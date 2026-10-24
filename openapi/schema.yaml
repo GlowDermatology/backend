@@ -3,6 +3,176 @@ info:
   title: Glow Derma API
   version: 1.0.0
 paths:
+  /api/v1/admin/auth/change-password/:
+    post:
+      operationId: admin_auth_change_password
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePassword'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '204':
+          description: No response body
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/auth/login/:
+    post:
+      operationId: admin_auth_login
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Login'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/auth/logout/:
+    post:
+      operationId: admin_auth_logout
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Logout'
+        required: true
+      responses:
+        '204':
+          description: No response body
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/auth/me/:
+    get:
+      operationId: admin_auth_me
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Me'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/auth/refresh/:
+    post:
+      operationId: admin_auth_refresh
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Refresh'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Access'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/health/:
     get:
       operationId: health_retrieve
@@ -12,7 +182,7 @@ paths:
         schema:
           type: boolean
       tags:
-      - api
+      - health
       responses:
         '200':
           content:
@@ -28,6 +198,67 @@ paths:
           description: ''
 components:
   schemas:
+    Access:
+      type: object
+      properties:
+        access:
+          type: string
+        access_expires_at:
+          type: string
+          format: date-time
+        refresh_expires_at:
+          type: string
+          format: date-time
+      required:
+      - access
+      - access_expires_at
+      - refresh_expires_at
+    ChangePassword:
+      type: object
+      properties:
+        current_password:
+          type: string
+          writeOnly: true
+          maxLength: 128
+        new_password:
+          type: string
+          writeOnly: true
+          maxLength: 128
+      required:
+      - current_password
+      - new_password
+    ErrorEnvelope:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ErrorItem'
+        request_id:
+          type: string
+      required:
+      - code
+      - errors
+      - message
+      - request_id
+    ErrorItem:
+      type: object
+      properties:
+        field:
+          type: string
+          nullable: true
+        code:
+          type: string
+        message:
+          type: string
+      required:
+      - code
+      - field
+      - message
     Health:
       type: object
       properties:
@@ -47,6 +278,103 @@ components:
           type: string
       required:
       - status
+    LinkedProvidersEnum:
+      enum:
+      - google
+      - facebook
+      type: string
+      description: |-
+        * `google` - google
+        * `facebook` - facebook
+    Login:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        password:
+          type: string
+          writeOnly: true
+          maxLength: 128
+      required:
+      - email
+      - password
+    LoginResponse:
+      type: object
+      properties:
+        access:
+          type: string
+        access_expires_at:
+          type: string
+          format: date-time
+        refresh_expires_at:
+          type: string
+          format: date-time
+        refresh:
+          type: string
+        user:
+          $ref: '#/components/schemas/Me'
+      required:
+      - access
+      - access_expires_at
+      - refresh
+      - refresh_expires_at
+      - user
+    Logout:
+      type: object
+      properties:
+        refresh:
+          type: string
+        scope:
+          allOf:
+          - $ref: '#/components/schemas/ScopeEnum'
+          default: current
+      required:
+      - refresh
+    Me:
+      type: object
+      properties:
+        id:
+          type: integer
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+        is_superuser:
+          type: boolean
+        linked_providers:
+          type: array
+          items:
+            $ref: '#/components/schemas/LinkedProvidersEnum'
+        session_expires_at:
+          type: string
+          format: date-time
+      required:
+      - display_name
+      - email
+      - id
+      - is_superuser
+      - linked_providers
+      - session_expires_at
+    Refresh:
+      type: object
+      properties:
+        refresh:
+          type: string
+      required:
+      - refresh
+    ScopeEnum:
+      enum:
+      - current
+      - others
+      - all
+      type: string
+      description: |-
+        * `current` - current
+        * `others` - others
+        * `all` - all
     StatusEnum:
       enum:
       - ok
@@ -55,3 +383,8 @@ components:
       description: |-
         * `ok` - ok
         * `error` - error
+  securitySchemes:
+    StaffJWT:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
