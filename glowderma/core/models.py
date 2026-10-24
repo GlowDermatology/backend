@@ -1,7 +1,8 @@
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, TypeVar
 
+from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
 
 from glowderma.core import timeutils
@@ -11,6 +12,10 @@ ModelT = TypeVar("ModelT", bound=models.Model)
 
 def timestamp_default() -> datetime:
     return timeutils.now()
+
+
+def idempotency_expiry() -> datetime:
+    return timeutils.now() + timedelta(hours=24)
 
 
 class AppendOnlyError(RuntimeError):
@@ -85,3 +90,26 @@ class AuditEntry(AppendOnlyModel):
 
     def __str__(self) -> str:
         return f"{self.action}: {self.entity_type}/{self.entity_id}"
+
+
+class IdempotencyRecord(models.Model):
+    audience = models.CharField(max_length=32)
+    actor_id = models.BigIntegerField()
+    method = models.CharField(max_length=10)
+    path = models.CharField(max_length=2048)
+    key = models.UUIDField()
+    request_hash = models.CharField(max_length=64)
+    response_status = models.PositiveSmallIntegerField()
+    response_body = models.JSONField(encoder=DjangoJSONEncoder, null=True)
+    created_at = models.DateTimeField(default=timestamp_default, editable=False)
+    expires_at = models.DateTimeField(default=idempotency_expiry, db_index=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["audience", "actor_id", "method", "path", "key"], name="idempotency_scope_unique"
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.method} {self.path}: {self.key}"

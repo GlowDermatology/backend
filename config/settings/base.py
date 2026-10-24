@@ -35,6 +35,7 @@ ASGI_APPLICATION = "config.asgi.application"
 AUTH_USER_MODEL = "accounts.StaffUser"
 AUTHENTICATION_BACKENDS = ["django.contrib.auth.backends.ModelBackend"]
 TIME_ZONE = "Asia/Tashkent"
+CELERY_TIMEZONE = TIME_ZONE
 USE_TZ = True
 LANGUAGE_CODE = "uz"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
