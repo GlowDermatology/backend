@@ -133,6 +133,8 @@ def test_concurrent_duplicate_409() -> None:
     worker.start()
     try:
         assert entered.wait(timeout=10), "First request never entered its view"
+        # Measure advisory-lock contention independently of connection establishment.
+        connection.ensure_connection()
         started = perf_counter()
         duplicate = post(key)
         elapsed = perf_counter() - started

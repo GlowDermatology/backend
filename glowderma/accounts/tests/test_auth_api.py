@@ -1,9 +1,11 @@
 from typing import Any
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
 from rest_framework.test import APIClient
 
+from glowderma.accounts.api.guard import LoginGuard, email_hash
 from glowderma.accounts.models import AuthSession, StaffUser
 from glowderma.core.models import AuditEntry, IdempotencyRecord
 
@@ -221,3 +223,75 @@ def test_auth_rejects_form_content_type() -> None:
         BASE + "login/", "email=admin%40x.uz&password=wrong", content_type="application/x-www-form-urlencoded"
     )
     assert response.status_code == 415
+
+
+def test_locked_password_change_does_not_compare_passwords(user: StaffUser) -> None:
+    client = APIClient()
+    data = login(client).data
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {data['access']}")
+    guard = LoginGuard()
+    for _ in range(5):
+        guard.record_failure("change_password", email_hash(user.email))
+    with patch.object(StaffUser, "check_password", autospec=True) as compare:
+        response = client.post(
+            BASE + "change-password/", {"current_password": WRONG, "new_password": PASSWORD}, format="json"
+        )
+    assert response.status_code == 429
+    compare.assert_not_called()
+
+
+def test_unchanged_password_checked_only_after_current_password(user: StaffUser) -> None:
+    client = APIClient()
+    data = login(client).data
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {data['access']}")
+    response = client.post(
+        BASE + "change-password/", {"current_password": WRONG, "new_password": PASSWORD}, format="json"
+    )
+    assert response.status_code == 400
+    assert response.data["errors"][0]["code"] == "password_incorrect"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_concurrent_login_attempts_are_reserved_before_authenticate() -> None:
+    from threading import Event, Thread
+
+    from django.db import connection
+
+    entered, rejected, release = Event(), Event(), Event()
+    calls: list[int] = []
+    statuses: list[int] = []
+    errors: list[BaseException] = []
+
+    def authenticate_wait(*args: Any, **kwargs: Any) -> None:
+        calls.append(1)
+        if len(calls) >= 5:
+            entered.set()
+        if not release.wait(timeout=10):
+            raise TimeoutError("authentication attempts were not released")
+
+    def attempt() -> None:
+        try:
+            response = login(APIClient(), "unknown@x.uz", WRONG)
+            statuses.append(response.status_code)
+            if response.status_code == 429:
+                rejected.set()
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            connection.close()
+
+    workers = [Thread(target=attempt, daemon=True) for _ in range(6)]
+    with patch("glowderma.accounts.api.admin.views.authenticate", side_effect=authenticate_wait):
+        try:
+            for worker in workers:
+                worker.start()
+            assert entered.wait(timeout=10)
+            assert rejected.wait(timeout=1), "sixth attempt entered authentication before failures completed"
+        finally:
+            release.set()
+            for worker in workers:
+                worker.join(timeout=10)
+    assert all(not worker.is_alive() for worker in workers)
+    assert errors == []
+    assert len(calls) == 5
+    assert sorted(statuses) == [401] * 5 + [429]

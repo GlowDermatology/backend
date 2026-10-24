@@ -44,8 +44,6 @@ class ChangePasswordSerializer(serializers.Serializer[dict[str, Any]]):
                     for error in exc.error_list
                 ]
             ) from exc
-        if user.check_password(value):
-            raise serializers.ValidationError("Yangi parol eskisidan farq qilsin.", code="password_unchanged")
         return value
 
 

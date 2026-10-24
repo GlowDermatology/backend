@@ -36,6 +36,9 @@ class LoginGuard:
             if wait > 0:
                 raise Throttled(wait=wait)
             cache.delete(key)
+        # Reserve an attempt before authentication so concurrent guesses share the limit.
+        if _increment(f"auth:attempt:{scope}:{hashed_email}", 60) > 5:
+            raise Throttled(wait=60)
 
     def record_failure(self, scope: str, hashed_email: str) -> None:
         count = _increment(f"auth:fail:{scope}:{hashed_email}", 60)
@@ -46,6 +49,7 @@ class LoginGuard:
 
     def reset(self, scope: str, hashed_email: str) -> None:
         cache.delete(f"auth:fail:{scope}:{hashed_email}")
+        cache.delete(f"auth:attempt:{scope}:{hashed_email}")
 
 
 class GuardedAdminAuthenticationForm(AdminAuthenticationForm):

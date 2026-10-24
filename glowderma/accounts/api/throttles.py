@@ -18,6 +18,11 @@ class LoginRateThrottle(ClientIPThrottle):
         return self.cache_format % {"scope": self.scope, "ident": self.get_ident(request)}
 
 
+class AuthClientIPThrottle(LoginRateThrottle):
+    scope = "auth_client_ip"
+    rate = "600/min"
+
+
 class RefreshRateThrottle(ClientIPThrottle):
     scope = "refresh"
     rate = "120/min"

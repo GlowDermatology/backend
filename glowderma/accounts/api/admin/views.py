@@ -23,7 +23,7 @@ from glowderma.accounts.api.admin.serializers import (
 )
 from glowderma.accounts.api.base import AdminAPIView
 from glowderma.accounts.api.guard import LoginGuard, email_hash
-from glowderma.accounts.api.throttles import LoginRateThrottle, RefreshRateThrottle
+from glowderma.accounts.api.throttles import AuthClientIPThrottle, LoginRateThrottle, RefreshRateThrottle
 from glowderma.accounts.models import AuthSession, StaffUser
 from glowderma.core import audit, timeutils
 from glowderma.core.api.exceptions import AuthFailed
@@ -105,7 +105,7 @@ class LoginView(PublicAuthAPIView):
 
 
 class RefreshView(PublicAuthAPIView):
-    throttle_classes = [RefreshRateThrottle]
+    throttle_classes = [AuthClientIPThrottle, RefreshRateThrottle]
 
     @extend_schema(
         operation_id="admin_auth_refresh",
@@ -121,6 +121,8 @@ class RefreshView(PublicAuthAPIView):
 
 
 class LogoutView(PublicAuthAPIView):
+    throttle_classes = [AuthClientIPThrottle, RefreshRateThrottle]
+
     @extend_schema(
         operation_id="admin_auth_logout", auth=[], request=LogoutSerializer, responses={204: None, **ERRORS}
     )
@@ -168,17 +170,25 @@ class ChangePasswordView(AdminAPIView):
         responses={204: None, **ERRORS},
     )
     def post(self, request: Request) -> Response:
-        serializer = ChangePasswordSerializer(data=request.data, context={"request": request})
-        serializer.is_valid(raise_exception=True)
         guard = LoginGuard()
         hashed = email_hash(cast(StaffUser, request.user).email)
         guard.check("change_password", hashed)
+        serializer = ChangePasswordSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
         with transaction.atomic():
             user = StaffUser.objects.select_for_update().get(pk=cast(StaffUser, request.user).pk)
             if not user.check_password(serializer.validated_data["current_password"]):
                 guard.record_failure("change_password", hashed)
                 raise ValidationError(
                     {"current_password": [ErrorDetail("Joriy parol noto‘g‘ri.", code="password_incorrect")]}
+                )
+            if user.check_password(serializer.validated_data["new_password"]):
+                raise ValidationError(
+                    {
+                        "new_password": [
+                            ErrorDetail("Yangi parol eskisidan farq qilsin.", code="password_unchanged")
+                        ]
+                    }
                 )
             user.set_password(serializer.validated_data["new_password"])
             user.save(update_fields=["password"])
