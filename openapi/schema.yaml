@@ -12,7 +12,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ChangePassword'
+              $ref: '#/components/schemas/ChangePasswordRequest'
         required: true
       security:
       - StaffJWT: []
@@ -46,7 +46,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Login'
+              $ref: '#/components/schemas/LoginRequest'
         required: true
       responses:
         '200':
@@ -82,7 +82,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Logout'
+              $ref: '#/components/schemas/LogoutRequest'
         required: true
       responses:
         '204':
@@ -146,7 +146,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Refresh'
+              $ref: '#/components/schemas/RefreshRequest'
         required: true
       responses:
         '200':
@@ -213,16 +213,18 @@ components:
       - access
       - access_expires_at
       - refresh_expires_at
-    ChangePassword:
+    ChangePasswordRequest:
       type: object
       properties:
         current_password:
           type: string
           writeOnly: true
+          minLength: 1
           maxLength: 128
         new_password:
           type: string
           writeOnly: true
+          minLength: 1
           maxLength: 128
       required:
       - current_password
@@ -286,16 +288,18 @@ components:
       description: |-
         * `google` - google
         * `facebook` - facebook
-    Login:
+    LoginRequest:
       type: object
       properties:
         email:
           type: string
           format: email
+          minLength: 1
           maxLength: 254
         password:
           type: string
           writeOnly: true
+          minLength: 1
           maxLength: 128
       required:
       - email
@@ -321,11 +325,12 @@ components:
       - refresh
       - refresh_expires_at
       - user
-    Logout:
+    LogoutRequest:
       type: object
       properties:
         refresh:
           type: string
+          minLength: 1
         scope:
           allOf:
           - $ref: '#/components/schemas/ScopeEnum'
@@ -358,11 +363,12 @@ components:
       - is_superuser
       - linked_providers
       - session_expires_at
-    Refresh:
+    RefreshRequest:
       type: object
       properties:
         refresh:
           type: string
+          minLength: 1
       required:
       - refresh
     ScopeEnum:

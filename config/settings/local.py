@@ -1,9 +1,15 @@
 from config.env import env_bool, env_list, env_str
 
 from .base import *  # noqa: F403
+from .base import SPECTACULAR_SETTINGS as BASE_SPECTACULAR_SETTINGS
 from .base import database_config
 
 DEBUG = True
+SPECTACULAR_SETTINGS = {
+    **BASE_SPECTACULAR_SETTINGS,
+    "SERVE_AUTHENTICATION": [],
+    "SERVE_PERMISSIONS": ["rest_framework.permissions.AllowAny"],
+}
 SECRET_KEY = env_str("SECRET_KEY", "local-development-key-at-least-32-characters")
 INTERNAL_API_SECRET = env_str("INTERNAL_API_SECRET", "local-internal-secret-at-least-32-characters")
 JWT_SIGNING_KEYS = {"dev": b"local-jwt-signing-key-at-least-32-bytes"}

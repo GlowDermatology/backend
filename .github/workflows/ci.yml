@@ -1,0 +1,46 @@
+name: Backend CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-trixie
+        env:
+          POSTGRES_USER: glowderma
+          POSTGRES_PASSWORD: glowderma
+          POSTGRES_DB: glowderma
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U glowderma -d glowderma"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:8-alpine
+        ports: ["6380:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.5"
+          python-version: "3.14"
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy .
+      - run: uv run lint-imports
+      - run: uv run python manage.py makemigrations --check --dry-run
+      - run: uv run coverage run -m pytest
+      - run: uv run coverage report --fail-under=85
+      - run: uv run python manage.py spectacular --validate --fail-on-warn --file /tmp/schema.yaml
+      - run: diff -u openapi/schema.yaml /tmp/schema.yaml

@@ -84,7 +84,16 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
     "DATETIME_FORMAT": "%Y-%m-%dT%H:%M:%S%:z",
 }
-SPECTACULAR_SETTINGS = {"TITLE": "Glow Derma API", "VERSION": "1.0.0"}
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Glow Derma API",
+    "VERSION": "1.0.0",
+    "COMPONENT_SPLIT_REQUEST": True,
+    "SERVE_INCLUDE_SCHEMA": False,
+    "SWAGGER_UI_DIST": "SIDECAR",
+    "SWAGGER_UI_FAVICON_HREF": "SIDECAR",
+    "SERVE_AUTHENTICATION": ["glowderma.accounts.authentication.StaffJWTAuthentication"],
+    "SERVE_PERMISSIONS": ["glowderma.accounts.permissions.IsActiveStaff"],
+}
 GIT_SHA = env_str("GIT_SHA", "dev")
 TRUSTED_PROXIES: list[str] = []
 
