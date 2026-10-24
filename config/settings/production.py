@@ -3,7 +3,7 @@ import binascii
 
 from django.core.exceptions import ImproperlyConfigured
 
-from config.env import env_bool, env_json, env_list, env_str
+from config.env import env_bool, env_int, env_json, env_list, env_str
 
 from .base import *  # noqa: F403
 from .base import database_config
@@ -35,9 +35,14 @@ DATABASE_URL = env_str("DATABASE_URL")
 DATABASES = {"default": database_config(DATABASE_URL)}
 REDIS_URL = env_str("REDIS_URL")
 CELERY_BROKER_URL = REDIS_URL
-ALLOWED_HOSTS = env_list("ALLOWED_HOSTS")
+ALLOWED_HOSTS = env_list("ALLOWED_HOSTS") + ["localhost"]
 ADMIN_API_ALLOWED_NETS = env_list("ADMIN_API_ALLOWED_NETS")
 DJANGO_ADMIN_ENABLED = env_bool("DJANGO_ADMIN_ENABLED", False)
+# TLS terminates at the edge proxy; Next calls the API over HTTP on the private network.
+SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", False)
+SILENCED_SYSTEM_CHECKS = ["security.W008"]
+SECURE_HSTS_SECONDS = env_int("SECURE_HSTS_SECONDS", 0)
+SESSION_COOKIE_SECURE = CSRF_COOKIE_SECURE = True
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
