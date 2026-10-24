@@ -62,6 +62,18 @@ TEMPLATES = [
     }
 ]
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.Argon2PasswordHasher"]
+AUTH_PASSWORD_VALIDATORS = [
+    {
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
+        "OPTIONS": {"user_attributes": ["email", "full_name"]},
+    },
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator", "OPTIONS": {"min_length": 12}},
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+]
+JWT_ISSUER = "glowderma"
+STAFF_ACCESS_TTL = 900
+STAFF_REFRESH_TTL = 43200
 REST_FRAMEWORK = {
     "EXCEPTION_HANDLER": "glowderma.core.api.exceptions.envelope_exception_handler",
     "DEFAULT_PAGINATION_CLASS": "glowderma.core.api.pagination.EnvelopePagination",
