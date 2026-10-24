@@ -1,0 +1,57 @@
+openapi: 3.0.3
+info:
+  title: Glow Derma API
+  version: 1.0.0
+paths:
+  /api/v1/health/:
+    get:
+      operationId: health_retrieve
+      parameters:
+      - in: query
+        name: ready
+        schema:
+          type: boolean
+      tags:
+      - api
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+          description: ''
+        '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+          description: ''
+components:
+  schemas:
+    Health:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/StatusEnum'
+        checks:
+          type: object
+          additionalProperties:
+            enum:
+            - ok
+            - error
+            type: string
+            description: |-
+              * `ok` - ok
+              * `error` - error
+        version:
+          type: string
+      required:
+      - status
+    StatusEnum:
+      enum:
+      - ok
+      - error
+      type: string
+      description: |-
+        * `ok` - ok
+        * `error` - error

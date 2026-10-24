@@ -1,0 +1,9 @@
+[importlinter]
+root_package = glowderma
+
+[importlinter:contract:core-independent]
+name = core is independent
+type = layers
+layers =
+    glowderma.accounts
+    glowderma.core
