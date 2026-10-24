@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import Decimal
 
 import pytest
 from django.test import RequestFactory
@@ -86,3 +87,16 @@ def test_audit_created_at_uses_patchable_clock(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr("glowderma.core.timeutils.now", lambda: expected)
     entry = audit.record(action="test.created", entity_type="test", entity_id="1")
     assert entry.created_at == expected
+
+
+def test_audit_json_supports_dates_and_decimals() -> None:
+    entry = audit.record(
+        action="test",
+        entity_type="test",
+        entity_id="1",
+        before={"amount": Decimal("1.50")},
+        after={"at": datetime(2020, 1, 1, tzinfo=UTC)},
+    )
+    entry.refresh_from_db()
+    assert entry.before == {"amount": "1.50"}
+    assert entry.after == {"at": "2020-01-01T00:00:00Z"}

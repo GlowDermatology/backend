@@ -4,12 +4,12 @@ from functools import lru_cache
 from string import Formatter
 from typing import Any
 
-from django.core.exceptions import RequestDataTooBig
+from django.core.exceptions import BadRequest, RequestDataTooBig, SuspiciousOperation
 from django.http import Http404, HttpRequest, JsonResponse
 from django.utils.translation import get_language, override
 from rest_framework import exceptions, fields, relations, serializers, validators
 from rest_framework.response import Response
-from rest_framework.views import exception_handler
+from rest_framework.views import exception_handler, set_rollback
 
 logger = logging.getLogger(__name__)
 MESSAGES = {
@@ -92,16 +92,19 @@ def _field_message(value: Any, code: str) -> str:
 class Conflict(exceptions.APIException):
     status_code = 409
     default_code = "conflict"
+    default_detail = MESSAGES["validation_error"]
 
 
 class InvalidTransition(exceptions.APIException):
     status_code = 409
     default_code = "invalid_transition"
+    default_detail = MESSAGES["validation_error"]
 
 
 class NotCancellable(exceptions.APIException):
     status_code = 409
     default_code = "not_cancellable"
+    default_detail = MESSAGES["validation_error"]
 
 
 class RequestInProgress(exceptions.APIException):
@@ -162,7 +165,7 @@ def error_body(
 ) -> dict[str, Any]:
     return {
         "code": code,
-        "message": message or MESSAGES.get(code, "Maydonlarni tekshiring."),
+        "message": MESSAGES.get(code, "Maydonlarni tekshiring.") if message is None else message,
         "errors": errors or [],
         "request_id": getattr(request, "request_id", ""),
     }
@@ -172,24 +175,46 @@ def envelope_exception_handler(exc: Exception, context: dict[str, Any]) -> Respo
     response = exception_handler(exc, context)
     request = context.get("request")
     if isinstance(exc, RequestDataTooBig):
+        set_rollback()
         return Response(error_body("payload_too_large", request), status=413)
+    if isinstance(exc, (BadRequest, SuspiciousOperation)):
+        set_rollback()
+        return Response(error_body("bad_request", request), status=400)
     if response is None:
-        logger.exception("Unexpected API exception", exc_info=exc)
+        set_rollback()
+        logger.exception(
+            "Unexpected API exception request_id=%s path=%s",
+            getattr(request, "request_id", ""),
+            getattr(request, "path", ""),
+            exc_info=exc,
+        )
         return Response(error_body("server_error", request), status=500)
     code = "not_found" if isinstance(exc, Http404) else str(getattr(exc, "default_code", "permission_denied"))
     errors = None
     message = None
+    if isinstance(exc, exceptions.APIException) and not isinstance(exc, exceptions.ValidationError):
+        code = str(exc.get_codes())
+        message = str(exc.detail)
+        if message == str(exc.default_detail):
+            message = MESSAGES.get(code, message)
     if isinstance(exc, exceptions.ValidationError):
         code = "validation_error"
         errors = flatten_errors(exc.detail)
     elif isinstance(exc, (exceptions.NotAuthenticated, exceptions.AuthenticationFailed)):
         code = "not_authenticated"
         response.status_code = 401
+        if str(exc.detail) == str(exc.default_detail):
+            message = MESSAGES[code]
     elif isinstance(exc, AuthFailed):
         code = str(exc.get_codes())
     elif isinstance(exc, exceptions.Throttled):
         code = "throttled"
-        message = f"Juda ko‘p urinish. {getattr(exc, 'wait', 0) or 0} soniyadan so‘ng qayta urinib ko‘ring."
+        wait = getattr(exc, "wait", None)
+        message = (
+            "Juda ko‘p urinish."
+            if wait is None
+            else f"Juda ko‘p urinish. {wait} soniyadan so‘ng qayta urinib ko‘ring."
+        )
     response.data = error_body(code, request, message=message, errors=errors)
     return response
 
@@ -199,4 +224,7 @@ def not_found_view(request: HttpRequest, exception: Exception) -> JsonResponse:
 
 
 def server_error_view(request: HttpRequest) -> JsonResponse:
+    logger.exception(
+        "Unexpected server exception request_id=%s path=%s", getattr(request, "request_id", ""), request.path
+    )
     return JsonResponse(error_body("server_error", request), status=500)

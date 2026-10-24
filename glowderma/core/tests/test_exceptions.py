@@ -1,18 +1,34 @@
 from datetime import UTC, datetime
 from typing import Any
+from unittest.mock import patch
 
 import pytest
-from django.core.exceptions import RequestDataTooBig
+from django.core.exceptions import BadRequest, RequestDataTooBig, TooManyFieldsSent
+from django.test import RequestFactory
 from rest_framework import serializers
 from rest_framework.authentication import BaseAuthentication
-from rest_framework.exceptions import AuthenticationFailed, ErrorDetail, NotAuthenticated, Throttled
+from rest_framework.exceptions import (
+    APIException,
+    AuthenticationFailed,
+    ErrorDetail,
+    NotAuthenticated,
+    Throttled,
+)
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.test import APIRequestFactory
 from rest_framework.views import APIView
 
-from glowderma.core.api.exceptions import AuthFailed, InvalidTransition
+from glowderma.core.api.exceptions import (
+    AuthFailed,
+    Conflict,
+    InvalidTransition,
+    NotCancellable,
+    RequestInProgress,
+    envelope_exception_handler,
+    server_error_view,
+)
 
 
 class HeaderAuthentication(BaseAuthentication):
@@ -155,6 +171,59 @@ def test_datetime_has_seconds_precision() -> None:
 
     value = datetime(2026, 10, 24, 7, 0, 0, 123456, tzinfo=UTC)
     assert TimestampSerializer({"created_at": value}).data["created_at"] == "2026-10-24T12:00:00+05:00"
+
+
+@pytest.mark.parametrize("exception_type", [Conflict, InvalidTransition, NotCancellable, RequestInProgress])
+def test_conflict_message_and_code_are_preserved(exception_type: type[APIException]) -> None:
+    default = exception_type()
+    response = exception_response(default)
+    assert response.status_code == 409
+    assert response.data["message"] == str(default.detail)
+    assert response.data["code"] == default.get_codes()
+    custom = exception_response(exception_type("Kategoriyada mahsulotlar bor.", code="custom_conflict"))
+    assert custom.data["message"] == "Kategoriyada mahsulotlar bor."
+    assert custom.data["code"] == "custom_conflict"
+    if exception_type is RequestInProgress:
+        assert response["Retry-After"] == "1"
+
+
+def test_suspicious_request_is_400() -> None:
+    response = exception_response(TooManyFieldsSent("private limits"))
+    assert response.status_code == 400
+    assert response.data["code"] == "bad_request"
+
+
+def test_throttled_without_wait_has_no_seconds_count() -> None:
+    response = exception_response(Throttled())
+    assert response.status_code == 429
+    assert response.data["message"] == "Juda ko‘p urinish."
+    assert not response.has_header("Retry-After")
+
+
+@pytest.mark.parametrize(
+    "exc", [RuntimeError("private"), RequestDataTooBig("private"), BadRequest("private")]
+)
+def test_internal_failures_use_rollback_hook(exc: Exception) -> None:
+    with patch("glowderma.core.api.exceptions.set_rollback") as rollback:
+        envelope_exception_handler(exc, {})
+    rollback.assert_called_once()
+
+
+def test_500_logs_request_metadata(caplog: pytest.LogCaptureFixture) -> None:
+    request = RequestFactory().get("/api/private/")
+    request.request_id = "request-1234"  # type: ignore[attr-defined]
+    envelope_exception_handler(RuntimeError("private"), {"request": request})
+    server_error_view(request)
+    assert (
+        len(
+            [
+                r
+                for r in caplog.records
+                if "request-1234" in r.getMessage() and "/api/private/" in r.getMessage()
+            ]
+        )
+        == 2
+    )
 
 
 @pytest.mark.parametrize(

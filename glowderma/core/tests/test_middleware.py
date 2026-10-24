@@ -13,6 +13,7 @@ def test_unknown_route_returns_404_envelope() -> None:
     response = Client().get("/api/unknown/")
     assert response.status_code == 404
     assert response.json()["code"] == "not_found"
+    assert response.json()["request_id"] == response["X-Request-ID"]
     assert set(response.json()) == {"code", "message", "errors", "request_id"}
 
 

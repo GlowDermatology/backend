@@ -38,6 +38,8 @@ def request_fingerprint(request: Request) -> str:
                     upload.seek(position)
                 files[key].append(digest.hexdigest())
         parsed = {"fields": fields, "files": files}
+    elif hasattr(parsed, "lists"):
+        parsed = dict(parsed.lists())
     canonical = json.dumps(parsed, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(canonical.encode()).hexdigest()
 

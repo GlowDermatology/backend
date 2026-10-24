@@ -9,6 +9,7 @@ import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import connection
 from rest_framework.authentication import BaseAuthentication
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -54,6 +55,8 @@ class WriteView(APIView):
             actor=request.user,
             after={"value": data.get("value"), "file": file_text},
         )
+        if data.get("raise_error"):
+            raise ValidationError({"value": "Rejected after effect"})
         if self.entered is not None:
             self.entered.set()
         if self.release is not None and not self.release.wait(timeout=10):
@@ -159,6 +162,31 @@ def test_non_2xx_not_stored() -> None:
     assert AuditEntry.objects.count() == IdempotencyRecord.objects.count() == 0
     assert post(key, {"value": "corrected"}).status_code == 201
     assert AuditEntry.objects.count() == IdempotencyRecord.objects.count() == 1
+
+
+def test_exception_rolls_back_effect_and_record() -> None:
+    response = post(str(uuid4()), {"raise_error": True})
+    assert response.status_code == 400
+    assert AuditEntry.objects.count() == IdempotencyRecord.objects.count() == 0
+
+
+def test_form_fingerprint_preserves_every_value() -> None:
+    key = str(uuid4())
+    factory = APIRequestFactory()
+    first = factory.post(
+        "/api/test/",
+        "value=one&value=last",
+        content_type="application/x-www-form-urlencoded",
+        HTTP_IDEMPOTENCY_KEY=key,
+    )
+    second = factory.post(
+        "/api/test/",
+        "value=two&value=last",
+        content_type="application/x-www-form-urlencoded",
+        HTTP_IDEMPOTENCY_KEY=key,
+    )
+    assert WriteView.as_view()(first).status_code == 201
+    assert WriteView.as_view()(second).status_code == 422
 
 
 def test_same_key_different_path_is_separate() -> None:
