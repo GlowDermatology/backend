@@ -1,0 +1,238 @@
+from datetime import UTC, datetime
+from typing import Any
+
+import pytest
+from django.core.exceptions import RequestDataTooBig
+from rest_framework import serializers
+from rest_framework.authentication import BaseAuthentication
+from rest_framework.exceptions import AuthenticationFailed, ErrorDetail, NotAuthenticated, Throttled
+from rest_framework.permissions import AllowAny
+from rest_framework.request import Request
+from rest_framework.response import Response
+from rest_framework.test import APIRequestFactory
+from rest_framework.views import APIView
+
+from glowderma.core.api.exceptions import AuthFailed, InvalidTransition
+
+
+class HeaderAuthentication(BaseAuthentication):
+    def authenticate(self, request: Request) -> None:
+        return None
+
+    def authenticate_header(self, request: Request) -> str:
+        return 'Bearer realm="test"'
+
+
+def exception_response(exc: Exception, *, with_authenticator: bool = False) -> Response:
+    class RaisingView(APIView):
+        authentication_classes = [HeaderAuthentication] if with_authenticator else []
+        permission_classes = [AllowAny]
+
+        def get(self, request: Request) -> Response:
+            raise exc
+
+    return RaisingView.as_view()(APIRequestFactory().get("/api/test/"))
+
+
+class TierSerializer(serializers.Serializer[dict[str, Any]]):
+    percent = serializers.DecimalField(max_digits=5, decimal_places=2)
+
+
+class TiersSerializer(serializers.Serializer[dict[str, Any]]):
+    tiers = TierSerializer(many=True)
+
+
+class NameSerializer(serializers.Serializer[dict[str, Any]]):
+    name = serializers.CharField(min_length=2)
+
+
+class TextsSerializer(serializers.Serializer[dict[str, Any]]):
+    uz = NameSerializer()
+
+
+class ProductSerializer(serializers.Serializer[dict[str, Any]]):
+    texts = TextsSerializer()
+
+
+def validation_response(serializer: serializers.Serializer[Any]) -> Response:
+    with pytest.raises(serializers.ValidationError) as caught:
+        serializer.is_valid(raise_exception=True)
+    return exception_response(caught.value)
+
+
+def test_nested_list_errors_flatten() -> None:
+    response = validation_response(TiersSerializer(data={"tiers": [{"percent": "1.00"}, {"percent": "bad"}]}))
+    assert response.status_code == 400
+    assert response.data["code"] == "validation_error"
+    assert response.data["message"] == "Maydonlarni tekshiring."
+    assert response.data["errors"][0]["field"] == "tiers.1.percent"
+    assert response.data["errors"][0]["code"] == "invalid"
+
+
+def test_nested_dict_errors_flatten() -> None:
+    response = validation_response(ProductSerializer(data={"texts": {"uz": {"name": "x"}}}))
+    assert response.data["errors"][0]["field"] == "texts.uz.name"
+    assert response.data["errors"][0]["code"] == "min_length"
+
+
+def test_non_field_error_has_null_field() -> None:
+    response = exception_response(
+        serializers.ValidationError(
+            {"non_field_errors": [ErrorDetail("Invalid combination", code="invalid")]}
+        )
+    )
+    assert response.data["errors"] == [{"field": None, "code": "invalid", "message": "Invalid combination"}]
+
+
+def test_validation_errors_deduplicate_field_and_code_in_order() -> None:
+    response = exception_response(
+        serializers.ValidationError(
+            {
+                "name": [
+                    ErrorDetail("First", "invalid"),
+                    ErrorDetail("Second", "invalid"),
+                    ErrorDetail("Required", "required"),
+                ]
+            }
+        )
+    )
+    assert response.data["errors"] == [
+        {"field": "name", "code": "invalid", "message": "First"},
+        {"field": "name", "code": "required", "message": "Required"},
+    ]
+
+
+def test_invalid_transition_is_409() -> None:
+    response = exception_response(InvalidTransition())
+    assert response.status_code == 409
+    assert response.data["code"] == "invalid_transition"
+    assert response.data["errors"] == []
+
+
+@pytest.mark.parametrize("with_authenticator", [False, True])
+def test_auth_failed_is_401_on_view_without_authenticators(with_authenticator: bool) -> None:
+    response = exception_response(AuthFailed("invalid_credentials"), with_authenticator=with_authenticator)
+    assert response.status_code == 401
+    assert response.data["code"] == "invalid_credentials"
+    assert response.data["message"] == "Login yoki parol noto‘g‘ri."
+    assert response.data["errors"] == []
+
+
+@pytest.mark.parametrize("exception_type", [NotAuthenticated, AuthenticationFailed])
+@pytest.mark.parametrize("with_authenticator", [False, True])
+def test_builtin_auth_failures_are_401(
+    exception_type: type[NotAuthenticated] | type[AuthenticationFailed], with_authenticator: bool
+) -> None:
+    response = exception_response(exception_type(), with_authenticator=with_authenticator)
+    assert response.status_code == 401
+    assert response.data["code"] == "not_authenticated"
+    if with_authenticator:
+        assert response["WWW-Authenticate"] == 'Bearer realm="test"'
+
+
+def test_throttled_has_retry_after_header_only() -> None:
+    response = exception_response(Throttled(wait=3.2))
+    assert response.status_code == 429
+    assert response["Retry-After"] == "4"
+    assert response.data["message"] == "Juda ko‘p urinish. 4 soniyadan so‘ng qayta urinib ko‘ring."
+    assert set(response.data) == {"code", "message", "errors", "request_id"}
+    assert response.data["errors"] == []
+
+
+def test_500_hides_details(caplog: pytest.LogCaptureFixture) -> None:
+    response = exception_response(RuntimeError("private database connection detail"))
+    assert response.status_code == 500
+    assert response.data["code"] == "server_error"
+    assert response.data["message"] == "Kutilmagan xato."
+    assert response.data["errors"] == []
+    assert "private database connection detail" not in str(response.data)
+    assert any(record.exc_info is not None for record in caplog.records)
+
+
+def test_datetime_has_seconds_precision() -> None:
+    class TimestampSerializer(serializers.Serializer[dict[str, Any]]):
+        created_at = serializers.DateTimeField()
+
+    value = datetime(2026, 10, 24, 7, 0, 0, 123456, tzinfo=UTC)
+    assert TimestampSerializer({"created_at": value}).data["created_at"] == "2026-10-24T12:00:00+05:00"
+
+
+@pytest.mark.parametrize(
+    ("field", "data", "code", "message"),
+    [
+        (serializers.CharField(), {}, "required", "Majburiy maydon."),
+        (serializers.CharField(), {"value": None}, "null", "Majburiy maydon."),
+        (serializers.CharField(), {"value": ""}, "blank", "Maydonni to‘ldiring."),
+        (serializers.IntegerField(), {"value": "bad"}, "invalid", "Noto‘g‘ri qiymat."),
+        (
+            serializers.DecimalField(max_digits=5, decimal_places=2),
+            {"value": "bad"},
+            "invalid",
+            "Noto‘g‘ri qiymat.",
+        ),
+        (
+            serializers.ChoiceField(choices=["allowed"]),
+            {"value": "bad"},
+            "invalid_choice",
+            "Ruxsat etilmagan qiymat.",
+        ),
+        (serializers.CharField(min_length=3), {"value": "x"}, "min_length", "Kamida 3 ta belgi kiriting."),
+        (serializers.CharField(max_length=3), {"value": "xxxx"}, "max_length", "3 belgidan oshmasin."),
+        (serializers.IntegerField(min_value=5), {"value": 4}, "min_value", "Qiymat 5 dan kam bo‘lmasin."),
+        (
+            serializers.DecimalField(max_digits=5, decimal_places=2, max_value=12),
+            {"value": "12.01"},
+            "max_value",
+            "Qiymat 12 dan oshmasin.",
+        ),
+        (
+            serializers.DecimalField(max_digits=5, decimal_places=2),
+            {"value": "1.234"},
+            "max_decimal_places",
+            "Ko‘pi bilan 2 ta kasr raqam.",
+        ),
+    ],
+)
+def test_stock_field_messages_follow_contract(
+    field: serializers.Field[Any, Any, Any, Any], data: dict[str, Any], code: str, message: str
+) -> None:
+    class InputSerializer(serializers.Serializer[dict[str, Any]]):
+        value = field
+
+    response = validation_response(InputSerializer(data=data))
+    assert response.data["errors"] == [{"field": "value", "code": code, "message": message}]
+
+
+@pytest.mark.parametrize(
+    ("field", "data", "message"),
+    [
+        (
+            serializers.CharField(error_messages={"required": "Enter the product name."}),
+            {},
+            "Enter the product name.",
+        ),
+        (
+            serializers.CharField(
+                min_length=3, error_messages={"min_length": "Name needs {min_length} letters."}
+            ),
+            {"value": "x"},
+            "Name needs 3 letters.",
+        ),
+    ],
+)
+def test_explicit_field_messages_are_preserved(
+    field: serializers.Field[Any, Any, Any, Any], data: dict[str, Any], message: str
+) -> None:
+    class InputSerializer(serializers.Serializer[dict[str, Any]]):
+        value = field
+
+    response = validation_response(InputSerializer(data=data))
+    assert response.data["errors"][0]["message"] == message
+
+
+def test_django_body_limit_error_is_payload_too_large() -> None:
+    response = exception_response(RequestDataTooBig("internal upload limit detail"))
+    assert response.status_code == 413
+    assert response.data["code"] == "payload_too_large"
+    assert response.data["message"] == "Fayl juda katta."
+    assert response.data["errors"] == []

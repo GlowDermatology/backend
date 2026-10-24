@@ -21,6 +21,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
+    "glowderma.core.middleware.RequestIdMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -37,6 +38,7 @@ TIME_ZONE = "Asia/Tashkent"
 USE_TZ = True
 LANGUAGE_CODE = "uz"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+DATA_UPLOAD_MAX_MEMORY_SIZE = 6 * 1024 * 1024
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
@@ -56,6 +58,8 @@ TEMPLATES = [
 ]
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.Argon2PasswordHasher"]
 REST_FRAMEWORK = {
+    "EXCEPTION_HANDLER": "glowderma.core.api.exceptions.envelope_exception_handler",
+    "DEFAULT_PAGINATION_CLASS": "glowderma.core.api.pagination.EnvelopePagination",
     "DEFAULT_AUTHENTICATION_CLASSES": [],
     "DEFAULT_PERMISSION_CLASSES": ["glowderma.core.permissions.DenyAll"],
     "DEFAULT_THROTTLE_CLASSES": [],
