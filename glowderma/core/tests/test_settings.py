@@ -97,3 +97,12 @@ def test_api_defaults_deny() -> None:
     from glowderma.core.permissions import DenyAll
 
     assert cast(object, api_settings.DEFAULT_PERMISSION_CLASSES) == [DenyAll]
+
+
+@override_settings(INTERNAL_API_SECRET="x" * 32)
+def test_internal_secret_matches_correct_value_only() -> None:
+    from glowderma.core.clientip import has_internal_secret
+
+    factory = RequestFactory()
+    assert has_internal_secret(factory.get("/", HTTP_X_GD_INTERNAL_SECRET="x" * 32))
+    assert not has_internal_secret(factory.get("/", HTTP_X_GD_INTERNAL_SECRET="y" * 32))

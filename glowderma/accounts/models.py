@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any, ClassVar
 
 from django.contrib.auth.base_user import AbstractBaseUser
@@ -10,13 +11,17 @@ from glowderma.core import timeutils
 from .managers import StaffUserManager
 
 
+def date_joined_default() -> datetime:
+    return timeutils.now()
+
+
 class StaffUser(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(max_length=254, unique=True)
     full_name = models.CharField(max_length=150, blank=True)
     role = models.CharField(max_length=10, choices=[("admin", "admin")], default="admin")
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
-    date_joined = models.DateTimeField(default=timeutils.now)
+    date_joined = models.DateTimeField(default=date_joined_default)
     objects = StaffUserManager()
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS: ClassVar[list[str]] = []

@@ -1,3 +1,4 @@
+import logging
 import secrets
 from typing import Any
 
@@ -12,6 +13,8 @@ from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+logger = logging.getLogger(__name__)
 
 
 class HealthSerializer(serializers.Serializer[dict[str, Any]]):
@@ -41,22 +44,25 @@ class HealthView(APIView):
                 cursor.fetchone()
         except Exception:
             checks["database"] = "error"
+            logger.warning("health check %s failed", "database", exc_info=True)
         try:
             key = f"health:{secrets.token_hex(16)}"
             cache.set(key, "ok", timeout=10)
             if cache.get(key) != "ok":
-                checks["cache"] = "error"
+                raise RuntimeError("Cache round trip failed")
             cache.delete(key)
         except Exception:
             checks["cache"] = "error"
+            logger.warning("health check %s failed", "cache", exc_info=True)
         try:
             with redis.Redis.from_url(
                 settings.CELERY_BROKER_URL, socket_connect_timeout=1, socket_timeout=1
             ) as broker:
                 if not broker.ping():
-                    checks["broker"] = "error"
+                    raise RuntimeError("Broker ping failed")
         except Exception:
             checks["broker"] = "error"
+            logger.warning("health check %s failed", "broker", exc_info=True)
         ok = all(value == "ok" for value in checks.values())
         return Response(
             {"status": "ok" if ok else "error", "checks": checks, "version": settings.GIT_SHA},

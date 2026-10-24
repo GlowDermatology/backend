@@ -2,6 +2,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
+from django.core.exceptions import ImproperlyConfigured
+
 from config.env import env_str
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -73,13 +75,21 @@ GIT_SHA = env_str("GIT_SHA", "dev")
 
 
 def database_config(url: str) -> dict[str, Any]:
-    parsed = urlsplit(url)
-    return {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": unquote(parsed.path.lstrip("/")),
-        "USER": unquote(parsed.username or ""),
-        "PASSWORD": unquote(parsed.password or ""),
-        "HOST": parsed.hostname,
-        "PORT": parsed.port or 5433,
-        "OPTIONS": {"connect_timeout": 3},
-    }
+    try:
+        parsed = urlsplit(url)
+        name = unquote(parsed.path.lstrip("/"))
+        if parsed.scheme not in {"postgres", "postgresql"} or not name:
+            raise ValueError("Expected a PostgreSQL URL with a database name")
+        return {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": name,
+            "USER": unquote(parsed.username or ""),
+            "PASSWORD": unquote(parsed.password or ""),
+            "HOST": parsed.hostname,
+            "PORT": parsed.port if parsed.port is not None else 5432,
+            "OPTIONS": {"connect_timeout": 3},
+        }
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise ImproperlyConfigured(
+            "DATABASE_URL must be a valid PostgreSQL URL with a database name"
+        ) from exc

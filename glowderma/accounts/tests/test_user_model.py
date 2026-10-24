@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 import pytest
 from django.db import IntegrityError, transaction
 
@@ -18,3 +20,11 @@ def test_email_is_case_insensitive_unique() -> None:
     StaffUser.objects.create_user("Admin@X.uz")
     with pytest.raises(IntegrityError), transaction.atomic():
         StaffUser.objects.create(email="ADMIN@X.UZ")
+
+
+def test_date_joined_uses_shared_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    from glowderma.accounts.models import StaffUser
+
+    instant = datetime(2020, 1, 1, tzinfo=UTC)
+    monkeypatch.setattr("glowderma.core.timeutils.now", lambda: instant)
+    assert StaffUser(email="admin@x.uz").date_joined == instant
