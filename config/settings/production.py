@@ -37,6 +37,8 @@ REDIS_URL = env_str("REDIS_URL")
 CELERY_BROKER_URL = REDIS_URL
 ALLOWED_HOSTS = env_list("ALLOWED_HOSTS") + ["localhost"]
 ADMIN_API_ALLOWED_NETS = env_list("ADMIN_API_ALLOWED_NETS")
+ADMIN_API_REQUIRE_INTERNAL_SECRET = True
+TRUSTED_PROXIES = env_list("TRUSTED_PROXIES", [])
 DJANGO_ADMIN_ENABLED = env_bool("DJANGO_ADMIN_ENABLED", False)
 # TLS terminates at the edge proxy; Next calls the API over HTTP on the private network.
 SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", False)

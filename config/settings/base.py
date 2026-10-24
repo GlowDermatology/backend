@@ -24,6 +24,8 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "glowderma.core.middleware.RequestIdMiddleware",
+    "glowderma.core.clientip.ClientIPMiddleware",
+    "glowderma.core.network.AdminNetworkMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -72,6 +74,7 @@ REST_FRAMEWORK = {
 }
 SPECTACULAR_SETTINGS = {"TITLE": "Glow Derma API", "VERSION": "1.0.0"}
 GIT_SHA = env_str("GIT_SHA", "dev")
+TRUSTED_PROXIES: list[str] = []
 
 
 def database_config(url: str) -> dict[str, Any]:
