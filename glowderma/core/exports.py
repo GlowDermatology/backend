@@ -1,10 +1,13 @@
 import csv
 from collections.abc import Iterable, Sequence
 from io import BytesIO, StringIO
+from itertools import chain
 from typing import Any, cast
 
 from django.http import HttpResponse
 from openpyxl import Workbook  # type: ignore[import-untyped]
+from openpyxl.cell import WriteOnlyCell  # type: ignore[import-untyped]
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE  # type: ignore[import-untyped]
 from rest_framework.exceptions import ErrorDetail, Throttled, ValidationError
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -29,14 +32,19 @@ def render_csv(rows: Iterable[Sequence[Any]], headers: Sequence[str]) -> bytes:
 
 
 def render_xlsx(rows: Iterable[Sequence[Any]], headers: Sequence[str], sheet: str) -> bytes:
-    workbook = Workbook()
-    worksheet = workbook.active
-    worksheet.title = sheet
-    for row in [headers, *rows]:
-        worksheet.append([safe_cell(value) for value in row])
-        for cell in worksheet[worksheet.max_row]:
-            if isinstance(cell.value, str):
+    workbook = Workbook(write_only=True)
+    worksheet = workbook.create_sheet(title=sheet)
+    for row in chain((headers,), rows):
+        cells = []
+        for raw_value in row:
+            value = safe_cell(raw_value)
+            if isinstance(value, str):
+                cell = WriteOnlyCell(worksheet, value=ILLEGAL_CHARACTERS_RE.sub("", value))
                 cell.data_type = "s"
+                cells.append(cell)
+            else:
+                cells.append(value)
+        worksheet.append(cells)
     stream = BytesIO()
     workbook.save(stream)
     workbook.close()

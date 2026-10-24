@@ -1,12 +1,16 @@
 import csv
 from collections.abc import Iterable, Sequence
 from io import BytesIO, StringIO
+from time import perf_counter
 from typing import Any, cast
+from unittest.mock import patch
+from zipfile import ZipFile
 
 import pytest
 from django.contrib.auth import get_user_model
 from django.db.models import QuerySet
 from openpyxl import load_workbook  # type: ignore[import-untyped]
+from openpyxl.worksheet.worksheet import Worksheet  # type: ignore[import-untyped]
 from rest_framework import serializers
 from rest_framework.generics import ListAPIView
 from rest_framework.permissions import AllowAny
@@ -40,6 +44,26 @@ def test_xlsx_cells_are_text() -> None:
 def test_csv_has_bom_semicolons_and_quotes() -> None:
     content = render_csv([["a", 7]], ["name", "amount"])
     assert content == b'\xef\xbb\xbf"name";"amount"\r\n"a";"7"\r\n'
+
+
+def test_xlsx_streams_fifty_thousand_rows_without_random_access() -> None:
+    with patch.object(Worksheet, "__getitem__", side_effect=AssertionError("quadratic row lookup")):
+        started = perf_counter()
+        content = render_xlsx((("Customer", index) for index in range(50_000)), ["name", "amount"], "test")
+        elapsed = perf_counter() - started
+    assert elapsed < 8, f"50,000-row export took {elapsed:.2f}s"
+    with ZipFile(BytesIO(content)) as archive:
+        assert archive.read("xl/worksheets/sheet1.xml").count(b"<row ") == 50_001
+
+
+def test_xlsx_removes_illegal_characters_without_logging_values(caplog: pytest.LogCaptureFixture) -> None:
+    content = render_xlsx([["=private\x00", "hello\x07world", "\x01=1+1", 42]], ["a", "b", "c", "d"], "test")
+    workbook = load_workbook(BytesIO(content))
+    sheet = workbook.active
+    assert [cell.value for cell in sheet[2]] == ["'=private", "helloworld", "=1+1", 42]
+    assert [cell.data_type for cell in sheet[2]] == ["s", "s", "s", "n"]
+    workbook.close()
+    assert "private" not in caplog.text
 
 
 class AuditSerializer(serializers.ModelSerializer[AuditEntry]):

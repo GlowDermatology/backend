@@ -4,7 +4,7 @@ from urllib.parse import unquote, urlsplit
 
 from django.core.exceptions import ImproperlyConfigured
 
-from config.env import env_str
+from config.env import Network, env_str
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 INSTALLED_APPS = [
@@ -95,7 +95,7 @@ SPECTACULAR_SETTINGS = {
     "SERVE_PERMISSIONS": ["glowderma.accounts.permissions.IsActiveStaff"],
 }
 GIT_SHA = env_str("GIT_SHA", "dev")
-TRUSTED_PROXIES: list[str] = []
+TRUSTED_PROXIES: tuple[Network, ...] = ()
 
 
 def database_config(url: str) -> dict[str, Any]:

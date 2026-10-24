@@ -18,7 +18,7 @@ class AdminNetworkMiddleware:
         ):
             try:
                 peer = ipaddress.ip_address(peer_ip(request))
-                allowed = any(peer in ipaddress.ip_network(net) for net in settings.ADMIN_API_ALLOWED_NETS)
+                allowed = any(peer in net for net in settings.ADMIN_API_ALLOWED_NETS)
             except ValueError:
                 allowed = False
             if not allowed or (

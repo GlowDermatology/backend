@@ -1,10 +1,12 @@
 import json
 import os
+from ipaddress import IPv4Network, IPv6Network, ip_network
 from typing import Any
 
 from django.core.exceptions import ImproperlyConfigured
 
 MISSING = object()
+type Network = IPv4Network | IPv6Network
 
 
 def env_str(name: str, default: Any = MISSING) -> str:
@@ -43,3 +45,15 @@ def env_json(name: str, default: Any = MISSING) -> Any:
         return json.loads(env_str(name))
     except ValueError as exc:
         raise ImproperlyConfigured(f"{name} must be JSON") from exc
+
+
+def env_networks(name: str, default: Any = MISSING) -> tuple[Network, ...]:
+    values = (
+        [value.strip() for value in env_str(name).split(",")]
+        if os.environ.get(name)
+        else env_list(name, default)
+    )
+    try:
+        return tuple(ip_network(value, strict=True) for value in values)
+    except ValueError as exc:
+        raise ImproperlyConfigured(f"{name} must contain valid networks without host bits") from exc

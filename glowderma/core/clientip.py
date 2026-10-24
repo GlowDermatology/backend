@@ -18,7 +18,7 @@ def has_internal_secret(request: HttpRequest) -> bool:
 
 def peer_ip(request: HttpRequest) -> str:
     current = str(request.META.get("REMOTE_ADDR", ""))
-    proxies = [ipaddress.ip_network(value) for value in settings.TRUSTED_PROXIES]
+    proxies = settings.TRUSTED_PROXIES
     hops = [hop.strip() for hop in request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")]
     while True:
         try:

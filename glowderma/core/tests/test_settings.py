@@ -106,3 +106,31 @@ def test_internal_secret_matches_correct_value_only() -> None:
     factory = RequestFactory()
     assert has_internal_secret(factory.get("/", HTTP_X_GD_INTERNAL_SECRET="x" * 32))
     assert not has_internal_secret(factory.get("/", HTTP_X_GD_INTERNAL_SECRET="y" * 32))
+
+
+@pytest.mark.parametrize("module_name", ["local", "production"])
+@pytest.mark.parametrize("variable", ["TRUSTED_PROXIES", "ADMIN_API_ALLOWED_NETS"])
+@pytest.mark.parametrize("value", ["not-a-network", "10.0.0.1/8", "10.0.0.0/8,"])
+def test_invalid_cidrs_fail_settings_startup(
+    production_env: None, monkeypatch: pytest.MonkeyPatch, module_name: str, variable: str, value: str
+) -> None:
+    monkeypatch.setenv(variable, value)
+    full_name = f"config.settings.{module_name}"
+    original = sys.modules.pop(full_name, None)
+    try:
+        with pytest.raises(ImproperlyConfigured, match=variable):
+            importlib.import_module(full_name)
+    finally:
+        sys.modules.pop(full_name, None)
+        if original is not None:
+            sys.modules[full_name] = original
+            setattr(sys.modules["config.settings"], module_name, original)
+
+
+def test_cidrs_are_compiled_to_network_objects(monkeypatch: pytest.MonkeyPatch) -> None:
+    from ipaddress import ip_network
+
+    from config.env import env_networks
+
+    monkeypatch.setenv("TRUSTED_PROXIES", "10.0.0.0/8,2001:db8::/32")
+    assert env_networks("TRUSTED_PROXIES") == (ip_network("10.0.0.0/8"), ip_network("2001:db8::/32"))

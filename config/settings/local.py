@@ -1,4 +1,4 @@
-from config.env import env_bool, env_list, env_str
+from config.env import env_bool, env_list, env_networks, env_str
 
 from .base import *  # noqa: F403
 from .base import SPECTACULAR_SETTINGS as BASE_SPECTACULAR_SETTINGS
@@ -16,9 +16,9 @@ JWT_SIGNING_KEYS = {"dev": b"local-jwt-signing-key-at-least-32-bytes"}
 JWT_ACTIVE_KID = "dev"
 DJANGO_ADMIN_ENABLED = env_bool("DJANGO_ADMIN_ENABLED", True)
 ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", ["localhost", "127.0.0.1", "testserver"])
-ADMIN_API_ALLOWED_NETS = env_list("ADMIN_API_ALLOWED_NETS", ["0.0.0.0/0", "::/0"])
+ADMIN_API_ALLOWED_NETS = env_networks("ADMIN_API_ALLOWED_NETS", ["0.0.0.0/0", "::/0"])
 ADMIN_API_REQUIRE_INTERNAL_SECRET = False
-TRUSTED_PROXIES = env_list("TRUSTED_PROXIES", [])
+TRUSTED_PROXIES = env_networks("TRUSTED_PROXIES", [])
 DATABASE_URL = env_str("DATABASE_URL", "postgres://glowderma:glowderma@localhost:5433/glowderma")
 DATABASES = {"default": database_config(DATABASE_URL)}
 REDIS_URL = env_str("REDIS_URL", "redis://localhost:6380/0")
