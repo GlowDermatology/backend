@@ -52,16 +52,22 @@ def test_decode_rejects_wrong_audience() -> None:
 
 
 def test_decode_rejects_unknown_kid() -> None:
-    token = jwt.encode(claims(), b"x" * 32, algorithm="HS256", headers={"kid": "unknown"})
+    token = jwt.encode(
+        claims(),
+        settings.JWT_SIGNING_KEYS[settings.JWT_ACTIVE_KID],
+        algorithm="HS256",
+        headers={"kid": "unknown"},
+    )
     with pytest.raises(AuthFailed):
         tokens.decode_access(token, audience="staff")
 
 
 @pytest.mark.parametrize("algorithm", ["none", "HS512"])
+@override_settings(JWT_SIGNING_KEYS={"test": b"x" * 64}, JWT_ACTIVE_KID="test")
 def test_decode_rejects_alg_none_and_hs512(algorithm: str) -> None:
     token = jwt.encode(
         claims(),
-        "" if algorithm == "none" else b"x" * 64,
+        "" if algorithm == "none" else settings.JWT_SIGNING_KEYS[settings.JWT_ACTIVE_KID],
         algorithm=algorithm,
         headers={"kid": settings.JWT_ACTIVE_KID},
     )

@@ -127,6 +127,7 @@ class OutboxMessage(TimeStampedModel):
     attempts = models.PositiveIntegerField(default=0)
     available_at = models.DateTimeField(default=timestamp_default, db_index=True)
     lease_expires_at = models.DateTimeField(null=True)
+    claim_token = models.UUIDField(null=True, editable=False)
     last_error = models.TextField(blank=True)
 
     def __str__(self) -> str:

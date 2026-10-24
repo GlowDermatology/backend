@@ -64,7 +64,9 @@ def test_inactive_staff_rejected_immediately() -> None:
 
 
 def test_unauthenticated_admin_request_is_401_not_403() -> None:
-    assert request_with(None).status_code == 401
+    response = request_with(None)
+    assert response.status_code == 401
+    assert response["WWW-Authenticate"] == 'Bearer realm="api"'
 
 
 def test_revoked_session_rejected_next_request(django_capture_on_commit_callbacks: Any) -> None:
