@@ -113,3 +113,21 @@ class IdempotencyRecord(models.Model):
 
     def __str__(self) -> str:
         return f"{self.method} {self.path}: {self.key}"
+
+
+class OutboxMessage(TimeStampedModel):
+    topic = models.CharField(max_length=100)
+    payload = models.JSONField(encoder=DjangoJSONEncoder)
+    dedupe_key = models.CharField(max_length=254, unique=True)
+    status = models.CharField(
+        max_length=16,
+        default="pending",
+        choices=[(value, value) for value in ("pending", "in_flight", "done", "failed", "dead")],
+    )
+    attempts = models.PositiveIntegerField(default=0)
+    available_at = models.DateTimeField(default=timestamp_default, db_index=True)
+    lease_expires_at = models.DateTimeField(null=True)
+    last_error = models.TextField(blank=True)
+
+    def __str__(self) -> str:
+        return f"{self.topic}: {self.dedupe_key} ({self.status})"
