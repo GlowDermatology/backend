@@ -96,6 +96,7 @@ def mark_created(
     tariff: int,
     bts_order_id: str,
     bts_status: str,
+    via: str = enums.ShipmentVia.POLLING,
     at: datetime | None = None,
     manual: bool = False,
     payload: Mapping[str, Any] | None = None,
@@ -116,7 +117,7 @@ def mark_created(
         shipment.tariff = tariff
         shipment.bts_order_id = bts_order_id
         shipment.bts_status = bts_status
-        shipment.via = enums.ShipmentVia.POLLING  # the create answer counts as a polled status (D-2)
+        shipment.via = via  # the create answer counts as a polled status by default (D-2)
         shipment.bts_created_at = instant
         shipment.last_status_at = instant
         shipment.attempts += 1
@@ -177,7 +178,8 @@ def apply_status(
     payload: Mapping[str, Any] | None = None,
     at: datetime | None = None,
 ) -> StatusResult:
-    """A BTS webhook / poll status for a created parcel (02 §3.1 ``created → created``).
+    """A BTS webhook / poll status for a parcel (02 §3.1 ``created → created``; a cancelled parcel's late
+    statuses are recorded too, the order ignores them).
 
     Appends a ``status_received`` event and stores ``bts_status``/``via``/``last_status_at``. A status equal
     to the newest received one (same code and payload) is a duplicate: nothing is written. The order side
@@ -189,8 +191,8 @@ def apply_status(
     body = dict(payload or {})
     with transaction.atomic():
         shipment = _shipment(order_id)
-        if shipment.state != Shipment.State.CREATED:
-            raise DeliveryError(f"Shipment of order {order_id} is {shipment.state}, not created")
+        if shipment.state not in (Shipment.State.CREATED, Shipment.State.CANCELLED):
+            raise DeliveryError(f"Shipment of order {order_id} is {shipment.state}: BTS has no parcel")
         newest = (
             ShipmentEvent.objects.filter(shipment=shipment, kind=ShipmentEvent.Kind.STATUS_RECEIVED)
             .order_by("-at", "-id")

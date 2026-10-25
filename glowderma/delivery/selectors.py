@@ -100,7 +100,7 @@ def shipment_view(
     }
 
 
-def shipment_for_order(order_id: int, fulfilment: str) -> dict[str, Any]:
+def shipment_for_order(order_id: int, fulfilment: str = enums.FulfilmentMethod.DELIVERY) -> dict[str, Any]:
     """The contract union of one order (one query)."""
     row = Shipment.objects.select_related("create_message").filter(order_id=order_id).first()
     return shipment_view(row, fulfilment)

@@ -86,12 +86,18 @@ def test_mark_failed_then_created_then_status_and_cancel() -> None:
     assert selectors.shipment_for_order(order.pk, "delivery")["state"] == "created"  # D-1
     with pytest.raises(services.DeliveryError):
         services.cancel(order.pk)
-    with pytest.raises(services.DeliveryError):
-        services.apply_status(order.pk, bts_status="300", via="polling")
+    late = services.apply_status(order.pk, bts_status="300", via="polling")  # recorded, the order ignores it
+    assert late.changed and Shipment.objects.get(order=order).state == "cancelled"
     kinds = list(
         ShipmentEvent.objects.filter(shipment=shipment).order_by("id").values_list("kind", flat=True)
     )
-    assert kinds == ["create_failed", "created", "status_received", "cancelled"]
+    assert kinds == ["create_failed", "created", "status_received", "cancelled", "status_received"]
+    with pytest.raises(services.DeliveryError):
+        services.apply_status(OrderRowFactory.create(paid=True).pk, bts_status="200", via="webhook")
+    other = OrderRowFactory.create(paid=True)
+    services.ensure_shipment(other.pk)
+    with pytest.raises(services.DeliveryError):
+        services.apply_status(other.pk, bts_status="200", via="webhook")
 
 
 def test_views_and_attention_count() -> None:
