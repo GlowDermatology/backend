@@ -16,11 +16,20 @@ else:
 
 
 class ReadOnlyTabularInline(_TabularInline):
-    """An inline that only lists rows: no add/change/delete, every field read-only."""
+    """An inline that only lists rows: no add/change/delete, every field read-only.
+
+    The view grant mirrors ``ReadOnlyAdmin``'s (every active ``is_staff`` user): Django's default falls
+    back to ``user.has_perm(...)``, which would drop the inline for exactly the users the read-only admin
+    exists for.
+    """
 
     extra = 0
     can_delete = False
     show_change_link = True
+
+    def has_view_permission(self, request: HttpRequest, obj: models.Model | None = None) -> bool:
+        user = request.user
+        return bool(user.is_active and user.is_staff)
 
     def has_add_permission(self, request: HttpRequest, obj: models.Model | None = None) -> bool:
         return False
