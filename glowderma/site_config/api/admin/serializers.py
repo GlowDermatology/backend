@@ -10,17 +10,8 @@ from rest_framework import serializers
 
 from glowderma.core.api.exceptions import field_error
 from glowderma.core.api.fields import PhoneField
+from glowderma.core.api.serializers import ActorSerializer
 from glowderma.site_config.models import SiteSettings
-
-
-class ActorRefSerializer(serializers.Serializer[Any]):
-    """Contract §2.0 ``Actor = {"id", "display_name"}``: the staff full name, else the email."""
-
-    id = serializers.IntegerField(source="pk")
-    display_name = serializers.SerializerMethodField()
-
-    def get_display_name(self, obj: Any) -> str:
-        return str(getattr(obj, "full_name", "") or getattr(obj, "email", ""))
 
 
 class PickupAddressSerializer(serializers.Serializer[dict[str, str]]):
@@ -41,7 +32,7 @@ class SettingsSerializer(serializers.Serializer[SiteSettings]):
     pickup_address = serializers.SerializerMethodField()
     integrations = serializers.SerializerMethodField()
     updated_at = serializers.DateTimeField()
-    updated_by = ActorRefSerializer(allow_null=True)
+    updated_by = ActorSerializer(allow_null=True)
 
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_support_phone(self, obj: SiteSettings) -> str | None:

@@ -98,6 +98,8 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
 - Field errors: raise contract codes through `core.api.exceptions.field_error(code, message=None, limit=None)`;
   generic codes carry their default Uzbek message, endpoint-specific codes (`ENDPOINT_FIELD_CODES`) require the
   explicit message from the endpoint table. Unknown codes raise `ValueError` at development time.
+- Shared contract shapes live in `glowderma/core/api/serializers.py` (`ActorSerializer` = `{id, display_name}`; declare
+  it with `allow_null=True` where the actor may be the system) — never redeclare them in a module.
 - OpenAPI helpers in `glowderma/core/api/schema.py`: `ADMIN_ERRORS` / `PUBLIC_ERRORS` response maps,
   `IDEMPOTENCY_KEY_HEADER`, `EXPORT_PARAM`. Uzbek export labels live in `glowderma/core/labels.py`; datetimes in
   exports go through `core.exports.format_export_datetime`.

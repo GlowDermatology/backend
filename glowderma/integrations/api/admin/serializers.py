@@ -5,16 +5,7 @@ from typing import Any
 from rest_framework import serializers
 
 from glowderma.core import enums
-
-
-class ActorSerializer(serializers.Serializer[Any]):
-    """Contract §2.0 ``Actor = {"id", "display_name"}``: the staff full name, else the email."""
-
-    id = serializers.IntegerField(source="pk")
-    display_name = serializers.SerializerMethodField()
-
-    def get_display_name(self, obj: Any) -> str:
-        return str(getattr(obj, "full_name", "") or obj.get_username())
+from glowderma.core.api.serializers import ActorSerializer
 
 
 class JobSerializer(serializers.Serializer[Any]):

@@ -17,8 +17,8 @@ from glowderma.catalog.models import Banner, Category, Product, ProductImage
 from glowderma.core import enums
 from glowderma.core.api.exceptions import field_error
 from glowderma.core.api.fields import AwareDateTimeField, QueryBooleanField, SlugField, i18n_dict, i18n_text
+from glowderma.core.api.serializers import ActorSerializer
 from glowderma.core.media import absolute_media_url
-from glowderma.integrations.api.admin.serializers import ActorSerializer
 from glowderma.integrations.billz.ports import BillzPort, BillzProduct
 
 BILLZ_ID_PATTERN = r"^\d{6,14}$"

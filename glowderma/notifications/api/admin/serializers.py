@@ -13,10 +13,10 @@ from glowderma.catalog.models import Product
 from glowderma.core import enums, timeutils
 from glowderma.core.api.exceptions import field_error
 from glowderma.core.api.fields import AwareDateTimeField, BoundedListField, PhoneField
+from glowderma.core.api.serializers import ActorSerializer
 from glowderma.core.media import absolute_media_url
 from glowderma.notifications import selectors, services
 from glowderma.notifications.models import Campaign, CustomerSegment, StatusTemplate
-from glowderma.site_config.api.admin.serializers import ActorRefSerializer
 
 # A ``{`` that does not open ``{raqam}`` (the DB CHECK uses the same pattern).
 UNKNOWN_PLACEHOLDER = re.compile(r"\{(?!raqam\})")
@@ -85,7 +85,7 @@ class NotificationRecordSerializer(serializers.Serializer[Campaign]):
     sent = serializers.IntegerField(allow_null=True)
     failed = serializers.IntegerField(allow_null=True)
     delivered = serializers.IntegerField(allow_null=True)
-    author = ActorRefSerializer(allow_null=True)
+    author = ActorSerializer(allow_null=True)
 
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_image_url(self, obj: Campaign) -> str | None:
@@ -138,7 +138,7 @@ class StatusTemplateSerializer(serializers.Serializer[StatusTemplate]):
     status = serializers.ChoiceField(choices=enums.TemplateStatus.values)
     texts = serializers.SerializerMethodField()
     updated_at = serializers.DateTimeField()
-    updated_by = ActorRefSerializer(allow_null=True)
+    updated_by = ActorSerializer(allow_null=True)
 
     @extend_schema_field(TemplateTextsSerializer())
     def get_texts(self, obj: StatusTemplate) -> dict[str, str]:

@@ -7,9 +7,9 @@ from typing import Any
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
+from glowderma.core.api.serializers import ActorSerializer
 from glowderma.core.models import AuditEntry
 from glowderma.reporting import selectors
-from glowderma.site_config.api.admin.serializers import ActorRefSerializer
 
 
 class AuditEntrySerializer(serializers.Serializer[AuditEntry]):
@@ -23,7 +23,7 @@ class AuditEntrySerializer(serializers.Serializer[AuditEntry]):
     ip = serializers.IPAddressField(allow_null=True)
     request_id = serializers.CharField()
 
-    @extend_schema_field(ActorRefSerializer(allow_null=True))
+    @extend_schema_field(ActorSerializer(allow_null=True))
     def get_actor(self, obj: AuditEntry) -> dict[str, Any] | None:
         return selectors.audit_actor(obj)
 

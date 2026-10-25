@@ -3560,21 +3560,10 @@ components:
       - refresh_expires_at
     Actor:
       type: object
-      description: 'Contract §2.0 ``Actor = {"id", "display_name"}``: the staff full
-        name, else the email.'
-      properties:
-        id:
-          type: integer
-        display_name:
-          type: string
-          readOnly: true
-      required:
-      - display_name
-      - id
-    ActorRef:
-      type: object
-      description: 'Contract §2.0 ``Actor = {"id", "display_name"}``: the staff full
-        name, else the email.'
+      description: |-
+        ``Actor = {"id", "display_name"}``: the staff full name, else the email (``null`` = system).
+
+        Takes any staff user instance; declare it with ``allow_null=True`` where the actor may be the system.
       properties:
         id:
           type: integer
@@ -3726,7 +3715,7 @@ components:
           format: date-time
         actor:
           allOf:
-          - $ref: '#/components/schemas/ActorRef'
+          - $ref: '#/components/schemas/Actor'
           nullable: true
           readOnly: true
         action:
@@ -4666,7 +4655,7 @@ components:
           nullable: true
         author:
           allOf:
-          - $ref: '#/components/schemas/ActorRef'
+          - $ref: '#/components/schemas/Actor'
           nullable: true
       required:
       - audience
@@ -5440,7 +5429,7 @@ components:
           format: date-time
         updated_by:
           allOf:
-          - $ref: '#/components/schemas/ActorRef'
+          - $ref: '#/components/schemas/Actor'
           nullable: true
       required:
       - integrations
@@ -5515,7 +5504,7 @@ components:
           format: date-time
         updated_by:
           allOf:
-          - $ref: '#/components/schemas/ActorRef'
+          - $ref: '#/components/schemas/Actor'
           nullable: true
       required:
       - status
