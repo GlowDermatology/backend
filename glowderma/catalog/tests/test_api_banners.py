@@ -393,3 +393,40 @@ def test_reorder_empty_list_without_banners_is_a_noop(staff_client: APIClient) -
     response = staff_client.put(f"{BANNERS}order/", {"ids": []})
     assert response.status_code == 200, response.json()
     assert response.json() == {"results": []}
+
+
+def test_patch_keeps_a_link_to_a_product_hidden_since(staff_client: APIClient) -> None:
+    """§2.5: an unchanged link.product_id is not re-checked, so the banner stays editable and switchable."""
+    product = ProductFactory.create(status="active")
+    banner = BannerFactory.create(title_uz="Kuz", link_kind="product", link_product=product)
+    product.status = "hidden"
+    product.save()
+    url = f"{BANNERS}{banner.pk}/"
+    response = staff_client.patch(
+        url,
+        {"title": {"uz": "Qish"}, "link": {"kind": "product", "product_id": product.pk, "category": None}},
+    )
+    assert response.status_code == 200, response.json()
+    assert response.json()["link"]["product_id"] == product.pk
+    assert staff_client.patch(url, {"is_active": False}).status_code == 200
+    # a different hidden product is still refused
+    other = ProductFactory.create(status="hidden")
+    response = staff_client.patch(url, {"link": {"product_id": other.pk}})
+    assert errors_of(response)["link.product_id"] == ("does_not_exist", "Topilmadi.")
+
+
+def test_patch_request_schemas_allow_partial_nested_objects() -> None:
+    """The OpenAPI PATCH bodies match the leaf merge: no texts/title leaf is required (F2a typed client)."""
+    import yaml
+
+    schema = yaml.safe_load((Path(settings.BASE_DIR) / "openapi" / "schema.yaml").read_text())
+    components = schema["components"]["schemas"]
+    for name in ("PatchedProductPatchRequest", "PatchedBannerPatchRequest"):
+        assert "required" not in components[name], name
+    for name in ("ProductTextsPatchRequest", "ProductUzTextPatchRequest", "BannerTitlePatchRequest"):
+        assert "required" not in components[name], name
+    paths = schema["paths"]
+    product_patch = paths["/api/v1/admin/products/{id}/"]["patch"]["requestBody"]["content"]
+    assert product_patch["application/json"]["schema"]["$ref"].endswith("/PatchedProductPatchRequest")
+    banner_patch = paths["/api/v1/admin/banners/{id}/"]["patch"]["requestBody"]["content"]
+    assert banner_patch["application/json"]["schema"]["$ref"].endswith("/PatchedBannerPatchRequest")

@@ -46,6 +46,14 @@ class BannerTitleSerializer(serializers.Serializer[dict[str, str]]):
     en = serializers.CharField(max_length=80, allow_blank=True, required=False, default="")
 
 
+class BannerTitlePatchSerializer(BannerTitleSerializer):
+    """``title`` of ``PATCH banners/{id}/``: any subset of the three leaves (merged into the stored title)."""
+
+    uz = serializers.CharField(max_length=80, required=False)
+    ru = serializers.CharField(max_length=80, allow_blank=True, required=False)
+    en = serializers.CharField(max_length=80, allow_blank=True, required=False)
+
+
 class ProductImageSerializer(serializers.Serializer[ProductImage]):
     """Contract §2.3 ``ProductImage = {id, url, position}``."""
 
@@ -85,6 +93,18 @@ class ProductTextsSerializer(serializers.Serializer[dict[str, Any]]):
     uz = ProductUzTextSerializer()
     ru = ProductTextSerializer(required=False)
     en = ProductTextSerializer(required=False)
+
+
+class ProductUzTextPatchSerializer(ProductUzTextSerializer):
+    """PATCH leaf merge: every Uzbek leaf is optional; a sent ``name`` keeps the 2..120 rule."""
+
+    name = serializers.CharField(max_length=120, allow_blank=True, required=False)
+
+
+class ProductTextsPatchSerializer(ProductTextsSerializer):
+    """``texts`` of ``PATCH products/{id}/``: any subset of languages and leaves (§2.3 leaf merge)."""
+
+    uz = ProductUzTextPatchSerializer(required=False)
 
 
 class LastChangeSerializer(serializers.Serializer[Product]):
@@ -276,6 +296,16 @@ class ProductWriteSerializer(serializers.Serializer[Any]):
         )
 
 
+class ProductPatchSerializer(ProductWriteSerializer):
+    """``PATCH products/{id}/``: every field optional and ``texts`` merged leaf by leaf (contract §2.3).
+
+    Validation is the create serializer's (``partial=True`` skips absent fields); the separate class gives the
+    OpenAPI request its true shape, where no ``texts`` leaf is required.
+    """
+
+    texts = ProductTextsPatchSerializer(required=False)
+
+
 class ImageOrderSerializer(serializers.Serializer[dict[str, Any]]):
     """Body of ``PUT products/{id}/images/order/``."""
 
@@ -426,7 +456,11 @@ class BannerWriteSerializer(serializers.Serializer[Any]):
             product_id = link.get("product_id", current.link_product_id if current is not None else None)
             if product_id is None:
                 raise serializers.ValidationError({"link": {"product_id": [field_error("required")]}})
-            product = Product.objects.filter(pk=product_id, status=enums.ProductStatus.ACTIVE).first()
+            unchanged = current is not None and product_id == current.link_product_id
+            candidates = Product.objects.filter(pk=product_id)
+            if not unchanged:
+                candidates = candidates.filter(status=enums.ProductStatus.ACTIVE)
+            product = candidates.first()
             if product is None:
                 raise serializers.ValidationError({"link": {"product_id": [field_error("does_not_exist")]}})
             self.link_product = product
@@ -467,6 +501,16 @@ class BannerWriteSerializer(serializers.Serializer[Any]):
             ends_at=data.get("ends_at"),
             ends_at_set="ends_at" in data,
         )
+
+
+class BannerPatchSerializer(BannerWriteSerializer):
+    """``PATCH banners/{id}/`` (JSON or multipart): ``title`` merged leaf by leaf, every field optional.
+
+    An unchanged ``link.product_id`` is not re-checked against the active products, so a banner whose product
+    was hidden later can still be edited or switched off (contract §2.5).
+    """
+
+    title = BannerTitlePatchSerializer(required=False)
 
 
 class IdOrderSerializer(serializers.Serializer[dict[str, Any]]):

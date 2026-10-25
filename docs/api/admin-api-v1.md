@@ -479,6 +479,8 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 - `last_change.kind` is chosen by priority: `created` > `price_changed` > `activated`/`hidden` > `promo_added`/`promo_removed` > `updated`. Image calls do not change `last_change`.
 - Audit `product.created` / `product.updated` (field diff).
 
+- PATCH request shape: every field optional and `texts` merged leaf by leaf — any subset of languages and leaves (OpenAPI `PatchedProductPatchRequest`).
+
 **`GET products/{id}/`** → `Product`; 404.
 
 **`POST products/{id}/images/`** (multipart, one part `file`) → 201 `{"id": 32, "url": "…", "position": 1}`.
@@ -507,7 +509,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 ```
 - `GET categories/` (P E; ordered by `position`; filter `is_active`).
 - `POST categories/` → 201:
-  - `slug`: `^[a-z0-9-]{2,40}$`, unique, not `order` or `none` (reserved), immutable afterwards; a lost unique race is reported as `slug` `unique` too;
+  - `slug`: `^[a-z0-9-]{2,40}$`, unique, not `order` or `none` (reserved → `slug` `invalid` "Bu slug band."), immutable afterwards; a lost unique race is reported as `slug` `unique` too;
   - `name.uz` 2..60 required; `name.ru`, `name.en` ≤60, optional (default `""`);
   - `is_active` default `true`;
   - appended last.
@@ -529,7 +531,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
   - Form encoding: nested keys are dotted form fields (`title.uz`, `link.kind`, `link.product_id`, `link.category`); `""` means `null` for the nullable keys (`link.product_id`, `link.category`, `starts_at`, `ends_at`); booleans are `true`/`false`. Only `multipart/form-data` (and JSON for PATCH) is accepted — never `application/x-www-form-urlencoded`.
   - `link.product_id` must be an active product, `link.category` an existing slug (`does_not_exist`).
   - `ends_at` must be after `starts_at` (`invalid`).
-- `PATCH banners/{id}/` takes multipart or JSON; `image` is optional.
+- `PATCH banners/{id}/` takes multipart or JSON; `image` is optional; `title` merges leaf by leaf (every leaf optional). An unchanged `link.product_id` is not re-checked against the active products, so a banner whose product was hidden later can still be edited or switched off; a different product must be active.
 - `DELETE banners/{id}/` → 204.
 - `PUT banners/order/` `{"ids": [...]}` (exact set, `mismatch`; `[]` only when there are no banners) → 200 `{"results": [Banner…]}`.
 - Audit `banner.created|updated|deleted|reordered`.
@@ -1177,7 +1179,7 @@ Provisional, configurable rules that shape payloads:
 7. **Photos.**
    - `OrderItem` gains `imageUrl`; the order item and products-table thumbnails render the photo before `art`.
    - `ProductImage.src` = API url and `label` = "Rasm N".
-   - Product save orchestration: JSON `POST products/` (hidden) or `PATCH`, then images, deletes, `PUT images/order`, then `PATCH status`. This replaces the "multipart PUT" comment in `products.actions.ts`.
+   - Product save orchestration (as built in F2a): JSON `POST products/` (hidden, keyed) or a `PATCH` carrying only the fields changed against the editor's baseline (texts leaf by leaf, so a concurrent edit by another admin survives), then image deletes, then uploads (deletes first, so swapping a photo on a product with 8 images never reaches 9; an active product keeps one old image as an anchor until the first upload lands), then `PUT images/order` only when the order differs from the server's, then `PATCH status`. `POST products/{id}/images/` honours an optional `Idempotency-Key` (§1.7), so a client may key each picked file and retry a lost upload without a duplicate.
 8. **Categories become data.** `CategoryId` → `string` (slug); add `getCategories()`; schema `category: z.string()`; pass categories to ProductEditor, ProductsToolbar and ProductsTable; wrap `/admin/products/new` in Suspense.
 9. **Catalog stats.**
    - `getCatalogStats` returns `lastSyncAt` and `billzConnected`; `lastSyncLabel` is derived per §5.2.
@@ -1205,7 +1207,7 @@ Provisional, configurable rules that shape payloads:
     - The custom range ("Tanlash") can be wired to `range=custom&from=&to=`.
     - Fix the out-of-stock link `?stock=out` → `?out=1`.
     - `getRecentOrders(6)` → `orders/?page_size=6`.
-15. **Export route.** Stream Django's file and forward `Content-Disposition`. Translate UI params to API params with the shared mapper:
+15. **Export route.** Stream Django's file and forward `Content-Disposition`; the UI downloads through `fetch` + blob and shows the envelope message as a toast on any non-2xx (429, 400 `export_too_large`) instead of navigating to the route. Translate UI params to API params with the shared mapper:
     - Orders: `q`→`search`, `sort` `date_desc`/`date_asc`→`ordering` `-created_at`/`created_at`, `size`→`page_size`.
     - Products: `promo` `yes`/`no`→`true`/`false`, `out=1`→`out_of_stock=true`, `new=1`→`is_new=true`, `sort` `default`/`name_asc`/`name_desc`→`ordering` `default`/`name`/`-name`.
     - The CSV date format changes from "23-okt, 14:02" to "2026-10-23 14:02" (it now includes the year).

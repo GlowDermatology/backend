@@ -1183,10 +1183,10 @@ paths:
         content:
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PatchedBannerFormRequest'
+              $ref: '#/components/schemas/PatchedBannerPatchFormRequest'
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchedBannerWriteRequest'
+              $ref: '#/components/schemas/PatchedBannerPatchRequest'
       security:
       - StaffJWT: []
       responses:
@@ -2957,7 +2957,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchedProductWriteRequest'
+              $ref: '#/components/schemas/PatchedProductPatchRequest'
       security:
       - StaffJWT: []
       responses:
@@ -4283,10 +4283,10 @@ components:
             $ref: '#/components/schemas/Banner'
       required:
       - results
-    BannerTitleRequest:
+    BannerTitlePatchRequest:
       type: object
-      description: 'Contract §2.5 ``title``: ``uz`` 1..80 required; ``ru`` / ``en``
-        ≤ 80 optional (missing → "").'
+      description: '``title`` of ``PATCH banners/{id}/``: any subset of the three
+        leaves (merged into the stored title).'
       properties:
         uz:
           type: string
@@ -4294,14 +4294,10 @@ components:
           maxLength: 80
         ru:
           type: string
-          default: ''
           maxLength: 80
         en:
           type: string
-          default: ''
           maxLength: 80
-      required:
-      - uz
     BillzImportModeEnum:
       enum:
       - delta
@@ -5647,7 +5643,7 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Segment'
-    PatchedBannerFormRequest:
+    PatchedBannerPatchFormRequest:
       type: object
       properties:
         image:
@@ -5683,23 +5679,16 @@ components:
           type: string
           format: date-time
           nullable: true
-    PatchedBannerWriteRequest:
+    PatchedBannerPatchRequest:
       type: object
       description: |-
-        Fields of ``POST banners/`` (multipart) and ``PATCH banners/{id}/`` (multipart or JSON; ``partial``).
+        ``PATCH banners/{id}/`` (JSON or multipart): ``title`` merged leaf by leaf, every field optional.
 
-        Accepted form encoding (multipart): nested keys arrive as dotted form names — ``title.uz``, ``title.ru``,
-        ``title.en``, ``link.kind``, ``link.product_id``, ``link.category`` — next to the flat ``is_active``,
-        ``starts_at``, ``ends_at`` and the file part ``image``. The view un-dots them into this nested shape
-        (``views.form_to_nested``); an empty string for ``link.product_id``, ``link.category``, ``starts_at`` or
-        ``ends_at`` means ``null``. Booleans are ``true``/``false``/``1``/``0``. Error paths use the same dotted
-        names, so multipart and JSON callers map errors identically.
-
-        The ``image`` part is read from the request by the view (it is not a field here); the link targets and
-        the date order are validated against the merged state (``instance`` on PATCH).
+        An unchanged ``link.product_id`` is not re-checked against the active products, so a banner whose product
+        was hidden later can still be edited or switched off (contract §2.5).
       properties:
         title:
-          $ref: '#/components/schemas/BannerTitleRequest'
+          $ref: '#/components/schemas/BannerTitlePatchRequest'
         link:
           $ref: '#/components/schemas/BannerLinkRequest'
         is_active:
@@ -5727,19 +5716,20 @@ components:
         is_active:
           type: boolean
           default: true
-    PatchedProductWriteRequest:
+    PatchedProductPatchRequest:
       type: object
       description: |-
-        Body of ``POST products/`` (every rule of the §2.3 table) and ``PATCH products/{id}/`` (``partial``).
+        ``PATCH products/{id}/``: every field optional and ``texts`` merged leaf by leaf (contract §2.3).
 
-        ``context["billz"]`` may carry a ``BillzPort`` (tests); otherwise the configured adapter is used.
+        Validation is the create serializer's (``partial=True`` skips absent fields); the separate class gives the
+        OpenAPI request its true shape, where no ``texts`` leaf is required.
       properties:
         billz_id:
           type: string
           minLength: 1
           pattern: ^\d{6,14}$
         texts:
-          $ref: '#/components/schemas/ProductTextsRequest'
+          $ref: '#/components/schemas/ProductTextsPatchRequest'
         price:
           type: integer
           maximum: 100000000
@@ -6109,6 +6099,17 @@ components:
           $ref: '#/components/schemas/ProductText'
       required:
       - uz
+    ProductTextsPatchRequest:
+      type: object
+      description: '``texts`` of ``PATCH products/{id}/``: any subset of languages
+        and leaves (§2.3 leaf merge).'
+      properties:
+        uz:
+          $ref: '#/components/schemas/ProductUzTextPatchRequest'
+        ru:
+          $ref: '#/components/schemas/ProductTextRequest'
+        en:
+          $ref: '#/components/schemas/ProductTextRequest'
     ProductTextsRequest:
       type: object
       description: 'Language-first product texts ``{uz: {...}, ru: {...}, en: {...}}``
@@ -6141,6 +6142,23 @@ components:
           maxLength: 1000
       required:
       - name
+    ProductUzTextPatchRequest:
+      type: object
+      description: 'PATCH leaf merge: every Uzbek leaf is optional; a sent ``name``
+        keeps the 2..120 rule.'
+      properties:
+        name:
+          type: string
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 2000
+        ingredients:
+          type: string
+          maxLength: 1000
+        usage:
+          type: string
+          maxLength: 1000
     ProductUzTextRequest:
       type: object
       description: 'The Uzbek texts: ``name`` is mandatory on create and, whenever

@@ -19,6 +19,7 @@ from glowderma.accounts.api.base import AdminAPIView, AdminGenericViewSet
 from glowderma.catalog import billz, selectors, services
 from glowderma.catalog.api.admin.serializers import (
     BannerListQuerySerializer,
+    BannerPatchSerializer,
     BannerResultsSerializer,
     BannerSerializer,
     BannerWriteSerializer,
@@ -31,6 +32,7 @@ from glowderma.catalog.api.admin.serializers import (
     ImagesResponseSerializer,
     ProductImageSerializer,
     ProductListQuerySerializer,
+    ProductPatchSerializer,
     ProductSerializer,
     ProductStatsSerializer,
     ProductWriteSerializer,
@@ -108,7 +110,7 @@ class ProductViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
 
     @extend_schema(
         operation_id="admin_products_partial_update",
-        request=ProductWriteSerializer,
+        request=ProductPatchSerializer,
         responses={200: ProductSerializer, **ADMIN_ERRORS},
     )
     @idempotent(required=False)
@@ -116,7 +118,7 @@ class ProductViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
         product = Product.objects.filter(pk=pk).first()
         if product is None:
             raise NotFound
-        serializer = ProductWriteSerializer(instance=product, data=request.data, partial=True)
+        serializer = ProductPatchSerializer(instance=product, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         updated = services.update_product(
             product.pk, serializer.to_input(), actor=request.user, request=request
@@ -349,6 +351,23 @@ BannerFormSerializer = inline_serializer(
 )
 
 
+BannerPatchFormSerializer = inline_serializer(
+    name="BannerPatchForm",
+    fields={
+        "image": serializers.FileField(required=False),
+        "title.uz": serializers.CharField(max_length=80, required=False),
+        "title.ru": serializers.CharField(max_length=80, required=False, allow_blank=True),
+        "title.en": serializers.CharField(max_length=80, required=False, allow_blank=True),
+        "link.kind": serializers.ChoiceField(choices=enums.BannerLinkKind.values, required=False),
+        "link.product_id": serializers.IntegerField(required=False, allow_null=True),
+        "link.category": serializers.CharField(required=False, allow_null=True, max_length=40),
+        "is_active": serializers.BooleanField(required=False),
+        "starts_at": serializers.DateTimeField(required=False, allow_null=True),
+        "ends_at": serializers.DateTimeField(required=False, allow_null=True),
+    },
+)
+
+
 class BannerViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
     serializer_class = BannerSerializer
     export_name = "bannerlar"
@@ -433,13 +452,13 @@ class BannerViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
 
     @extend_schema(
         operation_id="admin_banners_partial_update",
-        request={"multipart/form-data": BannerFormSerializer, "application/json": BannerWriteSerializer},
+        request={"multipart/form-data": BannerPatchFormSerializer, "application/json": BannerPatchSerializer},
         responses={200: BannerSerializer, **ADMIN_ERRORS},
     )
     @idempotent(required=False)
     def partial_update(self, request: Request, pk: int) -> Response:
         banner = self._banner(pk)
-        serializer = BannerWriteSerializer(instance=banner, data=form_to_nested(request.data), partial=True)
+        serializer = BannerPatchSerializer(instance=banner, data=form_to_nested(request.data), partial=True)
         serializer.is_valid(raise_exception=True)
         updated = services.update_banner(
             banner, serializer.to_input(), request.FILES.get("image"), actor=request.user, request=request
