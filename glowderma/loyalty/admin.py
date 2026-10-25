@@ -3,13 +3,9 @@
 The only secret column of the module is ``PosDevice.key_hash`` (review minor 20): excluded.
 """
 
-from typing import TYPE_CHECKING
-
 from django.contrib import admin
-from django.db import models
-from django.http import HttpRequest
 
-from glowderma.core.admin import ReadOnlyAdmin, register_read_only
+from glowderma.core.admin import ReadOnlyAdmin, ReadOnlyTabularInline, register_read_only
 from glowderma.loyalty.models import (
     CashbackHold,
     CashbackPolicy,
@@ -20,41 +16,6 @@ from glowderma.loyalty.models import (
     Purchase,
     PurchaseItem,
 )
-
-if TYPE_CHECKING:
-    _TabularInline = admin.TabularInline[models.Model, models.Model]
-else:
-    _TabularInline = admin.TabularInline  # the runtime class is not generic
-
-
-class ReadOnlyTabularInline(_TabularInline):
-    """An inline that only lists rows: no add/change/delete, every field read-only.
-
-    The view grant mirrors ``ReadOnlyAdmin``'s (every active ``is_staff`` user): Django's default falls
-    back to ``user.has_perm(...)``, which would drop the inline for exactly the users the read-only admin
-    exists for. ``core.admin`` has no inline base on this branch; ``commerce.admin`` carries the same class.
-    """
-
-    extra = 0
-    can_delete = False
-    show_change_link = True
-
-    def has_view_permission(self, request: HttpRequest, obj: models.Model | None = None) -> bool:
-        user = request.user
-        return bool(user.is_active and user.is_staff)
-
-    def has_add_permission(self, request: HttpRequest, obj: models.Model | None = None) -> bool:
-        return False
-
-    def has_change_permission(self, request: HttpRequest, obj: models.Model | None = None) -> bool:
-        return False
-
-    def has_delete_permission(self, request: HttpRequest, obj: models.Model | None = None) -> bool:
-        return False
-
-    def get_readonly_fields(self, request: HttpRequest, obj: models.Model | None = None) -> list[str]:
-        # ``fields`` is declared flat (no fieldset-style nesting) on every inline below.
-        return [name for name in self.fields or () if isinstance(name, str)]
 
 
 class CashbackTierInline(ReadOnlyTabularInline):
