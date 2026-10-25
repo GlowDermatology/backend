@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
+from uuid import UUID
 
 from django.db.models import (
     BigIntegerField,
@@ -296,6 +297,47 @@ def purchase_for_order(order_id: int) -> PurchaseRow | None:
     return None if purchase is None else purchase_row(purchase)
 
 
+@dataclass(frozen=True, slots=True)
+class BillzPushInfo:
+    """What the ``billz.push_sale`` handler needs (03 §5): the pre-persisted Billz order id and its guard."""
+
+    purchase_id: int
+    customer_id: int
+    order_id: int | None
+    billz_order_uuid: UUID | None
+    billz_sale_id: str
+    billz_sale_ref: str
+    billz_pushed_at: datetime | None  # set → the push already succeeded; the handler skips
+
+
+def billz_push_info(purchase_id: int) -> BillzPushInfo | None:
+    """The Billz-side state of a purchase (``None`` when it does not exist)."""
+    purchase = (
+        Purchase.objects.filter(pk=purchase_id)
+        .only(
+            "id",
+            "customer_id",
+            "order_id",
+            "billz_order_uuid",
+            "billz_sale_id",
+            "billz_sale_ref",
+            "billz_pushed_at",
+        )
+        .first()
+    )
+    if purchase is None:
+        return None
+    return BillzPushInfo(
+        purchase_id=purchase.pk,
+        customer_id=purchase.customer_id,
+        order_id=purchase.order_id,
+        billz_order_uuid=purchase.billz_order_uuid,
+        billz_sale_id=purchase.billz_sale_id,
+        billz_sale_ref=purchase.billz_sale_ref,
+        billz_pushed_at=purchase.billz_pushed_at,
+    )
+
+
 def purchases_for_customer(customer_id: int) -> list[PurchaseRow]:
     """Full history incl. reversed purchases, newest first (``at desc, id desc``)."""
     rows = Purchase.objects.select_related("policy").filter(customer_id=customer_id).order_by("-at", "-id")
@@ -359,6 +401,7 @@ def list_annotations(policy: CashbackPolicy | None = None, *, customer_ref: str 
 __all__ = [
     "AccountSummary",
     "Actor",
+    "BillzPushInfo",
     "LedgerRow",
     "NextTier",
     "PurchaseRow",
@@ -366,6 +409,7 @@ __all__ = [
     "Totals",
     "account_summary",
     "active_policy",
+    "billz_push_info",
     "customer_totals",
     "held_amount",
     "ledger_entry",

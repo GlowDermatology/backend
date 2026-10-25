@@ -802,50 +802,67 @@ def reverse_purchase(purchase_id: int, at: datetime, actor_id: int | None = None
 
 
 def link_billz_sale(
-    purchase_id: int, *, billz_sale_id: str, billz_sale_ref: str = "", pushed_at: datetime | None = None
+    purchase_id: int,
+    *,
+    billz_order_uuid: UUID | None = None,
+    billz_sale_id: str = "",
+    billz_sale_ref: str = "",
+    pushed_at: datetime | None = None,
 ) -> LinkResult:
-    """The ``billz.push_sale`` handler records the Billz-side sale of an online purchase (never credits).
+    """Record the Billz side of an online purchase (``billz.push_sale`` handler, M3 sync echo); never credits.
 
-    The Billz order id (``billz_order_uuid``) was persisted by :func:`record_online_purchase` before the
-    push; this stores the sale id / document number Billz answered with and ``billz_pushed_at``. Idempotent
-    for the same sale id; a different sale id on an already linked purchase raises ``BillzSaleConflict``.
+    The Billz order id (``billz_order_uuid``) was persisted by :func:`record_online_purchase` **before** the
+    outbox row was committed (02 §1.6); the handler passes it back so a mismatch (a payload that does not
+    belong to this purchase) raises :class:`BillzSaleConflict` instead of linking the wrong sale. A successful
+    push sets ``billz_pushed_at`` (the handler's skip guard, 03 §5) even when Billz answers without a sale id;
+    ``billz_sale_id``/``billz_sale_ref`` are stored when known (the ref defaults to the sale id). Idempotent:
+    a pushed purchase with the same (or no new) sale id is a no-op (``changed=False``); a different sale id on
+    an already linked purchase, or a sale id that already belongs to another purchase, raises
+    :class:`BillzSaleConflict`.
     """
-    if not billz_sale_id:
-        raise ValueError("A Billz sale id is required")
     with transaction.atomic():
         purchase = Purchase.objects.select_for_update(of=("self",)).filter(pk=purchase_id).first()
         if purchase is None:
             raise PurchaseNotFound(f"Purchase {purchase_id} does not exist")
         if purchase.source != enums.PurchaseSource.ONLINE:
             raise BillzSaleConflict(f"Purchase {purchase_id} is a store sale, not an online order")
-        if purchase.billz_sale_id and purchase.billz_sale_id != billz_sale_id:
+        if billz_order_uuid is not None and billz_order_uuid != purchase.billz_order_uuid:
+            raise BillzSaleConflict(
+                f"Purchase {purchase_id} was pushed as Billz order {purchase.billz_order_uuid}, "
+                f"not {billz_order_uuid}"
+            )
+        if billz_sale_id and purchase.billz_sale_id and purchase.billz_sale_id != billz_sale_id:
             raise BillzSaleConflict(
                 f"Purchase {purchase_id} is already linked to Billz sale {purchase.billz_sale_id}"
             )
-        if purchase.billz_sale_id == billz_sale_id and purchase.billz_pushed_at is not None:
-            return LinkResult(
-                purchase_id=purchase.pk,
-                billz_order_uuid=purchase.billz_order_uuid,
-                billz_sale_id=purchase.billz_sale_id,
-                billz_sale_ref=purchase.billz_sale_ref,
-                billz_pushed_at=purchase.billz_pushed_at,
-                changed=False,
-            )
-        instant = pushed_at or timeutils.now()
-        ref = billz_sale_ref or purchase.billz_sale_ref or billz_sale_id
-        Purchase.objects.filter(pk=purchase.pk).update(
-            billz_sale_id=billz_sale_id,
-            billz_sale_ref=ref,
-            billz_pushed_at=instant,
-            updated_at=timeutils.now(),
+        sale_id = billz_sale_id or purchase.billz_sale_id
+        ref = billz_sale_ref or purchase.billz_sale_ref or sale_id
+        pushed = purchase.billz_pushed_at or pushed_at or timeutils.now()
+        changed = (sale_id, ref, pushed) != (
+            purchase.billz_sale_id,
+            purchase.billz_sale_ref,
+            purchase.billz_pushed_at,
         )
+        if changed:
+            try:
+                with transaction.atomic():
+                    Purchase.objects.filter(pk=purchase.pk).update(
+                        billz_sale_id=sale_id,
+                        billz_sale_ref=ref,
+                        billz_pushed_at=pushed,
+                        updated_at=timeutils.now(),
+                    )
+            except IntegrityError as exc:
+                if "purchase_billz_sale_unique" not in str(exc):
+                    raise
+                raise BillzSaleConflict(f"Billz sale {sale_id} already belongs to another purchase") from exc
         return LinkResult(
             purchase_id=purchase.pk,
             billz_order_uuid=purchase.billz_order_uuid,
-            billz_sale_id=billz_sale_id,
+            billz_sale_id=sale_id,
             billz_sale_ref=ref,
-            billz_pushed_at=instant,
-            changed=True,
+            billz_pushed_at=pushed,
+            changed=changed,
         )
 
 

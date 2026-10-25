@@ -285,18 +285,26 @@ def test_link_billz_sale() -> None:
     seed_policies()
     customer = CustomerFactory.create()
     order, result = paid_order_with_cashback(customer, items_subtotal=185_000, promo=0, cashback_used=0, when=(10, 20, 9, 0))  # fmt: skip  # noqa: E501
-    with pytest.raises(ValueError, match="sale id"):
-        services.link_billz_sale(result.purchase_id, billz_sale_id="")
-    linked = services.link_billz_sale(result.purchase_id, billz_sale_id="bz-123", billz_sale_ref="S-90001", pushed_at=at(10, 20, 9, 1))  # fmt: skip  # noqa: E501
+    assert result.billz_order_uuid is not None  # persisted with the purchase, before any push
+    info = selectors.billz_push_info(result.purchase_id)
+    assert info == selectors.BillzPushInfo(result.purchase_id, customer.pk, order.pk, result.billz_order_uuid, "", "", None)  # fmt: skip  # noqa: E501
+    assert selectors.billz_push_info(10**9) is None
+    # a payload of another purchase (wrong Billz order id) is refused before anything is written
+    with pytest.raises(services.BillzSaleConflict, match="pushed as Billz order"):
+        services.link_billz_sale(result.purchase_id, billz_order_uuid=uuid4())
+    # the push succeeded without a sale id: only billz_pushed_at is set (the handler's skip guard)
+    pushed = services.link_billz_sale(result.purchase_id, billz_order_uuid=result.billz_order_uuid, pushed_at=at(10, 20, 9, 1))  # fmt: skip  # noqa: E501
+    assert pushed == services.LinkResult(result.purchase_id, result.billz_order_uuid, "", "", at(10, 20, 9, 1), True)  # fmt: skip  # noqa: E501
+    again = services.link_billz_sale(result.purchase_id, billz_order_uuid=result.billz_order_uuid, pushed_at=at(10, 20, 9, 9))  # fmt: skip  # noqa: E501
+    assert not again.changed and again.billz_pushed_at == at(10, 20, 9, 1)
+    # the sale id discovered later (M3 sync echo) is stored; the push instant is kept
+    linked = services.link_billz_sale(result.purchase_id, billz_sale_id="bz-123", billz_sale_ref="S-90001", pushed_at=at(10, 21))  # fmt: skip  # noqa: E501
     assert linked == services.LinkResult(result.purchase_id, result.billz_order_uuid, "bz-123", "S-90001", at(10, 20, 9, 1), True)  # fmt: skip  # noqa: E501
     purchase = Purchase.objects.get(pk=result.purchase_id)
     assert (purchase.billz_sale_id, purchase.billz_sale_ref, purchase.billz_pushed_at) == ("bz-123", "S-90001", at(10, 20, 9, 1))  # fmt: skip  # noqa: E501
     replay = services.link_billz_sale(result.purchase_id, billz_sale_id="bz-123")
-    assert (
-        not replay.changed
-        and replay.billz_sale_ref == "S-90001"
-        and replay.billz_pushed_at == at(10, 20, 9, 1)
-    )
+    assert not replay.changed and replay.billz_sale_ref == "S-90001"
+    assert selectors.billz_push_info(result.purchase_id).billz_pushed_at == at(10, 20, 9, 1)  # type: ignore[union-attr]
     with pytest.raises(services.BillzSaleConflict, match="already linked"):
         services.link_billz_sale(result.purchase_id, billz_sale_id="bz-999")
     # it never credits again, and the same Billz sale cannot be re-ingested as a store purchase
@@ -308,7 +316,12 @@ def test_link_billz_sale() -> None:
         services.link_billz_sale(sale.purchase_id, billz_sale_id="S-55")
     with pytest.raises(services.PurchaseNotFound):
         services.link_billz_sale(10**9, billz_sale_id="x")
-    # a purchase whose uuid is known can be linked with the sale ref defaulting to the sale id
+    # a sale id that already belongs to another purchase is a conflict, not an IntegrityError
     other = paid_order(customer, created_at=at(10, 21), items_subtotal=100_000)
     second = services.record_online_purchase(customer.pk, other.pk, 100_000, 0, 0, at(10, 21, 0, 3), billz_order_uuid=uuid4())  # fmt: skip  # noqa: E501
-    assert services.link_billz_sale(second.purchase_id, billz_sale_id="bz-124").billz_sale_ref == "bz-124"
+    with pytest.raises(services.BillzSaleConflict, match="another purchase"):
+        services.link_billz_sale(second.purchase_id, billz_sale_id="S-55")
+    # the sale ref defaults to the sale id; pushed_at defaults to now
+    with pinned_clock(at(10, 22, 8)):
+        third = services.link_billz_sale(second.purchase_id, billz_sale_id="bz-124")
+    assert (third.billz_sale_ref, third.billz_pushed_at) == ("bz-124", at(10, 22, 8))
