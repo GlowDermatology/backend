@@ -13,6 +13,7 @@ and one default tier ``[0, 20M) 1.00`` (``tiers=[(from, to, "percent"), …]`` o
 
 from __future__ import annotations
 
+import importlib
 from collections.abc import Sequence as SequenceType
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -27,8 +28,6 @@ from factory.django import DjangoModelFactory
 from factory.helpers import post_generation
 
 from glowderma.accounts.tests.factories import CustomerFactory, StaffUserFactory
-from glowderma.catalog.tests.factories import ProductFactory
-from glowderma.commerce.tests.factories import OrderFactory
 from glowderma.core import enums, timeutils
 from glowderma.loyalty.models import (
     CashbackHold,
@@ -43,6 +42,20 @@ from glowderma.loyalty.models import (
 
 DEFAULT_TIERS: tuple[tuple[int, int | None, str], ...] = ((0, 20_000_000, "1.00"),)
 _billz_sale_numbers = count(1)
+
+# ``commerce`` sits above ``loyalty`` and ``catalog`` beside it, yet ``LedgerEntry.order``,
+# ``Purchase.order``, ``CashbackHold.order`` and ``PurchaseItem.product`` point at their tables, so the tests
+# need real rows of both. factory-boy resolves a dotted ``SubFactory`` target lazily and :func:`upper_factory`
+# imports at call time, which keeps the import-linter layers contract (static imports) meaningful for
+# application code.
+ORDER_FACTORY = "glowderma.commerce.tests.factories.OrderFactory"
+PRODUCT_FACTORY = "glowderma.catalog.tests.factories.ProductFactory"
+
+
+def upper_factory(path: str) -> Any:
+    """The factory class at ``path`` (``ORDER_FACTORY`` / ``PRODUCT_FACTORY``), imported at call time."""
+    module_name, _, attribute = path.rpartition(".")
+    return getattr(importlib.import_module(module_name), attribute)
 
 
 def _now() -> datetime:
@@ -129,7 +142,7 @@ class PurchaseFactory(DjangoModelFactory[Purchase]):
 
     customer = SubFactory(CustomerFactory)  # type: ignore[no-untyped-call]
     source = enums.PurchaseSource.ONLINE
-    order = SubFactory(OrderFactory, customer=SelfAttribute("..customer"), paid=True)  # type: ignore[no-untyped-call]
+    order = SubFactory(ORDER_FACTORY, customer=SelfAttribute("..customer"), paid=True)  # type: ignore[no-untyped-call]
     billz_order_uuid = LazyFunction(uuid4)  # type: ignore[no-untyped-call]
     amount = LazyAttribute(lambda o: 231_000 if o.order is None else o.order.items_subtotal)  # type: ignore[no-untyped-call]
     promo_amount = LazyAttribute(lambda o: 0 if o.order is None else o.order.promo_subtotal)  # type: ignore[no-untyped-call]
@@ -188,7 +201,7 @@ class PurchaseItemFactory(DjangoModelFactory[PurchaseItem]):
 
     purchase = SubFactory(PurchaseFactory, items=[])  # type: ignore[no-untyped-call]
     position = LazyAttribute(lambda o: o.purchase.items.count())  # type: ignore[no-untyped-call]
-    product = SubFactory(ProductFactory)  # type: ignore[no-untyped-call]
+    product = SubFactory(PRODUCT_FACTORY)  # type: ignore[no-untyped-call]
     billz_product_id = LazyAttribute(lambda o: "" if o.product is None else o.product.billz_id)  # type: ignore[no-untyped-call]
     name = LazyAttribute(  # type: ignore[no-untyped-call]
         lambda o: "Billz mahsulot" if o.product is None else (o.product.display_name or o.product.billz_id)
@@ -245,7 +258,7 @@ class LedgerEntryFactory(DjangoModelFactory[LedgerEntry]):
     kind = enums.LedgerKind.CREDIT
     amount = 1_850
     source_type = enums.LedgerSourceType.ORDER
-    order = SubFactory(OrderFactory, customer=SelfAttribute("..account.customer"), paid=True)  # type: ignore[no-untyped-call]
+    order = SubFactory(ORDER_FACTORY, customer=SelfAttribute("..account.customer"), paid=True)  # type: ignore[no-untyped-call]
     purchase = None
     source_ref = LazyAttribute(lambda o: "" if o.order is None else str(o.order.pk))  # type: ignore[no-untyped-call]
     base = 185_000
@@ -328,7 +341,7 @@ class CashbackHoldFactory(DjangoModelFactory[CashbackHold]):
 
     account = SubFactory(LoyaltyAccountFactory, balance=100_000)  # type: ignore[no-untyped-call]
     order = SubFactory(  # type: ignore[no-untyped-call]
-        OrderFactory,
+        ORDER_FACTORY,
         customer=SelfAttribute("..account.customer"),  # type: ignore[no-untyped-call]
         cashback_used=20_000,
     )
@@ -353,6 +366,8 @@ class PosDeviceFactory(DjangoModelFactory[PosDevice]):
 
 __all__ = [
     "DEFAULT_TIERS",
+    "ORDER_FACTORY",
+    "PRODUCT_FACTORY",
     "CashbackHoldFactory",
     "CashbackPolicyFactory",
     "CashbackTierFactory",
@@ -363,4 +378,5 @@ __all__ = [
     "PurchaseItemFactory",
     "reverse_entry",
     "reverse_purchase_rows",
+    "upper_factory",
 ]

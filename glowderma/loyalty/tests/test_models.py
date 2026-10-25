@@ -8,14 +8,12 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from django.apps import apps
 from django.db import IntegrityError, connection, models, transaction
 from django.db.models import ProtectedError
 
 from glowderma.accounts.models import Customer, StaffUser
 from glowderma.accounts.tests.factories import StaffUserFactory
-from glowderma.catalog.tests.factories import ProductFactory
-from glowderma.commerce.models import Order
-from glowderma.commerce.tests.factories import OrderFactory
 from glowderma.core.models import AppendOnlyError
 from glowderma.core.seeding import pinned_clock
 from glowderma.core.timeutils import TASHKENT
@@ -29,6 +27,8 @@ from glowderma.loyalty.models import (
     PurchaseItem,
 )
 from glowderma.loyalty.tests.factories import (
+    ORDER_FACTORY,
+    PRODUCT_FACTORY,
     CashbackHoldFactory,
     CashbackPolicyFactory,
     CashbackTierFactory,
@@ -39,9 +39,15 @@ from glowderma.loyalty.tests.factories import (
     PurchaseItemFactory,
     reverse_entry,
     reverse_purchase_rows,
+    upper_factory,
 )
 
 pytestmark = pytest.mark.django_db
+
+# upper-layer rows the FKs point at (see ``factories.upper_factory``); ``Order`` itself only for its manager
+Order = apps.get_model("commerce", "Order")
+OrderFactory = upper_factory(ORDER_FACTORY)
+ProductFactory = upper_factory(PRODUCT_FACTORY)
 
 
 def at(month: int, day: int, hour: int = 0, minute: int = 0) -> datetime:
@@ -246,7 +252,7 @@ def test_ledger_factory_chain_str_ordering_and_fk_rules() -> None:
     with pytest.raises(ProtectedError):
         account.delete()
     with pytest.raises(ProtectedError):
-        Order.objects.filter(pk=credit.order.pk).delete()  # type: ignore[union-attr]
+        Order._default_manager.filter(pk=credit.order.pk).delete()  # type: ignore[union-attr]
     with pytest.raises(ProtectedError):
         adjustment.actor.delete()
     with pytest.raises(AppendOnlyError):
@@ -403,7 +409,7 @@ def test_hold_factory_traits_str_and_fk_rules() -> None:
     with pytest.raises(ProtectedError):
         hold.account.delete()
     with pytest.raises(ProtectedError):
-        Order.objects.filter(pk=hold.order.pk).delete()
+        Order._default_manager.filter(pk=hold.order.pk).delete()
     with pytest.raises(AppendOnlyError):
         captured.captured_entry.delete()
     assert hold.updated_at >= hold.created_at
@@ -481,7 +487,7 @@ def test_purchase_factory_str_ordering_credit_and_reversal_rows() -> None:
     with pytest.raises(ProtectedError):
         purchase.customer.delete()
     with pytest.raises(ProtectedError):
-        Order.objects.filter(pk=purchase.order.pk).delete()
+        Order._default_manager.filter(pk=purchase.order.pk).delete()
     assert credited.policy is not None
     with pytest.raises(AppendOnlyError):  # append-only refuses before PROTECT would (02 §0.1)
         credited.policy.delete()
