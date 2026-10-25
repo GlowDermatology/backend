@@ -6,10 +6,15 @@ annotation of :func:`order_products` — never in ``LIKE``, equality, ``DISTINCT
 ``search_text`` column so the trigram GIN index applies.
 """
 
-from django.db.models import F, Q, QuerySet, Value
+from collections.abc import Iterator
+from typing import TypedDict
+
+from django.db.models import Count, F, Prefetch, Q, QuerySet, Value
 from django.db.models.functions import Coalesce, Collate, Lower, NullIf
 
-from glowderma.catalog.models import Product
+from glowderma.catalog.models import Banner, Category, Product, ProductImage, ProductStock
+from glowderma.core import enums, timeutils
+from glowderma.integrations.billz.ports import BillzProduct
 
 SEARCH_TERM_MAX_LENGTH = 64
 MAX_ID_DIGITS = 18  # every 18-digit number fits a bigint id; longer terms can only match the text columns
@@ -41,3 +46,107 @@ def order_products(qs: QuerySet[Product], ordering: str) -> QuerySet[Product]:
     # default: last_change.at desc (falling back to created_at), then id desc — the expression index
     # catalog_product_default_order matches this exactly.
     return qs.annotate(_changed=Coalesce(F("last_change_at"), F("created_at"))).order_by("-_changed", "-id")
+
+
+# --- B3: admin list / detail / stats selectors --------------------------------------------------------------
+
+
+def category_queryset() -> QuerySet[Category]:
+    """Contract §2.4: ordered by position, ``product_count`` = every product of the category (any status)."""
+    return Category.objects.annotate(product_count=Count("products", distinct=True)).order_by(
+        "position", "id"
+    )
+
+
+def banner_queryset() -> QuerySet[Banner]:
+    return Banner.objects.select_related("link_product", "link_category").order_by("position", "id")
+
+
+def product_queryset() -> QuerySet[Product]:
+    """Products with everything the contract §2.3 shape needs loaded in one pass (no per-row queries)."""
+    return (
+        Product.objects.select_related("category", "last_change_actor", "stock")
+        .prefetch_related(Prefetch("images", queryset=ProductImage.objects.order_by("position", "id")))
+        .annotate(stock_quantity=Coalesce(F("stock__quantity"), Value(0)))
+    )
+
+
+def get_product(product_id: int) -> Product | None:
+    return product_queryset().filter(pk=product_id).first()
+
+
+class ProductFilters(TypedDict, total=False):
+    search: str
+    category: Category | None  # ``None`` = "no category"; absent = any
+    status: str
+    promo: bool
+    out_of_stock: bool
+    is_new: bool
+    ordering: str
+
+
+OUT_OF_STOCK = Q(stock__quantity__lte=0) | Q(stock__isnull=True)
+
+
+def filter_products(qs: QuerySet[Product], filters: ProductFilters) -> QuerySet[Product]:
+    """Contract §2.3 ``GET products/`` filters and ordering over an already annotated queryset."""
+    if "search" in filters:
+        qs = filter_products_search(qs, filters["search"])
+    if "category" in filters:
+        category = filters["category"]
+        qs = qs.filter(category__isnull=True) if category is None else qs.filter(category=category)
+    if "status" in filters:
+        qs = qs.filter(status=filters["status"])
+    if "promo" in filters:
+        qs = qs.filter(promo=filters["promo"])
+    if "out_of_stock" in filters:
+        qs = qs.filter(OUT_OF_STOCK) if filters["out_of_stock"] else qs.exclude(OUT_OF_STOCK)
+    if "is_new" in filters:
+        qs = qs.filter(is_new_from_billz=filters["is_new"])
+    return order_products(qs, filters.get("ordering", "default"))
+
+
+def product_counts() -> dict[str, int]:
+    """Contract §2.3 ``products/stats/`` counters (``billz`` is added by the view)."""
+    counts = Product.objects.aggregate(
+        total=Count("id"),
+        active=Count("id", filter=Q(status=enums.ProductStatus.ACTIVE)),
+        hidden=Count("id", filter=Q(status=enums.ProductStatus.HIDDEN)),
+        new_from_billz=Count("id", filter=Q(is_new_from_billz=True)),
+        out_of_stock=Count("id", filter=OUT_OF_STOCK),
+    )
+    return {key: int(value or 0) for key, value in counts.items()}
+
+
+def _stock_of(product: Product) -> ProductStock | None:
+    try:
+        return product.stock
+    except ProductStock.DoesNotExist:
+        return None
+
+
+def billz_view(product: Product) -> BillzProduct:
+    """The Billz-owned fields of a product as a port row (what Billz "currently says" about it)."""
+    stock = _stock_of(product)
+    return BillzProduct(
+        billz_id=product.billz_id,
+        billz_name=product.billz_name,
+        volume=product.volume,
+        price=product.billz_price,
+        stock=stock.quantity if stock is not None else 0,
+        synced_at=(stock.synced_at if stock is not None else None)
+        or product.billz_synced_at
+        or timeutils.now(),
+    )
+
+
+class CatalogKnownProducts:
+    """``integrations.billz.ports.KnownProducts`` over the catalog tables (handed to the fake adapter)."""
+
+    def get(self, billz_id: str) -> BillzProduct | None:
+        product = Product.objects.select_related("stock").filter(billz_id=billz_id).first()
+        return None if product is None else billz_view(product)
+
+    def all(self) -> Iterator[BillzProduct]:
+        for product in Product.objects.select_related("stock").order_by("id").iterator(chunk_size=200):
+            yield billz_view(product)

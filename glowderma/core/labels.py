@@ -58,3 +58,28 @@ NOTIFICATION_KIND: dict[str, str] = {
 
 def yes_no(value: bool) -> str:
     return "Ha" if value else "Yo‘q"
+
+
+# Contract 1.8 export columns (Uzbek headers) of the catalog lists.
+PRODUCT_EXPORT_HEADERS: tuple[str, ...] = (
+    "ID",
+    "Billz ID",
+    "Billz nomi",
+    "Nomi",
+    "Kategoriya",
+    "Narx (so‘m)",
+    "Qoldiq",
+    "Aksiya",
+    "Holat",
+    "Yangi",
+)
+CATEGORY_EXPORT_HEADERS: tuple[str, ...] = ("Slug", "Nomi", "Tartib", "Faol", "Mahsulotlar")
+BANNER_EXPORT_HEADERS: tuple[str, ...] = (
+    "ID",
+    "Sarlavha",
+    "Havola",
+    "Faol",
+    "Boshlanishi",
+    "Tugashi",
+    "Tartib",
+)
