@@ -11,18 +11,15 @@ dates from her registration and the deletions from ``DELETED_AT``.
 
 from __future__ import annotations
 
-import math
 import os
-from collections.abc import Callable, Iterator, Sequence
-from contextlib import contextmanager
 from datetime import datetime
 
 from django.db import transaction
 
 from glowderma.accounts import services
 from glowderma.accounts.models import Address, Customer, Device, StaffUser
-from glowderma.core import enums, timeutils
-from glowderma.core.seeding import SeedContext, register_seeder
+from glowderma.core import enums
+from glowderma.core.seeding import MockRandom, SeedContext, pinned_clock, register_seeder
 from glowderma.core.timeutils import TASHKENT
 
 ADMIN_EMAIL = "admin@glowderma.uz"
@@ -71,34 +68,6 @@ MALIKA_REGISTERED_AT = datetime(2025, 3, 12, 10, 20, tzinfo=TASHKENT)
 MALIKA_LAST_ACTIVE = datetime(2026, 10, 24, 9, 12, tzinfo=TASHKENT)
 MALIKA_ADDRESS = "Toshkent, Chilonzor, 9-kvartal"
 
-_MASK = 0xFFFFFFFF
-
-
-class MockRandom:
-    """Python port of the frontend's ``createRandom`` (mulberry32; ``Math.imul`` semantics via 32-bit masks).
-
-    Every intermediate is masked to 32 bits, which is what JS's ``>>> 0`` / ``imul`` / int32 ``^`` amount to.
-    """
-
-    def __init__(self, seed: int) -> None:
-        self.state = seed & _MASK
-
-    def next(self) -> float:
-        self.state = (self.state + 0x6D2B79F5) & _MASK
-        t = self.state
-        t = ((t ^ (t >> 15)) * (t | 1)) & _MASK
-        t ^= (t + (((t ^ (t >> 7)) * (t | 61)) & _MASK)) & _MASK
-        return ((t ^ (t >> 14)) & _MASK) / 4294967296
-
-    def int(self, low: int, high: int) -> int:
-        return low + math.floor(self.next() * (high - low + 1))
-
-    def chance(self, probability: float) -> bool:
-        return self.next() < probability
-
-    def pick[T](self, items: Sequence[T]) -> T:
-        return items[math.floor(self.next() * len(items))]
-
 
 def generated_customers() -> list[tuple[int, str, str]]:
     """Customers 13–432 exactly as ``people.ts generateCustomers()`` (same draws, same duplicate retry)."""
@@ -138,17 +107,6 @@ class CustomerFacts:
         else:
             self.device = (Device.Platform.ANDROID, "Samsung Galaxy A54", "Android 14")
         self.push_enabled = random.chance(0.8)
-
-
-@contextmanager
-def pinned_clock(instant: datetime) -> Iterator[None]:
-    """Run a service at a design instant: ``timeutils.now`` is a module attribute, as the tests patch it."""
-    original: Callable[[], datetime] = timeutils.now
-    timeutils.now = lambda: instant
-    try:
-        yield
-    finally:
-        timeutils.now = original
 
 
 def ensure_admin() -> StaffUser:

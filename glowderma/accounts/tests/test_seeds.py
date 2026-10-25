@@ -9,7 +9,7 @@ from django.db import models
 from glowderma.accounts import seeds
 from glowderma.accounts.models import Address, Customer, Device, StaffUser
 from glowderma.core import enums, seeding
-from glowderma.core.seeding import SeedContext
+from glowderma.core.seeding import MockRandom, SeedContext, pinned_clock
 from glowderma.core.timeutils import TASHKENT
 
 ANCHOR = datetime.fromisoformat(seeding.DEFAULT_ANCHOR)
@@ -26,7 +26,7 @@ def test_mock_random_matches_the_frontend_vectors() -> None:
         432: (49, 9, 9, True, False, False),
     }
     for customer_id, vector in expected.items():
-        random = seeds.MockRandom(customer_id * 97)
+        random = MockRandom(customer_id * 97)
         assert (
             random.int(0, 60),
             random.int(1, 12),
@@ -159,6 +159,6 @@ def test_pinned_clock_restores_the_module_clock() -> None:
 
     original = timeutils.now
     instant = datetime(2026, 10, 20, 10, 0, tzinfo=TASHKENT)
-    with seeds.pinned_clock(instant):
+    with pinned_clock(instant):
         assert timeutils.now() == instant
     assert timeutils.now is original

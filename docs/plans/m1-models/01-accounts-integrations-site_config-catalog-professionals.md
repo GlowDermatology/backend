@@ -230,6 +230,7 @@ class Address(TimeStampedModel):
 
 **Invariants**
 - `accounts.services.set_default_address()` clears the previous default in the same transaction (the partial unique forbids two).
+- As built (B2): the address write path is `accounts.services.add_address / update_address / set_default_address / remove_address`; every one of them recomputes `Customer.address_text`, and M2's `PATCH /me/addresses/{id}` (B7) must go through `update_address` rather than adding a second path.
 - Saving/creating/deleting an address recomputes `Customer.address_text` = default address `text` (or the most recently updated one, or `""`), so the admin card needs no join. `delete_customer()` deletes `Address` rows (PII scrub).
 
 **Contract fields served**

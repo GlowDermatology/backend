@@ -124,6 +124,11 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
   `timeutils.now()` for demos and e2e runs.
 - Retention jobs delete from `core.db.PURGEABLE_TABLES` only inside `core.db.purge_window()`; the outbox offers
   `outbox.on_dead(topic)` hooks for the orchestrating module to record what a dead message means.
+- Rows that must always exist (the `SiteSettings` singleton, the six `IntegrationState` rows, status templates,
+  …) are created by a data migration **and** re-ensured by a `post_migrate` receiver in the app's `AppConfig.ready()`
+  (pattern: `glowderma/integrations/apps.py` `ensure_provider_rows`, `glowderma/site_config/apps.py`
+  `ensure_singleton`), because pytest-django flushes the database after `transaction=True` tests and `--reuse-db`
+  reruns would otherwise start without them. Reads never create such rows.
 - Time only via `timeutils.now()` (module attribute, never an imported name). Money: integer so'm
   (`BigIntegerField`). Percent: `DecimalField(5, 2)`; cashback math in integer basis points (`core.money`).
 - Append-only models (ledger, audit, order events, policy versions, webhook inbox, appointment events) subclass
