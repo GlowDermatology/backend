@@ -23,6 +23,34 @@ from rest_framework.test import APIClient
 from glowderma.accounts import services, tokens
 from glowderma.accounts.models import StaffUser
 
+# Sample values by URL kwarg name; any ``*_id``, ``pk``, ``id`` and ``version`` resolve to "1".
+KWARG_VALUES = {
+    "format": "json",
+    "slug": "serums",
+    "status": "processing",
+    "provider": "google",
+    "action": "confirm",
+    "date": "2026-10-26",
+}
+CONVERTER_VALUES = {
+    "UUIDConverter": "00000000-0000-4000-8000-000000000001",
+    "IntConverter": "1",
+    "SlugConverter": "serums",
+    "StringConverter": "example",
+    "PathConverter": "example",
+}
+
+
+def route_kwarg(name: str, converter: str | None = None) -> str:
+    """A sample value that satisfies a URL kwarg by its converter class name or, failing that, its name."""
+    if converter in ("UUIDConverter", "IntConverter"):
+        return CONVERTER_VALUES[converter]
+    if name in KWARG_VALUES:
+        return KWARG_VALUES[name]
+    if name in {"pk", "id", "version"} or name.endswith("_id"):
+        return "1"
+    return CONVERTER_VALUES.get(converter or "", "example")
+
 
 def protected_routes(
     patterns: list[Any],
@@ -36,18 +64,8 @@ def protected_routes(
         converters = getattr(pattern.pattern, "converters", {})
         names = set(converters) | set(pattern.pattern.regex.groupindex)
         for name in names:
-            converter = type(converters.get(name)).__name__
-            kwargs[name] = (
-                "00000000-0000-4000-8000-000000000001"
-                if converter == "UUIDConverter"
-                else "1"
-                if converter == "IntConverter" or name in {"pk", "id", "version"} or name.endswith("_id")
-                else "json"
-                if name == "format"
-                else "google"
-                if name == "provider"
-                else "example"
-            )
+            converter = converters.get(name)
+            kwargs[name] = route_kwarg(name, type(converter).__name__ if converter is not None else None)
         if isinstance(pattern, URLResolver):
             nested = namespace + ((pattern.namespace,) if pattern.namespace else ())
             yield from protected_routes(pattern.url_patterns, raw, nested, kwargs)
@@ -143,6 +161,79 @@ def test_matrix_fails_when_a_route_cannot_be_reversed() -> None:
         with override_settings(ROOT_URLCONF=module):
             clear_url_caches()
             with pytest.raises(pytest.fail.Exception, match="Cannot reverse"):
+                list(protected_routes(get_resolver().url_patterns))
+    finally:
+        clear_url_caches()
+
+
+@pytest.mark.parametrize(
+    "name,converter,expected",
+    [
+        ("sid", "UUIDConverter", "00000000-0000-4000-8000-000000000001"),
+        ("slug", "IntConverter", "1"),
+        ("slug", "SlugConverter", "serums"),
+        ("slug", "StringConverter", "serums"),
+        ("status", "StringConverter", "processing"),
+        ("provider", "StringConverter", "google"),
+        ("action", "StringConverter", "confirm"),
+        ("date", "StringConverter", "2026-10-26"),
+        ("format", None, "json"),
+        ("pk", None, "1"),
+        ("id", "StringConverter", "1"),
+        ("version", None, "1"),
+        ("order_id", "StringConverter", "1"),
+        ("customer_id", None, "1"),
+        ("code", "StringConverter", "example"),
+        ("anything", None, "example"),
+        ("anything", "PathConverter", "example"),
+    ],
+)
+def test_route_kwarg_filler(name: str, converter: str | None, expected: str) -> None:
+    """Converter class wins for UUID/int, then the kwarg name, then ``*_id``/pk/id/version, then "example"."""
+    assert route_kwarg(name, converter) == expected
+
+
+m1_urlpatterns = [
+    path("api/v1/admin/categories/<slug:slug>/", plain_view, name="matrix-m1-category"),
+    path("api/v1/admin/orders/<int:order_id>/transition/<str:status>/", plain_view, name="matrix-m1-order"),
+    path("api/v1/admin/auth/oauth/<str:provider>/", plain_view, name="matrix-m1-oauth"),
+    path("api/v1/admin/appointments/<int:pk>/<str:action>/", plain_view, name="matrix-m1-appointment"),
+    path("api/v1/admin/dashboard/<str:date>/", plain_view, name="matrix-m1-dashboard"),
+    path("api/v1/admin/cashback/policy-versions/<version>/", plain_view, name="matrix-m1-policy"),
+    path("api/v1/admin/sessions/<uuid:sid>/", plain_view, name="matrix-m1-session"),
+]
+
+
+def test_matrix_fills_m1_route_kwargs() -> None:
+    module: Any = ModuleType("m1_matrix_urls")
+    module.urlpatterns = m1_urlpatterns
+    try:
+        with override_settings(ROOT_URLCONF=module):
+            clear_url_caches()
+            paths = {route_path for route_path, _ in protected_routes(get_resolver().url_patterns)}
+    finally:
+        clear_url_caches()
+    assert paths == {
+        "/api/v1/admin/categories/serums/",
+        "/api/v1/admin/orders/1/transition/processing/",
+        "/api/v1/admin/auth/oauth/google/",
+        "/api/v1/admin/appointments/1/confirm/",
+        "/api/v1/admin/dashboard/2026-10-26/",
+        "/api/v1/admin/cashback/policy-versions/1/",
+        "/api/v1/admin/sessions/00000000-0000-4000-8000-000000000001/",
+    }
+
+
+def test_matrix_failure_message_asks_for_unique_route_names() -> None:
+    module: Any = ModuleType("ambiguous_matrix_urls")
+    module.urlpatterns = [
+        path("api/v1/admin/first/<str:code>/", plain_view, name="matrix-dup"),
+        path("api/v1/admin/<str:code>/second/", plain_view, name="matrix-dup"),
+    ]
+    try:
+        with override_settings(ROOT_URLCONF=module):
+            clear_url_caches()
+            with pytest.raises(pytest.fail.Exception, match="give the route a unique name"):
                 list(protected_routes(get_resolver().url_patterns))
     finally:
         clear_url_caches()
