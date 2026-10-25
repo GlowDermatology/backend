@@ -1,3 +1,18 @@
+"""Error envelope (admin API v1, section 1.6).
+
+Field error codes come in two groups:
+
+* **Generic codes** carry a default Uzbek message from ``FIELD_MESSAGES`` (``required``, ``invalid``,
+  ``read_only``, ``file_too_large``, ``unsupported_image``, ``max_items``, ``mismatch``, ...).
+  :func:`field_error` builds such an ``ErrorDetail``; :func:`flatten_errors` also swaps DRF's stock
+  English messages for the Uzbek default.
+* **Endpoint-specific codes** (``ENDPOINT_FIELD_CODES``: ``customer_not_found``, ``in_past``,
+  ``empty_range``, ``overlap``, ``out_of_range``, ``effective_from_in_past``, ``insufficient_balance``,
+  ``billz_not_found``, ``required_for_active``, ``export_too_large``) have no default: the view raises
+  them with the explicit message its contract table lists, e.g.
+  ``ValidationError({"amount": [field_error("insufficient_balance", "Balansdan ko‘p ayirib bo‘lmaydi.")]})``.
+"""
+
 import logging
 import re
 from functools import lru_cache
@@ -25,6 +40,9 @@ MESSAGES = {
     "idempotency_key_required": "Idempotency-Key sarlavhasi kerak.",
     "server_error": "Kutilmagan xato.",
     "payload_too_large": "Fayl juda katta.",
+    "provider_unavailable": "Tashqi xizmat javob bermadi. Qayta urinib ko‘ring.",
+    "oauth_exchange_failed": "Ijtimoiy tarmoq orqali kirish amalga oshmadi.",
+    "social_account_not_allowed": "Bu hisob administrator sifatida ro‘yxatdan o‘tmagan.",
 }
 FIELD_MESSAGES = {
     "required": "Majburiy maydon.",
@@ -39,7 +57,56 @@ FIELD_MESSAGES = {
     "max_decimal_places": "Ko‘pi bilan 2 ta kasr raqam.",
     "unique": "Bu qiymat band.",
     "does_not_exist": "Topilmadi.",
+    "read_only": "Bu maydonni o‘zgartirib bo‘lmaydi.",
+    "file_too_large": "Rasm 5 MB dan oshmasin.",
+    "unsupported_image": "Faqat JPEG, PNG yoki WebP rasm.",
+    "max_items": "Ko‘pi bilan {limit} ta.",
+    "mismatch": "Ro‘yxat joriy elementlarga mos emas.",
 }
+# Raised by views with the explicit message of the endpoint's contract table (see the module docstring).
+ENDPOINT_FIELD_CODES = frozenset(
+    {
+        "customer_not_found",
+        "in_past",
+        "empty_range",
+        "overlap",
+        "out_of_range",
+        "effective_from_in_past",
+        "insufficient_balance",
+        "billz_not_found",
+        "required_for_active",
+        "export_too_large",
+    }
+)
+AUTH_FAILURE_CODES = frozenset(
+    {
+        "not_authenticated",
+        "SESSION_EXPIRED",
+        "SESSION_REPLACED",
+        "invalid_credentials",
+        "social_account_not_allowed",
+    }
+)
+
+
+def field_error(
+    code: str, message: str | None = None, *, limit: int | str | None = None
+) -> exceptions.ErrorDetail:
+    """An ``ErrorDetail`` with a contract code.
+
+    Generic codes default to their ``FIELD_MESSAGES`` entry (``limit`` fills ``{limit}``); endpoint-specific
+    codes require an explicit ``message``.
+    """
+    if message is None:
+        template = FIELD_MESSAGES.get(code)
+        if template is None:
+            raise ValueError(f"Field code {code!r} needs an explicit message")
+        if "{limit}" in template:
+            if limit is None:
+                raise ValueError(f"Field code {code!r} needs a limit")
+            template = template.format(limit=limit)
+        message = template
+    return exceptions.ErrorDetail(message, code=code)
 
 
 @lru_cache(maxsize=64)
@@ -64,6 +131,8 @@ def _field_message(value: Any, code: str) -> str:
     replacement = FIELD_MESSAGES.get(code)
     if replacement is None:
         return message
+    if message in ("", code) and "{limit}" not in replacement:
+        return replacement
     # Match only framework defaults; serializer-specific messages remain intact.
     languages = {get_language() or "uz", "en"}
     for language in languages:
@@ -126,11 +195,23 @@ class IdempotencyKeyReused(exceptions.APIException):
     default_detail = MESSAGES[default_code]
 
 
+class ProviderUnavailable(exceptions.APIException):
+    status_code = 503
+    default_code = "provider_unavailable"
+    default_detail = MESSAGES[default_code]
+
+
+class OAuthExchangeFailed(exceptions.APIException):
+    status_code = 400
+    default_code = "oauth_exchange_failed"
+    default_detail = MESSAGES[default_code]
+
+
 class AuthFailed(exceptions.APIException):
     status_code = 401
 
     def __init__(self, code: str = "not_authenticated") -> None:
-        if code not in {"not_authenticated", "SESSION_EXPIRED", "SESSION_REPLACED", "invalid_credentials"}:
+        if code not in AUTH_FAILURE_CODES:
             raise ValueError("Unknown authentication failure code")
         super().__init__(MESSAGES[code], code=code)
 

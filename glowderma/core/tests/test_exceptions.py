@@ -25,12 +25,19 @@ from rest_framework.test import APIRequestFactory
 from rest_framework.views import APIView
 
 from glowderma.core.api.exceptions import (
+    ENDPOINT_FIELD_CODES,
+    FIELD_MESSAGES,
+    MESSAGES,
     AuthFailed,
     Conflict,
     InvalidTransition,
     NotCancellable,
+    OAuthExchangeFailed,
+    ProviderUnavailable,
     RequestInProgress,
     envelope_exception_handler,
+    field_error,
+    flatten_errors,
     server_error_view,
 )
 
@@ -350,3 +357,92 @@ def test_django_body_limit_error_is_payload_too_large() -> None:
     assert response.data["code"] == "payload_too_large"
     assert response.data["message"] == "Fayl juda katta."
     assert response.data["errors"] == []
+
+
+def test_provider_unavailable_is_503_envelope() -> None:
+    """Contract 1.6: 503 `provider_unavailable` "Tashqi xizmat javob bermadi. Qayta urinib ko‘ring."."""
+    response = exception_response(ProviderUnavailable())
+    assert response.status_code == 503
+    assert response.data == {
+        "code": "provider_unavailable",
+        "message": "Tashqi xizmat javob bermadi. Qayta urinib ko‘ring.",
+        "errors": [],
+        "request_id": "",
+    }
+
+
+def test_oauth_exchange_failed_is_400_envelope() -> None:
+    """Contract 2.1: 400 `oauth_exchange_failed` (bad/expired code, verifier mismatch)."""
+    response = exception_response(OAuthExchangeFailed())
+    assert response.status_code == 400
+    assert response.data["code"] == "oauth_exchange_failed"
+    assert response.data["message"] == "Ijtimoiy tarmoq orqali kirish amalga oshmadi."
+    assert response.data["errors"] == []
+
+
+def test_any_api_exception_subclass_default_code_reaches_the_envelope() -> None:
+    class BillzDown(APIException):
+        status_code = 503
+        default_code = "billz_down"
+        default_detail = "Billz javob bermadi."
+
+    response = exception_response(BillzDown())
+    assert response.status_code == 503
+    assert response.data["code"] == "billz_down"
+    # Default details outside MESSAGES fall back to the generic Uzbek text; explicit details are kept.
+    assert response.data["message"] == "Maydonlarni tekshiring."
+    assert exception_response(BillzDown("Billz 30 soniya javob bermadi.")).data["message"] == (
+        "Billz 30 soniya javob bermadi."
+    )
+
+
+def test_social_account_not_allowed_is_401() -> None:
+    """Contract 2.1: 401 `social_account_not_allowed` "Bu hisob administrator sifatida ro‘yxatdan
+    o‘tmagan."."""
+    response = exception_response(AuthFailed("social_account_not_allowed"))
+    assert response.status_code == 401
+    assert response.data["code"] == "social_account_not_allowed"
+    assert response.data["message"] == "Bu hisob administrator sifatida ro‘yxatdan o‘tmagan."
+    assert MESSAGES["social_account_not_allowed"] == response.data["message"]
+    with pytest.raises(ValueError, match="Unknown authentication failure code"):
+        AuthFailed("made_up")
+
+
+@pytest.mark.parametrize(
+    ("code", "message"),
+    [
+        ("read_only", "Bu maydonni o‘zgartirib bo‘lmaydi."),
+        ("file_too_large", "Rasm 5 MB dan oshmasin."),
+        ("unsupported_image", "Faqat JPEG, PNG yoki WebP rasm."),
+        ("mismatch", "Ro‘yxat joriy elementlarga mos emas."),
+    ],
+)
+def test_generic_contract_field_codes_have_default_messages(code: str, message: str) -> None:
+    """Contract 1.6 generic field codes: read_only, file_too_large, unsupported_image, max_items, mismatch."""
+    assert FIELD_MESSAGES[code] == message
+    detail = field_error(code)
+    assert detail == message and detail.code == code
+    response = exception_response(serializers.ValidationError({"slug": [detail]}))
+    assert response.data["errors"] == [{"field": "slug", "code": code, "message": message}]
+    # A bare code (or an empty message) also resolves to the default.
+    assert flatten_errors({"slug": [ErrorDetail(code, code=code), ErrorDetail("", code=code)]}) == [
+        {"field": "slug", "code": code, "message": message}
+    ]
+
+
+def test_max_items_formats_the_limit() -> None:
+    """Contract 1.6: `max_items` "Ko‘pi bilan {n} ta."."""
+    detail = field_error("max_items", limit=8)
+    assert detail == "Ko‘pi bilan 8 ta." and detail.code == "max_items"
+    with pytest.raises(ValueError, match="limit"):
+        field_error("max_items")
+
+
+@pytest.mark.parametrize("code", sorted(ENDPOINT_FIELD_CODES))
+def test_endpoint_specific_codes_need_an_explicit_message(code: str) -> None:
+    assert code not in FIELD_MESSAGES
+    with pytest.raises(ValueError, match=code):
+        field_error(code)
+    detail = field_error(code, "Aniq xabar.")
+    response = exception_response(serializers.ValidationError({"tiers": [{"percent": [detail]}]}))
+    assert response.data["errors"] == [{"field": "tiers.0.percent", "code": code, "message": "Aniq xabar."}]
