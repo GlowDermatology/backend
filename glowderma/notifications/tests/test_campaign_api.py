@@ -471,3 +471,14 @@ def test_scheduled_at_far_future_and_timezones(staff_client: APIClient, clock: A
     assert response.data["scheduled_at"] == "2026-10-24T12:06:00+05:00"
     zulu = post(staff_client, form(scheduled_at="2026-10-26T05:00:00Z"), key=KEY.replace("a", "b"))
     assert zulu.status_code == 201 and zulu.data["scheduled_at"] == "2026-10-26T10:00:00+05:00"
+
+
+def test_create_cuts_a_long_billz_name_label_to_the_snapshot_column(
+    staff_client: APIClient, clock: Any
+) -> None:
+    """A product without an Uzbek name falls back to ``billz_name`` (≤255); the snapshot column holds 120."""
+    product = ProductFactory.create(name_uz="", billz_name="B" * 200, status="active")
+    response = post(staff_client, form(**{"link.kind": "product", "link.product_id": str(product.pk)}))
+    assert response.status_code == 201, response.data
+    assert response.data["link"] == {"kind": "product", "product_id": product.pk, "label": "B" * 120}
+    assert Campaign.objects.get(pk=response.data["id"]).link_product_label == "B" * 120

@@ -132,6 +132,14 @@ def _queue(campaign: Campaign) -> None:
     )
 
 
+def _label_snapshot(product: Product | None) -> str:
+    """The uz display name at creation, cut to the column: ``billz_name`` (the fallback) holds up to 255."""
+    if product is None:
+        return ""
+    limit = Campaign._meta.get_field("link_product_label").max_length or 120
+    return product.display_name[:limit]
+
+
 @transaction.atomic
 def create_campaign(data: CampaignInput, image: Any = None, *, actor: Any, request: Any = None) -> Campaign:
     """``POST notifications/``: without ``scheduled_at`` the send starts now (recipients materialised, batch 0
@@ -143,7 +151,7 @@ def create_campaign(data: CampaignInput, image: Any = None, *, actor: Any, reque
         body=data.body,
         link_kind=data.link_kind,
         link_product=data.link_product,
-        link_product_label=data.link_product.display_name if data.link_product is not None else "",
+        link_product_label=_label_snapshot(data.link_product),
         audience_type=data.audience_type,
         audience_segment=data.audience_segment,
         audience_segment_name=data.audience_segment.name if data.audience_segment is not None else "",
