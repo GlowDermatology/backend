@@ -4,7 +4,9 @@ Staff ``admin@glowderma.uz`` (id 1), the twelve design customers, the 420 genera
 phones equal the frontend mock (``people.ts``: ``createRandom(4812)`` with the mock's draw order), one active
 device per customer, Malika's address (through ``services.add_address`` so ``address_text`` is derived)
 and the six soft-deleted customers 427–432. Idempotent by natural keys (staff ``email``, customer ``phone``,
-device ``(customer, fid)``).
+device ``(customer, fid)``). Every bookkeeping timestamp is pinned (design 03 §7.1): a customer and its
+device are created at ``registered_at``, the device was last touched at ``last_active_at``, Malika's address
+dates from her registration and the deletions from ``DELETED_AT``.
 """
 
 from __future__ import annotations
@@ -169,9 +171,10 @@ def _ensure_customer(customer_id: int, name: str, phone: str) -> Customer:
     else:
         facts = CustomerFacts(customer_id)
         registered_at, language = facts.registered_at, facts.language
-    return Customer.objects.create(
-        id=customer_id, phone=phone, name=name, language=language, registered_at=registered_at
-    )
+    with pinned_clock(registered_at):  # created_at == updated_at == registered_at
+        return Customer.objects.create(
+            id=customer_id, phone=phone, name=name, language=language, registered_at=registered_at
+        )
 
 
 def _ensure_device(customer: Customer) -> Device:
@@ -186,18 +189,20 @@ def _ensure_device(customer: Customer) -> Device:
         facts = CustomerFacts(customer.pk)
         platform, model, os_name = facts.device
         push_enabled, last_active_at = facts.push_enabled, DEVICE_LAST_ACTIVE
-    return Device.objects.create(
-        customer=customer,
-        fid=fid,
-        platform=platform,
-        model=model,
-        os=os_name,
-        app_version="1.0.0",
-        fcm_token=f"seed-fcm-{customer.pk}",
-        push_enabled=push_enabled,
-        is_active=True,
-        last_active_at=last_active_at,
-    )
+    with pinned_clock(last_active_at):  # updated_at == last_active_at; created_at == registration
+        return Device.objects.create(
+            customer=customer,
+            fid=fid,
+            platform=platform,
+            model=model,
+            os=os_name,
+            app_version="1.0.0",
+            fcm_token=f"seed-fcm-{customer.pk}",
+            push_enabled=push_enabled,
+            is_active=True,
+            last_active_at=last_active_at,
+            created_at=customer.registered_at,
+        )
 
 
 @register_seeder("accounts", order=10)

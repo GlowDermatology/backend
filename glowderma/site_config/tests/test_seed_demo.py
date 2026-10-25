@@ -5,6 +5,7 @@ The registry is rebuilt from the modules here, so the test does not depend on wh
 """
 
 import importlib
+from datetime import datetime, timedelta
 from io import StringIO
 
 import pytest
@@ -51,6 +52,13 @@ def test_seed_demo_runs_the_three_seeders_in_layer_order_and_is_idempotent(
     assert first == (1, 432, 432, 1, 1, 6, 1)
     assert Job.objects.get().created_by == get_user_model().objects.get(email="admin@glowderma.uz")
     assert SiteSettings.load().support_phone == "+998712000000"
+    # design 03 §7.1: every seeded timestamp is absolute, nothing carries the real clock
+    anchor = datetime.fromisoformat(seeding.DEFAULT_ANCHOR)
+    assert Job.objects.get().updated_at == anchor - timedelta(minutes=2)
+    assert not Customer.objects.filter(created_at__gt=anchor).exists()
+    assert not Customer.objects.filter(updated_at__gt=anchor).exists()
+    assert not Device.objects.filter(updated_at__gt=anchor).exists()
+    assert not Address.objects.filter(updated_at__gt=anchor).exists()
     call_command("seed_demo", force=True, stdout=StringIO())
     assert counts() == first
     # sequences are re-synced: the next customer continues after the explicit ids

@@ -2,7 +2,8 @@
 
 ``IntegrationState(billz).last_sync_at = anchor − 2 min`` and one succeeded delta ``Job`` at that time,
 created by the seeded administrator (looked up through ``get_user_model()``: integrations sits below
-accounts in the layer contract). Other providers keep ``last_sync_at = null`` (rows from ``0003``).
+accounts in the layer contract; the accounts seeder runs first, order 10). Other providers keep
+``last_sync_at = null`` (rows from ``0003``).
 """
 
 from datetime import timedelta
@@ -29,8 +30,13 @@ def seed_integrations(context: SeedContext) -> None:
         )
     if Job.objects.filter(kind=enums.JobKind.BILLZ_IMPORT, created_at=synced_at).exists():
         return
-    admin = get_user_model().objects.filter(email=ADMIN_EMAIL).first()
-    Job.objects.create(
+    try:
+        admin = get_user_model().objects.get(email=ADMIN_EMAIL)
+    except get_user_model().DoesNotExist as exc:  # idempotency keys on (kind, created_at): never backfilled
+        raise RuntimeError(
+            "seed_integrations needs the seeded administrator: run the accounts seeder first"
+        ) from exc
+    job = Job.objects.create(
         kind=enums.JobKind.BILLZ_IMPORT,
         state=enums.JobState.SUCCEEDED,
         params={"mode": enums.BillzImportMode.DELTA},
@@ -44,3 +50,5 @@ def seed_integrations(context: SeedContext) -> None:
         attempts=1,
         created_by=admin,
     )
+    # TimeStampedModel.save() stamps updated_at with the real clock; pin it like every other seeded instant
+    Job.objects.filter(pk=job.pk).update(updated_at=synced_at)

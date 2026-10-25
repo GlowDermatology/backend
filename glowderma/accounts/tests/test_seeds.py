@@ -4,6 +4,7 @@ import importlib
 from datetime import datetime
 
 import pytest
+from django.db import models
 
 from glowderma.accounts import seeds
 from glowderma.accounts.models import Address, Customer, Device, StaffUser
@@ -61,7 +62,8 @@ def test_customer_facts_follow_the_mock_draw_order() -> None:
 
 
 @pytest.mark.django_db
-def test_seed_accounts_builds_the_dataset_and_is_idempotent() -> None:
+def test_seed_accounts_builds_the_dataset_and_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("SEED_ADMIN_PASSWORD", raising=False)
     seeds.seed_accounts(CONTEXT)
     admin = StaffUser.objects.get(email="admin@glowderma.uz")
     assert admin.pk == 1 and admin.is_staff and admin.full_name == "Administrator"
@@ -70,6 +72,7 @@ def test_seed_accounts_builds_the_dataset_and_is_idempotent() -> None:
     malika = Customer.objects.get(pk=5)
     assert malika.name == "Malika Karimova" and malika.phone == "+998901234567"
     assert malika.registered_at == datetime(2025, 3, 12, 10, 20, tzinfo=TASHKENT)
+    assert malika.created_at == malika.updated_at == malika.registered_at  # add_address ran at registration
     assert malika.address_text == "Toshkent, Chilonzor, 9-kvartal"
     assert Address.objects.get(customer=malika).is_default
     device = malika.devices.get()
@@ -80,10 +83,12 @@ def test_seed_accounts_builds_the_dataset_and_is_idempotent() -> None:
         True,
     )
     assert device.last_active_at == datetime(2026, 10, 24, 9, 12, tzinfo=TASHKENT)
+    assert device.updated_at == device.last_active_at and device.created_at == malika.registered_at
     assert device.fid == "seed-fid-5" and device.fcm_token == "seed-fcm-5"  # noqa: S105 - seed token
     thirteen = Customer.objects.get(pk=13)
     assert thirteen.name == "Lola Nazarova" and thirteen.phone == "+998997022200"
     assert thirteen.registered_at == datetime(2025, 1, 16, 12, 0, tzinfo=TASHKENT)
+    assert thirteen.created_at == thirteen.updated_at == thirteen.registered_at
     assert thirteen.devices.get().last_active_at == datetime(2026, 10, 23, 20, 15, tzinfo=TASHKENT)
     deleted = Customer.objects.filter(status=enums.CustomerStatus.DELETED)
     assert sorted(deleted.values_list("pk", flat=True)) == list(range(427, 433))
@@ -91,8 +96,22 @@ def test_seed_accounts_builds_the_dataset_and_is_idempotent() -> None:
     assert set(deleted.values_list("deleted_at", flat=True)) == {
         datetime(2026, 10, 20, 10, 0, tzinfo=TASHKENT)
     }
+    assert set(deleted.values_list("updated_at", flat=True)) == {
+        datetime(2026, 10, 20, 10, 0, tzinfo=TASHKENT)
+    }
     assert Device.objects.filter(is_active=True).count() == 426
     assert Device.objects.filter(customer__in=deleted, is_active=False).count() == 6
+    # every bookkeeping timestamp is pinned (design 03 §7.1): nothing carries the real clock
+    assert not Customer.objects.filter(created_at__gt=ANCHOR).exists()
+    assert not Customer.objects.filter(updated_at__gt=ANCHOR).exists()
+    assert not Customer.objects.filter(updated_at__lt=models.F("created_at")).exists()
+    assert not Device.objects.filter(created_at__gt=ANCHOR).exists()
+    assert not Device.objects.filter(updated_at__gt=ANCHOR).exists()
+    assert not Device.objects.filter(updated_at__lt=models.F("created_at")).exists()
+    assert set(Device.objects.exclude(customer__in=deleted).values_list("updated_at", flat=True)) == {
+        datetime(2026, 10, 23, 20, 15, tzinfo=TASHKENT),
+        datetime(2026, 10, 24, 9, 12, tzinfo=TASHKENT),
+    }
     counts = (
         Customer.objects.count(),
         Device.objects.count(),
@@ -108,6 +127,17 @@ def test_seed_accounts_builds_the_dataset_and_is_idempotent() -> None:
     ) == counts
     assert seeding.reset_sequences() > 0
     assert Customer.objects.create(phone="+998900000000").pk == 433
+
+
+@pytest.mark.django_db
+def test_seed_admin_password_comes_from_the_environment_when_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SEED_ADMIN_PASSWORD", "Override!Harbor-Long72")
+    seeds.ensure_admin()
+    admin = StaffUser.objects.get(email="admin@glowderma.uz")
+    assert admin.check_password("Override!Harbor-Long72")
+    assert not admin.check_password("glowderma-demo-2026")
+    monkeypatch.delenv("SEED_ADMIN_PASSWORD")
+    assert seeds.ensure_admin() == admin  # an existing admin keeps its password
 
 
 @pytest.mark.django_db
