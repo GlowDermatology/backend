@@ -6,17 +6,76 @@ awaiting-payment order, no transaction yet), ``failed`` (provider error ``-9``) 
 returned) keep the ``payment_status_times`` / ``payment_paid_has_txn`` CHECKs satisfied. ``RefundFactory``
 is a ``requested`` full refund of a paid payment; one trait per further state (``submitting``,
 ``succeeded``, ``failed``, ``dead_letter``, ``manual_required``, ``unknown``). B5 builds its services and the
-fake Click/Payme adapters on top of these rows.
+fake Click/Payme adapters on top of these rows. ``OrderRowFactory`` writes the ``commerce.Order`` the rows
+point at.
 """
 
 from datetime import datetime, timedelta
 
-from factory.declarations import LazyAttribute, LazyAttributeSequence, SubFactory, Trait
+from django.db import models
+from factory.declarations import LazyAttribute, LazyAttributeSequence, LazyFunction, SubFactory, Trait
 from factory.django import DjangoModelFactory
 
-from glowderma.commerce.tests.factories import OrderFactory
-from glowderma.core import enums
+from glowderma.accounts.tests.factories import CustomerFactory, StaffUserFactory
+from glowderma.core import enums, timeutils
 from glowderma.payments.models import Payment, Refund
+
+
+def _now() -> datetime:
+    return timeutils.now()
+
+
+class OrderRowFactory(DjangoModelFactory[models.Model]):
+    """A ``commerce.Order`` row for tests of this lower module.
+
+    ``payments`` sits below ``commerce`` (import-linter layers), so it may not import
+    ``commerce.tests.factories``; like the FK, the model is referenced by label and resolved through the app
+    registry. The columns satisfy every CHECK of the order (total formula, address by fulfilment, cancellation
+    and ``paid_at`` by status); the traits ``paid`` (processing), ``cancelled`` (admin cancel of a paid order)
+    and ``payme`` cover what payments and shipments need. No order items are written: a payment or shipment
+    never reads them.
+    """
+
+    class Meta:
+        model = "commerce.Order"
+
+    class Params:
+        paid = Trait(  # type: ignore[no-untyped-call]
+            status=enums.OrderStatus.PROCESSING,
+            paid_at=LazyAttribute(lambda o: o.created_at + timedelta(minutes=3)),  # type: ignore[no-untyped-call]
+            status_changed_at=LazyAttribute(lambda o: o.paid_at),  # type: ignore[no-untyped-call]
+        )
+        cancelled = Trait(  # type: ignore[no-untyped-call]
+            status=enums.OrderStatus.CANCELLED,
+            paid_at=LazyAttribute(lambda o: o.created_at + timedelta(minutes=3)),  # type: ignore[no-untyped-call]
+            cancelled_at=LazyAttribute(lambda o: o.created_at + timedelta(minutes=60)),  # type: ignore[no-untyped-call]
+            status_changed_at=LazyAttribute(lambda o: o.cancelled_at),  # type: ignore[no-untyped-call]
+            cancellation_reason=enums.CancellationReason.ADMIN,
+            cancellation_note="Mijoz so‘rovi bilan",
+            cancelled_by=SubFactory(StaffUserFactory),  # type: ignore[no-untyped-call]
+        )
+        payme = Trait(payment_provider=enums.PaymentProvider.PAYME)  # type: ignore[no-untyped-call]
+
+    customer = SubFactory(CustomerFactory)  # type: ignore[no-untyped-call]
+    channel = enums.OrderChannel.IOS
+    fulfilment = enums.FulfilmentMethod.DELIVERY
+    address_text = "Toshkent, Chilonzor tumani, 9-kvartal, 12-uy, 45-xonadon"
+    address_region_code = "10"
+    address_city_code = "1001"
+    recipient_name = LazyAttribute(lambda o: o.customer.name)  # type: ignore[no-untyped-call]
+    recipient_phone = LazyAttribute(lambda o: o.customer.phone)  # type: ignore[no-untyped-call]
+    items_subtotal = 185_000
+    promo_subtotal = 0
+    delivery_fee = 25_000
+    cashback_used = 0
+    total = LazyAttribute(lambda o: o.items_subtotal + o.delivery_fee - o.cashback_used)  # type: ignore[no-untyped-call]
+    payment_provider = enums.PaymentProvider.CLICK
+    reservation_minutes = 15
+    created_at = LazyFunction(_now)  # type: ignore[no-untyped-call]
+    status_changed_at = LazyAttribute(lambda o: o.created_at)  # type: ignore[no-untyped-call]
+    reservation_expires_at = LazyAttribute(  # type: ignore[no-untyped-call]
+        lambda o: o.created_at + timedelta(minutes=o.reservation_minutes)
+    )
 
 
 def _txn_id(payment: Payment, n: int) -> str:
@@ -32,13 +91,13 @@ class PaymentFactory(DjangoModelFactory[Payment]):
 
     class Params:
         pending = Trait(  # type: ignore[no-untyped-call]
-            order=SubFactory(OrderFactory),  # type: ignore[no-untyped-call]
+            order=SubFactory(OrderRowFactory),  # type: ignore[no-untyped-call]
             status=enums.PaymentStatus.PENDING,
             provider_txn_id="",
             confirmed_at=None,
         )
         failed = Trait(  # type: ignore[no-untyped-call]
-            order=SubFactory(OrderFactory),  # type: ignore[no-untyped-call]
+            order=SubFactory(OrderRowFactory),  # type: ignore[no-untyped-call]
             status=enums.PaymentStatus.FAILED,
             confirmed_at=None,
             failed_at=LazyAttribute(lambda o: o.created_at + timedelta(minutes=2)),  # type: ignore[no-untyped-call]
@@ -46,12 +105,12 @@ class PaymentFactory(DjangoModelFactory[Payment]):
             error_message="Transaction cancelled",
         )
         refunded = Trait(  # type: ignore[no-untyped-call]
-            order=SubFactory(OrderFactory, cancelled=True),  # type: ignore[no-untyped-call]
+            order=SubFactory(OrderRowFactory, cancelled=True),  # type: ignore[no-untyped-call]
             status=enums.PaymentStatus.REFUNDED,
-            refunded_at=LazyAttribute(lambda o: o.confirmed_at + timedelta(hours=1)),  # type: ignore[no-untyped-call]
+            refunded_at=LazyAttribute(lambda o: (o.confirmed_at or o.created_at) + timedelta(hours=1)),  # type: ignore[no-untyped-call]
         )
 
-    order = SubFactory(OrderFactory, paid=True)  # type: ignore[no-untyped-call]
+    order = SubFactory(OrderRowFactory, paid=True)  # type: ignore[no-untyped-call]
     provider = LazyAttribute(lambda o: o.order.payment_provider)  # type: ignore[no-untyped-call]
     status = enums.PaymentStatus.PAID
     amount = LazyAttribute(lambda o: o.order.total)  # type: ignore[no-untyped-call]
@@ -98,7 +157,7 @@ class RefundFactory(DjangoModelFactory[Refund]):
             last_error="refund.submit: 10 transport failures",
         )
         manual_required = Trait(  # type: ignore[no-untyped-call]
-            payment=SubFactory(PaymentFactory, order__payment_provider=enums.PaymentProvider.PAYME),  # type: ignore[no-untyped-call]
+            payment=SubFactory(PaymentFactory, order__payme=True),  # type: ignore[no-untyped-call]
             state=enums.RefundState.MANUAL_REQUIRED,
         )
         unknown = Trait(  # type: ignore[no-untyped-call]
@@ -117,4 +176,4 @@ class RefundFactory(DjangoModelFactory[Refund]):
     created_at = LazyAttribute(lambda o: o.requested_at)  # type: ignore[no-untyped-call]
 
 
-__all__ = ["PaymentFactory", "RefundFactory"]
+__all__ = ["OrderRowFactory", "PaymentFactory", "RefundFactory"]
