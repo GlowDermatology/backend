@@ -64,7 +64,11 @@ def test_patch_updates_actor_and_audits_only_the_diff(staff_client: APIClient, s
     assert entry.before == {
         "reservation_minutes": 15,
         "support_phone": "+998712000000",
-        "pickup_address": {"uz": "Toshkent, Chilonzor tumani, Bunyodkor shoh ko‘chasi, 12", "ru": "", "en": ""},
+        "pickup_address": {
+            "uz": "Toshkent, Chilonzor tumani, Bunyodkor shoh ko‘chasi, 12",
+            "ru": "",
+            "en": "",
+        },
     }
     assert entry.after == {
         "reservation_minutes": 20,
@@ -94,8 +98,14 @@ def test_patch_without_changes_writes_no_audit_entry(staff_client: APIClient) ->
         ({"reservation_minutes": 4}, [("reservation_minutes", "min_value", "Qiymat 5 dan kam bo‘lmasin.")]),
         ({"reservation_minutes": 61}, [("reservation_minutes", "max_value", "Qiymat 60 dan oshmasin.")]),
         ({"reservation_minutes": "abc"}, [("reservation_minutes", "invalid", "Noto‘g‘ri qiymat.")]),
-        ({"support_phone": "998901234567"}, [("support_phone", "invalid", "Telefon raqamini to‘g‘ri kiriting.")]),
-        ({"pickup_address": {"uz": "x" * 201}}, [("pickup_address.uz", "max_length", "200 belgidan oshmasin.")]),
+        (
+            {"support_phone": "998901234567"},
+            [("support_phone", "invalid", "Telefon raqamini to‘g‘ri kiriting.")],
+        ),
+        (
+            {"pickup_address": {"uz": "x" * 201}},
+            [("pickup_address.uz", "max_length", "200 belgidan oshmasin.")],
+        ),
         (
             {"integrations": {"mode": "live"}},
             [("integrations", "read_only", "Bu maydonni o‘zgartirib bo‘lmaydi.")],

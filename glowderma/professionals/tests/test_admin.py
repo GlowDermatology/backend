@@ -1,4 +1,6 @@
-"""Design 01 §11 / 03 §8: the professionals models are read-only in this slice (editing comes with B6)."""
+"""Design 01 §11 / 03 §8: six professionals models are editable through the services; the override is not."""
+
+from datetime import time
 
 import pytest
 from django.contrib import admin
@@ -8,6 +10,8 @@ from django.urls import reverse
 
 from glowderma.accounts.tests.factories import StaffUserFactory
 from glowderma.core.admin import ReadOnlyAdmin
+from glowderma.core.models import AuditEntry
+from glowderma.professionals.admin import ServiceBackedAdmin
 from glowderma.professionals.models import (
     BlockedPeriod,
     Location,
@@ -29,46 +33,41 @@ from glowderma.professionals.tests.factories import (
 
 pytestmark = pytest.mark.django_db
 
-MODELS = [
-    Location,
-    Professional,
-    Service,
-    ProfessionalService,
-    WorkingHours,
-    WorkingHoursOverride,
-    BlockedPeriod,
-]
+EDITABLE = [Location, Professional, Service, ProfessionalService, WorkingHours, BlockedPeriod]
 
 
-@pytest.mark.parametrize("model", MODELS)
-def test_registered_read_only(model: type[models.Model]) -> None:
+@pytest.mark.parametrize("model", EDITABLE)
+def test_editable_models_use_the_service_backed_admin(model: type[models.Model]) -> None:
     model_admin = admin.site._registry[model]
-    assert isinstance(model_admin, ReadOnlyAdmin)
+    assert isinstance(model_admin, ServiceBackedAdmin)
     assert model_admin.list_display != ("__str__",) and model_admin.search_fields
+    assert model_admin.actions is None  # bulk delete would bypass delete_model
     request = RequestFactory().get("/django-admin/")
     request.user = StaffUserFactory.create(is_staff=True)
     assert model_admin.has_view_permission(request)
-    assert not model_admin.has_add_permission(request)
-    assert not model_admin.has_change_permission(request)
-    assert not model_admin.has_delete_permission(request)
+    assert model_admin.has_add_permission(request)
+    assert model_admin.has_change_permission(request)
+    assert model_admin.has_delete_permission(request)
     assert model_admin.check() == []
+    request.user = StaffUserFactory.create(is_staff=False)
+    assert not model_admin.has_change_permission(request)
 
 
-def test_override_admin_lists_the_design_columns() -> None:
-    assert admin.site._registry[WorkingHoursOverride].list_display == (
-        "id",
-        "professional",
-        "date",
-        "start",
-        "end",
-        "created_by",
-    )
+def test_override_stays_read_only() -> None:
+    model_admin = admin.site._registry[WorkingHoursOverride]
+    assert isinstance(model_admin, ReadOnlyAdmin)
+    assert model_admin.list_display == ("id", "professional", "date", "start", "end", "created_by")
     assert admin.site._registry[Professional].list_filter == ("role", "is_active")
 
 
-def test_changelists_and_change_pages_render() -> None:
+def staff_client() -> Client:
     client = Client()
-    client.force_login(StaffUserFactory.create(is_staff=True, is_superuser=True))
+    client.force_login(StaffUserFactory.create(is_staff=True))
+    return client
+
+
+def test_changelists_and_change_pages_render() -> None:
+    client = staff_client()
     link = ProfessionalServiceFactory.create()
     rows = [
         link.professional.location,
@@ -87,6 +86,156 @@ def test_changelists_and_change_pages_render() -> None:
         assert client.get(reverse(f"admin:{meta.app_label}_{meta.model_name}_changelist")).status_code == 200
         change = client.get(reverse(f"admin:{meta.app_label}_{meta.model_name}_change", args=[row.pk]))
         assert change.status_code == 200
-        assert client.post(reverse(f"admin:{meta.app_label}_{meta.model_name}_add"), {}).status_code == 403
+    assert client.post(reverse("admin:professionals_workinghoursoverride_add"), {}).status_code == 403
     search = client.get(reverse("admin:professionals_professional_changelist"), {"q": link.professional.name})
     assert search.status_code == 200 and link.professional.name.encode() in search.content
+
+
+def test_add_change_and_delete_go_through_the_services() -> None:
+    client = staff_client()
+    response = client.post(
+        reverse("admin:professionals_service_add"),
+        {
+            "name_uz": "Lazer epilyatsiya",
+            "name_ru": "",
+            "name_en": "",
+            "short_name_uz": "Lazer",
+            "short_name_ru": "",
+            "short_name_en": "",
+            "description_uz": "",
+            "description_ru": "",
+            "description_en": "",
+            "default_duration_min": 40,
+            "default_price": 500000,
+            "position": 7,
+            "is_active": "on",
+        },
+    )
+    assert response.status_code == 302, response.content.decode()[:500]
+    service = Service.objects.get(name_uz="Lazer epilyatsiya")
+    created = AuditEntry.objects.get(action="service.created")
+    assert created.entity_id == str(service.pk) and created.actor_type == "staff" and created.ip
+    change_url = reverse("admin:professionals_service_change", args=[service.pk])
+    data = {
+        "name_uz": "Lazer epilyatsiya",
+        "name_ru": "",
+        "name_en": "",
+        "short_name_uz": "Lazer",
+        "short_name_ru": "",
+        "short_name_en": "",
+        "description_uz": "",
+        "description_ru": "",
+        "description_en": "",
+        "default_duration_min": 50,
+        "default_price": 500000,
+        "position": 7,
+        "is_active": "on",
+    }
+    assert client.post(change_url, data).status_code == 302
+    updated = AuditEntry.objects.get(action="service.updated")
+    assert updated.before is not None and updated.after is not None
+    assert updated.before["default_duration_min"] == 40 and updated.after["default_duration_min"] == 50
+    # an invariant breach is a form error, never a 500 or a silent write
+    bad = client.post(change_url, {**data, "default_duration_min": 2})
+    assert bad.status_code == 200 and Service.objects.get(pk=service.pk).default_duration_min == 50
+    assert (
+        client.post(
+            reverse("admin:professionals_service_delete", args=[service.pk]), {"post": "yes"}
+        ).status_code
+        == 302
+    )
+    assert not Service.objects.filter(pk=service.pk).exists()
+    deleted = AuditEntry.objects.get(action="service.deleted")
+    assert deleted.before is not None and deleted.before["name_uz"] == "Lazer epilyatsiya"
+
+
+def test_delete_of_a_referenced_service_is_refused_by_the_admin() -> None:
+    client = staff_client()
+    link = ProfessionalServiceFactory.create()
+    response = client.post(
+        reverse("admin:professionals_service_delete", args=[link.service.pk]), {"post": "yes"}
+    )
+    assert (
+        response.status_code == 200
+    )  # Django's "cannot delete" page: the PROTECT is explained, nothing changes
+    assert Service.objects.filter(pk=link.service.pk).exists()
+    assert not AuditEntry.objects.filter(action="service.deleted").exists()
+
+
+def test_working_hours_inline_is_saved_through_the_services() -> None:
+    client = staff_client()
+    professional = ProfessionalFactory.create()
+    existing = WorkingHoursFactory.create(professional=professional, weekday=0)
+    data = {
+        "location": professional.location_id,
+        "name": professional.name,
+        "role": professional.role,
+        "bio_uz": "",
+        "bio_ru": "",
+        "bio_en": "",
+        "experience_years": "",
+        "slot_step_min": 30,
+        "position": 0,
+        "is_active": "on",
+        "working_hours-TOTAL_FORMS": 2,
+        "working_hours-INITIAL_FORMS": 1,
+        "working_hours-MIN_NUM_FORMS": 0,
+        "working_hours-MAX_NUM_FORMS": 1000,
+        "working_hours-0-id": existing.pk,
+        "working_hours-0-professional": professional.pk,
+        "working_hours-0-weekday": 0,
+        "working_hours-0-start": "10:00",
+        "working_hours-0-end": "17:00",
+        "working_hours-0-break_start": "",
+        "working_hours-0-break_end": "",
+        "working_hours-1-id": "",
+        "working_hours-1-professional": professional.pk,
+        "working_hours-1-weekday": 1,
+        "working_hours-1-start": "09:00",
+        "working_hours-1-end": "18:00",
+        "working_hours-1-break_start": "13:00",
+        "working_hours-1-break_end": "14:00",
+    }
+    response = client.post(reverse("admin:professionals_professional_change", args=[professional.pk]), data)
+    assert response.status_code == 302, response.content.decode()[:800]
+    assert WorkingHours.objects.get(pk=existing.pk).start == time(10, 0)
+    tuesday = WorkingHours.objects.get(professional=professional, weekday=1)
+    assert tuesday.break_start == time(13, 0)
+    assert set(AuditEntry.objects.values_list("action", flat=True)) == {
+        "professional.updated",
+        "working_hours.updated",
+        "working_hours.created",
+    }
+    data.update(
+        {"working_hours-TOTAL_FORMS": 1, "working_hours-INITIAL_FORMS": 1, "working_hours-0-DELETE": "on"}
+    )
+    assert (
+        client.post(
+            reverse("admin:professionals_professional_change", args=[professional.pk]), data
+        ).status_code
+        == 302
+    )
+    assert not WorkingHours.objects.filter(pk=existing.pk).exists()
+    assert AuditEntry.objects.filter(action="working_hours.deleted").exists()
+
+
+def test_blocked_period_add_sets_created_by() -> None:
+    client = staff_client()
+    professional = ProfessionalFactory.create()
+    response = client.post(
+        reverse("admin:professionals_blockedperiod_add"),
+        {
+            "professional": professional.pk,
+            "start_0": "2026-10-26",
+            "start_1": "16:00:00",
+            "end_0": "2026-10-26",
+            "end_1": "16:30:00",
+            "kind": "busy",
+            "label": "Band qilingan",
+        },
+    )
+    assert response.status_code == 302, response.content.decode()[:800]
+    block = BlockedPeriod.objects.get(professional=professional)
+    assert block.created_by is not None and block.created_by.is_staff
+    created = AuditEntry.objects.get(action="blocked_period.created")
+    assert created.after is not None and created.after["label"] == "Band qilingan"

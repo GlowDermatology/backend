@@ -15,7 +15,9 @@ from glowderma.site_config.models import SiteSettings
 
 
 class SettingsView(AdminAPIView):
-    @extend_schema(operation_id="admin_settings_retrieve", responses={200: SettingsSerializer, **ADMIN_ERRORS})
+    @extend_schema(
+        operation_id="admin_settings_retrieve", responses={200: SettingsSerializer, **ADMIN_ERRORS}
+    )
     def get(self, request: Request) -> Response:
         # Reads never create the singleton (post_migrate keeps it): a missing row is a deployment error.
         row = SiteSettings.objects.select_related("updated_by").get(pk=1)

@@ -1,4 +1,4 @@
-"""``get_fcm_port()``: the adapter ``settings.FCM_MODE`` selects (``fake`` in M1; ``live`` arrives with M3)."""
+"""``get_fcm_port()``: the adapter ``settings.FCM_MODE`` selects (``fake`` in M1; ``live`` comes with M3)."""
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
