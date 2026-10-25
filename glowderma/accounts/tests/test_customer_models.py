@@ -118,7 +118,12 @@ def test_customer_name_search_uses_the_trigram_index() -> None:
     )
     assert [c.name for c in queryset] == ["Malika Karimova"]
     with connection.cursor() as cursor:
+        # two rows: with a sequential scan ruled out the planner may still prefer walking the
+        # ``registered_at`` ordering index with a filter; rule plain index scans out as well so that the
+        # only remaining access path is the bitmap scan the trigram GIN index serves
         cursor.execute("SET LOCAL enable_seqscan = off")
+        cursor.execute("SET LOCAL enable_indexscan = off")
+        cursor.execute("SET LOCAL enable_indexonlyscan = off")
         sql, params = queryset.query.sql_with_params()
         cursor.execute("EXPLAIN " + sql, params)
         plan = "\n".join(row[0] for row in cursor.fetchall())
