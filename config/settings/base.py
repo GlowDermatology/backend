@@ -5,6 +5,7 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 from django.core.exceptions import ImproperlyConfigured
 
 from config.env import Network, env_json, env_str
+from glowderma.core.enums import enum_name_overrides
 from glowderma.core.throttling import validate_throttle_rates
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -189,3 +190,15 @@ def database_config(url: str, *, pool: bool = False) -> dict[str, Any]:
         raise ImproperlyConfigured(
             "DATABASE_URL must be a valid PostgreSQL URL with a database name"
         ) from exc
+
+
+# --- Media and schema (core-api) ---
+# Contract 1.4: media URLs are absolute and built from this base, never from the request Host.
+PUBLIC_MEDIA_BASE_URL = env_str("PUBLIC_MEDIA_BASE_URL", "http://127.0.0.1:8000/media/")
+FILE_UPLOAD_PERMISSIONS = 0o644
+FILE_UPLOAD_MAX_MEMORY_SIZE = 6 * 1024 * 1024
+SPECTACULAR_SETTINGS["ENUM_NAME_OVERRIDES"] = {
+    **enum_name_overrides(),
+    "HealthStatusEnum": ["ok", "error"],
+    "SocialProviderEnum": ["google", "facebook"],
+}

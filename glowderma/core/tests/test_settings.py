@@ -24,6 +24,7 @@ REQUIRED = (
     "REDIS_URL",
     "ALLOWED_HOSTS",
     "ADMIN_API_ALLOWED_NETS",
+    "PUBLIC_MEDIA_BASE_URL",
 )
 
 
@@ -58,6 +59,7 @@ def production_env(monkeypatch: pytest.MonkeyPatch) -> None:
         REDIS_URL="redis://localhost:6380/0",
         ALLOWED_HOSTS="localhost",
         ADMIN_API_ALLOWED_NETS="127.0.0.0/8",
+        PUBLIC_MEDIA_BASE_URL="https://media.example.uz/",
     )
     for name, value in values.items():
         monkeypatch.setenv(name, value)
@@ -390,3 +392,31 @@ def test_gunicorn_config_logs_request_id() -> None:
     assert "%({x-request-id}o)s" in module.access_log_format
     assert (module.timeout, module.graceful_timeout, module.keepalive) == (60, 30, 5)
     assert module.worker_class == "gthread"
+
+
+def test_production_requires_public_media_base_url(
+    production_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Contract 1.4: media URLs are "built from `PUBLIC_MEDIA_BASE_URL`, never from the request Host"."""
+    monkeypatch.delenv("PUBLIC_MEDIA_BASE_URL")
+    with pytest.raises(ImproperlyConfigured, match="PUBLIC_MEDIA_BASE_URL"):
+        load_production()
+
+
+@pytest.mark.parametrize(
+    "value", ["https://media.example.uz", "ftp://media.example.uz/", "media.example.uz/", "https:///media/"]
+)
+def test_production_rejects_malformed_public_media_base_url(
+    production_env: None, monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("PUBLIC_MEDIA_BASE_URL", value)
+    with pytest.raises(ImproperlyConfigured, match="PUBLIC_MEDIA_BASE_URL"):
+        load_production()
+
+
+def test_production_accepts_http_media_base_url_with_trailing_slash(production_env: None) -> None:
+    module = load_production()
+    assert module.PUBLIC_MEDIA_BASE_URL == "https://media.example.uz/"
+    assert module.FILE_UPLOAD_PERMISSIONS == 0o644
+    assert module.FILE_UPLOAD_MAX_MEMORY_SIZE == 6 * 1024 * 1024
+    sys.modules.pop("config.settings.production", None)

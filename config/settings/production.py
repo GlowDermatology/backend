@@ -1,5 +1,6 @@
 import base64
 import binascii
+from urllib.parse import urlsplit
 
 from django.core.exceptions import ImproperlyConfigured
 
@@ -87,3 +88,7 @@ CACHES = {
         "VERSION": 1,
     }
 }
+PUBLIC_MEDIA_BASE_URL = env_str("PUBLIC_MEDIA_BASE_URL")
+_media = urlsplit(PUBLIC_MEDIA_BASE_URL)
+if _media.scheme not in {"http", "https"} or not _media.netloc or not PUBLIC_MEDIA_BASE_URL.endswith("/"):
+    raise ImproperlyConfigured("PUBLIC_MEDIA_BASE_URL must be an http(s) URL ending with /")

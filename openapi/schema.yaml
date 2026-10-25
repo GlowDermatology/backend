@@ -265,7 +265,7 @@ components:
       type: object
       properties:
         status:
-          $ref: '#/components/schemas/StatusEnum'
+          $ref: '#/components/schemas/HealthStatusEnum'
         checks:
           type: object
           additionalProperties:
@@ -280,14 +280,14 @@ components:
           type: string
       required:
       - status
-    LinkedProvidersEnum:
+    HealthStatusEnum:
       enum:
-      - google
-      - facebook
+      - ok
+      - error
       type: string
       description: |-
-        * `google` - google
-        * `facebook` - facebook
+        * `ok` - ok
+        * `error` - error
     LoginRequest:
       type: object
       properties:
@@ -333,10 +333,20 @@ components:
           minLength: 1
         scope:
           allOf:
-          - $ref: '#/components/schemas/ScopeEnum'
+          - $ref: '#/components/schemas/LogoutScopeEnum'
           default: current
       required:
       - refresh
+    LogoutScopeEnum:
+      enum:
+      - current
+      - others
+      - all
+      type: string
+      description: |-
+        * `current` - current
+        * `others` - others
+        * `all` - all
     Me:
       type: object
       properties:
@@ -352,7 +362,7 @@ components:
         linked_providers:
           type: array
           items:
-            $ref: '#/components/schemas/LinkedProvidersEnum'
+            $ref: '#/components/schemas/SocialProviderEnum'
         session_expires_at:
           type: string
           format: date-time
@@ -371,24 +381,14 @@ components:
           minLength: 1
       required:
       - refresh
-    ScopeEnum:
+    SocialProviderEnum:
       enum:
-      - current
-      - others
-      - all
+      - google
+      - facebook
       type: string
       description: |-
-        * `current` - current
-        * `others` - others
-        * `all` - all
-    StatusEnum:
-      enum:
-      - ok
-      - error
-      type: string
-      description: |-
-        * `ok` - ok
-        * `error` - error
+        * `google` - google
+        * `facebook` - facebook
   securitySchemes:
     StaffJWT:
       type: http
