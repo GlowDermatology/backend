@@ -85,3 +85,7 @@ def test_migrate_zero_and_forward_again() -> None:
     assert TABLES <= table_names()
     assert MigrationRecorder.Migration.objects.filter(app="professionals", name="0001_initial").exists()
     assert "workinghours_break_inside_day" in constraint_names("professionals_workinghours", "c")
+    # ``migrate professionals zero`` also unapplied every app depending on professionals (appointments, ...);
+    # the forward ``migrate professionals`` did not bring them back, so leave the test DB fully migrated
+    call_command("migrate", verbosity=0)
+    assert "appointments_appointment" in table_names()

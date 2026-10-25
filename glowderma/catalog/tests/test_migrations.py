@@ -41,3 +41,7 @@ def test_migrate_zero_and_forward_again() -> None:
     with connection.cursor() as cursor:
         cursor.execute("SELECT indexdef FROM pg_indexes WHERE indexname = 'catalog_product_search_trgm'")
         assert "gin_trgm_ops" in cursor.fetchone()[0]
+    # ``migrate catalog zero`` also unapplied every app depending on catalog (notifications, ...); the forward
+    # ``migrate catalog`` did not bring them back, so leave the test DB fully migrated for the tests after us
+    call_command("migrate", verbosity=0)
+    assert "notifications_campaign" in table_names()
