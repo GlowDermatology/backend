@@ -115,26 +115,61 @@ def test_readonly_fields_cover_every_field_with_pretty_json(entry: AuditEntry) -
 
 
 def test_register_read_only_builds_subclass_with_options() -> None:
+    """``register_read_only`` forwards its options to a ``ReadOnlyAdmin`` on the given site."""
     site = admin.AdminSite(name="test_read_only")
-
-    class Probe(models.Model):
-        payload = models.JSONField()
-
-        class Meta:
-            app_label = "core"
-            managed = False
-
-        def __str__(self) -> str:
-            return f"probe {self.pk}"
-
-    site.register(Probe, ReadOnlyAdmin, list_display=("id", "payload"))
-    model_admin = site._registry[Probe]
+    register_read_only(OutboxMessage, site=site, list_display=("id", "topic"), search_fields=("topic",))
+    model_admin = site._registry[OutboxMessage]
     assert isinstance(model_admin, ReadOnlyAdmin)
-    assert model_admin.list_display == ("id", "payload")
-    assert model_admin.get_readonly_fields(RequestFactory().get("/")) == ["id", "payload_pretty"]
+    assert type(model_admin) is not ReadOnlyAdmin  # an options subclass, as ``site.register`` builds
+    assert model_admin.list_display == ("id", "topic")
+    assert model_admin.search_fields == ("topic",)
+    readonly = model_admin.get_readonly_fields(RequestFactory().get("/"))
+    assert "payload_pretty" in readonly and "payload" not in readonly
     assert model_admin.check() == []
+    assert set(site._registry) == {OutboxMessage}  # a fresh site, no phantom model in the app registry
     with pytest.raises(AlreadyRegistered):
-        register_read_only(AuditEntry)
+        register_read_only(OutboxMessage, site=site)
+    with pytest.raises(AlreadyRegistered):
+        register_read_only(AuditEntry)  # the default site is ``admin.site``
+
+
+def test_register_read_only_defaults_to_the_global_site() -> None:
+    registered = admin.site._registry[OutboxMessage]
+    assert isinstance(registered, ReadOnlyAdmin)
+    assert registered.list_display[:2] == ("id", "topic")
+    assert registered.ordering == ("-id",)
+
+
+def test_plain_staff_user_can_navigate_to_the_changelist(entry: AuditEntry) -> None:
+    """Brief: view permission for active ``is_staff`` users, reachable through the admin navigation."""
+    client = Client()
+    client.force_login(make_user("staff@x.uz", is_staff=True))
+    model_admin = admin.site._registry[AuditEntry]
+    request = RequestFactory().get("/django-admin/")
+    request.user = make_user("other@x.uz", is_staff=True)
+    assert model_admin.has_module_permission(request)
+    index = client.get(reverse("admin:index"))
+    assert index.status_code == 200
+    assert url(AuditEntry, "changelist").encode() in index.content
+    assert client.get(reverse("admin:app_list", kwargs={"app_label": "core"})).status_code == 200
+    assert client.get(url(AuditEntry, "changelist")).status_code == 200
+    assert client.get(url(AuditEntry, "change", entry.pk)).status_code == 200
+    assert client.get(url(AuditEntry, "add")).status_code == 403
+    assert client.post(url(AuditEntry, "change", entry.pk), {"action": "x"}).status_code == 403
+    assert client.post(url(AuditEntry, "delete", entry.pk), {"post": "yes"}).status_code == 403
+    entry.refresh_from_db()
+    assert entry.action == "test.changed"
+
+
+def test_module_permission_requires_active_staff() -> None:
+    model_admin = admin.site._registry[AuditEntry]
+    request = RequestFactory().get("/django-admin/")
+    request.user = make_user("plain@x.uz", is_staff=False)
+    assert not model_admin.has_module_permission(request)
+    request.user = make_user("inactive@x.uz", is_staff=True, is_active=False)
+    assert not model_admin.has_module_permission(request)
+    request.user = AnonymousUser()
+    assert not model_admin.has_module_permission(request)
 
 
 def test_admin_checks_pass() -> None:

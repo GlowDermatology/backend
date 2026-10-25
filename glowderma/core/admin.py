@@ -37,6 +37,11 @@ def _json_renderer(field: models.Field[Any, Any]) -> Callable[[models.Model], st
     return render
 
 
+def _is_active_staff(request: HttpRequest) -> bool:
+    user = request.user
+    return bool(user.is_active and user.is_staff)
+
+
 class ReadOnlyAdmin(_ModelAdmin):
     """View-only ``ModelAdmin``: JSON fields render as preformatted text, nothing can be written."""
 
@@ -58,8 +63,12 @@ class ReadOnlyAdmin(_ModelAdmin):
         return False
 
     def has_view_permission(self, request: HttpRequest, obj: models.Model | None = None) -> bool:
-        user = request.user
-        return bool(user.is_active and user.is_staff)
+        return _is_active_staff(request)
+
+    def has_module_permission(self, request: HttpRequest) -> bool:
+        # Same predicate as the view grant: otherwise the app index and the index links stay hidden
+        # from exactly the users who may view the records.
+        return _is_active_staff(request)
 
     def _json_field_names(self) -> list[str]:
         return [f.name for f in self.model._meta.concrete_fields if isinstance(f, models.JSONField)]
@@ -79,9 +88,14 @@ class ReadOnlyAdmin(_ModelAdmin):
         return names
 
 
-def register_read_only(model: type[models.Model], **options: Any) -> None:
-    """Register ``model`` with a ``ReadOnlyAdmin`` subclass built from ``options`` (list_display, ...)."""
-    admin.site.register(model, ReadOnlyAdmin, **options)
+def register_read_only(
+    model: type[models.Model], *, site: admin.AdminSite = admin.site, **options: Any
+) -> None:
+    """Register ``model`` on ``site`` with a ``ReadOnlyAdmin`` subclass built from ``options``.
+
+    ``options`` are ``ModelAdmin`` attributes (``list_display``, ``search_fields``, ``exclude``, ...).
+    """
+    site.register(model, ReadOnlyAdmin, **options)
 
 
 register_read_only(
