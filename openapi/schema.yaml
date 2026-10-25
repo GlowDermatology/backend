@@ -1357,6 +1357,139 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
+  /api/v1/admin/cashback/policy/:
+    get:
+      operationId: admin_cashback_policy_retrieve
+      description: The active and the scheduled version (at most one each), every
+        version newest first by `version` (superseded ones included) and `next_effective_from`,
+        the start of the next Tashkent calendar month.
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CashbackPolicy'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/cashback/policy-versions/:
+    post:
+      operationId: admin_cashback_policy_versions_create
+      description: Appends a scheduled version. Tier errors use the submitted index
+        (`tiers.{i}.from|to|percent`); gaps and an upper-bounded last tier are returned
+        as `warnings`. A previously scheduled version becomes superseded (`superseded_version`).
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PolicyVersionCreateRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PolicyVersionCreated'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/admin/categories/:
     get:
       operationId: admin_categories_list
@@ -1705,6 +1838,277 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CategoryResults'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/customers/:
+    get:
+      operationId: admin_customers_list
+      description: '`search`: the name contains the term, or (≥ 3 digits) the phone
+        contains its digits. `segment`: segment membership (rules or manual, active
+        customers only). Orderings tie by `id`.'
+      parameters:
+      - in: query
+        name: export
+        schema:
+          type: string
+          enum:
+          - csv
+          - xlsx
+        description: Download the filtered list as a file instead of the JSON page.
+      - in: query
+        name: ordering
+        schema:
+          enum:
+          - -registered_at
+          - registered_at
+          - name
+          - -name
+          - lifetime_total
+          - -lifetime_total
+          - balance
+          - -balance
+          type: string
+          default: -registered_at
+          minLength: 1
+        description: |-
+          * `-registered_at` - -registered_at
+          * `registered_at` - registered_at
+          * `name` - name
+          * `-name` - -name
+          * `lifetime_total` - lifetime_total
+          * `-lifetime_total` - -lifetime_total
+          * `balance` - balance
+          * `-balance` - -balance
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          enum:
+          - 20
+          - 50
+      - in: query
+        name: search
+        schema:
+          type: string
+          maxLength: 64
+      - in: query
+        name: segment
+        schema:
+          type: integer
+          minimum: 1
+      - in: query
+        name: status
+        schema:
+          enum:
+          - active
+          - deleted
+          type: string
+          minLength: 1
+        description: |-
+          * `active` - active
+          * `deleted` - deleted
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedCustomerListItemList'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/customers/{id}/:
+    get:
+      operationId: admin_customers_retrieve
+      description: 'The customer card of an active or deleted customer (deleted: name
+        `""`, `deleted_at`).'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerCard'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/customers/{id}/cashback-adjustments/:
+    post:
+      operationId: admin_customers_cashback_adjustments_create
+      description: 'Checks in order: `amount` 1..10 000 000 ("Summani kiriting."),
+        `reason` trimmed 3..300 ("Sababni kiriting."), then for `subtract` `amount
+        ≤ available` under the account lock ("Balans manfiy bo‘lib qoladi."). Allowed
+        for deleted customers.'
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CashbackAdjustmentRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CashbackAdjustmentResult'
           description: ''
         '400':
           content:
@@ -3573,6 +3977,14 @@ components:
       required:
       - display_name
       - id
+    AdjustmentDirectionEnum:
+      enum:
+      - add
+      - subtract
+      type: string
+      description: |-
+        * `add` - add
+        * `subtract` - subtract
     AppointmentCancelRequest:
       type: object
       description: '``POST appointments/{id}/cancel/``: optional ``reason`` (≤ 300),
@@ -3966,6 +4378,112 @@ components:
       - name
       - role
       - services
+    CashbackAdjustmentRequest:
+      type: object
+      description: |-
+        ``POST customers/{id}/cashback-adjustments/`` body (OpenAPI shape).
+
+        The view validates ``direction`` here and hands ``amount`` / ``reason`` as received to the service, which
+        runs the contract checks in order with the table's messages.
+      properties:
+        direction:
+          $ref: '#/components/schemas/AdjustmentDirectionEnum'
+        amount:
+          type: integer
+          maximum: 10000000
+          minimum: 1
+        reason:
+          type: string
+          minLength: 3
+          maxLength: 300
+      required:
+      - amount
+      - direction
+      - reason
+    CashbackAdjustmentResult:
+      type: object
+      description: '201: the new ``adjustment`` entry, the balance after it and ``available``
+        (balance − active holds).'
+      properties:
+        entry:
+          $ref: '#/components/schemas/LedgerEntry'
+        balance:
+          type: integer
+        available:
+          type: integer
+      required:
+      - available
+      - balance
+      - entry
+    CashbackPolicy:
+      type: object
+      description: '``GET cashback/policy/``: the active and scheduled versions, every
+        version and the suggested start.'
+      properties:
+        active:
+          allOf:
+          - $ref: '#/components/schemas/PolicyVersion'
+          nullable: true
+        scheduled:
+          allOf:
+          - $ref: '#/components/schemas/PolicyVersion'
+          nullable: true
+        versions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PolicyVersion'
+        next_effective_from:
+          type: string
+          format: date-time
+      required:
+      - active
+      - next_effective_from
+      - scheduled
+      - versions
+    CashbackTier:
+      type: object
+      description: 'Contract §2.7 tier: ``from`` inclusive, ``to`` exclusive | null,
+        2-dp percent.'
+      properties:
+        id:
+          type: integer
+        from:
+          type: integer
+        to:
+          type: integer
+          nullable: true
+        percent:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
+      required:
+      - from
+      - id
+      - percent
+      - to
+    CashbackTierInputRequest:
+      type: object
+      description: One submitted tier. ``percent`` is a decimal string; its range
+        and precision are the policy rules (``out_of_range`` / ``max_decimal_places``)
+        checked by ``create_policy_version``.
+      properties:
+        from:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        to:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: -9223372036854775807
+          format: int64
+          nullable: true
+        percent:
+          type: string
+          format: decimal
+      required:
+      - from
+      - percent
     Category:
       type: object
       description: Contract §2.4 ``Category``; instances come from ``selectors.category_queryset()``.
@@ -4059,6 +4577,122 @@ components:
       required:
       - current_password
       - new_password
+    ContentLanguageEnum:
+      enum:
+      - uz
+      - ru
+      - en
+      type: string
+      description: |-
+        * `uz` - uz
+        * `ru` - ru
+        * `en` - en
+    CustomerCard:
+      type: object
+      description: Contract §2.6 ``CustomerCard``.
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        phone:
+          type: string
+        status:
+          $ref: '#/components/schemas/CustomerStatusEnum'
+        registered_at:
+          type: string
+          format: date-time
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+        language:
+          $ref: '#/components/schemas/ContentLanguageEnum'
+        address:
+          type: string
+          nullable: true
+        totals:
+          $ref: '#/components/schemas/CustomerTotals'
+        online_orders:
+          $ref: '#/components/schemas/OnlineOrders'
+        tier:
+          allOf:
+          - $ref: '#/components/schemas/CustomerTier'
+          nullable: true
+        balance:
+          type: integer
+        held:
+          type: integer
+        available:
+          type: integer
+        groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/CustomerGroup'
+        upcoming_appointments:
+          type: integer
+        device:
+          allOf:
+          - $ref: '#/components/schemas/CustomerDevice'
+          nullable: true
+        ledger:
+          type: array
+          items:
+            $ref: '#/components/schemas/LedgerEntry'
+        purchases:
+          type: array
+          items:
+            $ref: '#/components/schemas/Purchase'
+      required:
+      - address
+      - available
+      - balance
+      - deleted_at
+      - device
+      - groups
+      - held
+      - id
+      - language
+      - ledger
+      - name
+      - online_orders
+      - phone
+      - purchases
+      - registered_at
+      - status
+      - tier
+      - totals
+      - upcoming_appointments
+    CustomerDevice:
+      type: object
+      properties:
+        model:
+          type: string
+        os:
+          type: string
+        app_version:
+          type: string
+        last_active_at:
+          type: string
+          format: date-time
+        push_enabled:
+          type: boolean
+      required:
+      - app_version
+      - last_active_at
+      - model
+      - os
+      - push_enabled
+    CustomerGroup:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+      required:
+      - id
+      - name
     CustomerListItem:
       type: object
       description: Contract §2.6 ``CustomerListItem`` for the members list; loyalty-owned
@@ -4119,6 +4753,36 @@ components:
       description: |-
         * `active` - active
         * `deleted` - deleted
+    CustomerTier:
+      type: object
+      properties:
+        policy_version:
+          type: integer
+        percent:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
+        next:
+          allOf:
+          - $ref: '#/components/schemas/NextTier'
+          nullable: true
+      required:
+      - next
+      - percent
+      - policy_version
+    CustomerTotals:
+      type: object
+      properties:
+        store:
+          type: integer
+        online:
+          type: integer
+        lifetime:
+          type: integer
+      required:
+      - lifetime
+      - online
+      - store
     DayBlock:
       type: object
       properties:
@@ -4379,6 +5043,92 @@ components:
       - kind
       - new_price
       - old_price
+    LedgerEntry:
+      type: object
+      description: Contract §2.6 ``LedgerEntry``.
+      properties:
+        id:
+          type: integer
+        at:
+          type: string
+          format: date-time
+        kind:
+          $ref: '#/components/schemas/LedgerKindEnum'
+        amount:
+          type: integer
+        balance_after:
+          type: integer
+        source_type:
+          $ref: '#/components/schemas/LedgerSourceTypeEnum'
+        source_ref:
+          type: string
+          nullable: true
+          readOnly: true
+        order_id:
+          type: integer
+          nullable: true
+        base:
+          type: integer
+          nullable: true
+        percent:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
+          nullable: true
+        promo_excluded:
+          type: boolean
+        policy_version:
+          type: integer
+          nullable: true
+        reverses_id:
+          type: integer
+          nullable: true
+        reason:
+          type: string
+          nullable: true
+        actor:
+          allOf:
+          - $ref: '#/components/schemas/Actor'
+          nullable: true
+          readOnly: true
+      required:
+      - actor
+      - amount
+      - at
+      - balance_after
+      - base
+      - id
+      - kind
+      - order_id
+      - percent
+      - policy_version
+      - promo_excluded
+      - reason
+      - reverses_id
+      - source_ref
+      - source_type
+    LedgerKindEnum:
+      enum:
+      - credit
+      - debit
+      - adjustment
+      - reversal
+      type: string
+      description: |-
+        * `credit` - credit
+        * `debit` - debit
+        * `adjustment` - adjustment
+        * `reversal` - reversal
+    LedgerSourceTypeEnum:
+      enum:
+      - order
+      - billz_sale
+      - admin
+      type: string
+      description: |-
+        * `order` - order
+        * `billz_sale` - billz_sale
+        * `admin` - admin
     LinkKindEnum:
       enum:
       - none
@@ -4505,6 +5255,27 @@ components:
       required:
       - appointments_pending
       - orders_processing
+    NextTier:
+      type: object
+      description: 'The next band: its percent, start, the so''m left and the 0..1
+        progress.'
+      properties:
+        percent:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
+        from:
+          type: integer
+        remaining:
+          type: integer
+        progress:
+          type: number
+          format: double
+      required:
+      - from
+      - percent
+      - progress
+      - remaining
     NotificationAudience:
       type: object
       properties:
@@ -4713,6 +5484,22 @@ components:
       - code
       - code_verifier
       - redirect_uri
+    OnlineOrders:
+      type: object
+      properties:
+        count:
+          type: integer
+        last_order_id:
+          type: integer
+          nullable: true
+        last_order_at:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+      - count
+      - last_order_at
+      - last_order_id
     PaginatedAuditEntryList:
       type: object
       required:
@@ -5033,6 +5820,103 @@ components:
         en:
           type: string
           maxLength: 200
+    PolicyVersion:
+      type: object
+      description: Contract §2.7 ``PolicyVersion`` (state derived at ``context["now"]``).
+      properties:
+        version:
+          type: integer
+        state:
+          allOf:
+          - $ref: '#/components/schemas/PolicyVersionStateEnum'
+          readOnly: true
+        effective_from:
+          type: string
+          format: date-time
+        effective_to:
+          type: string
+          format: date-time
+          nullable: true
+        basis:
+          $ref: '#/components/schemas/RateBasisEnum'
+        earn_on_cashback_paid:
+          type: boolean
+        tiers:
+          type: array
+          items:
+            $ref: '#/components/schemas/CashbackTier'
+          readOnly: true
+        author:
+          allOf:
+          - $ref: '#/components/schemas/Actor'
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        superseded_by:
+          type: integer
+          nullable: true
+      required:
+      - author
+      - basis
+      - created_at
+      - earn_on_cashback_paid
+      - effective_from
+      - effective_to
+      - state
+      - superseded_by
+      - tiers
+      - version
+    PolicyVersionCreateRequest:
+      type: object
+      description: '``POST cashback/policy-versions/`` body; the §2.7 rules run in
+        ``create_policy_version``.'
+      properties:
+        effective_from:
+          type: string
+          format: date-time
+        basis:
+          $ref: '#/components/schemas/RateBasisEnum'
+        earn_on_cashback_paid:
+          type: boolean
+        tiers:
+          type: array
+          items:
+            $ref: '#/components/schemas/CashbackTierInputRequest'
+      required:
+      - basis
+      - earn_on_cashback_paid
+      - effective_from
+      - tiers
+    PolicyVersionCreated:
+      type: object
+      description: '``POST cashback/policy-versions/`` 201.'
+      properties:
+        version:
+          $ref: '#/components/schemas/PolicyVersion'
+        superseded_version:
+          type: integer
+          nullable: true
+        warnings:
+          type: array
+          items:
+            $ref: '#/components/schemas/TierWarning'
+      required:
+      - superseded_version
+      - version
+      - warnings
+    PolicyVersionStateEnum:
+      enum:
+      - active
+      - scheduled
+      - expired
+      - superseded
+      type: string
+      description: |-
+        * `active` - active
+        * `scheduled` - scheduled
+        * `expired` - expired
+        * `superseded` - superseded
     Product:
       type: object
       description: Contract §2.3 ``Product``; instances come from ``selectors.product_queryset()``.
@@ -5309,6 +6193,61 @@ components:
       - billz_id
       - price
       - texts
+    Purchase:
+      type: object
+      description: Contract §2.6 ``Purchase``.
+      properties:
+        id:
+          type: integer
+        at:
+          type: string
+          format: date-time
+        source:
+          $ref: '#/components/schemas/PurchaseSourceEnum'
+        order_id:
+          type: integer
+          nullable: true
+        billz_sale_ref:
+          type: string
+          nullable: true
+        amount:
+          type: integer
+        promo_amount:
+          type: integer
+        cashback:
+          type: integer
+        policy_version:
+          type: integer
+          nullable: true
+        reversed:
+          type: boolean
+      required:
+      - amount
+      - at
+      - billz_sale_ref
+      - cashback
+      - id
+      - order_id
+      - policy_version
+      - promo_amount
+      - reversed
+      - source
+    PurchaseSourceEnum:
+      enum:
+      - online
+      - store_qr
+      type: string
+      description: |-
+        * `online` - online
+        * `store_qr` - store_qr
+    RateBasisEnum:
+      enum:
+      - before_purchase
+      - with_purchase
+      type: string
+      description: |-
+        * `before_purchase` - before_purchase
+        * `with_purchase` - with_purchase
     RefreshRequest:
       type: object
       properties:
@@ -5564,6 +6503,30 @@ components:
           $ref: '#/components/schemas/TemplateTextsRequest'
       required:
       - texts
+    TierWarning:
+      type: object
+      description: '``warnings[]``: ``gap`` = ``[from, to)`` uncovered; ``uncovered_above``:
+        open top.'
+      properties:
+        code:
+          $ref: '#/components/schemas/TierWarningEnum'
+        from:
+          type: integer
+        to:
+          type: integer
+          nullable: true
+      required:
+      - code
+      - from
+      - to
+    TierWarningEnum:
+      enum:
+      - gap
+      - uncovered_above
+      type: string
+      description: |-
+        * `gap` - gap
+        * `uncovered_above` - uncovered_above
     WorkingHours:
       type: object
       properties:
