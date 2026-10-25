@@ -23,9 +23,32 @@ schema_access = {
     ],
 }
 
+# Layer order (lowest first); a module's admin routes live in glowderma/<module>/api/admin/urls.py.
+ADMIN_API_MODULES = (
+    "integrations",
+    "site_config",
+    "catalog",
+    "loyalty",
+    "payments",
+    "commerce",
+    "appointments",
+    "notifications",
+    "customers",
+    "reporting",
+)
+
 urlpatterns: list[URLPattern | URLResolver] = [
     path("api/v1/health/", HealthView.as_view()),
     path("api/v1/admin/auth/", include("glowderma.accounts.api.admin.urls")),
+    # One include per module, all mounted at the admin root: each module's urls.py carries its own prefixes
+    # (products/, categories/, orders/, …) so slices never edit this file or each other's route tables.
+    *(
+        path(
+            "api/v1/admin/",
+            include(f"glowderma.{module}.api.admin.urls"),
+        )
+        for module in ADMIN_API_MODULES
+    ),
     path("api/v1/schema/", SpectacularAPIView.as_view(**schema_access), name="schema"),
     path("api/v1/docs/", SpectacularSwaggerView.as_view(url_name="schema", **schema_access), name="docs"),
 ]
