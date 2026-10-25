@@ -112,6 +112,23 @@ def test_bad_id_token_is_invalid_token(
     assert info.value.kind == "invalid_token"
 
 
+def test_non_ascii_nonce_is_compared_not_crashed(
+    recorder: Recorder, jwk_client: StaticJWKClient, make_id_token: Callable[..., str]
+) -> None:
+    # ``compare_digest`` on str raises TypeError for non-ASCII input; the adapter must compare bytes so a
+    # Unicode request nonce is an ordinary mismatch (400 upstream), never a 500.
+    recorder.route(TOKEN_PATH, token_ok(make_id_token()))
+    with pytest.raises(OAuthExchangeError) as info:
+        exchange(provider(recorder, jwk_client), nonce="nonce-é")
+    assert info.value.kind == "invalid_token"
+    assert info.value.detail == "nonce mismatch"
+    recorder.route(TOKEN_PATH, token_ok(make_id_token(nonce="nonce-é")))
+    assert exchange(provider(recorder, jwk_client), nonce="nonce-é").email == "ali@glowderma.uz"
+    with pytest.raises(OAuthExchangeError) as info:
+        exchange(provider(recorder, jwk_client), nonce="nonce-é")  # decomposed form is a different nonce
+    assert info.value.kind == "invalid_token"
+
+
 def test_both_google_issuers_are_accepted(
     recorder: Recorder, jwk_client: StaticJWKClient, make_id_token: Callable[..., str]
 ) -> None:

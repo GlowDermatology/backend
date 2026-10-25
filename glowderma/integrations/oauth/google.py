@@ -5,8 +5,8 @@ unreachable JWKS endpoint -> ``unavailable``; an ID token that fails any check (
 ``iss``, ``exp``, ``nonce``, ``email_verified``, ``hd``) -> ``invalid_token``.
 """
 
+import hmac
 import logging
-import secrets
 from functools import cache
 from typing import Any
 
@@ -24,6 +24,11 @@ ISSUERS = ("https://accounts.google.com", "accounts.google.com")
 ALGORITHMS = ("RS256",)
 REQUIRED_CLAIMS = ("iss", "aud", "exp", "iat", "sub", "email")
 LEEWAY_SECONDS = 30
+
+
+def nonces_match(token_nonce: str, nonce: str) -> bool:
+    """Constant-time nonce comparison that accepts any Unicode input (``compare_digest`` on bytes)."""
+    return hmac.compare_digest(token_nonce.encode("utf-8"), nonce.encode("utf-8"))
 
 
 @cache
@@ -102,11 +107,9 @@ class GoogleOAuthProvider:
         except jwt.PyJWTError as exc:
             raise OAuthExchangeError("invalid_token", type(exc).__name__) from exc
         token_nonce = claims.get("nonce")
-        if (
-            not isinstance(token_nonce, str)
-            or nonce is None
-            or not secrets.compare_digest(token_nonce, nonce)
-        ):
+        # Compare bytes: ``compare_digest`` on ``str`` raises TypeError for non-ASCII input, and the request
+        # nonce is free text, so a str comparison would turn a bad nonce into a 500 instead of invalid_token.
+        if not isinstance(token_nonce, str) or nonce is None or not nonces_match(token_nonce, nonce):
             raise OAuthExchangeError("invalid_token", "nonce mismatch")
         if claims.get("email_verified") is not True:
             raise OAuthExchangeError("invalid_token", "email not verified")
