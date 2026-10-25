@@ -2,6 +2,8 @@ from config.env import env_str
 
 from .local import *  # noqa: F403
 
+# Parallel workers (git worktrees) each run the suite against their own test database.
+DATABASES["default"]["TEST"] = {"NAME": env_str("TEST_DB_NAME", "test_glowderma")}  # noqa: F405
 CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
 CELERY_TASK_ALWAYS_EAGER = True
 CELERY_TASK_EAGER_PROPAGATES = True

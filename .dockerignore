@@ -14,3 +14,4 @@ htmlcov
 media
 staticfiles
 docs
+dump.rdb
