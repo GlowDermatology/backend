@@ -3,13 +3,14 @@ import secrets
 import uuid
 from collections.abc import Iterable
 from datetime import timedelta
+from typing import Any
 
 from django.conf import settings
 from django.core.cache import cache
 from django.db import transaction
 
 from glowderma.accounts.models import AuthSession, StaffUser
-from glowderma.core import timeutils
+from glowderma.core import audit, timeutils
 from glowderma.core.api.exceptions import AuthFailed
 
 
@@ -68,6 +69,12 @@ def revoke_session(session: AuthSession, reason: str) -> None:
 
 @transaction.atomic
 def revoke_user_sessions(user: StaffUser, reason: str, *, except_sid: uuid.UUID | None = None) -> int:
+    return len(_revoke_user_sessions(user, reason, except_sid=except_sid))
+
+
+def _revoke_user_sessions(
+    user: StaffUser, reason: str, *, except_sid: uuid.UUID | None = None
+) -> list[AuthSession]:
     queryset = AuthSession.objects.select_for_update().filter(staff=user, revoked_at__isnull=True)
     if except_sid is not None:
         queryset = queryset.exclude(pk=except_sid)
@@ -81,4 +88,61 @@ def revoke_user_sessions(user: StaffUser, reason: str, *, except_sid: uuid.UUID 
             revoked_at=instant, revoke_reason=reason
         )
     _tombstone_on_commit(sessions)
+    return sessions
+
+
+@transaction.atomic
+def deactivate_staff(user: StaffUser, *, actor: StaffUser, request: Any = None) -> int:
+    """Deactivate ``user`` and revoke every open session with reason ``deactivated``.
+
+    Returns the number of revoked sessions; an already inactive user revokes nothing (0).
+    """
+    stored = StaffUser.objects.select_for_update().get(pk=user.pk)
+    if not stored.is_active:
+        user.is_active = False
+        return 0
+    stored.is_active = False
+    stored.save(update_fields=["is_active"])
+    user.is_active = False
+    sessions = _revoke_user_sessions(stored, "deactivated")
+    audit.record(
+        action="auth.staff_deactivated",
+        entity_type="staff",
+        entity_id=str(stored.pk),
+        actor=actor,
+        request=request,
+        before={"is_active": True},
+        after={"revoked_count": len(sessions)},
+    )
+    for session in sessions:
+        audit.record(
+            action="auth.session_revoked",
+            entity_type="auth_session",
+            entity_id=str(session.pk),
+            actor=actor,
+            request=request,
+            after={"sid": str(session.pk), "reason": "deactivated"},
+        )
     return len(sessions)
+
+
+@transaction.atomic
+def reactivate_staff(user: StaffUser, *, actor: StaffUser, request: Any = None) -> bool:
+    """Reactivate ``user``. Returns False when the user was already active (no audit is written)."""
+    stored = StaffUser.objects.select_for_update().get(pk=user.pk)
+    if stored.is_active:
+        user.is_active = True
+        return False
+    stored.is_active = True
+    stored.save(update_fields=["is_active"])
+    user.is_active = True
+    audit.record(
+        action="auth.staff_reactivated",
+        entity_type="staff",
+        entity_id=str(stored.pk),
+        actor=actor,
+        request=request,
+        before={"is_active": False},
+        after={"is_active": True},
+    )
+    return True
