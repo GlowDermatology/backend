@@ -169,4 +169,17 @@ def test_seed_records_the_store_sales_through_the_service(monkeypatch: pytest.Mo
     seed_loyalty(CONTEXT)
     seed_loyalty(SeedContext(anchor=ANCHOR, keep_open=False))
     assert list(Purchase.objects.order_by("id").values_list("id", "billz_sale_id", "cashback_amount", "updated_at")) == before  # fmt: skip  # noqa: E501
-    assert LedgerEntry.objects.count() == len(sales) and seeds._seed_store_sales() == 0
+    assert LedgerEntry.objects.count() == len(sales) and seeds.seed_store_sales() == 0
+
+
+def test_store_sales_join_the_commerce_replay_once_it_exists(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With a ``commerce`` seeder registered, seed_loyalty leaves the store sales to its chronological replay
+    (post_entry refuses entries older than an account's newest one), which calls seed_store_sales itself."""
+    monkeypatch.delenv("SEED_ADMIN_PASSWORD", raising=False)
+    accounts_seeds.seed_accounts(CONTEXT)
+    monkeypatch.setattr(seeding, "_registry", {"commerce": (70, lambda context: None)})
+    seed_loyalty(CONTEXT)
+    assert CashbackPolicy.objects.count() == 3 and not Purchase.objects.exists()
+    assert seeds.seed_store_sales() == len(seeds.store_sales()) == Purchase.objects.count()
+    assert seeds.seed_store_sales() == 0
+    assert set(LedgerEntry.objects.values_list("at", flat=True)) == {STORE_SALE_SOLD_AT}

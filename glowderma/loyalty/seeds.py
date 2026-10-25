@@ -12,6 +12,12 @@ Malika's whole timeline and the deliberate negative balance of customer 13 (03 �
 the commerce seeder (B5) replays them in chronological order through ``loyalty.services`` together with the
 orders, so every ``balance_after`` chain comes out of production code paths.
 
+Posting order: ``post_entry`` refuses an entry earlier than the account's newest one, and the generated
+customers' paid orders (B5) fall on both sides of 2026-09-05. So the store sales must join that chronological
+replay: once a ``commerce`` seeder is registered, :func:`seed_loyalty` seeds the policies only and the
+commerce seeder calls :func:`seed_store_sales` when its replay reaches :data:`STORE_SALE_SOLD_AT`. Without
+one (this slice, or a standalone run) :func:`seed_loyalty` seeds them itself.
+
 Idempotent: policies by ``version``, sales by ``billz_sale_id`` (the service itself is idempotent; the
 seeder also skips the sales already present). Every timestamp is a pinned design instant, so the run is
 anchor-independent and ``keep_open`` has nothing to move. A missing lower-layer row (no demo admin, no
@@ -30,7 +36,7 @@ from django.db import transaction
 from glowderma.accounts.models import Customer, StaffUser
 from glowderma.accounts.seeds import MALIKA_ID, CustomerFacts
 from glowderma.core import enums
-from glowderma.core.seeding import SeedContext, pinned_clock, register_seeder
+from glowderma.core.seeding import SeedContext, pinned_clock, register_seeder, registered_seeders
 from glowderma.core.timeutils import TASHKENT
 from glowderma.loyalty import services
 from glowderma.loyalty.models import CashbackPolicy, CashbackTier, Purchase
@@ -42,6 +48,7 @@ STORE_SALE_CUSTOMER_IDS = range(
 STORE_SALE_SOLD_AT = datetime(2026, 9, 5, 12, 0, tzinfo=TASHKENT)  # under v2: 1 % below 20 M
 JAVOHIR_ID = 7
 JAVOHIR_MIN_STORE_TOTAL = 2_000_000  # order №10246 spends 20 000 so'm of cashback (03 §7.7)
+STORE_SALES_REPLAYED_BY = "commerce"  # the seeder that interleaves the store sales with its orders
 
 
 def _dt(month: int, day: int, hour: int = 0, minute: int = 0) -> datetime:
@@ -112,8 +119,12 @@ def store_sales() -> list[tuple[int, str, int]]:
     return rows
 
 
-def _seed_store_sales() -> int:
-    """Replay the missing store sales through the service; returns how many were recorded this run."""
+def seed_store_sales() -> int:
+    """Replay the missing store sales through the service at :data:`STORE_SALE_SOLD_AT` (pinned clock).
+
+    Idempotent; returns how many were recorded this run. Called by :func:`seed_loyalty` standalone, or by the
+    commerce seeder at that point of its chronological replay (see the module docstring).
+    """
     sales = store_sales()
     present = set(
         Purchase.objects.filter(billz_sale_id__in=[sale_id for _, sale_id, _ in sales]).values_list(
@@ -150,4 +161,5 @@ def seed_loyalty(context: SeedContext) -> None:
             if spec.version in existing:
                 continue
             _insert(spec, admin)
-        _seed_store_sales()
+        if STORE_SALES_REPLAYED_BY not in {name for name, _order, _seeder in registered_seeders()}:
+            seed_store_sales()
