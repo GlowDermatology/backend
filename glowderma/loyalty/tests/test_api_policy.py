@@ -58,7 +58,7 @@ def client_now(staff: StaffUser) -> APIClient:
     refused by PyJWT's ``iat`` check, so the credentials are forced; the permission still sees aud=staff)."""
     client = APIClient()
     client.default_format = "json"
-    client.force_authenticate(user=staff, token={"aud": "staff"})
+    client.force_authenticate(user=staff, token={"aud": "staff"})  # type: ignore[arg-type]  # claims dict
     client.credentials(HTTP_X_GD_INTERNAL_SECRET=settings.INTERNAL_API_SECRET)
     return client
 
@@ -67,7 +67,7 @@ def post(client: APIClient, body: dict[str, Any], key: str | None = None) -> Any
     return client.post(VERSIONS_URL, body, format="json", HTTP_IDEMPOTENCY_KEY=key or str(uuid.uuid4()))
 
 
-def tier(start: int, end: int | None, percent: str) -> dict[str, Any]:
+def tier(start: int, end: int | None, percent: Any) -> dict[str, Any]:
     return {"from": start, "to": end, "percent": percent}
 
 
@@ -181,7 +181,9 @@ def test_next_effective_from_follows_the_tashkent_calendar_month(
 # --- POST cashback/policy-versions/ -------------------------------------------------------------------------
 
 
-def test_create_returns_the_scheduled_version_and_warnings(staff_client: APIClient, seeded: StaffUser) -> None:
+def test_create_returns_the_scheduled_version_and_warnings(
+    staff_client: APIClient, seeded: StaffUser
+) -> None:
     response = post(
         staff_client,
         body(
@@ -344,7 +346,9 @@ FIELDS = "Maydonlarni tekshiring."
         ),
         pytest.param(
             # several rules at once: one entry per (field, code) in rule order, the first rule's message
-            body(tier(10 * MLN, 5 * MLN, "150"), tier(0, 20 * MLN, "1.555"), effective_from="2026-01-01T00:00Z"),
+            body(
+                tier(10 * MLN, 5 * MLN, "150"), tier(0, 20 * MLN, "1.555"), effective_from="2026-01-01T00:00Z"
+            ),
             OVERLAP,
             [
                 ("tiers.0.to", "empty_range", EMPTY_RANGE),
@@ -397,7 +401,9 @@ def test_create_validation_table(
             ],
             id="required",
         ),
-        pytest.param({**body(tier(0, None, "1")), "basis": "after"}, [("basis", "invalid_choice")], id="basis"),
+        pytest.param(
+            {**body(tier(0, None, "1")), "basis": "after"}, [("basis", "invalid_choice")], id="basis"
+        ),
     ],
 )
 def test_create_field_errors(
