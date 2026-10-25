@@ -1,10 +1,12 @@
 """loyalty.services.adjust — contract §2.6 rules (code AND message), available math under the lock, deleted
 customers, the ``cashback.adjusted`` audit."""
 
+from threading import Event, Thread
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from django.db import connection, transaction
 
 from glowderma.accounts.tests.factories import CustomerFactory, StaffUserFactory
 from glowderma.core import enums
@@ -115,3 +117,51 @@ def test_adjust_boundaries() -> None:
     assert top.balance == 10_000_000
     assert services.adjust(customer.pk, "subtract", 1, "x" * 300, staff.pk).balance == 9_999_999
     assert LedgerEntry.objects.filter(reason="x" * 300).exists()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_insufficient_balance_is_decided_under_the_account_lock() -> None:
+    """Two staff subtract 60 000 from 100 000 at once: the second waits for the lock, then sees 40 000."""
+    staff = StaffUserFactory.create()
+    account = LoyaltyAccountFactory.create(balance=0)
+    customer_id = account.customer_id
+    services.adjust(customer_id, "add", 100_000, "boshlang‘ich", staff.pk)
+    first_posted, release, second_done = Event(), Event(), Event()
+    outcome: dict[str, Any] = {}
+
+    def first() -> None:
+        try:
+            with transaction.atomic():  # the caller's transaction keeps the account lock until it commits
+                outcome["first"] = services.adjust(customer_id, "subtract", 60_000, "birinchi", staff.pk)
+                first_posted.set()
+                assert release.wait(timeout=10)
+        except BaseException as exc:  # noqa: BLE001 - surfaced through ``outcome``
+            outcome["first_error"] = exc
+            first_posted.set()
+        finally:
+            connection.close()
+
+    def second() -> None:
+        try:
+            outcome["second"] = services.adjust(customer_id, "subtract", 60_000, "ikkinchi", staff.pk)
+        except BaseException as exc:  # noqa: BLE001 - the expected InsufficientBalance lands here
+            outcome["second_error"] = exc
+        finally:
+            second_done.set()
+            connection.close()
+
+    threads = [Thread(target=first, daemon=True), Thread(target=second, daemon=True)]
+    threads[0].start()
+    assert first_posted.wait(timeout=10) and "first_error" not in outcome
+    threads[1].start()
+    assert not second_done.wait(timeout=0.5)  # blocked on the LoyaltyAccount row lock
+    release.set()
+    for thread in threads:
+        thread.join(timeout=10)
+    assert all(not thread.is_alive() for thread in threads)
+    assert outcome["first"].balance == 40_000 and "second" not in outcome
+    error = outcome["second_error"]
+    assert isinstance(error, services.InsufficientBalance)
+    assert (error.available, error.requested) == (40_000, 60_000)
+    assert LoyaltyAccount.objects.get(pk=account.pk).balance == 40_000
+    assert chain(account.pk) == [("adjustment", 100_000, 100_000), ("adjustment", -60_000, 40_000)]
