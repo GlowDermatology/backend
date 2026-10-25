@@ -373,6 +373,1489 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
+  /api/v1/admin/banners/:
+    get:
+      operationId: admin_banners_list
+      parameters:
+      - in: query
+        name: export
+        schema:
+          type: string
+          enum:
+          - csv
+          - xlsx
+        description: Download the filtered list as a file instead of the JSON page.
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          enum:
+          - 20
+          - 50
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedBannerList'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    post:
+      operationId: admin_banners_create
+      description: 'Multipart: `image` plus dotted keys `title.uz`, `link.kind`, …
+        (BannerWriteSerializer).'
+      tags:
+      - admin
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/BannerFormRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Banner'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/banners/{id}/:
+    get:
+      operationId: admin_banners_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Banner'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    patch:
+      operationId: admin_banners_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedBannerFormRequest'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedBannerWriteRequest'
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Banner'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    delete:
+      operationId: admin_banners_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '204':
+          description: No response body
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/banners/order/:
+    put:
+      operationId: admin_banners_reorder
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IdOrderRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BannerResults'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/categories/:
+    get:
+      operationId: admin_categories_list
+      parameters:
+      - in: query
+        name: export
+        schema:
+          type: string
+          enum:
+          - csv
+          - xlsx
+        description: Download the filtered list as a file instead of the JSON page.
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          enum:
+          - 20
+          - 50
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedCategoryList'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    post:
+      operationId: admin_categories_create
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CategoryWriteRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Category'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/categories/{slug}/:
+    get:
+      operationId: admin_categories_retrieve
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Category'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    patch:
+      operationId: admin_categories_partial_update
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedCategoryWriteRequest'
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Category'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    delete:
+      operationId: admin_categories_destroy
+      parameters:
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '204':
+          description: No response body
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/categories/order/:
+    put:
+      operationId: admin_categories_reorder
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SlugOrderRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategoryResults'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/integrations/billz/import/:
+    post:
+      operationId: admin_billz_import_create
+      description: 'Start a Billz import job (single-flight: a queued or running `billz_import`
+        job is returned instead of a new one). Poll `jobs/{id}/`.'
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BillzImportRequest'
+      security:
+      - StaffJWT: []
+      responses:
+        '202':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/jobs/{id}/:
+    get:
+      operationId: admin_jobs_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/products/:
+    get:
+      operationId: admin_products_list
+      parameters:
+      - in: query
+        name: category
+        schema:
+          type: string
+          minLength: 1
+        description: A category slug, or `none` for products without a category.
+      - in: query
+        name: export
+        schema:
+          type: string
+          enum:
+          - csv
+          - xlsx
+        description: Download the filtered list as a file instead of the JSON page.
+      - in: query
+        name: is_new
+        schema:
+          type: boolean
+      - in: query
+        name: ordering
+        schema:
+          enum:
+          - default
+          - name
+          - -name
+          type: string
+          default: default
+          minLength: 1
+        description: |-
+          * `default` - default
+          * `name` - name
+          * `-name` - -name
+      - in: query
+        name: out_of_stock
+        schema:
+          type: boolean
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          enum:
+          - 8
+      - in: query
+        name: promo
+        schema:
+          type: boolean
+      - in: query
+        name: search
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          enum:
+          - active
+          - hidden
+          type: string
+          minLength: 1
+        description: |-
+          * `active` - active
+          * `hidden` - hidden
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedProductList'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    post:
+      operationId: admin_products_create
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductWriteRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/products/{id}/:
+    get:
+      operationId: admin_products_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    patch:
+      operationId: admin_products_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedProductWriteRequest'
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Product'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/products/{id}/images/:
+    post:
+      operationId: admin_product_images_create
+      description: One multipart part `file` (JPEG, PNG or WebP, ≤ 5 MiB, ≤ 8 images
+        per product).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ProductImageUploadRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductImage'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/products/{id}/images/{image_id}/:
+    delete:
+      operationId: admin_product_images_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: image_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '204':
+          description: No response body
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/products/{id}/images/order/:
+    put:
+      operationId: admin_product_images_reorder
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImageOrderRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImagesResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/products/stats/:
+    get:
+      operationId: admin_products_stats
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductStats'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/health/:
     get:
       operationId: health_retrieve
@@ -413,6 +1896,233 @@ components:
       - access
       - access_expires_at
       - refresh_expires_at
+    Actor:
+      type: object
+      description: 'Contract §2.0 ``Actor = {"id", "display_name"}``: the staff full
+        name, else the email.'
+      properties:
+        id:
+          type: integer
+        display_name:
+          type: string
+          readOnly: true
+      required:
+      - display_name
+      - id
+    Banner:
+      type: object
+      description: Contract §2.5 ``Banner``; instances come from ``selectors.banner_queryset()``.
+      properties:
+        id:
+          type: integer
+        title:
+          allOf:
+          - $ref: '#/components/schemas/I18nText80'
+          readOnly: true
+        image_url:
+          type: string
+          format: uri
+          readOnly: true
+        link:
+          allOf:
+          - $ref: '#/components/schemas/BannerLink'
+          readOnly: true
+        is_active:
+          type: boolean
+        starts_at:
+          type: string
+          format: date-time
+          nullable: true
+        ends_at:
+          type: string
+          format: date-time
+          nullable: true
+        position:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+      - created_at
+      - ends_at
+      - id
+      - image_url
+      - is_active
+      - link
+      - position
+      - starts_at
+      - title
+      - updated_at
+    BannerFormRequest:
+      type: object
+      properties:
+        image:
+          type: string
+          format: binary
+        title.uz:
+          type: string
+          minLength: 1
+          maxLength: 80
+        title.ru:
+          type: string
+          maxLength: 80
+        title.en:
+          type: string
+          maxLength: 80
+        link.kind:
+          $ref: '#/components/schemas/BannerLinkKindEnum'
+        link.product_id:
+          type: integer
+          nullable: true
+        link.category:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 40
+        is_active:
+          type: boolean
+        starts_at:
+          type: string
+          format: date-time
+          nullable: true
+        ends_at:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+      - title.uz
+    BannerLink:
+      type: object
+      properties:
+        kind:
+          $ref: '#/components/schemas/BannerLinkKindEnum'
+        product_id:
+          type: integer
+          nullable: true
+        category:
+          type: string
+          nullable: true
+          maxLength: 40
+    BannerLinkKindEnum:
+      enum:
+      - none
+      - product
+      - category
+      type: string
+      description: |-
+        * `none` - none
+        * `product` - product
+        * `category` - category
+    BannerLinkRequest:
+      type: object
+      properties:
+        kind:
+          $ref: '#/components/schemas/BannerLinkKindEnum'
+        product_id:
+          type: integer
+          nullable: true
+        category:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 40
+    BannerResults:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Banner'
+      required:
+      - results
+    BillzImportModeEnum:
+      enum:
+      - delta
+      - full
+      type: string
+      description: |-
+        * `delta` - delta
+        * `full` - full
+    BillzImportRequest:
+      type: object
+      description: 'Body of ``POST integrations/billz/import/``: ``{}`` or ``{"mode":
+        "delta"|"full"}``.'
+      properties:
+        mode:
+          allOf:
+          - $ref: '#/components/schemas/BillzImportModeEnum'
+          default: delta
+    BillzStatus:
+      type: object
+      properties:
+        connected:
+          type: boolean
+        last_sync_at:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+      - connected
+      - last_sync_at
+    Category:
+      type: object
+      description: Contract §2.4 ``Category``; instances come from ``selectors.category_queryset()``.
+      properties:
+        slug:
+          type: string
+        name:
+          allOf:
+          - $ref: '#/components/schemas/I18nText60'
+          readOnly: true
+        position:
+          type: integer
+        is_active:
+          type: boolean
+        product_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+      - created_at
+      - is_active
+      - name
+      - position
+      - product_count
+      - slug
+      - updated_at
+    CategoryResults:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Category'
+      required:
+      - results
+    CategoryWriteRequest:
+      type: object
+      description: '``POST categories/`` and ``PATCH categories/{slug}/`` (``partial``;
+        ``slug`` is then ``read_only``).'
+      properties:
+        slug:
+          type: string
+          minLength: 1
+          pattern: ^[a-z0-9-]{2,40}$
+        name:
+          $ref: '#/components/schemas/I18nText60Min2Request'
+        is_active:
+          type: boolean
+          default: true
+      required:
+      - name
+      - slug
     ChangePasswordRequest:
       type: object
       properties:
@@ -488,6 +2198,194 @@ components:
       description: |-
         * `ok` - ok
         * `error` - error
+    I18nText60:
+      type: object
+      description: 'Contract 1.4: i18n text is {"uz", "ru", "en"}; "" means not filled,
+        never null.'
+      properties:
+        uz:
+          type: string
+          maxLength: 60
+        ru:
+          type: string
+          maxLength: 60
+        en:
+          type: string
+          maxLength: 60
+      required:
+      - en
+      - ru
+      - uz
+    I18nText60Min2Request:
+      type: object
+      description: 'Contract 1.4: i18n text is {"uz", "ru", "en"}; "" means not filled,
+        never null.'
+      properties:
+        uz:
+          type: string
+          minLength: 2
+          maxLength: 60
+        ru:
+          type: string
+          maxLength: 60
+        en:
+          type: string
+          maxLength: 60
+      required:
+      - en
+      - ru
+      - uz
+    I18nText80:
+      type: object
+      description: 'Contract 1.4: i18n text is {"uz", "ru", "en"}; "" means not filled,
+        never null.'
+      properties:
+        uz:
+          type: string
+          maxLength: 80
+        ru:
+          type: string
+          maxLength: 80
+        en:
+          type: string
+          maxLength: 80
+      required:
+      - en
+      - ru
+      - uz
+    I18nText80Min1Request:
+      type: object
+      description: 'Contract 1.4: i18n text is {"uz", "ru", "en"}; "" means not filled,
+        never null.'
+      properties:
+        uz:
+          type: string
+          minLength: 1
+          maxLength: 80
+        ru:
+          type: string
+          maxLength: 80
+        en:
+          type: string
+          maxLength: 80
+      required:
+      - en
+      - ru
+      - uz
+    IdOrderRequest:
+      type: object
+      description: Body of ``PUT banners/order/``.
+      properties:
+        ids:
+          type: array
+          items:
+            type: integer
+      required:
+      - ids
+    ImageOrderRequest:
+      type: object
+      description: Body of ``PUT products/{id}/images/order/``.
+      properties:
+        image_ids:
+          type: array
+          items:
+            type: integer
+      required:
+      - image_ids
+    ImagesResponse:
+      type: object
+      properties:
+        images:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductImage'
+      required:
+      - images
+    Job:
+      type: object
+      description: Contract §2.14 ``Job``.
+      properties:
+        id:
+          type: integer
+        kind:
+          $ref: '#/components/schemas/JobKindEnum'
+        state:
+          $ref: '#/components/schemas/JobStateEnum'
+        params: {}
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+        progress:
+          nullable: true
+        result:
+          nullable: true
+        error:
+          nullable: true
+        created_by:
+          allOf:
+          - $ref: '#/components/schemas/Actor'
+          nullable: true
+      required:
+      - created_at
+      - created_by
+      - error
+      - finished_at
+      - id
+      - kind
+      - params
+      - progress
+      - result
+      - started_at
+      - state
+    JobKindEnum:
+      enum:
+      - billz_import
+      type: string
+      description: '* `billz_import` - billz_import'
+    JobStateEnum:
+      enum:
+      - queued
+      - running
+      - succeeded
+      - failed
+      type: string
+      description: |-
+        * `queued` - queued
+        * `running` - running
+        * `succeeded` - succeeded
+        * `failed` - failed
+    LastChange:
+      type: object
+      properties:
+        at:
+          type: string
+          format: date-time
+        actor:
+          allOf:
+          - $ref: '#/components/schemas/Actor'
+          nullable: true
+        kind:
+          $ref: '#/components/schemas/ProductChangeKindEnum'
+        old_price:
+          type: integer
+          nullable: true
+        new_price:
+          type: integer
+          nullable: true
+      required:
+      - actor
+      - at
+      - kind
+      - new_price
+      - old_price
     LoginRequest:
       type: object
       properties:
@@ -602,6 +2500,454 @@ components:
       - code
       - code_verifier
       - redirect_uri
+    PaginatedBannerList:
+      type: object
+      required:
+      - count
+      - page
+      - page_size
+      - page_count
+      - results
+      properties:
+        count:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+        page_count:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Banner'
+    PaginatedCategoryList:
+      type: object
+      required:
+      - count
+      - page
+      - page_size
+      - page_count
+      - results
+      properties:
+        count:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+        page_count:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Category'
+    PaginatedProductList:
+      type: object
+      required:
+      - count
+      - page
+      - page_size
+      - page_count
+      - results
+      properties:
+        count:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+        page_count:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Product'
+    PatchedBannerFormRequest:
+      type: object
+      properties:
+        image:
+          type: string
+          format: binary
+        title.uz:
+          type: string
+          minLength: 1
+          maxLength: 80
+        title.ru:
+          type: string
+          maxLength: 80
+        title.en:
+          type: string
+          maxLength: 80
+        link.kind:
+          $ref: '#/components/schemas/BannerLinkKindEnum'
+        link.product_id:
+          type: integer
+          nullable: true
+        link.category:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 40
+        is_active:
+          type: boolean
+        starts_at:
+          type: string
+          format: date-time
+          nullable: true
+        ends_at:
+          type: string
+          format: date-time
+          nullable: true
+    PatchedBannerWriteRequest:
+      type: object
+      description: |-
+        Fields of ``POST banners/`` (multipart) and ``PATCH banners/{id}/`` (multipart or JSON; ``partial``).
+
+        Accepted form encoding (multipart): nested keys arrive as dotted form names — ``title.uz``, ``title.ru``,
+        ``title.en``, ``link.kind``, ``link.product_id``, ``link.category`` — next to the flat ``is_active``,
+        ``starts_at``, ``ends_at`` and the file part ``image``. The view un-dots them into this nested shape
+        (``views.form_to_nested``); an empty string for ``link.product_id``, ``link.category``, ``starts_at`` or
+        ``ends_at`` means ``null``. Booleans are ``true``/``false``/``1``/``0``. Error paths use the same dotted
+        names, so multipart and JSON callers map errors identically.
+
+        The ``image`` part is read from the request by the view (it is not a field here); the link targets and
+        the date order are validated against the merged state (``instance`` on PATCH).
+      properties:
+        title:
+          $ref: '#/components/schemas/I18nText80Min1Request'
+        link:
+          $ref: '#/components/schemas/BannerLinkRequest'
+        is_active:
+          type: boolean
+          default: true
+        starts_at:
+          type: string
+          format: date-time
+          nullable: true
+        ends_at:
+          type: string
+          format: date-time
+          nullable: true
+    PatchedCategoryWriteRequest:
+      type: object
+      description: '``POST categories/`` and ``PATCH categories/{slug}/`` (``partial``;
+        ``slug`` is then ``read_only``).'
+      properties:
+        slug:
+          type: string
+          minLength: 1
+          pattern: ^[a-z0-9-]{2,40}$
+        name:
+          $ref: '#/components/schemas/I18nText60Min2Request'
+        is_active:
+          type: boolean
+          default: true
+    PatchedProductWriteRequest:
+      type: object
+      description: |-
+        Body of ``POST products/`` (every rule of the §2.3 table) and ``PATCH products/{id}/`` (``partial``).
+
+        ``context["billz"]`` may carry a ``BillzPort`` (tests); otherwise the configured adapter is used.
+      properties:
+        billz_id:
+          type: string
+          minLength: 1
+          pattern: ^\d{6,14}$
+        texts:
+          $ref: '#/components/schemas/ProductTextsRequest'
+        price:
+          type: integer
+          maximum: 100000000
+          minimum: 1000
+        category:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 40
+        promo:
+          type: boolean
+          default: false
+        status:
+          allOf:
+          - $ref: '#/components/schemas/ProductStatusEnum'
+          default: hidden
+    Product:
+      type: object
+      description: Contract §2.3 ``Product``; instances come from ``selectors.product_queryset()``.
+      properties:
+        id:
+          type: integer
+        billz_id:
+          type: string
+        billz_name:
+          type: string
+        volume:
+          type: string
+        category:
+          type: string
+          nullable: true
+          readOnly: true
+        price:
+          type: integer
+        billz_price:
+          type: integer
+          nullable: true
+        stock:
+          type: integer
+          readOnly: true
+        promo:
+          type: boolean
+        status:
+          $ref: '#/components/schemas/ProductStatusEnum'
+        is_new_from_billz:
+          type: boolean
+        texts:
+          allOf:
+          - $ref: '#/components/schemas/ProductTexts'
+          readOnly: true
+        main_image_url:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
+        images:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductImage'
+          readOnly: true
+        last_change:
+          allOf:
+          - $ref: '#/components/schemas/LastChange'
+          nullable: true
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+      - billz_id
+      - billz_name
+      - billz_price
+      - category
+      - created_at
+      - id
+      - images
+      - is_new_from_billz
+      - last_change
+      - main_image_url
+      - price
+      - promo
+      - status
+      - stock
+      - texts
+      - updated_at
+      - volume
+    ProductChangeKindEnum:
+      enum:
+      - created
+      - price_changed
+      - activated
+      - hidden
+      - promo_added
+      - promo_removed
+      - updated
+      type: string
+      description: |-
+        * `created` - created
+        * `price_changed` - price_changed
+        * `activated` - activated
+        * `hidden` - hidden
+        * `promo_added` - promo_added
+        * `promo_removed` - promo_removed
+        * `updated` - updated
+    ProductImage:
+      type: object
+      description: Contract §2.3 ``ProductImage = {id, url, position}``.
+      properties:
+        id:
+          type: integer
+        url:
+          type: string
+          readOnly: true
+        position:
+          type: integer
+      required:
+      - id
+      - position
+      - url
+    ProductImageUploadRequest:
+      type: object
+      properties:
+        file:
+          type: string
+          format: binary
+      required:
+      - file
+    ProductStats:
+      type: object
+      description: Contract §2.3 ``GET products/stats/``.
+      properties:
+        total:
+          type: integer
+        active:
+          type: integer
+        hidden:
+          type: integer
+        new_from_billz:
+          type: integer
+        out_of_stock:
+          type: integer
+        billz:
+          $ref: '#/components/schemas/BillzStatus'
+      required:
+      - active
+      - billz
+      - hidden
+      - new_from_billz
+      - out_of_stock
+      - total
+    ProductStatusEnum:
+      enum:
+      - active
+      - hidden
+      type: string
+      description: |-
+        * `active` - active
+        * `hidden` - hidden
+    ProductText:
+      type: object
+      description: 'One language of ``texts``: ``{name, description, ingredients,
+        usage}``.'
+      properties:
+        name:
+          type: string
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 2000
+        ingredients:
+          type: string
+          maxLength: 1000
+        usage:
+          type: string
+          maxLength: 1000
+    ProductTextRequest:
+      type: object
+      description: 'One language of ``texts``: ``{name, description, ingredients,
+        usage}``.'
+      properties:
+        name:
+          type: string
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 2000
+        ingredients:
+          type: string
+          maxLength: 1000
+        usage:
+          type: string
+          maxLength: 1000
+    ProductTexts:
+      type: object
+      description: 'Language-first product texts ``{uz: {...}, ru: {...}, en: {...}}``
+        (AGENTS.md: not ``i18n_text``).'
+      properties:
+        uz:
+          $ref: '#/components/schemas/ProductUzText'
+        ru:
+          $ref: '#/components/schemas/ProductText'
+        en:
+          $ref: '#/components/schemas/ProductText'
+      required:
+      - uz
+    ProductTextsRequest:
+      type: object
+      description: 'Language-first product texts ``{uz: {...}, ru: {...}, en: {...}}``
+        (AGENTS.md: not ``i18n_text``).'
+      properties:
+        uz:
+          $ref: '#/components/schemas/ProductUzTextRequest'
+        ru:
+          $ref: '#/components/schemas/ProductTextRequest'
+        en:
+          $ref: '#/components/schemas/ProductTextRequest'
+      required:
+      - uz
+    ProductUzText:
+      type: object
+      description: 'The Uzbek texts: ``name`` is mandatory on create and, whenever
+        sent, trimmed 2..120 characters.'
+      properties:
+        name:
+          type: string
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 2000
+        ingredients:
+          type: string
+          maxLength: 1000
+        usage:
+          type: string
+          maxLength: 1000
+      required:
+      - name
+    ProductUzTextRequest:
+      type: object
+      description: 'The Uzbek texts: ``name`` is mandatory on create and, whenever
+        sent, trimmed 2..120 characters.'
+      properties:
+        name:
+          type: string
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 2000
+        ingredients:
+          type: string
+          maxLength: 1000
+        usage:
+          type: string
+          maxLength: 1000
+      required:
+      - name
+    ProductWriteRequest:
+      type: object
+      description: |-
+        Body of ``POST products/`` (every rule of the §2.3 table) and ``PATCH products/{id}/`` (``partial``).
+
+        ``context["billz"]`` may carry a ``BillzPort`` (tests); otherwise the configured adapter is used.
+      properties:
+        billz_id:
+          type: string
+          minLength: 1
+          pattern: ^\d{6,14}$
+        texts:
+          $ref: '#/components/schemas/ProductTextsRequest'
+        price:
+          type: integer
+          maximum: 100000000
+          minimum: 1000
+        category:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 40
+        promo:
+          type: boolean
+          default: false
+        status:
+          allOf:
+          - $ref: '#/components/schemas/ProductStatusEnum'
+          default: hidden
+      required:
+      - billz_id
+      - price
+      - texts
     RefreshRequest:
       type: object
       properties:
@@ -610,6 +2956,18 @@ components:
           minLength: 1
       required:
       - refresh
+    SlugOrderRequest:
+      type: object
+      description: Body of ``PUT categories/order/``.
+      properties:
+        slugs:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 40
+      required:
+      - slugs
     SocialProviderEnum:
       enum:
       - google
