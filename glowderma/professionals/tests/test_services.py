@@ -1,13 +1,14 @@
 """professionals.services: validated writes with ``<model>.created|updated|deleted`` audit entries."""
 
 from datetime import date, datetime, time
+from io import BytesIO
 
 import pytest
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from PIL import Image
 
 from glowderma.accounts.models import StaffUser
-from glowderma.catalog.tests.factories import image_bytes
 from glowderma.core import enums
 from glowderma.core.models import AuditEntry
 from glowderma.core.timeutils import TASHKENT
@@ -28,6 +29,12 @@ from glowderma.professionals.tests.factories import (
 )
 
 pytestmark = pytest.mark.django_db
+
+
+def image_bytes(fmt: str = "PNG") -> bytes:
+    output = BytesIO()
+    Image.new("RGB", (24, 16), "#d6b2c4").save(output, format=fmt)
+    return output.getvalue()
 
 
 def actions() -> list[tuple[str, str, str]]:

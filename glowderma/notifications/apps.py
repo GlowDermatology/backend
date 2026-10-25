@@ -64,3 +64,6 @@ class NotificationsConfig(AppConfig):
         post_migrate.connect(
             ensure_status_templates, sender=self, dispatch_uid="notifications.ensure_status_templates"
         )
+        # The outbox handlers (push.order_status, push.appointment, campaign.send_batch) and the dead-letter
+        # hook register at import time; every process that dispatches the outbox needs them.
+        from glowderma.notifications import tasks  # noqa: F401

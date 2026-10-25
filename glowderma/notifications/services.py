@@ -1,0 +1,629 @@
+"""Writes of `notifications` (design 03 §3): campaigns and their batched send, status-push deliveries,
+templates, segments and manual members.
+
+Delivery is at-least-once: every handler body here is idempotent at the provider boundary through the
+``InboxNotification.dedupe_key`` claim protocol (§3.6) and the ``CampaignRecipient`` states (§3.5).
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass, field
+from typing import Any
+
+from django.conf import settings
+from django.core.files.base import ContentFile
+from django.db import transaction
+from rest_framework.exceptions import NotFound, ValidationError
+
+from glowderma.accounts.models import Customer, Device
+from glowderma.appointments import selectors as appointment_selectors
+from glowderma.catalog.models import Product
+from glowderma.core import audit, enums, labels, outbox, timeutils
+from glowderma.core.api.exceptions import Conflict, field_error
+from glowderma.core.images import ImageError, process_image
+from glowderma.core.media import absolute_media_url, media_name
+from glowderma.integrations.fcm.ports import FcmUnavailable, PushMessage, PushResult
+from glowderma.integrations.fcm.registry import get_fcm_port
+from glowderma.notifications import selectors, texts, topics
+from glowderma.notifications.media import CAMPAIGN_IMAGE_KIND
+from glowderma.notifications.models import (
+    Campaign,
+    CampaignRecipient,
+    CustomerSegment,
+    InboxNotification,
+    SegmentMember,
+    StatusTemplate,
+)
+
+logger = logging.getLogger(__name__)
+
+MESSAGES = {
+    "segment_in_use": "Rejalashtirilgan xabar bu guruhga yuboriladi.",
+    "rule_member": "Mijoz guruhga qoida orqali kiradi.",
+    "unknown_placeholder": "Faqat {raqam} o‘rinbosari ishlatiladi.",
+}
+IMAGE_MESSAGES = {"file_too_large": None, "unsupported_image": None}
+INTERRUPTED = "interrupted"  # a claim left in ``sending`` by a crash: never resent (design 03 §3.6)
+NO_DEVICE = "no_device"
+
+
+def batch_size() -> int:
+    return int(settings.CAMPAIGN_BATCH_SIZE)
+
+
+# --- campaigns ----------------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class CampaignInput:
+    kind: str
+    title: str
+    body: str
+    link_kind: str = enums.LinkKind.NONE
+    link_product: Product | None = None
+    audience_type: str = enums.AudienceType.ALL
+    audience_segment: CustomerSegment | None = None
+    audience_customer: Customer | None = None
+    scheduled_at: Any = None
+    extra: dict[str, Any] = field(default_factory=dict)
+
+
+def _store_image(campaign: Campaign, upload: Any) -> None:
+    try:
+        processed = process_image(upload)
+    except ImageError as exc:
+        raise ValidationError({"image": [field_error(exc.code)]}) from exc
+    name = media_name(CAMPAIGN_IMAGE_KIND, campaign.pk, processed.content, processed.extension)
+    campaign.image.save(name.rsplit("/", 1)[-1], ContentFile(processed.content), save=False)
+    campaign.save(update_fields=["image"])
+
+
+def _campaign_audit_image(campaign: Campaign) -> dict[str, Any]:
+    return {
+        "kind": campaign.kind,
+        "title": campaign.title,
+        "audience_type": campaign.audience_type,
+        "audience_segment_id": campaign.audience_segment_id,
+        "audience_phone": campaign.audience_phone or None,
+        "link_kind": campaign.link_kind,
+        "link_product_id": campaign.link_product_id,
+        "scheduled_at": timeutils.isoformat(campaign.scheduled_at) if campaign.scheduled_at else None,
+        "state": campaign.state,
+        "recipient_count": campaign.recipient_count,
+    }
+
+
+def _finish_empty(campaign: Campaign, now: Any) -> None:
+    """A campaign without a single pushable recipient goes straight to ``sent`` with zero counters."""
+    campaign.state = Campaign.State.SENT
+    campaign.started_at = campaign.started_at or now
+    campaign.sent_at = now
+    campaign.sent = campaign.failed = 0
+
+
+def materialise(campaign: Campaign) -> int:
+    """Insert one ``CampaignRecipient`` per pushable device of the audience (idempotent) and recompute
+    ``recipient_count``; returns the count."""
+    recipients = selectors.audience_recipients(campaign)
+    CampaignRecipient.objects.bulk_create(
+        [
+            CampaignRecipient(campaign=campaign, customer_id=customer_id, device_id=device_id)
+            for customer_id, device_id in recipients
+        ],
+        ignore_conflicts=True,
+    )
+    campaign.recipient_count = CampaignRecipient.objects.filter(campaign=campaign).count()
+    return campaign.recipient_count
+
+
+def _queue(campaign: Campaign) -> None:
+    """``queued`` + batch 0 (or ``sent`` when nobody can be reached). The caller saves the row."""
+    now = timeutils.now()
+    if materialise(campaign) == 0:
+        _finish_empty(campaign, now)
+        return
+    campaign.state = Campaign.State.QUEUED
+    outbox.enqueue(
+        topics.CAMPAIGN_SEND_BATCH,
+        {"campaign_id": campaign.pk, "batch_no": 0},
+        dedupe_key=topics.campaign_send_batch_key(campaign.pk, 0),
+    )
+
+
+@transaction.atomic
+def create_campaign(data: CampaignInput, image: Any = None, *, actor: Any, request: Any = None) -> Campaign:
+    """``POST notifications/``: without ``scheduled_at`` the send starts now (recipients materialised, batch 0
+    enqueued); with it the campaign waits for ``start_due_campaigns``. Audit ``notification.created``."""
+    scheduled = data.scheduled_at is not None
+    campaign = Campaign(
+        kind=data.kind,
+        title=data.title,
+        body=data.body,
+        link_kind=data.link_kind,
+        link_product=data.link_product,
+        link_product_label=data.link_product.display_name if data.link_product is not None else "",
+        audience_type=data.audience_type,
+        audience_segment=data.audience_segment,
+        audience_segment_name=data.audience_segment.name if data.audience_segment is not None else "",
+        audience_customer=data.audience_customer,
+        audience_phone=data.audience_customer.phone if data.audience_customer is not None else "",
+        state=Campaign.State.SCHEDULED if scheduled else Campaign.State.QUEUED,
+        scheduled_at=data.scheduled_at,
+        author=actor,
+    )
+    campaign.save()
+    if image is not None:
+        _store_image(campaign, image)
+    if scheduled:
+        campaign.recipient_count = len(selectors.audience_recipients(campaign))
+    else:
+        _queue(campaign)
+    campaign.save()
+    audit.record(
+        action="notification.created",
+        entity_type="campaign",
+        entity_id=str(campaign.pk),
+        actor=actor,
+        request=request,
+        after=_campaign_audit_image(campaign),
+    )
+    return campaign
+
+
+def start_due_campaigns(now: Any = None) -> list[int]:
+    """Beat ``notifications.start_due_campaigns`` (1 min): queue every ``scheduled`` campaign that is due,
+    one transaction each (``select_for_update(skip_locked=True)`` keeps two beats apart)."""
+    instant = timeutils.now() if now is None else now
+    started: list[int] = []
+    due = list(
+        Campaign.objects.filter(state=Campaign.State.SCHEDULED, scheduled_at__lte=instant)
+        .order_by("scheduled_at", "id")
+        .values_list("pk", flat=True)
+    )
+    for pk in due:
+        with transaction.atomic():
+            campaign = (
+                Campaign.objects.select_for_update(skip_locked=True)
+                .filter(pk=pk, state=Campaign.State.SCHEDULED, scheduled_at__lte=instant)
+                .first()
+            )
+            if campaign is None:
+                continue
+            _queue(campaign)
+            campaign.save()
+            started.append(pk)
+    return started
+
+
+@dataclass(slots=True)
+class _Claim:
+    recipient: CampaignRecipient
+    inbox: InboxNotification
+    token: str
+
+
+def _inbox_defaults(campaign: Campaign, push_state: str) -> dict[str, Any]:
+    link: dict[str, Any] = {"kind": "none"}
+    if campaign.link_kind == enums.LinkKind.PRODUCT and campaign.link_product_id is not None:
+        link = {"kind": "product", "product_id": campaign.link_product_id}
+    return {
+        "kind": campaign.kind,
+        "title": campaign.title,
+        "body": campaign.body,
+        "link": link,
+        "image_url": absolute_media_url(campaign.image.name or "") if campaign.image else "",
+        "source_type": InboxNotification.SourceType.CAMPAIGN,
+        "source_id": campaign.pk,
+        "language": enums.ContentLanguage.UZ,
+        "push_state": push_state,
+    }
+
+
+def _usable_token(device: Device | None) -> str:
+    if device is None or not device.is_active or not device.push_enabled or not device.fcm_token:
+        return ""
+    return device.fcm_token
+
+
+def _claim_batch(campaign: Campaign, recipients: Sequence[CampaignRecipient]) -> list[_Claim]:
+    """Create the inbox rows and claim the deliveries (``push_state = sending``) of the pending recipients."""
+    claims: list[_Claim] = []
+    for recipient in recipients:
+        if recipient.state != CampaignRecipient.State.PENDING:
+            continue  # a redelivered batch: already settled
+        token = _usable_token(recipient.device)
+        inbox, _created = InboxNotification.objects.get_or_create(
+            dedupe_key=topics.campaign_inbox_key(campaign.pk, recipient.customer_id),
+            defaults={
+                "customer_id": recipient.customer_id,
+                **_inbox_defaults(
+                    campaign,
+                    InboxNotification.PushState.QUEUED if token else InboxNotification.PushState.NO_DEVICE,
+                ),
+            },
+        )
+        recipient.inbox = inbox
+        if not token:
+            recipient.state = CampaignRecipient.State.SKIPPED
+            recipient.error = NO_DEVICE
+        elif inbox.push_state == InboxNotification.PushState.QUEUED:
+            inbox.push_state = InboxNotification.PushState.SENDING
+            inbox.save(update_fields=["push_state"])
+            claims.append(_Claim(recipient, inbox, token))
+        elif inbox.push_state == InboxNotification.PushState.SENT:
+            recipient.state = CampaignRecipient.State.SENT
+            recipient.sent_at = inbox.pushed_at or timeutils.now()
+        else:  # sending (a crash after the claim), failed, no_device: never resent
+            recipient.state = CampaignRecipient.State.FAILED
+            recipient.error = (
+                INTERRUPTED if inbox.push_state == InboxNotification.PushState.SENDING else inbox.push_error
+            ) or inbox.push_state
+        recipient.save(update_fields=["inbox", "state", "error", "sent_at"])
+    return claims
+
+
+def _push_messages(campaign: Campaign, claims: Iterable[_Claim]) -> list[PushMessage]:
+    data = {"type": "campaign", "campaign_id": str(campaign.pk)}
+    return [PushMessage(claim.token, campaign.title, campaign.body, data) for claim in claims]
+
+
+def _release(claims: Iterable[_Claim]) -> None:
+    """The provider was unreachable before anything was accepted: give the claims back for the retry."""
+    with transaction.atomic():
+        for claim in claims:
+            InboxNotification.objects.filter(
+                pk=claim.inbox.pk, push_state=InboxNotification.PushState.SENDING
+            ).update(push_state=InboxNotification.PushState.QUEUED)
+
+
+def _settle(claim: _Claim, result: PushResult, now: Any) -> None:
+    recipient, inbox = claim.recipient, claim.inbox
+    if result.ok:
+        recipient.state = CampaignRecipient.State.SENT
+        recipient.sent_at = now
+        recipient.provider_message_id = result.message_id
+        inbox.push_state = InboxNotification.PushState.SENT
+        inbox.pushed_at = now
+    else:
+        recipient.state = CampaignRecipient.State.FAILED
+        recipient.error = result.error
+        recipient.provider_state = {"error": result.error}
+        inbox.push_state = InboxNotification.PushState.FAILED
+        inbox.push_error = result.error
+    recipient.save(update_fields=["state", "sent_at", "error", "provider_message_id", "provider_state"])
+    inbox.save(update_fields=["push_state", "pushed_at", "push_error"])
+
+
+def send_batch(campaign_id: int, batch_no: int) -> None:
+    """Handler body of ``campaign.send_batch`` (design 03 §3.4): claim → provider → settle → cursor → next.
+
+    A redelivered batch (``batch_no < batches_dispatched``) is a no-op; an out-of-order one raises so the
+    dispatcher retries it after the previous batch committed.
+    """
+    with transaction.atomic():
+        campaign = Campaign.objects.select_for_update().get(pk=campaign_id)
+        if campaign.state == Campaign.State.SENT or batch_no < campaign.batches_dispatched:
+            return
+        if campaign.state == Campaign.State.SCHEDULED or batch_no > campaign.batches_dispatched:
+            raise RuntimeError(f"campaign {campaign_id} is not ready for batch {batch_no}")
+        if campaign.state == Campaign.State.QUEUED:
+            campaign.state = Campaign.State.SENDING
+            campaign.started_at = timeutils.now()
+            campaign.save(update_fields=["state", "started_at"])
+        recipients = list(
+            CampaignRecipient.objects.filter(campaign=campaign, id__gt=campaign.send_cursor)
+            .select_related("device")
+            .order_by("id")[: batch_size()]
+        )
+        claims = _claim_batch(campaign, recipients)
+    try:
+        results = get_fcm_port().send(_push_messages(campaign, claims)) if claims else []
+    except FcmUnavailable:
+        _release(claims)
+        raise
+    with transaction.atomic():
+        campaign = Campaign.objects.select_for_update().get(pk=campaign_id)
+        now = timeutils.now()
+        for claim, result in zip(claims, results, strict=True):
+            _settle(claim, result, now)
+        if recipients:
+            campaign.send_cursor = recipients[-1].pk
+        campaign.batches_dispatched += 1
+        remaining = CampaignRecipient.objects.filter(campaign=campaign, id__gt=campaign.send_cursor).exists()
+        if remaining:
+            outbox.enqueue(
+                topics.CAMPAIGN_SEND_BATCH,
+                {"campaign_id": campaign.pk, "batch_no": batch_no + 1},
+                dedupe_key=topics.campaign_send_batch_key(campaign.pk, batch_no + 1),
+            )
+        else:
+            states = CampaignRecipient.objects.filter(campaign=campaign).values_list("state", flat=True)
+            tally = {"sent": 0, "failed": 0}
+            for state in states:
+                tally["sent" if state == CampaignRecipient.State.SENT else "failed"] += 1
+            campaign.state = Campaign.State.SENT
+            campaign.sent_at = now
+            campaign.sent, campaign.failed = tally["sent"], tally["failed"]
+        campaign.save()
+
+
+# --- status pushes (handler bodies of push.order_status / push.appointment) --------------------------------
+
+
+def _deliver(
+    customer: Customer,
+    *,
+    dedupe_key: str,
+    kind: str,
+    title: str,
+    body: str,
+    link: dict[str, Any],
+    source_type: str,
+    source_id: int,
+    language: str,
+    template_status: str = "",
+    data: dict[str, str],
+) -> InboxNotification:
+    """Claim protocol (design 03 §3.6): ``get_or_create`` the inbox row, claim it, call FCM outside the
+    transaction, record the outcome. A redelivery finds the row settled and does nothing."""
+    with transaction.atomic():
+        device = selectors.customer_push_device(customer.pk)
+        inbox, _created = InboxNotification.objects.get_or_create(
+            dedupe_key=dedupe_key,
+            defaults={
+                "customer": customer,
+                "kind": kind,
+                "title": title,
+                "body": body,
+                "link": link,
+                "source_type": source_type,
+                "source_id": source_id,
+                "template_status": template_status,
+                "language": language,
+                "push_state": (
+                    InboxNotification.PushState.QUEUED if device else InboxNotification.PushState.NO_DEVICE
+                ),
+            },
+        )
+        if inbox.push_state != InboxNotification.PushState.QUEUED:
+            return inbox
+        if device is None:
+            inbox.push_state = InboxNotification.PushState.NO_DEVICE
+            inbox.save(update_fields=["push_state"])
+            return inbox
+        inbox.push_state = InboxNotification.PushState.SENDING
+        inbox.save(update_fields=["push_state"])
+        token = device.fcm_token
+    try:
+        [result] = get_fcm_port().send([PushMessage(token, inbox.title, inbox.body, data)])
+    except FcmUnavailable:
+        InboxNotification.objects.filter(pk=inbox.pk, push_state=InboxNotification.PushState.SENDING).update(
+            push_state=InboxNotification.PushState.QUEUED
+        )
+        raise
+    now = timeutils.now()
+    if result.ok:
+        inbox.push_state, inbox.pushed_at = InboxNotification.PushState.SENT, now
+    else:
+        inbox.push_state, inbox.push_error = InboxNotification.PushState.FAILED, result.error
+    inbox.save(update_fields=["push_state", "pushed_at", "push_error"])
+    return inbox
+
+
+def render_template(template: StatusTemplate, language: str, order_id: int) -> tuple[str, str]:
+    """``(body, language used)``: the customer's language, else Uzbek; ``{raqam}`` → the order number."""
+    text = getattr(template, f"text_{language}", "") if language in enums.ContentLanguage.values else ""
+    used = language if text else enums.ContentLanguage.UZ
+    return (text or template.text_uz).replace("{raqam}", str(order_id)), used
+
+
+def deliver_order_status(payload: dict[str, Any]) -> InboxNotification | None:
+    """``push.order_status {order_id, status, event_id, customer_id}``; one push per order per status."""
+    status = str(payload["status"])
+    if status not in enums.TemplateStatus.values:
+        raise ValueError(f"No push template for order status {status!r}")
+    customer = Customer.objects.filter(pk=payload["customer_id"]).first()
+    if customer is None:
+        logger.warning("push.order_status for unknown customer %s", payload["customer_id"])
+        return None
+    order_id = int(payload["order_id"])
+    template = StatusTemplate.objects.get(status=status)
+    body, language = render_template(template, customer.language, order_id)
+    return _deliver(
+        customer,
+        dedupe_key=topics.order_status_inbox_key(order_id, status),
+        kind=InboxNotification.Kind.ORDER_STATUS,
+        title=labels.ORDER_STATUS[status],
+        body=body,
+        link={"kind": "order", "order_id": order_id},
+        source_type=InboxNotification.SourceType.ORDER,
+        source_id=order_id,
+        language=language,
+        template_status=status,
+        data={"type": "order_status", "order_id": str(order_id), "status": status},
+    )
+
+
+def deliver_appointment(payload: dict[str, Any]) -> InboxNotification | None:
+    """``push.appointment {appointment_id, action, event_id, customer_id, reschedule_no}``."""
+    action = str(payload["action"])
+    if action not in texts.APPOINTMENT_TEXTS:
+        raise ValueError(f"No push text for appointment action {action!r}")
+    appointment = appointment_selectors.get_appointment(int(payload["appointment_id"]))
+    if appointment is None:
+        logger.warning("push.appointment for unknown appointment %s", payload["appointment_id"])
+        return None
+    customer = appointment.customer
+    reschedule_no = payload.get("reschedule_no")
+    title, body, language = texts.appointment_text(action, customer.language, appointment.start)
+    return _deliver(
+        customer,
+        dedupe_key=topics.appointment_inbox_key(
+            appointment.pk, action, int(reschedule_no) if reschedule_no is not None else None
+        ),
+        kind=InboxNotification.Kind.APPOINTMENT,
+        title=title,
+        body=body,
+        link={"kind": "appointment", "appointment_id": appointment.pk},
+        source_type=InboxNotification.SourceType.APPOINTMENT,
+        source_id=appointment.pk,
+        language=language,
+        data={"type": "appointment", "appointment_id": str(appointment.pk), "action": action},
+    )
+
+
+# --- templates ----------------------------------------------------------------------------------------------
+
+
+def template_texts(template: StatusTemplate) -> dict[str, str]:
+    return {"uz": template.text_uz, "ru": template.text_ru, "en": template.text_en}
+
+
+@transaction.atomic
+def update_template(
+    status: str, texts_: dict[str, str], *, actor: Any, request: Any = None
+) -> StatusTemplate:
+    """``PUT notification-templates/{status}/`` (validated by the serializer); audit the diff."""
+    template = StatusTemplate.objects.select_for_update().get(status=status)
+    before = template_texts(template)
+    template.text_uz, template.text_ru, template.text_en = texts_["uz"], texts_["ru"], texts_["en"]
+    template.updated_at = timeutils.now()
+    template.updated_by = actor
+    template.save()
+    after = template_texts(template)
+    audit.record(
+        action="notification_template.updated",
+        entity_type="notification_template",
+        entity_id=status,
+        actor=actor,
+        request=request,
+        before={key: value for key, value in before.items() if after[key] != value},
+        after={key: value for key, value in after.items() if before[key] != value},
+    )
+    return template
+
+
+# --- segments -----------------------------------------------------------------------------------------------
+
+
+def _segment_image(segment: CustomerSegment) -> dict[str, Any]:
+    return {
+        "name": segment.name,
+        "min_online_orders": segment.min_online_orders,
+        "min_lifetime_amount": segment.min_lifetime_amount,
+    }
+
+
+@transaction.atomic
+def create_segment(
+    *,
+    name: str,
+    min_online_orders: int | None,
+    min_lifetime_amount: int | None,
+    actor: Any,
+    request: Any = None,
+) -> CustomerSegment:
+    segment = CustomerSegment.objects.create(
+        name=name,
+        min_online_orders=min_online_orders,
+        min_lifetime_amount=min_lifetime_amount,
+        created_by=actor,
+    )
+    audit.record(
+        action="segment.created",
+        entity_type="segment",
+        entity_id=str(segment.pk),
+        actor=actor,
+        request=request,
+        after=_segment_image(segment),
+    )
+    return segment
+
+
+@transaction.atomic
+def update_segment(
+    segment: CustomerSegment, changes: dict[str, Any], *, actor: Any, request: Any = None
+) -> CustomerSegment:
+    segment = CustomerSegment.objects.select_for_update().get(pk=segment.pk)
+    before = _segment_image(segment)
+    for key, value in changes.items():
+        setattr(segment, key, value)
+    segment.save()
+    after = _segment_image(segment)
+    if after != before:
+        audit.record(
+            action="segment.updated",
+            entity_type="segment",
+            entity_id=str(segment.pk),
+            actor=actor,
+            request=request,
+            before={key: value for key, value in before.items() if after[key] != value},
+            after={key: value for key, value in after.items() if before[key] != value},
+        )
+    return segment
+
+
+@transaction.atomic
+def delete_segment(segment: CustomerSegment, *, actor: Any, request: Any = None) -> None:
+    """409 ``conflict`` while a scheduled campaign targets the segment (contract §2.8)."""
+    segment = CustomerSegment.objects.select_for_update().get(pk=segment.pk)
+    if Campaign.objects.filter(audience_segment=segment, state=Campaign.State.SCHEDULED).exists():
+        raise Conflict(MESSAGES["segment_in_use"])
+    before = _segment_image(segment)
+    pk = segment.pk
+    segment.delete()
+    audit.record(
+        action="segment.deleted",
+        entity_type="segment",
+        entity_id=str(pk),
+        actor=actor,
+        request=request,
+        before=before,
+    )
+
+
+@transaction.atomic
+def add_members(
+    segment: CustomerSegment, customer_ids: Sequence[int], *, actor: Any, request: Any = None
+) -> CustomerSegment:
+    """``POST segments/{id}/members/``: ``bulk_create(ignore_conflicts=True)``; a known member is a no-op."""
+    existing = set(
+        SegmentMember.objects.filter(segment=segment, customer_id__in=customer_ids).values_list(
+            "customer_id", flat=True
+        )
+    )
+    added = sorted({int(pk) for pk in customer_ids} - existing)
+    SegmentMember.objects.bulk_create(
+        [SegmentMember(segment=segment, customer_id=pk, added_by=actor) for pk in added],
+        ignore_conflicts=True,
+    )
+    audit.record(
+        action="segment.members_added",
+        entity_type="segment",
+        entity_id=str(segment.pk),
+        actor=actor,
+        request=request,
+        after={"customer_ids": [int(pk) for pk in customer_ids], "added": added},
+    )
+    return segment
+
+
+@transaction.atomic
+def remove_member(segment: CustomerSegment, customer_id: int, *, actor: Any, request: Any = None) -> None:
+    """``DELETE segments/{id}/members/{customer_id}/``: manual membership only; a rule-only member → 409."""
+    membership = SegmentMember.objects.filter(segment=segment, customer_id=customer_id).first()
+    if membership is None:
+        if selectors.matches_rules(segment, customer_id):
+            raise Conflict(MESSAGES["rule_member"])
+        raise NotFound
+    membership.delete()
+    audit.record(
+        action="segment.member_removed",
+        entity_type="segment",
+        entity_id=str(segment.pk),
+        actor=actor,
+        request=request,
+        after={"customer_id": customer_id},
+    )

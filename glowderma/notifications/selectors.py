@@ -1,0 +1,256 @@
+"""Read-side helpers of `notifications` (design 03 §3.2 membership, §6.5 meta and segment sizes).
+
+The segment membership predicate is implemented once here (:func:`segment_members`) and reused by the
+campaign audience, the meta sizes, the members list and — through :func:`segments_for_customer` and
+``customers/?segment=`` — the customers slice.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+from typing import Any, TypedDict
+
+from django.db.models import (
+    BigIntegerField,
+    Count,
+    Exists,
+    Expression,
+    IntegerField,
+    OuterRef,
+    Q,
+    QuerySet,
+    Subquery,
+    Value,
+)
+from django.db.models.functions import Coalesce, Collate
+
+from glowderma.accounts.models import Customer, Device
+from glowderma.catalog.models import Product
+from glowderma.catalog.selectors import DISPLAY_NAME
+from glowderma.commerce.models import Order
+from glowderma.core import enums
+from glowderma.notifications.models import Campaign, CustomerSegment, SegmentMember, StatusTemplate
+
+# Order statuses that mean "paid, not reversed" while the payments models are not on this base (B5 may refine
+# the count with a paid Payment; the status CHECK already implies ``paid_at IS NOT NULL`` for these).
+PAID_ORDER_STATUSES: tuple[str, ...] = (
+    enums.OrderStatus.PROCESSING,
+    enums.OrderStatus.HANDED_TO_COURIER,
+    enums.OrderStatus.DELIVERED,
+)
+PUSHABLE_DEVICE = Q(is_active=True, push_enabled=True) & ~Q(fcm_token="")
+
+
+# --- rule hooks (the customers / loyalty slices refine these) ----------------------------------------------
+
+
+def online_orders_expression() -> Expression:
+    """``online_orders_count`` of the customer row being annotated: paid, non-reversed online orders."""
+    paid = (
+        Order.objects.filter(customer_id=OuterRef("pk"), status__in=PAID_ORDER_STATUSES)
+        .order_by()
+        .values("customer_id")
+        .annotate(count=Count("id"))
+        .values("count")
+    )
+    return Coalesce(Subquery(paid, output_field=IntegerField()), Value(0), output_field=IntegerField())
+
+
+def lifetime_total_expression() -> Expression:
+    """``lifetime_total`` (so'm) of the customer row being annotated — ``totals.lifetime`` of the card.
+
+    The loyalty models (purchases) are not on this base yet: every customer reads ``0`` until B4 replaces
+    this hook with the purchases subquery. Everything above it (segment rule, members list, sizes) is wired.
+    """
+    return Value(0, output_field=BigIntegerField())
+
+
+def lifetime_totals(customer_ids: Iterable[int]) -> dict[int, int]:
+    """``{customer_id: lifetime_total}`` through the same hook (0 for every customer until B4)."""
+    rows = (
+        Customer.objects.filter(pk__in=list(customer_ids))
+        .annotate(lifetime_total=lifetime_total_expression())
+        .values_list("pk", "lifetime_total")
+    )
+    return {int(pk): int(total or 0) for pk, total in rows}
+
+
+def annotate_customer_stats(qs: QuerySet[Customer]) -> QuerySet[Customer]:
+    return qs.annotate(
+        online_orders_count=online_orders_expression(), lifetime_total=lifetime_total_expression()
+    )
+
+
+# --- membership (contract §2.8) -----------------------------------------------------------------------------
+
+
+def rules_set(segment: CustomerSegment) -> bool:
+    return segment.min_online_orders is not None or segment.min_lifetime_amount is not None
+
+
+def rule_match_q(segment: CustomerSegment) -> Q:
+    """The ANDed rule predicate over an ``annotate_customer_stats`` queryset; never matches without rules."""
+    if not rules_set(segment):
+        return Q(pk__in=[])
+    condition = Q()
+    if segment.min_online_orders is not None:
+        condition &= Q(online_orders_count__gte=segment.min_online_orders)
+    if segment.min_lifetime_amount is not None:
+        condition &= Q(lifetime_total__gte=segment.min_lifetime_amount)
+    return condition
+
+
+def manual_member_q(segment: CustomerSegment) -> Q:
+    return Q(Exists(SegmentMember.objects.filter(segment=segment, customer_id=OuterRef("pk"))))
+
+
+def segment_members(segment: CustomerSegment) -> QuerySet[Customer]:
+    """active customer ∧ (all set rules match ∨ manual member); with no rules, manual only."""
+    qs = annotate_customer_stats(Customer.objects.filter(status=enums.CustomerStatus.ACTIVE))
+    return qs.filter(manual_member_q(segment) | rule_match_q(segment))
+
+
+def segment_member_ids(segment: CustomerSegment) -> QuerySet[Customer, int]:
+    return segment_members(segment).order_by().values_list("pk", flat=True)
+
+
+def matches_rules(segment: CustomerSegment, customer_id: int) -> bool:
+    """Whether the (active) customer is a member through the rules alone."""
+    qs = annotate_customer_stats(Customer.objects.filter(pk=customer_id, status=enums.CustomerStatus.ACTIVE))
+    return qs.filter(rule_match_q(segment)).exists()
+
+
+def segments_for_customer(customer_id: int) -> list[CustomerSegment]:
+    """Card ``groups[]``: every segment the customer belongs to, by id."""
+    return [
+        segment
+        for segment in CustomerSegment.objects.order_by("id")
+        if segment_members(segment).filter(pk=customer_id).exists()
+    ]
+
+
+class SegmentStats(TypedDict):
+    manual_member_count: int
+    member_count: int
+    size: int
+
+
+def segment_stats(segment: CustomerSegment) -> SegmentStats:
+    """``manual_member_count``, ``member_count`` (predicate) and ``size`` (push-enabled member devices)."""
+    counts = segment_members(segment).aggregate(
+        member_count=Count("pk", distinct=True),
+        size=Count(
+            "devices",
+            filter=Q(devices__is_active=True, devices__push_enabled=True) & ~Q(devices__fcm_token=""),
+            distinct=True,
+        ),
+    )
+    return {
+        "manual_member_count": SegmentMember.objects.filter(segment=segment).count(),
+        "member_count": int(counts["member_count"] or 0),
+        "size": int(counts["size"] or 0),
+    }
+
+
+def segment_size(segment: CustomerSegment) -> int:
+    return segment_stats(segment)["size"]
+
+
+# --- devices and audiences ----------------------------------------------------------------------------------
+
+
+def pushable_devices() -> QuerySet[Device]:
+    """Push-enabled active devices of active customers (``total_devices``)."""
+    return Device.objects.filter(PUSHABLE_DEVICE, customer__status=enums.CustomerStatus.ACTIVE)
+
+
+def total_devices() -> int:
+    return pushable_devices().count()
+
+
+def customer_push_device(customer_id: int) -> Device | None:
+    """The device a status push goes to: the customer's most recently active pushable device."""
+    return (
+        Device.objects.filter(PUSHABLE_DEVICE, customer_id=customer_id)
+        .order_by("-last_active_at", "-id")
+        .first()
+    )
+
+
+def audience_recipients(campaign: Campaign) -> list[tuple[int, int]]:
+    """``(customer_id, device_id)`` per customer of the campaign's audience — one (the latest) device each."""
+    devices = pushable_devices()
+    if campaign.audience_type == enums.AudienceType.SEGMENT:
+        if campaign.audience_segment_id is None:
+            return []
+        devices = devices.filter(customer_id__in=segment_member_ids(campaign.audience_segment))  # type: ignore[arg-type]
+    elif campaign.audience_type == enums.AudienceType.CUSTOMER:
+        if campaign.audience_customer_id is None:
+            return []
+        devices = devices.filter(customer_id=campaign.audience_customer_id)
+    latest: dict[int, int] = {}
+    for customer_id, device_id in devices.order_by("customer_id", "last_active_at", "id").values_list(
+        "customer_id", "id"
+    ):
+        latest[customer_id] = device_id  # the last row per customer is the most recently active one
+    return sorted(latest.items())
+
+
+# --- campaigns, templates, meta -----------------------------------------------------------------------------
+
+
+def campaign_queryset() -> QuerySet[Campaign]:
+    return Campaign.objects.select_related("author", "audience_segment", "link_product")
+
+
+def filter_campaigns(qs: QuerySet[Campaign], *, state: str | None, kind: str | None) -> QuerySet[Campaign]:
+    """Contract §2.8 filters; the API ``queued`` covers the internal ``queued`` and ``sending``."""
+    if state == enums.NotificationState.QUEUED:
+        qs = qs.filter(state__in=[Campaign.State.QUEUED, Campaign.State.SENDING])
+    elif state is not None:
+        qs = qs.filter(state=state)
+    if kind is not None:
+        qs = qs.filter(kind=kind)
+    return qs
+
+
+def get_campaign(pk: int) -> Campaign | None:
+    return campaign_queryset().filter(pk=pk).first()
+
+
+def templates() -> list[StatusTemplate]:
+    """The four rows in ``TemplateStatus`` order."""
+    order = {status: index for index, status in enumerate(enums.TemplateStatus.values)}
+    rows = list(StatusTemplate.objects.select_related("updated_by"))
+    return sorted(rows, key=lambda row: order.get(row.status, len(order)))
+
+
+def get_template(status: str) -> StatusTemplate | None:
+    if status not in enums.TemplateStatus.values:
+        return None
+    return StatusTemplate.objects.select_related("updated_by").filter(status=status).first()
+
+
+def link_options() -> list[dict[str, Any]]:
+    """Active products as ``{product_id, label}`` (uz display name), sorted by label (``glowderma_ci``)."""
+    rows = (
+        Product.objects.filter(status=enums.ProductStatus.ACTIVE)
+        .annotate(label=DISPLAY_NAME, label_ci=Collate(DISPLAY_NAME, "glowderma_ci"))
+        .order_by("label_ci", "id")
+        .values_list("id", "label")
+    )
+    return [{"product_id": pk, "label": label} for pk, label in rows]
+
+
+def meta() -> dict[str, Any]:
+    """``GET notifications/meta/`` (contract §2.8)."""
+    segments = [
+        {"id": segment.pk, "name": segment.name, "size": segment_size(segment)}
+        for segment in CustomerSegment.objects.order_by("id")
+    ]
+    return {
+        "total_devices": total_devices(),
+        "segments": segments,
+        "templates": templates(),
+        "link_options": link_options(),
+    }
