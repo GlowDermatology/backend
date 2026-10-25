@@ -88,5 +88,7 @@ def dispatch_outbox(batch: int = 50) -> None:
                             "last_error": last_error,
                         },
                     )
+            if completed and status == "dead":
+                outbox.notify_dead(message)
         else:
             _complete_outbox_message(message, claim_token, status="done", lease_expires_at=None)

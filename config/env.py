@@ -1,5 +1,6 @@
 import json
 import os
+from datetime import datetime
 from ipaddress import IPv4Network, IPv6Network, ip_network
 from typing import Any
 
@@ -45,6 +46,19 @@ def env_json(name: str, default: Any = MISSING) -> Any:
         return json.loads(env_str(name))
     except ValueError as exc:
         raise ImproperlyConfigured(f"{name} must be JSON") from exc
+
+
+def env_datetime(name: str, default: Any = MISSING) -> datetime | None:
+    """An aware ISO 8601 datetime (naive values are refused so a pinned clock is never ambiguous)."""
+    if not os.environ.get(name) and default is not MISSING:
+        return default  # type: ignore[no-any-return]
+    try:
+        value = datetime.fromisoformat(env_str(name))
+    except ValueError as exc:
+        raise ImproperlyConfigured(f"{name} must be an ISO 8601 datetime") from exc
+    if value.tzinfo is None:
+        raise ImproperlyConfigured(f"{name} must carry a timezone offset")
+    return value
 
 
 def env_networks(name: str, default: Any = MISSING) -> tuple[Network, ...]:

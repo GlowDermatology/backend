@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlsplit, urlunsplit
@@ -16,12 +17,25 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.postgres",
     "rest_framework",
     "drf_spectacular",
     "drf_spectacular_sidecar",
+    # Layer order (AGENTS.md "Architecture rules"); migrations depend across apps in this order.
     "glowderma.core",
     "glowderma.integrations",
     "glowderma.accounts",
+    "glowderma.site_config",
+    "glowderma.catalog",
+    "glowderma.professionals",
+    "glowderma.loyalty",
+    "glowderma.payments",
+    "glowderma.delivery",
+    "glowderma.commerce",
+    "glowderma.appointments",
+    "glowderma.notifications",
+    "glowderma.customers",
+    "glowderma.reporting",
 ]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -98,6 +112,9 @@ SPECTACULAR_SETTINGS = {
     "SERVE_PERMISSIONS": ["glowderma.accounts.permissions.IsActiveStaff"],
 }
 GIT_SHA = env_str("GIT_SHA", "dev")
+# A pinned clock for demo data and browser e2e checks (glowderma.core.timeutils.now). Local/test settings read
+# the FAKE_NOW variable; production refuses it.
+FAKE_NOW: datetime | None = None
 TRUSTED_PROXIES: tuple[Network, ...] = ()
 # Celery: at-least-once delivery (acks late, requeue on worker loss), one task in flight per worker
 # process, hard limits so a stuck provider call cannot hold a worker forever.

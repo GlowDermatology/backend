@@ -1,5 +1,6 @@
 import base64
 import binascii
+import os
 from urllib.parse import urlsplit
 
 from django.core.exceptions import ImproperlyConfigured
@@ -10,6 +11,10 @@ from .base import *  # noqa: F403
 from .base import OAUTH_MODE, database_config, redis_db_url
 
 DEBUG = False
+if os.environ.get("FAKE_NOW"):
+    raise ImproperlyConfigured(
+        "FAKE_NOW pins the clock for demos and tests; it must not be set in production"
+    )
 
 
 def _decode_jwt_key(encoded: str) -> bytes:

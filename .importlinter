@@ -2,9 +2,14 @@
 root_package = glowderma
 
 [importlinter:contract:layers]
-name = modules import only strictly lower layers
+name = module layering (AGENTS.md "Architecture rules")
 type = layers
 layers =
+    glowderma.reporting | glowderma.customers
+    glowderma.notifications
+    glowderma.commerce | glowderma.appointments
+    glowderma.payments | glowderma.delivery | glowderma.loyalty | glowderma.catalog | glowderma.professionals
+    glowderma.site_config
     glowderma.accounts
     glowderma.integrations
     glowderma.core

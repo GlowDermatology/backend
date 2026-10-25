@@ -495,3 +495,9 @@ def test_env_example_documents_oauth_block_in_fake_mode() -> None:
     for name in LIVE_OAUTH_ENV:
         assert re.search(rf"^#?{name}=", env_example, re.MULTILINE), name
     assert "change-me" in env_example.split("OAUTH_MODE=fake", 1)[1]
+
+
+def test_production_refuses_fake_now(production_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FAKE_NOW", "2026-10-24T12:05:00+05:00")
+    with pytest.raises(ImproperlyConfigured, match="FAKE_NOW"):
+        load_production()

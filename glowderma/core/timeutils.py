@@ -1,12 +1,21 @@
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+from django.conf import settings
 from django.utils import timezone
 
 TASHKENT = ZoneInfo("Asia/Tashkent")
 
 
 def now() -> datetime:
+    """The one clock of the codebase.
+
+    ``settings.FAKE_NOW`` (local/test settings only; production refuses it) pins the instant so a seeded
+    demo dataset and the browser end-to-end checks see the same "today". Tests monkeypatch this function.
+    """
+    fixed: datetime | None = getattr(settings, "FAKE_NOW", None)
+    if fixed is not None:
+        return fixed
     return timezone.now()
 
 

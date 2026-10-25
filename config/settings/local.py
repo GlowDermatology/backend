@@ -1,10 +1,11 @@
-from config.env import env_bool, env_list, env_networks, env_str
+from config.env import env_bool, env_datetime, env_list, env_networks, env_str
 
 from .base import *  # noqa: F403
 from .base import SPECTACULAR_SETTINGS as BASE_SPECTACULAR_SETTINGS
 from .base import database_config, logging_config, redis_db_url
 
 DEBUG = True
+FAKE_NOW = env_datetime("FAKE_NOW", None)
 SPECTACULAR_SETTINGS = {
     **BASE_SPECTACULAR_SETTINGS,
     "SERVE_AUTHENTICATION": [],
