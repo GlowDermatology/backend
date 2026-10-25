@@ -9,9 +9,12 @@ their producers; ``bts.cancel_shipment`` is a synchronous call inside ``cancel_o
 
 from __future__ import annotations
 
-BTS_CREATE_SHIPMENT = "bts.create_shipment"
+# ``bts.create_shipment`` / ``refund.submit`` are enqueued by the lower modules (``delivery``, ``payments``),
+# which cannot import this one: their names and dedupe-key builders live there and are re-exported here.
+from glowderma.delivery.topics import BTS_CREATE_SHIPMENT, bts_create_shipment_key
+from glowderma.payments.topics import REFUND_SUBMIT, refund_submit_key
+
 BILLZ_PUSH_SALE = "billz.push_sale"
-REFUND_SUBMIT = "refund.submit"
 PUSH_ORDER_STATUS = "push.order_status"
 
 # Topics whose handler is ``commerce/tasks.py`` (B5).
@@ -34,16 +37,8 @@ PAYLOAD_KEYS: dict[str, tuple[str, ...]] = {
 }
 
 
-def bts_create_shipment_key(order_id: int, request_no: int) -> str:
-    return f"{BTS_CREATE_SHIPMENT}:{order_id}:{request_no}"
-
-
 def billz_push_sale_key(billz_order_uuid: str) -> str:
     return f"{BILLZ_PUSH_SALE}:{billz_order_uuid}"
-
-
-def refund_submit_key(refund_id: int) -> str:
-    return f"{REFUND_SUBMIT}:{refund_id}"
 
 
 def push_order_status_key(order_id: int, status: str) -> str:
@@ -54,3 +49,21 @@ def push_order_status_key(order_id: int, status: str) -> str:
 def order_status_inbox_key(order_id: int, status: str) -> str:
     """``InboxNotification.dedupe_key`` the notifications handler claims for ``push.order_status``."""
     return f"order_status:{order_id}:{status}"
+
+
+__all__ = [
+    "BILLZ_PUSH_SALE",
+    "BTS_CREATE_SHIPMENT",
+    "DEAD_LETTER_ERROR_CODE",
+    "DEAD_LETTER_TOPICS",
+    "HANDLED_TOPICS",
+    "PAYLOAD_KEYS",
+    "PRODUCED_TOPICS",
+    "PUSH_ORDER_STATUS",
+    "REFUND_SUBMIT",
+    "billz_push_sale_key",
+    "bts_create_shipment_key",
+    "order_status_inbox_key",
+    "push_order_status_key",
+    "refund_submit_key",
+]
