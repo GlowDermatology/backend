@@ -32,7 +32,7 @@ def ids(response: Any) -> list[int]:
     return [item["id"] for item in response.json()["results"]]
 
 
-# --- list ---------------------------------------------------------------------------------------------------------
+# --- list ---------------------------------------------------------------------------------------------------
 
 
 def test_list_envelope_and_default_page_size_eight(staff_client: APIClient) -> None:
@@ -121,9 +121,15 @@ def test_list_nulls_for_never_edited_product_without_stock_row(staff_client: API
 
 def test_search_vectors(staff_client: APIClient) -> None:
     serum = ProductFactory.create(
-        id=4607, name_uz="Gialuron kislotali serum", name_ru="Сыворотка", name_en="Hyaluronic", billz_id="4607012301"
+        id=4607,
+        name_uz="Gialuron kislotali serum",
+        name_ru="Сыворотка",
+        name_en="Hyaluronic",
+        billz_id="4607012301",
     )
-    spf = ProductFactory.create(id=77, name_uz="Quyoshdan himoya", billz_name="SUN CREAM SPF50", billz_id="4607012401")
+    spf = ProductFactory.create(
+        id=77, name_uz="Quyoshdan himoya", billz_name="SUN CREAM SPF50", billz_id="4607012401"
+    )
 
     def found(term: str) -> set[int]:
         response = staff_client.get(PRODUCTS, {"search": term})
@@ -174,7 +180,19 @@ def test_status_promo_stock_and_new_filters(staff_client: APIClient) -> None:
 
 
 def test_ordering_by_name_uses_the_ci_collation(staff_client: APIClient) -> None:
-    names = ["Yulduz serum", "ыы krem", "Ёлка", "ёлка", "aloe", "Aloe vera", "o‘rik", "Orik", "O'rik", "", "Zebra"]
+    names = [
+        "Yulduz serum",
+        "ыы krem",
+        "Ёлка",
+        "ёлка",
+        "aloe",
+        "Aloe vera",
+        "o‘rik",
+        "Orik",
+        "O'rik",
+        "",
+        "Zebra",
+    ]
     for name in names:
         ProductFactory.create(name_uz=name, billz_name="BAKUCHIOL BALM" if name == "" else "X")
     expected = [
@@ -192,9 +210,9 @@ def test_ordering_by_name_uses_the_ci_collation(staff_client: APIClient) -> None
     ]
 
     def labels(ordering: str) -> list[str]:
-        response = staff_client.get(PRODUCTS, {"ordering": ordering, "page_size": 8})
+        response = staff_client.get(PRODUCTS, {"ordering": ordering, "page_size": "8"})
         first = response.json()["results"]
-        second = staff_client.get(PRODUCTS, {"ordering": ordering, "page": 2}).json()["results"]
+        second = staff_client.get(PRODUCTS, {"ordering": ordering, "page": "2"}).json()["results"]
         return [item["texts"]["uz"]["name"] or item["billz_name"] for item in first + second]
 
     assert labels("name") == expected
@@ -210,17 +228,22 @@ def test_default_ordering_is_last_change_then_created_then_id(staff_client: APIC
     older = ProductFactory.create(created_at=day(5))
     same = ProductFactory.create(created_at=day(5))
     assert ids(staff_client.get(PRODUCTS)) == [edited.pk, newer.pk, same.pk, older.pk]
-    assert ids(staff_client.get(PRODUCTS, {"ordering": "default"})) == [edited.pk, newer.pk, same.pk, older.pk]
+    assert ids(staff_client.get(PRODUCTS, {"ordering": "default"})) == [
+        edited.pk,
+        newer.pk,
+        same.pk,
+        older.pk,
+    ]
 
 
-# --- export -------------------------------------------------------------------------------------------------------
+# --- export -------------------------------------------------------------------------------------------------
 
 
 def test_csv_export(staff_client: APIClient, staff: StaffUser) -> None:
     category = CategoryFactory.create(slug="serums", name_uz="Serumlar")
     product = ProductFactory.create(
         billz_id="4607012301",
-        billz_name="=HYPERLINK(\"x\")",
+        billz_name='=HYPERLINK("x")',
         name_uz="-Gialuron",
         category=category,
         price=185_000,
@@ -252,7 +275,7 @@ def test_csv_export(staff_client: APIClient, staff: StaffUser) -> None:
     assert rows[1] == [
         str(product.pk),
         "4607012301",
-        "'=HYPERLINK(\"x\")",
+        '\'=HYPERLINK("x")',
         "'-Gialuron",
         "Serumlar",
         "185000",
@@ -300,7 +323,7 @@ def test_export_format_and_throttle(staff_client: APIClient) -> None:
     assert staff_client.get(PRODUCTS).status_code == 200  # the JSON list has its own (staff) scope
 
 
-# --- stats --------------------------------------------------------------------------------------------------------
+# --- stats --------------------------------------------------------------------------------------------------
 
 
 def test_stats_counts_and_billz_block(staff_client: APIClient) -> None:
@@ -321,7 +344,7 @@ def test_stats_counts_and_billz_block(staff_client: APIClient) -> None:
     }
 
 
-# --- retrieve -----------------------------------------------------------------------------------------------------
+# --- retrieve -----------------------------------------------------------------------------------------------
 
 
 def test_retrieve_and_404(staff_client: APIClient) -> None:
@@ -338,7 +361,7 @@ def test_retrieve_and_404(staff_client: APIClient) -> None:
     }
 
 
-# --- create -------------------------------------------------------------------------------------------------------
+# --- create -------------------------------------------------------------------------------------------------
 
 
 def valid_body(**overrides: Any) -> dict[str, Any]:
@@ -355,7 +378,12 @@ def test_create_happy_path_full_shape(staff_client: APIClient, staff: StaffUser)
     CategoryFactory.create(slug="serums")
     body = valid_body(
         texts={
-            "uz": {"name": "  Gialuron kislotali serum ", "description": "Tavsif", "ingredients": "Aqua", "usage": "Kuniga"},
+            "uz": {
+                "name": "  Gialuron kislotali serum ",
+                "description": "Tavsif",
+                "ingredients": "Aqua",
+                "usage": "Kuniga",
+            },
             "ru": {"name": "Сыворотка"},
         },
         category="serums",
@@ -379,7 +407,12 @@ def test_create_happy_path_full_shape(staff_client: APIClient, staff: StaffUser)
         "status": "hidden",
         "is_new_from_billz": False,
         "texts": {
-            "uz": {"name": "Gialuron kislotali serum", "description": "Tavsif", "ingredients": "Aqua", "usage": "Kuniga"},
+            "uz": {
+                "name": "Gialuron kislotali serum",
+                "description": "Tavsif",
+                "ingredients": "Aqua",
+                "usage": "Kuniga",
+            },
             "ru": {"name": "Сыворотка", "description": "", "ingredients": "", "usage": ""},
             "en": {"name": "", "description": "", "ingredients": "", "usage": ""},
         },
@@ -399,7 +432,9 @@ def test_create_happy_path_full_shape(staff_client: APIClient, staff: StaffUser)
     entry = AuditEntry.objects.get(action="product.created")
     assert entry.entity_type == "product" and entry.entity_id == str(product.pk)
     assert entry.actor_id == staff.pk and entry.before is None
-    assert entry.after["texts.uz.name"] == "Gialuron kislotali serum" and entry.after["category"] == "serums"
+    assert (entry.after or {})["texts.uz.name"] == "Gialuron kislotali serum" and (entry.after or {})[
+        "category"
+    ] == "serums"
 
 
 def test_create_defaults_status_hidden_and_promo_false(staff_client: APIClient) -> None:
@@ -411,17 +446,62 @@ def test_create_defaults_status_hidden_and_promo_false(staff_client: APIClient) 
 @pytest.mark.parametrize(
     ("overrides", "field", "code", "message"),
     [
-        ({"billz_id": "12345"}, "billz_id", "invalid", "Billz ID yoki shtrix-kod 6–14 ta raqamdan iborat bo‘lsin."),
-        ({"billz_id": "4607012301x"}, "billz_id", "invalid", "Billz ID yoki shtrix-kod 6–14 ta raqamdan iborat bo‘lsin."),
+        (
+            {"billz_id": "12345"},
+            "billz_id",
+            "invalid",
+            "Billz ID yoki shtrix-kod 6–14 ta raqamdan iborat bo‘lsin.",
+        ),
+        (
+            {"billz_id": "4607012301x"},
+            "billz_id",
+            "invalid",
+            "Billz ID yoki shtrix-kod 6–14 ta raqamdan iborat bo‘lsin.",
+        ),
         ({"billz_id": "4607010000"}, "billz_id", "billz_not_found", "Billz’da bunday mahsulot topilmadi."),
-        ({"texts": {"uz": {"name": "G"}}}, "texts.uz.name", "min_length", "O‘zbekcha nomni kiriting (kamida 2 belgi)."),
-        ({"texts": {"uz": {"name": "   "}}}, "texts.uz.name", "min_length", "O‘zbekcha nomni kiriting (kamida 2 belgi)."),
+        (
+            {"texts": {"uz": {"name": "G"}}},
+            "texts.uz.name",
+            "min_length",
+            "O‘zbekcha nomni kiriting (kamida 2 belgi).",
+        ),
+        (
+            {"texts": {"uz": {"name": "   "}}},
+            "texts.uz.name",
+            "min_length",
+            "O‘zbekcha nomni kiriting (kamida 2 belgi).",
+        ),
         ({"texts": {"uz": {"name": "x" * 121}}}, "texts.uz.name", "max_length", "120 belgidan oshmasin."),
-        ({"texts": {"uz": {"name": "Serum", "description": "x" * 2001}}}, "texts.uz.description", "max_length", "2000 belgidan oshmasin."),
-        ({"texts": {"uz": {"name": "Serum", "ingredients": "x" * 1001}}}, "texts.uz.ingredients", "max_length", "1000 belgidan oshmasin."),
-        ({"texts": {"uz": {"name": "Serum", "usage": "x" * 1001}}}, "texts.uz.usage", "max_length", "1000 belgidan oshmasin."),
-        ({"texts": {"uz": {"name": "Serum"}, "ru": {"name": "x" * 121}}}, "texts.ru.name", "max_length", "120 belgidan oshmasin."),
-        ({"texts": {"uz": {"name": "Serum"}, "en": {"name": "x" * 121}}}, "texts.en.name", "max_length", "120 belgidan oshmasin."),
+        (
+            {"texts": {"uz": {"name": "Serum", "description": "x" * 2001}}},
+            "texts.uz.description",
+            "max_length",
+            "2000 belgidan oshmasin.",
+        ),
+        (
+            {"texts": {"uz": {"name": "Serum", "ingredients": "x" * 1001}}},
+            "texts.uz.ingredients",
+            "max_length",
+            "1000 belgidan oshmasin.",
+        ),
+        (
+            {"texts": {"uz": {"name": "Serum", "usage": "x" * 1001}}},
+            "texts.uz.usage",
+            "max_length",
+            "1000 belgidan oshmasin.",
+        ),
+        (
+            {"texts": {"uz": {"name": "Serum"}, "ru": {"name": "x" * 121}}},
+            "texts.ru.name",
+            "max_length",
+            "120 belgidan oshmasin.",
+        ),
+        (
+            {"texts": {"uz": {"name": "Serum"}, "en": {"name": "x" * 121}}},
+            "texts.en.name",
+            "max_length",
+            "120 belgidan oshmasin.",
+        ),
         ({"price": 999}, "price", "min_value", "Narx kamida 1 000 so‘m bo‘lsin."),
         ({"price": 100_000_001}, "price", "max_value", "Narx juda katta."),
         ({"price": "abc"}, "price", "invalid", "Noto‘g‘ri qiymat."),
@@ -463,7 +543,9 @@ def test_create_active_always_fails(staff_client: APIClient) -> None:
     CategoryFactory.create(slug="serums")
     response = staff_client.post(PRODUCTS, valid_body(status="active", category="serums"))
     assert response.status_code == 400
-    assert errors_of(response) == {"images": ("required_for_active", "Faol mahsulotda kamida bitta rasm bo‘lsin.")}
+    assert errors_of(response) == {
+        "images": ("required_for_active", "Faol mahsulotda kamida bitta rasm bo‘lsin.")
+    }
     response = staff_client.post(PRODUCTS, valid_body(status="active"))
     assert errors_of(response) == {
         "category": ("required_for_active", "Faol mahsulot uchun kategoriyani tanlang."),
@@ -489,7 +571,7 @@ def test_idempotency_key_is_honoured_on_create(staff_client: APIClient) -> None:
     assert reused.status_code == 422 and reused.json()["code"] == "idempotency_key_reused"
 
 
-# --- PATCH --------------------------------------------------------------------------------------------------------
+# --- PATCH --------------------------------------------------------------------------------------------------
 
 
 def detail(product: Product) -> str:
@@ -505,7 +587,9 @@ def test_patch_merges_texts_at_leaf_level(staff_client: APIClient) -> None:
         is_new_from_billz=True,
         status="hidden",
     )
-    response = staff_client.patch(detail(product), {"texts": {"ru": {"name": "Новая"}, "en": {"usage": "AM"}}})
+    response = staff_client.patch(
+        detail(product), {"texts": {"ru": {"name": "Новая"}, "en": {"usage": "AM"}}}
+    )
     assert response.status_code == 200, response.json()
     assert response.json()["texts"] == {
         "uz": {"name": "Serum", "description": "Tavsif", "ingredients": "", "usage": ""},
@@ -523,7 +607,10 @@ def test_patch_validates_uz_name_when_sent(staff_client: APIClient) -> None:
     product = ProductFactory.create(status="hidden")
     response = staff_client.patch(detail(product), {"texts": {"uz": {"name": "x"}}})
     assert response.status_code == 400
-    assert errors_of(response)["texts.uz.name"] == ("min_length", "O‘zbekcha nomni kiriting (kamida 2 belgi).")
+    assert errors_of(response)["texts.uz.name"] == (
+        "min_length",
+        "O‘zbekcha nomni kiriting (kamida 2 belgi).",
+    )
     response = staff_client.patch(detail(product), {"texts": {"uz": {"description": "ok"}}})
     assert response.status_code == 200  # uz.name is only mandatory on create
 
@@ -537,12 +624,48 @@ def test_patch_no_put_and_404(staff_client: APIClient) -> None:
 @pytest.mark.parametrize(
     ("before", "body", "kind", "old_price", "new_price"),
     [
-        ({"price": 100_000, "status": "hidden", "promo": False}, {"price": 120_000, "status": "active", "promo": True}, "price_changed", 100_000, 120_000),
-        ({"price": 100_000, "status": "hidden", "promo": False}, {"status": "active", "promo": True}, "activated", None, None),
-        ({"price": 100_000, "status": "active", "promo": True}, {"status": "hidden", "promo": False}, "hidden", None, None),
-        ({"price": 100_000, "status": "active", "promo": False}, {"promo": True, "texts": {"uz": {"name": "Yangi"}}}, "promo_added", None, None),
-        ({"price": 100_000, "status": "active", "promo": True}, {"promo": False}, "promo_removed", None, None),
-        ({"price": 100_000, "status": "active", "promo": True}, {"texts": {"en": {"name": "New"}}}, "updated", None, None),
+        (
+            {"price": 100_000, "status": "hidden", "promo": False},
+            {"price": 120_000, "status": "active", "promo": True},
+            "price_changed",
+            100_000,
+            120_000,
+        ),
+        (
+            {"price": 100_000, "status": "hidden", "promo": False},
+            {"status": "active", "promo": True},
+            "activated",
+            None,
+            None,
+        ),
+        (
+            {"price": 100_000, "status": "active", "promo": True},
+            {"status": "hidden", "promo": False},
+            "hidden",
+            None,
+            None,
+        ),
+        (
+            {"price": 100_000, "status": "active", "promo": False},
+            {"promo": True, "texts": {"uz": {"name": "Yangi"}}},
+            "promo_added",
+            None,
+            None,
+        ),
+        (
+            {"price": 100_000, "status": "active", "promo": True},
+            {"promo": False},
+            "promo_removed",
+            None,
+            None,
+        ),
+        (
+            {"price": 100_000, "status": "active", "promo": True},
+            {"texts": {"en": {"name": "New"}}},
+            "updated",
+            None,
+            None,
+        ),
         ({"price": 100_000, "status": "active", "promo": True}, {"price": 100_000}, "updated", None, None),
     ],
 )
@@ -577,13 +700,17 @@ def test_patch_active_rule(staff_client: APIClient) -> None:
     assert Product.objects.get(pk=product.pk).status == "hidden"
     category = CategoryFactory.create(slug="serums")
     response = staff_client.patch(detail(product), {"status": "active", "category": "serums"})
-    assert errors_of(response) == {"images": ("required_for_active", "Faol mahsulotda kamida bitta rasm bo‘lsin.")}
+    assert errors_of(response) == {
+        "images": ("required_for_active", "Faol mahsulotda kamida bitta rasm bo‘lsin.")
+    }
     ProductImageFactory.create(product=product)
     response = staff_client.patch(detail(product), {"status": "active", "category": category.slug})
     assert response.status_code == 200 and response.json()["status"] == "active"
     # clearing the category of an active product is refused too
     response = staff_client.patch(detail(product), {"category": None})
-    assert errors_of(response) == {"category": ("required_for_active", "Faol mahsulot uchun kategoriyani tanlang.")}
+    assert errors_of(response) == {
+        "category": ("required_for_active", "Faol mahsulot uchun kategoriyani tanlang.")
+    }
 
 
 def test_patch_activating_an_imported_product_requires_a_price(staff_client: APIClient) -> None:
