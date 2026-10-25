@@ -290,6 +290,12 @@ def purchase_row(purchase: Purchase) -> PurchaseRow:
     )
 
 
+def purchase_for_order(order_id: int) -> PurchaseRow | None:
+    """The purchase of a paid order (``Purchase.order`` is 1:1): the id ``reverse_purchase`` needs."""
+    purchase = Purchase.objects.select_related("policy").filter(order_id=order_id).first()
+    return None if purchase is None else purchase_row(purchase)
+
+
 def purchases_for_customer(customer_id: int) -> list[PurchaseRow]:
     """Full history incl. reversed purchases, newest first (``at desc, id desc``)."""
     rows = Purchase.objects.select_related("policy").filter(customer_id=customer_id).order_by("-at", "-id")
@@ -371,6 +377,7 @@ __all__ = [
     "next_effective_from",
     "policy_at",
     "policy_versions",
+    "purchase_for_order",
     "purchase_row",
     "purchases_for_customer",
     "rules_of",

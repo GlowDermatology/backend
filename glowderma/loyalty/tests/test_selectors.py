@@ -133,6 +133,8 @@ def test_malika_timeline_reproduces_the_contract_card() -> None:
     assert len(purchases) == 25 and Purchase.objects.filter(customer=malika, reversed=True).count() == 1
     assert purchases[0] == PurchaseRow(id=ids["10248"].purchase_id, at=at(10, 23, 14, 5), source="online", order_id=10248, billz_sale_ref=None, amount=808_000, promo_amount=240_000, cashback=5_680, policy_version=3, reversed=False)  # fmt: skip  # noqa: E501
     by_order = {p.order_id: p for p in purchases if p.order_id}
+    assert selectors.purchase_for_order(10248) == purchases[0] and selectors.purchase_for_order(10999) is None
+    assert selectors.purchase_for_order(10198) == by_order[10198]
     assert (by_order[10198].reversed, by_order[10198].cashback, by_order[10198].policy_version) == (
         True,
         1_560,
