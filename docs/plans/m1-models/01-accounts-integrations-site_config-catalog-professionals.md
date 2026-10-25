@@ -800,7 +800,7 @@ class Product(TimeStampedModel):
         ]
         indexes = [
             GinIndex(fields=["search_text"], name="catalog_product_search_trgm", opclasses=["gin_trgm_ops"]),
-            models.Index(fields=["category", "status"], name="catalog_product_category_status"),
+            models.Index(fields=["category", "status"], name="catalog_product_cat_status"),  # ≤ 30 chars (E034)
             models.Index(
                 Coalesce("last_change_at", "created_at").desc(),
                 F("id").desc(),
@@ -1313,7 +1313,12 @@ Four queries total (professionals, overrides for D, hours for the weekday, block
 
 ## 6. Database features by migration (pg_trgm, GIN, ICU collation)
 
-### 6.1 `pg_trgm` extension — `core/migrations/0007_pg_trgm.py`
+### 6.1 `pg_trgm` extension — `core/migrations/0007_db_extensions.py`
+
+> **As built (B2 groundwork, T12):** `core.0007_db_extensions` creates `pg_trgm`, `btree_gist` **and** the ICU
+> collation `glowderma_ci` in one migration; there is no `catalog.0002_glowderma_ci_collation` (§6.3 below describes
+> the collation itself, which is unchanged). App migrations depend on `("core", "0007_db_extensions")` or, when they
+> add an append-only trigger, on `("core", "0008_forbid_mutation_purge_guc")`.
 
 Placed in `core` (lowest layer, migrates first) because **both** `accounts.Customer.name` (trigram index, skeleton row 1) and `catalog.Product.search_text` need it, and `accounts` migrates before `catalog`. This is the one deliberate refinement of §5.3's "catalog (+ RunSQL: pg_trgm, …)".
 
@@ -1330,7 +1335,7 @@ class Migration(migrations.Migration):
 - `pg_trgm` is a **trusted** extension (PG ≥ 13): any role with `CREATE` on the database installs it without superuser. Locally the `glowderma` role is superuser; in the `postgres:18-trixie` image `POSTGRES_USER` is superuser; on a managed server the deploy doc says: either `ALTER DATABASE glowderma OWNER TO glowderma` or a one-off `CREATE EXTENSION pg_trgm` by the DBA, after which `IF NOT EXISTS` is a no-op.
 - **`django.contrib.postgres` is in `INSTALLED_APPS`** (`config/settings/base.py`, after `django.contrib.staticfiles`, before `rest_framework`). In Django 6.1.2 `PostgresIndex` (base of `GinIndex`), `ExclusionConstraint` and `RangeField` (base of the `DateTimeRangeField` used by `appointments`) all mix in `CheckPostgresInstalledMixin`, whose system check raises `postgres.E005` ("'django.contrib.postgres' must be in INSTALLED_APPS in order to use GinIndex") and fails `manage.py check`/`migrate`/`makemigrations --check` otherwise (review blocker 1). Cost: one `post_migrate` handler (`register_type_handlers`) and a few extra lookups on `CharField`/`TextField`; nothing else changes. The `CreateExtension` operations (`TrigramExtension`, `BtreeGistExtension`) do not carry the check, but with the app installed they are the natural spelling.
 - Reverse: `TrigramExtension` drops the extension. By the time `core 0007` reverses, every dependent index has been dropped by the reversing app migrations (they depend on `core 0007`), so the drop never cascades into anything. The only overreach is dropping an extension a DBA pre-created; `migrate … zero` is a scratch-DB-only operation, documented as such.
-- Dependent migrations declare it: `accounts 0004_customer_device_address_smscode` → `dependencies = [("accounts", "0003_sessions_socialidentity"), ("core", "0007_pg_trgm")]`; `catalog 0001_initial` → `[("core", "0007_pg_trgm"), ("accounts", "0004_…")]`.
+- Dependent migrations declare it (as built): `accounts 0004_customer_device_address_smscode_social` → `dependencies = [("accounts", "0003_…"), ("core", "0008_forbid_mutation_purge_guc")]` (0008 transitively includes 0007); `catalog 0001_initial` → `[("core", "0007_db_extensions"), ("accounts", "0001_initial")]` — no catalog field references `accounts.Customer`, so the catalog package could land in parallel with `accounts.0004`.
 
 ### 6.2 Generated search column and its GIN index — `catalog/migrations/0001_initial.py`
 
@@ -1377,7 +1382,7 @@ CREATE INDEX "catalog_product_search_trgm" ON "catalog_product"
 ```
 with the filter written against the same expression. The stored column is preferred: the query is simpler (`search_text LIKE …`), `EXPLAIN` is unambiguous, and the planner matches the index without expression equivalence.
 
-### 6.3 ICU collation — `catalog/migrations/0002_glowderma_ci_collation.py`
+### 6.3 ICU collation — created by `core.0007_db_extensions` (T12; the `catalog.0002` file below was not generated)
 
 ```python
 from django.db import migrations
@@ -1477,18 +1482,17 @@ Display name is the same expression everywhere a product is labelled in Uzbek (`
 
 | App | Migration | Contents | Depends on |
 |---|---|---|---|
-| core | `0007_pg_trgm` | `TrigramExtension()` §6.1 | `core.0006_outbox_claim_token` |
+| core | `0007_db_extensions` | `TrigramExtension()`, `BtreeGistExtension()`, ICU collation `glowderma_ci` (§6.1, §6.3; T12) | `core.0006_outbox_claim_token` |
 | core | `0008_forbid_mutation_purge_guc` | GUC-aware `glowderma_forbid_mutation()` (03 §9 row 2); **S-4: `core/db.py` emits the same body, in the same commit, before any app trigger migration is generated** | `core.0007` |
-| accounts | `0004_customer_device_address_smscode_social` | `Customer`, `Device`, `Address`, `SmsCode`, `CustomerSocialIdentity` (+ `OpClass` GIN index on `LOWER(name)`) | `accounts.0003`, `core.0007` |
+| accounts | `0004_customer_device_address_smscode_social` | `Customer`, `Device`, `Address`, `SmsCode`, `CustomerSocialIdentity` (+ `OpClass` GIN index on `LOWER(name)`) | `accounts.0003`, `core.0008` |
 | accounts | `0005_authsession_customer_fk` | `RunPython` precheck (no stray `customer_id`), `AlterField customer`, `AddField device/previous_refresh_hash/rotated_at`, indexes, check constraint | `accounts.0004` |
 | integrations | `0001_initial` | `WebhookInbox`, `Job`, `IntegrationState` | `accounts.0004` (Job.created_by) |
 | integrations | `0002_webhookinbox_append_only` | `RunSQL(*append_only_trigger_sql("integrations_webhookinbox"))` | `integrations.0001`, **`core.0008`** (so the trigger function already carries the purge GUC; same list as 03 §9 row 5) |
 | integrations | `0003_seed_integration_state` | `RunPython` creating the six provider rows (reverse: delete them) | `integrations.0002` |
 | site_config | `0001_initial` | `SiteSettings` | `accounts.0001` (updated_by) |
 | site_config | `0002_seed_singleton` | `RunPython` `get_or_create(pk=1)` (reverse: noop) | `site_config.0001` |
-| catalog | `0001_initial` | `Category`, `Product` (generated column, GIN index), `ProductStock`, `ProductImage` (deferrable unique), `Banner` | `core.0007`, `accounts.0004` |
-| catalog | `0002_glowderma_ci_collation` | `RunSQL` §6.3 | `catalog.0001` |
-| professionals | `0001_initial` | `Location`, `Professional`, `Service`, `ProfessionalService`, `WorkingHours`, `WorkingHoursOverride`, `BlockedPeriod` | `accounts.0004` |
+| catalog | `0001_initial` | `Category`, `Product` (generated column, GIN index), `ProductStock`, `ProductImage` (deferrable unique), `Banner` | `core.0007`, `accounts.0001` |
+| professionals | `0001_initial` | `Location`, `Professional`, `Service`, `ProfessionalService`, `WorkingHours`, `WorkingHoursOverride`, `BlockedPeriod` | `accounts.0001` |
 
 `INSTALLED_APPS` gains `django.contrib.postgres` (after `django.contrib.staticfiles`, before `rest_framework` — required by `GinIndex`, `ExclusionConstraint` and `DateTimeRangeField`, §6.1) and `glowderma.integrations`, `glowderma.site_config`, `glowderma.catalog`, `glowderma.professionals` (in that order after `glowderma.accounts`); `.importlinter` layers per plan §4.1.
 

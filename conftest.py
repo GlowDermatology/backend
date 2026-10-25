@@ -3,6 +3,7 @@ from collections.abc import Iterator
 import pytest
 from django.conf import settings
 from django.core.cache import cache
+from django.test import override_settings
 from rest_framework.test import APIClient
 
 from glowderma.accounts import tokens
@@ -20,6 +21,13 @@ def clear_cache() -> Iterator[None]:
 @pytest.fixture(scope="session", autouse=True)
 def static_directory() -> None:
     settings.STATIC_ROOT.mkdir(parents=True, exist_ok=True)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def media_root(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+    """Image factories and the demo seeders write real files: keep them out of the repository's MEDIA_ROOT."""
+    with override_settings(MEDIA_ROOT=tmp_path_factory.mktemp("media")):
+        yield
 
 
 def _json_client() -> APIClient:

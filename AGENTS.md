@@ -112,8 +112,16 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
   `nonce-<subject>` or `*`). Adapters never put a secret or bearer token in a URL (POST bodies / `Authorization`
   headers only), retry only on transport errors, and map failures to `OAuthExchangeError`-style typed errors.
 - Demo data: each module registers one idempotent seeder in `glowderma/<module>/seeds.py`
-  (`core.seeding.register_seeder(name, order=…)`); `manage.py seed_demo` runs them in layer order and re-syncs the
-  id sequences. `settings.FAKE_NOW` (env `FAKE_NOW`, local/test only) pins `timeutils.now()` for demos and e2e runs.
+  (`core.seeding.register_seeder(name, order=…)`, orders accounts 10 · integrations 20 · site_config 30 · catalog 40 ·
+  professionals 50 · loyalty 60 · commerce 70 · appointments 80 · notifications 90); `manage.py seed_demo` runs them in
+  one transaction and re-syncs the id sequences, so design rows are inserted with their explicit ids. Shared helpers
+  live in `core.seeding` only — never re-port them: `MockRandom` (the frontend's `createRandom`, vectors pinned),
+  `pinned_clock(instant)` / `ctx.at(instant)` for running services at a design instant, `placeholder_art(kind, tone)`
+  / `ctx.media_placeholder` for image bytes. Seeders look rows up by natural keys, read the demo staff through
+  `get_user_model()` (`admin@glowderma.uz`, id 1; password from `SEED_ADMIN_PASSWORD`), and tolerate a missing
+  lower-layer row (actor `NULL`) so a module seeder runs standalone. The root `conftest.py` `media_root` fixture
+  gives the whole test session a temporary `MEDIA_ROOT`. `settings.FAKE_NOW` (env `FAKE_NOW`, local/test only) pins
+  `timeutils.now()` for demos and e2e runs.
 - Retention jobs delete from `core.db.PURGEABLE_TABLES` only inside `core.db.purge_window()`; the outbox offers
   `outbox.on_dead(topic)` hooks for the orchestrating module to record what a dead message means.
 - Time only via `timeutils.now()` (module attribute, never an imported name). Money: integer so'm

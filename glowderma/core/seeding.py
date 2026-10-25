@@ -16,15 +16,105 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
-from collections.abc import Callable, Iterator
+import math
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from datetime import datetime
+from io import BytesIO
 
 from django.apps import apps
 from django.db import connection
 from django.db.models import AutoField, BigAutoField, Model
+from PIL import Image, ImageDraw
+
+from glowderma.core import timeutils
 
 DEFAULT_ANCHOR = "2026-10-24T12:05:00+05:00"
+
+_MASK = 0xFFFFFFFF
+
+
+class MockRandom:
+    """Python port of the frontend's ``createRandom`` (``frontend/src/data/mock/random.ts``, mulberry32).
+
+    ``Math.imul`` is a 32-bit multiply, ``>>>`` a logical shift and ``|``/``^`` operate on the 32-bit pattern,
+    so every intermediate is masked to 32 bits; the final division by 2**32 is exact in IEEE doubles on both
+    sides. ``int``/``chance``/``pick``/``shuffle`` therefore return exactly what the TypeScript returns for
+    the same seed and draw order, which lets the seeders reproduce the frontend's generated mock rows.
+    """
+
+    def __init__(self, seed: int) -> None:
+        self.state = seed & _MASK
+
+    def next(self) -> float:
+        self.state = (self.state + 0x6D2B79F5) & _MASK
+        t = self.state
+        t = ((t ^ (t >> 15)) * (t | 1)) & _MASK
+        t ^= (t + (((t ^ (t >> 7)) * (t | 61)) & _MASK)) & _MASK
+        return ((t ^ (t >> 14)) & _MASK) / 4294967296
+
+    def int(self, low: int, high: int) -> int:
+        return low + math.floor(self.next() * (high - low + 1))
+
+    def chance(self, probability: float) -> bool:
+        return self.next() < probability
+
+    def pick[T](self, items: Sequence[T]) -> T:
+        return items[math.floor(self.next() * len(items))]
+
+    def shuffle[T](self, items: Sequence[T]) -> list[T]:
+        copy = list(items)
+        for i in range(len(copy) - 1, 0, -1):
+            j = math.floor(self.next() * (i + 1))
+            copy[i], copy[j] = copy[j], copy[i]
+        return copy
+
+
+@contextmanager
+def pinned_clock(instant: datetime) -> Iterator[None]:
+    """Run a service at a design instant: ``timeutils.now`` is a module attribute, as the tests patch it."""
+    original: Callable[[], datetime] = timeutils.now
+    timeutils.now = lambda: instant
+    try:
+        yield
+    finally:
+        timeutils.now = original
+
+
+_ART_COLOURS: dict[str, tuple[int, int, int]] = {
+    "dropper": (214, 178, 196),
+    "box": (226, 206, 186),
+    "texture": (239, 226, 220),
+    "tube": (178, 206, 214),
+    "pump": (188, 214, 196),
+    "jar": (226, 196, 176),
+    "toner": (196, 206, 226),
+    "portrait": (222, 214, 206),
+    "banner": (206, 222, 214),
+}
+_TONE_COLOURS: dict[str, tuple[int, int, int]] = {
+    "default": (255, 255, 255),
+    "night": (52, 48, 86),
+    "dark-cap": (48, 48, 52),
+}
+PLACEHOLDER_SIDE = 96
+
+
+def placeholder_art(kind: str, tone: str = "default") -> bytes:
+    """A small WebP per art kind/tone — the seeders' stand-in for product, banner and profile photos.
+
+    Deterministic bytes for a given ``(kind, tone)``, so re-running a seeder reproduces the same content hash.
+    """
+    background = _ART_COLOURS.get(kind, (220, 220, 220))
+    accent = _TONE_COLOURS.get(tone, _TONE_COLOURS["default"])
+    image = Image.new("RGB", (PLACEHOLDER_SIDE, PLACEHOLDER_SIDE), background)
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((28, 20, 68, 84), radius=10, fill=accent)
+    draw.rectangle((36, 10, 60, 22), fill=accent)
+    output = BytesIO()
+    image.save(output, format="WEBP", quality=80, method=4)
+    return output.getvalue()
 
 
 @dataclass(frozen=True)
@@ -36,10 +126,22 @@ class SeedContext:
     keep_open: bool
     """Push seeded open reservations/holds past the real clock so the expiry job does not cancel them."""
 
+    def at(self, instant: datetime) -> AbstractContextManager[None]:
+        """``with ctx.at(instant):`` — run services with ``timeutils.now()`` pinned to a design instant."""
+        return pinned_clock(instant)
+
+    def random(self, seed: int) -> MockRandom:
+        """The frontend's ``createRandom(seed)``."""
+        return MockRandom(seed)
+
+    def media_placeholder(self, kind: str, tone: str = "default") -> bytes:
+        return placeholder_art(kind, tone)
+
 
 Seeder = Callable[[SeedContext], None]
 
 _registry: dict[str, tuple[int, Seeder]] = {}
+_TAG = "_glowderma_seeder"
 
 
 def register_seeder(name: str, *, order: int) -> Callable[[Seeder], Seeder]:
@@ -47,6 +149,7 @@ def register_seeder(name: str, *, order: int) -> Callable[[Seeder], Seeder]:
         if name in _registry:
             raise ValueError(f"Seeder {name!r} is already registered")
         _registry[name] = (order, seeder)
+        setattr(seeder, _TAG, (name, order))
         return seeder
 
     return decorate
@@ -59,17 +162,26 @@ def registered_seeders() -> list[tuple[str, int, Seeder]]:
 
 
 def discover_seeders() -> list[str]:
-    """Import ``<app>.seeds`` for every installed glowderma app that has one; returns the modules imported."""
-    imported: list[str] = []
+    """Import ``<app>.seeds`` for every installed glowderma app that has one; returns the modules found.
+
+    Registration happens at import time, so a module imported while a test had swapped the registry out would
+    otherwise stay unregistered for the rest of the process: every tagged seeder of a discovered module is
+    (re-)entered into the current registry, which makes discovery idempotent.
+    """
+    found: list[str] = []
     for config in apps.get_app_configs():
         if not config.name.startswith("glowderma."):
             continue
         module_name = f"{config.name}.seeds"
         if importlib.util.find_spec(module_name) is None:
             continue
-        importlib.import_module(module_name)
-        imported.append(module_name)
-    return imported
+        module = importlib.import_module(module_name)
+        for attribute in vars(module).values():
+            tag = getattr(attribute, _TAG, None)
+            if tag is not None and callable(attribute):
+                _registry.setdefault(tag[0], (tag[1], attribute))
+        found.append(module_name)
+    return found
 
 
 def run_seeders(context: SeedContext) -> list[str]:

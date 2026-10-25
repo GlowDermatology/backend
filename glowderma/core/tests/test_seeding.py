@@ -1,22 +1,29 @@
+import sys
+from collections.abc import Iterator
 from datetime import datetime
-from io import StringIO
+from io import BytesIO, StringIO
+from pathlib import Path
 
 import pytest
+from django.apps import apps
 from django.core.management import CommandError, call_command
+from PIL import Image
 
-from glowderma.core import seeding
+from glowderma.core import seeding, timeutils
 from glowderma.core.models import AuditEntry, IdempotencyRecord
-from glowderma.core.seeding import SeedContext, register_seeder, registered_seeders, run_seeders
+from glowderma.core.seeding import MockRandom, SeedContext, register_seeder, registered_seeders, run_seeders
 
 ANCHOR = datetime.fromisoformat(seeding.DEFAULT_ANCHOR)
 
 
-@pytest.fixture(autouse=True)
-def isolated_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.fixture
+def isolated_registry(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """A throwaway registry; ``discover_seeders()`` heals the real one afterwards (see the discovery test)."""
     monkeypatch.setattr(seeding, "_registry", {})
+    yield
 
 
-def test_seeders_run_in_order_then_name() -> None:
+def test_seeders_run_in_order_then_name(isolated_registry: None) -> None:
     calls: list[str] = []
 
     @register_seeder("beta", order=10)
@@ -37,7 +44,7 @@ def test_seeders_run_in_order_then_name() -> None:
     assert calls == ["core", "alpha", "beta"]
 
 
-def test_duplicate_seeder_name_is_rejected() -> None:
+def test_duplicate_seeder_name_is_rejected(isolated_registry: None) -> None:
     @register_seeder("dup", order=1)
     def first(context: SeedContext) -> None:
         pass
@@ -49,8 +56,89 @@ def test_duplicate_seeder_name_is_rejected() -> None:
             pass
 
 
-def test_discover_seeders_imports_only_existing_modules() -> None:
-    assert seeding.discover_seeders() == []  # no module ships seeds.py yet
+def _apps_with_seeds() -> set[str]:
+    return {
+        f"{config.name}.seeds"
+        for config in apps.get_app_configs()
+        if config.name.startswith("glowderma.") and (Path(config.path) / "seeds.py").is_file()
+    }
+
+
+def test_discover_seeders_finds_every_seeds_module_and_heals_the_registry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected = _apps_with_seeds()
+    assert set(seeding.discover_seeders()) == expected
+    assert expected <= set(sys.modules)
+    # A registry swapped out after the modules were imported (a test fixture, a reload) is refilled.
+    monkeypatch.setattr(seeding, "_registry", {})
+    assert set(seeding.discover_seeders()) == expected
+    healed = {seeder.__module__ for _, _, seeder in registered_seeders()}
+    assert healed == expected
+    assert seeding.discover_seeders() == sorted(expected, key=list(seeding.discover_seeders()).index)
+
+
+def test_mock_random_matches_the_frontend_vectors() -> None:
+    # Printed by node from frontend/src/data/mock/random.ts: createRandom(seed).next() × 5.
+    vectors = {
+        1: [
+            0.6270739405881613,
+            0.002735721180215478,
+            0.5274470399599522,
+            0.9810509674716741,
+            0.9683778982143849,
+        ],
+        248: [
+            0.925356333842501,
+            0.7136159487999976,
+            0.1818826668895781,
+            0.9284277136903256,
+            0.13922672229819,
+        ],
+        4812: [
+            0.7404222865588963,
+            0.2791005386970937,
+            0.2148161947261542,
+            0.7022200578358024,
+            0.7818405847065151,
+        ],
+        485: [
+            0.4356456738896668,
+            0.5443729809485376,
+            0.5117773441597819,
+            0.651210536248982,
+            0.7351113725453615,
+        ],
+    }
+    for seed, expected in vectors.items():
+        random = MockRandom(seed)
+        assert [random.next() for _ in range(5)] == expected
+    random = MockRandom(97)
+    assert [random.int(0, 60), random.int(1, 12), random.int(1, 28)] == [34, 3, 24]
+    assert random.chance(0.75) is True
+    assert random.pick(["a", "b", "c", "d"]) == "b"
+    assert MockRandom(7).shuffle([1, 2, 3, 4, 5, 6]) == [5, 2, 3, 4, 6, 1]
+    assert MockRandom(2**40 + 5).next() == MockRandom(5).next()  # seed >>> 0
+
+
+def test_pinned_clock_and_context_helpers() -> None:
+    original = timeutils.now
+    instant = datetime(2026, 3, 1, 9, 30, tzinfo=timeutils.TASHKENT)
+    context = SeedContext(anchor=ANCHOR, keep_open=False)
+    with context.at(instant):
+        assert timeutils.now() == instant
+    assert timeutils.now is original
+    with pytest.raises(RuntimeError), seeding.pinned_clock(instant):
+        raise RuntimeError("boom")
+    assert timeutils.now is original
+    assert context.random(248).next() == MockRandom(248).next()
+    art = context.media_placeholder("dropper", "night")
+    assert art == seeding.placeholder_art("dropper", "night")
+    assert art != seeding.placeholder_art("dropper")
+    with Image.open(BytesIO(art)) as image:
+        assert image.format == "WEBP"
+        assert image.size == (seeding.PLACEHOLDER_SIDE, seeding.PLACEHOLDER_SIDE)
+    assert seeding.placeholder_art("unknown-kind", "unknown-tone")  # falls back to grey
 
 
 @pytest.mark.django_db
@@ -79,13 +167,33 @@ def test_reset_sequences_returns_empty_tables_to_their_start() -> None:
 
 
 @pytest.mark.django_db
-def test_seed_demo_command_runs_and_validates_anchor() -> None:
-    out = StringIO()
-    with pytest.raises(CommandError, match="--force"):
-        call_command("seed_demo", stdout=out)  # pytest-django runs with DEBUG=False
-    call_command("seed_demo", force=True, stdout=out)
-    assert "Sequences re-synced" in out.getvalue()
-    with pytest.raises(CommandError, match="timezone offset"):
-        call_command("seed_demo", anchor="2026-10-24T12:05:00", force=True)
-    with pytest.raises(CommandError, match="ISO 8601"):
-        call_command("seed_demo", anchor="soon", force=True)
+def test_seed_demo_command_runs_and_validates_anchor(isolated_registry: None) -> None:
+    # The command re-discovers the real seeders; this test only checks the command's own behaviour, so the
+    # discovered seeders are replaced by a probe after discovery.
+    seen: list[SeedContext] = []
+
+    def probe(context: SeedContext) -> None:
+        seen.append(context)
+
+    real_discover = seeding.discover_seeders
+
+    def discover_then_probe() -> list[str]:
+        found = real_discover()
+        seeding._registry.clear()
+        seeding._registry["probe"] = (1, probe)
+        return found
+
+    seeding.discover_seeders = discover_then_probe
+    try:
+        out = StringIO()
+        with pytest.raises(CommandError, match="--force"):
+            call_command("seed_demo", stdout=out)  # pytest-django runs with DEBUG=False
+        call_command("seed_demo", force=True, stdout=out)
+        assert "Sequences re-synced" in out.getvalue()
+        assert len(seen) == 1 and seen[0].anchor == ANCHOR and seen[0].keep_open
+        with pytest.raises(CommandError, match="timezone offset"):
+            call_command("seed_demo", anchor="2026-10-24T12:05:00", force=True)
+        with pytest.raises(CommandError, match="ISO 8601"):
+            call_command("seed_demo", anchor="soon", force=True)
+    finally:
+        seeding.discover_seeders = real_discover

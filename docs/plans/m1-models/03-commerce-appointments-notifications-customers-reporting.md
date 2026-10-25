@@ -1947,29 +1947,36 @@ SELECT id FROM notifications_campaign WHERE state = 'sending' AND updated_at < n
 - `manage.py seed_demo [--anchor 2026-10-24T12:05:00+05:00] [--no-keep-open] [--only <module>[,…]]`. Refuses to run
   unless every provider is in `fake` mode and `DEBUG` or `ALLOW_SEED_DEMO=1` (never on a production database by
   accident). `manage.py seed_policy` (02 §1.1) stays separate and is called by `seed_demo` first.
-- Registry: every module may ship `glowderma/<module>/seed.py` with `def seed(ctx: SeedContext) -> None`; the command
-  runs them in layer order `accounts → integrations → site_config → catalog → professionals → loyalty → commerce →
-  appointments → notifications` (`payments`, `delivery`, `customers`, `reporting` have nothing to seed: their rows are
-  produced by the replayed flows).
+- Registry (as built in `core.seeding`): every module may ship `glowderma/<module>/seeds.py` with one function
+  decorated `@register_seeder("<module>", order=…)`; `seed_demo` imports them (`discover_seeders()`) and runs them in
+  `order` = layer order `accounts (10) → integrations (20) → site_config (30) → catalog (40) → professionals (50) →
+  loyalty (60) → commerce (70) → appointments (80) → notifications (90)` (`payments`, `delivery`, `customers`,
+  `reporting` have nothing to seed: their rows are produced by the replayed flows). Actual flags: `--anchor`,
+  `--no-keep-open`, `--sequences-only`, and `--force` (required when `DEBUG` is False; there is no `--only` and no
+  `ALLOW_SEED_DEMO`). The whole run happens inside one transaction; `reset_sequences()` runs once at the end.
 - **Replay through services.** Business rows are created by calling the real services (`commerce.services.checkout`,
   `confirm_payment_effects`, `apply_bts_status`, `cancel_order`, `transition`, `loyalty.services.record_store_purchase`,
   `adjust`, `appointments.services.*`, `notifications.services.*`) under a controllable clock, so events, ledger
   entries, purchases, holds, payments, shipments and inbox rows come out of production code paths and the vectors
   are asserted against the same code the API runs. Only configuration tables (categories, products, specialists,
   services, hours, templates, segments, settings, customers, devices, policy versions) are inserted directly.
-- `SeedContext` helpers (`glowderma/core/seeding.py`): `ctx.at(iso)` — context manager that sets `timeutils.now` to a
-  fixed instant (module attribute, as the tests do) and restores it; `ctx.deliver(topic, at=…)` — claims and delivers
-  the pending outbox messages of one topic inline (same claim/complete code as `core.tasks`, filtered by topic; the
-  dispatcher's `.delay` on commit is disabled for the run); `ctx.sequence(table, next_id)` — `setval(seq, next_id − 1,
-  true)` (or `setval(seq, next_id, false)` when `next_id = 1`) right before a design row so its natural id is the one
-  the contract vectors cite; `ctx.random(seed)` — a Python port of the frontend's `createRandom` (mulberry32,
-  32-bit arithmetic with `& 0xFFFFFFFF`, `Math.imul` semantics) so generated people/products/appointments match the
-  mock byte for byte; `ctx.media_placeholder(kind, tone)` — generates a small WebP (Pillow) per product-art kind.
+- `SeedContext` helpers (`glowderma/core/seeding.py`, as built): `ctx.at(instant)` (= `pinned_clock(instant)`) — context
+  manager that sets `timeutils.now` to a fixed aware datetime (module attribute, as the tests do) and restores it;
+  `ctx.random(seed)` (= `MockRandom(seed)`) — the Python port of the frontend's `createRandom` (mulberry32, 32-bit
+  arithmetic with `& 0xFFFFFFFF`, `Math.imul` semantics; `next/int/chance/pick/shuffle`; vectors pinned in
+  `core/tests/test_seeding.py`) so generated people/products/appointments match the mock byte for byte;
+  `ctx.media_placeholder(kind, tone)` (= `placeholder_art`) — a deterministic 96 px WebP per art kind/tone.
+  **Not provided:** `ctx.sequence` — design rows are inserted with explicit ids and `reset_sequences()` re-syncs every
+  serial sequence at the end of the run (where later sections say `ctx.sequence(table, n)`, read "insert the following
+  rows with explicit ids from n"); `ctx.deliver` — a seeder that must replay an outbox effect calls the handler
+  directly (`core.outbox` registry) under `ctx.at(...)`, since the outbox dispatcher's on-commit `.delay` is inert
+  without a worker anyway. Seeders that write media files rely on the root `conftest.py` `media_root` fixture
+  (session-scoped temporary `MEDIA_ROOT`) in tests.
 - Idempotent by natural keys: staff `email`, customer `phone`, product `billz_id`, category `slug`, professional
   `name`, service `name_uz`, order `id` (a scenario whose order id exists is skipped entirely), appointment
   `(professional, start)`, campaign `(title, created_at)`, segment `name`, policy `version`, Billz purchase
   `billz_sale_id`. Re-running the command on a seeded database makes no changes and prints what it skipped.
-- Explicit-id policy: design rows get the ids the contract or the frontend mock cites (via `ctx.sequence`);
+- Explicit-id policy: design rows get the ids the contract or the frontend mock cites (inserted with explicit ids);
   generated rows take ids from 1000 upwards for events/ledger/appointments/inbox (the sequences are parked at 999
   before the first generated row), and their natural ranges elsewhere. After every module seeder, §7.9 resets the
   sequences.
@@ -2270,14 +2277,14 @@ glowderma.commerce, glowderma.appointments, glowderma.notifications, glowderma.c
 
 | # | App · migration | Contents | Depends on |
 |---|---|---|---|
-| 1 | `core.0007_pg_trgm` | `CREATE EXTENSION IF NOT EXISTS pg_trgm` (01 §6.1) | `core.0006` |
+| 1 | `core.0007_db_extensions` | `pg_trgm`, `btree_gist`, ICU collation `glowderma_ci` (01 §6.1, T12) | `core.0006` |
 | 2 | `core.0008_forbid_mutation_purge_guc` | `CREATE OR REPLACE FUNCTION glowderma_forbid_mutation()` — raises unless `current_setting('glowderma.allow_purge', true) = 'on'` **and** `TG_TABLE_NAME IN ('integrations_webhookinbox', 'core_auditentry')`, in which case it returns `OLD` (DELETE) / `NEW` (UPDATE) (T6). **`core/db.py` must be updated to emit this same body** in `append_only_trigger_sql`, because every later trigger migration re-runs `CREATE OR REPLACE FUNCTION` and would otherwise revert the GUC support (open point S-4) | `core.0007` |
-| 3 | `accounts.0004_customer_device_address_smscode_social` | 01 §7 | `accounts.0003`, `core.0007` |
+| 3 | `accounts.0004_customer_device_address_smscode_social` | 01 §7 | `accounts.0003`, `core.0008` |
 | 4 | `accounts.0005_authsession_customer_fk` | 01 §7 | `accounts.0004` |
 | 5 | `integrations.0001_initial` · `0002_webhookinbox_append_only` · `0003_seed_integration_state` | 01 §7 | `accounts.0004`, `core.0008` |
 | 6 | `site_config.0001_initial` · `0002_seed_singleton` | 01 §7 | `accounts.0001` |
-| 7 | `catalog.0001_initial` · `0002_glowderma_ci_collation` | 01 §7 (generated column, GIN, deferrable unique, collation) | `core.0007`, `accounts.0004` |
-| 8 | `professionals.0001_initial` | 01 §7 | `accounts.0004` |
+| 7 | `catalog.0001_initial` | 01 §7 (generated column, GIN, deferrable unique; collation from `core.0007`) | `core.0007`, `accounts.0001` |
+| 8 | `professionals.0001_initial` | 01 §7 | `accounts.0001` |
 | 9 | `commerce.0001_initial` | `Cart`, `CartItem`, `Order`, `OrderItem`, `OrderEvent`, `StockReservation` (+ all constraints/indexes above) | `accounts.0004`, `catalog.0001` |
 | 10 | `commerce.0002_order_sequence` | `RunSQL("ALTER SEQUENCE commerce_order_id_seq START WITH 10001 RESTART WITH 10001", reverse "… START WITH 1 RESTART WITH 1")` | `commerce.0001` |
 | 11 | `commerce.0003_orderevent_append_only` | `RunSQL(*append_only_trigger_sql("commerce_orderevent"))` | `commerce.0002`, `core.0008` |
