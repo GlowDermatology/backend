@@ -173,6 +173,32 @@ def test_policy_derived_state_follows_the_seed_timeline() -> None:
         assert plain.state == "expired" and v3.state == "active" and v1.state == "expired"
 
 
+def test_policy_refresh_from_db_re_derives_the_cached_columns() -> None:
+    """The derived columns depend on later rows: a refresh must not keep values read before they existed."""
+    v1 = CashbackPolicyFactory.create(created_at=at(1, 10), effective_from=at(2, 1))
+    assert (v1.superseded_by, v1.effective_to) == (None, None)  # cached in __dict__
+    # created while v1 is still scheduled, so it supersedes v1
+    v2 = CashbackPolicyFactory.create(created_at=at(1, 20), effective_from=at(3, 1))
+    with pinned_clock(at(1, 25)):
+        assert v1.state == "scheduled"  # stale: still the pre-v2 picture
+        v1.refresh_from_db()
+        assert "_effective_to" not in v1.__dict__ and "_superseded_by" not in v1.__dict__
+        assert (v1.superseded_by, v1.effective_to) == (v2.version, v2.effective_from)
+        assert v1.state == "superseded"
+    # a partial refresh and a refresh through a queryset drop the cache too
+    assert v2.effective_to is None  # cached before v3 exists
+    v3 = CashbackPolicyFactory.create(created_at=at(4, 1), effective_from=at(5, 1))
+    assert v2.effective_to is None  # stale until refreshed
+    v2.refresh_from_db(fields=["basis"])
+    assert v2.effective_to == at(5, 1)
+    assert v3.effective_to is None  # cached before v4 exists
+    v4 = CashbackPolicyFactory.create(created_at=at(6, 1), effective_from=at(7, 1))
+    v3.refresh_from_db(from_queryset=CashbackPolicy.objects.with_derived())
+    assert v3.effective_to == at(7, 1) and v3.superseded_by is None
+    assert v4.effective_to is None
+    assert CashbackPolicy.objects.with_derived().get(pk=v1.pk).superseded_by == v1.superseded_by == 2
+
+
 def test_policy_supersession_rule_t4() -> None:
     """``v`` is superseded by the smallest ``w > v`` with ``w.created_at < v.effective_from`` (L-2)."""
     v1 = CashbackPolicyFactory.create(created_at=at(1, 10), effective_from=at(2, 1))

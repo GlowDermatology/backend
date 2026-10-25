@@ -11,6 +11,7 @@ read-only.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime
 from typing import ClassVar, Self
 
@@ -87,7 +88,20 @@ class CashbackPolicy(AppendOnlyModel):
         return f"Cashback policy v{self.version} ({self.basis}, from {self.effective_from:%Y-%m-%d})"
 
     # Derived columns: ``with_derived()`` attaches them as annotations (Django assigns them through the
-    # setters below); a plain instance loads both lazily with one query.
+    # setters below); a plain instance loads both lazily with one query. They depend on *other* rows (a
+    # later version), so ``refresh_from_db()`` drops the cache and the next read re-derives them.
+    _DERIVED_CACHE_KEYS = ("_superseded_by", "_effective_to")
+
+    def refresh_from_db(
+        self,
+        using: str | None = None,
+        fields: Iterable[str] | None = None,
+        from_queryset: models.QuerySet[Self] | None = None,
+    ) -> None:
+        for key in self._DERIVED_CACHE_KEYS:
+            self.__dict__.pop(key, None)
+        super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
+
     def _load_derived(self) -> None:
         derived = CashbackPolicy.objects.with_derived().get(pk=self.pk)
         self.__dict__["_superseded_by"] = derived.__dict__["_superseded_by"]
