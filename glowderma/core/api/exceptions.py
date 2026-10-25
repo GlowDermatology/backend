@@ -220,6 +220,8 @@ def envelope_exception_handler(exc: Exception, context: dict[str, Any]) -> Respo
     if isinstance(exc, exceptions.ValidationError):
         code = "validation_error"
         errors = flatten_errors(exc.detail)
+    elif isinstance(exc, exceptions.ParseError) and code == "parse_error":
+        message = MESSAGES.get("parse_error", MESSAGES["validation_error"])
     elif isinstance(exc, (exceptions.NotAuthenticated, exceptions.AuthenticationFailed)):
         code = "not_authenticated"
         response.status_code = 401

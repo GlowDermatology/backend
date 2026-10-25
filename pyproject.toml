@@ -22,6 +22,7 @@ cache-dir = ".uv-cache"
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "config.settings.test"
+markers = ["redis_integration: tests against the development Redis instance"]
 
 [tool.mypy]
 python_version = "3.14"

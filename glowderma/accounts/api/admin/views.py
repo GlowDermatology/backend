@@ -172,9 +172,10 @@ class ChangePasswordView(AdminAPIView):
     def post(self, request: Request) -> Response:
         guard = LoginGuard()
         hashed = email_hash(cast(StaffUser, request.user).email)
-        guard.check("change_password", hashed)
+        guard.check("change_password", hashed, reserve=False)
         serializer = ChangePasswordSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
+        guard.check("change_password", hashed)
         with transaction.atomic():
             user = StaffUser.objects.select_for_update().get(pk=cast(StaffUser, request.user).pk)
             if not user.check_password(serializer.validated_data["current_password"]):
@@ -183,6 +184,8 @@ class ChangePasswordView(AdminAPIView):
                     {"current_password": [ErrorDetail("Joriy parol noto‘g‘ri.", code="password_incorrect")]}
                 )
             if user.check_password(serializer.validated_data["new_password"]):
+                # Current credentials were verified; this validation error is not a failed guess.
+                guard.reset("change_password", hashed)
                 raise ValidationError(
                     {
                         "new_password": [

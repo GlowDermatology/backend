@@ -225,6 +225,32 @@ def test_auth_rejects_form_content_type() -> None:
     assert response.status_code == 415
 
 
+def test_real_json_parser_uses_uzbek_error_message() -> None:
+    response = APIClient().post(BASE + "login/", b"{bad", content_type="application/json")
+    assert response.status_code == 400
+    assert response.data["code"] == "parse_error"
+    assert response.data["message"] == "Maydonlarni tekshiring."
+    assert "JSON parse error" not in str(response.data)
+    assert "Expecting property" not in str(response.data)
+
+
+@pytest.mark.parametrize("new_password", ["12", PASSWORD])
+def test_new_password_validation_does_not_spend_attempt_budget(user: StaffUser, new_password: str) -> None:
+    from django.core.cache import cache
+
+    client = APIClient()
+    data = login(client).data
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {data['access']}")
+    for _ in range(6):
+        response = client.post(
+            BASE + "change-password/",
+            {"current_password": PASSWORD, "new_password": new_password},
+            format="json",
+        )
+        assert response.status_code == 400
+    assert cache.get(f"auth:attempt:change_password:{email_hash(user.email)}", 0) == 0
+
+
 def test_locked_password_change_does_not_compare_passwords(user: StaffUser) -> None:
     client = APIClient()
     data = login(client).data

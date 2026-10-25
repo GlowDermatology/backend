@@ -4,7 +4,8 @@ from typing import Any
 
 from django.contrib import admin
 from django.contrib.admin.forms import AdminAuthenticationForm
-from django.core.cache import cache
+from django.core.cache import cache, caches
+from django.core.cache.backends.redis import RedisCache
 from django.core.exceptions import ValidationError
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from rest_framework.exceptions import Throttled
@@ -18,17 +19,26 @@ def email_hash(email: str) -> str:
 
 
 def _increment(key: str, timeout: int) -> int:
-    cache.add(key, 0, timeout=timeout)
+    backend = caches["default"]
+    if isinstance(backend, RedisCache):
+        raw_key = backend.make_and_validate_key(key)
+        client = backend._cache.get_client(raw_key, write=True)
+        with client.pipeline(transaction=True) as pipeline:
+            pipeline.incr(raw_key)
+            pipeline.expire(raw_key, timeout, nx=True)
+            return int(pipeline.execute()[0])
+    # LocMem's increment checks expiry while holding its lock and never creates a missing key.
+    backend.add(key, 0, timeout=timeout)
     try:
-        return int(cache.incr(key))
+        return int(backend.incr(key))
     except ValueError:
-        if cache.add(key, 1, timeout=timeout):
+        if backend.add(key, 1, timeout=timeout):
             return 1
-        return int(cache.incr(key))
+        return int(backend.incr(key))
 
 
 class LoginGuard:
-    def check(self, scope: str, hashed_email: str) -> None:
+    def check(self, scope: str, hashed_email: str, *, reserve: bool = True) -> None:
         key = f"auth:lock:{scope}:{hashed_email}"
         expiry = cache.get(key)
         if expiry is not None:
@@ -37,7 +47,7 @@ class LoginGuard:
                 raise Throttled(wait=wait)
             cache.delete(key)
         # Reserve an attempt before authentication so concurrent guesses share the limit.
-        if _increment(f"auth:attempt:{scope}:{hashed_email}", 60) > 5:
+        if reserve and _increment(f"auth:attempt:{scope}:{hashed_email}", 60) > 5:
             raise Throttled(wait=60)
 
     def record_failure(self, scope: str, hashed_email: str) -> None:

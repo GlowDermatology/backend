@@ -108,7 +108,7 @@ def test_admin_auth_matrix(django_capture_on_commit_callbacks: Any) -> None:
         session_client = APIClient()
         session_client.force_login(user)
         assert getattr(session_client, method)(route_path, {}, format="json").status_code == expected, (
-            path,
+            route_path,
             method,
         )
 
