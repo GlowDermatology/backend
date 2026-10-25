@@ -1,7 +1,10 @@
 import base64
 import importlib
+import re
+import secrets
 import sys
 from collections.abc import Callable, Iterator
+from pathlib import Path
 from types import ModuleType
 from typing import cast
 
@@ -73,6 +76,60 @@ def test_production_rejects_placeholder_secrets(
     monkeypatch.setenv("SECRET_KEY", "change-me-" * 8)
     with pytest.raises(ImproperlyConfigured, match="SECRET_KEY"):
         load_production()
+
+
+# Every secret-looking value that was ever committed (.env.example, CI workflow history).
+COMMITTED_SECRET_KEY = "OFMmKSy50zW12DnugPKJmF4b0rNGeIvkm9SNWNjO9NRAN97Dmlr3CJH0tfi4Z6Kr"  # noqa: S105
+COMMITTED_INTERNAL_SECRET = "slqp9tXiEipMGqSzlvPcW9p0hBnle7sDTJSOQKgmZHNHdwYK"  # noqa: S105
+COMMITTED_JWT_KEYS = (
+    "4zhPFokAL4QMFGTQpn-XIhwA3i4TYB9SgcekVIfjG2U",  # .env.example
+    "oQAQ0h7x354qUJXY9NmXu9SBoKbHt5NF9oKkakDsjdk",  # former CI placeholder
+)
+
+
+@pytest.mark.parametrize(
+    "variable,value",
+    [
+        ("SECRET_KEY", COMMITTED_SECRET_KEY),
+        ("SECRET_KEY", COMMITTED_INTERNAL_SECRET),
+        ("INTERNAL_API_SECRET", COMMITTED_INTERNAL_SECRET),
+        ("INTERNAL_API_SECRET", COMMITTED_SECRET_KEY),
+        *[("JWT_SIGNING_KEYS", '{"test":"' + key + '"}') for key in COMMITTED_JWT_KEYS],
+        # the same key bytes with standard base64 padding/alphabet are still the same key
+        *[
+            ("JWT_SIGNING_KEYS", '{"test":"' + key.replace("-", "+").replace("_", "/") + "=" + '"}')
+            for key in COMMITTED_JWT_KEYS
+        ],
+    ],
+)
+def test_production_rejects_committed_placeholder_values(
+    production_env: None, monkeypatch: pytest.MonkeyPatch, variable: str, value: str
+) -> None:
+    """AGENTS.md: "No secrets in the repo ... .env.example lists them with dummy values" - a committed dummy
+    that production accepts would let anyone with repo access mint staff tokens, so production refuses it."""
+    monkeypatch.setenv(variable, value)
+    with pytest.raises(ImproperlyConfigured, match=f"{variable}.*placeholder"):
+        load_production()
+
+
+def test_env_example_jwt_key_is_valid_but_rejected_by_production(production_env: None) -> None:
+    """The .env.example key must stay a *valid* 32-byte base64url example (local boots with it) and must be
+    one of the keys production refuses, otherwise `cp .env.example .env` could run production unchanged."""
+    env_example = (Path(__file__).resolve().parents[3] / ".env.example").read_text()
+    match = re.search(r'^JWT_SIGNING_KEYS=\{"dev":"([A-Za-z0-9_-]+)"\}$', env_example, re.MULTILINE)
+    assert match is not None
+    encoded = match.group(1)
+    decoded = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+    assert len(decoded) == 32
+    assert decoded in load_production().KNOWN_PLACEHOLDER_JWT_KEYS
+
+
+def test_ci_workflow_commits_no_secret_literals() -> None:
+    workflow = (Path(__file__).resolve().parents[3] / ".github" / "workflows" / "ci.yml").read_text()
+    for literal in (COMMITTED_SECRET_KEY, COMMITTED_INTERNAL_SECRET, *COMMITTED_JWT_KEYS):
+        assert literal not in workflow
+    assert "openssl rand" in workflow
+    assert 'SECURE_HSTS_PRELOAD: "true"' in workflow
 
 
 def test_production_rejects_unknown_active_kid(production_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -258,19 +315,22 @@ def test_log_level_env_validated_at_startup(
 DEPLOY_ENV = {
     "SECURE_SSL_REDIRECT": "true",
     "SECURE_HSTS_SECONDS": "31536000",
+    # Preload is an explicit opt-in (never implied by SECURE_HSTS_SECONDS); CI sets it the same way.
+    "SECURE_HSTS_PRELOAD": "true",
     "PUBLIC_MEDIA_BASE_URL": "https://media.example.uz/media/",
     "ALLOWED_HOSTS": "api.example.uz",
     "ADMIN_API_ALLOWED_NETS": "10.0.0.0/8",
-    # Same shape as the CI placeholder: >= 50 chars, >= 5 unique, no "django-insecure-" prefix (W009).
-    "SECRET_KEY": "OFMmKSy50zW12DnugPKJmF4b0rNGeIvkm9SNWNjO9NRAN97Dmlr3CJH0tfi4Z6Kr",
 }
 NOT_OVERRIDDEN = {"DATABASES", "CACHES", "LOGGING", "INSTALLED_APPS"}
 
 
 def test_production_passes_deploy_checks(production_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Mirrors the CI step `manage.py check --deploy --fail-level WARNING` with production settings."""
+    """Mirrors the CI step `manage.py check --deploy --fail-level WARNING` with production settings.
+    Secrets are generated like in CI (>= 50 chars, >= 5 unique, no "django-insecure-" prefix for W009)."""
     for name, value in DEPLOY_ENV.items():
         monkeypatch.setenv(name, value)
+    monkeypatch.setenv("SECRET_KEY", secrets.token_hex(32))
+    monkeypatch.setenv("INTERNAL_API_SECRET", secrets.token_hex(24))
     module = load_production()
     assert module.SILENCED_SYSTEM_CHECKS == ["security.W008"]
     assert module.SECURE_HSTS_INCLUDE_SUBDOMAINS is True
@@ -295,6 +355,26 @@ def test_production_without_hsts_warns_only_about_hsts(
     assert module.SECURE_HSTS_SECONDS == 0
     assert module.SECURE_HSTS_INCLUDE_SUBDOMAINS is False
     assert module.SECURE_HSTS_PRELOAD is False
+
+
+def test_hsts_preload_is_never_implied(production_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Turning HSTS on enables includeSubDomains (W005) but not preload: that commitment is near-irreversible
+    and must be an explicit SECURE_HSTS_PRELOAD=true; until then `check --deploy` keeps reporting W021."""
+    for name, value in DEPLOY_ENV.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.delenv("SECURE_HSTS_PRELOAD")
+    monkeypatch.setenv("SECRET_KEY", secrets.token_hex(32))
+    module = load_production()
+    assert module.SECURE_HSTS_SECONDS == 31536000
+    assert module.SECURE_HSTS_INCLUDE_SUBDOMAINS is True
+    assert module.SECURE_HSTS_PRELOAD is False
+    overrides = {
+        name: getattr(module, name) for name in dir(module) if name.isupper() and name not in NOT_OVERRIDDEN
+    }
+    with override_settings(**overrides):
+        messages = checks.run_checks(include_deployment_checks=True)
+        ids = {m.id for m in messages if m.level >= checks.WARNING and not m.is_silenced()}
+    assert ids == {"security.W021"}
 
 
 def test_gunicorn_config_logs_request_id() -> None:

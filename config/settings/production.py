@@ -9,11 +9,35 @@ from .base import *  # noqa: F403
 from .base import database_config, redis_db_url
 
 DEBUG = False
+
+
+def _decode_jwt_key(encoded: str) -> bytes:
+    return base64.b64decode(encoded + "=" * (-len(encoded) % 4), altchars=b"-_", validate=True)
+
+
+# Values that were ever committed to this repository (.env.example, CI workflow history). They are public, so
+# production refuses to boot with them even though they satisfy the length checks below.
+KNOWN_PLACEHOLDER_SECRETS = frozenset(
+    {
+        "OFMmKSy50zW12DnugPKJmF4b0rNGeIvkm9SNWNjO9NRAN97Dmlr3CJH0tfi4Z6Kr",
+        "slqp9tXiEipMGqSzlvPcW9p0hBnle7sDTJSOQKgmZHNHdwYK",
+    }
+)
+KNOWN_PLACEHOLDER_JWT_KEYS = frozenset(
+    _decode_jwt_key(encoded)
+    for encoded in (
+        "4zhPFokAL4QMFGTQpn-XIhwA3i4TYB9SgcekVIfjG2U",  # .env.example
+        "oQAQ0h7x354qUJXY9NmXu9SBoKbHt5NF9oKkakDsjdk",  # former CI placeholder
+    )
+)
+
 SECRET_KEY = env_str("SECRET_KEY")
 INTERNAL_API_SECRET = env_str("INTERNAL_API_SECRET")
 for name, secret in (("SECRET_KEY", SECRET_KEY), ("INTERNAL_API_SECRET", INTERNAL_API_SECRET)):
     if len(secret) < 32 or "change-me" in secret.lower():
         raise ImproperlyConfigured(f"{name} must be at least 32 characters without placeholders")
+    if secret in KNOWN_PLACEHOLDER_SECRETS:
+        raise ImproperlyConfigured(f"{name} is a committed placeholder value; generate a real secret")
 raw_keys = env_json("JWT_SIGNING_KEYS")
 if not isinstance(raw_keys, dict) or not raw_keys:
     raise ImproperlyConfigured("JWT_SIGNING_KEYS must be a nonempty JSON object")
@@ -22,11 +46,15 @@ for kid, encoded in raw_keys.items():
     try:
         if not isinstance(encoded, str):
             raise ValueError
-        decoded = base64.b64decode(encoded + "=" * (-len(encoded) % 4), altchars=b"-_", validate=True)
+        decoded = _decode_jwt_key(encoded)
         if len(decoded) < 32:
             raise ValueError
     except (ValueError, binascii.Error) as exc:
         raise ImproperlyConfigured("JWT_SIGNING_KEYS values must decode to at least 32 bytes") from exc
+    if decoded in KNOWN_PLACEHOLDER_JWT_KEYS:
+        raise ImproperlyConfigured(
+            f"JWT_SIGNING_KEYS[{kid!r}] is a committed placeholder key; generate a new one"
+        )
     JWT_SIGNING_KEYS[kid] = decoded
 JWT_ACTIVE_KID = env_str("JWT_ACTIVE_KID")
 if JWT_ACTIVE_KID not in JWT_SIGNING_KEYS:
@@ -44,9 +72,11 @@ DJANGO_ADMIN_ENABLED = env_bool("DJANGO_ADMIN_ENABLED", False)
 SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", False)
 SILENCED_SYSTEM_CHECKS = ["security.W008"]
 SECURE_HSTS_SECONDS = env_int("SECURE_HSTS_SECONDS", 0)
-# Django's deploy checks (W005/W021) expect both once HSTS is on; the edge proxy forwards the header.
+# includeSubDomains follows HSTS (deploy check W005). Preload is an explicit opt-in: submitting the host to
+# the browser preload lists is close to irreversible, so `check --deploy` keeps warning (W021) until an
+# operator sets SECURE_HSTS_PRELOAD=true deliberately.
 SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", SECURE_HSTS_SECONDS > 0)
-SECURE_HSTS_PRELOAD = env_bool("SECURE_HSTS_PRELOAD", SECURE_HSTS_SECONDS > 0)
+SECURE_HSTS_PRELOAD = env_bool("SECURE_HSTS_PRELOAD", False)
 SESSION_COOKIE_SECURE = CSRF_COOKIE_SECURE = True
 CACHES = {
     "default": {
