@@ -185,20 +185,25 @@ class NotificationCreateSerializer(serializers.Serializer[dict[str, Any]]):
     """The multipart body of ``POST notifications/`` after :func:`form_to_nested` (dotted keys un-dotted)."""
 
     kind = serializers.ChoiceField(choices=enums.NotificationKind.values)
-    title = serializers.CharField(max_length=60, min_length=3)
-    body = serializers.CharField(max_length=180, min_length=5)
+    title = serializers.CharField(
+        max_length=60,
+        min_length=3,
+        error_messages={"min_length": MESSAGES["title_min"], "max_length": MESSAGES["title_max"]},
+    )
+    body = serializers.CharField(
+        max_length=180,
+        min_length=5,
+        error_messages={"min_length": MESSAGES["body_min"], "max_length": MESSAGES["body_max"]},
+    )
     link = NotificationLinkInputSerializer(required=False)
     audience = NotificationAudienceInputSerializer()
     scheduled_at = AwareDateTimeField(required=False, allow_null=True)
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.fields["title"].error_messages.update(
-            min_length=MESSAGES["title_min"], max_length=MESSAGES["title_max"]
-        )
-        self.fields["body"].error_messages.update(
-            min_length=MESSAGES["body_min"], max_length=MESSAGES["body_max"]
-        )
+    def to_internal_value(self, data: Any) -> dict[str, Any]:
+        # A form without any ``audience.*`` key reports ``audience.type`` (the multipart name).
+        if isinstance(data, dict) and "audience" not in data:
+            data = {**data, "audience": {}}
+        return cast(dict[str, Any], super().to_internal_value(data))
 
     def validate_scheduled_at(self, value: Any) -> Any:
         if value is not None and value <= timeutils.now():
