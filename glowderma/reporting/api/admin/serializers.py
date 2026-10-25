@@ -7,6 +7,8 @@ from typing import Any
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
+from glowderma.core import enums, timeutils
+from glowderma.core.api.exceptions import field_error
 from glowderma.core.api.serializers import ActorSerializer
 from glowderma.core.models import AuditEntry
 from glowderma.reporting import selectors
@@ -45,3 +47,83 @@ class AuditLogQuerySerializer(serializers.Serializer[dict[str, Any]]):
 class NavCountsSerializer(serializers.Serializer[dict[str, int]]):
     orders_processing = serializers.IntegerField()
     appointments_pending = serializers.IntegerField()
+
+
+# --- dashboard (contract §2.10) -----------------------------------------------------------------------------
+
+
+class DashboardQuerySerializer(serializers.Serializer[dict[str, Any]]):
+    """``range`` (default ``today``); ``from``/``to`` required iff ``custom``: ``from ≤ to ≤ today``
+    (Tashkent), span ≤ 366 days."""
+
+    range = serializers.ChoiceField(
+        choices=enums.DashboardRange.values, required=False, default=enums.DashboardRange.TODAY
+    )
+    from_ = serializers.DateField(required=False)
+    to = serializers.DateField(required=False)
+
+    def get_fields(self) -> dict[str, serializers.Field[Any, Any, Any, Any]]:
+        fields = super().get_fields()
+        fields["from"] = fields.pop("from_")  # ``from`` is a Python keyword
+        return fields
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        if attrs["range"] != enums.DashboardRange.CUSTOM:
+            attrs.pop("from", None)
+            attrs.pop("to", None)
+            return attrs
+        errors: dict[str, list[Any]] = {}
+        for name in ("from", "to"):
+            if attrs.get(name) is None:
+                errors[name] = [field_error("required")]
+        if errors:
+            raise serializers.ValidationError(errors)
+        first, last = attrs["from"], attrs["to"]
+        today = timeutils.local_date(timeutils.now())
+        if first > last:
+            raise serializers.ValidationError({"from": [field_error("invalid")]})
+        if last > today:
+            raise serializers.ValidationError({"to": [field_error("invalid")]})
+        if (last - first).days + 1 > selectors.CUSTOM_MAX_DAYS:
+            raise serializers.ValidationError({"to": [field_error("invalid")]})
+        return attrs
+
+
+class DashboardBucketSerializer(serializers.Serializer[dict[str, Any]]):
+    start = serializers.DateTimeField()
+    revenue = serializers.IntegerField()
+    orders = serializers.IntegerField()
+
+
+class DashboardStatsSerializer(serializers.Serializer[dict[str, Any]]):
+    orders = serializers.IntegerField()
+    revenue = serializers.IntegerField()
+    new_customers = serializers.IntegerField()
+    total_customers = serializers.IntegerField()
+    deleted_customers = serializers.IntegerField()
+    out_of_stock = serializers.IntegerField()
+
+
+class DashboardAttentionSerializer(serializers.Serializer[dict[str, Any]]):
+    bts_failed = serializers.IntegerField()
+    pending_appointments = serializers.IntegerField()
+    next_appointment_at = serializers.DateTimeField(allow_null=True)
+    new_from_billz = serializers.IntegerField()
+    refunds_needing_action = serializers.IntegerField()
+
+
+class DashboardSerializer(serializers.Serializer[dict[str, Any]]):
+    range = serializers.ChoiceField(choices=enums.DashboardRange.values)
+    from_ = serializers.DateField()
+    to = serializers.DateField()
+    bucket = serializers.ChoiceField(choices=enums.DashboardBucket.values)
+    buckets = DashboardBucketSerializer(many=True)
+    previous_period_orders = serializers.IntegerField()
+    stats = DashboardStatsSerializer()
+    attention = DashboardAttentionSerializer()
+    generated_at = serializers.DateTimeField()
+
+    def get_fields(self) -> dict[str, serializers.Field[Any, Any, Any, Any]]:
+        fields = super().get_fields()
+        fields["from"] = fields.pop("from_")
+        return fields

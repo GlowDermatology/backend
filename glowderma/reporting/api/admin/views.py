@@ -1,4 +1,5 @@
-"""Admin views of `reporting` for the shell: ``GET audit-log/`` (§2.13) and ``GET nav-counts/`` (§2.10)."""
+"""Admin views of `reporting` for the shell: ``GET dashboard/`` and ``GET nav-counts/`` (§2.10), ``GET
+audit-log/`` (§2.13)."""
 
 from __future__ import annotations
 
@@ -12,7 +13,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from glowderma.accounts.api.base import AdminAPIView, AdminGenericViewSet
-from glowderma.core import labels
+from glowderma.core import labels, timeutils
 from glowderma.core.api.schema import ADMIN_ERRORS, EXPORT_PARAM
 from glowderma.core.exports import ExportMixin, format_export_datetime
 from glowderma.core.models import AuditEntry
@@ -20,6 +21,8 @@ from glowderma.reporting import selectors
 from glowderma.reporting.api.admin.serializers import (
     AuditEntrySerializer,
     AuditLogQuerySerializer,
+    DashboardQuerySerializer,
+    DashboardSerializer,
     NavCountsSerializer,
 )
 
@@ -63,3 +66,20 @@ class NavCountsView(AdminAPIView):
     @extend_schema(operation_id="admin_nav_counts", responses={200: NavCountsSerializer, **ADMIN_ERRORS})
     def get(self, request: Request) -> Response:
         return Response(NavCountsSerializer(selectors.nav_counts()).data)
+
+
+class DashboardView(AdminAPIView):
+    @extend_schema(
+        operation_id="admin_dashboard",
+        parameters=[DashboardQuerySerializer],
+        responses={200: DashboardSerializer, **ADMIN_ERRORS},
+    )
+    def get(self, request: Request) -> Response:
+        query = DashboardQuerySerializer(data=request.query_params.dict())
+        query.is_valid(raise_exception=True)
+        params = query.validated_data
+        now = timeutils.now()
+        window = selectors.dashboard_window(
+            params["range"], timeutils.local_date(now), params.get("from"), params.get("to")
+        )
+        return Response(DashboardSerializer(selectors.dashboard(window, now)).data)
