@@ -37,6 +37,7 @@ class CustomerViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
     export_name = "mijozlar"
     export_resource = "customers"
     export_headers = labels.CUSTOMER_EXPORT_HEADERS
+    export_filter_keys = frozenset(CustomerListQuerySerializer().fields)
 
     def get_queryset(self) -> QuerySet[Customer]:
         query = CustomerListQuerySerializer(data=self.request.query_params.dict())

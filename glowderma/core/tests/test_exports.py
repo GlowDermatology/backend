@@ -126,6 +126,26 @@ def test_export_writes_downloaded_audit() -> None:
 
 
 @pytest.mark.django_db
+def test_export_audit_filters_drop_nul_and_unknown_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    """JSONB cannot store \\u0000: an unvalidated parameter carrying NUL must not turn the download into a
+    500; a view with ``export_filter_keys`` records only the parameters it understands."""
+    user = get_user_model().objects.create_user("admin@x.uz")
+    query = {"export": "csv", "foo": "a\x00b", "se\x00arch": "x\x00"}
+    request = APIRequestFactory().get("/api/test/", query)
+    force_authenticate(request, user=user)
+    assert ExportView.as_view()(request).status_code == 200
+    entry = AuditEntry.objects.get(action="export.downloaded")
+    assert entry.after is not None and entry.after["filters"] == {"foo": "ab", "search": "x"}
+
+    monkeypatch.setattr(ExportView, "export_filter_keys", frozenset({"search"}), raising=False)
+    request = APIRequestFactory().get("/api/test/", {"export": "csv", "foo": "a\x00b", "search": "y"})
+    force_authenticate(request, user=user)
+    assert ExportView.as_view()(request).status_code == 200
+    latest = AuditEntry.objects.filter(action="export.downloaded").latest("id")
+    assert latest.after is not None and latest.after["filters"] == {"search": "y"}
+
+
+@pytest.mark.django_db
 def test_export_too_large_is_field_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ExportView, "get_queryset", lambda self: [None] * 50_001)
     request = APIRequestFactory().get("/api/test/", {"export": "csv"})

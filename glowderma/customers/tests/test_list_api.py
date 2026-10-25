@@ -326,3 +326,25 @@ def test_xlsx_export_keeps_filters_and_ordering(
     assert audit.after["filters"] == {"status": "active", "ordering": "name"}
     assert audit.after["row_count"] == 1
     assert staff_client.get(URL, {"export": "pdf"}).status_code == 400
+
+
+def test_export_audit_ignores_unknown_parameters_with_nul(
+    staff_client: APIClient, policies: dict[int, CashbackPolicy]
+) -> None:
+    """An unknown parameter carrying NUL used to reach the JSONB audit ``filters`` and answer 500."""
+    make_customer("Bekzod")
+    response = staff_client.get(URL + "?export=csv&foo=%00&status=active&ordering=name")
+    assert response.status_code == 200
+    audit = AuditEntry.objects.get(action="export.downloaded")
+    assert audit.after is not None
+    assert audit.after["filters"] == {"status": "active", "ordering": "name"}
+    assert audit.after["row_count"] == 1
+
+
+def test_known_parameter_with_nul_is_400(
+    staff_client: APIClient, policies: dict[int, CashbackPolicy]
+) -> None:
+    response = staff_client.get(URL + "?export=csv&search=a%00b")
+    assert response.status_code == 400
+    assert response.data["errors"][0]["field"] == "search"
+    assert not AuditEntry.objects.filter(action="export.downloaded").exists()

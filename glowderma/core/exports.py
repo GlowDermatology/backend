@@ -70,10 +70,27 @@ class ExportRateThrottle(SimpleRateThrottle):
         return self.cache_format % {"scope": self.scope, "ident": str(request.user.pk)}
 
 
+_EXPORT_NON_FILTER_PARAMS = frozenset({"page", "page_size", "export"})
+
+
 class ExportMixin:
     export_name: str
     export_resource: str
     export_headers: Sequence[str]
+    # The query parameters the view understands; only these reach the ``export.downloaded`` audit filters.
+    # ``None`` keeps every parameter but paging and ``export`` (the views that predate the allow-list).
+    export_filter_keys: frozenset[str] | None = None
+
+    def get_export_filters(self, request: Request) -> dict[str, str]:
+        """The filters recorded on the ``export.downloaded`` audit row: the view's known parameters, with NUL
+        removed from keys and values (JSONB cannot store ``\\u0000``; an unvalidated parameter must not turn
+        a download into a 500)."""
+        allowed = self.export_filter_keys
+        return {
+            key.replace("\x00", ""): str(value).replace("\x00", "")
+            for key, value in request.query_params.items()
+            if key not in _EXPORT_NON_FILTER_PARAMS and (allowed is None or key in allowed)
+        }
 
     def get_export_rows(self, items: Iterable[Any]) -> Iterable[Sequence[Any]]:
         raise NotImplementedError("Declare the Uzbek export columns for this resource")
@@ -110,11 +127,7 @@ class ExportMixin:
             request=request,
             after={
                 "resource": self.export_resource,
-                "filters": {
-                    key: value
-                    for key, value in request.query_params.items()
-                    if key not in {"page", "page_size", "export"}
-                },
+                "filters": self.get_export_filters(request),
                 "row_count": len(items),
                 "format": fmt,
             },
