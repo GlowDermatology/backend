@@ -2,7 +2,7 @@ from config.env import env_bool, env_list, env_networks, env_str
 
 from .base import *  # noqa: F403
 from .base import SPECTACULAR_SETTINGS as BASE_SPECTACULAR_SETTINGS
-from .base import database_config
+from .base import database_config, logging_config, redis_db_url
 
 DEBUG = True
 SPECTACULAR_SETTINGS = {
@@ -20,13 +20,16 @@ ADMIN_API_ALLOWED_NETS = env_networks("ADMIN_API_ALLOWED_NETS", ["0.0.0.0/0", ":
 ADMIN_API_REQUIRE_INTERNAL_SECRET = False
 TRUSTED_PROXIES = env_networks("TRUSTED_PROXIES", [])
 DATABASE_URL = env_str("DATABASE_URL", "postgres://glowderma:glowderma@localhost:5433/glowderma")
-DATABASES = {"default": database_config(DATABASE_URL)}
+DATABASES = {"default": database_config(DATABASE_URL, pool=env_bool("DB_POOL", False))}
 REDIS_URL = env_str("REDIS_URL", "redis://localhost:6380/0")
-CELERY_BROKER_URL = REDIS_URL
+CELERY_BROKER_URL = env_str("CELERY_BROKER_URL", redis_db_url(REDIS_URL, 1))
+LOGGING = logging_config(env_str("LOG_LEVEL", "DEBUG").upper())
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
         "LOCATION": REDIS_URL,
         "OPTIONS": {"socket_connect_timeout": 1, "socket_timeout": 1},
+        "KEY_PREFIX": "gd",
+        "VERSION": 1,
     }
 }

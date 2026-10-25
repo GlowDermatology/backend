@@ -6,7 +6,7 @@ from django.core.exceptions import ImproperlyConfigured
 from config.env import env_bool, env_int, env_json, env_list, env_networks, env_str
 
 from .base import *  # noqa: F403
-from .base import database_config
+from .base import database_config, redis_db_url
 
 DEBUG = False
 SECRET_KEY = env_str("SECRET_KEY")
@@ -32,9 +32,9 @@ JWT_ACTIVE_KID = env_str("JWT_ACTIVE_KID")
 if JWT_ACTIVE_KID not in JWT_SIGNING_KEYS:
     raise ImproperlyConfigured("JWT_ACTIVE_KID must identify a signing key")
 DATABASE_URL = env_str("DATABASE_URL")
-DATABASES = {"default": database_config(DATABASE_URL)}
+DATABASES = {"default": database_config(DATABASE_URL, pool=env_bool("DB_POOL", True))}
 REDIS_URL = env_str("REDIS_URL")
-CELERY_BROKER_URL = REDIS_URL
+CELERY_BROKER_URL = env_str("CELERY_BROKER_URL", redis_db_url(REDIS_URL, 1))
 ALLOWED_HOSTS = env_list("ALLOWED_HOSTS") + ["localhost"]
 ADMIN_API_ALLOWED_NETS = env_networks("ADMIN_API_ALLOWED_NETS")
 ADMIN_API_REQUIRE_INTERNAL_SECRET = True
@@ -44,11 +44,16 @@ DJANGO_ADMIN_ENABLED = env_bool("DJANGO_ADMIN_ENABLED", False)
 SECURE_SSL_REDIRECT = env_bool("SECURE_SSL_REDIRECT", False)
 SILENCED_SYSTEM_CHECKS = ["security.W008"]
 SECURE_HSTS_SECONDS = env_int("SECURE_HSTS_SECONDS", 0)
+# Django's deploy checks (W005/W021) expect both once HSTS is on; the edge proxy forwards the header.
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", SECURE_HSTS_SECONDS > 0)
+SECURE_HSTS_PRELOAD = env_bool("SECURE_HSTS_PRELOAD", SECURE_HSTS_SECONDS > 0)
 SESSION_COOKIE_SECURE = CSRF_COOKIE_SECURE = True
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
         "LOCATION": REDIS_URL,
         "OPTIONS": {"socket_connect_timeout": 1, "socket_timeout": 1},
+        "KEY_PREFIX": "gd",
+        "VERSION": 1,
     }
 }

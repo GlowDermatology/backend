@@ -1,12 +1,16 @@
 import base64
 import importlib
 import sys
+from collections.abc import Callable, Iterator
 from types import ModuleType
 from typing import cast
 
 import pytest
+from django.core import checks
 from django.core.exceptions import ImproperlyConfigured
 from django.test import RequestFactory, override_settings
+
+from config.settings.base import redis_db_url
 
 REQUIRED = (
     "SECRET_KEY",
@@ -23,6 +27,22 @@ REQUIRED = (
 def load_production() -> ModuleType:
     sys.modules.pop("config.settings.production", None)
     return importlib.import_module("config.settings.production")
+
+
+@pytest.fixture
+def load_fresh_production() -> Iterator[Callable[[], ModuleType]]:
+    """Load production after re-executing config.settings.base so base-level env validation runs again."""
+    original = sys.modules["config.settings.base"]
+
+    def load() -> ModuleType:
+        sys.modules.pop("config.settings.base", None)
+        return load_production()
+
+    try:
+        yield load
+    finally:
+        sys.modules["config.settings.base"] = original
+        sys.modules["config.settings"].base = original  # type: ignore[attr-defined]
 
 
 @pytest.fixture
@@ -134,3 +154,159 @@ def test_cidrs_are_compiled_to_network_objects(monkeypatch: pytest.MonkeyPatch) 
 
     monkeypatch.setenv("TRUSTED_PROXIES", "10.0.0.0/8,2001:db8::/32")
     assert env_networks("TRUSTED_PROXIES") == (ip_network("10.0.0.0/8"), ip_network("2001:db8::/32"))
+
+
+# ---- Redis split --------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "url,expected",
+    [
+        ("redis://localhost:6380/0", "redis://localhost:6380/1"),
+        ("redis://redis:6379", "redis://redis:6379/1"),
+        ("redis://:pw@redis:6379/5?socket_timeout=2", "redis://:pw@redis:6379/1?socket_timeout=2"),
+        ("rediss://user:pw@cache.internal:6380/0", "rediss://user:pw@cache.internal:6380/1"),
+    ],
+)
+def test_redis_db_url_replaces_database_path(url: str, expected: str) -> None:
+    assert redis_db_url(url, 1) == expected
+    assert redis_db_url(expected, 0) == expected.replace("/1", "/0")
+
+
+@pytest.mark.parametrize(
+    "url,db", [("http://localhost/0", 1), ("redis:///0", 1), ("redis://localhost/0", -1)]
+)
+def test_redis_db_url_rejects_invalid_values(url: str, db: int) -> None:
+    with pytest.raises(ImproperlyConfigured, match="REDIS_URL"):
+        redis_db_url(url, db)
+
+
+def test_production_broker_defaults_to_db_1(production_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CELERY_BROKER_URL", raising=False)
+    module = load_production()
+    assert module.REDIS_URL == "redis://localhost:6380/0"
+    assert module.CELERY_BROKER_URL == "redis://localhost:6380/1"
+    assert module.CACHES["default"]["LOCATION"] == "redis://localhost:6380/0"
+    assert module.CACHES["default"]["KEY_PREFIX"] == "gd"
+    assert module.CACHES["default"]["VERSION"] == 1
+    monkeypatch.setenv("CELERY_BROKER_URL", "redis://broker.internal:6379/3")
+    assert load_production().CELERY_BROKER_URL == "redis://broker.internal:6379/3"
+
+
+def test_production_pools_by_default(production_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    default = load_production().DATABASES["default"]
+    assert default["OPTIONS"]["pool"]
+    assert default["CONN_MAX_AGE"] == 0
+    monkeypatch.setenv("DB_POOL", "false")
+    assert "pool" not in load_production().DATABASES["default"]["OPTIONS"]
+
+
+def test_test_settings_cache_and_broker() -> None:
+    from django.conf import settings
+
+    assert settings.CACHES["default"]["BACKEND"] == "django.core.cache.backends.locmem.LocMemCache"
+    assert settings.CELERY_BROKER_URL == "redis://localhost:6380/1"
+    assert settings.INTEGRATIONS_MODE == "fake"
+    assert settings.THROTTLE_RATES == {}
+
+
+# ---- base-level env validation ------------------------------------------------
+
+
+@pytest.mark.parametrize("value,ok", [("fake", True), ("live", True), ("sandbox", False)])
+def test_integrations_mode_validated_at_startup(
+    production_env: None,
+    load_fresh_production: Callable[[], ModuleType],
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+    ok: bool,
+) -> None:
+    monkeypatch.setenv("INTEGRATIONS_MODE", value)
+    if ok:
+        assert load_fresh_production().INTEGRATIONS_MODE == value
+    else:
+        with pytest.raises(ImproperlyConfigured, match="INTEGRATIONS_MODE"):
+            load_fresh_production()
+
+
+def test_throttle_rates_env_validated_at_startup(
+    production_env: None, load_fresh_production: Callable[[], ModuleType], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """§1.9 throttles are "defaults, configurable": a malformed THROTTLE_RATES fails settings import."""
+    monkeypatch.setenv("THROTTLE_RATES", '{"login": "ten per minute"}')
+    with pytest.raises(ImproperlyConfigured, match="THROTTLE_RATES"):
+        load_fresh_production()
+    monkeypatch.setenv("THROTTLE_RATES", "not json")
+    with pytest.raises(ImproperlyConfigured, match="THROTTLE_RATES"):
+        load_fresh_production()
+    monkeypatch.setenv("THROTTLE_RATES", '{"login": "10/min"}')
+    assert load_fresh_production().THROTTLE_RATES == {"login": "10/min"}
+
+
+def test_log_level_env_validated_at_startup(
+    production_env: None, load_fresh_production: Callable[[], ModuleType], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LOG_LEVEL", "warning")
+    assert load_fresh_production().LOGGING["loggers"]["glowderma"]["level"] == "WARNING"
+    monkeypatch.setenv("LOG_LEVEL", "loud")
+    with pytest.raises(ImproperlyConfigured, match="LOG_LEVEL"):
+        load_fresh_production()
+
+
+# ---- deploy checks ------------------------------------------------------------
+
+DEPLOY_ENV = {
+    "SECURE_SSL_REDIRECT": "true",
+    "SECURE_HSTS_SECONDS": "31536000",
+    "PUBLIC_MEDIA_BASE_URL": "https://media.example.uz/media/",
+    "ALLOWED_HOSTS": "api.example.uz",
+    "ADMIN_API_ALLOWED_NETS": "10.0.0.0/8",
+    # Same shape as the CI placeholder: >= 50 chars, >= 5 unique, no "django-insecure-" prefix (W009).
+    "SECRET_KEY": "OFMmKSy50zW12DnugPKJmF4b0rNGeIvkm9SNWNjO9NRAN97Dmlr3CJH0tfi4Z6Kr",
+}
+NOT_OVERRIDDEN = {"DATABASES", "CACHES", "LOGGING", "INSTALLED_APPS"}
+
+
+def test_production_passes_deploy_checks(production_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mirrors the CI step `manage.py check --deploy --fail-level WARNING` with production settings."""
+    for name, value in DEPLOY_ENV.items():
+        monkeypatch.setenv(name, value)
+    module = load_production()
+    assert module.SILENCED_SYSTEM_CHECKS == ["security.W008"]
+    assert module.SECURE_HSTS_INCLUDE_SUBDOMAINS is True
+    assert module.SECURE_HSTS_PRELOAD is True
+    overrides = {
+        name: getattr(module, name) for name in dir(module) if name.isupper() and name not in NOT_OVERRIDDEN
+    }
+    with override_settings(**overrides):
+        messages = checks.run_checks(include_deployment_checks=True)
+        silenced = {message.id for message in messages if message.is_silenced()}
+        problems = [
+            message for message in messages if message.level >= checks.WARNING and not message.is_silenced()
+        ]
+    assert silenced <= {"security.W008"}
+    assert problems == [], [str(message) for message in problems]
+
+
+def test_production_without_hsts_warns_only_about_hsts(
+    production_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_production()
+    assert module.SECURE_HSTS_SECONDS == 0
+    assert module.SECURE_HSTS_INCLUDE_SUBDOMAINS is False
+    assert module.SECURE_HSTS_PRELOAD is False
+
+
+def test_gunicorn_config_logs_request_id() -> None:
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[3] / "config" / "gunicorn.conf.py"
+    spec = importlib.util.spec_from_file_location("gunicorn_conf", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.accesslog == "-"
+    assert "%({x-request-id}o)s" in module.access_log_format
+    assert (module.timeout, module.graceful_timeout, module.keepalive) == (60, 30, 5)
+    assert module.worker_class == "gthread"
