@@ -8,7 +8,8 @@ Field error codes come in two groups:
   English messages for the Uzbek default.
 * **Endpoint-specific codes** (``ENDPOINT_FIELD_CODES``: ``customer_not_found``, ``in_past``,
   ``empty_range``, ``overlap``, ``out_of_range``, ``effective_from_in_past``, ``insufficient_balance``,
-  ``billz_not_found``, ``required_for_active``, ``export_too_large``) have no default: the view raises
+  ``billz_not_found``, ``required_for_active``, ``export_too_large``, ``unknown_placeholder``,
+  ``slot_unavailable``, ``outside_working_hours``) have no default: the view raises
   them with the explicit message its contract table lists, e.g.
   ``ValidationError({"amount": [field_error("insufficient_balance", "Balansdan ko‘p ayirib bo‘lmaydi.")]})``.
 """
@@ -76,6 +77,10 @@ ENDPOINT_FIELD_CODES = frozenset(
         "billz_not_found",
         "required_for_active",
         "export_too_large",
+        # notifications (§2.8) and the admin appointment slots (T10 / §7 item 18)
+        "unknown_placeholder",
+        "slot_unavailable",
+        "outside_working_hours",
     }
 )
 AUTH_FAILURE_CODES = frozenset(

@@ -83,3 +83,36 @@ BANNER_EXPORT_HEADERS: tuple[str, ...] = (
     "Tugashi",
     "Tartib",
 )
+# Contract 1.8 export columns (Uzbek headers) of the notifications, segments and audit-log lists (M1d).
+NOTIFICATION_EXPORT_HEADERS: tuple[str, ...] = (
+    "ID",
+    "Sana",
+    "Turi",
+    "Sarlavha",
+    "Auditoriya",
+    "Holat",
+    "Yuborildi",
+    "Yetkazildi",
+)
+SEGMENT_EXPORT_HEADERS: tuple[str, ...] = ("ID", "Nomi", "A’zolar", "Push qurilmalar")
+# The customer columns of ``mijozlar`` (contract 1.8), reused by the segment members export.
+SEGMENT_MEMBER_EXPORT_HEADERS: tuple[str, ...] = (
+    "ID",
+    "Ism",
+    "Telefon",
+    "Ro‘yxatdan o‘tgan",
+    "Jami xaridlar (so‘m)",
+    "Cashback foizi",
+    "Balans (so‘m)",
+    "Holat",
+)
+AUDIT_LOG_EXPORT_HEADERS: tuple[str, ...] = (
+    "ID",
+    "Sana",
+    "Xodim",
+    "Amal",
+    "Obyekt",
+    "Obyekt ID",
+    "IP",
+    "So‘rov ID",
+)

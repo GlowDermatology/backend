@@ -5,7 +5,7 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 
 from django.core.exceptions import ImproperlyConfigured
 
-from config.env import Network, env_bool, env_json, env_str
+from config.env import Network, env_bool, env_int, env_json, env_str
 from glowderma.core.enums import enum_name_overrides
 from glowderma.core.throttling import validate_throttle_rates
 
@@ -244,3 +244,13 @@ SPECTACULAR_SETTINGS["ENUM_NAME_OVERRIDES"] = {
 BILLZ_MODE = env_str("BILLZ_MODE", INTEGRATIONS_MODE)
 if BILLZ_MODE not in {"fake", "live"}:
     raise ImproperlyConfigured("BILLZ_MODE must be 'fake' or 'live'")
+# --- Notifications: FCM adapter and campaign batching (contract 2.8, M1d) ---
+# FCM_MODE: "fake" (deterministic in-process push adapter, see integrations.fcm.fake; tokens ending in "-bad"
+# fail) or "live" (M3); defaults to INTEGRATIONS_MODE. CAMPAIGN_BATCH_SIZE is the number of recipients one
+# ``campaign.send_batch`` outbox message hands to the adapter (design 03 §3.4, default 500).
+FCM_MODE = env_str("FCM_MODE", INTEGRATIONS_MODE)
+if FCM_MODE not in {"fake", "live"}:
+    raise ImproperlyConfigured("FCM_MODE must be 'fake' or 'live'")
+CAMPAIGN_BATCH_SIZE = env_int("CAMPAIGN_BATCH_SIZE", 500)
+if CAMPAIGN_BATCH_SIZE < 1:
+    raise ImproperlyConfigured("CAMPAIGN_BATCH_SIZE must be a positive integer")
