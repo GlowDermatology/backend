@@ -281,6 +281,7 @@ def test_integrations_mode_validated_at_startup(
     ok: bool,
 ) -> None:
     monkeypatch.setenv("INTEGRATIONS_MODE", value)
+    monkeypatch.setenv("OAUTH_MODE", "fake")  # live OAuth would also demand provider credentials
     if ok:
         assert load_fresh_production().INTEGRATIONS_MODE == value
     else:
@@ -420,3 +421,77 @@ def test_production_accepts_http_media_base_url_with_trailing_slash(production_e
     assert module.FILE_UPLOAD_PERMISSIONS == 0o644
     assert module.FILE_UPLOAD_MAX_MEMORY_SIZE == 6 * 1024 * 1024
     sys.modules.pop("config.settings.production", None)
+
+
+LIVE_OAUTH_ENV = {
+    "GOOGLE_OAUTH_CLIENT_ID": "123.apps.googleusercontent.com",
+    "GOOGLE_OAUTH_CLIENT_SECRET": "google-secret-value",
+    "FACEBOOK_APP_ID": "1234567890",
+    "FACEBOOK_APP_SECRET": "facebook-secret-value",
+    "OAUTH_REDIRECT_URI": "https://admin.example.uz/admin/auth/callback",
+}
+
+
+def test_oauth_mode_defaults_to_integrations_mode_and_fake_needs_no_credentials(
+    production_env: None, load_fresh_production: Callable[[], ModuleType], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Contract 2.1 / M0b: fake providers by default; no OAuth variable is required then."""
+    for name in (*LIVE_OAUTH_ENV, "OAUTH_MODE", "INTEGRATIONS_MODE", "GOOGLE_ALLOWED_HD"):
+        monkeypatch.delenv(name, raising=False)
+    production = load_fresh_production()
+    assert production.OAUTH_MODE == production.INTEGRATIONS_MODE == "fake"
+    assert production.GOOGLE_OAUTH_CLIENT_ID == ""
+    assert production.GOOGLE_ALLOWED_HD == ""
+    assert production.STAFF_GOOGLE_AUTOLINK is False
+    assert production.FACEBOOK_GRAPH_VERSION == "v21.0"
+    assert production.OAUTH_REDIRECT_URI == ""
+
+
+def test_oauth_mode_is_validated(
+    production_env: None, load_fresh_production: Callable[[], ModuleType], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OAUTH_MODE", "sandbox")
+    with pytest.raises(ImproperlyConfigured, match="OAUTH_MODE"):
+        load_fresh_production()
+
+
+@pytest.mark.parametrize("missing", sorted(LIVE_OAUTH_ENV))
+def test_live_oauth_requires_each_credential_by_name(
+    production_env: None,
+    load_fresh_production: Callable[[], ModuleType],
+    monkeypatch: pytest.MonkeyPatch,
+    missing: str,
+) -> None:
+    monkeypatch.setenv("OAUTH_MODE", "live")
+    for name, value in LIVE_OAUTH_ENV.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.delenv(missing)
+    with pytest.raises(ImproperlyConfigured, match=missing):
+        load_fresh_production()
+
+
+def test_live_oauth_follows_integrations_mode_and_rejects_placeholders(
+    production_env: None, load_fresh_production: Callable[[], ModuleType], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OAUTH_MODE", raising=False)
+    monkeypatch.setenv("INTEGRATIONS_MODE", "live")
+    for name, value in LIVE_OAUTH_ENV.items():
+        monkeypatch.setenv(name, value)
+    production = load_fresh_production()
+    assert production.OAUTH_MODE == "live"
+    assert production.GOOGLE_OAUTH_CLIENT_ID == LIVE_OAUTH_ENV["GOOGLE_OAUTH_CLIENT_ID"]
+    monkeypatch.setenv("FACEBOOK_APP_SECRET", "change-me-facebook-app-secret")
+    with pytest.raises(ImproperlyConfigured, match="FACEBOOK_APP_SECRET.*placeholder"):
+        load_fresh_production()
+    monkeypatch.setenv("FACEBOOK_APP_SECRET", LIVE_OAUTH_ENV["FACEBOOK_APP_SECRET"])
+    monkeypatch.setenv("OAUTH_REDIRECT_URI", "admin/auth/callback")
+    with pytest.raises(ImproperlyConfigured, match="OAUTH_REDIRECT_URI"):
+        load_fresh_production()
+
+
+def test_env_example_documents_oauth_block_in_fake_mode() -> None:
+    env_example = (Path(__file__).resolve().parents[3] / ".env.example").read_text()
+    assert re.search(r"^OAUTH_MODE=fake$", env_example, re.MULTILINE)
+    for name in LIVE_OAUTH_ENV:
+        assert re.search(rf"^#?{name}=", env_example, re.MULTILINE), name
+    assert "change-me" in env_example.split("OAUTH_MODE=fake", 1)[1]

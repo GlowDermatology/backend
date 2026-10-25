@@ -4,7 +4,7 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 
 from django.core.exceptions import ImproperlyConfigured
 
-from config.env import Network, env_json, env_str
+from config.env import Network, env_bool, env_json, env_str
 from glowderma.core.enums import enum_name_overrides
 from glowderma.core.throttling import validate_throttle_rates
 
@@ -20,6 +20,7 @@ INSTALLED_APPS = [
     "drf_spectacular",
     "drf_spectacular_sidecar",
     "glowderma.core",
+    "glowderma.integrations",
     "glowderma.accounts",
 ]
 MIDDLEWARE = [
@@ -112,6 +113,24 @@ CELERY_WORKER_HIJACK_ROOT_LOGGER = False  # keep the LOGGING dictConfig below in
 INTEGRATIONS_MODE = env_str("INTEGRATIONS_MODE", "fake")
 if INTEGRATIONS_MODE not in {"fake", "live"}:
     raise ImproperlyConfigured("INTEGRATIONS_MODE must be 'fake' or 'live'")
+# --- Staff social sign-in (contract 2.1, M0b) ---
+# OAUTH_MODE: "fake" (deterministic in-process providers, see integrations.oauth.fake) or "live"; defaults
+# to INTEGRATIONS_MODE. Production requires the credentials and OAUTH_REDIRECT_URI when live.
+OAUTH_MODE = env_str("OAUTH_MODE", INTEGRATIONS_MODE)
+if OAUTH_MODE not in {"fake", "live"}:
+    raise ImproperlyConfigured("OAUTH_MODE must be 'fake' or 'live'")
+GOOGLE_OAUTH_CLIENT_ID = env_str("GOOGLE_OAUTH_CLIENT_ID", "")
+GOOGLE_OAUTH_CLIENT_SECRET = env_str("GOOGLE_OAUTH_CLIENT_SECRET", "")
+# Restrict Google sign-in to one Workspace domain (the ID token's ``hd`` claim); empty = any Google account.
+GOOGLE_ALLOWED_HD = env_str("GOOGLE_ALLOWED_HD", "")
+# First-use auto-link of a Google identity to the active staff user with the same email (Google-only, and
+# only when Google is authoritative for the address: @gmail.com or hd == the email's domain). Default off.
+STAFF_GOOGLE_AUTOLINK = env_bool("STAFF_GOOGLE_AUTOLINK", False)
+FACEBOOK_APP_ID = env_str("FACEBOOK_APP_ID", "")
+FACEBOOK_APP_SECRET = env_str("FACEBOOK_APP_SECRET", "")
+FACEBOOK_GRAPH_VERSION = env_str("FACEBOOK_GRAPH_VERSION", "v21.0")
+# The Next callback URL; when set, the body's redirect_uri must equal it (400 otherwise). Empty = not checked.
+OAUTH_REDIRECT_URI = env_str("OAUTH_REDIRECT_URI", "")
 # Throttle overrides (contract §1.9), e.g. THROTTLE_RATES={"login": "10/min"}; validated at startup.
 THROTTLE_RATES = validate_throttle_rates(env_json("THROTTLE_RATES", {}))
 LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")

@@ -7,7 +7,7 @@ from django.core.exceptions import ImproperlyConfigured
 from config.env import env_bool, env_int, env_json, env_list, env_networks, env_str
 
 from .base import *  # noqa: F403
-from .base import database_config, redis_db_url
+from .base import OAUTH_MODE, database_config, redis_db_url
 
 DEBUG = False
 
@@ -92,3 +92,19 @@ PUBLIC_MEDIA_BASE_URL = env_str("PUBLIC_MEDIA_BASE_URL")
 _media = urlsplit(PUBLIC_MEDIA_BASE_URL)
 if _media.scheme not in {"http", "https"} or not _media.netloc or not PUBLIC_MEDIA_BASE_URL.endswith("/"):
     raise ImproperlyConfigured("PUBLIC_MEDIA_BASE_URL must be an http(s) URL ending with /")
+# Live staff social sign-in needs every provider credential and the exact callback URL (contract 2.1).
+LIVE_OAUTH_VARIABLES = (
+    "GOOGLE_OAUTH_CLIENT_ID",
+    "GOOGLE_OAUTH_CLIENT_SECRET",
+    "FACEBOOK_APP_ID",
+    "FACEBOOK_APP_SECRET",
+    "OAUTH_REDIRECT_URI",
+)
+if OAUTH_MODE == "live":
+    for name in LIVE_OAUTH_VARIABLES:
+        value = env_str(name)  # raises ImproperlyConfigured("<name> is required")
+        if "change-me" in value.lower():
+            raise ImproperlyConfigured(f"{name} is a placeholder value; set the real credential")
+    _redirect = urlsplit(env_str("OAUTH_REDIRECT_URI"))
+    if _redirect.scheme not in {"http", "https"} or not _redirect.netloc:
+        raise ImproperlyConfigured("OAUTH_REDIRECT_URI must be an absolute http(s) URL")
