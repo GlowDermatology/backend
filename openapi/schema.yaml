@@ -2038,6 +2038,25 @@ components:
             $ref: '#/components/schemas/Banner'
       required:
       - results
+    BannerTitleRequest:
+      type: object
+      description: 'Contract §2.5 ``title``: ``uz`` 1..80 required; ``ru`` / ``en``
+        ≤ 80 optional (missing → "").'
+      properties:
+        uz:
+          type: string
+          minLength: 1
+          maxLength: 80
+        ru:
+          type: string
+          default: ''
+          maxLength: 80
+        en:
+          type: string
+          default: ''
+          maxLength: 80
+      required:
+      - uz
     BillzImportModeEnum:
       enum:
       - delta
@@ -2097,6 +2116,27 @@ components:
       - product_count
       - slug
       - updated_at
+    CategoryNameRequest:
+      type: object
+      description: |-
+        Contract §2.4 ``name``: ``uz`` 2..60 required; ``ru`` / ``en`` ≤ 60 optional (missing on create → "").
+
+        The core ``i18n_text`` shape requires every language; the catalog write shapes only require Uzbek.
+      properties:
+        uz:
+          type: string
+          minLength: 2
+          maxLength: 60
+        ru:
+          type: string
+          default: ''
+          maxLength: 60
+        en:
+          type: string
+          default: ''
+          maxLength: 60
+      required:
+      - uz
     CategoryResults:
       type: object
       properties:
@@ -2116,7 +2156,7 @@ components:
           minLength: 1
           pattern: ^[a-z0-9-]{2,40}$
         name:
-          $ref: '#/components/schemas/I18nText60Min2Request'
+          $ref: '#/components/schemas/CategoryNameRequest'
         is_active:
           type: boolean
           default: true
@@ -2216,25 +2256,6 @@ components:
       - en
       - ru
       - uz
-    I18nText60Min2Request:
-      type: object
-      description: 'Contract 1.4: i18n text is {"uz", "ru", "en"}; "" means not filled,
-        never null.'
-      properties:
-        uz:
-          type: string
-          minLength: 2
-          maxLength: 60
-        ru:
-          type: string
-          maxLength: 60
-        en:
-          type: string
-          maxLength: 60
-      required:
-      - en
-      - ru
-      - uz
     I18nText80:
       type: object
       description: 'Contract 1.4: i18n text is {"uz", "ru", "en"}; "" means not filled,
@@ -2242,25 +2263,6 @@ components:
       properties:
         uz:
           type: string
-          maxLength: 80
-        ru:
-          type: string
-          maxLength: 80
-        en:
-          type: string
-          maxLength: 80
-      required:
-      - en
-      - ru
-      - uz
-    I18nText80Min1Request:
-      type: object
-      description: 'Contract 1.4: i18n text is {"uz", "ru", "en"}; "" means not filled,
-        never null.'
-      properties:
-        uz:
-          type: string
-          minLength: 1
           maxLength: 80
         ru:
           type: string
@@ -2615,7 +2617,7 @@ components:
         the date order are validated against the merged state (``instance`` on PATCH).
       properties:
         title:
-          $ref: '#/components/schemas/I18nText80Min1Request'
+          $ref: '#/components/schemas/BannerTitleRequest'
         link:
           $ref: '#/components/schemas/BannerLinkRequest'
         is_active:
@@ -2639,7 +2641,7 @@ components:
           minLength: 1
           pattern: ^[a-z0-9-]{2,40}$
         name:
-          $ref: '#/components/schemas/I18nText60Min2Request'
+          $ref: '#/components/schemas/CategoryNameRequest'
         is_active:
           type: boolean
           default: true
