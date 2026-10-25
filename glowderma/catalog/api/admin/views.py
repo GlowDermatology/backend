@@ -7,7 +7,7 @@ from typing import Any, cast
 
 from django.core.files.uploadedfile import UploadedFile
 from django.db.models import QuerySet
-from django.http import QueryDict
+from django.http import HttpRequest, QueryDict
 from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework import mixins, serializers
 from rest_framework.exceptions import NotFound, ValidationError
@@ -137,7 +137,7 @@ class ProductStatsView(AdminAPIView):
 def query_params(request: Request) -> dict[str, str]:
     # A plain dict, not the QueryDict: DRF reads a missing BooleanField from HTML-style input as ``False``,
     # which would turn an absent ``promo`` / ``is_active`` filter into ``?promo=false``.
-    return {key: value for key, value in request.query_params.items()}
+    return request.query_params.dict()
 
 
 def _product_or_404(pk: int) -> Product:
@@ -352,6 +352,12 @@ class BannerViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
     export_name = "bannerlar"
     export_resource = "banners"
     export_headers = labels.BANNER_EXPORT_HEADERS
+
+    def initialize_request(self, request: HttpRequest, *args: Any, **kwargs: Any) -> Request:
+        # DRF picks the parsers before the viewset resolves ``self.action``: resolve it first.
+        action_map: dict[str, str] = getattr(self, "action_map", None) or {}
+        self.action = action_map.get(request.method.lower() if request.method else "") or ""
+        return super().initialize_request(request, *args, **kwargs)
 
     def get_parsers(self) -> list[BaseParser]:
         # Contract §2.5: POST is multipart; PATCH takes multipart or JSON; the rest are JSON.

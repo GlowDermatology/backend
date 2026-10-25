@@ -307,16 +307,18 @@ def delete_image(product_id: int, image_id: int, *, actor: Any, request: Any = N
             raise NotFound
         if product.status == enums.ProductStatus.ACTIVE and len(images) == 1:
             raise Conflict(LAST_IMAGE_OF_ACTIVE)
+        remaining = [candidate for candidate in images if candidate.pk != image_id]
+        position = image.position
         _delete_file_on_commit(image.file)
-        image.delete()
-        _compact_positions([candidate for candidate in images if candidate.pk != image_id])
+        image.delete()  # nulls ``image.pk``: the remaining list is computed above
+        _compact_positions(remaining)
         audit.record(
             action="product.image_deleted",
             entity_type="product",
             entity_id=str(product.pk),
             actor=actor,
             request=request,
-            before={"image_id": image_id, "position": image.position},
+            before={"image_id": image_id, "position": position},
         )
 
 
@@ -525,7 +527,8 @@ def _store_banner_image(banner: Banner, processed: ProcessedImage) -> None:
     name = media_name("banners", banner.pk, processed.content, processed.extension)
     banner.image_width = processed.width
     banner.image_height = processed.height
-    banner.image.save(_basename(name), ContentFile(processed.content), save=True)
+    # Django 6.1 derives the dimension fields from the *content* object: it needs a name to count as a file.
+    banner.image.save(_basename(name), ContentFile(processed.content, name=_basename(name)), save=True)
     if previous and previous != banner.image.name:
         storage = banner.image.storage
         transaction.on_commit(lambda: storage.delete(previous))
