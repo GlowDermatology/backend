@@ -163,12 +163,11 @@ def record_event(
 
 
 def _event_exists(order_id: int, event_type: str, data: Mapping[str, Any]) -> bool:
-    key = events.DEDUPE_KEYS.get(event_type)
-    if key is None:
+    keys = events.DEDUPE_KEYS.get(event_type)
+    if keys is None:
         return False
-    return OrderEvent.objects.filter(
-        order_id=order_id, type=event_type, **{f"data__{key}": data[key]}
-    ).exists()
+    lookup = {f"data__{key}": data[key] for key in keys}
+    return OrderEvent.objects.filter(order_id=order_id, type=event_type, **lookup).exists()
 
 
 def record_event_once(

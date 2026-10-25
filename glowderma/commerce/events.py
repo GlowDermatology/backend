@@ -39,13 +39,13 @@ EVENT_DATA_KEYS: dict[str, tuple[str, ...]] = {
 
 # Events written by at-least-once handlers carry a discriminating key: a second delivery finds the event
 # (same type, same value) and writes nothing (03 §1.5 invariants).
-DEDUPE_KEYS: dict[str, str] = {
-    _E.BILLZ_SALE_RECORDED: "billz_order_id",
-    _E.SHIPMENT_CREATED: "tracking_number",
-    _E.SHIPMENT_FAILED: "attempt",
-    _E.REFUND_REQUESTED: "refund_id",
-    _E.REFUND_SUCCEEDED: "refund_id",
-    _E.REFUND_FAILED: "refund_id",
+DEDUPE_KEYS: dict[str, tuple[str, ...]] = {
+    _E.BILLZ_SALE_RECORDED: ("billz_order_id",),
+    _E.SHIPMENT_CREATED: ("tracking_number",),
+    _E.SHIPMENT_FAILED: ("attempt",),
+    _E.REFUND_REQUESTED: ("refund_id",),
+    _E.REFUND_SUCCEEDED: ("refund_id",),
+    _E.REFUND_FAILED: ("refund_id", "state"),  # an ``unknown`` refund resolved as ``failed`` is a second row
 }
 
 
