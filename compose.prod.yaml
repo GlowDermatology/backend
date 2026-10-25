@@ -1,0 +1,165 @@
+# Production stack on one VPS: Caddy edge (TLS) -> Next.js frontend and the Django API, with the Celery worker,
+# a single Celery beat, PostgreSQL 18 and Redis 8 on a private network. Runbook: docs/ops/deploy.md.
+#
+#   docker compose -f compose.prod.yaml build
+#   docker compose -f compose.prod.yaml run --rm api migrate
+#   docker compose -f compose.prod.yaml up -d
+#
+# Variables come from ./.env (Compose interpolation AND the backend containers' env_file); template:
+# deploy/env.production.example. Topology-derived settings (hosts, networks, URLs) are set here so the
+# .env file holds only secrets, domains and provider modes.
+name: glowderma
+
+x-logging: &logging
+  driver: json-file
+  options: {max-size: "20m", max-file: "5"}
+
+x-backend: &backend
+  # Built once by the api service; worker and beat run the same image.
+  image: glowderma-backend:${GIT_SHA:-latest}
+  env_file: .env
+  environment: &backend-environment
+    DJANGO_SETTINGS_MODULE: config.settings.production
+    DATABASE_URL: postgres://glowderma:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/glowderma
+    REDIS_URL: redis://redis:6379/0
+    CELERY_BROKER_URL: redis://redis:6379/1
+    # The public API host for the mobile app and webhooks, and "api" for the Next server's private calls.
+    ALLOWED_HOSTS: ${API_DOMAIN:?set API_DOMAIN in .env},api
+    # Only the Next container may call /api/v1/admin/ (plus the internal secret, enforced in production);
+    # requests arriving through the edge resolve to the browser's IP and are refused.
+    ADMIN_API_ALLOWED_NETS: 172.30.0.20/32
+    # The edge overwrites X-Forwarded-For with the TCP peer; only its address is trusted.
+    TRUSTED_PROXIES: 172.30.0.10/32
+    PUBLIC_MEDIA_BASE_URL: https://${API_DOMAIN}/media/
+    GIT_SHA: ${GIT_SHA:-unknown}
+  volumes: ["media:/app/media"]
+  networks: [internal]
+  restart: unless-stopped
+  logging: *logging
+  depends_on:
+    postgres: {condition: service_healthy}
+    redis: {condition: service_healthy}
+
+services:
+  api:
+    <<: *backend
+    build:
+      context: .
+    command: api
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:8000/api/v1/health/?ready=1', headers={'Host': 'localhost'}), timeout=5).read()"]
+      interval: 15s
+      timeout: 6s
+      retries: 6
+      start_period: 20s
+
+  worker:
+    <<: *backend
+    command: ["worker", "--concurrency", "${CELERY_CONCURRENCY:-2}"]
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A config inspect ping -d celery@$$HOSTNAME --timeout 5"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+
+  # Exactly one beat process: two would enqueue every periodic task twice. Never scale this service.
+  beat:
+    <<: *backend
+    command: beat
+    healthcheck: {disable: true}
+
+  frontend:
+    image: glowderma-frontend:${FRONTEND_GIT_SHA:-latest}
+    build:
+      context: ${FRONTEND_CONTEXT:-../frontend}
+      args:
+        NEXT_PUBLIC_SITE_URL: https://${SITE_DOMAIN:?set SITE_DOMAIN in .env}
+        GLOWDERMA_ALLOWED_ORIGINS: ${ADMIN_DOMAIN:?set ADMIN_DOMAIN in .env}
+        GLOWDERMA_MEDIA_HOSTS: ${API_DOMAIN}
+        GLOWDERMA_BUILD_SHA: ${FRONTEND_GIT_SHA:-}
+    environment:
+      GLOWDERMA_DATA_SOURCE: api
+      GLOWDERMA_API_URL: http://api:8000
+      # One secret, two names: Django reads INTERNAL_API_SECRET, the Next BFF sends it as X-GD-Internal-Secret.
+      GLOWDERMA_INTERNAL_SECRET: ${INTERNAL_API_SECRET:?set INTERNAL_API_SECRET in .env}
+      GLOWDERMA_ALLOWED_ORIGINS: ${ADMIN_DOMAIN}
+      GLOWDERMA_COOKIE_SECURE: "true"
+    networks:
+      internal: {ipv4_address: 172.30.0.20}
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      api: {condition: service_healthy}
+
+  edge:
+    image: caddy:2.10.2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+      SITE_DOMAIN: ${SITE_DOMAIN}
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN}
+      API_DOMAIN: ${API_DOMAIN}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - media:/srv/media:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      internal: {ipv4_address: 172.30.0.10}
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      frontend: {condition: service_started}
+      api: {condition: service_healthy}
+
+  postgres:
+    image: postgres:18-trixie
+    environment:
+      POSTGRES_USER: glowderma
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: glowderma
+    volumes: ["pgdata:/var/lib/postgresql"]
+    networks: [internal]
+    restart: unless-stopped
+    logging: *logging
+    shm_size: 256mb
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "glowderma", "-d", "glowderma"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:8-alpine
+    # AOF persistence: queued Celery messages survive a restart. noeviction (the default) because DB 1 is the
+    # broker; never set a maxmemory eviction policy on this instance.
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes: ["redisdata:/data"]
+    networks: [internal]
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+networks:
+  internal:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+          # Dynamic addresses come from the upper half, so the fixed edge (.10) and frontend (.20) addresses
+          # that TRUSTED_PROXIES and ADMIN_API_ALLOWED_NETS name can never be taken by another container.
+          ip_range: 172.30.0.128/25
+
+volumes:
+  pgdata:
+  redisdata:
+  media:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,87 @@
+# Glow Derma edge proxy (compose.prod.yaml service "edge"). Caddy obtains and renews the TLS certificates.
+#
+#   SITE_DOMAIN   public landing (Next.js); www.SITE_DOMAIN redirects to it
+#   ADMIN_DOMAIN  admin panel (Next.js BFF); its session cookies are host-only
+#   API_DOMAIN    Django: mobile customer API, provider webhooks, POS, health, /media/ from the shared volume
+#
+# Header contract: Caddy trusts no upstream proxy, so X-Forwarded-For is overwritten with the TCP peer. The Next
+# BFF forwards that hop to Django as X-GD-Client-IP; Django trusts X-Forwarded-For only from this container
+# (TRUSTED_PROXIES). Never put a second proxy or CDN in front without collapsing X-Forwarded-For.
+{
+	email {$ACME_EMAIL}
+}
+
+(common) {
+	encode zstd gzip
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000"
+	}
+	log {
+		output stdout
+		format json
+	}
+}
+
+(next) {
+	# Partially prerendered pages stream: flush every chunk to the browser.
+	reverse_proxy {$FRONTEND_UPSTREAM:frontend:3000} {
+		flush_interval -1
+	}
+}
+
+{$SITE_DOMAIN} {
+	import common
+	# The admin panel answers on its own host only.
+	redir /admin https://{$ADMIN_DOMAIN}/admin 308
+	redir /admin/* https://{$ADMIN_DOMAIN}{uri} 308
+	request_body {
+		max_size 1MB
+	}
+	import next
+}
+
+www.{$SITE_DOMAIN} {
+	redir https://{$SITE_DOMAIN}{uri} 308
+}
+
+{$ADMIN_DOMAIN} {
+	import common
+	# Replace (not append to) the header Next already sends on /admin.
+	header >X-Robots-Tag "noindex, nofollow"
+	redir / /admin 302
+	# Server Actions carry product images (5 MB each) plus multipart overhead; Next refuses above 6 MB.
+	request_body {
+		max_size 7MB
+	}
+	import next
+}
+
+{$API_DOMAIN} {
+	import common
+
+	# Uploaded media, re-encoded by Django and stored under content-hashed names.
+	handle_path /media/* {
+		root * {$MEDIA_ROOT:/srv/media}
+		header {
+			Cache-Control "public, max-age=604800"
+			X-Content-Type-Options nosniff
+			Content-Security-Policy "default-src 'none'; img-src 'self'; sandbox"
+		}
+		file_server
+	}
+
+	# Staff surfaces stay on the private network: the Next server calls api:8000 directly. Django refuses them
+	# from any other address as well (ADMIN_API_ALLOWED_NETS); this keeps them invisible from the internet.
+	@private path /api/v1/admin /api/v1/admin/* /api/v1/schema/* /api/v1/docs/* /django-admin /django-admin/*
+	handle @private {
+		respond 404
+	}
+
+	handle {
+		request_body {
+			max_size 10MB
+		}
+		reverse_proxy {$API_UPSTREAM:api:8000}
+	}
+}

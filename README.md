@@ -8,6 +8,7 @@ integrations (Billz, BTS, Click, Payme, Eskiz, Firebase).
 - Open business questions: [`docs/decisions/open-questions.md`](docs/decisions/open-questions.md)
 - Implementation plans: [`docs/plans/`](docs/plans/)
 - Agent instructions and local commands: [`AGENTS.md`](AGENTS.md)
+- Production deployment (Compose on a VPS, Caddy edge, backups): [`docs/ops/deploy.md`](docs/ops/deploy.md)
 
 ## Quick start (Docker)
 ```bash
@@ -18,4 +19,5 @@ docker compose exec api python manage.py createstaff admin@glowderma.uz --manage
 ```
 API: http://localhost:8000/api/v1/ · OpenAPI docs: http://localhost:8000/api/v1/docs/ (local only)
 
-> The quick start becomes valid once milestone M0 lands.
+`compose.yaml` is the local development stack (local settings, ports on 127.0.0.1). Production uses
+`compose.prod.yaml`; see [`docs/ops/deploy.md`](docs/ops/deploy.md).
