@@ -4,9 +4,11 @@ Rows 1–8 are ``appointments.ts DESIGN_APPOINTMENTS`` on Monday 26 October 2026
 27th; the surrounding days (offsets −3 … +4, Sundays skipped) come from ``createRandom(26)`` in the mock's
 draw order (``surroundingDays()``), with ``core.seeding.MockRandom`` so the slots, services and customers
 equal the frontend's. Every row is inserted directly with its ``AppointmentEvent`` trail: ``requested`` at
-``requested_at``; a confirmed row is confirmed by the Administrator 30 minutes later (``confirmed`` event,
-actor staff ``admin@glowderma.uz``); a past generated row is ``attended`` at its end. Inbox rows are not
-written here — they come from the B6 replay through ``appointments.services``.
+``requested_at``; a confirmed row is confirmed by the Administrator 30 minutes later through
+``appointments.services.confirm`` (``confirmed`` event, ``push.appointment`` outbox message, audit entry;
+actor staff ``admin@glowderma.uz``); a past generated row is ``attended`` at its end through
+``services.attend``. Inbox rows are not written here — the outbox handler in ``notifications`` creates them
+when the pushes are delivered.
 
 Idempotent by ``(professional, start)``; design rows take their ids explicitly, generated rows take ids from
 1000 (the sequence is parked at 999 first). A missing lower-layer row (professional, service, link, customer,
@@ -24,6 +26,7 @@ from django.db import IntegrityError, connection, transaction
 
 from glowderma.accounts.models import Customer, StaffUser
 from glowderma.accounts.seeds import all_customers
+from glowderma.appointments import services
 from glowderma.appointments.models import Appointment, AppointmentEvent
 from glowderma.core import enums, timeutils
 from glowderma.core.seeding import MockRandom, SeedContext, pinned_clock, register_seeder
@@ -242,26 +245,23 @@ def _insert(spec: AppointmentSpec, lookup: _Lookup) -> bool:
     if spec.status == REQUESTED:
         return True
     confirmed_at = spec.requested_at + CONFIRM_DELAY
-    appointment.status = CONFIRMED
-    appointment.confirmed_at = confirmed_at
+    if admin is None:
+        # apptevent_source_by_type: a confirmation is always an admin event, so without the demo staff the
+        # row keeps its design status and no event (or push) is written.
+        appointment.status = spec.status
+        appointment.confirmed_at = confirmed_at
+        appointment.attended_at = end if spec.status == ATTENDED else None
+        with pinned_clock(end if spec.status == ATTENDED else confirmed_at):
+            appointment.save(update_fields=["status", "confirmed_at", "attended_at"])
+        return True
+    # The replayed flow (design 03 §7.11): the Administrator confirms 30 minutes after the request through the
+    # service, which writes the event, enqueues the push (the inbox row comes from the outbox handler) and
+    # audits; a past generated row is then attended at its end.
     with pinned_clock(confirmed_at):
-        appointment.save(update_fields=["status", "confirmed_at"])
-    if admin is not None:  # apptevent_source_by_type: a confirmation is always an admin event
-        _event(
-            appointment,
-            AppointmentEvent.Type.CONFIRMED,
-            AppointmentEvent.Source.ADMIN,
-            admin,
-            {"push_sent": False},
-            confirmed_at,
-        )
+        services.confirm(appointment.pk, actor=admin)
     if spec.status == ATTENDED:
-        appointment.status = ATTENDED
-        appointment.attended_at = end
         with pinned_clock(end):
-            appointment.save(update_fields=["status", "attended_at"])
-        if admin is not None:
-            _event(appointment, AppointmentEvent.Type.ATTENDED, AppointmentEvent.Source.ADMIN, admin, {}, end)
+            services.attend(appointment.pk, actor=admin)
     return True
 
 

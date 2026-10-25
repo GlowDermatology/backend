@@ -8,11 +8,12 @@ import pytest
 from django.db import models
 
 from glowderma.accounts import seeds as accounts_seeds
-from glowderma.accounts.models import Customer, StaffUser
+from glowderma.accounts.models import Customer, Device, StaffUser
 from glowderma.appointments import seeds
 from glowderma.appointments.models import Appointment, AppointmentEvent
 from glowderma.appointments.seeds import generated_appointments, seed_appointments
 from glowderma.core import enums, seeding, timeutils
+from glowderma.core.models import OutboxMessage
 from glowderma.core.seeding import SeedContext
 from glowderma.core.timeutils import TASHKENT
 from glowderma.professionals import seeds as professionals_seeds
@@ -136,7 +137,11 @@ def test_seed_reproduces_the_design_and_is_idempotent(monkeypatch: pytest.Monkey
         ("confirmed", "admin", 1),
     ]
     assert sardor_events[0].data["via"] == "admin"
-    assert sardor_events[1].at == sardor.confirmed_at and sardor_events[1].data == {"push_sent": False}
+    pushable = Device.objects.filter(customer_id=11, is_active=True, push_enabled=True).exists()
+    assert sardor_events[1].at == sardor.confirmed_at and sardor_events[1].data == {"push_sent": pushable}
+    # the replayed confirm enqueued the push (design 03 §7.11: the inbox row comes from the outbox handler)
+    assert OutboxMessage.objects.filter(dedupe_key="push.appointment:3:confirmed").exists()
+    assert OutboxMessage.objects.filter(topic="push.appointment").count() == 6 + 36
 
     # generated rows: ids from 1000, past days attended, future days confirmed, link snapshots
     generated = Appointment.objects.filter(pk__gte=1000).order_by("pk")
