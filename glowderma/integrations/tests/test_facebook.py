@@ -93,13 +93,18 @@ def test_happy_path_exchanges_debugs_and_reads_profile(recorder: Recorder) -> No
         "redirect_uri": [REDIRECT],
     }
     assert debug.method == "GET" and debug.url.path == DEBUG_PATH
-    assert dict(debug.url.params) == {"input_token": ACCESS_TOKEN, "access_token": f"{APP_ID}|{APP_SECRET}"}
+    assert dict(debug.url.params) == {"input_token": ACCESS_TOKEN}
+    assert debug.headers["Authorization"] == f"Bearer {APP_ID}|{APP_SECRET}"
     assert me.method == "GET" and me.url.path == ME_PATH
     assert dict(me.url.params) == {
         "fields": "id,email",
-        "access_token": ACCESS_TOKEN,
         "appsecret_proof": appsecret_proof(APP_SECRET, ACCESS_TOKEN),
     }
+    assert me.headers["Authorization"] == f"Bearer {ACCESS_TOKEN}"
+    # Neither the app secret nor the user token may ever appear in a URL (proxy logs, APM, httpx INFO line).
+    for request in (token, debug, me):
+        assert APP_SECRET not in str(request.url)
+    assert ACCESS_TOKEN not in str(me.url)
 
 
 def test_profile_without_email_is_allowed(recorder: Recorder) -> None:

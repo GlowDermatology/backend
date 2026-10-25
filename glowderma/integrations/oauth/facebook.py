@@ -4,6 +4,9 @@ Failure mapping (contract 2.1): ``oauth/access_token`` 4xx -> ``exchange_failed`
 error -> ``unavailable``; a token that ``debug_token`` does not confirm for our app, or a failing
 ``/me`` call -> ``invalid_token``. Facebook never vouches for the email, so ``email_verified`` is always
 ``False`` (the address is informational, stored as ``email_at_link``) and ``hd`` is ``None``.
+
+Secrets never appear in a URL: the code exchange POSTs the app secret in the body, and the app access token
+(``app_id|app_secret``) and the user access token are sent as ``Authorization: Bearer`` headers.
 """
 
 import hashlib
@@ -23,6 +26,11 @@ GRAPH_URL = "https://graph.facebook.com"
 def appsecret_proof(app_secret: str, access_token: str) -> str:
     """HMAC-SHA256 of the access token keyed with the app secret (Graph API "appsecret_proof")."""
     return hmac.new(app_secret.encode(), access_token.encode(), hashlib.sha256).hexdigest()
+
+
+def bearer(token: str) -> dict[str, str]:
+    """Graph API accepts any access token (user or ``app_id|app_secret``) as ``Authorization: Bearer``."""
+    return {"Authorization": f"Bearer {token}"}
 
 
 class FacebookOAuthProvider:
@@ -101,12 +109,15 @@ class FacebookOAuthProvider:
         return access_token
 
     def _debug_token(self, session: httpx.Client, access_token: str) -> None:
+        # The app access token embeds the app secret: it travels in the Authorization header, never in the
+        # URL, so proxy access logs, APM and httpx's own INFO request line cannot leak it.
         body = self._call(
             session,
             "GET",
             "/debug_token",
             client_error="invalid_token",
-            params={"input_token": access_token, "access_token": f"{self.app_id}|{self.app_secret}"},
+            params={"input_token": access_token},
+            headers=bearer(f"{self.app_id}|{self.app_secret}"),
         )
         data = body.get("data")
         if not isinstance(data, dict):
@@ -122,9 +133,6 @@ class FacebookOAuthProvider:
             "GET",
             f"/{self.graph_version}/me",
             client_error="invalid_token",
-            params={
-                "fields": "id,email",
-                "access_token": access_token,
-                "appsecret_proof": appsecret_proof(self.app_secret, access_token),
-            },
+            params={"fields": "id,email", "appsecret_proof": appsecret_proof(self.app_secret, access_token)},
+            headers=bearer(access_token),
         )
