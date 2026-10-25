@@ -1,5 +1,6 @@
 import csv
 from collections.abc import Iterable, Sequence
+from datetime import datetime
 from io import BytesIO, StringIO
 from itertools import chain
 from typing import Any, cast
@@ -113,3 +114,10 @@ class ExportMixin:
         )
         # DRF accepts HttpResponse at dispatch; its list-mixin stubs require Response.
         return cast(Response, response)
+
+
+def format_export_datetime(value: datetime | None) -> str:
+    """Contract 1.8: export datetimes are text ``YYYY-MM-DD HH:MM`` in Tashkent time; ``""`` for ``None``."""
+    if value is None:
+        return ""
+    return value.astimezone(timeutils.TASHKENT).strftime("%Y-%m-%d %H:%M")

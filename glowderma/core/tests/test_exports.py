@@ -1,5 +1,6 @@
 import csv
 from collections.abc import Iterable, Sequence
+from datetime import UTC, datetime
 from io import BytesIO, StringIO
 from time import perf_counter
 from typing import Any, cast
@@ -16,7 +17,7 @@ from rest_framework.generics import ListAPIView
 from rest_framework.permissions import AllowAny
 from rest_framework.test import APIRequestFactory, force_authenticate
 
-from glowderma.core.exports import ExportMixin, render_csv, render_xlsx, safe_cell
+from glowderma.core.exports import ExportMixin, format_export_datetime, render_csv, render_xlsx, safe_cell
 from glowderma.core.models import AuditEntry
 
 
@@ -133,3 +134,9 @@ def test_export_throttle_and_normal_list() -> None:
     request = factory.get("/api/test/", {"export": "csv"})
     force_authenticate(request, user=user)
     assert ExportView.as_view()(request).status_code == 429
+
+
+def test_format_export_datetime_is_tashkent_minutes() -> None:
+    """Contract 1.8: "datetimes as text `YYYY-MM-DD HH:MM` (Tashkent)"."""
+    assert format_export_datetime(datetime(2026, 10, 23, 9, 2, 59, tzinfo=UTC)) == "2026-10-23 14:02"
+    assert format_export_datetime(None) == ""
