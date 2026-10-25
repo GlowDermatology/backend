@@ -78,8 +78,11 @@ class GuardedAdminAuthenticationForm(AdminAuthenticationForm):
         return result
 
 
+# Wired once at import time (config.urls imports this module); the view never mutates the site.
+admin.site.login_form = GuardedAdminAuthenticationForm
+
+
 def guarded_admin_login(request: HttpRequest, extra_context: dict[str, Any] | None = None) -> HttpResponse:
-    admin.site.login_form = GuardedAdminAuthenticationForm
     try:
         return admin.site.login(request, extra_context=extra_context)
     except Throttled as exc:
