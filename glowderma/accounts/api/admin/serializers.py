@@ -1,8 +1,11 @@
 from typing import Any
 
+from django.conf import settings
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
+
+from glowderma.core.api.exceptions import field_error
 
 
 class LoginSerializer(serializers.Serializer[dict[str, Any]]):
@@ -65,3 +68,27 @@ class AccessSerializer(serializers.Serializer[dict[str, Any]]):
 class LoginResponseSerializer(AccessSerializer):
     refresh = serializers.CharField()
     user = MeSerializer()
+
+
+class OAuthCallbackSerializer(serializers.Serializer[dict[str, Any]]):
+    """Body of ``POST auth/oauth/{provider}/`` and ``.../link/`` (contract 2.1).
+
+    ``context["provider"]`` decides whether ``nonce`` is required (Google only). ``redirect_uri`` must equal
+    ``settings.OAUTH_REDIRECT_URI`` when that is set.
+    """
+
+    code = serializers.CharField(min_length=1, max_length=2048, trim_whitespace=False)
+    code_verifier = serializers.CharField(min_length=43, max_length=128, trim_whitespace=False)
+    redirect_uri = serializers.URLField(max_length=2048)
+    nonce = serializers.CharField(max_length=512, required=False, trim_whitespace=False)
+
+    def validate_redirect_uri(self, value: str) -> str:
+        configured = str(settings.OAUTH_REDIRECT_URI)
+        if configured and value != configured:
+            raise serializers.ValidationError([field_error("invalid")])
+        return value
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        if self.context.get("provider") == "google" and "nonce" not in attrs:
+            raise serializers.ValidationError({"nonce": [field_error("required")]})
+        return attrs

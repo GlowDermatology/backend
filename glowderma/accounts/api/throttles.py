@@ -43,3 +43,9 @@ class StaffRateThrottle(ClientIPThrottle):
 
     def get_cache_key(self, request: Request, view: Any) -> str:
         return self.cache_format % {"scope": self.scope, "ident": str(request.user.pk)}
+
+
+class OAuthIPThrottle(LoginRateThrottle):
+    """Contract 1.9: ``auth/oauth/{provider}/`` per client IP, 30/min by default."""
+
+    scope = "oauth"

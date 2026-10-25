@@ -32,6 +32,14 @@ KWARG_VALUES = {
     "action": "confirm",
     "date": "2026-10-26",
 }
+# The only (route, method) pairs an anonymous caller may use (contract 1.2 and 2.1); everything else under
+# api/v1/admin/ must reject every non-staff credential. ``auth/oauth/<provider>/`` is public for POST only:
+# DELETE on the same route (unlink) and ``.../link/`` need a bearer.
+PUBLIC_METHODS = {
+    (f"/api/v1/admin/auth/{name}/", "post") for name in ("login", "refresh", "logout", "oauth/google")
+}
+# Views without any authentication class answer other methods with 405 (OPTIONS 200) instead of 401.
+UNAUTHENTICATED_VIEWS = {f"/api/v1/admin/auth/{name}/" for name in ("login", "refresh", "logout")}
 CONVERTER_VALUES = {
     "UUIDConverter": "00000000-0000-4000-8000-000000000001",
     "IntConverter": "1",
@@ -110,11 +118,10 @@ def test_admin_auth_matrix(django_capture_on_commit_callbacks: Any) -> None:
     with django_capture_on_commit_callbacks(execute=True):
         services.revoke_session(session, "logout")
     basic = b64encode(b"admin@x.uz:Saffron!Harbor-Long72").decode()
-    public_auth = {f"/api/v1/admin/auth/{name}/" for name in ("login", "refresh", "logout")}
     for route_path, method in routes:
-        if route_path in public_auth and method == "post":
+        if (route_path, method) in PUBLIC_METHODS:
             continue
-        expected = (200 if method == "options" else 405) if route_path in public_auth else 401
+        expected = (200 if method == "options" else 405) if route_path in UNAUTHENTICATED_VIEWS else 401
         for header in (None, f"Basic {basic}", f"Bearer {customer_token}", f"Bearer {revoked_token}"):
             client = APIClient()
             if header:

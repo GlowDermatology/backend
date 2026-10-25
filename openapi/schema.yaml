@@ -137,6 +137,206 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
+  /api/v1/admin/auth/oauth/{provider}/:
+    post:
+      operationId: admin_auth_oauth_login
+      description: 'Staff social sign-in, allow-list only: Django exchanges the authorization
+        code with the provider and signs in the staff member whose identity is already
+        linked. Same response as auth/login/.'
+      parameters:
+      - in: path
+        name: provider
+        schema:
+          type: string
+          enum:
+          - facebook
+          - google
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OAuthCallbackRequest'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    delete:
+      operationId: admin_auth_oauth_unlink
+      description: Unlink the caller's identity for the provider.
+      parameters:
+      - in: path
+        name: provider
+        schema:
+          type: string
+          enum:
+          - facebook
+          - google
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '204':
+          description: No response body
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/auth/oauth/{provider}/link/:
+    post:
+      operationId: admin_auth_oauth_link
+      description: Link the provider identity to the signed-in staff member (same
+        body as the sign-in); returns Me with the updated linked_providers.
+      parameters:
+      - in: path
+        name: provider
+        schema:
+          type: string
+          enum:
+          - facebook
+          - google
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OAuthCallbackRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Me'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/admin/auth/refresh/:
     post:
       operationId: admin_auth_refresh
@@ -373,6 +573,35 @@ components:
       - is_superuser
       - linked_providers
       - session_expires_at
+    OAuthCallbackRequest:
+      type: object
+      description: |-
+        Body of ``POST auth/oauth/{provider}/`` and ``.../link/`` (contract 2.1).
+
+        ``context["provider"]`` decides whether ``nonce`` is required (Google only). ``redirect_uri`` must equal
+        ``settings.OAUTH_REDIRECT_URI`` when that is set.
+      properties:
+        code:
+          type: string
+          minLength: 1
+          maxLength: 2048
+        code_verifier:
+          type: string
+          minLength: 43
+          maxLength: 128
+        redirect_uri:
+          type: string
+          format: uri
+          minLength: 1
+          maxLength: 2048
+        nonce:
+          type: string
+          minLength: 1
+          maxLength: 512
+      required:
+      - code
+      - code_verifier
+      - redirect_uri
     RefreshRequest:
       type: object
       properties:
