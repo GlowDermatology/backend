@@ -45,9 +45,15 @@ def test_seed_demo_runs_the_three_seeders_in_layer_order_and_is_idempotent(
         "integrations",
         "site_config",
     ]
+    # seed_demo's discovery would re-enter every seeder already imported in this process (the commerce
+    # seeder adds the named customers' addresses): keep the run to the three modules of this slice
+    monkeypatch.setattr(
+        "glowderma.core.management.commands.seed_demo.discover_seeders",
+        lambda: [m.__name__ for m in (accounts_seeds, integrations_seeds, site_config_seeds)],
+    )
     out = StringIO()
     call_command("seed_demo", force=True, stdout=out)
-    assert "ran: accounts, integrations, site_config" in out.getvalue()
+    assert "ran: accounts, integrations, site_config\n" in out.getvalue()
     first = counts()
     assert first == (1, 432, 432, 1, 1, 6, 1)
     assert Job.objects.get().created_by == get_user_model().objects.get(email="admin@glowderma.uz")
