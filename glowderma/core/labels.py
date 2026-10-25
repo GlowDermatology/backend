@@ -118,3 +118,38 @@ AUDIT_LOG_EXPORT_HEADERS: tuple[str, ...] = (
     "IP",
     "So‘rov ID",
 )
+# Contract §5.1 "Refund state (new UI line)": also the ``Qaytarish`` column of the payments export (M1c).
+REFUND_STATE: dict[str, str] = {
+    enums.RefundState.REQUESTED: "Qaytarish so‘raldi",
+    enums.RefundState.SUBMITTING: "Qaytarilmoqda",
+    enums.RefundState.SUCCEEDED: "Qaytarildi",
+    enums.RefundState.FAILED: "Qaytarib bo‘lmadi",
+    enums.RefundState.MANUAL_REQUIRED: "Payme kabinetida qaytarish kerak",
+    enums.RefundState.UNKNOWN: "Holat noma’lum · tekshiring",
+}
+# Contract 1.8 export columns (Uzbek headers) of the orders and payments lists (M1c).
+ORDER_EXPORT_HEADERS: tuple[str, ...] = (
+    "№",
+    "Mijoz",
+    "Telefon",
+    "Sana",
+    "Summa (so‘m)",
+    "To‘lov",
+    "Usul",
+    "Olish usuli",
+    "Holat",
+    "BTS",
+)
+PAYMENT_EXPORT_HEADERS: tuple[str, ...] = (
+    "ID",
+    "Buyurtma №",
+    "Mijoz",
+    "Telefon",
+    "Usul",
+    "Holat",
+    "Summa (so‘m)",
+    "Tranzaksiya",
+    "Yaratilgan",
+    "Tasdiqlangan",
+    "Qaytarish",
+)
