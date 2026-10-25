@@ -116,3 +116,20 @@ def test_migrate_zero_and_forward_again() -> None:
     with connection.cursor() as cursor:
         cursor.execute("SELECT indexdef FROM pg_indexes WHERE indexname = 'segment_name_ci_unique'")
         assert "lower((name)::text)" in cursor.fetchone()[0]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_dependency_migrate_zero_cascades_and_a_full_migrate_restores_us() -> None:
+    """Regression: a sibling's ``migrate catalog zero`` unapplies notifications too (0001 depends on
+    catalog.0001) and ``migrate catalog`` alone does not re-apply us; only a plain ``migrate`` does, and the
+    ``post_migrate`` receiver must cope with the table being absent in between."""
+    call_command("migrate", verbosity=0)
+    call_command("migrate", "catalog", "zero", verbosity=0)
+    assert not (TABLES & table_names())
+    assert not MigrationRecorder.Migration.objects.filter(app="notifications").exists()
+    call_command("migrate", "catalog", verbosity=0)
+    assert not (TABLES & table_names())  # the forward migrate of the dependency leaves us unapplied
+    call_command("flush", interactive=False, verbosity=0)  # pytest-django's teardown in this state
+    call_command("migrate", verbosity=0)
+    assert TABLES <= table_names()
+    assert list(StatusTemplate.objects.values_list("status", flat=True)) == STATUSES
