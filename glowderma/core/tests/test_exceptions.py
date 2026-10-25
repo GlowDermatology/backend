@@ -3,7 +3,7 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from django.core.exceptions import BadRequest, RequestDataTooBig, TooManyFieldsSent
+from django.core.exceptions import BadRequest, RequestDataTooBig, TooManyFieldsSent, TooManyFilesSent
 from django.test import RequestFactory
 from rest_framework import serializers
 from rest_framework.authentication import BaseAuthentication
@@ -11,8 +11,12 @@ from rest_framework.exceptions import (
     APIException,
     AuthenticationFailed,
     ErrorDetail,
+    MethodNotAllowed,
+    NotAcceptable,
     NotAuthenticated,
+    ParseError,
     Throttled,
+    UnsupportedMediaType,
 )
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
@@ -198,6 +202,47 @@ def test_throttled_without_wait_has_no_seconds_count() -> None:
     assert response.status_code == 429
     assert response.data["message"] == "Juda ko‘p urinish."
     assert not response.has_header("Retry-After")
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [MethodNotAllowed("POST"), NotAcceptable(), UnsupportedMediaType("private/client-type"), ParseError()],
+)
+def test_framework_defaults_use_uzbek_fallback(exc: APIException) -> None:
+    response = exception_response(exc)
+    assert response.status_code == exc.status_code
+    assert response.data["code"] == exc.default_code
+    assert response.data["message"] == "Maydonlarni tekshiring."
+    assert response.data["errors"] == []
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        MethodNotAllowed("POST", detail="custom", code="custom_code"),
+        NotAcceptable("custom", code="custom_code"),
+        UnsupportedMediaType("private/client-type", detail="custom", code="custom_code"),
+        ParseError("custom", code="custom_code"),
+    ],
+)
+def test_explicit_framework_exception_details_are_preserved(exc: APIException) -> None:
+    response = exception_response(exc)
+    assert response.data["message"] == "custom"
+    assert response.data["code"] == "custom_code"
+
+
+@pytest.mark.parametrize("exception_type", [TooManyFieldsSent, TooManyFilesSent])
+def test_suspicious_requests_keep_django_security_logging(
+    exception_type: type[TooManyFieldsSent], caplog: pytest.LogCaptureFixture
+) -> None:
+    response = exception_response(exception_type("limits exceeded"))
+    assert response.status_code == 400
+    records = [
+        record for record in caplog.records if record.name == f"django.security.{exception_type.__name__}"
+    ]
+    assert len(records) == 1
+    assert records[0].exc_info
+    assert getattr(records[0], "status_code", None) == 400
 
 
 @pytest.mark.parametrize(

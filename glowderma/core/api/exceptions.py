@@ -171,9 +171,29 @@ def error_body(
     }
 
 
+def _uses_default_detail(exc: exceptions.APIException) -> bool:
+    detail, default = str(exc.detail), str(exc.default_detail)
+    if detail == default:
+        return True
+    # DRF formats these class defaults in the constructor without retaining the arguments.
+    if isinstance(exc, (exceptions.MethodNotAllowed, exceptions.UnsupportedMediaType)):
+        pattern = "".join(
+            re.escape(literal) + (".*" if name is not None else "")
+            for literal, name, _format_spec, _conversion in Formatter().parse(default)
+        )
+        return re.fullmatch(pattern, detail, flags=re.DOTALL) is not None
+    return False
+
+
 def envelope_exception_handler(exc: Exception, context: dict[str, Any]) -> Response:
     response = exception_handler(exc, context)
     request = context.get("request")
+    if isinstance(exc, SuspiciousOperation):
+        logging.getLogger(f"django.security.{type(exc).__name__}").error(
+            str(exc),
+            exc_info=exc,
+            extra={"status_code": 413 if isinstance(exc, RequestDataTooBig) else 400, "request": request},
+        )
     if isinstance(exc, RequestDataTooBig):
         set_rollback()
         return Response(error_body("payload_too_large", request), status=413)
@@ -195,8 +215,8 @@ def envelope_exception_handler(exc: Exception, context: dict[str, Any]) -> Respo
     if isinstance(exc, exceptions.APIException) and not isinstance(exc, exceptions.ValidationError):
         code = str(exc.get_codes())
         message = str(exc.detail)
-        if message == str(exc.default_detail):
-            message = MESSAGES.get(code, message)
+        if _uses_default_detail(exc):
+            message = MESSAGES.get(code, MESSAGES["validation_error"])
     if isinstance(exc, exceptions.ValidationError):
         code = "validation_error"
         errors = flatten_errors(exc.detail)
