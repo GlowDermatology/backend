@@ -260,3 +260,15 @@ if FCM_MODE not in {"fake", "live"}:
 CAMPAIGN_BATCH_SIZE = env_int("CAMPAIGN_BATCH_SIZE", 500)
 if CAMPAIGN_BATCH_SIZE < 1:
     raise ImproperlyConfigured("CAMPAIGN_BATCH_SIZE must be a positive integer")
+# --- Orders, payments and delivery adapters (contract 2.2 / 2.12, M1c) ---
+# CLICK_MODE / PAYME_MODE / BTS_MODE: "fake" (deterministic in-process providers driven by Order.metadata
+# ["fake"], see integrations.{click,payme,bts}.fake) or "live" (M3); each defaults to INTEGRATIONS_MODE.
+CLICK_MODE = env_str("CLICK_MODE", INTEGRATIONS_MODE)
+PAYME_MODE = env_str("PAYME_MODE", INTEGRATIONS_MODE)
+BTS_MODE = env_str("BTS_MODE", INTEGRATIONS_MODE)
+if CLICK_MODE not in {"fake", "live"}:
+    raise ImproperlyConfigured("CLICK_MODE must be 'fake' or 'live'")
+if PAYME_MODE not in {"fake", "live"}:
+    raise ImproperlyConfigured("PAYME_MODE must be 'fake' or 'live'")
+if BTS_MODE not in {"fake", "live"}:
+    raise ImproperlyConfigured("BTS_MODE must be 'fake' or 'live'")
