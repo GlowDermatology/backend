@@ -55,7 +55,7 @@ def audit_actor(entry: AuditEntry) -> dict[str, Any] | None:
 
 
 def audit_data(entry: AuditEntry) -> Any:
-    """The ``after`` image, falling back to ``before`` (contract §7 item 18); ``null`` when there is neither."""
+    """The ``after`` image, else the ``before`` image (contract §7 item 18); ``null`` when neither exists."""
     return entry.after if entry.after is not None else entry.before
 
 

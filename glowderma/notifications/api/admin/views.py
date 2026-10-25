@@ -111,7 +111,9 @@ class NotificationViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSe
 
     def get_parsers(self) -> list[Any]:
         # Contract §2.8: ``POST notifications/`` is multipart (anything else is a 415); GET has no body.
-        return [MultiPartParser()] if self.request.method == "POST" else [JSONParser()]
+        # ``self.request`` is unset while drf-spectacular introspects the view.
+        request = getattr(self, "request", None)
+        return [MultiPartParser()] if request is not None and request.method == "POST" else [JSONParser()]
 
     def get_queryset(self) -> QuerySet[Campaign]:
         query = NotificationListQuerySerializer(data=self.request.query_params.dict())

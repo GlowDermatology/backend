@@ -3,6 +3,535 @@ info:
   title: Glow Derma API
   version: 1.0.0
 paths:
+  /api/v1/admin/appointments/:
+    get:
+      operationId: admin_appointments_day
+      parameters:
+      - in: query
+        name: date
+        schema:
+          type: string
+          format: date
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DaySchedule'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    post:
+      operationId: admin_appointments_create
+      description: Staff booking (requested_via=admin, created directly as confirmed).
+        The slot must sit on a 5-minute grid in the future, inside the specialist's
+        hours for that day (a date override wins), outside blocked periods and the
+        recurring break, and must not overlap another open appointment (a concurrent
+        booking of the same slot answers 409 conflict).
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppointmentCreateRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentItem'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/appointments/{id}/{action}/:
+    post:
+      operationId: admin_appointments_action
+      description: confirm / reject (from requested) or attend (from confirmed); otherwise
+        409 invalid_transition.
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: action
+        schema:
+          type: string
+          enum:
+          - attend
+          - confirm
+          - reject
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentItem'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/appointments/{id}/cancel/:
+    post:
+      operationId: admin_appointments_cancel
+      description: Cancel an open (requested|confirmed) appointment; the slot is freed
+        and the customer is pushed.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppointmentCancelRequest'
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentItem'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/appointments/{id}/reschedule/:
+    post:
+      operationId: admin_appointments_reschedule
+      description: Move an open (requested|confirmed) appointment; the status is kept.
+        Same slot rules as the creation. A new specialist re-snapshots duration and
+        price from that specialist's service link.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppointmentRescheduleRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentItem'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/appointments/pending-summary/:
+    get:
+      operationId: admin_appointments_pending_summary
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PendingSummary'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/audit-log/:
+    get:
+      operationId: admin_audit_log_list
+      parameters:
+      - in: query
+        name: action
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 100
+      - in: query
+        name: actor
+        schema:
+          type: integer
+          minimum: 1
+      - in: query
+        name: date_from
+        schema:
+          type: string
+          format: date
+      - in: query
+        name: date_to
+        schema:
+          type: string
+          format: date
+      - in: query
+        name: export
+        schema:
+          type: string
+          enum:
+          - csv
+          - xlsx
+        description: Download the filtered list as a file instead of the JSON page.
+      - in: query
+        name: object_id
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 254
+      - in: query
+        name: object_type
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 100
+      - in: query
+        name: ordering
+        schema:
+          enum:
+          - -at
+          - at
+          type: string
+          default: -at
+          minLength: 1
+        description: |-
+          * `-at` - -at
+          * `at` - at
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          enum:
+          - 20
+          - 50
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAuditEntryList'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/admin/auth/change-password/:
     post:
       operationId: admin_auth_change_password
@@ -403,6 +932,9 @@ paths:
           enum:
           - 20
           - 50
+  /api/v1/admin/nav-counts/:
+    get:
+      operationId: admin_nav_counts
       tags:
       - admin
       security:
@@ -413,6 +945,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PaginatedBannerList'
+                $ref: '#/components/schemas/NavCounts'
           description: ''
         '400':
           content:
@@ -1357,6 +1890,15 @@ paths:
         description: |-
           * `active` - active
           * `hidden` - hidden
+  /api/v1/admin/notification-templates/{status}/:
+    get:
+      operationId: admin_notification_templates_retrieve
+      parameters:
+      - in: path
+        name: status
+        schema:
+          type: string
+        required: true
       tags:
       - admin
       security:
@@ -1367,6 +1909,177 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PaginatedProductList'
+                $ref: '#/components/schemas/StatusTemplate'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    put:
+      operationId: admin_notification_templates_update
+      parameters:
+      - in: path
+        name: status
+        schema:
+          type: string
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TemplateUpdateRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusTemplate'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/notifications/:
+    get:
+      operationId: admin_notifications_list
+      parameters:
+      - in: query
+        name: export
+        schema:
+          type: string
+          enum:
+          - csv
+          - xlsx
+        description: Download the filtered list as a file instead of the JSON page.
+      - in: query
+        name: kind
+        schema:
+          enum:
+          - promo
+          - general
+          type: string
+          minLength: 1
+        description: |-
+          * `promo` - promo
+          * `general` - general
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          enum:
+          - 20
+          - 50
+      - in: query
+        name: state
+        schema:
+          enum:
+          - scheduled
+          - queued
+          - sent
+          type: string
+          minLength: 1
+        description: |-
+          * `scheduled` - scheduled
+          * `queued` - queued
+          * `sent` - sent
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedNotificationRecordList'
           description: ''
         '400':
           content:
@@ -1412,6 +2125,20 @@ paths:
           description: ''
     post:
       operationId: admin_products_create
+      operationId: admin_notifications_create
+      description: Multipart with dotted keys (`link.kind`, `audience.type`, …) and
+        an optional `image` (JPEG, PNG or WebP, ≤ 5 MiB). Without `scheduled_at` the
+        send starts at once (state queued); with it the campaign waits for its time
+        (state scheduled).
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
       tags:
       - admin
       requestBody:
@@ -1419,6 +2146,9 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/ProductWriteRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/NotificationFormRequest'
         required: true
       security:
       - StaffJWT: []
@@ -1428,6 +2158,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Product'
+                $ref: '#/components/schemas/NotificationRecord'
           description: ''
         '400':
           content:
@@ -1474,6 +2205,205 @@ paths:
   /api/v1/admin/products/{id}/:
     get:
       operationId: admin_products_retrieve
+  /api/v1/admin/notifications/meta/:
+    get:
+      operationId: admin_notifications_meta
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationMeta'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/segments/:
+    get:
+      operationId: admin_segments_list
+      parameters:
+      - in: query
+        name: export
+        schema:
+          type: string
+          enum:
+          - csv
+          - xlsx
+        description: Download the filtered list as a file instead of the JSON page.
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          enum:
+          - 20
+          - 50
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedSegmentList'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    post:
+      operationId: admin_segments_create
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SegmentWriteRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Segment'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/segments/{id}/:
+    get:
+      operationId: admin_segments_retrieve
       parameters:
       - in: path
         name: id
@@ -1490,6 +2420,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Product'
+                $ref: '#/components/schemas/Segment'
           description: ''
         '400':
           content:
@@ -1535,6 +2466,7 @@ paths:
           description: ''
     patch:
       operationId: admin_products_partial_update
+      operationId: admin_segments_partial_update
       parameters:
       - in: path
         name: id
@@ -1548,6 +2480,7 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/PatchedProductWriteRequest'
+              $ref: '#/components/schemas/PatchedSegmentWriteRequest'
       security:
       - StaffJWT: []
       responses:
@@ -1556,6 +2489,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Product'
+                $ref: '#/components/schemas/Segment'
           description: ''
         '400':
           content:
@@ -1672,6 +2606,8 @@ paths:
   /api/v1/admin/products/{id}/images/{image_id}/:
     delete:
       operationId: admin_product_images_destroy
+    delete:
+      operationId: admin_segments_destroy
       parameters:
       - in: path
         name: id
@@ -1735,6 +2671,92 @@ paths:
   /api/v1/admin/products/{id}/images/order/:
     put:
       operationId: admin_product_images_reorder
+  /api/v1/admin/segments/{id}/members/:
+    get:
+      operationId: admin_segment_members_list
+      parameters:
+      - in: query
+        name: export
+        schema:
+          type: string
+          enum:
+          - csv
+          - xlsx
+        description: Download the filtered list as a file instead of the JSON page.
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          enum:
+          - 20
+          - 50
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedCustomerListItemList'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    post:
+      operationId: admin_segment_members_add
       parameters:
       - in: path
         name: id
@@ -1748,6 +2770,7 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/ImageOrderRequest'
+              $ref: '#/components/schemas/SegmentMembersInputRequest'
         required: true
       security:
       - StaffJWT: []
@@ -1757,6 +2780,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ImagesResponse'
+                $ref: '#/components/schemas/Segment'
           description: ''
         '400':
           content:
@@ -1803,6 +2827,73 @@ paths:
   /api/v1/admin/products/stats/:
     get:
       operationId: admin_products_stats
+  /api/v1/admin/segments/{id}/members/{customer_id}/:
+    delete:
+      operationId: admin_segment_members_remove
+      description: Removes a manual membership; a rule-only member answers 409 conflict.
+      parameters:
+      - in: path
+        name: customer_id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '204':
+          description: No response body
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/settings/:
+    get:
+      operationId: admin_settings_retrieve
       tags:
       - admin
       security:
@@ -1813,6 +2904,67 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProductStats'
+                $ref: '#/components/schemas/Settings'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    patch:
+      operationId: admin_settings_partial_update
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedSettingsPatchRequest'
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Settings'
           description: ''
         '400':
           content:
@@ -1897,6 +3049,7 @@ components:
       - access_expires_at
       - refresh_expires_at
     Actor:
+    ActorRef:
       type: object
       description: 'Contract §2.0 ``Actor = {"id", "display_name"}``: the staff full
         name, else the email.'
@@ -2163,6 +3316,171 @@ components:
       required:
       - name
       - slug
+    AppointmentCancelRequest:
+      type: object
+      description: '``POST appointments/{id}/cancel/``: optional ``reason`` (≤ 300),
+        kept as the staff note.'
+      properties:
+        reason:
+          type: string
+          default: ''
+          maxLength: 300
+    AppointmentCreateRequest:
+      type: object
+      description: |-
+        ``POST appointments/`` (T10): ``specialist_id``, ``service_id``, ``customer_id`` | ``phone`` (E.164 of
+        an active customer), ``start`` (aware, 5-minute grid, inside working hours), ``note`` (≤ 300).
+      properties:
+        specialist_id:
+          type: integer
+        service_id:
+          type: integer
+        customer_id:
+          type: integer
+        phone:
+          type: string
+          minLength: 1
+          pattern: ^\+998\d{9}$
+        start:
+          type: string
+          format: date-time
+        note:
+          type: string
+          default: ''
+          maxLength: 300
+      required:
+      - service_id
+      - specialist_id
+      - start
+    AppointmentItem:
+      type: object
+      description: The day-item shape (contract §2.9), also returned by every action
+        endpoint.
+      properties:
+        id:
+          type: integer
+        specialist_id:
+          type: integer
+        customer:
+          $ref: '#/components/schemas/CustomerRef'
+        service_id:
+          type: integer
+        service_name:
+          type: string
+        service_short_name:
+          type: string
+        duration_min:
+          type: integer
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+        price:
+          type: integer
+        status:
+          $ref: '#/components/schemas/AppointmentStatusEnum'
+        requested_at:
+          type: string
+          format: date-time
+        requested_via:
+          $ref: '#/components/schemas/RequestedViaEnum'
+      required:
+      - customer
+      - duration_min
+      - end
+      - id
+      - price
+      - requested_at
+      - requested_via
+      - service_id
+      - service_name
+      - service_short_name
+      - specialist_id
+      - start
+      - status
+    AppointmentRescheduleRequest:
+      type: object
+      description: '``POST appointments/{id}/reschedule/``: ``start`` (same slot rules),
+        optional ``specialist_id``.'
+      properties:
+        start:
+          type: string
+          format: date-time
+        specialist_id:
+          type: integer
+      required:
+      - start
+    AppointmentStatusEnum:
+      enum:
+      - requested
+      - confirmed
+      - rejected
+      - attended
+      - cancelled
+      type: string
+      description: |-
+        * `requested` - requested
+        * `confirmed` - confirmed
+        * `rejected` - rejected
+        * `attended` - attended
+        * `cancelled` - cancelled
+    AudienceTypeEnum:
+      enum:
+      - all
+      - segment
+      - customer
+      type: string
+      description: |-
+        * `all` - all
+        * `segment` - segment
+        * `customer` - customer
+    AuditEntry:
+      type: object
+      properties:
+        id:
+          type: integer
+        at:
+          type: string
+          format: date-time
+        actor:
+          allOf:
+          - $ref: '#/components/schemas/ActorRef'
+          nullable: true
+          readOnly: true
+        action:
+          type: string
+        object_type:
+          type: string
+        object_id:
+          type: string
+        data:
+          nullable: true
+          readOnly: true
+        ip:
+          type: string
+          nullable: true
+        request_id:
+          type: string
+      required:
+      - action
+      - actor
+      - at
+      - data
+      - id
+      - ip
+      - object_id
+      - object_type
+      - request_id
+    BlockKindEnum:
+      enum:
+      - busy
+      - 'off'
+      type: string
+      description: |-
+        * `busy` - busy
+        * `off` - off
     ChangePasswordRequest:
       type: object
       properties:
@@ -2179,6 +3497,102 @@ components:
       required:
       - current_password
       - new_password
+    CustomerListItem:
+      type: object
+      description: Contract §2.6 ``CustomerListItem`` for the members list; loyalty-owned
+        numbers read 0 / null (B4).
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        phone:
+          type: string
+        status:
+          $ref: '#/components/schemas/CustomerStatusEnum'
+        registered_at:
+          type: string
+          format: date-time
+        lifetime_total:
+          type: integer
+        percent:
+          type: string
+          nullable: true
+          readOnly: true
+        balance:
+          type: integer
+          readOnly: true
+        online_orders_count:
+          type: integer
+      required:
+      - balance
+      - id
+      - lifetime_total
+      - name
+      - online_orders_count
+      - percent
+      - phone
+      - registered_at
+      - status
+    CustomerRef:
+      type: object
+      description: Contract §2.0 ``CustomerRef``; ``name`` is ``""`` once the customer
+        is deleted (scrubbed).
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        phone:
+          type: string
+      required:
+      - id
+      - name
+      - phone
+    CustomerStatusEnum:
+      enum:
+      - active
+      - deleted
+      type: string
+      description: |-
+        * `active` - active
+        * `deleted` - deleted
+    DayBlock:
+      type: object
+      properties:
+        start:
+          type: string
+        end:
+          type: string
+        kind:
+          $ref: '#/components/schemas/BlockKindEnum'
+        label:
+          type: string
+          nullable: true
+      required:
+      - end
+      - kind
+      - label
+      - start
+    DaySchedule:
+      type: object
+      description: '``GET appointments/?date=`` (contract §2.9).'
+      properties:
+        date:
+          type: string
+          format: date
+        specialists:
+          type: array
+          items:
+            $ref: '#/components/schemas/SpecialistDay'
+        appointments:
+          type: array
+          items:
+            $ref: '#/components/schemas/AppointmentItem'
+      required:
+      - appointments
+      - date
+      - specialists
     ErrorEnvelope:
       type: object
       properties:
@@ -2388,6 +3802,31 @@ components:
       - kind
       - new_price
       - old_price
+    Integrations:
+      type: object
+      properties:
+        mode:
+          $ref: '#/components/schemas/ModeEnum'
+      required:
+      - mode
+    LinkKindEnum:
+      enum:
+      - none
+      - product
+      type: string
+      description: |-
+        * `none` - none
+        * `product` - product
+    LinkOption:
+      type: object
+      properties:
+        product_id:
+          type: integer
+        label:
+          type: string
+      required:
+      - label
+      - product_id
     LoginRequest:
       type: object
       properties:
@@ -2473,6 +3912,216 @@ components:
       - is_superuser
       - linked_providers
       - session_expires_at
+    MetaSegment:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        size:
+          type: integer
+      required:
+      - id
+      - name
+      - size
+    ModeEnum:
+      enum:
+      - fake
+      - live
+      type: string
+      description: |-
+        * `fake` - fake
+        * `live` - live
+    NavCounts:
+      type: object
+      properties:
+        orders_processing:
+          type: integer
+        appointments_pending:
+          type: integer
+      required:
+      - appointments_pending
+      - orders_processing
+    NotificationAudience:
+      type: object
+      properties:
+        type:
+          $ref: '#/components/schemas/AudienceTypeEnum'
+        segment_id:
+          type: integer
+          nullable: true
+        segment_name:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+      required:
+      - phone
+      - segment_id
+      - segment_name
+      - type
+    NotificationFormRequest:
+      type: object
+      properties:
+        kind:
+          $ref: '#/components/schemas/NotificationKindEnum'
+        title:
+          type: string
+          minLength: 3
+          maxLength: 60
+        body:
+          type: string
+          minLength: 5
+          maxLength: 180
+        image:
+          type: string
+          format: binary
+        link.kind:
+          $ref: '#/components/schemas/LinkKindEnum'
+        link.product_id:
+          type: integer
+        audience.type:
+          $ref: '#/components/schemas/AudienceTypeEnum'
+        audience.segment_id:
+          type: integer
+        audience.phone:
+          type: string
+          minLength: 1
+        scheduled_at:
+          type: string
+          format: date-time
+      required:
+      - audience.type
+      - body
+      - kind
+      - title
+    NotificationKindEnum:
+      enum:
+      - promo
+      - general
+      type: string
+      description: |-
+        * `promo` - promo
+        * `general` - general
+    NotificationLink:
+      type: object
+      properties:
+        kind:
+          $ref: '#/components/schemas/LinkKindEnum'
+        product_id:
+          type: integer
+          nullable: true
+        label:
+          type: string
+          nullable: true
+      required:
+      - kind
+      - label
+      - product_id
+    NotificationMeta:
+      type: object
+      properties:
+        total_devices:
+          type: integer
+        segments:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetaSegment'
+        templates:
+          type: array
+          items:
+            $ref: '#/components/schemas/StatusTemplate'
+        link_options:
+          type: array
+          items:
+            $ref: '#/components/schemas/LinkOption'
+      required:
+      - link_options
+      - segments
+      - templates
+      - total_devices
+    NotificationRecord:
+      type: object
+      properties:
+        id:
+          type: integer
+        kind:
+          $ref: '#/components/schemas/NotificationKindEnum'
+        title:
+          type: string
+        body:
+          type: string
+        image_url:
+          type: string
+          nullable: true
+          readOnly: true
+        link:
+          allOf:
+          - $ref: '#/components/schemas/NotificationLink'
+          readOnly: true
+        audience:
+          allOf:
+          - $ref: '#/components/schemas/NotificationAudience'
+          readOnly: true
+        recipient_count:
+          type: integer
+        state:
+          allOf:
+          - $ref: '#/components/schemas/NotificationStateEnum'
+          readOnly: true
+        scheduled_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        sent_at:
+          type: string
+          format: date-time
+          nullable: true
+        sent:
+          type: integer
+          nullable: true
+        failed:
+          type: integer
+          nullable: true
+        delivered:
+          type: integer
+          nullable: true
+        author:
+          allOf:
+          - $ref: '#/components/schemas/ActorRef'
+          nullable: true
+      required:
+      - audience
+      - author
+      - body
+      - created_at
+      - delivered
+      - failed
+      - id
+      - image_url
+      - kind
+      - link
+      - recipient_count
+      - scheduled_at
+      - sent
+      - sent_at
+      - state
+      - title
+    NotificationStateEnum:
+      enum:
+      - scheduled
+      - queued
+      - sent
+      type: string
+      description: |-
+        * `scheduled` - scheduled
+        * `queued` - queued
+        * `sent` - sent
     OAuthCallbackRequest:
       type: object
       description: |-
@@ -2503,6 +4152,7 @@ components:
       - code_verifier
       - redirect_uri
     PaginatedBannerList:
+    PaginatedAuditEntryList:
       type: object
       required:
       - count
@@ -2524,6 +4174,8 @@ components:
           items:
             $ref: '#/components/schemas/Banner'
     PaginatedCategoryList:
+            $ref: '#/components/schemas/AuditEntry'
+    PaginatedCustomerListItemList:
       type: object
       required:
       - count
@@ -2545,6 +4197,8 @@ components:
           items:
             $ref: '#/components/schemas/Category'
     PaginatedProductList:
+            $ref: '#/components/schemas/CustomerListItem'
+    PaginatedNotificationRecordList:
       type: object
       required:
       - count
@@ -2950,6 +4604,92 @@ components:
       - billz_id
       - price
       - texts
+            $ref: '#/components/schemas/NotificationRecord'
+    PaginatedSegmentList:
+      type: object
+      required:
+      - count
+      - page
+      - page_size
+      - page_count
+      - results
+      properties:
+        count:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+        page_count:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Segment'
+    PatchedSegmentWriteRequest:
+      type: object
+      description: '``POST segments/`` (``name`` 2..60 unique, ``rules``) and ``PATCH
+        segments/{id}/`` (partial).'
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 60
+        rules:
+          $ref: '#/components/schemas/SegmentRulesRequest'
+    PatchedSettingsPatchRequest:
+      type: object
+      description: |-
+        ``PATCH settings/``: ``reservation_minutes`` 5..60, ``support_phone`` E.164 | null,
+        ``pickup_address.*`` ≤ 200; ``integrations`` is read-only (``read_only`` field error).
+      properties:
+        reservation_minutes:
+          type: integer
+          maximum: 60
+          minimum: 5
+        support_phone:
+          type: string
+          nullable: true
+          minLength: 1
+          pattern: ^\+998\d{9}$
+        pickup_address:
+          $ref: '#/components/schemas/PickupAddressRequest'
+    PendingSummary:
+      type: object
+      properties:
+        count:
+          type: integer
+        next_at:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+      - count
+      - next_at
+    PickupAddress:
+      type: object
+      properties:
+        uz:
+          type: string
+          maxLength: 200
+        ru:
+          type: string
+          maxLength: 200
+        en:
+          type: string
+          maxLength: 200
+    PickupAddressRequest:
+      type: object
+      properties:
+        uz:
+          type: string
+          maxLength: 200
+        ru:
+          type: string
+          maxLength: 200
+        en:
+          type: string
+          maxLength: 200
     RefreshRequest:
       type: object
       properties:
@@ -2970,6 +4710,127 @@ components:
             maxLength: 40
       required:
       - slugs
+    RequestedViaEnum:
+      enum:
+      - app
+      - admin
+      type: string
+      description: |-
+        * `app` - app
+        * `admin` - admin
+    Segment:
+      type: object
+      description: Contract §2.8 ``Segment``; the counts come from ``selectors.segment_stats``.
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        rules:
+          allOf:
+          - $ref: '#/components/schemas/SegmentRules'
+          readOnly: true
+        manual_member_count:
+          type: integer
+          readOnly: true
+        member_count:
+          type: integer
+          readOnly: true
+        size:
+          type: integer
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+      - created_at
+      - id
+      - manual_member_count
+      - member_count
+      - name
+      - rules
+      - size
+      - updated_at
+    SegmentMembersInputRequest:
+      type: object
+      properties:
+        customer_ids:
+          type: array
+          items:
+            type: integer
+          maxItems: 500
+      required:
+      - customer_ids
+    SegmentRules:
+      type: object
+      properties:
+        min_online_orders:
+          type: integer
+          minimum: 1
+          nullable: true
+        min_lifetime_amount:
+          type: integer
+          minimum: 1
+          nullable: true
+    SegmentRulesRequest:
+      type: object
+      properties:
+        min_online_orders:
+          type: integer
+          minimum: 1
+          nullable: true
+        min_lifetime_amount:
+          type: integer
+          minimum: 1
+          nullable: true
+    SegmentWriteRequest:
+      type: object
+      description: '``POST segments/`` (``name`` 2..60 unique, ``rules``) and ``PATCH
+        segments/{id}/`` (partial).'
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 60
+        rules:
+          $ref: '#/components/schemas/SegmentRulesRequest'
+      required:
+      - name
+    Settings:
+      type: object
+      description: '``GET settings/`` (contract §2.11).'
+      properties:
+        reservation_minutes:
+          type: integer
+        support_phone:
+          type: string
+          nullable: true
+          readOnly: true
+        pickup_address:
+          allOf:
+          - $ref: '#/components/schemas/PickupAddress'
+          readOnly: true
+        integrations:
+          allOf:
+          - $ref: '#/components/schemas/Integrations'
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+        updated_by:
+          allOf:
+          - $ref: '#/components/schemas/ActorRef'
+          nullable: true
+      required:
+      - integrations
+      - pickup_address
+      - reservation_minutes
+      - support_phone
+      - updated_at
+      - updated_by
     SocialProviderEnum:
       enum:
       - google
@@ -2978,6 +4839,122 @@ components:
       description: |-
         * `google` - google
         * `facebook` - facebook
+    SpecialistDay:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        role:
+          $ref: '#/components/schemas/SpecialistRoleEnum'
+        working_hours:
+          allOf:
+          - $ref: '#/components/schemas/WorkingHours'
+          nullable: true
+          readOnly: true
+        blocks:
+          type: array
+          items:
+            $ref: '#/components/schemas/DayBlock'
+      required:
+      - blocks
+      - id
+      - name
+      - role
+      - working_hours
+    SpecialistRoleEnum:
+      enum:
+      - dermatologist
+      - cosmetologist
+      type: string
+      description: |-
+        * `dermatologist` - dermatologist
+        * `cosmetologist` - cosmetologist
+    StatusTemplate:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/TemplateStatusEnum'
+        texts:
+          allOf:
+          - $ref: '#/components/schemas/TemplateTexts'
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+        updated_by:
+          allOf:
+          - $ref: '#/components/schemas/ActorRef'
+          nullable: true
+      required:
+      - status
+      - texts
+      - updated_at
+      - updated_by
+    TemplateStatusEnum:
+      enum:
+      - processing
+      - handed_to_courier
+      - delivered
+      - cancelled
+      type: string
+      description: |-
+        * `processing` - processing
+        * `handed_to_courier` - handed_to_courier
+        * `delivered` - delivered
+        * `cancelled` - cancelled
+    TemplateTexts:
+      type: object
+      properties:
+        uz:
+          type: string
+          maxLength: 180
+          minLength: 5
+        ru:
+          type: string
+          maxLength: 180
+        en:
+          type: string
+          maxLength: 180
+      required:
+      - en
+      - ru
+      - uz
+    TemplateTextsRequest:
+      type: object
+      properties:
+        uz:
+          type: string
+          minLength: 5
+          maxLength: 180
+        ru:
+          type: string
+          maxLength: 180
+        en:
+          type: string
+          maxLength: 180
+      required:
+      - en
+      - ru
+      - uz
+    TemplateUpdateRequest:
+      type: object
+      properties:
+        texts:
+          $ref: '#/components/schemas/TemplateTextsRequest'
+      required:
+      - texts
+    WorkingHours:
+      type: object
+      properties:
+        start:
+          type: string
+        end:
+          type: string
+      required:
+      - end
+      - start
   securitySchemes:
     StaffJWT:
       type: http
