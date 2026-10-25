@@ -238,3 +238,9 @@ SPECTACULAR_SETTINGS["ENUM_NAME_OVERRIDES"] = {
     "HealthStatusEnum": ["ok", "error"],
     "SocialProviderEnum": ["google", "facebook"],
 }
+# --- Billz adapter (contract 2.3, M1a) ---
+# BILLZ_MODE: "fake" (deterministic in-process catalog, see integrations.billz.fake) or "live" (M3); defaults
+# to INTEGRATIONS_MODE.
+BILLZ_MODE = env_str("BILLZ_MODE", INTEGRATIONS_MODE)
+if BILLZ_MODE not in {"fake", "live"}:
+    raise ImproperlyConfigured("BILLZ_MODE must be 'fake' or 'live'")
