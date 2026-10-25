@@ -12,7 +12,7 @@ from collections.abc import Callable
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, OperationalError, transaction
 from rest_framework.exceptions import ValidationError
 
 from glowderma.accounts.models import Customer, Device
@@ -48,6 +48,20 @@ PUSHED_ACTIONS: dict[str, str] = {
 
 # Test seam for the booking race: called after the slot checks and before the row is written.
 _before_write: Callable[[], None] = lambda: None  # noqa: E731
+DEADLOCK_DETECTED = "40P01"
+
+
+def _lost_the_slot(exc: Exception) -> bool:
+    """Whether a write error means a concurrent booking won the slot.
+
+    Two transactions inserting overlapping rows each find the other's uncommitted tuple while checking the
+    ``appointment_no_overlap`` exclusion constraint; PostgreSQL then either makes one wait and fails it with
+    the exclusion violation (``IntegrityError``) or detects the mutual wait and aborts one with a deadlock
+    (``OperationalError`` 40P01). Both are the same lost race.
+    """
+    if isinstance(exc, IntegrityError):
+        return True
+    return getattr(exc.__cause__, "sqlstate", None) == DEADLOCK_DETECTED
 
 
 def _start_error(code: str, message: str) -> ValidationError:
@@ -252,7 +266,9 @@ def create_by_admin(
             _audit(
                 appointment, "created", actor=actor, request=request, requested_via=enums.RequestedVia.ADMIN
             )
-    except IntegrityError as exc:  # appointment_no_overlap: a concurrent booking won the slot
+    except (IntegrityError, OperationalError) as exc:  # appointment_no_overlap: a concurrent booking won
+        if not _lost_the_slot(exc):
+            raise
         raise Conflict(MESSAGES["slot_taken"]) from exc
     return appointment
 
@@ -293,7 +309,9 @@ def reschedule(
             appointment.save(
                 update_fields=["professional", "start", "end", "duration_min", "price", "reschedule_count"]
             )
-    except IntegrityError as exc:
+    except (IntegrityError, OperationalError) as exc:
+        if not _lost_the_slot(exc):
+            raise
         raise Conflict(MESSAGES["slot_taken"]) from exc
     event = record_event(
         appointment,

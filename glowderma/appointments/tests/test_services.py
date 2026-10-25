@@ -420,3 +420,48 @@ def test_check_slot_outside_a_day_spanning_block(staff: StaffUser, clock: Any) -
         services.check_slot(link.professional, at(MONDAY, 23, 30), at(MONDAY, 23, 59))
     assert slot_error(info.value)[0] == "slot_unavailable"
     services.check_slot(link.professional, at(MONDAY, 21), at(MONDAY, 21, 30))
+
+
+def _raising(error: Exception) -> Callable[..., Any]:
+    def create(*args: Any, **kwargs: Any) -> Any:
+        raise error
+
+    return create
+
+
+@pytest.mark.django_db
+def test_a_deadlock_on_the_exclusion_check_is_the_same_lost_race(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Two concurrent inserts can also end in a deadlock (40P01) while checking the exclusion constraint:
+    the aborted one answers 409 ``conflict`` like the exclusion violation; other operational errors pass."""
+    import psycopg
+    from django.db import OperationalError
+
+    monkeypatch.setattr("glowderma.core.timeutils.now", lambda: ANCHOR)
+    link = booking_setup()
+    staff = StaffUserFactory.create()
+    kwargs: dict[str, Any] = {
+        "professional": link.professional,
+        "service": link.service,
+        "customer": CustomerFactory.create(),
+        "start": at(MONDAY, 10),
+        "actor": staff,
+    }
+    deadlock = OperationalError("deadlock detected")
+    deadlock.__cause__ = psycopg.errors.DeadlockDetected("deadlock detected")
+    monkeypatch.setattr(Appointment.objects, "create", _raising(deadlock))
+    with pytest.raises(Conflict) as caught:
+        services.create_by_admin(**kwargs)
+    assert str(caught.value.detail) == "Bu vaqt band."
+    other = OperationalError("server closed the connection")
+    other.__cause__ = psycopg.OperationalError("server closed the connection")
+    monkeypatch.setattr(Appointment.objects, "create", _raising(other))
+    with pytest.raises(OperationalError):
+        services.create_by_admin(**kwargs)
+    monkeypatch.undo()
+    monkeypatch.setattr("glowderma.core.timeutils.now", lambda: ANCHOR)
+    booked = AppointmentFactory.create(
+        professional=link.professional, service=link.service, start=at(MONDAY, 15)
+    )
+    monkeypatch.setattr(Appointment, "save", _raising(deadlock))
+    with pytest.raises(Conflict):
+        services.reschedule(booked.pk, start=at(MONDAY, 11), actor=staff)
