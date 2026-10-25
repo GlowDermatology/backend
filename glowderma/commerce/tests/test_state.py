@@ -55,16 +55,25 @@ def test_cancel_rows_carry_the_contract_rules() -> None:
     assert [t.row for t in admin_cancels] == [1]
     assert [t.row for t in state.transitions_from(S.AWAITING_PAYMENT)] == [2, 3, 4, 5]
     assert [t.row for t in state.transitions_from(S.PROCESSING, Trigger.ADMIN_CANCEL)] == [6]
-    expiry = state.find_transition(S.AWAITING_PAYMENT, S.CANCELLED, Trigger.RESERVATION_EXPIRY)
+    expiry = state.find_transition(
+        S.AWAITING_PAYMENT, S.CANCELLED, Trigger.RESERVATION_EXPIRY, fulfilment=F.DELIVERY
+    )
     assert expiry is not None and not expiry.push and expiry.audit_action == ""  # N-1
     assert expiry.cancellation_reason == enums.CancellationReason.RESERVATION_EXPIRED
-    paid_cancel = state.find_transition(S.PROCESSING, S.CANCELLED, Trigger.ADMIN_CANCEL)
+    paid_cancel = state.find_transition(S.PROCESSING, S.CANCELLED, Trigger.ADMIN_CANCEL, fulfilment=F.PICKUP)
     assert paid_cancel is not None and paid_cancel.bts_cancel and paid_cancel.push
-    unpaid_cancel = state.find_transition(S.AWAITING_PAYMENT, S.CANCELLED, Trigger.ADMIN_CANCEL)
+    unpaid_cancel = state.find_transition(
+        S.AWAITING_PAYMENT, S.CANCELLED, Trigger.ADMIN_CANCEL, fulfilment=F.DELIVERY
+    )
     assert unpaid_cancel is not None and not unpaid_cancel.bts_cancel
-    customer = state.find_transition(S.AWAITING_PAYMENT, S.CANCELLED, Trigger.CUSTOMER_CANCEL)
+    customer = state.find_transition(
+        S.AWAITING_PAYMENT, S.CANCELLED, Trigger.CUSTOMER_CANCEL, fulfilment=F.DELIVERY
+    )
     assert customer is not None and customer.event_source == enums.EventSource.SYSTEM
-    assert state.find_transition(S.PROCESSING, S.CANCELLED, Trigger.CUSTOMER_CANCEL) is None  # C-6
+    assert (
+        state.find_transition(S.PROCESSING, S.CANCELLED, Trigger.CUSTOMER_CANCEL, fulfilment=F.DELIVERY)
+        is None
+    )  # C-6
 
 
 def test_find_transition_respects_fulfilment() -> None:
@@ -84,12 +93,46 @@ def test_find_transition_respects_fulfilment() -> None:
         )
         is None
     )
-    assert state.find_transition(S.AWAITING_PAYMENT, S.HANDED_TO_COURIER, Trigger.ADMIN_TRANSITION) is None
-    assert state.find_transition(S.DELIVERED, S.PROCESSING, Trigger.ADMIN_TRANSITION) is None
+    assert (
+        state.find_transition(
+            S.AWAITING_PAYMENT, S.HANDED_TO_COURIER, Trigger.ADMIN_TRANSITION, fulfilment=F.DELIVERY
+        )
+        is None
+    )
+    assert (
+        state.find_transition(S.DELIVERED, S.PROCESSING, Trigger.ADMIN_TRANSITION, fulfilment=F.DELIVERY)
+        is None
+    )
     assert (
         state.find_transition(S.PROCESSING, S.HANDED_TO_COURIER, Trigger.BTS_STATUS, fulfilment=F.PICKUP)
         is None
     )
+
+
+@pytest.mark.parametrize("fulfilment", F.values)
+def test_find_transition_never_treats_a_missing_fulfilment_as_a_wildcard(fulfilment: str) -> None:
+    """Regression: rows 8/9/11/12 must never match an order whose fulfilment the caller forgot to pass."""
+    with pytest.raises(TypeError):
+        state.find_transition(S.PROCESSING, S.DELIVERED, Trigger.ADMIN_TRANSITION)  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        state.find_transition(S.PROCESSING, S.DELIVERED, Trigger.ADMIN_TRANSITION, None)  # type: ignore[arg-type,call-arg]
+    # every fulfilment-restricted row answers only for its own fulfilment
+    for transition in state.TRANSITIONS:
+        if transition.fulfilment is None:
+            continue
+        found = state.find_transition(
+            transition.source, transition.target, transition.trigger, fulfilment=fulfilment
+        )
+        if fulfilment == transition.fulfilment:
+            assert found is transition
+        else:
+            assert found is None or found.fulfilment == fulfilment
+    # ...and find_transition agrees with manual_transitions for every (status, fulfilment) pair
+    for status in S.values:
+        offered = state.manual_transitions(status, fulfilment)
+        for target in S.values:
+            row = state.find_transition(status, target, Trigger.ADMIN_TRANSITION, fulfilment=fulfilment)
+            assert (row is not None) == (target in offered), (status, target, fulfilment)
 
 
 def test_available_actions_derivation() -> None:

@@ -219,16 +219,17 @@ def transitions_from(source: str | None, trigger: Trigger | None = None) -> tupl
 
 
 def find_transition(
-    source: str | None, target: str, trigger: Trigger, *, fulfilment: str | None = None
+    source: str | None, target: str, trigger: Trigger, *, fulfilment: str
 ) -> Transition | None:
-    """The §4.1 row for ``source → target`` under ``trigger``.
+    """The §4.1 row for ``source → target`` under ``trigger`` for an order with ``fulfilment``.
 
-    ``fulfilment`` is compared only where the row restricts it (rows 8, 9, 11, 12).
+    ``fulfilment`` is required (every order has one) so that the rows §4.1 restricts by fulfilment
+    (8, 9, 11, 12) can never match the wrong order: a missing keyword is a ``TypeError``, not a wildcard.
     """
     for transition in TRANSITIONS:
         if transition.source != source or transition.target != target or transition.trigger != trigger:
             continue
-        if transition.fulfilment is None or fulfilment is None or transition.fulfilment == fulfilment:
+        if transition.fulfilment is None or transition.fulfilment == fulfilment:
             return transition
     return None
 
