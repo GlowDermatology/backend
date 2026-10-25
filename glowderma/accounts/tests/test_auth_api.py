@@ -7,12 +7,13 @@ from rest_framework.test import APIClient
 
 from glowderma.accounts.api.guard import LoginGuard, email_hash
 from glowderma.accounts.models import AuthSession, StaffUser
+from glowderma.accounts.tests.factories import TEST_PASSWORD
 from glowderma.core.models import AuditEntry, IdempotencyRecord
 
 pytestmark = pytest.mark.django_db
 WRONG = "wrong"
 BASE = "/api/v1/admin/auth/"
-PASSWORD = "Saffron!Harbor-Long72"  # noqa: S105
+PASSWORD = TEST_PASSWORD
 
 
 @pytest.fixture
@@ -186,11 +187,10 @@ def test_change_password_revokes_other_sessions(
         (PASSWORD, "12", "new_password", "password_too_short"),
     ],
 )
-def test_change_password_field_errors(user: StaffUser, current: str, new: str, field: str, code: str) -> None:
-    client = APIClient()
-    data = login(client).data
-    client.credentials(HTTP_AUTHORIZATION=f"Bearer {data['access']}")
-    response = client.post(
+def test_change_password_field_errors(
+    admin_client: APIClient, current: str, new: str, field: str, code: str
+) -> None:
+    response = admin_client.post(
         BASE + "change-password/", {"current_password": current, "new_password": new}, format="json"
     )
     assert response.status_code == 400
@@ -251,26 +251,20 @@ def test_new_password_validation_does_not_spend_attempt_budget(user: StaffUser, 
     assert cache.get(f"auth:attempt:change_password:{email_hash(user.email)}", 0) == 0
 
 
-def test_locked_password_change_does_not_compare_passwords(user: StaffUser) -> None:
-    client = APIClient()
-    data = login(client).data
-    client.credentials(HTTP_AUTHORIZATION=f"Bearer {data['access']}")
+def test_locked_password_change_does_not_compare_passwords(staff: StaffUser, admin_client: APIClient) -> None:
     guard = LoginGuard()
     for _ in range(5):
-        guard.record_failure("change_password", email_hash(user.email))
+        guard.record_failure("change_password", email_hash(staff.email))
     with patch.object(StaffUser, "check_password", autospec=True) as compare:
-        response = client.post(
+        response = admin_client.post(
             BASE + "change-password/", {"current_password": WRONG, "new_password": PASSWORD}, format="json"
         )
     assert response.status_code == 429
     compare.assert_not_called()
 
 
-def test_unchanged_password_checked_only_after_current_password(user: StaffUser) -> None:
-    client = APIClient()
-    data = login(client).data
-    client.credentials(HTTP_AUTHORIZATION=f"Bearer {data['access']}")
-    response = client.post(
+def test_unchanged_password_checked_only_after_current_password(admin_client: APIClient) -> None:
+    response = admin_client.post(
         BASE + "change-password/", {"current_password": WRONG, "new_password": PASSWORD}, format="json"
     )
     assert response.status_code == 400
