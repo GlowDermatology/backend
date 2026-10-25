@@ -138,15 +138,26 @@ class SegmentStats(TypedDict):
     size: int
 
 
+def has_pushable_device() -> Exists:
+    """Over a ``Customer`` queryset: the customer has at least one pushable device."""
+    return Exists(Device.objects.filter(PUSHABLE_DEVICE, customer_id=OuterRef("pk")))
+
+
 def segment_stats(segment: CustomerSegment) -> SegmentStats:
-    """``manual_member_count``, ``member_count`` (predicate) and ``size`` (push-enabled member devices)."""
-    counts = segment_members(segment).aggregate(
-        member_count=Count("pk", distinct=True),
-        size=Count(
-            "devices",
-            filter=Q(devices__is_active=True, devices__push_enabled=True) & ~Q(devices__fcm_token=""),
-            distinct=True,
-        ),
+    """``manual_member_count``, ``member_count`` (predicate) and ``size``.
+
+    ``size`` counts the members a campaign can reach — members with at least one pushable device — because
+    a campaign pushes to one device per customer (``CampaignRecipient`` is unique on ``(campaign, customer)``,
+    :func:`audience_recipients`), so the meta size equals the ``recipient_count`` of a campaign sent to the
+    segment.
+    """
+    counts = (
+        segment_members(segment)
+        .annotate(reachable=has_pushable_device())
+        .aggregate(
+            member_count=Count("pk", distinct=True),
+            size=Count("pk", distinct=True, filter=Q(reachable=True)),
+        )
     )
     return {
         "manual_member_count": SegmentMember.objects.filter(segment=segment).count(),
@@ -163,12 +174,14 @@ def segment_size(segment: CustomerSegment) -> int:
 
 
 def pushable_devices() -> QuerySet[Device]:
-    """Push-enabled active devices of active customers (``total_devices``)."""
+    """Push-enabled active devices (with a token) of active customers."""
     return Device.objects.filter(PUSHABLE_DEVICE, customer__status=enums.CustomerStatus.ACTIVE)
 
 
 def total_devices() -> int:
-    return pushable_devices().count()
+    """``meta.total_devices``: the active customers with at least one pushable device — the reach of an
+    ``all`` campaign (one device per customer, like :func:`audience_recipients` and the segment ``size``)."""
+    return Customer.objects.filter(has_pushable_device(), status=enums.CustomerStatus.ACTIVE).count()
 
 
 def customer_push_device(customer_id: int) -> Device | None:

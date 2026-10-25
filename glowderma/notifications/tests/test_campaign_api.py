@@ -482,3 +482,35 @@ def test_create_cuts_a_long_billz_name_label_to_the_snapshot_column(
     assert response.status_code == 201, response.data
     assert response.data["link"] == {"kind": "product", "product_id": product.pk, "label": "B" * 120}
     assert Campaign.objects.get(pk=response.data["id"]).link_product_label == "B" * 120
+
+
+def test_meta_sizes_agree_with_the_recipient_count_for_customers_with_two_devices(
+    staff_client: APIClient, clock: Any
+) -> None:
+    """One push per customer (``CampaignRecipient`` is unique on (campaign, customer)): ``total_devices`` and
+    the segment ``size`` count reachable customers, so they equal a campaign's ``recipient_count``."""
+    segment = CustomerSegmentFactory.create(name="Ikki qurilma", min_online_orders=None)
+    two_devices, one_device, no_device = (CustomerFactory.create() for _ in range(3))
+    DeviceFactory.create(customer=two_devices, last_active_at=ANCHOR - timedelta(days=2))
+    latest = DeviceFactory.create(customer=two_devices, last_active_at=ANCHOR - timedelta(hours=1))
+    DeviceFactory.create(customer=one_device)
+    DeviceFactory.create(customer=no_device, push_enabled=False, fcm_token="")
+    for customer in (two_devices, one_device, no_device):
+        SegmentMemberFactory.create(segment=segment, customer=customer)
+    meta = staff_client.get(URL + "meta/").data
+    assert meta["total_devices"] == 2
+    assert [s["size"] for s in meta["segments"] if s["id"] == segment.pk] == [2]
+    listed = staff_client.get("/api/v1/admin/segments/").data["results"]
+    assert [(s["member_count"], s["size"]) for s in listed if s["id"] == segment.pk] == [(3, 2)]
+
+    audience = {"audience.type": "segment", "audience.segment_id": str(segment.pk)}
+    immediate = post(staff_client, form(**audience))
+    scheduled = post(
+        staff_client, form(scheduled_at="2026-10-26T10:00:00+05:00", **audience), key=KEY.replace("6f", "7f")
+    )
+    everyone = post(staff_client, form(), key=KEY.replace("6f", "8f"))
+    assert immediate.status_code == scheduled.status_code == everyone.status_code == 201
+    assert immediate.data["recipient_count"] == scheduled.data["recipient_count"] == 2
+    assert everyone.data["recipient_count"] == meta["total_devices"]
+    devices = CampaignRecipient.objects.filter(campaign_id=immediate.data["id"], customer=two_devices)
+    assert list(devices.values_list("device_id", flat=True)) == [latest.pk]  # the most recently active one
