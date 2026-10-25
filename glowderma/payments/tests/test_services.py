@@ -59,7 +59,7 @@ def test_click_refund_state_machine_and_audits() -> None:
     assert (
         OutboxMessage.objects.get(topic="refund.submit").dedupe_key == f"refund.submit:{requested.refund_id}"
     )
-    again = services.create_refund(payment.pk, payment.amount, staff)
+    again = services.create_refund(payment.pk, payment.amount, staff.pk if staff else None)
     assert (again.refund_id, again.changed) == (requested.refund_id, False)
     submitting = services.mark_submitting(requested.refund_id, AT)
     assert (submitting.state, submitting.attempts) == ("submitting", 1)
@@ -79,7 +79,7 @@ def test_click_refund_state_machine_and_audits() -> None:
     with pytest.raises(InvalidTransition):
         services.mark_unknown(services.create_refund(other.pk, other.amount, None).refund_id)
     transitions = [
-        a["to"]
+        a["to"]  # type: ignore[index]
         for a in AuditEntry.objects.filter(action="refund.state_changed").values_list("after", flat=True)
     ]
     assert transitions == ["submitting", "submitting", "unknown", "succeeded"]

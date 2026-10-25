@@ -156,7 +156,7 @@ def test_export_csv_and_xlsx(staff_client: APIClient) -> None:
     xlsx = staff_client.get(URL, {"export": "xlsx"})
     assert xlsx.status_code == 200 and xlsx.content[:2] == b"PK"
     audit = AuditEntry.objects.filter(action="export.downloaded").first()
-    assert audit is not None and audit.after["resource"] == "orders"
+    assert audit is not None and audit.after["resource"] == "orders"  # type: ignore[index]
 
 
 # --- detail -------------------------------------------------------------------------------------------------

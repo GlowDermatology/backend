@@ -42,7 +42,7 @@ def test_resolve_a_manual_payme_refund(staff_client: APIClient) -> None:
     assert body["status"] == "refunded" and body["refunds"][0]["state"] == "succeeded"
     assert OrderEvent.objects.get(order=order, type="refund_succeeded").data["refund_id"] == refund.pk
     audit = AuditEntry.objects.filter(action="refund.state_changed").latest("id")
-    assert audit.actor_id is not None and audit.after["to"] == "succeeded"
+    assert audit.actor_id is not None and audit.after["to"] == "succeeded"  # type: ignore[index]
     again = staff_client.post(_url(refund, "resolve"), {"state": "failed"}, format="json")
     assert again.status_code == 409 and again.json()["message"] == "Bu qaytarishni yakunlab bo‘lmaydi."
 

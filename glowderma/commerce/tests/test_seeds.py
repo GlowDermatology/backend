@@ -228,7 +228,7 @@ def test_seed_demo_reproduces_the_design_vectors(staff_client: APIClient) -> Non
     assert loyalty_selectors.account_summary(5) == AccountSummary(5_680, 0, 5_680)
     assert len(loyalty_selectors.purchases_for_customer(5)) == 25
     adjustment = AuditEntry.objects.get(action="cashback.adjusted", entity_id="5")
-    assert adjustment.after["balance_after"] == 63_150 and adjustment.actor_id is not None
+    assert adjustment.after["balance_after"] == 63_150 and adjustment.actor_id is not None  # type: ignore[index]
 
     # --- customer 13: the deliberate negative balance (02 §4.5 item 4) ---
     assert list(LoyaltyAccount.objects.filter(balance__lt=0).values_list("customer_id", flat=True)) == [13]
@@ -250,7 +250,8 @@ def test_seed_demo_reproduces_the_design_vectors(staff_client: APIClient) -> Non
     assert order_10249["payment"]["status"] == "failed"
     order_10198 = Order.objects.get(pk=10198)
     assert order_10198.status == "cancelled" and Shipment.objects.get(order=order_10198).state == "failed"
-    assert Order.objects.get(pk=10252).reservation_expires_at > ANCHOR  # keep_open
+    expires = Order.objects.get(pk=10252).reservation_expires_at
+    assert expires is not None and expires > ANCHOR  # keep_open
     assert Order.objects.get(pk=10246).delivered_at is not None
     tracking = dict(
         Shipment.objects.filter(order_id__in=[10243, 10245, 10246]).values_list("order_id", "tracking_number")

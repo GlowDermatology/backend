@@ -197,7 +197,7 @@ def test_refund_succeeds_and_turns_the_payment_refunded() -> None:
         .order_by("id")
         .values_list("after", flat=True)
     )
-    assert [(a["from"], a["to"]) for a in transitions] == [
+    assert [(a["from"], a["to"]) for a in transitions] == [  # type: ignore[index]
         ("requested", "submitting"),
         ("submitting", "succeeded"),
     ]

@@ -39,7 +39,7 @@ def test_checkout_snapshots_lines_amounts_and_writes_the_two_events() -> None:
         (spf.pk, 1, 240_000, True, 240_000),
         (foam.pk, 2, 128_000, False, 256_000),
     ]
-    assert items[0].image_url == absolute_media_url(cream.images.get().file.name)
+    assert items[0].image_url == absolute_media_url(cream.images.get().file.name or "")
     assert items[1].image_url == "" and items[0].name == cream.name_uz and items[0].billz_id == cream.billz_id
     assert order.reservation_minutes == 15 and order.reservation_expires_at == AT + timedelta(minutes=15)
     assert order.recipient_phone == order.customer.phone
