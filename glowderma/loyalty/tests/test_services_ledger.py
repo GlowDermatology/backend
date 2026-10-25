@@ -267,3 +267,49 @@ def test_hold_services_return_none_for_an_order_without_a_hold() -> None:
     assert services.capture_hold(order.pk) is None
     assert services.release_hold(order.pk, CashbackHold.ReleaseReason.ORDER_CANCELLED) is None
     assert services.expire_holds() == []
+
+
+def test_create_hold_never_recreates_a_captured_or_released_hold() -> None:
+    """Probe P2: an at-least-once replay of checkout + capture must not spend the cashback twice."""
+    account = LoyaltyAccountFactory.create(balance=50_000)
+    order = make_order(account, 20_000)
+    first = services.create_hold(account.customer_id, order.pk, 20_000, order.reservation_expires_at)
+    captured = services.capture_hold(order.pk, at=at(10, 18, 15, 25))
+    assert captured is not None and captured.changed
+    replay = services.create_hold(account.customer_id, order.pk, 20_000, order.reservation_expires_at)
+    assert not replay.changed and (replay.hold_id, replay.state) == (first.hold_id, "captured")
+    again = services.capture_hold(order.pk)
+    assert again is not None and not again.changed
+    debits = list(LedgerEntry.objects.filter(order_id=order.pk).values_list("amount", flat=True))
+    assert debits == [-20_000] and CashbackHold.objects.filter(order_id=order.pk).count() == 1
+    assert selectors.account_summary(account.customer_id) == selectors.AccountSummary(30_000, 0, 30_000)
+    # a released hold is terminal: the order was cancelled with it and is never re-paid
+    cancelled = make_order(account, 5_000)
+    services.create_hold(account.customer_id, cancelled.pk, 5_000, cancelled.reservation_expires_at)
+    services.release_hold(cancelled.pk, CashbackHold.ReleaseReason.ORDER_CANCELLED)
+    with pytest.raises(InvalidTransition, match="released"):
+        services.create_hold(account.customer_id, cancelled.pk, 5_000, cancelled.reservation_expires_at)
+    assert CashbackHold.objects.filter(order_id=cancelled.pk).count() == 1
+    assert selectors.account_summary(account.customer_id).held == 0
+
+
+def test_expire_holds_skips_a_hold_captured_meanwhile_and_continues(monkeypatch: pytest.MonkeyPatch) -> None:
+    account = LoyaltyAccountFactory.create(balance=50_000)
+    first, second = make_order(account, 10_000), make_order(account, 5_000)
+    services.create_hold(account.customer_id, first.pk, 10_000, first.reservation_expires_at)
+    services.create_hold(account.customer_id, second.pk, 5_000, second.reservation_expires_at)
+    due = max(first.reservation_expires_at, second.reservation_expires_at)
+    original = services._lock_account_by_id
+    raced: list[int] = []
+
+    def lock_after_the_webhook(account_id: int) -> LoyaltyAccount:
+        if not raced:  # the payment webhook captures the first due hold between the listing and its release
+            raced.append(first.pk)
+            services.capture_hold(first.pk, at=at(10, 18, 15, 25))
+        return original(account_id)
+
+    monkeypatch.setattr(services, "_lock_account_by_id", lock_after_the_webhook)
+    assert services.expire_holds(due) == [second.pk]
+    states = dict(CashbackHold.objects.values_list("order_id", "state"))
+    assert states == {first.pk: "captured", second.pk: "released"}
+    assert raced == [first.pk] and selectors.account_summary(account.customer_id) == selectors.AccountSummary(40_000, 0, 40_000)  # fmt: skip  # noqa: E501

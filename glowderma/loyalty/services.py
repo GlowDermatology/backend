@@ -11,10 +11,18 @@ PostgreSQL treats the re-acquired account lock as already held. :func:`post_entr
 ``balance_after`` on the entry, in one transaction. Negative balances are allowed (L5) and flagged with the
 audit action ``loyalty.balance_negative`` when a posting takes the balance below zero.
 
+Posting order: under the account lock ids grow in insert order, and every entry's ``at`` is at least the
+``at`` of the account's newest entry. An explicit ``at`` earlier than that raises :class:`OutOfOrderPosting`
+(the ``balance_after`` chain read newest-first by ``at`` would otherwise not be a running sum); the default
+instant is read **after** the lock and never goes backwards. Every datetime argument must be timezone-aware
+(``ValueError`` otherwise).
+
 Typed exceptions: :class:`InsufficientBalance`, :class:`AdjustmentValidationError` and
 :class:`PolicyValidationError` carry contract field errors (``core.api.exceptions.field_error``) and the
 top-level message of the contract table, ready for B4b/B5 to turn into HTTP 400; hold state mismatches raise
-``core.api.exceptions.InvalidTransition`` (409); an unknown purchase raises :class:`PurchaseNotFound`.
+``core.api.exceptions.InvalidTransition`` (409); an unknown purchase raises :class:`PurchaseNotFound`; a
+replay that names another customer, or a sale/order that belongs to another purchase, raises
+:class:`PurchaseConflict` (:class:`BillzSaleConflict` for Billz sale ids).
 """
 
 from __future__ import annotations
@@ -28,6 +36,7 @@ from uuid import UUID, uuid4
 
 from django.db import IntegrityError, connection, transaction
 from django.db.models import F, Max
+from django.utils import timezone
 from rest_framework.exceptions import ErrorDetail
 
 from glowderma.accounts.models import StaffUser
@@ -63,6 +72,8 @@ MESSAGE_OUT_OF_RANGE = "Foiz 0 dan katta va 100 dan oshmasligi kerak."
 MESSAGE_FIELDS = "Maydonlarni tekshiring."
 MESSAGE_IN_PAST = "Kelajakdagi sanani tanlang."
 POLICY_ADVISORY_LOCK = "loyalty.cashbackpolicy"
+BILLZ_SALE_ID_MAX_LENGTH = 64  # Purchase.billz_sale_id
+BILLZ_SALE_REF_MAX_LENGTH = 32  # Purchase.billz_sale_ref (also the store credit's source_ref)
 AUDIT_POLICY_ENTITY = "cashback_policy"
 
 
@@ -105,8 +116,25 @@ class PurchaseNotFound(LoyaltyError):
     pass
 
 
-class BillzSaleConflict(LoyaltyError):
-    """The purchase is already linked to a different Billz sale, or is not an online purchase."""
+class OutOfOrderPosting(LoyaltyError, ValueError):
+    """An explicit ``at`` earlier than the account's newest entry (the chain must follow posting order)."""
+
+    def __init__(self, *, account_id: int, at: datetime, latest_at: datetime) -> None:
+        super().__init__(
+            f"Ledger entry of account {account_id} at {at.isoformat()} is earlier than its newest entry "
+            f"({latest_at.isoformat()})"
+        )
+        self.account_id = account_id
+        self.at = at
+        self.latest_at = latest_at
+
+
+class PurchaseConflict(LoyaltyError):
+    """The order (or Billz order id) already belongs to another customer's purchase."""
+
+
+class BillzSaleConflict(PurchaseConflict):
+    """The Billz sale belongs to another customer or purchase, or the purchase is not an online one."""
 
 
 # --- Results ---
@@ -226,6 +254,22 @@ class PolicyVersionResult:
 # --- Helpers ---
 
 
+def _aware(value: datetime | None, name: str) -> None:
+    """Refuse naive datetimes before any DB work (Django would store them as Tashkent wall time)."""
+    if value is not None and timezone.is_naive(value):
+        raise ValueError(f"{name} must be timezone-aware")
+
+
+def _check_billz_refs(billz_sale_id: str, billz_sale_ref: str) -> None:
+    if len(billz_sale_id) > BILLZ_SALE_ID_MAX_LENGTH:
+        raise ValueError(f"billz_sale_id is longer than {BILLZ_SALE_ID_MAX_LENGTH} characters")
+    if len(billz_sale_ref) > BILLZ_SALE_REF_MAX_LENGTH:
+        raise ValueError(
+            f"billz_sale_ref is longer than {BILLZ_SALE_REF_MAX_LENGTH} characters "
+            "(pass an explicit document number when the sale id is longer)"
+        )
+
+
 def _staff(staff_id: int | None) -> StaffUser | None:
     return None if staff_id is None else StaffUser.objects.get(pk=staff_id)
 
@@ -263,7 +307,15 @@ def _hold_result(hold: CashbackHold, *, changed: bool) -> HoldResult:
 
 
 def _purchase_result(purchase: Purchase, *, created: bool) -> PurchaseResult:
-    credited = purchase.credited_entry
+    """The result of a stored purchase: the engine re-run on its snapshotted inputs and (immutable) policy,
+    so an idempotent replay equals the first call except for ``created``."""
+    result = engine.credit_for_purchase(
+        amount=purchase.amount,
+        promo_amount=purchase.promo_amount,
+        cashback_paid=purchase.cashback_paid,
+        lifetime_before=purchase.lifetime_before,
+        policy=selectors.rules_of(purchase.policy),
+    )
     return PurchaseResult(
         purchase_id=purchase.pk,
         customer_id=purchase.customer_id,
@@ -277,11 +329,9 @@ def _purchase_result(purchase: Purchase, *, created: bool) -> PurchaseResult:
         cashback_paid=purchase.cashback_paid,
         lifetime_before=purchase.lifetime_before,
         policy_version=None if purchase.policy is None else purchase.policy.version,
-        base=purchase.amount - purchase.promo_amount
-        if credited is None or credited.base is None
-        else credited.base,
-        percent=None if credited is None else credited.percent,
-        promo_excluded=False if credited is None else credited.promo_excluded,
+        base=result.eligible,
+        percent=result.percent,
+        promo_excluded=result.promo_excluded,
         cashback_amount=purchase.cashback_amount,
         credited_entry_id=purchase.credited_entry_id,
         at=purchase.at,
@@ -290,7 +340,9 @@ def _purchase_result(purchase: Purchase, *, created: bool) -> PurchaseResult:
 
 
 def _load_purchase(**lookup: Any) -> Purchase | None:
-    return Purchase.objects.select_related("policy", "credited_entry").filter(**lookup).first()
+    return (
+        Purchase.objects.select_related("policy").prefetch_related("policy__tiers").filter(**lookup).first()
+    )
 
 
 # --- Accounts and ledger ---
@@ -324,10 +376,12 @@ def post_entry(
 
     Runs in (or joins) a transaction, locks the account row, applies ``F("balance") + amount``, re-reads the
     balance under the same lock and stores it as ``balance_after``. ``amount == 0`` is refused (callers skip
-    zero credits). ``at`` is the business time (default ``timeutils.now()``); ``actor_id``/``reason`` are
-    stored on adjustments only (the DB rejects them elsewhere). A balance that drops below zero is audited
-    as ``loyalty.balance_negative`` (L5).
+    zero credits). ``at`` is the business time (aware; default ``timeutils.now()`` read under the lock); an
+    ``at`` earlier than the account's newest entry raises :class:`OutOfOrderPosting`. ``actor_id``/``reason``
+    are stored on adjustments only (the DB rejects them elsewhere). A balance that drops below zero is
+    audited as ``loyalty.balance_negative`` (L5).
     """
+    _aware(at, "at")
     actor = _staff(actor_id)
     return _post_entry(
         account_id,
@@ -370,9 +424,22 @@ def _post_entry(
 ) -> PostedEntry:
     if amount == 0:
         raise ValueError("A ledger entry never moves the balance by zero")
-    instant = at or timeutils.now()
+    _aware(at, "at")
     with transaction.atomic():
         account = _lock_account_by_id(account_id)
+        # under the lock: the newest entry is final, and this entry gets the next id
+        latest_at = (
+            LedgerEntry.objects.filter(account_id=account.pk)
+            .order_by("-at")
+            .values_list("at", flat=True)
+            .first()
+        )
+        if at is None:
+            instant = timeutils.now() if latest_at is None else max(timeutils.now(), latest_at)
+        elif latest_at is not None and at < latest_at:
+            raise OutOfOrderPosting(account_id=account.pk, at=at, latest_at=latest_at)
+        else:
+            instant = at
         balance_before = account.balance
         LoyaltyAccount.objects.filter(pk=account.pk).update(
             balance=F("balance") + amount, updated_at=timeutils.now()
@@ -436,17 +503,20 @@ def _post_entry(
 def create_hold(customer_id: int, order_id: int, amount: int, expires_at: datetime) -> HoldResult:
     """Reserve ``amount`` of the customer's available cashback for an unpaid order.
 
-    ``available = balance − Σ active holds`` is checked under the account lock (``InsufficientBalance``). An
-    active hold that already exists for the order is returned unchanged (``changed=False``).
+    ``available = balance − Σ active holds`` is checked under the account lock (``InsufficientBalance``). One
+    hold per order (02 §1.5): an existing ``active`` or ``captured`` hold of the order is returned unchanged
+    (``changed=False``, so an at-least-once checkout replay never reserves or spends twice); a ``released``
+    one raises ``InvalidTransition`` (the order was cancelled with it and is never re-paid).
     """
     if amount <= 0:
         raise ValueError("A hold reserves a positive amount")
+    _aware(expires_at, "expires_at")
     with transaction.atomic():
         account = _lock_account(customer_id)
-        existing = CashbackHold.objects.filter(
-            order_id=order_id, state=enums.CashbackHoldState.ACTIVE
-        ).first()
+        existing = CashbackHold.objects.filter(order_id=order_id).order_by("-id").first()
         if existing is not None:
+            if existing.state == enums.CashbackHoldState.RELEASED:
+                raise InvalidTransition(f"Hold of order {order_id} was released")
             return _hold_result(existing, changed=False)
         available = account.balance - selectors.held_amount(account.pk)
         if amount > available:
@@ -468,6 +538,7 @@ def capture_hold(order_id: int, *, at: datetime | None = None) -> HoldResult | N
     ``None`` when the order has no hold (it used no cashback); an already captured hold is a no-op; a
     released one raises ``InvalidTransition``. ``at`` is the confirmation instant of the debit entry.
     """
+    _aware(at, "at")
     with transaction.atomic():
         found = _latest_hold(order_id)
         if found is None:
@@ -478,7 +549,6 @@ def capture_hold(order_id: int, *, at: datetime | None = None) -> HoldResult | N
             return _hold_result(hold, changed=False)
         if hold.state == enums.CashbackHoldState.RELEASED:
             raise InvalidTransition(f"Hold of order {order_id} was released")
-        instant = at or timeutils.now()
         posted = _post_entry(
             hold.account_id,
             kind=enums.LedgerKind.DEBIT,
@@ -486,26 +556,41 @@ def capture_hold(order_id: int, *, at: datetime | None = None) -> HoldResult | N
             source_type=enums.LedgerSourceType.ORDER,
             order_id=order_id,
             source_ref=str(order_id),
-            at=instant,
+            at=at,
         )
         CashbackHold.objects.filter(pk=hold.pk).update(
             state=enums.CashbackHoldState.CAPTURED,
             captured_entry_id=posted.entry_id,
-            captured_at=instant,
+            captured_at=posted.at,
             updated_at=timeutils.now(),
         )
         hold.refresh_from_db()
         return _hold_result(hold, changed=True)
 
 
+def _release(hold: CashbackHold, reason: str, at: datetime | None) -> HoldResult:
+    """Mark a hold read under its account lock ``released`` (no ledger entry)."""
+    CashbackHold.objects.filter(pk=hold.pk).update(
+        state=enums.CashbackHoldState.RELEASED,
+        released_at=at or timeutils.now(),
+        release_reason=reason,
+        updated_at=timeutils.now(),
+    )
+    hold.refresh_from_db()
+    return _hold_result(hold, changed=True)
+
+
 def release_hold(order_id: int, reason: str, *, at: datetime | None = None) -> HoldResult | None:
     """Release the order's active hold (no ledger entry). ``reason`` is a ``CashbackHold.ReleaseReason``.
 
     ``None`` when the order has no hold; an already released hold is a no-op; a captured one raises
-    ``InvalidTransition`` (a paid order is reversed through :func:`reverse_purchase` instead).
+    ``InvalidTransition`` (a paid order is reversed through :func:`reverse_purchase` instead). The commerce
+    reservation-expiry job calls this per order inside its own Order lock (02 §1.5), with
+    ``reason="reservation_expired"``.
     """
     if reason not in CashbackHold.ReleaseReason.values:
         raise ValueError(f"Unknown release reason {reason!r}")
+    _aware(at, "at")
     with transaction.atomic():
         found = _latest_hold(order_id)
         if found is None:
@@ -516,29 +601,36 @@ def release_hold(order_id: int, reason: str, *, at: datetime | None = None) -> H
             return _hold_result(hold, changed=False)
         if hold.state == enums.CashbackHoldState.CAPTURED:
             raise InvalidTransition(f"Hold of order {order_id} was captured")
-        CashbackHold.objects.filter(pk=hold.pk).update(
-            state=enums.CashbackHoldState.RELEASED,
-            released_at=at or timeutils.now(),
-            release_reason=reason,
-            updated_at=timeutils.now(),
-        )
-        hold.refresh_from_db()
-        return _hold_result(hold, changed=True)
+        return _release(hold, reason, at)
 
 
 def expire_holds(now: datetime | None = None) -> list[int]:
-    """Release every active hold whose ``expires_at`` has passed (one transaction per hold); order ids."""
+    """Maintenance/test helper: release every active hold whose ``expires_at`` has passed; order ids.
+
+    **Not scheduled and not for production flows**: it takes only the account lock, never the Order lock, so
+    it could release a hold just before the payment webhook captures it. Expiry belongs to the commerce job
+    (02 §1.5), which calls :func:`release_hold` per order under its Order lock. Each hold is re-read under its
+    account lock and skipped unless it is still ``active`` and due (a hold captured meanwhile is left alone,
+    and the remaining holds are still processed); one transaction per hold.
+    """
+    _aware(now, "now")
     instant = now or timeutils.now()
     due = list(
         CashbackHold.objects.filter(state=enums.CashbackHoldState.ACTIVE, expires_at__lte=instant)
         .order_by("expires_at", "id")
-        .values_list("order_id", flat=True)
+        .values_list("id", "account_id", "order_id")
     )
     released: list[int] = []
-    for order_id in due:
-        result = release_hold(order_id, CashbackHold.ReleaseReason.RESERVATION_EXPIRED, at=instant)
-        if result is not None and result.changed:
-            released.append(order_id)
+    for hold_id, account_id, order_id in due:
+        with transaction.atomic():
+            _lock_account_by_id(account_id)
+            hold = CashbackHold.objects.filter(
+                pk=hold_id, state=enums.CashbackHoldState.ACTIVE, expires_at__lte=instant
+            ).first()
+            if hold is None:
+                continue
+            _release(hold, CashbackHold.ReleaseReason.RESERVATION_EXPIRED, instant)
+        released.append(order_id)
     return released
 
 
@@ -557,7 +649,7 @@ def _record_purchase(
     promo_amount: int,
     cashback_paid: int,
     purchase_at: datetime,
-    entry_at: datetime,
+    entry_at: datetime | None,
     items: Sequence[PurchaseLine],
     policy_version: int | None,
     source_type: str,
@@ -651,6 +743,19 @@ def _record_purchase(
     )
 
 
+def _violated_constraint(exc: IntegrityError) -> str:
+    """The constraint/index name PostgreSQL reports for a unique violation ('' when unknown)."""
+    diag = getattr(exc.__cause__, "diag", None)
+    return str(getattr(diag, "constraint_name", None) or "")
+
+
+def _replay(existing: Purchase, customer_id: int, conflict: PurchaseConflict) -> PurchaseResult:
+    """An idempotent redelivery returns the stored purchase; one that names another customer is a conflict."""
+    if existing.customer_id != customer_id:
+        raise conflict
+    return _purchase_result(existing, created=False)
+
+
 def record_online_purchase(
     customer_id: int,
     order_id: int,
@@ -667,32 +772,50 @@ def record_online_purchase(
 
     Called after ``capture_hold`` inside the orchestrator's Order → Payment → LoyaltyAccount transaction.
     ``amount`` is ``items_subtotal`` (delivery fee never earns), ``cashback_paid`` is ``cashback_used``.
-    Idempotent per order (``Purchase.order`` is 1:1): a replay returns the existing purchase
-    (``created=False``). ``billz_order_uuid`` (default ``uuid4()``) is persisted here, **before** the outbox
-    ``billz.push_sale`` row (dedupe key ``billz.push_sale:{billz_order_uuid}``) is committed.
+    Idempotent per order (``Purchase.order`` is 1:1): a replay for the same customer returns the existing
+    purchase (``created=False``, otherwise equal to the first result); an order (or ``billz_order_uuid``)
+    that already belongs to another customer's purchase raises :class:`PurchaseConflict`.
+    ``billz_order_uuid`` (default ``uuid4()``) is persisted here, **before** the outbox ``billz.push_sale``
+    row (dedupe key ``billz.push_sale:{billz_order_uuid}``) is committed.
     """
+    _aware(at, "at")
+    conflict = PurchaseConflict(f"Order {order_id} already belongs to another customer's purchase")
     with transaction.atomic():
         account = _lock_account(customer_id)
         existing = _load_purchase(order_id=order_id)
         if existing is not None:
-            return _purchase_result(existing, created=False)
-        return _record_purchase(
-            account,
-            source=enums.PurchaseSource.ONLINE,
-            order_id=order_id,
-            billz_order_uuid=billz_order_uuid or uuid4(),
-            billz_sale_id="",
-            billz_sale_ref="",
-            amount=amount,
-            promo_amount=promo_amount,
-            cashback_paid=cashback_paid,
-            purchase_at=at,
-            entry_at=at,
-            items=items,
-            policy_version=policy_version,
-            source_type=enums.LedgerSourceType.ORDER,
-            source_ref=str(order_id),
-        )
+            return _replay(existing, customer_id, conflict)
+        try:
+            with transaction.atomic():
+                return _record_purchase(
+                    account,
+                    source=enums.PurchaseSource.ONLINE,
+                    order_id=order_id,
+                    billz_order_uuid=billz_order_uuid or uuid4(),
+                    billz_sale_id="",
+                    billz_sale_ref="",
+                    amount=amount,
+                    promo_amount=promo_amount,
+                    cashback_paid=cashback_paid,
+                    purchase_at=at,
+                    entry_at=at,
+                    items=items,
+                    policy_version=policy_version,
+                    source_type=enums.LedgerSourceType.ORDER,
+                    source_ref=str(order_id),
+                )
+        except IntegrityError as exc:  # a concurrent writer committed the same order / Billz order id
+            constraint = _violated_constraint(exc)
+            if constraint == "purchase_billz_uuid_unique":
+                raise PurchaseConflict(
+                    f"Billz order {billz_order_uuid} already belongs to a purchase"
+                ) from exc
+            raced = (
+                _load_purchase(order_id=order_id) if constraint == "loyalty_purchase_order_id_key" else None
+            )
+            if raced is None:
+                raise
+            return _replay(raced, customer_id, conflict)
 
 
 def record_store_purchase(
@@ -711,33 +834,49 @@ def record_store_purchase(
 
     No in-store redemption (L6: ``cashback_paid = 0``). The purchase keeps the Billz sale time (``at =
     sold_at``, which also picks the policy); the credit entry is posted at ``at`` (default now). Idempotent
-    by ``billz_sale_id`` (unique): an existing sale is returned unchanged.
+    by ``billz_sale_id`` (unique, ≤ 64 characters): a redelivery for the same customer returns the existing
+    purchase, a sale that belongs to another customer raises :class:`BillzSaleConflict` (also when the
+    other writer commits between the check and the insert). ``billz_sale_ref`` (≤ 32) defaults to the sale
+    id; a longer id needs an explicit ref (``ValueError``).
     """
     if not billz_sale_id:
         raise ValueError("A store purchase needs the Billz sale id")
+    ref = billz_sale_ref or billz_sale_id
+    _check_billz_refs(billz_sale_id, ref)
+    _aware(sold_at, "sold_at")
+    _aware(at, "at")
+    conflict = BillzSaleConflict(f"Billz sale {billz_sale_id} already belongs to another customer")
     with transaction.atomic():
         account = _lock_account(customer_id)
         existing = _load_purchase(billz_sale_id=billz_sale_id)
         if existing is not None:
-            return _purchase_result(existing, created=False)
-        ref = billz_sale_ref or billz_sale_id
-        return _record_purchase(
-            account,
-            source=enums.PurchaseSource.STORE_QR,
-            order_id=None,
-            billz_order_uuid=None,
-            billz_sale_id=billz_sale_id,
-            billz_sale_ref=ref,
-            amount=amount,
-            promo_amount=promo_amount,
-            cashback_paid=0,
-            purchase_at=sold_at,
-            entry_at=at or timeutils.now(),
-            items=items,
-            policy_version=policy_version,
-            source_type=enums.LedgerSourceType.BILLZ_SALE,
-            source_ref=ref,
-        )
+            return _replay(existing, customer_id, conflict)
+        try:
+            with transaction.atomic():
+                return _record_purchase(
+                    account,
+                    source=enums.PurchaseSource.STORE_QR,
+                    order_id=None,
+                    billz_order_uuid=None,
+                    billz_sale_id=billz_sale_id,
+                    billz_sale_ref=ref,
+                    amount=amount,
+                    promo_amount=promo_amount,
+                    cashback_paid=0,
+                    purchase_at=sold_at,
+                    entry_at=at,
+                    items=items,
+                    policy_version=policy_version,
+                    source_type=enums.LedgerSourceType.BILLZ_SALE,
+                    source_ref=ref,
+                )
+        except IntegrityError as exc:  # another customer's sale, or an online echo, committed meanwhile
+            if _violated_constraint(exc) != "purchase_billz_sale_unique":
+                raise
+            raced = _load_purchase(billz_sale_id=billz_sale_id)
+            if raced is None:  # pragma: no cover - the violating row is committed, so it is visible
+                raise
+            return _replay(raced, customer_id, conflict)
 
 
 def reverse_purchase(purchase_id: int, at: datetime, actor_id: int | None = None) -> ReversalResult:
@@ -745,10 +884,12 @@ def reverse_purchase(purchase_id: int, at: datetime, actor_id: int | None = None
 
     One ``reversal`` (``amount = −entry.amount``, unique ``reverses``) per unreversed ``credit``/``debit`` of
     the purchase's order (or Billz sale); the reversal of ``credited_entry`` is stored as
-    ``Purchase.reversal_entry``. Idempotent: a second call posts nothing (``already_reversed=True``). The
-    balance may go negative (L5): the ``loyalty.balance_negative`` audit then names ``actor_id`` (the
-    cancelling admin); reversal rows themselves carry no actor.
+    ``Purchase.reversal_entry`` — also when that credit was reversed earlier by another path (the existing
+    reversal is linked, so reconciliation check C5 stays clean). Idempotent: a second call posts nothing
+    (``already_reversed=True``). The balance may go negative (L5): the ``loyalty.balance_negative`` audit
+    then names ``actor_id`` (the cancelling admin); reversal rows themselves carry no actor.
     """
+    _aware(at, "at")
     actor = _staff(actor_id)
     with transaction.atomic():
         found = Purchase.objects.filter(pk=purchase_id).only("id", "customer_id").first()
@@ -783,6 +924,16 @@ def reverse_purchase(purchase_id: int, at: datetime, actor_id: int | None = None
             net += posted.amount
             if entry.pk == purchase.credited_entry_id:
                 credit_reversal = posted.entry_id
+        if (
+            credit_reversal is None
+            and purchase.credited_entry_id is not None
+            and purchase.reversal_entry_id is None
+        ):
+            credit_reversal = (
+                LedgerEntry.objects.filter(reverses_id=purchase.credited_entry_id)
+                .values_list("id", flat=True)
+                .first()
+            )
         already = purchase.reversed
         updates: dict[str, Any] = {}
         if not already:
@@ -815,11 +966,14 @@ def link_billz_sale(
     outbox row was committed (02 §1.6); the handler passes it back so a mismatch (a payload that does not
     belong to this purchase) raises :class:`BillzSaleConflict` instead of linking the wrong sale. A successful
     push sets ``billz_pushed_at`` (the handler's skip guard, 03 §5) even when Billz answers without a sale id;
-    ``billz_sale_id``/``billz_sale_ref`` are stored when known (the ref defaults to the sale id). Idempotent:
+    ``billz_sale_id`` (≤ 64)/``billz_sale_ref`` (≤ 32) are stored when known (the ref defaults to the sale
+    id, so a longer id needs an explicit ref; ``ValueError`` otherwise). Idempotent:
     a pushed purchase with the same (or no new) sale id is a no-op (``changed=False``); a different sale id on
     an already linked purchase, or a sale id that already belongs to another purchase, raises
     :class:`BillzSaleConflict`.
     """
+    _check_billz_refs(billz_sale_id, billz_sale_ref)
+    _aware(pushed_at, "pushed_at")
     with transaction.atomic():
         purchase = Purchase.objects.select_for_update(of=("self",)).filter(pk=purchase_id).first()
         if purchase is None:
@@ -837,6 +991,7 @@ def link_billz_sale(
             )
         sale_id = billz_sale_id or purchase.billz_sale_id
         ref = billz_sale_ref or purchase.billz_sale_ref or sale_id
+        _check_billz_refs(sale_id, ref)  # a defaulted ref (the sale id) must fit too
         pushed = purchase.billz_pushed_at or pushed_at or timeutils.now()
         changed = (sale_id, ref, pushed) != (
             purchase.billz_sale_id,
@@ -905,6 +1060,7 @@ def adjust(
     """
     if direction not in enums.AdjustmentDirection.values:
         raise ValueError(f"Unknown adjustment direction {direction!r}")
+    _aware(at, "at")
     amount, text = _validate_adjustment(amount, reason)
     staff = StaffUser.objects.get(pk=actor_id)
     with transaction.atomic():
@@ -1002,6 +1158,8 @@ def validate_policy_version(
     effective_from: datetime, tiers: Sequence[TierBand], *, now: datetime
 ) -> tuple[TierWarning, ...]:
     """Raise :class:`PolicyValidationError` per contract §2.7; return the warnings of a valid submission."""
+    _aware(effective_from, "effective_from")
+    _aware(now, "now")
     errors, message = _tier_errors(tiers)
     if effective_from <= now:
         errors["effective_from"] = [field_error("effective_from_in_past", MESSAGE_IN_PAST)]
@@ -1057,6 +1215,7 @@ def create_policy_version(
     """
     if basis not in enums.RateBasis.values:
         raise ValueError(f"Unknown rate basis {basis!r}")
+    _aware(effective_from, "effective_from")
     now = timeutils.now()
     warnings = validate_policy_version(effective_from, tiers, now=now)
     author = _staff(author_id)
@@ -1122,9 +1281,11 @@ __all__ = [
     "LinkResult",
     "LoyaltyError",
     "LoyaltyValidationError",
+    "OutOfOrderPosting",
     "PolicyValidationError",
     "PolicyVersionResult",
     "PostedEntry",
+    "PurchaseConflict",
     "PurchaseLine",
     "PurchaseNotFound",
     "PurchaseResult",

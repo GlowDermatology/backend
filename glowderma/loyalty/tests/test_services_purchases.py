@@ -1,6 +1,7 @@
 """loyalty.services — online and store purchases, the reversal flow and the Billz link (design 02 §1.6, §1.10,
 §1.9.1 vectors through the database)."""
 
+from dataclasses import replace
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -10,7 +11,7 @@ import pytest
 from glowderma.accounts.tests.factories import CustomerFactory, StaffUserFactory
 from glowderma.core.models import AuditEntry
 from glowderma.core.seeding import pinned_clock
-from glowderma.loyalty import selectors, services
+from glowderma.loyalty import selectors, services, tasks
 from glowderma.loyalty.models import LedgerEntry, LoyaltyAccount, Purchase, PurchaseItem
 from glowderma.loyalty.services import PurchaseLine
 from glowderma.loyalty.tests.factories import CashbackPolicyFactory, reverse_entry
@@ -33,7 +34,7 @@ def test_record_online_purchase_reproduces_order_10248() -> None:
     # lifetime before №10248 = 12 772 000 (one store sale), balance 48 600 to spend
     services.record_store_purchase(customer.pk, "S-1", "S-1", 12_772_000, at(9, 5, 12), at=at(9, 5, 12))
     staff = StaffUserFactory.create()
-    services.adjust(customer.pk, "subtract", 127_720 - 48_600, "balansni to‘g‘rilash", staff.pk)
+    services.adjust(customer.pk, "subtract", 127_720 - 48_600, "balansni to‘g‘rilash", staff.pk, at=at(10, 1))
     order = paid_order(customer, created_at=at(10, 23, 14, 2), items_subtotal=808_000, promo_subtotal=240_000, cashback_used=48_600)  # fmt: skip  # noqa: E501
     services.create_hold(customer.pk, order.pk, 48_600, order.reservation_expires_at)
     paid_at = at(10, 23, 14, 5)
@@ -71,7 +72,7 @@ def test_record_online_purchase_reproduces_order_10248() -> None:
     assert selectors.customer_totals(customer.pk) == selectors.Totals(12_772_000, 808_000, 13_580_000, 1)
     # a redelivery returns the existing purchase untouched
     replay = services.record_online_purchase(customer.pk, order.pk, 808_000, 240_000, 48_600, paid_at)
-    assert not replay.created
+    assert not replay.created and replace(replay, created=True) == result
     assert (replay.purchase_id, replay.credited_entry_id, replay.cashback_amount, replay.base, replay.percent, replay.policy_version, replay.billz_order_uuid) == (purchase.pk, entry.pk, 5_680, 568_000, Decimal("1.00"), 3, design_uuid)  # fmt: skip  # noqa: E501
     assert Purchase.objects.count() == 2 and LedgerEntry.objects.count() == 4
 
@@ -154,6 +155,7 @@ def test_record_store_purchase_vectors_and_idempotency() -> None:
     assert chain(entry.account_id) == [("credit", 3_610, 3_610), ("credit", 2_310, 5_920)]
     replay = services.record_store_purchase(customer.pk, "S-80091", "other ref", 999, at(1, 1))
     assert not replay.created and replay.purchase_id == first.purchase_id and replay.amount == 361_000
+    assert replace(replay, created=True) == first
     assert replay.cashback_amount == 3_610 and replay.base == 361_000 and replay.percent == Decimal("1.00")
     with pytest.raises(ValueError, match="sale id"):
         services.record_store_purchase(customer.pk, "", "", 1, at(1, 1))
@@ -266,8 +268,8 @@ def test_reverse_purchase_partial_and_negative_balance() -> None:
 def test_reverse_store_purchase_and_unknown_purchase() -> None:
     seed_policies()
     customer = CustomerFactory.create()
-    sale = services.record_store_purchase(customer.pk, "S-7", "S-7", 412_000, at(10, 9, 13, 40))
-    uncredited = services.record_store_purchase(customer.pk, "S-8", "S-8", 50, at(10, 9, 13, 41))  # 0.5 → 0
+    sale = services.record_store_purchase(customer.pk, "S-7", "S-7", 412_000, at(10, 9, 13, 40), at=at(10, 9, 13, 40))  # fmt: skip  # noqa: E501
+    uncredited = services.record_store_purchase(customer.pk, "S-8", "S-8", 50, at(10, 9, 13, 41), at=at(10, 9, 13, 41))  # 0.5 → 0  # fmt: skip  # noqa: E501
     assert uncredited.cashback_amount == 0 and uncredited.credited_entry_id is None
     reversal = services.reverse_purchase(sale.purchase_id, at(10, 10))
     assert len(reversal.reversal_entry_ids) == 1 and reversal.net_amount == -4_120
@@ -311,7 +313,7 @@ def test_link_billz_sale() -> None:
     assert LedgerEntry.objects.count() == 1
     store = services.record_store_purchase(customer.pk, "bz-123", "", 185_000, at(10, 20, 9, 5))
     assert not store.created and store.purchase_id == result.purchase_id
-    sale = services.record_store_purchase(customer.pk, "S-55", "", 100_000, at(10, 20, 9, 5))
+    sale = services.record_store_purchase(customer.pk, "S-55", "", 100_000, at(10, 20, 9, 5), at=at(10, 20, 9, 5))  # fmt: skip  # noqa: E501
     with pytest.raises(services.BillzSaleConflict, match="store sale"):
         services.link_billz_sale(sale.purchase_id, billz_sale_id="S-55")
     with pytest.raises(services.PurchaseNotFound):
@@ -325,3 +327,130 @@ def test_link_billz_sale() -> None:
     with pinned_clock(at(10, 22, 8)):
         third = services.link_billz_sale(second.purchase_id, billz_sale_id="bz-124")
     assert (third.billz_sale_ref, third.billz_pushed_at) == ("bz-124", at(10, 22, 8))
+
+
+def test_replays_equal_the_first_result_without_a_credit_entry() -> None:
+    """Probe P4 and friends: base/percent/promo_excluded come from the engine, not from the credit entry."""
+    seed_policies()
+    customer = CustomerFactory.create()
+    tiny_order = paid_order(customer, created_at=at(10, 20), items_subtotal=50)
+    tiny = services.record_online_purchase(customer.pk, tiny_order.pk, 50, 0, 0, at(10, 20, 0, 3))
+    assert (tiny.base, tiny.percent, tiny.cashback_amount, tiny.credited_entry_id) == (50, Decimal("1.00"), 0, None)  # fmt: skip  # noqa: E501
+    replay = services.record_online_purchase(customer.pk, tiny_order.pk, 50, 0, 0, at(10, 20, 0, 3))
+    assert replace(replay, created=True) == tiny
+    promo_only = services.record_store_purchase(customer.pk, "S-PROMO", "", 300_000, at(10, 21), promo_amount=300_000)  # fmt: skip  # noqa: E501
+    assert (promo_only.base, promo_only.percent, promo_only.promo_excluded, promo_only.credited_entry_id) == (0, Decimal("1.00"), True, None)  # fmt: skip  # noqa: E501
+    again = services.record_store_purchase(
+        customer.pk, "S-PROMO", "", 300_000, at(10, 21), promo_amount=300_000
+    )
+    assert replace(again, created=True) == promo_only
+    # earn_on_cashback_paid = false (v2): the replay keeps the cashback-paid part out of the base too
+    services.adjust(
+        customer.pk, "add", 10_000, "boshlang‘ich", StaffUserFactory.create().pk, at=at(10, 21, 1)
+    )
+    v2_order = paid_order(customer, created_at=at(10, 21, 2), items_subtotal=80_000, cashback_used=10_000)
+    services.create_hold(customer.pk, v2_order.pk, 10_000, v2_order.reservation_expires_at)
+    services.capture_hold(v2_order.pk, at=v2_order.paid_at)
+    v2 = services.record_online_purchase(customer.pk, v2_order.pk, 80_000, 0, 10_000, v2_order.paid_at, policy_version=2)  # fmt: skip  # noqa: E501
+    assert (v2.policy_version, v2.base, v2.cashback_amount) == (2, 70_000, 700)
+    v2_again = services.record_online_purchase(customer.pk, v2_order.pk, 80_000, 0, 10_000, v2_order.paid_at)
+    assert replace(v2_again, created=True) == v2
+
+
+def test_replay_for_another_customer_is_a_conflict() -> None:
+    seed_policies()
+    owner, intruder = CustomerFactory.create(), CustomerFactory.create()
+    services.record_store_purchase(owner.pk, "S-77", "S-77", 400_000, at(10, 20), at=at(10, 20))
+    with pytest.raises(services.BillzSaleConflict, match="another customer"):
+        services.record_store_purchase(intruder.pk, "S-77", "S-77", 400_000, at(10, 20), at=at(10, 20))
+    order = paid_order(owner, created_at=at(10, 21), items_subtotal=100_000)
+    services.record_online_purchase(owner.pk, order.pk, 100_000, 0, 0, at(10, 21, 0, 3))
+    with pytest.raises(services.PurchaseConflict, match=f"Order {order.pk}"):
+        services.record_online_purchase(intruder.pk, order.pk, 100_000, 0, 0, at(10, 21, 0, 3))
+    assert not LoyaltyAccount.objects.filter(customer=intruder, balance__gt=0).exists()
+    assert not Purchase.objects.filter(customer=intruder).exists()
+    # a Billz order id that another purchase already carries is a conflict too
+    used = Purchase.objects.get(order_id=order.pk).billz_order_uuid
+    other = paid_order(owner, created_at=at(10, 22), items_subtotal=100_000)
+    with pytest.raises(services.PurchaseConflict, match="Billz order"):
+        services.record_online_purchase(
+            owner.pk, other.pk, 100_000, 0, 0, at(10, 22, 0, 3), billz_order_uuid=used
+        )
+    assert not Purchase.objects.filter(order_id=other.pk).exists()
+
+
+@pytest.mark.parametrize("same_customer", [True, False])
+def test_store_sale_committed_between_check_and_insert(monkeypatch: pytest.MonkeyPatch, same_customer: bool) -> None:  # fmt: skip  # noqa: E501
+    """The existence check reads a stale snapshot (simulated): the unique violation is mapped, not raised."""
+    seed_policies()
+    owner, caller = CustomerFactory.create(), CustomerFactory.create()
+    first = services.record_store_purchase(owner.pk, "S-99", "S-99", 200_000, at(10, 20), at=at(10, 20))
+    original = services._load_purchase
+    calls: list[dict[str, Any]] = []
+
+    def stale_then_fresh(**lookup: Any) -> Purchase | None:
+        calls.append(lookup)
+        return None if len(calls) == 1 else original(**lookup)
+
+    monkeypatch.setattr(services, "_load_purchase", stale_then_fresh)
+    who = owner if same_customer else caller
+    if same_customer:
+        raced = services.record_store_purchase(who.pk, "S-99", "S-99", 200_000, at(10, 20), at=at(10, 20))
+        assert not raced.created and replace(raced, created=True) == first
+    else:
+        with pytest.raises(services.BillzSaleConflict, match="another customer"):
+            services.record_store_purchase(who.pk, "S-99", "S-99", 200_000, at(10, 20), at=at(10, 20))
+    assert calls == [{"billz_sale_id": "S-99"}, {"billz_sale_id": "S-99"}]
+    assert Purchase.objects.count() == 1 and LedgerEntry.objects.count() == 1  # the savepoint rolled back
+
+
+def test_online_order_committed_between_check_and_insert(monkeypatch: pytest.MonkeyPatch) -> None:
+    seed_policies()
+    owner, caller = CustomerFactory.create(), CustomerFactory.create()
+    order = paid_order(owner, created_at=at(10, 21), items_subtotal=100_000)
+    first = services.record_online_purchase(owner.pk, order.pk, 100_000, 0, 0, at(10, 21, 0, 3))
+    original = services._load_purchase
+    calls: list[dict[str, Any]] = []
+
+    def stale_once(
+        **lookup: Any,
+    ) -> Purchase | None:  # every call's existence check is stale, the re-read not
+        calls.append(lookup)
+        return None if len(calls) % 2 else original(**lookup)
+
+    monkeypatch.setattr(services, "_load_purchase", stale_once)
+    raced = services.record_online_purchase(owner.pk, order.pk, 100_000, 0, 0, at(10, 21, 0, 3))
+    assert replace(raced, created=True) == first
+    with pytest.raises(services.PurchaseConflict):
+        services.record_online_purchase(caller.pk, order.pk, 100_000, 0, 0, at(10, 21, 0, 3))
+    assert calls == [{"order_id": order.pk}] * 4 and Purchase.objects.count() == 1
+
+
+def test_reverse_purchase_links_a_credit_reversal_posted_earlier() -> None:
+    """Probe P3: the credit was reversed through post_entry before reverse_purchase ran."""
+    seed_policies()
+    customer = CustomerFactory.create()
+    sale = services.record_store_purchase(customer.pk, "S-7", "S-7", 412_000, at(10, 9, 13, 40), at=at(10, 9, 13, 40))  # fmt: skip  # noqa: E501
+    assert sale.credited_entry_id is not None
+    account_id = services.get_or_create_account(customer.pk)
+    early = services.post_entry(
+        account_id,
+        kind="reversal",
+        amount=-4_120,
+        source_type="billz_sale",
+        purchase_id=sale.purchase_id,
+        source_ref="S-7",
+        reverses_id=sale.credited_entry_id,
+        at=at(10, 9, 14),
+    )
+    result = services.reverse_purchase(sale.purchase_id, at(10, 10))
+    assert result.reversal_entry_ids == () and result.credit_reversal_entry_id == early.entry_id
+    assert result.net_amount == 0 and not result.already_reversed
+    purchase = Purchase.objects.get(pk=sale.purchase_id)
+    assert (purchase.reversed, purchase.reversal_entry_id) == (True, early.entry_id)
+    assert tasks.reconcile_balances_now()["checks"]["purchase_links"] == 0
+    # a purchase already flagged reversed without its link (older data) is repaired by a re-run
+    Purchase.objects.filter(pk=sale.purchase_id).update(reversal_entry_id=None)
+    repaired = services.reverse_purchase(sale.purchase_id, at(10, 11))
+    assert repaired.already_reversed and repaired.credit_reversal_entry_id == early.entry_id
+    assert Purchase.objects.get(pk=sale.purchase_id).reversal_entry_id == early.entry_id
