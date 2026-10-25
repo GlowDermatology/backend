@@ -81,6 +81,8 @@ ENDPOINT_FIELD_CODES = frozenset(
         "unknown_placeholder",
         "slot_unavailable",
         "outside_working_hours",
+        # cashback policy versions (§2.7): "no tiers"
+        "min_items",
     }
 )
 AUTH_FAILURE_CODES = frozenset(

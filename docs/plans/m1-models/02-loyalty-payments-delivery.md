@@ -946,7 +946,14 @@ mutated only while their order's (resp. payment's) lock is held, which serialise
 | Policy version create | advisory lock `hashtext('loyalty.cashbackpolicy')` | independent of the three-level rule |
 | Nightly reconciliation | none | single-statement snapshots (1.9.3) |
 
-#### 1.9.3 Nightly reconciliation (`loyalty.tasks.reconcile_balances`, beat 03:30 Tashkent)
+#### 1.9.3 Nightly reconciliation (`loyalty.tasks.reconcile_balances`, beat 03:10 Tashkent)
+> **As built (B4a):** posting order is id order per account — every posting holds the account row lock, and
+> `post_entry` refuses an explicit `at` older than the account's newest entry (`OutOfOrderPosting`) and stamps the
+> default instant under the lock, so `(at, id)` order equals id order. C2 and C3 read the chain in id order. A
+> replay (the demo seeder) must therefore post in chronological order per account; equal instants are allowed.
+> Reservation expiry releases holds through `release_hold(order_id, "reservation_expired")` under the Order lock
+> (never `expire_holds`, which is maintenance-only).
+
 Each check is one SQL statement (one snapshot under READ COMMITTED), so concurrent postings cannot produce false
 mismatches; findings are written as audit entries `loyalty.reconciliation_mismatch` (actor `system`,
 `entity_type="loyalty_account"`, `after={check, balance, expected, delta}`), and a summary
