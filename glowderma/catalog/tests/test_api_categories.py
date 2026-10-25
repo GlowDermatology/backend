@@ -4,10 +4,14 @@ Shapes, codes and messages follow the contract table literally.
 """
 
 import csv
+import threading
 from io import StringIO
 from typing import Any
+from unittest.mock import patch
 
 import pytest
+from django.db import connection
+from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIClient
 
 from glowderma.accounts.models import StaffUser
@@ -15,6 +19,7 @@ from glowderma.catalog.models import Banner, Category
 from glowderma.catalog.tests.factories import BannerFactory, CategoryFactory, ProductFactory
 from glowderma.catalog.tests.helpers import errors_of
 from glowderma.core import timeutils
+from glowderma.core.api.exceptions import field_error
 from glowderma.core.models import AuditEntry
 
 pytestmark = pytest.mark.django_db
@@ -88,13 +93,11 @@ def test_create_appends_last_and_audits(staff_client: APIClient, staff: StaffUse
     entry = AuditEntry.objects.get(action="category.created")
     assert entry.entity_type == "category" and entry.entity_id == "toners" and entry.actor_id == staff.pk
     assert (entry.after or {})["name.uz"] == "Tonerlar" and (entry.after or {})["position"] == 1
-    # ru/en keys are mandatory (core i18n_text: "" means not filled, never absent)
+    # contract §2.4: only ``name.uz`` is required; the other languages default to "" on create
     response = staff_client.post(CATEGORIES, {"slug": "sun", "name": {"uz": "Quyosh"}, "is_active": False})
-    assert response.status_code == 400 and set(errors_of(response)) == {"name.ru", "name.en"}
-    body = {"slug": "sun", "name": {"uz": "Quyosh", "ru": "", "en": ""}, "is_active": False}
-    response = staff_client.post(CATEGORIES, body)
-    assert response.status_code == 201 and response.json()["position"] == 2
-    assert response.json()["is_active"] is False
+    assert response.status_code == 201, response.json()
+    assert response.json()["name"] == {"uz": "Quyosh", "ru": "", "en": ""}
+    assert response.json()["position"] == 2 and response.json()["is_active"] is False
 
 
 @pytest.mark.parametrize(
@@ -234,3 +237,85 @@ def test_reorder(staff_client: APIClient) -> None:
         assert errors_of(response)["slugs"] == ("mismatch", "Ro‘yxat joriy elementlarga mos emas.")
     assert errors_of(staff_client.put(url, {}))["slugs"] == ("required", "Majburiy maydon.")
     assert slugs(staff_client.get(CATEGORIES)) == ["sun", "serums", "toners"]
+
+
+def test_create_with_uz_only_name_defaults_other_languages_to_empty(staff_client: APIClient) -> None:
+    """Contract §2.4: only ``name.uz`` is required; ``ru`` / ``en`` missing on create → ``""``."""
+    response = staff_client.post(CATEGORIES, {"slug": "ab", "name": {"uz": "Ab"}})
+    assert response.status_code == 201, response.json()
+    assert response.json()["name"] == {"uz": "Ab", "ru": "", "en": ""}
+    category = Category.objects.get(slug="ab")
+    assert (category.name_uz, category.name_ru, category.name_en) == ("Ab", "", "")
+    # PATCH keeps the partial semantics: a lone ``uz`` leaves the other languages alone
+    category.name_ru = "Аб"
+    category.save(update_fields=["name_ru"])
+    response = staff_client.patch(f"{CATEGORIES}ab/", {"name": {"uz": "Abc"}})
+    assert response.status_code == 200 and response.json()["name"] == {"uz": "Abc", "ru": "Аб", "en": ""}
+
+
+def test_reorder_empty_list(staff_client: APIClient) -> None:
+    """``[]`` is the exact (empty) set when there are no categories; otherwise it is a ``mismatch``."""
+    url = f"{CATEGORIES}order/"
+    response = staff_client.put(url, {"slugs": []})
+    assert response.status_code == 200, response.json()
+    assert response.json() == {"results": []}
+    CategoryFactory.create(slug="serums")
+    response = staff_client.put(url, {"slugs": []})
+    assert response.status_code == 400
+    assert errors_of(response)["slugs"] == ("mismatch", "Ro‘yxat joriy elementlarga mos emas.")
+
+
+def test_create_losing_the_slug_race_is_a_unique_error(staff_client: APIClient, staff: StaffUser) -> None:
+    """The serializer pre-check passed, the row appeared before the INSERT: 400 ``unique``, never a 500."""
+    from glowderma.catalog import services
+
+    original = services.create_category
+
+    def create_after_competitor(slug: str, name: dict[str, str], **kwargs: Any) -> Category:
+        CategoryFactory.create(slug=slug)  # the competitor commits between validation and the service
+        return original(slug, name, **kwargs)
+
+    with patch("glowderma.catalog.api.admin.views.services.create_category", create_after_competitor):
+        response = staff_client.post(CATEGORIES, {"slug": "serums", "name": {"uz": "Serumlar"}})
+    assert response.status_code == 400, response.json()
+    assert errors_of(response)["slug"] == ("unique", "Bu qiymat band.")
+    assert Category.objects.filter(slug="serums").count() == 1
+    assert not AuditEntry.objects.filter(action="category.created").exists()
+    # the service itself reports the same error when called directly
+    with pytest.raises(ValidationError) as excinfo:
+        services.create_category("serums", {"uz": "Serumlar"}, actor=staff)
+    assert excinfo.value.detail == {"slug": [field_error("unique")]}
+
+
+@pytest.mark.django_db(transaction=True)
+def test_concurrent_creates_with_the_same_slug(staff: StaffUser) -> None:
+    from glowderma.catalog import services
+
+    start = threading.Event()
+    outcomes: list[str] = []
+    lock = threading.Lock()
+
+    def worker() -> None:
+        try:
+            assert start.wait(10)
+            services.create_category("serums", {"uz": "Serumlar"}, actor=staff)
+            result = "ok"
+        except ValidationError as exc:
+            detail: Any = exc.detail
+            result = str(detail["slug"][0].code)
+        except BaseException as exc:  # noqa: BLE001 - surfaced to the main thread below
+            result = type(exc).__name__
+        finally:
+            connection.close()
+        with lock:
+            outcomes.append(result)
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    start.set()
+    for thread in threads:
+        thread.join(10)
+        assert not thread.is_alive()
+    assert sorted(outcomes) == ["ok", "unique"]
+    assert Category.objects.filter(slug="serums").count() == 1

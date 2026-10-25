@@ -1,16 +1,21 @@
 """Contract §2.3 ``products/``: list, stats, create, retrieve, PATCH (validation table, shapes, audit)."""
 
 import csv
+import threading
 from datetime import datetime
 from io import BytesIO, StringIO
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from django.conf import settings
+from django.db import connection
 from openpyxl import load_workbook  # type: ignore[import-untyped]
+from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIClient
 
 from glowderma.accounts.models import StaffUser
+from glowderma.catalog import services
 from glowderma.catalog.models import Product, ProductStock
 from glowderma.catalog.tests.factories import (
     CategoryFactory,
@@ -537,6 +542,93 @@ def test_create_unique_billz_id(staff_client: APIClient) -> None:
     response = staff_client.post(PRODUCTS, valid_body())
     assert response.status_code == 400
     assert errors_of(response)["billz_id"] == ("unique", "Bu Billz ID bilan mahsulot allaqachon bor.")
+
+
+def test_create_losing_the_billz_id_race_is_a_unique_error(staff_client: APIClient, staff: StaffUser) -> None:
+    """The serializer pre-check passed but the row appeared before the INSERT (another staff, or the Billz
+    import): 400 ``unique`` with the contract message, never a 500."""
+    original = services.create_product
+
+    def create_after_competitor(data: services.ProductInput, **kwargs: Any) -> Product:
+        ProductFactory.create(billz_id="4607012301")
+        return original(data, **kwargs)
+
+    with patch("glowderma.catalog.api.admin.views.services.create_product", create_after_competitor):
+        response = staff_client.post(PRODUCTS, valid_body())
+    assert response.status_code == 400, response.json()
+    assert errors_of(response)["billz_id"] == ("unique", "Bu Billz ID bilan mahsulot allaqachon bor.")
+    assert Product.objects.filter(billz_id="4607012301").count() == 1
+    assert not AuditEntry.objects.filter(action="product.created").exists()
+
+
+def billz_row(billz_id: str) -> Any:
+    from glowderma.integrations.billz.ports import BillzProduct
+
+    return BillzProduct(
+        billz_id=billz_id, billz_name="X", volume="30 ml", price=100_000, stock=1, synced_at=timeutils.now()
+    )
+
+
+def test_services_translate_the_unique_violation_on_create_and_patch(staff: StaffUser) -> None:
+    ProductFactory.create(billz_id="4607012301")
+    other = ProductFactory.create(billz_id="4607012302", status="hidden")
+    expected = {"billz_id": [("unique", "Bu Billz ID bilan mahsulot allaqachon bor.")]}
+    with pytest.raises(ValidationError) as excinfo:
+        services.create_product(
+            services.ProductInput(
+                billz_id="4607012301", billz_product=billz_row("4607012301"), price=100_000
+            ),
+            actor=staff,
+        )
+    assert {k: [(e.code, str(e)) for e in v] for k, v in excinfo.value.detail.items()} == expected  # type: ignore[union-attr]
+    with pytest.raises(ValidationError) as excinfo:
+        services.update_product(
+            other.pk,
+            services.ProductInput(billz_id="4607012301", billz_product=billz_row("4607012301")),
+            actor=staff,
+        )
+    assert {k: [(e.code, str(e)) for e in v] for k, v in excinfo.value.detail.items()} == expected  # type: ignore[union-attr]
+    other.refresh_from_db()
+    assert other.billz_id == "4607012302" and other.last_change_at is None
+    assert not AuditEntry.objects.filter(action__startswith="product.").exists()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_concurrent_creates_with_the_same_billz_id(staff: StaffUser) -> None:
+    start = threading.Event()
+    outcomes: list[str] = []
+    lock = threading.Lock()
+
+    def worker() -> None:
+        try:
+            assert start.wait(10)
+            services.create_product(
+                services.ProductInput(
+                    billz_id="4607012301", billz_product=billz_row("4607012301"), price=100_000
+                ),
+                actor=staff,
+            )
+            result = "ok"
+        except ValidationError as exc:
+            detail: Any = exc.detail
+            result = str(detail["billz_id"][0].code)
+        except BaseException as exc:  # noqa: BLE001 - surfaced to the main thread below
+            result = type(exc).__name__
+        finally:
+            connection.close()
+        with lock:
+            outcomes.append(result)
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    start.set()
+    for thread in threads:
+        thread.join(10)
+        assert not thread.is_alive()
+    assert sorted(outcomes) == ["ok", "unique"]
+    assert Product.objects.filter(billz_id="4607012301").count() == 1
+    assert AuditEntry.objects.filter(action="product.created").count() == 1
 
 
 def test_create_active_always_fails(staff_client: APIClient) -> None:

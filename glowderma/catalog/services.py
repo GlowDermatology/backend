@@ -16,7 +16,7 @@ from pathlib import PurePosixPath
 from typing import Any, Literal
 
 from django.core.files.base import ContentFile
-from django.db import connection, transaction
+from django.db import IntegrityError, connection, transaction
 from rest_framework.exceptions import NotFound, ValidationError
 
 from glowderma.catalog import selectors
@@ -37,6 +37,10 @@ LAST_IMAGE_OF_ACTIVE = "Faol mahsulotda kamida bitta rasm bo‘lsin."
 CATEGORY_HAS_PRODUCTS = "Kategoriyada mahsulotlar bor."
 CATEGORY_LOCK = "catalog_category_position"
 BANNER_LOCK = "catalog_banner_position"
+BILLZ_ID_TAKEN = "Bu Billz ID bilan mahsulot allaqachon bor."
+# PostgreSQL names of the two ``unique=True`` columns (``<table>_<column>_key``, see the 0001 migration).
+PRODUCT_BILLZ_ID_CONSTRAINT = "catalog_product_billz_id_key"
+CATEGORY_SLUG_CONSTRAINT = "catalog_category_slug_key"
 
 type UpsertOutcome = Literal["created", "updated", "unchanged"]
 
@@ -60,6 +64,34 @@ def _delete_file_on_commit(field: Any) -> None:
 def _diff(before: dict[str, Any], after: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     changed = [key for key in after if before.get(key) != after[key]]
     return {key: before.get(key) for key in changed}, {key: after[key] for key in changed}
+
+
+def _violates(exc: IntegrityError, constraint: str) -> bool:
+    """Whether ``exc`` is the unique violation of ``constraint`` (psycopg ``diag``, else the message text)."""
+    cause = exc.__cause__
+    name = getattr(getattr(cause, "diag", None), "constraint_name", None)
+    if name is not None:
+        return bool(name == constraint)
+    return constraint in str(exc)  # pragma: no cover - a driver without diagnostics
+
+
+def _save_unique(save: Any, constraint: str, field: str, message: str | None = None) -> None:
+    """Run ``save`` in a savepoint; a unique violation of ``constraint`` becomes 400 ``unique`` on ``field``.
+
+    The serializers pre-check uniqueness for the ordinary case; this covers the race (two staff, or an admin
+    create against the Billz import) where both pass the check and the loser would otherwise be a 500.
+    """
+    try:
+        with transaction.atomic():
+            save()
+    except IntegrityError as exc:
+        if not _violates(exc, constraint):
+            raise
+        raise ValidationError({field: [field_error("unique", message)]}) from exc
+
+
+def _save_product(product: Product) -> None:
+    _save_unique(product.save, PRODUCT_BILLZ_ID_CONSTRAINT, "billz_id", BILLZ_ID_TAKEN)
 
 
 def _process(uploaded: Any, field: str) -> ProcessedImage:
@@ -176,7 +208,7 @@ def create_product(data: ProductInput, *, actor: Any, request: Any = None) -> Pr
             _apply_texts(product, data.texts)
         _check_active_rule(product, image_count=0)
         _set_last_change(product, enums.ProductChangeKind.CREATED, actor, None)
-        product.save()
+        _save_product(product)
         ProductStock.objects.create(
             product=product, quantity=data.billz_product.stock, synced_at=data.billz_product.synced_at
         )
@@ -220,7 +252,7 @@ def update_product(product_id: int, data: ProductInput, *, actor: Any, request: 
         after = product_snapshot(product)
         product.is_new_from_billz = False
         _set_last_change(product, _change_kind(before, after), actor, before)
-        product.save()
+        _save_product(product)
         diff_before, diff_after = _diff(before, after)
         audit.record(
             action="product.updated",
@@ -370,7 +402,7 @@ def create_category(
 ) -> Category:
     with transaction.atomic():
         _advisory_lock(CATEGORY_LOCK)
-        category = Category.objects.create(
+        category = Category(
             slug=slug,
             name_uz=name["uz"],
             name_ru=name.get("ru", ""),
@@ -378,6 +410,7 @@ def create_category(
             is_active=is_active,
             position=_next_position(Category),
         )
+        _save_unique(category.save, CATEGORY_SLUG_CONSTRAINT, "slug")
         audit.record(
             action="category.created",
             entity_type="category",
