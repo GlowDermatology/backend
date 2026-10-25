@@ -44,8 +44,14 @@ from glowderma.loyalty.models import (
 
 
 def policy_versions() -> list[CashbackPolicy]:
-    """Every version, newest first, with ``superseded_by``/``effective_to`` derived and tiers prefetched."""
-    return list(CashbackPolicy.objects.with_derived().prefetch_related("tiers").order_by("-version"))
+    """Every version, newest first, with ``superseded_by``/``effective_to`` derived, the author joined and the
+    tiers prefetched (two queries for ``GET cashback/policy/``)."""
+    return list(
+        CashbackPolicy.objects.with_derived()
+        .select_related("author")
+        .prefetch_related("tiers")
+        .order_by("-version")
+    )
 
 
 def policy_at(instant: datetime) -> CashbackPolicy | None:
