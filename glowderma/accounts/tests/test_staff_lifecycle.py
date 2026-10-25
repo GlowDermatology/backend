@@ -81,13 +81,13 @@ def test_deactivate_writes_tombstones_on_commit(
 
 
 def test_access_token_of_deactivated_staff_fails_with_session_expired(
-    staff: StaffUser, actor: StaffUser, admin_client: APIClient, django_capture_on_commit_callbacks: Any
+    staff: StaffUser, actor: StaffUser, staff_client: APIClient, django_capture_on_commit_callbacks: Any
 ) -> None:
     """Contract §1.2: `SESSION_EXPIRED` — session revoked (`deactivated`) or staff inactive."""
-    assert admin_client.get("/api/v1/admin/auth/me/").status_code == 200
+    assert staff_client.get("/api/v1/admin/auth/me/").status_code == 200
     with django_capture_on_commit_callbacks(execute=True):
         services.deactivate_staff(staff, actor=actor)
-    response = admin_client.get("/api/v1/admin/auth/me/")
+    response = staff_client.get("/api/v1/admin/auth/me/")
     assert response.status_code == 401
     assert response.data["code"] == "SESSION_EXPIRED"
 

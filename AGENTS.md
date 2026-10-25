@@ -84,8 +84,26 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
   boundary (delivery is at-least-once).
 - The upper module owns the transaction. Lock order is always Order → Payment → LoyaltyAccount.
   `LoyaltyAccount.balance` changes only in `loyalty.services.post_entry()`.
-- Contract enums live in `glowderma/core/enums.py` (literals exactly as in the contract §3); shared serializer
-  field types in `glowderma/core/api/fields.py`; error and OpenAPI helpers in `glowderma/core/api/{exceptions,schema}.py`.
+- Contract enums live in `glowderma/core/enums.py` (literals exactly as in the contract §3). Serializers declare
+  `ChoiceField(choices=<Enum>.values)` (or `.choices`) so drf-spectacular's `ENUM_NAME_OVERRIDES` names the
+  component `<Enum>Enum`; adding an enum means adding it to `enums.py` (the override map is built from it).
+- Shared serializer field types live in `glowderma/core/api/fields.py` (`AwareDateTimeField`, `PercentField`,
+  `PhoneField`, `SlugField`, `BoundedListField`, `QueryBooleanField`, `i18n_text()` for **field-first** shapes
+  such as category `name` / banner `title` = `{uz, ru, en}`). Product `texts` is **language-first**
+  (`{uz: {name, …}, ru: …}`) and needs its own serializer in `catalog`.
+- Field errors: raise contract codes through `core.api.exceptions.field_error(code, message=None, limit=None)`;
+  generic codes carry their default Uzbek message, endpoint-specific codes (`ENDPOINT_FIELD_CODES`) require the
+  explicit message from the endpoint table. Unknown codes raise `ValueError` at development time.
+- OpenAPI helpers in `glowderma/core/api/schema.py`: `ADMIN_ERRORS` / `PUBLIC_ERRORS` response maps,
+  `IDEMPOTENCY_KEY_HEADER`, `EXPORT_PARAM`. Uzbek export labels live in `glowderma/core/labels.py`; datetimes in
+  exports go through `core.exports.format_export_datetime`.
+- Uploads go through `core.images.process_image()` (re-encode, EXIF strip, ≤2400 px, 5 MiB) and are named by
+  `core.media.media_name()`; URLs come from `core.media.absolute_media_url()` (`PUBLIC_MEDIA_BASE_URL`).
+- Throttle scopes and their default rates live in `glowderma/core/throttling.py` (`DEFAULT_THROTTLE_RATES`,
+  overridable by the `THROTTLE_RATES` env JSON); a new throttle class must add its scope there or settings
+  validation fails. `LOG_LEVEL` sets the `glowderma.*` logger level; every log line carries `request_id`.
+- The Django admin is read-only: register models through `glowderma.core.admin.register_read_only` (`ReadOnlyAdmin`);
+  never expose `password` or `refresh_hash`. Only the six professionals models become editable, through services.
 - Time only via `timeutils.now()` (module attribute, never an imported name). Money: integer so'm
   (`BigIntegerField`). Percent: `DecimalField(5, 2)`; cashback math in integer basis points (`core.money`).
 - Append-only models (ledger, audit, order events, policy versions, webhook inbox, appointment events) subclass
@@ -98,4 +116,9 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
   endpoint (the auth matrix is automatic — add validation and happy-path tests); `format="json"` on APIClient
   calls; on-commit effects via `django_capture_on_commit_callbacks(execute=True)`; concurrency tests with
   `transaction=True`, threads and `threading.Event` (10 s timeouts), closing the DB connection in `finally`.
+  Root `conftest.py` fixtures: `staff`, `staff_session`, `staff_token`, `staff_client` (DRF `APIClient` with the
+  bearer token and internal secret; `admin_client` remains pytest-django's Django-admin client) and
+  `anon_client`; factories in `glowderma/accounts/tests/factories.py` (`StaffUserFactory.create(...)`,
+  `AuthSessionFactory.create(...)`, `TEST_PASSWORD`, `raw_refresh(session)`). `core` tests must not import
+  `accounts` (import-linter): use `get_user_model()`. Each module adds `tests/factories.py` for its own models.
 - Commits: small, imperative subject lines (`feat(accounts): add staff login endpoint`).

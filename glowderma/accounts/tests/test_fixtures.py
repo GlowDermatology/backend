@@ -87,19 +87,19 @@ def test_staff_fixtures(staff: StaffUser, staff_session: tuple[AuthSession, str]
     assert (claims["sub"], claims["sid"]) == (str(staff.pk), str(session.pk))
 
 
-def test_admin_client_is_authenticated_json_client(staff: StaffUser, admin_client: APIClient) -> None:
-    response = admin_client.get(BASE + "me/")
+def test_admin_client_is_authenticated_json_client(staff: StaffUser, staff_client: APIClient) -> None:
+    response = staff_client.get(BASE + "me/")
     assert response.status_code == 200
     assert response.data["id"] == staff.pk
     # Default JSON format: a dict body is accepted where form data would be 415.
-    response = admin_client.post(BASE + "change-password/", {"current_password": "x", "new_password": "y"})
+    response = staff_client.post(BASE + "change-password/", {"current_password": "x", "new_password": "y"})
     assert response.status_code == 400
     assert response.data["code"] == "validation_error"
 
 
-def test_admin_client_sends_internal_secret(admin_client: APIClient) -> None:
+def test_admin_client_sends_internal_secret(staff_client: APIClient) -> None:
     """§1.2: `X-GD-Client-IP` is honoured only when the internal secret matches."""
-    response = admin_client.get(BASE + "me/", HTTP_X_GD_CLIENT_IP="198.51.100.7")
+    response = staff_client.get(BASE + "me/", HTTP_X_GD_CLIENT_IP="198.51.100.7")
     assert response.status_code == 200
     assert response.wsgi_request.client_ip == "198.51.100.7"  # type: ignore[attr-defined]
 

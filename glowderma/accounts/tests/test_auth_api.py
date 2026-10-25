@@ -188,9 +188,9 @@ def test_change_password_revokes_other_sessions(
     ],
 )
 def test_change_password_field_errors(
-    admin_client: APIClient, current: str, new: str, field: str, code: str
+    staff_client: APIClient, current: str, new: str, field: str, code: str
 ) -> None:
-    response = admin_client.post(
+    response = staff_client.post(
         BASE + "change-password/", {"current_password": current, "new_password": new}, format="json"
     )
     assert response.status_code == 400
@@ -251,20 +251,20 @@ def test_new_password_validation_does_not_spend_attempt_budget(user: StaffUser, 
     assert cache.get(f"auth:attempt:change_password:{email_hash(user.email)}", 0) == 0
 
 
-def test_locked_password_change_does_not_compare_passwords(staff: StaffUser, admin_client: APIClient) -> None:
+def test_locked_password_change_does_not_compare_passwords(staff: StaffUser, staff_client: APIClient) -> None:
     guard = LoginGuard()
     for _ in range(5):
         guard.record_failure("change_password", email_hash(staff.email))
     with patch.object(StaffUser, "check_password", autospec=True) as compare:
-        response = admin_client.post(
+        response = staff_client.post(
             BASE + "change-password/", {"current_password": WRONG, "new_password": PASSWORD}, format="json"
         )
     assert response.status_code == 429
     compare.assert_not_called()
 
 
-def test_unchanged_password_checked_only_after_current_password(admin_client: APIClient) -> None:
-    response = admin_client.post(
+def test_unchanged_password_checked_only_after_current_password(staff_client: APIClient) -> None:
+    response = staff_client.post(
         BASE + "change-password/", {"current_password": WRONG, "new_password": PASSWORD}, format="json"
     )
     assert response.status_code == 400
