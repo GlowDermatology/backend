@@ -252,3 +252,69 @@ def test_send_batch_on_a_scheduled_campaign_is_refused(clock: Any) -> None:
     )
     with pytest.raises(RuntimeError):
         services.send_batch(campaign.pk, 0)
+
+
+class ReenteringFcm(FakeFcm):
+    """Simulates an expired outbox lease: while worker A is inside the provider call, worker B re-runs the
+    same batch (once) before A's call returns."""
+
+    def __init__(self, campaign_id: int, batch_no: int) -> None:
+        super().__init__()
+        self.campaign_id, self.batch_no, self.reentered = campaign_id, batch_no, False
+
+    def send(self, messages: Any) -> Any:
+        if not self.reentered:
+            self.reentered = True
+            services.send_batch(self.campaign_id, self.batch_no)  # worker B
+        return super().send(messages)
+
+
+@override_settings(CAMPAIGN_BATCH_SIZE=2)
+def test_an_overlapping_redelivery_of_a_middle_batch_does_not_strand_the_campaign(
+    clock: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from glowderma.integrations.fcm import registry
+
+    reachable(3)
+    campaign = queued_campaign()
+    fake = ReenteringFcm(campaign.pk, 0)
+    monkeypatch.setattr(registry, "_fake", fake)
+    services.send_batch(campaign.pk, 0)  # worker A
+    campaign.refresh_from_db()
+    assert fake.reentered and campaign.batches_dispatched == 1 and campaign.state == "sending"
+    first_two = list(CampaignRecipient.objects.filter(campaign=campaign).order_by("id")[:2])
+    assert [r.state for r in first_two] == ["sent", "sent"]  # A's settle wins over B's "interrupted"
+    assert all(r.error == "" for r in first_two)
+    next_batch = OutboxMessage.objects.filter(topic="campaign.send_batch")
+    assert [m.payload["batch_no"] for m in next_batch] == [1]  # enqueued exactly once
+    dispatch_outbox(batch=10)  # batch 1 still runs
+    campaign.refresh_from_db()
+    assert (campaign.state, campaign.sent, campaign.failed, campaign.batches_dispatched) == ("sent", 3, 0, 2)
+    assert set(CampaignRecipient.objects.filter(campaign=campaign).values_list("state", flat=True)) == {
+        "sent"
+    }
+    assert set(
+        InboxNotification.objects.filter(source_id=campaign.pk).values_list("push_state", flat=True)
+    ) == {"sent"}
+    assert len(fake.sent) == 3  # nobody pushed twice
+
+
+def test_an_overlapping_redelivery_of_the_last_batch_refreshes_the_final_tally(
+    clock: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from glowderma.integrations.fcm import registry
+
+    reachable(3)
+    campaign = queued_campaign()
+    fake = ReenteringFcm(campaign.pk, 0)
+    monkeypatch.setattr(registry, "_fake", fake)
+    with override_settings(CAMPAIGN_BATCH_SIZE=10):
+        services.send_batch(campaign.pk, 0)
+    campaign.refresh_from_db()
+    # B finished the campaign while A's claims were in flight (counted as interrupted); A's settle corrects it
+    assert (campaign.state, campaign.sent, campaign.failed, campaign.batches_dispatched) == ("sent", 3, 0, 1)
+    assert set(CampaignRecipient.objects.filter(campaign=campaign).values_list("state", flat=True)) == {
+        "sent"
+    }
+    assert not OutboxMessage.objects.filter(topic="campaign.send_batch").exists()
+    assert len(fake.sent) == 3

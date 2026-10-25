@@ -304,11 +304,27 @@ def _settle(claim: _Claim, result: PushResult, now: Any) -> None:
     inbox.save(update_fields=["push_state", "pushed_at", "push_error"])
 
 
+def _refresh_tally(campaign: Campaign) -> None:
+    """``sent`` / ``failed`` from the recipient states (``skipped`` counts as failed)."""
+    states = CampaignRecipient.objects.filter(campaign=campaign).values_list("state", flat=True)
+    tally = {"sent": 0, "failed": 0}
+    for state in states:
+        tally["sent" if state == CampaignRecipient.State.SENT else "failed"] += 1
+    campaign.sent, campaign.failed = tally["sent"], tally["failed"]
+
+
 def send_batch(campaign_id: int, batch_no: int) -> None:
     """Handler body of ``campaign.send_batch`` (design 03 §3.4): claim → provider → settle → cursor → next.
 
     A redelivered batch (``batch_no < batches_dispatched``) is a no-op; an out-of-order one raises so the
     dispatcher retries it after the previous batch committed.
+
+    Single-flight under an overlapping redelivery (the outbox lease expired while this worker was inside the
+    provider call and another worker re-ran the same batch): the claims are exclusive (``push_state`` queued →
+    sending under the campaign lock), and the advance is a compare-and-set under the lock — only the delivery
+    that still sees ``batches_dispatched == batch_no`` moves the cursor, bumps the counter and enqueues the
+    next batch or finishes. A delivery that lost the race settles only its own claims, refreshes the final
+    tally when the campaign already finished, and enqueues nothing.
     """
     with transaction.atomic():
         campaign = Campaign.objects.select_for_update().get(pk=campaign_id)
@@ -336,6 +352,12 @@ def send_batch(campaign_id: int, batch_no: int) -> None:
         now = timeutils.now()
         for claim, result in zip(claims, results, strict=True):
             _settle(claim, result, now)
+        if campaign.state != Campaign.State.SENDING or campaign.batches_dispatched != batch_no:
+            # Another delivery of this batch already advanced it (compare-and-set lost).
+            if campaign.state == Campaign.State.SENT:
+                _refresh_tally(campaign)
+                campaign.save(update_fields=["sent", "failed"])
+            return
         if recipients:
             campaign.send_cursor = recipients[-1].pk
         campaign.batches_dispatched += 1
@@ -347,13 +369,9 @@ def send_batch(campaign_id: int, batch_no: int) -> None:
                 dedupe_key=topics.campaign_send_batch_key(campaign.pk, batch_no + 1),
             )
         else:
-            states = CampaignRecipient.objects.filter(campaign=campaign).values_list("state", flat=True)
-            tally = {"sent": 0, "failed": 0}
-            for state in states:
-                tally["sent" if state == CampaignRecipient.State.SENT else "failed"] += 1
             campaign.state = Campaign.State.SENT
             campaign.sent_at = now
-            campaign.sent, campaign.failed = tally["sent"], tally["failed"]
+            _refresh_tally(campaign)
         campaign.save()
 
 
