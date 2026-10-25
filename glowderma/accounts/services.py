@@ -345,6 +345,55 @@ def add_address(
     return address
 
 
+_UNSET: Any = object()
+
+
+@transaction.atomic
+def update_address(
+    address: Address,
+    *,
+    text: str = _UNSET,
+    label: str = _UNSET,
+    region_code: str = _UNSET,
+    city_code: str = _UNSET,
+    comment: str = _UNSET,
+    latitude: Decimal | None = _UNSET,
+    longitude: Decimal | None = _UNSET,
+    is_default: bool = _UNSET,
+) -> Address:
+    """Edit an address (M2 ``PATCH /me/addresses/{id}``) and recompute ``Customer.address_text``.
+
+    Only the keyword arguments given change. ``is_default=True`` clears the previous default inside the same
+    transaction; ``is_default=False`` on the current default leaves the customer without one (``address_text``
+    then falls back to the most recently updated address). The write path every edit must take so the design
+    01 §1.3 invariant (saving an address recomputes the denormalised text) holds.
+    """
+    Customer.objects.select_for_update().get(pk=address.customer_id)
+    changes = {
+        name: value
+        for name, value in (
+            ("text", text),
+            ("label", label),
+            ("region_code", region_code),
+            ("city_code", city_code),
+            ("comment", comment),
+            ("latitude", latitude),
+            ("longitude", longitude),
+            ("is_default", is_default),
+        )
+        if value is not _UNSET
+    }
+    if changes.get("is_default"):
+        Address.objects.filter(customer_id=address.customer_id, is_default=True).exclude(
+            pk=address.pk
+        ).update(is_default=False, updated_at=timeutils.now())
+    for name, value in changes.items():
+        setattr(address, name, value)
+    address.save(update_fields=[*changes])  # TimeStampedModel adds updated_at
+    _sync_address_text(address.customer_id)
+    return address
+
+
 @transaction.atomic
 def set_default_address(address: Address) -> Address:
     """Make ``address`` the customer's default, clearing the previous one in the same transaction."""

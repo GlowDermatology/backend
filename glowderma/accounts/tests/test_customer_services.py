@@ -1,12 +1,14 @@
 """Customer-side services the model invariants need: address sync, delete/reactivate scrub (decision A1)."""
 
 from datetime import timedelta
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 import pytest
 from django.core.cache import cache
 from django.core.files.base import ContentFile
+from django.db import IntegrityError
 
 from glowderma.accounts import services
 from glowderma.accounts.models import Address, AuthSession, Customer, CustomerSocialIdentity, Device
@@ -66,6 +68,51 @@ def test_remove_address_falls_back_to_the_most_recent_then_empty() -> None:
 def test_add_address_requires_an_existing_customer() -> None:
     with pytest.raises(Customer.DoesNotExist):
         services.add_address(987654321, text="x")
+
+
+def test_update_address_recomputes_address_text() -> None:
+    customer = CustomerFactory.create()
+    home = services.add_address(customer.pk, text="Toshkent, Chilonzor, 9-kvartal", label="Uy")
+    work = services.add_address(customer.pk, text="Toshkent, Yunusobod, 4-kvartal", label="Ish")
+    before = home.updated_at
+    services.update_address(home, text="Toshkent, Chilonzor, 10-kvartal", comment="2-podyezd")
+    customer.refresh_from_db()
+    home.refresh_from_db()
+    assert customer.address_text == "Toshkent, Chilonzor, 10-kvartal"
+    assert home.comment == "2-podyezd" and home.label == "Uy" and home.is_default
+    assert home.updated_at >= before
+    # the invariant also holds when a non-default address is edited: the default text stays
+    services.update_address(
+        work, text="Toshkent, Yunusobod, 5-kvartal", latitude=Decimal("41.3"), longitude=Decimal("69.3")
+    )
+    customer.refresh_from_db()
+    assert customer.address_text == "Toshkent, Chilonzor, 10-kvartal"
+    assert Address.objects.get(pk=work.pk).latitude == Decimal("41.300000")
+
+
+def test_update_address_moves_the_default_inside_one_transaction() -> None:
+    customer = CustomerFactory.create()
+    home = services.add_address(customer.pk, text="home")
+    work = services.add_address(customer.pk, text="work")
+    services.update_address(work, is_default=True)
+    home.refresh_from_db()
+    customer.refresh_from_db()
+    assert work.is_default and not home.is_default
+    assert customer.address_text == "work"
+    assert Address.objects.filter(customer=customer, is_default=True).count() == 1
+    services.update_address(work, is_default=False)  # no default left: the most recently updated one wins
+    customer.refresh_from_db()
+    assert not Address.objects.filter(customer=customer, is_default=True).exists()
+    assert customer.address_text == "work"
+    services.update_address(home)  # nothing to change: still recomputes, still consistent
+    customer.refresh_from_db()
+    assert customer.address_text == "home"
+
+
+def test_update_address_latlng_pair_is_enforced() -> None:
+    address = services.add_address(CustomerFactory.create().pk, text="x")
+    with pytest.raises(IntegrityError):
+        services.update_address(address, latitude=Decimal("41.3"))
 
 
 def test_password_is_hashed_and_checked() -> None:
