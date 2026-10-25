@@ -1,4 +1,6 @@
 from django.db.models import TextChoices
+from drf_spectacular.plumbing import list_hash
+from drf_spectacular.settings import spectacular_settings
 
 from glowderma.core import enums
 
@@ -95,14 +97,21 @@ def test_every_contract_enum_has_the_contract_literals() -> None:
     assert len(CONTRACT_TABLE["OrderEventType"]) == 16
 
 
-def test_labels_equal_values_so_choice_sets_hash_identically() -> None:
-    for enum in enums.CONTRACT_ENUMS:
-        assert enum.choices == [(value, value) for value in enum.values], enum.__name__
-        assert all(member.label == member.value for member in enum), enum.__name__
-
-
-def test_enum_name_overrides_point_at_choices() -> None:
+def test_enum_name_overrides_point_at_values() -> None:
+    """Each ``<Name>Enum`` component is pinned to the enum's literal list (``.values``)."""
     overrides = enums.enum_name_overrides()
-    assert overrides["OrderStatusEnum"] == "glowderma.core.enums.OrderStatus.choices"
+    assert overrides["OrderStatusEnum"] == "glowderma.core.enums.OrderStatus.values"
     assert set(overrides) == {f"{name}Enum" for name in CONTRACT_TABLE}
     assert len(set(overrides.values())) == len(overrides)
+
+
+def test_enum_overrides_hash_like_the_schema_hook() -> None:
+    """Regression: the hook hashes ``(value, value)`` pairs (hooks.py), so ``.values`` must match it and the
+    label hack (``label == value``) is not needed; Django's default labels stay intact."""
+    assert enums.OrderStatus.AWAITING_PAYMENT.label == "Awaiting Payment"
+    assert enums.OrderStatus.choices[0] == ("awaiting_payment", "Awaiting Payment")
+    for enum in enums.CONTRACT_ENUMS:
+        field_side = list_hash([(value, value) for value in enum.values])
+        assert field_side == list_hash([(value, value) for value in enum.values if value not in ("", None)])
+        assert field_side != list_hash(list(enum.choices)), enum.__name__
+    assert set(enums.enum_name_overrides()) <= set(spectacular_settings.ENUM_NAME_OVERRIDES)

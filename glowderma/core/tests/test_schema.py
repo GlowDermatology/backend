@@ -82,7 +82,7 @@ def test_contract_enum_components_are_named_after_the_enum() -> None:
     assert schemas["SocialProviderEnum"]["enum"] == ["google", "facebook"]
     assert not {"ScopeEnum", "StatusEnum", "LinkedProvidersEnum"} & set(schemas)
     overrides = cast(dict[str, Any], settings.SPECTACULAR_SETTINGS["ENUM_NAME_OVERRIDES"])
-    assert overrides["OrderStatusEnum"] == "glowderma.core.enums.OrderStatus.choices"
+    assert overrides["OrderStatusEnum"] == "glowderma.core.enums.OrderStatus.values"
 
 
 def test_schema_helpers_match_the_contract() -> None:
