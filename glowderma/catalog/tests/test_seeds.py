@@ -4,11 +4,13 @@ from datetime import datetime, timedelta
 
 import pytest
 from django.core.management import call_command
+from django.db import IntegrityError
 
 from glowderma.accounts.tests.factories import StaffUserFactory
 from glowderma.catalog import seeds
 from glowderma.catalog.models import Category, Product, ProductImage, ProductStock
 from glowderma.catalog.seeds import MockRandom, build_catalog, seed_catalog
+from glowderma.catalog.tests.factories import ProductFactory
 from glowderma.core import enums, seeding
 from glowderma.core.seeding import SeedContext
 from glowderma.core.timeutils import TASHKENT
@@ -111,6 +113,20 @@ def test_seed_catalog_is_idempotent_and_matches_the_design() -> None:
     generated = Product.objects.get(pk=19)
     generated.refresh_from_db()
     assert generated.search_text == "aloe verali serum сыворотка с алоэ вера  aloe vera serum 30ml 4607012500"
+
+
+@pytest.mark.django_db
+def test_seed_catalog_refuses_to_overwrite_a_foreign_row_at_a_design_id() -> None:
+    """Idempotency is checked by billz_id but the write is by id: a stranger at id 1 raises, not vanishes."""
+    foreign = ProductFactory.create(id=1, billz_id="999999999999", billz_name="NOT OURS", price=5)
+    categories_before = Category.objects.count()
+    with pytest.raises(IntegrityError):
+        seed_catalog(CONTEXT)
+    foreign.refresh_from_db()
+    assert (foreign.billz_id, foreign.billz_name, foreign.price) == ("999999999999", "NOT OURS", 5)
+    # The whole seed rolled back: no product, category, stock or image of the design landed.
+    assert Product.objects.count() == 1 and Category.objects.count() == categories_before
+    assert ProductStock.objects.count() == 0 and ProductImage.objects.count() == 0
 
 
 @pytest.mark.django_db

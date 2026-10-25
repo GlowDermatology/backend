@@ -604,7 +604,9 @@ def _seed_product(
         product.last_change_old_price = 175_000
         product.last_change_new_price = 185_000
         product.last_change_actor = admin
-    product.save()
+    # force_insert: the design id is written as an INSERT, never as an UPDATE of whatever row holds that id;
+    # a foreign row at 1..248 raises IntegrityError and the whole seed rolls back instead of overwriting it.
+    product.save(force_insert=True)
     Product.objects.filter(pk=product.pk).update(updated_at=updated_at)
     ProductStock.objects.create(product=product, quantity=spec.stock, synced_at=synced_at)
     if spec.art is not None:

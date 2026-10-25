@@ -195,6 +195,17 @@ def test_numeric_term_matches_id_and_billz_id(catalog: dict[str, Product]) -> No
     assert ids(filter_products_search(base, "99")) == set()
 
 
+def test_non_ascii_and_oversized_digit_terms_never_raise(catalog: dict[str, Product]) -> None:
+    """``str.isdigit()`` accepts superscripts and circled digits ``int()`` rejects; input must never raise."""
+    base = Product.objects.all()
+    for term in ("²", "①", "⑩", "٣", "4607²"):
+        assert ids(filter_products_search(base, term)) == set()
+    assert ids(filter_products_search(base, "9" * 19)) == set()  # beyond any bigint id: text match only
+    assert ids(filter_products_search(base, "9" * 64)) == set()
+    assert ids(filter_products_search(base, "0" * 17 + "77")) == set()  # 19 digits: not parsed as an id
+    assert ids(filter_products_search(base, "0" * 16 + "77")) == {77}  # 18 digits: still an exact id match
+
+
 def test_search_term_is_trimmed_to_64_characters(catalog: dict[str, Product]) -> None:
     term = "gialuron kislotali serum" + "x" * 80
     assert ids(filter_products_search(Product.objects.all(), term)) == set()

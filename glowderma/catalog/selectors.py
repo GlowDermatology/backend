@@ -12,6 +12,7 @@ from django.db.models.functions import Coalesce, Collate, Lower, NullIf
 from glowderma.catalog.models import Product
 
 SEARCH_TERM_MAX_LENGTH = 64
+MAX_ID_DIGITS = 18  # every 18-digit number fits a bigint id; longer terms can only match the text columns
 
 # Display name = Uzbek name, else the Billz name (what every Uzbek label of a product shows).
 DISPLAY_NAME = Coalesce(NullIf(F("name_uz"), Value("")), F("billz_name"))
@@ -25,8 +26,10 @@ def filter_products_search(qs: QuerySet[Product], raw: str) -> QuerySet[Product]
     # LIKE '%' || lower('term') || '%' — both sides lower-cased by PostgreSQL (same lower() as the generated
     # column); Django escapes % _ \ in the term.
     cond = Q(search_text__contains=Lower(Value(term)))
-    if term.isdigit():
-        cond |= Q(id=int(term))  # a numeric term also matches the id exactly, never instead of the text
+    # ASCII digits only: str.isdigit() is also True for "²" or "①", which int() rejects (user input must
+    # never raise here). A numeric term also matches the id exactly, never instead of the text.
+    if term.isascii() and term.isdigit() and len(term) <= MAX_ID_DIGITS:
+        cond |= Q(id=int(term))
     return qs.filter(cond)
 
 
