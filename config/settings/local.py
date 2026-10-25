@@ -24,6 +24,11 @@ DATABASE_URL = env_str("DATABASE_URL", "postgres://glowderma:glowderma@localhost
 DATABASES = {"default": database_config(DATABASE_URL, pool=env_bool("DB_POOL", False))}
 REDIS_URL = env_str("REDIS_URL", "redis://localhost:6380/0")
 CELERY_BROKER_URL = env_str("CELERY_BROKER_URL", redis_db_url(REDIS_URL, 1))
+# A local runserver has no worker by default: run tasks inline (outbox dispatch on commit, Billz import
+# jobs, campaign batches) so the fake-provider stack works end to end. Set CELERY_TASK_ALWAYS_EAGER=false and
+# start a worker and a beat process (DJANGO_SETTINGS_MODULE=config.settings.local) to exercise the real queue;
+# beat-only work (scheduled campaigns, reservation expiry) always needs the beat process.
+CELERY_TASK_ALWAYS_EAGER = env_bool("CELERY_TASK_ALWAYS_EAGER", True)
 LOGGING = logging_config(env_str("LOG_LEVEL", "DEBUG").upper())
 CACHES = {
     "default": {

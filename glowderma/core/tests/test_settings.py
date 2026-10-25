@@ -6,7 +6,7 @@ import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import ModuleType
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from django.core import checks
@@ -327,6 +327,10 @@ DEPLOY_ENV = {
 NOT_OVERRIDDEN = {"DATABASES", "CACHES", "LOGGING", "INSTALLED_APPS"}
 
 
+# The system checks include Django 6.1's GeneratedField check, which asks the connection for the server
+# version (catalog.Product.search_text): without DB access these tests only passed after another test had
+# cached it.
+@pytest.mark.django_db
 def test_production_passes_deploy_checks(production_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
     """Mirrors the CI step `manage.py check --deploy --fail-level WARNING` with production settings.
     Secrets are generated like in CI (>= 50 chars, >= 5 unique, no "django-insecure-" prefix for W009)."""
@@ -360,6 +364,7 @@ def test_production_without_hsts_warns_only_about_hsts(
     assert module.SECURE_HSTS_PRELOAD is False
 
 
+@pytest.mark.django_db  # see test_production_passes_deploy_checks
 def test_hsts_preload_is_never_implied(production_env: None, monkeypatch: pytest.MonkeyPatch) -> None:
     """Turning HSTS on enables includeSubDomains (W005) but not preload: that commitment is near-irreversible
     and must be an explicit SECURE_HSTS_PRELOAD=true; until then `check --deploy` keeps reporting W021."""
@@ -501,3 +506,23 @@ def test_production_refuses_fake_now(production_env: None, monkeypatch: pytest.M
     monkeypatch.setenv("FAKE_NOW", "2026-10-24T12:05:00+05:00")
     with pytest.raises(ImproperlyConfigured, match="FAKE_NOW"):
         load_production()
+
+
+def _load_local() -> Any:
+    full_name = "config.settings.local"
+    original = sys.modules.pop(full_name, None)
+    try:
+        return importlib.import_module(full_name)
+    finally:
+        sys.modules.pop(full_name, None)
+        if original is not None:
+            sys.modules[full_name] = original
+            package: Any = sys.modules["config.settings"]
+            package.local = original
+
+
+def test_local_runs_celery_tasks_inline_unless_told_otherwise(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CELERY_TASK_ALWAYS_EAGER", raising=False)
+    assert _load_local().CELERY_TASK_ALWAYS_EAGER is True  # a bare runserver has no worker
+    monkeypatch.setenv("CELERY_TASK_ALWAYS_EAGER", "false")
+    assert _load_local().CELERY_TASK_ALWAYS_EAGER is False
