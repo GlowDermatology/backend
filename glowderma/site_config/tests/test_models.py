@@ -129,9 +129,22 @@ def test_admin_registration_is_read_only() -> None:
 
 @pytest.mark.django_db(transaction=True)
 def test_site_config_migrations_reverse_to_zero_and_forward_again() -> None:
+    SiteSettings.objects.filter(pk=1).update(support_phone="+998712000000")
     call_command("migrate", "site_config", "0001", verbosity=0)
-    assert SiteSettings.objects.count() == 0  # reverse of 0002 is a no-op; 0001 reverse drops the table
+    # reverse of 0002 is a no-op (the row is configuration): pk 1 survives untouched; 0001's reverse drops it
+    assert SiteSettings.objects.get().pk == 1 and SiteSettings.load().support_phone == "+998712000000"
     call_command("migrate", "site_config", "zero", verbosity=0)
     assert "site_config_sitesettings" not in connection.introspection.table_names()
     call_command("migrate", "site_config", verbosity=0)
     assert SiteSettings.objects.get().pk == 1
+    assert SiteSettings.load().support_phone == ""  # a fresh row, not the flushed one
+
+
+@pytest.mark.django_db(transaction=True)
+def test_flush_keeps_the_singleton() -> None:
+    """A transactional test ends with pytest-django's flush; ``post_migrate`` re-inserts pk 1, so later tests
+    (and a ``--reuse-db`` rerun) never find ``load()`` inserting."""
+    SiteSettings.objects.filter(pk=1).update(reservation_minutes=30)
+    call_command("flush", interactive=False, verbosity=0)
+    assert SiteSettings.objects.count() == 1
+    assert SiteSettings.load().pk == 1 and SiteSettings.load().reservation_minutes == 15

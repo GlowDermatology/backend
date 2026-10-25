@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import pytest
+from django.apps import apps as django_apps
 from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
@@ -80,9 +81,20 @@ def test_seed_integrations_marks_billz_synced_and_is_idempotent() -> None:
     assert job.params == {"mode": "delta"}
     assert job.result == {"created": 0, "updated": 248, "unchanged": 0, "new_from_billz": 0}
     assert job.created_at == synced_at and job.finished_at == synced_at
+    assert job.updated_at == synced_at and job.started_at == synced_at and job.heartbeat_at == synced_at
     assert job.created_by == admin_user
+    assert billz.updated_at == synced_at
     seeds.seed_integrations(CONTEXT)
     assert Job.objects.count() == 1 and IntegrationState.objects.count() == 6
+    assert Job.objects.get().updated_at == synced_at
+
+
+@pytest.mark.django_db
+def test_seed_integrations_refuses_to_run_without_the_seeded_admin() -> None:
+    with pytest.raises(RuntimeError, match="accounts seeder first"):
+        seeds.seed_integrations(CONTEXT)
+    assert not Job.objects.exists()  # atomic: the billz state change rolled back with it
+    assert IntegrationState.objects.get(provider="billz").last_sync_at is None
 
 
 def test_seeder_registered_after_accounts(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -102,10 +114,35 @@ def test_integrations_migrations_reverse_to_zero_and_forward_again() -> None:
     assert trigger_exists()
     call_command("migrate", "integrations", "0001", verbosity=0)
     assert not trigger_exists()
-    assert IntegrationState.objects.count() == 0
+    # 0003's reverse deleted the rows; the post_migrate receiver re-inserted them (the table still exists)
+    assert IntegrationState.objects.count() == 6
     call_command("migrate", "integrations", "zero", verbosity=0)
     assert "integrations_webhookinbox" not in connection.introspection.table_names()
+    assert "integrations_integrationstate" not in connection.introspection.table_names()
     call_command("migrate", "integrations", verbosity=0)
     assert trigger_exists()
     assert IntegrationState.objects.count() == 6
     assert "integrations_job" in connection.introspection.table_names()
+
+
+@pytest.mark.django_db
+def test_0003_reverse_deletes_the_provider_rows_and_forward_restores_them() -> None:
+    module = importlib.import_module("glowderma.integrations.migrations.0003_seed_integration_state")
+    module.delete_provider_rows(django_apps, connection.schema_editor)
+    assert IntegrationState.objects.count() == 0
+    module.create_provider_rows(django_apps, connection.schema_editor)
+    module.create_provider_rows(django_apps, connection.schema_editor)  # idempotent
+    assert sorted(IntegrationState.objects.values_list("provider", flat=True)) == sorted(module.PROVIDERS)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_flush_keeps_the_provider_rows() -> None:
+    """A transactional test ends with pytest-django's flush; ``post_migrate`` restores the six rows, so later
+    tests (and a ``--reuse-db`` rerun) never see an empty table."""
+    IntegrationState.objects.filter(provider="billz").update(consecutive_failures=3)
+    call_command("flush", interactive=False, verbosity=0)
+    providers = sorted(IntegrationState.objects.values_list("provider", flat=True))
+    assert providers == ["billz", "bts", "click", "eskiz", "fcm", "payme"]
+    assert IntegrationState.objects.get(provider="billz").consecutive_failures == 0
+    call_command("flush", interactive=False, verbosity=0)  # idempotent
+    assert IntegrationState.objects.count() == 6
