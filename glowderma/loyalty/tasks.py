@@ -5,6 +5,10 @@ false mismatches. Every finding is written as an audit entry ``loyalty.reconcili
 ``system``, ``entity_type="loyalty_account"``), then a summary ``loyalty.reconciliation_completed``. Nothing
 is corrected automatically: the ledger is append-only and a mismatch means a bug or a raw write, which staff
 investigate.
+
+C2 and C3 follow **posting order**, i.e. ``id`` order per account: every posting holds the account row lock,
+so ids grow in insert order within an account, while ``at`` is business time (``post_entry`` keeps it
+non-decreasing, but ``id`` is the order the ``balance_after`` chain was actually built in).
 """
 
 from __future__ import annotations
@@ -34,24 +38,24 @@ CHECKS: dict[str, tuple[str, tuple[str, ...]]] = {
         """,
         ("account_id", "balance", "ledger_sum"),
     ),
-    # C2: the newest entry's balance_after == balance (a balance change without an entry)
+    # C2: the last posted entry's balance_after == balance (a balance change without an entry)
     "last_balance_after": (
         """
         SELECT a.id, a.balance, last.balance_after
         FROM loyalty_loyaltyaccount a
         JOIN LATERAL (SELECT e.balance_after FROM loyalty_ledgerentry e
-                      WHERE e.account_id = a.id ORDER BY e.at DESC, e.id DESC LIMIT 1) last ON true
+                      WHERE e.account_id = a.id ORDER BY e.id DESC LIMIT 1) last ON true
         WHERE last.balance_after <> a.balance
         ORDER BY a.id
         """,
         ("account_id", "balance", "last_balance_after"),
     ),
-    # C3: the running chain is consistent (balance_after_i == balance_after_{i-1} + amount_i)
+    # C3: the running chain is consistent in posting order (balance_after_i == balance_after_{i-1} + amount_i)
     "chain": (
         """
         SELECT account_id, id, amount, balance_after, prev_after FROM (
           SELECT e.id, e.account_id, e.amount, e.balance_after,
-                 LAG(e.balance_after, 1, 0) OVER (PARTITION BY e.account_id ORDER BY e.at, e.id) AS prev_after
+                 LAG(e.balance_after, 1, 0) OVER (PARTITION BY e.account_id ORDER BY e.id) AS prev_after
           FROM loyalty_ledgerentry e) x
         WHERE balance_after <> prev_after + amount
         ORDER BY account_id, id

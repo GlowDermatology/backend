@@ -114,3 +114,62 @@ def test_reconciliation_is_scheduled_nightly_at_03_10_tashkent() -> None:
     assert entry["task"] == "loyalty.reconcile_balances" == tasks.reconcile_balances.name
     assert (entry["schedule"].hour, entry["schedule"].minute) == ({3}, {10})
     assert app.conf.timezone == "Asia/Tashkent"
+
+
+def test_broken_reversal_links_and_hold_orders_are_reported_per_row() -> None:
+    """C5's reversal clause and C6's order clause, each failing alone."""
+    account, online, order_id = build_chains()
+    store = Purchase.objects.get(billz_sale_id="S-1")
+    store_reversal = services.reverse_purchase(store.pk, at(10, 20))
+    online_reversal = services.reverse_purchase(online.purchase_id, at(10, 20, 0, 1))
+    debit_reversal = LedgerEntry.objects.get(reverses__kind="debit", reverses__order_id=order_id)
+    assert tasks.reconcile_balances_now()["mismatches"] == 0  # the service-built reversals are clean
+    with connection.cursor() as cursor:  # loyalty_purchase / loyalty_cashbackhold are not append-only
+        cursor.execute("UPDATE loyalty_purchase SET reversal_entry_id = NULL WHERE id = %s", [store.pk])
+        cursor.execute(  # points at the debit's reversal instead of the credit's
+            "UPDATE loyalty_purchase SET reversal_entry_id = %s WHERE id = %s",
+            [debit_reversal.pk, online.purchase_id],
+        )
+    other_order = paid_order(account.customer, created_at=at(10, 21), items_subtotal=100_000)
+    hold = CashbackHold.objects.get(order_id=order_id)
+    CashbackHold.objects.filter(pk=hold.pk).update(order_id=other_order.pk)  # debit belongs to order_id
+    summary = tasks.reconcile_balances_now()
+    assert summary["checks"] == {"ledger_sum": 0, "last_balance_after": 0, "chain": 0, "purchase_links": 2, "captured_holds": 1}  # fmt: skip  # noqa: E501
+    rows = [row for row in findings() if row["check"] != "ledger_sum"]
+    assert rows == [
+        {
+            "entity": ("customer", str(account.customer_id)),
+            "check": "purchase_links",
+            "customer_id": account.customer_id,
+            "purchase_id": store.pk,
+            "cashback_amount": 30_000,
+            "credited_amount": 30_000,
+            "credited_entry_id": store.credited_entry_id,
+            "reversal_entry_id": None,
+        },  # fmt: skip  # noqa: E501
+        {
+            "entity": ("customer", str(account.customer_id)),
+            "check": "purchase_links",
+            "customer_id": account.customer_id,
+            "purchase_id": online.purchase_id,
+            "cashback_amount": 3_140,
+            "credited_amount": 3_140,
+            "credited_entry_id": online.credited_entry_id,
+            "reversal_entry_id": debit_reversal.pk,
+        },  # fmt: skip  # noqa: E501
+        {
+            "entity": ("loyalty_account", str(account.pk)),
+            "check": "captured_holds",
+            "account_id": account.pk,
+            "hold_id": hold.pk,
+            "hold_amount": 20_000,
+            "entry_kind": "debit",
+            "entry_amount": -20_000,
+            "entry_order_id": order_id,
+            "order_id": other_order.pk,
+        },  # fmt: skip  # noqa: E501
+    ]
+    assert (
+        store_reversal.credit_reversal_entry_id is not None
+        and online_reversal.credit_reversal_entry_id is not None
+    )

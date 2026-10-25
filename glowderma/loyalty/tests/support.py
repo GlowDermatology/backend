@@ -23,10 +23,10 @@ def seed_policies() -> dict[int, CashbackPolicy]:
 
 
 def chain(account_id: int) -> list[tuple[str, int, int]]:
-    """``(kind, amount, balance_after)`` of the account's entries in posting order."""
+    """``(kind, amount, balance_after)`` of the account's entries in posting (``id``) order."""
     return list(
         LedgerEntry.objects.filter(account_id=account_id)
-        .order_by("at", "id")
+        .order_by("id")
         .values_list("kind", "amount", "balance_after")
     )
 
