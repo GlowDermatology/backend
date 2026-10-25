@@ -199,14 +199,21 @@ def test_reorder_exact_set(staff_client: APIClient) -> None:
     for body in ([a.pk, b.pk], [a.pk, b.pk, c.pk, 999], [a.pk, a.pk, b.pk], []):
         response = staff_client.put(url, {"image_ids": body})
         assert response.status_code == 400, body
-        code, _message = errors_of(response)["image_ids"]
-        assert code in {"mismatch", "empty"}, body
-    assert errors_of(staff_client.put(url, {"image_ids": [a.pk, b.pk]}))["image_ids"] == (
-        "mismatch",
-        "Ro‘yxat joriy elementlarga mos emas.",
-    )
+        assert errors_of(response)["image_ids"] == ("mismatch", "Ro‘yxat joriy elementlarga mos emas."), body
     assert errors_of(staff_client.put(url, {}))["image_ids"] == ("required", "Majburiy maydon.")
     assert staff_client.put(f"{PRODUCTS}999999/images/order/", {"image_ids": [1]}).status_code == 404
+
+
+def test_reorder_empty_list_is_the_exact_set_of_a_product_without_images(staff_client: APIClient) -> None:
+    """``[]`` is a valid body (never DRF's ``empty``): a 200 no-op on an empty product, else ``mismatch``."""
+    product = ProductFactory.create(status="hidden")
+    response = staff_client.put(f"{images_url(product)}order/", {"image_ids": []})
+    assert response.status_code == 200, response.json()
+    assert response.json() == {"images": []}
+    ProductImageFactory.create(product=product)
+    response = staff_client.put(f"{images_url(product)}order/", {"image_ids": []})
+    assert response.status_code == 400
+    assert errors_of(response)["image_ids"] == ("mismatch", "Ro‘yxat joriy elementlarga mos emas.")
 
 
 @pytest.mark.django_db(transaction=True)

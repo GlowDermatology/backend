@@ -27,6 +27,25 @@ UZ_NAME_MIN_LENGTH = 2
 # --- shared -------------------------------------------------------------------------------------------------
 
 
+class CategoryNameSerializer(serializers.Serializer[dict[str, str]]):
+    """Contract §2.4 ``name``: ``uz`` 2..60 required; ``ru`` / ``en`` ≤ 60 optional (missing on create → "").
+
+    The core ``i18n_text`` shape requires every language; the catalog write shapes only require Uzbek.
+    """
+
+    uz = serializers.CharField(max_length=60, min_length=UZ_NAME_MIN_LENGTH)
+    ru = serializers.CharField(max_length=60, allow_blank=True, required=False, default="")
+    en = serializers.CharField(max_length=60, allow_blank=True, required=False, default="")
+
+
+class BannerTitleSerializer(serializers.Serializer[dict[str, str]]):
+    """Contract §2.5 ``title``: ``uz`` 1..80 required; ``ru`` / ``en`` ≤ 80 optional (missing → "")."""
+
+    uz = serializers.CharField(max_length=80)
+    ru = serializers.CharField(max_length=80, allow_blank=True, required=False, default="")
+    en = serializers.CharField(max_length=80, allow_blank=True, required=False, default="")
+
+
 class ProductImageSerializer(serializers.Serializer[ProductImage]):
     """Contract §2.3 ``ProductImage = {id, url, position}``."""
 
@@ -226,9 +245,7 @@ class ProductWriteSerializer(serializers.Serializer[Any]):
         if current is not None:
             others = others.exclude(pk=current.pk)
         if others.exists():
-            raise serializers.ValidationError(
-                [field_error("unique", "Bu Billz ID bilan mahsulot allaqachon bor.")]
-            )
+            raise serializers.ValidationError([field_error("unique", services.BILLZ_ID_TAKEN)])
         found = self._port().get_product(value)
         if found is None:
             raise serializers.ValidationError(
@@ -262,7 +279,9 @@ class ProductWriteSerializer(serializers.Serializer[Any]):
 class ImageOrderSerializer(serializers.Serializer[dict[str, Any]]):
     """Body of ``PUT products/{id}/images/order/``."""
 
-    image_ids = serializers.ListField(child=serializers.IntegerField(), allow_empty=False)
+    # ``[]`` is a valid body: it is the exact current set of a product without images (200, no-op); for a
+    # non-empty set the service answers ``mismatch`` — never DRF's untranslated ``empty``.
+    image_ids = serializers.ListField(child=serializers.IntegerField())
 
 
 class ImagesResponseSerializer(serializers.Serializer[dict[str, Any]]):
@@ -296,7 +315,7 @@ class CategoryWriteSerializer(serializers.Serializer[Any]):
     """``POST categories/`` and ``PATCH categories/{slug}/`` (``partial``; ``slug`` is then ``read_only``)."""
 
     slug = SlugField()
-    name = i18n_text(60, uz_min_length=2)
+    name = CategoryNameSerializer()
     is_active = serializers.BooleanField(required=False, default=True)
 
     def to_internal_value(self, data: Any) -> dict[str, Any]:
@@ -313,7 +332,7 @@ class CategoryWriteSerializer(serializers.Serializer[Any]):
 class SlugOrderSerializer(serializers.Serializer[dict[str, Any]]):
     """Body of ``PUT categories/order/``."""
 
-    slugs = serializers.ListField(child=serializers.CharField(max_length=40), allow_empty=False)
+    slugs = serializers.ListField(child=serializers.CharField(max_length=40))  # ``[]`` → mismatch, or no-op
 
 
 class CategoryResultsSerializer(serializers.Serializer[dict[str, Any]]):
@@ -383,7 +402,7 @@ class BannerWriteSerializer(serializers.Serializer[Any]):
     the date order are validated against the merged state (``instance`` on PATCH).
     """
 
-    title = i18n_text(80, uz_min_length=1)
+    title = BannerTitleSerializer()
     link = BannerLinkSerializer(required=False)
     is_active = serializers.BooleanField(required=False, default=True)
     starts_at = AwareDateTimeField(required=False, allow_null=True)
@@ -453,7 +472,7 @@ class BannerWriteSerializer(serializers.Serializer[Any]):
 class IdOrderSerializer(serializers.Serializer[dict[str, Any]]):
     """Body of ``PUT banners/order/``."""
 
-    ids = serializers.ListField(child=serializers.IntegerField(), allow_empty=False)
+    ids = serializers.ListField(child=serializers.IntegerField())  # ``[]`` → mismatch unless no banners
 
 
 class BannerResultsSerializer(serializers.Serializer[dict[str, Any]]):

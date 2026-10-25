@@ -202,6 +202,28 @@ def test_create_requires_multipart(staff_client: APIClient) -> None:
     assert response.status_code == 415 and response.json()["code"] == "unsupported_media_type"
 
 
+def test_urlencoded_bodies_are_415(staff_client: APIClient) -> None:
+    """Contract §1.2: JSON or multipart (where stated), anything else → 415 — form-urlencoded included."""
+    banner = BannerFactory.create(title_uz="Kuz")
+    for method, url in (("post", BANNERS), ("patch", f"{BANNERS}{banner.pk}/")):
+        response = getattr(staff_client, method)(
+            url, "title.uz=Changed", content_type="application/x-www-form-urlencoded"
+        )
+        assert response.status_code == 415, (method, response.content)
+        assert response.json()["code"] == "unsupported_media_type"
+    banner.refresh_from_db()
+    assert banner.title_uz == "Kuz" and Banner.objects.count() == 1
+
+
+def test_create_with_uz_only_title_defaults_other_languages_to_empty(staff_client: APIClient) -> None:
+    """Contract §2.5: only ``title.uz`` is required; ``ru`` / ``en`` missing on create → ``""``."""
+    response = staff_client.post(BANNERS, form(), format="multipart")
+    assert response.status_code == 201, response.json()
+    assert response.json()["title"] == {"uz": "Kuzgi chegirmalar", "ru": "", "en": ""}
+    banner = Banner.objects.get()
+    assert (banner.title_uz, banner.title_ru, banner.title_en) == ("Kuzgi chegirmalar", "", "")
+
+
 def test_list_and_export(staff_client: APIClient) -> None:
     product = ProductFactory.create(status="active")
     category = CategoryFactory.create(slug="serums")
@@ -360,4 +382,14 @@ def test_reorder(staff_client: APIClient) -> None:
         assert response.status_code == 400, body
         assert errors_of(response)["ids"] == ("mismatch", "Ro‘yxat joriy elementlarga mos emas.")
     assert errors_of(staff_client.put(url, {}))["ids"] == ("required", "Majburiy maydon.")
+    assert errors_of(staff_client.put(url, {"ids": []}))["ids"] == (
+        "mismatch",
+        "Ro‘yxat joriy elementlarga mos emas.",
+    )
     assert staff_client.get(url).status_code == 405
+
+
+def test_reorder_empty_list_without_banners_is_a_noop(staff_client: APIClient) -> None:
+    response = staff_client.put(f"{BANNERS}order/", {"ids": []})
+    assert response.status_code == 200, response.json()
+    assert response.json() == {"results": []}

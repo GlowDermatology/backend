@@ -11,7 +11,7 @@ from django.http import HttpRequest, QueryDict
 from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework import mixins, serializers
 from rest_framework.exceptions import NotFound, ValidationError
-from rest_framework.parsers import BaseParser, FormParser, JSONParser, MultiPartParser
+from rest_framework.parsers import BaseParser, JSONParser, MultiPartParser
 from rest_framework.request import Request
 from rest_framework.response import Response
 
@@ -360,12 +360,13 @@ class BannerViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
         return super().initialize_request(request, *args, **kwargs)
 
     def get_parsers(self) -> list[BaseParser]:
-        # Contract §2.5: POST is multipart; PATCH takes multipart or JSON; the rest are JSON.
+        # Contract §1.2 / §2.5: POST is multipart; PATCH takes multipart or JSON; the rest are JSON. Anything
+        # else (``application/x-www-form-urlencoded`` included) is a 415.
         action = getattr(self, "action", None)
         if action == "create":
-            return [MultiPartParser(), FormParser()]
+            return [MultiPartParser()]
         if action == "partial_update":
-            return [JSONParser(), MultiPartParser(), FormParser()]
+            return [JSONParser(), MultiPartParser()]
         return [JSONParser()]
 
     def get_queryset(self) -> QuerySet[Banner]:
