@@ -106,6 +106,8 @@ SEGMENT_MEMBER_EXPORT_HEADERS: tuple[str, ...] = (
     "Balans (so‘m)",
     "Holat",
 )
+# Contract 1.8 ``mijozlar`` (customers list, B4b): the same columns as the segment members export.
+CUSTOMER_EXPORT_HEADERS: tuple[str, ...] = SEGMENT_MEMBER_EXPORT_HEADERS
 AUDIT_LOG_EXPORT_HEADERS: tuple[str, ...] = (
     "ID",
     "Sana",
