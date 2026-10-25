@@ -26,9 +26,16 @@ def current_request_id() -> str:
 
 
 class RequestIdFilter(logging.Filter):
-    """Inject ``request_id`` into every record (never drops a record)."""
+    """Inject ``request_id`` into every record (never drops a record).
+
+    Precedence: an explicit ``extra={"request_id": ...}`` wins; then the ``request`` Django attaches through
+    ``django.utils.log.log_response`` (the ``django.request`` / ``django.security`` 4xx/5xx lines are emitted
+    by ``BaseHandler.get_response`` after the middleware chain, i.e. after the ContextVar was reset); then the
+    ContextVar bound by ``RequestIdMiddleware``.
+    """
 
     def filter(self, record: logging.LogRecord) -> bool:
         if not hasattr(record, "request_id"):
-            record.request_id = current_request_id()
+            attached = getattr(getattr(record, "request", None), "request_id", None)
+            record.request_id = attached if isinstance(attached, str) and attached else current_request_id()
         return True

@@ -5,7 +5,7 @@ import pytest
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest, HttpResponse
-from django.test import RequestFactory, override_settings
+from django.test import Client, RequestFactory, override_settings
 
 from config.settings.base import logging_config
 from glowderma.core.logging import NO_REQUEST_ID, RequestIdFilter, current_request_id
@@ -112,3 +112,41 @@ def test_logging_config_levels() -> None:
 def test_logging_config_rejects_unknown_level() -> None:
     with pytest.raises(ImproperlyConfigured, match="LOG_LEVEL"):
         logging_config("VERBOSE")
+
+
+def test_django_request_warning_carries_x_request_id(client: Client) -> None:
+    """§1.3 X-Request-ID (always) and §1.3 "500 server_error: quote request_id": the django.request line
+    Django emits for a 4xx/5xx *response* (after the middleware chain reset the ContextVar) still carries
+    the id the response returned, taken from the request attached by django.utils.log.log_response."""
+    handler = Collector()
+    logger = logging.getLogger("django.request")
+    logger.addHandler(handler)
+    try:
+        response = client.get("/api/v1/does-not-exist/")
+    finally:
+        logger.removeHandler(handler)
+    assert response.status_code == 404
+    assert current_request_id() == "-"
+    warnings = [
+        r for r in handler.records if r.levelno == logging.WARNING and "does-not-exist" in r.getMessage()
+    ]
+    assert len(warnings) == 1
+    assert warnings[0].request_id == response["X-Request-ID"]  # type: ignore[attr-defined]
+
+
+def test_filter_prefers_explicit_extra_over_attached_request() -> None:
+    record = logging.LogRecord("x", logging.INFO, __file__, 1, "m", None, None)
+    record.request = RequestFactory().get("/")
+    record.request.request_id = "from-request"  # type: ignore[attr-defined]
+    assert RequestIdFilter().filter(record) is True
+    assert record.request_id == "from-request"  # type: ignore[attr-defined]
+    explicit = logging.LogRecord("x", logging.INFO, __file__, 1, "m", None, None)
+    explicit.request = record.request  # type: ignore[attr-defined]
+    explicit.request_id = "explicit"
+    RequestIdFilter().filter(explicit)
+    assert explicit.request_id == "explicit"  # type: ignore[attr-defined]
+    # django.server logs attach a socket/string as ``request``: no request_id there, fall back to "-".
+    other = logging.LogRecord("x", logging.INFO, __file__, 1, "m", None, None)
+    other.request = "GET / HTTP/1.1"
+    RequestIdFilter().filter(other)
+    assert other.request_id == "-"  # type: ignore[attr-defined]
