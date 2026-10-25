@@ -313,7 +313,9 @@ def form_to_nested(data: Any) -> dict[str, Any]:
         return dict(data) if isinstance(data, dict) else {}
     nested: dict[str, Any] = {}
     for key in data:
-        value = data.get(key)
+        # DRF merges request.FILES into request.data, so a value may be a file although the QueryDict stubs
+        # only know strings: widen the type so the guard is not flagged as unreachable.
+        value: object = data.get(key)
         if isinstance(value, UploadedFile):
             continue
         if key in NULLABLE_FORM_KEYS and value == "":
