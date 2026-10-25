@@ -354,7 +354,9 @@ def test_concurrent_bookings_of_one_slot_yield_one_row_and_one_conflict(
     link = booking_setup()
     customers = [CustomerFactory.create(), CustomerFactory.create()]
     staff = StaffUserFactory.create()
-    barrier = threading.Barrier(2, timeout=10)
+    # Both threads must meet before either writes; a generous timeout keeps a loaded database server
+    # (parallel worktree suites) from turning the rendezvous into a BrokenBarrierError.
+    barrier = threading.Barrier(2, timeout=30)
     outcomes: dict[int, Any] = {}
 
     def wait_at_barrier() -> None:
@@ -380,10 +382,10 @@ def test_concurrent_bookings_of_one_slot_yield_one_row_and_one_conflict(
     for thread in threads:
         thread.start()
     for thread in threads:
-        thread.join(timeout=10)
+        thread.join(timeout=40)
     assert not any(thread.is_alive() for thread in threads)
     results = sorted(outcomes.values(), key=lambda value: isinstance(value, Exception))
-    assert isinstance(results[0], Appointment) and isinstance(results[1], Conflict)
+    assert isinstance(results[0], Appointment) and isinstance(results[1], Conflict), outcomes
     assert str(results[1].detail) == "Bu vaqt band." and results[1].get_codes() == "conflict"
     assert Appointment.objects.count() == 1
     assert AppointmentEvent.objects.count() == 2
