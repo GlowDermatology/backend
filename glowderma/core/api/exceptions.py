@@ -168,6 +168,18 @@ def _field_message(value: Any, code: str) -> str:
     return message
 
 
+class ContractValidationError(exceptions.ValidationError):
+    """A 400 ``validation_error`` whose top-level ``message`` comes from the endpoint's contract table.
+
+    ``detail`` is the usual ``{field: [ErrorDetail]}`` mapping; ``message`` replaces the generic
+    "Maydonlarni tekshiring." (e.g. ``"Summani kiriting."`` on ``customers/{id}/cashback-adjustments/``).
+    """
+
+    def __init__(self, detail: Any, *, message: str) -> None:
+        super().__init__(detail)
+        self.top_level_message = message
+
+
 class Conflict(exceptions.APIException):
     status_code = 409
     default_code = "conflict"
@@ -317,6 +329,7 @@ def envelope_exception_handler(exc: Exception, context: dict[str, Any]) -> Respo
     if isinstance(exc, exceptions.ValidationError):
         code = "validation_error"
         errors = flatten_errors(exc.detail)
+        message = getattr(exc, "top_level_message", None)
     elif isinstance(exc, exceptions.ParseError) and code == "parse_error":
         message = MESSAGES.get("parse_error", MESSAGES["validation_error"])
     elif isinstance(exc, (exceptions.NotAuthenticated, exceptions.AuthenticationFailed)):
