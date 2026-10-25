@@ -63,5 +63,26 @@ Status: `open` (default in use, awaiting decision) · `decided` (confirmed; move
 | I1 | Production media storage | Named volume behind the reverse proxy; S3-compatible storage later |
 | I2 | Deployment | `infra` repo / GitOps — owned by the user, out of scope here |
 
+## Technical decisions (lead, 2026-10-25) — taken while planning M0b–M3
+| # | Decision | Why |
+|---|---|---|
+| T1 | Module layering is a strict import-linter `layers` contract: `reporting \| customers` → `notifications` → `commerce \| appointments` → `payments \| delivery \| loyalty \| catalog \| professionals` → `site_config` → `accounts` → `integrations` → `core`. Siblings never import each other; upward effects travel as outbox topics (strings); the upper module owns the transaction and hosts the outbox handler. | The spec's "cross-module access only via services/selectors" cannot be expressed without a direction; commerce ↔ payments/delivery/notifications would otherwise be cyclic. |
+| T2 | The admin customer list/card/cashback-adjustment API lives in a new `customers` module (above commerce, loyalty, appointments, notifications). `Customer`, `Device`, `Address`, `SmsCode` stay in `accounts`. | The card aggregates purchases, ledger, orders, appointments and segments, which `accounts` (a low layer) may not import. |
+| T3 | Contract enums are defined once in `glowderma/core/enums.py` as `TextChoices`; `AppointmentStatus` carries an extra `cancelled` literal reserved for the M2 customer flow. | One source of truth for literals and for drf-spectacular `ENUM_NAME_OVERRIDES`. |
+| T4 | `CashbackPolicy` has no mutable columns: `state` and `superseded_by` are derived (version *v* is superseded by the smallest *w > v* created before *v*'s `effective_from`). | The table is append-only at the database level; the contract only needs the derived values. |
+| T5 | `WebhookInbox` rows are inserted after the synchronous processing of the callback, in the same transaction, with the outcome in `result`. | Keeps the inbox append-only while still recording what happened. |
+| T6 | Retention deletes on append-only tables (`WebhookInbox`, `AuditEntry`) are allowed only inside a transaction that sets the local GUC `glowderma.allow_purge = on`; the trigger function checks it. Only the purge task sets it. | Compliance item C4 needs retention; everything else keeps the hard guarantee. |
+| T7 | Django cache uses Redis DB 0 with `KEY_PREFIX=gd`; the Celery broker uses DB 1 (`CELERY_BROKER_URL`, default derived from `REDIS_URL`). | A cache flush must never drop queued tasks. |
+| T8 | Media URLs are built from `PUBLIC_MEDIA_BASE_URL` (required in production); uploads are re-encoded by `core.images` (EXIF stripped, ≤2400 px) and stored under `MEDIA_ROOT/<kind>/<owner>/<sha256-prefix>.<ext>` on the shared media volume, served by the edge proxy. | Spec "Media"; production storage stays an open question (I1). |
+| T9 | Throttle rates are configurable through `THROTTLE_RATES` (JSON) with the contract §1.9 values as defaults. | Contract says "defaults, configurable". |
+| T10 | Admin appointment creation and rescheduling (`requested_via=admin`) are added to M1d so the three "not designed" buttons in the admin schedule can be wired. | User decision 2026-10-25 to build undesigned admin UI now. |
+| T11 | All six integrations default to fake adapters (`INTEGRATIONS_MODE=fake`, per-provider overrides in M3); live adapters are written against the documented protocols with recorded-fixture tests only. | No provider credentials are available (A7 and the M3 gate). |
+
 ## Decision log
 _(move rows here with date and who decided)_
+| Date | # | Decision | By |
+|---|---|---|---|
+| 2026-10-25 | A4 | BFF token model confirmed; frontend slices F1–F3 implement it | user |
+| 2026-10-25 | — | Undesigned admin sections (categories, banners, customer list + groups, payments, settings, audit log) are built now in the existing design system | user |
+| 2026-10-25 | — | Delivery as stacked slice PRs, gated locally; the user reviews and merges | user |
+| 2026-10-25 | I2 | Production target is Docker Compose on a VPS behind an edge proxy; `docs/ops/deploy.md` documents it | user |
