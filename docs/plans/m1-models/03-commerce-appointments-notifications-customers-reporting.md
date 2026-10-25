@@ -71,7 +71,7 @@ decision T2). Their selectors are specified in §6 because they read the tables 
 | Table | Migration |
 |---|---|
 | `commerce_orderevent` | `commerce/migrations/0003_orderevent_append_only.py` |
-| `appointments_appointmentevent` | `appointments/migrations/0003_appointmentevent_append_only.py` |
+| `appointments_appointmentevent` | `appointments/migrations/0002_appointmentevent_append_only.py` (as built; the duration CHECK lives in `0001_initial`) |
 
 Tests per table (B2): ORM `save()` of a loaded row, `QuerySet.update()`, `delete()`, `bulk_update()` raise
 `AppendOnlyError`; raw `UPDATE`/`DELETE` raise `append-only table …` on PG 16 and 18; a purge with
@@ -726,7 +726,7 @@ class StockReservation(TimeStampedModel):
             models.Index(
                 fields=["product", "converted_at"],
                 condition=models.Q(state="converted"),
-                name="reservation_converted_product_idx",
+                name="reservation_converted_prod_idx",  # ≤ 30 chars (E034)
             ),
             models.Index(
                 fields=["expires_at"],
@@ -746,7 +746,7 @@ ALTER TABLE commerce_stockreservation ADD CONSTRAINT reservation_state_fields CH
   OR (state = 'converted' AND converted_at IS NOT NULL AND released_at IS NULL  AND release_reason = '')
   OR (state = 'released'  AND converted_at IS NULL  AND released_at IS NOT NULL AND release_reason <> ''));
 CREATE INDEX reservation_active_product_idx    ON commerce_stockreservation (product_id) WHERE state = 'active';
-CREATE INDEX reservation_converted_product_idx ON commerce_stockreservation (product_id, converted_at) WHERE state = 'converted';
+CREATE INDEX reservation_converted_prod_idx ON commerce_stockreservation (product_id, converted_at) WHERE state = 'converted';
 CREATE INDEX reservation_active_expires_idx    ON commerce_stockreservation (expires_at) WHERE state = 'active';
 ```
 
@@ -932,7 +932,7 @@ class Appointment(TimeStampedModel):
             models.Index(
                 fields=["start"],
                 condition=models.Q(status="requested"),
-                name="appointment_requested_start_idx",
+                name="appointment_req_start_idx",  # ≤ 30 chars (E034)
             ),
             models.Index(
                 fields=["customer", "start"],
@@ -944,8 +944,9 @@ class Appointment(TimeStampedModel):
     def __str__(self) -> str:
         return f"Appointment #{self.pk} {self.status}: prof {self.professional_id} {self.start:%Y-%m-%d %H:%M} ({self.duration_min} min)"
 ```
-Exact SQL (the migration `appointments/0001_initial.py` runs `BtreeGistExtension()` first; `0002` adds the raw
-duration check that the ORM cannot express):
+Exact SQL (as built: `btree_gist` already exists from `core.0007_db_extensions`, so `appointments/0001_initial.py`
+depends on it instead of running `BtreeGistExtension()`, and the raw duration check that the ORM cannot express is a
+`RunSQL` inside the same `0001_initial`; the append-only trigger is `0002_appointmentevent_append_only`):
 ```sql
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 ALTER TABLE appointments_appointment ADD CONSTRAINT appointment_end_after_start CHECK ("end" > start);
@@ -962,12 +963,12 @@ ALTER TABLE appointments_appointment ADD CONSTRAINT appointment_status_fields CH
 ALTER TABLE appointments_appointment ADD CONSTRAINT appointment_no_overlap
   EXCLUDE USING gist (tstzrange(start, "end", '[)') WITH &&, professional_id WITH =)
   WHERE (status IN ('requested', 'confirmed'));
--- appointments/migrations/0002_appointment_duration_check.py (RunSQL; reverse: DROP CONSTRAINT)
+-- RunSQL inside appointments/migrations/0001_initial.py (reverse: DROP CONSTRAINT)
 ALTER TABLE appointments_appointment ADD CONSTRAINT appointment_duration_matches
   CHECK ("end" - start = make_interval(mins => duration_min));
 CREATE INDEX appointment_prof_start_idx      ON appointments_appointment (professional_id, start);
 CREATE INDEX appointment_start_idx           ON appointments_appointment (start);
-CREATE INDEX appointment_requested_start_idx ON appointments_appointment (start) WHERE status = 'requested';
+CREATE INDEX appointment_req_start_idx ON appointments_appointment (start) WHERE status = 'requested';
 CREATE INDEX appointment_customer_open_idx   ON appointments_appointment (customer_id, start) WHERE status IN ('requested','confirmed');
 ```
 `end` is a reserved word: Django quotes identifiers, raw SQL must write `"end"`. `ExclusionConstraint` and
@@ -1007,7 +1008,7 @@ exclusion constraint is re-checked by PostgreSQL on every `UPDATE` that touches 
 - `GET appointments/pending-summary/` and dashboard `attention.pending_appointments/next_appointment_at`,
   `nav-counts.appointments_pending`:
   `SELECT COUNT(*), MIN(start) FROM appointments_appointment WHERE status = 'requested' AND start >= %(now)s`
-  (partial index `appointment_requested_start_idx`).
+  (partial index `appointment_req_start_idx`).
 - Customer card `upcoming_appointments`:
   `SELECT COUNT(*) FROM appointments_appointment WHERE customer_id = %(id)s AND status IN ('requested','confirmed') AND start >= %(now)s`.
 - Action endpoints return the day-item shape above.
@@ -1078,7 +1079,7 @@ ALTER TABLE appointments_appointmentevent ADD CONSTRAINT apptevent_actor_by_sour
   (source = 'admin' AND actor_id IS NOT NULL) OR (source <> 'admin' AND actor_id IS NULL));
 ALTER TABLE appointments_appointmentevent ADD CONSTRAINT apptevent_source_by_type CHECK (
   (type IN ('confirmed','rejected','attended','rescheduled') AND source = 'admin') OR type IN ('requested','cancelled'));
--- + append-only trigger (0.2): appointments/migrations/0003_appointmentevent_append_only.py
+-- + append-only trigger (0.2): appointments/migrations/0002_appointmentevent_append_only.py
 ```
 
 `data` per type: `requested {via, start, end, service_id, professional_id, price, duration_min}` ·
@@ -2203,7 +2204,7 @@ Ids 1–8 = `appointments.ts DESIGN_APPOINTMENTS` on **2026-10-26** (Monday): 1 
 Namlantiruvchi parvarish 260 000 `confirmed` (22 Oct 09:47). Confirmed rows are confirmed by the Administrator 30 min
 after the request (event + inbox row via the replayed `confirm`). Id 9: Malika·Dilnoza **2026-10-27 10:00**
 Namlantiruvchi parvarish 260 000 `confirmed` (22 Oct 14:10) → `upcoming_appointments = 1`. Surrounding days (ids ≥
-100): `createRandom(26)` in the mock's call order for offsets −3, −2, −1 (25 Oct is a Sunday → skipped), +1 … +4,
+1000, the sequence parked at 999 as §7.1 rules; the earlier "≥ 100" was superseded): `createRandom(26)` in the mock's call order for offsets −3, −2, −1 (25 Oct is a Sunday → skipped), +1 … +4,
 customers from ids 13+, past days `attended`, future `confirmed`; a generated slot that collides with a pinned row
 (exclusion `IntegrityError`) is dropped. Pending summary at the anchor: `{count 3, next_at 2026-10-26T09:00:00+05:00}`.
 
@@ -2285,15 +2286,15 @@ glowderma.commerce, glowderma.appointments, glowderma.notifications, glowderma.c
 | 6 | `site_config.0001_initial` · `0002_seed_singleton` | 01 §7 | `accounts.0001` |
 | 7 | `catalog.0001_initial` | 01 §7 (generated column, GIN, deferrable unique; collation from `core.0007`) | `core.0007`, `accounts.0001` |
 | 8 | `professionals.0001_initial` | 01 §7 | `accounts.0001` |
-| 9 | `commerce.0001_initial` | `Cart`, `CartItem`, `Order`, `OrderItem`, `OrderEvent`, `StockReservation` (+ all constraints/indexes above) | `accounts.0004`, `catalog.0001` |
+| 9 | `commerce.0001_initial` | `Cart`, `CartItem`, `Order`, `OrderItem`, `OrderEvent`, `StockReservation` (+ all constraints/indexes above) | `accounts.0004`, `catalog.0001`, `core.0007` |
 | 10 | `commerce.0002_order_sequence` | `RunSQL("ALTER SEQUENCE commerce_order_id_seq START WITH 10001 RESTART WITH 10001", reverse "… START WITH 1 RESTART WITH 1")` | `commerce.0001` |
 | 11 | `commerce.0003_orderevent_append_only` | `RunSQL(*append_only_trigger_sql("commerce_orderevent"))` | `commerce.0002`, `core.0008` |
 | 12 | `loyalty.0001_initial` · `0002_append_only` | 02 §0.2 (`CashbackPolicy`, `CashbackTier`, `LoyaltyAccount`, `LedgerEntry`, `CashbackHold`, `Purchase`, `PurchaseItem`, `PosDevice`; three triggers) | `accounts.0004`, `catalog.0001`, `commerce.0001`, `core.0008` |
 | 13 | `payments.0001_initial` | `Payment`, `Refund` | `accounts.0004`, `commerce.0001` |
 | 14 | `delivery.0001_initial` · `0002_append_only` | `Shipment` (FK `core.OutboxMessage`), `ShipmentEvent` + trigger | `commerce.0001`, `core.0008` |
-| 15 | `appointments.0001_initial` | `BtreeGistExtension()` first, then `Appointment` (with `ExclusionConstraint`), `AppointmentEvent` | `accounts.0004`, `professionals.0001` |
-| 16 | `appointments.0002_appointment_duration_check` | `RunSQL` `appointment_duration_matches` (`"end" - start = make_interval(mins => duration_min)`) | `appointments.0001` |
-| 17 | `appointments.0003_appointmentevent_append_only` | trigger | `appointments.0002`, `core.0008` |
+| 15 | `appointments.0001_initial` (as built) | `Appointment` (with `ExclusionConstraint`; `btree_gist` comes from `core.0007`), `AppointmentEvent`, and the `RunSQL` `appointment_duration_matches` (`"end" - start = make_interval(mins => duration_min)`) in the same migration | `accounts.0004`, `professionals.0001`, `core.0007` |
+| 16 | `appointments.0002_appointmentevent_append_only` (as built) | trigger | `appointments.0001`, `core.0008` |
+| 17 | — (merged into rows 15–16) | | |
 | 18 | `notifications.0001_initial` | `StatusTemplate`, `CustomerSegment`, `SegmentMember`, `Campaign`, `CampaignRecipient`, `InboxNotification` | `accounts.0004`, `catalog.0001` |
 | 19 | `notifications.0002_seed_status_templates` | `RunPython` inserting the four templates (§3.1; reverse deletes them) | `notifications.0001` |
 

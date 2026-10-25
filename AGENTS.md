@@ -146,4 +146,10 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
   `anon_client`; factories in `glowderma/accounts/tests/factories.py` (`StaffUserFactory.create(...)`,
   `AuthSessionFactory.create(...)`, `TEST_PASSWORD`, `raw_refresh(session)`). `core` tests must not import
   `accounts` (import-linter): use `get_user_model()`. Each module adds `tests/factories.py` for its own models.
+  A migration round-trip test (`migrate <app> zero` → forward) must end with a plain `call_command("migrate",
+  verbosity=0)`: the app-scoped forward step leaves every dependent app unapplied for the rest of the
+  transactional-test phase.
+- Django-admin inlines use `glowderma.core.admin.ReadOnlyTabularInline` (same view grant as `ReadOnlyAdmin`,
+  `core.admin.is_active_staff`); every admin rendering test logs in a plain active `is_staff` user, never a
+  superuser, so a missing grant is visible.
 - Commits: small, imperative subject lines (`feat(accounts): add staff login endpoint`).

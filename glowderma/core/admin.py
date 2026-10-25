@@ -37,9 +37,43 @@ def _json_renderer(field: models.Field[Any, Any]) -> Callable[[models.Model], st
     return render
 
 
-def _is_active_staff(request: HttpRequest) -> bool:
+def is_active_staff(request: HttpRequest) -> bool:
+    """The one predicate behind every view grant of the read-only admin (and its inlines)."""
     user = request.user
     return bool(user.is_active and user.is_staff)
+
+
+_is_active_staff = is_active_staff
+
+
+class ReadOnlyTabularInline(admin.TabularInline):  # type: ignore[type-arg]
+    """View-only inline: the same grant as ``ReadOnlyAdmin``, never a write path."""
+
+    can_delete = False
+    extra = 0
+    show_change_link = True
+
+    def has_add_permission(self, request: HttpRequest, obj: models.Model | None = None) -> bool:
+        return False
+
+    def has_change_permission(self, request: HttpRequest, obj: models.Model | None = None) -> bool:
+        return False
+
+    def has_delete_permission(self, request: HttpRequest, obj: models.Model | None = None) -> bool:
+        return False
+
+    def has_view_permission(self, request: HttpRequest, obj: models.Model | None = None) -> bool:
+        return is_active_staff(request)
+
+    def get_readonly_fields(self, request: HttpRequest, obj: models.Model | None = None) -> list[str]:
+        # Exactly the declared ``fields`` (flat; computed columns such as ``line_total`` included), else every
+        # concrete field — so the inline never builds an editable form field.
+        if self.fields:
+            names = [name for name in self.fields if isinstance(name, str)]
+        else:
+            names = [field.name for field in self.model._meta.concrete_fields]
+        names.extend(name for name in self.readonly_fields if name not in names)
+        return names
 
 
 class ReadOnlyAdmin(_ModelAdmin):
