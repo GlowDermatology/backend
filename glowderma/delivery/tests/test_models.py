@@ -174,7 +174,9 @@ def test_shipment_pending_is_derived_from_the_create_message() -> None:
 def test_shipment_create_message_set_null_on_outbox_purge() -> None:
     shipment = ShipmentFactory.create()
     message = create_message_for(shipment)
-    assert shipment.create_requests == 1 and shipment.create_message == message
+    # compare ids, not instances: an instance `==` would let mypy narrow create_message to non-Optional
+    # for the rest of the function and silently skip the checks after the purge below
+    assert shipment.create_requests == 1 and shipment.create_message_id == message.pk
     assert message.dedupe_key == f"bts.create_shipment:{shipment.order_id}:1"
     assert message.payload == {
         "order_id": shipment.order_id,
@@ -186,9 +188,11 @@ def test_shipment_create_message_set_null_on_outbox_purge() -> None:
     assert second.dedupe_key.endswith(":2") and shipment.create_requests == 2
     assert OutboxMessage.objects.filter(pk=message.pk).exists()  # the older message is simply superseded
     OutboxMessage.objects.filter(pk=second.pk).delete()  # retention purge of the outbox
-    shipment.refresh_from_db()
-    assert shipment.create_message is None and shipment.is_pending is False
-    assert Shipment.objects.with_pending().get(pk=shipment.pk).pending is False
+    shipment = Shipment.objects.get(pk=shipment.pk)  # a fresh load, so no stale narrowing survives
+    assert shipment.create_message_id is None
+    assert shipment.create_message is None
+    assert shipment.is_pending is False
+    assert Shipment.objects.with_pending().get(pk=shipment.pk).pending is False  # type: ignore[attr-defined]
 
 
 def test_shipment_indexes_and_constraints_in_pg_catalog() -> None:
