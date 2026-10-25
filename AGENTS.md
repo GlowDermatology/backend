@@ -40,7 +40,9 @@ through a small typed helper in `config/env.py`).
   database: `TEST_DB_NAME=test_gd_<branch> uv run pytest` (default `test_glowderma`). Never run two pytest
   processes against the same `TEST_DB_NAME`.
 - Redis DB 0 is the Django cache, DB 1 the Celery broker. Tests use LocMem; never call `cache.clear()` in
-  application code.
+  application code. `config/__init__.py` loads the Celery app (`celery_app`) so `shared_task.delay()` from a
+  request reaches the configured app (eager in tests, Redis otherwise); beat entries are declared centrally in
+  `config/celery.py` (`beat_schedule`) — add yours there and list the file in `shared_files_touched`.
 
 ## Dev loop
 Run from the repository root and stop at the first non-zero exit:
@@ -89,8 +91,9 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
   `ChoiceField(choices=<Enum>.values)` (or `.choices`) so drf-spectacular's `ENUM_NAME_OVERRIDES` names the
   component `<Enum>Enum`; adding an enum means adding it to `enums.py` (the override map is built from it).
 - Shared serializer field types live in `glowderma/core/api/fields.py` (`AwareDateTimeField`, `PercentField`,
-  `PhoneField`, `SlugField`, `BoundedListField`, `QueryBooleanField`, `i18n_text()` for **field-first** shapes
-  such as category `name` / banner `title` = `{uz, ru, en}`). Product `texts` is **language-first**
+  `PhoneField`, `SlugField`, `BoundedListField`, `QueryBooleanField` (feed query serializers `request.query_params.dict()`), `i18n_text()` for **field-first**
+  shapes = `{uz, ru, en}`; create shapes where only `uz` is required use a module serializer like catalog's
+  `CategoryNameSerializer`; `RESERVED_SLUGS` = `order`, `none`). Product `texts` is **language-first**
   (`{uz: {name, …}, ru: …}`) and needs its own serializer in `catalog`.
 - Field errors: raise contract codes through `core.api.exceptions.field_error(code, message=None, limit=None)`;
   generic codes carry their default Uzbek message, endpoint-specific codes (`ENDPOINT_FIELD_CODES`) require the
@@ -107,7 +110,13 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
   never expose `password` or `refresh_hash`. Only the professionals models become editable, through services.
 - Provider adapters live in `glowderma/integrations/<provider>/` behind a port (Protocol) with a fake and a live
   implementation chosen by `*_MODE` settings (default `INTEGRATIONS_MODE=fake`); views and services obtain them
-  through the module's `registry`. OAuth: `integrations/oauth/{ports,fake,google,facebook,registry}.py` (fake
+  through the module's `registry`. `integrations` cannot host admin views (`AdminAPIView` lives in `accounts`,
+  above it): provider-facing admin routes (`integrations/billz/import/`, `jobs/<pk>/`) are declared by the
+  orchestrating module (`catalog`) while the paths stay as the contract says. Billz: `integrations/billz/{ports,fake,
+  registry}.py` (`FakeBillz`: a known product returns its own fields, an id ending in `0000` is not found, anything
+  else is synthetic; an import always yields the three `46070199xx` new products once). Jobs go through
+  `integrations.services` (`start_job` single-flight, `claim_job`, `report_progress`, `finish_job`, `fail_job`,
+  `reap_stale_jobs`). OAuth: `integrations/oauth/{ports,fake,google,facebook,registry}.py` (fake
   codes `fake:<subject>:<email>[:hd]`, `fake-unverified:…`, `fake-fail`, `fake-down`; FakeGoogle nonce
   `nonce-<subject>` or `*`). Adapters never put a secret or bearer token in a URL (POST bodies / `Authorization`
   headers only), retry only on transport errors, and map failures to `OAuthExchangeError`-style typed errors.

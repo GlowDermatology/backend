@@ -11,7 +11,8 @@ from glowderma.core.api.exceptions import FIELD_MESSAGES, field_error
 
 PHONE_PATTERN = r"^\+998\d{9}$"
 SLUG_PATTERN = r"^[a-z0-9-]{2,40}$"
-RESERVED_SLUGS = frozenset({"order"})
+# ``order`` is a route segment (``categories/order/``); ``none`` is the "no category" filter keyword (2.3).
+RESERVED_SLUGS = frozenset({"order", "none"})
 LANGUAGES = ("uz", "ru", "en")
 
 

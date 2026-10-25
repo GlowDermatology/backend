@@ -446,8 +446,8 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 
 | Param | Values | Rule |
 |---|---|---|
-| `search` | str ≤64 | Case-insensitive substring over `texts.{uz,ru,en}.name`, `billz_name` and `billz_id` (pg_trgm GIN). A numeric term also matches `id` exactly. |
-| `category` | slug or `none` | `none` = no category; an unknown slug → 400 `invalid_choice` |
+| `search` | str ≤64 (longer input is trimmed to 64) | Case-insensitive substring over `texts.{uz,ru,en}.name`, `billz_name` and `billz_id` (pg_trgm GIN). An ASCII-digit term of ≤18 digits also matches `id` exactly. |
+| `category` | slug or `none` | `none` = no category (hence `none` is a reserved slug, §2.4); an unknown slug → 400 `invalid_choice` |
 | `status` | `active`, `hidden` | |
 | `promo`, `out_of_stock`, `is_new` | bool | `out_of_stock` = `stock ≤ 0`; `is_new` = `is_new_from_billz` |
 | `ordering` | `default`, `name`, `-name` | `default` = `last_change.at` desc (falling back to `created_at`), then `id` desc. `name` = display name (uz name, else `billz_name`), case-insensitive ICU collation. |
@@ -471,7 +471,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 | `category` | slug or `null`; an unknown slug → `does_not_exist` |
 | `promo` | bool, default `false` |
 | `status` | `active` or `hidden`, default `hidden` |
-| Active rule | Whenever the resulting status is `active`: `category` must be set (`required_for_active` "Faol mahsulot uchun kategoriyani tanlang.") and the product needs ≥1 image (field `images`, `required_for_active` "Faol mahsulotda kamida bitta rasm bo‘lsin."). A create with `active` therefore always fails; the FE creates `hidden`. |
+| Active rule | Whenever the resulting status is `active`: `category` must be set (`required_for_active` "Faol mahsulot uchun kategoriyani tanlang."), the product needs ≥1 image (field `images`, `required_for_active` "Faol mahsulotda kamida bitta rasm bo‘lsin.") and `price ≥ 1000` (field `price`, `min_value` "Narx kamida 1 000 so‘m bo‘lsin." — imported products may carry `price = 0` while hidden). A create with `active` therefore always fails; the FE creates `hidden`. |
 
 - Every successful create or PATCH sets `is_new_from_billz=false`.
 - `last_change.kind` is chosen by priority: `created` > `price_changed` > `activated`/`hidden` > `promo_added`/`promo_removed` > `updated`. Image calls do not change `last_change`.
@@ -480,20 +480,22 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 **`GET products/{id}/`** → `Product`; 404.
 
 **`POST products/{id}/images/`** (multipart, one part `file`) → 201 `{"id": 32, "url": "…", "position": 1}`.
-- Limits: ≤5 MiB (`file_too_large`); must decode in Pillow as JPEG, PNG or WebP (`unsupported_image`); ≤8 images per product (`max_items` "Ko‘pi bilan 8 ta rasm.").
+- Limits: ≤5 MiB (field `file`, `file_too_large`); must decode in Pillow as JPEG, PNG or WebP (field `file`, `unsupported_image`; a missing part → `file` `required`); ≤8 images per product (field `images`, `max_items` "Ko‘pi bilan 8 ta rasm.").
 - The file is re-encoded in the same format, EXIF stripped, longest side ≤2400 px, and appended last.
 - Audit `product.image_added`.
 
 **`DELETE products/{id}/images/{image_id}/`** → 204; positions are compacted. 409 `conflict` "Faol mahsulotda kamida bitta rasm bo‘lsin." for the last image of an active product. 404 if the image belongs to another product.
 
-**`PUT products/{id}/images/order/`**. Body `{"image_ids": [32, 31]}`, exactly the current set (`mismatch`) → 200 `{"images": [ProductImage…]}`. Audit `product.images_reordered`.
+**`PUT products/{id}/images/order/`**. Body `{"image_ids": [32, 31]}`, exactly the current set (`mismatch`; `[]` is the exact set of a product without images → 200) → 200 `{"images": [ProductImage…]}`. Audit `product.images_reordered`.
 
 **`POST integrations/billz/import/`**. Body `{}` or `{"mode": "delta"|"full"}` (default `delta`) → 202 `Job`.
-- Single-flight: if a `billz_import` job is queued or running, that job is returned.
-- Fake adapter in M1. Products are upserted by `billz_id`:
+- Single-flight: if a `billz_import` job is queued or running, that job is returned. A `failed` job never blocks a new import.
+- Fake adapter in M1 (`BILLZ_MODE`, default `INTEGRATIONS_MODE`). Products are upserted by `billz_id`:
   - new → `hidden` with `is_new_from_billz=true`;
-  - existing → only the Billz-owned fields change.
-- Sets `billz.last_sync_at`. Audit `billz.import_started` / `billz.import_finished`.
+  - existing → only the Billz-owned fields change (`billz_name`, `volume`, `billz_price`, stock); admin-owned fields and `last_change` never move.
+- `Job.result` counts: `created` (new rows), `updated` (an existing product whose Billz-owned field or stock changed), `unchanged` (a `synced_at` refresh alone), `new_from_billz` (= `created`). `Job.progress` is `{"done", "total"}`.
+- Sets `billz.last_sync_at`. Audit `billz.import_started` (actor = the staff who started it) / `billz.import_finished` (written by the worker, or by the stale-job reaper with `error.code = "worker_lost"`).
+- Routes: the views live in `catalog` (an admin view sits above `integrations` in the layering); the paths are unchanged.
 
 ### 2.4 Categories (addressed by slug)
 ```jsonc
@@ -503,13 +505,13 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 ```
 - `GET categories/` (P E; ordered by `position`; filter `is_active`).
 - `POST categories/` → 201:
-  - `slug`: `^[a-z0-9-]{2,40}$`, unique, not `order`, immutable afterwards;
-  - `name.uz` 2..60 required; `name.ru`, `name.en` ≤60;
+  - `slug`: `^[a-z0-9-]{2,40}$`, unique, not `order` or `none` (reserved), immutable afterwards; a lost unique race is reported as `slug` `unique` too;
+  - `name.uz` 2..60 required; `name.ru`, `name.en` ≤60, optional (default `""`);
   - `is_active` default `true`;
   - appended last.
 - `GET`/`PATCH categories/{slug}/`. Sending `slug` in PATCH → `read_only`.
 - `DELETE categories/{slug}/` → 204, or 409 `conflict` "Kategoriyada mahsulotlar bor." when `product_count > 0`.
-- `PUT categories/order/` `{"slugs": [...]}` (exact set, `mismatch`) → 200 `{"results": [Category…]}`.
+- `PUT categories/order/` `{"slugs": [...]}` (exact set, `mismatch`; `[]` only when there are no categories) → 200 `{"results": [Category…]}`.
 - Audit `category.created|updated|deleted|reordered`.
 
 ### 2.5 Banners (API only in M1)
@@ -521,12 +523,13 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
  "is_active": true, "starts_at": null, "ends_at": null, "position": 0, "created_at": "…", "updated_at": "…"}
 ```
 - `GET banners/` (P E; ordered by `position`; filter `is_active`).
-- `POST banners/` (multipart): `image` (required; product-image rules), `title.uz` (1..80, required), `title.ru`, `title.en` (≤80), `link.kind`, `link.product_id`, `link.category`, `is_active`, `starts_at`, `ends_at` → 201.
+- `POST banners/` (multipart): `image` (required; product-image rules), `title.uz` (1..80, required), `title.ru`, `title.en` (≤80, optional, default `""`), `link.kind`, `link.product_id`, `link.category`, `is_active`, `starts_at`, `ends_at` → 201.
+  - Form encoding: nested keys are dotted form fields (`title.uz`, `link.kind`, `link.product_id`, `link.category`); `""` means `null` for the nullable keys (`link.product_id`, `link.category`, `starts_at`, `ends_at`); booleans are `true`/`false`. Only `multipart/form-data` (and JSON for PATCH) is accepted — never `application/x-www-form-urlencoded`.
   - `link.product_id` must be an active product, `link.category` an existing slug (`does_not_exist`).
   - `ends_at` must be after `starts_at` (`invalid`).
 - `PATCH banners/{id}/` takes multipart or JSON; `image` is optional.
 - `DELETE banners/{id}/` → 204.
-- `PUT banners/order/` `{"ids": [...]}` (exact set) → 200 `{"results": [Banner…]}`.
+- `PUT banners/order/` `{"ids": [...]}` (exact set, `mismatch`; `[]` only when there are no banners) → 200 `{"results": [Banner…]}`.
 - Audit `banner.created|updated|deleted|reordered`.
 
 ### 2.6 Customers
@@ -819,9 +822,12 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
  "created_at": "…", "started_at": "…", "finished_at": null,
  "progress": {"done": 120, "total": 248},                  // null if unknown
  "result": null,                                           // succeeded: {"created": 3, "updated": 245, "unchanged": 0, "new_from_billz": 3}
- "error": null,                                            // failed: {"code": "provider_unavailable", "message": "…"}
+ "error": null,                                            // failed: {"code": "provider_unavailable" | "worker_lost" | …, "message": "…"}
  "created_by": {"id": 1, "display_name": "Administrator"}}
 ```
+- `progress` is always `{"done", "total"}` (or `null` before the first batch); `result` is the kind-specific summary (Billz import: §2.3).
+- A `running` job whose worker died is re-claimed by a redelivery or, after 15 minutes without a heartbeat, failed by the beat task `integrations.reap_stale_jobs` with `error.code = "worker_lost"` ("Jarayon uzilib qoldi. Qayta urinib ko‘ring."). A failed job never blocks a new one of the same kind.
+- 404 `not_found` for an unknown id.
 
 ### 2.15 Health
 **`GET /api/v1/health/`**: no auth, no network gate, no throttle; not in the error envelope.
