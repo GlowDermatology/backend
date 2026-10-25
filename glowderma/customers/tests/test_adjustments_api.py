@@ -160,6 +160,19 @@ def test_subtract_accounts_for_active_holds(staff_client: APIClient, customer: C
             id="no_reason",
         ),
         pytest.param(
+            # PostgreSQL text cannot hold NUL: a 400, never a 500 (DataError) from the INSERT
+            {"direction": "add", "amount": 100, "reason": "abc\u0000def"},
+            REASON,
+            [("reason", "invalid", "Noto‘g‘ri qiymat.")],
+            id="reason_nul",
+        ),
+        pytest.param(
+            {"direction": "add", "amount": 0, "reason": "\u0000\u0000\u0000"},
+            AMOUNT,
+            [("amount", "min_value", AMOUNT), ("reason", "invalid", "Noto‘g‘ri qiymat.")],
+            id="amount_then_reason_nul",
+        ),
+        pytest.param(
             # the amount and reason checks come before the balance check
             {"direction": "subtract", "amount": 10_000_000, "reason": "x"},
             REASON,

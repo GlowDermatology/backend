@@ -1024,6 +1024,12 @@ def link_billz_sale(
 # --- Adjustments (contract §2.6) ---
 
 
+def _has_unstorable_characters(text: str) -> bool:
+    """NUL or a lone surrogate: PostgreSQL text/JSONB cannot store either (DRF's CharField refuses both
+    through ProhibitNullCharactersValidator / ProhibitSurrogateCharactersValidator)."""
+    return any(char == "\x00" or "\ud800" <= char <= "\udfff" for char in text)
+
+
 def _validate_adjustment(amount: Any, reason: Any) -> tuple[int, str]:
     errors: dict[str, list[ErrorDetail]] = {}
     if isinstance(amount, bool) or not isinstance(amount, int):
@@ -1033,7 +1039,9 @@ def _validate_adjustment(amount: Any, reason: Any) -> tuple[int, str]:
     elif amount > ADJUSTMENT_MAX_AMOUNT:
         errors["amount"] = [field_error("max_value", MESSAGE_AMOUNT)]
     text = reason.strip() if isinstance(reason, str) else ""
-    if len(text) < REASON_MIN_LENGTH:
+    if _has_unstorable_characters(text):
+        errors["reason"] = [field_error("invalid")]
+    elif len(text) < REASON_MIN_LENGTH:
         errors["reason"] = [field_error("min_length", limit=REASON_MIN_LENGTH)]
     elif len(text) > REASON_MAX_LENGTH:
         errors["reason"] = [field_error("max_length", limit=REASON_MAX_LENGTH)]
