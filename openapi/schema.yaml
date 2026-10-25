@@ -2152,6 +2152,89 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
+  /api/v1/admin/dashboard/:
+    get:
+      operationId: admin_dashboard
+      parameters:
+      - in: query
+        name: from
+        schema:
+          type: string
+          format: date
+      - in: query
+        name: range
+        schema:
+          enum:
+          - today
+          - week
+          - month
+          - custom
+          type: string
+          default: today
+          minLength: 1
+        description: |-
+          * `today` - today
+          * `week` - week
+          * `month` - month
+          * `custom` - custom
+      - in: query
+        name: to
+        schema:
+          type: string
+          format: date
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dashboard'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/admin/integrations/billz/import/:
     post:
       operationId: admin_billz_import_create
@@ -2652,6 +2735,899 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/NotificationMeta'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/orders/:
+    get:
+      operationId: admin_orders_list
+      parameters:
+      - in: query
+        name: customer
+        schema:
+          type: integer
+          minimum: 1
+      - in: query
+        name: date_from
+        schema:
+          type: string
+          format: date
+      - in: query
+        name: date_to
+        schema:
+          type: string
+          format: date
+      - in: query
+        name: export
+        schema:
+          type: string
+          enum:
+          - csv
+          - xlsx
+        description: Download the filtered list as a file instead of the JSON page.
+      - in: query
+        name: fulfilment
+        schema:
+          enum:
+          - delivery
+          - pickup
+          type: string
+          minLength: 1
+        description: |-
+          * `delivery` - delivery
+          * `pickup` - pickup
+      - in: query
+        name: ordering
+        schema:
+          enum:
+          - -created_at
+          - created_at
+          type: string
+          default: -created_at
+          minLength: 1
+        description: |-
+          * `-created_at` - -created_at
+          * `created_at` - created_at
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          enum:
+          - 6
+          - 10
+          - 25
+          - 50
+      - in: query
+        name: payment
+        schema:
+          enum:
+          - pending
+          - paid
+          - failed
+          - refunded
+          type: string
+          minLength: 1
+        description: |-
+          * `pending` - pending
+          * `paid` - paid
+          * `failed` - failed
+          * `refunded` - refunded
+      - in: query
+        name: period
+        schema:
+          enum:
+          - today
+          - week
+          - month
+          - all
+          type: string
+          default: all
+          minLength: 1
+        description: |-
+          * `today` - today
+          * `week` - week
+          * `month` - month
+          * `all` - all
+      - in: query
+        name: search
+        schema:
+          type: string
+          maxLength: 64
+      - in: query
+        name: status
+        schema:
+          enum:
+          - awaiting_payment
+          - processing
+          - handed_to_courier
+          - delivered
+          - cancelled
+          type: string
+          minLength: 1
+        description: |-
+          * `awaiting_payment` - awaiting_payment
+          * `processing` - processing
+          * `handed_to_courier` - handed_to_courier
+          * `delivered` - delivered
+          * `cancelled` - cancelled
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedOrderSummaryList'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/orders/{id}/:
+    get:
+      operationId: admin_orders_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderDetail'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/orders/{id}/cancel/:
+    post:
+      operationId: admin_orders_cancel
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelOrderRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderDetail'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/orders/{id}/retry-shipment/:
+    post:
+      operationId: admin_orders_retry_shipment
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '202':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderDetail'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/orders/{id}/transition/:
+    post:
+      operationId: admin_orders_transition
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransitionRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderDetail'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/orders/status-counts/:
+    get:
+      operationId: admin_orders_status_counts
+      parameters:
+      - in: query
+        name: customer
+        schema:
+          type: integer
+          minimum: 1
+      - in: query
+        name: date_from
+        schema:
+          type: string
+          format: date
+      - in: query
+        name: date_to
+        schema:
+          type: string
+          format: date
+      - in: query
+        name: fulfilment
+        schema:
+          enum:
+          - delivery
+          - pickup
+          type: string
+          minLength: 1
+        description: |-
+          * `delivery` - delivery
+          * `pickup` - pickup
+      - in: query
+        name: payment
+        schema:
+          enum:
+          - pending
+          - paid
+          - failed
+          - refunded
+          type: string
+          minLength: 1
+        description: |-
+          * `pending` - pending
+          * `paid` - paid
+          * `failed` - failed
+          * `refunded` - refunded
+      - in: query
+        name: period
+        schema:
+          enum:
+          - today
+          - week
+          - month
+          - all
+          type: string
+          default: all
+          minLength: 1
+        description: |-
+          * `today` - today
+          * `week` - week
+          * `month` - month
+          * `all` - all
+      - in: query
+        name: search
+        schema:
+          type: string
+          maxLength: 64
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusCounts'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/payments/:
+    get:
+      operationId: admin_payments_list
+      parameters:
+      - in: query
+        name: date_from
+        schema:
+          type: string
+          format: date
+      - in: query
+        name: date_to
+        schema:
+          type: string
+          format: date
+      - in: query
+        name: export
+        schema:
+          type: string
+          enum:
+          - csv
+          - xlsx
+        description: Download the filtered list as a file instead of the JSON page.
+      - in: query
+        name: ordering
+        schema:
+          enum:
+          - -created_at
+          - created_at
+          type: string
+          default: -created_at
+          minLength: 1
+        description: |-
+          * `-created_at` - -created_at
+          * `created_at` - created_at
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          enum:
+          - 20
+          - 50
+      - in: query
+        name: period
+        schema:
+          enum:
+          - today
+          - week
+          - month
+          - all
+          type: string
+          default: all
+          minLength: 1
+        description: |-
+          * `today` - today
+          * `week` - week
+          * `month` - month
+          * `all` - all
+      - in: query
+        name: provider
+        schema:
+          enum:
+          - click
+          - payme
+          type: string
+          minLength: 1
+        description: |-
+          * `click` - click
+          * `payme` - payme
+      - in: query
+        name: refund_state
+        schema:
+          enum:
+          - requested
+          - submitting
+          - succeeded
+          - failed
+          - manual_required
+          - unknown
+          type: string
+          minLength: 1
+        description: |-
+          * `requested` - requested
+          * `submitting` - submitting
+          * `succeeded` - succeeded
+          * `failed` - failed
+          * `manual_required` - manual_required
+          * `unknown` - unknown
+      - in: query
+        name: search
+        schema:
+          type: string
+          maxLength: 64
+      - in: query
+        name: status
+        schema:
+          enum:
+          - pending
+          - paid
+          - failed
+          - refunded
+          type: string
+          minLength: 1
+        description: |-
+          * `pending` - pending
+          * `paid` - paid
+          * `failed` - failed
+          * `refunded` - refunded
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedPaymentList'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/payments/{id}/refunds/{refund_id}/resolve/:
+    post:
+      operationId: admin_payments_refund_resolve
+      description: Close an `unknown` / `manual_required` refund after a manual check
+        (audited `refund.state_changed` with the actor; order event `refund_succeeded`
+        / `refund_failed`).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: refund_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveRefundRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/payments/{id}/refunds/{refund_id}/retry/:
+    post:
+      operationId: admin_payments_refund_retry
+      description: 'Retry a `failed` refund: a new refund of the payment (Click `requested`,
+        Payme `manual_required`) and its `refund_requested` order event.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: refund_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
           description: ''
         '400':
           content:
@@ -4154,6 +5130,21 @@ components:
       - object_id
       - object_type
       - request_id
+    AvailableActions:
+      type: object
+      properties:
+        transitions:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderStatusEnum'
+        cancel:
+          type: boolean
+        retry_shipment:
+          type: boolean
+      required:
+      - cancel
+      - retry_shipment
+      - transitions
     Banner:
       type: object
       description: Contract §2.5 ``Banner``; instances come from ``selectors.banner_queryset()``.
@@ -4374,6 +5365,34 @@ components:
       - name
       - role
       - services
+    CancelOrderRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+      required:
+      - reason
+    Cancellation:
+      type: object
+      properties:
+        reason:
+          $ref: '#/components/schemas/CancellationReasonEnum'
+        note:
+          type: string
+          nullable: true
+      required:
+      - note
+      - reason
+    CancellationReasonEnum:
+      enum:
+      - reservation_expired
+      - admin
+      - customer_request
+      type: string
+      description: |-
+        * `reservation_expired` - reservation_expired
+        * `admin` - admin
+        * `customer_request` - customer_request
     CashbackAdjustmentRequest:
       type: object
       description: |-
@@ -4411,6 +5430,30 @@ components:
       - available
       - balance
       - entry
+    CashbackHold:
+      type: object
+      properties:
+        amount:
+          type: integer
+        state:
+          $ref: '#/components/schemas/CashbackHoldStateEnum'
+        expires_at:
+          type: string
+          format: date-time
+      required:
+      - amount
+      - expires_at
+      - state
+    CashbackHoldStateEnum:
+      enum:
+      - active
+      - captured
+      - released
+      type: string
+      description: |-
+        * `active` - active
+        * `captured` - captured
+        * `released` - released
     CashbackPolicy:
       type: object
       description: '``GET cashback/policy/``: the active and scheduled versions, every
@@ -4782,6 +5825,119 @@ components:
       - lifetime
       - online
       - store
+    Dashboard:
+      type: object
+      properties:
+        range:
+          $ref: '#/components/schemas/DashboardRangeEnum'
+        to:
+          type: string
+          format: date
+        bucket:
+          $ref: '#/components/schemas/DashboardBucketEnum'
+        buckets:
+          type: array
+          items:
+            $ref: '#/components/schemas/DashboardBucket'
+        previous_period_orders:
+          type: integer
+        stats:
+          $ref: '#/components/schemas/DashboardStats'
+        attention:
+          $ref: '#/components/schemas/DashboardAttention'
+        generated_at:
+          type: string
+          format: date-time
+        from:
+          type: string
+          format: date
+      required:
+      - attention
+      - bucket
+      - buckets
+      - from
+      - generated_at
+      - previous_period_orders
+      - range
+      - stats
+      - to
+    DashboardAttention:
+      type: object
+      properties:
+        bts_failed:
+          type: integer
+        pending_appointments:
+          type: integer
+        next_appointment_at:
+          type: string
+          format: date-time
+          nullable: true
+        new_from_billz:
+          type: integer
+        refunds_needing_action:
+          type: integer
+      required:
+      - bts_failed
+      - new_from_billz
+      - next_appointment_at
+      - pending_appointments
+      - refunds_needing_action
+    DashboardBucket:
+      type: object
+      properties:
+        start:
+          type: string
+          format: date-time
+        revenue:
+          type: integer
+        orders:
+          type: integer
+      required:
+      - orders
+      - revenue
+      - start
+    DashboardBucketEnum:
+      enum:
+      - hour
+      - day
+      type: string
+      description: |-
+        * `hour` - hour
+        * `day` - day
+    DashboardRangeEnum:
+      enum:
+      - today
+      - week
+      - month
+      - custom
+      type: string
+      description: |-
+        * `today` - today
+        * `week` - week
+        * `month` - month
+        * `custom` - custom
+    DashboardStats:
+      type: object
+      properties:
+        orders:
+          type: integer
+        revenue:
+          type: integer
+        new_customers:
+          type: integer
+        total_customers:
+          type: integer
+        deleted_customers:
+          type: integer
+        out_of_stock:
+          type: integer
+      required:
+      - deleted_customers
+      - new_customers
+      - orders
+      - out_of_stock
+      - revenue
+      - total_customers
     DayBlock:
       type: object
       properties:
@@ -4850,6 +6006,24 @@ components:
       - code
       - field
       - message
+    EventSourceEnum:
+      enum:
+      - system
+      - bts
+      - admin
+      type: string
+      description: |-
+        * `system` - system
+        * `bts` - bts
+        * `admin` - admin
+    FulfilmentMethodEnum:
+      enum:
+      - delivery
+      - pickup
+      type: string
+      description: |-
+        * `delivery` - delivery
+        * `pickup` - pickup
     Health:
       type: object
       properties:
@@ -5454,6 +6628,9 @@ components:
         * `scheduled` - scheduled
         * `queued` - queued
         * `sent` - sent
+    NullEnum:
+      enum:
+      - null
     OAuthCallbackRequest:
       type: object
       description: |-
@@ -5499,6 +6676,331 @@ components:
       - count
       - last_order_at
       - last_order_id
+    OrderCashback:
+      type: object
+      properties:
+        ledger_entry_id:
+          type: integer
+        kind:
+          $ref: '#/components/schemas/OrderCashbackKindEnum'
+        amount:
+          type: integer
+        at:
+          type: string
+          format: date-time
+        base:
+          type: integer
+          nullable: true
+        percent:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
+          nullable: true
+        reverses_id:
+          type: integer
+          nullable: true
+      required:
+      - amount
+      - at
+      - base
+      - kind
+      - ledger_entry_id
+      - percent
+      - reverses_id
+    OrderCashbackKindEnum:
+      enum:
+      - debit
+      - credit
+      - reversal
+      type: string
+      description: |-
+        * `debit` - debit
+        * `credit` - credit
+        * `reversal` - reversal
+    OrderChannelEnum:
+      enum:
+      - ios
+      - android
+      type: string
+      description: |-
+        * `ios` - ios
+        * `android` - android
+    OrderCustomerRef:
+      type: object
+      description: |-
+        ``CustomerRef = {id, name, phone}``; ``name`` is ``""`` once the customer is deleted (§2.0).
+
+        Same shape as ``appointments``' ``CustomerRef`` (a sibling module this one cannot import); the component
+        is named ``OrderCustomerRef`` until the shape moves to ``core.api.serializers`` (proposed to the lead).
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        phone:
+          type: string
+      required:
+      - id
+      - name
+      - phone
+    OrderDetail:
+      type: object
+      description: Contract ``Order`` = ``OrderSummary`` + the detail keys (rendered
+        from ``selectors.order_detail``).
+      properties:
+        id:
+          type: integer
+        customer:
+          $ref: '#/components/schemas/OrderCustomerRef'
+        created_at:
+          type: string
+          format: date-time
+        total:
+          type: integer
+        status:
+          $ref: '#/components/schemas/OrderStatusEnum'
+        payment:
+          $ref: '#/components/schemas/OrderPayment'
+        fulfilment:
+          $ref: '#/components/schemas/FulfilmentMethodEnum'
+        shipment:
+          allOf:
+          - $ref: '#/components/schemas/Shipment'
+          readOnly: true
+        cancellation:
+          allOf:
+          - $ref: '#/components/schemas/Cancellation'
+          nullable: true
+          readOnly: true
+        channel:
+          $ref: '#/components/schemas/OrderChannelEnum'
+        address:
+          type: string
+          nullable: true
+          readOnly: true
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        items_subtotal:
+          type: integer
+        promo_subtotal:
+          type: integer
+        delivery_fee:
+          type: integer
+        cashback_used:
+          type: integer
+        refunds:
+          type: array
+          items:
+            $ref: '#/components/schemas/Refund'
+        cashback_hold:
+          allOf:
+          - $ref: '#/components/schemas/CashbackHold'
+          nullable: true
+        cashback:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderCashback'
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderEvent'
+        available_actions:
+          $ref: '#/components/schemas/AvailableActions'
+      required:
+      - address
+      - available_actions
+      - cancellation
+      - cashback
+      - cashback_hold
+      - cashback_used
+      - channel
+      - created_at
+      - customer
+      - delivery_fee
+      - fulfilment
+      - history
+      - id
+      - items
+      - items_subtotal
+      - payment
+      - promo_subtotal
+      - refunds
+      - shipment
+      - status
+      - total
+    OrderEvent:
+      type: object
+      description: 'Contract §4 ``OrderEvent``: ``status_after`` ``""`` → ``null``;
+        ``actor`` for source ``admin``.'
+      properties:
+        id:
+          type: integer
+        type:
+          $ref: '#/components/schemas/OrderEventTypeEnum'
+        at:
+          type: string
+          format: date-time
+        source:
+          $ref: '#/components/schemas/EventSourceEnum'
+        status_after:
+          nullable: true
+          readOnly: true
+          oneOf:
+          - $ref: '#/components/schemas/OrderStatusEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        actor:
+          allOf:
+          - $ref: '#/components/schemas/Actor'
+          nullable: true
+        data: {}
+      required:
+      - actor
+      - at
+      - data
+      - id
+      - source
+      - status_after
+      - type
+    OrderEventTypeEnum:
+      enum:
+      - order_created
+      - reservation_created
+      - payment_confirmed
+      - billz_sale_recorded
+      - cashback_credited
+      - payment_failed
+      - shipment_created
+      - shipment_failed
+      - status_changed
+      - handed_to_courier
+      - delivered
+      - cancelled
+      - reservation_expired
+      - refund_requested
+      - refund_succeeded
+      - refund_failed
+      type: string
+      description: |-
+        * `order_created` - order_created
+        * `reservation_created` - reservation_created
+        * `payment_confirmed` - payment_confirmed
+        * `billz_sale_recorded` - billz_sale_recorded
+        * `cashback_credited` - cashback_credited
+        * `payment_failed` - payment_failed
+        * `shipment_created` - shipment_created
+        * `shipment_failed` - shipment_failed
+        * `status_changed` - status_changed
+        * `handed_to_courier` - handed_to_courier
+        * `delivered` - delivered
+        * `cancelled` - cancelled
+        * `reservation_expired` - reservation_expired
+        * `refund_requested` - refund_requested
+        * `refund_succeeded` - refund_succeeded
+        * `refund_failed` - refund_failed
+    OrderItem:
+      type: object
+      properties:
+        product_id:
+          type: integer
+        name:
+          type: string
+        billz_id:
+          type: string
+        image_url:
+          type: string
+          nullable: true
+        quantity:
+          type: integer
+        unit_price:
+          type: integer
+        promo:
+          type: boolean
+      required:
+      - billz_id
+      - image_url
+      - name
+      - product_id
+      - promo
+      - quantity
+      - unit_price
+    OrderPayment:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/PaymentStatusEnum'
+        provider:
+          $ref: '#/components/schemas/PaymentProviderEnum'
+        amount:
+          type: integer
+        transaction_id:
+          type: string
+          nullable: true
+        confirmed_at:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+      - amount
+      - confirmed_at
+      - provider
+      - status
+      - transaction_id
+    OrderStatusEnum:
+      enum:
+      - awaiting_payment
+      - processing
+      - handed_to_courier
+      - delivered
+      - cancelled
+      type: string
+      description: |-
+        * `awaiting_payment` - awaiting_payment
+        * `processing` - processing
+        * `handed_to_courier` - handed_to_courier
+        * `delivered` - delivered
+        * `cancelled` - cancelled
+    OrderSummary:
+      type: object
+      description: Contract ``OrderSummary`` (list rows and the head of the detail).
+      properties:
+        id:
+          type: integer
+        customer:
+          $ref: '#/components/schemas/OrderCustomerRef'
+        created_at:
+          type: string
+          format: date-time
+        total:
+          type: integer
+        status:
+          $ref: '#/components/schemas/OrderStatusEnum'
+        payment:
+          allOf:
+          - $ref: '#/components/schemas/PaymentSummary'
+          readOnly: true
+        fulfilment:
+          $ref: '#/components/schemas/FulfilmentMethodEnum'
+        shipment:
+          allOf:
+          - $ref: '#/components/schemas/Shipment'
+          readOnly: true
+        cancellation:
+          allOf:
+          - $ref: '#/components/schemas/Cancellation'
+          nullable: true
+          readOnly: true
+      required:
+      - cancellation
+      - created_at
+      - customer
+      - fulfilment
+      - id
+      - payment
+      - shipment
+      - status
+      - total
     PaginatedAuditEntryList:
       type: object
       required:
@@ -5604,6 +7106,48 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/NotificationRecord'
+    PaginatedOrderSummaryList:
+      type: object
+      required:
+      - count
+      - page
+      - page_size
+      - page_count
+      - results
+      properties:
+        count:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+        page_count:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderSummary'
+    PaginatedPaymentList:
+      type: object
+      required:
+      - count
+      - page
+      - page_size
+      - page_count
+      - results
+      properties:
+        count:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+        page_count:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Payment'
     PaginatedProductList:
       type: object
       required:
@@ -5777,6 +7321,80 @@ components:
           pattern: ^\+998\d{9}$
         pickup_address:
           $ref: '#/components/schemas/PickupAddressRequest'
+    Payment:
+      type: object
+      description: One ``GET payments/`` row; ``refunds`` come from the view's per-page
+        lookup (newest first).
+      properties:
+        id:
+          type: integer
+        order_id:
+          type: integer
+        customer:
+          $ref: '#/components/schemas/OrderCustomerRef'
+        provider:
+          $ref: '#/components/schemas/PaymentProviderEnum'
+        status:
+          $ref: '#/components/schemas/PaymentStatusEnum'
+        amount:
+          type: integer
+        transaction_id:
+          type: string
+          nullable: true
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+        confirmed_at:
+          type: string
+          format: date-time
+          nullable: true
+        refunds:
+          type: array
+          items:
+            $ref: '#/components/schemas/Refund'
+          readOnly: true
+      required:
+      - amount
+      - confirmed_at
+      - created_at
+      - customer
+      - id
+      - order_id
+      - provider
+      - refunds
+      - status
+      - transaction_id
+    PaymentProviderEnum:
+      enum:
+      - click
+      - payme
+      type: string
+      description: |-
+        * `click` - click
+        * `payme` - payme
+    PaymentStatusEnum:
+      enum:
+      - pending
+      - paid
+      - failed
+      - refunded
+      type: string
+      description: |-
+        * `pending` - pending
+        * `paid` - paid
+        * `failed` - failed
+        * `refunded` - refunded
+    PaymentSummary:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/PaymentStatusEnum'
+        provider:
+          $ref: '#/components/schemas/PaymentProviderEnum'
+      required:
+      - provider
+      - status
     PendingSummary:
       type: object
       properties:
@@ -6277,6 +7895,53 @@ components:
           minLength: 1
       required:
       - refresh
+    Refund:
+      type: object
+      description: 'Contract ``Refund`` (§2.2): ``completed_at`` is set on ``succeeded``
+        only.'
+      properties:
+        id:
+          type: integer
+        state:
+          $ref: '#/components/schemas/RefundStateEnum'
+        provider:
+          $ref: '#/components/schemas/PaymentProviderEnum'
+        amount:
+          type: integer
+        requested_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+      - amount
+      - completed_at
+      - id
+      - provider
+      - requested_at
+      - state
+      - updated_at
+    RefundStateEnum:
+      enum:
+      - requested
+      - submitting
+      - succeeded
+      - failed
+      - manual_required
+      - unknown
+      type: string
+      description: |-
+        * `requested` - requested
+        * `submitting` - submitting
+        * `succeeded` - succeeded
+        * `failed` - failed
+        * `manual_required` - manual_required
+        * `unknown` - unknown
     RequestedViaEnum:
       enum:
       - app
@@ -6285,6 +7950,17 @@ components:
       description: |-
         * `app` - app
         * `admin` - admin
+    ResolveRefundRequest:
+      type: object
+      description: '``{state: succeeded | failed}`` (a ``CharField`` so the schema
+        keeps one ``RefundStateEnum``).'
+      properties:
+        state:
+          type: string
+          minLength: 1
+          description: '`succeeded` or `failed`'
+      required:
+      - state
     Segment:
       type: object
       description: Contract §2.8 ``Segment``; the counts come from ``selectors.segment_stats``.
@@ -6398,6 +8074,85 @@ components:
       - support_phone
       - updated_at
       - updated_by
+    Shipment:
+      oneOf:
+      - $ref: '#/components/schemas/ShipmentNotRequired'
+      - $ref: '#/components/schemas/ShipmentNotCreated'
+      - $ref: '#/components/schemas/ShipmentFailed'
+      - $ref: '#/components/schemas/ShipmentCreated'
+      discriminator:
+        propertyName: state
+        mapping:
+          not_required: '#/components/schemas/ShipmentNotRequired'
+          not_created: '#/components/schemas/ShipmentNotCreated'
+          failed: '#/components/schemas/ShipmentFailed'
+          created: '#/components/schemas/ShipmentCreated'
+    ShipmentCreated:
+      type: object
+      properties:
+        state:
+          type: string
+          description: '`created`'
+        tracking_number:
+          type: string
+        tariff:
+          type: integer
+        updated_at:
+          type: string
+          format: date-time
+        via:
+          $ref: '#/components/schemas/ShipmentViaEnum'
+      required:
+      - state
+      - tariff
+      - tracking_number
+      - updated_at
+      - via
+    ShipmentFailed:
+      type: object
+      properties:
+        state:
+          type: string
+          description: '`failed`'
+        last_attempt_at:
+          type: string
+          format: date-time
+        attempts:
+          type: integer
+        pending:
+          type: boolean
+      required:
+      - attempts
+      - last_attempt_at
+      - pending
+      - state
+    ShipmentNotCreated:
+      type: object
+      properties:
+        state:
+          type: string
+          description: '`not_created`'
+        pending:
+          type: boolean
+      required:
+      - pending
+      - state
+    ShipmentNotRequired:
+      type: object
+      properties:
+        state:
+          type: string
+          description: '`not_required` (pickup)'
+      required:
+      - state
+    ShipmentViaEnum:
+      enum:
+      - webhook
+      - polling
+      type: string
+      description: |-
+        * `webhook` - webhook
+        * `polling` - polling
     SlugOrderRequest:
       type: object
       description: Body of ``PUT categories/order/``.
@@ -6450,6 +8205,28 @@ components:
       description: |-
         * `dermatologist` - dermatologist
         * `cosmetologist` - cosmetologist
+    StatusCounts:
+      type: object
+      properties:
+        all:
+          type: integer
+        awaiting_payment:
+          type: integer
+        processing:
+          type: integer
+        handed_to_courier:
+          type: integer
+        delivered:
+          type: integer
+        cancelled:
+          type: integer
+      required:
+      - all
+      - awaiting_payment
+      - cancelled
+      - delivered
+      - handed_to_courier
+      - processing
     StatusTemplate:
       type: object
       properties:
@@ -6548,6 +8325,13 @@ components:
       description: |-
         * `gap` - gap
         * `uncovered_above` - uncovered_above
+    TransitionRequest:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/OrderStatusEnum'
+      required:
+      - status
     WorkingHours:
       type: object
       properties:
