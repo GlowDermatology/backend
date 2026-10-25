@@ -19,8 +19,8 @@ SEARCH_MAX_LENGTH = 64
 class CustomerRefSerializer(serializers.Serializer[Any]):
     """``CustomerRef = {id, name, phone}``; ``name`` is ``""`` once the customer is deleted (§2.0).
 
-    Same shape as ``appointments``' ``CustomerRef`` (a sibling module this one cannot import); the component is
-    named ``OrderCustomerRef`` until the shape moves to ``core.api.serializers`` (proposed to the lead).
+    Same shape as ``appointments``' ``CustomerRef`` (a sibling module this one cannot import); the component
+    is named ``OrderCustomerRef`` until the shape moves to ``core.api.serializers`` (proposed to the lead).
     """
 
     id = serializers.IntegerField(source="pk")
