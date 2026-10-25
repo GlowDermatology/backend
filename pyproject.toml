@@ -38,6 +38,8 @@ branch = true
 
 [tool.ruff]
 line-length = 110
+# Design documents under docs/ carry illustrative python fences that are not formatter targets.
+extend-exclude = ["docs"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "S", "DJ"]
