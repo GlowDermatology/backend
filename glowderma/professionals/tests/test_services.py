@@ -15,6 +15,7 @@ from glowderma.core.timeutils import TASHKENT
 from glowderma.professionals import services
 from glowderma.professionals.models import (
     BlockedPeriod,
+    Professional,
     ProfessionalService,
     WorkingHours,
     WorkingHoursOverride,
@@ -49,8 +50,8 @@ def test_create_update_deactivate_professional_are_audited(staff: StaffUser) -> 
     assert professional.pk is not None and professional.is_active
     services.update_professional(professional, actor=staff, experience_years=12)
     services.deactivate_professional(professional, actor=staff)
-    professional.refresh_from_db()
-    assert professional.experience_years == 12 and professional.is_active is False
+    stored = Professional.objects.get(pk=professional.pk)
+    assert stored.experience_years == 12 and stored.is_active is False
     pk = str(professional.pk)
     assert actions() == [
         ("professional.created", "professional", pk),
@@ -58,9 +59,10 @@ def test_create_update_deactivate_professional_are_audited(staff: StaffUser) -> 
         ("professional.updated", "professional", pk),
     ]
     created, updated, deactivated = AuditEntry.objects.order_by("id")
-    assert (
-        created.before is None and created.after["name"] == "Nodira Rahimova" and created.actor_id == staff.pk
-    )
+    assert created.before is None and created.actor_id == staff.pk
+    assert created.after is not None and updated.before is not None and updated.after is not None
+    assert deactivated.before is not None and deactivated.after is not None
+    assert created.after["name"] == "Nodira Rahimova"
     assert updated.before["experience_years"] is None and updated.after["experience_years"] == 12
     assert deactivated.before["is_active"] is True and deactivated.after["is_active"] is False
     assert created.after["location_id"] == location.pk and created.after["photo"] == ""

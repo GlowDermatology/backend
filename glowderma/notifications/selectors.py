@@ -20,6 +20,7 @@ from django.db.models import (
     Q,
     QuerySet,
     Subquery,
+    Sum,
     Value,
 )
 from django.db.models.functions import Coalesce, Collate
@@ -27,46 +28,48 @@ from django.db.models.functions import Coalesce, Collate
 from glowderma.accounts.models import Customer, Device
 from glowderma.catalog.models import Product
 from glowderma.catalog.selectors import DISPLAY_NAME
-from glowderma.commerce.models import Order
 from glowderma.core import enums
+from glowderma.loyalty.models import Purchase
 from glowderma.notifications.models import Campaign, CustomerSegment, SegmentMember, StatusTemplate
 
-# Order statuses that mean "paid, not reversed" while the payments models are not on this base (B5 may refine
-# the count with a paid Payment; the status CHECK already implies ``paid_at IS NOT NULL`` for these).
-PAID_ORDER_STATUSES: tuple[str, ...] = (
-    enums.OrderStatus.PROCESSING,
-    enums.OrderStatus.HANDED_TO_COURIER,
-    enums.OrderStatus.DELIVERED,
-)
 PUSHABLE_DEVICE = Q(is_active=True, push_enabled=True) & ~Q(fcm_token="")
 
 
-# --- rule hooks (the customers / loyalty slices refine these) ----------------------------------------------
+# --- rule expressions (design 03 §3.2 / §6.3: the same subqueries the customers list uses) -----------------
 
 
 def online_orders_expression() -> Expression:
-    """``online_orders_count`` of the customer row being annotated: paid, non-reversed online orders."""
-    paid = (
-        Order.objects.filter(customer_id=OuterRef("pk"), status__in=PAID_ORDER_STATUSES)
+    """``online_orders_count`` of the customer row being annotated: paid, non-reversed online orders — a
+    ``loyalty.Purchase`` row of source ``online`` exists only once the order was paid (design 03 §3.2)."""
+    purchases = (
+        Purchase.objects.filter(
+            customer_id=OuterRef("pk"), source=enums.PurchaseSource.ONLINE, reversed=False
+        )
         .order_by()
         .values("customer_id")
         .annotate(count=Count("id"))
         .values("count")
     )
-    return Coalesce(Subquery(paid, output_field=IntegerField()), Value(0), output_field=IntegerField())
+    return Coalesce(Subquery(purchases, output_field=IntegerField()), Value(0), output_field=IntegerField())
 
 
 def lifetime_total_expression() -> Expression:
-    """``lifetime_total`` (so'm) of the customer row being annotated — ``totals.lifetime`` of the card.
-
-    The loyalty models (purchases) are not on this base yet: every customer reads ``0`` until B4 replaces
-    this hook with the purchases subquery. Everything above it (segment rule, members list, sizes) is wired.
-    """
-    return Value(0, output_field=BigIntegerField())
+    """``lifetime_total`` (so'm) of the customer row being annotated: Σ ``amount`` of the non-reversed
+    purchases of both channels — the card's ``totals.lifetime``."""
+    totals = (
+        Purchase.objects.filter(customer_id=OuterRef("pk"), reversed=False)
+        .order_by()
+        .values("customer_id")
+        .annotate(total=Sum("amount"))
+        .values("total")
+    )
+    return Coalesce(
+        Subquery(totals, output_field=BigIntegerField()), Value(0), output_field=BigIntegerField()
+    )
 
 
 def lifetime_totals(customer_ids: Iterable[int]) -> dict[int, int]:
-    """``{customer_id: lifetime_total}`` through the same hook (0 for every customer until B4)."""
+    """``{customer_id: lifetime_total}`` for the given customers (the customers slice reuses this)."""
     rows = (
         Customer.objects.filter(pk__in=list(customer_ids))
         .annotate(lifetime_total=lifetime_total_expression())

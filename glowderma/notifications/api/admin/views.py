@@ -68,7 +68,7 @@ def form_to_nested(data: Any) -> dict[str, Any]:
         return dict(data) if isinstance(data, dict) else {}
     nested: dict[str, Any] = {}
     for key in data:
-        value = data.get(key)
+        value: Any = data.get(key)
         if isinstance(value, UploadedFile):
             continue
         target = nested

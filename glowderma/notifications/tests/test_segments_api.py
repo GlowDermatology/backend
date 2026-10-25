@@ -8,9 +8,9 @@ from rest_framework.test import APIClient
 
 from glowderma.accounts.models import Customer, StaffUser
 from glowderma.accounts.tests.factories import CustomerFactory, DeviceFactory
-from glowderma.commerce.tests.factories import OrderFactory
 from glowderma.core.models import AuditEntry
 from glowderma.core.timeutils import TASHKENT
+from glowderma.loyalty.tests.factories import PurchaseFactory
 from glowderma.notifications import selectors, services
 from glowderma.notifications.models import CustomerSegment, SegmentMember
 from glowderma.notifications.tests.conftest import ANCHOR
@@ -29,24 +29,31 @@ def errors(response: Any) -> list[tuple[str | None, str, str]]:
     return [(e["field"], e["code"], e["message"]) for e in response.data["errors"]]
 
 
-def customer_with_orders(paid: int, *, unpaid: int = 0, cancelled: int = 0, **kwargs: Any) -> Customer:
+def customer_with_purchases(
+    online: int, *, store: int = 0, reversed_online: int = 0, store_amount: int = 231_000, **kwargs: Any
+) -> Customer:
+    """A customer with paid online purchases (one paid order each), in-store purchases and reversed ones."""
     customer = CustomerFactory.create(**kwargs)
-    for _ in range(paid):
-        OrderFactory.create(customer=customer, paid=True)
-    for _ in range(unpaid):
-        OrderFactory.create(customer=customer)
-    for _ in range(cancelled):
-        OrderFactory.create(customer=customer, cancelled=True)
+    for _ in range(online):
+        PurchaseFactory.create(customer=customer)
+    for _ in range(store):
+        PurchaseFactory.create(customer=customer, store=True, amount=store_amount)
+    for _ in range(reversed_online):
+        PurchaseFactory.create(customer=customer, reversed=True, reversed_at=ANCHOR)
     return customer
+
+
+def lifetime(customer: Customer) -> int:
+    return sum(p.amount for p in customer.purchases.filter(reversed=False))
 
 
 # --- rule evaluation ----------------------------------------------------------------------------------------
 
 
 def test_membership_vectors() -> None:
-    three_paid = customer_with_orders(3, unpaid=2, cancelled=1)
-    two_paid = customer_with_orders(2)
-    deleted_three = customer_with_orders(3, status="deleted", deleted_at=ANCHOR)
+    three_paid = customer_with_purchases(3, store=1, reversed_online=1)  # store and reversed rows never count
+    two_paid = customer_with_purchases(2)
+    deleted_three = customer_with_purchases(3, status="deleted", deleted_at=ANCHOR)
     manual_only = CustomerFactory.create()
     orders_rule = CustomerSegmentFactory.create(min_online_orders=3)
     SegmentMemberFactory.create(segment=orders_rule, customer=manual_only)
@@ -55,26 +62,37 @@ def test_membership_vectors() -> None:
     assert selectors.matches_rules(orders_rule, three_paid.pk)
     assert not selectors.matches_rules(orders_rule, two_paid.pk)
     assert not selectors.matches_rules(orders_rule, manual_only.pk)
-    # lifetime rule: the loyalty totals are not on this base, so nobody matches it by rule (hook returns 0)
-    amount_rule = CustomerSegmentFactory.create(min_lifetime_amount=10_000_000)
+    # lifetime rule: Σ non-reversed purchases of both channels (reversed rows never count)
+    big_spender = customer_with_purchases(0, store=2, store_amount=6_000_000)  # 12 mln
+    nearly = customer_with_purchases(0, store=1, store_amount=9_999_999, reversed_online=1)
+    amount_rule = CustomerSegmentFactory.create(min_online_orders=None, min_lifetime_amount=10_000_000)
     SegmentMemberFactory.create(segment=amount_rule, customer=two_paid)
-    assert set(selectors.segment_member_ids(amount_rule)) == {two_paid.pk}
-    assert selectors.lifetime_totals([three_paid.pk, two_paid.pk]) == {three_paid.pk: 0, two_paid.pk: 0}
-    # both rules are ANDed: 3 orders alone do not qualify
-    both = CustomerSegmentFactory.create(min_online_orders=3, min_lifetime_amount=1)
+    assert set(selectors.segment_member_ids(amount_rule)) == {two_paid.pk, big_spender.pk}
+    assert selectors.lifetime_totals([three_paid.pk, nearly.pk, big_spender.pk, manual_only.pk]) == {
+        three_paid.pk: lifetime(three_paid),
+        nearly.pk: 9_999_999,
+        big_spender.pk: 12_000_000,
+        manual_only.pk: 0,
+    }
+    # both rules are ANDed: 3 online orders with a lifetime below the amount do not qualify, above they do
+    both = CustomerSegmentFactory.create(min_online_orders=3, min_lifetime_amount=lifetime(three_paid) + 1)
     assert set(selectors.segment_member_ids(both)) == set()
+    both.min_lifetime_amount = lifetime(three_paid)
+    both.save()
+    assert set(selectors.segment_member_ids(both)) == {three_paid.pk}
     # no rules: manual only
     manual = CustomerSegmentFactory.create(min_online_orders=None)
     SegmentMemberFactory.create(segment=manual, customer=three_paid)
     assert set(selectors.segment_member_ids(manual)) == {three_paid.pk}
-    assert selectors.segments_for_customer(three_paid.pk) == [orders_rule, manual]
+    assert selectors.segments_for_customer(three_paid.pk) == [orders_rule, both, manual]
     assert selectors.segments_for_customer(two_paid.pk) == [amount_rule]
+    assert selectors.segments_for_customer(big_spender.pk) == [amount_rule]
     assert selectors.segments_for_customer(deleted_three.pk) == []
 
 
 def test_segment_stats_count_members_and_pushable_devices() -> None:
     segment = CustomerSegmentFactory.create(min_online_orders=2)
-    by_rule = customer_with_orders(2)
+    by_rule = customer_with_purchases(2)
     DeviceFactory.create(customer=by_rule)
     DeviceFactory.create(customer=by_rule, push_enabled=False)  # not pushable: one device counts
     manual = CustomerFactory.create()
@@ -213,7 +231,7 @@ def test_export_segments(staff_client: APIClient, clock: Any) -> None:
 
 def test_members_list_add_remove(staff_client: APIClient, staff: StaffUser, clock: Any) -> None:
     segment = CustomerSegmentFactory.create(min_online_orders=2)
-    by_rule = customer_with_orders(
+    by_rule = customer_with_purchases(
         2,
         name="Malika Karimova",
         phone="+998901234567",
@@ -251,7 +269,7 @@ def test_members_list_add_remove(staff_client: APIClient, staff: StaffUser, cloc
         "phone": "+998901234567",
         "status": "active",
         "registered_at": "2025-03-12T10:20:00+05:00",
-        "lifetime_total": 0,
+        "lifetime_total": lifetime(by_rule),
         "percent": None,
         "balance": 0,
         "online_orders_count": 2,
@@ -265,7 +283,8 @@ def test_members_list_add_remove(staff_client: APIClient, staff: StaffUser, cloc
     )
     assert (
         # core.exports.safe_cell prefixes every string cell starting with "+" (phones included)
-        lines[3] == f'"{by_rule.pk}";"Malika Karimova";"\'+998901234567";"2025-03-12 10:20";"0";"";"0";"Faol"'
+        lines[3] == f'"{by_rule.pk}";"Malika Karimova";"\'+998901234567";"2025-03-12 10:20";'
+        f'"{lifetime(by_rule)}";"";"0";"Faol"'
     )
 
     # rule-only member: 409; manual: 204; unknown: 404
