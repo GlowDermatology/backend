@@ -1286,6 +1286,15 @@ Literals live in `glowderma/core/enums.py` (P0 adds the new classes); labels in 
 | **InboxKind** (new; = `InboxNotification.Kind`) | `promo`, `general`, `order_status`, `appointment` | inbox |
 | **InboxLinkKind** (new) | `none`, `product`, `order`, `appointment` | inbox |
 
+**Audit actions added in M2** (shown by the admin `audit-log/`; `actor_type` in brackets):
+
+| Area | `action` values |
+|---|---|
+| Customer auth (`customer`) | `customer.registered` (`{reactivated, terms_version}`), `customer.login_succeeded` (`{method, new_device}`), `customer.login_failed` (`{method}`), `customer.logout`, `customer.password_reset`, `customer.refresh_reused` (`{sid}`), `customer.social_linked` (`{provider}`), `customer.consent_accepted` (`{terms_version}`), `customer.deleted` (`{orders_cancelled, appointments_cancelled}`), `auth.device_mismatch` (`{sid}`, ≤1 per session per hour) |
+| Appointments (`customer`) | `appointment.requested`, `appointment.cancelled` (with `by: "customer"`) |
+| Payments (`system`) | `payment.late_capture` (`{order_id, payment_id, provider}`) |
+| POS (`integration`) | `pos.qr_resolved` (`{pos_device_id, customer_id, sale_ref}`), `pos.qr_rejected` (`{pos_device_id, reason}`), `pos.device_created` (`{pos_device_id, name}`, staff via `createposkey`) |
+
 ---
 
 ## 4. Order timeline for customers
