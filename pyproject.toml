@@ -28,6 +28,7 @@ markers = ["redis_integration: tests against the development Redis instance"]
 python_version = "3.14"
 plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]
 strict = true
+warn_unreachable = true
 
 [tool.django-stubs]
 django_settings_module = "config.settings.test"

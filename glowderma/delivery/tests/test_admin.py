@@ -70,7 +70,7 @@ def test_shipment_admin_as_designed() -> None:
     assert not inline.has_add_permission(request, None)
     assert not inline.has_change_permission(request, None)
     assert not inline.has_delete_permission(request, None)
-    assert set(inline.fields or ()) <= set(inline.get_readonly_fields(request))
+    assert set(inline.fields) <= set(inline.get_readonly_fields(request))
     event_admin = admin.site._registry[ShipmentEvent]
     assert event_admin.list_display == ("at", "shipment", "kind", "bts_status", "via", "error_code")
     assert event_admin.list_filter == ("kind", "via")

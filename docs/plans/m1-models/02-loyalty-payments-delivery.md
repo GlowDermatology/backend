@@ -672,7 +672,7 @@ class Purchase(TimeStampedModel):
                 condition=~models.Q(billz_sale_id=""),
                 name="purchase_billz_sale_unique",
             ),
-            models.UniqueConstraint(fields=["billz_order_uuid"], name="purchase_billz_order_uuid_unique"),
+            models.UniqueConstraint(fields=["billz_order_uuid"], name="purchase_billz_uuid_unique"  # ≤ 30 chars (E034)),
             models.CheckConstraint(
                 condition=models.Q(
                     amount__gte=0,
@@ -729,7 +729,7 @@ class Purchase(TimeStampedModel):
 ```
 ```sql
 CREATE UNIQUE INDEX purchase_billz_sale_unique ON loyalty_purchase (billz_sale_id) WHERE billz_sale_id <> '';
-ALTER TABLE loyalty_purchase ADD CONSTRAINT purchase_billz_order_uuid_unique UNIQUE (billz_order_uuid);  -- NULLs distinct
+ALTER TABLE loyalty_purchase ADD CONSTRAINT purchase_billz_uuid_unique UNIQUE (billz_order_uuid);  -- NULLs distinct
 ALTER TABLE loyalty_purchase ADD CONSTRAINT loyalty_purchase_order_id_key UNIQUE (order_id);              -- OneToOne
 ALTER TABLE loyalty_purchase ADD CONSTRAINT purchase_amounts CHECK (
   amount >= 0 AND promo_amount >= 0 AND cashback_paid >= 0 AND cashback_amount >= 0 AND lifetime_before >= 0

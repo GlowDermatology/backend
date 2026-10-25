@@ -148,7 +148,9 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
   `accounts` (import-linter): use `get_user_model()`. Each module adds `tests/factories.py` for its own models.
   A migration round-trip test (`migrate <app> zero` → forward) must end with a plain `call_command("migrate",
   verbosity=0)`: the app-scoped forward step leaves every dependent app unapplied for the rest of the
-  transactional-test phase.
+  transactional-test phase. The layering contract exempts `glowderma.*.tests.**`, so a lower module's tests and
+  factories import upper-layer factories statically (`from glowderma.commerce.tests.factories import
+  OrderFactory`) instead of dotted-path or `apps.get_model` workarounds; production code never does.
 - Django-admin inlines use `glowderma.core.admin.ReadOnlyTabularInline` (same view grant as `ReadOnlyAdmin`,
   `core.admin.is_active_staff`); every admin rendering test logs in a plain active `is_staff` user, never a
   superuser, so a missing grant is visible.

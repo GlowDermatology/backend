@@ -2289,9 +2289,9 @@ glowderma.commerce, glowderma.appointments, glowderma.notifications, glowderma.c
 | 9 | `commerce.0001_initial` | `Cart`, `CartItem`, `Order`, `OrderItem`, `OrderEvent`, `StockReservation` (+ all constraints/indexes above) | `accounts.0004`, `catalog.0001`, `core.0007` |
 | 10 | `commerce.0002_order_sequence` | `RunSQL("ALTER SEQUENCE commerce_order_id_seq START WITH 10001 RESTART WITH 10001", reverse "… START WITH 1 RESTART WITH 1")` | `commerce.0001` |
 | 11 | `commerce.0003_orderevent_append_only` | `RunSQL(*append_only_trigger_sql("commerce_orderevent"))` | `commerce.0002`, `core.0008` |
-| 12 | `loyalty.0001_initial` · `0002_append_only` | 02 §0.2 (`CashbackPolicy`, `CashbackTier`, `LoyaltyAccount`, `LedgerEntry`, `CashbackHold`, `Purchase`, `PurchaseItem`, `PosDevice`; three triggers) | `accounts.0004`, `catalog.0001`, `commerce.0001`, `core.0008` |
-| 13 | `payments.0001_initial` | `Payment`, `Refund` | `accounts.0004`, `commerce.0001` |
-| 14 | `delivery.0001_initial` · `0002_append_only` | `Shipment` (FK `core.OutboxMessage`), `ShipmentEvent` + trigger | `commerce.0001`, `core.0008` |
+| 12 | `loyalty.0001_initial` · `0002_append_only` | 02 §0.2 (`CashbackPolicy`, `CashbackTier`, `LoyaltyAccount`, `LedgerEntry`, `CashbackHold`, `Purchase`, `PurchaseItem`, `PosDevice`; three triggers) | 0001: `accounts.0004`, `catalog.0001`, `commerce.0001`, `core.0007` · 0002: `loyalty.0001`, `core.0008` |
+| 13 | `payments.0001_initial` | `Payment`, `Refund` | `accounts.0004`, `commerce.0001`, `core.0007` |
+| 14 | `delivery.0001_initial` · `0002_append_only` | `Shipment` (FK `core.OutboxMessage`), `ShipmentEvent` + trigger | 0001: `commerce.0001`, `core.0007` · 0002: `delivery.0001`, `core.0008` |
 | 15 | `appointments.0001_initial` (as built) | `Appointment` (with `ExclusionConstraint`; `btree_gist` comes from `core.0007`), `AppointmentEvent`, and the `RunSQL` `appointment_duration_matches` (`"end" - start = make_interval(mins => duration_min)`) in the same migration | `accounts.0004`, `professionals.0001`, `core.0007` |
 | 16 | `appointments.0002_appointmentevent_append_only` (as built) | trigger | `appointments.0001`, `core.0008` |
 | 17 | — (merged into rows 15–16) | | |

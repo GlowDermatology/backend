@@ -13,3 +13,7 @@ layers =
     glowderma.accounts
     glowderma.integrations
     glowderma.core
+# Test packages may build rows of upper layers (loyalty tests need orders/products): the layering applies to
+# production code; tests of a lower module may import any module's test factories.
+ignore_imports =
+    glowderma.*.tests.** -> glowderma.**

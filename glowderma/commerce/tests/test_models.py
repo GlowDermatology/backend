@@ -73,8 +73,8 @@ def test_cart_one_per_customer_str_and_on_delete_rules() -> None:
     cart.save()
     assert Customer.objects.get(pk=cart.customer_id).cart == cart
     Order.objects.filter(pk=order.pk).delete()  # SET_NULL: the cart survives its last checkout order
-    cart.refresh_from_db()
-    assert cart.last_checkout_order is None
+    # Re-read: mypy keeps the ``Order`` narrowing from the assignment above across refresh_from_db().
+    assert Cart.objects.get(pk=cart.pk).last_checkout_order is None
     cart.customer.delete()  # A1 says this never happens; the CASCADE is the right semantics for a cart
     assert not Cart.objects.filter(pk=cart.pk).exists()
 

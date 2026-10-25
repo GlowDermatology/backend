@@ -509,7 +509,8 @@ def test_purchase_factory_str_ordering_credit_and_reversal_rows() -> None:
     )
     assert reversal.reversed_purchase == credited
     assert str(credited).endswith(" reversed")
-    assert reverse_purchase_rows(purchase) is None and purchase.reversed is True
+    # Re-read: mypy keeps the Literal[False] narrowing of ``purchase.reversed`` across the helper call.
+    assert reverse_purchase_rows(purchase) is None and Purchase.objects.get(pk=purchase.pk).reversed is True
     with pytest.raises(ProtectedError):
         purchase.customer.delete()
     with pytest.raises(ProtectedError):

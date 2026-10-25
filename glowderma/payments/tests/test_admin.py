@@ -73,7 +73,7 @@ def test_payment_admin_as_designed() -> None:
     assert not inline.has_add_permission(request, None)
     assert not inline.has_change_permission(request, None)
     assert not inline.has_delete_permission(request, None)
-    assert set(inline.fields or ()) <= set(inline.get_readonly_fields(request))
+    assert set(inline.fields) <= set(inline.get_readonly_fields(request))
     refund_admin = admin.site._registry[Refund]
     assert refund_admin.list_filter == ("state", "origin")
     assert refund_admin.search_fields == ("provider_refund_id", "=payment__id")
