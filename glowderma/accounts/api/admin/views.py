@@ -9,7 +9,6 @@ from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import ErrorDetail, NotFound, ValidationError
-from rest_framework.parsers import JSONParser
 from rest_framework.permissions import AllowAny, BasePermission
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -38,6 +37,7 @@ from glowderma.accounts.api.throttles import (
 from glowderma.accounts.models import AuthSession, StaffUser
 from glowderma.core import audit, timeutils
 from glowderma.core.api.exceptions import AuthFailed, OAuthExchangeFailed, ProviderUnavailable
+from glowderma.core.api.parsers import JSONParser
 from glowderma.core.api.schema import ADMIN_ERRORS, PUBLIC_ERRORS, ErrorEnvelopeSerializer
 from glowderma.integrations.oauth.ports import OAuthExchangeError, SocialClaims
 from glowderma.integrations.oauth.registry import PROVIDER_NAMES, get_oauth_provider

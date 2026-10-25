@@ -258,3 +258,16 @@ def test_optional_mode_without_key_runs_normally(key: str | None) -> None:
     assert post(key, view=OptionalWriteView).status_code == 201
     assert AuditEntry.objects.count() == 2
     assert IdempotencyRecord.objects.count() == 0
+
+
+def test_a_lone_surrogate_in_the_body_is_a_parse_error_before_any_effect() -> None:
+    """The strict JSON parser answers 400 before the fingerprint, the effect or the stored record."""
+    key = str(uuid4())
+    request = APIRequestFactory().post(
+        "/api/test/", '{"value": "\\ud800"}', content_type="application/json", HTTP_IDEMPOTENCY_KEY=key
+    )
+    response = WriteView.as_view()(request)
+    assert response.status_code == 400
+    assert response.data["code"] == "parse_error"
+    assert not AuditEntry.objects.filter(action="test.idempotent_write").exists()
+    assert not IdempotencyRecord.objects.filter(key=key).exists()

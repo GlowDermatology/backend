@@ -41,7 +41,9 @@ def request_fingerprint(request: Request) -> str:
     elif hasattr(parsed, "lists"):
         parsed = dict(parsed.lists())
     canonical = json.dumps(parsed, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(canonical.encode()).hexdigest()
+    # core.api.parsers.JSONParser already refuses lone surrogate escapes ("\ud800") with a 400; a view on
+    # another parser still gets a hash instead of a UnicodeEncodeError (500) here.
+    return hashlib.sha256(canonical.encode("utf-8", "surrogatepass")).hexdigest()
 
 
 def idempotent(required: bool = True) -> Callable[[Callable[..., Response]], Callable[..., Response]]:

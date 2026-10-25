@@ -11,7 +11,7 @@ from django.http import HttpRequest, QueryDict
 from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework import mixins, serializers
 from rest_framework.exceptions import NotFound, ValidationError
-from rest_framework.parsers import BaseParser, JSONParser, MultiPartParser
+from rest_framework.parsers import BaseParser, MultiPartParser
 from rest_framework.request import Request
 from rest_framework.response import Response
 
@@ -42,6 +42,7 @@ from glowderma.catalog.models import Banner, Category, Product
 from glowderma.core import enums, labels
 from glowderma.core.api.exceptions import field_error
 from glowderma.core.api.fields import RESERVED_SLUGS
+from glowderma.core.api.parsers import JSONParser
 from glowderma.core.api.schema import ADMIN_ERRORS, EXPORT_PARAM
 from glowderma.core.exports import ExportMixin, format_export_datetime
 from glowderma.core.idempotency import idempotent

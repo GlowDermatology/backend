@@ -1,12 +1,12 @@
 from typing import Any
 
-from rest_framework.parsers import JSONParser
 from rest_framework.views import APIView
 from rest_framework.viewsets import GenericViewSet
 
 from glowderma.accounts.api.throttles import StaffRateThrottle
 from glowderma.accounts.authentication import StaffJWTAuthentication
 from glowderma.accounts.permissions import IsActiveStaff
+from glowderma.core.api.parsers import JSONParser
 
 
 class AdminAPIView(APIView):

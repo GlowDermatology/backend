@@ -99,6 +99,12 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_CLASSES": [],
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
+    # DRF's defaults with the JSON parser swapped for the one that refuses unpaired surrogates.
+    "DEFAULT_PARSER_CLASSES": [
+        "glowderma.core.api.parsers.JSONParser",
+        "rest_framework.parsers.FormParser",
+        "rest_framework.parsers.MultiPartParser",
+    ],
     "DATETIME_FORMAT": "%Y-%m-%dT%H:%M:%S%:z",
 }
 SPECTACULAR_SETTINGS = {

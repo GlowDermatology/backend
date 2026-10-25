@@ -1,10 +1,10 @@
 import pytest
-from rest_framework.parsers import JSONParser
 from rest_framework.request import Request
 from rest_framework.test import APIRequestFactory
 
 from glowderma.accounts.api.admin.views import LogoutView, RefreshView
 from glowderma.accounts.api.base import AdminAPIView, AdminGenericViewSet
+from glowderma.core.api.parsers import JSONParser
 
 
 @pytest.mark.parametrize("view_class", [RefreshView, LogoutView])

@@ -100,6 +100,9 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
   explicit message from the endpoint table. Unknown codes raise `ValueError` at development time.
 - Shared contract shapes live in `glowderma/core/api/serializers.py` (`ActorSerializer` = `{id, display_name}`; declare
   it with `allow_null=True` where the actor may be the system) — never redeclare them in a module.
+- JSON bodies are parsed by `glowderma.core.api.parsers.JSONParser` (the DRF default and every explicit
+  `parser_classes`/`get_parsers`): it answers `400 parse_error` for an unpaired surrogate escape, which no UTF-8
+  column or `jsonb` document can store. Never import `rest_framework.parsers.JSONParser` in a module.
 - OpenAPI helpers in `glowderma/core/api/schema.py`: `ADMIN_ERRORS` / `PUBLIC_ERRORS` response maps,
   `IDEMPOTENCY_KEY_HEADER`, `EXPORT_PARAM`. Uzbek export labels live in `glowderma/core/labels.py`; datetimes in
   exports go through `core.exports.format_export_datetime`.

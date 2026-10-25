@@ -12,13 +12,14 @@ from django.http import QueryDict
 from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework import mixins, serializers
 from rest_framework.exceptions import NotFound
-from rest_framework.parsers import JSONParser, MultiPartParser
+from rest_framework.parsers import MultiPartParser
 from rest_framework.request import Request
 from rest_framework.response import Response
 
 from glowderma.accounts.api.base import AdminAPIView, AdminGenericViewSet
 from glowderma.accounts.models import Customer
 from glowderma.core import enums, labels
+from glowderma.core.api.parsers import JSONParser
 from glowderma.core.api.schema import ADMIN_ERRORS, EXPORT_PARAM, IDEMPOTENCY_KEY_HEADER
 from glowderma.core.exports import ExportMixin, format_export_datetime
 from glowderma.core.idempotency import idempotent
