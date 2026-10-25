@@ -27,6 +27,7 @@ from glowderma.reporting.api.admin.serializers import (
 class AuditLogViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
     serializer_class = AuditEntrySerializer
     export_name = "harakatlar-jurnali"
+    export_filter_keys = frozenset(AuditLogQuerySerializer().fields)
     export_resource = "audit-log"
     export_headers = labels.AUDIT_LOG_EXPORT_HEADERS
 

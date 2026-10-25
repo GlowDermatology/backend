@@ -14,7 +14,7 @@ from glowderma.accounts.models import Customer
 from glowderma.catalog.models import Product
 from glowderma.core import enums, timeutils
 from glowderma.core.api.exceptions import field_error
-from glowderma.core.api.fields import AwareDateTimeField, BoundedListField, PhoneField
+from glowderma.core.api.fields import AwareDateTimeField, BoundedListField, PercentField, PhoneField
 from glowderma.core.api.serializers import ActorSerializer
 from glowderma.core.media import absolute_media_url
 from glowderma.notifications import selectors, services
@@ -387,7 +387,11 @@ class SegmentMembersInputSerializer(serializers.Serializer[dict[str, Any]]):
 
 
 class CustomerListItemSerializer(serializers.Serializer[Customer]):
-    """Contract §2.6 ``CustomerListItem`` for the members list; loyalty-owned numbers read 0 / null (B4)."""
+    """Contract §2.6 ``CustomerListItem``: the one renderer of ``GET customers/`` and of segment members.
+
+    Rows carry the ``loyalty.selectors.list_annotations()`` values (``lifetime_total``, ``balance``,
+    ``percent``, ``online_orders_count``).
+    """
 
     id = serializers.IntegerField()
     name = serializers.CharField(allow_blank=True)
@@ -395,14 +399,6 @@ class CustomerListItemSerializer(serializers.Serializer[Customer]):
     status = serializers.ChoiceField(choices=enums.CustomerStatus.values)
     registered_at = serializers.DateTimeField()
     lifetime_total = serializers.IntegerField()
-    percent = serializers.SerializerMethodField()
-    balance = serializers.SerializerMethodField()
+    percent = PercentField(allow_null=True)
+    balance = serializers.IntegerField()
     online_orders_count = serializers.IntegerField()
-
-    @extend_schema_field(serializers.CharField(allow_null=True))
-    def get_percent(self, obj: Customer) -> str | None:
-        return None
-
-    @extend_schema_field(serializers.IntegerField())
-    def get_balance(self, obj: Customer) -> int:
-        return 0

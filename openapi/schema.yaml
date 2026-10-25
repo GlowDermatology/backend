@@ -4691,8 +4691,11 @@ components:
       - name
     CustomerListItem:
       type: object
-      description: Contract §2.6 ``CustomerListItem`` for the members list; loyalty-owned
-        numbers read 0 / null (B4).
+      description: |-
+        Contract §2.6 ``CustomerListItem``: the one renderer of ``GET customers/`` and of segment members.
+
+        Rows carry the ``loyalty.selectors.list_annotations()`` values (``lifetime_total``, ``balance``,
+        ``percent``, ``online_orders_count``).
       properties:
         id:
           type: integer
@@ -4709,11 +4712,11 @@ components:
           type: integer
         percent:
           type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,2})?$
           nullable: true
-          readOnly: true
         balance:
           type: integer
-          readOnly: true
         online_orders_count:
           type: integer
       required:

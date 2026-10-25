@@ -187,26 +187,14 @@ def active_device(customer_id: int) -> DeviceInfo | None:
     )
 
 
-def _rules_hold(segment: CustomerSegment, totals: Totals) -> bool:
-    """The segment's set rules all hold for these stats (never without rules) — the Python mirror of
-    ``notifications.selectors.rule_match_q`` over the card's ``customer_totals`` row, whose
-    ``online_orders_count`` / ``lifetime`` are the same quantities as ``online_orders_expression`` /
-    ``lifetime_total_expression`` (non-reversed online purchases; Σ non-reversed purchase amounts)."""
-    if not notifications_selectors.rules_set(segment):
-        return False
-    if segment.min_online_orders is not None and totals.online_orders_count < segment.min_online_orders:
-        return False
-    return segment.min_lifetime_amount is None or totals.lifetime >= segment.min_lifetime_amount
-
-
 def customer_groups(customer: Customer, totals: Totals) -> list[Group]:
     """The segments the customer belongs to (rules or manual membership, contract §2.8), by id; a deleted
     customer has none (membership requires an active customer).
 
     One query whatever the number of segments (design 03 §6.3, no N+1): every segment annotated with whether
     the customer is a manual member, the rules checked in Python against the card's ``totals``.
-    ``notifications.selectors.segments_for_customer`` answers the same set with one query per segment, so
-    the card does not call it (reported to the lead).
+    It reuses the card's ``totals`` instead of re-reading the stats (``notifications.selectors.rules_hold``
+    is the shared rule check; ``segments_for_customer`` answers the same set for callers without totals).
     """
     if customer.status != enums.CustomerStatus.ACTIVE:
         return []
@@ -222,7 +210,10 @@ def customer_groups(customer: Customer, totals: Totals) -> list[Group]:
     return [
         Group(id=segment.pk, name=segment.name)
         for segment in segments
-        if getattr(segment, "is_manual_member", False) or _rules_hold(segment, totals)
+        if getattr(segment, "is_manual_member", False)
+        or notifications_selectors.rules_hold(
+            segment, online_orders_count=totals.online_orders_count, lifetime=totals.lifetime
+        )
     ]
 
 

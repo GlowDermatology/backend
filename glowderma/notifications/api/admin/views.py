@@ -22,6 +22,7 @@ from glowderma.core import enums, labels
 from glowderma.core.api.schema import ADMIN_ERRORS, EXPORT_PARAM, IDEMPOTENCY_KEY_HEADER
 from glowderma.core.exports import ExportMixin, format_export_datetime
 from glowderma.core.idempotency import idempotent
+from glowderma.loyalty import selectors as loyalty_selectors
 from glowderma.notifications import selectors, services
 from glowderma.notifications.api.admin.serializers import (
     CustomerListItemSerializer,
@@ -106,6 +107,7 @@ NotificationFormSerializer = inline_serializer(
 class NotificationViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
     serializer_class = NotificationRecordSerializer
     export_name = "bildirishnomalar"
+    export_filter_keys = frozenset(NotificationListQuerySerializer().fields)
     export_resource = "notifications"
     export_headers = labels.NOTIFICATION_EXPORT_HEADERS
 
@@ -219,6 +221,7 @@ def _segment_or_404(pk: int) -> CustomerSegment:
 class SegmentViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
     serializer_class = SegmentSerializer
     export_name = "guruhlar"
+    export_filter_keys = frozenset[str]()  # no filters
     export_resource = "segments"
     export_headers = labels.SEGMENT_EXPORT_HEADERS
 
@@ -285,15 +288,27 @@ class SegmentViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
         return Response(status=204)
 
 
+def _percent_cell(percent: Any) -> str:
+    return "" if percent is None else f"{percent:.2f}"
+
+
 class SegmentMembersViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
     serializer_class = CustomerListItemSerializer
     export_name = "guruh-azolari"
+    export_filter_keys = frozenset[str]()  # no filters
     export_resource = "segment_members"
     export_headers = labels.SEGMENT_MEMBER_EXPORT_HEADERS
 
     def get_queryset(self) -> QuerySet[Customer]:
         segment = _segment_or_404(int(self.kwargs["pk"]))
-        return selectors.segment_members(segment).order_by("-registered_at", "-id")
+        loyalty = (
+            loyalty_selectors.list_annotations()
+        )  # lifetime_total / online_orders_count come from the rules
+        return (
+            selectors.segment_members(segment)
+            .annotate(balance=loyalty["balance"], percent=loyalty["percent"])
+            .order_by("-registered_at", "-id")
+        )
 
     def get_export_rows(self, items: Iterable[Customer]) -> Iterable[Sequence[Any]]:
         for customer in items:
@@ -303,8 +318,8 @@ class SegmentMembersViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericView
                 customer.phone,
                 format_export_datetime(customer.registered_at),
                 int(getattr(customer, "lifetime_total", 0)),
-                "",
-                0,
+                _percent_cell(getattr(customer, "percent", None)),
+                int(getattr(customer, "balance", 0)),
                 labels.CUSTOMER_STATUS[customer.status],
             )
 

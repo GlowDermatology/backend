@@ -257,7 +257,9 @@ def test_csv_export(staff_client: APIClient, staff: StaffUser) -> None:
         is_new_from_billz=True,
     )
     ProductStockFactory.create(product=product, quantity=12)
-    response = staff_client.get(PRODUCTS, {"export": "csv", "status": "hidden", "page": "9"})
+    response = staff_client.get(
+        PRODUCTS, {"export": "csv", "status": "hidden", "page": "9", "utm_source": "tg"}
+    )
     assert response.status_code == 200
     assert response["Content-Type"] == "text/csv; charset=utf-8"
     assert response["Content-Disposition"].startswith('attachment; filename="mahsulotlar-')

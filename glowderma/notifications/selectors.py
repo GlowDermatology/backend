@@ -124,12 +124,40 @@ def matches_rules(segment: CustomerSegment, customer_id: int) -> bool:
 
 
 def segments_for_customer(customer_id: int) -> list[CustomerSegment]:
-    """Card ``groups[]``: every segment the customer belongs to, by id."""
+    """Every segment the customer belongs to, by id — two queries whatever the number of segments.
+
+    The customer's stats come from one annotated row (the same expressions as ``segment_members``); each
+    segment then carries whether the customer is a manual member, and the rules are checked in Python
+    (``rules_hold``). A non-active customer belongs to none.
+    """
+    customer = annotate_customer_stats(
+        Customer.objects.filter(pk=customer_id, status=enums.CustomerStatus.ACTIVE)
+    ).first()
+    if customer is None:
+        return []
+    online_orders_count = int(getattr(customer, "online_orders_count", 0))
+    lifetime = int(getattr(customer, "lifetime_total", 0))
+    segments = CustomerSegment.objects.order_by("id").annotate(
+        is_manual_member=Exists(
+            SegmentMember.objects.filter(segment_id=OuterRef("pk"), customer_id=customer_id)
+        )
+    )
     return [
         segment
-        for segment in CustomerSegment.objects.order_by("id")
-        if segment_members(segment).filter(pk=customer_id).exists()
+        for segment in segments
+        if getattr(segment, "is_manual_member", False)
+        or rules_hold(segment, online_orders_count=online_orders_count, lifetime=lifetime)
     ]
+
+
+def rules_hold(segment: CustomerSegment, *, online_orders_count: int, lifetime: int) -> bool:
+    """The segment's set rules all hold for these stats (never without rules): the Python mirror of
+    ``rule_match_q`` for one customer whose stats are already known."""
+    if not rules_set(segment):
+        return False
+    if segment.min_online_orders is not None and online_orders_count < segment.min_online_orders:
+        return False
+    return segment.min_lifetime_amount is None or lifetime >= segment.min_lifetime_amount
 
 
 class SegmentStats(TypedDict):

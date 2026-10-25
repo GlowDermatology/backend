@@ -57,6 +57,7 @@ class ProductViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
     page_size_options = (8,)
     default_page_size = 8
     export_name = "mahsulotlar"
+    export_filter_keys = frozenset(ProductListQuerySerializer().fields)
     export_resource = "products"
     export_headers = labels.PRODUCT_EXPORT_HEADERS
 
@@ -203,6 +204,7 @@ class ProductImagesOrderView(AdminAPIView):
 class CategoryViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
     serializer_class = CategorySerializer
     export_name = "kategoriyalar"
+    export_filter_keys = frozenset(CategoryListQuerySerializer().fields)
     export_resource = "categories"
     export_headers = labels.CATEGORY_EXPORT_HEADERS
     lookup_field = "slug"
@@ -371,6 +373,7 @@ BannerPatchFormSerializer = inline_serializer(
 class BannerViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
     serializer_class = BannerSerializer
     export_name = "bannerlar"
+    export_filter_keys = frozenset(BannerListQuerySerializer().fields)
     export_resource = "banners"
     export_headers = labels.BANNER_EXPORT_HEADERS
 

@@ -2,9 +2,8 @@
 
 Every serializer reads the frozen rows of ``loyalty.selectors`` / ``customers.selectors`` (attributes named as
 the contract keys); none touches another module's ORM row except the annotated ``Customer`` of the list.
-``CustomerListItem`` is declared once, by ``notifications`` (the segment members list returns the same shape);
-the list view points its OpenAPI response at that component and renders with :class:`CustomerRowSerializer`,
-which fills the loyalty-owned numbers from the SQL annotations.
+``CustomerListItem`` is declared once, by ``notifications`` (the segment members list returns the same shape),
+and the list view renders with it over rows annotated by ``loyalty.selectors.list_annotations()``.
 """
 
 from __future__ import annotations
@@ -14,7 +13,6 @@ from typing import Any, cast
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
-from glowderma.accounts.models import Customer
 from glowderma.core import enums
 from glowderma.core.api.fields import PercentField
 from glowderma.core.api.serializers import ActorSerializer
@@ -31,20 +29,6 @@ class CustomerListQuerySerializer(serializers.Serializer[dict[str, Any]]):
     status = serializers.ChoiceField(choices=enums.CustomerStatus.values, required=False)
     segment = serializers.IntegerField(required=False, min_value=1)
     ordering = serializers.ChoiceField(choices=list(ORDERINGS), required=False, default=DEFAULT_ORDERING)
-
-
-class CustomerRowSerializer(serializers.Serializer[Customer]):
-    """Runtime renderer of ``CustomerListItem`` over ``customers.selectors.customers_list`` rows."""
-
-    id = serializers.IntegerField()
-    name = serializers.CharField(allow_blank=True)
-    phone = serializers.CharField()
-    status = serializers.ChoiceField(choices=enums.CustomerStatus.values)
-    registered_at = serializers.DateTimeField()
-    lifetime_total = serializers.IntegerField()
-    percent = PercentField(allow_null=True)
-    balance = serializers.IntegerField()
-    online_orders_count = serializers.IntegerField()
 
 
 # --- card -------------------------------------------------------------------------------------------------

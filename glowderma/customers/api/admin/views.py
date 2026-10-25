@@ -26,14 +26,13 @@ from glowderma.customers.api.admin.serializers import (
     CashbackAdjustmentSerializer,
     CustomerCardSerializer,
     CustomerListQuerySerializer,
-    CustomerRowSerializer,
 )
 from glowderma.loyalty.services import LoyaltyValidationError
 from glowderma.notifications.api.admin.serializers import CustomerListItemSerializer
 
 
 class CustomerViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
-    serializer_class = CustomerRowSerializer
+    serializer_class = CustomerListItemSerializer
     export_name = "mijozlar"
     export_resource = "customers"
     export_headers = labels.CUSTOMER_EXPORT_HEADERS

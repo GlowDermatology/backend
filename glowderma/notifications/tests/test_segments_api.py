@@ -332,3 +332,44 @@ def test_deleted_customers_may_be_manual_members_but_never_count(staff_client: A
     assert response.status_code == 200
     assert (response.data["manual_member_count"], response.data["member_count"]) == (1, 0)
     assert services.remove_member(segment, gone.pk, actor=None) is None
+
+
+def test_members_list_and_export_carry_the_loyalty_numbers(staff_client: APIClient) -> None:
+    from glowderma.loyalty.tests.factories import LoyaltyAccountFactory
+
+    customer = CustomerFactory.create()
+    PurchaseFactory.create(customer=customer, store=True, amount=21_000_000)
+    LoyaltyAccountFactory.create(customer=customer, balance=48_600)
+    segment = CustomerSegmentFactory.create(
+        name="Katta xaridorlar", min_online_orders=None, min_lifetime_amount=20_000_000
+    )
+    rows = staff_client.get(f"/api/v1/admin/segments/{segment.pk}/members/").json()["results"]
+    row = next(item for item in rows if item["id"] == customer.pk)
+    assert row["balance"] == 48_600
+    assert row["lifetime_total"] == 21_000_000
+    export = staff_client.get(f"/api/v1/admin/segments/{segment.pk}/members/?export=csv")
+    lines = export.content.decode("utf-8-sig").split("\r\n")
+    line = next(line for line in lines if line.startswith(f'"{customer.pk}"'))
+    assert '"48600"' in line
+
+
+def test_segments_for_customer_runs_two_queries_whatever_the_segment_count(
+    django_assert_max_num_queries: Any,
+) -> None:
+    customer = CustomerFactory.create()
+    PurchaseFactory.create(customer=customer, store=True, amount=12_000_000)
+    expected = []
+    for index in range(6):
+        segment = CustomerSegmentFactory.create(
+            name=f"S{index}", min_online_orders=None, min_lifetime_amount=10_000_000 * (index % 2 + 1)
+        )
+        if index % 2 == 0:
+            expected.append(segment.pk)
+    manual = CustomerSegmentFactory.create(name="Qo‘lda", min_online_orders=50)
+    SegmentMember.objects.create(segment=manual, customer=customer)
+    expected.append(manual.pk)
+    with django_assert_max_num_queries(2):
+        found = [segment.pk for segment in selectors.segments_for_customer(customer.pk)]
+    assert sorted(found) == sorted(expected)
+    Customer.objects.filter(pk=customer.pk).update(status="deleted", deleted_at=ANCHOR)
+    assert selectors.segments_for_customer(customer.pk) == []
