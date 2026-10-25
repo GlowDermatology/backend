@@ -144,7 +144,7 @@ def test_shipment_pending_is_derived_from_the_create_message() -> None:
         shipment = ShipmentFactory.create(failed=True)
         create_message_for(shipment, status=status)
         by_status[status] = shipment
-    flags = dict(Shipment.objects.with_pending().values_list("pk", "pending"))
+    flags = {row.pk: row.pending for row in Shipment.objects.with_pending()}  # type: ignore[attr-defined]
     assert flags[no_message.pk] is False
     assert {status: flags[s.pk] for status, s in by_status.items()} == {
         "pending": True,
@@ -188,7 +188,7 @@ def test_shipment_create_message_set_null_on_outbox_purge() -> None:
     OutboxMessage.objects.filter(pk=second.pk).delete()  # retention purge of the outbox
     shipment.refresh_from_db()
     assert shipment.create_message is None and shipment.is_pending is False
-    assert Shipment.objects.with_pending().get(pk=shipment.pk).pending is False  # type: ignore[attr-defined]
+    assert Shipment.objects.with_pending().get(pk=shipment.pk).pending is False
 
 
 def test_shipment_indexes_and_constraints_in_pg_catalog() -> None:

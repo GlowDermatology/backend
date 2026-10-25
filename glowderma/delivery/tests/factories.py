@@ -11,8 +11,8 @@ the rows point at.
 """
 
 from datetime import datetime, timedelta
+from typing import Any
 
-from django.db import models
 from factory.declarations import LazyAttribute, LazyFunction, SubFactory, Trait
 from factory.django import DjangoModelFactory
 
@@ -26,13 +26,14 @@ def _now() -> datetime:
     return timeutils.now()
 
 
-class OrderRowFactory(DjangoModelFactory[models.Model]):
+class OrderRowFactory(DjangoModelFactory[Any]):
     """A ``commerce.Order`` row for tests of this lower module.
 
     ``delivery`` sits below ``commerce`` (import-linter layers), so it may not import
     ``commerce.tests.factories``; like the FK, the model is referenced by label and resolved through the app
-    registry. The columns satisfy every CHECK of the order (total formula, address by fulfilment, cancellation
-    and ``paid_at`` by status); the traits ``paid`` (processing), ``cancelled`` (admin cancel of a paid order)
+    registry (hence the ``Any`` type parameter). The columns satisfy every CHECK of the order (total
+    formula, address by fulfilment, cancellation and ``paid_at`` by status); the traits ``paid``
+    (processing), ``cancelled`` (admin cancel of a paid order)
     and ``payme`` cover what payments and shipments need. No order items are written: a payment or shipment
     never reads them.
     """
