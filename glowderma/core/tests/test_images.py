@@ -1,3 +1,4 @@
+import struct
 from io import BytesIO
 
 import pytest
@@ -102,6 +103,34 @@ def test_animated_webp_is_unsupported() -> None:
     with pytest.raises(ImageError) as caught:
         process_image(stream.getvalue())
     assert caught.value.code == "unsupported_image"
+
+
+def test_multi_picture_jpeg_is_accepted_as_jpeg() -> None:
+    """Contract 2.3: "must decode in Pillow as JPEG": an MPO (multi-picture JPEG from Samsung phones) is
+    Pillow's JPEG plugin subclass; its primary picture is kept, the extra frames are dropped."""
+    frames = [gradient(40, 30), gradient(20, 10)]
+    stream = BytesIO()
+    frames[0].save(stream, format="MPO", save_all=True, append_images=frames[1:])
+    with Image.open(BytesIO(stream.getvalue())) as source:
+        assert source.format == "MPO" and getattr(source, "n_frames", 1) == 2
+    result = process_image(stream.getvalue())
+    assert (result.format, result.content_type, result.extension) == ("jpeg", "image/jpeg", "jpg")
+    assert (result.width, result.height) == (40, 30)
+    decoded = decode(result)
+    assert decoded.format == "JPEG" and getattr(decoded, "n_frames", 1) == 1
+
+
+def test_decoder_crash_is_unsupported_image(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Untrusted-input boundary: any decoder exception (not only OSError) maps to `unsupported_image`."""
+
+    def explode(*args: object, **kwargs: object) -> None:
+        raise struct.error("unpack requires a buffer of 4 bytes")
+
+    monkeypatch.setattr(Image, "open", explode)
+    with pytest.raises(ImageError) as caught:
+        process_image(encode(Image.new("RGB", (4, 4)), "PNG"))
+    assert caught.value.code == "unsupported_image"
+    assert isinstance(caught.value.__cause__, struct.error)
 
 
 def test_too_large_file_is_rejected_before_decoding() -> None:

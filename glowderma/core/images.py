@@ -6,7 +6,6 @@ that its longest side is at most ``max_side`` and re-encoded in the same format 
 XMP metadata.
 """
 
-import warnings
 from dataclasses import dataclass
 from io import BytesIO
 from typing import Any, Literal
@@ -19,8 +18,12 @@ MAX_BYTES = 5 * 1024 * 1024
 MAX_SIDE = 2400
 # Pixel budget before decoding: a 5 MiB PNG can expand to gigabytes in memory (decompression bomb).
 MAX_PIXELS = 40_000_000
+JPEG: tuple[ImageFormat, str, str] = ("jpeg", "image/jpeg", "jpg")
 FORMATS: dict[str, tuple[ImageFormat, str, str]] = {
-    "JPEG": ("jpeg", "image/jpeg", "jpg"),
+    "JPEG": JPEG,
+    # Multi-picture JPEG (APP2 MPF segment, e.g. Samsung phones): Pillow's JPEG plugin subclass. The primary
+    # picture (frame 0) is what the user sees, so it is accepted as a JPEG; the extra frames are dropped.
+    "MPO": JPEG,
     "PNG": ("png", "image/png", "png"),
     "WEBP": ("webp", "image/webp", "webp"),
 }
@@ -78,21 +81,25 @@ def process_image(uploaded: Any, *, max_bytes: int = MAX_BYTES, max_side: int = 
     """Validate and normalise an uploaded image (a Django ``UploadedFile``, a binary stream or ``bytes``)."""
     content = _read(uploaded, max_bytes)
     try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", Image.DecompressionBombWarning)
-            with Image.open(BytesIO(content)) as source:
-                spec = FORMATS.get(source.format or "")
-                if spec is None:
-                    raise ImageError("unsupported_image")
-                if getattr(source, "is_animated", False) or getattr(source, "n_frames", 1) > 1:
-                    raise ImageError("unsupported_image")
-                if source.width * source.height > MAX_PIXELS:
-                    raise ImageError("unsupported_image")
-                source.load()
-                image = ImageOps.exif_transpose(source) or source.copy()
+        with Image.open(BytesIO(content)) as source:
+            spec = FORMATS.get(source.format or "")
+            if spec is None:
+                raise ImageError("unsupported_image")
+            if source.format != "MPO" and (
+                getattr(source, "is_animated", False) or getattr(source, "n_frames", 1) > 1
+            ):
+                raise ImageError("unsupported_image")
+            # Checked before load(): a 5 MiB PNG can expand to gigabytes, and this stays well below the
+            # pixel count at which Pillow itself raises DecompressionBombError.
+            if source.width * source.height > MAX_PIXELS:
+                raise ImageError("unsupported_image")
+            source.load()
+            image = ImageOps.exif_transpose(source) or source.copy()
     except ImageError:
         raise
-    except (OSError, ValueError, SyntaxError, TypeError, Image.DecompressionBombError, Warning) as exc:
+    except Exception as exc:
+        # Untrusted-input boundary: Pillow decoders raise OSError, ValueError, SyntaxError, struct.error,
+        # IndexError, KeyError, EOFError ... on corrupt files. Every decoder failure is "not an image".
         raise ImageError("unsupported_image") from exc
     fmt, content_type, extension = spec
     image = _prepare_mode(image, fmt)
