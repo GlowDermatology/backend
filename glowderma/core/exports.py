@@ -14,6 +14,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import SimpleRateThrottle
 
 from glowderma.core import audit, timeutils
+from glowderma.core.throttling import rate_for
 
 
 def safe_cell(value: Any) -> Any:
@@ -53,7 +54,9 @@ def render_xlsx(rows: Iterable[Sequence[Any]], headers: Sequence[str], sheet: st
 
 class ExportRateThrottle(SimpleRateThrottle):
     scope = "export"
-    rate = "10/min"
+
+    def get_rate(self) -> str:
+        return rate_for(self.scope)
 
     def get_cache_key(self, request: Request, view: Any) -> str:
         return self.cache_format % {"scope": self.scope, "ident": str(request.user.pk)}
