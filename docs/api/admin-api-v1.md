@@ -166,7 +166,7 @@ The FE creates one key per form/dialog instance (`crypto.randomUUID()`), reuses 
 - **CSV:** `text/csv; charset=utf-8`; UTF-8 **BOM**; `;` separator; CRLF; every cell double-quoted with `"` doubled.
 - **XLSX:** one sheet named `<name>`; text cells typed `s`; money and counts numeric.
 - **Formatting:** Uzbek headers; enums as the Uzbek labels in §5.8; datetimes as text `YYYY-MM-DD HH:MM` (Tashkent); phones as text in E.164; money as plain integers.
-- **Formula safety:** a cell that comes from a string field and starts with `=` `+` `-` `@` TAB or CR gets a leading `'`. Integer cells are exempt.
+- **Formula safety:** a cell that comes from a string field and starts with `=` `+` `-` `@` TAB or CR gets a leading `'`. Integer cells are exempt, and so is a value that is exactly an E.164 phone (`+` then 7–15 digits, no leading zero): it cannot carry a formula and stays plain E.164 text.
 - **Audit:** every export writes the AuditEntry `export.downloaded` `{resource, filters, row_count, format}`.
 
 | Resource | `<name>` | Columns |
@@ -239,8 +239,10 @@ The FE creates one key per form/dialog instance (`crypto.randomUUID()`), reuses 
 | GET / PATCH / DELETE | `segments/{id}/` | | 200 / 200 / 204 |
 | GET / POST | `segments/{id}/members/` | P E / – | 200 |
 | DELETE | `segments/{id}/members/{customer_id}/` | | 204 |
-| GET | `appointments/?date=`, `appointments/pending-summary/` | | 200 |
+| GET | `appointments/?date=`, `appointments/pending-summary/`, `appointments/meta/` | | 200 |
 | POST | `appointments/{id}/confirm/`, `…/reject/`, `…/attend/` | I | 200 |
+| POST | `appointments/` (admin booking, T10) | I optional | 201 |
+| POST | `appointments/{id}/reschedule/`, `appointments/{id}/cancel/` (T10) | I optional | 200 |
 | GET | `dashboard/`, `nav-counts/` | | 200 |
 | GET / PATCH | `settings/` | | 200 |
 | GET | `payments/`, `audit-log/` | P E | 200 |
@@ -715,6 +717,8 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 - `GET segments/{id}/members/` (P E, CustomerListItem).
 - `POST segments/{id}/members/` `{"customer_ids": [int] ≤500}` → 200 Segment.
 - `DELETE segments/{id}/members/{customer_id}/` → 204. It removes manual membership only; a rule-only member → 409 `conflict` "Mijoz guruhga qoida orqali kiradi.".
+- `POST segments/{id}/members/`: `customer_ids` non-empty, ≤500, every id must exist (any status) — errors `customer_ids` `required` / `max_items` "Ko‘pi bilan 500 ta." / `does_not_exist`, a bad element `customer_ids.{i}` `invalid`. `DELETE …/members/{customer_id}/` for a customer who is neither a manual nor a rule member → 404.
+- `size` (and `notifications/meta/` `total_devices`) count one pushable device per customer (the most recently active one), the same rule the send uses.
 - Audit `segment.*`.
 
 ### 2.9 Appointments
@@ -740,6 +744,39 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 - Allowed: `requested` → confirm or reject; `confirmed` → attend. Otherwise 409 `invalid_transition` "Bu amal ushbu holatda mumkin emas.".
 - Effects: an AppointmentEvent; a push through the outbox on confirm and reject; audit `appointment.confirmed|rejected|attended`.
 - 200 with the appointment in the day-item shape above.
+- `GET appointments/?date=` lists every status, so a day item may carry `status: "cancelled"` (T3).
+- Route note: `confirm|reject|attend` share one route `appointments/{id}/{action}/`; any other action → 404.
+
+**`GET appointments/meta/`** → what the admin booking dialog offers (M1d, for T10):
+```jsonc
+{"specialists": [                                   // active professionals, by position then name
+   {"id": 2, "name": "Jasur Aliyev", "role": "dermatologist",
+    "services": [                                   // active links to active services, by service position then name
+      {"id": 1, "name": "Dermatolog konsultatsiyasi", "short_name": "Konsultatsiya",
+       "duration_min": 30, "price": 120000}]}],     // what a booking with this specialist snapshots
+ "slot_step_min": 5}
+```
+
+**Admin booking, rescheduling and cancellation (T10, M1d).** `Idempotency-Key` is optional on these three (honoured when sent, §1.7).
+
+**`POST appointments/`** → 201 day-item (`status` `confirmed`, `requested_via` `admin`, `requested_at` = now).
+
+| Field | Rule | Field errors (code · message) |
+|---|---|---|
+| `specialist_id` | int, an **active** professional | `required` · `does_not_exist` "Mutaxassis topilmadi." |
+| `service_id` | int, an **active** service the specialist offers (duration and price are snapshotted from that link) | `required` · `does_not_exist` "Xizmat topilmadi." · `does_not_exist` "Mutaxassis bu xizmatni ko‘rsatmaydi." |
+| `customer_id` \| `phone` | exactly one; the customer must be `active` | both missing → `customer_id` `required`; both sent → `customer_id` `invalid` "customer_id yoki phone dan faqat bittasini yuboring."; unknown/deleted id → `customer_id` `does_not_exist` "Mijoz topilmadi."; `phone` not E.164 → `invalid` "Telefon raqamini to‘g‘ri kiriting."; no active customer → `phone` `customer_not_found` "Bu raqam bilan mijoz topilmadi." |
+| `start` | aware datetime, 5-minute grid, not in the past, inside that day's working hours (date override wins; `end = start + duration` must fit), outside blocked periods and the recurring break, not overlapping another `requested`/`confirmed` appointment of the specialist | `required` · `invalid` "Noto‘g‘ri qiymat." (naive) · `invalid` "Vaqt 5 daqiqalik qadamda bo‘lsin." · `in_past` "Kelajakdagi vaqtni tanlang." · `outside_working_hours` "Mutaxassis bu vaqtda ishlamaydi." · `slot_unavailable` "Bu vaqt band." |
+| `note` | optional, ≤300 (staff note) | `max_length` "300 belgidan oshmasin." |
+
+- 409 `conflict` "Bu vaqt band." when a concurrent booking wins the slot (exclusion constraint; nothing is written).
+- Effects: events `requested {via: "admin", …}` + `confirmed {push_sent: false}`; audit `appointment.created`. No push (the customer is on the phone).
+
+**`POST appointments/{id}/reschedule/`** `{"start", "specialist_id"?}` → 200 day-item, status unchanged. Same `start` rules (the appointment itself is excluded from the overlap check). Changing the specialist re-snapshots duration and price from that specialist's link (`specialist_id` `does_not_exist`, or `service_id` `does_not_exist` "Mutaxassis bu xizmatni ko‘rsatmaydi."). 409 `invalid_transition` "Bu amal ushbu holatda mumkin emas." unless `requested`/`confirmed`; 409 `conflict` "Bu vaqt band." on the race. Effects: event `rescheduled {from_start, from_end, to_start, to_end, from_professional_id, to_professional_id, by: "admin", push_sent}`, push `rescheduled`, audit `appointment.rescheduled`.
+
+**`POST appointments/{id}/cancel/`** `{"reason"?: str ≤300}` → 200 day-item with `status: "cancelled"`. 409 `invalid_transition` unless `requested`/`confirmed`. Effects: event `cancelled {by: "admin", reason, push_sent}`, push `cancelled`, audit `appointment.cancelled`; the slot is free again.
+
+`push_sent` on appointment events = the customer had an active push-enabled device at event time; the push itself is asynchronous (outbox `push.appointment`).
 
 ### 2.10 Dashboard and shell
 **`GET dashboard/`**
@@ -895,10 +932,10 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 | Orders | `order.cancelled`, `order.status_changed`, `order.shipment_retry_requested`, `refund.requested`, `refund.state_changed` (system) |
 | Catalog | `product.created`, `product.updated`, `product.image_added`, `product.image_deleted`, `product.images_reordered`, `billz.import_started`, `billz.import_finished`, `category.created`, `category.updated`, `category.deleted`, `category.reordered`, `banner.created`, `banner.updated`, `banner.deleted`, `banner.reordered` |
 | Loyalty | `cashback.adjusted`, `cashback.policy_version_created`, `cashback.policy_version_superseded` |
-| Notifications | `notification.created`, `notification_template.updated`, `segment.created`, `segment.updated`, `segment.deleted`, `segment.members_added`, `segment.member_removed` |
-| Appointments | `appointment.confirmed`, `appointment.rejected`, `appointment.attended` |
+| Notifications | `notification.created`, `notification_template.updated`, `segment.created`, `segment.updated`, `segment.deleted`, `segment.members_added`, `segment.member_removed`, `notification.push_dead` (system; a dead `push.order_status` / `push.appointment` / `campaign.send_batch` message: `{topic, dedupe_key, attempts, last_error, customer_id, campaign_id}`) |
+| Appointments | `appointment.confirmed`, `appointment.rejected`, `appointment.attended`, `appointment.created`, `appointment.rescheduled` (`{…, from_start, from_end, reschedule_no}`), `appointment.cancelled` (`{…, reason}`) |
 | Shell | `settings.updated`, `export.downloaded` |
-| Django admin (editable models) | `<model>.created`, `<model>.updated`, `<model>.deleted` for `location`, `professional`, `service`, `professional_service`, `working_hours`, `blocked_period` |
+| Django admin (editable models) | `<model>.created`, `<model>.updated`, `<model>.deleted` for `location`, `professional`, `service`, `professional_service`, `working_hours`, `blocked_period`; `working_hours_override.created`, `working_hours_override.updated` |
 
 ---
 

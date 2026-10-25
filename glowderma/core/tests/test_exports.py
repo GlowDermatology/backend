@@ -31,6 +31,22 @@ def test_csv_formula_injection_neutralized() -> None:
         assert safe_cell(prefix + "value") == "'" + prefix + "value"
 
 
+def test_e164_phones_are_exempt_from_the_formula_prefix() -> None:
+    assert safe_cell("+998901234567") == "+998901234567"
+    assert safe_cell("+12025550123") == "+12025550123"
+    # Anything else starting with "+" is still neutralised: operators, letters, too short/long, leading zero.
+    for value in (
+        "+998901234567+1",
+        "+1+1",
+        "+998 90 123 45 67",
+        "+12345",
+        "+0998901234567",
+        "+9" * 9,
+        "+cmd",
+    ):
+        assert safe_cell(value) == "'" + value, value
+
+
 def test_xlsx_cells_are_text() -> None:
     workbook = load_workbook(
         BytesIO(render_xlsx([["=1+1", "+998901234567", 100]], ["name", "phone", "amount"], "test"))
@@ -38,6 +54,7 @@ def test_xlsx_cells_are_text() -> None:
     sheet = workbook.active
     assert sheet["A2"].data_type == sheet["B2"].data_type == "s"
     assert sheet["A2"].value == "'=1+1"
+    assert sheet["B2"].value == "+998901234567"  # a text cell holding plain E.164 (contract 1.8)
     assert sheet["C2"].data_type == "n"
     workbook.close()
 

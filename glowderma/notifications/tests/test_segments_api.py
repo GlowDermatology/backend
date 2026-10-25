@@ -282,8 +282,8 @@ def test_members_list_add_remove(staff_client: APIClient, staff: StaffUser, cloc
         '"Balans (so‘m)";"Holat"'
     )
     assert (
-        # core.exports.safe_cell prefixes every string cell starting with "+" (phones included)
-        lines[3] == f'"{by_rule.pk}";"Malika Karimova";"\'+998901234567";"2025-03-12 10:20";'
+        # contract 1.8: phones are plain E.164 text (exempt from the formula prefix)
+        lines[3] == f'"{by_rule.pk}";"Malika Karimova";"+998901234567";"2025-03-12 10:20";'
         f'"{lifetime(by_rule)}";"";"0";"Faol"'
     )
 

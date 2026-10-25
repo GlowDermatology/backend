@@ -1,4 +1,5 @@
 import csv
+import re
 from collections.abc import Iterable, Sequence
 from datetime import datetime
 from io import BytesIO, StringIO
@@ -17,9 +18,15 @@ from rest_framework.throttling import SimpleRateThrottle
 from glowderma.core import audit, timeutils
 from glowderma.core.throttling import rate_for
 
+# A phone in E.164 (``+`` then digits only) cannot carry a formula, and contract 1.8 wants phones as plain
+# E.164 text: it is the one string exempt from the leading apostrophe.
+_E164 = re.compile(r"\+[1-9]\d{6,14}")
+
 
 def safe_cell(value: Any) -> Any:
     if isinstance(value, str) and value.startswith(("=", "+", "-", "@", "\t", "\r")):
+        if _E164.fullmatch(value):
+            return value
         return "'" + value
     return value
 
