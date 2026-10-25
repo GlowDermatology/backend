@@ -132,6 +132,10 @@ def test_store_sales_vector() -> None:
 
 def test_seed_records_the_store_sales_through_the_service(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SEED_ADMIN_PASSWORD", raising=False)
+    # the standalone run: once the commerce seeder (B5) is registered it replays the store sales instead
+    monkeypatch.setattr(
+        seeding, "_registry", {name: row for name, row in seeding._registry.items() if name != "commerce"}
+    )
     accounts_seeds.seed_accounts(CONTEXT)
     seed_loyalty(CONTEXT)
     sales = seeds.store_sales()

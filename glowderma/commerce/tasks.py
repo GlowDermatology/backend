@@ -146,6 +146,12 @@ def on_bts_create_dead(message: OutboxMessage) -> None:
         order = services.lock_order(order_id)
         if order.status != enums.OrderStatus.PROCESSING:
             return
+        shipment = Shipment.objects.filter(order_id=order_id).first()
+        if shipment is None or shipment.create_message_id not in (None, message.pk):
+            return  # a newer create request owns the shipment now
+        dead = topics.DEAD_LETTER_ERROR_CODE
+        if shipment.state == Shipment.State.FAILED and shipment.last_error_code == dead:
+            return  # already recorded (the hook is idempotent)
         number = delivery_services.mark_failed(
             order_id,
             error_code=topics.DEAD_LETTER_ERROR_CODE,
