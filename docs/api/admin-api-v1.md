@@ -666,7 +666,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 
 **`GET notifications/meta/`**
 ```jsonc
-{"total_devices": 4751,                                     // push-enabled devices of active customers
+{"total_devices": 4751,                                     // active customers with ≥1 push-enabled device (one push each)
  "segments": [{"id": 1, "name": "Doimiy mijozlar", "size": 612}, {"id": 2, "name": "10 mln+ xarid", "size": 318}],
  "templates": [{"status": "processing",
                 "texts": {"uz": "To‘lov qabul qilindi. Buyurtma №{raqam} tayyorlanmoqda.", "ru": "…", "en": "…"},
@@ -704,7 +704,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 // Segment
 {"id": 1, "name": "Doimiy mijozlar",
  "rules": {"min_online_orders": 3, "min_lifetime_amount": null},   // null = rule off; non-null rules are ANDed
- "manual_member_count": 0, "member_count": 640, "size": 612,       // size = push-enabled devices of members
+ "manual_member_count": 0, "member_count": 640, "size": 612,       // size = members with ≥1 push-enabled device
  "created_at": "…", "updated_at": "…"}
 ```
 - **Membership** = active customer ∧ (all set rules match ∨ manual member). With no rules set, membership is manual only.
@@ -718,7 +718,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 - `POST segments/{id}/members/` `{"customer_ids": [int] ≤500}` → 200 Segment.
 - `DELETE segments/{id}/members/{customer_id}/` → 204. It removes manual membership only; a rule-only member → 409 `conflict` "Mijoz guruhga qoida orqali kiradi.".
 - `POST segments/{id}/members/`: `customer_ids` non-empty, ≤500, every id must exist (any status) — errors `customer_ids` `required` / `max_items` "Ko‘pi bilan 500 ta." / `does_not_exist`, a bad element `customer_ids.{i}` `invalid`. `DELETE …/members/{customer_id}/` for a customer who is neither a manual nor a rule member → 404.
-- `size` (and `notifications/meta/` `total_devices`) count one pushable device per customer (the most recently active one), the same rule the send uses.
+- `size` (and `notifications/meta/` `total_devices`) count reachable customers — active members with at least one push-enabled device — because a campaign sends one push per customer (to the most recently active device); each figure equals the `recipient_count` a campaign to that audience would get. A non-list or empty `customer_ids` answers `invalid` / `required`.
 - Audit `segment.*`.
 
 ### 2.9 Appointments
@@ -935,7 +935,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 | Notifications | `notification.created`, `notification_template.updated`, `segment.created`, `segment.updated`, `segment.deleted`, `segment.members_added`, `segment.member_removed`, `notification.push_dead` (system; a dead `push.order_status` / `push.appointment` / `campaign.send_batch` message: `{topic, dedupe_key, attempts, last_error, customer_id, campaign_id}`) |
 | Appointments | `appointment.confirmed`, `appointment.rejected`, `appointment.attended`, `appointment.created`, `appointment.rescheduled` (`{…, from_start, from_end, reschedule_no}`), `appointment.cancelled` (`{…, reason}`) |
 | Shell | `settings.updated`, `export.downloaded` |
-| Django admin (editable models) | `<model>.created`, `<model>.updated`, `<model>.deleted` for `location`, `professional`, `service`, `professional_service`, `working_hours`, `blocked_period`; `working_hours_override.created`, `working_hours_override.updated` |
+| Django admin (editable models) | `<model>.created`, `<model>.updated`, `<model>.deleted` for `location`, `professional`, `service`, `professional_service`, `working_hours`, `blocked_period`; `working_hours_override.created`, `working_hours_override.updated`, `working_hours_override.deleted` (the override is the seventh editable model, T13) |
 
 ---
 

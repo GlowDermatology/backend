@@ -1,10 +1,9 @@
 """Django admin for the professionals models (design 01 §11, 03 §8).
 
-The six models ``Location``, ``Professional``, ``Service``, ``ProfessionalService``, ``WorkingHours`` and
-``BlockedPeriod`` are the only editable ones in the whole Django admin; every write goes through
-:mod:`glowderma.professionals.services` (``save_model`` / ``delete_model`` / the weekly-hours inline on a
-professional), which validates and audits ``<model>.created|updated|deleted``. ``WorkingHoursOverride`` stays
-read-only in M1 (open point S-3).
+The seven models ``Location``, ``Professional``, ``Service``, ``ProfessionalService``, ``WorkingHours``,
+``WorkingHoursOverride`` (decision T13) and ``BlockedPeriod`` are the only editable ones in the whole Django
+admin; every write goes through :mod:`glowderma.professionals.services` (``save_model`` / ``delete_model`` /
+the weekly-hours inline on a professional), which validates and audits ``<model>.created|updated|deleted``.
 """
 
 from __future__ import annotations
@@ -18,7 +17,7 @@ from django.db import models
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.urls import reverse
 
-from glowderma.core.admin import register_read_only
+from glowderma.core.admin import is_active_staff
 from glowderma.professionals import services
 from glowderma.professionals.models import (
     BlockedPeriod,
@@ -36,11 +35,6 @@ if TYPE_CHECKING:
 else:
     _ModelAdmin = admin.ModelAdmin
     _TabularInline = admin.TabularInline
-
-
-def _is_active_staff(request: HttpRequest) -> bool:
-    user = request.user
-    return bool(user.is_active and user.is_staff)
 
 
 class ServiceRefused(Exception):
@@ -97,19 +91,19 @@ class ServiceBackedAdmin(_ModelAdmin):
         return super().formfield_for_dbfield(db_field, request, **kwargs)
 
     def has_module_permission(self, request: HttpRequest) -> bool:
-        return _is_active_staff(request)
+        return is_active_staff(request)
 
     def has_view_permission(self, request: HttpRequest, obj: models.Model | None = None) -> bool:
-        return _is_active_staff(request)
+        return is_active_staff(request)
 
     def has_add_permission(self, request: HttpRequest) -> bool:
-        return _is_active_staff(request)
+        return is_active_staff(request)
 
     def has_change_permission(self, request: HttpRequest, obj: models.Model | None = None) -> bool:
-        return _is_active_staff(request)
+        return is_active_staff(request)
 
     def has_delete_permission(self, request: HttpRequest, obj: models.Model | None = None) -> bool:
-        return _is_active_staff(request)
+        return is_active_staff(request)
 
     def get_form(
         self, request: HttpRequest, obj: models.Model | None = None, change: bool = False, **kwargs: Any
@@ -197,16 +191,16 @@ class WorkingHoursInline(_TabularInline):
         return super().formfield_for_dbfield(db_field, request, **kwargs)
 
     def has_view_permission(self, request: HttpRequest, obj: models.Model | None = None) -> bool:
-        return _is_active_staff(request)
+        return is_active_staff(request)
 
     def has_add_permission(self, request: HttpRequest, obj: models.Model | None = None) -> bool:
-        return _is_active_staff(request)
+        return is_active_staff(request)
 
     def has_change_permission(self, request: HttpRequest, obj: models.Model | None = None) -> bool:
-        return _is_active_staff(request)
+        return is_active_staff(request)
 
     def has_delete_permission(self, request: HttpRequest, obj: models.Model | None = None) -> bool:
-        return _is_active_staff(request)
+        return is_active_staff(request)
 
 
 @admin.register(Location)
@@ -275,10 +269,16 @@ class BlockedPeriodAdmin(ServiceBackedAdmin):
         super().save_model(request, obj, form, change)
 
 
-register_read_only(
-    WorkingHoursOverride,
-    list_display=("id", "professional", "date", "start", "end", "created_by"),
-    search_fields=("professional__name",),
-    ordering=("-date", "id"),
-    raw_id_fields=("professional", "created_by"),
-)
+@admin.register(WorkingHoursOverride)
+class WorkingHoursOverrideAdmin(ServiceBackedAdmin):
+    """A date's own hours (both empty = day off); one row per professional and date (T13)."""
+
+    list_display = ("id", "professional", "date", "start", "end", "created_by")
+    search_fields = ("professional__name",)
+    ordering = ("-date", "id")
+    raw_id_fields = ("professional",)
+
+    def save_model(self, request: HttpRequest, obj: models.Model, form: Any, change: bool) -> None:
+        if not change:
+            obj.created_by = request.user  # type: ignore[attr-defined]
+        super().save_model(request, obj, form, change)

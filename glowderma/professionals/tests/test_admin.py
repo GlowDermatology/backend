@@ -1,4 +1,4 @@
-"""Design 01 §11 / 03 §8: six professionals models are editable through the services; the override is not."""
+"""Design 01 §11 / 03 §8 + T13: seven professionals models are editable, every write through the services."""
 
 from datetime import time
 
@@ -9,7 +9,6 @@ from django.test import Client, RequestFactory
 from django.urls import reverse
 
 from glowderma.accounts.tests.factories import StaffUserFactory
-from glowderma.core.admin import ReadOnlyAdmin
 from glowderma.core.models import AuditEntry
 from glowderma.professionals.admin import ServiceBackedAdmin
 from glowderma.professionals.models import (
@@ -33,7 +32,15 @@ from glowderma.professionals.tests.factories import (
 
 pytestmark = pytest.mark.django_db
 
-EDITABLE = [Location, Professional, Service, ProfessionalService, WorkingHours, BlockedPeriod]
+EDITABLE = [
+    Location,
+    Professional,
+    Service,
+    ProfessionalService,
+    WorkingHours,
+    WorkingHoursOverride,
+    BlockedPeriod,
+]
 
 
 @pytest.mark.parametrize("model", EDITABLE)
@@ -53,9 +60,9 @@ def test_editable_models_use_the_service_backed_admin(model: type[models.Model])
     assert not model_admin.has_change_permission(request)
 
 
-def test_override_stays_read_only() -> None:
+def test_override_is_editable_through_the_services() -> None:
     model_admin = admin.site._registry[WorkingHoursOverride]
-    assert isinstance(model_admin, ReadOnlyAdmin)
+    assert isinstance(model_admin, ServiceBackedAdmin)
     assert model_admin.list_display == ("id", "professional", "date", "start", "end", "created_by")
     assert admin.site._registry[Professional].list_filter == ("role", "is_active")
 
@@ -86,7 +93,8 @@ def test_changelists_and_change_pages_render() -> None:
         assert client.get(reverse(f"admin:{meta.app_label}_{meta.model_name}_changelist")).status_code == 200
         change = client.get(reverse(f"admin:{meta.app_label}_{meta.model_name}_change", args=[row.pk]))
         assert change.status_code == 200
-    assert client.post(reverse("admin:professionals_workinghoursoverride_add"), {}).status_code == 403
+    # T13: the override is editable; an empty add form is re-rendered with errors, not refused.
+    assert client.post(reverse("admin:professionals_workinghoursoverride_add"), {}).status_code == 200
     search = client.get(reverse("admin:professionals_professional_changelist"), {"q": link.professional.name})
     assert search.status_code == 200 and link.professional.name.encode() in search.content
 
@@ -388,3 +396,26 @@ def test_a_refused_delete_redirects_to_the_change_page_with_the_error(
     assert response["Location"] == reverse("admin:professionals_service_change", args=[service.pk])
     assert flashed(response) == [("error", services.PROTECTED_MESSAGE)]
     assert Service.objects.filter(pk=service.pk).exists()
+
+
+def test_override_add_and_delete_are_audited() -> None:
+    from datetime import date, time
+
+    from glowderma.core.models import AuditEntry
+
+    client = staff_client()
+    professional = ProfessionalFactory.create()
+    response = client.post(
+        reverse("admin:professionals_workinghoursoverride_add"),
+        {"professional": professional.pk, "date": "2026-11-02", "start": "10:00", "end": "15:00", "note": ""},
+    )
+    assert response.status_code == 302, response.content
+    row = WorkingHoursOverride.objects.get(professional=professional, date=date(2026, 11, 2))
+    assert (row.start, row.end) == (time(10), time(15)) and row.created_by is not None
+    assert AuditEntry.objects.filter(action="working_hours_override.created", entity_id=str(row.pk)).exists()
+    response = client.post(
+        reverse("admin:professionals_workinghoursoverride_delete", args=[row.pk]), {"post": "yes"}
+    )
+    assert response.status_code == 302
+    assert not WorkingHoursOverride.objects.filter(pk=row.pk).exists()
+    assert AuditEntry.objects.filter(action="working_hours_override.deleted", entity_id=str(row.pk)).exists()
