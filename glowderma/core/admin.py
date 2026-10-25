@@ -43,9 +43,15 @@ def _is_active_staff(request: HttpRequest) -> bool:
 
 
 class ReadOnlyAdmin(_ModelAdmin):
-    """View-only ``ModelAdmin``: JSON fields render as preformatted text, nothing can be written."""
+    """View-only ``ModelAdmin``: JSON fields render as preformatted text, nothing can be written.
+
+    Large tables (ledger, events, inbox) are the norm, so pages are short and the changelist never runs the
+    full ``COUNT(*)``.
+    """
 
     actions = None
+    list_per_page = 50
+    show_full_result_count = False
 
     def __init__(self, model: type[models.Model], admin_site: admin.AdminSite) -> None:
         super().__init__(model, admin_site)

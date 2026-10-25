@@ -9,10 +9,10 @@ from django.db import IntegrityError
 from glowderma.accounts.tests.factories import StaffUserFactory
 from glowderma.catalog import seeds
 from glowderma.catalog.models import Category, Product, ProductImage, ProductStock
-from glowderma.catalog.seeds import MockRandom, build_catalog, seed_catalog
+from glowderma.catalog.seeds import build_catalog, seed_catalog
 from glowderma.catalog.tests.factories import ProductFactory
 from glowderma.core import enums, seeding
-from glowderma.core.seeding import SeedContext
+from glowderma.core.seeding import MockRandom, SeedContext
 from glowderma.core.timeutils import TASHKENT
 
 ANCHOR = datetime.fromisoformat(seeding.DEFAULT_ANCHOR)

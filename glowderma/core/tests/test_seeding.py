@@ -167,33 +167,30 @@ def test_reset_sequences_returns_empty_tables_to_their_start() -> None:
 
 
 @pytest.mark.django_db
-def test_seed_demo_command_runs_and_validates_anchor(isolated_registry: None) -> None:
-    # The command re-discovers the real seeders; this test only checks the command's own behaviour, so the
-    # discovered seeders are replaced by a probe after discovery.
+def test_seed_demo_command_runs_and_validates_anchor(
+    isolated_registry: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The command re-discovers the real seeders (the full dataset is exercised by the module seeder tests and
+    # the wave-4 end-to-end test); here only the command's own behaviour matters, so discovery is replaced by
+    # a probe registration. The command imports the name, hence the patch on the command module.
     seen: list[SeedContext] = []
 
     def probe(context: SeedContext) -> None:
         seen.append(context)
 
-    real_discover = seeding.discover_seeders
-
-    def discover_then_probe() -> list[str]:
-        found = real_discover()
-        seeding._registry.clear()
+    def discover_probe() -> list[str]:
         seeding._registry["probe"] = (1, probe)
-        return found
+        return ["probe.seeds"]
 
-    seeding.discover_seeders = discover_then_probe
-    try:
-        out = StringIO()
-        with pytest.raises(CommandError, match="--force"):
-            call_command("seed_demo", stdout=out)  # pytest-django runs with DEBUG=False
-        call_command("seed_demo", force=True, stdout=out)
-        assert "Sequences re-synced" in out.getvalue()
-        assert len(seen) == 1 and seen[0].anchor == ANCHOR and seen[0].keep_open
-        with pytest.raises(CommandError, match="timezone offset"):
-            call_command("seed_demo", anchor="2026-10-24T12:05:00", force=True)
-        with pytest.raises(CommandError, match="ISO 8601"):
-            call_command("seed_demo", anchor="soon", force=True)
-    finally:
-        seeding.discover_seeders = real_discover
+    monkeypatch.setattr("glowderma.core.management.commands.seed_demo.discover_seeders", discover_probe)
+    out = StringIO()
+    with pytest.raises(CommandError, match="--force"):
+        call_command("seed_demo", stdout=out)  # pytest-django runs with DEBUG=False
+    call_command("seed_demo", force=True, stdout=out)
+    assert "Sequences re-synced" in out.getvalue()
+    assert "Imported 1 seed module(s); ran: probe" in out.getvalue()
+    assert len(seen) == 1 and seen[0].anchor == ANCHOR and seen[0].keep_open
+    with pytest.raises(CommandError, match="timezone offset"):
+        call_command("seed_demo", anchor="2026-10-24T12:05:00", force=True)
+    with pytest.raises(CommandError, match="ISO 8601"):
+        call_command("seed_demo", anchor="soon", force=True)

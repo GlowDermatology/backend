@@ -10,68 +10,23 @@ sequences afterwards.
 
 from __future__ import annotations
 
-import math
-from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from hashlib import sha256
-from io import BytesIO
-from typing import TypeVar
 
 from django.core.files.base import ContentFile
 from django.db import transaction
-from PIL import Image, ImageDraw
 
 from glowderma.accounts.models import StaffUser
 from glowderma.catalog.models import Category, Product, ProductImage, ProductStock
 from glowderma.core import enums
 from glowderma.core.images import process_image
 from glowderma.core.media import media_name
-from glowderma.core.seeding import SeedContext, register_seeder
+from glowderma.core.seeding import MockRandom, SeedContext, placeholder_art, register_seeder
 from glowderma.core.timeutils import TASHKENT
-
-T = TypeVar("T")
 
 SEED_ADMIN_EMAIL = "admin@glowderma.uz"
 TOTAL_PRODUCTS = 248
-_MASK = 0xFFFFFFFF
-
-
-class MockRandom:
-    """Port of the frontend's ``createRandom`` (mulberry32 with JavaScript 32-bit semantics).
-
-    ``Math.imul`` is a 32-bit multiply, ``>>>`` a logical shift and ``|``/``^`` operate on the 32-bit pattern,
-    so every intermediate is masked to 32 bits; the final division by 2**32 is exact in IEEE doubles on both
-    sides, which makes ``int``/``pick``/``chance``/``shuffle`` return the same values as the TypeScript.
-    """
-
-    def __init__(self, seed: int) -> None:
-        self.state = seed & _MASK
-
-    def next(self) -> float:
-        self.state = (self.state + 0x6D2B79F5) & _MASK
-        t = self.state
-        t = ((t ^ (t >> 15)) * (t | 1)) & _MASK
-        t ^= (t + (((t ^ (t >> 7)) * (t | 61)) & _MASK)) & _MASK
-        return ((t ^ (t >> 14)) & _MASK) / 4294967296
-
-    def int(self, low: int, high: int) -> int:
-        return low + math.floor(self.next() * (high - low + 1))
-
-    def chance(self, probability: float) -> bool:
-        return self.next() < probability
-
-    def pick(self, items: Sequence[T]) -> T:
-        return items[math.floor(self.next() * len(items))]
-
-    def shuffle(self, items: Sequence[T]) -> list[T]:
-        copy = list(items)
-        for i in range(len(copy) - 1, 0, -1):
-            j = math.floor(self.next() * (i + 1))
-            copy[i], copy[j] = copy[j], copy[i]
-        return copy
-
-
 # --- categories (03 §7.5; uz labels = CATEGORY_LABEL in the frontend, ru/en invented) -----------------------
 
 CATEGORIES: tuple[tuple[str, str, str, str], ...] = (
@@ -488,38 +443,6 @@ def build_catalog() -> list[ProductSpec]:
         spec.art = None
         spec.uz = spec.ru = spec.en = Texts()
     return [*fixed, *generated]
-
-
-# --- placeholder art ----------------------------------------------------------------------------------------
-
-_ART_COLOURS: dict[str, tuple[int, int, int]] = {
-    "dropper": (214, 178, 196),
-    "box": (226, 206, 186),
-    "texture": (239, 226, 220),
-    "tube": (178, 206, 214),
-    "pump": (188, 214, 196),
-    "jar": (226, 196, 176),
-    "toner": (196, 206, 226),
-}
-_TONE_COLOURS: dict[str, tuple[int, int, int]] = {
-    "default": (255, 255, 255),
-    "night": (52, 48, 86),
-    "dark-cap": (48, 48, 52),
-}
-PLACEHOLDER_SIDE = 96
-
-
-def placeholder_art(kind: str, tone: str = "default") -> bytes:
-    """A small WebP per product-art kind/tone (the design's ``ctx.media_placeholder``)."""
-    background = _ART_COLOURS.get(kind, (220, 220, 220))
-    accent = _TONE_COLOURS.get(tone, _TONE_COLOURS["default"])
-    image = Image.new("RGB", (PLACEHOLDER_SIDE, PLACEHOLDER_SIDE), background)
-    draw = ImageDraw.Draw(image)
-    draw.rounded_rectangle((28, 20, 68, 84), radius=10, fill=accent)
-    draw.rectangle((36, 10, 60, 22), fill=accent)
-    output = BytesIO()
-    image.save(output, format="WEBP", quality=80, method=4)
-    return output.getvalue()
 
 
 # --- seeding ------------------------------------------------------------------------------------------------

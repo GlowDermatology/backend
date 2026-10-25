@@ -1443,7 +1443,7 @@ def filter_products_search(qs, raw: str):
     cond = Q(
         search_text__contains=Lower(Value(term))
     )  # LIKE '%' || lower('term') || '%' (Django escapes % _ \)
-    if term.isdigit():
+    if term.isascii() and term.isdigit() and len(term) <= 18:  # str.isdigit() also accepts "²"/"①", which int() rejects
         cond |= Q(id=int(term))  # a numeric term also matches id exactly
     return qs.filter(cond)
 ```
