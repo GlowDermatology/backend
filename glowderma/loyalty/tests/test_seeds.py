@@ -9,12 +9,13 @@ import pytest
 from django.contrib.auth import get_user_model
 
 from glowderma.accounts import seeds as accounts_seeds
+from glowderma.accounts.seeds import CustomerFacts
 from glowderma.core import seeding
 from glowderma.core.seeding import SeedContext, discover_seeders
 from glowderma.core.timeutils import TASHKENT
 from glowderma.loyalty import seeds
-from glowderma.loyalty.models import CashbackPolicy, CashbackTier
-from glowderma.loyalty.seeds import POLICY_VERSIONS, seed_loyalty
+from glowderma.loyalty.models import CashbackPolicy, CashbackTier, LedgerEntry, LoyaltyAccount, Purchase
+from glowderma.loyalty.seeds import POLICY_VERSIONS, STORE_SALE_SOLD_AT, seed_loyalty
 
 ANCHOR = datetime.fromisoformat(seeding.DEFAULT_ANCHOR)
 CONTEXT = SeedContext(anchor=ANCHOR, keep_open=True)
@@ -99,6 +100,7 @@ def test_seed_is_idempotent_and_runs_standalone(monkeypatch: pytest.MonkeyPatch)
     assert list(CashbackTier.objects.order_by("id").values_list("id", "policy_id", "from_amount")) == tiers
     assert list(CashbackPolicy.objects.order_by("version").values_list("author", flat=True)) == [None] * 3
     assert CashbackPolicy.objects.count() == 3 and CashbackTier.objects.count() == 6
+    assert not Purchase.objects.exists()  # no customers → no store sales, no error
 
 
 def test_seed_fills_only_the_missing_versions() -> None:
@@ -106,3 +108,65 @@ def test_seed_fills_only_the_missing_versions() -> None:
     seed_loyalty(CONTEXT)
     assert list(CashbackPolicy.objects.order_by("version").values_list("version", flat=True)) == [1, 2, 3]
     assert CashbackTier.objects.count() == 6
+
+
+# --- store sales of the generated customers (03 §7.7) ---
+
+
+def test_store_sales_vector() -> None:
+    sales = seeds.store_sales()
+    ids = [customer_id for customer_id, _, _ in sales]
+    assert 5 not in ids and 7 in ids and all(1 <= customer_id <= 426 for customer_id in ids)
+    assert ids == sorted(ids) and len(ids) == len(set(ids))
+    assert all(sale_id == f"S-{80_000 + customer_id * 7}" for customer_id, sale_id, _ in sales)
+    assert all(
+        amount % 50_000 == 0 and 0 < amount <= 3_000_000
+        for customer_id, _, amount in sales
+        if customer_id != 7
+    )
+    assert len(sales) == sum(1 for c in range(1, 427) if c != 5 and seeds.store_total(c) > 0)
+    assert seeds.store_total(7) == max(CustomerFacts(7).store_total, 2_000_000) >= 2_000_000
+    assert all(seeds.store_total(c) == CustomerFacts(c).store_total for c in range(1, 427) if c != 7)
+    assert seeds.store_sale_id(5) == "S-80035" and STORE_SALE_SOLD_AT == at(9, 5, 12)
+
+
+def test_seed_records_the_store_sales_through_the_service(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("SEED_ADMIN_PASSWORD", raising=False)
+    accounts_seeds.seed_accounts(CONTEXT)
+    seed_loyalty(CONTEXT)
+    sales = seeds.store_sales()
+    assert (
+        len(sales)
+        == Purchase.objects.count()
+        == LedgerEntry.objects.count()
+        == LoyaltyAccount.objects.count()
+    )
+    assert not Purchase.objects.filter(customer_id=5).exists()  # Malika's timeline belongs to B5
+    assert set(LoyaltyAccount.objects.values_list("customer_id", flat=True)) == {c for c, _, _ in sales}
+    # Javohir (7): max(store, 2 000 000) so order №10246 can spend 20 000
+    javohir = Purchase.objects.select_related("policy").get(customer_id=7)
+    assert (javohir.billz_sale_id, javohir.amount) == (
+        "S-80049",
+        max(CustomerFacts(7).store_total, 2_000_000),
+    )
+    assert LoyaltyAccount.objects.get(customer_id=7).balance == javohir.amount // 100 >= 20_000
+    # a generated customer: v2 (sold 2026-09-05), credit store // 100 at 1 %, every timestamp pinned
+    customer_id, sale_id, amount = next(row for row in sales if row[0] >= 13)
+    purchase = Purchase.objects.select_related("policy", "credited_entry").get(billz_sale_id=sale_id)
+    assert purchase.policy is not None and purchase.credited_entry is not None
+    assert (purchase.customer_id, purchase.billz_sale_ref, purchase.amount, purchase.source, purchase.cashback_paid) == (customer_id, sale_id, amount, "store_qr", 0)  # fmt: skip  # noqa: E501
+    assert (purchase.at, purchase.created_at, purchase.updated_at, purchase.policy.version, purchase.lifetime_before) == (STORE_SALE_SOLD_AT, STORE_SALE_SOLD_AT, STORE_SALE_SOLD_AT, 2, 0)  # fmt: skip  # noqa: E501
+    assert purchase.cashback_amount == amount // 100 and not purchase.reversed
+    entry = purchase.credited_entry
+    assert (entry.at, entry.amount, entry.balance_after, entry.percent, entry.base, entry.source_type, entry.source_ref, entry.promo_excluded) == (STORE_SALE_SOLD_AT, amount // 100, amount // 100, Decimal("1.00"), amount, "billz_sale", sale_id, False)  # fmt: skip  # noqa: E501
+    assert {p.policy_id for p in Purchase.objects.all()} == {CashbackPolicy.objects.get(version=2).pk}
+    assert not LoyaltyAccount.objects.filter(balance__lt=0).exists()
+    assert all(
+        a.balance == a.entries.get().amount for a in LoyaltyAccount.objects.prefetch_related("entries")
+    )
+    # idempotent: a second run (with either keep_open) adds nothing and rewrites nothing
+    before = list(Purchase.objects.order_by("id").values_list("id", "billz_sale_id", "cashback_amount", "updated_at"))  # fmt: skip  # noqa: E501
+    seed_loyalty(CONTEXT)
+    seed_loyalty(SeedContext(anchor=ANCHOR, keep_open=False))
+    assert list(Purchase.objects.order_by("id").values_list("id", "billz_sale_id", "cashback_amount", "updated_at")) == before  # fmt: skip  # noqa: E501
+    assert LedgerEntry.objects.count() == len(sales) and seeds._seed_store_sales() == 0

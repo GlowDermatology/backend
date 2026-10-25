@@ -25,7 +25,7 @@ CHECKS: dict[str, tuple[str, tuple[str, ...]]] = {
     # C1: balance == Σ entries
     "ledger_sum": (
         """
-        SELECT a.id, a.balance, COALESCE(SUM(e.amount), 0) AS ledger_sum
+        SELECT a.id, a.balance, COALESCE(SUM(e.amount), 0)::bigint AS ledger_sum
         FROM loyalty_loyaltyaccount a
         LEFT JOIN loyalty_ledgerentry e ON e.account_id = a.id
         GROUP BY a.id, a.balance

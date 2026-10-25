@@ -944,8 +944,9 @@ def _tier_errors(tiers: Sequence[TierBand]) -> tuple[dict[str, list[ErrorDetail]
         message = message or top
 
     if not tiers:
-        add("tiers", "min_items", MESSAGE_MIN_ITEMS, MESSAGE_MIN_ITEMS)
-        return errors, message
+        # ``min_items`` is a contract code of this endpoint only; core's registry has no entry for it yet
+        errors["tiers"] = [ErrorDetail(MESSAGE_MIN_ITEMS, code="min_items")]
+        return errors, MESSAGE_MIN_ITEMS
     for index, tier in enumerate(tiers):
         if tier.to_amount is not None and tier.to_amount <= tier.from_amount:
             add(f"tiers.{index}.to", "empty_range", MESSAGE_EMPTY_RANGE, MESSAGE_OVERLAP)
