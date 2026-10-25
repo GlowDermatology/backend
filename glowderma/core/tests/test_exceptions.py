@@ -381,6 +381,9 @@ def test_oauth_exchange_failed_is_400_envelope() -> None:
 
 
 def test_any_api_exception_subclass_default_code_reaches_the_envelope() -> None:
+    """Contract 1.6: the envelope ``code`` is the exception's ``default_code``; a project subclass raised bare
+    keeps its own Uzbek ``default_detail`` (only DRF's stock English defaults are swapped)."""
+
     class BillzDown(APIException):
         status_code = 503
         default_code = "billz_down"
@@ -389,11 +392,13 @@ def test_any_api_exception_subclass_default_code_reaches_the_envelope() -> None:
     response = exception_response(BillzDown())
     assert response.status_code == 503
     assert response.data["code"] == "billz_down"
-    # Default details outside MESSAGES fall back to the generic Uzbek text; explicit details are kept.
-    assert response.data["message"] == "Maydonlarni tekshiring."
+    assert response.data["message"] == "Billz javob bermadi."
+    assert response.data["errors"] == []
     assert exception_response(BillzDown("Billz 30 soniya javob bermadi.")).data["message"] == (
         "Billz 30 soniya javob bermadi."
     )
+    # Stock DRF exceptions without a MESSAGES entry still get the generic Uzbek fallback.
+    assert exception_response(NotAcceptable()).data["message"] == "Maydonlarni tekshiring."
 
 
 def test_social_account_not_allowed_is_401() -> None:
@@ -428,6 +433,14 @@ def test_generic_contract_field_codes_have_default_messages(code: str, message: 
     assert flatten_errors({"slug": [ErrorDetail(code, code=code), ErrorDetail("", code=code)]}) == [
         {"field": "slug", "code": code, "message": message}
     ]
+
+
+def test_unknown_field_code_is_rejected() -> None:
+    """A code outside FIELD_MESSAGES / ENDPOINT_FIELD_CODES is a typo the FE mapper would never match."""
+    with pytest.raises(ValueError, match="in_pastt"):
+        field_error("in_pastt", "Sana o‘tib ketgan.")
+    with pytest.raises(ValueError, match="made_up"):
+        field_error("made_up")
 
 
 def test_max_items_formats_the_limit() -> None:

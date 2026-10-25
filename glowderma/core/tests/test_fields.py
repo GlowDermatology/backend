@@ -194,7 +194,9 @@ class TestQueryBooleanField:
 
 class TestI18nText:
     def test_nested_paths_and_uz_minimum(self) -> None:
-        """Contract 1.6 example: field "texts.uz.name", code "min_length"; 1.4: `{"uz","ru","en"}`."""
+        """Contract 1.4: i18n text is `{"uz","ru","en"}`; `i18n_text` is field-first (categories.name,
+        banners.title, notification-templates.texts), so paths flatten as `texts.name.uz`. The product
+        `texts` object of 2.3 is language-first (`texts.uz.name`) and needs its own serializer."""
 
         class NameSerializer(serializers.Serializer[dict[str, Any]]):
             name = i18n_text(120, uz_min_length=2)

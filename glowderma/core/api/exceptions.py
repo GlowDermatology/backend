@@ -95,8 +95,11 @@ def field_error(
     """An ``ErrorDetail`` with a contract code.
 
     Generic codes default to their ``FIELD_MESSAGES`` entry (``limit`` fills ``{limit}``); endpoint-specific
-    codes require an explicit ``message``.
+    codes require an explicit ``message``. Any other code is a typo: the frontend maps codes to UI, so an
+    invented one would ship silently.
     """
+    if code not in FIELD_MESSAGES and code not in ENDPOINT_FIELD_CODES:
+        raise ValueError(f"Unknown field code {code!r}")
     if message is None:
         template = FIELD_MESSAGES.get(code)
         if template is None:
@@ -252,6 +255,10 @@ def error_body(
     }
 
 
+def _is_stock_exception(exc: exceptions.APIException) -> bool:
+    return type(exc).__module__ == exceptions.__name__
+
+
 def _uses_default_detail(exc: exceptions.APIException) -> bool:
     detail, default = str(exc.detail), str(exc.default_detail)
     if detail == default:
@@ -296,7 +303,9 @@ def envelope_exception_handler(exc: Exception, context: dict[str, Any]) -> Respo
     if isinstance(exc, exceptions.APIException) and not isinstance(exc, exceptions.ValidationError):
         code = str(exc.get_codes())
         message = str(exc.detail)
-        if _uses_default_detail(exc):
+        # Swap DRF's English defaults (and anything with a MESSAGES entry) for the Uzbek text; a project
+        # subclass raised bare keeps its own default_detail instead of the generic "check the fields".
+        if _uses_default_detail(exc) and (code in MESSAGES or _is_stock_exception(exc)):
             message = MESSAGES.get(code, MESSAGES["validation_error"])
     if isinstance(exc, exceptions.ValidationError):
         code = "validation_error"
