@@ -1,8 +1,11 @@
 """The shared test infrastructure (factories and root conftest fixtures) works end to end."""
 
+import gc
+from datetime import timedelta
 from hashlib import sha256
 
 import pytest
+from django.core.exceptions import FieldDoesNotExist
 from rest_framework.test import APIClient
 
 from glowderma.accounts import services, tokens
@@ -13,6 +16,8 @@ from glowderma.accounts.tests.factories import (
     StaffUserFactory,
     raw_refresh,
 )
+from glowderma.core import timeutils
+from glowderma.core.api.exceptions import AuthFailed
 
 pytestmark = pytest.mark.django_db
 BASE = "/api/v1/admin/auth/"
@@ -36,6 +41,42 @@ def test_auth_session_factory_uses_the_service() -> None:
     assert session.audience == "staff" and session.staff is not None
     assert session.refresh_hash == sha256(raw_refresh(session).encode()).hexdigest()
     assert services.refresh_staff_session(raw_refresh(session)).pk == session.pk
+
+
+def test_auth_session_factory_honours_field_overrides(staff: StaffUser) -> None:
+    """Extra kwargs are written onto the row after the service call instead of being dropped."""
+    revoked_at = timeutils.now() - timedelta(minutes=1)
+    expires_at = timeutils.now() + timedelta(days=3)
+    session = AuthSessionFactory.create(
+        staff=staff,
+        device_label="phone",
+        revoked_at=revoked_at,
+        revoke_reason="logout",
+        absolute_expires_at=expires_at,
+    )
+    session.refresh_from_db()
+    assert session.staff_id == staff.pk and session.device_label == "phone"
+    assert (session.revoked_at, session.revoke_reason) == (revoked_at, "logout")
+    assert session.absolute_expires_at == expires_at
+    assert session.refresh_hash == sha256(raw_refresh(session).encode()).hexdigest()
+    with pytest.raises(AuthFailed):
+        services.refresh_staff_session(raw_refresh(session))
+
+
+def test_auth_session_factory_rejects_unknown_fields() -> None:
+    with pytest.raises(FieldDoesNotExist):
+        AuthSessionFactory.create(bogus=1)
+    assert not AuthSession.objects.exists()
+
+
+def test_raw_refresh_survives_refetch_after_the_instance_is_gone() -> None:
+    session = AuthSessionFactory.create()
+    pk, token = session.pk, raw_refresh(session)
+    del session
+    gc.collect()
+    refetched = AuthSession.objects.get(pk=pk)
+    assert raw_refresh(refetched) == token
+    assert services.refresh_staff_session(token).pk == pk
 
 
 def test_staff_fixtures(staff: StaffUser, staff_session: tuple[AuthSession, str], staff_token: str) -> None:

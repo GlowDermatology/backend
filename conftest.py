@@ -50,7 +50,11 @@ def staff_token(staff_session: tuple[AuthSession, str]) -> str:
 
 @pytest.fixture
 def admin_client(staff_token: str) -> APIClient:
-    """A JSON ``APIClient`` sending ``Authorization: Bearer`` and ``X-GD-Internal-Secret`` for ``staff``."""
+    """A JSON ``APIClient`` sending ``Authorization: Bearer`` and ``X-GD-Internal-Secret`` for ``staff``.
+
+    This deliberately replaces pytest-django's ``admin_client`` (a Django ``Client`` logged into the
+    Django admin); for ``/django-admin/`` pages build a ``django.test.Client`` and ``force_login``.
+    """
     client = _json_client()
     client.credentials(
         HTTP_AUTHORIZATION=f"Bearer {staff_token}", HTTP_X_GD_INTERNAL_SECRET=settings.INTERNAL_API_SECRET

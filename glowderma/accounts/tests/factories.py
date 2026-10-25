@@ -5,8 +5,8 @@ that need the raw refresh token of a factory-made session read it with :func:`ra
 Call the factories as ``StaffUserFactory.create(...)``: the typed ``create`` returns the model.
 """
 
+import uuid
 from typing import Any
-from weakref import WeakKeyDictionary
 
 from factory.base import Factory
 from factory.declarations import Sequence, SubFactory
@@ -18,7 +18,9 @@ from glowderma.accounts.models import AuthSession, StaffUser
 
 TEST_PASSWORD = "Saffron!Harbor-Long72"  # noqa: S105
 
-_refresh_tokens: WeakKeyDictionary[AuthSession, str] = WeakKeyDictionary()
+# Keyed by primary key, so the token stays readable for any instance of that session (a re-fetched
+# row, a ``refresh_from_db`` copy) regardless of whether the original object is still alive.
+_refresh_tokens: dict[uuid.UUID, str] = {}
 
 
 class StaffUserFactory(DjangoModelFactory[StaffUser]):
@@ -39,7 +41,12 @@ class StaffUserFactory(DjangoModelFactory[StaffUser]):
 
 
 class AuthSessionFactory(Factory[AuthSession]):
-    """A staff session started through ``services.start_staff_session`` (never a raw ``create``)."""
+    """A staff session started through ``services.start_staff_session`` (never a raw ``create``).
+
+    ``staff`` and ``device_label`` go to the service; every other kwarg (``revoked_at``,
+    ``absolute_expires_at``, ``last_used_at``, ...) is written onto the row afterwards, so overrides
+    are honoured and an unknown field name raises ``FieldDoesNotExist`` instead of being dropped.
+    """
 
     class Meta:
         model = AuthSession
@@ -49,11 +56,18 @@ class AuthSessionFactory(Factory[AuthSession]):
 
     @classmethod
     def _create(cls, model_class: type[AuthSession], *args: Any, **kwargs: Any) -> AuthSession:
-        session, refresh = services.start_staff_session(kwargs["staff"], device_label=kwargs["device_label"])
-        _refresh_tokens[session] = refresh
+        staff = kwargs.pop("staff")
+        device_label = kwargs.pop("device_label")
+        for name in kwargs:
+            model_class._meta.get_field(name)  # unknown names raise FieldDoesNotExist before any write
+        session, refresh = services.start_staff_session(staff, device_label=device_label)
+        if kwargs:
+            model_class.objects.filter(pk=session.pk).update(**kwargs)
+            session.refresh_from_db()
+        _refresh_tokens[session.pk] = refresh
         return session
 
 
 def raw_refresh(session: AuthSession) -> str:
-    """The raw refresh token of a session made by ``AuthSessionFactory``."""
-    return _refresh_tokens[session]
+    """The raw refresh token of a session made by ``AuthSessionFactory`` (any instance with that pk)."""
+    return _refresh_tokens[session.pk]
