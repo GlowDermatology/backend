@@ -125,7 +125,8 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
 - Demo data: each module registers one idempotent seeder in `glowderma/<module>/seeds.py`
   (`core.seeding.register_seeder(name, order=…)`, orders accounts 10 · integrations 20 · site_config 30 · catalog 40 ·
   professionals 50 · loyalty 60 · commerce 70 · appointments 80 · notifications 90); `manage.py seed_demo` runs them in
-  one transaction and re-syncs the id sequences, so design rows are inserted with their explicit ids. Shared helpers
+  one transaction and re-syncs the id sequences (`--reset` flushes first for repeatable demo/e2e runs; refused
+  under the production settings), so design rows are inserted with their explicit ids. Shared helpers
   live in `core.seeding` only — never re-port them: `MockRandom` (the frontend's `createRandom`, vectors pinned),
   `pinned_clock(instant)` / `ctx.at(instant)` for running services at a design instant, `placeholder_art(kind, tone)`
   / `ctx.media_placeholder` for image bytes. Seeders look rows up by natural keys, read the demo staff through

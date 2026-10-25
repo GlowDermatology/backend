@@ -3,6 +3,7 @@ from collections.abc import Iterator
 from datetime import datetime
 from io import BytesIO, StringIO
 from pathlib import Path
+from typing import Any
 
 import pytest
 from django.apps import apps
@@ -194,3 +195,31 @@ def test_seed_demo_command_runs_and_validates_anchor(
         call_command("seed_demo", anchor="2026-10-24T12:05:00", force=True)
     with pytest.raises(CommandError, match="ISO 8601"):
         call_command("seed_demo", anchor="soon", force=True)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_seed_demo_reset_flushes_then_seeds(
+    isolated_registry: None, monkeypatch: pytest.MonkeyPatch, settings: Any
+) -> None:
+    from django.contrib.auth import get_user_model
+
+    get_user_model().objects.create_user("leftover@glowderma.uz", "x" * 16)
+    AuditEntry.objects.create(actor_type="system", action="seed", entity_type="t", entity_id="1")
+    seen: list[int] = []
+
+    def discover_probe() -> list[str]:
+        seeding._registry["probe"] = (1, lambda context: seen.append(AuditEntry.objects.count()))
+        return ["probe.seeds"]
+
+    monkeypatch.setattr("glowderma.core.management.commands.seed_demo.discover_seeders", discover_probe)
+    out = StringIO()
+    call_command("seed_demo", reset=True, force=True, stdout=out)
+    assert "Database flushed." in out.getvalue()
+    assert seen == [0]  # the seeders ran on an empty database
+    assert not get_user_model().objects.filter(email="leftover@glowderma.uz").exists()
+    settings.SETTINGS_MODULE = "config.settings.production"
+    with pytest.raises(CommandError, match="production"):
+        call_command("seed_demo", reset=True, force=True)
+    settings.SETTINGS_MODULE = "config.settings.test"
+    with pytest.raises(CommandError, match="--force"):
+        call_command("seed_demo", reset=True)  # pytest-django runs with DEBUG=False: nothing is flushed
