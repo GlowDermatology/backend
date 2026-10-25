@@ -68,3 +68,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build -t glowderma-backend:ci .
+      - name: Production compose file resolves
+        run: |
+          cp deploy/env.production.example .env
+          docker compose -f compose.prod.yaml config --quiet
+      - name: Edge Caddyfile is valid
+        run: >-
+          docker run --rm -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro"
+          -e ACME_EMAIL=ci@example.com -e SITE_DOMAIN=example.com -e ADMIN_DOMAIN=admin.example.com
+          -e API_DOMAIN=api.example.com caddy:2.10.2-alpine
+          caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
