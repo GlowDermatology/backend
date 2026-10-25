@@ -14,7 +14,7 @@ from glowderma.appointments.models import Appointment
 from glowderma.appointments.tests.conftest import ANCHOR
 from glowderma.appointments.tests.factories import AppointmentFactory
 from glowderma.core.models import AuditEntry, IdempotencyRecord, OutboxMessage
-from glowderma.core.seeding import SeedContext
+from glowderma.core.seeding import SeedContext, reset_sequences
 from glowderma.core.timeutils import TASHKENT
 from glowderma.professionals import seeds as professionals_seeds
 from glowderma.professionals.models import Professional
@@ -337,3 +337,44 @@ def test_seeded_confirmations_went_through_the_service(seeded: None) -> None:
     assert entry.created_at == sardor.confirmed_at and entry.actor_id == 1
     assert not Appointment.objects.filter(start__date=date(2026, 10, 25)).exists()
     assert time(9, 0) <= Appointment.objects.get(pk=6).start.astimezone(TASHKENT).time()
+
+
+def test_meta_lists_active_specialists_with_their_bookable_services(
+    staff_client: APIClient, seeded: None
+) -> None:
+    response = staff_client.get(f"{BASE}meta/")
+    assert response.status_code == 200, response.content
+    body = response.json()
+    assert body["slot_step_min"] == 5
+    names = [specialist["name"] for specialist in body["specialists"]]
+    assert names == ["Nodira Rahimova", "Jasur Aliyev", "Dilnoza Yusupova"]
+    jasur = body["specialists"][1]
+    assert jasur["role"] == "dermatologist"
+    consultation = next(s for s in jasur["services"] if s["short_name"] == "Konsultatsiya")
+    assert consultation == {
+        "id": consultation["id"],
+        "name": "Dermatolog konsultatsiyasi",
+        "short_name": "Konsultatsiya",
+        "duration_min": 30,
+        "price": 120_000,
+    }
+    # Inactive links, inactive services and inactive specialists are not offered (the seeders insert explicit
+    # ids, so re-sync the sequences before the factories add rows).
+    reset_sequences()
+    jasur_row = Professional.objects.get(name="Jasur Aliyev")
+    link = ProfessionalServiceFactory.create(professional=jasur_row)
+    link.service.is_active = False
+    link.service.save()
+    inactive = ProfessionalServiceFactory.create(professional=jasur_row, is_active=False)
+    Professional.objects.filter(name="Dilnoza Yusupova").update(is_active=False)
+    body = staff_client.get(f"{BASE}meta/").json()
+    assert [s["name"] for s in body["specialists"]] == ["Nodira Rahimova", "Jasur Aliyev"]
+    offered = {s["id"] for specialist in body["specialists"] for s in specialist["services"]}
+    assert link.service_id not in offered and inactive.service_id not in offered
+
+
+def test_meta_runs_in_a_bounded_number_of_queries(
+    staff_client: APIClient, seeded: None, django_assert_max_num_queries: Any
+) -> None:
+    with django_assert_max_num_queries(8):
+        assert staff_client.get(f"{BASE}meta/").status_code == 200

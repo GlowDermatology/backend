@@ -10,10 +10,16 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime, time
 
-from django.db.models import QuerySet
+from django.db.models import Prefetch, QuerySet
 
 from glowderma.core import enums, timeutils
-from glowderma.professionals.models import BlockedPeriod, Professional, WorkingHours, WorkingHoursOverride
+from glowderma.professionals.models import (
+    BlockedPeriod,
+    Professional,
+    ProfessionalService,
+    WorkingHours,
+    WorkingHoursOverride,
+)
 
 # A block that runs to (or past) midnight is clipped to the last minute of the day: the FE parser accepts
 # ``HH:MM`` ≤ 23:59 only (design 01 §5.7, open point 11).
@@ -101,3 +107,21 @@ def day_schedules(day: date, professionals: QuerySet[Professional] | None = None
         day_blocks.sort(key=lambda b: (b.start, b.end))
         schedules.append(DaySchedule(professional=professional, working_hours=hours, blocks=day_blocks))
     return schedules
+
+
+def booking_catalogue() -> QuerySet[Professional]:
+    """Active professionals (by position, then name) with their active, bookable services prefetched.
+
+    ``bookable_links`` holds the professional's active ``ProfessionalService`` rows whose service is active,
+    ordered by the service position then name — what the admin booking dialog offers (contract §2.9 meta).
+    """
+    links = (
+        ProfessionalService.objects.filter(is_active=True, service__is_active=True)
+        .select_related("service")
+        .order_by("service__position", "service__name_uz", "service_id")
+    )
+    return (
+        Professional.objects.filter(is_active=True)
+        .order_by("position", "name", "id")
+        .prefetch_related(Prefetch("services", queryset=links, to_attr="bookable_links"))
+    )

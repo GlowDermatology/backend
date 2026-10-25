@@ -163,3 +163,25 @@ class AppointmentCancelSerializer(serializers.Serializer[dict[str, Any]]):
     """``POST appointments/{id}/cancel/``: optional ``reason`` (≤ 300), kept as the staff note."""
 
     reason = serializers.CharField(max_length=300, allow_blank=True, required=False, default="")
+
+
+class BookingServiceSerializer(serializers.Serializer[Any]):
+    """One bookable service of a specialist: the snapshot an admin booking would take (contract §2.9 meta)."""
+
+    id = serializers.IntegerField(source="service.pk")
+    name = serializers.CharField(source="service.name_uz")
+    short_name = serializers.CharField(source="service.short_name_uz")
+    duration_min = serializers.IntegerField()
+    price = serializers.IntegerField()
+
+
+class BookingSpecialistSerializer(serializers.Serializer[Any]):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+    role = serializers.ChoiceField(choices=enums.SpecialistRole.values)
+    services = BookingServiceSerializer(many=True, source="bookable_links")
+
+
+class AppointmentsMetaSerializer(serializers.Serializer[dict[str, Any]]):
+    specialists = BookingSpecialistSerializer(many=True)
+    slot_step_min = serializers.IntegerField()

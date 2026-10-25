@@ -352,6 +352,65 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
+  /api/v1/admin/appointments/meta/:
+    get:
+      operationId: admin_appointments_meta
+      description: 'What the admin booking dialog offers: active specialists (by position,
+        then name) with their active services (the duration and price a booking would
+        snapshot) and the slot grid in minutes.'
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentsMeta'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/admin/appointments/pending-summary/:
     get:
       operationId: admin_appointments_pending_summary
@@ -3635,6 +3694,18 @@ components:
         * `rejected` - rejected
         * `attended` - attended
         * `cancelled` - cancelled
+    AppointmentsMeta:
+      type: object
+      properties:
+        specialists:
+          type: array
+          items:
+            $ref: '#/components/schemas/BookingSpecialist'
+        slot_step_min:
+          type: integer
+      required:
+      - slot_step_min
+      - specialists
     AudienceTypeEnum:
       enum:
       - all
@@ -3867,6 +3938,45 @@ components:
       description: |-
         * `busy` - busy
         * `off` - off
+    BookingService:
+      type: object
+      description: 'One bookable service of a specialist: the snapshot an admin booking
+        would take (contract §2.9 meta).'
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        short_name:
+          type: string
+        duration_min:
+          type: integer
+        price:
+          type: integer
+      required:
+      - duration_min
+      - id
+      - name
+      - price
+      - short_name
+    BookingSpecialist:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        role:
+          $ref: '#/components/schemas/SpecialistRoleEnum'
+        services:
+          type: array
+          items:
+            $ref: '#/components/schemas/BookingService'
+      required:
+      - id
+      - name
+      - role
+      - services
     Category:
       type: object
       description: Contract §2.4 ``Category``; instances come from ``selectors.category_queryset()``.

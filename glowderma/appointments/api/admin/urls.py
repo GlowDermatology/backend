@@ -11,12 +11,14 @@ from .views import (
     AppointmentActionView,
     AppointmentCancelView,
     AppointmentRescheduleView,
+    AppointmentsMetaView,
     AppointmentsView,
     PendingSummaryView,
 )
 
 urlpatterns: list[URLPattern | URLResolver] = [
     path("appointments/", AppointmentsView.as_view(), name="admin-appointments"),
+    path("appointments/meta/", AppointmentsMetaView.as_view(), name="admin-appointments-meta"),
     path(
         "appointments/pending-summary/",
         PendingSummaryView.as_view(),

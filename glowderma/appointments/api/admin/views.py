@@ -17,6 +17,7 @@ from glowderma.appointments.api.admin.serializers import (
     AppointmentCreateSerializer,
     AppointmentItemSerializer,
     AppointmentRescheduleSerializer,
+    AppointmentsMetaSerializer,
     DayQuerySerializer,
     DayScheduleSerializer,
     PendingSummarySerializer,
@@ -25,6 +26,7 @@ from glowderma.appointments.models import Appointment
 from glowderma.core import enums, timeutils
 from glowderma.core.api.schema import ADMIN_ERRORS, IDEMPOTENCY_KEY_HEADER
 from glowderma.core.idempotency import idempotent
+from glowderma.professionals import selectors as professionals_selectors
 
 ACTION_PARAM = OpenApiParameter(
     name="action",
@@ -150,3 +152,21 @@ class AppointmentCancelView(AdminAPIView):
             pk, reason=serializer.validated_data["reason"], actor=request.user, request=request
         )
         return Response(_item(appointment))
+
+
+class AppointmentsMetaView(AdminAPIView):
+    @extend_schema(
+        operation_id="admin_appointments_meta",
+        description=(
+            "What the admin booking dialog offers: active specialists (by position, then name) with "
+            "their active services (the duration and price a booking would snapshot) and the slot grid "
+            "in minutes."
+        ),
+        responses={200: AppointmentsMetaSerializer, **ADMIN_ERRORS},
+    )
+    def get(self, request: Request) -> Response:
+        data = {
+            "specialists": list(professionals_selectors.booking_catalogue()),
+            "slot_step_min": services.SLOT_STEP_MIN,
+        }
+        return Response(AppointmentsMetaSerializer(data).data)
