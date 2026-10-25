@@ -1,15 +1,21 @@
-"""Demo cashback policy versions (design 03 §7.7, 02 §1.1): v1–v3 with their tiers.
+"""Demo loyalty data (design 03 §7.7, 02 §1.1, §4.5): policy versions v1–v3 and the generated store sales.
 
-Only the configuration rows are inserted here. Accounts, ledger entries, holds and purchases are **not**
-seeded by this slice: B4a/B5 replay them through ``loyalty.services`` (store sales, Malika's timeline, the
-deliberate negative balance of customer 13), so every balance chain comes out of production code paths.
+Wave 3 inserted only the configuration rows (policies and tiers). B4a adds the store purchases of the
+generated customers 13–426 and of the named customers 1–12 **except Malika (5)**: ``store =
+accounts.seeds.CustomerFacts(id).store_total`` (the mock's ``createRandom(id × 97)`` draw); when ``> 0`` the
+sale ``S-{80000 + id × 7}`` of that amount, sold 2026-09-05 12:00 Tashkent, is replayed through
+``loyalty.services.record_store_purchase`` under ``pinned_clock`` → one credit ``store // 100`` under v2
+(1 % below 20 M, basis before_purchase), exactly the mock's "Chek … so‘m · 1%" rows. Javohir (7) gets
+``max(store, 2 000 000)`` so that his order №10246 can spend 20 000 so'm of cashback (B5).
 
-Idempotent by ``version``. ``created_at`` is pinned to the design instants through
-``core.seeding.pinned_clock`` (so ``effective_from > created_at`` and the derived states reproduce: v1 and v2
-``expired``, v3 ``active`` at the anchor). v2/v3 are authored by the demo staff ``admin@glowderma.uz``
-(accounts.seed, id 1) read through ``get_user_model()``; when the admin is absent the author is ``NULL`` so
-the seeder runs standalone. The run is anchor-independent: every timestamp is an absolute design date, and
-``keep_open`` has nothing to move here.
+Malika's whole timeline and the deliberate negative balance of customer 13 (03 §7.7) are **not** seeded here:
+the commerce seeder (B5) replays them in chronological order through ``loyalty.services`` together with the
+orders, so every ``balance_after`` chain comes out of production code paths.
+
+Idempotent: policies by ``version``, sales by ``billz_sale_id`` (the service itself is idempotent; the
+seeder also skips the sales already present). Every timestamp is a pinned design instant, so the run is
+anchor-independent and ``keep_open`` has nothing to move. A missing lower-layer row (no demo admin, no
+customers) is tolerated: the author is ``NULL`` and absent customers are skipped (standalone run).
 """
 
 from __future__ import annotations
@@ -21,13 +27,21 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.db import transaction
 
-from glowderma.accounts.models import StaffUser
+from glowderma.accounts.models import Customer, StaffUser
+from glowderma.accounts.seeds import MALIKA_ID, CustomerFacts
 from glowderma.core import enums
 from glowderma.core.seeding import SeedContext, pinned_clock, register_seeder
 from glowderma.core.timeutils import TASHKENT
-from glowderma.loyalty.models import CashbackPolicy, CashbackTier
+from glowderma.loyalty import services
+from glowderma.loyalty.models import CashbackPolicy, CashbackTier, Purchase
 
 SEED_ADMIN_EMAIL = "admin@glowderma.uz"
+STORE_SALE_CUSTOMER_IDS = range(
+    1, 427
+)  # named 1–12 (except Malika) and generated 13–426; 427–432 are deleted
+STORE_SALE_SOLD_AT = datetime(2026, 9, 5, 12, 0, tzinfo=TASHKENT)  # under v2: 1 % below 20 M
+JAVOHIR_ID = 7
+JAVOHIR_MIN_STORE_TOTAL = 2_000_000  # order №10246 spends 20 000 so'm of cashback (03 §7.7)
 
 
 def _dt(month: int, day: int, hour: int = 0, minute: int = 0) -> datetime:
@@ -73,6 +87,60 @@ def _insert(spec: PolicySpec, admin: StaffUser | None) -> CashbackPolicy:
     return policy
 
 
+def store_sale_id(customer_id: int) -> str:
+    """The Billz document number of the seeded store sale of a customer (``S-{80000 + id × 7}``)."""
+    return f"S-{80_000 + customer_id * 7}"
+
+
+def store_total(customer_id: int) -> int:
+    """The mock's store total of a customer (03 §7.7), with Javohir's floor applied."""
+    total = CustomerFacts(customer_id).store_total
+    if customer_id == JAVOHIR_ID:
+        total = max(total, JAVOHIR_MIN_STORE_TOTAL)
+    return total
+
+
+def store_sales() -> list[tuple[int, str, int]]:
+    """``(customer_id, billz_sale_id, amount)`` of every seeded store sale (amount > 0, Malika excluded)."""
+    rows: list[tuple[int, str, int]] = []
+    for customer_id in STORE_SALE_CUSTOMER_IDS:
+        if customer_id == MALIKA_ID:
+            continue
+        amount = store_total(customer_id)
+        if amount > 0:
+            rows.append((customer_id, store_sale_id(customer_id), amount))
+    return rows
+
+
+def _seed_store_sales() -> int:
+    """Replay the missing store sales through the service; returns how many were recorded this run."""
+    sales = store_sales()
+    present = set(
+        Purchase.objects.filter(billz_sale_id__in=[sale_id for _, sale_id, _ in sales]).values_list(
+            "billz_sale_id", flat=True
+        )
+    )
+    customers = set(
+        Customer.objects.filter(pk__in=[customer_id for customer_id, _, _ in sales]).values_list(
+            "pk", flat=True
+        )
+    )
+    recorded = 0
+    with pinned_clock(STORE_SALE_SOLD_AT):
+        for customer_id, sale_id, amount in sales:
+            if sale_id in present or customer_id not in customers:
+                continue
+            result = services.record_store_purchase(
+                customer_id,
+                billz_sale_id=sale_id,
+                billz_sale_ref=sale_id,
+                amount=amount,
+                sold_at=STORE_SALE_SOLD_AT,
+            )
+            recorded += int(result.created)
+    return recorded
+
+
 @register_seeder("loyalty", order=60)
 def seed_loyalty(context: SeedContext) -> None:
     admin: StaffUser | None = get_user_model().objects.filter(email=SEED_ADMIN_EMAIL).first()
@@ -82,3 +150,4 @@ def seed_loyalty(context: SeedContext) -> None:
             if spec.version in existing:
                 continue
             _insert(spec, admin)
+        _seed_store_sales()
