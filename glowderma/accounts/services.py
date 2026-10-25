@@ -3,15 +3,25 @@ import secrets
 import uuid
 from collections.abc import Iterable
 from datetime import timedelta
+from decimal import Decimal
 from typing import Any
 
 from django.conf import settings
+from django.contrib.auth.hashers import check_password, make_password
 from django.core.cache import cache
 from django.db import IntegrityError, transaction
 from rest_framework.exceptions import NotFound
 
-from glowderma.accounts.models import AuthSession, SocialIdentity, StaffUser
-from glowderma.core import audit, timeutils
+from glowderma.accounts.models import (
+    Address,
+    AuthSession,
+    Customer,
+    CustomerSocialIdentity,
+    Device,
+    SocialIdentity,
+    StaffUser,
+)
+from glowderma.core import audit, enums, timeutils
 from glowderma.core.api.exceptions import AuthFailed, Conflict
 from glowderma.integrations.oauth.ports import SocialClaims
 
@@ -281,3 +291,148 @@ def unlink_identity(user: StaffUser, provider: str, *, request: Any = None) -> N
         request=request,
         after={"provider": provider, "subject": subject},
     )
+
+
+# --- customers (design 01 §1.1–§1.5: the model invariants B2 needs; the M2 API builds on them) ---
+
+
+def _sync_address_text(customer_id: int) -> str:
+    """``Customer.address_text`` = the default address, else the most recently updated one, else ``""``."""
+    address = (
+        Address.objects.filter(customer_id=customer_id).order_by("-is_default", "-updated_at", "-id").first()
+    )
+    text = address.text if address is not None else ""
+    Customer.objects.filter(pk=customer_id).update(address_text=text, updated_at=timeutils.now())
+    return text
+
+
+@transaction.atomic
+def add_address(
+    customer_id: int,
+    *,
+    text: str,
+    label: str = "",
+    is_default: bool = False,
+    region_code: str = "",
+    city_code: str = "",
+    comment: str = "",
+    latitude: Decimal | None = None,
+    longitude: Decimal | None = None,
+) -> Address:
+    """Create an address of the customer and recompute the denormalised ``address_text``.
+
+    The first address of a customer always becomes the default; ``is_default=True`` replaces the previous one
+    inside the same transaction (the partial unique constraint forbids two).
+    """
+    Customer.objects.select_for_update().get(pk=customer_id)
+    if is_default or not Address.objects.filter(customer_id=customer_id).exists():
+        Address.objects.filter(customer_id=customer_id, is_default=True).update(
+            is_default=False, updated_at=timeutils.now()
+        )
+        is_default = True
+    address = Address.objects.create(
+        customer_id=customer_id,
+        text=text,
+        label=label,
+        is_default=is_default,
+        region_code=region_code,
+        city_code=city_code,
+        comment=comment,
+        latitude=latitude,
+        longitude=longitude,
+    )
+    _sync_address_text(customer_id)
+    return address
+
+
+@transaction.atomic
+def set_default_address(address: Address) -> Address:
+    """Make ``address`` the customer's default, clearing the previous one in the same transaction."""
+    Customer.objects.select_for_update().get(pk=address.customer_id)
+    Address.objects.filter(customer_id=address.customer_id, is_default=True).exclude(pk=address.pk).update(
+        is_default=False, updated_at=timeutils.now()
+    )
+    if not address.is_default:
+        address.is_default = True
+        address.save(update_fields=["is_default"])
+    _sync_address_text(address.customer_id)
+    return address
+
+
+@transaction.atomic
+def remove_address(address: Address) -> None:
+    """Delete one address; the denormalised text falls back to the next best address (or ``""``)."""
+    customer_id = address.customer_id
+    Customer.objects.select_for_update().get(pk=customer_id)
+    address.delete()
+    _sync_address_text(customer_id)
+
+
+def set_customer_password(customer: Customer, raw_password: str) -> None:
+    customer.password = make_password(raw_password)
+    customer.password_changed_at = timeutils.now()
+    customer.save(update_fields=["password", "password_changed_at"])
+
+
+def check_customer_password(customer: Customer, raw_password: str) -> bool:
+    return bool(customer.password) and check_password(raw_password, customer.password)
+
+
+@transaction.atomic
+def delete_customer(customer: Customer) -> Customer:
+    """Soft-delete a customer (decision A1): scrub PII, revoke sessions, deactivate devices; keep the row.
+
+    ``LoyaltyAccount``, ``Purchase``, ``Order`` and ``Appointment`` rows keep pointing at it (``PROTECT``).
+    Idempotent: an already deleted customer is returned unchanged.
+    """
+    stored = Customer.objects.select_for_update().get(pk=customer.pk)
+    if stored.status == enums.CustomerStatus.DELETED:
+        customer.refresh_from_db()
+        return customer
+    instant = timeutils.now()
+    if stored.image:
+        stored.image.delete(save=False)
+    stored.status = enums.CustomerStatus.DELETED
+    stored.deleted_at = instant
+    stored.name = ""
+    stored.address_text = ""
+    stored.image = ""
+    stored.password = ""
+    stored.save(
+        update_fields=["status", "deleted_at", "name", "address_text", "image", "password", "updated_at"]
+    )
+    Address.objects.filter(customer_id=stored.pk).delete()
+    CustomerSocialIdentity.objects.filter(customer_id=stored.pk).delete()
+    Device.objects.filter(customer_id=stored.pk).update(
+        is_active=False, push_enabled=False, fcm_token="", updated_at=instant
+    )
+    sessions = list(
+        AuthSession.objects.select_for_update().filter(customer_id=stored.pk, revoked_at__isnull=True)
+    )
+    if sessions:
+        AuthSession.objects.filter(pk__in=[session.pk for session in sessions]).update(
+            revoked_at=instant, revoke_reason="deactivated"
+        )
+        for session in sessions:
+            session.revoked_at = instant
+            session.revoke_reason = "deactivated"
+        _tombstone_on_commit(sessions)
+    customer.refresh_from_db()
+    return customer
+
+
+@transaction.atomic
+def reactivate_customer(customer: Customer, *, name: str = "") -> Customer:
+    """Re-registration with the same phone: ``active`` again, ``registered_at`` kept (first registration)."""
+    stored = Customer.objects.select_for_update().get(pk=customer.pk)
+    if stored.status == enums.CustomerStatus.ACTIVE:
+        customer.refresh_from_db()
+        return customer
+    stored.status = enums.CustomerStatus.ACTIVE
+    stored.deleted_at = None
+    stored.reactivated_at = timeutils.now()
+    if name:
+        stored.name = name
+    stored.save(update_fields=["status", "deleted_at", "reactivated_at", "name", "updated_at"])
+    customer.refresh_from_db()
+    return customer

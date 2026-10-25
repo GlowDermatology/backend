@@ -5,16 +5,27 @@ that need the raw refresh token of a factory-made session read it with :func:`ra
 Call the factories as ``StaffUserFactory.create(...)``: the typed ``create`` returns the model.
 """
 
+import hashlib
 import uuid
+from datetime import datetime, timedelta
 from typing import Any
 
 from factory.base import Factory
-from factory.declarations import Sequence, SubFactory
+from factory.declarations import LazyFunction, Sequence, SubFactory
 from factory.django import DjangoModelFactory
 from factory.helpers import post_generation
 
 from glowderma.accounts import services
-from glowderma.accounts.models import AuthSession, StaffUser
+from glowderma.accounts.models import (
+    Address,
+    AuthSession,
+    Customer,
+    CustomerSocialIdentity,
+    Device,
+    SmsCode,
+    StaffUser,
+)
+from glowderma.core import timeutils
 
 TEST_PASSWORD = "Saffron!Harbor-Long72"  # noqa: S105
 
@@ -71,3 +82,71 @@ class AuthSessionFactory(Factory[AuthSession]):
 def raw_refresh(session: AuthSession) -> str:
     """The raw refresh token of a session made by ``AuthSessionFactory`` (any instance with that pk)."""
     return _refresh_tokens[session.pk]
+
+
+class CustomerFactory(DjangoModelFactory[Customer]):
+    class Meta:
+        model = Customer
+
+    phone = Sequence(lambda n: f"+99890{n + 1:07d}")  # type: ignore[no-untyped-call]
+    name = Sequence(lambda n: f"Mijoz {n + 1}")  # type: ignore[no-untyped-call]
+
+
+class DeviceFactory(DjangoModelFactory[Device]):
+    class Meta:
+        model = Device
+
+    customer = SubFactory(CustomerFactory)  # type: ignore[no-untyped-call]
+    fid = Sequence(lambda n: f"fid-{n + 1}")  # type: ignore[no-untyped-call]
+    platform = Device.Platform.IOS
+    model = "iPhone 14"
+    os = "iOS 18.1"
+    app_version = "1.0.0"
+    fcm_token = Sequence(lambda n: f"fcm-{n + 1}")  # type: ignore[no-untyped-call]
+    push_enabled = True
+
+
+class AddressFactory(DjangoModelFactory[Address]):
+    class Meta:
+        model = Address
+
+    customer = SubFactory(CustomerFactory)  # type: ignore[no-untyped-call]
+    label = "Uy"
+    text = Sequence(lambda n: f"Toshkent, Chilonzor, {n + 1}-kvartal")  # type: ignore[no-untyped-call]
+
+
+def _expires_at() -> datetime:
+    return timeutils.now() + timedelta(seconds=120)
+
+
+class SmsCodeFactory(DjangoModelFactory[SmsCode]):
+    class Meta:
+        model = SmsCode
+
+    phone = Sequence(lambda n: f"+99891{n + 1:07d}")  # type: ignore[no-untyped-call]
+    purpose = SmsCode.Purpose.SIGNUP
+    code_hmac = Sequence(lambda n: hashlib.sha256(f"code-{n}".encode()).hexdigest())  # type: ignore[no-untyped-call]
+    expires_at = LazyFunction(_expires_at)  # type: ignore[no-untyped-call]
+
+
+class CustomerSocialIdentityFactory(DjangoModelFactory[CustomerSocialIdentity]):
+    class Meta:
+        model = CustomerSocialIdentity
+
+    customer = SubFactory(CustomerFactory)  # type: ignore[no-untyped-call]
+    provider = "google"
+    subject = Sequence(lambda n: f"sub-{n + 1}")  # type: ignore[no-untyped-call]
+    email_at_link = Sequence(lambda n: f"customer{n + 1}@gmail.com")  # type: ignore[no-untyped-call]
+
+
+class CustomerSessionFactory(DjangoModelFactory[AuthSession]):
+    """A customer-audience session written directly (the M2 service does not exist yet)."""
+
+    class Meta:
+        model = AuthSession
+
+    audience = "customer"
+    customer = SubFactory(CustomerFactory)  # type: ignore[no-untyped-call]
+    device_label = "pytest"
+    refresh_hash = Sequence(lambda n: hashlib.sha256(f"customer-refresh-{n}".encode()).hexdigest())  # type: ignore[no-untyped-call]
+    absolute_expires_at = LazyFunction(lambda: timeutils.now() + timedelta(days=30))  # type: ignore[no-untyped-call]
