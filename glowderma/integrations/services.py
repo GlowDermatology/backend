@@ -8,6 +8,7 @@ Billz import lives in ``catalog.tasks``); it is handed over through the outbox a
 """
 
 import logging
+from datetime import timedelta
 from typing import Any
 
 from django.db import IntegrityError, transaction
@@ -21,6 +22,12 @@ logger = logging.getLogger(__name__)
 ACTIVE_STATES = (enums.JobState.QUEUED, enums.JobState.RUNNING)
 # Outbox topic of a freshly queued job; the orchestrating module registers the handler in its ``tasks.py``.
 JOB_QUEUED_TOPIC = "job.queued"
+# A running job whose worker has not touched ``heartbeat_at`` for this long lost its worker (design 01 §2.2):
+# a Celery redelivery may re-claim it, and ``tasks.reap_stale_jobs`` fails it so the single-flight index
+# never wedges the import button.
+STALE_JOB_AFTER = timedelta(minutes=15)
+WORKER_LOST_CODE = "worker_lost"
+WORKER_LOST_MESSAGE = "Jarayon uzilib qoldi. Qayta urinib ko‘ring."
 
 
 class JobNotActive(RuntimeError):
@@ -61,19 +68,68 @@ def start_job(
         return job, True
 
 
+def is_stale(job: Job, *, now: Any = None) -> bool:
+    """A ``running`` job whose heartbeat is older than :data:`STALE_JOB_AFTER` (its worker was lost)."""
+    if job.state != enums.JobState.RUNNING:
+        return False
+    reference = job.heartbeat_at or job.started_at or job.created_at
+    return bool(reference < (now or timeutils.now()) - STALE_JOB_AFTER)
+
+
 def claim_job(job_id: int) -> Job | None:
-    """Move a queued job to ``running`` (``attempts += 1``); ``None`` when it is no longer queued."""
+    """Move a queued job to ``running`` (``attempts += 1``); ``None`` when it cannot be claimed.
+
+    A ``running`` job whose heartbeat is stale (:func:`is_stale`) is re-claimed the same way, keeping its
+    ``started_at``: that is a Celery redelivery after a worker loss (``acks_late`` +
+    ``task_reject_on_worker_lost``) resuming the idempotent work instead of leaving the row stuck.
+    """
     with transaction.atomic():
         job = Job.objects.select_for_update().filter(pk=job_id).first()
-        if job is None or job.state != enums.JobState.QUEUED:
+        if job is None:
             return None
         instant = timeutils.now()
+        if job.state == enums.JobState.QUEUED:
+            job.started_at = instant
+        elif not is_stale(job, now=instant):
+            return None
         job.state = enums.JobState.RUNNING
-        job.started_at = instant
         job.heartbeat_at = instant
         job.attempts += 1
         job.save(update_fields=["state", "started_at", "heartbeat_at", "attempts"])
         return job
+
+
+def reap_stale_jobs(*, now: Any = None) -> list[Job]:
+    """Fail every stale running job with ``{"code": "worker_lost"}`` (design 01 §2.2); returns them.
+
+    Each job is finished in its own transaction under the row lock, so a worker that is still alive and
+    heartbeats concurrently wins (the row is re-checked after the lock). A ``billz_import`` job also records
+    the provider failure and the ``billz.import_finished`` audit row, like the worker would.
+    """
+    instant = now or timeutils.now()
+    reaped: list[Job] = []
+    candidates = Job.objects.filter(
+        state=enums.JobState.RUNNING, heartbeat_at__lt=instant - STALE_JOB_AFTER
+    ).values_list("pk", flat=True)
+    for job_id in list(candidates):
+        with transaction.atomic():
+            job = Job.objects.select_for_update().filter(pk=job_id).first()
+            if job is None or not is_stale(job, now=instant):
+                continue
+            job = _finish(
+                job, enums.JobState.FAILED, error={"code": WORKER_LOST_CODE, "message": WORKER_LOST_MESSAGE}
+            )
+            if job.kind == enums.JobKind.BILLZ_IMPORT:
+                record_failure(IntegrationState.Provider.BILLZ, WORKER_LOST_MESSAGE)
+                audit.record(
+                    action="billz.import_finished",
+                    entity_type="job",
+                    entity_id=str(job.pk),
+                    after={"job_id": job.pk, "state": job.state, "result": None, "error": job.error},
+                )
+        logger.warning("Reaped stale %s job %s (no heartbeat since %s)", job.kind, job.pk, job.heartbeat_at)
+        reaped.append(job)
+    return reaped
 
 
 def set_celery_task_id(job_id: int, task_id: str) -> None:

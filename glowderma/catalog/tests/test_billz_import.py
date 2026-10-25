@@ -3,7 +3,7 @@
 The fake rules are pinned here as the admin e2e scripts rely on them.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 from unittest.mock import patch
 
@@ -18,6 +18,7 @@ from glowderma.catalog.tests.helpers import errors_of
 from glowderma.core import enums, timeutils
 from glowderma.core.models import AuditEntry, OutboxMessage
 from glowderma.core.timeutils import TASHKENT
+from glowderma.integrations import tasks as integration_tasks
 from glowderma.integrations.billz.fake import NEW_ITEMS, FakeBillz
 from glowderma.integrations.billz.ports import BillzError, BillzProduct
 from glowderma.integrations.models import IntegrationState, Job
@@ -245,6 +246,50 @@ def test_task_ignores_jobs_that_are_not_queued(staff: StaffUser) -> None:
     tasks.run_billz_import(999999)
     done.refresh_from_db()
     assert done.state == "succeeded" and not Product.objects.exists()
+
+
+def test_task_resumes_a_stale_running_job_after_a_worker_loss(staff: StaffUser) -> None:
+    """``acks_late`` + ``task_reject_on_worker_lost`` redeliver the task: the stale job is re-claimed and the
+    idempotent upsert runs to the end instead of leaving the row (and the import button) stuck."""
+    started = timeutils.now() - timedelta(hours=5)
+    stale = JobFactory.create(
+        state="running", started_at=started, heartbeat_at=started, attempts=1, created_by=staff
+    )
+    tasks.run_billz_import(stale.pk)
+    stale.refresh_from_db()
+    assert stale.state == "succeeded" and stale.attempts == 2 and stale.started_at == started
+    assert stale.result == {"created": 3, "updated": 0, "unchanged": 0, "new_from_billz": 3}
+    assert Product.objects.filter(is_new_from_billz=True).count() == 3
+    assert AuditEntry.objects.filter(action="billz.import_finished").count() == 1
+
+
+def test_task_leaves_a_live_running_job_alone(staff: StaffUser) -> None:
+    live = JobFactory.create(
+        state="running", started_at=timeutils.now(), heartbeat_at=timeutils.now(), attempts=1
+    )
+    tasks.run_billz_import(live.pk)  # a duplicate delivery while another worker is still working
+    live.refresh_from_db()
+    assert live.state == "running" and live.attempts == 1 and not Product.objects.exists()
+
+
+def test_reaped_job_unwedges_the_import_button(
+    staff_client: APIClient, django_capture_on_commit_callbacks: Any
+) -> None:
+    started = timeutils.now() - timedelta(hours=5)
+    stale = JobFactory.create(state="running", started_at=started, heartbeat_at=started, attempts=1)
+    with django_capture_on_commit_callbacks(execute=True):
+        assert integration_tasks.reap_stale_jobs() == 1
+    polled = staff_client.get(f"{JOBS}{stale.pk}/").json()
+    assert polled["state"] == "failed"
+    assert polled["error"] == {
+        "code": "worker_lost",
+        "message": "Jarayon uzilib qoldi. Qayta urinib ko‘ring.",
+    }
+    assert staff_client.get(STATS).json()["billz"]["connected"] is False  # last import failed
+    response = start(staff_client, django_capture_on_commit_callbacks)
+    assert response.status_code == 202 and response.json()["id"] != stale.pk
+    assert Job.objects.get(pk=response.json()["id"]).state == "succeeded"
+    assert staff_client.get(STATS).json()["billz"]["connected"] is True
 
 
 def test_outbox_handler_ignores_other_kinds() -> None:

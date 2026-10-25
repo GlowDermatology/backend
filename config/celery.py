@@ -13,4 +13,6 @@ app.conf.beat_schedule = {
         "task": "core.purge_idempotency_records",
         "schedule": crontab(hour=3, minute=0),
     },
+    # design 01 §2.2: fail running jobs with no heartbeat for 15 min (worker lost), unwedging single-flight
+    "reap-stale-jobs": {"task": "integrations.reap_stale_jobs", "schedule": 300.0},
 }
