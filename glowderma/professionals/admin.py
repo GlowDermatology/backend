@@ -9,12 +9,14 @@ read-only in M1 (open point S-3).
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
 from django.contrib import admin, messages
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.http import HttpRequest
+from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
+from django.urls import reverse
 
 from glowderma.core.admin import register_read_only
 from glowderma.professionals import services
@@ -41,9 +43,30 @@ def _is_active_staff(request: HttpRequest) -> bool:
     return bool(user.is_active and user.is_staff)
 
 
-def _report(request: HttpRequest, exc: ValidationError) -> None:
-    for message in exc.messages:
-        messages.error(request, message)
+class ServiceRefused(Exception):
+    """A service ``ValidationError`` raised out of ``save_model`` / ``save_formset`` / ``delete_model``.
+
+    Raising (instead of swallowing) lets the atomic ``changeform_view`` / ``delete_view`` roll back the whole
+    request — nothing is saved, no ``LogEntry`` and no success message are written — and the view below turns
+    it into a re-rendered form (or an error message on the change page for a delete).
+    """
+
+    def __init__(self, error: ValidationError) -> None:
+        super().__init__(error)
+        self.error = error
+
+
+# The refusal of the first (rolled back) pass, read by the form of the second pass of the same request.
+_REFUSAL: ContextVar[ValidationError | None] = ContextVar("professionals_admin_refusal", default=None)
+
+
+def _attach(form: Any, error: ValidationError) -> None:
+    """Put the service's errors on the form: per field when the form has that field, else non-field."""
+    if hasattr(error, "error_dict"):
+        for name, errors in error.error_dict.items():
+            form.add_error(name if name in form.fields else None, errors)
+    else:
+        form.add_error(None, error)
 
 
 class ServiceBackedAdmin(_ModelAdmin):
@@ -88,30 +111,78 @@ class ServiceBackedAdmin(_ModelAdmin):
     def has_delete_permission(self, request: HttpRequest, obj: models.Model | None = None) -> bool:
         return _is_active_staff(request)
 
+    def get_form(
+        self, request: HttpRequest, obj: models.Model | None = None, change: bool = False, **kwargs: Any
+    ) -> Any:
+        form_class = super().get_form(request, obj, change, **kwargs)
+        current = _REFUSAL.get()
+        if current is None:
+            return form_class
+        refusal: ValidationError = current
+
+        class RefusedForm(form_class):  # type: ignore[misc,valid-type]
+            def clean(self) -> Any:
+                cleaned = super().clean()
+                _attach(self, refusal)
+                return cleaned
+
+        return RefusedForm
+
+    def changeform_view(
+        self,
+        request: HttpRequest,
+        object_id: str | None = None,
+        form_url: str = "",
+        extra_context: dict[str, Any] | None = None,
+    ) -> HttpResponse:
+        """A service refusal rolls the first pass back; the second pass re-renders the bound form with the
+        refusal attached, so the staff user keeps the input and never sees a success banner."""
+        try:
+            return super().changeform_view(request, object_id, form_url, extra_context)
+        except ServiceRefused as exc:
+            for _name, uploads in request.FILES.lists():
+                for upload in uploads:
+                    upload.seek(0)  # the first pass read the uploads (image processing)
+            token = _REFUSAL.set(exc.error)
+            try:
+                return super().changeform_view(request, object_id, form_url, extra_context)
+            finally:
+                _REFUSAL.reset(token)
+
+    def delete_view(
+        self, request: HttpRequest, object_id: str, extra_context: dict[str, Any] | None = None
+    ) -> HttpResponse:
+        try:
+            return super().delete_view(request, object_id, extra_context)
+        except ServiceRefused as exc:
+            for message in exc.error.messages:
+                messages.error(request, message)
+            meta = self.model._meta
+            return HttpResponseRedirect(
+                reverse(f"admin:{meta.app_label}_{meta.model_name}_change", args=[object_id])
+            )
+
     def save_model(self, request: HttpRequest, obj: models.Model, form: Any, change: bool) -> None:
         try:
             services.save_row(obj, actor=request.user, request=request)
         except ValidationError as exc:  # the ModelForm validated already; this is the last line of defence
-            _report(request, exc)
+            raise ServiceRefused(exc) from exc
 
     def delete_model(self, request: HttpRequest, obj: models.Model) -> None:
         try:
             services.delete_row(obj, actor=request.user, request=request)
         except ValidationError as exc:
-            _report(request, exc)
+            raise ServiceRefused(exc) from exc
 
     def save_formset(self, request: HttpRequest, form: Any, formset: Any, change: bool) -> None:
         # Inline rows (weekly hours of a professional) pass through the same services, one by one.
-        for obj in formset.save(commit=False):
-            try:
+        try:
+            for obj in formset.save(commit=False):
                 services.save_row(obj, actor=request.user, request=request)
-            except ValidationError as exc:
-                _report(request, exc)
-        for obj in formset.deleted_objects:
-            try:
+            for obj in formset.deleted_objects:
                 services.delete_row(obj, actor=request.user, request=request)
-            except ValidationError as exc:
-                _report(request, exc)
+        except ValidationError as exc:
+            raise ServiceRefused(exc) from exc
         formset.save_m2m()
 
 

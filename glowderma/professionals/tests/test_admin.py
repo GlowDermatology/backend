@@ -239,3 +239,152 @@ def test_blocked_period_add_sets_created_by() -> None:
     assert block.created_by is not None and block.created_by.is_staff
     created = AuditEntry.objects.get(action="blocked_period.created")
     assert created.after is not None and created.after["label"] == "Band qilingan"
+
+
+# --- service refusals (fix pass): never a success banner for a row that was not saved ----------------------
+
+
+def professional_form(location_id: int, **extra: object) -> dict[str, object]:
+    return {
+        "location": location_id,
+        "name": "Probe Doctor",
+        "role": "dermatologist",
+        "bio_uz": "",
+        "bio_ru": "",
+        "bio_en": "",
+        "experience_years": "",
+        "slot_step_min": 30,
+        "position": 0,
+        "is_active": "on",
+        "working_hours-TOTAL_FORMS": 0,
+        "working_hours-INITIAL_FORMS": 0,
+        "working_hours-MIN_NUM_FORMS": 0,
+        "working_hours-MAX_NUM_FORMS": 1000,
+        **extra,
+    }
+
+
+def flashed(response: object) -> list[tuple[str, str]]:
+    from django.contrib.messages import get_messages
+
+    return [(m.level_tag, str(m)) for m in get_messages(response.wsgi_request)]  # type: ignore[attr-defined]
+
+
+def test_an_oversized_photo_re_renders_the_add_form_without_a_success_message() -> None:
+    import io
+    import os
+
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from PIL import Image
+
+    noise = Image.frombytes("RGB", (1400, 1400), os.urandom(1400 * 1400 * 3))
+    buffer = io.BytesIO()
+    noise.save(buffer, format="PNG")
+    assert buffer.tell() > 5 * 1024 * 1024  # passes the ModelForm's ImageField, fails process_image
+    upload = SimpleUploadedFile("big.png", buffer.getvalue(), content_type="image/png")
+    client = staff_client()
+    location = LocationFactory.create()
+    response = client.post(
+        reverse("admin:professionals_professional_add"), professional_form(location.pk, photo=upload)
+    )
+    assert response.status_code == 200  # the bound form again, not a redirect
+    assert response.context["adminform"].form.errors["photo"] == ["Rasm 5 MB dan oshmasin."]
+    assert "Probe Doctor" in response.content.decode()  # the input is kept
+    assert flashed(response) == []  # no "was added successfully"
+    assert not Professional.objects.exists()
+    assert not AuditEntry.objects.filter(action="professional.created").exists()
+    from django.contrib.admin.models import LogEntry
+
+    assert not LogEntry.objects.exists()
+
+
+def test_a_refused_save_rolls_back_and_shows_the_errors_on_the_form(monkeypatch: pytest.MonkeyPatch) -> None:
+    from django.core.exceptions import ValidationError
+
+    from glowderma.professionals import services
+
+    def refuse(obj: models.Model, **kwargs: object) -> models.Model:
+        obj.save()  # a write that must not survive the refusal
+        raise ValidationError({"name_uz": "Band.", "nonexistent": "Boshqa sabab."})
+
+    monkeypatch.setattr(services, "save_row", refuse)
+    client = staff_client()
+    response = client.post(
+        reverse("admin:professionals_service_add"),
+        {
+            "name_uz": "Yangi",
+            "short_name_uz": "Yangi",
+            "default_duration_min": 30,
+            "default_price": 100000,
+            "position": 1,
+            "is_active": "on",
+        },
+    )
+    assert response.status_code == 200
+    form = response.context["adminform"].form
+    assert form.errors["name_uz"] == ["Band."]
+    assert form.non_field_errors() == ["Boshqa sabab."]
+    assert flashed(response) == []
+    assert not Service.objects.exists()
+
+
+def test_a_refused_inline_row_rolls_back_the_whole_change(monkeypatch: pytest.MonkeyPatch) -> None:
+    from django.core.exceptions import ValidationError
+
+    from glowderma.professionals import services
+
+    professional = ProfessionalFactory.create(name="Asl nom")
+    real_save_row = services.save_row
+
+    def refuse_hours(obj: models.Model, **kwargs: object) -> models.Model:
+        if isinstance(obj, WorkingHours):
+            raise ValidationError("Ish vaqti kesishadi.")
+        return real_save_row(obj, **kwargs)
+
+    monkeypatch.setattr(services, "save_row", refuse_hours)
+    data = professional_form(
+        professional.location_id,
+        name="Yangi nom",
+        **{
+            "working_hours-TOTAL_FORMS": 1,
+            "working_hours-0-id": "",
+            "working_hours-0-professional": professional.pk,
+            "working_hours-0-weekday": 2,
+            "working_hours-0-start": "09:00",
+            "working_hours-0-end": "18:00",
+            "working_hours-0-break_start": "",
+            "working_hours-0-break_end": "",
+        },
+    )
+    data["role"] = professional.role
+    response = staff_client().post(
+        reverse("admin:professionals_professional_change", args=[professional.pk]), data
+    )
+    assert response.status_code == 200
+    assert response.context["adminform"].form.non_field_errors() == ["Ish vaqti kesishadi."]
+    assert flashed(response) == []
+    assert Professional.objects.get(pk=professional.pk).name == "Asl nom"  # the parent save rolled back
+    assert not WorkingHours.objects.filter(professional=professional).exists()
+    assert not AuditEntry.objects.exists()
+
+
+def test_a_refused_delete_redirects_to_the_change_page_with_the_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from django.core.exceptions import ValidationError
+
+    from glowderma.professionals import services
+
+    def refuse(obj: models.Model, **kwargs: object) -> None:
+        obj.delete()
+        raise ValidationError(services.PROTECTED_MESSAGE)
+
+    monkeypatch.setattr(services, "delete_row", refuse)
+    service = ServiceFactory.create()
+    response = staff_client().post(
+        reverse("admin:professionals_service_delete", args=[service.pk]), {"post": "yes"}
+    )
+    assert response.status_code == 302
+    assert response["Location"] == reverse("admin:professionals_service_change", args=[service.pk])
+    assert flashed(response) == [("error", services.PROTECTED_MESSAGE)]
+    assert Service.objects.filter(pk=service.pk).exists()
