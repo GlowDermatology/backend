@@ -1,5 +1,6 @@
 import importlib
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 import yaml
@@ -70,3 +71,38 @@ def test_local_docs_use_sidecar() -> None:
     response = Client().get("/api/v1/docs/")
     assert response.status_code == 200
     assert b"drf_spectacular_sidecar" in response.content
+
+
+def test_contract_enum_components_are_named_after_the_enum() -> None:
+    schema = SchemaGenerator().get_schema(request=None, public=True)  # type: ignore[no-untyped-call]
+    assert schema is not None
+    schemas = schema["components"]["schemas"]
+    assert schemas["LogoutScopeEnum"]["enum"] == ["current", "others", "all"]
+    assert schemas["HealthStatusEnum"]["enum"] == ["ok", "error"]
+    assert schemas["SocialProviderEnum"]["enum"] == ["google", "facebook"]
+    assert not {"ScopeEnum", "StatusEnum", "LinkedProvidersEnum"} & set(schemas)
+    overrides = cast(dict[str, Any], settings.SPECTACULAR_SETTINGS["ENUM_NAME_OVERRIDES"])
+    assert overrides["OrderStatusEnum"] == "glowderma.core.enums.OrderStatus.choices"
+
+
+def test_schema_helpers_match_the_contract() -> None:
+    """Contract 1.7: `Idempotency-Key` is a UUID header; 1.8: `?export=csv|xlsx`; 1.6: error envelope."""
+    from drf_spectacular.utils import OpenApiParameter
+
+    from glowderma.core.api.schema import (
+        ADMIN_ERRORS,
+        EXPORT_PARAM,
+        IDEMPOTENCY_KEY_HEADER,
+        PUBLIC_ERRORS,
+        ErrorEnvelopeSerializer,
+    )
+
+    assert IDEMPOTENCY_KEY_HEADER.name == "Idempotency-Key"
+    assert IDEMPOTENCY_KEY_HEADER.location == OpenApiParameter.HEADER
+    assert IDEMPOTENCY_KEY_HEADER.required is True
+    assert EXPORT_PARAM.name == "export"
+    assert EXPORT_PARAM.location == OpenApiParameter.QUERY
+    assert EXPORT_PARAM.enum == ["csv", "xlsx"]
+    assert set(ADMIN_ERRORS) == {400, 401, 403, 404, 409, 422, 429}
+    assert set(PUBLIC_ERRORS) == {400, 401, 429}
+    assert set(ADMIN_ERRORS.values()) == set(PUBLIC_ERRORS.values()) == {ErrorEnvelopeSerializer}
