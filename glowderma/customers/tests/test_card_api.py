@@ -294,6 +294,15 @@ def test_card_query_count_is_bounded(staff_client: APIClient, history: dict[str,
         loyalty_services.record_online_purchase(customer.pk, order.pk, 100_000, 0, 0, at(20, 12))
     assert count() == before
     assert before <= 16
+    # more segments never mean more queries either (groups: one statement, no per-segment membership probe)
+    for index in range(6):
+        manual = CustomerSegmentFactory.create(min_online_orders=None, min_lifetime_amount=None)
+        SegmentMemberFactory.create(segment=manual, customer=customer)
+        CustomerSegmentFactory.create(min_online_orders=index + 1, min_lifetime_amount=None)
+        CustomerSegmentFactory.create(min_online_orders=None, min_lifetime_amount=(index + 1) * MLN)
+    response = staff_client.get(url(customer.pk))
+    assert len(response.json()["groups"]) == 6 + 6 + 2  # manual; ≥ 1..6 of 6 orders; ≥ 1..2 of 2.0 mln
+    assert count() == before
 
 
 def test_customer_without_history(staff_client: APIClient, policies: dict[int, CashbackPolicy]) -> None:

@@ -4,8 +4,9 @@
 `notifications` and aggregates them. Every loyalty number comes from ``loyalty.selectors``: the list orders
 by the SQL annotations of :func:`loyalty.selectors.list_annotations` (so sorting and paging happen in the
 database), the card reads ``customer_totals`` / ``account_summary`` / ``tier_for`` / ``ledger_for_customer`` /
-``purchases_for_customer``; segment membership comes from ``notifications.selectors`` and the upcoming
-appointments from ``appointments.selectors.upcoming_count``.
+``purchases_for_customer``; the list's segment filter reuses ``notifications.selectors.segment_member_ids``,
+the card's groups evaluate the same membership rule in one query (:func:`customer_groups`), and the upcoming
+appointments come from ``appointments.selectors.upcoming_count``.
 
 Three reads have no selector in their owning module yet and are implemented here against the models
 (reported to the lead): the customer row itself (``accounts`` has no selectors module), the active device
@@ -19,7 +20,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 
-from django.db.models import F, OrderBy, Q, QuerySet
+from django.db.models import Exists, F, OrderBy, OuterRef, Q, QuerySet
 from django.db.models.functions import Collate, Lower
 from django.db.models.lookups import Contains
 
@@ -30,7 +31,7 @@ from glowderma.core import enums
 from glowderma.loyalty import selectors as loyalty_selectors
 from glowderma.loyalty.selectors import AccountSummary, LedgerRow, PurchaseRow, TierInfo, Totals
 from glowderma.notifications import selectors as notifications_selectors
-from glowderma.notifications.models import CustomerSegment
+from glowderma.notifications.models import CustomerSegment, SegmentMember
 
 NAME_COLLATION = "glowderma_ci"  # ICU case-insensitive collation (core.0007), used in ORDER BY only
 SEARCH_MAX_LENGTH = 64
@@ -186,12 +187,43 @@ def active_device(customer_id: int) -> DeviceInfo | None:
     )
 
 
-def customer_groups(customer: Customer) -> list[Group]:
-    """The segments the customer belongs to (rules or manual membership), by id; a deleted customer has
-    none (membership requires an active customer, contract §2.8)."""
+def _rules_hold(segment: CustomerSegment, totals: Totals) -> bool:
+    """The segment's set rules all hold for these stats (never without rules) — the Python mirror of
+    ``notifications.selectors.rule_match_q`` over the card's ``customer_totals`` row, whose
+    ``online_orders_count`` / ``lifetime`` are the same quantities as ``online_orders_expression`` /
+    ``lifetime_total_expression`` (non-reversed online purchases; Σ non-reversed purchase amounts)."""
+    if not notifications_selectors.rules_set(segment):
+        return False
+    if segment.min_online_orders is not None and totals.online_orders_count < segment.min_online_orders:
+        return False
+    return segment.min_lifetime_amount is None or totals.lifetime >= segment.min_lifetime_amount
+
+
+def customer_groups(customer: Customer, totals: Totals) -> list[Group]:
+    """The segments the customer belongs to (rules or manual membership, contract §2.8), by id; a deleted
+    customer has none (membership requires an active customer).
+
+    One query whatever the number of segments (design 03 §6.3, no N+1): every segment annotated with whether
+    the customer is a manual member, the rules checked in Python against the card's ``totals``.
+    ``notifications.selectors.segments_for_customer`` answers the same set with one query per segment, so
+    the card does not call it (reported to the lead).
+    """
     if customer.status != enums.CustomerStatus.ACTIVE:
         return []
-    return [Group(id=s.pk, name=s.name) for s in notifications_selectors.segments_for_customer(customer.pk)]
+    segments = (
+        CustomerSegment.objects.order_by("id")
+        .only("id", "name", "min_online_orders", "min_lifetime_amount")
+        .annotate(
+            is_manual_member=Exists(
+                SegmentMember.objects.filter(segment_id=OuterRef("pk"), customer_id=customer.pk)
+            )
+        )
+    )
+    return [
+        Group(id=segment.pk, name=segment.name)
+        for segment in segments
+        if getattr(segment, "is_manual_member", False) or _rules_hold(segment, totals)
+    ]
 
 
 def customer_card(customer_id: int) -> CustomerCard | None:
@@ -221,7 +253,7 @@ def customer_card(customer_id: int) -> CustomerCard | None:
         balance=summary.balance,
         held=summary.held,
         available=summary.available,
-        groups=customer_groups(customer),
+        groups=customer_groups(customer, totals),
         upcoming_appointments=appointments_selectors.upcoming_count(customer.pk),
         device=active_device(customer.pk),
         ledger=loyalty_selectors.ledger_for_customer(customer.pk),
