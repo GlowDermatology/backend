@@ -149,12 +149,25 @@ def held_amount(account_id: int) -> int:
 
 
 def account_summary(customer_id: int) -> AccountSummary:
-    """``balance``, ``held`` and ``available = balance − held``; no account row → all zero."""
-    account = LoyaltyAccount.objects.filter(customer_id=customer_id).only("id", "balance").first()
-    if account is None:
+    """``balance``, ``held`` and ``available = balance − held`` in ONE statement (02 §4.2: the account row
+    with the active-hold sum as a correlated subquery); no account row → all zero."""
+    active_holds = (
+        CashbackHold.objects.filter(account_id=OuterRef("pk"), state=enums.CashbackHoldState.ACTIVE)
+        .order_by()
+        .values("account_id")
+        .annotate(total=Sum("amount"))
+        .values("total")[:1]
+    )
+    row = (
+        LoyaltyAccount.objects.filter(customer_id=customer_id)
+        .annotate(held=Coalesce(Subquery(active_holds, output_field=BigIntegerField()), Value(0)))
+        .values_list("balance", "held")
+        .first()
+    )
+    if row is None:
         return AccountSummary(0, 0, 0)
-    held = held_amount(account.pk)
-    return AccountSummary(balance=account.balance, held=held, available=account.balance - held)
+    balance, held = int(row[0]), int(row[1])
+    return AccountSummary(balance=balance, held=held, available=balance - held)
 
 
 def tier_for(lifetime: int, policy: CashbackPolicy | engine.PolicyRules | None = None) -> TierInfo | None:

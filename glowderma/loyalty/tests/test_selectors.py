@@ -23,7 +23,7 @@ from glowderma.loyalty.selectors import (
     Totals,
 )
 from glowderma.loyalty.tests.factories import CashbackPolicyFactory, LoyaltyAccountFactory
-from glowderma.loyalty.tests.support import at, chain, paid_order, seed_policies
+from glowderma.loyalty.tests.support import OrderFactory, at, chain, paid_order, seed_policies
 
 pytestmark = pytest.mark.django_db
 
@@ -259,3 +259,19 @@ def test_list_annotations_order_by_lifetime_and_balance_in_sql() -> None:
     bounded = CashbackPolicyFactory.create(created_at=at(10, 25), effective_from=at(10, 26), tiers=[(0, 1_000_000, "1.00")])  # fmt: skip  # noqa: E501
     assert annotated_customers(bounded).values("percent").get(pk=rich.pk) == {"percent": None}  # fmt: skip  # noqa: E501
     assert selectors.lifetime_totals((rich.pk, mid.pk, poor.pk)) == {rich.pk: 25_000_000, mid.pk: 2_000_000, poor.pk: 0}  # fmt: skip  # noqa: E501
+
+
+def test_account_summary_is_one_statement(django_assert_num_queries: Any) -> None:
+    account = LoyaltyAccountFactory.create(balance=50_000)
+    for amount in (20_000, 5_000):
+        order = OrderFactory.create(customer=account.customer, cashback_used=amount)
+        services.create_hold(account.customer_id, order.pk, amount, order.reservation_expires_at)
+    released = OrderFactory.create(customer=account.customer, cashback_used=1_000)
+    services.create_hold(account.customer_id, released.pk, 1_000, released.reservation_expires_at)
+    services.release_hold(released.pk, "order_cancelled")
+    with django_assert_num_queries(1):
+        summary = selectors.account_summary(account.customer_id)
+    assert summary == AccountSummary(balance=50_000, held=25_000, available=25_000)
+    no_account = CustomerFactory.create()
+    with django_assert_num_queries(1):
+        assert selectors.account_summary(no_account.pk) == AccountSummary(0, 0, 0)
