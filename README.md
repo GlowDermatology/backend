@@ -14,7 +14,7 @@ integrations (Billz, BTS, Click, Payme, Eskiz, Firebase).
 cp .env.example .env
 docker compose up -d --build
 docker compose exec api python manage.py migrate
-docker compose exec api python manage.py createstaff admin
+docker compose exec api python manage.py createstaff admin@glowderma.uz
 ```
 API: http://localhost:8000/api/v1/ · OpenAPI docs: http://localhost:8000/api/v1/docs/ (local only)
 

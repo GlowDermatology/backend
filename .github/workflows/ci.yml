@@ -44,3 +44,24 @@ jobs:
       - run: uv run coverage report --fail-under=85
       - run: uv run python manage.py spectacular --validate --fail-on-warn --file /tmp/schema.yaml
       - run: diff -u openapi/schema.yaml /tmp/schema.yaml
+      - name: Production deploy checks
+        # CI-only placeholders that satisfy production settings validation; they are not secrets.
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.production
+          SECRET_KEY: OFMmKSy50zW12DnugPKJmF4b0rNGeIvkm9SNWNjO9NRAN97Dmlr3CJH0tfi4Z6Kr
+          INTERNAL_API_SECRET: slqp9tXiEipMGqSzlvPcW9p0hBnle7sDTJSOQKgmZHNHdwYK
+          JWT_SIGNING_KEYS: '{"ci":"oQAQ0h7x354qUJXY9NmXu9SBoKbHt5NF9oKkakDsjdk"}'
+          JWT_ACTIVE_KID: ci
+          DATABASE_URL: postgres://glowderma:glowderma@localhost:5433/glowderma
+          REDIS_URL: redis://localhost:6380/0
+          ALLOWED_HOSTS: api.example.uz
+          ADMIN_API_ALLOWED_NETS: 10.0.0.0/8
+          PUBLIC_MEDIA_BASE_URL: https://media.example.uz/media/
+          SECURE_SSL_REDIRECT: "true"
+          SECURE_HSTS_SECONDS: "31536000"
+        run: uv run python manage.py check --deploy --fail-level WARNING
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t glowderma-backend:ci .
