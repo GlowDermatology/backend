@@ -23,7 +23,7 @@ Examples use `jsonc`: `//` comments give types and nullability and are not part 
 
 | Header | Required | Rule |
 |---|---|---|
-| `Authorization: Bearer <access JWT>` | all routes except `auth/login/`, `auth/refresh/`, `auth/logout/` (these identify the session by the refresh token) | HS256, `kid` header, claims `iss, aud="staff", sub, sid, iat, exp, jti` (all required). Access TTL 15 min. |
+| `Authorization: Bearer <access JWT>` | all routes except `auth/login/`, `auth/refresh/`, `auth/logout/` (these identify the session by the refresh token) and `POST auth/oauth/{provider}/` | HS256, `kid` header, claims `iss, aud="staff", sub, sid, iat, exp, jti` (all required). Access TTL 15 min. |
 | `X-GD-Internal-Secret` | sent by Next on every call | Compared in constant time on bytes; an empty configured secret never matches. Required on admin, schema and docs routes in production (403 `permission_denied`). Elsewhere a mismatch is not an error; `X-GD-Client-IP` and `X-Request-ID` are then ignored. |
 | `X-GD-Client-IP` | sent by Next on every call | End-user IP. Honoured only when the internal secret matches; otherwise the client IP is REMOTE_ADDR, or (only when REMOTE_ADDR is in `TRUSTED_PROXIES`) the rightmost `X-Forwarded-For` hop not in `TRUSTED_PROXIES`. Used for throttles and `AuditEntry.ip`. |
 | `Accept-Language` | optional, Next sends `uz` | M1 messages are always Uzbek (`Content-Language: uz`). ru/en catalogs arrive in M2. i18n data fields (`texts`, `name`) always return all three languages. |
@@ -204,6 +204,9 @@ The FE creates one key per form/dialog instance (`crypto.randomUUID()`), reuses 
 | POST | `auth/login/`, `auth/refresh/` | | 200 |
 | POST | `auth/logout/` (body `refresh`, `scope`), `auth/change-password/` | | 204 |
 | GET | `auth/me/` | | 200 |
+| POST | `auth/oauth/{provider}/` (no bearer; M0b) | | 200 |
+| POST | `auth/oauth/{provider}/link/` (M0b) | | 200 |
+| DELETE | `auth/oauth/{provider}/` (M0b) | | 204 |
 | GET | `orders/` | P E | 200 |
 | GET | `orders/status-counts/`, `orders/{id}/` | | 200 |
 | POST | `orders/{id}/cancel/`, `orders/{id}/transition/` | I | 200 |
@@ -288,6 +291,9 @@ Body `{"code": str, "code_verifier": str (43..128), "redirect_uri": str (must eq
 Matching: an existing `SocialIdentity(provider, subject)` whose staff user is active → that user. Otherwise → 401 `social_account_not_allowed` "Bu hisob administrator sifatida ro‘yxatdan o‘tmagan." (same response whether or not the email exists). Identities are created only by **`POST auth/oauth/{provider}/link/`** (bearer + the same body; audit `auth.social_linked`), i.e. by a staff member already signed in with email + password. Optional Google-only first-use auto-link (`STAFF_GOOGLE_AUTOLINK`, default **off**) applies only when Google is authoritative for the address: `email_verified == true` and either the email ends with `@gmail.com` or the ID token's `hd` equals the email's domain (and matches `GOOGLE_ALLOWED_HD` when set). Facebook never auto-links.
 - 200: same body as `auth/login/`. Audit `auth.login_succeeded` (`{email, method: provider}`) / `auth.login_failed`.
 - 400 `oauth_exchange_failed` (bad/expired code, verifier mismatch), 401 `social_account_not_allowed`, 429 `throttled`, 503 `provider_unavailable`.
+- Field errors: `nonce` `required` (Google only); `redirect_uri` `invalid` when it differs from the configured `OAUTH_REDIRECT_URI`; `code_verifier` 43..128. An unknown `provider` → 404. The nonce is compared byte-wise against the ID token's `nonce` claim (no Unicode normalisation), so the client sends exactly the string it put in the authorize URL.
+- `link/` conflicts: 409 `conflict` "Bu provayder allaqachon bog‘langan." when the caller already has an identity for that provider, "Bu ijtimoiy hisob allaqachon bog‘langan." when the subject belongs to another staff member. `DELETE` without a linked identity → 404.
+- Policy: an identity linked to an inactive staff member is refused like an unknown one; auto-link never creates a second Google identity for a staff member who already has one.
 
 **`DELETE auth/oauth/{provider}/`** (bearer; M0b) → 204. Unlinks the caller's identity for that provider. Audit `auth.social_unlinked`.
 

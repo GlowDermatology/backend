@@ -20,7 +20,8 @@ Task-level plans live in `docs/plans/`. If the repository state differs from wha
 ## Stack (pinned — do not change versions without asking)
 Python 3.14 · Django 6.1.2 · djangorestframework 3.18.3 · drf-spectacular 0.30.0 (+ sidecar) ·
 psycopg[binary,pool] 3.3.6 · gunicorn 26.2.0 (gthread) · whitenoise 6.12.0 · celery[redis] 5.6.3 ·
-redis 6.4.0 (kombu bound — do not upgrade) · PyJWT 2.15.1 · argon2-cffi 25.1.0 · django-filter 26.2 ·
+redis 6.4.0 (kombu bound — do not upgrade) · PyJWT[crypto] 2.15.1 (cryptography is required for RS256 ID-token
+verification) · argon2-cffi 25.1.0 · django-filter 26.2 ·
 Pillow 13.0.0 · openpyxl 3.1.5 · httpx 0.28.1 · tenacity 9.2.1.
 Dev: ruff 0.17.2 · mypy 2.3.1 + django-stubs[compatible-mypy] 6.1.2 + djangorestframework-stubs[compatible-mypy]
 3.18.1 · drf-spectacular-sidecar (pin the version resolved in uv.lock) · pytest 9.1.1 · pytest-django 4.14.0 ·
@@ -103,7 +104,18 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
   overridable by the `THROTTLE_RATES` env JSON); a new throttle class must add its scope there or settings
   validation fails. `LOG_LEVEL` sets the `glowderma.*` logger level; every log line carries `request_id`.
 - The Django admin is read-only: register models through `glowderma.core.admin.register_read_only` (`ReadOnlyAdmin`);
-  never expose `password` or `refresh_hash`. Only the six professionals models become editable, through services.
+  never expose `password` or `refresh_hash`. Only the professionals models become editable, through services.
+- Provider adapters live in `glowderma/integrations/<provider>/` behind a port (Protocol) with a fake and a live
+  implementation chosen by `*_MODE` settings (default `INTEGRATIONS_MODE=fake`); views and services obtain them
+  through the module's `registry`. OAuth: `integrations/oauth/{ports,fake,google,facebook,registry}.py` (fake
+  codes `fake:<subject>:<email>[:hd]`, `fake-unverified:…`, `fake-fail`, `fake-down`; FakeGoogle nonce
+  `nonce-<subject>` or `*`). Adapters never put a secret or bearer token in a URL (POST bodies / `Authorization`
+  headers only), retry only on transport errors, and map failures to `OAuthExchangeError`-style typed errors.
+- Demo data: each module registers one idempotent seeder in `glowderma/<module>/seeds.py`
+  (`core.seeding.register_seeder(name, order=…)`); `manage.py seed_demo` runs them in layer order and re-syncs the
+  id sequences. `settings.FAKE_NOW` (env `FAKE_NOW`, local/test only) pins `timeutils.now()` for demos and e2e runs.
+- Retention jobs delete from `core.db.PURGEABLE_TABLES` only inside `core.db.purge_window()`; the outbox offers
+  `outbox.on_dead(topic)` hooks for the orchestrating module to record what a dead message means.
 - Time only via `timeutils.now()` (module attribute, never an imported name). Money: integer so'm
   (`BigIntegerField`). Percent: `DecimalField(5, 2)`; cashback math in integer basis points (`core.money`).
 - Append-only models (ledger, audit, order events, policy versions, webhook inbox, appointment events) subclass
