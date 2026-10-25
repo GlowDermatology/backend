@@ -109,12 +109,13 @@ def reconcile_balances_now() -> dict[str, Any]:
         per_check[check] = len(rows)
         for row in rows:
             finding = dict(zip(columns, row, strict=True))
-            entity_id = finding.pop("account_id") if "account_id" in finding else finding.pop("customer_id")
+            by_account = "account_id" in finding
+            entity_id = finding["account_id"] if by_account else finding["customer_id"]
             audit.record(
                 action="loyalty.reconciliation_mismatch",
-                entity_type="loyalty_account" if "account_id" in columns else "customer",
+                entity_type="loyalty_account" if by_account else "customer",
                 entity_id=str(entity_id),
-                after={"check": check, **finding},
+                after={"check": check, **finding},  # e.g. {check, account_id, balance, ledger_sum}
             )
             logger.warning("Loyalty reconciliation mismatch check=%s %s", check, finding)
         mismatches += len(rows)

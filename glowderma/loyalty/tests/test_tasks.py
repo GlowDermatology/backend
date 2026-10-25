@@ -70,12 +70,14 @@ def test_raw_sql_tampered_balance_is_detected_and_not_fixed() -> None:
         {
             "entity": ("loyalty_account", str(account.pk)),
             "check": "ledger_sum",
+            "account_id": account.pk,
             "balance": 17_090,
             "ledger_sum": 16_090,
         },
         {
             "entity": ("loyalty_account", str(account.pk)),
             "check": "last_balance_after",
+            "account_id": account.pk,
             "balance": 17_090,
             "last_balance_after": 16_090,
         },  # fmt: skip  # noqa: E501
@@ -99,9 +101,9 @@ def test_broken_chain_links_and_holds_are_reported_per_row() -> None:
     summary = tasks.reconcile_balances_now()
     assert summary["checks"] == {"ledger_sum": 1, "last_balance_after": 1, "chain": 1, "purchase_links": 1, "captured_holds": 1}  # fmt: skip  # noqa: E501
     rows = {row["check"]: row for row in findings()}
-    assert rows["chain"] == {"entity": ("loyalty_account", str(account.pk)), "check": "chain", "entry_id": broken.pk, "amount": 10, "balance_after": 1, "previous_balance_after": 16_090}  # fmt: skip  # noqa: E501
-    assert rows["purchase_links"] == {"entity": ("customer", str(account.customer_id)), "check": "purchase_links", "purchase_id": purchase.purchase_id, "cashback_amount": 1, "credited_amount": 3_140, "credited_entry_id": purchase.credited_entry_id, "reversal_entry_id": None}  # fmt: skip  # noqa: E501
-    assert rows["captured_holds"] == {"entity": ("loyalty_account", str(account.pk)), "check": "captured_holds", "hold_id": hold.pk, "hold_amount": 19_999, "entry_kind": "debit", "entry_amount": -20_000, "entry_order_id": order_id, "order_id": order_id}  # fmt: skip  # noqa: E501
+    assert rows["chain"] == {"entity": ("loyalty_account", str(account.pk)), "check": "chain", "account_id": account.pk, "entry_id": broken.pk, "amount": 10, "balance_after": 1, "previous_balance_after": 16_090}  # fmt: skip  # noqa: E501
+    assert rows["purchase_links"] == {"entity": ("customer", str(account.customer_id)), "check": "purchase_links", "customer_id": account.customer_id, "purchase_id": purchase.purchase_id, "cashback_amount": 1, "credited_amount": 3_140, "credited_entry_id": purchase.credited_entry_id, "reversal_entry_id": None}  # fmt: skip  # noqa: E501
+    assert rows["captured_holds"] == {"entity": ("loyalty_account", str(account.pk)), "check": "captured_holds", "account_id": account.pk, "hold_id": hold.pk, "hold_amount": 19_999, "entry_kind": "debit", "entry_amount": -20_000, "entry_order_id": order_id, "order_id": order_id}  # fmt: skip  # noqa: E501
     assert LedgerEntry.objects.count() == 6 and summary["mismatches"] == 5
 
 
