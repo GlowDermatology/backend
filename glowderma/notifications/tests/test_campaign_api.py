@@ -379,6 +379,10 @@ def test_create_for_one_customer_without_devices_is_sent_at_once(staff_client: A
     [
         ({"kind": "news"}, [("kind", "invalid_choice", "Ruxsat etilmagan qiymat.")]),
         ({"title": " ab "}, [("title", "min_length", "Sarlavhani kiriting.")]),
+        ({"title": ""}, [("title", "min_length", "Sarlavhani kiriting.")]),
+        ({"title": "   "}, [("title", "min_length", "Sarlavhani kiriting.")]),
+        ({"body": ""}, [("body", "min_length", "Matnni kiriting.")]),
+        ({"body": "    "}, [("body", "min_length", "Matnni kiriting.")]),
         ({"title": "x" * 61}, [("title", "max_length", "60 belgidan oshmasin.")]),
         ({"body": "abcd"}, [("body", "min_length", "Matnni kiriting.")]),
         ({"body": "x" * 181}, [("body", "max_length", "180 belgidan oshmasin.")]),

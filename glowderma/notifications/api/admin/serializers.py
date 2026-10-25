@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from typing import Any, cast
 
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
+from rest_framework.utils import html
 
 from glowderma.accounts.models import Customer
 from glowderma.catalog.models import Product
@@ -185,14 +187,18 @@ class NotificationCreateSerializer(serializers.Serializer[dict[str, Any]]):
     """The multipart body of ``POST notifications/`` after :func:`form_to_nested` (dotted keys un-dotted)."""
 
     kind = serializers.ChoiceField(choices=enums.NotificationKind.values)
+    # ``allow_blank``: DRF trims first and would answer ``blank`` for "" / "   "; the contract wants the
+    # ``min_length`` copy for every trimmed length below the minimum, the empty string included.
     title = serializers.CharField(
         max_length=60,
         min_length=3,
+        allow_blank=True,
         error_messages={"min_length": MESSAGES["title_min"], "max_length": MESSAGES["title_max"]},
     )
     body = serializers.CharField(
         max_length=180,
         min_length=5,
+        allow_blank=True,
         error_messages={"min_length": MESSAGES["body_min"], "max_length": MESSAGES["body_max"]},
     )
     link = NotificationLinkInputSerializer(required=False)
@@ -204,6 +210,16 @@ class NotificationCreateSerializer(serializers.Serializer[dict[str, Any]]):
         if isinstance(data, dict) and "audience" not in data:
             data = {**data, "audience": {}}
         return cast(dict[str, Any], super().to_internal_value(data))
+
+    def validate_title(self, value: str) -> str:
+        if value == "":
+            raise serializers.ValidationError([field_error("min_length", MESSAGES["title_min"])])
+        return value
+
+    def validate_body(self, value: str) -> str:
+        if value == "":
+            raise serializers.ValidationError([field_error("min_length", MESSAGES["body_min"])])
+        return value
 
     def validate_scheduled_at(self, value: Any) -> Any:
         if value is not None and value <= timeutils.now():
@@ -345,8 +361,22 @@ class SegmentWriteSerializer(serializers.Serializer[dict[str, Any]]):
         return changes
 
 
+class CustomerIdsField(BoundedListField):
+    """``customer_ids``: DRF's ``not_a_list`` / ``empty`` are not contract codes (and carry English stock
+    text), so they answer the generic ``invalid`` / ``required`` (contract §1.6)."""
+
+    def to_internal_value(self, data: Any) -> list[Any]:
+        if html.is_html_input(data):
+            data = html.parse_html_list(data, default=[])
+        if isinstance(data, (str, bytes, Mapping)) or not hasattr(data, "__iter__"):
+            raise serializers.ValidationError([field_error("invalid")])
+        if len(data) == 0:
+            raise serializers.ValidationError([field_error("required")])
+        return super().to_internal_value(data)
+
+
 class SegmentMembersInputSerializer(serializers.Serializer[dict[str, Any]]):
-    customer_ids = BoundedListField(child=serializers.IntegerField(), max_items=500, allow_empty=False)
+    customer_ids = CustomerIdsField(child=serializers.IntegerField(), max_items=500)
 
     def validate_customer_ids(self, value: list[int]) -> list[int]:
         ids = sorted(set(value))
