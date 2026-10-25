@@ -307,7 +307,11 @@ def test_members_list_add_remove(staff_client: APIClient, staff: StaffUser, cloc
     "body,expected",
     [
         ({}, [("customer_ids", "required", "Majburiy maydon.")]),
-        ({"customer_ids": []}, [("customer_ids", "empty", "This list may not be empty.")]),
+        ({"customer_ids": []}, [("customer_ids", "required", "Majburiy maydon.")]),
+        ({"customer_ids": "abc"}, [("customer_ids", "invalid", "Noto‘g‘ri qiymat.")]),
+        ({"customer_ids": {"a": 1}}, [("customer_ids", "invalid", "Noto‘g‘ri qiymat.")]),
+        ({"customer_ids": 5}, [("customer_ids", "invalid", "Noto‘g‘ri qiymat.")]),
+        ({"customer_ids": None}, [("customer_ids", "null", "Majburiy maydon.")]),
         ({"customer_ids": list(range(1, 502))}, [("customer_ids", "max_items", "Ko‘pi bilan 500 ta.")]),
         ({"customer_ids": ["x"]}, [("customer_ids.0", "invalid", "Noto‘g‘ri qiymat.")]),
         ({"customer_ids": [999999]}, [("customer_ids", "does_not_exist", "Topilmadi.")]),
