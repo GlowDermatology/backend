@@ -35,7 +35,7 @@ Examples use `jsonc`: `//` comments give types and nullability and are not part 
 
 | `code` | Cause | Client reaction |
 |---|---|---|
-| `not_authenticated` | Header missing or malformed; bad signature, `aud` or `iss`; access JWT expired; unknown refresh token on `auth/refresh/` | Refresh once, then retry |
+| `not_authenticated` | Header missing or malformed; bad signature, `aud` or `iss`; access JWT expired; unknown refresh token on `auth/refresh/` | Refresh once, then retry — except that **any** 401 from `auth/refresh/` or `auth/logout/` ends the session (clear cookies, go to login, no retry) |
 | `SESSION_EXPIRED` | Session revoked (`logout`, `password_changed`, `deactivated`, `admin_revoked`), past `absolute_expires_at`, or staff inactive; any invalid or unknown refresh token on `auth/logout/` | Clear cookies and go to login |
 | `SESSION_REPLACED` | Session revoked with reason `replaced` (reserved; used by the customer API) | Clear cookies and go to login |
 | `invalid_credentials` | `auth/login/` only | Show the form error |
@@ -84,7 +84,7 @@ Collections embedded in a resource (customer ledger and purchases, order items, 
 ### 1.6 Errors
 ```jsonc
 {"code": "validation_error",                      // machine code, table below
- "message": "Maydonlarni tekshiring.",            // Uzbek; goes to ActionResult.error
+ "message": "Maydonlarni tekshiring.",            // Uzbek; ActionResult.error = the first errors[] entry with field null, else this message
  "errors": [{"field": "texts.uz.name",            // dotted snake_case path | null (non-field)
              "code": "min_length",
              "message": "O‘zbekcha nomni kiriting (kamida 2 belgi)."}],
@@ -98,6 +98,9 @@ Collections embedded in a resource (customer ledger and purchases, order items, 
 | HTTP | `code` | When |
 |---|---|---|
 | 400 | `validation_error` | Body, query or field errors (`errors[]` is non-empty) |
+| 400 | `bad_request` | Malformed request rejected by Django (`SuspiciousOperation`, `BadRequest`, too many fields/files) |
+| 400 | `parse_error` | Body cannot be parsed (malformed JSON) |
+| 406 | `not_acceptable` | `Accept` header cannot be satisfied |
 | 400 | `idempotency_key_required` | Missing or non-UUID `Idempotency-Key` on an endpoint that requires it |
 | 401 | `not_authenticated` · `SESSION_EXPIRED` · `SESSION_REPLACED` · `invalid_credentials` | §1.2 |
 | 403 | `permission_denied` | Outside the allowed networks (a token with an audience other than `staff` fails decoding → 401 `not_authenticated`) |
@@ -154,7 +157,7 @@ Default top-level messages: `not_authenticated` "Avtorizatsiya talab qilinadi." 
 | Same key, different fingerprint | 422 `idempotency_key_reused` |
 | Same key, first request still running | 409 `request_in_progress`, `Retry-After: 1` |
 
-The FE creates the key once per dialog open (`crypto.randomUUID()`), reuses it on retry and resets it after success. A replay counts as success.
+The FE creates one key per form/dialog instance (`crypto.randomUUID()`), reuses it on retries and across re-opens until a success (including a replay), and renews it after a success or after 422 `idempotency_key_reused`. A replay counts as success.
 
 ### 1.8 Exports (`?export=csv|xlsx`)
 - **Where:** available on every list marked **E** in §2.0.
@@ -184,7 +187,8 @@ The FE creates the key once per dialog open (`crypto.randomUUID()`), reuses it o
 | `auth/login/` and `auth/change-password/` per normalized email | 5/min, then exponential lockout (1 → 15 min) |
 | `auth/oauth/{provider}/` per client IP | 30/min |
 | `auth/login/` per client IP | 30/min |
-| `auth/refresh/` per session | 120/min (not per IP: Next prefetch bursts) |
+| `auth/refresh/` per session | 120/min (keyed on the token hash: Next prefetch bursts) |
+| `auth/refresh/` and `auth/logout/` per client IP | 600/min (loose ceiling) |
 | `?export=` per staff | 10/min |
 | Everything else per staff | 1200/min |
 
@@ -255,7 +259,7 @@ Shared shapes: `Actor` = `{"id": int, "display_name": str}`, where `display_name
 - Audit `auth.login_succeeded` / `auth.login_failed` (`{email, method: "password"}`).
 
 **`POST auth/refresh/`** (no bearer). Body `{"refresh": str}`.
-- 200 `{"access", "access_expires_at", "refresh_expires_at"}`. The refresh token is unchanged.
+- 200 `{"access", "access_expires_at", "refresh_expires_at"}`. The refresh token is unchanged. `access_expires_at ≤ refresh_expires_at` always (the access JWT `exp` is capped at the session's absolute expiry).
 - 401 `SESSION_EXPIRED`: revoked, past absolute expiry, or staff inactive.
 - 401 `not_authenticated`: unknown token.
 
