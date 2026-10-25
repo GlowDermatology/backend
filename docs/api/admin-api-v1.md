@@ -377,7 +377,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
    {"ledger_entry_id": 121, "kind": "credit", "amount": 5680, "at": "2026-10-23T14:05:00+05:00",
     "base": 568000, "percent": "1.00", "reverses_id": null}],
  "history": [ /* OrderEvent[], newest first (at desc, id desc); see §4 */ ],
- "available_actions": {"transitions": [], "cancel": true, "retry_shipment": false}}
+ "available_actions": {"transitions": ["delivered"], "cancel": true, "retry_shipment": false}}
 ```
 ```jsonc
 // Refund
@@ -1169,5 +1169,15 @@ Provisional, configurable rules that shape payloads:
 16. **Deleted customers.** `customer.name` can be `""`; render "O‘chirilgan mijoz" in orders, appointments and customer views.
 17. **Auth.**
     - Handle the 401 codes per §1.2: `not_authenticated` → refresh once; `SESSION_*` → clear cookies and redirect.
+18. **Decisions recorded while designing the M1 data model (2026-10-25, `docs/plans/2026-10-25-m1-models.md`).**
+    - The seeded policy v3 carries `earn_on_cashback_paid = true` so order №10248's drawn credit (base 568 000 → 5 680) reproduces; the contract example in §2.7 stays illustrative.
+    - `payment_failed` is emitted only on provider callbacks. A reservation expiry or an admin cancel of an unpaid order fails a `pending` payment silently (`reservation_expired.data.payment_failed` says whether one was failed); a Payme transaction in state 1 is never failed unilaterally and waits for Payme's `CancelTransaction`.
+    - `online_orders.count` = paid, non-reversed online purchases; `online_orders.last_order_*` = the customer's newest order of any status.
+    - A cancelled BTS parcel keeps `shipment.state = "created"` with its tracking number (no `cancelled` literal in M1); the `cancelled` order event carries `bts_cancelled`.
+    - `cashback_used` never exceeds `items_subtotal` (cashback never pays the delivery fee) — a DB CHECK.
+    - `Order.cashback_hold` renders only an `active` hold, else `null`.
+    - Orders keep a recipient snapshot (`recipient_name`, `recipient_phone`, `address_text`) taken at checkout, so BTS parcels and exports survive a later customer scrub.
+    - Admin appointment creation / rescheduling / cancellation (`requested_via = admin`) add audit actions `appointment.created`, `appointment.rescheduled`, `appointment.cancelled` and pushes on reschedule and cancel (M1d).
+    - Refund operations for the Payments screen (M1c, consumed by F3): `POST payments/{id}/refunds/{refund_id}/retry/` (from `failed`) and `…/resolve/` `{state: succeeded|failed}` (from `unknown` / `manual_required`, audited `refund.state_changed` with the actor).
     - The logout action posts `{refresh: <gd_admin_refresh cookie>, scope: "current"}` and clears both cookies whatever the response (a 401 `SESSION_EXPIRED` counts as logged out). Settings (A1) can offer "others" and "all".
     - The login page, `auth.actions.ts`, cookies and `proxy.ts` follow the spec's "Auth" section.
