@@ -443,6 +443,16 @@ __all__ = [
     "handle_refund_submit",
     "on_bts_create_dead",
     "on_refund_submit_dead",
+    "poll_bts",
     "push_sale",
     "submit_refund",
 ]
+
+
+@shared_task(name="commerce.poll_bts")  # type: ignore[untyped-decorator]
+def poll_bts() -> list[int]:
+    """BTS polling fallback (customer contract §2.13.3; beat ``commerce-poll-bts`` every 600 s).
+
+    P0 stub returning ``[]`` (no parcel polled); P2 implements the single-flight round-robin run.
+    """
+    return []

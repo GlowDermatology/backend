@@ -20,7 +20,7 @@ from django.db.models.functions import Cast, Coalesce, TruncDay, TruncHour
 from glowderma.catalog.models import ProductStock
 from glowderma.commerce import state
 from glowderma.commerce.models import Order, OrderEvent, StockReservation
-from glowderma.core import enums, timeutils
+from glowderma.core import enums, integration_modes, timeutils
 from glowderma.core.timeutils import TASHKENT
 from glowderma.delivery import selectors as delivery_selectors
 from glowderma.delivery.models import Shipment
@@ -75,6 +75,26 @@ def available_stock(product_ids: Iterable[int]) -> dict[int, int]:
     for product_id, quantity, held, sold in rows:
         result[int(product_id)] = int(quantity) - int(held) - int(sold)
     return result
+
+
+def customer_available_stock(product_ids: Iterable[int]) -> dict[int, int]:
+    """The one availability read of the customer API (customer contract §1.4, §2.3).
+
+    ``max(0, available_stock)`` per product; **0 for every product** while online selling is off
+    (``core.integration_modes.online_sales_enabled()`` false: Billz is fake under the production settings, so
+    the stock is unknown). The catalog (P1), the cart and checkout (P2) read availability only through here.
+    """
+    ids = list(product_ids)
+    if not integration_modes.online_sales_enabled():
+        return dict.fromkeys(ids, 0)
+    return {product_id: max(0, quantity) for product_id, quantity in available_stock(ids).items()}
+
+
+def customer_inflight_order(customer_id: int) -> int | None:
+    """The customer's ``awaiting_payment`` order whose Click payment is in flight (customer contract §2.2.3
+    step 1), else ``None``. P0 stub: always ``None``; P2 implements it with
+    ``commerce.services.in_flight``."""
+    return None
 
 
 # --- orders list (03 §6.1) ----------------------------------------------------------------------------------
@@ -326,6 +346,8 @@ __all__ = [
     "OrderFilters",
     "available_actions",
     "available_stock",
+    "customer_available_stock",
+    "customer_inflight_order",
     "cancellation",
     "count_created",
     "filter_orders",

@@ -34,6 +34,7 @@ from glowderma.commerce import events, selectors, state, topics
 from glowderma.commerce.models import (
     EVENT_SOURCES,
     EVENT_STATUS_AFTER,
+    CartItem,
     Order,
     OrderEvent,
     OrderItem,
@@ -1015,10 +1016,12 @@ __all__ = [
     "OrderNotFound",
     "OutOfStock",
     "apply_bts_status",
+    "cancel_by_customer",
     "cancel_order",
     "clean_reason",
     "confirm_payment_effects",
     "create_order",
+    "delete_cart_lines",
     "expire_due_reservations",
     "expire_reservation",
     "fail_payment_effects",
@@ -1035,3 +1038,23 @@ __all__ = [
     "retry_shipment",
     "transition",
 ]
+
+
+# --- M2 seams (plan §1 P0): stubs P2 replaces, and the cart helper P1 needs now
+# ---------------------------------
+
+
+def cancel_by_customer(order_id: int, customer_id: int, *, at: datetime | None = None) -> int:
+    """Customer cancel of an ``awaiting_payment`` order (customer contract §2.7.3); returns the order id.
+
+    P0 stub with the final signature: P2 implements it (state.py row 5; a Click payment in flight →
+    ``PaymentInProgress``). ``DELETE me/`` (P1) calls it only for customers with open orders.
+    """
+    raise NotImplementedError("P2")
+
+
+def delete_cart_lines(customer_id: int) -> int:
+    """Delete every cart line of the customer (``DELETE me/`` step 4, the dormant reset of customer contract
+    §2.2.3); returns the number of lines deleted. P2's ``clear_cart`` reuses it."""
+    deleted, _ = CartItem.objects.filter(cart__customer_id=customer_id).delete()
+    return deleted
