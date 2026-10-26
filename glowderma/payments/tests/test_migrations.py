@@ -40,7 +40,11 @@ def test_no_further_payments_migrations() -> None:
     from glowderma.payments import migrations as package
 
     names = sorted(name for name in __import__("os").listdir(package.__path__[0]) if name[0].isdigit())
-    assert names == ["0001_initial.py", "0002_payment_active_excludes_late_capture.py"]
+    assert names == [
+        "0001_initial.py",
+        "0002_payment_active_excludes_late_capture.py",
+        "0003_payment_late_capture_open_idx.py",
+    ]
 
 
 @pytest.mark.django_db(transaction=True)
@@ -62,6 +66,7 @@ def test_migrate_zero_and_forward_again() -> None:
         "payment_created_idx",
         "payment_status_created_idx",
         "payment_confirmed_idx",
+        "payment_late_capture_open_idx",
     } <= index_names("payments_payment")
     assert {"refund_one_open_per_payment", "refund_payment_idx", "refund_attention_idx"} <= index_names(
         "payments_refund"
@@ -69,6 +74,7 @@ def test_migrate_zero_and_forward_again() -> None:
     assert {row.name for row in MigrationRecorder.Migration.objects.filter(app="payments")} == {
         "0001_initial",
         "0002_payment_active_excludes_late_capture",
+        "0003_payment_late_capture_open_idx",
     }
     refund = RefundFactory.create(payment=PaymentFactory.create())
     assert refund.pk is not None
