@@ -68,6 +68,10 @@ class Customer(TimeStampedModel):
     terms_version = models.CharField(max_length=32, blank=True)
     consent_at = models.DateTimeField(null=True)
     consent_ip = models.GenericIPAddressField(null=True)
+    # M2 history horizon (customer contract §2.2.3, M2-A15/A16): the customer's own orders, appointments and
+    # inbox rows created before it belong to a previous holder of the number. Null = no horizon
+    # (registered_at).
+    history_from = models.DateTimeField(null=True)
 
     class Meta:
         constraints = [
@@ -96,6 +100,16 @@ class Customer(TimeStampedModel):
     def __str__(self) -> str:
         return f"{self.phone} {self.name}".strip()
 
+    # DRF and core.idempotency treat request.user as a user object: a customer signed in through
+    # CustomerJWTAuthentication is authenticated (no SQL behind either property).
+    @property
+    def is_authenticated(self) -> bool:
+        return True
+
+    @property
+    def is_anonymous(self) -> bool:
+        return False
+
 
 class Device(TimeStampedModel):
     """A mobile installation of one customer; carries the FCM token used by notifications."""
@@ -116,6 +130,8 @@ class Device(TimeStampedModel):
     is_active = models.BooleanField(default=True)  # false after logout/replace/delete
     last_active_at = models.DateTimeField(default=timestamp_default)
     fcm_invalidated_at = models.DateTimeField(null=True)  # set when FCM reports the token dead
+    # M2 (customer contract §1.9): SHA-256 hex of the device key issued once on a verified sign-in; "" = none.
+    key_hash = models.CharField(max_length=64, blank=True)
 
     class Meta:
         constraints = [
@@ -226,11 +242,15 @@ class CustomerSocialIdentity(models.Model):
     customer = models.ForeignKey(
         "accounts.Customer", on_delete=models.CASCADE, related_name="social_identities"
     )
-    provider = models.CharField(max_length=16, choices=[("google", "google"), ("facebook", "facebook")])
+    provider = models.CharField(
+        max_length=16, choices=[("google", "google"), ("facebook", "facebook"), ("apple", "apple")]
+    )
     subject = models.CharField(max_length=254)
     email_at_link = models.EmailField(max_length=254, blank=True)
     created_at = models.DateTimeField(default=timestamp_default, editable=False)
     last_login_at = models.DateTimeField(null=True)
+    # Apple's refresh token sealed with core.secretbox (customer contract §2.1.8), revoked on unlink/deletion.
+    provider_refresh_token = models.TextField(blank=True)
 
     class Meta:
         constraints = [
@@ -269,17 +289,34 @@ class AuthSession(models.Model):
         blank=True,
         choices=[
             (value, value)
-            for value in ("logout", "expired", "password_changed", "deactivated", "replaced", "admin_revoked")
+            for value in (
+                "logout",
+                "expired",
+                "password_changed",
+                "deactivated",
+                "replaced",
+                "admin_revoked",
+                "refresh_reused",
+            )
         ],
     )
     # M2 rotating refresh (customers only; staff refresh is non-rotating and leaves these empty)
     previous_refresh_hash = models.CharField(max_length=64, blank=True)
     rotated_at = models.DateTimeField(null=True)
+    # Customer contract §2.1.6: the access-token claim ``rot`` is this counter (never a timestamp); the first
+    # request carrying the current ``rot`` sets ``rotation_confirmed`` (CustomerJWTAuthentication).
+    rotation = models.PositiveIntegerField(default=0)
+    rotation_confirmed = models.BooleanField(default=False)
 
     class Meta:
         indexes = [
             models.Index(fields=["customer", "revoked_at"], name="accounts_authsession_cust_rev"),
             models.Index(fields=["staff", "revoked_at"], name="accounts_authsession_staff_rev"),
+            models.Index(
+                fields=["previous_refresh_hash"],
+                condition=~Q(previous_refresh_hash=""),
+                name="authsession_prev_refresh_idx",  # Django caps index names at 30
+            ),
         ]
         constraints = [
             models.CheckConstraint(
