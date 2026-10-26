@@ -112,7 +112,9 @@ def test_apple_revoke_is_never_reported_done_through_the_fake_in_production(
 def test_apple_revoke_without_identity_is_revoked() -> None:
     sealed = services.seal_apple_refresh("orphan-refresh", client_id="uz.glowderma.app")
     with transaction.atomic():
-        services.enqueue_apple_token_revoke(sealed, client_id="uz.glowderma.app")
+        services.enqueue_apple_token_revoke(
+            sealed, client_id="uz.glowderma.app", customer_id=None, subject="orphan-sub"
+        )
     message = OutboxMessage.objects.get(topic="apple.revoke")
     tasks.revoke_apple_token(message)
     assert fake_apple().revoked == [("orphan-refresh", "uz.glowderma.app")]

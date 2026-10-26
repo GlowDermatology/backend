@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import logging
 import secrets
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
 from difflib import SequenceMatcher
@@ -544,6 +547,64 @@ def _exchange_apple(code: str | None, claims: AppTokenClaims) -> tuple[str, str]
     return account_services.seal_apple_refresh(refresh, client_id=client_id), client_id
 
 
+@dataclass(frozen=True, slots=True)
+class RefusedAppleToken:
+    """An Apple refresh token the code exchange produced for a request that was then refused."""
+
+    sealed: str
+    client_id: str
+    customer_id: int | None
+    subject: str
+
+
+# Inside an Idempotency-Key transaction (``POST me/social/``) a refusal rolls the ``apple.revoke`` row back
+# with everything else; the view collects the tokens instead and queues them after that transaction ended.
+_REFUSED_APPLE_TOKENS: ContextVar[list[RefusedAppleToken] | None] = ContextVar(
+    "refused_apple_tokens", default=None
+)
+
+
+@contextmanager
+def revoke_refused_apple_tokens() -> Iterator[None]:
+    """Wrap a request whose own transaction rolls back on a refusal: the Apple tokens refused inside are
+    revoked (``apple.revoke``, each in its own transaction) once the block has ended, success or error."""
+    pending: list[RefusedAppleToken] = []
+    marker = _REFUSED_APPLE_TOKENS.set(pending)
+    try:
+        yield
+    finally:
+        _REFUSED_APPLE_TOKENS.reset(marker)
+        for refused in pending:
+            _enqueue_refused_apple_token(refused)
+
+
+def _revoke_refused_apple_token(refused: RefusedAppleToken) -> None:
+    pending = _REFUSED_APPLE_TOKENS.get()
+    if pending is not None:
+        pending.append(refused)
+    else:
+        _enqueue_refused_apple_token(refused)
+
+
+def _enqueue_refused_apple_token(refused: RefusedAppleToken) -> None:
+    """``accounts.services.enqueue_apple_token_revoke`` in its own transaction (nothing is queued while the
+    subject is linked); a failure is logged, never raised over the refusal the client receives."""
+    try:
+        with transaction.atomic():
+            account_services.enqueue_apple_token_revoke(
+                refused.sealed,
+                client_id=refused.client_id,
+                customer_id=refused.customer_id,
+                subject=refused.subject,
+            )
+    except Exception:
+        logger.exception(
+            "apple.revoke not queued for a refused flow customer_id=%s subject_ref=%s",
+            refused.customer_id,
+            pii_ref(refused.subject),
+        )
+
+
 def social_sign_in(
     provider: str,
     token: str,
@@ -556,7 +617,12 @@ def social_sign_in(
 ) -> SignIn | PhoneStep:
     """``auth/social/``: a linked identity of an active customer signs in (no new-device SMS, M2-A10), an
     unknown one gets the ``verify_phone`` ticket (Apple's code is exchanged now, the sealed token waits in
-    Redis for the completion)."""
+    Redis for the completion).
+
+    Accepted residual: a ticket that is never completed leaves its Apple token unrevoked when the cache
+    entry expires (``SOCIAL_TICKET_TTL_SECONDS``); a completion refused for good revokes it
+    (:func:`complete_social`).
+    """
     claims = verify_social_token(provider, token, token_type, nonce, fid=device.fid)
     identity = (
         CustomerSocialIdentity.objects.select_related("customer")
@@ -663,7 +729,9 @@ def complete_social(
     device: DeviceContext,
     request: Any = None,
 ) -> SignIn:
-    """``auth/social/complete/`` (customer contract §2.1.9)."""
+    """``auth/social/complete/`` (customer contract §2.1.9). A final refusal (409 ``social_provider_linked``
+    / ``social_identity_linked``) drops the waiting Apple token and revokes it in its own transaction (never
+    while its subject is linked, C§2.1.8); other refusals keep it for a retry of the same ticket."""
     social = read_social_ticket(ticket, fid=device.fid)
     row = account_services.verification_row(verification_token, purpose=enums.OtpPurpose.LINK_SOCIAL)
     if cache.get(account_services.social_otp_key(row.pk)) != social.jti:
@@ -714,6 +782,21 @@ def complete_social(
             request,
             checked_hash=checked_hash,
         )
+    except SocialProviderLinked, SocialIdentityLinked:
+        # Final for this ticket: the phone's account has this provider, or the identity is linked elsewhere.
+        # The waiting Apple token is dropped and revoked (unless its subject is linked: C§2.1.8).
+        _best_effort(cache.delete, used_key)
+        if apple is not None:
+            _best_effort(cache.delete, SOCIAL_APPLE_KEY.format(jti=social.jti))
+            _revoke_refused_apple_token(
+                RefusedAppleToken(
+                    apple["sealed"],
+                    apple.get("client_id", ""),
+                    customer.pk if customer is not None else None,
+                    social.subject,
+                )
+            )
+        raise
     except Exception:
         _best_effort(cache.delete, used_key)  # never replaces the original error
         raise
@@ -936,8 +1019,7 @@ def link_social(
             _audit("customer.social_linked", customer, request, {"provider": provider, "via": "settings"})
     except Exception:
         if sealed:
-            with transaction.atomic():
-                account_services.enqueue_apple_token_revoke(sealed, client_id=client_id)
+            _revoke_refused_apple_token(RefusedAppleToken(sealed, client_id, customer_id, claims.subject))
         raise
 
 

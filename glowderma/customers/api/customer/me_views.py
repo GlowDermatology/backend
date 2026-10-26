@@ -222,8 +222,14 @@ class SocialLinkView(MeBase):
         request=s.MeSocialLinkSerializer,
         responses={200: s.CustomerMeSerializer, **CUSTOMER_ERRORS},
     )
-    @idempotent()
     def post(self, request: Request) -> Response:
+        # The Idempotency-Key transaction rolls back with a refusal: an Apple token exchanged for it is
+        # revoked after that transaction ended, so the revocation is not rolled back with it.
+        with services.revoke_refused_apple_tokens():
+            return self.link(request)
+
+    @idempotent()
+    def link(self, request: Request) -> Response:
         require_social_available(request.data.get("provider") if isinstance(request.data, dict) else None)
         serializer = s.MeSocialLinkSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)

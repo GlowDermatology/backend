@@ -826,12 +826,36 @@ def enqueue_apple_revoke(identity: CustomerSocialIdentity) -> bool:
         topics.APPLE_REVOKE,
         {
             "identity_id": identity.pk,
+            **apple_grant_reference(identity.customer_id, identity.subject),
             "client_id": apple_client_id(identity),
             "sealed_token": identity.provider_refresh_token,
         },
         dedupe_key=topics.apple_revoke_key(identity.pk),
     )
     return True
+
+
+def apple_grant_reference(customer_id: int | None, subject: str) -> dict[str, Any]:
+    """The non-secret reference of an Apple grant in an ``apple.revoke`` payload: the customer, Apple's
+    ``sub`` (the handler skips a grant whose subject is linked again, and staff need it to find a grant
+    whose message went dead; blanked with the token after a final outcome) and ``subject_ref``
+    (``pii_ref``, the only form the log lines carry)."""
+    return {
+        "customer_id": customer_id,
+        "subject": subject,
+        "subject_ref": pii_ref(subject) if subject else "",
+    }
+
+
+def apple_subject_linked(subject: str) -> bool:
+    """Whether an Apple identity with ``subject`` is linked to any customer. Apple's revocation ends the
+    user's whole authorization of the app, not only the one token, so a token whose subject is linked keeps
+    the linked identity's grant alive and must never be revoked on its own."""
+    return bool(subject) and (
+        CustomerSocialIdentity.objects.filter(
+            provider=enums.CustomerSocialProvider.APPLE, subject=subject
+        ).exists()
+    )
 
 
 # Attempts of ``register_device`` whose locked read may find a token holder the unlocked read missed; the
@@ -1837,7 +1861,11 @@ def touch_identity_sign_in(
 ) -> bool:
     """A linked identity signs in: lock it (after the customer-level lock), stamp ``last_login_at`` and store
     a newly exchanged Apple refresh token. ``False`` when the identity is gone (unlinked by a reset, the
-    dormant rule or the customer meanwhile)."""
+    dormant rule or the customer meanwhile).
+
+    A token exchanged while a concurrent sign-in of the same identity stored one first is dropped, not
+    revoked: both belong to the same Apple authorization of the app, and Apple's revocation ends the whole
+    authorization, so revoking the dropped one would invalidate the stored one too."""
     identity = (
         CustomerSocialIdentity.objects.select_for_update()
         .filter(pk=identity_id, customer_id=customer_id)
@@ -1852,16 +1880,26 @@ def touch_identity_sign_in(
     return True
 
 
-def enqueue_apple_token_revoke(sealed_token: str, *, client_id: str) -> None:
+def enqueue_apple_token_revoke(
+    sealed_token: str, *, client_id: str, customer_id: int | None, subject: str
+) -> bool:
     """Revoke an Apple refresh token the code exchange produced for a flow that was then refused (nothing
-    linked): ``apple.revoke`` without an identity, deduplicated on the sealed token."""
-    if not sealed_token:
-        return
+    linked): ``apple.revoke`` without an identity, deduplicated on the sealed token. Nothing is queued while
+    an identity with the same ``subject`` is linked (:func:`apple_subject_linked`: revoking would end that
+    identity's grant too); the handler re-checks at delivery. Returns whether a message was queued."""
+    if not sealed_token or apple_subject_linked(subject):
+        return False
     outbox.enqueue(
         topics.APPLE_REVOKE,
-        {"identity_id": None, "client_id": client_id, "sealed_token": sealed_token},
+        {
+            "identity_id": None,
+            **apple_grant_reference(customer_id, subject),
+            "client_id": client_id,
+            "sealed_token": sealed_token,
+        },
         dedupe_key=f"{topics.APPLE_REVOKE}:token:{hash_secret(sealed_token)[:32]}",
     )
+    return True
 
 
 def update_customer_address(address_id: int, customer_id: int, **changes: Any) -> Address:

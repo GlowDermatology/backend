@@ -273,6 +273,9 @@ def test_delete_customer_clears_keys_consent_and_queues_apple_revokes(
     # blanked the token in the stored payload (a final outcome).
     assert revoke.payload == {
         "identity_id": apple.pk,
+        "customer_id": customer.pk,
+        "subject": "",
+        "subject_ref": pii_ref(apple.subject),
         "client_id": "uz.glowderma.app",
         "sealed_token": "",
     }
