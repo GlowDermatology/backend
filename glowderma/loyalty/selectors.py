@@ -15,6 +15,8 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
+from django.conf import settings
+from django.contrib.postgres.expressions import ArraySubquery
 from django.db.models import (
     BigIntegerField,
     Case,
@@ -30,7 +32,7 @@ from django.db.models import (
 )
 from django.db.models.functions import Coalesce
 
-from glowderma.core import enums, timeutils
+from glowderma.core import enums, i18n, timeutils
 from glowderma.core.timeutils import TASHKENT
 from glowderma.loyalty import engine
 from glowderma.loyalty.models import (
@@ -467,10 +469,211 @@ def list_annotations(policy: CashbackPolicy | None = None, *, customer_ref: str 
     }
 
 
+# --- Customer API (customer contract §2.9, plan §4 P3) ---
+
+
+@dataclass(frozen=True, slots=True)
+class EffectiveHold:
+    """One active hold as the customer sees it (``GET me/cashback/`` ``holds[]``)."""
+
+    order_id: int
+    amount: int
+    expires_at: datetime  # the EFFECTIVE expiry (C§2.9.1)
+
+
+def effective_holds(customer_id: int, now: datetime | None = None) -> list[EffectiveHold]:
+    """The customer's ``active`` holds with their effective expiry, oldest first.
+
+    ``CashbackHold.expires_at`` stays at the order's ``reservation_expires_at``. An active hold whose
+    ``expires_at`` has passed exists only while the expiry job skips its order for an open transaction
+    attached in time (otherwise the expiry would have released it), so such a hold is shown with
+    ``expires_at + PAYMENT_IN_FLIGHT_GRACE_SECONDS``; any other with ``expires_at``. No read of commerce or
+    payments (layering).
+    """
+    rows = (
+        CashbackHold.objects.filter(account__customer_id=customer_id, state=enums.CashbackHoldState.ACTIVE)
+        .order_by("expires_at", "id")
+        .values_list("order_id", "amount", "expires_at")
+    )
+    return _effective(rows, timeutils.now() if now is None else now)
+
+
+def _effective(rows: Any, instant: datetime) -> list[EffectiveHold]:
+    grace = timedelta(seconds=int(settings.PAYMENT_IN_FLIGHT_GRACE_SECONDS))
+    return [
+        EffectiveHold(
+            order_id=int(order_id),
+            amount=int(amount),
+            expires_at=expires_at + grace if expires_at <= instant else expires_at,
+        )
+        for order_id, amount, expires_at in rows
+    ]
+
+
+def _account_with_holds(customer_id: int) -> tuple[int, list[tuple[int, int, datetime]]]:
+    """The balance and the active holds ``(order_id, amount, expires_at)`` (oldest first) in ONE statement,
+    so ``held``/``available`` and ``holds[]`` of one response come from the same snapshot (a hold captured
+    or released between two READ COMMITTED reads would otherwise make them disagree). No account → 0, []."""
+    active = CashbackHold.objects.filter(
+        account_id=OuterRef("pk"), state=enums.CashbackHoldState.ACTIVE
+    ).order_by("expires_at", "id")
+    row = (
+        LoyaltyAccount.objects.filter(customer_id=customer_id)
+        .annotate(
+            hold_orders=ArraySubquery(active.values("order_id")),
+            hold_amounts=ArraySubquery(active.values("amount")),
+            hold_expiries=ArraySubquery(active.values("expires_at")),
+        )
+        .values_list("balance", "hold_orders", "hold_amounts", "hold_expiries")
+        .first()
+    )
+    if row is None:
+        return 0, []
+    balance, orders, amounts, expiries = row
+    return int(balance), list(zip(orders, amounts, expiries, strict=True))
+
+
+@dataclass(frozen=True, slots=True)
+class TierBandView:
+    percent: Decimal
+    from_amount: int
+    to_amount: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class CashbackSummary:
+    """C§2.9.1 ``GET me/cashback/`` (``qr_ttl_seconds`` is added by the view from the settings)."""
+
+    balance: int
+    held: int
+    available: int
+    negative: bool
+    lifetime_total: int
+    tier: TierBandView | None
+    next_tier: NextTier | None
+    tiers: list[TierBandView]
+    earn_on_cashback_paid: bool
+    holds: list[EffectiveHold]
+
+
+def cashback_summary(customer_id: int, now: datetime | None = None) -> CashbackSummary:
+    """The customer's cashback screen: the same numbers as the admin card (``account_summary``'s balance and
+    active-hold sum, ``customer_totals``, ``tier_for`` under the active policy) plus the policy bands and the
+    effective holds; balance, ``held`` and ``holds[]`` are read in one statement."""
+    instant = timeutils.now() if now is None else now
+    balance, hold_rows = _account_with_holds(customer_id)
+    held = sum(amount for _order, amount, _expires in hold_rows)
+    lifetime = customer_totals(customer_id).lifetime
+    rules = rules_of(active_policy(instant))
+    tiers: list[TierBandView] = []
+    band: TierBandView | None = None
+    next_tier: NextTier | None = None
+    if rules is not None:
+        tiers = [
+            TierBandView(tier.percent.quantize(engine.PERCENT_QUANTUM), tier.from_amount, tier.to_amount)
+            for tier in rules.tiers
+        ]
+        index = engine.tier_index(rules.tiers, lifetime)
+        if index is not None:
+            band = tiers[index]
+            info = tier_for(lifetime, rules)
+            next_tier = info.next if info is not None else None
+    return CashbackSummary(
+        balance=balance,
+        held=held,
+        available=balance - held,
+        negative=balance < 0,
+        lifetime_total=lifetime,
+        tier=band,
+        next_tier=next_tier,
+        tiers=tiers,
+        earn_on_cashback_paid=bool(rules.earn_on_cashback_paid) if rules is not None else False,
+        holds=_effective(hold_rows, instant),
+    )
+
+
+def customer_ledger_page(customer_id: int) -> QuerySet[LedgerEntry]:
+    """The customer's own entries, newest first (``at desc, id desc``), as a queryset the view paginates in
+    SQL (``ledger_for_customer`` builds a full Python list and is not used for pages)."""
+    return _ledger_queryset().filter(account__customer_id=customer_id).order_by("-at", "-id")
+
+
+LEDGER_SOURCES = {
+    enums.LedgerSourceType.ORDER: enums.LedgerSource.ONLINE,
+    enums.LedgerSourceType.BILLZ_SALE: enums.LedgerSource.STORE,
+    enums.LedgerSourceType.ADMIN: enums.LedgerSource.ADMIN,
+}
+
+
+@dataclass(frozen=True, slots=True)
+class LedgerItemView:
+    """C§2.9.2 ``LedgerItem``: rendered in the request language; the staff ``reason`` never appears."""
+
+    id: int
+    at: datetime
+    kind: str
+    amount: int
+    balance_after: int
+    title: str
+    subtitle: str | None
+    order_id: int | None
+    source: str
+
+
+def _ledger_texts(entry: LedgerEntry, lang: str) -> tuple[str, str | None]:
+    """``(title, subtitle)`` of one entry by kind and source (C§2.9.2 table)."""
+    store = entry.source_type == enums.LedgerSourceType.BILLZ_SALE
+    order_id = entry.order_id
+    if entry.kind == enums.LedgerKind.CREDIT:
+        percent = i18n.format_percent(entry.percent if entry.percent is not None else 0, lang)
+        if store:
+            return i18n.t("label.ledger.credit", lang), i18n.t(
+                "label.ledger.sub_store_percent", lang, percent=percent
+            )
+        return i18n.t("label.ledger.credit", lang), i18n.t(
+            "label.ledger.sub_order_percent", lang, order_id=order_id, percent=percent
+        )
+    if entry.kind == enums.LedgerKind.DEBIT:
+        return i18n.t("label.ledger.debit", lang), i18n.t("label.ledger.sub_order", lang, order_id=order_id)
+    if entry.kind == enums.LedgerKind.REVERSAL:
+        title_key = "label.ledger.reversal_back" if entry.amount > 0 else "label.ledger.reversal_taken"
+        if store:
+            return i18n.t(title_key, lang), i18n.t("label.ledger.sub_store_returned", lang)
+        return i18n.t(title_key, lang), i18n.t("label.ledger.sub_order_cancelled", lang, order_id=order_id)
+    # adjustment: generic texts; the staff reason is internal (M2-N1)
+    title_key = "label.ledger.adjust_add" if entry.amount > 0 else "label.ledger.adjust_subtract"
+    return i18n.t(title_key, lang), None
+
+
+def ledger_item_view(entry: LedgerEntry, lang: str, horizon: datetime | None) -> LedgerItemView:
+    """One entry in the C§2.9.2 shape. Before the history ``horizon`` (``Customer.history_from``) the entry
+    keeps ``amount``/``balance_after`` but loses its order link and reads "Avvalgi hisob"."""
+    title, subtitle = _ledger_texts(entry, lang)
+    order_id = entry.order_id
+    if horizon is not None and entry.at < horizon:
+        order_id = None
+        subtitle = i18n.t("label.ledger.sub_previous", lang)
+    return LedgerItemView(
+        id=entry.pk,
+        at=entry.at,
+        kind=entry.kind,
+        amount=entry.amount,
+        balance_after=entry.balance_after,
+        title=title,
+        subtitle=subtitle,
+        order_id=order_id,
+        source=LEDGER_SOURCES[enums.LedgerSourceType(entry.source_type)],
+    )
+
+
 __all__ = [
     "AccountSummary",
     "Actor",
+    "EffectiveHold",
+    "LedgerItemView",
     "BillzPushInfo",
+    "CashbackSummary",
+    "TierBandView",
     "LedgerRow",
     "NextTier",
     "PurchaseRow",
@@ -479,11 +682,15 @@ __all__ = [
     "account_summary",
     "active_policy",
     "billz_push_info",
+    "cashback_summary",
+    "customer_ledger_page",
     "customer_totals",
+    "effective_holds",
     "held_amount",
     "ledger_entry",
     "ledger_for_customer",
     "ledger_for_order",
+    "ledger_item_view",
     "ledger_row",
     "lifetime_totals",
     "list_annotations",

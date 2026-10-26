@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import transaction
 
@@ -163,3 +164,13 @@ def seed_loyalty(context: SeedContext) -> None:
             _insert(spec, admin)
         if STORE_SALES_REPLAYED_BY not in {name for name, _order, _seeder in registered_seeders()}:
             seed_store_sales()
+        seed_pos_devices(admin)
+
+
+def seed_pos_devices(admin: StaffUser | None = None) -> int:
+    """The ``POS_API_KEYS`` cashier terminals (customer contract §2.10), **only** under the local/test
+    settings (``DEV_FEATURES_ALLOWED``; the production settings refuse the variable), so a known demo key
+    never reaches a deployed database. Idempotent by key hash; returns how many rows were created."""
+    if not settings.DEV_FEATURES_ALLOWED:
+        return 0
+    return sum(int(services.ensure_pos_device(name, key, admin)) for name, key in settings.POS_API_KEYS)

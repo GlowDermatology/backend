@@ -8,6 +8,7 @@ campaign audience, the meta sizes, the members list and — through :func:`segme
 from __future__ import annotations
 
 from collections.abc import Iterable
+from datetime import datetime
 from typing import Any, TypedDict
 
 from django.db.models import (
@@ -28,9 +29,16 @@ from django.db.models.functions import Coalesce, Collate
 from glowderma.accounts.models import Customer, Device
 from glowderma.catalog.models import Product
 from glowderma.catalog.selectors import DISPLAY_NAME
+from glowderma.commerce.models import Order
 from glowderma.core import enums
 from glowderma.loyalty.models import Purchase
-from glowderma.notifications.models import Campaign, CustomerSegment, SegmentMember, StatusTemplate
+from glowderma.notifications.models import (
+    Campaign,
+    CustomerSegment,
+    InboxNotification,
+    SegmentMember,
+    StatusTemplate,
+)
 
 PUSHABLE_DEVICE = Q(is_active=True, push_enabled=True) & ~Q(fcm_token="")
 
@@ -298,3 +306,29 @@ def meta() -> dict[str, Any]:
         "templates": templates(),
         "link_options": link_options(),
     }
+
+
+# --- M2 customer inbox (customer contract §2.12, plan §4 P3) ------------------------------------------------
+
+
+def inbox_queryset(customer_id: int, horizon: datetime | None) -> QuerySet[InboxNotification]:
+    """The customer's own rows inside the history horizon (rows created before ``Customer.history_from``
+    belong to a previous holder of the number, C§2.2.3)."""
+    qs = InboxNotification.objects.filter(customer_id=customer_id)
+    return qs if horizon is None else qs.filter(created_at__gte=horizon)
+
+
+def inbox_page(customer_id: int, horizon: datetime | None) -> QuerySet[InboxNotification]:
+    """``GET me/notifications/``: newest first (``created_at desc, id desc``)."""
+    return inbox_queryset(customer_id, horizon).order_by("-created_at", "-id")
+
+
+def unread_count(customer_id: int, horizon: datetime | None) -> int:
+    """The badge: unread rows inside the horizon (``inbox_customer_unread_idx``)."""
+    return inbox_queryset(customer_id, horizon).filter(read_at__isnull=True).count()
+
+
+def order_push_facts(order_id: int) -> tuple[str, datetime] | None:
+    """``(fulfilment, created_at)`` of an order (the order-status push title and the horizon check)."""
+    row = Order.objects.filter(pk=order_id).values_list("fulfilment", "created_at").first()
+    return None if row is None else (str(row[0]), row[1])

@@ -310,7 +310,20 @@ def test_create_queued_sends_end_to_end(
     assert row.dedupe_key == f"campaign:{campaign.pk}:{reachable[0].pk}" and row.pushed_at == ANCHOR
     assert inbox[dead_token.pk].push_state == "failed" and inbox[dead_token.pk].push_error == "unregistered"
     assert recipients[reachable[0].pk].inbox == row
-    assert len(fcm.sent) == 3 and fcm.sent[0].data == {"type": "campaign", "campaign_id": str(campaign.pk)}
+    assert len(fcm.sent) == 3
+    first = fcm.sent[0]
+    assert first.data == {
+        "type": "campaign",
+        "inbox_id": first.data["inbox_id"],
+        "campaign_id": str(campaign.pk),
+        "product_id": str(product.pk),
+    }
+    assert InboxNotification.objects.get(pk=int(first.data["inbox_id"])).source_id == campaign.pk
+    assert (first.android_channel, first.android_priority, first.image_url) == (
+        "promo",
+        "normal",
+        record["image_url"],
+    )
     assert OutboxMessage.objects.get(topic="campaign.send_batch").status == "done"
     audit = AuditEntry.objects.get(action="notification.created")
     assert (

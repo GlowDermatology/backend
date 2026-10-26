@@ -210,7 +210,10 @@ def test_due_campaign_without_recipients_is_sent_immediately(clock: Any) -> None
 
 def test_handler_registration_and_dead_letter_audit(clock: Any) -> None:
     for topic in topics.HANDLED_TOPICS:
-        assert topic in outbox._handlers and outbox._dead_handlers[topic] is tasks.on_push_dead
+        expected = (
+            tasks.on_account_security_dead if topic == topics.PUSH_ACCOUNT_SECURITY else tasks.on_push_dead
+        )
+        assert topic in outbox._handlers and outbox._dead_handlers[topic] is expected
     message = OutboxMessage.objects.create(
         topic="push.order_status",
         payload={"order_id": 10248, "status": "processing", "event_id": 3, "customer_id": 99},

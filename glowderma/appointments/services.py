@@ -12,16 +12,27 @@ from collections.abc import Callable
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
+from django.conf import settings
 from django.db import IntegrityError, OperationalError, transaction
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import NotFound, ValidationError
 
 from glowderma.accounts.models import Customer, Device
-from glowderma.appointments import topics
+from glowderma.appointments import selectors, topics
 from glowderma.appointments.models import OPEN_STATUSES, Appointment, AppointmentEvent
 from glowderma.core import audit, enums, outbox, timeutils
-from glowderma.core.api.exceptions import Conflict, InvalidTransition, field_error
+from glowderma.core.api.exceptions import (
+    AuthFailed,
+    BookingLimit,
+    Conflict,
+    InvalidTransition,
+    SlotTaken,
+    TermsUpdateRequired,
+    field_error,
+    not_cancellable,
+)
 from glowderma.professionals.models import Professional, ProfessionalService, Service
 from glowderma.professionals.selectors import DAY_END_LABEL, day_schedules
+from glowderma.site_config.models import SiteSettings
 
 SLOT_STEP_MIN = 5  # admin bookings sit on a 5-minute grid (open point A-4: not the professional's slot_step)
 MESSAGES = {
@@ -49,6 +60,8 @@ PUSHED_ACTIONS: dict[str, str] = {
 # Test seam for the booking race: called after the slot checks and before the row is written.
 _before_write: Callable[[], None] = lambda: None  # noqa: E731
 DEADLOCK_DETECTED = "40P01"
+EXCLUSION_VIOLATION = "23P01"
+NO_OVERLAP_CONSTRAINT = "appointment_no_overlap"
 
 
 def _lost_the_slot(exc: Exception) -> bool:
@@ -56,12 +69,16 @@ def _lost_the_slot(exc: Exception) -> bool:
 
     Two transactions inserting overlapping rows each find the other's uncommitted tuple while checking the
     ``appointment_no_overlap`` exclusion constraint; PostgreSQL then either makes one wait and fails it with
-    the exclusion violation (``IntegrityError``) or detects the mutual wait and aborts one with a deadlock
-    (``OperationalError`` 40P01). Both are the same lost race.
+    the exclusion violation (``IntegrityError`` 23P01 on that constraint) or detects the mutual wait and
+    aborts one with a deadlock (``OperationalError`` 40P01). Both are the same lost race; any other
+    integrity error (a check constraint, a foreign key to a row deleted meanwhile) is a real error.
     """
+    cause = exc.__cause__
+    sqlstate = getattr(cause, "sqlstate", None)
     if isinstance(exc, IntegrityError):
-        return True
-    return getattr(exc.__cause__, "sqlstate", None) == DEADLOCK_DETECTED
+        constraint = getattr(getattr(cause, "diag", None), "constraint_name", None)
+        return sqlstate == EXCLUSION_VIOLATION and constraint == NO_OVERLAP_CONSTRAINT
+    return sqlstate == DEADLOCK_DETECTED
 
 
 def _start_error(code: str, message: str) -> ValidationError:
@@ -366,12 +383,197 @@ def cancel(appointment_id: int, *, reason: str = "", actor: Any, request: Any = 
     return appointment
 
 
-# --- M2 seam (plan §1 P0): the customer cancel, implemented by P3
+# --- M2 customer booking and cancel (customer contract §2.11, plan §4 P3) -----------------------------------
+
+ACCOUNT_DELETED_REASON = "account_deleted"  # passed by ``DELETE me/`` (P1): open items are cancelled at once
 
 
-def cancel_by_customer(
-    appointment_id: int, customer_id: int, *, reason: str = "", at: datetime | None = None
+def current_terms_version() -> str | None:
+    """The published terms version (C§2.1.3: ``SiteSettings.terms_version`` non-empty **and** the uz texts of
+    the terms and the privacy policy non-empty), else ``None``. A read never creates the singleton."""
+    row = (
+        SiteSettings.objects.filter(pk=1)
+        .values_list("terms_version", "terms_uz", "privacy_policy_uz")
+        .first()
+    )
+    if row is None:
+        return None
+    version, terms, privacy = row
+    return version if version and terms and privacy else None
+
+
+def _check_consent(customer: Customer) -> None:
+    """409 ``terms_update_required`` while the customer's consent is older than the published terms."""
+    current = current_terms_version()
+    if current is not None and customer.terms_version != current:
+        raise TermsUpdateRequired(details={"current_version": current})
+
+
+def _field(name: str, code: str, key: str, **params: Any) -> ValidationError:
+    return ValidationError({name: [field_error(code, message_key=key, params=params or None)]})
+
+
+def _check_customer_slot(
+    professional: Professional, customer_id: int, start: datetime, duration_min: int, now: datetime
+) -> datetime:
+    """The ``start`` rows of the C§2.11 booking table, in order (after the customer lock and the count);
+    returns the end of the slot.
+
+    The end is computed only once the start is inside the horizon: a start at the edge of the datetime range
+    (``9999-12-31T23:59…``) would overflow ``start + duration`` (or its conversion to Tashkent time) and is
+    beyond the horizon anyway, so it answers ``out_of_range`` instead of a 500. A start at the other edge
+    (``0001-01-01…``) is refused as ``in_past`` first.
+    """
+    if start.tzinfo is None or start.utcoffset() is None:
+        raise ValidationError({"start": [field_error("invalid")]})
+    lead = int(settings.BOOKING_MIN_LEAD_MINUTES)
+    if start < now + timedelta(minutes=lead):
+        raise _field("start", "in_past", "field.booking_too_soon", n=lead)
+    horizon_error = _field(
+        "start", "out_of_range", "field.booking_horizon", n=int(settings.BOOKING_HORIZON_DAYS)
+    )
+    try:
+        day = timeutils.local_date(start)
+    except OverflowError:
+        raise horizon_error from None
+    if day > selectors.booking_horizon_end(now):
+        raise horizon_error
+    end = start + timedelta(minutes=duration_min)
+    frame = selectors.day_frame(professional.pk, day)
+    if frame.hours is None:
+        raise _field("start", "outside_working_hours", "field.outside_working_hours")
+    if not selectors.on_grid(professional, frame, start):
+        raise _field("start", "invalid", "field.booking_grid", n=professional.slot_step_min)
+    if start < frame.hours[0] or end > frame.hours[1]:
+        raise _field("start", "outside_working_hours", "field.outside_working_hours")
+    if selectors.overlaps_busy(frame, start, end):
+        raise _field("start", "slot_unavailable", "field.slot_unavailable")
+    if selectors.customer_open_overlap(customer_id, start, end):
+        raise _field("start", "slot_unavailable", "field.own_overlap")
+    return end
+
+
+@transaction.atomic
+def request_by_customer(
+    customer_id: int,
+    professional_id: int,
+    service_id: int,
+    start: datetime,
+    note: str = "",
+    *,
+    request: Any = None,
 ) -> Appointment:
-    """Customer cancel of an own open appointment (customer contract §2.11; ``DELETE me/`` passes
-    ``reason="account_deleted"``). P0 stub with the final signature; P3 implements it."""
-    raise NotImplementedError("P3")
+    """``POST appointments/`` (C§2.11): the checks of the booking table in order, then a ``requested``
+    appointment (``requested_via=app``, duration and price snapshotted from the link, the customer's note).
+
+    The customer row is locked first (``FOR NO KEY UPDATE``, C§2.7.1) before the open-appointment count and
+    the own-overlap check, so concurrent bookings of one customer serialise; a concurrent booking of the slot
+    by someone else that wins the ``appointment_no_overlap`` exclusion (or the 40P01 deadlock it can raise)
+    answers 409 ``slot_taken`` with nothing written. A customer deleted (or blocked) while the booking waited
+    on its lock answers 401 ``SESSION_EXPIRED`` (its sessions are revoked with it). Event ``requested``
+    (source ``customer``) and audit ``appointment.requested`` (actor type ``customer``); no push.
+    """
+    professional = Professional.objects.filter(pk=professional_id, is_active=True).first()
+    if professional is None:
+        raise _field("specialist_id", "does_not_exist", "field.specialist_not_found")
+    link = selectors.offered_link(professional.pk, service_id)
+    if link is None:
+        raise _field("service_id", "does_not_exist", "field.service_not_offered")
+    customer = (
+        Customer.objects.select_for_update(no_key=True)
+        .filter(pk=customer_id, status=enums.CustomerStatus.ACTIVE)
+        .first()
+    )
+    if customer is None:
+        # ``DELETE me/`` (or a staff block) committed while this booking waited on the customer lock: the
+        # re-checked row is no longer active and its sessions are revoked (C§2.2.3: "refused because the
+        # customer is no longer active").
+        raise AuthFailed("SESSION_EXPIRED")
+    _check_consent(customer)
+    now = timeutils.now()
+    limit = int(settings.BOOKING_MAX_OPEN_PER_CUSTOMER)
+    if selectors.customer_open_future_count(customer.pk, now) >= limit:
+        raise BookingLimit(params={"limit": limit}, details={"limit": limit})
+    end = _check_customer_slot(professional, customer.pk, start, link.duration_min, now)
+    _before_write()
+    try:
+        with transaction.atomic():
+            appointment = Appointment.objects.create(
+                professional=professional,
+                service_id=link.service_id,
+                customer=customer,
+                start=start,
+                end=end,
+                duration_min=link.duration_min,
+                price=link.price,
+                status=enums.AppointmentStatus.REQUESTED,
+                requested_via=enums.RequestedVia.APP,
+                requested_at=now,
+                created_by=None,
+                customer_note=note,
+            )
+    except (IntegrityError, OperationalError) as exc:  # appointment_no_overlap: a concurrent booking won
+        if not _lost_the_slot(exc):
+            raise
+        raise SlotTaken() from exc
+    record_event(
+        appointment,
+        AppointmentEvent.Type.REQUESTED,
+        source=AppointmentEvent.Source.CUSTOMER,
+        data={"via": enums.RequestedVia.APP, **_range_data(appointment)},
+    )
+    _audit(appointment, "requested", actor=customer, request=request, requested_via=enums.RequestedVia.APP)
+    return appointment
+
+
+@transaction.atomic
+def cancel_by_customer(
+    appointment_id: int,
+    customer_id: int,
+    *,
+    reason: str = "",
+    at: datetime | None = None,
+    request: Any = None,
+    account_deleted: bool | None = None,
+) -> Appointment:
+    """``POST appointments/{id}/cancel/`` (C§2.11) and ``DELETE me/`` step 3 (C§2.2.3).
+
+    Under the row lock: an appointment of another customer → ``NotFound`` (404); allowed for ``requested`` /
+    ``confirmed`` with ``start − now ≥ BOOKING_CANCEL_MIN_LEAD_MINUTES``, else 409 ``not_cancellable``
+    (``error.appointment_not_cancellable``). The account deletion cancels every open **future** appointment
+    without the lead rule (it protects the specialist's day from a customer's late cancel, not from a deleted
+    account, and must not abort the deletion); an appointment that already started stays as it is.
+    ``status=cancelled``, ``cancelled_by=customer``; event ``cancelled {by: "customer", reason, push_sent:
+    false}`` (source ``customer``); the slot is free again; no push; audit ``appointment.cancelled`` (actor
+    type ``customer``).
+
+    ``account_deleted`` is a server-side flag: the customer route always passes ``False``, so the free-text
+    ``reason`` a client sends never changes the rules. ``None`` (the C§2.2.3 call shape, ``reason =
+    "account_deleted"``, used by ``customers.services.delete_account``) derives it from the reason.
+    """
+    if account_deleted is None:
+        account_deleted = reason == ACCOUNT_DELETED_REASON
+    instant = timeutils.now() if at is None else at
+    appointment = (
+        Appointment.objects.select_for_update().filter(pk=appointment_id, customer_id=customer_id).first()
+    )
+    if appointment is None:
+        raise NotFound
+    allowed = appointment.status in OPEN_STATUSES and (
+        selectors.can_cancel(appointment, instant) or (account_deleted and appointment.start >= instant)
+    )
+    if not allowed:
+        raise not_cancellable("appointment")
+    appointment.status = enums.AppointmentStatus.CANCELLED
+    appointment.cancelled_at = instant
+    appointment.cancelled_by = Appointment.CancelledBy.CUSTOMER
+    appointment.save(update_fields=["status", "cancelled_at", "cancelled_by", "updated_at"])
+    record_event(
+        appointment,
+        AppointmentEvent.Type.CANCELLED,
+        source=AppointmentEvent.Source.CUSTOMER,
+        data={"by": "customer", "reason": reason or None, "push_sent": False},
+    )
+    customer = Customer.objects.filter(pk=customer_id).first()
+    _audit(appointment, "cancelled", actor=customer, request=request, by="customer", reason=reason or None)
+    return appointment
