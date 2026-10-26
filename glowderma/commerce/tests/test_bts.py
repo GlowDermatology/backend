@@ -19,12 +19,15 @@ from glowderma.commerce.models import Order, OrderEvent
 from glowderma.commerce.tests.factories import OrderFactory
 from glowderma.commerce.tests.webhook_support import BTS_URL, real_now, rows
 from glowderma.core import timeutils
+from glowderma.core.timeutils import TASHKENT
 from glowderma.delivery.models import Shipment, ShipmentEvent
 from glowderma.delivery.tests.factories import ShipmentFactory
 from glowderma.integrations.bts.fake import FakeBts
 from glowderma.integrations.bts.ports import BtsRejected, BtsUnavailable, Parcel
 from glowderma.integrations.models import IntegrationState
 from glowderma.reporting.selectors import bts_polling_failing
+
+SINCE = datetime(2026, 10, 25, 12, 0, tzinfo=TASHKENT)  # the shipment row's creation
 
 pytestmark = pytest.mark.django_db
 SECRET = "local-bts-webhook-secret-at-least-32-characters"  # noqa: S105 - the local default
@@ -392,6 +395,6 @@ def test_fake_bts_in_production_makes_nothing_up() -> None:
         assert bts.regions() == []
         with pytest.raises(BtsRejected):
             bts.quote("10", "1001")
-        assert bts.find_by_client_id("1") is None
+        assert bts.find_by_client_id("1", since=SINCE) is None
         with pytest.raises(BtsUnavailable):
             bts.track("1")

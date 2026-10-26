@@ -45,6 +45,7 @@ class ShipmentInfo:
     bts_status: str
     attempts: int
     create_requests: int
+    created_at: datetime  # the row (created at checkout, before any create request)
 
 
 def shipment_info(order_id: int) -> ShipmentInfo | None:
@@ -62,6 +63,7 @@ def shipment_info(order_id: int) -> ShipmentInfo | None:
         bts_status=row.bts_status,
         attempts=row.attempts,
         create_requests=row.create_requests,
+        created_at=row.created_at,
     )
 
 

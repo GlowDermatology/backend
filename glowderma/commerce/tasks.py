@@ -3,12 +3,14 @@
 Imported at startup by ``CommerceConfig.ready`` so the handlers exist in every process that dispatches the
 outbox. Delivery is at-least-once: each handler is idempotent at the provider boundary.
 
-* ``bts.create_shipment`` — under the Order lock: skip unless the order is ``processing`` and the shipment is
-  not created yet, and skip a request BTS already answered (``request_no``); ask BTS for ``clientId =
-  str(order_id)`` **before** creating (a redelivery after "BTS created the parcel, then the worker crashed"
-  adopts it); ``shipment_created`` / ``shipment_failed`` (source ``admin`` + actor for a manual retry). For an
-  order cancelled meanwhile the lookup still runs and a parcel found is cancelled at BTS (orphan). Only
-  transport errors raise (the dispatcher retries).
+* ``bts.create_shipment`` — the checks under the Order lock (skip unless the order is ``processing`` and the
+  shipment is not created yet, skip a request BTS already answered: ``request_no``) are committed **before**
+  BTS is called; the ``clientId`` lookup (``BTS_CLIENT_ID_PREFIX`` + order id, from the day before the
+  shipment row was created) and the create then run holding only the ``bts-create:{order_id}`` advisory lock
+  (a redelivery after "BTS created the parcel, then the worker crashed" adopts it); the order is re-locked to
+  record ``shipment_created`` / ``shipment_failed`` (source ``admin`` + actor for a manual retry). For an
+  order cancelled meanwhile — before the call or while it was in flight — a parcel found or just created is
+  cancelled at BTS (orphan). Only transport errors raise (the dispatcher retries).
 * ``billz.push_sale`` — skip when the purchase is already pushed; never call a fake Billz under the
   production settings (customer contract §6.14: WARNING ``billz.sale_not_pushed``, the sale is entered by
   hand) and never complete the sale of an order cancelled meanwhile (checked before the push, again under
@@ -41,7 +43,9 @@ Dead letters (``outbox.on_dead``): ``bts.create_shipment`` → shipment ``failed
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
@@ -108,15 +112,85 @@ def _request_no(payload: dict[str, Any]) -> int | None:
     return None if value is None else int(value)
 
 
-def _adopt_orphan(order: Order, scenario: dict[str, Any], request_no: int | None, now: datetime) -> None:
-    """The order was cancelled while this create request was in flight: if the request reached BTS (the
-    worker crashed after BTS created the parcel), the parcel exists although the cancel saw none — cancel it
-    at BTS so no courier collects it (a transport error raises: the outbox retries)."""
-    parcel = get_bts(scenario).find_by_client_id(str(order.pk))
-    if parcel is None:
-        return
+class CreateBusy(RuntimeError):
+    """Another worker is creating this order's parcel right now: the outbox retries this delivery later."""
+
+
+@contextmanager
+def _create_lock(order_id: int) -> Iterator[None]:
+    """A session-level advisory lock ``bts-create:{order_id}`` held across the BTS lookup and create, so two
+    deliveries of a create request never call BTS for the same order at once. It holds no row and no open
+    transaction; a busy lock raises :class:`CreateBusy` (retried)."""
+    key = f"bts-create:{order_id}"
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT pg_try_advisory_lock(hashtext(%s))", [key])
+        row = cursor.fetchone()
+    if not row or not row[0]:
+        raise CreateBusy(f"order {order_id}: another worker is creating its BTS parcel")
+    try:
+        yield
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT pg_advisory_unlock(hashtext(%s))", [key])
+
+
+@dataclass(frozen=True, slots=True)
+class _CreatePlan:
+    """What the checks under the Order lock decided (committed before any BTS call)."""
+
+    order_id: int
+    scenario: dict[str, Any]
+    since: datetime  # the shipment row's creation: the clientId lookup starts the day before
+    request: CreateRequest | None  # None: the order was cancelled meanwhile (orphan lookup only)
+    request_no: int | None
+    manual: bool
+    actor_id: int | None
+
+
+def _plan_create(payload: dict[str, Any]) -> _CreatePlan | None:
+    """Under the Order lock: skip unless the order is ``processing`` (or ``cancelled``: orphan lookup) and the
+    shipment is not created yet, and skip a request BTS already answered (``request_no``) or one superseded by
+    a newer request."""
+    order_id = int(payload["order_id"])
+    manual, actor_id = _shipment_source(payload)
+    request_no = _request_no(payload)
+    with transaction.atomic():
+        order = services.lock_order(order_id)
+        if order.fulfilment != enums.FulfilmentMethod.DELIVERY:
+            return None
+        shipment = delivery_selectors.shipment_info(order_id)
+        if shipment is None or shipment.state in (Shipment.State.CREATED, Shipment.State.CANCELLED):
+            return None
+        if request_no is not None and (
+            request_no < shipment.create_requests
+            or delivery_selectors.create_request_answered(order_id, request_no)
+        ):
+            return None  # answered before, or superseded by a newer (manual) request
+        scenario = services.fake_scenario(order, "bts")
+        plan = _CreatePlan(order_id, scenario, shipment.created_at, None, request_no, manual, actor_id)
+        if order.status == enums.OrderStatus.CANCELLED:
+            return plan
+        if order.status != enums.OrderStatus.PROCESSING:
+            return None  # delivered meanwhile: nothing to create (03 §4.1 row 6)
+        request = CreateRequest(
+            client_id=str(order_id),
+            attempt=shipment.attempts + 1,
+            recipient_name=order.recipient_name,
+            recipient_phone=order.recipient_phone,
+            address=order.address_text,
+            region_code=order.address_region_code,
+            city_code=order.address_city_code,
+            comment=order.address_comment,
+        )
+        return replace(plan, request=request)
+
+
+def _cancel_orphan(order: Order, plan: _CreatePlan, parcel: Parcel, now: datetime) -> None:
+    """The order was cancelled while this create request was in flight (or BTS created the parcel and the
+    worker crashed): the parcel exists although the cancel saw none — cancel it at BTS so no courier collects
+    it (under the Order lock: one bounded call; a transport error raises and the outbox retries)."""
     outcome = delivery_services.cancel_orphan(
-        order.pk, parcel, scenario=scenario, at=now, request_no=request_no
+        order.pk, parcel, scenario=plan.scenario, at=now, request_no=plan.request_no
     )
     if outcome.ok:
         logger.warning(
@@ -131,89 +205,109 @@ def _adopt_orphan(order: Order, scenario: dict[str, Any], request_no: int | None
         )
 
 
-def create_shipment(payload: dict[str, Any]) -> None:
-    """The ``bts.create_shipment`` effect (callable inline by the seeder under a pinned clock).
-
-    A request BTS already answered (its ``request_no`` names a ``created`` / ``create_failed`` shipment
-    event) or one superseded by a newer request is skipped without calling BTS: a redelivery after
-    "``mark_failed`` committed, then the worker died" must not ask BTS a second time.
-    """
-    order_id = int(payload["order_id"])
-    manual, actor_id = _shipment_source(payload)
-    request_no = _request_no(payload)
+def _record_parcel(plan: _CreatePlan, parcel: Parcel) -> None:
+    """Re-lock the order and record the parcel BTS holds: ``created`` (+ ``shipment_created``), or — the
+    order was cancelled meanwhile — cancel it at BTS as an orphan."""
+    order_id = plan.order_id
+    now = timeutils.now()
     with transaction.atomic():
         order = services.lock_order(order_id)
-        if order.fulfilment != enums.FulfilmentMethod.DELIVERY:
-            return
         shipment = delivery_selectors.shipment_info(order_id)
-        if shipment is None or shipment.state in (Shipment.State.CREATED, Shipment.State.CANCELLED):
+        if shipment is None:
             return
-        if request_no is not None and (
-            request_no < shipment.create_requests
-            or delivery_selectors.create_request_answered(order_id, request_no)
-        ):
-            return  # answered before, or superseded by a newer (manual) request
-        scenario = services.fake_scenario(order, "bts")
-        now = timeutils.now()
+        if shipment.state in (Shipment.State.CREATED, Shipment.State.CANCELLED):
+            if shipment.tracking_number and shipment.tracking_number != parcel.tracking_number:
+                logger.error(
+                    "bts.duplicate_parcels %s",
+                    {
+                        "order_id": order_id,
+                        "recorded": shipment.tracking_number,
+                        "found": parcel.tracking_number,
+                    },
+                )
+            return
         if order.status == enums.OrderStatus.CANCELLED:
-            _adopt_orphan(order, scenario, request_no, now)
+            _cancel_orphan(order, plan, parcel, now)
             return
-        if order.status != enums.OrderStatus.PROCESSING:
-            return  # delivered meanwhile: nothing to create (03 §4.1 row 6)
-        port = get_bts(scenario)
-        attempt = shipment.attempts + 1
-        parcel = port.find_by_client_id(str(order_id))
-        if parcel is None:
-            try:
-                parcel = port.create(
-                    CreateRequest(
-                        client_id=str(order_id),
-                        attempt=attempt,
-                        recipient_name=order.recipient_name,
-                        recipient_phone=order.recipient_phone,
-                        address=order.address_text,
-                        region_code=order.address_region_code,
-                        city_code=order.address_city_code,
-                        comment=order.address_comment,
-                    )
-                )
-            except BtsRejected as exc:
-                number = delivery_services.mark_failed(
-                    order_id,
-                    error_code=exc.error_code,
-                    error=exc.message,
-                    at=now,
-                    manual=manual,
-                    request_no=request_no,
-                )
-                if number is not None:
-                    services.record_event_once(
-                        order,
-                        _E.SHIPMENT_FAILED,
-                        {"attempt": number, "manual": manual, "error_code": exc.error_code},
-                        actor_id=actor_id,
-                        at=now,
-                    )
-                return
         tariff = parcel.tariff if parcel.tariff is not None else order.delivery_fee
-        delivery_services.mark_created(
+        created = delivery_services.mark_created(
             order_id,
             tracking_number=parcel.tracking_number,
             tariff=tariff,
             bts_order_id=parcel.bts_order_id,
             bts_status=parcel.status,
             at=now,
-            manual=manual,
+            manual=plan.manual,
             payload={"tracking_number": parcel.tracking_number, "status": parcel.status},
-            request_no=request_no,
+            request_no=plan.request_no,
         )
-        services.record_event_once(
-            order,
-            _E.SHIPMENT_CREATED,
-            {"tracking_number": parcel.tracking_number, "tariff": tariff, "manual": manual},
-            actor_id=actor_id,
+        if created:
+            services.record_event_once(
+                order,
+                _E.SHIPMENT_CREATED,
+                {"tracking_number": parcel.tracking_number, "tariff": tariff, "manual": plan.manual},
+                actor_id=plan.actor_id,
+                at=now,
+            )
+
+
+def _record_refusal(plan: _CreatePlan, exc: BtsRejected) -> None:
+    """Re-lock the order and record BTS's definitive refusal (``failed`` + ``shipment_failed``), unless the
+    order or the request moved on meanwhile."""
+    order_id = plan.order_id
+    now = timeutils.now()
+    with transaction.atomic():
+        order = services.lock_order(order_id)
+        if order.status != enums.OrderStatus.PROCESSING:
+            return
+        number = delivery_services.mark_failed(
+            order_id,
+            error_code=exc.error_code,
+            error=exc.message,
             at=now,
+            manual=plan.manual,
+            request_no=plan.request_no,
         )
+        if number is not None:
+            services.record_event_once(
+                order,
+                _E.SHIPMENT_FAILED,
+                {"attempt": number, "manual": plan.manual, "error_code": exc.error_code},
+                actor_id=plan.actor_id,
+                at=now,
+            )
+
+
+def create_shipment(payload: dict[str, Any]) -> None:
+    """The ``bts.create_shipment`` effect (callable inline by the seeder under a pinned clock).
+
+    Three steps, so no BTS call ever runs under the Order row lock (a Click/Payme webhook, an admin action
+    or the customer's order view on the same order never waits for BTS): (1) the checks of
+    :func:`_plan_create`, committed; (2) holding only the ``bts-create:{order_id}`` advisory lock, the
+    ``clientId`` lookup and — when BTS holds no parcel — the create; (3) re-lock the order and record the
+    outcome (a parcel of an order cancelled meanwhile is cancelled at BTS as an orphan). A request BTS
+    already answered (its ``request_no`` names a ``created`` / ``create_failed`` shipment event) or one
+    superseded by a newer request is skipped without calling BTS: a redelivery after "``mark_failed``
+    committed, then the worker died" must not ask BTS a second time.
+    """
+    order_id = int(payload["order_id"])
+    with _create_lock(order_id):
+        plan = _plan_create(payload)
+        if plan is None:
+            return
+        port = get_bts(plan.scenario)
+        parcel = port.find_by_client_id(str(order_id), since=plan.since)
+        if plan.request is None:  # cancelled meanwhile: only a parcel that reached BTS needs cancelling
+            if parcel is not None:
+                _record_parcel(plan, parcel)
+            return
+        if parcel is None:
+            try:
+                parcel = port.create(plan.request)
+            except BtsRejected as exc:
+                _record_refusal(plan, exc)
+                return
+        _record_parcel(plan, parcel)
 
 
 @outbox.register(topics.BTS_CREATE_SHIPMENT)
@@ -656,10 +750,28 @@ def lock_parcel(order_id: int) -> None:
         cursor.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", [f"bts:{order_id}"])
 
 
+# BTS statuses of a parcel that will never be delivered: deleted (1300, also a cancel's answer) and expired
+# (1400). Seen on a parcel we did not cancel, staff must act (re-create it, or cancel and refund the order).
+GONE_STATUSES = frozenset({"1300", "1400"})
+
+
+def alert_if_gone(order_id: int, parcel: Parcel, previous: str) -> None:
+    """ERROR ``bts.parcel_gone`` the first time a tracked parcel reports 1300 / 1400 (A-S8: a parcel BTS
+    deleted or let expire is recorded only; the order would otherwise wait for a delivery that never
+    comes)."""
+    if parcel.status in GONE_STATUSES and parcel.status != previous:
+        logger.error(
+            "bts.parcel_gone %s",
+            {"order_id": order_id, "tracking_number": parcel.tracking_number, "bts_status": parcel.status},
+        )
+
+
 def _track_and_apply(order_id: int, tracking_number: str, scenario: dict[str, Any]) -> Parcel:
     with transaction.atomic():
         lock_parcel(order_id)
+        shipment = delivery_selectors.shipment_info(order_id)
         parcel = get_bts(scenario).track(tracking_number)
+        alert_if_gone(order_id, parcel, shipment.bts_status if shipment is not None else "")
         services.apply_bts_status(
             order_id, parcel.status, enums.ShipmentVia.POLLING, payload=stable_payload(parcel)
         )

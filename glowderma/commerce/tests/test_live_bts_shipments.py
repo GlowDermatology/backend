@@ -4,12 +4,14 @@ the sending office", never "delivered") and the admin cancel — against docs.bt
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Iterator
 from datetime import timedelta
 from typing import Any
 
 import httpx
 import pytest
+from django.db import connection, transaction
 from django.test import override_settings
 
 from glowderma.commerce import services, tasks
@@ -17,6 +19,8 @@ from glowderma.commerce.models import Order, OrderEvent
 from glowderma.commerce.tests.factories import OrderFactory
 from glowderma.commerce.tests.support import AT, admin, deliver, pay, place
 from glowderma.commerce.tests.webhook_support import real_now
+from glowderma.core import timeutils
+from glowderma.core.models import OutboxMessage
 from glowderma.core.seeding import pinned_clock
 from glowderma.delivery.models import Shipment, ShipmentEvent
 from glowderma.delivery.tests.factories import ShipmentFactory
@@ -164,3 +168,102 @@ def test_an_admin_cancel_of_a_parcel_bts_already_cancelled_is_idempotent(script:
     shipment = Shipment.objects.get(order=order)
     assert order.status == "cancelled" and shipment.state == "cancelled"
     assert len(script.to("GET", "/v1/order-cancel/index")) == 1
+
+
+def test_an_order_cancelled_while_the_create_was_in_flight_gets_its_parcel_cancelled(script: Script) -> None:
+    """R3: the create runs outside the Order lock, so an admin cancel can land while BTS creates the parcel;
+    the re-lock sees the cancelled order and cancels the parcel at BTS as an orphan (never a live parcel of a
+    cancelled order)."""
+    order = paid_delivery_order()
+    script.on("GET", "/v1/order/list", listing())
+
+    def create_while_cancelled(request: httpx.Request) -> httpx.Response:
+        with pinned_clock(AT + timedelta(hours=1)):
+            services.cancel_order(order.pk, "Mijoz so‘rovi bilan", admin().pk)  # sees no parcel yet
+        return httpx.Response(200, json=order_document(order.pk))
+
+    script.on("POST", "/v1/order/add", create_while_cancelled)
+    script.on("GET", "/v1/order-cancel/index", reply("bts", "cancel_ok"))
+    with override_settings(**LIVE_BTS):
+        deliver("bts.create_shipment", order.pk)
+    shipment = Shipment.objects.get(order=order)
+    assert (shipment.state, shipment.tracking_number) == ("cancelled", "4293644")
+    assert ShipmentEvent.objects.filter(shipment=shipment, kind="created", payload__orphan=True).exists()
+    assert len(script.to("GET", "/v1/order-cancel/index")) == 1
+    assert not OrderEvent.objects.filter(order=order, type="shipment_created").exists()
+
+
+def test_the_lookup_window_starts_the_day_before_the_shipment_row(script: Script) -> None:
+    """A-S4 / A-S5: ``beginDate`` = the shipment row's creation (before its first create request) minus a
+    day, ``endDate`` = a week ahead."""
+    order = paid_delivery_order()
+    shipment = Shipment.objects.get(order=order)
+    script.on("GET", "/v1/order/list", listing())
+    script.on("POST", "/v1/order/add", httpx.Response(200, json=order_document(order.pk)))
+    with override_settings(**LIVE_BTS):
+        deliver("bts.create_shipment", order.pk)
+    (lookup,) = script.to("GET", "/v1/order/list")
+    created = timeutils.local_date(shipment.created_at)
+    assert lookup.url.params["beginDate"] == (created - timedelta(days=1)).isoformat()
+    today = timeutils.local_date(timeutils.now())
+    assert lookup.url.params["endDate"] == (today + timedelta(days=7)).isoformat()
+
+
+@pytest.mark.parametrize("code", [1300, 1400])
+def test_polling_alerts_once_on_a_parcel_bts_deleted_or_let_expire(
+    script: Script, code: int, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A-S8: 1300 / 1400 are recorded only (no order change), so polling raises an ERROR for staff."""
+    shipment = stale_parcel("4293644")
+    script.on("GET", "/v1/order/track", track(code))
+    with override_settings(**LIVE_BTS):
+        tasks.run_bts_poll()
+        Shipment.objects.filter(pk=shipment.pk).update(last_status_at=real_now() - timedelta(minutes=60))
+        tasks.run_bts_poll()
+    assert caplog.text.count("bts.parcel_gone") == 1 and str(code) in caplog.text
+    assert Order.objects.get(pk=shipment.order_id).status == "processing"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_no_bts_call_runs_under_the_order_row_lock(script: Script, monkeypatch: pytest.MonkeyPatch) -> None:
+    """R3: while the lookup is in flight the Order row is free (a payment webhook, an admin action or the
+    customer's order view never wait for BTS); a second delivery of the same request waits for nothing."""
+    from glowderma.core import tasks as core_tasks
+
+    monkeypatch.setattr(core_tasks.dispatch_outbox, "delay", lambda *args, **kwargs: None)
+    order = paid_delivery_order()
+    message = OutboxMessage.objects.get(topic="bts.create_shipment", payload__order_id=order.pk)
+    in_lookup, release = threading.Event(), threading.Event()
+
+    def slow_listing(request: httpx.Request) -> httpx.Response:
+        in_lookup.set()
+        release.wait(10)
+        return listing()
+
+    script.on("GET", "/v1/order/list", slow_listing)
+    script.on("POST", "/v1/order/add", httpx.Response(200, json=order_document(order.pk)))
+    errors: list[BaseException] = []
+
+    def worker() -> None:
+        try:
+            with override_settings(**LIVE_BTS):
+                tasks.handle_bts_create_shipment(message)
+        except BaseException as exc:  # noqa: BLE001 - reported below
+            errors.append(exc)
+        finally:
+            connection.close()
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    try:
+        assert in_lookup.wait(10)
+        with transaction.atomic():  # nowait: raises at once if the worker held the row
+            Order.objects.select_for_update(nowait=True).get(pk=order.pk)
+        with pytest.raises(tasks.CreateBusy):  # an overlapping delivery never calls BTS concurrently
+            tasks.create_shipment(message.payload)
+    finally:
+        release.set()
+        thread.join(10)
+    assert errors == []
+    assert Shipment.objects.get(order=order).state == "created"
+    assert len(script.to("POST", "/v1/order/add")) == 1
