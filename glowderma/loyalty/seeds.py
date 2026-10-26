@@ -22,7 +22,11 @@ Idempotent: policies by ``version``, sales by ``billz_sale_id`` (the service its
 seeder also skips the sales already present). A migrated database already holds the install's first policy
 (``loyalty.0006``: v1 with the L3 bands from 2026-06-01, the design v1's period): the design v1 is then not
 seeded (versions are append-only) and the run notes it; v2 and v3 follow as designed, and every credit of the
-dataset stays the same (no seeded purchase of the v1 period reaches the 20 M band). Every timestamp is a
+dataset stays the same (no seeded purchase of the v1 period reaches the 20 M band). The policy **history**
+does not match the design then: v1 shows the install's three bands instead of "20 mln gacha 1%", and the v2
+card summarised against it reads as a removed band instead of "20–30 mln: 2% qo‘shildi" (rows are
+append-only, so the seeder cannot replace v1). The design v1/v2 policy cards need ``seed_demo --reset``
+(a flush, then the design v1); ``commerce/tests/test_seeds.py`` pins both outcomes. Every timestamp is a
 pinned design instant, so the run is anchor-independent and ``keep_open`` has nothing to move. A missing
 lower-layer row (no demo admin, no customers) is tolerated: the author is ``NULL`` and absent customers are
 skipped (standalone run).

@@ -407,6 +407,22 @@ def test_seed_demo_over_the_install_policy_keeps_the_design_vectors(staff_client
     assert sorted(versions) == [1, 2, 3] and versions[1].author is None
     assert [t.to_amount for t in versions[1].tiers.all()] == [20_000_000, 30_000_000, None]
     assert [p.superseded_by for p in versions.values()] == [None, None, None]
+    # Review should_fix: the policy HISTORY as staff see it differs from the design here (documented in
+    # loyalty/seeds.py, AGENTS.md and GS-6: the design v1/v2 cards need `seed_demo --reset`). Pinned so the
+    # divergence stays a known, tested state: v1 is the install's three bands, v2 drops its open top band.
+    policy = staff_client.get("/api/v1/admin/cashback/policy/").json()
+    served = {
+        row["version"]: [(tier["from"], tier["to"], tier["percent"]) for tier in row["tiers"]]
+        for row in policy["versions"]
+    }
+    assert served == {
+        1: [(0, 20_000_000, "1.00"), (20_000_000, 30_000_000, "2.00"), (30_000_000, None, "3.00")],
+        2: [(0, 20_000_000, "1.00"), (20_000_000, 30_000_000, "2.00")],
+        3: [(0, 20_000_000, "1.00"), (20_000_000, 30_000_000, "2.00"), (30_000_000, 50_000_000, "3.00")],
+    }
+    authors = {row["version"]: row["author"] for row in policy["versions"]}
+    assert authors[1] is None and authors[2] is not None and authors[3] is not None
+    assert policy["active"]["version"] == 3
     # the install policy changed no credit: nothing before 1 June earns, nothing under v1 reached 20 M
     june = datetime(2026, 6, 1, tzinfo=TASHKENT)
     assert not Purchase.objects.filter(at__lt=june, policy__isnull=False).exists()
