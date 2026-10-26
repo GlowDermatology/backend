@@ -42,6 +42,7 @@ from glowderma.core.api.exceptions import (
     PasswordChanged,
     PhoneNotRegistered,
     PhoneRegistered,
+    RequestInProgress,
     SmsUnavailable,
     VerificationInvalid,
     field_error,
@@ -400,7 +401,7 @@ def add_address(
     The first address of a customer always becomes the default; ``is_default=True`` replaces the previous one
     inside the same transaction (the partial unique constraint forbids two).
     """
-    Customer.objects.select_for_update().get(pk=customer_id)
+    lock_customer(customer_id)
     if is_default or not Address.objects.filter(customer_id=customer_id).exists():
         Address.objects.filter(customer_id=customer_id, is_default=True).update(
             is_default=False, updated_at=timeutils.now()
@@ -444,7 +445,7 @@ def update_address(
     then falls back to the most recently updated address). The write path every edit must take so the design
     01 §1.3 invariant (saving an address recomputes the denormalised text) holds.
     """
-    Customer.objects.select_for_update().get(pk=address.customer_id)
+    lock_customer(address.customer_id)
     changes = {
         name: value
         for name, value in (
@@ -473,7 +474,7 @@ def update_address(
 @transaction.atomic
 def set_default_address(address: Address) -> Address:
     """Make ``address`` the customer's default, clearing the previous one in the same transaction."""
-    Customer.objects.select_for_update().get(pk=address.customer_id)
+    lock_customer(address.customer_id)
     Address.objects.filter(customer_id=address.customer_id, is_default=True).exclude(pk=address.pk).update(
         is_default=False, updated_at=timeutils.now()
     )
@@ -488,7 +489,7 @@ def set_default_address(address: Address) -> Address:
 def remove_address(address: Address) -> None:
     """Delete one address; the denormalised text falls back to the next best address (or ``""``)."""
     customer_id = address.customer_id
-    Customer.objects.select_for_update().get(pk=customer_id)
+    lock_customer(customer_id)
     address.delete()
     _sync_address_text(customer_id)
 
@@ -584,7 +585,7 @@ def _refreshed(customer: Customer | int, stored: Customer) -> Customer:
 @transaction.atomic
 def reactivate_customer(customer: Customer, *, name: str = "") -> Customer:
     """Re-registration with the same phone: ``active`` again, ``registered_at`` kept (first registration)."""
-    stored = Customer.objects.select_for_update().get(pk=customer.pk)
+    stored = lock_customer(customer.pk)
     if stored.status == enums.CustomerStatus.ACTIVE:
         customer.refresh_from_db()
         return customer
@@ -864,13 +865,24 @@ def apple_subject_linked(subject: str) -> bool:
     )
 
 
-# Attempts of ``register_device`` whose locked read may find a token holder the unlocked read missed; the
-# last one locks such a late holder's customer out of order instead of starting again.
+# Attempts of ``register_device`` whose locked read finds a token holder the unlocked read missed. Under the
+# per-token lock only a writer that bypasses ``register_device`` can add a holder (none does at request
+# time), so a second attempt is never needed in practice; the bound keeps such a writer from looping a
+# request forever.
 REGISTER_DEVICE_ATTEMPTS = 3
 
 
 class _TokenHoldersChanged(Exception):
     """The token moved to another customer's device between the unlocked and the locked read."""
+
+
+def _lock_fcm_token(token: str) -> None:
+    """``pg_advisory_xact_lock`` keyed on the SHA-256 of the FCM token (never the token itself, which would
+    appear in the statement text): every ``register_device`` of one token waits for the previous one to end
+    its transaction, so its holder read sees every committed holder."""
+    digest = hashlib.sha256(f"gd.fcm:{token}".encode()).digest()
+    with transaction.get_connection().cursor() as cursor:
+        cursor.execute("SELECT pg_advisory_xact_lock(%s)", [int.from_bytes(digest[:8], "big", signed=True)])
 
 
 def register_device(
@@ -895,24 +907,31 @@ def register_device(
     push: the token is this install's now), so that customer's app is signed out on every route instead of
     only on ``PUT me/device/``. ``fcm_invalidated_at`` is cleared when a new token arrives.
 
-    Lock order (customer contract §2.7.1): the customer-level locks first — this customer and every customer
-    whose device holds the token, in ascending primary key order — then the device rows (this device and the
-    token's holders in one query ordered by primary key), then the holders' sessions. Every other flow of a
-    holder (logout, a signed-in write, ``DELETE me/``, a reset) takes that holder's customer lock before its
-    sessions and devices, so they serialize with this one instead of deadlocking with it. The holders are
-    read without a lock first; when the locked read finds a holder whose customer is not locked (a token
-    moved meanwhile), the attempt rolls back and starts again. Under the lock a
-    customer who is no longer active (401 ``SESSION_EXPIRED``) or a device another sign-in or a logout
-    deactivated meanwhile (401 ``SESSION_REPLACED`` when its newest session was replaced, else
-    ``SESSION_EXPIRED``) is refused before anything is written, so no token lands on a deleted or replaced
-    device.
+    Lock order (customer contract §2.7.1): a transaction-level advisory lock on the token first (keyed on its
+    hash; only this function takes it, and nothing holds a customer lock before calling it), then the
+    customer-level locks — this customer and every customer whose device holds the token, in ascending
+    primary key order — then the device rows (this device and the token's holders in one query ordered by
+    primary key), then the holders' sessions. Every other flow of a holder (logout, a signed-in write,
+    ``DELETE me/``, a reset) takes that holder's customer lock before its sessions and devices, so they
+    serialize with this one instead of deadlocking with it. The token lock serializes two customers
+    registering the same new token (an account switch on the install still in flight): the second one reads
+    the first one's committed device as a holder and takes the token from it, instead of both saving it and
+    the second failing on ``device_active_fcm_token_unique``. Only this function gives a row a token at
+    request time (the demo seeder aside), so under the token lock the holder set can only shrink between the
+    unlocked holder read and the locked device read; should the locked read still find a holder whose
+    customer is not locked, the attempt rolls back and starts again (never locking a customer after a
+    device), and after ``REGISTER_DEVICE_ATTEMPTS`` the request answers 409 ``request_in_progress``
+    (``Retry-After: 1``). Under the lock a customer who is no longer active (401 ``SESSION_EXPIRED``) or a
+    device another sign-in or a logout deactivated meanwhile (401 ``SESSION_REPLACED`` when its newest
+    session was replaced, else ``SESSION_EXPIRED``) is refused before anything is written, so no token lands
+    on a deleted or replaced device.
     """
     token = (fcm_token or "").strip()
     if push_enabled and not token:
         raise ValidationError(
             {"push_enabled": [field_error("push_token_missing", message_key="field.push_token_missing")]}
         )
-    for attempt in range(1, REGISTER_DEVICE_ATTEMPTS + 1):
+    for _attempt in range(REGISTER_DEVICE_ATTEMPTS):
         try:
             return _register_device_attempt(
                 customer_id,
@@ -924,11 +943,11 @@ def register_device(
                 locale=locale,
                 platform=platform,
                 app_version=app_version,
-                lock_late=attempt == REGISTER_DEVICE_ATTEMPTS,
             )
         except _TokenHoldersChanged:
             continue
-    raise AssertionError("unreachable: the last attempt never raises _TokenHoldersChanged")
+    logger.warning("register_device: the token holders kept changing customer_id=%s", customer_id)
+    raise RequestInProgress()
 
 
 @transaction.atomic
@@ -943,10 +962,10 @@ def _register_device_attempt(
     locale: str,
     platform: str | None,
     app_version: str | None,
-    lock_late: bool,
 ) -> Device:
     holder_customers: set[int] = set()
     if token:
+        _lock_fcm_token(token)
         holder_customers = set(
             Device.objects.filter(fcm_token=token).values_list("customer_id", flat=True).distinct()
         )
@@ -960,12 +979,8 @@ def _register_device_attempt(
     if token:
         wanted |= Q(fcm_token=token)
     rows = list(Device.objects.select_for_update().filter(wanted).order_by("pk"))
-    late = sorted({row.customer_id for row in rows} - set(locked_customers))
-    if late:
-        if not lock_late:
-            raise _TokenHoldersChanged
-        for late_id in late:
-            lock_customer(late_id)
+    if {row.customer_id for row in rows} - set(locked_customers):
+        raise _TokenHoldersChanged
     device = next((row for row in rows if row.customer_id == customer_id and row.fid == fid), None)
     if device is None:
         raise Device.DoesNotExist(f"No device {pii_ref(fid)} for customer {customer_id}")
@@ -1481,14 +1496,22 @@ def _check_refresh_device(session: AuthSession, fid: str, platform: str | None) 
         raise AuthFailed("not_authenticated")
 
 
-def rotate_customer_refresh(raw: str, *, fid: str, platform: str | None = None) -> RefreshResult:
+def rotate_customer_refresh(
+    raw: str, *, fid: str, platform: str | None = None, request: Any = None
+) -> RefreshResult:
     """``auth/refresh/`` steps 1–6 (customer contract §2.1.6) in one transaction on the locked row.
 
     Rotate (current token), grace replay (``auth:refresh_grace:{h}`` exists: identical tokens, nothing
     written, confirmed or not), re-rotation (previous token, rotation unconfirmed and younger than
     ``CUSTOMER_REFRESH_UNCONFIRMED_SECONDS``: the unused current hash is remembered as dead), else reuse → the
-    session is revoked ``refresh_reused`` (committed, audited) and 401 ``SESSION_EXPIRED``. The grace body is
-    written before commit and deleted again when the transaction rolls back.
+    session is revoked ``refresh_reused`` (committed, audited with the request) and 401 ``SESSION_EXPIRED``.
+    The grace body is written before commit and deleted again when the transaction rolls back.
+
+    Reuse is decided before the device check: a stale token (previous without a grace body outside the
+    re-rotation window, or dead) revokes the session whichever install presents it — one from another
+    install is the stronger theft signal, and its presenter gets nothing either way. Only the answers that
+    hand out tokens (rotate, grace replay, re-rotation) require the session's device (else 401
+    ``not_authenticated``).
     """
     digest = hash_secret(raw)
     written: list[str] = []
@@ -1526,7 +1549,23 @@ def rotate_customer_refresh(raw: str, *, fid: str, platform: str | None = None) 
                 or customer.status != enums.CustomerStatus.ACTIVE
             ):
                 raise AuthFailed("SESSION_EXPIRED")
-            _check_refresh_device(session, fid, platform)
+            grace: Any = None
+            window = timedelta(seconds=int(settings.CUSTOMER_REFRESH_UNCONFIRMED_SECONDS))
+            unconfirmed = (
+                not session.rotation_confirmed
+                and session.rotated_at is not None
+                and now - session.rotated_at <= window
+            )
+            if not reuse and session.refresh_hash != digest:
+                grace = cache.get(_grace_key(digest))
+                reuse = not isinstance(grace, dict) and not unconfirmed
+            foreign_device = False
+            try:
+                _check_refresh_device(session, fid, platform)
+            except AuthFailed:
+                if not reuse:
+                    raise
+                foreign_device = True
             grace_ttl = int(settings.CUSTOMER_REFRESH_GRACE_SECONDS)
             if not reuse and session.refresh_hash == digest:
                 new_raw = secrets.token_urlsafe(32)
@@ -1551,32 +1590,23 @@ def rotate_customer_refresh(raw: str, *, fid: str, platform: str | None = None) 
                 cache.set(_grace_key(digest), body, grace_ttl)
                 written.append(_grace_key(digest))
                 return RefreshResult(body, str(session.pk))
-            if not reuse:
-                grace = cache.get(_grace_key(digest))
-                if isinstance(grace, dict):
-                    return RefreshResult(grace, str(session.pk))
-                window = timedelta(seconds=int(settings.CUSTOMER_REFRESH_UNCONFIRMED_SECONDS))
-                if (
-                    not session.rotation_confirmed
-                    and session.rotated_at is not None
-                    and now - session.rotated_at <= window
-                ):
-                    remaining = max(1, int((session.absolute_expires_at - now).total_seconds()))
-                    cache.set(_dead_key(session.refresh_hash), str(session.pk), remaining)
-                    written.append(_dead_key(session.refresh_hash))  # removed again on rollback
-                    new_raw = secrets.token_urlsafe(32)
-                    session.refresh_hash = hash_secret(new_raw)
-                    session.rotation += 1
-                    session.rotation_confirmed = False
-                    session.last_used_at = now
-                    session.save(
-                        update_fields=["refresh_hash", "rotation", "rotation_confirmed", "last_used_at"]
-                    )
-                    body = refresh_body(session, new_raw)
-                    cache.set(_grace_key(digest), body, grace_ttl)
-                    written.append(_grace_key(digest))
-                    return RefreshResult(body, str(session.pk))
-            # reuse: one of the holders is not the app
+            if not reuse and isinstance(grace, dict):
+                return RefreshResult(grace, str(session.pk))
+            if not reuse:  # the previous token, no grace body, the rotation unconfirmed: re-rotate
+                remaining = max(1, int((session.absolute_expires_at - now).total_seconds()))
+                cache.set(_dead_key(session.refresh_hash), str(session.pk), remaining)
+                written.append(_dead_key(session.refresh_hash))  # removed again on rollback
+                new_raw = secrets.token_urlsafe(32)
+                session.refresh_hash = hash_secret(new_raw)
+                session.rotation += 1
+                session.rotation_confirmed = False
+                session.last_used_at = now
+                session.save(update_fields=["refresh_hash", "rotation", "rotation_confirmed", "last_used_at"])
+                body = refresh_body(session, new_raw)
+                cache.set(_grace_key(digest), body, grace_ttl)
+                written.append(_grace_key(digest))
+                return RefreshResult(body, str(session.pk))
+            # reuse: one of the holders is not the app (from this install or another one)
             _revoke_open_customer_sessions(
                 AuthSession.objects.filter(pk=session.pk), enums.SessionRevokeReason.REFRESH_REUSED, at=now
             )
@@ -1586,9 +1616,10 @@ def rotate_customer_refresh(raw: str, *, fid: str, platform: str | None = None) 
                 entity_type="customer",
                 entity_id=str(session.customer_id),
                 actor=customer,
+                request=request,
                 after={"sid": str(session.pk)},
             )
-            logger.warning("customer.refresh_reused sid=%s", session.pk)
+            logger.warning("customer.refresh_reused sid=%s foreign_device=%s", session.pk, foreign_device)
             refusal = AuthFailed("SESSION_EXPIRED")
     except Exception:
         for key in written:

@@ -19,6 +19,12 @@ class CacheDown:
     def get(self, *args: Any, **kwargs: Any) -> Any:
         raise ConnectionError("redis down")
 
+    def get_many(self, *args: Any, **kwargs: Any) -> Any:
+        raise ConnectionError("redis down")
+
+    def add(self, *args: Any, **kwargs: Any) -> Any:
+        raise ConnectionError("redis down")
+
     def set(self, *args: Any, **kwargs: Any) -> Any:
         raise ConnectionError("redis down")
 
@@ -34,6 +40,20 @@ def test_public_settings_survive_a_failed_cache_write(monkeypatch: pytest.Monkey
         def get(self, *args: Any, **kwargs: Any) -> Any:
             return None
 
+        def get_many(self, *args: Any, **kwargs: Any) -> Any:
+            return {}
+
     expected = selectors.public_settings("ru")
     monkeypatch.setattr(selectors, "cache", WriteFails())
     assert selectors.public_settings("ru") == expected
+
+
+def test_public_settings_survive_a_failed_generation_write(monkeypatch: pytest.MonkeyPatch) -> None:
+    class GenerationWriteFails(CacheDown):
+        def get_many(self, *args: Any, **kwargs: Any) -> Any:
+            return {}
+
+    expected = selectors.public_settings("en")
+    cache.clear()
+    monkeypatch.setattr(selectors, "cache", GenerationWriteFails())
+    assert selectors.public_settings("en") == expected

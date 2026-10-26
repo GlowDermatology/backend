@@ -178,8 +178,13 @@ def test_register_device_takes_the_customer_locks_first() -> None:
     held = DeviceFactory.create(fcm_token="tok-held")
     with CaptureQueriesContext(connection) as queries:
         services.register_device(customer.pk, "fid-lockorder-1", fcm_token="tok-held", push_enabled=True)
+    sql = [q["sql"] for q in queries.captured_queries]
+    # The per-token advisory lock comes first (keyed on a hash: the token never appears in a statement), ...
+    advisory = [index for index, text in enumerate(sql) if "pg_advisory_xact_lock" in text]
+    assert len(advisory) == 1 and not any("tok-held" in text for text in sql[: advisory[0] + 1])
+    assert not any(text.rstrip().endswith("UPDATE") for text in sql[: advisory[0]])
     locking = [q for q in queries.captured_queries if q["sql"].rstrip().endswith("UPDATE")]
-    # Both customers (the caller and the token's holder) in ascending primary key order, ...
+    # ... then both customers (the caller and the token's holder) in ascending primary key order, ...
     customer_locks = [q["sql"] for q in locking[:2]]
     assert all('FROM "accounts_customer"' in sql and "FOR NO KEY UPDATE" in sql for sql in customer_locks)
     ordered = sorted([customer.pk, held.customer_id])

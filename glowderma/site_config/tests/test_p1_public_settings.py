@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from django.core.cache import cache
 from django.test import override_settings
@@ -84,3 +86,24 @@ def test_fake_providers_under_the_production_settings() -> None:
     assert data["payment_providers"] == []
     assert data["fulfilment_methods"] == ["pickup"]
     assert data["online_sales_enabled"] is False
+
+
+def test_a_snapshot_read_before_a_change_is_never_served_after_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A request reads the row, then a settings change commits and invalidates, then the request writes its
+    (old) snapshot to the cache: the next request still reads the new row, because the old snapshot carries
+    the generation the invalidation retired (verification round 2, site_config)."""
+    original = selectors._snapshot
+
+    def racing() -> dict[str, Any]:
+        snapshot = original()
+        SiteSettings.objects.filter(pk=1).update(reservation_minutes=25)  # the change commits ...
+        selectors.invalidate_public_settings()  # ... and its on-commit invalidation runs
+        return snapshot
+
+    monkeypatch.setattr(selectors, "_snapshot", racing)
+    assert get()["reservation_minutes"] == 15  # this request read the row before the change
+    monkeypatch.setattr(selectors, "_snapshot", original)
+    assert get()["reservation_minutes"] == 25
+    assert get()["reservation_minutes"] == 25  # and the fresh snapshot is cached
+    SiteSettings.objects.filter(pk=1).update(reservation_minutes=40)
+    assert get()["reservation_minutes"] == 25
