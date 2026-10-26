@@ -12,7 +12,9 @@ from typing import Any
 
 from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
+from django.contrib.auth.password_validation import validate_password
 from django.core.cache import cache
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
 from django.db.models import Q, Sum
@@ -163,29 +165,56 @@ def _revoke_user_sessions(
     return sessions
 
 
-@transaction.atomic
-def deactivate_staff(user: StaffUser, *, actor: StaffUser, request: Any = None) -> int:
-    """Deactivate ``user`` and revoke every open session with reason ``deactivated``.
+# --- staff management (admin contract §2.16; decisions GST-1..GST-6) ----------------------------------------
 
-    Returns the number of revoked sessions; an already inactive user revokes nothing (0).
+STAFF_EMAIL_TAKEN = "Bu email bilan xodim allaqachon bor (nofaol bo‘lsa, uni qayta faollashtiring)."
+STAFF_LAST_MANAGER = "Kamida bitta faol menejer qolishi kerak. Avval boshqa xodimni menejer qiling."
+STAFF_SELF_DEACTIVATE = "O‘z hisobingizni faolsizlantira olmaysiz."
+STAFF_SELF_DEMOTE = "O‘zingizni menejerlikdan chiqara olmaysiz."
+STAFF_SELF_RESET = "O‘z parolingizni «Parolni o‘zgartirish» orqali almashtiring."
+# Editable through ``PATCH staff/{id}/`` (the email is the sign-in identity and stays as created).
+STAFF_EDITABLE_FIELDS = ("full_name", "is_manager")
+# A temporary password: four groups of four characters without look-alikes (0/O, 1/l/I), ~92 bits.
+TEMPORARY_PASSWORD_ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789"  # noqa: S105 - alphabet
+TEMPORARY_PASSWORD_GROUPS = 4
+TEMPORARY_PASSWORD_ATTEMPTS = 20
+
+
+def generate_temporary_password(user: StaffUser) -> str:
+    """A random ``xxxx-xxxx-xxxx-xxxx`` password that passes ``AUTH_PASSWORD_VALIDATORS`` for ``user``."""
+    for _ in range(TEMPORARY_PASSWORD_ATTEMPTS):
+        candidate = "-".join(
+            "".join(secrets.choice(TEMPORARY_PASSWORD_ALPHABET) for _ in range(4))
+            for _ in range(TEMPORARY_PASSWORD_GROUPS)
+        )
+        try:
+            validate_password(candidate, user)
+        except DjangoValidationError:  # pragma: no cover - ~92 random bits are never common or similar
+            continue
+        return candidate
+    raise RuntimeError(
+        "Could not generate a temporary password that passes the validators"
+    )  # pragma: no cover
+
+
+def _lock_active_managers() -> list[int]:
+    """Lock the active managers (by id, one lock order for every caller) and return their ids.
+
+    Every write that could leave no active manager (demotion, deactivation) takes these locks before the
+    target row, so two managers demoting or deactivating each other at the same time serialize and the
+    second one sees the first one's result (PostgreSQL re-checks the locked rows' conditions).
     """
-    stored = StaffUser.objects.select_for_update().get(pk=user.pk)
-    if not stored.is_active:
-        user.is_active = False
-        return 0
-    stored.is_active = False
-    stored.save(update_fields=["is_active"])
-    user.is_active = False
-    sessions = _revoke_user_sessions(stored, "deactivated")
-    audit.record(
-        action="auth.staff_deactivated",
-        entity_type="staff",
-        entity_id=str(stored.pk),
-        actor=actor,
-        request=request,
-        before={"is_active": True},
-        after={"revoked_count": len(sessions)},
+    return list(
+        StaffUser.objects.select_for_update()
+        .filter(is_active=True, is_manager=True)
+        .order_by("pk")
+        .values_list("pk", flat=True)
     )
+
+
+def _audit_revoked_sessions(
+    sessions: Iterable[AuthSession], *, actor: Any, request: Any, reason: str
+) -> None:
     for session in sessions:
         audit.record(
             action="auth.session_revoked",
@@ -193,14 +222,159 @@ def deactivate_staff(user: StaffUser, *, actor: StaffUser, request: Any = None) 
             entity_id=str(session.pk),
             actor=actor,
             request=request,
-            after={"sid": str(session.pk), "reason": "deactivated"},
+            after={"sid": str(session.pk), "reason": session.revoke_reason},
+            reason=reason,
         )
+
+
+@transaction.atomic
+def create_staff(
+    *,
+    email: str,
+    full_name: str,
+    is_manager: bool = False,
+    password: str | None = None,
+    is_superuser: bool = False,
+    actor: StaffUser | None,
+    request: Any = None,
+    reason: str = "",
+) -> tuple[StaffUser, str]:
+    """Create an active staff account and return it with its password (admin contract §2.16 ``POST staff/``).
+
+    ``password=None`` generates a temporary password (:func:`generate_temporary_password`) the caller shows
+    once; ``manage.py createstaff`` passes the operator's validated password. The email is trimmed and
+    lower-cased; an existing account with it (active or not, case-insensitive) is a ``unique`` field error.
+    The first account of an install without an active manager becomes a manager, so staff management is
+    never left without one (decision GST-1). A superuser is always a manager. Audited ``staff.created``.
+    """
+    email = email.strip().lower()
+    if StaffUser.objects.filter(email__iexact=email).exists():
+        raise ValidationError({"email": [field_error("unique", STAFF_EMAIL_TAKEN)]})
+    manager = is_manager or is_superuser
+    if not manager and not StaffUser.objects.filter(is_active=True, is_manager=True).exists():
+        manager = True
+    user = StaffUser(email=email, full_name=full_name, is_manager=manager)
+    raw = password if password is not None else generate_temporary_password(user)
+    try:
+        with transaction.atomic():
+            create = StaffUser.objects.create_superuser if is_superuser else StaffUser.objects.create_user
+            user = create(email, raw, full_name=full_name, is_manager=manager)
+    except IntegrityError as exc:  # lost a race with a concurrent create of the same email
+        raise ValidationError({"email": [field_error("unique", STAFF_EMAIL_TAKEN)]}) from exc
+    audit.record(
+        action="staff.created",
+        entity_type="staff",
+        entity_id=str(user.pk),
+        actor=actor,
+        request=request,
+        after={"email": user.email, "full_name": user.full_name, "is_manager": user.is_manager},
+        reason=reason,
+    )
+    return user, raw
+
+
+@transaction.atomic
+def update_staff(
+    user: StaffUser,
+    changes: dict[str, Any],
+    *,
+    actor: StaffUser | None,
+    request: Any = None,
+    reason: str = "",
+    refuse_self: bool = True,
+) -> StaffUser:
+    """Apply ``full_name`` / ``is_manager`` changes (admin contract §2.16 ``PATCH staff/{id}/``).
+
+    Only the values that differ are written and audited (``staff.updated`` with ``before`` / ``after`` of the
+    changed fields); no difference writes nothing. Removing the manager role is refused (409 ``conflict``)
+    for the caller's own account (``refuse_self``; the operator commands pass ``False``) and for the last
+    active manager.
+    """
+    unknown = set(changes) - set(STAFF_EDITABLE_FIELDS)
+    if unknown:
+        raise ValueError(f"Not editable: {sorted(unknown)}")
+    demoting = changes.get("is_manager") is False
+    managers = _lock_active_managers() if demoting else []
+    stored = StaffUser.objects.select_for_update().get(pk=user.pk)
+    before: dict[str, Any] = {}
+    after: dict[str, Any] = {}
+    for name, value in changes.items():
+        if getattr(stored, name) != value:
+            before[name], after[name] = getattr(stored, name), value
+    if after.get("is_manager") is False:
+        if refuse_self and actor is not None and actor.pk == stored.pk:
+            raise Conflict(STAFF_SELF_DEMOTE)
+        if stored.is_active and managers == [stored.pk]:
+            raise Conflict(STAFF_LAST_MANAGER)
+    if not after:
+        return stored
+    for name, value in after.items():
+        setattr(stored, name, value)
+    stored.save(update_fields=list(after))
+    audit.record(
+        action="staff.updated",
+        entity_type="staff",
+        entity_id=str(stored.pk),
+        actor=actor,
+        request=request,
+        before=before,
+        after=after,
+        reason=reason,
+    )
+    return stored
+
+
+@transaction.atomic
+def deactivate_staff(
+    user: StaffUser,
+    *,
+    actor: StaffUser | None,
+    request: Any = None,
+    reason: str = "",
+    refuse_self: bool = True,
+) -> int:
+    """Deactivate ``user`` and revoke every open session with reason ``deactivated``.
+
+    Social identities stay linked (they sign in again after a reactivation; an inactive member's identity
+    is refused like an unknown one). Refused (409 ``conflict``) for the caller's own account
+    (``refuse_self``) and for the last active manager. Returns the number of revoked sessions; an already
+    inactive user revokes nothing and writes nothing (0). Audited ``staff.deactivated`` plus one
+    ``auth.session_revoked`` per session.
+    """
+    if refuse_self and actor is not None and actor.pk == user.pk:
+        raise Conflict(STAFF_SELF_DEACTIVATE)
+    managers = _lock_active_managers()
+    stored = StaffUser.objects.select_for_update().get(pk=user.pk)
+    if not stored.is_active:
+        user.is_active = False
+        return 0
+    if stored.is_manager and managers == [stored.pk]:
+        raise Conflict(STAFF_LAST_MANAGER)
+    stored.is_active = False
+    stored.save(update_fields=["is_active"])
+    user.is_active = False
+    sessions = _revoke_user_sessions(stored, "deactivated")
+    audit.record(
+        action="staff.deactivated",
+        entity_type="staff",
+        entity_id=str(stored.pk),
+        actor=actor,
+        request=request,
+        before={"is_active": True},
+        after={"is_active": False, "revoked_count": len(sessions)},
+        reason=reason,
+    )
+    _audit_revoked_sessions(sessions, actor=actor, request=request, reason=reason)
     return len(sessions)
 
 
 @transaction.atomic
-def reactivate_staff(user: StaffUser, *, actor: StaffUser, request: Any = None) -> bool:
-    """Reactivate ``user``. Returns False when the user was already active (no audit is written)."""
+def reactivate_staff(
+    user: StaffUser, *, actor: StaffUser | None, request: Any = None, reason: str = ""
+) -> bool:
+    """Reactivate ``user``: it signs in again with its password or a linked identity; the sessions revoked at
+    deactivation stay revoked and the manager role is kept. Returns False when the user was already active
+    (nothing is written). Audited ``staff.reactivated``."""
     stored = StaffUser.objects.select_for_update().get(pk=user.pk)
     if stored.is_active:
         user.is_active = True
@@ -209,15 +383,55 @@ def reactivate_staff(user: StaffUser, *, actor: StaffUser, request: Any = None) 
     stored.save(update_fields=["is_active"])
     user.is_active = True
     audit.record(
-        action="auth.staff_reactivated",
+        action="staff.reactivated",
         entity_type="staff",
         entity_id=str(stored.pk),
         actor=actor,
         request=request,
         before={"is_active": False},
         after={"is_active": True},
+        reason=reason,
     )
     return True
+
+
+@transaction.atomic
+def reset_staff_password(
+    user: StaffUser,
+    *,
+    actor: StaffUser | None,
+    request: Any = None,
+    reason: str = "",
+    password: str | None = None,
+    refuse_self: bool = True,
+) -> tuple[str, int]:
+    """Replace ``user``'s password and revoke every open session (reason ``password_changed``).
+
+    ``password=None`` generates a temporary password (returned once, never stored in clear or audited);
+    ``manage.py resetstaffpassword --password-stdin`` passes the operator's validated one. The caller's own
+    password is refused (``refuse_self``, 409 ``conflict``): staff change it with ``auth/change-password/``,
+    which asks for the current one, so a stolen session cannot take the account over. Social identities stay
+    linked. Works on an inactive account too (prepared before a reactivation). Returns ``(password,
+    revoked_count)``; audited ``staff.password_reset`` plus one ``auth.session_revoked`` per session.
+    """
+    if refuse_self and actor is not None and actor.pk == user.pk:
+        raise Conflict(STAFF_SELF_RESET)
+    stored = StaffUser.objects.select_for_update().get(pk=user.pk)
+    raw = password if password is not None else generate_temporary_password(stored)
+    stored.set_password(raw)
+    stored.save(update_fields=["password"])
+    sessions = _revoke_user_sessions(stored, "password_changed")
+    audit.record(
+        action="staff.password_reset",
+        entity_type="staff",
+        entity_id=str(stored.pk),
+        actor=actor,
+        request=request,
+        after={"revoked_count": len(sessions), "generated": password is None},
+        reason=reason,
+    )
+    _audit_revoked_sessions(sessions, actor=actor, request=request, reason=reason)
+    return raw, len(sessions)
 
 
 def _google_is_authoritative(claims: SocialClaims) -> bool:

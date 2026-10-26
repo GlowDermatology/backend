@@ -28,6 +28,9 @@ class StaffUser(AbstractBaseUser, PermissionsMixin):
     role = models.CharField(max_length=10, choices=[("admin", "admin")], default="admin")
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
+    # Admin contract §2.16: only a manager creates, edits, deactivates, reactivates staff or resets their
+    # password. Every other staff right is the same for everyone (the client's single "admin" role).
+    is_manager = models.BooleanField(default=False)
     date_joined = models.DateTimeField(default=date_joined_default)
     objects = StaffUserManager()
     USERNAME_FIELD = "email"
