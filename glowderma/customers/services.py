@@ -14,6 +14,7 @@ import logging
 import secrets
 from dataclasses import dataclass
 from datetime import datetime
+from difflib import SequenceMatcher
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -205,11 +206,17 @@ def _field(name: str, code: str, key: str | None = None, **params: Any) -> Valid
     return ValidationError({name: [field_error(code, message_key=key, params=params or None)]})
 
 
-class _PasswordOwner:
-    """What Django's similarity validator compares the password with: the phone (digits)."""
-
-    def __init__(self, phone: str) -> None:
-        self.phone = phone.lstrip("+")
+def _too_similar(password: str, phone: str, max_similarity: float = 0.7) -> bool:
+    """Django's ``UserAttributeSimilarityValidator`` rule applied to the phone's digits (customer contract
+    §2.1.3: "not similar to the phone"); the validator itself needs a model instance."""
+    value = phone.lstrip("+")
+    password = password.lower()
+    if len(password) >= 10 * len(value):
+        return False
+    for part in {value, value[3:], value[-9:], value[-7:]}:
+        if part and SequenceMatcher(a=password, b=part).quick_ratio() >= max_similarity:
+            return True
+    return False
 
 
 PASSWORD_CODE_KEYS = {
@@ -230,13 +237,11 @@ def validate_customer_password(
         password_validation.MinimumLengthValidator(min_length=limit),
         password_validation.CommonPasswordValidator(),
         password_validation.NumericPasswordValidator(),
-        password_validation.UserAttributeSimilarityValidator(user_attributes=("phone",)),
     ]
     details = []
-    owner = _PasswordOwner(phone)
     for validator in validators:
         try:
-            validator.validate(password, owner)
+            validator.validate(password)
         except DjangoValidationError as exc:
             for error in exc.error_list:
                 code = error.code or "invalid"
@@ -247,6 +252,9 @@ def validate_customer_password(
                     details.append(field_error(code, message_key=key, limit=limit))
                 else:
                     details.append(field_error(code, message_key=key))
+    if _too_similar(password, phone):
+        key = PASSWORD_CODE_KEYS["password_too_similar"]
+        details.append(field_error("password_too_similar", message_key=key))
     if not details and current_hash and check_password(password, current_hash):
         details.append(field_error("password_unchanged", message_key="field.password_unchanged"))
     if details:

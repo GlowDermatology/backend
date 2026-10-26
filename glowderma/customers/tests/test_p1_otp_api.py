@@ -1,3 +1,4 @@
+# ruff: noqa: S105, S106 - test credentials and token-type literals
 """``auth/send-code/`` and ``auth/verify-code/`` (customer contract §2.1.1, §2.1.2; plan §2 P1 "OTP")."""
 
 from __future__ import annotations
@@ -6,6 +7,7 @@ import logging
 import threading
 from collections.abc import Iterator
 from datetime import timedelta
+from typing import Any
 
 import pytest
 from django.core.cache import cache
@@ -15,10 +17,9 @@ from rest_framework.test import APIClient
 
 from glowderma.accounts import services as account_services
 from glowderma.accounts.models import Customer, SmsCode
-from glowderma.core import enums, timeutils
+from glowderma.core import timeutils
 from glowderma.core.models import OutboxMessage
 from glowderma.customers.tests.p1_support import (
-    FID,
     OTHER_FID,
     app_client,
     password_customer,
@@ -41,14 +42,14 @@ def fakes() -> Iterator[None]:
 
 
 @pytest.fixture
-def clock(monkeypatch: pytest.MonkeyPatch) -> list:
+def clock(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
     """A movable clock: ``clock[0]`` is now."""
     state = [timeutils.now()]
     monkeypatch.setattr(timeutils, "now", lambda: state[0])
     return state
 
 
-def send(client: APIClient, phone: str = PHONE, purpose: str = "register", **extra: object) -> object:
+def send(client: APIClient, phone: str = PHONE, purpose: str = "register", **extra: object) -> Any:
     return client.post(SEND, {"phone": phone, "purpose": purpose, **extra})
 
 
@@ -109,7 +110,7 @@ def test_language_and_android_hash_line(django_capture_on_commit_callbacks: obje
         ({"phone": PHONE, "purpose": "link_social"}, "social_ticket", "required"),
     ],
 )
-def test_send_code_validation(body: dict, field: str, code: str) -> None:
+def test_send_code_validation(body: dict[str, Any], field: str, code: str) -> None:
     response = app_client().post(SEND, body)
     assert response.status_code == 400
     assert (response.data["errors"][0]["field"], response.data["errors"][0]["code"]) == (field, code)
@@ -149,7 +150,7 @@ def test_phone_state_rules() -> None:
     assert send(app_client(), phone="+998907770013", purpose="register").status_code == 200
 
 
-def test_resend_window(clock: list) -> None:
+def test_resend_window(clock: list[Any]) -> None:
     client = app_client()
     assert send(client).status_code == 200
     clock[0] += timedelta(seconds=59)
@@ -166,7 +167,7 @@ def test_resend_window(clock: list) -> None:
 
 
 @override_settings(THROTTLE_RATES={"sms_phone": "100/min", "sms_device": "100/min"})
-def test_daily_cap_per_phone_and_tashkent_day(clock: list) -> None:
+def test_daily_cap_per_phone_and_tashkent_day(clock: list[Any]) -> None:
     clock[0] = clock[0].astimezone(timeutils.TASHKENT).replace(hour=23, minute=0, second=0, microsecond=0)
     client = app_client()
     for index in range(10):
@@ -182,7 +183,7 @@ def test_daily_cap_per_phone_and_tashkent_day(clock: list) -> None:
 
 
 @override_settings(CUSTOMER_OTP_DEVICE_DAILY_LIMIT=2, THROTTLE_RATES={"sms_device": "100/min"})
-def test_fid_cap(clock: list) -> None:
+def test_fid_cap(clock: list[Any]) -> None:
     client = app_client()
     for phone in ("+998907770021", "+998907770022"):
         assert send(client, phone=phone).status_code == 200
@@ -214,7 +215,7 @@ def code_of(phone: str = PHONE) -> str:
     return "123456"
 
 
-def verify(client: APIClient, code: str, phone: str = PHONE, purpose: str = "register") -> object:
+def verify(client: APIClient, code: str, phone: str = PHONE, purpose: str = "register") -> Any:
     return client.post(VERIFY, {"phone": phone, "purpose": purpose, "code": code})
 
 
@@ -233,7 +234,7 @@ def test_verify_issues_a_single_use_token() -> None:
     assert (again.status_code, again.data["code"]) == (400, "otp_expired")
 
 
-def test_wrong_code_counts_and_locks(clock: list) -> None:
+def test_wrong_code_counts_and_locks(clock: list[Any]) -> None:
     client = app_client()
     send(client)
     for left in (4, 3, 2, 1):
@@ -241,7 +242,11 @@ def test_wrong_code_counts_and_locks(clock: list) -> None:
         assert (response.status_code, response.data["code"]) == (400, "otp_invalid")
         assert response.data["details"] == {"attempts_left": left}
         assert response.data["errors"] == [
-            {"field": "code", "code": "otp_invalid", "message": f"Kod noto‘g‘ri. Yana {left} marta urinishingiz mumkin."}
+            {
+                "field": "code",
+                "code": "otp_invalid",
+                "message": f"Kod noto‘g‘ri. Yana {left} marta urinishingiz mumkin.",
+            }
         ]
     locked = verify(client, "000000")
     assert (locked.status_code, locked.data["code"]) == (429, "otp_locked")
@@ -254,10 +259,14 @@ def test_wrong_code_counts_and_locks(clock: list) -> None:
     assert send(client).status_code == 200
 
 
-def test_verify_validation_and_expiry(clock: list) -> None:
+def test_verify_validation_and_expiry(clock: list[Any]) -> None:
     client = app_client()
     response = verify(client, "12ab56")
-    assert response.data["errors"][0] == {"field": "code", "code": "invalid", "message": "6 xonali kodni kiriting."}
+    assert response.data["errors"][0] == {
+        "field": "code",
+        "code": "invalid",
+        "message": "6 xonali kodni kiriting.",
+    }
     assert verify(client, "123456").data["code"] == "otp_expired"  # no code at all
     send(client)
     clock[0] += timedelta(seconds=121)
@@ -265,7 +274,7 @@ def test_verify_validation_and_expiry(clock: list) -> None:
 
 
 @override_settings(THROTTLE_RATES={"sms_phone": "100/min", "sms_device": "100/min"})
-def test_daily_wrong_code_cap_across_codes(clock: list) -> None:
+def test_daily_wrong_code_cap_across_codes(clock: list[Any]) -> None:
     client = app_client()
     for _round in range(2):
         send(client)
@@ -287,7 +296,7 @@ def test_customer_exists_flag() -> None:
     assert response.data["customer_exists"] is True
 
 
-def test_consume_verification_rules(clock: list) -> None:
+def test_consume_verification_rules(clock: list[Any]) -> None:
     client = app_client()
     send(client)
     token = verify(client, "123456").data["verification_token"]
@@ -323,8 +332,8 @@ def test_send_code_with_eskiz_rejected_and_down(django_capture_on_commit_callbac
 # --- races (transaction=True, threads)
 
 
-def _run_threads(target: object, count: int = 2) -> list:
-    results: list = []
+def _run_threads(target: object, count: int = 2) -> list[Any]:
+    results: list[Any] = []
     start = threading.Event()
 
     def worker() -> None:
@@ -346,7 +355,7 @@ def _run_threads(target: object, count: int = 2) -> list:
 @pytest.mark.django_db(transaction=True)
 def test_concurrent_send_code_one_sms() -> None:
     def call() -> int:
-        return send(app_client()).status_code  # type: ignore[union-attr, no-any-return]
+        return int(send(app_client()).status_code)
 
     statuses = sorted(_run_threads(call))
     assert statuses == [200, 429]
@@ -357,12 +366,11 @@ def test_concurrent_send_code_one_sms() -> None:
 def test_concurrent_verify_one_token() -> None:
     send(app_client())
 
-    def call() -> object:
+    def call() -> Any:
         response = verify(app_client(), "123456")
-        return response.status_code, response.data.get("code")  # type: ignore[union-attr]
+        return response.status_code, response.data.get("code")
 
     results = sorted(_run_threads(call), key=str)
     assert [status for status, _ in results] == [200, 400]
     assert ("400", "otp_expired") in [(str(status), code) for status, code in results]
     assert Customer.objects.count() == 0
-    assert enums.OtpPurpose.REGISTER == "register"
