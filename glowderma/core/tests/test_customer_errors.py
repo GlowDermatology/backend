@@ -328,18 +328,22 @@ def test_integer_field_params_are_grouped_per_language() -> None:
     )
     assert str(detail) == "Cashback balansi yetarli emas (mavjud: 12\u00a0000 so‘m)."
     assert (
-        localize_field_message(detail.code, str(detail), "en")
+        localize_field_message("insufficient_balance", str(detail), "en")
         == "Not enough cashback (available: 12,000 so'm)."
     )
     assert (
-        localize_field_message(detail.code, str(detail), "ru")
+        localize_field_message("insufficient_balance", str(detail), "ru")
         == "Недостаточно кешбэка (доступно: 12\u00a0000 сум)."
     )
     big = field_error("insufficient_balance", message_key="field.cashback_max", params={"max": 1_250_000})
     assert (
-        localize_field_message(big.code, str(big), "en") == "You can use at most 1,250,000 so'm of cashback."
+        localize_field_message("insufficient_balance", str(big), "en")
+        == "You can use at most 1,250,000 so'm of cashback."
     )
     text = field_error(
         "insufficient_balance", message_key="field.cashback_insufficient", params={"available": "abc"}
     )
-    assert localize_field_message(text.code, str(text), "en") == "Not enough cashback (available: abc so'm)."
+    assert (
+        localize_field_message("insufficient_balance", str(text), "en")
+        == "Not enough cashback (available: abc so'm)."
+    )
