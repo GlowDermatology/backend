@@ -19,6 +19,10 @@ app.conf.beat_schedule = {
     "start-due-campaigns": {"task": "notifications.start_due_campaigns", "schedule": 60.0},
     # Unpaid orders whose reservation ran out are cancelled (design 03 §4.1 row 3 / §5: every minute).
     "commerce-expire-reservations": {"task": "commerce.expire_reservations", "schedule": 60.0},
+    # M2 (plan §8): SmsCode rows, done sms.send outbox rows and old customer sessions.
+    "accounts-cleanup-auth": {"task": "accounts.cleanup_auth", "schedule": 3600.0},
+    # M2 BTS polling fallback (customer contract §2.13.3); the P0 stub returns [] until P2 implements it.
+    "commerce-poll-bts": {"task": "commerce.poll_bts", "schedule": 600.0},
     "loyalty-reconcile-balances": {
         "task": "loyalty.reconcile_balances",
         "schedule": crontab(hour=3, minute=10),

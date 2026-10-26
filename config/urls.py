@@ -37,6 +37,29 @@ ADMIN_API_MODULES = (
     "reporting",
 )
 
+# Customer API (M2): one include per module, all mounted at api/v1/ (each urls.py carries its own prefixes:
+# auth/, me/, catalog/, cart/, orders/, …), in layer order; customer contract §1.1.
+CUSTOMER_API_MODULES = (
+    "customers",
+    "site_config",
+    "delivery",
+    "commerce",
+    "loyalty",
+    "appointments",
+    "notifications",
+)
+
+
+def dev_routes_enabled() -> bool:
+    """``api/v1/dev/`` exists only under the local/test settings with fake payments (contract §2.15)."""
+    return bool(
+        settings.DEV_FEATURES_ALLOWED
+        and settings.FAKE_PAYMENTS_ENABLED
+        and settings.CLICK_MODE == "fake"
+        and settings.PAYME_MODE == "fake"
+    )
+
+
 urlpatterns: list[URLPattern | URLResolver] = [
     path("api/v1/health/", HealthView.as_view()),
     path("api/v1/admin/auth/", include("glowderma.accounts.api.admin.urls")),
@@ -50,9 +73,16 @@ urlpatterns: list[URLPattern | URLResolver] = [
         )
         for module in ADMIN_API_MODULES
     ),
+    # Provider callbacks are always mounted: a fake provider under the production settings is refused in the
+    # view (customer contract §2.13.0), not by a missing route.
+    path("api/v1/webhooks/", include("glowderma.commerce.api.webhooks.urls")),
+    path("api/v1/pos/", include("glowderma.loyalty.api.pos.urls")),
+    *(path("api/v1/", include(f"glowderma.{module}.api.customer.urls")) for module in CUSTOMER_API_MODULES),
     path("api/v1/schema/", SpectacularAPIView.as_view(**schema_access), name="schema"),
     path("api/v1/docs/", SpectacularSwaggerView.as_view(url_name="schema", **schema_access), name="docs"),
 ]
+if dev_routes_enabled():
+    urlpatterns.append(path("api/v1/dev/", include("glowderma.commerce.api.dev.urls")))
 if settings.DJANGO_ADMIN_ENABLED:
     urlpatterns.append(path("django-admin/login/", guarded_admin_login))
     urlpatterns.append(path("django-admin/", admin.site.urls))
