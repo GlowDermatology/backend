@@ -381,13 +381,21 @@ CLICK_SERVICE_ID = env_str("CLICK_SERVICE_ID", "00000")
 CLICK_MERCHANT_ID = env_str("CLICK_MERCHANT_ID", "00000")
 CLICK_MERCHANT_USER_ID = env_str("CLICK_MERCHANT_USER_ID", "00000")
 CLICK_PAY_URL = env_str("CLICK_PAY_URL", "https://my.click.uz/services/pay")
+# Click Merchant API (M3 live adapter: payment status and reversal by click_paydoc_id, C§2.13.0), signed with
+# CLICK_MERCHANT_USER_ID and CLICK_SECRET_KEY.
+CLICK_MERCHANT_API_URL = env_str("CLICK_MERCHANT_API_URL", "https://api.click.uz/v2/merchant")
 CLICK_ALLOWED_IPS = env_networks("CLICK_ALLOWED_IPS", [])
 CLICK_INFLIGHT_SECONDS = env_positive_int("CLICK_INFLIGHT_SECONDS", 120)
 if CLICK_INFLIGHT_SECONDS > PAYMENT_IN_FLIGHT_GRACE_SECONDS:
     raise ImproperlyConfigured("CLICK_INFLIGHT_SECONDS must not exceed PAYMENT_IN_FLIGHT_GRACE_SECONDS")
 # Payme Merchant API (C§2.13.2).
 PAYME_MERCHANT_ID = env_str("PAYME_MERCHANT_ID", "")
-PAYME_CHECKOUT_URL = env_str("PAYME_CHECKOUT_URL", "https://checkout.paycom.uz")
+# PAYME_TEST_MODE picks the checkout host of the sandbox (test.paycom.uz) instead of production
+# (checkout.paycom.uz); PAYME_CHECKOUT_URL overrides either.
+PAYME_TEST_MODE = env_bool("PAYME_TEST_MODE", False)
+PAYME_CHECKOUT_URL = env_str(
+    "PAYME_CHECKOUT_URL", "https://test.paycom.uz" if PAYME_TEST_MODE else "https://checkout.paycom.uz"
+)
 PAYME_ACCOUNT_FIELD = env_str("PAYME_ACCOUNT_FIELD", "order_id")
 if not re.fullmatch(r"[a-z][a-z0-9_]{0,31}", PAYME_ACCOUNT_FIELD):
     raise ImproperlyConfigured("PAYME_ACCOUNT_FIELD must be a lower-case identifier")
@@ -401,6 +409,17 @@ BTS_LOGIN = env_str("BTS_LOGIN", "")
 BTS_PASSWORD = env_str("BTS_PASSWORD", "")
 BTS_SENDER_CITY_CODE = env_str("BTS_SENDER_CITY_CODE", "1001")
 BTS_DEFAULT_PARCEL_WEIGHT_G = env_positive_int("BTS_DEFAULT_PARCEL_WEIGHT_G", 1000)
+# Live adapter (M3, C§2.14.3): our side of every parcel, how BTS collects it (courier = a BTS courier picks it
+# up at the sender address, branch = staff bring it to BTS_SENDER_BRANCH_CODE) and how many days back the
+# clientId lookup before a create scans BTS's order list.
+BTS_SENDER_NAME = env_str("BTS_SENDER_NAME", "")
+BTS_SENDER_PHONE = env_str("BTS_SENDER_PHONE", "")
+BTS_SENDER_ADDRESS = env_str("BTS_SENDER_ADDRESS", "")
+BTS_SENDER_BRANCH_CODE = env_str("BTS_SENDER_BRANCH_CODE", "")
+BTS_PICKUP_TYPE = env_str("BTS_PICKUP_TYPE", "courier")
+if BTS_PICKUP_TYPE not in {"courier", "branch"}:
+    raise ImproperlyConfigured("BTS_PICKUP_TYPE must be 'courier' or 'branch'")
+BTS_CLIENT_LOOKUP_DAYS = env_positive_int("BTS_CLIENT_LOOKUP_DAYS", 30)
 BTS_POLL_STALE_MINUTES = env_positive_int("BTS_POLL_STALE_MINUTES", 30)
 BTS_POLL_BATCH = env_positive_int("BTS_POLL_BATCH", 100)
 BTS_POLL_MAX_SECONDS = env_positive_int("BTS_POLL_MAX_SECONDS", 300)

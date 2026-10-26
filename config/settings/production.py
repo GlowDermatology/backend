@@ -1,18 +1,37 @@
 import base64
 import binascii
+import json
 import os
 import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from django.core.exceptions import ImproperlyConfigured
 
 from config.env import env_bool, env_int, env_json, env_list, env_networks, env_str
 
 from .base import *  # noqa: F403
-from .base import APPLE_BUNDLE_IDS, OAUTH_MODE, database_config, redis_db_url
+from .base import (
+    APPLE_BUNDLE_IDS,
+    BTS_BASE_URL,
+    BTS_MODE,
+    BTS_PICKUP_TYPE,
+    BTS_SENDER_PHONE,
+    CLICK_MERCHANT_API_URL,
+    CLICK_MODE,
+    CLICK_PAY_URL,
+    ESKIZ_BASE_URL,
+    ESKIZ_CALLBACK_URL,
+    ESKIZ_MODE,
+    FCM_MODE,
+    OAUTH_MODE,
+    PAYME_CHECKOUT_URL,
+    PAYME_MODE,
+    database_config,
+    redis_db_url,
+)
 
 DEBUG = False
 if os.environ.get("FAKE_NOW"):
@@ -228,3 +247,72 @@ if OAUTH_MODE == "live" and APPLE_BUNDLE_IDS:
         _apple_key.curve, ec.SECP256R1
     ):
         raise ImproperlyConfigured("APPLE_PRIVATE_KEY_FILE must hold an EC P-256 key")
+
+
+# --- Live provider adapters (M3) ---
+# A provider whose mode is live needs every value its adapter sends; a fake one needs none (C§6.14). Values
+# are checked for presence, placeholders and shape — the messages name the variable, never its value.
+def _https_url(name: str, value: str) -> None:
+    parts = urlsplit(value)
+    if parts.scheme != "https" or not parts.netloc or "change-me" in value.lower():
+        raise ImproperlyConfigured(f"{name} must be an https URL")
+
+
+def _required(name: str) -> str:
+    value = env_str(name, "")
+    _refuse_placeholder(name, value)
+    return value.strip()
+
+
+if CLICK_MODE == "live":
+    for _name in ("CLICK_SERVICE_ID", "CLICK_MERCHANT_ID", "CLICK_MERCHANT_USER_ID"):
+        _value = _required(_name)
+        if not _value.isdigit() or not _value.strip("0"):
+            raise ImproperlyConfigured(f"{_name} must be the numeric id Click issued")
+    _https_url("CLICK_MERCHANT_API_URL", CLICK_MERCHANT_API_URL)
+    _https_url("CLICK_PAY_URL", CLICK_PAY_URL)
+if PAYME_MODE == "live":
+    # the checkout parameters are "key=value" pairs joined by ";": an id with either would corrupt them
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", _required("PAYME_MERCHANT_ID")):
+        raise ImproperlyConfigured(
+            "PAYME_MERCHANT_ID must be the merchant (cash desk) id from the Payme cabinet"
+        )
+    _https_url("PAYME_CHECKOUT_URL", PAYME_CHECKOUT_URL)
+if BTS_MODE == "live":
+    for _name in (
+        "BTS_LOGIN",
+        "BTS_PASSWORD",
+        "BTS_SENDER_NAME",
+        "BTS_SENDER_ADDRESS",
+        "BTS_SENDER_CITY_CODE",
+    ):
+        _required(_name)
+    if not re.fullmatch(r"\+998[0-9]{9}", BTS_SENDER_PHONE):
+        raise ImproperlyConfigured("BTS_SENDER_PHONE must be an E.164 Uzbek number (+998XXXXXXXXX)")
+    if BTS_PICKUP_TYPE == "branch":
+        _required("BTS_SENDER_BRANCH_CODE")
+    _https_url("BTS_BASE_URL", BTS_BASE_URL)
+if ESKIZ_MODE == "live":
+    for _name in ("ESKIZ_EMAIL", "ESKIZ_PASSWORD", "ESKIZ_SENDER"):
+        _required(_name)
+    _https_url("ESKIZ_BASE_URL", ESKIZ_BASE_URL)
+    if ESKIZ_CALLBACK_URL:
+        _https_url("ESKIZ_CALLBACK_URL", ESKIZ_CALLBACK_URL)
+if FCM_MODE == "live":
+    if not re.fullmatch(r"[a-z][a-z0-9-]{4,29}", _required("FCM_PROJECT_ID")):
+        raise ImproperlyConfigured("FCM_PROJECT_ID must be the Firebase project id")
+    # The service-account key is checked, never echoed: every failure names the variable only.
+    try:
+        _account = json.loads(Path(_required("FCM_CREDENTIALS_FILE")).read_text(encoding="utf-8"))
+        if not isinstance(_account, dict) or _account.get("type") != "service_account":
+            raise ValueError("not a service-account key")
+        if "@" not in str(_account.get("client_email") or ""):
+            raise ValueError("no client_email")
+        _fcm_key = serialization.load_pem_private_key(str(_account.get("private_key") or "").encode(), None)
+    except OSError, ValueError, TypeError:
+        raise ImproperlyConfigured(
+            "FCM_CREDENTIALS_FILE must be a readable Google service-account JSON key"
+        ) from None
+    if not isinstance(_fcm_key, rsa.RSAPrivateKey):
+        raise ImproperlyConfigured("FCM_CREDENTIALS_FILE must hold an RSA service-account key")
+    del _account, _fcm_key
