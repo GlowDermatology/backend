@@ -349,6 +349,36 @@ def test_a_full_listing_with_overlapping_pages_is_refused() -> None:
         list(live(server).iter_products("full"))
 
 
+@pytest.mark.django_db
+def test_a_full_listing_repeating_a_product_without_an_id_on_another_page_is_refused() -> None:
+    """NEW-6 (probe test_m4_variation_products_without_id_overlap_by_barcode): without Billz ids the overlap
+    check fell back to positions, so a shifted page repeating B (and never listing C) was accepted."""
+    server = BillzServer()
+    a, b, b_again, d = product(*A), product(*B), product(*B), product(*D)
+    for item in (a, b, b_again, d):
+        item["id"] = ""
+    server.product_pages = [{"count": 4, "products": [a, b]}, {"count": 4, "products": [b_again, d]}]
+    with pytest.raises(BillzListingIncomplete, match="1 repeated across pages"):
+        list(live(server).iter_products("full"))
+    adapter = live(server)
+    assert {row.billz_id for row in adapter.iter_products("delta")} == {A[1], B[1], D[1]}
+    adapter.sync_succeeded("delta")
+    assert selectors.provider_data("billz") == {}  # the delta keeps its watermark
+
+
+@pytest.mark.django_db
+def test_a_duplicate_barcode_on_one_page_without_ids_is_not_an_overlap() -> None:
+    """NEW-6: two id-less products sharing a barcode on the same page are a duplicate (first kept, S7), not a
+    shifted page: the full listing is accepted."""
+    server = BillzServer()
+    first, second, d = product(*A, stock=7), product(*A, stock=0), product(*D)
+    for item in (first, second, d):
+        item["id"] = ""
+    server.product_pages = [{"count": 3, "products": [first, second, d]}]
+    rows = list(live(server).iter_products("full"))
+    assert [(row.billz_id, row.stock) for row in rows] == [(A[1], 7), (D[1], 1)]
+
+
 def test_the_live_volume_is_not_asserted_without_a_volume_field() -> None:
     """Review A S6 (the adapter side): no ``BILLZ_VOLUME_FIELD`` → ``volume=None`` (not "")."""
     row = live(BillzServer(), volume_field="")._row(product(*A), A[1], timeutils.now())

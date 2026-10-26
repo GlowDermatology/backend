@@ -19,7 +19,8 @@ product, for the row and for the cached product UUID alike.
   :meth:`LiveBillz.sync_succeeded`, i.e. after the catalog applied the whole run — and not even then when the
   run saw fewer distinct products than Billz counted (pages shifted under it), so the next delta re-reads.
 * ``full`` is the reconciliation listing: every page must arrive, the count must not change while paging
-  (pages are offsets), the pages must not overlap (the **distinct** Billz product ids must equal the count),
+  (pages are offsets), the pages must not overlap (the **distinct** Billz product ids — the barcode of a
+  product without one — must equal the count),
   at least one listed product must carry an entry for ``BILLZ_SHOP_ID`` (a wrong shop id would zero every
   stock), and the count must be plausible (> 0 and ≥ ``BILLZ_FULL_SYNC_MIN_RATIO`` × the previous full
   count); otherwise :class:`BillzListingIncomplete` is raised before a single row is yielded, so nothing is
@@ -447,7 +448,7 @@ class LiveBillz:
             params["last_updated_date"] = (since - DELTA_OVERLAP).astimezone(UTC).strftime(WATERMARK_FORMAT)
         rows: dict[str, BillzProduct] = {}
         product_ids: dict[str, str] = {}  # cache key → the UUID of the product each row was built from
-        distinct: set[str] = set()  # Billz product ids seen (a repeat = overlapping pages)
+        distinct: dict[str, int] = {}  # product identity → the page it was first seen on (a repeat = overlap)
         repeats = 0
         in_our_shop = 0
         expected: int | None = None
@@ -466,11 +467,11 @@ class LiveBillz:
             expected = count
             received += len(products)
             for index, product in enumerate(products):
-                identity = _str(product.get("id")).lower() or f"#{page}:{index}"
+                identity = self._identity(product, page, index, distinct)
                 if identity in distinct:
                     repeats += 1
                     continue
-                distinct.add(identity)
+                distinct[identity] = page
                 if in_shop(product, self.config.shop_id):
                     in_our_shop += 1
                 barcode = barcode_of(product)
@@ -520,6 +521,19 @@ class LiveBillz:
                 expected,
             )
         yield from rows.values()
+
+    @staticmethod
+    def _identity(product: Mapping[str, Any], page: int, index: int, seen: Mapping[str, int]) -> str:
+        """What tells a repeated product from another one: Billz's product id; without one, its barcode — a
+        barcode met again **on another page** is a shifted page repeating it (review NEW-6), while one listed
+        twice on the same page is a duplicate barcode (kept once, the first); else its position."""
+        product_id = _str(product.get("id")).lower()
+        if product_id:
+            return product_id
+        barcode = barcode_of(product)
+        if barcode is not None and seen.get(f"barcode:{barcode}") != page:
+            return f"barcode:{barcode}"  # new, or first seen on another page (then a repeat)
+        return f"#{page}:{index}"
 
     def _watermark(self, cursor: Mapping[str, Any]) -> datetime | None:
         value = cursor.get("delta_since")
