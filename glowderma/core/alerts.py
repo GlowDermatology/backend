@@ -10,11 +10,16 @@ body bytes (header ``X-GD-Signature: sha256=<hex>``, key ``ALERT_WEBHOOK_SECRET`
 * **Never breaks the caller**: the insert runs in a savepoint and any failure is logged at WARNING and
   swallowed. An alert raised inside a transaction that later rolls back is rolled back with it; the ERROR log
   line every call site also writes stays the primary signal.
-* **Ids and counts only**: :func:`scrub_fields` redacts keys that name personal data or credentials and passes
-  every string through ``core.pii.scrub_free_text`` (control characters dropped, runs of seven or more
-  digits masked), cut to :data:`TEXT_LIMIT` characters. Callers pass ids, counts and short codes — never
-  names, phone numbers, addresses, tokens or a provider's free text. The destination must be hosted in
-  Uzbekistan or receive no personal data (docs/ops/compliance.md).
+* **Ids and counts only** (an allow-list, :func:`scrub_fields`): a value leaves the server only when it is a
+  bool, ``None``, an int of fewer than seven digits, a finite float below a million, or a short code
+  (:data:`CODE_PATTERN`: letters, digits, ``_ . : -``, at most 64 characters, no run of seven or more digits
+  even across separators); NaN and infinities become ``null``, every other value (an e-mail, a phone, a long
+  number, a date, free text) becomes :data:`REDACTED`. Keys pass the same code rule (a non-conforming key is
+  dropped and counted in :data:`DROPPED_KEYS_FIELD`); a key naming personal data or a credential
+  (:data:`SENSITIVE_KEY_PARTS`, :data:`SENSITIVE_KEY_TOKENS`) keeps its name but its whole value is redacted.
+  Callers pass ids, counts and short codes — never names, phone numbers, addresses, tokens or a provider's
+  free text. The destination must be hosted in Uzbekistan or receive no personal data
+  (docs/ops/compliance.md).
 * **Delivery** (``alert.send``): one POST with a 5 s timeout through httpx, redirects not followed, the URL
   never logged. 2xx → done; a transport error, 408, 429 or 5xx → retried by the outbox with backoff (dead
   after ``outbox.MAX_ATTEMPTS``); any other answer → :class:`~glowderma.core.outbox.PermanentFailure` (dead
@@ -27,9 +32,10 @@ import hashlib
 import hmac
 import json
 import logging
+import math
+import re
 import socket
 from collections.abc import Mapping
-from datetime import date, datetime
 from typing import Any
 
 import httpx
@@ -38,31 +44,52 @@ from django.db import transaction
 
 from glowderma.core import outbox, timeutils
 from glowderma.core.models import OutboxMessage
-from glowderma.core.pii import clean_text, scrub_free_text
+from glowderma.core.pii import clean_text
 
 logger = logging.getLogger(__name__)
 
 ALERT_TOPIC = "alert.send"
 SIGNATURE_HEADER = "X-GD-Signature"
 TIMEOUT_SECONDS = 5.0
-TEXT_LIMIT = 120
 MAX_ITEMS = 50
 MAX_DEPTH = 3
 REDACTED = "<redacted>"
+# The only strings that leave the server: short codes (topics, check names, enum literals, case codes).
+CODE_PATTERN = re.compile(r"[A-Za-z0-9_.:-]{1,64}")
+# Seven or more digits, also when split by the separators a code allows ("90_123_45_67"): a phone number,
+# a card or document number, or an id too long to be one of ours.
+_LONG_DIGIT_RUN = re.compile(r"\d(?:[_.:-]*\d){6,}")
+# Ints of this many digits or more are masked (a phone number as an int: 998901234567).
+MAX_INT = 10**6
 # A key containing one of these names personal data or a credential: its value never leaves the server.
 SENSITIVE_KEY_PARTS: tuple[str, ...] = (
-    "phone",
-    "name",
-    "email",
-    "address",
+    "auth",
     "token",
     "secret",
     "password",
     "passwd",
+    "credential",
     "card",
+    "msisdn",
+    "phone",
+    "mobile",
+    "email",
+    "name",
+    "recipient",
+    "contact",
+    "address",
     "passport",
+    "pinfl",
     "birth",
 )
+# Short names matched as a whole word of the key (``api_key``, ``client_ip``, ``pinCode``) so that
+# ``shipment_id`` or ``company`` stay readable.
+SENSITIVE_KEY_TOKENS: frozenset[str] = frozenset(
+    {"key", "otp", "pin", "cvv", "cvc", "pan", "tel", "fio", "ip", "dob", "inn"}
+)
+# Set to the number of keys dropped from a mapping because they were not short codes.
+DROPPED_KEYS_FIELD = "dropped_keys"
+_KEY_WORDS = re.compile(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|\d+")
 RETRYABLE_STATUSES = frozenset({408, 429})
 
 
@@ -75,35 +102,53 @@ def enabled() -> bool:
     return bool(str(getattr(settings, "ALERT_WEBHOOK_URL", "") or "").strip())
 
 
+def is_code(value: str) -> bool:
+    """Whether ``value`` is a short code that may leave the server (:data:`CODE_PATTERN`, no long digit
+    run)."""
+    return CODE_PATTERN.fullmatch(value) is not None and _LONG_DIGIT_RUN.search(value) is None
+
+
 def _sensitive(key: str) -> bool:
     lowered = key.lower()
-    return any(part in lowered for part in SENSITIVE_KEY_PARTS)
+    if any(part in lowered for part in SENSITIVE_KEY_PARTS):
+        return True
+    return any(word.lower() in SENSITIVE_KEY_TOKENS for word in _KEY_WORDS.findall(key))
 
 
 def _scrub(value: Any, depth: int) -> Any:
-    if value is None or isinstance(value, bool | int | float):
+    if value is None or isinstance(value, bool):
         return value
-    if isinstance(value, datetime | date):
-        return value.isoformat()
+    if isinstance(value, int):
+        return value if -MAX_INT < value < MAX_INT else REDACTED
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return None  # NaN / infinity: no JSON (and no jsonb) can carry it
+        return value if -MAX_INT < value < MAX_INT else REDACTED
     if isinstance(value, str):
-        return scrub_free_text(value, TEXT_LIMIT)
-    if depth >= MAX_DEPTH - 1:  # a container here would be nested MAX_DEPTH + 1 levels deep
-        return REDACTED
-    if isinstance(value, Mapping):
-        return scrub_fields(value, _depth=depth + 1)
-    if isinstance(value, list | tuple | set | frozenset):
-        return [_scrub(item, depth + 1) for item in list(value)[:MAX_ITEMS]]
-    return scrub_free_text(str(value), TEXT_LIMIT)
+        return value if is_code(value) else REDACTED
+    if isinstance(value, Mapping | list | tuple):
+        if depth >= MAX_DEPTH - 1:  # a container here would be nested MAX_DEPTH + 1 levels deep
+            return REDACTED
+        if isinstance(value, Mapping):
+            return scrub_fields(value, _depth=depth + 1)
+        return [_scrub(item, depth + 1) for item in value[:MAX_ITEMS]]
+    return REDACTED  # dates, decimals, bytes, sets, objects: not on the allow-list
 
 
-def scrub_fields(fields: Mapping[str, Any] | None, *, _depth: int = 0) -> dict[str, Any]:
-    """``fields`` made safe to leave the server: at most :data:`MAX_ITEMS` keys, sensitive keys redacted,
-    strings scrubbed and shortened, objects nested at most :data:`MAX_DEPTH` levels deep (``fields`` itself
-    is the first)."""
+def scrub_fields(fields: Mapping[Any, Any] | None, *, _depth: int = 0) -> dict[str, Any]:
+    """``fields`` made safe to leave the server (module doc): at most :data:`MAX_ITEMS` keys, keys that are
+    not short codes dropped (counted in :data:`DROPPED_KEYS_FIELD`), sensitive keys redacted, every value
+    through the allow-list, objects nested at most :data:`MAX_DEPTH` levels deep (``fields`` itself is the
+    first)."""
     clean: dict[str, Any] = {}
+    dropped = 0
     for raw_key, value in list((fields or {}).items())[:MAX_ITEMS]:
-        key = clean_text(str(raw_key), 64)
-        clean[key] = REDACTED if _sensitive(key) else _scrub(value, _depth)
+        if not isinstance(raw_key, str) or not is_code(raw_key) or raw_key == DROPPED_KEYS_FIELD:
+            dropped += 1
+            continue
+        clean[raw_key] = REDACTED if _sensitive(raw_key) else _scrub(value, _depth)
+    if dropped:
+        clean[DROPPED_KEYS_FIELD] = dropped
     return clean
 
 

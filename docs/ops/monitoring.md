@@ -34,9 +34,23 @@ compact JSON with sorted keys:
 ```
 
 `at` is when the event happened (Tashkent), `host` the container that raised it. `fields` hold ids, counts and
-short codes only: keys that name personal data or credentials (`phone`, `name`, `email`, `address`, `token`,
-`secret`, `password`, …) are replaced by `<redacted>` and every run of seven or more digits in a string by
-`<number>`. Verify on the receiver:
+short codes only, enforced by an **allow-list** (`core.alerts.scrub_fields`):
+
+- a value is sent only when it is a bool, `null`, an integer of fewer than seven digits, a finite number below
+  one million, or a short code (`^[A-Za-z0-9_.:-]{1,64}$` with no run of seven or more digits, separators
+  included: `90_123_45_67` is masked). NaN and infinities become `null`; everything else (an e-mail, a phone, a
+  long number, a date, free text, a name with a space) becomes `<redacted>`, inside lists and nested objects
+  too (at most three levels);
+- keys pass the same code rule: a key that is not a short code (`+998901234567`, `malika@gmail.com`) is dropped
+  and the object gets `dropped_keys: <n>`;
+- a key naming personal data or a credential keeps its name but its whole value (an object included) becomes
+  `<redacted>`: it contains `auth`, `token`, `secret`, `password`, `credential`, `card`, `msisdn`, `phone`,
+  `mobile`, `email`, `name`, `recipient`, `contact`, `address`, `passport`, `pinfl` or `birth`, or has one of
+  the words `key`, `otp`, `pin`, `cvv`, `cvc`, `pan`, `tel`, `fio`, `ip`, `dob`, `inn` (`api_key`, `client_ip`,
+  `pinCode`).
+
+An id of seven or more digits (an outbox message id past 999 999) is therefore masked too: the ERROR line and
+the audit rows keep it. Verify on the receiver:
 
 ```python
 expected = "sha256=" + hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()

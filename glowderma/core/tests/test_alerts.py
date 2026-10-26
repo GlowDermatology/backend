@@ -7,7 +7,8 @@ import hashlib
 import hmac
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 import httpx
@@ -86,12 +87,12 @@ def test_alert_queues_one_scrubbed_message(enabled: None) -> None:
     fields = payload["fields"]
     assert fields["order_id"] == 10248 and fields["purchase_id"] == 7
     assert fields["phone"] == fields["customer_name"] == fields["fcm_token"] == alerts.REDACTED
-    assert fields["note"] == "call <number> now"
+    assert fields["note"] == alerts.REDACTED  # free text never leaves, scrubbed or not
     assert fields["nested"]["ids"] == [1, 2] and fields["nested"]["Email"] == alerts.REDACTED
     assert fields["nested"]["deep"] == {"deeper": alerts.REDACTED}  # nesting cut after three levels
-    assert fields["at"] == INSTANT.isoformat()
+    assert fields["at"] == alerts.REDACTED  # a date is not on the allow-list
     assert (fields["ratio"], fields["flag"], fields["nothing"]) == (0.5, True, None)
-    assert fields["other"].startswith("<object object")
+    assert fields["other"] == alerts.REDACTED
     assert "+998" not in json.dumps(payload)
 
 
@@ -263,5 +264,134 @@ def test_scrub_fields_bounds_keys_and_lists() -> None:
     many = {f"k{i}": i for i in range(80)}
     assert len(alerts.scrub_fields(many)) == alerts.MAX_ITEMS
     assert alerts.scrub_fields({"ids": list(range(80))})["ids"] == list(range(50))
-    assert alerts.scrub_fields({"text": "x" * 500})["text"] == "x" * alerts.TEXT_LIMIT
+    assert alerts.scrub_fields({"text": "x" * 64, "long": "x" * 65}) == {
+        "text": "x" * 64,
+        "long": alerts.REDACTED,
+    }
     assert alerts.scrub_fields(None) == {}
+
+
+PHONE = "+998901234567"
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"contact": "malika@gmail.com"},
+        {"note": "malika@gmail.com"},
+        {"who": "Malika Karimova"},
+        {"auth": "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhYmMifQ.c2lnbmF0dXJl"},
+        {"authorization": "Basic cGF5bWU6a2V5"},
+        {"api_key": "sk_live_abcdefABCDEF"},
+        {"msisdn_int": 998901234567},
+        {"count": 998901234567},
+        {"count": -998901234567},
+        {"count": 1_000_000},
+        {"ratio": 998901234567.0},
+        {"code": "90_123_45_67"},
+        {"code": "998/90/123/45/67"},
+        {"code": "998.90.123.45.67"},
+        {"code": "tx1234567"},
+        {"phone_plain": PHONE},
+        {"customer": PHONE},
+        {"customer": "+998 (90) 123-45-67"},
+        {"fio": "Karimova Malika"},
+        {"fio": "Malika"},
+        {"otp": "123456"},
+        {"otp_code": 123456},
+        {"pin": "1234"},
+        {"pinCode": 1234},
+        {"cvv": "123"},
+        {"pan": "8600123456789012"},
+        {"card_last4": "9012"},
+        {"secret": "s"},
+        {"password": "p"},
+        {"credentials": "c"},
+        {"refresh_token": "t"},
+        {"tel": "t"},
+        {"mobile": "m"},
+        {"first_name": "Malika"},
+        {"client_ip": "10.0.0.1"},
+        {"address": "Tashkent"},
+        {"recipient": {"full": "Malika"}},
+        {"nested": {"recipient": {"full": "Malika"}}},
+        {"nested": {"recipient": {"tel": PHONE, "full": "Malika"}}},
+        {"list": ["malika@gmail.com", PHONE, "Malika Karimova", 998901234567]},
+        {"decimal": Decimal("5")},
+        {"bytes": b"x"},
+        {"day": date(1990, 5, 17)},
+        {"set": {"a"}},
+    ],
+)
+def test_nothing_personal_or_secret_leaves(fields: dict[str, Any]) -> None:
+    clean = alerts.scrub_fields(fields)
+    text = json.dumps(clean)
+    for needle in (
+        "malika",
+        "karimova",
+        "998",
+        "90123",
+        "eyj",
+        "sk_live",
+        "basic",
+        "bearer",
+        "123456",
+        "1234",
+        "9012",
+        "tashkent",
+        "10.0.0.1",
+        "1990",
+    ):
+        assert needle not in text.lower(), (fields, clean)
+    assert set(clean) == set(fields)  # the (safe) key stays, its value is masked
+    assert all(value == alerts.REDACTED or isinstance(value, dict | list) for value in clean.values())
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {PHONE: "x"},
+        {"malika@gmail.com": 1},
+        {"Malika Karimova": 1},
+        {"90_123_45_67": 1},
+        {"k" * 65: 1},
+        {1: 2},
+    ],
+)
+def test_keys_that_are_not_short_codes_are_dropped(fields: dict[Any, Any]) -> None:
+    assert alerts.scrub_fields({"order_id": 5, **fields}) == {"order_id": 5, alerts.DROPPED_KEYS_FIELD: 1}
+    nested = alerts.scrub_fields({"inner": fields})
+    assert nested == {"inner": {alerts.DROPPED_KEYS_FIELD: 1}}
+    # a caller's own "dropped_keys" cannot hide what was dropped
+    assert alerts.scrub_fields({alerts.DROPPED_KEYS_FIELD: 0, **fields}) == {alerts.DROPPED_KEYS_FIELD: 2}
+
+
+def test_ids_counts_and_codes_pass() -> None:
+    fields = {
+        "order_id": 10248,
+        "message_id": 999_999,
+        "negative": -5,
+        "ratio": 0.25,
+        "flag": False,
+        "nothing": None,
+        "topic": "billz.push_sale",
+        "case": "paid_after_cancel",
+        "counts": {"k3_refund_open": 2, "k1_billz_sale_unrecorded": 0},
+        "ids": [1, 2, 3],
+        "shipment_id": 7,
+        "company": "glow",
+        "version": "1.2.3",
+        "ref": "a:b-c.d_e",
+    }
+    assert alerts.scrub_fields(fields) == fields
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_floats_become_null_and_the_alert_is_queued(enabled: None, value: float) -> None:
+    assert alerts.scrub_fields({"ratio": value, "deep": {"x": [value]}}) == {
+        "ratio": None,
+        "deep": {"x": [None]},
+    }
+    assert alerts.alert("probe.nan", {"ratio": value}) is True
+    (message,) = alert_messages()
+    assert message.payload["fields"] == {"ratio": None}
