@@ -22,6 +22,7 @@ from glowderma.accounts.tests.factories import (
 )
 from glowderma.core import enums, qr_store, timeutils
 from glowderma.core.models import OutboxMessage
+from glowderma.core.pii import pii_ref
 
 pytestmark = pytest.mark.django_db
 
@@ -363,4 +364,4 @@ def test_register_device_for_an_unknown_fid_keeps_the_fid_out_of_the_error() -> 
     with pytest.raises(Device.DoesNotExist) as caught:
         services.register_device(customer.pk, "fid-secret-0001", fcm_token=None, push_enabled=False)
     assert "fid-secret-0001" not in str(caught.value)
-    assert services.pii_ref("fid-secret-0001") in str(caught.value)
+    assert pii_ref("fid-secret-0001") in str(caught.value)
