@@ -2589,12 +2589,14 @@ paths:
           - scheduled
           - queued
           - sent
+          - cancelled
           type: string
           minLength: 1
         description: |-
           * `scheduled` - scheduled
           * `queued` - queued
           * `sent` - sent
+          * `cancelled` - cancelled
       tags:
       - admin
       security:
@@ -2676,6 +2678,72 @@ paths:
       - StaffJWT: []
       responses:
         '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationRecord'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/notifications/{id}/cancel/:
+    post:
+      operationId: admin_notifications_cancel
+      description: 'Cancel a `scheduled` campaign before its send starts (state `cancelled`,
+        audited `notification.cancelled`). Idempotent: an already cancelled campaign
+        answers 200 unchanged. 409 `conflict` once the send started (`queued` / `sent`);
+        404 for an unknown id.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
           content:
             application/json:
               schema:
@@ -11536,6 +11604,18 @@ components:
       - object_id
       - object_type
       - request_id
+    AuthMethodEnum:
+      enum:
+      - password
+      - google
+      - facebook
+      - apple
+      type: string
+      description: |-
+        * `password` - password
+        * `google` - google
+        * `facebook` - facebook
+        * `apple` - apple
     AuthTokens:
       type: object
       properties:
@@ -13705,6 +13785,14 @@ components:
           description: 'With `integrations`: the live providers configured against
             a sandbox (BTS test host, Payme sandbox checkout / `PAYME_TEST_MODE`,
             Eskiz test sender); empty in a real deployment.'
+        providers:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ProviderReadiness'
+          description: '`?ready=1` only, and only for a caller that passes the admin
+            network gate (§1): one entry per provider whose mode is `live`. A live
+            provider that is not configured makes `status` `error` (503) for every
+            caller.'
       required:
       - status
     HealthStatusEnum:
@@ -14218,6 +14306,16 @@ components:
         * `current` - current
         * `others` - others
         * `all` - all
+    ManualReasonEnum:
+      enum:
+      - payme
+      - no_paydoc
+      - fake_mode
+      type: string
+      description: |-
+        * `payme` - payme
+        * `no_paydoc` - no_paydoc
+        * `fake_mode` - fake_mode
     Me:
       type: object
       properties:
@@ -14237,7 +14335,20 @@ components:
         session_expires_at:
           type: string
           format: date-time
+        auth_method:
+          nullable: true
+          description: |-
+            How the current session's sign-in was proven: `password` (email + password) or the social provider (`google`, `facebook`); `null` for a session opened before the method was recorded. Only a `password` session may link a social identity (`auth/oauth/{provider}/link/`).
+
+            * `password` - password
+            * `google` - google
+            * `facebook` - facebook
+            * `apple` - apple
+          oneOf:
+          - $ref: '#/components/schemas/AuthMethodEnum'
+          - $ref: '#/components/schemas/NullEnum'
       required:
+      - auth_method
       - display_name
       - email
       - id
@@ -14537,6 +14648,11 @@ components:
           type: string
           format: date-time
           nullable: true
+        cancelled_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: 'M3: when staff cancelled the scheduled campaign (state `cancelled`).'
         sent:
           type: integer
           nullable: true
@@ -14554,6 +14670,7 @@ components:
       - audience
       - author
       - body
+      - cancelled_at
       - created_at
       - delivered
       - failed
@@ -14572,11 +14689,13 @@ components:
       - scheduled
       - queued
       - sent
+      - cancelled
       type: string
       description: |-
         * `scheduled` - scheduled
         * `queued` - queued
         * `sent` - sent
+        * `cancelled` - cancelled
     NullEnum:
       enum:
       - null
@@ -16137,6 +16256,28 @@ components:
       - fcm
       - oauth
       - payme
+    ProviderReadiness:
+      type: object
+      properties:
+        configured:
+          type: boolean
+          description: The live adapter can be built and its `is_configured()` (where
+            the port has one) says yes; `false` makes readiness answer 503.
+        last_sync_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: 'Billz and BTS only: the last successful catalog sync / polling
+            run; `null` otherwise.'
+        last_sync_age_seconds:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: Seconds since `last_sync_at`; `null` with it.
+      required:
+      - configured
+      - last_sync_age_seconds
+      - last_sync_at
     PublicSettings:
       type: object
       properties:
@@ -16352,8 +16493,9 @@ components:
       - refresh_expires_at
     Refund:
       type: object
-      description: 'Contract ``Refund`` (§2.2): ``completed_at`` is set on ``succeeded``
-        only.'
+      description: |-
+        Contract ``Refund`` (§2.2): ``completed_at`` is set on ``succeeded`` only; ``manual_reason`` (M3) says
+        why a refund is manual (§5.1 picks the refund-state line by it).
       properties:
         id:
           type: integer
@@ -16373,10 +16515,22 @@ components:
           type: string
           format: date-time
           nullable: true
+        manual_reason:
+          nullable: true
+          description: |-
+            Why the refund is (or was) `manual_required`: `payme` (a Payme cabinet refund), `no_paydoc` (a Click payment without Click's payment id), `fake_mode` (Click fake under the production settings); `null` for a refund that was never manual.
+
+            * `payme` - payme
+            * `no_paydoc` - no_paydoc
+            * `fake_mode` - fake_mode
+          oneOf:
+          - $ref: '#/components/schemas/ManualReasonEnum'
+          - $ref: '#/components/schemas/NullEnum'
       required:
       - amount
       - completed_at
       - id
+      - manual_reason
       - provider
       - requested_at
       - state
