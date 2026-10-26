@@ -674,6 +674,14 @@ def test_a_form_body_with_too_many_fields_answers_minus_8(order: Order) -> None:
     assert payments(order)[0].provider_txn_id == ""
 
 
+def test_an_oversized_body_is_413_not_a_500(order: Order, caplog: pytest.LogCaptureFixture) -> None:
+    raw = urlencode(prepare_params(order))
+    with override_settings(DATA_UPLOAD_MAX_MEMORY_SIZE=16):
+        response = _post_raw(CLICK_PREPARE, raw, "application/x-www-form-urlencoded")
+    assert response.status_code == 413 and "failed; everything rolled back" not in caplog.text
+    assert rows("click") == [] and payments(order)[0].provider_txn_id == ""
+
+
 def test_a_json_body_nested_too_deep_answers_minus_8(order: Order, monkeypatch: pytest.MonkeyPatch) -> None:
     from glowderma.integrations.click import protocol
 

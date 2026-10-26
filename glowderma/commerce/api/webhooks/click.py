@@ -18,7 +18,7 @@ import time
 from typing import Any
 
 from django.conf import settings
-from django.core.exceptions import TooManyFieldsSent
+from django.core.exceptions import SuspiciousOperation, TooManyFieldsSent
 from django.db import connection, transaction
 from django.http import QueryDict
 from drf_spectacular.types import OpenApiTypes
@@ -100,6 +100,8 @@ class _ClickCallback(WebhookAPIView):
         started = time.monotonic()
         try:
             return self._handle(request, started)
+        except SuspiciousOperation:
+            raise  # an oversized body or too many fields: core's handler answers 400/413; nothing written
         except Exception:
             logger.exception("click.%s failed; everything rolled back", self._event_prefix)
             return Response({"error": protocol.UPDATE_FAILED, "error_note": "Internal error"}, status=500)

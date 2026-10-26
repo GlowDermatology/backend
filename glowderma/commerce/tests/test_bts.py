@@ -171,6 +171,20 @@ def test_a_body_nested_too_deep_is_unparsable() -> None:
     assert authenticated.status_code == 200 and authenticated.json() == {"ok": True, "ignored": True}
 
 
+def test_an_oversized_body_or_too_many_query_fields_is_a_client_error_not_a_500(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Django's own limits (``DATA_UPLOAD_MAX_MEMORY_SIZE``, ``DATA_UPLOAD_MAX_NUMBER_FIELDS``) reach core's
+    handler (413 / 400) instead of the webhook's catch-all, which would answer 500 with an ERROR."""
+    with override_settings(DATA_UPLOAD_MAX_MEMORY_SIZE=64):
+        big = APIClient().generic("POST", BTS_URL, "x" * 1024, content_type="application/json")
+    assert big.status_code == 413
+    many = "&".join(f"f{n}=1" for n in range(1200))
+    crowded = APIClient().generic("POST", f"{BTS_URL}?{many}", "{}", content_type="application/json")
+    assert crowded.status_code == 400
+    assert "bts.webhook failed" not in caplog.text and rows("bts") == []
+
+
 def test_fake_bts_in_production_answers_401() -> None:
     shipment = parcel()
     with override_settings(DEV_FEATURES_ALLOWED=False, BTS_MODE="fake"):

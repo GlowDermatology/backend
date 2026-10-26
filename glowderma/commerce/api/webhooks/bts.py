@@ -18,6 +18,7 @@ import uuid
 from typing import Any
 
 from django.conf import settings
+from django.core.exceptions import SuspiciousOperation
 from django.db import transaction
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema
@@ -63,6 +64,8 @@ class BtsWebhookView(WebhookAPIView):
         started = time.monotonic()
         try:
             return self._handle(request, started)
+        except SuspiciousOperation:
+            raise  # an oversized body or too many fields: core's handler answers 400/413; nothing written
         except Exception:
             logger.exception("bts.webhook failed; everything rolled back")
             return Response(REFUSED, status=500)
