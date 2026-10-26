@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Version | 1.0.1 (2026-10-26), M1 admin vertical; M2 cross-references from `docs/api/customer-api-v1.md` in §2.10 (revenue), §2.11 (`integrations.providers`), §2.15 (`providers`), §3.1 (`refresh_reused`) and §3.2 |
+| Version | 1.0.1 (2026-10-26), M1 admin vertical; M2 cross-references from `docs/api/customer-api-v1.md` in §2.1 (staff OAuth under fake OAuth in production), §2.10 (revenue), §2.11 (`integrations.providers`), §2.15 (`providers`), §3.1 (`refresh_reused`), §3.2 and §7 item 18 (refund resolve) |
 | Implemented by | Django 6.1 / DRF 3.18 backend (Codex) and the Next.js admin data layer (`frontend/src/data/api/*`, Claude) |
 | Source of truth | `docs/specs/2026-10-24-backend-foundation-design.md`. Where this file and the spec disagree, the spec wins and this file is fixed. |
 | Enforced by | drf-spectacular schema (`openapi/schema.yaml`, `--validate --fail-on-warn`), backend contract tests, frontend mapper tests (order №10248, Malika's ledger) |
@@ -299,6 +299,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 - Field errors: `nonce` `required` (Google only); `redirect_uri` `invalid` when it differs from the configured `OAUTH_REDIRECT_URI`; `code_verifier` 43..128. An unknown `provider` → 404. The nonce is compared byte-wise against the ID token's `nonce` claim (no Unicode normalisation), so the client sends exactly the string it put in the authorize URL.
 - `link/` conflicts: 409 `conflict` "Bu provayder allaqachon bog‘langan." when the caller already has an identity for that provider, "Bu ijtimoiy hisob allaqachon bog‘langan." when the subject belongs to another staff member. `DELETE` without a linked identity → 404.
 - Policy: an identity linked to an inactive staff member is refused like an unknown one; auto-link never creates a second Google identity for a staff member who already has one.
+- M2 (customer contract §6.14): under the production settings (`config.settings.production`, staging included) with `OAUTH_MODE=fake`, `POST auth/oauth/{provider}/` and `POST auth/oauth/{provider}/link/` answer 404 before the body is read (the OAuth registry refuses the provider), because the fake accepts any `fake:<subject>:<email>` code with a caller-chosen nonce; `DELETE auth/oauth/{provider}/` and email + password sign-in keep working. Under the local/test settings the fake works as above.
 
 **`DELETE auth/oauth/{provider}/`** (bearer; M0b) → 204. Unlinks the caller's identity for that provider. Audit `auth.social_unlinked`.
 

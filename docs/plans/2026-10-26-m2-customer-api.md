@@ -188,7 +188,10 @@ builds it (the contract cannot be edited into compliance after the fact):
 (the `sms.send` and `apple.revoke` handlers and the `apple.revoke` dead-letter hook, appended), `glowderma/integrations/eskiz/{__init__,ports,fake,registry}.py` (new),
 `glowderma/integrations/oauth/{ports,fake,google,facebook,apple (new),registry}.py` (`verify_app_token`, Apple; the
 registry keeps `PROVIDER_NAMES = STAFF_PROVIDERS = ("google", "facebook")` for the staff routes, which stay untouched,
-and adds `CUSTOMER_PROVIDERS = ("google", "facebook", "apple")` — `apple` never reaches staff `auth/oauth/{provider}`),
+and adds `CUSTOMER_PROVIDERS = ("google", "facebook", "apple")` — `apple` never reaches staff `auth/oauth/{provider}`;
+while `core.providers.fake_in_production("oauth")` every provider lookup, staff `get_oauth_provider` included, raises
+`NotFound`, so the staff `POST auth/oauth/{provider}/` and `…/link/` answer 404 through the registry and the staff views
+stay untouched, C§6.14, admin §2.1),
 `glowderma/site_config/{selectors.py, services.py (`update_settings` invalidates the `public_settings` cache on commit),
 api/customer/*}`, `glowderma/catalog/selectors.py` (customer list helpers, after
 P0's function), tests in `customers/tests/`, `accounts/tests/`, `integrations/tests/`, `site_config/tests/`.
@@ -291,7 +294,10 @@ None (P0 owns `accounts.0006`). The link-social ticket binding and the OTP fid/I
   Apple down → 503, nothing linked; `APPLE_BUNDLE_IDS` empty → 404 with `OAUTH_MODE=live`, fake adapter with
   `OAUTH_MODE=fake`; unlink, reset and `DELETE me/` enqueue `apple.revoke`; the handler revokes, retries on transport
   errors, treats Apple 400 as final, and the dead hook logs ERROR `apple.revoke_dead`. Fake OAuth under
-  `override_settings(DEV_FEATURES_ALLOWED=False)` → 404 on the four routes and the `*` nonce refused. Facebook: the live
+  `override_settings(DEV_FEATURES_ALLOWED=False)` → 404 on the four routes and the `*` nonce refused; **staff too:**
+  with a linked staff identity, `POST auth/oauth/google/` with a valid fake code and `nonce-<subject>` → 404 (no
+  session, no audit success), `POST auth/oauth/facebook/link/` → 404, `DELETE auth/oauth/google/` → 204, email +
+  password login → 200; the same staff sign-in under the test settings → 200. Facebook: the live
   adapter (recorded fixtures) sends `input_token` only in the POST body, never in a URL (staff path too).
 - `me/social/`: link with password (wrong → `password_incorrect`; locked by `customer_reauth`, each failure also counted
   in `customer_login`); a social-only
@@ -857,7 +863,7 @@ Validation (P0):
   `fake` for every `*_MODE`; `CoreConfig.ready()` logs one WARNING `providers.fake_in_production {provider}` per fake
   provider and `health/?ready=1` / admin `GET settings/` report the modes (C§6.14). What fake means there is C§6.14:
   callbacks refused, fake payment providers not offered, no home delivery with fake BTS (pickup only), no Billz sale
-  recorded by fake Billz, no SMS, no push, no social sign-in with fake OAuth.
+  recorded by fake Billz, no SMS, no push, no social sign-in (customer or staff) with fake OAuth.
 - `DEV_FEATURES_ALLOWED` is a settings-module constant (`True` only in `local.py`/`test.py`). The production settings
   refuse at boot `FAKE_PAYMENTS_ENABLED`, `FAKE_SCENARIO_HEADER_ENABLED`, `ESKIZ_FAKE_CODE`, `POS_API_KEYS` and (as
   today) `FAKE_NOW`, whatever the provider modes.
@@ -925,8 +931,8 @@ No beat entry for `loyalty.services.expire_holds`: it must stay unscheduled whil
    A deployment that runs fake adapters shows them in the startup WARNINGs `providers.fake_in_production` and in
    `health/?ready=1` `providers`; the runbook lists what that posture cannot do (C§6.14: no online payment through a
    fake provider, no home delivery with fake BTS — shipments of orders placed before a switch to fake are shipped by
-   hand from `attention.bts_failed` —, Billz sales entered by hand with fake Billz, no SMS, no push, no social sign-in
-   with fake OAuth).
+   hand from `attention.bts_failed` —, Billz sales entered by hand with fake Billz, no SMS, no push, no customer or
+   staff social sign-in with fake OAuth).
 5. Mobile handover: contract link, `openapi/schema.yaml`, the local fake-mode recipe (`ESKIZ_FAKE_CODE`, dev simulate —
    local/test settings only; a deployed staging needs live Eskiz and payment providers to sign up and pay), the
    device-key and refresh rules (C§1.9, C§2.1.6), the system-browser payment hand-off (C§2.7.2).

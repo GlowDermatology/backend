@@ -561,7 +561,8 @@ revoked or expired token → 401 `SESSION_EXPIRED` (the app treats it as logged 
 **Availability.** Customer social sign-in (`auth/social/nonce/`, `auth/social/`, `auth/social/complete/`, `POST
 me/social/`) answers **404** when `OAUTH_MODE=fake` under the production settings (`DEV_FEATURES_ALLOWED` false): the
 fake verifier accepts made-up subjects, which would let anyone sign in to an account linked while it was on — the OAuth
-equivalent of a fixed OTP (§6.14). `DELETE me/social/{provider}/` keeps working. Provider `apple` additionally needs
+equivalent of a fixed OTP (§6.14). `DELETE me/social/{provider}/` keeps working. The staff OAuth routes get the same
+gate (`POST auth/oauth/{provider}/` and `…/link/` answer 404, admin §2.1), because the staff fake has the same exposure. Provider `apple` additionally needs
 `APPLE_BUNDLE_IDS` (product-owner decision 2026-10-26): empty + `OAUTH_MODE=live` → 404 for `apple`; empty +
 `OAUTH_MODE=fake` (local/test) → the fake Apple adapter (`fake-apple:…`, plan §6) answers, so the app can be built
 before the client provides the bundle id.
@@ -2399,7 +2400,7 @@ code a customer view can raise to an existing key.
       reported by `GET /api/v1/health/?ready=1` (`providers`) and by admin `GET settings/` (`integrations.providers`,
       admin §2.11, §2.15). Fake and live providers may be **mixed** (live adapters arrive one at a time in M3), so the
       rule is per provider: in that posture a fake adapter never reports a real-money or real-world effect that did not
-      happen. Fake Click/Payme/BTS start no transaction and honour no capture (§2.13.0: a Click Complete of a
+      happen and never accepts a made-up credential. Fake Click/Payme/BTS start no transaction and honour no capture (§2.13.0: a Click Complete of a
       transaction attached while Click was live is accepted and reversed, so a switch to fake never strands a
       customer's money) and fake payment providers are not offered (§2.4), so no order is ever paid through a fake
       provider; a Click refund through the fake port becomes `manual_required`,
@@ -2409,7 +2410,11 @@ code a customer view can raise to an existing key.
       send: the `billz.push_sale` handler does not call it, leaves the purchase's `billz_pushed_at` null (no
       `billz_sale_id`, no `billz_sale_recorded` event) and logs WARNING `billz.sale_not_pushed {order_id,
       purchase_id}`, so staff enter the sale in Billz by hand and the M3 live adapter can find every unpushed online
-      sale; fake OAuth turns customer social sign-in off (404, §2.1.8); fake Eskiz delivers no SMS (demo/staging
+      sale; fake OAuth turns social sign-in off for customers **and staff** — 404 on the customer social routes
+      (§2.1.8) and on the staff `POST auth/oauth/{provider}/` and `POST auth/oauth/{provider}/link/` (admin §2.1;
+      unlinking keeps working, email + password sign-in is unaffected) — because a fake verifier accepts any
+      `fake:<subject>:<email>` code with a caller-chosen nonce and would sign anyone in as any linked identity, and with
+      `STAFF_GOOGLE_AUTOLINK` even as any staff email; fake Eskiz delivers no SMS (demo/staging
       posture, §2.14.1); fake FCM delivers no push; fakes keep no message history (§2.14.1, §2.14.2).
     - **Dev switches** — `FAKE_PAYMENTS_ENABLED` (dev simulate, §2.15), `FAKE_SCENARIO_HEADER_ENABLED` (§1.2),
       `ESKIZ_FAKE_CODE` (fixed OTP), `POS_API_KEYS` (seeded POS keys, §2.10), `FAKE_NOW` and the `*` nonce wildcard of
