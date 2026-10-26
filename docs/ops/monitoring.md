@@ -129,6 +129,7 @@ index named is what bounds it.
 | Check | Rows | Threshold (setting, default) | Ids | Plan |
 |---|---|---|---|---|
 | `k1_billz_sale_unrecorded` | orders paid and not cancelled whose online purchase has no `billz_pushed_at` or no Billz sale id; **only while `BILLZ_MODE=live`** (else `skipped: billz_not_live`) | paid more than `CONSISTENCY_BILLZ_SALE_MINUTES` (120) ago, within `CONSISTENCY_LOOKBACK_DAYS` (7) | order | `order_created_idx` range on the look-back (an order is paid within an hour of its creation), purchase by its unique `order_id` |
+| `k1_billz_sale_unrecorded_backlog` | the same rows paid **before** the look-back, however old (the two checks never overlap, so an old unpushed sale never drops out of the report); **only while `BILLZ_MODE=live`** | paid before `CONSISTENCY_LOOKBACK_DAYS` (7) ago | order | `purchase_unpushed_online_idx` (loyalty.0005, partial: the unrecorded online purchases only), then the order by its primary key |
 | `k1_billz_sale_dead` | dead `billz.push_sale` messages, however old (retention never purges a dead message) | — | order | `outbox_unfinished_idx` (core.0010) on `status = 'dead'` |
 | `k2_payment_pending_stuck` | `pending` payments holding a provider transaction whose order's reservation ran out | `reservation_expires_at` + `PAYMENT_IN_FLIGHT_GRACE_SECONDS` + `CONSISTENCY_PAYMENT_PENDING_MINUTES` (60) | payment | `payment_status_created_idx` on `status = 'pending'` |
 | `k2_click_paid_without_paydoc` | Click payments `paid` without `click_paydoc_id` (their refunds become manual) | confirmed within the look-back | payment | `payment_confirmed_idx` range on `confirmed_at` |
@@ -146,7 +147,8 @@ index named is what bounds it.
 
 | Check | Action |
 |---|---|
-| `k1_billz_sale_unrecorded` | Look at the order's `billz.push_sale` message: deferred for a closed shift → it goes through when the shift opens; dead → `billz.sale_dead`; done without a sale → the order was paid while Billz was fake (`billz.sale_not_pushed`): enter the sale in Billz by hand. A sale entered by hand keeps being listed until it leaves the look-back (proposal: a "recorded by hand" mark) |
+| `k1_billz_sale_unrecorded` | Look at the order's `billz.push_sale` message: deferred for a closed shift → it goes through when the shift opens; dead → `billz.sale_dead`; done without a sale → the order was paid while Billz was fake (`billz.sale_not_pushed`): enter the sale in Billz by hand. A sale entered by hand stays listed — after the look-back under `k1_billz_sale_unrecorded_backlog` — because nothing records it on our side yet (proposal: a "recorded by hand" mark) |
+| `k1_billz_sale_unrecorded_backlog` | as `k1_billz_sale_unrecorded`; these are older than the look-back, so their push message is usually dead (§2 `billz.sale_dead`) or was done while Billz was fake |
 | `k1_billz_sale_dead` | as `billz.sale_dead` (§2); a sale entered in Billz by hand → close its message with `requeue_outbox --topic billz.push_sale --dead --resolved --id <message id>` (the message id is in the `billz.sale_dead` line and the `outbox.dead` audit row) |
 | `k2_payment_pending_stuck` | Check the transaction in the provider's cabinet. Payme keeps a state-1 transaction up to its 12 h timeout and then cancels it: a Payme row younger than ~13 h usually resolves itself. Money taken → follow the late-capture refund |
 | `k2_click_paid_without_paydoc` | The Click Complete arrived without `click_paydoc_id` (see the webhook inbox row `payment:<id>`): a protocol issue for the developers; refunds of such payments are paid out by hand |

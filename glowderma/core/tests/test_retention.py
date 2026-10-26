@@ -98,17 +98,20 @@ def test_the_purge_is_scheduled_nightly() -> None:
 
 @pytest.mark.django_db
 def test_the_partial_indexes_of_the_checks_exist() -> None:
-    """core.0010 and payments.0003 (built concurrently): the unfinished outbox rows and the open late
-    captures, which the consistency checks and the dispatcher read without walking the whole tables."""
+    """core.0010, payments.0003 and loyalty.0005 (built concurrently): the unfinished outbox rows, the open
+    late captures and the unrecorded online Billz sales, which the consistency checks and the dispatcher read
+    without walking the whole tables."""
     from django.db import connection
 
     with connection.cursor() as cursor:
         cursor.execute(
-            "SELECT indexname, indexdef FROM pg_indexes WHERE indexname IN (%s, %s)",
-            ["outbox_unfinished_idx", "payment_late_capture_open_idx"],
+            "SELECT indexname, indexdef FROM pg_indexes WHERE indexname IN (%s, %s, %s)",
+            ["outbox_unfinished_idx", "payment_late_capture_open_idx", "purchase_unpushed_online_idx"],
         )
         definitions = dict(cursor.fetchall())
     unfinished = definitions["outbox_unfinished_idx"]
     assert "(status, available_at) WHERE (NOT ((status)::text = 'done'::text))" in unfinished
     late = definitions["payment_late_capture_open_idx"]
     assert "(confirmed_at)" in late and "'late_capture'" in late and "'paid'" in late
+    unpushed = definitions["purchase_unpushed_online_idx"]
+    assert "(order_id)" in unpushed and "billz_pushed_at IS NULL" in unpushed and "'online'" in unpushed

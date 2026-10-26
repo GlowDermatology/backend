@@ -375,6 +375,13 @@ class CashbackHold(TimeStampedModel):
         return f"Hold {self.amount} on order {self.order_id} ({self.state})"
 
 
+# An online purchase whose Billz sale is not recorded: not pushed, or pushed without Billz's sale id
+# (docs/integrations/billz.md §6). The condition of ``purchase_unpushed_online_idx``.
+UNPUSHED_ONLINE = Q(source=enums.PurchaseSource.ONLINE, reversed=False) & (
+    Q(billz_pushed_at__isnull=True) | Q(billz_sale_id="")
+)
+
+
 class Purchase(TimeStampedModel):
     """One purchase counting towards the lifetime total (paid online order or in-store Billz sale)."""
 
@@ -469,6 +476,9 @@ class Purchase(TimeStampedModel):
             models.Index(
                 fields=["customer", "source"], condition=Q(reversed=False), name="purchase_live_cust_src_idx"
             ),
+            # the online sales Billz has not recorded (consistency report K1, no look-back; loyalty.0005):
+            # a handful of rows, so the check never walks the purchases of every order ever paid
+            models.Index(fields=["order"], condition=UNPUSHED_ONLINE, name="purchase_unpushed_online_idx"),
         ]
 
     def __str__(self) -> str:

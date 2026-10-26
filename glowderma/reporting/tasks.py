@@ -5,7 +5,8 @@ Read-only checks, each one statement over an index or a bounded range (the ownin
 each returning how many rows are wrong and the first ``CONSISTENCY_SAMPLE_SIZE`` ids:
 
 * **K1** paid orders whose Billz sale is not recorded ``CONSISTENCY_BILLZ_SALE_MINUTES`` after payment while
-  Billz is live (look-back ``CONSISTENCY_LOOKBACK_DAYS``), and dead ``billz.push_sale`` messages (order ids);
+  Billz is live (paid within the look-back ``CONSISTENCY_LOOKBACK_DAYS``, and — ``_backlog`` — paid before it,
+  however old), and dead ``billz.push_sale`` messages of any age (order ids);
 * **K2** ``pending`` payments holding a transaction past ``reservation_expires_at`` +
   ``PAYMENT_IN_FLIGHT_GRACE_SECONDS`` + ``CONSISTENCY_PAYMENT_PENDING_MINUTES``, and Click payments ``paid``
   without ``click_paydoc_id`` (look-back; payment ids);
@@ -69,8 +70,14 @@ def _checks(now: datetime) -> list[tuple[str, Check]]:
         paid_before = now - timedelta(minutes=int(settings.CONSISTENCY_BILLZ_SALE_MINUTES))
         return commerce_selectors.unrecorded_billz_sales(lookback, paid_before, limit=limit)
 
+    def k1_unrecorded_backlog() -> Finding:
+        if not billz_live:
+            return Finding(count=0, skipped=BILLZ_NOT_LIVE)
+        return commerce_selectors.unrecorded_billz_sales_before(lookback, limit=limit)
+
     return [
         ("k1_billz_sale_unrecorded", k1_unrecorded),
+        ("k1_billz_sale_unrecorded_backlog", k1_unrecorded_backlog),
         ("k1_billz_sale_dead", lambda: commerce_selectors.dead_billz_sales(limit=limit)),
         (
             "k2_payment_pending_stuck",

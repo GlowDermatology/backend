@@ -20,7 +20,7 @@ from glowderma.core import alerts, enums, timeutils
 from glowderma.core.models import AuditEntry, OutboxMessage
 from glowderma.delivery.tests.factories import ShipmentFactory
 from glowderma.loyalty import tasks as loyalty_tasks
-from glowderma.loyalty.tests.factories import PurchaseFactory
+from glowderma.loyalty.tests.factories import PurchaseFactory, reverse_purchase_rows
 from glowderma.payments import selectors as payment_selectors
 from glowderma.payments.tests.factories import PaymentFactory, RefundFactory
 from glowderma.reporting import tasks
@@ -30,6 +30,7 @@ pytestmark = pytest.mark.django_db
 NOW = datetime.fromisoformat("2026-10-27T03:40:00+05:00")
 CHECKS = [
     "k1_billz_sale_unrecorded",
+    "k1_billz_sale_unrecorded_backlog",
     "k1_billz_sale_dead",
     "k2_payment_pending_stuck",
     "k2_click_paid_without_paydoc",
@@ -98,9 +99,15 @@ def test_k1_unrecorded_and_dead_billz_sales() -> None:
     )
     PurchaseFactory.create(order__created_at=ago(minutes=30))  # paid 27 min ago: still within 2 h
     PurchaseFactory.create(order__created_at=ago(hours=5), billz_pushed_at=ago(hours=4), billz_sale_id="b-1")
-    PurchaseFactory.create(order__created_at=ago(days=8))  # outside the 7-day look-back
+    backlog = PurchaseFactory.create(order__created_at=ago(days=8))  # before the 7-day look-back
+    ancient = PurchaseFactory.create(order__created_at=ago(days=400), billz_pushed_at=ago(days=399))
+    PurchaseFactory.create(
+        order__created_at=ago(days=400), billz_pushed_at=ago(days=399), billz_sale_id="b-2"
+    )
+    reverse_purchase_rows(PurchaseFactory.create(order__created_at=ago(days=30)), at=ago(days=29))
     cancelled = PurchaseFactory.create(order__created_at=ago(hours=5))
     assert unrecorded.order_id and no_sale_id.order_id and cancelled.order_id
+    assert backlog.order_id and ancient.order_id
     Order.objects.filter(pk=cancelled.order_id).update(
         status=enums.OrderStatus.CANCELLED,
         cancelled_at=ago(hours=4),
@@ -123,8 +130,15 @@ def test_k1_unrecorded_and_dead_billz_sales() -> None:
         "count": 2,
         "ids": sorted([unrecorded.order_id, no_sale_id.order_id]),
     }
+    # the backlog: everything paid before the look-back, however old (the two checks never overlap)
+    assert check(report, "k1_billz_sale_unrecorded_backlog") == {
+        "count": 2,
+        "ids": sorted([backlog.order_id, ancient.order_id]),
+    }
     assert check(report, "k1_billz_sale_dead") == {"count": 1, "ids": [10777]}
-    assert run(BILLZ_MODE="fake")["checks"]["k1_billz_sale_unrecorded"]["skipped"] == "billz_not_live"
+    fake = run(BILLZ_MODE="fake")["checks"]
+    assert fake["k1_billz_sale_unrecorded"]["skipped"] == "billz_not_live"
+    assert fake["k1_billz_sale_unrecorded_backlog"] == {"count": 0, "ids": [], "skipped": "billz_not_live"}
 
 
 def test_k2_stuck_pending_payments_and_click_payments_without_paydoc() -> None:

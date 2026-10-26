@@ -36,6 +36,7 @@ from glowderma.core import enums, i18n, timeutils
 from glowderma.core.timeutils import TASHKENT
 from glowderma.loyalty import engine, hold_grace
 from glowderma.loyalty.models import (
+    UNPUSHED_ONLINE,
     CashbackHold,
     CashbackPolicy,
     CashbackTier,
@@ -382,6 +383,13 @@ class BillzPushInfo:
     billz_payment_attempted_at: datetime | None = None  # a Billz payment whose outcome is not known yet
 
 
+def unpushed_online_order_ids() -> QuerySet[Purchase, int]:
+    """The order ids of the online purchases whose Billz sale is not recorded (:data:`UNPUSHED_ONLINE`), for
+    a subquery. Plan: the partial index ``purchase_unpushed_online_idx`` (loyalty.0005), which holds only
+    those rows."""
+    return Purchase.objects.filter(UNPUSHED_ONLINE).values_list("order_id", flat=True)
+
+
 def billz_push_info(purchase_id: int) -> BillzPushInfo | None:
     """The Billz-side state of a purchase (``None`` when it does not exist)."""
     purchase = (
@@ -708,4 +716,5 @@ __all__ = [
     "rules_of",
     "scheduled_policy",
     "tier_for",
+    "unpushed_online_order_ids",
 ]

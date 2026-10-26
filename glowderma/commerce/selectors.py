@@ -415,6 +415,7 @@ __all__ = [
     "status_counts",
     "tracking_number",
     "unrecorded_billz_sales",
+    "unrecorded_billz_sales_before",
     "unshipped_paid_orders",
 ]
 
@@ -1179,6 +1180,21 @@ def unrecorded_billz_sales(paid_since: datetime, paid_before: datetime, *, limit
         purchase__source=enums.PurchaseSource.ONLINE,
         purchase__reversed=False,
     ).filter(Q(purchase__billz_pushed_at__isnull=True) | Q(purchase__billz_sale_id=""))
+    return finding(queryset, limit=limit)
+
+
+def unrecorded_billz_sales_before(paid_before: datetime, *, limit: int) -> Finding:
+    """K1 without a look-back: orders paid before ``paid_before`` and not cancelled whose Billz sale is not
+    recorded, however old — the report passes the start of :func:`unrecorded_billz_sales`' look-back, so the
+    two checks together cover every paid order and an old unpushed sale never drops out of the report.
+
+    Plan: the partial index ``purchase_unpushed_online_idx`` (loyalty.0005: the unrecorded online purchases
+    only) drives a semi-join to the order by its primary key; neither table is walked."""
+    queryset = Order.objects.filter(
+        pk__in=loyalty_selectors.unpushed_online_order_ids(),
+        paid_at__lt=paid_before,
+        status__in=list(_PAID_STATUSES),
+    )
     return finding(queryset, limit=limit)
 
 
