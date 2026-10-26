@@ -1,6 +1,12 @@
 """``me/*`` of the customer API (customer contract §2.2): profile, deletion, consent, image, device, password,
 social identities and addresses. Every query starts from the signed-in customer; another customer's address
-id answers 404."""
+id answers 404.
+
+``Idempotency-Key`` (C§1.7): required on ``POST me/password/``, ``POST me/social/`` and ``POST
+me/addresses/``, optional and honoured when sent on every other write here. A refusal rolls the key's
+transaction back; what a refusal keeps on purpose lives outside it: the re-authentication guard counters
+(cache) and the revocation of an Apple token a refused link exchanged
+(:func:`customers.services.revoke_refused_apple_tokens`)."""
 
 from __future__ import annotations
 
@@ -34,6 +40,18 @@ from glowderma.integrations.oauth.registry import CUSTOMER_PROVIDERS
 
 PARAMETERS = [*DEVICE_HEADERS, ACCEPT_LANGUAGE_HEADER]
 I_PARAMETERS = [*PARAMETERS, IDEMPOTENCY_KEY_HEADER]
+# C§1.7: optional on every other C write, honoured when sent (``@idempotent(required=False)``).
+OPTIONAL_IDEMPOTENCY_KEY_HEADER = OpenApiParameter(
+    name="Idempotency-Key",
+    type=OpenApiTypes.UUID,
+    location=OpenApiParameter.HEADER,
+    required=False,
+    description=(
+        "Optional client-generated UUID; when sent, a retry with the same body returns the stored 2xx "
+        "response with `Idempotent-Replayed: true` and another body answers 422 `idempotency_key_reused`."
+    ),
+)
+O_PARAMETERS = [*PARAMETERS, OPTIONAL_IDEMPOTENCY_KEY_HEADER]
 PROVIDER_PARAM = OpenApiParameter(
     name="provider", type=OpenApiTypes.STR, location=OpenApiParameter.PATH, enum=list(CUSTOMER_PROVIDERS)
 )
@@ -71,10 +89,11 @@ class MeView(MeBase):
 
     @extend_schema(
         operation_id="customer_me_partial_update",
-        parameters=PARAMETERS,
+        parameters=O_PARAMETERS,
         request=s.MePatchSerializer,
         responses={200: s.CustomerMeSerializer, **CUSTOMER_ERRORS},
     )
+    @idempotent(required=False)
     def patch(self, request: Request) -> Response:
         serializer = s.MePatchSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -83,10 +102,11 @@ class MeView(MeBase):
 
     @extend_schema(
         operation_id="customer_me_destroy",
-        parameters=PARAMETERS,
+        parameters=O_PARAMETERS,
         request=s.ReauthSerializer,
         responses={204: None, **CUSTOMER_ERRORS},
     )
+    @idempotent(required=False)
     def delete(self, request: Request) -> Response:
         serializer = s.ReauthSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -104,10 +124,11 @@ class MeView(MeBase):
 class ConsentView(MeBase):
     @extend_schema(
         operation_id="customer_me_consent",
-        parameters=PARAMETERS,
+        parameters=O_PARAMETERS,
         request=s.ConsentSerializer,
         responses={200: s.CustomerMeSerializer, **CUSTOMER_ERRORS},
     )
+    @idempotent(required=False)
     def post(self, request: Request) -> Response:
         serializer = s.ConsentSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -131,7 +152,7 @@ class ImageView(MeBase):
 
     @extend_schema(
         operation_id="customer_me_image_update",
-        parameters=PARAMETERS,
+        parameters=O_PARAMETERS,
         request={
             "multipart/form-data": {
                 "type": "object",
@@ -140,6 +161,7 @@ class ImageView(MeBase):
         },
         responses={200: s.ImageUrlSerializer, **CUSTOMER_ERRORS},
     )
+    @idempotent(required=False)
     def put(self, request: Request) -> Response:
         upload = request.FILES.get("file")
         if upload is None:
@@ -148,9 +170,10 @@ class ImageView(MeBase):
 
     @extend_schema(
         operation_id="customer_me_image_destroy",
-        parameters=PARAMETERS,
+        parameters=O_PARAMETERS,
         responses={204: None, **CUSTOMER_ERRORS},
     )
+    @idempotent(required=False)
     def delete(self, request: Request) -> Response:
         services.delete_image(self.customer.pk, sid=self.sid)
         return Response(status=204)
@@ -159,10 +182,11 @@ class ImageView(MeBase):
 class DeviceView(MeBase):
     @extend_schema(
         operation_id="customer_me_device_update",
-        parameters=PARAMETERS,
+        parameters=O_PARAMETERS,
         request=s.DeviceSerializer,
         responses={200: s.DeviceStateSerializer, **CUSTOMER_ERRORS},
     )
+    @idempotent(required=False)
     def put(self, request: Request) -> Response:
         serializer = s.DeviceSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -255,10 +279,11 @@ class SocialUnlinkView(MeBase):
 
     @extend_schema(
         operation_id="customer_me_social_unlink",
-        parameters=[*PARAMETERS, PROVIDER_PARAM],
+        parameters=[*O_PARAMETERS, PROVIDER_PARAM],
         request=s.ReauthSerializer,
         responses={200: s.CustomerMeSerializer, **CUSTOMER_ERRORS},
     )
+    @idempotent(required=False)
     def delete(self, request: Request, provider: str) -> Response:
         if provider not in CUSTOMER_PROVIDERS:
             raise NotFound
@@ -306,10 +331,11 @@ class AddressDetailView(MeBase):
 
     @extend_schema(
         operation_id="customer_me_addresses_partial_update",
-        parameters=[*PARAMETERS, ADDRESS_ID_PARAM],
+        parameters=[*O_PARAMETERS, ADDRESS_ID_PARAM],
         request=s.AddressWriteSerializer,
         responses={200: s.CustomerAddressSerializer, **CUSTOMER_ERRORS},
     )
+    @idempotent(required=False)
     def patch(self, request: Request, pk: int) -> Response:
         if not Address.objects.filter(pk=pk, customer_id=self.customer.pk).exists():
             raise NotFound  # 404 before validation for a foreign or unknown id
@@ -320,9 +346,10 @@ class AddressDetailView(MeBase):
 
     @extend_schema(
         operation_id="customer_me_addresses_destroy",
-        parameters=[*PARAMETERS, ADDRESS_ID_PARAM],
+        parameters=[*O_PARAMETERS, ADDRESS_ID_PARAM],
         responses={204: None, **CUSTOMER_ERRORS},
     )
+    @idempotent(required=False)
     def delete(self, request: Request, pk: int) -> Response:
         services.remove_address(self.customer.pk, pk, sid=self.sid)
         return Response(status=204)
@@ -331,10 +358,11 @@ class AddressDetailView(MeBase):
 class AddressDefaultView(MeBase):
     @extend_schema(
         operation_id="customer_me_addresses_default",
-        parameters=[*PARAMETERS, ADDRESS_ID_PARAM],
+        parameters=[*O_PARAMETERS, ADDRESS_ID_PARAM],
         request=None,
         responses={200: s.CustomerAddressSerializer, **CUSTOMER_ERRORS},
     )
+    @idempotent(required=False)
     def post(self, request: Request, pk: int) -> Response:
         address = services.set_default_address(self.customer.pk, pk, sid=self.sid)
         return Response(selectors.address_payload(address))
