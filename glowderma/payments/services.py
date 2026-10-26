@@ -13,12 +13,19 @@ Refund states (contract §3.1 ``RefundState``): ``— → requested`` (Click; ou
 → succeeded | failed`` and ``unknown → succeeded | failed`` (provider confirmation or staff resolve) ·
 ``failed`` / ``succeeded`` terminal (a retry is a new row, ``origin = manual``). The payment turns
 ``refunded`` when the succeeded refunds cover its amount.
+
+Claim fencing (``refund.submit`` is delivered at least once, and an expired outbox lease hands a message to a
+second worker while the first may still be talking to Click): :func:`mark_submitting` is a compare-and-set
+under the Payment lock on ``(state, attempts)`` and re-claims a ``submitting`` refund only when its last
+attempt is older than the outbox lease; :func:`mark_failed` / :func:`mark_unknown` take the attempt number
+the worker claimed and do nothing when a newer attempt owns the row. A stale claim raises
+:class:`StaleRefundClaim` (the worker stops quietly).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from django.db import IntegrityError, transaction
@@ -44,6 +51,10 @@ class PaymentNotFound(PaymentError):
 
 class RefundNotFound(PaymentError):
     pass
+
+
+class StaleRefundClaim(PaymentError):
+    """The refund moved on since the worker read it (another worker claimed it, or it was resolved)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -352,16 +363,37 @@ def _locked_refund(refund_id: int) -> tuple[Payment, Refund]:
     return payment, Refund.objects.get(pk=refund_id)
 
 
-def mark_submitting(refund_id: int, at: datetime | None = None) -> RefundResult:
+def mark_submitting(
+    refund_id: int,
+    at: datetime | None = None,
+    *,
+    expected_state: str = enums.RefundState.REQUESTED,
+    expected_attempts: int | None = None,
+    resubmit_after: timedelta | None = None,
+) -> RefundResult:
     """The handler claims the refund before calling the provider (committed first): ``submitting``,
-    ``submitted_at`` (first time), ``last_attempt_at``, ``attempts += 1``. Allowed from ``requested`` and
-    ``submitting`` (a redelivery that is about to submit again)."""
+    ``submitted_at`` (first time), ``last_attempt_at``, ``attempts += 1``.
+
+    A compare-and-set under the Payment lock: the row must still be in ``expected_state`` (and have
+    ``expected_attempts`` attempts when given), else :class:`StaleRefundClaim`. Re-claiming a ``submitting``
+    row (``expected_state="submitting"``, a redelivery that is about to submit again after its status check
+    said "not reversed") additionally needs the last attempt to be older than ``resubmit_after`` (the outbox
+    lease): a younger claim belongs to a worker that may still be waiting for the provider.
+    """
     _aware(at, "at")
     instant = at or timeutils.now()
+    if expected_state not in (enums.RefundState.REQUESTED, enums.RefundState.SUBMITTING):
+        raise ValueError(f"A refund is claimed from requested or submitting, not {expected_state!r}")
     with transaction.atomic():
         payment, refund = _locked_refund(refund_id)
-        if refund.state not in (enums.RefundState.REQUESTED, enums.RefundState.SUBMITTING):
-            raise InvalidTransition(f"Refund {refund_id} is {refund.state}")
+        if refund.state != expected_state or (
+            expected_attempts is not None and refund.attempts != expected_attempts
+        ):
+            raise StaleRefundClaim(f"Refund {refund_id} is {refund.state} (attempt {refund.attempts})")
+        if refund.state == enums.RefundState.SUBMITTING:
+            last = refund.last_attempt_at
+            if resubmit_after is None or (last is not None and last > instant - resubmit_after):
+                raise StaleRefundClaim(f"Refund {refund_id} was claimed at {last}; its worker may be alive")
         before = refund.state
         refund.state = enums.RefundState.SUBMITTING
         refund.submitted_at = refund.submitted_at or instant
@@ -370,6 +402,15 @@ def mark_submitting(refund_id: int, at: datetime | None = None) -> RefundResult:
         refund.save()
         _audit_state(refund, before)
         return _refund_result(refund, payment, changed=True)
+
+
+def _stale(refund: Refund, expected_state: str | None, expected_attempts: int | None) -> bool:
+    """The caller's claim no longer owns the row (fencing of :func:`mark_failed` / :func:`mark_unknown`)."""
+    if expected_state is not None and refund.state != expected_state:
+        return True
+    return expected_attempts is not None and (
+        refund.state != enums.RefundState.SUBMITTING or refund.attempts != expected_attempts
+    )
 
 
 def _covered(payment: Payment) -> bool:
@@ -426,15 +467,23 @@ def mark_failed(
     *,
     actor_id: int | None = None,
     request: Any = None,
+    expected_state: str | None = None,
+    expected_attempts: int | None = None,
 ) -> RefundResult:
     """A definitive failure: ``failed`` (``error_code``, ``last_error``). From ``requested`` (the dead-letter
     hook: never ``unknown``, 03 §5), ``submitting`` (provider refusal), ``unknown`` or ``manual_required``
-    (staff resolve, contract §7 item 18). A failed refund is a no-op; ``refunds_needing_action`` counts it."""
+    (staff resolve, contract §7 item 18). A failed refund is a no-op; ``refunds_needing_action`` counts it.
+
+    Fencing: with ``expected_state`` (the dead-letter hook: ``requested``) or ``expected_attempts`` (the
+    handler's claimed attempt, which must still be the newest ``submitting`` one) a row that moved on is left
+    alone (``changed=False``)."""
     _aware(at, "at")
     instant = at or timeutils.now()
     actor = _staff(actor_id)
     with transaction.atomic():
         payment, refund = _locked_refund(refund_id)
+        if _stale(refund, expected_state, expected_attempts):
+            return _refund_result(refund, payment, changed=False)
         if refund.state == enums.RefundState.FAILED:
             return _refund_result(refund, payment, changed=False)
         if refund.state == enums.RefundState.SUCCEEDED:
@@ -449,13 +498,22 @@ def mark_failed(
         return _refund_result(refund, payment, changed=True)
 
 
-def mark_unknown(refund_id: int, last_error: str = "", at: datetime | None = None) -> RefundResult:
+def mark_unknown(
+    refund_id: int,
+    last_error: str = "",
+    at: datetime | None = None,
+    *,
+    expected_attempts: int | None = None,
+) -> RefundResult:
     """Transport failure after submission and the follow-up status check failed too: ``unknown``. Never
-    retried automatically (02 §2.2); staff resolve it."""
+    retried automatically (02 §2.2); staff resolve it. With ``expected_attempts`` a row whose newest attempt
+    is not the caller's is left alone (``changed=False``)."""
     _aware(at, "at")
     instant = at or timeutils.now()
     with transaction.atomic():
         payment, refund = _locked_refund(refund_id)
+        if _stale(refund, None, expected_attempts):
+            return _refund_result(refund, payment, changed=False)
         if refund.state == enums.RefundState.UNKNOWN:
             return _refund_result(refund, payment, changed=False)
         if refund.state != enums.RefundState.SUBMITTING:
@@ -475,6 +533,7 @@ __all__ = [
     "PaymentResult",
     "RefundNotFound",
     "RefundResult",
+    "StaleRefundClaim",
     "can_fail_unilaterally",
     "confirm_payment",
     "create_payment",

@@ -63,7 +63,24 @@ def test_click_refund_state_machine_and_audits() -> None:
     assert (again.refund_id, again.changed) == (requested.refund_id, False)
     submitting = services.mark_submitting(requested.refund_id, AT)
     assert (submitting.state, submitting.attempts) == ("submitting", 1)
-    assert services.mark_submitting(requested.refund_id, AT).attempts == 2  # a redelivery resubmits
+    with pytest.raises(services.StaleRefundClaim):  # claimed already: a second claim is refused
+        services.mark_submitting(requested.refund_id, AT)
+    with pytest.raises(services.StaleRefundClaim):  # a fresh claim: its worker may still be calling Click
+        services.mark_submitting(
+            requested.refund_id,
+            AT + timedelta(minutes=1),
+            expected_state="submitting",
+            expected_attempts=1,
+            resubmit_after=timedelta(minutes=5),
+        )
+    resubmitted = services.mark_submitting(  # a redelivery after the lease resubmits
+        requested.refund_id,
+        AT + timedelta(minutes=5),
+        expected_state="submitting",
+        expected_attempts=1,
+        resubmit_after=timedelta(minutes=5),
+    )
+    assert resubmitted.attempts == 2
     unknown = services.mark_unknown(requested.refund_id, "timeout", AT)
     assert unknown.state == "unknown" and not services.mark_unknown(requested.refund_id).changed
     succeeded = services.mark_succeeded(
@@ -91,8 +108,9 @@ def test_payme_refund_is_manual_and_resolvable() -> None:
     refund = services.create_refund(payment.pk, payment.amount, None)
     assert refund.state == "manual_required"
     assert not OutboxMessage.objects.filter(topic="refund.submit").exists()
-    with pytest.raises(InvalidTransition):
+    with pytest.raises(services.StaleRefundClaim):
         services.mark_submitting(refund.refund_id)
+    assert not services.mark_failed(refund.refund_id, "dead_letter", expected_state="requested").changed
     failed = services.mark_failed(refund.refund_id, "resolved_failed", actor_id=None)
     assert failed.state == "failed" and not services.mark_failed(refund.refund_id, "again").changed
     retried = services.retry_refund(refund.refund_id, None)
