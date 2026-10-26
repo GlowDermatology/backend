@@ -556,16 +556,18 @@ def customer_device_label(platform: str, model: str) -> str:
 
 
 def _revoke_qr_on_commit(customer_id: int) -> None:
-    transaction.on_commit(lambda: qr_store.revoke_all(customer_id))
+    # robust: the data already committed, so a Redis error is logged, never turned into a 500 (the keys
+    # expire after QR_TOKEN_TTL_SECONDS anyway).
+    transaction.on_commit(lambda: qr_store.revoke_all(customer_id), robust=True)
 
 
 @transaction.atomic
 def start_customer_session(
     customer_id: int,
-    *,
     fid: str,
     platform: str,
     app_version: str,
+    *,
     issue_device_key: bool,
 ) -> SessionStart:
     """Sign a customer in on one device (customer contract §1.9 steps 1–6, the single-device rule).
@@ -577,8 +579,15 @@ def start_customer_session(
     another active device (the install changed accounts); (5) with ``issue_device_key`` a new device key whose
     SHA-256 replaces the stored hash; (6) a new session (sliding ``CUSTOMER_REFRESH_TTL_DAYS``) and
     ``Customer.last_login_at``.
+
+    The customer's status is checked under the lock, not only by the caller: a sign-in racing ``DELETE me/``
+    (or an admin delete) that commits first is refused with 401 ``SESSION_EXPIRED`` before anything is
+    written, so a deleted account never regains a keyed device, an open session or ``last_login_at``
+    (customer contract §2.2.3 step 5). The re-registration flow reactivates the customer before calling.
     """
-    lock_customer(customer_id)
+    stored = lock_customer(customer_id)
+    if stored.status != enums.CustomerStatus.ACTIVE:
+        raise AuthFailed("SESSION_EXPIRED")
     instant = timeutils.now()
     device = Device.objects.select_for_update().filter(customer_id=customer_id, fid=fid).first()
     if device is None:
@@ -745,18 +754,42 @@ def register_device(
     held by another device row (the phone changed accounts) is taken from that row first (no token, no push,
     inactive if it was active), so ``device_active_fcm_token_unique`` never fires; ``fcm_invalidated_at`` is
     cleared when a new token arrives.
+
+    Lock order (customer contract §2.7.1): the customer-level lock first, then the device rows — this
+    device and the token's holders in one query ordered by primary key — so it serializes with
+    ``start_customer_session`` and ``delete_customer`` instead of deadlocking with them. Under the lock a
+    customer who is no longer active (401 ``SESSION_EXPIRED``) or a device another sign-in or a logout
+    deactivated meanwhile (401 ``SESSION_REPLACED`` when its newest session was replaced, else
+    ``SESSION_EXPIRED``) is refused before anything is written, so no token lands on a deleted or replaced
+    device.
     """
     token = (fcm_token or "").strip()
     if push_enabled and not token:
         raise ValidationError(
             {"push_enabled": [field_error("push_token_missing", message_key="field.push_token_missing")]}
         )
+    stored = lock_customer(customer_id)
+    if stored.status != enums.CustomerStatus.ACTIVE:
+        raise AuthFailed("SESSION_EXPIRED")
     instant = timeutils.now()
-    device = Device.objects.select_for_update().get(customer_id=customer_id, fid=fid)
+    wanted = Q(customer_id=customer_id, fid=fid)
     if token:
-        holders = list(
-            Device.objects.select_for_update().filter(fcm_token=token).exclude(pk=device.pk).order_by("pk")
+        wanted |= Q(fcm_token=token)
+    rows = list(Device.objects.select_for_update().filter(wanted).order_by("pk"))
+    device = next((row for row in rows if row.customer_id == customer_id and row.fid == fid), None)
+    if device is None:
+        raise Device.DoesNotExist(f"No device {fid!r} for customer {customer_id}")
+    if not device.is_active:
+        newest_reason = (
+            AuthSession.objects.filter(device_id=device.pk)
+            .order_by("-created_at")
+            .values_list("revoke_reason", flat=True)
+            .first()
         )
+        replaced = newest_reason == enums.SessionRevokeReason.REPLACED
+        raise AuthFailed("SESSION_REPLACED" if replaced else "SESSION_EXPIRED")
+    if token:
+        holders = [row for row in rows if row.pk != device.pk]
         for holder in holders:
             holder.fcm_token = ""
             holder.push_enabled = False
