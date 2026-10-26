@@ -340,7 +340,8 @@ def test_a_cache_blip_right_after_the_payment_never_pays_twice() -> None:
     cfg = config()
 
     def adapter(**_: Any) -> LiveBillz:
-        return LiveBillz(cfg, cache=blip, client=BillzClient(cfg, transport=server.transport, cache=blip))
+        flaky: Any = blip  # duck-typed like the Django cache
+        return LiveBillz(cfg, cache=flaky, client=BillzClient(cfg, transport=server.transport, cache=flaky))
 
     with patch("glowderma.commerce.billz_sales.get_billz", side_effect=adapter):
         first = dispatch(message_of(order.pk))
