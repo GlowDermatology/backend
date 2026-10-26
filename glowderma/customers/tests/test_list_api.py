@@ -188,6 +188,22 @@ def test_search_rule_vectors(
     assert {row["name"] for row in rows} == expected
 
 
+@pytest.mark.parametrize(
+    "term",
+    # gap CRIT-SEARCH-UZ-APOSTROPHE (GC-1): U+0027, U+0060, U+2018, U+2019, U+02BB, U+02BC and ё → е
+    ["g'ulom", "g`ulom", "g\u2018ulom", "g\u2019ulom", "G\u02bbULOM", "g\u02bculom", "ахмедова", "ахмёдова"],
+)
+def test_search_folds_apostrophes_and_yo_in_names(
+    staff_client: APIClient, policies: dict[int, CashbackPolicy], term: str
+) -> None:
+    make_customer("Dilnoza G\u2018ulomova", phone="+998901234567")  # typed with U+2018 at registration
+    make_customer("Мадина Ахмёдова", phone="+998901234568")
+    make_customer("Malika Karimova", phone="+998901234569")
+    rows = staff_client.get(URL, {"search": term}).json()["results"]
+    expected = "Мадина Ахмёдова" if term.startswith("ахм") else "Dilnoza G\u2018ulomova"
+    assert [row["name"] for row in rows] == [expected]
+
+
 def test_search_is_at_most_64_characters(staff_client: APIClient, clock: Any) -> None:
     response = staff_client.get(URL, {"search": "x" * 65})
     assert response.status_code == 400

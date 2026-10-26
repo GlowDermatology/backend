@@ -70,3 +70,35 @@ def test_0005_precheck_refuses_a_stray_customer_id() -> None:
         cursor.execute("DELETE FROM accounts_authsession")
     call_command("migrate", "accounts", verbosity=0)
     assert column_is_foreign_key("accounts_authsession", "customer_id")
+
+
+def customer_indexes() -> dict[str, str]:
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'accounts_customer'")
+        return {name: definition for name, definition in cursor.fetchall()}
+
+
+@pytest.mark.django_db(transaction=True)
+def test_0008_swaps_the_name_index_for_the_folded_one_and_back() -> None:
+    """accounts.0008 (GC-1): the folded-name trigram index is built before the lower(name) one is dropped,
+    both concurrently; the reverse restores the old index."""
+    from importlib import import_module
+
+    migration = import_module("glowderma.accounts.migrations.0008_customer_name_fold_trgm").Migration
+    assert migration.atomic is False
+    assert [type(op).__name__ for op in migration.operations] == [
+        "AddIndexConcurrently",
+        "RemoveIndexConcurrently",
+    ]
+    indexes = customer_indexes()
+    assert "translate(lower" in indexes["accounts_customer_fold_trgm"].lower()
+    assert "accounts_customer_name_trgm" not in indexes
+    try:
+        call_command("migrate", "accounts", "0007", verbosity=0)
+        indexes = customer_indexes()
+        assert "(lower((name)::text) gin_trgm_ops)" in indexes["accounts_customer_name_trgm"]
+        assert "accounts_customer_fold_trgm" not in indexes
+    finally:
+        call_command("migrate", verbosity=0)
+    indexes = customer_indexes()
+    assert "accounts_customer_fold_trgm" in indexes and "accounts_customer_name_trgm" not in indexes

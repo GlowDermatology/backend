@@ -23,7 +23,7 @@ from typing import Any
 
 from django.conf import settings
 from django.db.models import Count, Exists, F, Max, OrderBy, OuterRef, Q, QuerySet, Value
-from django.db.models.functions import Coalesce, Collate, Lower, NullIf
+from django.db.models.functions import Coalesce, Collate, NullIf
 from django.db.models.lookups import Contains
 
 from glowderma.accounts.models import Address, AuthSession, Customer, CustomerSocialIdentity, Device
@@ -34,6 +34,7 @@ from glowderma.commerce import selectors as commerce_selectors
 from glowderma.commerce.models import CartItem, Order
 from glowderma.core import enums, timeutils
 from glowderma.core.media import absolute_media_url
+from glowderma.core.search import SearchFold
 from glowderma.loyalty import selectors as loyalty_selectors
 from glowderma.loyalty.models import Purchase
 from glowderma.loyalty.selectors import AccountSummary, LedgerRow, PurchaseRow, TierInfo, Totals
@@ -68,12 +69,14 @@ ORDERINGS: dict[str, tuple[OrderBy, ...]] = {
 
 
 def search_q(term: str) -> Q | None:
-    """``name`` contains the term (case-insensitive, ``LOWER(name) LIKE …`` — the trigram index), or, when the
-    term carries at least three digits, the phone contains those digits. Blank → no filter."""
+    """``name`` contains the term (case-insensitive and folded — apostrophe variants and ё, ``core.search``,
+    decision GC-1: ``fold(name) LIKE '%' || fold(term) || '%'``, served by the trigram index
+    ``accounts_customer_fold_trgm``), or, when the term carries at least three digits, the phone contains
+    those digits. Blank → no filter."""
     text = term.strip()
     if not text:
         return None
-    condition = Q(Contains(Lower(F("name")), text.lower()))
+    condition = Q(Contains(SearchFold(F("name")), SearchFold(Value(text))))
     digits = re.sub(r"\D", "", text)
     if len(digits) >= PHONE_SEARCH_MIN_DIGITS:
         condition |= Q(phone__contains=digits)

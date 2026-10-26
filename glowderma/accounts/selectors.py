@@ -6,8 +6,10 @@ from typing import TypedDict
 
 from django.db.models import F, Q, QuerySet, Value
 from django.db.models.functions import Coalesce, Lower, NullIf
+from django.db.models.lookups import Contains
 
 from glowderma.accounts.models import StaffUser
+from glowderma.core.search import SearchFold
 
 
 class StaffFilters(TypedDict, total=False):
@@ -27,6 +29,9 @@ def staff_list(filters: StaffFilters) -> QuerySet[StaffUser]:
         rows = rows.filter(is_active=filters["is_active"])
     term = filters.get("search")
     if term:
-        rows = rows.filter(Q(full_name__icontains=term) | Q(email__icontains=term))
+        # the full name is folded like every name search (apostrophe variants and ё, decision GC-1)
+        rows = rows.filter(
+            Q(Contains(SearchFold(F("full_name")), SearchFold(Value(term)))) | Q(email__icontains=term)
+        )
     display = Coalesce(NullIf(F("full_name"), Value("")), F("email"))
     return rows.order_by(Lower(display), "id")

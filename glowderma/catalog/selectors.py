@@ -3,17 +3,19 @@
 ``glowderma_ci`` (the ICU case-insensitive collation from core.0007) is used **only** inside the ordering
 annotation of :func:`order_products` — never in ``LIKE``, equality, ``DISTINCT``, ``GROUP BY`` or a column's
 ``db_collation`` (a test walks this module's AST to enforce it). Search goes through the stored, deterministic
-``search_text`` column so the trigram GIN index applies.
+``search_text`` column so the trigram GIN index applies; the column and the term are folded alike
+(``core.search.SearchFold``: apostrophe variants and ё, decision GC-1).
 """
 
 from collections.abc import Iterator
 from typing import TypedDict
 
 from django.db.models import Count, F, Prefetch, Q, QuerySet, Value
-from django.db.models.functions import Coalesce, Collate, Lower, NullIf
+from django.db.models.functions import Coalesce, Collate, NullIf
 
 from glowderma.catalog.models import Banner, Category, Product, ProductImage, ProductStock
 from glowderma.core import enums, timeutils
+from glowderma.core.search import SearchFold
 from glowderma.integrations.billz.ports import BillzProduct
 
 SEARCH_TERM_MAX_LENGTH = 64
@@ -24,13 +26,18 @@ DISPLAY_NAME = Coalesce(NullIf(F("name_uz"), Value("")), F("billz_name"))
 
 
 def filter_products_search(qs: QuerySet[Product], raw: str) -> QuerySet[Product]:
-    """Contract §2.3 ``search``: case-insensitive substring over five columns; digits also match ``id``."""
+    """Contract §2.3 ``search``: case-insensitive substring over five columns; digits also match ``id``.
+
+    Both sides are folded by the same SQL expression (``core.search.SearchFold``): ``ko'pik``, ``ko‘pik``,
+    ``koʻpik`` and ``ko`pik`` find ``Yumshoq tozalovchi ko‘pik``, ``елка`` finds ``ёлка`` (decision GC-1).
+    """
     term = raw.strip()[:SEARCH_TERM_MAX_LENGTH]
     if not term:
         return qs
-    # LIKE '%' || lower('term') || '%' — both sides lower-cased by PostgreSQL (same lower() as the generated
-    # column); Django escapes % _ \ in the term.
-    cond = Q(search_text__contains=Lower(Value(term)))
+    # LIKE '%' || fold('term') || '%' — the term folded by PostgreSQL with the very expression of the
+    # generated column (a constant the planner pre-evaluates, so the trigram index applies); Django escapes
+    # % _ \ in it.
+    cond = Q(search_text__contains=SearchFold(Value(term)))
     # ASCII digits only: str.isdigit() is also True for "²" or "①", which int() rejects (user input must
     # never raise here). A numeric term also matches the id exactly, never instead of the text.
     if term.isascii() and term.isdigit() and len(term) <= MAX_ID_DIGITS:

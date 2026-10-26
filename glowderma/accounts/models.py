@@ -12,6 +12,7 @@ from django.db.models.functions import Lower
 from glowderma.accounts import media
 from glowderma.core import enums, timeutils
 from glowderma.core.models import TimeStampedModel, timestamp_default
+from glowderma.core.search import SearchFold
 
 from .managers import StaffUserManager
 
@@ -89,10 +90,11 @@ class Customer(TimeStampedModel):
             ),
         ]
         indexes = [
-            # Expression index so that LOWER("name") LIKE '%' || LOWER(term) || '%' is index-assisted.
-            # Index.opclasses cannot be combined with an expression; OpClass() is the expression form:
-            # CREATE INDEX … USING gin (LOWER("name") gin_trgm_ops)
-            GinIndex(OpClass(Lower("name"), name="gin_trgm_ops"), name="accounts_customer_name_trgm"),
+            # Expression index so that fold(name) LIKE '%' || fold(term) || '%' is index-assisted (the admin
+            # customers search, core.search / decision GC-1). Index.opclasses cannot be combined with an
+            # expression; OpClass() is the expression form:
+            # CREATE INDEX … USING gin (translate(lower("name"), …) gin_trgm_ops)
+            GinIndex(OpClass(SearchFold("name"), name="gin_trgm_ops"), name="accounts_customer_fold_trgm"),
             models.Index(fields=["status", "registered_at"], name="accounts_customer_status_reg"),
         ]
         ordering = ["-registered_at", "-id"]
