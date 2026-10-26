@@ -10,7 +10,7 @@ from typing import Any
 
 from celery import shared_task  # type: ignore[import-untyped]
 
-from glowderma.core import audit, outbox
+from glowderma.core import audit, outbox, timeutils
 from glowderma.core.models import OutboxMessage
 from glowderma.notifications import services, topics
 
@@ -23,6 +23,23 @@ def handle_push_order_status(message: OutboxMessage) -> None:
 @outbox.register(topics.PUSH_APPOINTMENT)
 def handle_push_appointment(message: OutboxMessage) -> None:
     services.deliver_appointment(message.payload)
+
+
+@outbox.register(topics.PUSH_ACCOUNT_SECURITY)
+def handle_push_account_security(message: OutboxMessage) -> None:
+    """``push.account_security`` (customer contract §2.14.2): inbox row + visible notice to the current device
+    and to every farewell token; the tokens are then blanked in the stored payload, so a redelivery sends no
+    farewell twice and no token stays behind."""
+    payload: dict[str, Any] = dict(message.payload) if isinstance(message.payload, dict) else {}
+    services.deliver_account_security(payload)
+    _blank_farewell_tokens(message, payload)
+
+
+def _blank_farewell_tokens(message: OutboxMessage, payload: dict[str, Any]) -> None:
+    if payload.get("farewell_tokens"):
+        OutboxMessage.objects.filter(pk=message.pk).update(
+            payload={**payload, "farewell_tokens": []}, updated_at=timeutils.now()
+        )
 
 
 @outbox.register(topics.CAMPAIGN_SEND_BATCH)
@@ -48,8 +65,17 @@ def on_push_dead(message: OutboxMessage) -> None:
     )
 
 
+def on_account_security_dead(message: OutboxMessage) -> None:
+    """A dead ``push.account_security``: audited like every push, and its row keeps no FCM token either."""
+    on_push_dead(message)
+    payload: dict[str, Any] = dict(message.payload) if isinstance(message.payload, dict) else {}
+    _blank_farewell_tokens(message, payload)
+
+
 for _topic in topics.HANDLED_TOPICS:
-    outbox.on_dead(_topic)(on_push_dead)
+    outbox.on_dead(_topic)(
+        on_account_security_dead if _topic == topics.PUSH_ACCOUNT_SECURITY else on_push_dead
+    )
 
 
 @shared_task(name="notifications.start_due_campaigns")  # type: ignore[untyped-decorator]

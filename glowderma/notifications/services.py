@@ -15,16 +15,26 @@ from typing import Any
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.db import transaction
+from django.db.models import F, Value
+from django.db.models.functions import Coalesce
 from rest_framework.exceptions import NotFound, ValidationError
 
+from glowderma.accounts import services as account_services
+from glowderma.accounts import topics as account_topics
 from glowderma.accounts.models import Customer, Device
 from glowderma.appointments import selectors as appointment_selectors
 from glowderma.catalog.models import Product
-from glowderma.core import audit, enums, labels, outbox, timeutils
+from glowderma.core import audit, enums, i18n, outbox, timeutils
 from glowderma.core.api.exceptions import Conflict, field_error
 from glowderma.core.images import ImageError, process_image
 from glowderma.core.media import absolute_media_url, media_name
-from glowderma.integrations.fcm.ports import FcmUnavailable, PushMessage, PushResult
+from glowderma.integrations.fcm.ports import (
+    PAYLOAD_INVALID,
+    UNREGISTERED,
+    FcmUnavailable,
+    PushMessage,
+    PushResult,
+)
 from glowderma.integrations.fcm.registry import get_fcm_port
 from glowderma.notifications import selectors, texts, topics
 from glowderma.notifications.media import CAMPAIGN_IMAGE_KIND
@@ -47,6 +57,50 @@ MESSAGES = {
 IMAGE_MESSAGES = {"file_too_large": None, "unsupported_image": None}
 INTERRUPTED = "interrupted"  # a claim left in ``sending`` by a crash: never resent (design 03 §3.6)
 NO_DEVICE = "no_device"
+
+# Customer contract §2.14.2: Android channel and priority per ``data.type`` (APNs: alert, priority 10 for
+# "high", 5 for "normal").
+PUSH_PROFILES: dict[str, tuple[str, str]] = {
+    enums.PushDataType.ORDER_STATUS: ("orders", "high"),
+    enums.PushDataType.APPOINTMENT: ("appointments", "high"),
+    enums.PushDataType.ACCOUNT_SECURITY: ("general", "high"),
+}
+CAMPAIGN_PRIORITY = "normal"
+PROVIDER_BRANDS = {"google": "Google", "facebook": "Facebook", "apple": "Apple"}
+
+
+def push_message(
+    token: str,
+    title: str,
+    body: str,
+    data: dict[str, str],
+    *,
+    channel: str,
+    priority: str,
+    image_url: str = "",
+) -> PushMessage:
+    """A visible push with the channel/priority of its ``data.type`` (all ``data`` values are strings)."""
+    return PushMessage(
+        token,
+        title,
+        body,
+        {key: str(value) for key, value in data.items()},
+        android_channel=channel,
+        android_priority=priority,
+        apns_push_type="alert",
+        apns_priority=10 if priority == "high" else 5,
+        image_url=image_url,
+    )
+
+
+def _typed_message(token: str, title: str, body: str, data: dict[str, str]) -> PushMessage:
+    channel, priority = PUSH_PROFILES[data["type"]]
+    return push_message(token, title, body, data, channel=channel, priority=priority)
+
+
+def _log_payload_invalid(topic: str, inbox_id: int | None) -> None:
+    """A malformed message (C§2.14.2): alert and fail the message; the device is never touched."""
+    logger.error("push.payload_invalid topic=%s field=message inbox_id=%s", topic, inbox_id)
 
 
 def batch_size() -> int:
@@ -273,8 +327,32 @@ def _claim_batch(campaign: Campaign, recipients: Sequence[CampaignRecipient]) ->
 
 
 def _push_messages(campaign: Campaign, claims: Iterable[_Claim]) -> list[PushMessage]:
-    data = {"type": "campaign", "campaign_id": str(campaign.pk)}
-    return [PushMessage(claim.token, campaign.title, campaign.body, data) for claim in claims]
+    """Campaign pushes (C§2.14.2): ``data`` ``{type, inbox_id, campaign_id, product_id | ""}``, channel
+    ``promo`` / ``general``, normal priority, the campaign image as ``notification.image``."""
+    product_id = (
+        str(campaign.link_product_id)
+        if campaign.link_kind == enums.LinkKind.PRODUCT and campaign.link_product_id is not None
+        else ""
+    )
+    image_url = absolute_media_url(campaign.image.name or "") if campaign.image else ""
+    channel = "promo" if campaign.kind == enums.NotificationKind.PROMO else "general"
+    return [
+        push_message(
+            claim.token,
+            campaign.title,
+            campaign.body,
+            {
+                "type": enums.PushDataType.CAMPAIGN,
+                "inbox_id": str(claim.inbox.pk),
+                "campaign_id": str(campaign.pk),
+                "product_id": product_id,
+            },
+            channel=channel,
+            priority=CAMPAIGN_PRIORITY,
+            image_url=image_url,
+        )
+        for claim in claims
+    ]
 
 
 def _release(claims: Iterable[_Claim]) -> None:
@@ -300,8 +378,18 @@ def _settle(claim: _Claim, result: PushResult, now: Any) -> None:
         recipient.provider_state = {"error": result.error}
         inbox.push_state = InboxNotification.PushState.FAILED
         inbox.push_error = result.error
+        _after_failure(result, claim.token, recipient.device_id, topics.CAMPAIGN_SEND_BATCH, inbox.pk)
     recipient.save(update_fields=["state", "sent_at", "error", "provider_message_id", "provider_state"])
     inbox.save(update_fields=["push_state", "pushed_at", "push_error"])
+
+
+def _after_failure(result: PushResult, token: str, device_id: int | None, topic: str, inbox_id: int) -> None:
+    """Token pruning only when FCM says the token is dead (``unregistered``); a malformed message
+    (``payload_invalid``) is alerted and never touches a device (C§2.14.2)."""
+    if result.error == UNREGISTERED and device_id is not None:
+        account_services.invalidate_fcm_token(device_id, token=token)
+    elif result.error == PAYLOAD_INVALID:
+        _log_payload_invalid(topic, inbox_id)
 
 
 def _refresh_tally(campaign: Campaign) -> None:
@@ -391,9 +479,16 @@ def _deliver(
     language: str,
     template_status: str = "",
     data: dict[str, str],
+    topic: str,
 ) -> InboxNotification:
     """Claim protocol (design 03 §3.6): ``get_or_create`` the inbox row, claim it, call FCM outside the
-    transaction, record the outcome. A redelivery finds the row settled and does nothing."""
+    transaction, record the outcome. A redelivery finds the row settled and does nothing.
+
+    ``data`` gets the row's ``inbox_id`` (C§2.14.2) and the message the channel/priority of its type. A dead
+    token (``unregistered``) prunes the device; ``payload_invalid`` fails the row with ``push_error =
+    "payload_invalid"`` and an ERROR log and returns normally (the outbox message ends ``done``), never
+    touching the device.
+    """
     with transaction.atomic():
         device = selectors.customer_push_device(customer.pk)
         inbox, _created = InboxNotification.objects.get_or_create(
@@ -421,9 +516,10 @@ def _deliver(
             return inbox
         inbox.push_state = InboxNotification.PushState.SENDING
         inbox.save(update_fields=["push_state"])
-        token = device.fcm_token
+        token, device_id = device.fcm_token, device.pk
+    message = _typed_message(token, inbox.title, inbox.body, {**data, "inbox_id": str(inbox.pk)})
     try:
-        [result] = get_fcm_port().send([PushMessage(token, inbox.title, inbox.body, data)])
+        [result] = get_fcm_port().send([message])
     except FcmUnavailable:
         InboxNotification.objects.filter(pk=inbox.pk, push_state=InboxNotification.PushState.SENDING).update(
             push_state=InboxNotification.PushState.QUEUED
@@ -434,6 +530,7 @@ def _deliver(
         inbox.push_state, inbox.pushed_at = InboxNotification.PushState.SENT, now
     else:
         inbox.push_state, inbox.push_error = InboxNotification.PushState.FAILED, result.error
+        _after_failure(result, token, device_id, topic, inbox.pk)
     inbox.save(update_fields=["push_state", "pushed_at", "push_error"])
     return inbox
 
@@ -445,8 +542,21 @@ def render_template(template: StatusTemplate, language: str, order_id: int) -> t
     return (text or template.text_uz).replace("{raqam}", str(order_id)), used
 
 
+def order_status_title(status: str, fulfilment: str, language: str) -> str:
+    """The customer label of C§4.3 in the customer's language; a delivered pickup order reads "Olib
+    ketildi"."""
+    if status == enums.OrderStatus.DELIVERED and fulfilment == enums.FulfilmentMethod.PICKUP:
+        return i18n.t("label.order_status_pickup.delivered", language)
+    return i18n.t(f"label.order_status.{status}", language)
+
+
 def deliver_order_status(payload: dict[str, Any]) -> InboxNotification | None:
-    """``push.order_status {order_id, status, event_id, customer_id}``; one push per order per status."""
+    """``push.order_status {order_id, status, event_id, customer_id}``; one push per order per status.
+
+    Title = the customer label (C§4.3) in the customer's language, body = the admin template text. An order
+    created before the customer's history horizon (``Customer.history_from``) belongs to a previous holder
+    of the number: no inbox row, no push.
+    """
     status = str(payload["status"])
     if status not in enums.TemplateStatus.values:
         raise ValueError(f"No push template for order status {status!r}")
@@ -455,20 +565,29 @@ def deliver_order_status(payload: dict[str, Any]) -> InboxNotification | None:
         logger.warning("push.order_status for unknown customer %s", payload["customer_id"])
         return None
     order_id = int(payload["order_id"])
+    facts = selectors.order_push_facts(order_id)
+    if facts is None:
+        logger.warning("push.order_status for unknown order %s", order_id)
+        return None
+    fulfilment, created_at = facts
+    if customer.history_from is not None and created_at < customer.history_from:
+        logger.info("push.order_status skipped: order %s precedes the history horizon", order_id)
+        return None
     template = StatusTemplate.objects.get(status=status)
     body, language = render_template(template, customer.language, order_id)
     return _deliver(
         customer,
         dedupe_key=topics.order_status_inbox_key(order_id, status),
         kind=InboxNotification.Kind.ORDER_STATUS,
-        title=labels.ORDER_STATUS[status],
+        title=order_status_title(status, fulfilment, i18n.normalize_language(customer.language)),
         body=body,
         link={"kind": "order", "order_id": order_id},
         source_type=InboxNotification.SourceType.ORDER,
         source_id=order_id,
         language=language,
         template_status=status,
-        data={"type": "order_status", "order_id": str(order_id), "status": status},
+        data={"type": enums.PushDataType.ORDER_STATUS, "order_id": str(order_id), "status": status},
+        topic=topics.PUSH_ORDER_STATUS,
     )
 
 
@@ -496,8 +615,171 @@ def deliver_appointment(payload: dict[str, Any]) -> InboxNotification | None:
         source_type=InboxNotification.SourceType.APPOINTMENT,
         source_id=appointment.pk,
         language=language,
-        data={"type": "appointment", "appointment_id": str(appointment.pk), "action": action},
+        data={
+            "type": enums.PushDataType.APPOINTMENT,
+            "appointment_id": str(appointment.pk),
+            "action": action,
+        },
+        topic=topics.PUSH_APPOINTMENT,
     )
+
+
+def deliver_account_security(payload: dict[str, Any]) -> InboxNotification | None:
+    """Handler body of ``push.account_security`` (C§2.14.2, §2.12): one ``general`` inbox row per
+    ``event_id`` (``source_type=account``, ``source_id`` = the customer, ``link {"kind": "none"}``, dedupe
+    ``account:{customer_id}:{event}:{event_id}``), the visible notice to the current device, then the same
+    notice (same ``inbox_id``) to each ``farewell_token`` — the devices a reset or a social completion
+    deactivated. The handler blanks those tokens in the stored payload afterwards. No PII: the texts carry
+    the provider name only.
+    """
+    missing = set(account_topics.ACCOUNT_SECURITY_PAYLOAD_KEYS) - set(payload)
+    if missing:
+        raise ValueError(f"push.account_security payload misses {sorted(missing)}")
+    event = str(payload["event"])
+    if event not in enums.AccountSecurityEvent.values:
+        raise ValueError(f"Unknown account security event {event!r}")
+    customer_id = int(payload["customer_id"])
+    customer = Customer.objects.filter(pk=customer_id).first()
+    if customer is None:
+        logger.warning("push.account_security for unknown customer %s", customer_id)
+        return None
+    provider = str(payload["provider"] or "")
+    language = i18n.normalize_language(customer.language)
+    brand = PROVIDER_BRANDS.get(provider, provider)
+    title = i18n.t(f"push.account_security.{event}.title", language)
+    body = i18n.t(f"push.account_security.{event}.body", language, provider=brand)
+    data = {"type": enums.PushDataType.ACCOUNT_SECURITY, "event": event, "provider": provider}
+    inbox = _deliver(
+        customer,
+        dedupe_key=account_topics.account_security_inbox_key(customer_id, event, str(payload["event_id"])),
+        kind=InboxNotification.Kind.GENERAL,
+        title=title,
+        body=body,
+        link={"kind": enums.InboxLinkKind.NONE},
+        source_type=InboxNotification.SourceType.ACCOUNT,
+        source_id=customer_id,
+        language=language,
+        data=data,
+        topic=account_topics.PUSH_ACCOUNT_SECURITY,
+    )
+    current = selectors.customer_push_device(customer_id)
+    farewell = [
+        str(token)
+        for token in payload.get("farewell_tokens") or []
+        if token and (current is None or str(token) != current.fcm_token)
+    ]
+    if farewell:
+        messages = [
+            _typed_message(token, title, body, {**data, "inbox_id": str(inbox.pk)}) for token in farewell
+        ]
+        for result in get_fcm_port().send(messages):
+            if not result.ok and result.error == PAYLOAD_INVALID:
+                _log_payload_invalid(account_topics.PUSH_ACCOUNT_SECURITY, inbox.pk)
+            elif not result.ok:
+                logger.info("push.account_security farewell not delivered error=%s", result.error)
+    return inbox
+
+
+# --- customer inbox (customer contract §2.12) ---------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class AckResult:
+    acknowledged: int  # the customer's rows among the ids (all delivered now): stable under retries
+    newly: int  # rows this call moved from undelivered to delivered
+
+
+def _acknowledge(inbox_ids: Sequence[int], instant: Any) -> int:
+    """Mark undelivered rows delivered; for each linked ``CampaignRecipient`` still undelivered set its
+    ``delivered_at`` and add the number of recipient rows that **actually changed** to
+    ``Campaign.delivered`` (``COALESCE(delivered, 0) + n``), so a retried acknowledgement never counts twice.
+
+    Lock order campaign → recipient → inbox, the order of ``send_batch``'s settle step, so an ack that
+    arrives while its batch is being settled waits instead of deadlocking.
+    """
+    if not inbox_ids:
+        return 0
+    campaign_ids = sorted(
+        set(
+            CampaignRecipient.objects.filter(inbox_id__in=inbox_ids, delivered_at__isnull=True).values_list(
+                "campaign_id", flat=True
+            )
+        )
+    )
+    if campaign_ids:
+        list(
+            Campaign.objects.select_for_update().filter(pk__in=campaign_ids).order_by("pk").values_list("pk")
+        )
+    for campaign_id in campaign_ids:
+        changed = CampaignRecipient.objects.filter(
+            campaign_id=campaign_id, inbox_id__in=inbox_ids, delivered_at__isnull=True
+        ).update(delivered_at=instant)
+        if changed:
+            Campaign.objects.filter(pk=campaign_id).update(
+                delivered=Coalesce(F("delivered"), Value(0)) + changed, updated_at=instant
+            )
+    return InboxNotification.objects.filter(pk__in=inbox_ids, delivered_at__isnull=True).update(
+        delivered_at=instant, updated_at=instant
+    )
+
+
+@transaction.atomic
+def acknowledge(
+    customer_id: int, inbox_ids: Iterable[int], *, horizon: Any = None, at: Any = None
+) -> AckResult:
+    """``POST me/notifications/ack/``: delivery acknowledgement from the app's push handler. Ids of other
+    customers, unknown ids and rows before the history horizon are ignored silently (no enumeration)."""
+    instant = timeutils.now() if at is None else at
+    wanted = sorted({int(pk) for pk in inbox_ids})
+    owned = list(
+        selectors.inbox_queryset(customer_id, horizon).filter(pk__in=wanted).values_list("pk", flat=True)
+    )
+    return AckResult(acknowledged=len(owned), newly=_acknowledge(owned, instant))
+
+
+@dataclass(frozen=True, slots=True)
+class ReadResult:
+    id: int
+    read_at: Any
+    unread_count: int
+
+
+@transaction.atomic
+def mark_read(customer_id: int, inbox_id: int, *, horizon: Any = None, at: Any = None) -> ReadResult:
+    """``POST me/notifications/{id}/read/`` (idempotent; 404 for another customer's row). Reading implies
+    delivery: the row goes through the same acknowledgement as ``ack/`` before ``read_at`` is set."""
+    instant = timeutils.now() if at is None else at
+    if not selectors.inbox_queryset(customer_id, horizon).filter(pk=inbox_id).exists():
+        raise NotFound
+    _acknowledge([inbox_id], instant)
+    InboxNotification.objects.filter(pk=inbox_id, read_at__isnull=True).update(
+        read_at=instant, updated_at=instant
+    )
+    read_at = InboxNotification.objects.filter(pk=inbox_id).values_list("read_at", flat=True).get()
+    return ReadResult(id=inbox_id, read_at=read_at, unread_count=selectors.unread_count(customer_id, horizon))
+
+
+@dataclass(frozen=True, slots=True)
+class ReadAllResult:
+    updated: int
+    unread_count: int
+
+
+@transaction.atomic
+def mark_all_read(customer_id: int, *, horizon: Any = None, at: Any = None) -> ReadAllResult:
+    """``POST me/notifications/read-all/``: every unread row (inside the horizon) is acknowledged, then read —
+    one set-based conditional update per table."""
+    instant = timeutils.now() if at is None else at
+    unread = list(
+        selectors.inbox_queryset(customer_id, horizon)
+        .filter(read_at__isnull=True)
+        .values_list("pk", flat=True)
+    )
+    _acknowledge(unread, instant)
+    updated = InboxNotification.objects.filter(pk__in=unread, read_at__isnull=True).update(
+        read_at=instant, updated_at=instant
+    )
+    return ReadAllResult(updated=updated, unread_count=selectors.unread_count(customer_id, horizon))
 
 
 # --- templates ----------------------------------------------------------------------------------------------

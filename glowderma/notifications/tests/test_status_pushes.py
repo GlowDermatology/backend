@@ -5,9 +5,12 @@ from typing import Any
 
 import pytest
 
+from glowderma.accounts.models import Customer
 from glowderma.accounts.tests.factories import CustomerFactory, DeviceFactory
 from glowderma.appointments import services as appointment_services
 from glowderma.appointments.tests.factories import AppointmentFactory
+from glowderma.commerce.models import Order
+from glowderma.commerce.tests.factories import OrderFactory
 from glowderma.core import outbox
 from glowderma.core.models import OutboxMessage
 from glowderma.core.tasks import dispatch_outbox
@@ -22,6 +25,9 @@ pytestmark = pytest.mark.django_db
 
 
 def order_payload(customer_id: int, status: str = "processing", order_id: int = 10248) -> dict[str, Any]:
+    # P3: the push reads the order's fulfilment (pickup title) and creation time (history horizon)
+    if not Order.objects.filter(pk=order_id).exists() and Customer.objects.filter(pk=customer_id).exists():
+        OrderFactory.create(id=order_id, customer_id=customer_id, created_at=ANCHOR)
     return {"order_id": order_id, "status": status, "event_id": 3, "customer_id": customer_id}
 
 
@@ -30,7 +36,8 @@ def test_order_status_push_renders_the_template_in_the_customer_language(clock: 
     device = DeviceFactory.create(customer=customer)
     inbox = services.deliver_order_status(order_payload(customer.pk))
     assert inbox is not None
-    assert inbox.title == "Jarayonda" and inbox.body == "Оплата принята. Заказ №10248 готовится."
+    # P3 (C§4.3): the title is the customer label in the customer's language
+    assert inbox.title == "Готовится" and inbox.body == "Оплата принята. Заказ №10248 готовится."
     assert (inbox.kind, inbox.source_type, inbox.source_id, inbox.template_status) == (
         "order_status",
         "order",
@@ -43,15 +50,20 @@ def test_order_status_push_renders_the_template_in_the_customer_language(clock: 
         and inbox.dedupe_key == "order_status:10248:processing"
     )
     [message] = fcm.sent
-    assert message.token == device.fcm_token and message.title == "Jarayonda"
-    assert message.data == {"type": "order_status", "order_id": "10248", "status": "processing"}
+    assert message.token == device.fcm_token and message.title == "Готовится"
+    assert message.data == {
+        "type": "order_status",
+        "inbox_id": str(inbox.pk),
+        "order_id": "10248",
+        "status": "processing",
+    }
     # a missing translation falls back to Uzbek (delivered has no English text)
     english = CustomerFactory.create(language="en")
     DeviceFactory.create(customer=english)
-    delivered = services.deliver_order_status(order_payload(english.pk, "delivered"))
+    delivered = services.deliver_order_status(order_payload(english.pk, "delivered", order_id=10250))
     assert delivered is not None and delivered.language == "uz"
-    assert delivered.body == "Buyurtma №10248 yetkazildi. Xaridingiz uchun rahmat."
-    assert delivered.title == "Yetkazildi"
+    assert delivered.body == "Buyurtma №10250 yetkazildi. Xaridingiz uchun rahmat."
+    assert delivered.title == "Delivered"
 
 
 def test_order_status_push_is_idempotent_on_redelivery(clock: Any, fcm: FakeFcm) -> None:
@@ -141,6 +153,7 @@ def test_appointment_push_through_the_outbox(clock: Any, fcm: FakeFcm, staff: An
     assert message.token == device.fcm_token
     assert message.data == {
         "type": "appointment",
+        "inbox_id": str(inbox.pk),
         "appointment_id": str(appointment.pk),
         "action": "confirmed",
     }
