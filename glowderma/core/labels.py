@@ -119,14 +119,32 @@ AUDIT_LOG_EXPORT_HEADERS: tuple[str, ...] = (
     "So‘rov ID",
 )
 # Contract §5.1 "Refund state (new UI line)": also the ``Qaytarish`` column of the payments export (M1c).
+# ``manual_required`` has no single line: :func:`refund_state_label` picks it by reason and provider.
 REFUND_STATE: dict[str, str] = {
     enums.RefundState.REQUESTED: "Qaytarish so‘raldi",
     enums.RefundState.SUBMITTING: "Qaytarilmoqda",
     enums.RefundState.SUCCEEDED: "Qaytarildi",
     enums.RefundState.FAILED: "Qaytarib bo‘lmadi",
-    enums.RefundState.MANUAL_REQUIRED: "Payme kabinetida qaytarish kerak",
     enums.RefundState.UNKNOWN: "Holat noma’lum · tekshiring",
 }
+# Contract §5.1: a manual refund of Payme is a cabinet refund; a manual Click refund (no Click payment id, or
+# Click fake in production) is paid to the customer by hand and then marked "Qaytarildi".
+REFUND_MANUAL_PAYME = "Payme kabinetida qaytarish kerak"
+REFUND_MANUAL_CLICK = "Mijozga qo‘lda to‘lang, so‘ng «Qaytarildi» deb belgilang"
+
+
+def refund_state_label(state: str, provider: str, manual_reason: str | None = None) -> str:
+    """The §5.1 refund-state line of ``state``; ``manual_required`` by its reason and provider — the Payme
+    cabinet line only for a Payme refund (reason ``payme``), the Click line otherwise. Never assumes Payme."""
+    if state != enums.RefundState.MANUAL_REQUIRED:
+        return REFUND_STATE[state]
+    if manual_reason == enums.RefundManualReason.PAYME or (
+        not manual_reason and provider == enums.PaymentProvider.PAYME
+    ):
+        return REFUND_MANUAL_PAYME
+    return REFUND_MANUAL_CLICK
+
+
 # Contract 1.8 export columns (Uzbek headers) of the orders and payments lists (M1c).
 ORDER_EXPORT_HEADERS: tuple[str, ...] = (
     "№",

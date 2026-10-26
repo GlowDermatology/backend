@@ -179,6 +179,8 @@ class Refund(TimeStampedModel):
     provider_state = models.JSONField(
         default=dict, blank=True
     )  # click: {payment_status, error, error_note, checked_at}; payme: {cancel_time, reason, state: -2}
+    # why the refund is (or was) manual_required: payme | no_paydoc | fake_mode; "" = never manual (M3)
+    manual_reason = models.CharField(max_length=16, choices=enums.RefundManualReason.choices, blank=True)
 
     class Meta:
         ordering = ["-requested_at", "-id"]

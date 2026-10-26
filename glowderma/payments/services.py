@@ -87,6 +87,7 @@ class RefundResult:
     error_code: str
     changed: bool  # False = idempotent no-op (already in the target state / an open refund returned)
     payment_refunded: bool = False  # this call turned the payment ``refunded``
+    manual_reason: str = ""  # RefundManualReason when the refund is (or was) manual_required, else ""
 
 
 def _aware(value: datetime | None, name: str) -> None:
@@ -133,6 +134,7 @@ def _refund_result(
         error_code=refund.error_code,
         changed=changed,
         payment_refunded=payment_refunded,
+        manual_reason=refund.manual_reason,
     )
 
 
@@ -335,9 +337,13 @@ def _new_refund(
     requested_by: StaffUser | None,
     at: datetime,
     request: Any,
-    manual: bool = False,
+    manual_reason: str = "",
 ) -> Refund:
-    manual = manual or payment.provider == enums.PaymentProvider.PAYME
+    if payment.provider == enums.PaymentProvider.PAYME:
+        manual_reason = enums.RefundManualReason.PAYME
+    elif manual_reason and manual_reason not in enums.RefundManualReason.values:
+        raise ValueError(f"Unknown refund manual reason {manual_reason!r}")
+    manual = bool(manual_reason)
     refund = Refund.objects.create(
         payment=payment,
         amount=amount,
@@ -345,6 +351,7 @@ def _new_refund(
         requested_by=requested_by,
         requested_at=at,
         state=enums.RefundState.MANUAL_REQUIRED if manual else enums.RefundState.REQUESTED,
+        manual_reason=manual_reason,
     )
     if not manual:
         outbox.enqueue(
@@ -372,6 +379,7 @@ def _new_refund(
             "amount": amount,
             "state": refund.state,
             "origin": origin,
+            "manual_reason": manual_reason or None,
         },
     )
     return refund
@@ -385,12 +393,15 @@ def create_refund(
     *,
     at: datetime | None = None,
     request: Any = None,
-    manual: bool = False,
+    manual_reason: str = "",
 ) -> RefundResult:
-    """Return a paid payment: Click ``requested`` (+ outbox ``refund.submit``), Payme ``manual_required``.
+    """Return a paid payment: Click ``requested`` (+ outbox ``refund.submit``), Payme ``manual_required``
+    (``manual_reason`` ``payme``).
 
-    ``manual=True`` creates a Click refund ``manual_required`` too, without the outbox message (customer
-    contract §2.13.0: no ``click_paydoc_id``, or the Click port is fake under the production settings).
+    A ``manual_reason`` (:class:`~glowderma.core.enums.RefundManualReason`) creates a Click refund
+    ``manual_required`` too, without the outbox message (customer contract §2.13.0: ``no_paydoc`` — no
+    ``click_paydoc_id``; ``fake_mode`` — the Click port is fake under the production settings); the reason is
+    stored on the refund (admin contract §2.2 ``Refund.manual_reason``).
     M1 refunds are full (``amount == payment.amount``, O2). A payment with an open refund returns that one
     (``changed=False``), so a replayed cancel never asks twice. ``payment.status`` stays ``paid`` (O5).
     """
@@ -414,7 +425,7 @@ def create_refund(
             requested_by=staff,
             at=at or timeutils.now(),
             request=request,
-            manual=manual,
+            manual_reason=manual_reason,
         )
         return _refund_result(refund, payment, changed=True)
 
@@ -425,9 +436,10 @@ def retry_refund(
     *,
     at: datetime | None = None,
     request: Any = None,
-    manual: bool = False,
+    manual_reason: str = "",
 ) -> RefundResult:
-    """A ``failed`` refund is terminal: a retry is a **new** refund (``origin = manual``) of the payment."""
+    """A ``failed`` refund is terminal: a retry is a **new** refund (``origin = manual``) of the payment
+    (``manual_reason`` as in :func:`create_refund`)."""
     _aware(at, "at")
     staff = _staff(requested_by)
     with transaction.atomic():
@@ -447,7 +459,7 @@ def retry_refund(
             requested_by=staff,
             at=at or timeutils.now(),
             request=request,
-            manual=manual,
+            manual_reason=manual_reason,
         )
         return _refund_result(new, payment, changed=True)
 
@@ -632,21 +644,24 @@ def mark_failed(
         return _refund_result(refund, payment, changed=True)
 
 
-def mark_manual_required(refund_id: int, at: datetime | None = None) -> RefundResult:
+def mark_manual_required(refund_id: int, at: datetime | None = None, *, reason: str) -> RefundResult:
     """``requested → manual_required``: a Click refund that must never reach the provider (customer contract
-    §2.13.0: its payment has no ``click_paydoc_id``, or the Click port is fake under the production settings)
-    — the ``refund.submit`` handler's re-check before any port call. Any other state is left alone
-    (``changed=False``)."""
+    §2.13.0: its payment has no ``click_paydoc_id`` — ``reason`` ``no_paydoc`` —, or the Click port is fake
+    under the production settings — ``fake_mode``) — the ``refund.submit`` handler's re-check before any port
+    call; the reason is stored on the refund. Any other state is left alone (``changed=False``)."""
     _aware(at, "at")
+    if reason not in enums.RefundManualReason.values:
+        raise ValueError(f"Unknown refund manual reason {reason!r}")
     with transaction.atomic():
         payment, refund = _locked_refund(refund_id)
         if refund.state != enums.RefundState.REQUESTED:
             return _refund_result(refund, payment, changed=False)
         before = refund.state
         refund.state = enums.RefundState.MANUAL_REQUIRED
+        refund.manual_reason = reason
         refund.last_attempt_at = at or timeutils.now()
         refund.save()
-        _audit_state(refund, before)
+        _audit_state(refund, before, extra={"manual_reason": reason})
         return _refund_result(refund, payment, changed=True)
 
 

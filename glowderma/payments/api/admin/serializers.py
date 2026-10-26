@@ -18,7 +18,8 @@ SEARCH_MAX_LENGTH = 64
 
 
 class RefundSerializer(serializers.Serializer[RefundRow]):
-    """Contract ``Refund`` (§2.2): ``completed_at`` is set on ``succeeded`` only."""
+    """Contract ``Refund`` (§2.2): ``completed_at`` is set on ``succeeded`` only; ``manual_reason`` (M3) says
+    why a refund is manual (§5.1 picks the refund-state line by it)."""
 
     id = serializers.IntegerField()
     state = serializers.ChoiceField(choices=enums.RefundState.values)
@@ -27,6 +28,13 @@ class RefundSerializer(serializers.Serializer[RefundRow]):
     requested_at = serializers.DateTimeField()
     updated_at = serializers.DateTimeField()
     completed_at = serializers.DateTimeField(allow_null=True)
+    manual_reason = serializers.ChoiceField(
+        choices=enums.RefundManualReason.values,
+        allow_null=True,
+        help_text="Why the refund is (or was) `manual_required`: `payme` (a Payme cabinet refund), "
+        "`no_paydoc` (a Click payment without Click's payment id), `fake_mode` (Click fake under the "
+        "production settings); `null` for a refund that was never manual.",
+    )
 
 
 class PaymentSerializer(serializers.Serializer[Any]):

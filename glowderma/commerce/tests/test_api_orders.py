@@ -182,6 +182,7 @@ def test_detail_404_and_shape_of_a_cancelled_refunded_order(staff_client: APICli
             "requested_at": "2026-10-20T13:00:00+05:00",
             "updated_at": "2026-10-20T13:00:00+05:00",
             "completed_at": None,
+            "manual_reason": None,
         }
     ]
     assert (

@@ -56,7 +56,9 @@ class PaymentViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
                 payment.provider_txn_id,
                 format_export_datetime(payment.created_at),
                 format_export_datetime(payment.confirmed_at),
-                labels.REFUND_STATE[newest[0].state] if newest else "",
+                labels.refund_state_label(newest[0].state, newest[0].provider, newest[0].manual_reason)
+                if newest
+                else "",
             )
 
     @extend_schema(

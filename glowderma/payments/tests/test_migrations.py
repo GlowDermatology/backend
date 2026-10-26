@@ -44,6 +44,7 @@ def test_no_further_payments_migrations() -> None:
         "0001_initial.py",
         "0002_payment_active_excludes_late_capture.py",
         "0003_payment_late_capture_open_idx.py",
+        "0004_refund_manual_reason.py",
     ]
 
 
@@ -75,7 +76,8 @@ def test_migrate_zero_and_forward_again() -> None:
         "0001_initial",
         "0002_payment_active_excludes_late_capture",
         "0003_payment_late_capture_open_idx",
+        "0004_refund_manual_reason",
     }
     refund = RefundFactory.create(payment=PaymentFactory.create())
     assert refund.pk is not None
-    call_command("migrate", verbosity=0)  # re-apply any app that depends on payments (none today)
+    call_command("migrate", verbosity=0)  # re-apply what depends on payments (commerce.0008, the backfill)

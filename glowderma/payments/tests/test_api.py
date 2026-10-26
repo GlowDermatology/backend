@@ -53,6 +53,7 @@ def test_shape_and_refunds(staff_client: APIClient) -> None:
                 "requested_at": "2026-10-24T14:02:30+05:00",
                 "updated_at": row["refunds"][0]["updated_at"],
                 "completed_at": None,
+                "manual_reason": None,
             }
         ],
     }
@@ -60,10 +61,28 @@ def test_shape_and_refunds(staff_client: APIClient) -> None:
 
 
 def test_filters_search_and_ordering(staff_client: APIClient) -> None:
+    # Every field the search reads (order id, transaction id, customer phone) is pinned: factory sequences
+    # grow over the whole run, so a sequenced phone or ``CLK-…`` id could otherwise contain a searched term
+    # (an order id, "4567") depending on which tests ran before.
     malika = CustomerFactory.create(name="Malika", phone="+998901234567")
-    click = PaymentFactory.create(order=OrderRowFactory.create(customer=malika, paid=True), created_at=DAY)
-    payme = PaymentFactory.create(provider="payme", created_at=DAY - timedelta(days=10))
-    pending = PaymentFactory.create(pending=True, created_at=DAY + timedelta(hours=1))
+    click = PaymentFactory.create(
+        order=OrderRowFactory.create(id=777001, customer=malika, paid=True),
+        created_at=DAY,
+        provider_txn_id="CLK-1000001",
+    )
+    payme = PaymentFactory.create(
+        order=OrderRowFactory.create(
+            id=777002, customer=CustomerFactory.create(phone="+998935550101"), paid=True, payme=True
+        ),
+        provider="payme",
+        created_at=DAY - timedelta(days=10),
+        provider_txn_id="68fa0c3e0000000000b7c9d2",
+    )
+    pending = PaymentFactory.create(
+        order=OrderRowFactory.create(id=777003, customer=CustomerFactory.create(phone="+998935550202")),
+        pending=True,
+        created_at=DAY + timedelta(hours=1),
+    )
     RefundFactory.create(payment=payme, manual_required=True)
     assert _ids(staff_client.get(URL, {"status": "pending"})) == [pending.pk]
     assert _ids(staff_client.get(URL, {"provider": "payme"})) == [payme.pk]

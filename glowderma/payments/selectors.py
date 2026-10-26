@@ -87,6 +87,10 @@ class RefundRow:
     # The provider's payment reference for refund/status calls: Click's ``click_paydoc_id`` (customer contract
     # §2.13.0, never ``click_trans_id``); ``""`` when the payment has none (seeded/legacy rows).
     provider_payment_ref: str = ""
+    # Why the refund is (or was) ``manual_required`` (admin contract §2.2 ``Refund.manual_reason``): the
+    # stored ``Refund.manual_reason``; for a ``manual_required`` row stored without one (a factory row, a
+    # row the M3 backfill could not place) the reason its payment implies; ``None`` otherwise.
+    manual_reason: str | None = None
 
 
 def click_paydoc_id(provider_state: Any) -> str:
@@ -130,7 +134,24 @@ def refund_row(refund: Refund, payment: Payment | None = None) -> RefundRow:
         provider_payment_ref=click_paydoc_id(owner.provider_state)
         if owner.provider == enums.PaymentProvider.CLICK
         else "",
+        manual_reason=refund_manual_reason_of(refund, owner),
     )
+
+
+def refund_manual_reason_of(refund: Refund, payment: Payment) -> str | None:
+    """``Refund.manual_reason`` for the API (:attr:`RefundRow.manual_reason`). The fallback of a
+    ``manual_required`` row without a stored reason never assumes Payme for a Click refund: Payme →
+    ``payme``; Click → ``no_paydoc`` without a ``click_paydoc_id``, else ``fake_mode`` (the only other reason
+    a Click refund is manual)."""
+    if refund.manual_reason:
+        return str(refund.manual_reason)
+    if refund.state != enums.RefundState.MANUAL_REQUIRED:
+        return None
+    if payment.provider == enums.PaymentProvider.PAYME:
+        return enums.RefundManualReason.PAYME.value
+    if not click_paydoc_id(payment.provider_state):
+        return enums.RefundManualReason.NO_PAYDOC.value
+    return enums.RefundManualReason.FAKE_MODE.value
 
 
 # --- display payment (customer contract §2.8): one ranking, newest id first within a rank -------------------
@@ -483,6 +504,7 @@ __all__ = [
     "payments_of_order",
     "payments_list",
     "pick_display",
+    "refund_manual_reason_of",
     "refund_row",
     "refunds_by_payment",
     "refunds_for_order",

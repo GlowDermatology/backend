@@ -60,3 +60,26 @@ def test_yes_no() -> None:
     """Contract 5.8: Booleans in exports "Ha" / "Yo‘q"."""
     assert labels.yes_no(True) == "Ha"
     assert labels.yes_no(False) == "Yo‘q"
+
+
+def test_refund_state_line_by_reason_and_provider() -> None:
+    """Contract §5.1 "Refund state": ``manual_required`` is never assumed to be Payme."""
+    payme = "Payme kabinetida qaytarish kerak"
+    click = "Mijozga qo‘lda to‘lang, so‘ng «Qaytarildi» deb belgilang"
+    manual = enums.RefundState.MANUAL_REQUIRED
+    assert labels.refund_state_label(manual, "payme", "payme") == payme
+    assert labels.refund_state_label(manual, "payme", None) == payme  # no stored reason: by provider
+    assert labels.refund_state_label(manual, "click", "no_paydoc") == click
+    assert labels.refund_state_label(manual, "click", "fake_mode") == click
+    assert labels.refund_state_label(manual, "click", None) == click
+    expected = {
+        "requested": "Qaytarish so‘raldi",
+        "submitting": "Qaytarilmoqda",
+        "succeeded": "Qaytarildi",
+        "failed": "Qaytarib bo‘lmadi",
+        "unknown": "Holat noma’lum · tekshiring",
+    }
+    for state, line in expected.items():
+        assert labels.refund_state_label(state, "payme", "payme") == line
+        assert labels.refund_state_label(state, "click", None) == line
+    assert set(labels.REFUND_STATE) | {manual} == set(enums.RefundState.values)

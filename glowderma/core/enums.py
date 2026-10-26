@@ -98,6 +98,14 @@ class RefundState(TextChoices):
     UNKNOWN = "unknown"
 
 
+class RefundManualReason(TextChoices):
+    """Why a refund is ``manual_required`` (admin contract §2.2 ``Refund.manual_reason``, §4)."""
+
+    PAYME = "payme"  # Payme refunds are cabinet refunds
+    NO_PAYDOC = "no_paydoc"  # a Click payment without click_paydoc_id: Click cannot reverse it
+    FAKE_MODE = "fake_mode"  # the Click port is fake under the production settings
+
+
 class CashbackHoldState(TextChoices):
     ACTIVE = "active"
     CAPTURED = "captured"

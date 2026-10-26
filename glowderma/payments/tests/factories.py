@@ -160,6 +160,7 @@ class RefundFactory(DjangoModelFactory[Refund]):
         manual_required = Trait(  # type: ignore[no-untyped-call]
             payment=SubFactory(PaymentFactory, order__payme=True),  # type: ignore[no-untyped-call]
             state=enums.RefundState.MANUAL_REQUIRED,
+            manual_reason=enums.RefundManualReason.PAYME,
         )
         unknown = Trait(  # type: ignore[no-untyped-call]
             state=enums.RefundState.UNKNOWN,

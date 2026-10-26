@@ -412,7 +412,7 @@ def test_row_32_a_refused_reversal_needs_a_staff_payout(now: datetime, staff_cli
     assert refunds_needing_action() == 1
     url = f"/api/v1/admin/payments/{refund.payment_id}/refunds/{refund.pk}/resolve/"
     refused = staff_client.post(url, {"state": "succeeded"}, format="json")
-    assert refused.status_code == 409 and refused.json()["code"] == "invalid_transition"
+    assert refused.status_code == 409 and refused.json()["code"] == "click_not_reversed"
     assert refused.json()["message"] == services.MESSAGE_REFUND_STILL_PAID
     paid = staff_client.post(url, {"state": "succeeded", "manual_payout": True}, format="json")
     assert paid.status_code == 200

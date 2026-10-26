@@ -14,7 +14,7 @@ from rest_framework.test import APIClient
 from glowderma.commerce import services, tasks
 from glowderma.commerce.models import Order, OrderEvent
 from glowderma.commerce.tests.support import AT, admin, deliver, pay, place
-from glowderma.core.api.exceptions import InvalidTransition
+from glowderma.core.api.exceptions import Conflict
 from glowderma.core.models import AuditEntry, OutboxMessage
 from glowderma.core.seeding import pinned_clock
 from glowderma.integrations.click import fake as fake_click
@@ -138,6 +138,7 @@ def test_fresh_status_check_paid_needs_the_flag(staff_client: APIClient) -> None
     order, refund = _failed()
     refused = staff_client.post(_resolve_url(refund), {"state": "succeeded"}, format="json")
     assert refused.status_code == 409 and refused.json()["message"] == services.MESSAGE_REFUND_STILL_PAID
+    assert refused.json()["code"] == "click_not_reversed"  # M3: its own code (the UI offers the payout)
     refund.refresh_from_db()
     assert refund.state == "failed"
     ok = staff_client.post(_resolve_url(refund), {"state": "succeeded", "manual_payout": True}, format="json")
@@ -200,10 +201,42 @@ def test_without_a_paydoc_no_check_and_the_flag_is_required() -> None:
     payment.provider_state = {}
     payment.save(update_fields=["provider_state"])
     calls = len(fake_click.calls)
-    with pytest.raises(InvalidTransition):
+    with pytest.raises(Conflict) as refused:
         services.resolve_refund(refund.pk, "succeeded", admin().pk)
+    # M3: Click was never asked, so the answer never says "Click has not reversed the payment"
+    assert refused.value.detail == services.MESSAGE_REFUND_NO_PAYDOC
+    assert services.MESSAGE_REFUND_NO_PAYDOC != services.MESSAGE_REFUND_STILL_PAID
     services.resolve_refund(refund.pk, "succeeded", admin().pk, manual_payout=True)
     assert len(fake_click.calls) == calls
+
+
+def test_without_a_paydoc_the_api_answers_409_conflict_with_its_own_message(staff_client: APIClient) -> None:
+    order, refund = _failed()
+    Payment.objects.filter(order=order).update(provider_state={})
+    calls = len(fake_click.calls)
+    response = staff_client.post(_resolve_url(refund), {"state": "succeeded"}, format="json")
+    assert response.status_code == 409
+    assert (response.json()["code"], response.json()["message"]) == (
+        "conflict",
+        services.MESSAGE_REFUND_NO_PAYDOC,
+    )
+    assert len(fake_click.calls) == calls
+    refund.refresh_from_db()
+    assert refund.state == "failed"
+
+
+def test_the_guard_runs_before_the_click_status_check(staff_client: APIClient) -> None:
+    """M3: a failed refund that can no longer be closed (a retry superseded it) is refused without asking
+    Click — not after a status call whose answer would be irrelevant (or a 503 when Click is down)."""
+    order, refund = _failed()
+    retry_url = f"/api/v1/admin/payments/{refund.payment_id}/refunds/{refund.pk}/retry/"
+    assert staff_client.post(retry_url, format="json").status_code == 200
+    _set_status(order, "down")  # a status call would answer 503
+    calls = len(fake_click.calls)
+    response = staff_client.post(_resolve_url(refund), {"state": "succeeded"}, format="json")
+    assert response.status_code == 409 and response.json()["code"] == "invalid_transition"
+    assert response.json()["message"] == services.MESSAGE_REFUND_NOT_RESOLVABLE
+    assert len(fake_click.calls) == calls  # Click never asked
 
 
 def test_the_resolve_guard_after_a_retry(staff_client: APIClient) -> None:
@@ -258,3 +291,128 @@ def test_a_failure_after_an_older_success_still_counts() -> None:
     RefundFactory.create(payment=payment, succeeded=True, amount=1)  # partial and older (defensive)
     RefundFactory.create(payment=payment, failed=True)
     assert payment_selectors.refunds_needing_action() == 1
+
+
+# --- Refund.manual_reason (M3, admin §2.2 / §2.12) and the §5.1 line of the payments export -----------------
+
+
+CLICK_MANUAL_LINE = "Mijozga qo‘lda to‘lang, so‘ng «Qaytarildi» deb belgilang"
+
+
+def _api_refund(staff_client: APIClient, order: Order) -> dict[str, Any]:
+    detail = staff_client.get(f"/api/v1/admin/orders/{order.pk}/").json()
+    (payments_row,) = [
+        row
+        for row in staff_client.get("/api/v1/admin/payments/", {"search": str(order.pk)}).json()["results"]
+        if row["order_id"] == order.pk
+    ]
+    assert detail["refunds"] == payments_row["refunds"]  # one Refund object on both screens
+    return dict(detail["refunds"][0])
+
+
+def _export_line(staff_client: APIClient, order: Order) -> str:
+    response = staff_client.get("/api/v1/admin/payments/", {"export": "csv", "search": str(order.pk)})
+    lines = response.content.decode("utf-8-sig").split("\r\n")
+    (line,) = [line for line in lines[1:] if line.startswith(f'"{Payment.objects.get(order=order).pk}";')]
+    return str(line.rsplit(";", 1)[1].strip('"'))
+
+
+@pytest.mark.parametrize(
+    ("provider", "paydoc", "settings_", "reason", "line"),
+    [
+        ("payme", True, {}, "payme", "Payme kabinetida qaytarish kerak"),
+        ("click", False, {}, "no_paydoc", "Mijozga qo‘lda to‘lang, so‘ng «Qaytarildi» deb belgilang"),
+        (
+            "click",
+            True,
+            PROD_FAKE_CLICK,
+            "fake_mode",
+            "Mijozga qo‘lda to‘lang, so‘ng «Qaytarildi» deb belgilang",
+        ),
+    ],
+)
+def test_a_manual_refund_carries_its_reason_and_the_export_line_by_provider(
+    staff_client: APIClient,
+    provider: str,
+    paydoc: bool,
+    settings_: dict[str, Any],
+    reason: str,
+    line: str,
+) -> None:
+    order = place(fulfilment="pickup", provider=provider)
+    pay(order, paydoc=paydoc)
+    with override_settings(**settings_), pinned_clock(AT + timedelta(minutes=30)):
+        services.cancel_order(order.pk, "Mijoz so‘rovi bilan", admin().pk)
+    refund = Refund.objects.get(payment__order=order)
+    assert (refund.state, refund.manual_reason) == ("manual_required", reason)
+    assert _api_refund(staff_client, order)["manual_reason"] == reason
+    assert _export_line(staff_client, order) == line
+    event = OrderEvent.objects.get(order=order, type="refund_requested")
+    assert event.data["manual_reason"] == reason
+    # the reason stays once the refund is closed (it says why it was manual)
+    services.resolve_refund(refund.pk, "succeeded", admin().pk)
+    assert _api_refund(staff_client, order)["manual_reason"] == reason
+    assert _export_line(staff_client, order) == "Qaytarildi"
+
+
+def test_a_click_refund_sent_to_click_has_no_manual_reason(staff_client: APIClient) -> None:
+    order, refund = _cancelled()
+    assert refund.manual_reason == "" and _api_refund(staff_client, order)["manual_reason"] is None
+    assert _export_line(staff_client, order) == "Qaytarish so‘raldi"
+
+
+def test_the_submit_recheck_stores_the_reason_it_found(staff_client: APIClient) -> None:
+    """A Click refund that turns manual_required in the refund.submit re-check (Click switched to fake) has no
+    event saying why: the reason is stored on the refund, so the API and the export never fall back to
+    Payme."""
+    order, refund = _cancelled()
+    with override_settings(**PROD_FAKE_CLICK):
+        deliver("refund.submit", order.pk)
+    refund.refresh_from_db()
+    assert (refund.state, refund.manual_reason) == ("manual_required", "fake_mode")
+    assert _api_refund(staff_client, order)["manual_reason"] == "fake_mode"
+    assert _export_line(staff_client, order) == CLICK_MANUAL_LINE
+    audit = AuditEntry.objects.filter(action="refund.state_changed", entity_id=str(refund.pk)).last()
+    assert audit is not None and isinstance(audit.after, dict) and audit.after["manual_reason"] == "fake_mode"
+
+
+def test_a_manual_click_refund_stored_without_a_reason_never_reads_as_payme(staff_client: APIClient) -> None:
+    """Rows stored without a reason (factory rows): the fallback derives the Click reason from the
+    payment."""
+    order = place(fulfilment="pickup")
+    pay(order, paydoc=False)
+    payment = Payment.objects.get(order=order)
+    RefundFactory.create(payment=payment, state="manual_required", manual_reason="")
+    assert _api_refund(staff_client, order)["manual_reason"] == "no_paydoc"
+    assert _export_line(staff_client, order) == CLICK_MANUAL_LINE
+
+
+def test_the_backfill_places_the_reason_of_existing_refunds() -> None:
+    """commerce.0008: the event's reason, else Payme → payme, Click → no_paydoc / fake_mode by the payment's
+    Click id; refunds that were never manual stay blank."""
+    from importlib import import_module
+
+    from django.db import connection
+
+    backfill = import_module("glowderma.commerce.migrations.0008_backfill_refund_manual_reason").BACKFILL
+    payme_order, payme_refund = _cancelled("payme")
+    no_paydoc_order, no_paydoc_refund = _cancelled(paydoc=False)
+    sent_order, sent_refund = _cancelled()
+    fake_order = place(fulfilment="pickup")
+    pay(fake_order)
+    with override_settings(**PROD_FAKE_CLICK), pinned_clock(AT + timedelta(minutes=30)):
+        services.cancel_order(fake_order.pk, "Mijoz so‘rovi bilan", admin().pk)
+    fake_refund = Refund.objects.get(payment__order=fake_order)
+    # a manual Click refund with a Click id and no event (the submit re-check): fake_mode by elimination
+    recheck = RefundFactory.create(state="manual_required", manual_reason="")
+    Payment.objects.filter(pk=recheck.payment_id).update(provider_state={"click_paydoc_id": "5500000001"})
+    Refund.objects.update(manual_reason="")
+    with connection.cursor() as cursor:
+        cursor.execute(backfill)
+    reasons = dict(Refund.objects.values_list("pk", "manual_reason"))
+    assert reasons[payme_refund.pk] == "payme"
+    assert reasons[no_paydoc_refund.pk] == "no_paydoc"
+    assert reasons[fake_refund.pk] == "fake_mode"  # from its event (its payment has a Click id)
+    assert reasons[recheck.pk] == "fake_mode"
+    assert reasons[sent_refund.pk] == ""
+    assert payme_order.pk and no_paydoc_order.pk and sent_order.pk

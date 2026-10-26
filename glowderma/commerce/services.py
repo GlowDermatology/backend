@@ -997,7 +997,7 @@ def cancel_order(
                     actor_id,
                     at=instant,
                     request=request,
-                    manual=refund_manual_reason(paid) is not None,
+                    manual_reason=refund_manual_reason(paid) or "",
                 )
             if purchase is not None:
                 # read under the LoyaltyAccount lock, after the BTS call (T19: never an older instant)
@@ -1154,9 +1154,16 @@ MESSAGE_REFUND_STILL_PAID = (
 MESSAGE_REFUND_CLICK_FAKE = (
     "Click sinov rejimida: to‘lov holatini tekshirib bo‘lmaydi. Click ulanganidan keyin yakunlang."
 )
-MANUAL_REASON_PAYME = "payme"
-MANUAL_REASON_NO_PAYDOC = "no_paydoc"
-MANUAL_REASON_FAKE_MODE = "fake_mode"
+MESSAGE_REFUND_NO_PAYDOC = (
+    "Bu to‘lovda Click to‘lov raqami yo‘q, shuning uchun Click’dan holatini tekshirib bo‘lmaydi. Mijozga "
+    "qo‘lda to‘lang, so‘ng «qo‘lda to‘landi» belgisi bilan yakunlang."
+)
+# The 409 code of "Click has not reversed the payment" (admin contract §1.6, §7 item 18): the UI offers the
+# manual payout ("Qo‘lda to‘landi") on it.
+CODE_CLICK_NOT_REVERSED = "click_not_reversed"
+MANUAL_REASON_PAYME = enums.RefundManualReason.PAYME.value
+MANUAL_REASON_NO_PAYDOC = enums.RefundManualReason.NO_PAYDOC.value
+MANUAL_REASON_FAKE_MODE = enums.RefundManualReason.FAKE_MODE.value
 
 
 def refund_manual_reason(payment: payment_selectors.PaymentRow) -> str | None:
@@ -1176,14 +1183,16 @@ def refund_manual_reason(payment: payment_selectors.PaymentRow) -> str | None:
 def refund_requested_data(
     refund: payment_services.RefundResult, payment: payment_selectors.PaymentRow
 ) -> dict[str, Any]:
-    """``refund_requested`` data with ``manual_reason`` (null unless the refund is ``manual_required``)."""
+    """``refund_requested`` data with ``manual_reason`` (null unless the refund is ``manual_required``): the
+    reason stored on the refund (``Refund.manual_reason``), else the one the payment implies now."""
     manual = refund.state == enums.RefundState.MANUAL_REQUIRED
+    reason = refund.manual_reason or refund_manual_reason(payment) or MANUAL_REASON_PAYME
     return {
         "refund_id": refund.refund_id,
         "amount": refund.amount,
         "provider": refund.provider,
         "manual": manual,
-        "manual_reason": (refund_manual_reason(payment) or MANUAL_REASON_PAYME) if manual else None,
+        "manual_reason": reason if manual else None,
     }
 
 
@@ -1222,14 +1231,16 @@ def _locked_refund_row(refund_id: int) -> tuple[Order, payment_selectors.RefundR
 
 def _click_status_for_resolve(row: payment_selectors.RefundRow, manual_payout: bool) -> bool:
     """The fresh Click status check of a ``failed`` Click refund's resolve (customer contract §2.13.0), run
-    **outside any row lock**: ``True`` when Click reversed the payment (closed without a payout); a payout
-    without ``manual_payout`` → 409 ``MESSAGE_REFUND_STILL_PAID``; Click down → 503; fake Click under the
-    production settings → 409 ``MESSAGE_REFUND_CLICK_FAKE``."""
+    **outside any row lock**: ``True`` when Click reversed the payment (closed without a payout); still paid
+    without ``manual_payout`` → 409 ``click_not_reversed`` ``MESSAGE_REFUND_STILL_PAID``; Click down → 503;
+    fake Click under the production settings → 409 ``MESSAGE_REFUND_CLICK_FAKE``. A payment without a Click
+    payment id is never checked (Click cannot be asked about it): without ``manual_payout`` → 409 ``conflict``
+    ``MESSAGE_REFUND_NO_PAYDOC``, never the "Click has not reversed" answer."""
     if integration_modes.callbacks_refused("click"):
         raise InvalidTransition(MESSAGE_REFUND_CLICK_FAKE)
     if not row.provider_payment_ref:
         if not manual_payout:
-            raise InvalidTransition(MESSAGE_REFUND_STILL_PAID)
+            raise Conflict(MESSAGE_REFUND_NO_PAYDOC)
         return False
     order = Order.objects.get(pk=row.order_id)
     try:
@@ -1239,7 +1250,7 @@ def _click_status_for_resolve(row: payment_selectors.RefundRow, manual_payout: b
     if status == "reversed":
         return True
     if not manual_payout:
-        raise InvalidTransition(MESSAGE_REFUND_STILL_PAID)
+        raise InvalidTransition(MESSAGE_REFUND_STILL_PAID, code=CODE_CLICK_NOT_REVERSED)
     return False
 
 
@@ -1271,12 +1282,14 @@ def resolve_refund(
 ) -> payment_services.RefundResult:
     """Close a ``manual_required`` / ``unknown`` refund as ``succeeded`` or ``failed`` (admin §7 item 18
     ``…/resolve/``; with ``actor_id=None`` it stands for Payme's ``CancelTransaction``), or a ``failed``
-    **Click** refund as ``succeeded`` (customer contract §2.13.0): a fresh Click status check outside any lock
-    (``reversed`` → closed; still ``paid`` → only with ``manual_payout``; Click down → 503; fake Click under
-    the production settings → 409), then the guard under the Order → Payment locks (newest refund, payment
-    still ``paid``, no other open or succeeded refund; else 409 ``MESSAGE_REFUND_NOT_RESOLVABLE``). The state
-    is checked under the Order lock (two concurrent resolves: the second gets 409 ``invalid_transition``);
-    writes the ``refund_succeeded`` / ``refund_failed`` event; ``manual_payout`` is audited."""
+    **Click** refund as ``succeeded`` (customer contract §2.13.0): first the guard (newest refund, payment
+    still ``paid``, no other open or succeeded refund; else 409 ``MESSAGE_REFUND_NOT_RESOLVABLE``, Click never
+    asked), then a fresh Click status check outside any lock (``reversed`` → closed; still ``paid`` → only
+    with ``manual_payout``, else 409 ``click_not_reversed``; no Click payment id → not checked, only with
+    ``manual_payout``, else 409 ``conflict``; Click down → 503; fake Click under the production settings →
+    409), then the guard again under the Order → Payment locks. The state is checked under the Order lock (two
+    concurrent resolves: the second gets 409 ``invalid_transition``); writes the ``refund_succeeded`` /
+    ``refund_failed`` event; ``manual_payout`` is audited."""
     _aware(at, "at")
     if outcome not in (enums.RefundState.SUCCEEDED, enums.RefundState.FAILED):
         raise ValueError(f"A refund resolves to succeeded or failed, not {outcome!r}")
@@ -1290,6 +1303,10 @@ def resolve_refund(
     )
     payout = False
     if failed_click:
+        # the guard first (read-only, re-checked under the locks below): a refund that can no longer be
+        # closed is refused without asking Click
+        if not _resolvable_failed(first):
+            raise InvalidTransition(MESSAGE_REFUND_NOT_RESOLVABLE)
         reversed_at_click = _click_status_for_resolve(first, manual_payout)  # no lock held (HTTP)
         payout = manual_payout and not reversed_at_click
     with transaction.atomic():
@@ -1353,7 +1370,7 @@ def retry_refund(
                 actor_id,
                 at=instant,
                 request=request,
-                manual=refund_manual_reason(payment) is not None,
+                manual_reason=refund_manual_reason(payment) or "",
             )
         except InvalidTransition as exc:  # pragma: no cover - the states were checked under the lock
             raise InvalidTransition(MESSAGE_REFUND_NOT_RETRYABLE) from exc
@@ -1895,7 +1912,7 @@ def record_late_capture(
             None,
             Refund.Origin.LATE_CAPTURE,
             at=instant,
-            manual=refund_manual_reason(row) is not None,
+            manual_reason=refund_manual_reason(row) or "",
         )
         record_event_once(order, _E.REFUND_REQUESTED, refund_requested_data(refund, row), at=instant)
         details = {"order_id": order_id, "payment_id": payment_id, "provider": provider, "case": case}

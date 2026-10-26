@@ -727,7 +727,11 @@ def submit_refund(payload: dict[str, Any]) -> None:
     ref = refund.provider_payment_ref
     if not ref or integration_modes.callbacks_refused("click"):
         if refund.state == enums.RefundState.REQUESTED:
-            payment_services.mark_manual_required(refund_id, timeutils.now())
+            payment_services.mark_manual_required(
+                refund_id,
+                timeutils.now(),
+                reason=enums.RefundManualReason.FAKE_MODE if ref else enums.RefundManualReason.NO_PAYDOC,
+            )
         else:
             # ``submitting``: a worker may have sent the reversal before the switch (or crashed after Click
             # answered), so its outcome at Click is unknown — never left ``submitting``, which no one sees

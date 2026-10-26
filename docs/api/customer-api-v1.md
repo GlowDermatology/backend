@@ -1690,7 +1690,7 @@ admin-only by DB constraint).
     lock), `ClickPort.payment_status(click_paydoc_id)`:
     - `reversed` → Click returned the money: the refund is closed `succeeded` (a Click reversal, whatever
       `manual_payout` says; staff must not pay out);
-    - `paid` and no `manual_payout: true` → 409 `invalid_transition` "Click to‘lovni qaytarmagan. Avval mijozga
+    - `paid` and no `manual_payout: true` → 409 `click_not_reversed` (M3; `invalid_transition` before) "Click to‘lovni qaytarmagan. Avval mijozga
       qo‘lda to‘lang, so‘ng «qo‘lda to‘landi» belgisi bilan yakunlang yoki qaytarishni qayta urinib ko‘ring."
       (`MESSAGE_REFUND_STILL_PAID`), nothing written;
     - `paid` and `manual_payout: true` (staff paid the customer outside Click) → closed `succeeded`, audit
@@ -1700,11 +1700,14 @@ admin-only by DB constraint).
       holatini tekshirib bo‘lmaydi. Click ulanganidan keyin yakunlang." (`MESSAGE_REFUND_CLICK_FAKE`): an unverified
       payout could double the refund (§6.14 operator procedure);
     - a payment without `click_paydoc_id` was never sent to Click, so there is nothing Click could have reversed: no
-      check, `manual_payout: true` required (else the 409 `MESSAGE_REFUND_STILL_PAID`).
+      check, `manual_payout: true` required (M3: else 409 `conflict` "Bu to‘lovda Click to‘lov raqami yo‘q, shuning
+      uchun Click’dan holatini tekshirib bo‘lmaydi. Mijozga qo‘lda to‘lang, so‘ng «qo‘lda to‘landi» belgisi bilan
+      yakunlang." — `MESSAGE_REFUND_NO_PAYDOC`, never the "Click has not reversed" answer: Click was not asked).
   - **Guard on that resolve.** A `failed` refund is closed, so a `retry` (a **new** refund of the same payment) may
     already exist, open or succeeded; resolving the old failed one as well would pay the customer twice and push
     revenue below zero. `commerce.services.resolve_refund` therefore closes a `failed` Click refund as `succeeded` only
-    when, after the status check and under the Order → Payment locks, (1) it is the payment's **newest** refund, (2) the payment is still `paid`
+    when — checked **before** the status check (M3: a refund that can no longer be closed is refused without asking
+    Click) and again after it under the Order → Payment locks — (1) it is the payment's **newest** refund, (2) the payment is still `paid`
     and (3) the payment has no other refund that is open (`requested`, `submitting`, `manual_required`, `unknown`) or
     `succeeded`; otherwise 409 `invalid_transition` with the built Uzbek message "Bu qaytarishni yakunlab bo‘lmaydi."
     (`MESSAGE_REFUND_NOT_RESOLVABLE`). `resolve` from `unknown` / `manual_required` is unchanged (such a refund is the
