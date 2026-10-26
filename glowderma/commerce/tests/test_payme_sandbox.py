@@ -147,6 +147,7 @@ def test_rows_8_9_create_and_replay(order: Order, now: datetime) -> None:
     payment.refresh_from_db()
     assert payment.provider_txn_id == TXN and payment.provider_state["state"] == 1
     assert rows("payme")[0].raw_body  # a write method keeps its raw body
+    assert all("Authorization" not in row.headers for row in rows("payme"))  # credentials never stored
     assert all(row.event_key.startswith("CreateTransaction:") for row in rows("payme"))
 
 
