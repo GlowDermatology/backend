@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+from django.conf import settings
 from drf_spectacular.utils import PolymorphicProxySerializer, extend_schema
 from rest_framework.exceptions import NotFound
 from rest_framework.request import Request
@@ -102,7 +103,9 @@ def device_step_body(step: services.DeviceStep) -> dict[str, Any]:
         "social_ticket": None,
         "provider": None,
         "email_mask": None,
-        "expires_in": issue.expires_in,
+        # The step lasts as long as the app may keep the password and the verification token (C§2.0,
+        # §2.1.4: 10 min), not the code's own TTL (that is otp.expires_in).
+        "expires_in": int(settings.CUSTOMER_VERIFICATION_TTL_SECONDS),
     }
 
 

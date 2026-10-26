@@ -4,7 +4,6 @@ and ``DELETE me/``."""
 
 from __future__ import annotations
 
-import uuid
 from collections.abc import Iterator
 from datetime import timedelta
 from io import BytesIO
@@ -17,12 +16,11 @@ from PIL import Image
 from rest_framework.test import APIClient
 
 from glowderma.accounts import services as account_services
-from glowderma.accounts import tokens, topics
+from glowderma.accounts import topics
 from glowderma.accounts.models import Address, AuthSession, Customer, CustomerSocialIdentity, Device
 from glowderma.accounts.tests.factories import (
     AddressFactory,
     CustomerSocialIdentityFactory,
-    start_test_session,
 )
 from glowderma.commerce.tests.factories import CartFactory, CartItemFactory, OrderFactory
 from glowderma.core import timeutils
@@ -33,6 +31,7 @@ from glowderma.customers.tests.p1_support import (
     OTHER_FID,
     PASSWORD,
     TERMS,
+    Signed,
     app_client,
     password_customer,
     publish_terms,
@@ -57,19 +56,6 @@ def fakes() -> Iterator[None]:
     reset_fakes()
     yield
     reset_fakes()
-
-
-class Signed:
-    def __init__(self, customer: Customer, fid: str = FID) -> None:
-        self.customer = customer
-        self.started = start_test_session(customer, fid=fid)
-        access, _ = tokens.issue_access(self.started.session)
-        self.client = app_client(
-            fid=fid, key=self.started.raw_device_key, HTTP_AUTHORIZATION=f"Bearer {access}"
-        )
-
-    def idem(self) -> dict[str, Any]:
-        return {"HTTP_IDEMPOTENCY_KEY": str(uuid.uuid4())}
 
 
 @pytest.fixture

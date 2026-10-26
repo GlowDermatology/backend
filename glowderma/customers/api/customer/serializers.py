@@ -21,6 +21,7 @@ from glowderma.core.api.fields import QueryBooleanField
 CODE_PATTERN = re.compile(r"^[0-9]{6}$")
 REFERENCE_CODE = re.compile(r"^[0-9]{1,16}$")
 SEARCH_MAX_LENGTH = 64
+CATEGORY_SLUG_MAX_LENGTH = 64
 
 
 class CustomerPhoneField(serializers.CharField):
@@ -44,10 +45,14 @@ def _password(**kwargs: Any) -> serializers.CharField:
 
 
 def _name(*, required: bool = True) -> serializers.CharField:
-    return serializers.CharField(max_length=150, required=required, allow_null=not required)
+    # allow_blank: an empty or whitespace-only name reaches clean_name and answers the contract's
+    # ``min_length`` (``field.name_min``), not DRF's ``blank``; a missing key still answers ``required``.
+    return serializers.CharField(max_length=150, required=required, allow_null=not required, allow_blank=True)
 
 
 def clean_name(value: str | None) -> str | None:
+    """Names are trimmed and need at least 2 characters (C§2.1.3, §2.1.9, §2.2.2: ``min_length``
+    ``field.name_min``, also for ``""`` and whitespace only)."""
     if value is None:
         return None
     value = value.strip()
@@ -161,7 +166,7 @@ class MePasswordSerializer(serializers.Serializer[dict[str, Any]]):
 
 
 class MePatchSerializer(serializers.Serializer[dict[str, Any]]):
-    name = serializers.CharField(max_length=150, required=False)
+    name = serializers.CharField(max_length=150, required=False, allow_blank=True)
     language = serializers.ChoiceField(choices=enums.ContentLanguage.values, required=False)
     push_enabled = serializers.BooleanField(required=False)
 
@@ -191,8 +196,9 @@ class AddressWriteSerializer(serializers.Serializer[dict[str, Any]]):
 
     label = serializers.CharField(max_length=60, required=False, allow_blank=True)  # type: ignore[assignment]
     text = serializers.CharField(max_length=300)
-    region_code = serializers.CharField(max_length=16, required=False, allow_blank=True)
-    city_code = serializers.CharField(max_length=16, required=False, allow_blank=True)
+    # No max_length: ``^[0-9]{1,16}$`` (or "") decides, so a long value answers ``invalid`` (C§2.2.7).
+    region_code = serializers.CharField(required=False, allow_blank=True)
+    city_code = serializers.CharField(required=False, allow_blank=True)
     comment = serializers.CharField(max_length=200, required=False, allow_blank=True)
     latitude = _coordinate(90)
     longitude = _coordinate(180)
@@ -237,7 +243,7 @@ class AddressWriteSerializer(serializers.Serializer[dict[str, Any]]):
 
 class ProductListQuerySerializer(serializers.Serializer[dict[str, Any]]):
     search = serializers.CharField(required=False, allow_blank=True, trim_whitespace=True)
-    category = serializers.CharField(required=False, max_length=64)
+    category = serializers.CharField(required=False)
     in_stock = QueryBooleanField(required=False)
     promo = QueryBooleanField(required=False)
     ordering = serializers.ChoiceField(
@@ -248,6 +254,12 @@ class ProductListQuerySerializer(serializers.Serializer[dict[str, Any]]):
 
     def validate_search(self, value: str) -> str:
         return value.strip()[:SEARCH_MAX_LENGTH]
+
+    def validate_category(self, value: str) -> str:
+        # An over-long slug can match no category: ``invalid_choice`` like any unknown slug (C§2.3).
+        if len(value) > CATEGORY_SLUG_MAX_LENGTH:
+            raise serializers.ValidationError([field_error("invalid_choice")])
+        return value
 
 
 # --- response shapes (OpenAPI only) ------------------------------------------------------------------------

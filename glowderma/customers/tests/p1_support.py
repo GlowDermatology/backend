@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import secrets
+import uuid
 from datetime import timedelta
 from typing import Any
 
@@ -10,8 +11,9 @@ from django.core.cache import cache
 from rest_framework.test import APIClient
 
 from glowderma.accounts import services as account_services
+from glowderma.accounts import tokens
 from glowderma.accounts.models import Customer, SmsCode
-from glowderma.accounts.tests.factories import device_headers
+from glowderma.accounts.tests.factories import device_headers, start_test_session
 from glowderma.core import timeutils
 from glowderma.integrations.eskiz.registry import fake_eskiz
 from glowderma.integrations.oauth.registry import fake_apple
@@ -80,3 +82,18 @@ def password_customer(phone: str = "+998901112233", **fields: Any) -> Customer:
     customer = Customer.objects.create(phone=phone, name=fields.pop("name", "Malika"), **fields)
     account_services.set_customer_password(customer, PASSWORD)
     return customer
+
+
+class Signed:
+    """A customer signed in on ``fid`` through ``start_customer_session``, with a bearer ``client``."""
+
+    def __init__(self, customer: Customer, fid: str = FID) -> None:
+        self.customer = customer
+        self.started = start_test_session(customer, fid=fid)
+        access, _ = tokens.issue_access(self.started.session)
+        self.client = app_client(
+            fid=fid, key=self.started.raw_device_key, HTTP_AUTHORIZATION=f"Bearer {access}"
+        )
+
+    def idem(self) -> dict[str, Any]:
+        return {"HTTP_IDEMPOTENCY_KEY": str(uuid.uuid4())}
