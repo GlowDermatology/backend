@@ -416,6 +416,9 @@ def test_gunicorn_config_logs_request_id() -> None:
     spec.loader.exec_module(module)
     assert module.accesslog == "-"
     assert "%({x-request-id}o)s" in module.access_log_format
+    # method, path and protocol only: the BTS webhook's ?token= secret never reaches the access log
+    assert '"%(m)s %(U)s %(H)s"' in module.access_log_format
+    assert "%(r)s" not in module.access_log_format and "%(q)s" not in module.access_log_format
     assert (module.timeout, module.graceful_timeout, module.keepalive) == (60, 30, 5)
     assert module.worker_class == "gthread"
 
