@@ -1541,6 +1541,16 @@ admin-only by DB constraint).
     outside Click and close it with `…/resolve/ {state: "succeeded"}`, which P2 extends from `unknown` /
     `manual_required` to a `failed` Click refund (admin §7 item 18). The customer keeps seeing "To‘lov qaytarilmoqda"
     until then (§2.8).
+  - **Guard on that resolve.** A `failed` refund is closed, so a `retry` (a **new** refund of the same payment) may
+    already exist, open or succeeded; resolving the old failed one as well would pay the customer twice and push
+    revenue below zero. `commerce.services.resolve_refund` therefore closes a `failed` Click refund as `succeeded` only
+    when, under the Order → Payment locks, (1) it is the payment's **newest** refund, (2) the payment is still `paid`
+    and (3) the payment has no other refund that is open (`requested`, `submitting`, `manual_required`, `unknown`) or
+    `succeeded`; otherwise 409 `invalid_transition` with the built Uzbek message "Bu qaytarishni yakunlab bo‘lmaydi."
+    (`MESSAGE_REFUND_NOT_RESOLVABLE`). `resolve` from `unknown` / `manual_required` is unchanged (such a refund is the
+    payment's only open one, `refund_one_open_per_payment`). As a second layer, `commerce.tasks.submit_refund` re-reads
+    the payment before any port call and, when it is no longer `paid`, ends the refund `failed` (`error_code
+    "payment_not_paid"`, event `refund_failed`) without calling Click.
 - **Refund and status calls for Click** are keyed by the Click payment id of the Merchant API (`DELETE
   …/payment/reversal/{service_id}/{payment_id}`, `GET …/payment/status/{service_id}/{payment_id}`), which is our
   `provider_state.click_paydoc_id` — never `click_trans_id` (`Payment.provider_txn_id`) **(verify M3)**. P2 exposes
