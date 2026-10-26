@@ -866,8 +866,9 @@ def apple_subject_linked(subject: str) -> bool:
 
 
 # Attempts of ``register_device`` whose locked read finds a token holder the unlocked read missed. Under the
-# per-token lock only a writer that bypasses ``register_device`` can add a holder (none does), so a second
-# attempt is never needed in practice; the bound keeps such a writer from looping a request forever.
+# per-token lock only a writer that bypasses ``register_device`` can add a holder (none does at request
+# time), so a second attempt is never needed in practice; the bound keeps such a writer from looping a
+# request forever.
 REGISTER_DEVICE_ATTEMPTS = 3
 
 
@@ -915,14 +916,15 @@ def register_device(
     serialize with this one instead of deadlocking with it. The token lock serializes two customers
     registering the same new token (an account switch on the install still in flight): the second one reads
     the first one's committed device as a holder and takes the token from it, instead of both saving it and
-    the second failing on ``device_active_fcm_token_unique``. Only this function gives a row a token, so under
-    the token lock the holder set can only shrink between the unlocked holder read and the locked device
-    read; should the locked read still find a holder whose customer is not locked, the attempt rolls back
-    and starts again (never locking a customer after a device), and after ``REGISTER_DEVICE_ATTEMPTS`` the
-    request answers 409 ``request_in_progress`` (``Retry-After: 1``). Under the lock a customer who is no
-    longer active (401 ``SESSION_EXPIRED``) or a device another sign-in or a logout deactivated meanwhile
-    (401 ``SESSION_REPLACED`` when its newest session was replaced, else ``SESSION_EXPIRED``) is refused
-    before anything is written, so no token lands on a deleted or replaced device.
+    the second failing on ``device_active_fcm_token_unique``. Only this function gives a row a token at
+    request time (the demo seeder aside), so under the token lock the holder set can only shrink between the
+    unlocked holder read and the locked device read; should the locked read still find a holder whose
+    customer is not locked, the attempt rolls back and starts again (never locking a customer after a
+    device), and after ``REGISTER_DEVICE_ATTEMPTS`` the request answers 409 ``request_in_progress``
+    (``Retry-After: 1``). Under the lock a customer who is no longer active (401 ``SESSION_EXPIRED``) or a
+    device another sign-in or a logout deactivated meanwhile (401 ``SESSION_REPLACED`` when its newest
+    session was replaced, else ``SESSION_EXPIRED``) is refused before anything is written, so no token lands
+    on a deleted or replaced device.
     """
     token = (fcm_token or "").strip()
     if push_enabled and not token:
