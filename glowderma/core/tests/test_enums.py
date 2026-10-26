@@ -58,6 +58,8 @@ CONTRACT_TABLE: dict[str, list[str]] = {
     "ContentLanguage": ["uz", "ru", "en"],
     "CustomerStatus": ["active", "deleted"],
     "SpecialistRole": ["dermatologist", "cosmetologist"],
+    "ServiceCategory": ["dermatology", "cosmetology"],
+    "DirectoryOrdering": ["position", "name", "-name", "created_at", "-created_at"],
     # "cancelled" is the extra M2 literal (customers cancel their own appointments).
     "AppointmentStatus": ["requested", "confirmed", "rejected", "attended", "cancelled"],
     "AppointmentAction": ["confirm", "reject", "attend"],

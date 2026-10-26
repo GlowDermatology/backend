@@ -57,6 +57,7 @@ def test_day_schedule_equals_the_design(staff_client: APIClient, seeded: None) -
         "id": 1,
         "name": "Nodira Rahimova",
         "role": "dermatologist",
+        "is_active": True,
         "working_hours": {"start": "09:00", "end": "18:00"},
         "blocks": [{"start": "16:00", "end": "16:30", "kind": "busy", "label": "Band qilingan"}],
     }
@@ -321,7 +322,11 @@ def test_create_refuses_deleted_customers_and_inactive_specialists(
         format="json",
     )
     assert errors(response) == [("specialist_id", "does_not_exist", "Mutaxassis topilmadi.")]
-    assert [s["id"] for s in staff_client.get(BASE, {"date": "2026-10-26"}).data["specialists"]] == [2, 3]
+    # the deactivated specialist keeps its column on a day it still has appointments (FND-1), marked
+    day = staff_client.get(BASE, {"date": "2026-10-26"}).data["specialists"]
+    assert [(s["id"], s["is_active"]) for s in day] == [(1, False), (2, True), (3, True)]
+    # and is gone on a day without any
+    assert [s["id"] for s in staff_client.get(BASE, {"date": "2026-12-07"}).data["specialists"]] == [2, 3]
 
 
 def test_reschedule_validation_and_404(staff_client: APIClient, clock: Any) -> None:

@@ -195,6 +195,23 @@ class SpecialistRole(TextChoices):
     COSMETOLOGIST = "cosmetologist"
 
 
+class ServiceCategory(TextChoices):
+    """The discipline of a bookable service (FND-7): the counterpart of the specialist's ``role``."""
+
+    DERMATOLOGY = "dermatology"
+    COSMETOLOGY = "cosmetology"
+
+
+class DirectoryOrdering(TextChoices):
+    """``ordering`` of the admin ``specialists/`` and ``services/`` lists (default ``position``)."""
+
+    POSITION = "position"
+    NAME = "name"
+    NAME_DESC = "-name"
+    CREATED_AT = "created_at"
+    CREATED_AT_DESC = "-created_at"
+
+
 class AppointmentStatus(TextChoices):
     REQUESTED = "requested"
     CONFIRMED = "confirmed"
@@ -490,6 +507,8 @@ CONTRACT_ENUMS: tuple[type[TextChoices], ...] = (
     ContentLanguage,
     CustomerStatus,
     SpecialistRole,
+    ServiceCategory,
+    DirectoryOrdering,
     AppointmentStatus,
     AppointmentAction,
     RequestedVia,

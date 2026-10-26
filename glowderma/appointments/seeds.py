@@ -159,7 +159,7 @@ class _Lookup:
         }
         self.professionals = {pk: by_name.get(name) for pk, name, _ in PROFESSIONALS}
         by_name_uz = {s.name_uz: s for s in Service.objects.filter(name_uz__in=[row[1] for row in SERVICES])}
-        self.services = {pk: by_name_uz.get(name_uz) for pk, name_uz, _, _ in SERVICES}
+        self.services = {pk: by_name_uz.get(name_uz) for pk, name_uz, *_ in SERVICES}
         self.phones = {pk: phone for pk, _, phone in all_customers()}
         self._customers: dict[int, Customer | None] = {}
         self.links = {

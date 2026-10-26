@@ -30,6 +30,7 @@ ADMIN_API_MODULES = (
     "catalog",
     "loyalty",
     "payments",
+    "professionals",
     "commerce",
     "appointments",
     "notifications",

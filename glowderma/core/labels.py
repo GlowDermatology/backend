@@ -57,8 +57,23 @@ NOTIFICATION_KIND: dict[str, str] = {
 }
 
 
+SPECIALIST_ROLE: dict[str, str] = {
+    enums.SpecialistRole.DERMATOLOGIST: "Dermatolog",
+    enums.SpecialistRole.COSMETOLOGIST: "Kosmetolog",
+}
+SERVICE_CATEGORY: dict[str, str] = {
+    enums.ServiceCategory.DERMATOLOGY: "Dermatologiya",
+    enums.ServiceCategory.COSMETOLOGY: "Kosmetologiya",
+}
+
+
 def yes_no(value: bool) -> str:
     return "Ha" if value else "Yo‘q"
+
+
+def active_label(value: bool) -> str:
+    """``is_active`` of specialists and services (contract §5.8): "Faol" / "Nofaol"."""
+    return "Faol" if value else "Nofaol"
 
 
 # Contract 1.8 export columns (Uzbek headers) of the catalog lists.
@@ -83,6 +98,27 @@ BANNER_EXPORT_HEADERS: tuple[str, ...] = (
     "Boshlanishi",
     "Tugashi",
     "Tartib",
+)
+# Contract 1.8 export columns (Uzbek headers) of the specialists and services lists (FND-1).
+SPECIALIST_EXPORT_HEADERS: tuple[str, ...] = (
+    "ID",
+    "Ism",
+    "Mutaxassislik",
+    "Tajriba (yil)",
+    "Xizmatlar",
+    "Ish kunlari",
+    "Kelgusi qabullar",
+    "Holat",
+)
+SERVICE_EXPORT_HEADERS: tuple[str, ...] = (
+    "ID",
+    "Nomi",
+    "Qisqa nomi",
+    "Kategoriya",
+    "Davomiyligi (daq.)",
+    "Narx (so‘m)",
+    "Mutaxassislar",
+    "Holat",
 )
 # Contract 1.8 export columns (Uzbek headers) of the notifications, segments and audit-log lists (M1d).
 NOTIFICATION_EXPORT_HEADERS: tuple[str, ...] = (

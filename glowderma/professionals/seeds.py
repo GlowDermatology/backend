@@ -35,13 +35,14 @@ PROFESSIONALS: tuple[tuple[int, str, str], ...] = (
     (2, "Jasur Aliyev", enums.SpecialistRole.DERMATOLOGIST),
     (3, "Dilnoza Yusupova", enums.SpecialistRole.COSMETOLOGIST),
 )
-# id, name_uz, short_name_uz, default duration
-SERVICES: tuple[tuple[int, str, str, int], ...] = (
-    (1, "Dermatolog konsultatsiyasi", "Konsultatsiya", 30),
-    (2, "Qayta ko‘rik", "Qayta ko‘rik", 20),
-    (3, "Yuzni chuqur tozalash", "Yuzni chuqur tozalash", 75),
-    (4, "Kimyoviy pilling", "Kimyoviy pilling", 60),
-    (5, "Namlantiruvchi parvarish", "Namlantiruvchi parvarish", 60),
+DERMATOLOGY, COSMETOLOGY = enums.ServiceCategory.DERMATOLOGY, enums.ServiceCategory.COSMETOLOGY
+# id, name_uz, short_name_uz, default duration, category (FND-7)
+SERVICES: tuple[tuple[int, str, str, int, str], ...] = (
+    (1, "Dermatolog konsultatsiyasi", "Konsultatsiya", 30, DERMATOLOGY),
+    (2, "Qayta ko‘rik", "Qayta ko‘rik", 20, DERMATOLOGY),
+    (3, "Yuzni chuqur tozalash", "Yuzni chuqur tozalash", 75, COSMETOLOGY),
+    (4, "Kimyoviy pilling", "Kimyoviy pilling", 60, COSMETOLOGY),
+    (5, "Namlantiruvchi parvarish", "Namlantiruvchi parvarish", 60, COSMETOLOGY),
 )
 # professional id → {service id: price}
 PRICES: dict[int, dict[int, int]] = {
@@ -83,7 +84,7 @@ def _seed_professionals(location: Location) -> dict[int, Professional]:
 
 def _seed_services() -> dict[int, Service]:
     rows: dict[int, Service] = {}
-    for position, (pk, name_uz, short_name_uz, duration) in enumerate(SERVICES):
+    for position, (pk, name_uz, short_name_uz, duration, category) in enumerate(SERVICES):
         service = Service.objects.filter(name_uz=name_uz).first()
         if service is None:
             service = Service.objects.create(
@@ -91,6 +92,7 @@ def _seed_services() -> dict[int, Service]:
                 name_uz=name_uz,
                 short_name_uz=short_name_uz,
                 default_duration_min=duration,
+                category=category,
                 position=position,
             )
         rows[pk] = service

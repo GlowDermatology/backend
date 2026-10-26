@@ -898,6 +898,16 @@ CATALOG: Final[dict[str, dict[str, str]]] = {
         "ru": "Косметолог",
         "en": "Cosmetologist",
     },
+    "label.service_category.dermatology": {
+        "uz": "Dermatologiya",
+        "ru": "Дерматология",
+        "en": "Dermatology",
+    },
+    "label.service_category.cosmetology": {
+        "uz": "Kosmetologiya",
+        "ru": "Косметология",
+        "en": "Cosmetology",
+    },
     "push.account_security.social_linked.title": {
         "uz": "Hisobingizga yangi kirish usuli qo‘shildi",
         "ru": "Добавлен новый способ входа",

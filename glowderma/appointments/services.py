@@ -13,7 +13,7 @@ from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from django.conf import settings
-from django.db import IntegrityError, OperationalError, transaction
+from django.db import IntegrityError, OperationalError, connection, transaction
 from rest_framework.exceptions import NotFound, ValidationError
 
 from glowderma.accounts.models import Customer, Device
@@ -42,6 +42,8 @@ MESSAGES = {
     "in_past": "Kelajakdagi vaqtni tanlang.",
     "grid": "Vaqt 5 daqiqalik qadamda bo‘lsin.",
     "service_not_offered": "Mutaxassis bu xizmatni ko‘rsatmaydi.",
+    "specialist_not_found": "Mutaxassis topilmadi.",
+    "service_not_found": "Xizmat topilmadi.",
 }
 # ``POST appointments/{id}/{action}/``: allowed source statuses and the resulting status (contract §2.9).
 TRANSITIONS: dict[str, tuple[tuple[str, ...], str]] = {
@@ -120,6 +122,47 @@ def check_slot(
         overlapping = overlapping.exclude(pk=exclude_pk)
     if overlapping.exists():
         raise _start_error("slot_unavailable", MESSAGES["slot_taken"])
+
+
+def _hold_row(model: type[Professional] | type[Service], pk: int) -> bool:
+    """Lock a row ``FOR KEY SHARE`` for the rest of the transaction and re-read its ``is_active``."""
+    table = connection.ops.quote_name(model._meta.db_table)
+    with connection.cursor() as cursor:
+        # The table name comes from the model's metadata, the id is a bound parameter.
+        cursor.execute(f"SELECT is_active FROM {table} WHERE id = %s FOR KEY SHARE", [pk])  # noqa: S608
+        row = cursor.fetchone()
+    return bool(row and row[0])
+
+
+def _hold_active_service(service_id: int) -> bool:
+    """Lock the service's row ``FOR KEY SHARE`` and re-read ``is_active``: ``PATCH services/{id}/`` takes the
+    row ``FOR UPDATE``, so a booking either waits for a deactivation and then sees it (refused), or the
+    deactivation waits for the booking (which is then kept, PS-3)."""
+    return _hold_row(Service, service_id)
+
+
+def _hold_active_specialist(professional_id: int) -> bool:
+    """Lock the specialist's row ``FOR KEY SHARE`` for the rest of the transaction and re-read ``is_active``.
+
+    The deactivation of the admin specialists API counts the open appointments under ``SELECT … FOR UPDATE``
+    of the same row, which conflicts with this lock (bookings among themselves do not: key-share locks are
+    compatible). Either the deactivation waits for this booking and then counts it (409 unless ``force``),
+    or this booking waits for the deactivation and then reads ``is_active = false`` (refused). The foreign
+    key of the new appointment cannot serve: Django creates it ``DEFERRABLE INITIALLY DEFERRED``, so its
+    check runs only at commit, after the guard.
+
+    Every schedule and offer write of the admin specialists API (hours, overrides, blocks,
+    ``PUT …/services/``) holds the same row ``FOR UPDATE``, so whatever a booking reads *after* this lock
+    (the offered link, its price and duration, the day's hours and blocks) is the committed state: the
+    bookings therefore read the link and check the slot only once they hold it.
+    """
+    return _hold_row(Professional, professional_id)
+
+
+def _specialist_gone() -> ValidationError:
+    return ValidationError(
+        {"specialist_id": [field_error("does_not_exist", MESSAGES["specialist_not_found"])]}
+    )
 
 
 def active_link(professional: Professional, service: Service) -> ProfessionalService:
@@ -243,14 +286,24 @@ def create_by_admin(
     actor: Any,
     request: Any = None,
 ) -> Appointment:
-    """A confirmed booking made by staff: ``requested_via = admin``, events ``requested`` + ``confirmed``."""
-    link = active_link(professional, service)
-    end = start + timedelta(minutes=link.duration_min)
-    check_slot(professional, start, end)
-    _before_write()
-    now = timeutils.now()
+    """A confirmed booking made by staff: ``requested_via = admin``, events ``requested`` + ``confirmed``.
+
+    The specialist and the service are locked first (``FOR KEY SHARE``); the offered link, the snapshot and
+    the slot are read under those locks, so a concurrent schedule, offer or service change is either seen
+    or waits for this booking."""
     try:
         with transaction.atomic():
+            if not _hold_active_specialist(professional.pk):  # deactivated since the serializer read it
+                raise _specialist_gone()
+            if not _hold_active_service(service.pk):  # retired since the serializer read it
+                raise ValidationError(
+                    {"service_id": [field_error("does_not_exist", MESSAGES["service_not_found"])]}
+                )
+            link = active_link(professional, service)
+            end = start + timedelta(minutes=link.duration_min)
+            check_slot(professional, start, end)
+            _before_write()
+            now = timeutils.now()
             appointment = Appointment.objects.create(
                 professional=professional,
                 service=service,
@@ -306,7 +359,13 @@ def reschedule(
         raise InvalidTransition(MESSAGES["invalid_transition"])
     target = professional or appointment.professional
     duration, price = appointment.duration_min, appointment.price
+    # Always lock the target specialist before the slot check, so a concurrent hours / override / block
+    # change is seen or waits. The same (possibly deactivated, PS-2) specialist keeps its appointment
+    # movable; a different one must be active.
+    target_active = _hold_active_specialist(target.pk)
     if target.pk != appointment.professional_id:
+        if not target_active:  # deactivated since the serializer read it
+            raise _specialist_gone()
         link = active_link(target, appointment.service)
         duration, price = link.duration_min, link.price
     end = start + timedelta(minutes=duration)
@@ -475,6 +534,14 @@ def request_by_customer(
         # re-checked row is no longer active and its sessions are revoked (C§2.2.3: "refused because the
         # customer is no longer active").
         raise AuthFailed("SESSION_EXPIRED")
+    if not _hold_active_specialist(professional.pk):  # deactivated while this booking was being checked
+        raise _field("specialist_id", "does_not_exist", "field.specialist_not_found")
+    # Re-read the offer under the specialist and service locks: ``PUT specialists/{id}/services/`` (specialist
+    # row ``FOR UPDATE``) or ``PATCH services/{id}/`` (service row ``FOR UPDATE``) that committed meanwhile
+    # is seen here — a withdrawn offer or a retired service is refused, a new price / duration is snapshotted.
+    link = selectors.offered_link(professional.pk, service_id) if _hold_active_service(service_id) else None
+    if link is None:
+        raise _field("service_id", "does_not_exist", "field.service_not_offered")
     _check_consent(customer)
     now = timeutils.now()
     limit = int(settings.BOOKING_MAX_OPEN_PER_CUSTOMER)

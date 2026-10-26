@@ -37,6 +37,8 @@ CONTRACT_LABELS: dict[str, dict[str, str]] = {
         "cancelled": "Bekor qilindi",
     },
     "NOTIFICATION_KIND": {"promo": "Aksiya", "general": "Umumiy"},
+    "SPECIALIST_ROLE": {"dermatologist": "Dermatolog", "cosmetologist": "Kosmetolog"},
+    "SERVICE_CATEGORY": {"dermatology": "Dermatologiya", "cosmetology": "Kosmetologiya"},
 }
 ENUM_FOR_LABELS = {
     "ORDER_STATUS": enums.OrderStatus,
@@ -49,6 +51,8 @@ ENUM_FOR_LABELS = {
     "LEDGER_KIND": enums.LedgerKind,
     "NOTIFICATION_STATE": enums.NotificationState,
     "NOTIFICATION_KIND": enums.NotificationKind,
+    "SPECIALIST_ROLE": enums.SpecialistRole,
+    "SERVICE_CATEGORY": enums.ServiceCategory,
 }
 
 
@@ -65,6 +69,12 @@ def test_yes_no() -> None:
     """Contract 5.8: Booleans in exports "Ha" / "Yo‘q"."""
     assert labels.yes_no(True) == "Ha"
     assert labels.yes_no(False) == "Yo‘q"
+
+
+def test_active_label() -> None:
+    """Contract 5.8: ``is_active`` of specialists and services "Faol" / "Nofaol"."""
+    assert labels.active_label(True) == "Faol"
+    assert labels.active_label(False) == "Nofaol"
 
 
 def test_refund_state_line_by_reason_and_provider() -> None:

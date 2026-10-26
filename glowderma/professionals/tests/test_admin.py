@@ -113,6 +113,7 @@ def test_add_change_and_delete_go_through_the_services() -> None:
             "description_uz": "",
             "description_ru": "",
             "description_en": "",
+            "category": "cosmetology",
             "default_duration_min": 40,
             "default_price": 500000,
             "position": 7,
@@ -134,6 +135,7 @@ def test_add_change_and_delete_go_through_the_services() -> None:
         "description_uz": "",
         "description_ru": "",
         "description_en": "",
+        "category": "cosmetology",
         "default_duration_min": 50,
         "default_price": 500000,
         "position": 7,
@@ -322,6 +324,7 @@ def test_a_refused_save_rolls_back_and_shows_the_errors_on_the_form(monkeypatch:
         {
             "name_uz": "Yangi",
             "short_name_uz": "Yangi",
+            "category": "dermatology",
             "default_duration_min": 30,
             "default_price": 100000,
             "position": 1,
