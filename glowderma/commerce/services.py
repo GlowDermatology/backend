@@ -25,7 +25,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from django.db import transaction
+from django.db import OperationalError, connection, transaction
 from django.utils import timezone
 
 from glowderma.accounts.models import Address, Customer, Device, StaffUser
@@ -49,6 +49,7 @@ from glowderma.integrations.bts.ports import BtsUnavailable
 from glowderma.integrations.bts.registry import get_bts
 from glowderma.loyalty import selectors as loyalty_selectors
 from glowderma.loyalty import services as loyalty_services
+from glowderma.loyalty.models import LedgerEntry, LoyaltyAccount
 from glowderma.payments import selectors as payment_selectors
 from glowderma.payments import services as payment_services
 from glowderma.payments.models import OPEN_REFUND_STATES
@@ -62,6 +63,11 @@ MESSAGE_RETRY_PENDING = "BTS so‘rovi allaqachon yuborilmoqda."
 MESSAGE_REFUND_NOT_RESOLVABLE = "Bu qaytarishni yakunlab bo‘lmaydi."
 MESSAGE_REFUND_NOT_RETRYABLE = "Bu qaytarishni qayta yuborib bo‘lmaydi."
 MESSAGE_REFUND_OPEN = "Bu to‘lov uchun qaytarish allaqachon jarayonda."
+MESSAGE_ORDER_BUSY = "Buyurtma boshqa amal bilan band. Birozdan so‘ng qayta urinib ko‘ring."
+MESSAGE_PURCHASE_CONFLICT = "Buyurtma xaridi boshqa mijozga tegishli. Ma’lumotlarni tekshiring."
+# How long an admin request waits for the order row (a BTS create holds it across two bounded BTS calls).
+ADMIN_LOCK_WAIT = timedelta(seconds=5)
+LOCK_NOT_AVAILABLE = "55P03"  # PostgreSQL SQLSTATE lock_not_available (lock_timeout expired)
 REASON_MIN_LENGTH = 3
 REASON_MAX_LENGTH = 500
 
@@ -98,13 +104,58 @@ def _aware(value: datetime | None, name: str) -> None:
         raise ValueError(f"{name} must be timezone-aware")
 
 
-def lock_order(order_id: int, *, skip_locked: bool = False) -> Order:
-    """The order row ``SELECT … FOR UPDATE OF`` itself — the first lock of every flow."""
+def _set_lock_timeout(value: str) -> None:
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT set_config('lock_timeout', %s, true)", [value])
+
+
+def lock_order(order_id: int, *, skip_locked: bool = False, wait: timedelta | None = None) -> Order:
+    """The order row ``SELECT … FOR UPDATE OF`` itself — the first lock of every flow.
+
+    ``wait`` bounds the wait for the row (``SET LOCAL lock_timeout`` inside a savepoint, restored right after
+    the row is locked): the admin paths pass :data:`ADMIN_LOCK_WAIT` and answer 409 ``conflict``
+    (:data:`MESSAGE_ORDER_BUSY`) instead of queueing behind a BTS call without limit.
+    """
     qs = Order.objects.select_for_update(of=("self",), skip_locked=skip_locked).filter(pk=order_id)
-    order = qs.first()
+    if wait is None:
+        order = qs.first()
+    else:
+        try:
+            with transaction.atomic():
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT current_setting('lock_timeout')")
+                    row = cursor.fetchone()
+                previous = str(row[0]) if row else "0"
+                _set_lock_timeout(f"{max(1, int(wait.total_seconds() * 1000))}ms")
+                order = qs.first()
+                _set_lock_timeout(previous)
+        except OperationalError as exc:
+            if getattr(exc.__cause__, "sqlstate", None) == LOCK_NOT_AVAILABLE:
+                raise Conflict(MESSAGE_ORDER_BUSY) from exc
+            raise
     if order is None:
         raise OrderNotFound(f"Order {order_id} does not exist")
     return order
+
+
+def ledger_instant(customer_id: int, floor: datetime) -> datetime:
+    """The instant a live flow posts the customer's ledger entries at: ``max(floor, newest entry's at)``,
+    read under the ``LoyaltyAccount`` row lock, which this transaction then keeps until it commits.
+
+    ``post_entry`` refuses an explicit ``at`` older than the account's newest entry (T19), and
+    ``record_online_purchase`` / ``reverse_purchase`` require an explicit ``at``. A ``now()`` read before
+    that lock (before a BTS call or an Order-lock wait) is older than any entry another transaction posts
+    meanwhile (a POS sale, an adjustment, another order's capture), so the live flows take their instant
+    here instead. Thin adapter: ``loyalty`` has no service that locks the account without writing, so
+    ``commerce`` takes the same ``FOR UPDATE OF`` lock itself (lock order Order → Payment → LoyaltyAccount
+    is kept: callers take it after the Payment lock).
+    """
+    account_id = loyalty_services.get_or_create_account(customer_id)
+    LoyaltyAccount.objects.select_for_update(of=("self",)).filter(pk=account_id).only("id").first()
+    newest = (
+        LedgerEntry.objects.filter(account_id=account_id).order_by("-at").values_list("at", flat=True).first()
+    )
+    return floor if newest is None or newest <= floor else newest
 
 
 def fake_scenario(order: Order, provider: str) -> dict[str, Any]:
@@ -243,13 +294,14 @@ def create_order(
 ) -> int:
     """Checkout (03 §4.1 row 1): snapshot the lines, reserve stock, hold cashback → ``awaiting_payment``.
 
-    ``items`` are ``(product_id, quantity)`` in cart order (one line per product). The delivery fee is the
-    BTS tariff quote for the address (``0`` for pickup); ``cashback_used`` (≤ ``items_subtotal``) becomes a
-    ``loyalty`` hold until the reservation expires. Stock is checked under the ``ProductStock`` row locks
-    (:class:`OutOfStock`); ``enforce_stock=False`` is for the demo seeder only, whose orders are replayed at
-    historical instants against today's Billz stock. ``order_id``/``billz_order_uuid`` pin design ids (seed
-    only). Writes the ``Order``, items, reservations, the hold, the ``pending`` payment, the delivery
-    shipment and the events ``order_created`` + ``reservation_created``; no outbox, no audit. Returns the id.
+    ``items`` are ``(product_id, quantity)`` in cart order (one line per product). The delivery fee is the BTS
+    tariff quote for the address (``0`` for pickup), asked **before** any row lock is taken; ``cashback_used``
+    (≤ ``items_subtotal``) becomes a ``loyalty`` hold until the reservation expires. Stock is checked under
+    the ``ProductStock`` row locks (:class:`OutOfStock`); ``enforce_stock=False`` is for the demo seeder only,
+    whose orders are replayed at historical instants against today's Billz stock.
+    ``order_id``/``billz_order_uuid`` pin design ids (seed only). Writes the ``Order``, items, reservations,
+    the hold, the ``pending`` payment, the delivery shipment and the events ``order_created`` +
+    ``reservation_created``; no outbox, no audit. Returns the id.
     """
     _aware(at, "at")
     instant = at or timeutils.now()
@@ -276,21 +328,6 @@ def create_order(
         if missing:
             raise CheckoutError(f"Unknown products {sorted(missing)}")
         lines = [_Line(products[product_id], quantity) for product_id, quantity in items]
-        if enforce_stock:
-            list(
-                ProductStock.objects.select_for_update(of=("self",))
-                .filter(product_id__in=product_ids)
-                .order_by("product_id")
-            )
-            available = selectors.available_stock(product_ids)
-            short = [
-                line.product.pk
-                for line in lines
-                if line.product.status != enums.ProductStatus.ACTIVE
-                or available.get(line.product.pk, 0) < line.quantity
-            ]
-            if short:
-                raise OutOfStock(short)
         items_subtotal = sum(line.product.price * line.quantity for line in lines)
         promo_subtotal = sum(line.product.price * line.quantity for line in lines if line.product.promo)
         if not 0 <= cashback_used <= items_subtotal:
@@ -325,6 +362,22 @@ def create_order(
         total = items_subtotal + delivery_fee - cashback_used
         if total <= 0:
             raise CheckoutError("The order total must be positive")
+        # the BTS quote above runs before any row lock; the stock rows are locked only from here to commit
+        if enforce_stock:
+            list(
+                ProductStock.objects.select_for_update(of=("self",))
+                .filter(product_id__in=product_ids)
+                .order_by("product_id")
+            )
+            available = selectors.available_stock(product_ids)
+            short = [
+                line.product.pk
+                for line in lines
+                if line.product.status != enums.ProductStatus.ACTIVE
+                or available.get(line.product.pk, 0) < line.quantity
+            ]
+            if short:
+                raise OutOfStock(short)
         minutes = SiteSettings.load().reservation_minutes
         expires_at = instant + timedelta(minutes=minutes)
         if billz_order_uuid is not None:
@@ -411,9 +464,9 @@ def mark_paid(order_id: int, provider_txn_id: str, at: datetime | None = None) -
     it into a late-capture refund). Idempotent for the same transaction on a paid order.
     """
     _aware(at, "at")
-    instant = at or timeutils.now()
     with transaction.atomic():
         order = lock_order(order_id)
+        instant = at or timeutils.now()  # after the Order lock
         paid = payment_selectors.active_payment(order_id, enums.PaymentStatus.PAID)
         if order.status != _S.AWAITING_PAYMENT:
             if paid is not None and paid.transaction_id == provider_txn_id:
@@ -423,10 +476,12 @@ def mark_paid(order_id: int, provider_txn_id: str, at: datetime | None = None) -
         if pending is None:
             raise InvalidTransition(f"Order {order_id} has no pending payment")
         payment_services.confirm_payment(pending.id, provider_txn_id, instant)
-        confirm_payment_effects(order_id, pending.id, instant)
+        confirm_payment_effects(order_id, pending.id, at, floor=instant)
 
 
-def confirm_payment_effects(order_id: int, payment_id: int, at: datetime | None = None) -> None:
+def confirm_payment_effects(
+    order_id: int, payment_id: int, at: datetime | None = None, *, floor: datetime | None = None
+) -> None:
     """After-payment orchestration (03 §4.1 row 2) for an order whose payment is already ``paid``.
 
     Reservations ``active → converted`` (Billz owns ``ProductStock``; converted units count against
@@ -435,9 +490,13 @@ def confirm_payment_effects(order_id: int, payment_id: int, at: datetime | None 
     ``payment_confirmed`` (+ ``cashback_credited`` when the credit is positive); outbox ``billz.push_sale``
     (the Billz order UUID is persisted on the purchase first), ``bts.create_shipment`` for delivery orders
     and ``push.order_status processing``. No audit (system).
+
+    Without an explicit ``at`` (every live path) the instant of the step is :func:`ledger_instant` — read
+    under the Order → Payment → LoyaltyAccount locks, never before them (``floor`` is the caller's instant,
+    e.g. the payment's ``confirmed_at``). An explicit ``at`` (the seeder) is used as given.
     """
     _aware(at, "at")
-    instant = at or timeutils.now()
+    _aware(floor, "floor")
     with transaction.atomic():
         order = lock_order(order_id)
         payment = payment_selectors.get_payment(payment_id)
@@ -449,6 +508,7 @@ def confirm_payment_effects(order_id: int, payment_id: int, at: datetime | None 
             if OrderEvent.objects.filter(order=order, type=_E.PAYMENT_CONFIRMED).exists():
                 return  # replay of an applied capture
             raise InvalidTransition(f"Order {order_id} is {order.status}, not awaiting payment")
+        instant = at or ledger_instant(order.customer_id, floor or timeutils.now())
         converted = StockReservation.objects.filter(order=order, state=StockReservation.State.ACTIVE).update(
             state=StockReservation.State.CONVERTED, converted_at=instant, updated_at=instant
         )
@@ -634,22 +694,31 @@ def cancel_order(
       are released;
     * ``processing`` / ``handed_to_courier`` → a BTS parcel that exists is cancelled **first**, synchronously
       (refusal → 409 ``not_cancellable`` with BTS's reason; transport failure → 503 ``provider_unavailable``;
-      nothing is written before the answer); then a Refund (Click ``requested`` + outbox, Payme
+      nothing is written before the answer, and every check that can refuse runs before the call; BTS
+      answers ``ok`` again for a parcel it already cancelled, so a cancel rolled back after BTS agreed is
+      simply repeated); then a Refund (Click ``requested`` + outbox, Payme
       ``manual_required``; the payment stays ``paid``) and one reversal per unreversed debit/credit;
     * ``delivered`` / ``cancelled`` → 409 ``not_cancellable``.
 
     Effects: ``cancelled`` (reason ``admin``, note, ``cancelled_by``), events ``cancelled`` (+
-    ``refund_requested``), push ``cancelled``, audit ``order.cancelled``.
+    ``refund_requested``), push ``cancelled``, audit ``order.cancelled``. The Order lock is awaited at most
+    :data:`ADMIN_LOCK_WAIT` (409 ``conflict``); the reversal instant is :func:`ledger_instant`.
     """
     _aware(at, "at")
     note = clean_reason(reason)
+    actor = StaffUser.objects.get(pk=actor_id)
     with transaction.atomic():
-        order = lock_order(order_id)
+        order = lock_order(order_id, wait=ADMIN_LOCK_WAIT)
         if not state.can_cancel(order.status):
             raise NotCancellable(MESSAGE_NOT_CANCELLABLE)
         instant = at or timeutils.now()
         bts_cancelled = False
+        paid = None
+        purchase = None
         if order.status in (_S.PROCESSING, _S.HANDED_TO_COURIER):
+            # everything that can refuse runs before the BTS cancel, the only effect outside the database
+            paid = payment_selectors.active_payment(order.pk, enums.PaymentStatus.PAID)
+            purchase = loyalty_selectors.purchase_for_order(order.pk)
             shipment = delivery_selectors.shipment_info(order.pk)
             has_parcel = shipment is not None and shipment.state == Shipment.State.CREATED
             if order.status == _S.HANDED_TO_COURIER and not has_parcel:
@@ -684,13 +753,13 @@ def cancel_order(
             )
             loyalty_services.release_hold(order.pk, "order_cancelled", at=instant)
         else:
-            paid = payment_selectors.active_payment(order.pk, enums.PaymentStatus.PAID)
             if paid is not None:
                 refund = payment_services.create_refund(
                     paid.id, paid.amount, actor_id, at=instant, request=request
                 )
-            purchase = loyalty_selectors.purchase_for_order(order.pk)
             if purchase is not None:
+                # read under the LoyaltyAccount lock, after the BTS call (T19: never an older instant)
+                instant = at or ledger_instant(order.customer_id, instant)
                 reversal = loyalty_services.reverse_purchase(purchase.id, instant, actor_id)
                 cashback_reversed = len(reversal.reversal_entry_ids) > 0
         _set_status(
@@ -731,12 +800,13 @@ def cancel_order(
                 at=instant,
             )
         _enqueue_push(order, _S.CANCELLED, cancelled)
-        _audit(
-            state.AUDIT_ORDER_CANCELLED,
-            order,
-            actor_id,
-            request,
-            {
+        audit.record(
+            action=state.AUDIT_ORDER_CANCELLED,
+            entity_type="order",
+            entity_id=str(order.pk),
+            actor=actor,
+            request=request,
+            after={
                 "reason": enums.CancellationReason.ADMIN,
                 "note": note,
                 "refund_id": refund_id,
@@ -756,7 +826,7 @@ def transition(
     409 ``invalid_transition``. Event ``status_changed``, push, audit ``order.status_changed``."""
     _aware(at, "at")
     with transaction.atomic():
-        order = lock_order(order_id)
+        order = lock_order(order_id, wait=ADMIN_LOCK_WAIT)
         if status not in state.manual_transitions(order.status, order.fulfilment):
             raise InvalidTransition(MESSAGE_INVALID_TRANSITION)
         instant = at or timeutils.now()
@@ -824,7 +894,7 @@ def retry_shipment(order_id: int, actor_id: int, *, request: Any = None) -> None
     ``bts.create_shipment`` and audits ``order.shipment_retry_requested``. Both checks run under the Order
     lock, so two concurrent retries cannot both enqueue."""
     with transaction.atomic():
-        order = lock_order(order_id)
+        order = lock_order(order_id, wait=ADMIN_LOCK_WAIT)
         shipment = delivery_selectors.shipment_info(order.pk)
         open_delivery = order.fulfilment == enums.FulfilmentMethod.DELIVERY and order.status == _S.PROCESSING
         if shipment is None or not open_delivery or shipment.state != Shipment.State.FAILED:
@@ -865,29 +935,44 @@ def record_refund_outcome(order: Order, refund: payment_services.RefundResult, *
         )
 
 
+def _locked_refund_row(refund_id: int) -> tuple[Order, payment_selectors.RefundRow]:
+    """The refund re-read under its order's lock (the state checks of resolve/retry happen here)."""
+    row = payment_selectors.get_refund(refund_id)
+    if row is None:
+        raise payment_services.RefundNotFound(f"Refund {refund_id} does not exist")
+    order = lock_order(row.order_id, wait=ADMIN_LOCK_WAIT)
+    locked = payment_selectors.get_refund(refund_id)
+    if locked is None:  # pragma: no cover - refunds are never deleted
+        raise payment_services.RefundNotFound(f"Refund {refund_id} does not exist")
+    return order, locked
+
+
 def resolve_refund(
     refund_id: int, outcome: str, actor_id: int | None, *, at: datetime | None = None, request: Any = None
 ) -> payment_services.RefundResult:
     """Close a ``manual_required`` / ``unknown`` refund as ``succeeded`` or ``failed`` (contract §7 item 18
-    ``…/resolve/``; with ``actor_id=None`` it stands for Payme's ``CancelTransaction``). Writes the
-    ``refund_succeeded`` / ``refund_failed`` event under the Order lock."""
+    ``…/resolve/``; with ``actor_id=None`` it stands for Payme's ``CancelTransaction``). The state is checked
+    under the Order lock (two concurrent resolves: the second gets 409 ``invalid_transition`` with the
+    Uzbek message); writes the ``refund_succeeded`` / ``refund_failed`` event."""
     _aware(at, "at")
-    instant = at or timeutils.now()
-    row = payment_selectors.get_refund(refund_id)
-    if row is None:
-        raise payment_services.RefundNotFound(f"Refund {refund_id} does not exist")
-    if row.state not in (enums.RefundState.MANUAL_REQUIRED, enums.RefundState.UNKNOWN):
-        raise InvalidTransition(MESSAGE_REFUND_NOT_RESOLVABLE)
+    if outcome not in (enums.RefundState.SUCCEEDED, enums.RefundState.FAILED):
+        raise ValueError(f"A refund resolves to succeeded or failed, not {outcome!r}")
     with transaction.atomic():
-        order = lock_order(row.order_id)
-        if outcome == enums.RefundState.SUCCEEDED:
-            result = payment_services.mark_succeeded(refund_id, instant, actor_id=actor_id, request=request)
-        elif outcome == enums.RefundState.FAILED:
-            result = payment_services.mark_failed(
-                refund_id, "resolved_failed", at=instant, actor_id=actor_id, request=request
-            )
-        else:
-            raise ValueError(f"A refund resolves to succeeded or failed, not {outcome!r}")
+        order, row = _locked_refund_row(refund_id)
+        if row.state not in (enums.RefundState.MANUAL_REQUIRED, enums.RefundState.UNKNOWN):
+            raise InvalidTransition(MESSAGE_REFUND_NOT_RESOLVABLE)
+        instant = at or timeutils.now()
+        try:
+            if outcome == enums.RefundState.SUCCEEDED:
+                result = payment_services.mark_succeeded(
+                    refund_id, instant, actor_id=actor_id, request=request
+                )
+            else:
+                result = payment_services.mark_failed(
+                    refund_id, "resolved_failed", at=instant, actor_id=actor_id, request=request
+                )
+        except InvalidTransition as exc:  # pragma: no cover - the state was checked under the lock
+            raise InvalidTransition(MESSAGE_REFUND_NOT_RESOLVABLE) from exc
         record_refund_outcome(order, result, at=instant)
         return result
 
@@ -896,19 +981,26 @@ def retry_refund(
     refund_id: int, actor_id: int, *, at: datetime | None = None, request: Any = None
 ) -> payment_services.RefundResult:
     """Retry a ``failed`` refund (contract §7 item 18 ``…/retry/``): a new refund of the payment (Click →
-    ``requested`` + outbox, Payme → ``manual_required``) and its ``refund_requested`` event."""
+    ``requested`` + outbox, Payme → ``manual_required``) and its ``refund_requested`` event. Refused with
+    the Uzbek messages under the Order lock: the refund is no longer ``failed``, its payment is no longer
+    ``paid`` (a later retry already returned the money), or another refund of the order is open."""
     _aware(at, "at")
-    instant = at or timeutils.now()
-    row = payment_selectors.get_refund(refund_id)
-    if row is None:
-        raise payment_services.RefundNotFound(f"Refund {refund_id} does not exist")
-    if row.state != enums.RefundState.FAILED:
-        raise InvalidTransition(MESSAGE_REFUND_NOT_RETRYABLE)
     with transaction.atomic():
-        order = lock_order(row.order_id)
+        order, row = _locked_refund_row(refund_id)
+        if row.state != enums.RefundState.FAILED:
+            raise InvalidTransition(MESSAGE_REFUND_NOT_RETRYABLE)
+        payment = payment_selectors.get_payment(row.payment_id)
+        if payment is None or payment.status != enums.PaymentStatus.PAID:
+            raise InvalidTransition(MESSAGE_REFUND_NOT_RETRYABLE)
         if any(r.state in OPEN_REFUND_STATES for r in payment_selectors.refunds_for_order(row.order_id)):
             raise Conflict(MESSAGE_REFUND_OPEN)
-        result = payment_services.retry_refund(refund_id, actor_id, at=instant, request=request)
+        instant = at or timeutils.now()
+        try:
+            result = payment_services.retry_refund(refund_id, actor_id, at=instant, request=request)
+        except InvalidTransition as exc:  # pragma: no cover - the states were checked under the lock
+            raise InvalidTransition(MESSAGE_REFUND_NOT_RETRYABLE) from exc
+        except Conflict as exc:  # pragma: no cover - idem
+            raise Conflict(MESSAGE_REFUND_OPEN) from exc
         record_event(
             order,
             _E.REFUND_REQUESTED,
@@ -937,6 +1029,7 @@ __all__ = [
     "expire_reservation",
     "fail_payment_effects",
     "fake_scenario",
+    "ledger_instant",
     "lock_order",
     "mark_paid",
     "push_sent",

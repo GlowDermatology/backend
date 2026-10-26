@@ -1,6 +1,7 @@
 """Payment confirmation (03 §4.1 row 2), provider failures (row 16) and reservation expiry (row 3)."""
 
 from datetime import timedelta
+from unittest import mock
 from uuid import UUID
 
 import pytest
@@ -13,7 +14,9 @@ from glowderma.core.api.exceptions import InvalidTransition
 from glowderma.core.models import OutboxMessage
 from glowderma.core.seeding import pinned_clock
 from glowderma.delivery.models import Shipment
+from glowderma.loyalty import services as loyalty_services
 from glowderma.loyalty.models import CashbackHold, LedgerEntry, Purchase
+from glowderma.payments import services as payment_services
 from glowderma.payments.models import Payment
 
 pytestmark = pytest.mark.django_db
@@ -190,3 +193,32 @@ def test_beat_task_expires_due_orders_only() -> None:
         assert order.status == status
     with pinned_clock(AT + timedelta(minutes=30)):
         assert services.expire_due_reservations() == [fresh.pk]
+
+
+def test_an_entry_posted_before_the_capture_locks_the_account_does_not_fail_mark_paid() -> None:
+    """P1b: a POS sale on the same account lands between the capture's clock read and its account lock; the
+    debit, the credit and the order effects are stamped at the newest entry, the capture never fails."""
+    seed_policies()
+    customer = shopper()
+    credit(customer, 30_000, AT - timedelta(days=1))
+    order = place(customer, cashback=10_000)
+    instant = AT + timedelta(minutes=3)
+    real_confirm = payment_services.confirm_payment
+
+    def confirm_with_a_pos_sale(*args: object, **kwargs: object) -> payment_services.PaymentResult:
+        result = real_confirm(*args, **kwargs)  # type: ignore[arg-type]
+        loyalty_services.record_store_purchase(
+            customer.pk, "S-RACE-2", "", 500_000, instant, at=instant + timedelta(seconds=2)
+        )
+        return result
+
+    with (
+        pinned_clock(instant),
+        mock.patch.object(payment_services, "confirm_payment", confirm_with_a_pos_sale),
+    ):
+        services.mark_paid(order.pk, txn(order))
+    order.refresh_from_db()
+    assert order.status == "processing" and order.paid_at == instant + timedelta(seconds=2)
+    debit = LedgerEntry.objects.get(order_id=order.pk, kind="debit")
+    assert debit.at == instant + timedelta(seconds=2)
+    assert Payment.objects.get(order=order).status == "paid"

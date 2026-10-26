@@ -53,8 +53,8 @@ def _order_or_404[T](call: Callable[[], T]) -> T:
         return call()
     except services.OrderNotFound as exc:
         raise NotFound from exc
-    except PurchaseConflict as exc:
-        raise Conflict(str(exc)) from exc
+    except PurchaseConflict as exc:  # loyalty's text is internal English: answer with the Uzbek message
+        raise Conflict(services.MESSAGE_PURCHASE_CONFLICT) from exc
 
 
 def _actor_id(request: Request) -> int:

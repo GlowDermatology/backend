@@ -1,6 +1,7 @@
 """commerce.services.cancel_order — contract §2.2 cancel table (03 §4.1 rows 4/6/7; 02 §1.10)."""
 
 from datetime import timedelta
+from unittest import mock
 
 import pytest
 
@@ -11,8 +12,14 @@ from glowderma.core import enums
 from glowderma.core.api.exceptions import NotCancellable, ProviderUnavailable
 from glowderma.core.models import AuditEntry, OutboxMessage
 from glowderma.core.seeding import pinned_clock
+from glowderma.delivery import services as delivery_services
 from glowderma.delivery.models import Shipment, ShipmentEvent
+from glowderma.integrations.bts import fake as fake_bts
+from glowderma.integrations.bts.fake import FakeBts
+from glowderma.integrations.bts.ports import Parcel
+from glowderma.loyalty import services as loyalty_services
 from glowderma.loyalty.models import CashbackHold, LedgerEntry, Purchase
+from glowderma.payments import services as payment_services
 from glowderma.payments.models import Payment, Refund
 
 pytestmark = pytest.mark.django_db
@@ -197,3 +204,63 @@ def test_reason_is_checked_by_the_service_too() -> None:
         services.cancel_order(place().pk, "  x ", admin().pk)
     with pytest.raises(services.OrderNotFound):
         services.cancel_order(10**9, NOTE, admin().pk)
+
+
+# --- review fixes: the BTS cancel is repeatable, the reversal instant is read under the account lock -------
+
+
+def test_a_failure_after_the_bts_cancel_rolls_back_and_the_retried_cancel_succeeds() -> None:
+    """BTS agreed, then a later step raised: the transaction rolled back (order processing, shipment
+    created/100) while BTS holds a cancelled parcel. The retried cancel asks BTS again, which answers ok
+    for a parcel it already cancelled, and the cancel completes."""
+    staff = admin()
+    order = ship(place())
+    with mock.patch.object(payment_services, "create_refund", side_effect=RuntimeError("database lost")):
+        with pytest.raises(RuntimeError):
+            _cancel(order, staff.pk)
+    order.refresh_from_db()
+    shipment = Shipment.objects.get(order=order)
+    assert (order.status, shipment.state, shipment.bts_status) == ("processing", "created", "100")
+    assert str(order.pk) in fake_bts._cancelled  # BTS did cancel the parcel
+    assert not Refund.objects.exists() and not OrderEvent.objects.filter(type="cancelled").exists()
+    result = _cancel(order, staff.pk, minutes=61)
+    assert result.bts_cancelled and result.refund_id is not None
+    assert Shipment.objects.get(order=order).state == "cancelled"
+    assert Order.objects.get(pk=order.pk).status == "cancelled"
+
+
+def test_fake_bts_cancel_is_idempotent_at_the_provider_boundary() -> None:
+    parcel = Parcel(
+        client_id="777", tracking_number="48200777", bts_order_id="BTS-777", tariff=25_000, status="100"
+    )
+    assert FakeBts().cancel(parcel).ok
+    # already cancelled: ok even where a first cancel would be refused
+    assert FakeBts({"cancel": "refused"}).cancel(parcel).ok
+    assert FakeBts({"status": "200"}).cancel(parcel).ok
+
+
+def test_an_entry_posted_during_the_cancel_window_does_not_fail_the_reversal() -> None:
+    """P1: the cancel read its instant, then (during the BTS call) a POS sale was posted on the same account
+    one second later. The reversal is stamped under the account lock (≥ that entry): no OutOfOrderPosting."""
+    seed_policies()
+    staff = admin()
+    customer = shopper()
+    credit(customer, 30_000, AT - timedelta(days=1))
+    order = ship(place(customer, cashback=10_000))
+    instant = order.created_at + timedelta(minutes=60)
+    real_cancel = delivery_services.cancel
+
+    def bts_cancel_with_a_pos_sale(*args: object, **kwargs: object) -> delivery_services.CancelOutcome:
+        loyalty_services.record_store_purchase(
+            customer.pk, "S-RACE-1", "", 500_000, instant, at=instant + timedelta(seconds=1)
+        )
+        return real_cancel(*args, **kwargs)  # type: ignore[arg-type]
+
+    with mock.patch.object(delivery_services, "cancel", side_effect=bts_cancel_with_a_pos_sale):
+        result = _cancel(order, staff.pk)
+    assert result.bts_cancelled and result.cashback_reversed
+    reversals = LedgerEntry.objects.filter(order_id=order.pk, kind="reversal")
+    assert reversals.count() == 2
+    assert all(entry.at == instant + timedelta(seconds=1) for entry in reversals)
+    order.refresh_from_db()
+    assert (order.status, order.cancelled_at) == ("cancelled", instant + timedelta(seconds=1))

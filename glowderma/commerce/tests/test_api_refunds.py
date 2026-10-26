@@ -1,17 +1,20 @@
 """Admin API — the refund operations of the payments screen (contract §7 item 18): retry a ``failed`` refund,
 resolve an ``unknown`` / ``manual_required`` one; both write the order events and the audit trail."""
 
+import uuid
 from datetime import timedelta
 from typing import Any
+from unittest import mock
 
 import pytest
 from rest_framework.test import APIClient
 
 from glowderma.commerce import services, topics
-from glowderma.commerce.models import OrderEvent
+from glowderma.commerce.models import Order, OrderEvent
 from glowderma.commerce.tests.support import AT, admin, deliver, pay, place
 from glowderma.core.models import AuditEntry, OutboxMessage
 from glowderma.core.seeding import pinned_clock
+from glowderma.loyalty.services import PurchaseConflict
 from glowderma.payments.models import Payment, Refund
 
 pytestmark = pytest.mark.django_db
@@ -89,3 +92,47 @@ def test_refund_routes_404(staff_client: APIClient) -> None:
         ).status_code
         == 404
     )  # noqa: E501
+
+
+def test_retry_of_a_refund_whose_payment_was_refunded_since_is_refused_in_uzbek(
+    staff_client: APIClient,
+) -> None:
+    """A failed refund, retried successfully: retrying the old failed row again must answer the contract's
+    Uzbek message, never payments' internal "Payment N is refunded, not paid"."""
+    order, refund = _cancelled("click", refund="failed")
+    deliver(topics.REFUND_SUBMIT, order.pk)
+    assert Refund.objects.get(pk=refund.pk).state == "failed"
+    assert staff_client.post(_url(refund, "retry"), {}, format="json").status_code == 200
+    Order.objects.filter(pk=order.pk).update(metadata={})  # Click accepts the reversal this time
+    deliver(topics.REFUND_SUBMIT, order.pk)
+    assert Payment.objects.get(order=order).status == "refunded"
+    again = staff_client.post(_url(refund, "retry"), {}, format="json")
+    assert again.status_code == 409
+    assert again.json()["code"] == "invalid_transition"
+    assert again.json()["message"] == "Bu qaytarishni qayta yuborib bo‘lmaydi."
+
+
+def test_resolve_of_a_closed_refund_is_refused_in_uzbek(staff_client: APIClient) -> None:
+    order, refund = _cancelled("click")
+    deliver(topics.REFUND_SUBMIT, order.pk)
+    assert Refund.objects.get(pk=refund.pk).state == "succeeded"
+    for state in ("failed", "succeeded"):
+        response = staff_client.post(_url(refund, "resolve"), {"state": state}, format="json")
+        assert response.status_code == 409
+        assert response.json()["message"] == "Bu qaytarishni yakunlab bo‘lmaydi."
+
+
+def test_a_loyalty_purchase_conflict_is_answered_in_uzbek(staff_client: APIClient) -> None:
+    order = pay(place(fulfilment="pickup"))
+    conflict = PurchaseConflict(f"Order {order.pk} already belongs to another customer's purchase")
+    with mock.patch.object(services, "transition", side_effect=conflict):
+        response = staff_client.post(
+            f"/api/v1/admin/orders/{order.pk}/transition/",
+            {"status": "delivered"},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
+        )
+    assert response.status_code == 409
+    assert response.json()["code"] == "conflict"
+    assert response.json()["message"] == services.MESSAGE_PURCHASE_CONFLICT
+    assert "already belongs" not in response.content.decode()
