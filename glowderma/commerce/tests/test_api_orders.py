@@ -96,6 +96,14 @@ def test_search_rule(staff_client: APIClient) -> None:
     assert staff_client.get(URL, {"search": "x" * 65}).status_code == 400
 
 
+@pytest.mark.parametrize("term", ["g'ulom", "G`ULOM", "g\u2019ulom", "g\u02bbulom", "g\u02bculom"])
+def test_search_folds_apostrophes_in_customer_names(staff_client: APIClient, term: str) -> None:
+    """Gap CRIT-SEARCH-UZ-APOSTROPHE (GC-1): the name match folds the six apostrophe encodings."""
+    dilnoza = place(shopper(name="Dilnoza G\u2018ulomova", phone="+998901234567"))
+    place(shopper(name="Sardor Umarov", phone="+998993007215"))
+    assert _ids(staff_client.get(URL, {"search": term})) == [dilnoza.pk]
+
+
 def test_period_and_dates_use_tashkent_days(staff_client: APIClient) -> None:
     last_second = place(when=at(19, 23, 59, 59))
     midnight = place(when=at(20, 0, 0, 0))

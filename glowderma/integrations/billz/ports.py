@@ -11,6 +11,15 @@ tables itself. The fake adapter needs the products the shop already knows (to an
 fields, no drift"), so the caller hands it a :class:`KnownProducts` view — a small read protocol the
 catalog module implements over its own selectors.
 
+Stock freshness (gap X-STOCK-FRESHNESS): ``read_stock(billz_ids, budget_seconds=…)`` reads the current Billz
+row of each barcode (one lookup per barcode, one deadline for all of them) and never raises for a Billz
+failure: what it could not read because Billz failed (transport error, 5xx, auth, circuit open) is
+reported :attr:`StockRead.unavailable`; what it did not reach because the call's own budget ran out
+(:class:`BillzOutOfTime`: the deadline, the limiter wait, a 429 pause) or because one barcode's search was too
+ambiguous is :attr:`StockRead.deferred` — except a request the deadline cut short before Billz answered any
+lookup of the call, which is Billz not answering (unavailable); what Billz does not know
+:attr:`StockRead.unknown`.
+
 Catalog sync: ``iter_products(mode)`` yields every row of one run. A ``full`` run yields the **complete**
 listing or raises (every page arrived, the count is plausible), so the caller may hide the products Billz no
 longer lists; a ``delta`` run yields what changed since the last successful run. Once the caller has applied
@@ -38,7 +47,7 @@ refunds of paid sales, per-receipt discovery of in-store sales, webhooks). Every
 was never sent, or Billz answered with a refusal).
 """
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Literal, Protocol
@@ -57,6 +66,17 @@ class BillzProduct:
     price: int | None  # Billz's own price, reference only (contract: ``billz_price``)
     stock: int  # Billz can report negatives after returns
     synced_at: datetime  # when these values were read from Billz
+
+
+@dataclass(frozen=True, slots=True)
+class StockRead:
+    """What one :meth:`BillzPort.read_stock` call learned; every requested barcode is in exactly one set."""
+
+    rows: Mapping[str, BillzProduct]  # barcode → Billz's row (``synced_at`` = when that barcode was asked)
+    unknown: frozenset[str]  # Billz does not know the barcode (no sellable stock)
+    unavailable: frozenset[str]  # not read because Billz failed: transport error, 5xx, auth, circuit open
+    # not reached because the call's own budget ran out (BillzOutOfTime) or the search was ambiguous
+    deferred: frozenset[str] = frozenset()
 
 
 class BillzError(Exception):
@@ -88,6 +108,16 @@ class BillzUnavailable(BillzError):
 
     The request may be retried later; a write whose outcome is unknown is re-checked before it is repeated.
     """
+
+
+class BillzOutOfTime(BillzUnavailable):
+    """The call's own budget ran out, not Billz: the deadline passed, the limiter's wait (our shared rate
+    limit, or Billz's 429 pause) was used up, or a read was cut short by the deadline. ``read_stock`` reports
+    the barcodes it did not reach :attr:`StockRead.deferred` rather than unavailable (review: a healthy but
+    slow or rate-limited Billz must not refuse a checkout). ``cut_short``: a request was in flight when the
+    deadline cut it (Billz had not answered yet), as opposed to a wait that never sent anything."""
+
+    cut_short = False
 
 
 class BillzMisconfigured(BillzUnavailable):
@@ -236,6 +266,14 @@ class BillzPort(Protocol):
         """One product by Billz id or barcode; ``None`` when Billz does not know it."""
         ...
 
+    def read_stock(
+        self, billz_ids: Sequence[str], *, budget_seconds: float, interactive: bool = True
+    ) -> StockRead:
+        """The current Billz row of each barcode, in the given order, all within ``budget_seconds``
+        (``interactive``: the customer-request client profile, else the batch one). Never raises for a Billz
+        failure: the barcodes it could not read are :attr:`StockRead.unavailable` (module doc)."""
+        ...
+
     def iter_products(self, mode: ImportMode) -> Iterator[BillzProduct]:
         """Every product of a ``delta`` (changed since the last sync) or ``full`` import (module doc)."""
         ...
@@ -269,7 +307,10 @@ STORE_SALE_NOT_SUPPORTED = (
     "the public API has no lookup of a sale by receipt and no sales feed (open questions L6/L7); "
     "in-store purchases are not discovered automatically"
 )
-WEBHOOKS_NOT_SUPPORTED = "Billz sends no webhooks; the catalog is polled (hourly delta, daily full sync)"
+WEBHOOKS_NOT_SUPPORTED = (
+    "Billz sends no webhooks; the catalog is polled (a delta every BILLZ_DELTA_SYNC_SECONDS, a daily full "
+    "sync) and stale cart lines are re-read at cart writes and checkout"
+)
 
 
 def refuse_refund(billz_order_id: str) -> None:

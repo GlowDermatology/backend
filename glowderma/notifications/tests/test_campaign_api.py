@@ -108,7 +108,7 @@ def test_list_shape_ordering_and_filters(staff_client: APIClient, staff: StaffUs
         "title": "Rejalashtirilgan",
         "body": scheduled.body,
         "image_url": None,
-        "link": {"kind": "none", "product_id": None, "label": None},
+        "link": {"kind": "none", "product_id": None, "label": None, "url": None},
         "audience": {
             "type": "segment",
             "segment_id": segment.pk,
@@ -132,6 +132,7 @@ def test_list_shape_ordering_and_filters(staff_client: APIClient, staff: StaffUs
         "kind": "product",
         "product_id": product.pk,
         "label": "Seramidli namlantiruvchi krem",
+        "url": None,
     }
     done = body["results"][3]
     assert (done["state"], done["sent"], done["failed"], done["delivered"]) == ("sent", 10, 0, 7)
@@ -180,8 +181,8 @@ def test_export_csv_and_xlsx(staff_client: APIClient, clock: Any) -> None:
     assert response.status_code == 200
     assert response["Content-Disposition"] == 'attachment; filename="bildirishnomalar-20261024-1205.csv"'
     lines = response.content.decode("utf-8-sig").split("\r\n")
-    assert lines[0] == '"ID";"Sana";"Turi";"Sarlavha";"Auditoriya";"Holat";"Yuborildi";"Yetkazildi"'
-    assert '"2026-10-20 09:00";"Umumiy";"Hammaga";"Barcha · 4 751";"Navbatda";"";""' in lines[1]
+    assert lines[0] == '"ID";"Sana";"Turi";"Sarlavha";"Auditoriya";"Holat";"Yuborildi";"Yetkazildi";"Havola"'
+    assert '"2026-10-20 09:00";"Umumiy";"Hammaga";"Barcha · 4 751";"Navbatda";"";"";""' in lines[1]
     assert '"\'=Bitta";"Bitta mijoz · +998 90 123 45 67";"Navbatda"' in lines[2]
     full = staff_client.get(URL, {"export": "xlsx"})
     assert full.status_code == 200 and full["Content-Type"].startswith("application/vnd.openxmlformats")
@@ -278,6 +279,7 @@ def test_create_queued_sends_end_to_end(
         "kind": "product",
         "product_id": product.pk,
         "label": "Seramidli namlantiruvchi krem",
+        "url": None,
     }
     assert record["audience"] == {"type": "all", "segment_id": None, "segment_name": None, "phone": None}
     assert record["recipient_count"] == 4 and record["state"] == "queued" and record["scheduled_at"] is None
@@ -318,6 +320,7 @@ def test_create_queued_sends_end_to_end(
         "inbox_id": first.data["inbox_id"],
         "campaign_id": str(campaign.pk),
         "product_id": str(product.pk),
+        "link_url": "",
     }
     assert InboxNotification.objects.get(pk=int(first.data["inbox_id"])).source_id == campaign.pk
     assert (first.android_channel, first.android_priority, first.image_url) == (
@@ -446,6 +449,15 @@ def test_create_for_one_customer_without_devices_is_sent_at_once(staff_client: A
         ({"link.kind": "product"}, [("link.product_id", "required", "Majburiy maydon.")]),
         ({"link.kind": "product", "link.product_id": "999999"},
          [("link.product_id", "does_not_exist", "Mahsulot topilmadi yoki yashirin.")]),
+        # gap ADM-10.1 (decision GC-3): an https link
+        ({"link.kind": "url"}, [("link.url", "required", "Majburiy maydon.")]),
+        ({"link.kind": "url", "link.url": ""}, [("link.url", "required", "Majburiy maydon.")]),
+        ({"link.kind": "url", "link.url": "http://glowderma.uz/aksiya"},
+         [("link.url", "invalid", "Havolani https:// bilan to‘liq kiriting.")]),
+        ({"link.kind": "url", "link.url": "glowderma.uz"},
+         [("link.url", "invalid", "Havolani https:// bilan to‘liq kiriting.")]),
+        ({"link.kind": "url", "link.url": "https://glowderma.uz/" + "a" * 480},
+         [("link.url", "max_length", "500 belgidan oshmasin.")]),
         ({"audience.type": "group"}, [("audience.type", "invalid_choice", "Ruxsat etilmagan qiymat.")]),
         ({"audience.type": "segment"}, [("audience.segment_id", "required", "Majburiy maydon.")]),
         ({"audience.type": "segment", "audience.segment_id": "999"},
@@ -536,7 +548,12 @@ def test_create_cuts_a_long_billz_name_label_to_the_snapshot_column(
     product = ProductFactory.create(name_uz="", billz_name="B" * 200, status="active")
     response = post(staff_client, form(**{"link.kind": "product", "link.product_id": str(product.pk)}))
     assert response.status_code == 201, response.data
-    assert response.data["link"] == {"kind": "product", "product_id": product.pk, "label": "B" * 120}
+    assert response.data["link"] == {
+        "kind": "product",
+        "product_id": product.pk,
+        "label": "B" * 120,
+        "url": None,
+    }
     assert Campaign.objects.get(pk=response.data["id"]).link_product_label == "B" * 120
 
 
@@ -570,3 +587,84 @@ def test_meta_sizes_agree_with_the_recipient_count_for_customers_with_two_device
     assert everyone.data["recipient_count"] == meta["total_devices"]
     devices = CampaignRecipient.objects.filter(campaign_id=immediate.data["id"], customer=two_devices)
     assert list(devices.values_list("device_id", flat=True)) == [latest.pk]  # the most recently active one
+
+
+# --- gap ADM-10.1: a campaign that opens an https link (decision GC-3) -------------------------------------
+
+
+def test_create_with_a_url_link_reaches_the_inbox_and_the_push(
+    staff_client: APIClient,
+    staff: StaffUser,
+    clock: Any,
+    fcm: FakeFcm,
+    django_capture_on_commit_callbacks: Any,
+) -> None:
+    customer = CustomerFactory.create()
+    DeviceFactory.create(customer=customer)
+    link = "https://glowderma.uz/aksiya?utm_source=push"
+    data = form(**{"link.kind": "url", "link.url": f" {link} "})
+    with django_capture_on_commit_callbacks(execute=True):
+        response = post(staff_client, data)
+    assert response.status_code == 201, response.data
+    assert response.data["link"] == {"kind": "url", "product_id": None, "label": None, "url": link}
+    campaign = Campaign.objects.get(pk=response.data["id"])
+    assert (campaign.link_kind, campaign.link_url, campaign.link_product_id) == ("url", link, None)
+    after = AuditEntry.objects.get(action="notification.created").after or {}
+    assert (after["link_kind"], after["link_url"]) == ("url", link)
+    inbox = InboxNotification.objects.get(source_type="campaign", customer=customer)
+    assert inbox.link == {"kind": "url", "url": link}
+    [message] = fcm.sent
+    assert message.data["link_url"] == link and message.data["product_id"] == ""
+    # the customer inbox renders it (customer contract §2.12)
+    from glowderma.notifications.api.customer.serializers import inbox_link
+
+    assert inbox_link(inbox.link) == {
+        "kind": "url",
+        "product_id": None,
+        "order_id": None,
+        "appointment_id": None,
+        "url": link,
+    }
+    assert inbox_link({"kind": "url"})["kind"] == "none"  # a url row without its url is rendered linkless
+    # the export names the destination (review nit: column Havola)
+    export = staff_client.get(URL, {"export": "csv"}).content.decode("utf-8-sig").split("\r\n")
+    assert export[0].endswith(';"Havola"') and export[1].endswith(f';"{link}"')
+
+
+def test_a_product_link_ignores_a_stray_url(staff_client: APIClient, clock: Any) -> None:
+    product = ProductFactory.create(name_uz="Krem")
+    data = form(**{"link.kind": "product", "link.product_id": str(product.pk), "link.url": "https://x.uz"})
+    response = post(staff_client, data)
+    assert response.status_code == 201, response.data
+    assert response.data["link"]["url"] is None
+    assert Campaign.objects.get(pk=response.data["id"]).link_url == ""
+    # review nit: an ignored stray URL is not validated either
+    data = form(**{"link.kind": "product", "link.product_id": str(product.pk), "link.url": "http://x"})
+    assert post(staff_client, data, key="8d0f5a43-3c8e-4d43-9a8a-3b7c6f1e2a90").status_code == 201
+
+
+@pytest.mark.parametrize("scheme", ["HTTPS", "Https"])
+def test_an_upper_case_scheme_is_stored_lower_case_not_a_500(
+    staff_client: APIClient, clock: Any, scheme: str
+) -> None:
+    """Review fix: URLValidator accepts ``HTTPS://``; the DB check is case-sensitive → normalise, no 500."""
+    response = post(staff_client, form(**{"link.kind": "url", "link.url": f"{scheme}://glowderma.uz/Aksiya"}))
+    assert response.status_code == 201, response.data
+    assert response.data["link"]["url"] == "https://glowderma.uz/Aksiya"
+    assert Campaign.objects.get(pk=response.data["id"]).link_url == "https://glowderma.uz/Aksiya"
+
+
+def test_database_refuses_inconsistent_url_links() -> None:
+    from django.db import IntegrityError, transaction
+
+    from glowderma.notifications.tests.factories import CampaignFactory
+
+    product = ProductFactory.create()
+    for fields in (
+        {"link_kind": "url", "link_url": "http://x.uz"},
+        {"link_kind": "url", "link_url": ""},
+        {"link_kind": "url", "link_url": "https://x.uz", "link_product": product, "link_product_label": "K"},
+        {"link_kind": "none", "link_url": "https://x.uz"},
+    ):
+        with pytest.raises(IntegrityError), transaction.atomic():
+            CampaignFactory.create(**fields)

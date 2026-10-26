@@ -15,8 +15,15 @@ from rest_framework import serializers
 from glowderma.catalog import billz, selectors, services
 from glowderma.catalog.models import Banner, Category, Product, ProductImage
 from glowderma.core import enums
-from glowderma.core.api.exceptions import ProviderUnavailable, field_error
-from glowderma.core.api.fields import AwareDateTimeField, QueryBooleanField, SlugField, i18n_dict, i18n_text
+from glowderma.core.api.exceptions import FIELD_MESSAGES, ProviderUnavailable, field_error
+from glowderma.core.api.fields import (
+    AwareDateTimeField,
+    HttpsUrlField,
+    QueryBooleanField,
+    SlugField,
+    i18n_dict,
+    i18n_text,
+)
 from glowderma.core.api.serializers import ActorSerializer
 from glowderma.core.media import absolute_media_url
 from glowderma.integrations.billz.ports import BillzError, BillzPort, BillzProduct
@@ -329,6 +336,7 @@ class CategorySerializer(serializers.Serializer[Category]):
 
     slug = serializers.CharField()
     name = serializers.SerializerMethodField()
+    image_url = serializers.SerializerMethodField()
     position = serializers.IntegerField()
     is_active = serializers.BooleanField()
     product_count = serializers.IntegerField()
@@ -339,13 +347,23 @@ class CategorySerializer(serializers.Serializer[Category]):
     def get_name(self, obj: Category) -> dict[str, str]:
         return i18n_dict(obj, "name")
 
+    @extend_schema_field(serializers.URLField(allow_null=True))
+    def get_image_url(self, obj: Category) -> str | None:
+        """Gap ADM-5.1: the category image (absolute, ``PUBLIC_MEDIA_BASE_URL``) | ``null``."""
+        return absolute_media_url(obj.image.name) if obj.image.name else None
+
 
 class CategoryListQuerySerializer(serializers.Serializer[dict[str, Any]]):
     is_active = QueryBooleanField(required=False)
 
 
 class CategoryWriteSerializer(serializers.Serializer[Any]):
-    """``POST categories/`` and ``PATCH categories/{slug}/`` (``partial``; ``slug`` is then ``read_only``)."""
+    """``POST categories/`` and ``PATCH categories/{slug}/`` (``partial``; ``slug`` is then ``read_only``).
+
+    JSON, or multipart with the dotted names ``name.uz``, ``name.ru``, ``name.en`` next to ``slug``,
+    ``is_active`` and the optional file part ``image`` (gap ADM-5.1; the view reads the file and un-dots the
+    names with ``views.form_to_nested``).
+    """
 
     slug = SlugField()
     name = CategoryNameSerializer()
@@ -360,6 +378,29 @@ class CategoryWriteSerializer(serializers.Serializer[Any]):
         if Category.objects.filter(slug=value).exists():
             raise serializers.ValidationError([field_error("unique")])
         return value
+
+
+class StrictBooleanField(serializers.BooleanField):
+    """A JSON boolean, or ``true`` / ``false`` (also ``1`` / ``0``) in multipart; anything else — ``"yes"``,
+    ``"on"``, a number — is ``invalid`` (contract §2.4 ``remove_image``; review nit: not DRF's truthy set)."""
+
+    default_error_messages = {"invalid": FIELD_MESSAGES["invalid"]}
+
+    def to_internal_value(self, data: Any) -> bool:
+        if isinstance(data, bool):
+            return data
+        if isinstance(data, str) and data in ("true", "1"):
+            return True
+        if isinstance(data, str) and data in ("false", "0"):
+            return False
+        self.fail("invalid")
+
+
+class CategoryPatchSerializer(CategoryWriteSerializer):
+    """``PATCH categories/{slug}/``: every field optional; ``remove_image: true`` drops the stored image
+    (gap ADM-5.1; refused together with a new ``image`` part: ``remove_image`` ``invalid``)."""
+
+    remove_image = StrictBooleanField(required=False, default=False)
 
 
 class SlugOrderSerializer(serializers.Serializer[dict[str, Any]]):
@@ -379,6 +420,8 @@ class BannerLinkSerializer(serializers.Serializer[dict[str, Any]]):
     kind = serializers.ChoiceField(choices=enums.BannerLinkKind.values, required=False)
     product_id = serializers.IntegerField(required=False, allow_null=True)
     category = serializers.CharField(required=False, allow_null=True, max_length=40)
+    # gap X-BANNER-URL (decision GC-3): kind "url" only; an absolute https link ≤ 500
+    url = HttpsUrlField(required=False, allow_null=True)
 
 
 class BannerSerializer(serializers.Serializer[Banner]):
@@ -414,6 +457,7 @@ class BannerSerializer(serializers.Serializer[Banner]):
                 if kind == enums.BannerLinkKind.CATEGORY and obj.link_category_id and obj.link_category
                 else None
             ),
+            "url": (obj.link_url or None) if kind == enums.BannerLinkKind.URL else None,
         }
 
 
@@ -425,11 +469,11 @@ class BannerWriteSerializer(serializers.Serializer[Any]):
     """Fields of ``POST banners/`` (multipart) and ``PATCH banners/{id}/`` (multipart or JSON; ``partial``).
 
     Accepted form encoding (multipart): nested keys arrive as dotted form names — ``title.uz``, ``title.ru``,
-    ``title.en``, ``link.kind``, ``link.product_id``, ``link.category`` — next to the flat ``is_active``,
-    ``starts_at``, ``ends_at`` and the file part ``image``. The view un-dots them into this nested shape
-    (``views.form_to_nested``); an empty string for ``link.product_id``, ``link.category``, ``starts_at`` or
-    ``ends_at`` means ``null``. Booleans are ``true``/``false``/``1``/``0``. Error paths use the same dotted
-    names, so multipart and JSON callers map errors identically.
+    ``title.en``, ``link.kind``, ``link.product_id``, ``link.category``, ``link.url`` — next to the flat
+    ``is_active``, ``starts_at``, ``ends_at`` and the file part ``image``. The view un-dots them into this
+    nested shape (``views.form_to_nested``); an empty string for ``link.product_id``, ``link.category``,
+    ``link.url``, ``starts_at`` or ``ends_at`` means ``null``. Booleans are ``true``/``false``/``1``/``0``.
+    Error paths use the same dotted names, so multipart and JSON callers map errors identically.
 
     The ``image`` part is read from the request by the view (it is not a field here); the link targets and
     the date order are validated against the merged state (``instance`` on PATCH).
@@ -445,6 +489,7 @@ class BannerWriteSerializer(serializers.Serializer[Any]):
         super().__init__(*args, **kwargs)
         self.link_product: Product | None = None
         self.link_category: Category | None = None
+        self.link_url = ""
         self.link_kind: str | None = None
 
     @property
@@ -480,6 +525,14 @@ class BannerWriteSerializer(serializers.Serializer[Any]):
             if category is None:
                 raise serializers.ValidationError({"link": {"category": [field_error("does_not_exist")]}})
             self.link_category = category
+        elif kind == enums.BannerLinkKind.URL:
+            if "url" in link:
+                url = link["url"]
+            else:  # PATCH without link.url keeps the stored one (only while the kind stays url)
+                url = current.link_url if current is not None and current.link_kind == kind else None
+            if not url:
+                raise serializers.ValidationError({"link": {"url": [field_error("required")]}})
+            self.link_url = url
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         current = self.banner
@@ -498,6 +551,7 @@ class BannerWriteSerializer(serializers.Serializer[Any]):
             link_kind=self.link_kind,
             link_product=self.link_product,
             link_category=self.link_category,
+            link_url=self.link_url,
             is_active=data.get("is_active"),
             starts_at=data.get("starts_at"),
             starts_at_set="starts_at" in data,

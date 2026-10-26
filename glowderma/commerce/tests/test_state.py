@@ -163,8 +163,13 @@ def test_status_tables_cover_the_enum() -> None:
 
 
 def test_outbox_topic_registry() -> None:
-    assert topics.HANDLED_TOPICS == ("bts.create_shipment", "billz.push_sale", "refund.submit")
-    assert topics.PRODUCED_TOPICS == ("billz.push_sale", "push.order_status")
+    assert topics.HANDLED_TOPICS == (
+        "bts.create_shipment",
+        "billz.push_sale",
+        "refund.submit",
+        "billz.stock_reread",  # gap X-STOCK-FRESHNESS
+    )
+    assert topics.PRODUCED_TOPICS == ("billz.push_sale", "push.order_status", "billz.stock_reread")
     assert topics.DEAD_LETTER_TOPICS == ("bts.create_shipment", "refund.submit")
     assert set(topics.PAYLOAD_KEYS) == set(topics.HANDLED_TOPICS) | set(topics.PRODUCED_TOPICS)
     assert topics.bts_create_shipment_key(10250, 2) == "bts.create_shipment:10250:2"
@@ -172,6 +177,7 @@ def test_outbox_topic_registry() -> None:
         "billz.push_sale:0d6f6c1e-5a7b-4c1e-9a43-2f1d8e3b7a10"
     )
     assert topics.refund_submit_key(7) == "refund.submit:7"
+    assert topics.billz_stock_reread_key(10248) == "billz.stock_reread:10248"
     assert (
         topics.push_order_status_key(10248, "handed_to_courier")
         == "push.order_status:10248:handed_to_courier"

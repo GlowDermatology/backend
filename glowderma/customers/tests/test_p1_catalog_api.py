@@ -139,17 +139,25 @@ def test_banners_window_and_link_downgrade() -> None:
     b = BannerFactory.create(link_kind="product", link_product=hidden)
     c = BannerFactory.create(link_kind="category", link_category=category)
     d = BannerFactory.create(link_kind="category", link_category=off)
+    e = BannerFactory.create(link_kind="url", link_url="https://glowderma.uz/aksiya?utm=app")
     BannerFactory.create(starts_at=now + timedelta(days=1))
     BannerFactory.create(ends_at=now - timedelta(minutes=1))
     BannerFactory.create(is_active=False)
     response = app_client().get(BANNERS)
     assert response["Cache-Control"] == "public, max-age=60"
     links = {row["id"]: row["link"] for row in response.data["results"]}
-    assert list(links) == [a.pk, b.pk, c.pk, d.pk]
-    assert links[a.pk] == {"kind": "product", "product_id": product.pk, "category": None}
-    assert links[b.pk] == {"kind": "none", "product_id": None, "category": None}
-    assert links[c.pk] == {"kind": "category", "product_id": None, "category": "masks"}
+    assert list(links) == [a.pk, b.pk, c.pk, d.pk, e.pk]
+    assert links[a.pk] == {"kind": "product", "product_id": product.pk, "category": None, "url": None}
+    assert links[b.pk] == {"kind": "none", "product_id": None, "category": None, "url": None}
+    assert links[c.pk] == {"kind": "category", "product_id": None, "category": "masks", "url": None}
     assert links[d.pk]["kind"] == "none"
+    # gap X-BANNER-URL: an https link the app opens
+    assert links[e.pk] == {
+        "kind": "url",
+        "product_id": None,
+        "category": None,
+        "url": "https://glowderma.uz/aksiya?utm=app",
+    }
 
 
 def test_categories_count_visible_products() -> None:

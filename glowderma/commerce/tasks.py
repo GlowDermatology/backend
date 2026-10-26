@@ -76,6 +76,7 @@ from glowderma.integrations.billz.ports import (
     BillzShiftClosed,
     SaleCancelled,
 )
+from glowderma.integrations.billz.registry import billz_mode
 from glowderma.integrations.bts.ports import BtsRejected, BtsUnavailable, CreateRequest, Parcel
 from glowderma.integrations.bts.registry import get_bts
 from glowderma.integrations.click.ports import (
@@ -452,8 +453,18 @@ def push_sale(payload: dict[str, Any]) -> None:
                 locked, _E.BILLZ_SALE_RECORDED, {"billz_order_id": receipt.billz_order_id}, at=now
             )
     # NEW-2: settle what Billz's stock already reflects for these products (this sale settles after the next
-    # read, at the next catalog.stock_synced)
-    services.settle_billz_reservations(_order_product_ids(order_id))
+    # read: the targeted re-read below, or the next catalog.stock_synced)
+    sold = _order_product_ids(order_id)
+    services.settle_billz_reservations(sold)
+    if billz_mode() == "live" and sold:
+        # gap X-STOCK-FRESHNESS: read the sold products again shortly (Billz's stock now reflects the sale),
+        # so the units settle and an in-store sale of the same products shows up before the next delta
+        outbox.enqueue(
+            topics.BILLZ_STOCK_REREAD,
+            {"order_id": order_id, "product_ids": sorted(sold)},
+            dedupe_key=topics.billz_stock_reread_key(order_id),
+            delay=STOCK_REREAD_DELAY,
+        )
 
 
 def _order_product_ids(order_id: int) -> list[int]:
@@ -474,6 +485,20 @@ def _alert_cancelled_sale(order_id: int, purchase_id: int, case: str) -> None:
 @outbox.register(topics.BILLZ_PUSH_SALE)
 def handle_billz_push_sale(message: OutboxMessage) -> None:
     push_sale(_payload(message))
+
+
+# Billz applies a paid sale to its stock right away; the short delay leaves it time before the re-read.
+STOCK_REREAD_DELAY = timedelta(seconds=30)
+
+
+@outbox.register(topics.BILLZ_STOCK_REREAD)
+def handle_billz_stock_reread(message: OutboxMessage) -> None:
+    """``billz.stock_reread``: re-read the sold products from Billz and settle what the read reflects; best
+    effort (never raises for Billz: the next delta or a cart read catches up, the unsettled units keep
+    counting meanwhile). Idempotent: a second run reads again and settles nothing new."""
+    payload = _payload(message)
+    product_ids = [int(pid) for pid in payload.get("product_ids") or [] if isinstance(pid, int)]
+    services.reread_sold_stock(product_ids)
 
 
 @outbox.register(catalog_topics.STOCK_SYNCED)
@@ -852,6 +877,7 @@ __all__ = [
     "create_shipment",
     "expire_reservations",
     "handle_billz_push_sale",
+    "handle_billz_stock_reread",
     "handle_stock_synced",
     "describe_push",
     "forget_payment_attempt",

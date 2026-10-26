@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Collection, Iterable, Sequence
+from collections.abc import Collection, Iterable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
@@ -415,7 +416,49 @@ def _category_snapshot(category: Category) -> dict[str, Any]:
         "name.en": category.name_en,
         "is_active": category.is_active,
         "position": category.position,
+        "image": category.image.name or None,  # content-addressed: categories/<id>/<sha256[:16]>.<ext>
     }
+
+
+def _store_category_image(category: Category, processed: ProcessedImage, stored: list[str]) -> None:
+    """Store the re-encoded image under ``categories/<id>/<sha256[:16]>.<ext>`` (gap ADM-5.1); the previous
+    file is removed after commit. The same bytes again change nothing (the name is content-addressed). The
+    new name is appended to ``stored``: the caller removes it if its block raises (``_discard_on_error``)."""
+    previous = category.image.name or ""
+    name = media_name("categories", category.pk, processed.content, processed.extension)
+    if previous == name:
+        return
+    category.image.save(_basename(name), ContentFile(processed.content, name=_basename(name)), save=False)
+    stored.append(str(category.image.name))
+    category.save(update_fields=["image"])
+    if previous:
+        storage = category.image.storage
+        transaction.on_commit(lambda: storage.delete(previous))
+
+
+@contextmanager
+def _discard_on_error(storage: Any) -> Iterator[list[str]]:
+    """Yield a list the block appends the files it wrote to; if the block raises (its transaction rolls back,
+    e.g. the audit write failed), those files are removed so no orphan stays in storage (review nit)."""
+    stored: list[str] = []
+    try:
+        yield stored
+    except BaseException:
+        for name in stored:
+            try:
+                storage.delete(name)
+            except Exception:  # best effort: the original error matters more
+                logger.warning("category image cleanup failed for %s", name, exc_info=True)
+        raise
+
+
+def _remove_category_image(category: Category) -> None:
+    """Drop the stored image (``remove_image``); the file is removed after commit. No image: nothing."""
+    if not category.image.name:
+        return
+    _delete_file_on_commit(category.image)
+    category.image = ""  # a FieldFile is cleared by assigning its empty name
+    category.save(update_fields=["image"])
 
 
 def _next_position(model: type[Category] | type[Banner]) -> int:
@@ -424,9 +467,18 @@ def _next_position(model: type[Category] | type[Banner]) -> int:
 
 
 def create_category(
-    slug: str, name: dict[str, str], *, is_active: bool = True, actor: Any, request: Any = None
+    slug: str,
+    name: dict[str, str],
+    *,
+    is_active: bool = True,
+    image: Any = None,
+    actor: Any,
+    request: Any = None,
 ) -> Category:
-    with transaction.atomic():
+    """``POST categories/``; ``image`` (optional upload, gap ADM-5.1) goes through ``core.images`` (the
+    product-image limits) and is stored once the row has its id, in the same transaction."""
+    processed = _process(image, "image") if image is not None else None
+    with _discard_on_error(Category._meta.get_field("image").storage) as stored, transaction.atomic():
         _advisory_lock(CATEGORY_LOCK)
         category = Category(
             slug=slug,
@@ -437,6 +489,8 @@ def create_category(
             position=_next_position(Category),
         )
         _save_unique(category.save, CATEGORY_SLUG_CONSTRAINT, "slug")
+        if processed is not None:
+            _store_category_image(category, processed, stored)
         audit.record(
             action="category.created",
             entity_type="category",
@@ -453,10 +507,17 @@ def update_category(
     *,
     name: dict[str, str] | None = None,
     is_active: bool | None = None,
+    image: Any = None,
+    remove_image: bool = False,
     actor: Any,
     request: Any = None,
 ) -> Category:
-    with transaction.atomic():
+    """``PATCH categories/{slug}/``: ``image`` replaces the stored one (the old file is removed after commit),
+    ``remove_image`` drops it (gap ADM-5.1); the serializer refuses both at once."""
+    if image is not None and remove_image:
+        raise ValueError("Either a new image or remove_image, not both")
+    processed = _process(image, "image") if image is not None else None
+    with _discard_on_error(Category._meta.get_field("image").storage) as stored, transaction.atomic():
         locked = Category.objects.select_for_update().get(pk=category.pk)
         before = _category_snapshot(locked)
         for language, value in (name or {}).items():
@@ -464,6 +525,10 @@ def update_category(
         if is_active is not None:
             locked.is_active = is_active
         locked.save()
+        if processed is not None:
+            _store_category_image(locked, processed, stored)
+        elif remove_image:
+            _remove_category_image(locked)
         diff_before, diff_after = _diff(before, _category_snapshot(locked))
         audit.record(
             action="category.updated",
@@ -534,13 +599,15 @@ def _reload_category(slug: str) -> Category:
 class BannerInput:
     """Validated body of ``POST banners/`` / ``PATCH banners/{id}/`` (unset keys stay ``None``).
 
-    ``link`` is already resolved: ``kind`` plus the target rows (the serializer checked they exist).
+    ``link`` is already resolved: ``kind`` plus the target rows (the serializer checked they exist) or the
+    validated https URL (kind ``url``, decision GC-3).
     """
 
     title: dict[str, str] | None = None
     link_kind: str | None = None
     link_product: Product | None = None
     link_category: Category | None = None
+    link_url: str = ""
     is_active: bool | None = None
     starts_at: Any = None
     starts_at_set: bool = False
@@ -559,6 +626,7 @@ def _banner_snapshot(banner: Banner) -> dict[str, Any]:
         "link.category": banner.link_category.slug
         if banner.link_category_id and banner.link_category
         else None,
+        "link.url": banner.link_url or None,
         "is_active": banner.is_active,
         "starts_at": banner.starts_at,
         "ends_at": banner.ends_at,
@@ -573,6 +641,7 @@ def _apply_banner(banner: Banner, data: BannerInput) -> None:
         banner.link_kind = data.link_kind
         banner.link_product = data.link_product if data.link_kind == enums.BannerLinkKind.PRODUCT else None
         banner.link_category = data.link_category if data.link_kind == enums.BannerLinkKind.CATEGORY else None
+        banner.link_url = data.link_url if data.link_kind == enums.BannerLinkKind.URL else ""
     if data.is_active is not None:
         banner.is_active = data.is_active
     if data.starts_at_set:

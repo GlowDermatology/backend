@@ -8,11 +8,12 @@ path (import ``bulk_update``, seeder, raw SQL) can let it drift.
 from django.contrib.postgres.indexes import GinIndex
 from django.db import models
 from django.db.models import Deferrable, F, Func, Q, TextField, Value
-from django.db.models.functions import Coalesce, Lower
+from django.db.models.functions import Coalesce
 
 from glowderma.catalog import media
 from glowderma.core import enums
 from glowderma.core.models import TimeStampedModel
+from glowderma.core.search import SearchFold
 
 
 class JoinText(Func):
@@ -85,9 +86,10 @@ class Product(TimeStampedModel):
     usage_uz = models.TextField(blank=True)  # ≤1000
     usage_ru = models.TextField(blank=True)
     usage_en = models.TextField(blank=True)
-    # search (stored generated column, §6.2)
+    # search (stored generated column, §6.2): folded like every search term (core.search, decision GC-1), so
+    # ko'pik / ko‘pik / koʻpik and ё / е match each other
     search_text = models.GeneratedField(
-        expression=Lower(
+        expression=SearchFold(
             JoinText(
                 F("name_uz"),
                 Value(" "),
@@ -239,6 +241,8 @@ class Banner(TimeStampedModel):
     link_category = models.ForeignKey(
         "catalog.Category", null=True, on_delete=models.SET_NULL, related_name="banners"
     )
+    # gap X-BANNER-URL: an https link the app opens (kind "url" only; "" otherwise; decision GC-3)
+    link_url = models.CharField(max_length=500, blank=True, default="")
     is_active = models.BooleanField(default=True)
     starts_at = models.DateTimeField(null=True)
     ends_at = models.DateTimeField(null=True)
@@ -257,9 +261,16 @@ class Banner(TimeStampedModel):
                         link_kind=enums.BannerLinkKind.NONE,
                         link_product__isnull=True,
                         link_category__isnull=True,
+                        link_url="",
                     )
-                    | Q(link_kind=enums.BannerLinkKind.PRODUCT, link_category__isnull=True)
-                    | Q(link_kind=enums.BannerLinkKind.CATEGORY, link_product__isnull=True)
+                    | Q(link_kind=enums.BannerLinkKind.PRODUCT, link_category__isnull=True, link_url="")
+                    | Q(link_kind=enums.BannerLinkKind.CATEGORY, link_product__isnull=True, link_url="")
+                    | Q(
+                        link_kind=enums.BannerLinkKind.URL,
+                        link_product__isnull=True,
+                        link_category__isnull=True,
+                        link_url__startswith="https://",
+                    )
                 ),
                 name="banner_link_kind_targets",
             ),

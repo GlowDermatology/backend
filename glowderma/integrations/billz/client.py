@@ -86,6 +86,7 @@ from glowderma.core.pii import clean_text, scrub_free_text
 from .ports import (
     BillzError,
     BillzMisconfigured,
+    BillzOutOfTime,
     BillzRejected,
     BillzShiftClosed,
     BillzUnavailable,
@@ -115,6 +116,8 @@ BACKOFF_CAP_SECONDS = 8.0
 RETRY_AFTER_CAP_SECONDS = 60.0
 # The circuit opens after this many failures in a row and stays open this long.
 CIRCUIT_FAILURES = 5
+# A timeout that ends this close to the active deadline was capped by it (the budget ran out, not Billz).
+DEADLINE_SLACK_SECONDS = 0.2
 CIRCUIT_OPEN_SECONDS = 90
 RESPONSE_CHANNEL_HEADER = "Billz-Response-Channel"
 # Billz's own free text kept in an error (after scrubbing).
@@ -402,14 +405,14 @@ class RateLimiter:
         """
         wait = self.max_wait if max_wait is None else max_wait
         if wait <= 0:
-            raise BillzUnavailable("Billz rate limit: no time left to wait for a slot", not_applied=True)
+            raise BillzOutOfTime("Billz rate limit: no time left to wait for a slot", not_applied=True)
         deadline = self.clock() + wait
         while True:
             now = self.clock()
             paused_until = self.cache.get(self._pause_key)
             if isinstance(paused_until, (int, float)) and paused_until > now:
                 if not wait_on_pause or paused_until > deadline:
-                    raise BillzUnavailable(
+                    raise BillzOutOfTime(
                         "Billz rate limit: paused longer than the limiter waits", not_applied=True
                     )
                 self.sleep(paused_until - now)
@@ -422,7 +425,7 @@ class RateLimiter:
                     start = slot * self.interval
                     self.sleep(max(0.0, start - self.clock()))
                     return start
-            raise BillzUnavailable(
+            raise BillzOutOfTime(
                 "Billz rate limit: every slot the limiter may wait for is taken", not_applied=True
             )
 
@@ -505,17 +508,30 @@ class BillzClient:
     def _remaining(self) -> float | None:
         return None if self._deadline is None else self._deadline - self.clock()
 
+    def _deadline_reached(self) -> bool:
+        """The active deadline has (all but) passed: a timeout capped by it is the budget, not Billz."""
+        remaining = self._remaining()
+        return remaining is not None and remaining < DEADLINE_SLACK_SECONDS
+
     def _check_deadline(self, label: str) -> None:
         remaining = self._remaining()
         if remaining is not None and remaining <= 0:
-            raise BillzUnavailable(f"{label}: the Billz deadline passed before the request", not_applied=True)
+            raise BillzOutOfTime(f"{label}: the Billz deadline passed before the request", not_applied=True)
 
     def _nap(self, seconds: float, label: str) -> None:
         """Sleep, unless that would cross the deadline (then :class:`BillzUnavailable`, nothing sent)."""
         remaining = self._remaining()
         if remaining is not None and seconds >= remaining:
-            raise BillzUnavailable(f"{label}: the Billz deadline leaves no time to wait", not_applied=True)
+            raise BillzOutOfTime(f"{label}: the Billz deadline leaves no time to wait", not_applied=True)
         self.sleep(seconds)
+
+    def _retry_nap(self, seconds: float, label: str, failure: str) -> None:
+        """The backoff before a retry of a failed request: no time left for it is Billz failing (the failure
+        it follows), not the budget running out (:class:`BillzOutOfTime` is for a healthy Billz)."""
+        try:
+            self._nap(seconds, label)
+        except BillzOutOfTime as exc:
+            raise BillzUnavailable(f"{label}: {failure}; no time left to retry", not_applied=True) from exc
 
     # --- transport ------------------------------------------------------------------------------------------
 
@@ -662,9 +678,16 @@ class BillzClient:
                     )
                     maybe_applied = maybe_applied or not never_sent
                     self._record_failure(label)
+                    if isinstance(exc, httpx.TimeoutException) and self._deadline_reached():
+                        # the timeout was capped by the deadline: our budget ran out (no time to retry)
+                        out_of_time = BillzOutOfTime(
+                            f"{label}: {type(exc).__name__} at the Billz deadline", not_applied=never_sent
+                        )
+                        out_of_time.cut_short = True
+                        raise out_of_time from exc
                     attempt += 1
                     if (idempotent or never_sent) and attempt < attempts_allowed:
-                        self._nap(self._backoff(attempt), label)
+                        self._retry_nap(self._backoff(attempt), label, type(exc).__name__)
                         continue
                     raise BillzUnavailable(f"{label}: {type(exc).__name__}", not_applied=never_sent) from exc
                 except httpx.HTTPError as exc:
@@ -697,7 +720,7 @@ class BillzClient:
             self._record_answer(label)
             throttled += 1
             if throttled > self.profile.max_throttled:
-                raise BillzUnavailable(
+                raise BillzOutOfTime(
                     f"{label}: rate limited by Billz (HTTP 429)", http_status=429, not_applied=True
                 )
             delay = retry_after_seconds(response, now=self.clock())
@@ -710,7 +733,7 @@ class BillzClient:
         if response.status_code >= 500 and idempotent:
             attempt += 1
             if attempt < attempts_allowed:
-                self._nap(self._backoff(attempt), label)
+                self._retry_nap(self._backoff(attempt), label, f"HTTP {response.status_code}")
                 return attempt, throttled
         return None
 

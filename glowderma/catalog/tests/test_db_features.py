@@ -39,6 +39,8 @@ def test_search_text_is_a_stored_generated_column() -> None:
     assert row is not None and row[0] == "s"
     expression = str(row[1]).lower()
     assert "lower(" in expression and "||" in expression and "concat" not in expression
+    # folded like every search term (core.search, decision GC-1): apostrophe variants and ё
+    assert expression.startswith("translate(lower(")
     for column in ("name_uz", "name_ru", "name_en", "billz_name", "billz_id"):
         assert column in expression
 
@@ -97,9 +99,11 @@ def test_check_constraints_exist(table: str, names: list[str]) -> None:
     assert set(names) <= present
 
 
-def test_search_uses_the_trigram_index() -> None:
+@pytest.mark.parametrize("term", ["serum", "ko'pik", "ko\u02bbpik", "ёлка"])
+def test_search_uses_the_trigram_index(term: str) -> None:
+    """The folded term is a constant the planner pre-evaluates: the GIN index still serves the LIKE."""
     ProductFactory.create(name_uz="Gialuron kislotali serum")
-    qs = filter_products_search(Product.objects.all(), "serum").order_by()
+    qs = filter_products_search(Product.objects.all(), term).order_by()
     sql, params = qs.query.sql_with_params()
     with transaction.atomic(), connection.cursor() as cursor:
         cursor.execute("SET LOCAL enable_seqscan = off")
@@ -177,6 +181,30 @@ def test_search_is_case_insensitive_over_the_five_columns(catalog: dict[str, Pro
     assert ids(filter_products_search(base, "  gentle  ")) == {50}
     assert ids(filter_products_search(base, "")) == {4607, 77, 50}
     assert ids(filter_products_search(base, "   ")) == {4607, 77, 50}
+
+
+@pytest.mark.parametrize(
+    "term",
+    # U+0027, U+0060, U+2018, U+2019, U+02BB, U+02BC (gap CRIT-SEARCH-UZ-APOSTROPHE, decision GC-1)
+    ["ko'pik", "ko`pik", "ko\u2018pik", "ko\u2019pik", "ko\u02bbpik", "ko\u02bcpik", "KOʻPIK", "chi ko'"],
+)
+def test_search_folds_every_uzbek_apostrophe_variant(term: str) -> None:
+    foam = ProductFactory.create(name_uz="Yumshoq tozalovchi ko\u2018pik")  # stored with U+2018 (the seed)
+    cream = ProductFactory.create(name_uz="Ko\u02bbz atrofi kremi", name_ru="Крем для век")
+    base = Product.objects.all()
+    assert ids(filter_products_search(base, term)) == {foam.pk}
+    assert ids(filter_products_search(base, "ko'z atrofi")) == {cream.pk}
+    assert ids(filter_products_search(base, "ko`z")) == {cream.pk}
+
+
+def test_search_folds_yo_to_ye_both_ways() -> None:
+    yo = ProductFactory.create(name_uz="Krem", name_ru="Ёлочный крем с мёдом")
+    ye = ProductFactory.create(name_uz="Balzam", name_ru="Бальзам с медом")
+    base = Product.objects.all()
+    assert ids(filter_products_search(base, "елочный")) == {yo.pk}
+    assert ids(filter_products_search(base, "ЁЛОЧНЫЙ")) == {yo.pk}
+    assert ids(filter_products_search(base, "мёд")) == {yo.pk, ye.pk}
+    assert ids(filter_products_search(base, "мед")) == {yo.pk, ye.pk}
 
 
 def test_search_escapes_like_wildcards(catalog: dict[str, Product]) -> None:

@@ -15,6 +15,7 @@ from rest_framework.test import APIClient
 
 from glowderma.accounts import services as account_services
 from glowderma.accounts.models import Customer
+from glowderma.catalog.models import ProductStock
 from glowderma.commerce import services, tasks
 from glowderma.commerce.models import Cart, CartItem, Order, OrderEvent
 from glowderma.commerce.tests.support import admin, deliver, pay, place, product, seed_policies, ship, shopper
@@ -52,6 +53,8 @@ def test_checkout_and_pay_refuse_a_fake_provider(customer_client: APIClient, cus
 
 def test_mixed_posture_delivery_is_not_offered(customer_client: APIClient, customer: Customer) -> None:
     fill(customer)
+    # live Billz read the stock a moment ago: no stale-stock re-read (gap X-STOCK-FRESHNESS) at checkout
+    ProductStock.objects.update(synced_at=real_now())
     own = account_services.add_address(customer.pk, text="Toshkent", region_code="10", city_code="1001")
     with (
         override_settings(DEV_FEATURES_ALLOWED=False, BTS_MODE="fake", BILLZ_MODE="live"),

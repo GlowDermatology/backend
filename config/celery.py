@@ -2,6 +2,7 @@ import os
 
 from celery import Celery  # type: ignore[import-untyped]
 from celery.schedules import crontab  # type: ignore[import-untyped]
+from django.conf import settings
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.production")
 app = Celery("glowderma")
@@ -39,10 +40,13 @@ app.conf.beat_schedule = {
         "task": "reporting.consistency_report",
         "schedule": crontab(hour=3, minute=40),
     },
-    # M3 Billz catalog sync (docs/integrations/billz.md): an hourly delta and a daily full reconciliation,
-    # both through the billz_import job (single-flight with admin imports); no-ops while BILLZ_MODE=fake.
-    # Off the hour so they never meet the other jobs' :00 load; the full at 04:23 Tashkent, away from the
-    # delta.
-    "billz-sync-delta": {"task": "catalog.billz_sync_delta", "schedule": crontab(minute=7)},
+    # M3 Billz catalog sync (docs/integrations/billz.md): a delta every BILLZ_DELTA_SYNC_SECONDS (default 300;
+    # gap X-STOCK-FRESHNESS, decision GC-5) and a daily full reconciliation at 04:23 Tashkent, both through
+    # the billz_import job (single-flight with admin imports); no-ops while BILLZ_MODE=fake. app.conf (read
+    # above) has already loaded the Django settings.
+    "billz-sync-delta": {
+        "task": "catalog.billz_sync_delta",
+        "schedule": float(settings.BILLZ_DELTA_SYNC_SECONDS),
+    },
     "billz-sync-full": {"task": "catalog.billz_sync_full", "schedule": crontab(hour=4, minute=23)},
 }

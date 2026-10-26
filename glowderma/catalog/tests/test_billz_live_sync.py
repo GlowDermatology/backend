@@ -237,14 +237,18 @@ def test_beat_joins_a_running_import_and_the_full_retries_later() -> None:
     assert Job.objects.count() == 1
 
 
-def test_beat_entries_are_scheduled_off_the_hour() -> None:
+def test_beat_entries_run_the_delta_every_interval_and_the_full_off_the_hour() -> None:
+    """Gap X-STOCK-FRESHNESS: a delta every BILLZ_DELTA_SYNC_SECONDS (default 300) instead of hourly."""
+    from django.conf import settings
+
     from config.celery import app
 
     app.autodiscover_tasks(force=True)
     delta = app.conf.beat_schedule["billz-sync-delta"]
     full = app.conf.beat_schedule["billz-sync-full"]
     assert (delta["task"], full["task"]) == ("catalog.billz_sync_delta", "catalog.billz_sync_full")
-    assert delta["schedule"].minute == {7} and len(delta["schedule"].hour) == 24
+    assert settings.BILLZ_DELTA_SYNC_SECONDS == 300
+    assert delta["schedule"] == 300.0
     assert (full["schedule"].hour, full["schedule"].minute) == ({4}, {23})
     assert "catalog.billz_sync_delta" in app.tasks and "catalog.billz_sync_full" in app.tasks
 

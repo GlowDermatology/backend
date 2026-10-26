@@ -83,7 +83,7 @@ def test_feed_newest_first_with_unread_count_and_link_shape(
         "title": "Kuryerga topshirildi",
         "body": "Buyurtma №10248 kuryerga topshirildi.",
         "image_url": None,
-        "link": {"kind": "order", "product_id": None, "order_id": 10248, "appointment_id": None},
+        "link": {"kind": "order", "product_id": None, "order_id": 10248, "appointment_id": None, "url": None},
         "created_at": item["created_at"],
         "read_at": None,
         "delivered_at": None,
@@ -93,6 +93,7 @@ def test_feed_newest_first_with_unread_count_and_link_shape(
         "product_id": None,
         "order_id": None,
         "appointment_id": None,
+        "url": None,
     }
     assert customer_client.get(FEED, {"page_size": 50}).json()["page_size"] == 50
     assert customer_client.get(FEED, {"page_size": 30}).status_code == 400

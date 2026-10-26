@@ -24,6 +24,7 @@ from glowderma.core.timeutils import TASHKENT
 pytestmark = pytest.mark.django_db
 
 BANNERS = "/api/v1/admin/banners/"
+URL_INVALID = "Havolani https:// bilan to‘liq kiriting."
 
 
 def media_url(name: str | None) -> str:
@@ -45,13 +46,14 @@ def test_form_to_nested_undots_keys_and_nulls_empty_targets() -> None:
             "link.kind": "product",
             "link.product_id": "",
             "link.category": "",
+            "link.url": "",
             "starts_at": "",
             "is_active": "false",
         }
     )
     assert form_to_nested(data) == {
         "title": {"uz": "Kuz", "ru": ""},
-        "link": {"kind": "product", "product_id": None, "category": None},
+        "link": {"kind": "product", "product_id": None, "category": None, "url": None},
         "starts_at": None,
         "is_active": "false",
     }
@@ -85,7 +87,7 @@ def test_create_multipart_full_shape(staff_client: APIClient, staff: StaffUser) 
         "id": banner.pk,
         "title": {"uz": "Kuzgi chegirmalar", "ru": "Осенние скидки", "en": ""},
         "image_url": media_url(banner.image.name),
-        "link": {"kind": "product", "product_id": product.pk, "category": None},
+        "link": {"kind": "product", "product_id": product.pk, "category": None, "url": None},
         "is_active": True,
         "starts_at": "2026-11-01T00:00:00+05:00",
         "ends_at": "2026-12-01T04:59:00+05:00",
@@ -102,7 +104,7 @@ def test_create_minimal_defaults(staff_client: APIClient) -> None:
     response = staff_client.post(BANNERS, form(**{"title.ru": "", "title.en": ""}), format="multipart")
     assert response.status_code == 201, response.json()
     data = response.json()
-    assert data["link"] == {"kind": "none", "product_id": None, "category": None}
+    assert data["link"] == {"kind": "none", "product_id": None, "category": None, "url": None}
     assert data["is_active"] is True and data["starts_at"] is None and data["ends_at"] is None
     assert data["position"] == 0
 
@@ -122,7 +124,12 @@ def test_create_with_category_link_and_empty_strings_as_null(staff_client: APICl
     )
     response = staff_client.post(BANNERS, body, format="multipart")
     assert response.status_code == 201, response.json()
-    assert response.json()["link"] == {"kind": "category", "product_id": None, "category": "serums"}
+    assert response.json()["link"] == {
+        "kind": "category",
+        "product_id": None,
+        "category": "serums",
+        "url": None,
+    }
     assert response.json()["starts_at"] is None
 
 
@@ -136,7 +143,21 @@ def test_create_with_category_link_and_empty_strings_as_null(staff_client: APICl
         ({"title.uz": "x" * 81}, "title.uz", "max_length", "80 belgidan oshmasin."),
         ({"title.ru": "x" * 81}, "title.ru", "max_length", "80 belgidan oshmasin."),
         ({"title.en": "x" * 81}, "title.en", "max_length", "80 belgidan oshmasin."),
-        ({"link.kind": "url"}, "link.kind", "invalid_choice", "Ruxsat etilmagan qiymat."),
+        ({"link.kind": "web"}, "link.kind", "invalid_choice", "Ruxsat etilmagan qiymat."),
+        ({"link.kind": "url"}, "link.url", "required", "Majburiy maydon."),
+        ({"link.kind": "url", "link.url": ""}, "link.url", "required", "Majburiy maydon."),
+        ({"link.kind": "url", "link.url": "http://glowderma.uz"}, "link.url", "invalid", URL_INVALID),
+        ({"link.kind": "url", "link.url": "glowderma.uz/aksiya"}, "link.url", "invalid", URL_INVALID),
+        ({"link.kind": "url", "link.url": "javascript:alert(1)"}, "link.url", "invalid", URL_INVALID),
+        ({"link.kind": "url", "link.url": "https://a:b@glowderma.uz/"}, "link.url", "invalid", URL_INVALID),
+        ({"link.kind": "url", "link.url": "https://glowderma.uz:8443/"}, "link.url", "invalid", URL_INVALID),
+        ({"link.kind": "url", "link.url": "https://"}, "link.url", "invalid", URL_INVALID),
+        (
+            {"link.kind": "url", "link.url": "https://glowderma.uz/" + "a" * 480},
+            "link.url",
+            "max_length",
+            "500 belgidan oshmasin.",
+        ),
         ({"link.kind": "product"}, "link.product_id", "required", "Majburiy maydon."),
         (
             {"link.kind": "product", "link.product_id": "999999"},
@@ -242,8 +263,18 @@ def test_list_and_export(staff_client: APIClient) -> None:
     body = response.json()
     assert (body["count"], body["page_size"]) == (2, 20)
     assert [item["id"] for item in body["results"]] == [first.pk, second.pk]
-    assert body["results"][0]["link"] == {"kind": "product", "product_id": product.pk, "category": None}
-    assert body["results"][1]["link"] == {"kind": "category", "product_id": None, "category": "serums"}
+    assert body["results"][0]["link"] == {
+        "kind": "product",
+        "product_id": product.pk,
+        "category": None,
+        "url": None,
+    }
+    assert body["results"][1]["link"] == {
+        "kind": "category",
+        "product_id": None,
+        "category": "serums",
+        "url": None,
+    }
     assert [item["id"] for item in staff_client.get(BANNERS, {"is_active": "false"}).json()["results"]] == [
         second.pk
     ]
@@ -289,7 +320,12 @@ def test_patch_json_merges_and_validates_against_current_state(staff_client: API
     )
     assert response.status_code == 200, response.json()
     assert response.json()["title"] == {"uz": "Kuz", "ru": "Осень", "en": "Autumn"}
-    assert response.json()["link"] == {"kind": "product", "product_id": product.pk, "category": None}
+    assert response.json()["link"] == {
+        "kind": "product",
+        "product_id": product.pk,
+        "category": None,
+        "url": None,
+    }
     entry = AuditEntry.objects.get(action="banner.updated")
     assert entry.before == {"title.en": "", "link.kind": "none", "link.product_id": None}
     assert entry.after == {"title.en": "Autumn", "link.kind": "product", "link.product_id": product.pk}
@@ -307,7 +343,7 @@ def test_patch_json_merges_and_validates_against_current_state(staff_client: API
     assert errors_of(response)["link.product_id"] == ("does_not_exist", "Topilmadi.")
     # kind none clears the target; a later product_id without kind reuses the stored kind
     response = staff_client.patch(url, {"link": {"kind": "none"}})
-    assert response.json()["link"] == {"kind": "none", "product_id": None, "category": None}
+    assert response.json()["link"] == {"kind": "none", "product_id": None, "category": None, "url": None}
     assert Banner.objects.get(pk=banner.pk).link_product_id is None
     response = staff_client.patch(url, {"starts_at": None, "ends_at": None, "is_active": False})
     assert response.status_code == 200
@@ -404,7 +440,10 @@ def test_patch_keeps_a_link_to_a_product_hidden_since(staff_client: APIClient) -
     url = f"{BANNERS}{banner.pk}/"
     response = staff_client.patch(
         url,
-        {"title": {"uz": "Qish"}, "link": {"kind": "product", "product_id": product.pk, "category": None}},
+        {
+            "title": {"uz": "Qish"},
+            "link": {"kind": "product", "product_id": product.pk, "category": None, "url": None},
+        },
     )
     assert response.status_code == 200, response.json()
     assert response.json()["link"]["product_id"] == product.pk
@@ -430,3 +469,87 @@ def test_patch_request_schemas_allow_partial_nested_objects() -> None:
     assert product_patch["application/json"]["schema"]["$ref"].endswith("/PatchedProductPatchRequest")
     banner_patch = paths["/api/v1/admin/banners/{id}/"]["patch"]["requestBody"]["content"]
     assert banner_patch["application/json"]["schema"]["$ref"].endswith("/PatchedBannerPatchRequest")
+
+
+# --- gap X-BANNER-URL: a banner that opens an https link (decision GC-3) ------------------------------------
+
+
+def test_create_with_url_link_audits_and_exports_it(staff_client: APIClient) -> None:
+    link = "https://glowderma.uz/aksiya?utm_source=app&b=1"
+    body = form(**{"link.kind": "url", "link.url": f"  {link}  ", "link.product_id": "", "link.category": ""})
+    response = staff_client.post(BANNERS, body, format="multipart")
+    assert response.status_code == 201, response.json()
+    assert response.json()["link"] == {"kind": "url", "product_id": None, "category": None, "url": link}
+    banner = Banner.objects.get()
+    assert (banner.link_kind, banner.link_url, banner.link_product_id) == ("url", link, None)
+    after = AuditEntry.objects.get(action="banner.created").after or {}
+    assert (after["link.kind"], after["link.url"]) == ("url", link)
+    rows = list(
+        csv.reader(
+            StringIO(staff_client.get(BANNERS, {"export": "csv"}).content.decode("utf-8-sig")), delimiter=";"
+        )
+    )
+    assert rows[1][2] == link
+
+
+def test_patch_switches_to_and_from_a_url_link(staff_client: APIClient) -> None:
+    product = ProductFactory.create(status="active")
+    banner = BannerFactory.create(link_kind="product", link_product=product)
+    url = f"{BANNERS}{banner.pk}/"
+    response = staff_client.patch(url, {"link": {"kind": "url", "url": "https://t.me/glowderma"}})
+    assert response.status_code == 200, response.json()
+    assert response.json()["link"] == {
+        "kind": "url",
+        "product_id": None,
+        "category": None,
+        "url": "https://t.me/glowderma",
+    }
+    entry = AuditEntry.objects.filter(action="banner.updated").latest("id")
+    assert entry.before == {"link.kind": "product", "link.product_id": product.pk, "link.url": None}
+    assert entry.after == {"link.kind": "url", "link.product_id": None, "link.url": "https://t.me/glowderma"}
+    # a PATCH without link.url keeps the stored URL while the kind stays url; a new one replaces it
+    assert (
+        staff_client.patch(url, {"link": {"kind": "url"}}).json()["link"]["url"] == "https://t.me/glowderma"
+    )
+    response = staff_client.patch(url, {"link": {"url": "https://instagram.com/glowderma"}}, format="json")
+    assert response.json()["link"]["url"] == "https://instagram.com/glowderma"
+    # multipart PATCH: an empty link.url is null → required
+    response = staff_client.patch(url, {"link.url": ""}, format="multipart")
+    assert errors_of(response)["link.url"] == ("required", "Majburiy maydon.")
+    response = staff_client.patch(url, {"link": {"url": "http://instagram.com/x"}})
+    assert errors_of(response)["link.url"] == ("invalid", URL_INVALID)
+    # switching away clears the stored URL
+    response = staff_client.patch(url, {"link": {"kind": "none"}})
+    assert response.json()["link"] == {"kind": "none", "product_id": None, "category": None, "url": None}
+    assert Banner.objects.get(pk=banner.pk).link_url == ""
+
+
+@pytest.mark.parametrize("scheme", ["HTTPS", "Https"])
+def test_an_upper_case_scheme_is_stored_lower_case_not_a_500(staff_client: APIClient, scheme: str) -> None:
+    """Review fix: URLValidator accepts ``HTTPS://``; the DB check is case-sensitive → normalise, no 500."""
+    body = form(**{"link.kind": "url", "link.url": f"{scheme}://glowderma.uz/Aksiya"})
+    response = staff_client.post(BANNERS, body, format="multipart")
+    assert response.status_code == 201, response.json()
+    assert response.json()["link"]["url"] == "https://glowderma.uz/Aksiya"
+    banner = Banner.objects.get()
+    assert banner.link_url == "https://glowderma.uz/Aksiya"
+    response = staff_client.patch(
+        f"{BANNERS}{banner.pk}/", {"link": {"kind": "url", "url": f"{scheme}://t.me/x"}}, format="json"
+    )
+    assert response.status_code == 200, response.json()
+    assert Banner.objects.get().link_url == "https://t.me/x"
+
+
+def test_database_refuses_a_url_banner_without_https_or_with_a_target() -> None:
+    from django.db import IntegrityError, transaction
+
+    product = ProductFactory.create()
+    for fields in (
+        {"link_kind": "url", "link_url": "http://x.uz"},
+        {"link_kind": "url", "link_url": ""},
+        {"link_kind": "url", "link_url": "https://x.uz", "link_product": product},
+        {"link_kind": "none", "link_url": "https://x.uz"},
+        {"link_kind": "product", "link_product": product, "link_url": "https://x.uz"},
+    ):
+        with pytest.raises(IntegrityError), transaction.atomic():
+            BannerFactory.create(**fields)

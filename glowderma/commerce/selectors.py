@@ -19,6 +19,7 @@ from django.db.models import (
     BigIntegerField,
     Count,
     Exists,
+    F,
     IntegerField,
     OuterRef,
     Q,
@@ -30,6 +31,7 @@ from django.db.models import (
 )
 from django.db.models.fields.json import KeyTextTransform
 from django.db.models.functions import Cast, Coalesce, TruncDay, TruncHour
+from django.db.models.lookups import Contains
 
 from glowderma.accounts.models import Customer
 from glowderma.catalog import selectors as catalog_selectors
@@ -40,6 +42,7 @@ from glowderma.core import enums, i18n, integration_modes, timeutils
 from glowderma.core.consistency import Finding, finding
 from glowderma.core.media import absolute_media_url
 from glowderma.core.models import OutboxMessage
+from glowderma.core.search import SearchFold
 from glowderma.core.timeutils import TASHKENT
 from glowderma.delivery import selectors as delivery_selectors
 from glowderma.delivery.models import Shipment
@@ -155,9 +158,10 @@ def order_queryset() -> QuerySet[Order]:
 
 def search_q(term: str) -> Q:
     """Contract §2.2 search: the order id contains the term without a leading ``№``; or the term has ≥ 3
-    digits and the customer phone contains them; or the customer name contains the term (case-insensitive)."""
+    digits and the customer phone contains them; or the customer name contains the term (case-insensitive and
+    folded like every name search: apostrophe variants and ё, ``core.search``, decision GC-1)."""
     number = term.removeprefix("№").strip()
-    condition = Q(customer__name__icontains=term)
+    condition = Q(Contains(SearchFold(F("customer__name")), SearchFold(Value(term))))
     if number:
         condition |= Q(id_text__contains=number)
     digits = re.sub(r"\D", "", term)
@@ -657,6 +661,15 @@ def line_status(visible: bool, available: int, quantity: int) -> str:
     if quantity > limit > 0:
         return enums.CartLineStatus.INSUFFICIENT
     return enums.CartLineStatus.OK
+
+
+def cart_product_ids(customer_id: int) -> list[int]:
+    """The products of the customer's cart lines in cart order (no lock: checkout's stale-stock re-read)."""
+    return list(
+        CartItem.objects.filter(cart__customer_id=customer_id)
+        .order_by("added_at", "id")
+        .values_list("product_id", flat=True)
+    )
 
 
 def visible_ids(product_ids: Iterable[int]) -> set[int]:

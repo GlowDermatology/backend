@@ -817,7 +817,13 @@ def test_journey_2_cart_checkout_click_and_order_timeline(world: World) -> None:
     row = feed["results"][0]
     assert (row["kind"], row["title"]) == ("order_status", "Tayyorlanmoqda")
     assert row["body"] == f"To‘lov qabul qilindi. Buyurtma №{order_id} tayyorlanmoqda."
-    assert row["link"] == {"kind": "order", "product_id": None, "order_id": order_id, "appointment_id": None}
+    assert row["link"] == {
+        "kind": "order",
+        "product_id": None,
+        "order_id": order_id,
+        "appointment_id": None,
+        "url": None,
+    }
     [message] = pushes(world, "order_status")
     assert message.token == "fcm-journey2" and message.title == "Tayyorlanmoqda"
     assert message.data == {
@@ -1329,6 +1335,7 @@ def test_journey_6_booking_race_confirm_push_ack_and_delivered_counter(
         "product_id": None,
         "order_id": None,
         "appointment_id": appointment["id"],
+        "url": None,
     }
     assert row["delivered_at"] is None and feed["unread_count"] == 1
     [message] = pushes(world, "appointment")
@@ -1947,7 +1954,13 @@ def test_journey_10_account_security_notices_reach_the_replaced_device(world: Wo
     assert (
         notice["body"] == "Hisobingizga Google profili bog‘landi. Agar bu siz bo‘lmasangiz, parolni tiklang."
     )
-    assert notice["link"] == {"kind": "none", "product_id": None, "order_id": None, "appointment_id": None}
+    assert notice["link"] == {
+        "kind": "none",
+        "product_id": None,
+        "order_id": None,
+        "appointment_id": None,
+        "url": None,
+    }
     [link_push] = pushes(world, "account_security")
     assert link_push.token == "fcm-journey10-first"
     assert link_push.data == {

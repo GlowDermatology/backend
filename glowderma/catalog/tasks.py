@@ -11,12 +11,13 @@ key ``hidden``), and only then lets the port advance its cursor (``sync_succeede
 a finished run announces ``catalog.stock_synced`` on the outbox (commerce settles the sold units the stock
 now reflects). A failure anywhere leaves the cursor and ``billz.last_sync_at`` where they were.
 
-Beat (``config/celery.py``): ``catalog.billz_sync_delta`` hourly and ``catalog.billz_sync_full`` daily start
-the same ``billz_import`` job through ``start_job`` (``created_by`` = system), so they single-flight with an
-admin import. With the fake Billz (any settings) they do nothing at all: the fake would only refresh
-``synced_at`` and write a job and two audit rows every hour, and under the production settings a fake import
-is refused anyway. A daily full that finds a delta (or an admin import) running retries a few times later
-instead of being skipped for the day.
+Beat (``config/celery.py``): ``catalog.billz_sync_delta`` every ``BILLZ_DELTA_SYNC_SECONDS`` (default 300,
+gap X-STOCK-FRESHNESS) and ``catalog.billz_sync_full`` daily start the same ``billz_import`` job through
+``start_job`` (``created_by`` = system), so they single-flight with an admin import (a delta that finds an
+import running joins it). With the fake Billz (any settings) they do nothing at all: the fake would only
+refresh ``synced_at`` and write a job and two audit rows every run, and under the production settings a fake
+import is refused anyway. A daily full that finds a delta (or an admin import) running retries a few times
+later instead of being skipped for the day.
 """
 
 import logging
@@ -141,7 +142,7 @@ def run_billz_import(job_id: int) -> None:
     _finished(finished, result=counters)
 
 
-# --- beat: hourly delta, daily full (docs/integrations/billz.md) -------------------------------------------
+# --- beat: a delta every BILLZ_DELTA_SYNC_SECONDS, a daily full (docs/integrations/billz.md) ---------------
 
 # A daily full that meets a running import retries this often, this many times (then waits for tomorrow).
 FULL_RETRY_SECONDS = 900
@@ -171,7 +172,8 @@ def _scheduled_import(mode: str) -> Job | None:
 
 @shared_task(name="catalog.billz_sync_delta")  # type: ignore[untyped-decorator]
 def billz_sync_delta() -> int | None:
-    """Hourly: the changes since the last successful sync (a running import covers them already)."""
+    """Every ``BILLZ_DELTA_SYNC_SECONDS``: the changes since the last successful sync (a running import covers
+    them already)."""
     job = _scheduled_import(enums.BillzImportMode.DELTA)
     return None if job is None else job.pk
 

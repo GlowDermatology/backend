@@ -87,8 +87,9 @@ def test_customer_consent_requires_terms_version() -> None:
 
 def test_customer_indexes_and_constraints_in_pg_catalog() -> None:
     indexes = index_definitions("accounts_customer")
-    trigram = indexes["accounts_customer_name_trgm"]
-    assert "USING gin" in trigram and "gin_trgm_ops" in trigram and "lower" in trigram.lower()
+    trigram = indexes["accounts_customer_fold_trgm"]  # accounts.0008: the folded name (GC-1)
+    assert "USING gin" in trigram and "gin_trgm_ops" in trigram and "translate(lower(" in trigram.lower()
+    assert "accounts_customer_name_trgm" not in indexes
     assert "status" in indexes["accounts_customer_status_reg"]
     assert "registered_at" in indexes["accounts_customer_status_reg"]
     assert constraint_names("accounts_customer") >= {
@@ -106,17 +107,20 @@ def test_customer_default_ordering_is_newest_registration_first() -> None:
     assert list(Customer.objects.all()) == [same, new, old]
 
 
-def test_customer_name_search_uses_the_trigram_index() -> None:
-    """``LOWER(name) LIKE %…%`` is the search shape the index serves (01 §1.1 contract notes)."""
-    from django.db.models import Value
-    from django.db.models.functions import Lower
+@pytest.mark.parametrize("term", ["KARIM", "g'ulom", "Gʻulom"])
+def test_customer_name_search_uses_the_trigram_index(term: str) -> None:
+    """``fold(name) LIKE %…%`` is the search shape the index serves (01 §1.1 contract notes; folded since
+    accounts.0008, decision GC-1)."""
+    from django.db.models import F, Value
+    from django.db.models.lookups import Contains
+
+    from glowderma.core.search import SearchFold
 
     CustomerFactory.create(name="Malika Karimova")
+    CustomerFactory.create(name="Dilnoza G\u2018ulomova")
     CustomerFactory.create(name="Sherzod Qodirov")
-    queryset = Customer.objects.annotate(_name_l=Lower("name")).filter(
-        _name_l__contains=Lower(Value("KARIM"))
-    )
-    assert [c.name for c in queryset] == ["Malika Karimova"]
+    queryset = Customer.objects.filter(Contains(SearchFold(F("name")), SearchFold(Value(term))))
+    assert len(queryset) == 1
     with connection.cursor() as cursor:
         # two rows: with a sequential scan ruled out the planner may still prefer walking the
         # ``registered_at`` ordering index with a filter; rule plain index scans out as well so that the
@@ -127,7 +131,7 @@ def test_customer_name_search_uses_the_trigram_index() -> None:
         sql, params = queryset.query.sql_with_params()
         cursor.execute("EXPLAIN " + sql, params)
         plan = "\n".join(row[0] for row in cursor.fetchall())
-    assert "accounts_customer_name_trgm" in plan
+    assert "accounts_customer_fold_trgm" in plan
 
 
 # --- Device ------------------------------------------------------------

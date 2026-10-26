@@ -16,12 +16,15 @@ from glowderma.payments.topics import REFUND_SUBMIT, refund_submit_key
 
 BILLZ_PUSH_SALE = "billz.push_sale"
 PUSH_ORDER_STATUS = "push.order_status"
+# Gap X-STOCK-FRESHNESS: after a pushed sale, read the sold products' stock from Billz again (best effort).
+BILLZ_STOCK_REREAD = "billz.stock_reread"
 
 # Topics whose handler is ``commerce/tasks.py`` (B5).
-HANDLED_TOPICS: tuple[str, ...] = (BTS_CREATE_SHIPMENT, BILLZ_PUSH_SALE, REFUND_SUBMIT)
+HANDLED_TOPICS: tuple[str, ...] = (BTS_CREATE_SHIPMENT, BILLZ_PUSH_SALE, REFUND_SUBMIT, BILLZ_STOCK_REREAD)
 # Topics ``commerce.services`` enqueues directly (``bts.create_shipment`` goes through
-# ``delivery.services.request_bts_create``; ``refund.submit`` through ``payments.services.create_refund``).
-PRODUCED_TOPICS: tuple[str, ...] = (BILLZ_PUSH_SALE, PUSH_ORDER_STATUS)
+# ``delivery.services.request_bts_create``; ``refund.submit`` through ``payments.services.create_refund``);
+# ``billz.stock_reread`` is enqueued by the ``billz.push_sale`` handler.
+PRODUCED_TOPICS: tuple[str, ...] = (BILLZ_PUSH_SALE, PUSH_ORDER_STATUS, BILLZ_STOCK_REREAD)
 # Topics whose ``dead`` message has a business consequence recorded by ``commerce.tasks.on_outbox_dead``:
 # the shipment / refund is marked failed with ``dead_letter`` and a ``shipment_failed`` / ``refund_failed``
 # event is written (design 03 §5; review major 5: never ``unknown``).
@@ -34,11 +37,17 @@ PAYLOAD_KEYS: dict[str, tuple[str, ...]] = {
     BILLZ_PUSH_SALE: ("purchase_id", "order_id", "billz_order_uuid"),
     REFUND_SUBMIT: ("refund_id", "payment_id", "order_id", "provider_txn_id", "amount"),
     PUSH_ORDER_STATUS: ("order_id", "status", "event_id", "customer_id"),
+    BILLZ_STOCK_REREAD: ("order_id", "product_ids"),
 }
 
 
 def billz_push_sale_key(billz_order_uuid: str) -> str:
     return f"{BILLZ_PUSH_SALE}:{billz_order_uuid}"
+
+
+def billz_stock_reread_key(order_id: int) -> str:
+    """One re-read per pushed sale (the push runs once; a redelivered success enqueues nothing new)."""
+    return f"{BILLZ_STOCK_REREAD}:{order_id}"
 
 
 def push_order_status_key(order_id: int, status: str) -> str:
@@ -53,6 +62,7 @@ def order_status_inbox_key(order_id: int, status: str) -> str:
 
 __all__ = [
     "BILLZ_PUSH_SALE",
+    "BILLZ_STOCK_REREAD",
     "BTS_CREATE_SHIPMENT",
     "DEAD_LETTER_ERROR_CODE",
     "DEAD_LETTER_TOPICS",
@@ -62,6 +72,7 @@ __all__ = [
     "PUSH_ORDER_STATUS",
     "REFUND_SUBMIT",
     "billz_push_sale_key",
+    "billz_stock_reread_key",
     "bts_create_shipment_key",
     "order_status_inbox_key",
     "push_order_status_key",

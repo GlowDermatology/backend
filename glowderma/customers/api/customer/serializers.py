@@ -411,6 +411,9 @@ class CustomerBannerLinkSerializer(serializers.Serializer[dict[str, Any]]):
     kind = serializers.ChoiceField(choices=enums.BannerLinkKind.values)
     product_id = serializers.IntegerField(allow_null=True)
     category = serializers.CharField(allow_null=True)
+    url = serializers.CharField(
+        allow_null=True, help_text="Kind `url`: the https link the app opens; else null."
+    )
 
 
 class CustomerBannerSerializer(serializers.Serializer[dict[str, Any]]):

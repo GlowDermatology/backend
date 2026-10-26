@@ -920,16 +920,21 @@ the fake Billz serves stock normally.
 (`ends_at` null or > now), ordered by `position`, id.
 ```jsonc
 {"id": 3, "title": "Kuzgi chegirmalar", "image_url": "https://…/77aa.webp", "image_width": 1200, "image_height": 600,
- "link": {"kind": "product", "product_id": 4, "category": null}}   // a link to an invisible product/inactive category renders kind "none"
+ "link": {"kind": "product", "product_id": 4, "category": null, "url": null}}   // a link to an invisible product/inactive category renders kind "none"
+// gap X-BANNER-URL: "link": {"kind": "url", "product_id": null, "category": null, "url": "https://glowderma.uz/aksiya"}
 ```
+`link.kind` `url` (BannerLinkKind, admin §2.5): the app opens `link.url` — always an absolute `https` URL ≤500 (validated
+when staff save it; open question GC-3) — in the system browser (or the in-app browser), never in a web view with the
+session. Every key of `link` is always present (`null` when it does not apply).
 **`GET catalog/categories/`** → `{"results": [{"slug", "name", "image_url" | null, "product_count"}]}`: active categories by
-`position`; `product_count` = visible products.
+`position`; `product_count` = visible products; `image_url` is the image staff upload in the admin (admin §2.4, gap
+ADM-5.1), `null` without one.
 
 **`GET catalog/products/`** → `Page<ProductCard>`
 
 | Param | Values | Rule |
 |---|---|---|
-| `search` | str ≤64 (trimmed; longer input cut to 64) | Case-insensitive partial match over the uz/ru/en names, `billz_name`, `billz_id` (`catalog.selectors.filter_products_search`, pg_trgm). Fewer than 2 characters is ignored. |
+| `search` | str ≤64 (trimmed; longer input cut to 64) | Case-insensitive partial match over the uz/ru/en names, `billz_name`, `billz_id` (`catalog.selectors.filter_products_search`, pg_trgm), folded on both sides: the Uzbek o‘/g‘ mark typed as `'`, `` ` ``, `‘`, `’`, `ʻ` or `ʼ` is one character and `ё` = `е` (`ko'pik` finds "ko‘pik"; open question GC-1). Fewer than 2 characters is ignored. |
 | `category` | slug | unknown or inactive slug → 400 `invalid_choice` |
 | `in_stock` | bool | `available > 0` (no product while online selling is off) |
 | `promo` | bool | |
@@ -998,7 +1003,19 @@ placed earlier.
  "last_change": null}                                // set on POST/PATCH responses: {"product_id", "requested_quantity", "quantity", "max_reached"}
 ```
 Line status: `unavailable` = not visible (§2.3); `out_of_stock` = `available ≤ 0`; `insufficient` = `quantity >
-max_quantity > 0`; else `ok`. A GET never changes stored quantities. Every write locks the `Cart` row
+max_quantity > 0`; else `ok`. A GET never changes stored quantities.
+
+**Stock freshness** (gap X-STOCK-FRESHNESS, open questions GC-5/GC-6). Billz is polled (no webhooks): a delta sync every
+`BILLZ_DELTA_SYNC_SECONDS` (300) and a daily full one. While Billz is **live**, `POST cart/items/` and
+`PATCH cart/items/{id}/` first re-read from Billz the stock of their product when its `ProductStock.synced_at` is older
+than `BILLZ_STOCK_MAX_AGE_SECONDS` (900; never read counts as older), through the Billz port with the interactive client
+profile and **4 s** for the request, **before** the request's transaction and every row lock; the read is written at
+once (`catalog.services.sync_stock`, never backwards) and the write then works on it (`available`, `max_quantity`,
+`OUT_OF_STOCK`). A barcode Billz no longer knows reads as stock 0. When Billz cannot be reached the cart write carries on
+from the cached stock — **cart writes never answer 503 for Billz**. Billz is not asked for a write that will be refused
+or replayed anyway (GC-10): a body that does not validate, a missing or malformed `Idempotency-Key` on `POST`, a key
+whose stored response is replayed, a product the customer cannot see, or (`PATCH`) a product that is not in the cart. A `GET` never calls Billz. With a fake Billz nothing
+changes (no read, the cached stock as before). Every write locks the `Cart` row
 (`select_for_update`; created lazily with `get_or_create`) and stores `price_at_add = current price` on the touched
 line (model change `commerce.0004_cartitem_price_at_add`, §7 `M2-C12`).
 
@@ -1091,6 +1108,17 @@ Body:
  "expected_total": 784400,            // the total the app showed; required
  "customer_note": "Soat 18:00 dan keyin"}   // ≤300, default ""
 ```
+**Stock freshness before the transaction** (gap X-STOCK-FRESHNESS, open questions GC-5/GC-6). While Billz is live, a
+checkout whose body is valid first re-reads from Billz — **before** the `@idempotent` transaction, holding no lock — the
+stock of every cart line whose `ProductStock.synced_at` is older than `BILLZ_STOCK_MAX_AGE_SECONDS` (900): never read
+first, then the oldest, one lookup per barcode, the interactive profile, **4 s** for all of them; each read is committed
+at once (`catalog.services.sync_stock`), so it is kept even when the checkout is then refused, and rows 7–9 run on it.
+A line Billz could not read keeps its cached stock; row 4a decides. Only the lines Billz **failed** to answer count for
+row 4a (transport error, 5xx, circuit open, or no answer at all within the 4 s); lines the 4 s budget, the rate limiter
+or a 429 pause left unread after Billz had answered are *deferred* and go on from the cache (GC-10). Nothing is read for
+a checkout without a well-formed `Idempotency-Key`, for a replayed key, or for lines whose product is not visible. With a
+fake Billz nothing is read (§2.3).
+
 **Serialisation.** Two checkouts of one customer (two taps, a retry with a renewed key, two app processes) must not
 both pass the open-order check. Checkout therefore runs, inside the `@idempotent` transaction:
 (a) body validation, consent, address checks and the BTS quote (an HTTP call while **no row lock** is held; the
@@ -1117,6 +1145,7 @@ Checks, in this order (the first failure answers):
 | 2 | Consent current (§2.2.4) | 409 `terms_update_required` · `error.terms_update_required`, `details {current_version}` |
 | 3 | Delivery: offered (§2.6; else 409 `delivery_unavailable` · `error.delivery_not_offered`, no BTS call), address own (`does_not_exist` `field.address_not_found`), region/city known (`address_incomplete`) | 409 / 400 |
 | 4 | Delivery: BTS quote (`quote(region_code, city_code)`, no row lock held; passed to `create_order` as `delivery_fee`) | 409 `delivery_unavailable` / 503 `provider_unavailable` |
+| 4a | Live Billz: every line the re-read above could not confirm because Billz failed (not merely *deferred*, GC-10) has a cached stock read within `BILLZ_STOCK_STALE_REFUSE_SECONDS` (3600; a line never read from Billz fails). Otherwise the checkout proceeds on the cache | 503 `provider_unavailable` "Tashqi xizmat javob bermadi. Qayta urinib ko‘ring." · `error.provider_unavailable` (nothing written but the stock reads; a retry re-reads — the reads that succeeded are kept, the oldest lines are read first) |
 | — | *Customer row locked (`select_for_update(no_key=True)`); customer still `active` (else 401 `SESSION_EXPIRED`)* | |
 | 5 | No other `awaiting_payment` order (`CHECKOUT_MAX_OPEN_ORDERS`, default 1) | 409 `open_order_exists` "Sizda to‘lanmagan buyurtma bor (№{order_id}). Avval uni to‘lang yoki bekor qiling." · `error.open_order_exists`, `details {order_id, pay_by}` |
 | 6 | Cart has lines (read under the lock) | 409 `cart_empty` "Savat bo‘sh." · `error.cart_empty` |
@@ -1539,7 +1568,8 @@ admin-only by DB constraint).
 {"id": 901, "kind": "order_status",          // InboxKind: promo | general | order_status | appointment
  "title": "Kuryerga topshirildi", "body": "Buyurtma №10248 kuryerga topshirildi.",   // rendered at creation in the customer's language (title = §4.3 customer label); never re-rendered after a language switch
  "image_url": null,
- "link": {"kind": "order", "product_id": null, "order_id": 10248, "appointment_id": null},   // InboxLinkKind: none | product | order | appointment
+ "link": {"kind": "order", "product_id": null, "order_id": 10248, "appointment_id": null, "url": null},   // InboxLinkKind: none | product | order | appointment | url
+ // a campaign with an https destination (gap ADM-10.1): "link": {"kind": "url", "product_id": null, "order_id": null, "appointment_id": null, "url": "https://glowderma.uz/aksiya"}
  "created_at": "2026-10-23T16:40:00+05:00", "read_at": null, "delivered_at": "2026-10-23T16:40:05+05:00"}
 ```
 - **`GET me/notifications/`** → `Page<InboxItem>` + top-level `"unread_count": int`; newest first; limited to the
@@ -1566,6 +1596,9 @@ admin-only by DB constraint).
   the recipient row actually changed (so retries never double count). This fills the admin `delivered` counter that
   was `null` in M1.
 - Push payloads carry `inbox_id` (P3 changes the three senders), §2.14.2.
+- `link.url` (gap ADM-10.1, open question GC-3): set only for `kind: "url"` — a campaign whose staff picked a link; an
+  absolute `https` URL ≤500 the app opens in the system browser; `null` for every other kind. Every key of `link` is
+  always present.
 
 ---
 ### 2.13 Provider callbacks (webhooks, **S**)
@@ -2041,7 +2074,7 @@ pushes are reported `sent` but reach no device (§6.14).
 |---|---|---|---|
 | `order_status` | `inbox_id`, `order_id`, `status` | title = customer label (§4.3) in the customer's language; body = template text (`{raqam}` only) | `orders` / high |
 | `appointment` | `inbox_id`, `appointment_id`, `action` | fixed texts (`notifications/texts.py`); sent only while the action is still true when the outbox message is handled (`confirmed`/`rescheduled`: status `requested` or `confirmed`; `rejected`: `rejected`; `cancelled`: `cancelled`), otherwise no inbox row and no push (INFO log) | `appointments` / high |
-| `campaign` | `inbox_id`, `campaign_id`, `product_id` (or `""`) | as authored; `notification.image` = campaign image URL | `promo` or `general` / normal |
+| `campaign` | `inbox_id`, `campaign_id`, `product_id` (or `""`), `link_url` (the campaign's https destination, or `""`; gap ADM-10.1) | as authored; `notification.image` = campaign image URL | `promo` or `general` / normal |
 | `account_security` | `inbox_id`, `event` (`social_linked`, `social_unlinked`, `password_reset`, `password_changed`), `provider` (or `""`) | catalog `push.account_security.<event>` (title + body; `{provider}` only) | `general` / high |
 | `session_replaced` | `sid` (the revoked session) | none (data-only; APNs `content-available: 1`, `apns-push-type: background`, priority 5) | – / high |
 
@@ -2149,7 +2182,7 @@ gains `refresh_reused` (§2.1.6).
 | ContentLanguage | `uz`, `ru`, `en` | `me.language`, `Accept-Language` |
 | SpecialistRole | `dermatologist`, `cosmetologist` | specialists |
 | AppointmentStatus | `requested`, `confirmed`, `rejected`, `attended`, `cancelled` (the `cancelled` literal reserved by T3 is now public) | appointments |
-| BannerLinkKind | `none`, `product`, `category` | banners |
+| BannerLinkKind | `none`, `product`, `category`, `url` (gap X-BANNER-URL) | banners |
 | **OtpPurpose** (new) | `register`, `login_new_device`, `reset_password`, `link_social` (`send-code` accepts all but `login_new_device`) | `auth/send-code/`, `auth/verify-code/` |
 | **NextStep** (new) | `verify_device`, `verify_phone` | `auth/login/`, `auth/social/` |
 | **CustomerSocialProvider** (new; component `CustomerSocialProviderEnum`) | `google`, `facebook`, `apple` | `auth/social/`, `me/social/`, `Me.linked_providers`. The staff OAuth routes keep their own `SocialProviderEnum` (`google`, `facebook`; admin §2.1), so Apple never appears on staff routes |
@@ -2168,7 +2201,7 @@ gains `refresh_reused` (§2.1.6).
 | **AppointmentScope** (new) | `upcoming`, `past` | `me/appointments/` |
 | **AppointmentCancelledBy** (new; = `Appointment.CancelledBy`) | `customer`, `admin` | appointments |
 | **InboxKind** (new; = `InboxNotification.Kind`) | `promo`, `general`, `order_status`, `appointment` | inbox |
-| **InboxLinkKind** (new) | `none`, `product`, `order`, `appointment` | inbox |
+| **InboxLinkKind** (new) | `none`, `product`, `order`, `appointment`, `url` (gap ADM-10.1) | inbox |
 | **PushDataType** (new; FCM `data.type`) | `order_status`, `appointment`, `campaign`, `account_security`, `session_replaced` | §2.14.2 |
 | **AccountSecurityEvent** (new) | `social_linked`, `social_unlinked`, `password_reset`, `password_changed` | `push.account_security`, §2.14.2 |
 
@@ -2683,3 +2716,12 @@ the client may still revise it later through a setting or a data field:
 | M2-N3 | Security notices (social link/unlink, password reset and change) | Push + inbox row (`account_security`), and for a reset or a social completion a visible push to the replaced device plus a 401 message there; no SMS (re-evaluated in revision 2: a reset needs the SMS code, so an SMS notice would reach whoever did it; an SMS template would also need Eskiz approval) |
 | M2-F1 | May production run fake provider adapters? | **Decided by the product owner (2026-10-26):** yes, warned at startup and reported per provider in `health/?ready=1` and admin settings; fake callbacks are refused (a Click Complete of a transaction attached while Click was live is accepted and reversed), fake payment providers are not offered, the dev simulate endpoint and the fixed OTP exist only under local/test settings, and fake Eskiz delivers no SMS (demo/staging posture, §6.14). Mixed with live providers, a fake never reports an effect that did not happen: fake BTS turns home delivery off (pickup only) and makes up no parcel; online selling requires live Billz — with fake Billz the stock is unknown, every product is unavailable online (`online_sales_enabled: false`), the admin import is refused and no sale is recorded (an earlier order's sale is entered by hand). Switching a payment provider from live to fake is an operator procedure: not while it holds open money (open transactions, unsettled refunds; the worker logs an ERROR at start listing them), and money a provider switched to fake still holds is reconciled by hand in its cabinet (§2.3, §2.6, §2.14.3, §6.14) |
 | M2-T1 | Terms not yet versioned in settings | Registration answers 503 `terms_not_published` until staff publish `terms_version` with the uz terms and privacy texts |
+
+Gap closure — catalog package (`feat/gap-catalog`, 2026-10-26; recorded in `docs/decisions/open-questions.md` as
+provisional defaults):
+
+| # | Point | Provisional default used here |
+|---|---|---|
+| GC-1 | Search over names in three languages with partial matches (Backend EN §4) | Folded on both sides: six apostrophe encodings of o‘/g‘ are one character, `ё` = `е` (§2.3 `search`) |
+| GC-3 | Banner and campaign destinations "product or link" | `link.kind` `url` with an absolute `https` `url` ≤500 (§2.3 banners, §2.12, FCM `link_url` §2.14.2) |
+| GC-5 / GC-6 | "Recheck stock against Billz (or a very recent cache) at cart and checkout" | Delta every 300 s; cart writes and checkout re-read lines older than 900 s (4 s budget, before the transaction); checkout refuses 503 only when Billz cannot confirm a line older than 3600 s; cart writes never refuse; a pushed sale's products are re-read 30 s later (§2.5, §2.7.1 row 4a) |

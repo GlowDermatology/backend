@@ -65,6 +65,9 @@ def test_filters_search_and_is_active(staff_client: APIClient) -> None:
     assert names(is_active="false") == [old.full_name]
     assert names(is_active="0", search="old@") == [old.full_name]
     assert len(names(search="")) == 2  # the caller and Nodira
+    # GC-1: the full name is folded like every name search (apostrophe variants, ё)
+    StaffUserFactory.create(full_name="Shahlo G\u02bbaniyeva", email="shahlo@glowderma.uz")
+    assert names(search="g'aniyeva") == names(search="G\u2018ANIYEVA") == ["Shahlo G\u02bbaniyeva"]
 
 
 @pytest.mark.parametrize(

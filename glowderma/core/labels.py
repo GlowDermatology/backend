@@ -74,7 +74,7 @@ PRODUCT_EXPORT_HEADERS: tuple[str, ...] = (
     "Holat",
     "Yangi",
 )
-CATEGORY_EXPORT_HEADERS: tuple[str, ...] = ("Slug", "Nomi", "Tartib", "Faol", "Mahsulotlar")
+CATEGORY_EXPORT_HEADERS: tuple[str, ...] = ("Slug", "Nomi", "Tartib", "Faol", "Mahsulotlar", "Rasm")
 BANNER_EXPORT_HEADERS: tuple[str, ...] = (
     "ID",
     "Sarlavha",
@@ -94,6 +94,7 @@ NOTIFICATION_EXPORT_HEADERS: tuple[str, ...] = (
     "Holat",
     "Yuborildi",
     "Yetkazildi",
+    "Havola",
 )
 SEGMENT_EXPORT_HEADERS: tuple[str, ...] = ("ID", "Nomi", "A’zolar", "Push qurilmalar")
 # The customer columns of ``mijozlar`` (contract 1.8), reused by the segment members export.

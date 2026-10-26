@@ -6,8 +6,10 @@ from typing import TypedDict
 
 from django.db.models import F, OuterRef, Prefetch, Q, QuerySet, Subquery, Value
 from django.db.models.functions import Coalesce, Lower, NullIf
+from django.db.models.lookups import Contains
 
 from glowderma.accounts.models import AuthSession, SocialIdentity, StaffUser
+from glowderma.core.search import SearchFold
 
 # Only the directory columns: never the password hash (or last_login, is_superuser) per row.
 DIRECTORY_COLUMNS = ("id", "full_name", "email", "is_active")
@@ -41,8 +43,8 @@ def with_member_columns(rows: QuerySet[StaffUser]) -> QuerySet[StaffUser]:
 def staff_list(filters: StaffFilters, *, members: bool = False) -> QuerySet[StaffUser]:
     """Staff users by display name (full name, else email; case-insensitive), ties by ``id``.
 
-    ``search`` matches the full name or the email (case-insensitive substring); ``is_active`` filters
-    when given (the API defaults it to ``true``). ``members`` adds the manager's columns
+    ``search`` matches the full name (folded, decision GC-1) or the email (case-insensitive substring);
+    ``is_active`` filters when given (the API defaults it to ``true``). ``members`` adds the manager's columns
     (:func:`with_member_columns`); without it only the directory columns are read.
     """
     rows = StaffUser.objects.only(*DIRECTORY_COLUMNS)
@@ -50,7 +52,10 @@ def staff_list(filters: StaffFilters, *, members: bool = False) -> QuerySet[Staf
         rows = rows.filter(is_active=filters["is_active"])
     term = filters.get("search")
     if term:
-        rows = rows.filter(Q(full_name__icontains=term) | Q(email__icontains=term))
+        # the full name is folded like every name search (apostrophe variants and ё, decision GC-1)
+        rows = rows.filter(
+            Q(Contains(SearchFold(F("full_name")), SearchFold(Value(term)))) | Q(email__icontains=term)
+        )
     if members:
         rows = with_member_columns(rows)
     display = Coalesce(NullIf(F("full_name"), Value("")), F("email"))

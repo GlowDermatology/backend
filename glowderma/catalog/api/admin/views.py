@@ -24,6 +24,7 @@ from glowderma.catalog.api.admin.serializers import (
     BannerSerializer,
     BannerWriteSerializer,
     CategoryListQuerySerializer,
+    CategoryPatchSerializer,
     CategoryResultsSerializer,
     CategorySerializer,
     CategoryWriteSerializer,
@@ -46,6 +47,7 @@ from glowderma.core.api.parsers import JSONParser
 from glowderma.core.api.schema import ADMIN_ERRORS, EXPORT_PARAM, ErrorEnvelopeSerializer
 from glowderma.core.exports import ExportMixin, format_export_datetime
 from glowderma.core.idempotency import idempotent
+from glowderma.core.media import absolute_media_url
 from glowderma.integrations import selectors as integration_selectors
 from glowderma.integrations import services as job_services
 from glowderma.integrations.api.admin.serializers import BillzImportSerializer, JobSerializer
@@ -216,13 +218,60 @@ class ProductImagesOrderView(AdminAPIView):
 # --- categories ---------------------------------------------------------------------------------------------
 
 
-class CategoryViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
+class ActionParsersViewSet(AdminGenericViewSet):
+    """DRF picks the parsers before the viewset resolves ``self.action``: resolve it first, so ``get_parsers``
+    can answer per action (multipart only where the contract allows it; anything else is a 415)."""
+
+    def initialize_request(self, request: HttpRequest, *args: Any, **kwargs: Any) -> Request:
+        action_map: dict[str, str] = getattr(self, "action_map", None) or {}
+        self.action = action_map.get(request.method.lower() if request.method else "") or ""
+        return super().initialize_request(request, *args, **kwargs)
+
+
+CategoryFormSerializer = inline_serializer(
+    name="CategoryForm",
+    fields={
+        "slug": serializers.CharField(max_length=40),
+        "name.uz": serializers.CharField(min_length=2, max_length=60),
+        "name.ru": serializers.CharField(max_length=60, required=False, allow_blank=True),
+        "name.en": serializers.CharField(max_length=60, required=False, allow_blank=True),
+        "is_active": serializers.BooleanField(required=False),
+        "image": serializers.FileField(required=False),
+    },
+)
+
+
+CategoryPatchFormSerializer = inline_serializer(
+    name="CategoryPatchForm",
+    fields={
+        "name.uz": serializers.CharField(min_length=2, max_length=60, required=False),
+        "name.ru": serializers.CharField(max_length=60, required=False, allow_blank=True),
+        "name.en": serializers.CharField(max_length=60, required=False, allow_blank=True),
+        "is_active": serializers.BooleanField(required=False),
+        "image": serializers.FileField(required=False),
+        "remove_image": serializers.BooleanField(required=False),
+    },
+)
+
+
+def _category_image(request: Request) -> Any:
+    """The optional ``image`` part (multipart only; a JSON body carries none)."""
+    return request.FILES.get("image") if request.FILES else None
+
+
+class CategoryViewSet(ExportMixin, mixins.ListModelMixin, ActionParsersViewSet):
     serializer_class = CategorySerializer
     export_name = "kategoriyalar"
     export_filter_keys = frozenset(CategoryListQuerySerializer().fields)
     export_resource = "categories"
     export_headers = labels.CATEGORY_EXPORT_HEADERS
     lookup_field = "slug"
+
+    def get_parsers(self) -> list[BaseParser]:
+        # Gap ADM-5.1: create and PATCH take JSON or multipart (the image); the rest are JSON.
+        if getattr(self, "action", None) in ("create", "partial_update"):
+            return [JSONParser(), MultiPartParser()]
+        return [JSONParser()]
 
     def get_queryset(self) -> QuerySet[Category]:
         query = CategoryListQuerySerializer(data=query_params(self.request))
@@ -240,6 +289,7 @@ class CategoryViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
                 category.position,
                 labels.yes_no(category.is_active),
                 int(getattr(category, "product_count", 0)),
+                absolute_media_url(category.image.name) if category.image.name else "",  # gap ADM-5.1
             )
 
     def _category(self, slug: str) -> Category:
@@ -260,16 +310,23 @@ class CategoryViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
 
     @extend_schema(
         operation_id="admin_categories_create",
-        request=CategoryWriteSerializer,
+        description="JSON, or multipart with dotted `name.uz`/`name.ru`/`name.en` and an optional `image` "
+        "(JPEG, PNG or WebP, ≤ 5 MiB; re-encoded, EXIF stripped, ≤ 2400 px).",
+        request={"application/json": CategoryWriteSerializer, "multipart/form-data": CategoryFormSerializer},
         responses={201: CategorySerializer, **ADMIN_ERRORS},
     )
     @idempotent(required=False)
     def create(self, request: Request) -> Response:
-        serializer = CategoryWriteSerializer(data=request.data)
+        serializer = CategoryWriteSerializer(data=form_to_nested(request.data))
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         category = services.create_category(
-            data["slug"], data["name"], is_active=data["is_active"], actor=request.user, request=request
+            data["slug"],
+            data["name"],
+            is_active=data["is_active"],
+            image=_category_image(request),
+            actor=request.user,
+            request=request,
         )
         return Response(CategorySerializer(category).data, status=201)
 
@@ -281,19 +338,32 @@ class CategoryViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
 
     @extend_schema(
         operation_id="admin_categories_partial_update",
-        request=CategoryWriteSerializer,
+        description="JSON or multipart (dotted names). A multipart `image` replaces the stored image (the "
+        "old file is removed); `remove_image: true` drops it; both at once → `remove_image` `invalid`.",
+        request={
+            "application/json": CategoryPatchSerializer,
+            "multipart/form-data": CategoryPatchFormSerializer,
+        },
         responses={200: CategorySerializer, **ADMIN_ERRORS},
     )
     @idempotent(required=False)
     def partial_update(self, request: Request, slug: str) -> Response:
         category = self._category(slug)
-        serializer = CategoryWriteSerializer(instance=category, data=request.data, partial=True)
+        serializer = CategoryPatchSerializer(
+            instance=category, data=form_to_nested(request.data), partial=True
+        )
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
+        image = _category_image(request)
+        remove_image = bool(data.get("remove_image", False))
+        if image is not None and remove_image:
+            raise ValidationError({"remove_image": [field_error("invalid")]})
         updated = services.update_category(
             category,
             name=data.get("name"),
             is_active=data.get("is_active"),
+            image=image,
+            remove_image=remove_image,
             actor=request.user,
             request=request,
         )
@@ -323,7 +393,7 @@ class CategoryViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
 # --- banners ------------------------------------------------------------------------------------------------
 
 # Multipart keys whose empty string means ``null`` (see BannerWriteSerializer's docstring).
-NULLABLE_FORM_KEYS = frozenset({"link.product_id", "link.category", "starts_at", "ends_at"})
+NULLABLE_FORM_KEYS = frozenset({"link.product_id", "link.category", "link.url", "starts_at", "ends_at"})
 
 
 def form_to_nested(data: Any) -> dict[str, Any]:
@@ -361,6 +431,7 @@ BannerFormSerializer = inline_serializer(
         "link.kind": serializers.ChoiceField(choices=enums.BannerLinkKind.values, required=False),
         "link.product_id": serializers.IntegerField(required=False, allow_null=True),
         "link.category": serializers.CharField(required=False, allow_null=True, max_length=40),
+        "link.url": serializers.CharField(required=False, allow_null=True, max_length=500),
         "is_active": serializers.BooleanField(required=False),
         "starts_at": serializers.DateTimeField(required=False, allow_null=True),
         "ends_at": serializers.DateTimeField(required=False, allow_null=True),
@@ -378,6 +449,7 @@ BannerPatchFormSerializer = inline_serializer(
         "link.kind": serializers.ChoiceField(choices=enums.BannerLinkKind.values, required=False),
         "link.product_id": serializers.IntegerField(required=False, allow_null=True),
         "link.category": serializers.CharField(required=False, allow_null=True, max_length=40),
+        "link.url": serializers.CharField(required=False, allow_null=True, max_length=500),
         "is_active": serializers.BooleanField(required=False),
         "starts_at": serializers.DateTimeField(required=False, allow_null=True),
         "ends_at": serializers.DateTimeField(required=False, allow_null=True),
@@ -385,18 +457,12 @@ BannerPatchFormSerializer = inline_serializer(
 )
 
 
-class BannerViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
+class BannerViewSet(ExportMixin, mixins.ListModelMixin, ActionParsersViewSet):
     serializer_class = BannerSerializer
     export_name = "bannerlar"
     export_filter_keys = frozenset(BannerListQuerySerializer().fields)
     export_resource = "banners"
     export_headers = labels.BANNER_EXPORT_HEADERS
-
-    def initialize_request(self, request: HttpRequest, *args: Any, **kwargs: Any) -> Request:
-        # DRF picks the parsers before the viewset resolves ``self.action``: resolve it first.
-        action_map: dict[str, str] = getattr(self, "action_map", None) or {}
-        self.action = action_map.get(request.method.lower() if request.method else "") or ""
-        return super().initialize_request(request, *args, **kwargs)
 
     def get_parsers(self) -> list[BaseParser]:
         # Contract §1.2 / §2.5: POST is multipart; PATCH takes multipart or JSON; the rest are JSON. Anything
@@ -422,6 +488,8 @@ class BannerViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
                 link = f"mahsulot #{banner.link_product_id}"
             elif banner.link_kind == enums.BannerLinkKind.CATEGORY and banner.link_category_id:
                 link = f"kategoriya {banner.link_category.slug if banner.link_category else ''}"
+            elif banner.link_kind == enums.BannerLinkKind.URL and banner.link_url:
+                link = banner.link_url
             else:
                 link = ""
             yield (

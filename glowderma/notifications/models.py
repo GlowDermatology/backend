@@ -116,11 +116,13 @@ class Campaign(TimeStampedModel):
     )  # MEDIA_ROOT/campaigns/<id>/<hash>.<ext>
     link_kind = models.CharField(
         max_length=8, choices=enums.LinkKind.choices, default=enums.LinkKind.NONE
-    )  # none|product
+    )  # none|product|url
     link_product = models.ForeignKey(
         "catalog.Product", null=True, on_delete=models.SET_NULL, related_name="+"
     )
     link_product_label = models.CharField(max_length=120, blank=True)  # uz display name at creation
+    # gap ADM-10.1: the https link the app opens (kind "url" only; "" otherwise; decision GC-3)
+    link_url = models.CharField(max_length=500, blank=True, default="")
     audience_type = models.CharField(max_length=8, choices=enums.AudienceType.choices)  # all|segment|customer
     audience_segment = models.ForeignKey(
         "notifications.CustomerSegment", null=True, on_delete=models.SET_NULL, related_name="campaigns"
@@ -157,8 +159,14 @@ class Campaign(TimeStampedModel):
             ),
             models.CheckConstraint(
                 condition=(
-                    Q(link_kind="none", link_product__isnull=True, link_product_label="")
-                    | Q(link_kind="product") & ~Q(link_product_label="")
+                    Q(link_kind="none", link_product__isnull=True, link_product_label="", link_url="")
+                    | Q(link_kind="product", link_url="") & ~Q(link_product_label="")
+                    | Q(
+                        link_kind="url",
+                        link_product__isnull=True,
+                        link_product_label="",
+                        link_url__startswith="https://",
+                    )
                 ),
                 name="campaign_link_fields",
             ),
@@ -332,7 +340,8 @@ class InboxNotification(TimeStampedModel):
     body = models.CharField(max_length=300)
     link = models.JSONField(
         default=dict, encoder=DjangoJSONEncoder
-    )  # {"kind":"none"} | {"kind":"product","product_id":4} | {"kind":"order","order_id":10248} | …
+    )  # {"kind":"none"} | {"kind":"product","product_id":4} | {"kind":"order","order_id":10248} |
+    # {"kind":"url","url":"https://…"} | …
     image_url = models.CharField(max_length=500, blank=True)
     source_type = models.CharField(max_length=16, choices=SourceType.choices)
     source_id = models.BigIntegerField()  # campaign / order / appointment / customer (account) id

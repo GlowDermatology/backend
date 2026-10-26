@@ -161,7 +161,7 @@ The Billz product UUID of each barcode is cached (`billz:product:<barcode>`, 7 d
 An admin lookup (`get_product`) pages through `search` results (50 a page, at most 10 pages) until the exact barcode
 turns up; more matches than that without an exact one is `BillzUnavailable`, never "not found".
 
-**Delta** (hourly, or admin "delta"): `last_updated_date` = start of the last successful run − 5 minutes (UTC,
+**Delta** (every `BILLZ_DELTA_SYNC_SECONDS`, default 300 — was hourly before gap X-STOCK-FRESHNESS — or admin "delta"): `last_updated_date` = start of the last successful run − 5 minutes (UTC,
 `yyyy-mm-dd hh:mm:ss`); without a cursor it lists everything. The cursor lives in `IntegrationState(billz).data`
 (`delta_since`, `full_count`, `full_synced_at`) and moves **only** through `BillzPort.sync_succeeded()`, which the
 import task calls after every row was applied; a run that fails anywhere (a page, an upsert, the reconciliation)
@@ -198,12 +198,30 @@ time limit of 840 s), `billz_listing_incomplete` or `billz_auth_failed` (Billz r
 its own limits (840 s soft / 870 s hard, below the 15-minute stale-job reaper, which now also fails a job still
 `queued` after 15 minutes); the beat warns when it joins an import job older than that.
 
-**Beat** (`config/celery.py`, Tashkent time): `billz-sync-delta` → `catalog.billz_sync_delta` every hour at :07;
-`billz-sync-full` → `catalog.billz_sync_full` daily at 04:23. Both start the `billz_import` job through
+**Beat** (`config/celery.py`, Tashkent time): `billz-sync-delta` → `catalog.billz_sync_delta` every
+`BILLZ_DELTA_SYNC_SECONDS` (300; 60..3600); `billz-sync-full` → `catalog.billz_sync_full` daily at 04:23. Both start the `billz_import` job through
 `integrations.services.start_job` (actor `system`), so they single-flight with an admin import and the stale-job
 reaper covers them. With `BILLZ_MODE=fake` (any settings) they do nothing: no job, no audit row, no `synced_at`
 churn. With live but unconfigured they log a WARNING and do nothing. A full that finds another import running
 retries every 15 minutes, 4 times, then skips the day (WARNING).
+
+**Stock freshness at the cart and checkout** (gap X-STOCK-FRESHNESS; open questions GC-5, GC-6, GC-8; customer
+contract §2.5, §2.7.1). While Billz is live, `POST`/`PATCH cart/items/` and `POST orders/checkout/` first re-read the
+lines whose `ProductStock.synced_at` is older than `BILLZ_STOCK_MAX_AGE_SECONDS` (900) through
+`BillzPort.read_stock(billz_ids, budget_seconds=4, interactive=True)`: the exact-barcode lookup of `get_product` for
+each barcode (never read first, then the oldest), one deadline of 4 s for all of them, the interactive profile (a 429
+pause fails fast); never an exception. A Billz failure (transport error, 5xx, auth, circuit open, or a request the
+deadline cut before any lookup of the call was answered) ends the run and reports the rest `unavailable`; the call's own
+budget running out (`BillzOutOfTime`: the deadline after an answer, the limiter wait, a 429 pause) ends it and reports
+the rest `deferred`; a barcode whose substring search fills `SEARCH_MAX_PAGES` without an exact match is `deferred` and
+the run goes on (GC-10). The views call it **before** their `@idempotent` transaction and every row lock, and not for a
+request they will refuse or replay anyway; each row is written at once through
+`catalog.services.sync_stock` (never backwards), a barcode Billz does not know as stock 0. Cart writes then carry on
+(from the cache for what was not read); a checkout refuses with 503 `provider_unavailable` only when a line Billz failed to
+answer (not a deferred one) was last read longer ago than `BILLZ_STOCK_STALE_REFUSE_SECONDS` (3600) or never. After a successful sale
+push, `billz.stock_reread` (outbox, 30 s later, handled by `commerce.tasks`) re-reads the sold products with the batch
+profile (60 s, best effort) and settles their units. A delta refreshes `synced_at` only for the products it lists
+(GC-8 asks Billz whether stock movements bump `last_updated_date`). Fake Billz: none of this runs.
 
 ## 6. Sale push (`billz.push_sale`)
 
@@ -385,6 +403,9 @@ that the shop id never matches), and the production settings validate exactly th
 | `BILLZ_VOLUME_FIELD` | no (`""` = volume not synced: the stored volume is kept) | `Объём` | no |
 | `BILLZ_SHIFT_RETRY_MINUTES` | no (`15`; 1..1440) | closed-shift retry interval (D2) | no |
 | `BILLZ_SHIFT_RETRY_MAX_HOURS` | no (`36`; 1..168) | how long a closed shift is waited for (D2) | no |
+| `BILLZ_DELTA_SYNC_SECONDS` | no (`300`; 60..3600) | seconds between two delta syncs (GC-5) | no |
+| `BILLZ_STOCK_MAX_AGE_SECONDS` | no (`900`; 60..86400) | cart/checkout re-read lines older than this (GC-5) | no |
+| `BILLZ_STOCK_STALE_REFUSE_SECONDS` | no (`3600`; ≥ the max age, ≤604800) | checkout 503 when Billz cannot confirm a line older than this (GC-6) | no |
 
 `is_configured()` (admin `products/stats` `billz.connected`) is true for live only when the key and the three ids
 are set. Constants (not settings): push deadline 240 s, payment quiet period 10 min, sale lock 10 min (a busy

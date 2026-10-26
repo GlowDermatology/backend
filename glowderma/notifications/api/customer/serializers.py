@@ -20,15 +20,22 @@ class InboxLinkSerializer(serializers.Serializer[Any]):
     product_id = serializers.IntegerField(allow_null=True)
     order_id = serializers.IntegerField(allow_null=True)
     appointment_id = serializers.IntegerField(allow_null=True)
+    url = serializers.CharField(
+        allow_null=True, help_text="Kind `url`: the campaign's https link the app opens (gap ADM-10.1)."
+    )
 
 
 def inbox_link(stored: Any) -> dict[str, Any]:
-    """The stored ``link`` JSON in the C§2.12 shape: every id key present (``null`` when absent)."""
+    """The stored ``link`` JSON in the C§2.12 shape: every id key present (``null`` when absent), and ``url``
+    (the https link of a ``url`` campaign, else ``null``)."""
     data = stored if isinstance(stored, dict) else {}
     kind = data.get("kind")
     if kind not in enums.InboxLinkKind.values:
         kind = enums.InboxLinkKind.NONE
-    return {"kind": kind, **{key: data.get(key) for key in LINK_IDS}}
+    url = data.get("url") if kind == enums.InboxLinkKind.URL and isinstance(data.get("url"), str) else None
+    if kind == enums.InboxLinkKind.URL and not url:
+        kind = enums.InboxLinkKind.NONE
+    return {"kind": kind, **{key: data.get(key) for key in LINK_IDS}, "url": url}
 
 
 class InboxItemSerializer(serializers.Serializer[InboxNotification]):

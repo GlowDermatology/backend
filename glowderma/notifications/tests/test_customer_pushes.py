@@ -313,6 +313,7 @@ def test_campaign_push_channel_and_payload(clock: Any, fcm: FakeFcm, kind: str, 
         "inbox_id": str(inbox.pk),
         "campaign_id": str(campaign.pk),
         "product_id": "",
+        "link_url": "",
     }
     assert (message.android_channel, message.android_priority, message.apns_priority) == (
         channel,

@@ -114,6 +114,7 @@ def test_migrate_zero_and_forward_again() -> None:
         "0002_seed_status_templates",
         "0003_inbox_account_source",
         "0004_campaign_cancelled",
+        "0005_campaign_link_url",
     }
     with connection.cursor() as cursor:
         cursor.execute("SELECT indexdef FROM pg_indexes WHERE indexname = 'segment_name_ci_unique'")
@@ -135,3 +136,20 @@ def test_dependency_migrate_zero_cascades_and_a_full_migrate_restores_us() -> No
     call_command("migrate", verbosity=0)
     assert TABLES <= table_names()
     assert list(StatusTemplate.objects.values_list("status", flat=True)) == STATUSES
+
+
+@pytest.mark.django_db(transaction=True)
+def test_campaign_url_migration_reverses_url_links_to_none() -> None:
+    """0005 (gap ADM-10.1): the reverse turns URL campaigns into campaigns without a link first."""
+    from glowderma.notifications.models import Campaign
+    from glowderma.notifications.tests.factories import CampaignFactory
+
+    campaign = CampaignFactory.create(link_kind="url", link_url="https://glowderma.uz/aksiya")
+    try:
+        call_command("migrate", "notifications", "0004", verbosity=0)
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT link_kind FROM notifications_campaign WHERE id = %s", [campaign.pk])
+            assert cursor.fetchone() == ("none",)
+    finally:
+        call_command("migrate", verbosity=0)
+    assert Campaign.objects.get(pk=campaign.pk).link_url == ""

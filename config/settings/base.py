@@ -326,6 +326,21 @@ BILLZ_VOLUME_FIELD = env_str("BILLZ_VOLUME_FIELD", "").strip()
 # dead-lettered with the reason "shift closed" (decision D2, docs/integrations/billz.md §7).
 BILLZ_SHIFT_RETRY_MINUTES = env_bounded_int("BILLZ_SHIFT_RETRY_MINUTES", 15, minimum=1, maximum=24 * 60)
 BILLZ_SHIFT_RETRY_MAX_HOURS = env_bounded_int("BILLZ_SHIFT_RETRY_MAX_HOURS", 36, minimum=1, maximum=7 * 24)
+# Stock freshness (gap X-STOCK-FRESHNESS, decision GC-5; customer contract §2.5, §2.7.1). The beat starts a
+# delta import every BILLZ_DELTA_SYNC_SECONDS (single-flight with admin imports; nothing while Billz is
+# fake). While Billz is live, a cart write or a checkout first re-reads from Billz (interactive profile, 4 s
+# for the whole request) the stock of every line whose ProductStock.synced_at is older than
+# BILLZ_STOCK_MAX_AGE_SECONDS; a checkout whose unread lines are older than BILLZ_STOCK_STALE_REFUSE_SECONDS
+# answers 503 provider_unavailable (cart writes keep working from the cache).
+BILLZ_DELTA_SYNC_SECONDS = env_bounded_int("BILLZ_DELTA_SYNC_SECONDS", 300, minimum=60, maximum=3600)
+BILLZ_STOCK_MAX_AGE_SECONDS = env_bounded_int("BILLZ_STOCK_MAX_AGE_SECONDS", 900, minimum=60, maximum=86_400)
+BILLZ_STOCK_STALE_REFUSE_SECONDS = env_bounded_int(
+    "BILLZ_STOCK_STALE_REFUSE_SECONDS", 3600, minimum=60, maximum=7 * 86_400
+)
+if BILLZ_STOCK_STALE_REFUSE_SECONDS < BILLZ_STOCK_MAX_AGE_SECONDS:
+    raise ImproperlyConfigured(
+        "BILLZ_STOCK_STALE_REFUSE_SECONDS must be at least BILLZ_STOCK_MAX_AGE_SECONDS"
+    )
 # --- Notifications: FCM adapter and campaign batching (contract 2.8, M1d) ---
 # FCM_MODE: "fake" (deterministic in-process push adapter, see integrations.fcm.fake; tokens ending in "-bad"
 # fail) or "live" (M3); defaults to INTEGRATIONS_MODE. CAMPAIGN_BATCH_SIZE is the number of recipients one
