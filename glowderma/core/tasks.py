@@ -1,9 +1,11 @@
 import logging
+import time
 import uuid
 from datetime import timedelta
 from typing import Any
 
 from celery import shared_task  # type: ignore[import-untyped]
+from celery.exceptions import SoftTimeLimitExceeded  # type: ignore[import-untyped]
 from django.db import transaction
 from django.db.models import Q
 
@@ -113,9 +115,23 @@ def _defer(message: OutboxMessage, claim_token: uuid.UUID | None, exc: outbox.Re
     )
 
 
+# One dispatch run stops claiming new messages after this many seconds, so a run whose handlers are slow
+# (provider calls of up to ~2 min, an FCM batch of 120 s) ends well inside the 540 s soft time limit and the
+# 300 s lease of the message in flight; the beat starts the next run 10 s later.
+DISPATCH_BUDGET_SECONDS = 240.0
+_clock = time.monotonic  # a module attribute so tests can drive the budget
+
+
 @shared_task(name="core.dispatch_outbox")  # type: ignore[untyped-decorator]
 def dispatch_outbox(batch: int = 50) -> None:
+    """Deliver up to ``batch`` due messages, claiming none after :data:`DISPATCH_BUDGET_SECONDS`. A Celery
+    soft time limit inside a handler fails that message (retried with backoff, its handler decides what the
+    interruption means) and ends the run."""
+    started = _clock()
     for _ in range(batch):
+        if _clock() - started >= DISPATCH_BUDGET_SECONDS:
+            logger.info("dispatch_outbox stops claiming: %s s budget used", DISPATCH_BUDGET_SECONDS)
+            break
         message = _claim_outbox_message()
         if message is None:
             break
@@ -149,5 +165,8 @@ def dispatch_outbox(batch: int = 50) -> None:
                 status="failed",
                 lease_expires_at=None,
             )
+            if isinstance(exc, SoftTimeLimitExceeded):
+                logger.warning("dispatch_outbox ran out of time in topic=%s id=%s", message.topic, message.pk)
+                break
         else:
             _complete_outbox_message(message, claim_token, status="done", lease_expires_at=None)
