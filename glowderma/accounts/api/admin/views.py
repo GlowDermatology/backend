@@ -1,8 +1,10 @@
+import hashlib
 import uuid
 from collections.abc import Sequence
 from typing import Any, cast
 
 from django.contrib.auth import authenticate
+from django.core.cache import cache
 from django.db import transaction
 from django.db.models import QuerySet
 from django.http import HttpRequest
@@ -229,12 +231,31 @@ class ChangePasswordView(AdminAPIView):
         return Response(status=204)
 
 
+# A PKCE verifier is single use across every API instance (admin contract §2.1): the key outlives the
+# provider's code (10 min) plus a minute of clock skew.
+VERIFIER_TTL_SECONDS = 660
+
+
+def claim_code_verifier(code_verifier: str) -> bool:
+    """Atomically mark ``code_verifier`` used (``cache.add`` on its SHA-256, shared Redis): ``False`` when
+    another request (any worker, any instance) already presented it."""
+    digest = hashlib.sha256(code_verifier.encode("utf-8")).hexdigest()
+    return bool(cache.add(f"oauth:verifier:{digest}", 1, VERIFIER_TTL_SECONDS))
+
+
 def _exchange(request: Request, provider: str) -> SocialClaims:
-    """Validate the callback body and turn the code into verified claims (provider errors -> API errors)."""
+    """Validate the callback body and turn the code into verified claims (provider errors -> API errors).
+
+    A reused ``code_verifier`` is refused with the uniform 401 ``social_account_not_allowed`` before the
+    provider is called, so a replayed callback (a second tab, a leaked request) cannot sign in twice even when
+    the provider would still accept the code.
+    """
     oauth = get_oauth_provider(provider)  # 404 for an unknown provider, before the body is read
     serializer = OAuthCallbackSerializer(data=request.data, context={"provider": provider})
     serializer.is_valid(raise_exception=True)
     data = serializer.validated_data
+    if not claim_code_verifier(data["code_verifier"]):
+        raise AuthFailed("social_account_not_allowed")
     try:
         return oauth.exchange(
             code=data["code"],
@@ -318,10 +339,12 @@ class OAuthLinkView(AdminAPIView):
         responses={200: MeSerializer, **ADMIN_ERRORS, 503: ErrorEnvelopeSerializer},
     )
     def post(self, request: Request, provider: str) -> Response:
+        get_oauth_provider(provider)  # 404 first (unknown provider, fake OAuth under the production settings)
+        sid = cast(dict[str, Any], request.auth)["sid"]
+        session = services.require_password_session(sid)  # 403 before the provider is called
         claims = _exchange(request, provider)
         user = cast(StaffUser, request.user)
-        services.link_identity(user, provider, claims, request=request)
-        session = AuthSession.objects.get(pk=cast(dict[str, Any], request.auth)["sid"])
+        services.link_identity(user, provider, claims, session_id=sid, request=request)
         return Response(_me(user, session))
 
 
