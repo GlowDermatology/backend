@@ -120,6 +120,17 @@ def test_the_retrack_is_authoritative() -> None:
     assert rows("bts")[1].event_key.startswith(f"dup:{key}:")
 
 
+def test_a_long_event_key_is_hashed_and_its_redelivery_is_a_duplicate() -> None:
+    shipment = parcel()
+    body = {"clientId": shipment.order_id, "status": "3" * 100, "eventTime": "2026-10-23T16:40:00" + "Z" * 80}
+    assert hook(body).status_code == 200
+    assert hook(body).status_code == 200  # was a unique violation (HTTP 500) on every retry
+    first, second = rows("bts")
+    assert first.event_key.startswith("sha256:") and len(first.event_key) <= 120
+    assert second.event_key.startswith(f"dup:{first.event_key}:") and len(second.event_key) <= 160
+    assert second.result["outcome"] == "duplicate"
+
+
 def test_a_payload_number_of_another_parcel_is_ignored(
     tracked: list[str], caplog: pytest.LogCaptureFixture
 ) -> None:

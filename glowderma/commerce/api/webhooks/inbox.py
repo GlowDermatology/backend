@@ -13,6 +13,7 @@ string.
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import json
 import logging
@@ -85,8 +86,19 @@ def result(status: int, body: Any, outcome: str, error_code: str | None = None) 
     return {"status": status, "body": body, "outcome": outcome, "error_code": error_code}
 
 
+EVENT_KEY_MAX = 120  # longer natural keys are hashed, so ``dup:{key}:{uuid4}`` always fits the 160 column
+
+
+def normalise_key(event_key: str) -> str:
+    """The stored form of a natural key: as is up to :data:`EVENT_KEY_MAX` characters, else
+    ``sha256:<hex>`` of it (the same key always maps to the same stored key)."""
+    if len(event_key) <= EVENT_KEY_MAX:
+        return event_key
+    return "sha256:" + hashlib.sha256(event_key.encode()).hexdigest()
+
+
 def exists(provider: str, event_key: str) -> WebhookInbox | None:
-    return WebhookInbox.objects.filter(provider=provider, event_key=event_key).first()
+    return WebhookInbox.objects.filter(provider=provider, event_key=normalise_key(event_key)).first()
 
 
 def store_delivery(
@@ -106,14 +118,14 @@ def store_delivery(
     """An authenticated delivery: under ``event_key``, or ``dup:{event_key}:{uuid4}`` when the key already
     has a
     row (never a second row under one key); a duplicate keeps no raw body."""
-    key = event_key
-    if exists(provider, event_key) is not None:
-        key = f"dup:{event_key}:{uuid.uuid4().hex}"
+    key = normalise_key(event_key)
+    if exists(provider, key) is not None:
+        key = f"dup:{key}:{uuid.uuid4().hex}"
         outcome = OUTCOME_DUPLICATE if outcome == OUTCOME_ACCEPTED else outcome
         raw_body = ""
     return WebhookInbox.objects.create(
         **_base(provider, request, started),
-        event_key=key[:160],
+        event_key=key,
         payload=payload,
         raw_body=raw_body[:RAW_BODY_MAX],
         entity_ref=entity_ref[:64],
