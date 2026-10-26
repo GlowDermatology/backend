@@ -30,6 +30,7 @@ from glowderma.core.api.schema import (
     CUSTOMER_ERRORS,
     DEVICE_HEADERS,
     IDEMPOTENCY_KEY_HEADER,
+    OPTIONAL_IDEMPOTENCY_KEY_HEADER,
 )
 from glowderma.core.idempotency import idempotent
 from glowderma.customers import selectors, services
@@ -40,17 +41,6 @@ from glowderma.integrations.oauth.registry import CUSTOMER_PROVIDERS
 
 PARAMETERS = [*DEVICE_HEADERS, ACCEPT_LANGUAGE_HEADER]
 I_PARAMETERS = [*PARAMETERS, IDEMPOTENCY_KEY_HEADER]
-# C§1.7: optional on every other C write, honoured when sent (``@idempotent(required=False)``).
-OPTIONAL_IDEMPOTENCY_KEY_HEADER = OpenApiParameter(
-    name="Idempotency-Key",
-    type=OpenApiTypes.UUID,
-    location=OpenApiParameter.HEADER,
-    required=False,
-    description=(
-        "Optional client-generated UUID; when sent, a retry with the same body returns the stored 2xx "
-        "response with `Idempotent-Replayed: true` and another body answers 422 `idempotency_key_reused`."
-    ),
-)
 O_PARAMETERS = [*PARAMETERS, OPTIONAL_IDEMPOTENCY_KEY_HEADER]
 PROVIDER_PARAM = OpenApiParameter(
     name="provider", type=OpenApiTypes.STR, location=OpenApiParameter.PATH, enum=list(CUSTOMER_PROVIDERS)

@@ -10,9 +10,9 @@ as in production. State that has no customer route is arranged through the admin
 and the catalogue rows are written directly (they have no API). Time moves through ``timeutils.now`` only
 (no freezegun), and never before a token is issued: PyJWT checks ``iat``/``exp`` against the real clock.
 
-The integration review found five seam defects with these journeys (M2J-1…5: one published-terms rule for
-checkout and booking, the hold grace shown only for orders really in it, and ``DELETE me/`` skipping an order or
-appointment settled under it); the tests that pinned them now pass.
+The integration review found five seam defects with these journeys (M2J-1…5: one published-terms rule
+for checkout and booking, the hold grace shown only for orders really in it, and ``DELETE me/`` skipping an
+order or appointment settled under it); the tests that pinned them now pass.
 """
 
 from __future__ import annotations
@@ -70,7 +70,7 @@ from glowderma.professionals.tests.factories import (
     WorkingHoursFactory,
 )
 from glowderma.site_config.models import SiteSettings
-from glowderma.site_config.selectors import PUBLIC_SETTINGS_CACHE_KEY
+from glowderma.site_config.selectors import invalidate_public_settings
 
 API = "/api/v1/"
 TERMS_V1 = "2026-10-01"
@@ -271,7 +271,7 @@ def publish_terms(
         privacy_policy_uz=privacy_uz,
         terms_updated_at=timezone.now(),
     )
-    cache.delete(PUBLIC_SETTINGS_CACHE_KEY)
+    invalidate_public_settings()
 
 
 def mask(phone: str) -> str:

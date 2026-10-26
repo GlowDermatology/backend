@@ -50,7 +50,12 @@ from glowderma.core.api.exceptions import (
     field_error,
 )
 from glowderma.core.api.exceptions import OutOfStock as OutOfStockError
-from glowderma.core.api.schema import CUSTOMER_ERRORS, DEVICE_HEADERS, IDEMPOTENCY_KEY_HEADER
+from glowderma.core.api.schema import (
+    CUSTOMER_ERRORS,
+    DEVICE_HEADERS,
+    IDEMPOTENCY_KEY_HEADER,
+    OPTIONAL_IDEMPOTENCY_KEY_HEADER,
+)
 from glowderma.core.idempotency import idempotent
 from glowderma.delivery import selectors as delivery_selectors
 from glowderma.integrations.bts.ports import BtsUnavailable
@@ -182,7 +187,7 @@ class CartView(CustomerAPIView):
 
     @extend_schema(
         operation_id="customer_cart_clear",
-        parameters=DEVICE_HEADERS,
+        parameters=[*DEVICE_HEADERS, OPTIONAL_IDEMPOTENCY_KEY_HEADER],
         responses={200: CustomerCartSerializer, **CUSTOMER_ERRORS},
     )
     @idempotent(required=False)
@@ -214,7 +219,7 @@ class CartItemsView(CustomerAPIView):
 
     @extend_schema(
         operation_id="customer_cart_items_bulk_delete",
-        parameters=[*DEVICE_HEADERS, PRODUCT_ID_PARAM],
+        parameters=[*DEVICE_HEADERS, PRODUCT_ID_PARAM, OPTIONAL_IDEMPOTENCY_KEY_HEADER],
         request=None,
         responses={200: CustomerCartSerializer, **CUSTOMER_ERRORS},
     )
@@ -236,7 +241,7 @@ class CartItemsView(CustomerAPIView):
 class CartItemView(CustomerAPIView):
     @extend_schema(
         operation_id="customer_cart_items_update",
-        parameters=DEVICE_HEADERS,
+        parameters=[*DEVICE_HEADERS, OPTIONAL_IDEMPOTENCY_KEY_HEADER],
         request=CustomerCartQuantitySerializer,
         responses={200: CustomerCartSerializer, **CUSTOMER_ERRORS},
     )
@@ -256,7 +261,7 @@ class CartItemView(CustomerAPIView):
 
     @extend_schema(
         operation_id="customer_cart_items_destroy",
-        parameters=DEVICE_HEADERS,
+        parameters=[*DEVICE_HEADERS, OPTIONAL_IDEMPOTENCY_KEY_HEADER],
         responses={200: CustomerCartSerializer, **CUSTOMER_ERRORS},
     )
     @idempotent(required=False)
@@ -272,7 +277,7 @@ class CartItemView(CustomerAPIView):
 class DeliveryCalculateView(CustomerAPIView):
     @extend_schema(
         operation_id="customer_delivery_calculate",
-        parameters=DEVICE_HEADERS,
+        parameters=[*DEVICE_HEADERS, OPTIONAL_IDEMPOTENCY_KEY_HEADER],
         request=CustomerDeliveryCalculateSerializer,
         responses={200: CustomerDeliveryQuoteSerializer, **CUSTOMER_ERRORS},
     )
