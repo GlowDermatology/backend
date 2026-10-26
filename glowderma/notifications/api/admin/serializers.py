@@ -379,10 +379,10 @@ class CustomerIdsField(BoundedListField):
         return super().to_internal_value(data)
 
 
+# ``validated_data`` carries the resolved, sorted ``customer_ids`` only (the union of both lists).
 class SegmentMembersInputSerializer(serializers.Serializer[dict[str, Any]]):
     """``POST segments/{id}/members/`` (contract §2.8): ``customer_ids`` (any status, must exist) and/or
-    ``phones`` (E.164, resolved to **active** customers), each ≤ 500 and deduplicated. ``validated_data``
-    carries the resolved, sorted ``customer_ids`` only."""
+    ``phones`` (E.164, resolved to **active** customers), each ≤ 500 and deduplicated."""
 
     customer_ids = CustomerIdsField(
         child=serializers.IntegerField(), max_items=MEMBERS_MAX_ITEMS, required=False

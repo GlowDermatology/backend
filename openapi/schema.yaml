@@ -8128,8 +8128,7 @@ components:
       type: object
       description: |-
         ``POST segments/{id}/members/`` (contract §2.8): ``customer_ids`` (any status, must exist) and/or
-        ``phones`` (E.164, resolved to **active** customers), each ≤ 500 and deduplicated. ``validated_data``
-        carries the resolved, sorted ``customer_ids`` only.
+        ``phones`` (E.164, resolved to **active** customers), each ≤ 500 and deduplicated.
       properties:
         customer_ids:
           type: array
