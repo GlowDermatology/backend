@@ -220,22 +220,28 @@ class _ClickCallback(WebhookAPIView):
         if self._conflicting(params):
             return self._conflict(request, params, started)
         txn = params["click_trans_id"]
+        # Which payment the transaction is bound to never changes once bound (the advisory lock above
+        # serialises this transaction's deliveries), so it may be looked up before the Order lock; its
+        # *status* may not (§2.13.0 step 3) and is read below, under the lock.
         bound = payment_selectors.payment_by_txn(PROVIDER, txn)
-        if bound is not None:
-            # A transaction we already bound is answered from state, never re-attached: re-running step 8
-            # would supersede the order's live attempt for a transaction that can no longer be attached.
-            if bound.order_id != order_id:
-                return self._store(request, params, protocol.BAD_REQUEST, raw, started, order_id=order_id)
-            if bound.status in _PREPARED:  # a plain or re-signed retry (refunded: captured, then returned)
-                return self._store(request, params, protocol.OK, raw, started, payment_id=bound.id)
-            # failed (by Click, superseded, expired or cancelled): a repeated attempt of a cancelled payment
-            return self._store(
-                request, params, protocol.TRANSACTION_CANCELLED, raw, started, payment_id=bound.id
-            )
+        if bound is not None and bound.order_id != order_id:
+            return self._store(request, params, protocol.BAD_REQUEST, raw, started, order_id=order_id)
         try:
             order = services.lock_order(order_id)
         except services.OrderNotFound:
             return self._store(request, params, protocol.USER_NOT_FOUND, raw, started)
+        if bound is not None:
+            # A transaction we already bound is answered from state, never re-attached: re-running step 8
+            # would supersede the order's live attempt for a transaction that can no longer be attached.
+            # Read under the Order lock: a concurrent expiry, cancel or pay switch is wholly before or after.
+            current = payment_selectors.get_payment(bound.id)
+            assert current is not None  # noqa: S101 - payments are never deleted
+            if current.status in _PREPARED:  # a plain or re-signed retry (refunded: captured, then returned)
+                return self._store(request, params, protocol.OK, raw, started, payment_id=current.id)
+            # failed (by Click, superseded, expired or cancelled): a repeated attempt of a cancelled payment
+            return self._store(
+                request, params, protocol.TRANSACTION_CANCELLED, raw, started, payment_id=current.id
+            )
         now = timeutils.now()
         if order.status in state.PAID_STATUSES or selectors.honoured_paid(order.pk):
             return self._store(request, params, protocol.ALREADY_PAID, raw, started, order_id=order.pk)
