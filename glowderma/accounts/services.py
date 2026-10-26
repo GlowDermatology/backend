@@ -401,7 +401,7 @@ def add_address(
     The first address of a customer always becomes the default; ``is_default=True`` replaces the previous one
     inside the same transaction (the partial unique constraint forbids two).
     """
-    Customer.objects.select_for_update().get(pk=customer_id)
+    lock_customer(customer_id)
     if is_default or not Address.objects.filter(customer_id=customer_id).exists():
         Address.objects.filter(customer_id=customer_id, is_default=True).update(
             is_default=False, updated_at=timeutils.now()
@@ -445,7 +445,7 @@ def update_address(
     then falls back to the most recently updated address). The write path every edit must take so the design
     01 §1.3 invariant (saving an address recomputes the denormalised text) holds.
     """
-    Customer.objects.select_for_update().get(pk=address.customer_id)
+    lock_customer(address.customer_id)
     changes = {
         name: value
         for name, value in (
@@ -474,7 +474,7 @@ def update_address(
 @transaction.atomic
 def set_default_address(address: Address) -> Address:
     """Make ``address`` the customer's default, clearing the previous one in the same transaction."""
-    Customer.objects.select_for_update().get(pk=address.customer_id)
+    lock_customer(address.customer_id)
     Address.objects.filter(customer_id=address.customer_id, is_default=True).exclude(pk=address.pk).update(
         is_default=False, updated_at=timeutils.now()
     )
@@ -489,7 +489,7 @@ def set_default_address(address: Address) -> Address:
 def remove_address(address: Address) -> None:
     """Delete one address; the denormalised text falls back to the next best address (or ``""``)."""
     customer_id = address.customer_id
-    Customer.objects.select_for_update().get(pk=customer_id)
+    lock_customer(customer_id)
     address.delete()
     _sync_address_text(customer_id)
 
@@ -585,7 +585,7 @@ def _refreshed(customer: Customer | int, stored: Customer) -> Customer:
 @transaction.atomic
 def reactivate_customer(customer: Customer, *, name: str = "") -> Customer:
     """Re-registration with the same phone: ``active`` again, ``registered_at`` kept (first registration)."""
-    stored = Customer.objects.select_for_update().get(pk=customer.pk)
+    stored = lock_customer(customer.pk)
     if stored.status == enums.CustomerStatus.ACTIVE:
         customer.refresh_from_db()
         return customer
