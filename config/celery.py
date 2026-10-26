@@ -23,16 +23,18 @@ app.conf.beat_schedule = {
     "accounts-cleanup-auth": {"task": "accounts.cleanup_auth", "schedule": 3600.0},
     # M2 BTS polling fallback (customer contract §2.13.3); the P0 stub returns [] until P2 implements it.
     "commerce-poll-bts": {"task": "commerce.poll_bts", "schedule": 600.0},
-    "loyalty-reconcile-balances": {
-        "task": "loyalty.reconcile_balances",
-        "schedule": crontab(hour=3, minute=10),
-    },
     # M3 retention (docs/ops/compliance.md): done/dead outbox rows after OUTBOX_RETENTION_DAYS, raw provider
     # callbacks (WebhookInbox) after WEBHOOK_INBOX_RETENTION_DAYS; batched, at most 5 minutes a night each.
     "core-purge-outbox": {"task": "core.purge_outbox", "schedule": crontab(hour=3, minute=20)},
     "integrations-purge-webhook-inbox": {
         "task": "integrations.purge_webhook_inbox",
         "schedule": crontab(hour=3, minute=25),
+    },
+    # M3 nightly consistency report K1-K6 (docs/ops/monitoring.md); it also runs the loyalty ledger
+    # reconciliation (loyalty.tasks.reconcile_balances_now), which therefore has no beat entry of its own.
+    "reporting-consistency-report": {
+        "task": "reporting.consistency_report",
+        "schedule": crontab(hour=3, minute=40),
     },
     # M3 Billz catalog sync (docs/integrations/billz.md): an hourly delta and a daily full reconciliation,
     # both through the billz_import job (single-flight with admin imports); no-ops while BILLZ_MODE=fake.

@@ -5,7 +5,8 @@ false mismatches. Every finding is written as an audit entry ``loyalty.reconcili
 ``system``, ``entity_type="loyalty_account"``), then a summary ``loyalty.reconciliation_completed``. Nothing
 is corrected automatically: the ledger is append-only and a mismatch means a bug or a raw write, which staff
 investigate. Any mismatch also logs one ERROR ``loyalty.reconciliation_mismatch`` with the counts per check
-and raises the alert of the same name (``core.alerts``).
+and raises the alert of the same name (``core.alerts``). The nightly run is part of the consistency report
+(``reporting.consistency_report``, 03:40 Tashkent), which calls :func:`reconcile_balances_now`.
 
 C2 and C3 follow **posting order**, i.e. ``id`` order per account: every posting holds the account row lock,
 so ids grow in insert order within an account, while ``at`` is business time (``post_entry`` keeps it

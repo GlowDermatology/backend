@@ -107,12 +107,16 @@ def test_broken_chain_links_and_holds_are_reported_per_row() -> None:
     assert LedgerEntry.objects.count() == 6 and summary["mismatches"] == 5
 
 
-def test_reconciliation_is_scheduled_nightly_at_03_10_tashkent() -> None:
+def test_reconciliation_runs_nightly_inside_the_consistency_report_at_03_40_tashkent() -> None:
+    """M3: the nightly consistency report calls ``reconcile_balances_now`` itself, so the ledger
+    reconciliation has no beat entry of its own (it would run twice a night)."""
     from config.celery import app
 
-    entry = app.conf.beat_schedule["loyalty-reconcile-balances"]
-    assert entry["task"] == "loyalty.reconcile_balances" == tasks.reconcile_balances.name
-    assert (entry["schedule"].hour, entry["schedule"].minute) == ({3}, {10})
+    schedule = app.conf.beat_schedule
+    assert not any(entry["task"] == tasks.reconcile_balances.name for entry in schedule.values())
+    entry = schedule["reporting-consistency-report"]
+    assert entry["task"] == "reporting.consistency_report"
+    assert (entry["schedule"].hour, entry["schedule"].minute) == ({3}, {40})
     assert app.conf.timezone == "Asia/Tashkent"
 
 
