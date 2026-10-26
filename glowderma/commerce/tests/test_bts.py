@@ -156,6 +156,21 @@ def test_unknown_parcel_rejected_and_down(caplog: pytest.LogCaptureFixture) -> N
     assert len(rows("bts")) == count  # nothing stored
 
 
+def test_a_body_nested_too_deep_is_unparsable() -> None:
+    """``json.loads`` raises RecursionError (not ValueError) on ``"[" * 200000``: without the token it is a
+    401 with a bounded row, never an HTTP 500 with nothing stored."""
+    deep = "[" * 200_000
+    response = APIClient().generic("POST", BTS_URL, deep, content_type="application/json")
+    assert response.status_code == 401 and response.json() == {"ok": False}
+    (row,) = rows("bts")
+    assert row.event_key.startswith("rejected:") and row.raw_body == ""
+    assert row.result["error_code"] == "bad_token" and len(str(row.payload)) <= 1024
+    authenticated = APIClient().generic(
+        "POST", BTS_URL, deep, content_type="application/json", HTTP_X_GD_WEBHOOK_TOKEN=SECRET
+    )
+    assert authenticated.status_code == 200 and authenticated.json() == {"ok": True, "ignored": True}
+
+
 def test_fake_bts_in_production_answers_401() -> None:
     shipment = parcel()
     with override_settings(DEV_FEATURES_ALLOWED=False, BTS_MODE="fake"):

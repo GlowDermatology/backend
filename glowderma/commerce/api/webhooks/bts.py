@@ -76,7 +76,7 @@ class BtsWebhookView(WebhookAPIView):
         raw = request.body.decode("utf-8", errors="replace")
         try:
             payload: Any = json.loads(raw) if raw else {}
-        except ValueError:
+        except ValueError, RecursionError:  # RecursionError: a body nested deeper than the decoder allows
             payload = None
         token = str(request.headers.get(TOKEN_HEADER) or request.query_params.get("token") or "")
         secret = str(settings.BTS_WEBHOOK_SECRET)
