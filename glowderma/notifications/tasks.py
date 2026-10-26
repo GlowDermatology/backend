@@ -47,6 +47,17 @@ def handle_campaign_send_batch(message: OutboxMessage) -> None:
     services.send_batch(int(message.payload["campaign_id"]), int(message.payload["batch_no"]))
 
 
+# A push FCM keeps answering "not sent" is deferred (outbox.RetryLater) and buried after
+# services.NOT_SENT_GIVE_UP: past that the nightly consistency report (K6) counts one still deferred as stuck.
+for _topic in (
+    topics.PUSH_ORDER_STATUS,
+    topics.PUSH_APPOINTMENT,
+    topics.PUSH_ACCOUNT_SECURITY,
+    topics.CAMPAIGN_SEND_BATCH,
+):
+    outbox.register_deferral_window(_topic, lambda: services.NOT_SENT_GIVE_UP)
+
+
 def on_push_dead(message: OutboxMessage) -> None:
     """A notification that could not be delivered in ten attempts: record it for the operators."""
     payload: dict[str, Any] = message.payload if isinstance(message.payload, dict) else {}

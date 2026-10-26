@@ -321,3 +321,34 @@ def test_an_overlapping_redelivery_of_the_last_batch_refreshes_the_final_tally(
     }
     assert not OutboxMessage.objects.filter(topic="campaign.send_batch").exists()
     assert len(fake.sent) == 3
+
+
+def test_push_topics_declare_their_deferral_window_for_the_consistency_report() -> None:
+    """M3 integration: a push FCM keeps deferring is buried after ``NOT_SENT_GIVE_UP`` (6 h), so the nightly
+    report (K6 ``deferred_past_window``) measures these topics against 6 h, not the 24 h default."""
+    from glowderma.core import consistency
+
+    windows = outbox.deferral_windows()
+    for topic in (
+        topics.PUSH_ORDER_STATUS,
+        topics.PUSH_APPOINTMENT,
+        topics.PUSH_ACCOUNT_SECURITY,
+        topics.CAMPAIGN_SEND_BATCH,
+    ):
+        assert windows[topic] == services.NOT_SENT_GIVE_UP == timedelta(hours=6)
+    stuck = OutboxMessage.objects.create(
+        topic=topics.PUSH_ORDER_STATUS,
+        payload={},
+        dedupe_key="push.order_status:k6",
+        status="failed",
+        deferred_since=ANCHOR - timedelta(hours=7),
+    )
+    fresh = OutboxMessage.objects.create(
+        topic=topics.PUSH_ORDER_STATUS,
+        payload={},
+        dedupe_key="push.order_status:k6-fresh",
+        status="failed",
+        deferred_since=ANCHOR - timedelta(hours=5),
+    )
+    found = consistency.deferred_past_window(ANCHOR, timedelta(minutes=30), limit=10)
+    assert stuck.pk in found.ids and fresh.pk not in found.ids
