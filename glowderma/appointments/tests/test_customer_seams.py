@@ -1,4 +1,5 @@
-"""The appointment seams P0 adds (plan §1 P0): ``last_activity_at`` (dormant rule) and the cancel stub."""
+"""The appointment seams P0 adds (plan §1 P0): ``last_activity_at`` (dormant rule) and the customer cancel
+(a P0 stub, implemented by P3)."""
 
 from datetime import timedelta
 
@@ -80,6 +81,8 @@ def test_rejected_and_cancelled_count_only_by_creation() -> None:
     assert selectors.last_activity_at(customer.pk) == max(rejected.created_at, cancelled.created_at)
 
 
-def test_cancel_by_customer_is_a_p3_stub() -> None:
-    with pytest.raises(NotImplementedError, match="P3"):
-        services.cancel_by_customer(1, 1, reason="account_deleted")
+def test_cancel_by_customer_is_implemented_by_p3() -> None:
+    customer = CustomerFactory.create()
+    appointment = make(customer, "requested")
+    cancelled = services.cancel_by_customer(appointment.pk, customer.pk, reason="account_deleted")
+    assert (cancelled.status, cancelled.cancelled_by) == ("cancelled", "customer")
