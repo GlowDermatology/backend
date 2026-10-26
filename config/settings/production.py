@@ -12,7 +12,19 @@ from django.core.exceptions import ImproperlyConfigured
 from config.env import env_bool, env_int, env_json, env_list, env_networks, env_str
 
 from .base import *  # noqa: F403
-from .base import APPLE_BUNDLE_IDS, OAUTH_MODE, database_config, redis_db_url
+from .base import (
+    APPLE_BUNDLE_IDS,
+    BILLZ_BASE_URL,
+    BILLZ_CASHBOX_ID,
+    BILLZ_MODE,
+    BILLZ_PAYMENT_TYPE_ID,
+    BILLZ_PLATFORM_ID,
+    BILLZ_SECRET_KEY,
+    BILLZ_SHOP_ID,
+    OAUTH_MODE,
+    database_config,
+    redis_db_url,
+)
 
 DEBUG = False
 if os.environ.get("FAKE_NOW"):
@@ -222,3 +234,21 @@ if OAUTH_MODE == "live" and APPLE_BUNDLE_IDS:
         _apple_key.curve, ec.SECP256R1
     ):
         raise ImproperlyConfigured("APPLE_PRIVATE_KEY_FILE must hold an EC P-256 key")
+# --- Billz live client (M3, docs/integrations/billz.md) ---
+# The fake needs nothing. Live needs the integration key and the ids of the shop, the cash box and the payment
+# type; a process with BILLZ_MODE=live refuses to start without them (no silent "connected" with no shop).
+_UUID_PATTERN = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+LIVE_BILLZ_SECRETS = {"BILLZ_SECRET_KEY": BILLZ_SECRET_KEY}
+LIVE_BILLZ_IDS = {
+    "BILLZ_SHOP_ID": BILLZ_SHOP_ID,
+    "BILLZ_CASHBOX_ID": BILLZ_CASHBOX_ID,
+    "BILLZ_PAYMENT_TYPE_ID": BILLZ_PAYMENT_TYPE_ID,
+}
+if BILLZ_MODE == "live":
+    for _name, _value in {**LIVE_BILLZ_SECRETS, **LIVE_BILLZ_IDS}.items():
+        _refuse_placeholder(_name, _value)
+    for _name, _value in {**LIVE_BILLZ_IDS, "BILLZ_PLATFORM_ID": BILLZ_PLATFORM_ID}.items():
+        if not _UUID_PATTERN.fullmatch(_value.strip()):
+            raise ImproperlyConfigured(f"{_name} must be a Billz UUID")
+    if urlsplit(BILLZ_BASE_URL).scheme != "https":
+        raise ImproperlyConfigured("BILLZ_BASE_URL must be an https URL")
