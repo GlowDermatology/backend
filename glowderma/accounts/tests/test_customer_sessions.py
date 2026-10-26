@@ -269,10 +269,15 @@ def test_delete_customer_clears_keys_consent_and_queues_apple_revokes(
     assert qr_store.take("d" * 64) is None
     assert not CustomerSocialIdentity.objects.filter(customer=customer).exists()
     revoke = OutboxMessage.objects.get(topic=topics.APPLE_REVOKE)
+    # P1: the eager apple.revoke handler ran on commit; "sealed" does not open, so it logged an ERROR and
+    # blanked the token in the stored payload (a final outcome).
     assert revoke.payload == {
         "identity_id": apple.pk,
+        "customer_id": customer.pk,
+        "subject": "",
+        "subject_ref": pii_ref(apple.subject),
         "client_id": "uz.glowderma.app",
-        "sealed_token": "sealed",
+        "sealed_token": "",
     }
     assert revoke.dedupe_key == f"apple.revoke:{apple.pk}"
     again = services.delete_customer(customer.pk)  # idempotent, by id too
