@@ -64,7 +64,7 @@ CONTRACT_TABLE: dict[str, list[str]] = {
     "RequestedVia": ["app", "admin"],
     "BlockKind": ["busy", "off"],
     "NotificationKind": ["promo", "general"],
-    "NotificationState": ["scheduled", "queued", "sent"],
+    "NotificationState": ["scheduled", "queued", "sent", "cancelled"],
     "AudienceType": ["all", "segment", "customer"],
     "LinkKind": ["none", "product"],
     "BannerLinkKind": ["none", "product", "category"],

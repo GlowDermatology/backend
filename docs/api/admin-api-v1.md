@@ -518,7 +518,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 - M3, live Billz, `mode = "full"` (the reconciliation; the daily beat runs one): the listing is used only when it is complete and plausible (every page, the count stable while paging, as many distinct products as Billz counts, at least one product of the configured shop, not fewer than `BILLZ_FULL_SYNC_MIN_RATIO` of the previous full count); otherwise the job fails with `error.code = "billz_listing_incomplete"` and nothing is applied or hidden. After the upserts, **the system hides** every `active` product Billz no longer lists: `status = hidden`, `last_change = {"kind": "hidden", "actor": null, …}` (the system), audit `product.updated` (`status` diff, actor `system`, reason `billz_missing: …`). Never more than `max(3, active − ceil(ratio × active))` products in one run (else the job fails `billz_listing_incomplete` and nothing is hidden), never a product created, edited or looked up in Billz after the listing started, and never deleted (texts, images and history stay; staff re-activate it). A delta never hides.
 - `Job.result` counts: `created` (new rows), `updated` (an existing product whose Billz-owned field or stock changed), `unchanged` (a `synced_at` refresh alone), `new_from_billz` (= `created`); a `full` run adds `hidden` (products the reconciliation hid). `Job.progress` is `{"done", "total"}`.
 - Sets `billz.last_sync_at`. Audit `billz.import_started` (actor = the staff who started it) / `billz.import_finished` (written by the worker, or by the stale-job reaper with `error.code = "worker_lost"`).
-- Error codes of a failed import job (§2.14; the message is always the generic `provider_unavailable` one): `provider_unavailable` (Billz did not answer or the run ran out of time), `billz_listing_incomplete` (the full listing above), `billz_auth_failed` (Billz refused the integration key: `BILLZ_SECRET_KEY` must be checked), `billz_fake_mode` (M2), `worker_lost`, `server_error`.
+- Error codes of a failed import job — `Job.error` `{code, message}`, the full table in §2.14: `provider_unavailable` (Billz did not answer or the run ran out of time), `billz_listing_incomplete` (the full listing above) and `billz_auth_failed` (Billz refused the integration key: `BILLZ_SECRET_KEY` must be checked) carry the generic message "Tashqi xizmat javob bermadi. Qayta urinib ko‘ring." (the code tells them apart); `billz_fake_mode` (M2) carries "Billz sinov rejimida: Billz ma’lumotlarini olib bo‘lmaydi. Billz ulanganidan keyin qayta urinib ko‘ring."; `worker_lost` "Jarayon uzilib qoldi. Qayta urinib ko‘ring."; `server_error` "Kutilmagan xato.".
 - Routes: the views live in `catalog` (an admin view sits above `integrations` in the layering); the paths are unchanged.
 
 ### 2.4 Categories (addressed by slug)
@@ -908,6 +908,17 @@ Export `tolovlar` (§1.8): the `Qaytarish` column is the §5.1 refund-state line
 ```
 - `progress` is always `{"done", "total"}` (or `null` before the first batch); `result` is the kind-specific summary (Billz import: §2.3).
 - A `running` job whose worker died is re-claimed by a redelivery or, after 15 minutes without a heartbeat, failed by the beat task `integrations.reap_stale_jobs` with `error.code = "worker_lost"` ("Jarayon uzilib qoldi. Qayta urinib ko‘ring."); M3: so is a job still `queued` 15 minutes after it was created (no worker ever claimed it). A failed job never blocks a new one of the same kind.
+- `error` of a failed job (the same codes and messages as §2.3; the UI shows `message` as is and may branch on `code`):
+
+| `error.code` | `error.message` | When |
+|---|---|---|
+| `provider_unavailable` | "Tashqi xizmat javob bermadi. Qayta urinib ko‘ring." | Billz did not answer, or the run ran out of time |
+| `billz_listing_incomplete` (M3) | "Tashqi xizmat javob bermadi. Qayta urinib ko‘ring." | A full listing was incomplete or implausible (§2.3); nothing applied or hidden |
+| `billz_auth_failed` (M3) | "Tashqi xizmat javob bermadi. Qayta urinib ko‘ring." | Billz refused the integration key (`BILLZ_SECRET_KEY`) |
+| `billz_fake_mode` (M2) | "Billz sinov rejimida: Billz ma’lumotlarini olib bo‘lmaydi. Billz ulanganidan keyin qayta urinib ko‘ring." | Queued before Billz was switched to fake under the production settings |
+| `worker_lost` | "Jarayon uzilib qoldi. Qayta urinib ko‘ring." | No heartbeat for 15 minutes, or still `queued` 15 minutes after creation (M3) |
+| `server_error` | "Kutilmagan xato." | An unexpected error in the worker |
+
 - 404 `not_found` for an unknown id.
 
 ### 2.15 Health
@@ -1105,7 +1116,7 @@ Generic mapping applies throughout: snake_case → camelCase; integer ids → `S
 | `Product.images[]` | `images[]` | `{id: String(id), src: url, label: `Rasm ${position + 1}`}`; `art` omitted |
 | `Product.art` | – | `null` |
 | list thumbnail (new) | `main_image_url` | Rendered before `art` |
-| `Product.lastChange.by` / `at` | `last_change.actor` / `.at` | `A(actor)` / `at` |
+| `Product.lastChange.by` / `at` | `last_change.actor` / `.at` | `actor?.display_name ?? "Tizim"` / `at` — M3: a null actor is the system (e.g. a product the Billz sync hid or created), never "Administrator"; `A(actor)` keeps its own fallback elsewhere |
 | `Product.lastChange.note` | `last_change.kind`, `old_price`, `new_price` | created "mahsulot yaratildi" · price_changed `` `narx ${N(old_price)} → ${N(new_price)}` `` · activated "faollashtirildi" · hidden "yashirildi" · promo_added "aksiyaga qo‘shildi" · promo_removed "aksiyadan olindi" · updated "ma’lumotlar yangilandi" |
 | `CatalogStats.lastSyncLabel` | `billz.last_sync_at`, server `now` | null → "hali sinxronlanmagan"; <60 s → "hozirgina"; <60 min → `` `${m} daqiqa oldin` ``; <24 h → `` `${h} soat oldin` ``; else `formatDateTimeShort` |
 | Sidebar Billz block | `billz.connected`, label above | "Billz ulangan" / "Billz ulanmagan"; second line `` `Sinxronlangan: ${lastSyncLabel}` `` |
