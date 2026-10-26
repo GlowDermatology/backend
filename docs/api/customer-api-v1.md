@@ -1645,9 +1645,11 @@ admin-only by DB constraint).
   excludes `error_code = 'late_capture'` (migration `payments.0002_payment_active_excludes_late_capture`), so case (c)
   can coexist with the order's real paid payment, and the payment selectors treat such rows by the display rule of §2.8
   — then `Refund(origin=late_capture, amount=payment.amount)` `requested` + outbox `refund.submit` (B5
-  `payments.services.create_refund`), event `refund_requested {refund_id, amount, provider, manual: false}` (source
-  system; `manual_required` without the outbox message and `manual: true` when the payment has no `click_paydoc_id` or
-  the Click port is fake under the production settings, below), audit `payment.late_capture {order_id, payment_id,
+  `payments.services.create_refund`), event `refund_requested {refund_id, amount, provider, manual: false,
+  manual_reason: null}` (source system; `manual_required` without the outbox message, `manual: true` and
+  `manual_reason: "no_paydoc"` when the payment has no `click_paydoc_id`, `"fake_mode"` when the Click port is fake
+  under the production settings, below — every `refund_requested` event carries `manual_reason`, `"payme"` for a Payme
+  refund, so the admin UI renders the right instruction, admin §4, §5.1), audit `payment.late_capture {order_id, payment_id,
   provider, case}`, ERROR log `payment.late_capture` (alert). Answer `0` with `merchant_confirm_id = payment.id` (Click
   keeps the capture; we return it). The order itself never changes status because of a refused capture.
   - **A reversal Click refuses** — Click reverses only payments of the current reporting month made with an online card,

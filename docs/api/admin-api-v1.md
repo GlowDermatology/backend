@@ -410,7 +410,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 
 - **Effects** (one transaction; lock order Order → Payment → LoyaltyAccount):
   - `status=cancelled`; `cancellation={"reason":"admin","note":reason}`.
-  - Refund: Click `requested`, submitted through the outbox; Payme `manual_required`. `payment.status` stays `paid`.
+  - Refund: Click `requested`, submitted through the outbox; Payme `manual_required`. M2 (customer contract §2.13.0): a Click refund is `manual_required` too — never sent to Click — when the payment has no Click payment id (`click_paydoc_id`: seeded or legacy rows) or the Click port is fake under the production settings; staff pay those out by hand and close them with `…/resolve/` (§7 item 18). `payment.status` stays `paid`.
   - One `reversal` ledger entry per unreversed debit and credit of the order (unique `reverses_id`).
   - Push through the outbox (template `cancelled`).
   - Events `cancelled` and `refund_requested` (§4); audit `order.cancelled`.
@@ -1009,7 +1009,7 @@ Events are append-only. The API returns all of them; the FE mapper **folds** the
 | `delivered` | bts | `delivered` | `via`, `bts_status`, `push_sent` | row |
 | `cancelled` | admin (or system for `customer_request`) | `cancelled` | `reason`, `note` (str\|null), `refund_id` (int\|null), `cashback_reversed` (bool), `stock_released` (bool), `bts_cancelled` (bool), `push_sent` | row |
 | `reservation_expired` | system | `cancelled` | `released_item_count`, `payment_failed` (bool) | row |
-| `refund_requested` | admin or system | null | `refund_id`, `amount`, `provider`, `manual` (bool, Payme) | folded into `cancelled` when `cancelled.data.refund_id` equals it, else a row |
+| `refund_requested` | admin or system | null | `refund_id`, `amount`, `provider`, `manual` (bool: the refund was created `manual_required`), `manual_reason` (M2: `"payme"` \| `"no_paydoc"` \| `"fake_mode"` when `manual`, else null; absent on M1 rows, read as `"payme"`) | folded into `cancelled` when `cancelled.data.refund_id` equals it, else a row |
 | `refund_succeeded` | system | null | `refund_id`, `amount`, `provider` | row |
 | `refund_failed` | system | null | `refund_id`, `amount`, `provider`, `state` (`failed`\|`unknown`), `error_code` | row |
 
@@ -1070,11 +1070,11 @@ Generic mapping applies throughout: snake_case → camelCase; integer ids → `S
 | note: `handed_to_courier`, `delivered` | `via`, `push_sent` | `VIA(via)` + (push_sent ? " · mijozga push yuborildi" : "") |
 | note: `cancelled` | `reason`, `refund_id`, `cashback_reversed`, `bts_cancelled`, `note`, `actor` | head = `customer_request` ? "Mijoz" : A. effects = [refund_id ? "to‘lov qaytarish so‘rovi yuborildi", cashback_reversed ? "cashback yozuvlari qaytarildi"] joined with `", "`. Parts = [head, effects (if any), bts_cancelled ? "BTS buyurtmasi bekor qilindi", note (if any)] joined with `" · "`. Example: "Administrator · to‘lov qaytarish so‘rovi yuborildi, cashback yozuvlari qaytarildi · Mijoz so‘rovi bilan" |
 | note: `reservation_expired` | | "Band muddati tugadi · mahsulotlar bo‘shatildi" |
-| note: `refund_requested` | `provider`, `amount`, `manual` | `` `${P} · ${SOM(amount)}` `` + (manual ? " · Payme kabinetida qo‘lda qaytariladi" : "") |
+| note: `refund_requested` | `provider`, `amount`, `manual`, `manual_reason` | `` `${P} · ${SOM(amount)}` `` + (manual ? by `manual_reason ?? "payme"`: `payme` " · Payme kabinetida qo‘lda qaytariladi" · `no_paydoc` " · Click to‘lov raqami yo‘q · qo‘lda to‘lanadi" · `fake_mode` " · Click sinov rejimida · qo‘lda to‘lanadi" : "") |
 | note: `refund_succeeded` | `provider`, `amount` | `` `${P} · ${SOM(amount)}` `` |
 | note: `refund_failed` | `provider`, `state` | `unknown`: `` `${P} · holat noma’lum, tekshirish kerak` ``; else `` `${P} · xato, administrator tekshiruvi kerak` `` |
 | `OrderCashbackEntry` | `cashback[]` (+ `cashback_hold`) | `{kind, amount, label}`. label: debit "Ishlatildi"; credit `` `${PCT(percent)}% × ${N(base)}` `` ("1% × 568 000"); reversal "Qarama-qarshi yozuv". If there is no debit entry and `cashback_hold.state` is `active`, prepend `{kind: "debit", amount: -hold.amount, label: "Ishlatildi"}`. |
-| Refund state (new UI line) | `refunds[0].state` | requested "Qaytarish so‘raldi" · submitting "Qaytarilmoqda" · succeeded "Qaytarildi" · failed "Qaytarib bo‘lmadi" · manual_required "Payme kabinetida qaytarish kerak" · unknown "Holat noma’lum · tekshiring" |
+| Refund state (new UI line) | `refunds[0].state`, `refunds[0].provider` | requested "Qaytarish so‘raldi" · submitting "Qaytarilmoqda" · succeeded "Qaytarildi" · failed "Qaytarib bo‘lmadi" · manual_required by provider: `payme` "Payme kabinetida qaytarish kerak", `click` (M2: no Click payment id, or Click fake in production) "Mijozga qo‘lda to‘lang, so‘ng «Qaytarildi» deb belgilang" · unknown "Holat noma’lum · tekshiring". Never assume `manual_required` means Payme. |
 | `cancellation` | `cancellation` | `{reason, note: note ?? undefined}`; labels stay `CANCEL_LABEL` |
 
 ### 5.2 Products and catalog
@@ -1210,7 +1210,7 @@ Provisional, configurable rules that shape payloads:
    - `sendNotification(FormData, key)`, `updateAppointment(id, action, key)`.
 3. **Order cancel no longer sets `refunded`.**
    - Remove the local `payment.status` flip.
-   - `OrderPaymentCard` shows the refund state line (§5.1).
+   - `OrderPaymentCard` shows the refund state line (§5.1), chosen by state **and provider** (a `manual_required` refund can be a Click one in M2).
    - The cancel dialog text "… qaytariladi" stays.
 4. **Use server actions, not local rules.** Use `available_actions` for the status, cancel and retry buttons instead of `manualTransitions`/`canCancel`. Domain functions stay for mock mode. 409 `not_cancellable` is possible from `handed_to_courier`.
 5. **Retry shipment is asynchronous.**

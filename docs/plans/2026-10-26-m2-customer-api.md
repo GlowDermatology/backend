@@ -372,7 +372,7 @@ P0. For the delete orchestration at integration time: P2 (`commerce.services.can
 
 ### Owns
 `glowderma/commerce/{models.py, migrations/0004_cartitem_price_at_add.py, services.py, selectors.py, payment_ref.py
-(new), tasks.py, seeds.py (call-site updates for the changed signatures only), api/customer/*, api/webhooks/*,
+(new), tasks.py, events.py (only `refund_requested` gains the `manual_reason` key), seeds.py (call-site updates for the changed signatures only), api/customer/*, api/webhooks/*,
 api/dev/*}`, `glowderma/payments/{models.py, migrations/0002_payment_active_excludes_late_capture.py, services.py,
 selectors.py, topics.py}`, `glowderma/delivery/{services.py, selectors.py, api/customer/*}`,
 `glowderma/commerce/api/admin/{serializers.py, views.py}` (only `ResolveRefundSerializer` gains the optional
@@ -417,6 +417,7 @@ C§2.0 rows 24–35 and 50–53: `cart/*`, `delivery/regions/`, `delivery/calcul
 | Payme protocol reads `account[PAYME_ACCOUNT_FIELD]` and answers `data = PAYME_ACCOUNT_FIELD` (the same setting builds the checkout URL's `ac.` key) | `integrations.payme.protocol`, `commerce/api/webhooks/payme.py` | C§2.13.2 |
 | Click refunds keyed by `click_paydoc_id`: `RefundRow.provider_payment_ref` (= `Payment.provider_state["click_paydoc_id"]`, `""` when absent) in `payments.selectors.refund_row`; B5's `commerce.tasks.submit_refund`, `_resolve_after_failure` and `_reversed` pass it (never `provider_txn_id` = `click_trans_id`) to `ClickPort.refund` / `payment_status`; a Click refund whose payment has no `click_paydoc_id` is created `manual_required` and re-checked by `submit_refund` before any port call; the seeded Click payments of `commerce/seeds.py` get a `click_paydoc_id`. `resolve_refund(refund_id, outcome, actor_id, *, manual_payout=False, …)` also accepts a `failed` Click refund → `succeeded` (admin §7 item 18) after a **fresh Click status check** through the port, outside any row lock: `reversed` → `succeeded`; `paid` → `InvalidTransition(MESSAGE_REFUND_STILL_PAID)` unless `manual_payout`; `ClickUnavailable` → `ProviderUnavailable` (503); fake Click under the production settings → `InvalidTransition(MESSAGE_REFUND_CLICK_FAKE)`; no `click_paydoc_id` → no check, `manual_payout` required; then **guarded** under the Order → Payment locks: only the payment's newest refund, the payment still `paid`, no other open or `succeeded` refund of the payment — else `InvalidTransition(MESSAGE_REFUND_NOT_RESOLVABLE)` (409); `payments.services.mark_succeeded` accepts `failed` only through that path; `submit_refund` re-reads the payment before any port call and ends the refund `failed` (`payment_not_paid`, `refund_failed` event, no Click call) when it is no longer `paid` | `payments.selectors`, `payments.services`, `commerce.tasks`, `commerce.services` | C§2.13.0 (Click Merchant API reversal/status are keyed by the payment id; the resolve guard) |
 | a Click refund is `manual_required` (created with `manual=True`, and re-checked by `submit_refund` before any port call) while the Click port is fake under the production settings (`core.providers.callbacks_refused("click")`): the fake would report a reversal that moved no money | `commerce.services` (refund creation call sites), `commerce.tasks.submit_refund` | C§2.13.0, C§6.14 |
+| every `refund_requested` event (admin cancel, retry, late capture) carries `manual_reason`: `"payme"` for Payme, `"no_paydoc"` / `"fake_mode"` for a Click refund created `manual_required`, null otherwise; a Click refund that `submit_refund` turns `manual_required` later keeps its event as written (the admin state line reads state and provider, admin §5.1) | `commerce.services`, `commerce.events` | admin §4, §5.1 (the admin UI must not read `manual_required` as Payme) |
 | `provider_open_money(provider) -> OpenMoney(open_transactions, open_refunds, order_ids)` and `report_fake_provider_open_money()` connected to Celery's `worker_ready` signal in `commerce/tasks.py` (imported by the worker's task autodiscovery before the signal fires) | `commerce.selectors`, `commerce.tasks` | C§6.14 operator procedure: for each payment provider with `core.providers.fake_in_production(provider)` and open money (`pending` payments with an open transaction — Click prepared without Complete, Payme state 1 — and refunds not `succeeded` whose payment is still `paid`), one ERROR `providers.fake_with_open_money {provider, open_transactions, open_refunds, order_ids}` (≤ 20 ids); nothing else changes (no new state, no blocking); never from `CoreConfig.ready()` (no database access at app loading) |
 | `region_catalog()` | `delivery.selectors` | BTS `regions()` cached 24 h (`gd:bts:regions`); `[]` (nothing cached) while `core.providers.delivery_available()` is false |
 | delivery offered only while `core.providers.delivery_available()`: `delivery/calculate/` and checkout answer 409 `delivery_unavailable` (`key="error.delivery_not_offered"`) for `fulfilment = delivery` before any BTS call; `delivery/regions/` answers `{"regions": [], "updated_at": null}` | `commerce/api/customer/*`, `delivery/api/customer/*` | C§2.6, C§2.7.1 row 3 |
@@ -546,7 +547,9 @@ create_refund}`, `payments.selectors.{active_payment, display_payment, refunds_f
   correctly signed Complete → `0`, payment `paid` `late_capture`, refund `manual_required` (no port call), audit
   `payment.late_capture {case: "fake_mode"}`, ERROR log, order not `processing`; the same Complete with a wrong
   signature → `-1`; checkout and pay refuse a fake provider with 400 `invalid_choice`; a Click refund created or
-  submitted while the Click port is fake becomes `manual_required` with no port call; **open money at worker start:**
+  submitted while the Click port is fake becomes `manual_required` with no port call and its `refund_requested` event
+  says `manual: true, manual_reason: "fake_mode"` (a payment without `click_paydoc_id`: `"no_paydoc"`; an admin cancel
+  of a Payme-paid order: `"payme"`); **open money at worker start:**
   with an open Click transaction and a `manual_required` Payme refund of a paid payment, `report_fake_provider_open_money()`
   under `CLICK_MODE = PAYME_MODE = "fake"` logs one ERROR `providers.fake_with_open_money` per provider with the counts
   and order ids (caplog), none when nothing is open or under the test settings, and writes nothing; a Payme
@@ -979,7 +982,8 @@ No beat entry for `loyalty.services.expire_holds`: it must stay unscheduled whil
    `docs/decisions/open-questions.md` (the `M2-*` rows of C§7 are already recorded as provisional defaults decided
    2026-10-26; update them only if a decision changes) and the spec's M2 section (§0.2 lists the edits that must land
    before P0; afterwards: refused-capture rule, device key for A2, history horizon for A1 and A16). `admin-api-v1.md`
-   already carries the M2 cross-references (§2.10, §2.11, §2.15, §3.1, §3.2, §7 item 18).
+   already carries the M2 cross-references (§2.2 cancel effects, §2.3 Billz posture, §2.10, §2.11, §2.15, §3.1, §3.2,
+   §4 `refund_requested.manual_reason`, §5.1 refund lines, §5.7, §6, §7 items 3 and 18).
 4. Ops: the website serves `apple-app-site-association` / `assetlinks.json` for `PAYMENT_RETURN_URL`; the edge proxy
    log format redacts `token=`; alerts on the ERROR events `otp.budget_tripped`, `payment.late_capture`,
    `push.payload_invalid`, `apple.revoke_dead`, `providers.fake_with_open_money`, `bts.poll_nothing_tracked`, and on refunds `failed` after a refused Click reversal (staff payout); throttle rates reviewed after two weeks of production metrics.
