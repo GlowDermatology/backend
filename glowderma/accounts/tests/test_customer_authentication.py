@@ -278,6 +278,7 @@ def test_a_staff_session_id_in_a_customer_token_is_refused(staff_session: tuple[
         device_headers(fid="short"),
         device_headers(platform="windows"),
         device_headers(version="1.0"),
+        device_headers(version="\u0661.\u0660.\u0660"),  # Arabic-Indic digits: ASCII only (review nit)
     ],
 )
 def test_missing_or_malformed_device_headers_are_400(customer_token: str, headers: dict[str, Any]) -> None:

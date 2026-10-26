@@ -15,7 +15,7 @@ from glowderma.core.pii import pii_ref
 
 # Customer contract §1.2.
 FID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
-APP_VERSION_PATTERN = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}$")
+APP_VERSION_PATTERN = re.compile(r"^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$")
 DEVICE_KEY_PATTERN = re.compile(r"^[A-Za-z0-9_-]{43}$")
 PLATFORMS = frozenset(enums.OrderChannel.values)
 # The device's last_active_at / app_version are written at most this often (seconds).

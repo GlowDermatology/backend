@@ -5,6 +5,7 @@
 import base64
 import importlib
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Callable, Iterator
@@ -99,6 +100,8 @@ def test_scenario_header_requires_every_provider_fake(
         ("BOOKING_CANCEL_MIN_LEAD_MINUTES", "-1", "BOOKING_CANCEL_MIN_LEAD_MINUTES"),
         ("ESKIZ_MODE", "sandbox", "ESKIZ_MODE"),
         ("MIN_APP_VERSION_IOS", "1.0", "MIN_APP_VERSION_IOS"),
+        ("MIN_APP_VERSION_ANDROID", "\u0661.\u0660.\u0660", "MIN_APP_VERSION_ANDROID"),  # ASCII digits only
+        ("QR_MAX_LIVE_TOKENS", "3", "QR_MAX_LIVE_TOKENS"),  # C§6.13: at most two live tokens
         ("ANDROID_SMS_APP_HASH", "short", "ANDROID_SMS_APP_HASH"),
         ("PAYME_ACCOUNT_FIELD", "Order-Id", "PAYME_ACCOUNT_FIELD"),
         ("ESKIZ_FAKE_CODE", "12ab56", "ESKIZ_FAKE_CODE"),
@@ -311,3 +314,11 @@ def test_production_process_with_every_provider_fake_boots_and_warns(
         result.stdout + result.stderr
     )
     assert "MODES ['billz', 'bts', 'click', 'eskiz', 'fcm', 'oauth', 'payme']" in result.stdout
+
+
+def test_env_example_does_not_ship_switches_that_production_refuses_at_any_value() -> None:
+    """Review nit: production refuses ``FAKE_*`` switches that are merely set (even to ``false``), so the
+    example file must not offer an uncommentable ``FAKE_PAYMENTS_ENABLED=false`` line."""
+    env_example = (Path(settings.BASE_DIR) / ".env.example").read_text()
+    for name in ("FAKE_PAYMENTS_ENABLED", "FAKE_SCENARIO_HEADER_ENABLED"):
+        assert not re.search(rf"^#?\s*{name}=", env_example, re.MULTILINE), name

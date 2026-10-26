@@ -301,7 +301,7 @@ def env_mode(name: str) -> str:
     return value
 
 
-APP_VERSION_PATTERN = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}$")
+APP_VERSION_PATTERN = re.compile(r"^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$")
 
 
 def env_app_version(name: str) -> str:
@@ -407,6 +407,8 @@ FCM_CREDENTIALS_FILE = env_str("FCM_CREDENTIALS_FILE", "")
 # Loyalty QR and POS (C§2.9.3, §2.10); POS_API_KEYS is read by config.settings.local only.
 QR_TOKEN_TTL_SECONDS = env_positive_int("QR_TOKEN_TTL_SECONDS", 60)
 QR_MAX_LIVE_TOKENS = env_positive_int("QR_MAX_LIVE_TOKENS", 2)
+if QR_MAX_LIVE_TOKENS > 2:  # C§6.13: at most two live QR tokens per customer
+    raise ImproperlyConfigured("QR_MAX_LIVE_TOKENS must be 1 or 2")
 POS_FAILED_AUTH_PER_IP_PER_MIN = env_positive_int("POS_FAILED_AUTH_PER_IP_PER_MIN", 20)
 POS_API_KEYS: list[tuple[str, str]] = []
 # Appointments (C§2.11).
