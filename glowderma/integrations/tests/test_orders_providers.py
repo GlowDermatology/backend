@@ -13,6 +13,7 @@ from glowderma.integrations.click.live import LiveClick
 from glowderma.integrations.click.ports import ClickRefundRejected, ClickUnavailable
 from glowderma.integrations.click.registry import get_click
 from glowderma.integrations.payme import fake as fake_payme
+from glowderma.integrations.payme.live import LivePayme
 from glowderma.integrations.payme.registry import get_payme
 
 
@@ -112,7 +113,7 @@ def test_transaction_ids_follow_the_design_rule() -> None:
     [
         ("BTS_MODE", get_bts, None),
         ("CLICK_MODE", get_click, LiveClick),
-        ("PAYME_MODE", get_payme, None),
+        ("PAYME_MODE", get_payme, LivePayme),
     ],
 )
 def test_registries_follow_the_mode_settings(setting: str, factory: object, live: type | None) -> None:

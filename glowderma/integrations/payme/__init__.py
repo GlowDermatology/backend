@@ -1,1 +1,2 @@
-"""Payme (payments) adapter behind a port: ``FakePayme`` in M1, the live JSON-RPC side arrives with M2/M3."""
+"""Payme (payments) adapter behind a port: ``FakePayme`` (M1) and ``LivePayme`` (M3: checkout URL); the
+Merchant API callbacks are the M2 webhook view."""
