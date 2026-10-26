@@ -638,7 +638,7 @@ The phone is the one the verification token is bound to. Checks: ticket valid an
 | Phone state | Requirements | Result |
 |---|---|---|
 | Active customer **with** a password | `password` required and correct (`required` / `password_incorrect` "Parol noto‘g‘ri." · `field.password_incorrect`; LoginGuard scope `customer_login`) | Identity linked → **200 `AuthTokens`** (`is_new_customer: false`) |
-| Active customer without a password (social-only) | — (the SMS code proves the phone; the account has no stronger factor). The dormant-account rule applies (§2.2.3, `M2-A16`) | Identity linked → **200** |
+| Active customer without a password (social-only) | — (the SMS code proves the phone; the account has no stronger factor). The dormant-account rule applies (§2.2.3, `M2-A16`): on a dormant account it first unlinks every existing identity, clears device keys and consent, then this identity is linked | Identity linked → **200** |
 | No customer | `name` (2..150) and `terms_version` required (`required`, `terms_outdated`); terms published (503 `terms_not_published`) | Customer created without a password (`has_password: false`; a password can be added later with `POST me/password/` and an SMS code, §2.2.9) → **201** |
 | Deleted customer | as above | Reactivated (A1) → **201** with `reactivated: true` |
 
@@ -731,12 +731,23 @@ their amounts (the balance must add up) but show `order_id: null` and the subtit
 **Dormant-account rule** (§7 `M2-A16`, provisional). Operators also recycle the numbers of customers who never deleted
 their account. When `auth/reset-password/`, or an SMS-only link of a social identity to an account without a password
 (`auth/social/complete/`), succeeds on an account whose **last activity** is older than `CUSTOMER_DORMANT_DAYS` (180),
-the same transaction moves the history horizon to now (`move_history_horizon`) and scrubs the profile as at deletion —
-`name` (the app asks for a name when `Me.name` is empty), image, saved addresses (`address_text`); balance, ledger and
-purchases are kept (A1). Last activity = the newest of `Customer.last_login_at`, the newest customer session
-`last_used_at`, the newest `Purchase` and the newest order of the customer (`customers.selectors.last_activity_at`, top
-layer), so an in-store customer who activates the app after recent purchases is not affected. Audit
-`customer.history_reset {reason: "dormant", last_activity_at}`.
+the same transaction — before the new session starts and before the new identity is linked — moves the history horizon
+to now (`move_history_horizon`) and resets the account as at deletion, so the previous holder keeps no way in:
+- profile: `name` (the app asks for a name when `Me.name` is empty), image, saved addresses (`address_text`);
+  `language` = the resolved request language; consent cleared (`terms_version = ""`, `consent_at`/`consent_ip` null),
+  so `Me.consent.update_required` is true and checkout and booking ask the new holder to accept the terms (§2.2.4);
+- sign-in methods: **every existing social identity unlinked** (audit `customer.social_unlinked {provider, reason:
+  "dormant"}` each; Apple identities enqueue `apple.revoke`, §2.1.8) — otherwise the previous holder's Google, Facebook
+  or Apple identity would still sign in on any device without SMS (`M2-A10`) — and every device's `key_hash` cleared
+  (the new session's device then gets a fresh key, §1.9); every other session is revoked by the sign-in itself (§1.9).
+  On `auth/social/complete/` the rule runs **before** the `social_provider_linked` check, so a provider the previous
+  holder had linked neither blocks nor outlives the new holder's identity. (The reset path unlinks identities and
+  rotates device keys anyway, §2.1.5.)
+
+Balance, ledger and purchases are kept (A1). Last activity = the newest of `Customer.last_login_at`, the newest
+customer session `last_used_at`, the newest `Purchase` and the newest order of the customer
+(`customers.selectors.last_activity_at`, top layer), so an in-store customer who activates the app after recent
+purchases is not affected. Audit `customer.history_reset {reason: "dormant", last_activity_at}`.
 
 #### 2.2.4 `POST me/consent/`
 Body `{"terms_version": str}` equal to the current version (else `terms_outdated`) → 200 `Me`. Stamps
@@ -2007,7 +2018,7 @@ gains `refresh_reused` (§2.1.6).
 
 | Area | `action` values |
 |---|---|
-| Customer auth (`customer`) | `customer.registered` (`{reactivated, terms_version}`), `customer.login_succeeded` (`{method, new_device}`), `customer.login_failed` (`{method}`), `customer.logout`, `customer.password_reset`, `customer.password_changed` (`{first_password}`), `customer.history_reset` (`{reason: "dormant", last_activity_at}`), `customer.refresh_reused` (`{sid}`), `customer.social_linked` (`{provider, via?}`), `customer.social_unlinked` (`{provider, reason: "customer" \| "password_reset"}`), `customer.consent_accepted` (`{terms_version}`), `customer.deleted` (`{orders_cancelled, appointments_cancelled}`), `auth.device_mismatch` (`{sid}`, ≤1 per session per hour) |
+| Customer auth (`customer`) | `customer.registered` (`{reactivated, terms_version}`), `customer.login_succeeded` (`{method, new_device}`), `customer.login_failed` (`{method}`), `customer.logout`, `customer.password_reset`, `customer.password_changed` (`{first_password}`), `customer.history_reset` (`{reason: "dormant", last_activity_at}`), `customer.refresh_reused` (`{sid}`), `customer.social_linked` (`{provider, via?}`), `customer.social_unlinked` (`{provider, reason: "customer" \| "password_reset" \| "dormant"}`), `customer.consent_accepted` (`{terms_version}`), `customer.deleted` (`{orders_cancelled, appointments_cancelled}`), `auth.device_mismatch` (`{sid}`, ≤1 per session per hour) |
 | Appointments (`customer`) | `appointment.requested`, `appointment.cancelled` (with `by: "customer"`) |
 | Payments (`system`) | `payment.late_capture` (`{order_id, payment_id, provider, case: "failed_by_us" \| "not_payable" \| "double_payment" \| "fake_mode"}`) |
 | POS (`integration` for resolves; `staff` for the commands) | `pos.qr_resolved` (`{pos_device_id, customer_id, sale_ref}`), `pos.qr_rejected` (`{pos_device_id, reason}`), `pos.device_created` (`{pos_device_id, name}`), `pos.device_revoked` (`{pos_device_id}`), `pos.device_rotated` (`{pos_device_id}`) — the three command actions carry the `--actor` staff user |
@@ -2418,7 +2429,9 @@ code a customer view can raise to an existing key.
     `SESSION_REPLACED` with a message (§1.2). `reset-password` revokes every session and unlinks every identity
     (§2.1.5).
 17. **Recycled numbers (PD law).** A reactivated account, and a dormant account recovered by SMS (`M2-A16`), sees only
-    history created after `Customer.history_from`, with the previous holder's name and addresses scrubbed (§2.2.3).
+    history created after `Customer.history_from`, with the previous holder's name, image, addresses, language and
+    consent reset; the previous holder keeps no way in — deletion and the dormant rule both remove every social
+    identity and device key, and the sign-in revokes every other session (§2.2.3).
 18. **Uploads** (`me/image/`) go through `core.images.process_image` (re-encode, EXIF strip, 5 MiB, type sniffing).
 
 ---
@@ -2459,7 +2472,7 @@ the client may still revise it later through a setting or a data field:
 | M2-A13 | Minimum app version enforcement | Off (`MIN_APP_VERSION_*=0.0.0`) until the first store release |
 | M2-A14 | Apple App Store guideline 4.8: Google/Facebook sign-in on iOS requires an equivalent privacy-focused option (Sign in with Apple) | **Decided by the product owner (2026-10-26):** offer Sign in with Apple on iOS (`apple` provider, ID token with nonce, token revocation on unlink and deletion per guideline 5.1.1(v)); `APPLE_BUNDLE_IDS` empty keeps it disabled (live) or fake (local/test) until the client provides the bundle id (A7) |
 | M2-A15 | Recycled phone numbers: what does the person who reactivates a deleted account see? | Balance and purchases kept (A1); orders, appointments, inbox and ledger order links only from the reactivation (`Customer.history_from`) |
-| M2-A16 | Recycled numbers of accounts that were never deleted: what does a new holder who recovers the account by SMS see? | After a password reset or an SMS-only social link on an account inactive for more than 180 days (`CUSTOMER_DORMANT_DAYS`; last sign-in, refresh, purchase or order), the history horizon moves to now and name, image and addresses are scrubbed; balance and purchases are kept (A1) |
+| M2-A16 | Recycled numbers of accounts that were never deleted: what does a new holder who recovers the account by SMS see? | After a password reset or an SMS-only social link on an account inactive for more than 180 days (`CUSTOMER_DORMANT_DAYS`; last sign-in, refresh, purchase or order), the history horizon moves to now; name, image and addresses are scrubbed, language and consent reset, and every existing social identity and device key removed, so the previous holder cannot sign in; balance and purchases are kept (A1) |
 | M2-A17 | How does a signed-in customer change or add a password? | `POST me/password/` with the current password, or an SMS code when the account has none; the session and social identities are kept. `auth/reset-password/` stays the recovery path that unlinks every identity |
 | M2-C12 | Show "price changed since you added it" in the cart | Yes — needs `CartItem.price_at_add` (migration `commerce.0004`) |
 | M2-C13 | Several unpaid orders at once? | No: one `awaiting_payment` order per customer (`CHECKOUT_MAX_OPEN_ORDERS=1`, serialised by the Customer row lock) |
