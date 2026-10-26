@@ -324,3 +324,43 @@ def test_tombstone_ttl_covers_both_audiences(settings: Any) -> None:
     settings.STAFF_ACCESS_TTL, settings.CUSTOMER_ACCESS_TTL = 900, 1800
     assert services.tombstone_ttl() == 1860
     assert enums.SessionRevokeReason.REFRESH_REUSED.value == "refresh_reused"
+
+
+def test_register_device_signs_out_the_token_holder_it_deactivates(
+    django_capture_on_commit_callbacks: Any,
+) -> None:
+    """Review nit (fix pass 2): the holder deactivated by a moved token loses its open session too, so its app
+    answers ``SESSION_REPLACED`` on every route, not only on ``PUT me/device/``."""
+    holder_customer = CustomerFactory.create()
+    holder = start_test_session(holder_customer, fid="fid-hold-0001")
+    Device.objects.filter(pk=device_pk(holder.session)).update(fcm_token="tok-shared", push_enabled=True)
+    stale_customer = CustomerFactory.create()
+    stale = start_test_session(stale_customer, fid="fid-stale-001")
+    # An inactive row still holding the token: it loses the token, its customer's session stays open.
+    Device.objects.filter(pk=device_pk(stale.session)).update(is_active=False, fcm_token="tok-shared")
+    qr_store.put("h" * 64, holder_customer.pk, ttl=60, max_live=2)
+    qr_store.put("s" * 64, stale_customer.pk, ttl=60, max_live=2)
+    customer = CustomerFactory.create()
+    mine = start_test_session(customer, fid="fid-mine-0002")
+    with django_capture_on_commit_callbacks(execute=True):
+        services.register_device(customer.pk, "fid-mine-0002", fcm_token="tok-shared", push_enabled=True)
+    holder.session.refresh_from_db()
+    assert holder.session.revoke_reason == enums.SessionRevokeReason.REPLACED
+    assert cache.get(f"auth:sid:{holder.session.pk}") == "revoked:replaced"
+    assert qr_store.take("h" * 64) is None
+    assert open_sessions(stale_customer) == [stale.session]
+    assert str(qr_store.take("s" * 64)).startswith(f"{stale_customer.pk}:")
+    assert open_sessions(customer) == [mine.session]
+    assert not OutboxMessage.objects.filter(topic=topics.PUSH_SESSION_REPLACED).exists()
+    assert set(Device.objects.filter(fcm_token="tok-shared").values_list("customer_id", flat=True)) == {
+        customer.pk
+    }
+
+
+def test_register_device_for_an_unknown_fid_keeps_the_fid_out_of_the_error() -> None:
+    """Review nit (fix pass 2): the escaped error is logged by the handler, so it carries ``pii_ref(fid)``."""
+    customer = CustomerFactory.create()
+    with pytest.raises(Device.DoesNotExist) as caught:
+        services.register_device(customer.pk, "fid-secret-0001", fcm_token=None, push_enabled=False)
+    assert "fid-secret-0001" not in str(caught.value)
+    assert services.pii_ref("fid-secret-0001") in str(caught.value)

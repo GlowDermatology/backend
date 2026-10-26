@@ -28,6 +28,7 @@ from glowderma.accounts.models import (
 )
 from glowderma.core import audit, enums, outbox, qr_store, timeutils
 from glowderma.core.api.exceptions import AuthFailed, Conflict, field_error
+from glowderma.core.pii import pii_ref
 from glowderma.integrations.oauth.ports import SocialClaims
 
 logger = logging.getLogger(__name__)
@@ -671,12 +672,17 @@ def start_customer_session(
 def _revoke_customer_sessions(
     customer_id: int, reason: str, *, except_sid: uuid.UUID | str | None = None, at: datetime | None = None
 ) -> list[AuthSession]:
-    queryset = AuthSession.objects.select_for_update().filter(
-        customer_id=customer_id, audience="customer", revoked_at__isnull=True
-    )
+    queryset = AuthSession.objects.filter(customer_id=customer_id)
     if except_sid is not None:
         queryset = queryset.exclude(pk=except_sid)
-    sessions = list(queryset)
+    return _revoke_open_customer_sessions(queryset, reason, at=at)
+
+
+def _revoke_open_customer_sessions(
+    queryset: Any, reason: str, *, at: datetime | None = None
+) -> list[AuthSession]:
+    """Lock and revoke the open customer sessions of ``queryset`` with ``reason`` (tombstones on commit)."""
+    sessions = list(queryset.select_for_update().filter(audience="customer", revoked_at__isnull=True))
     instant = at or timeutils.now()
     for session in sessions:
         session.revoked_at = instant
@@ -752,8 +758,10 @@ def register_device(
 
     ``push_enabled`` with an empty token → field ``push_enabled`` ``push_token_missing``. A non-empty token
     held by another device row (the phone changed accounts) is taken from that row first (no token, no push,
-    inactive if it was active), so ``device_active_fcm_token_unique`` never fires; ``fcm_invalidated_at`` is
-    cleared when a new token arrives.
+    inactive if it was active), so ``device_active_fcm_token_unique`` never fires; a holder deactivated here
+    also loses its open sessions (``replaced``, tombstones and its customer's QR keys on commit, no farewell
+    push: the token is this install's now), so that customer's app is signed out on every route instead of
+    only on ``PUT me/device/``. ``fcm_invalidated_at`` is cleared when a new token arrives.
 
     Lock order (customer contract §2.7.1): the customer-level lock first, then the device rows — this
     device and the token's holders in one query ordered by primary key — so it serializes with
@@ -778,7 +786,7 @@ def register_device(
     rows = list(Device.objects.select_for_update().filter(wanted).order_by("pk"))
     device = next((row for row in rows if row.customer_id == customer_id and row.fid == fid), None)
     if device is None:
-        raise Device.DoesNotExist(f"No device {fid!r} for customer {customer_id}")
+        raise Device.DoesNotExist(f"No device {pii_ref(fid)} for customer {customer_id}")
     if not device.is_active:
         newest_reason = (
             AuthSession.objects.filter(device_id=device.pk)
@@ -790,11 +798,22 @@ def register_device(
         raise AuthFailed("SESSION_REPLACED" if replaced else "SESSION_EXPIRED")
     if token:
         holders = [row for row in rows if row.pk != device.pk]
+        deactivated = [holder for holder in holders if holder.is_active]
         for holder in holders:
             holder.fcm_token = ""
             holder.push_enabled = False
             holder.is_active = False
             holder.save(update_fields=["fcm_token", "push_enabled", "is_active", "updated_at"])
+        if deactivated:
+            # The install now belongs to this customer: the holder's open session dies with its device, so
+            # every route of that app answers SESSION_REPLACED alike (not only PUT me/device).
+            _revoke_open_customer_sessions(
+                AuthSession.objects.filter(device_id__in=[holder.pk for holder in deactivated]),
+                enums.SessionRevokeReason.REPLACED,
+                at=instant,
+            )
+            for holder_customer_id in {holder.customer_id for holder in deactivated}:
+                _revoke_qr_on_commit(holder_customer_id)
     if token and token != device.fcm_token:
         device.fcm_invalidated_at = None
     device.fcm_token = token

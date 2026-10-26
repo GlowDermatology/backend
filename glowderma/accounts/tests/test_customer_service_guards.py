@@ -180,7 +180,10 @@ def test_register_device_takes_the_customer_lock_first() -> None:
         services.register_device(customer.pk, "fid-lockorder-1", fcm_token="tok-held", push_enabled=True)
     locking = [q["sql"] for q in queries.captured_queries if q["sql"].rstrip().endswith("UPDATE")]
     assert 'FROM "accounts_customer"' in locking[0] and "FOR NO KEY UPDATE" in locking[0]
-    assert all('FROM "accounts_device"' in sql for sql in locking[1:]) and len(locking) == 2
+    # Then the device rows, then (the active holder is deactivated) its open sessions: the order of
+    # start_customer_session and delete_customer (customer, devices, sessions), so they cannot deadlock.
+    assert 'FROM "accounts_device"' in locking[1] and 'FROM "accounts_authsession"' in locking[2]
+    assert len(locking) == 3
 
 
 @pytest.mark.django_db(transaction=True)
