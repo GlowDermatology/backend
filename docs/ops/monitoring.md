@@ -124,13 +124,15 @@ at 03:10), which writes its own audit rows.
 ### 3.1 Checks
 
 Every check is one read-only statement returning a count and the first `CONSISTENCY_SAMPLE_SIZE` (20) ids; the
-index named is what bounds it.
+index named is what bounds it. `outbox_unfinished_idx` is `(available_at, id) WHERE NOT status = 'done'`: the
+dispatcher's claim (`ORDER BY available_at, id LIMIT 1 FOR UPDATE SKIP LOCKED`) reads it in order and stops at the
+first due row (no sort, no done row visited), and the outbox checks filter its few rows (open and dead messages).
 
 | Check | Rows | Threshold (setting, default) | Ids | Plan |
 |---|---|---|---|---|
 | `k1_billz_sale_unrecorded` | orders paid and not cancelled whose online purchase has no `billz_pushed_at` or no Billz sale id; **only while `BILLZ_MODE=live`** (else `skipped: billz_not_live`) | paid more than `CONSISTENCY_BILLZ_SALE_MINUTES` (120) ago, within `CONSISTENCY_LOOKBACK_DAYS` (7) | order | `order_created_idx` range on the look-back (an order is paid within an hour of its creation), purchase by its unique `order_id` |
 | `k1_billz_sale_unrecorded_backlog` | the same rows paid **before** the look-back, however old (the two checks never overlap, so an old unpushed sale never drops out of the report); **only while `BILLZ_MODE=live`** | paid before `CONSISTENCY_LOOKBACK_DAYS` (7) ago | order | `purchase_unpushed_online_idx` (loyalty.0005, partial: the unrecorded online purchases only), then the order by its primary key |
-| `k1_billz_sale_dead` | dead `billz.push_sale` messages, however old (retention never purges a dead message) | — | order | `outbox_unfinished_idx` (core.0010) on `status = 'dead'` |
+| `k1_billz_sale_dead` | dead `billz.push_sale` messages, however old (retention never purges a dead message) | — | order | `outbox_unfinished_idx` (core.0010: `(available_at, id)` over the rows that are not done), filtered by status and topic |
 | `k2_payment_pending_stuck` | `pending` payments holding a provider transaction whose order's reservation ran out | `reservation_expires_at` + `PAYMENT_IN_FLIGHT_GRACE_SECONDS` + `CONSISTENCY_PAYMENT_PENDING_MINUTES` (60) | payment | `payment_status_created_idx` on `status = 'pending'` |
 | `k2_click_paid_without_paydoc` | Click payments `paid` without `click_paydoc_id` (their refunds become manual) | confirmed within the look-back | payment | `payment_confirmed_idx` range on `confirmed_at` |
 | `k3_refund_open` | refunds `requested`, `submitting`, `unknown` or `manual_required` | requested more than `CONSISTENCY_REFUND_OPEN_HOURS` (24) ago | refund | the partial unique index `refund_one_open_per_payment` (open refunds only) |
@@ -138,9 +140,9 @@ index named is what bounds it.
 | `k4_shipment_missing` | delivery orders `processing` without a BTS parcel (no shipment, or `not_created` / `failed`) | paid more than `CONSISTENCY_SHIPMENT_MINUTES` (60) ago | order | `order_status_idx` on `processing`, shipment by unique `order_id` |
 | `k4_parcel_untracked` | parcels created at BTS for orders `processing` / `handed_to_courier` without a new BTS status | last status (or creation) older than `CONSISTENCY_PARCEL_UNTRACKED_HOURS` (48) | order | `order_status_idx` on the two open statuses, shipment by unique `order_id` |
 | `k5_late_capture_unrefunded` | refused (late) captures still `paid` with no succeeded refund | captured more than `CONSISTENCY_LATE_CAPTURE_HOURS` (24) ago | payment | `payment_late_capture_open_idx` (payments.0003) |
-| `k6_outbox_dead` | outbox messages that went dead | in the last `CONSISTENCY_OUTBOX_DEAD_HOURS` (24) | message | `outbox_unfinished_idx` on `dead` |
-| `k6_outbox_overdue` | open messages (pending, failed, in flight) due for longer than `CONSISTENCY_OUTBOX_OVERDUE_MINUTES` (60), deferred ones excluded | — | message | `outbox_unfinished_idx` on the open statuses and `available_at` |
-| `k6_outbox_deferred_past_window` | open deferred messages (`RetryLater`) deferred longer than their topic's window + the overdue grace | `billz.push_sale`: `BILLZ_SHIFT_RETRY_MAX_HOURS` (36); other topics `OUTBOX_DEFERRAL_WINDOW_HOURS` (24) | message | `outbox_unfinished_idx` on the open statuses |
+| `k6_outbox_dead` | outbox messages that went dead | in the last `CONSISTENCY_OUTBOX_DEAD_HOURS` (24) | message | `outbox_unfinished_idx`, filtered by status and `updated_at` |
+| `k6_outbox_overdue` | open messages (pending, failed, in flight) due for longer than `CONSISTENCY_OUTBOX_OVERDUE_MINUTES` (60), deferred ones excluded | — | message | `outbox_unfinished_idx` range on `available_at`, filtered by status |
+| `k6_outbox_deferred_past_window` | open deferred messages (`RetryLater`) deferred longer than their topic's window + the overdue grace | `billz.push_sale`: `BILLZ_SHIFT_RETRY_MAX_HOURS` (36); other topics `OUTBOX_DEFERRAL_WINDOW_HOURS` (24) | message | `outbox_unfinished_idx`, filtered by status and `deferred_since` |
 | `loyalty_reconciliation` | ledger mismatches (checks C1–C3, C5, C6 of design 02 §1.9.3) and the count of negative balances | — | (see its audit rows) | reads the whole ledger by design; no timeout |
 
 ### 3.2 What to do

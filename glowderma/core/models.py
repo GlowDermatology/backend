@@ -135,10 +135,12 @@ class OutboxMessage(TimeStampedModel):
 
     class Meta:
         indexes = [
-            # every row that is not done (open and dead ones): the consistency report (K1, K6),
-            # requeue_outbox and the dispatcher's claim never walk the done rows (core.0010)
+            # every row that is not done (open and dead ones), in the dispatcher's claim order: the claim
+            # (status pending/failed/in_flight, ORDER BY available_at, id LIMIT 1) reads it in order and stops
+            # at the first due row, and the consistency report (K1 dead sales, K6) and requeue_outbox scan
+            # only these few rows instead of the done ones that make up the table (core.0010)
             models.Index(
-                fields=["status", "available_at"], condition=~Q(status="done"), name="outbox_unfinished_idx"
+                fields=["available_at", "id"], condition=~Q(status="done"), name="outbox_unfinished_idx"
             ),
         ]
 

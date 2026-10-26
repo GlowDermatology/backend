@@ -110,8 +110,36 @@ def test_the_partial_indexes_of_the_checks_exist() -> None:
         )
         definitions = dict(cursor.fetchall())
     unfinished = definitions["outbox_unfinished_idx"]
-    assert "(status, available_at) WHERE (NOT ((status)::text = 'done'::text))" in unfinished
+    assert "(available_at, id) WHERE (NOT ((status)::text = 'done'::text))" in unfinished
     late = definitions["payment_late_capture_open_idx"]
     assert "(confirmed_at)" in late and "'late_capture'" in late and "'paid'" in late
     unpushed = definitions["purchase_unpushed_online_idx"]
     assert "(order_id)" in unpushed and "billz_pushed_at IS NULL" in unpushed and "'online'" in unpushed
+
+
+@pytest.mark.django_db
+def test_the_dispatcher_claim_can_read_the_unfinished_index_in_order() -> None:
+    """core.0010 serves the claim (``ORDER BY available_at, id LIMIT 1 FOR UPDATE SKIP LOCKED`` over the open
+    statuses) without a sort: its predicate is implied by the claim's status filter and its key is the
+    claim's order. Sequential and bitmap scans are disabled so a tiny, unanalysed test table cannot hide a
+    mismatch (an index the claim cannot read in order would leave a Sort above it)."""
+    from django.db import connection, transaction
+    from django.db.models import Q
+
+    instant = timeutils.now()
+    claim = (
+        OutboxMessage.objects.select_for_update(skip_locked=True)
+        .filter(
+            Q(status__in=["pending", "failed"]) | Q(status="in_flight", lease_expires_at__lte=instant),
+            available_at__lte=instant,
+        )
+        .order_by("available_at", "id")[:1]
+    )
+    sql, params = claim.query.sql_with_params()
+    with transaction.atomic(), connection.cursor() as cursor:
+        cursor.execute("SET LOCAL enable_seqscan = off")
+        cursor.execute("SET LOCAL enable_bitmapscan = off")
+        cursor.execute("EXPLAIN " + sql, params)
+        plan = "\n".join(row[0] for row in cursor.fetchall())
+    assert "Index Scan using outbox_unfinished_idx" in plan, plan
+    assert "Sort" not in plan, plan

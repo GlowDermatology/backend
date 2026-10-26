@@ -1203,8 +1203,8 @@ def dead_billz_sales(*, limit: int) -> Finding:
     complete the sale in Billz by hand, or replay it (``manage.py requeue_outbox --topic billz.push_sale
     --dead``). The ids are the orders named by the messages.
 
-    Plan: ``outbox_unfinished_idx`` (core.0010, partial on status <> 'done') range scan on ``status =
-    'dead'``, filtered by topic."""
+    Plan: ``outbox_unfinished_idx`` (core.0010, partial on NOT status = 'done': open and dead rows only),
+    filtered by status and topic."""
     queryset = OutboxMessage.objects.filter(topic=topics.BILLZ_PUSH_SALE, status="dead").annotate(
         order_ref=Cast(KeyTextTransform("order_id", "payload"), BigIntegerField())
     )
