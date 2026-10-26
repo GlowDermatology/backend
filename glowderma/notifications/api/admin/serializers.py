@@ -14,7 +14,13 @@ from glowderma.accounts.models import Customer
 from glowderma.catalog.models import Product
 from glowderma.core import enums, timeutils
 from glowderma.core.api.exceptions import field_error
-from glowderma.core.api.fields import AwareDateTimeField, BoundedListField, PercentField, PhoneField
+from glowderma.core.api.fields import (
+    AwareDateTimeField,
+    BoundedListField,
+    HttpsUrlField,
+    PercentField,
+    PhoneField,
+)
 from glowderma.core.api.serializers import ActorSerializer
 from glowderma.core.media import absolute_media_url
 from glowderma.notifications import selectors, services
@@ -40,6 +46,7 @@ class NotificationLinkSerializer(serializers.Serializer[dict[str, Any]]):
     kind = serializers.ChoiceField(choices=enums.LinkKind.values)
     product_id = serializers.IntegerField(allow_null=True)
     label = serializers.CharField(allow_null=True)  # type: ignore[assignment]  # a field, not Field.label
+    url = serializers.CharField(allow_null=True, help_text="Kind `url` (gap ADM-10.1): the https link.")
 
 
 class NotificationAudienceSerializer(serializers.Serializer[dict[str, Any]]):
@@ -54,6 +61,7 @@ def record_link(campaign: Campaign) -> dict[str, Any]:
         "kind": campaign.link_kind,
         "product_id": campaign.link_product_id,
         "label": campaign.link_product_label or None,
+        "url": campaign.link_url or None,
     }
 
 
@@ -178,6 +186,8 @@ class NotificationMetaSerializer(serializers.Serializer[dict[str, Any]]):
 class NotificationLinkInputSerializer(serializers.Serializer[dict[str, Any]]):
     kind = serializers.ChoiceField(choices=enums.LinkKind.values, default=enums.LinkKind.NONE)
     product_id = serializers.IntegerField(required=False, allow_null=True)
+    # gap ADM-10.1 (decision GC-3): required for kind "url"; "" counts as missing; ignored for other kinds
+    url = HttpsUrlField(required=False, allow_null=True, allow_blank=True)
 
 
 class NotificationAudienceInputSerializer(serializers.Serializer[dict[str, Any]]):
@@ -233,7 +243,12 @@ class NotificationCreateSerializer(serializers.Serializer[dict[str, Any]]):
         errors: dict[str, Any] = {}
         link = attrs.get("link") or {"kind": enums.LinkKind.NONE}
         product: Product | None = None
-        if link["kind"] == enums.LinkKind.PRODUCT:
+        url = ""
+        if link["kind"] == enums.LinkKind.URL:
+            url = link.get("url") or ""
+            if not url:
+                errors["link"] = {"url": [field_error("required")]}
+        elif link["kind"] == enums.LinkKind.PRODUCT:
             if link.get("product_id") is None:
                 errors["link"] = {"product_id": [field_error("required")]}
             else:
@@ -269,6 +284,7 @@ class NotificationCreateSerializer(serializers.Serializer[dict[str, Any]]):
             raise serializers.ValidationError(errors)
         attrs["link_product"] = product
         attrs["link_kind"] = link["kind"]
+        attrs["link_url"] = url
         attrs["audience_segment"] = segment
         attrs["audience_customer"] = customer
         return attrs
@@ -281,6 +297,7 @@ class NotificationCreateSerializer(serializers.Serializer[dict[str, Any]]):
             body=data["body"],
             link_kind=data["link_kind"],
             link_product=data["link_product"],
+            link_url=data["link_url"],
             audience_type=data["audience"]["type"],
             audience_segment=data["audience_segment"],
             audience_customer=data["audience_customer"],

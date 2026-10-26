@@ -241,6 +241,7 @@ class AudienceType(TextChoices):
 class LinkKind(TextChoices):
     NONE = "none"
     PRODUCT = "product"
+    URL = "url"  # gap ADM-10.1: an https link (Campaign.link_url, decision GC-3)
 
 
 class BannerLinkKind(TextChoices):
@@ -441,6 +442,7 @@ class InboxLinkKind(TextChoices):
     PRODUCT = "product"
     ORDER = "order"
     APPOINTMENT = "appointment"
+    URL = "url"  # a campaign's https link (gap ADM-10.1)
 
 
 class PushDataType(TextChoices):

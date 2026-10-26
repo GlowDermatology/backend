@@ -125,6 +125,7 @@ class CampaignInput:
     body: str
     link_kind: str = enums.LinkKind.NONE
     link_product: Product | None = None
+    link_url: str = ""  # kind "url" only (gap ADM-10.1): a validated https link
     audience_type: str = enums.AudienceType.ALL
     audience_segment: CustomerSegment | None = None
     audience_customer: Customer | None = None
@@ -151,6 +152,7 @@ def _campaign_audit_image(campaign: Campaign) -> dict[str, Any]:
         "audience_phone": campaign.audience_phone or None,
         "link_kind": campaign.link_kind,
         "link_product_id": campaign.link_product_id,
+        "link_url": campaign.link_url or None,
         "scheduled_at": timeutils.isoformat(campaign.scheduled_at) if campaign.scheduled_at else None,
         "state": campaign.state,
         "recipient_count": campaign.recipient_count,
@@ -214,6 +216,7 @@ def create_campaign(data: CampaignInput, image: Any = None, *, actor: Any, reque
         link_kind=data.link_kind,
         link_product=data.link_product,
         link_product_label=_label_snapshot(data.link_product),
+        link_url=data.link_url if data.link_kind == enums.LinkKind.URL else "",
         audience_type=data.audience_type,
         audience_segment=data.audience_segment,
         audience_segment_name=data.audience_segment.name if data.audience_segment is not None else "",
@@ -317,6 +320,8 @@ def _inbox_defaults(campaign: Campaign, push_state: str) -> dict[str, Any]:
     link: dict[str, Any] = {"kind": "none"}
     if campaign.link_kind == enums.LinkKind.PRODUCT and campaign.link_product_id is not None:
         link = {"kind": "product", "product_id": campaign.link_product_id}
+    elif campaign.link_kind == enums.LinkKind.URL and campaign.link_url:
+        link = {"kind": enums.InboxLinkKind.URL.value, "url": campaign.link_url}  # gap ADM-10.1
     return {
         "kind": campaign.kind,
         "title": campaign.title,
@@ -374,13 +379,15 @@ def _claim_batch(campaign: Campaign, recipients: Sequence[CampaignRecipient]) ->
 
 
 def _push_messages(campaign: Campaign, claims: Iterable[_Claim]) -> list[PushMessage]:
-    """Campaign pushes (C§2.14.2): ``data`` ``{type, inbox_id, campaign_id, product_id | ""}``, channel
-    ``promo`` / ``general``, normal priority, the campaign image as ``notification.image``."""
+    """Campaign pushes (C§2.14.2): ``data`` ``{type, inbox_id, campaign_id, product_id | "", link_url | ""}``,
+    channel ``promo`` / ``general``, normal priority, the campaign image as ``notification.image``.
+    ``link_url`` is the campaign's https destination (kind ``url``, gap ADM-10.1)."""
     product_id = (
         str(campaign.link_product_id)
         if campaign.link_kind == enums.LinkKind.PRODUCT and campaign.link_product_id is not None
         else ""
     )
+    link_url = campaign.link_url if campaign.link_kind == enums.LinkKind.URL else ""
     image_url = absolute_media_url(campaign.image.name or "") if campaign.image else ""
     channel = "promo" if campaign.kind == enums.NotificationKind.PROMO else "general"
     return [
@@ -393,6 +400,7 @@ def _push_messages(campaign: Campaign, claims: Iterable[_Claim]) -> list[PushMes
                 "inbox_id": str(claim.inbox.pk),
                 "campaign_id": str(campaign.pk),
                 "product_id": product_id,
+                "link_url": link_url,
             },
             channel=channel,
             priority=CAMPAIGN_PRIORITY,

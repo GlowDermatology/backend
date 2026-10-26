@@ -66,7 +66,7 @@ CONTRACT_TABLE: dict[str, list[str]] = {
     "NotificationKind": ["promo", "general"],
     "NotificationState": ["scheduled", "queued", "sent", "cancelled"],
     "AudienceType": ["all", "segment", "customer"],
-    "LinkKind": ["none", "product"],
+    "LinkKind": ["none", "product", "url"],
     "BannerLinkKind": ["none", "product", "category", "url"],
     "TemplateStatus": ["processing", "handed_to_courier", "delivered", "cancelled"],
     "DashboardRange": ["today", "week", "month", "custom"],
@@ -116,7 +116,7 @@ CUSTOMER_TABLE: dict[str, list[str]] = {
     "AppointmentScope": ["upcoming", "past"],
     "AppointmentCancelledBy": ["customer", "admin"],
     "InboxKind": ["promo", "general", "order_status", "appointment"],
-    "InboxLinkKind": ["none", "product", "order", "appointment"],
+    "InboxLinkKind": ["none", "product", "order", "appointment", "url"],
     "PushDataType": ["order_status", "appointment", "campaign", "account_security", "session_replaced"],
     "AccountSecurityEvent": ["social_linked", "social_unlinked", "password_reset", "password_changed"],
 }
