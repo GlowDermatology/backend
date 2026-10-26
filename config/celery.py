@@ -27,4 +27,10 @@ app.conf.beat_schedule = {
         "task": "loyalty.reconcile_balances",
         "schedule": crontab(hour=3, minute=10),
     },
+    # M3 Billz catalog sync (docs/integrations/billz.md): an hourly delta and a daily full reconciliation,
+    # both through the billz_import job (single-flight with admin imports); no-ops while BILLZ_MODE=fake.
+    # Off the hour so they never meet the other jobs' :00 load; the full at 04:23 Tashkent, away from the
+    # delta.
+    "billz-sync-delta": {"task": "catalog.billz_sync_delta", "schedule": crontab(minute=7)},
+    "billz-sync-full": {"task": "catalog.billz_sync_full", "schedule": crontab(hour=4, minute=23)},
 }

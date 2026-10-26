@@ -9,7 +9,7 @@ rules that need the resulting state — the product **active rule** and the exac
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import PurePosixPath
@@ -728,6 +728,58 @@ def upsert_from_billz(row: BillzProduct) -> UpsertOutcome:
         )
         stock_changed = sync_stock(product, row.stock, row.synced_at)
         return "updated" if changed or stock_changed else "unchanged"
+
+
+# Audit reason of a product hidden by the reconciliation (docs/integrations/billz.md "Full sync").
+BILLZ_MISSING_REASON = "billz_missing: Billz no longer lists this product (daily full sync)"
+
+
+def hide_missing_from_billz(listed: Collection[str]) -> list[int]:
+    """The full sync's reconciliation: every **active** product whose ``billz_id`` is not in ``listed`` (the
+    complete Billz listing) becomes ``hidden``; returns their ids. Products are never deleted, so a product
+    Billz lists again keeps its texts, images and history and staff re-activate it.
+
+    Hiding is an admin-owned change made by the system: ``last_change`` = ``hidden`` without an actor and the
+    ``product.updated`` audit row (``status`` diff, actor ``system``) with :data:`BILLZ_MISSING_REASON`. Each
+    product is hidden in its own transaction under its row lock (an admin edit in between wins: the row is
+    re-read). The caller guarantees ``listed`` is complete (``BillzPort.iter_products("full")``).
+    """
+    require_live_billz()
+    wanted = frozenset(listed)
+    hidden: list[int] = []
+    candidates = (
+        Product.objects.filter(status=enums.ProductStatus.ACTIVE)
+        .exclude(billz_id__in=wanted)
+        .order_by("id")
+        .values_list("pk", flat=True)
+    )
+    for product_id in list(candidates):
+        with transaction.atomic():
+            product = (
+                Product.objects.select_for_update(of=("self",))
+                .select_related("category")
+                .filter(pk=product_id, status=enums.ProductStatus.ACTIVE)
+                .first()
+            )
+            if product is None or product.billz_id in wanted:
+                continue
+            before = product_snapshot(product)
+            product.status = enums.ProductStatus.HIDDEN
+            _set_last_change(product, enums.ProductChangeKind.HIDDEN, None, before)
+            product.save()
+            diff_before, diff_after = _diff(before, product_snapshot(product))
+            audit.record(
+                action="product.updated",
+                entity_type="product",
+                entity_id=str(product.pk),
+                before=diff_before,
+                after=diff_after,
+                reason=BILLZ_MISSING_REASON,
+            )
+            hidden.append(product.pk)
+    if hidden:
+        logger.warning("Billz full sync hid %d products Billz no longer lists: %s", len(hidden), hidden)
+    return hidden
 
 
 def import_products(rows: Iterable[BillzProduct]) -> dict[str, int]:

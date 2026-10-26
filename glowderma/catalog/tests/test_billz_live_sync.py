@@ -1,0 +1,246 @@
+"""The Billz import job over the live adapter (recorded answers, no network) and the M3 beat tasks.
+
+Full sync = reconciliation: products Billz no longer lists are hidden (never deleted) only when the listing
+is complete and plausible; the delta watermark moves only after a run was applied; the beat starts the same
+single-flight ``billz_import`` job and does nothing while Billz is fake.
+"""
+
+from typing import Any
+from unittest.mock import patch
+
+import httpx
+import pytest
+from celery.exceptions import Retry  # type: ignore[import-untyped]
+from django.test import override_settings
+from rest_framework.test import APIClient
+
+from glowderma.catalog import services, tasks
+from glowderma.catalog.models import Product, ProductStock
+from glowderma.catalog.tests.factories import ProductFactory, ProductImageFactory, ProductStockFactory
+from glowderma.core import timeutils
+from glowderma.core.models import AuditEntry
+from glowderma.integrations import selectors as integration_selectors
+from glowderma.integrations import services as job_services
+from glowderma.integrations.billz.live import LiveBillz
+from glowderma.integrations.billz.ports import BillzUnavailable
+from glowderma.integrations.models import IntegrationState, Job
+from glowderma.integrations.tests.billz_support import BillzServer, Clock, fixture, live
+from glowderma.integrations.tests.factories import JobFactory
+
+pytestmark = pytest.mark.django_db
+
+LIVE = {"BILLZ_MODE": "live"}
+
+
+def run(adapter: LiveBillz, mode: str = "full") -> Job:
+    job = JobFactory.create(params={"mode": mode})
+    with patch("glowderma.catalog.billz.get_port", return_value=adapter):
+        tasks.run_billz_import(job.pk)
+    job.refresh_from_db()
+    return job
+
+
+def billz_state() -> IntegrationState:
+    return IntegrationState.objects.get(provider="billz")
+
+
+@override_settings(**LIVE)
+def test_full_sync_maps_the_shop_and_hides_what_billz_no_longer_lists() -> None:
+    serum = ProductFactory.create(
+        billz_id="4607012301", billz_name="OLD NAME", billz_price=150_000, price=190_000
+    )
+    ProductImageFactory.create(product=serum)
+    ProductStockFactory.create(product=serum, quantity=1)
+    gone = ProductFactory.create(billz_id="4607012399", status="active")  # Billz dropped it
+    ProductImageFactory.create(product=gone)
+    already_hidden = ProductFactory.create(billz_id="4607012398", status="hidden")
+    job = run(live(BillzServer()))
+    assert job.state == "succeeded", job.error
+    assert job.result == {"created": 2, "updated": 1, "unchanged": 0, "new_from_billz": 2, "hidden": 1}
+    serum.refresh_from_db()
+    # Billz-owned fields for BILLZ_SHOP_ID; Glow Derma's price and status untouched
+    assert (serum.billz_name, serum.volume, serum.billz_price, serum.price, serum.status) == (
+        "HYALURONIC SERUM 30ML",
+        "30 ml",
+        185_000,
+        190_000,
+        "active",
+    )
+    assert ProductStock.objects.get(product=serum).quantity == 12
+    foam = Product.objects.get(billz_id="4607012302")
+    assert (foam.status, foam.is_new_from_billz, foam.billz_price, foam.price) == (
+        "hidden",
+        True,
+        99_000,
+        99_000,
+    )
+    assert ProductStock.objects.get(product=foam).quantity == 0
+    cream = Product.objects.get(billz_id="4607012303")
+    assert (cream.billz_price, ProductStock.objects.get(product=cream).quantity) == (None, 0)
+    # hidden, never deleted: texts, images and history stay
+    gone.refresh_from_db()
+    assert gone.status == "hidden" and gone.images.count() == 1
+    assert (gone.last_change_kind, gone.last_change_actor_id) == ("hidden", None)
+    entry = AuditEntry.objects.get(action="product.updated", entity_id=str(gone.pk))
+    assert (entry.actor_type, entry.before, entry.after) == (
+        "system",
+        {"status": "active"},
+        {"status": "hidden"},
+    )
+    assert entry.reason == services.BILLZ_MISSING_REASON
+    already_hidden.refresh_from_db()
+    assert already_hidden.last_change_at is None  # nothing to hide twice
+    data = integration_selectors.provider_data("billz")
+    assert data["full_count"] == 4 and data["delta_since"]
+    assert billz_state().last_sync_at is not None
+
+
+@override_settings(**LIVE)
+def test_a_listing_that_breaks_half_way_hides_nothing_and_moves_no_cursor() -> None:
+    gone = ProductFactory.create(billz_id="4607012399", status="active")
+    services_data = {"delta_since": "2026-10-25T10:00:00+00:00", "full_count": 4}
+    job_services.update_provider_data("billz", services_data)
+    server = BillzServer()
+    server.overrides["GET /v2/products"] = lambda request: (
+        httpx.Response(500, json=fixture("internal_error"))
+        if request.url.params["page"] == "2"
+        else httpx.Response(200, json=fixture("products_page1"))
+    )
+    job = run(live(server, Clock()))
+    assert job.state == "failed"
+    assert job.error == {
+        "code": "provider_unavailable",
+        "message": "Tashqi xizmat javob bermadi. Qayta urinib ko‘ring.",
+    }
+    gone.refresh_from_db()
+    assert gone.status == "active"
+    assert not Product.objects.filter(billz_id="4607012301").exists()  # nothing of the run was applied
+    assert integration_selectors.provider_data("billz") == services_data
+    assert billz_state().last_sync_at is None and billz_state().consecutive_failures == 1
+
+
+@override_settings(**LIVE)
+def test_an_implausibly_small_full_listing_is_refused() -> None:
+    gone = ProductFactory.create(billz_id="4607012399", status="active")
+    job_services.update_provider_data("billz", {"full_count": 100})
+    job = run(live(BillzServer()))
+    assert job.state == "failed" and (job.error or {})["code"] == "billz_listing_incomplete"
+    assert (job.error or {})["message"] == "Tashqi xizmat javob bermadi. Qayta urinib ko‘ring."
+    gone.refresh_from_db()
+    assert gone.status == "active" and not Product.objects.filter(billz_id="4607012302").exists()
+    assert integration_selectors.provider_data("billz") == {"full_count": 100}
+
+
+@override_settings(**LIVE)
+def test_delta_job_never_hides_and_advances_the_watermark_after_success() -> None:
+    gone = ProductFactory.create(billz_id="4607012399", status="active")
+    server = BillzServer()
+    job = run(live(server), mode="delta")
+    assert job.state == "succeeded" and "hidden" not in (job.result or {})
+    gone.refresh_from_db()
+    assert gone.status == "active"
+    data = integration_selectors.provider_data("billz")
+    assert set(data) == {"delta_since"}
+    run(live(server), mode="delta")
+    assert "last_updated_date" in server.requests[-1].url.params
+
+
+def test_fake_full_import_hides_nothing() -> None:
+    known = ProductFactory.create(billz_id="4607012301", status="active")
+    job = JobFactory.create(params={"mode": "full"})
+    tasks.run_billz_import(job.pk)
+    job.refresh_from_db()
+    assert job.result == {"created": 3, "updated": 1, "unchanged": 0, "new_from_billz": 3, "hidden": 0}
+    known.refresh_from_db()
+    assert known.status == "active"
+    assert integration_selectors.provider_data("billz") == {}  # the fake keeps no cursor
+
+
+def test_hide_service_ignores_listed_and_hidden_products() -> None:
+    listed = ProductFactory.create(billz_id="4607012301", status="active")
+    hidden = ProductFactory.create(billz_id="4607012302", status="hidden")
+    missing = ProductFactory.create(billz_id="4607012303", status="active")
+    assert services.hide_missing_from_billz({"4607012301"}) == [missing.pk]
+    assert services.hide_missing_from_billz({"4607012301"}) == []
+    listed.refresh_from_db()
+    hidden.refresh_from_db()
+    assert listed.status == "active" and hidden.last_change_at is None
+    assert Product.objects.count() == 3
+
+
+# --- beat ---------------------------------------------------------------------------------------------------
+
+
+def test_beat_does_nothing_while_billz_is_fake() -> None:
+    assert tasks.billz_sync_delta() is None
+    assert tasks.billz_sync_full() is None
+    assert not Job.objects.exists() and not AuditEntry.objects.exists()
+
+
+@override_settings(**LIVE)
+def test_beat_skips_an_unconfigured_live_adapter(caplog: pytest.LogCaptureFixture) -> None:
+    assert tasks.billz_sync_delta() is None
+    assert not Job.objects.exists()
+    assert "not configured" in caplog.text
+
+
+@override_settings(**LIVE)
+def test_beat_delta_runs_the_import_job_as_the_system(django_capture_on_commit_callbacks: Any) -> None:
+    adapter = live(BillzServer())
+    with patch("glowderma.catalog.billz.get_port", return_value=adapter):
+        with django_capture_on_commit_callbacks(execute=True):
+            job_id = tasks.billz_sync_delta()
+    job = Job.objects.get(pk=job_id)
+    assert (job.state, job.params, job.created_by_id) == ("succeeded", {"mode": "delta"}, None)
+    started = AuditEntry.objects.get(action="billz.import_started")
+    assert started.actor_type == "system"
+
+
+@override_settings(**LIVE)
+def test_beat_joins_a_running_import_and_the_full_retries_later() -> None:
+    running = JobFactory.create(
+        state="running", started_at=timeutils.now(), heartbeat_at=timeutils.now(), params={"mode": "delta"}
+    )
+    adapter = live(BillzServer())
+    with patch("glowderma.catalog.billz.get_port", return_value=adapter):
+        assert tasks.billz_sync_delta() == running.pk
+        with pytest.raises(Retry):
+            tasks.billz_sync_full()
+        # the last retry gives up for the day instead of retrying forever
+        assert tasks.billz_sync_full.apply(retries=tasks.FULL_MAX_RETRIES).get() is None
+        running.params = {"mode": "full"}
+        running.save()
+        assert tasks.billz_sync_full() == running.pk  # an admin full import is already reconciling
+    assert Job.objects.count() == 1
+
+
+def test_beat_entries_are_scheduled_off_the_hour() -> None:
+    from config.celery import app
+
+    app.autodiscover_tasks(force=True)
+    delta = app.conf.beat_schedule["billz-sync-delta"]
+    full = app.conf.beat_schedule["billz-sync-full"]
+    assert (delta["task"], full["task"]) == ("catalog.billz_sync_delta", "catalog.billz_sync_full")
+    assert delta["schedule"].minute == {7} and len(delta["schedule"].hour) == 24
+    assert (full["schedule"].hour, full["schedule"].minute) == ({4}, {23})
+    assert "catalog.billz_sync_delta" in app.tasks and "catalog.billz_sync_full" in app.tasks
+
+
+# --- admin product create with a live Billz that does not answer --------------------------------------------
+
+
+@override_settings(**LIVE)
+def test_product_create_answers_503_when_billz_does_not_answer(staff_client: APIClient) -> None:
+    class Down:
+        def get_product(self, billz_id: str) -> None:
+            raise BillzUnavailable("GET /v2/products: ConnectError")
+
+        def is_configured(self) -> bool:
+            return True
+
+    body = {"billz_id": "4607012301", "price": 185_000, "texts": {"uz": {"name": "Serum"}}}
+    with patch("glowderma.catalog.billz.get_port", return_value=Down()):
+        response = staff_client.post("/api/v1/admin/products/", body)
+    assert response.status_code == 503, response.json()
+    assert response.json()["code"] == "provider_unavailable"
+    assert not Product.objects.exists()

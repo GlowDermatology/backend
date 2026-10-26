@@ -139,7 +139,8 @@ def test_second_import_is_idempotent(
     assert response.status_code == 202
     second_job = Job.objects.get(pk=response.json()["id"])
     assert second_job.state == "succeeded"
-    assert second_job.result == {"created": 0, "updated": 0, "unchanged": 4, "new_from_billz": 0}
+    # a full run also reports the reconciliation (the fake lists every known product: nothing hidden)
+    assert second_job.result == {"created": 0, "updated": 0, "unchanged": 4, "new_from_billz": 0, "hidden": 0}
     assert Product.objects.count() == 4
     edited = Product.objects.get(pk=new.pk)
     assert (
