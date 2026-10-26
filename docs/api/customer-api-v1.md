@@ -1003,7 +1003,9 @@ than `BILLZ_STOCK_MAX_AGE_SECONDS` (900; never read counts as older), through th
 profile and **4 s** for the request, **before** the request's transaction and every row lock; the read is written at
 once (`catalog.services.sync_stock`, never backwards) and the write then works on it (`available`, `max_quantity`,
 `OUT_OF_STOCK`). A barcode Billz no longer knows reads as stock 0. When Billz cannot be reached the cart write carries on
-from the cached stock — **cart writes never answer 503 for Billz**. A `GET` never calls Billz. With a fake Billz nothing
+from the cached stock — **cart writes never answer 503 for Billz**. Billz is not asked for a write that will be refused
+or replayed anyway (GC-10): a body that does not validate, a missing or malformed `Idempotency-Key` on `POST`, a key
+whose stored response is replayed, a product the customer cannot see, or (`PATCH`) a product that is not in the cart. A `GET` never calls Billz. With a fake Billz nothing
 changes (no read, the cached stock as before). Every write locks the `Cart` row
 (`select_for_update`; created lazily with `get_or_create`) and stores `price_at_add = current price` on the touched
 line (model change `commerce.0004_cartitem_price_at_add`, §7 `M2-C12`).
@@ -1102,7 +1104,11 @@ checkout whose body is valid first re-reads from Billz — **before** the `@idem
 stock of every cart line whose `ProductStock.synced_at` is older than `BILLZ_STOCK_MAX_AGE_SECONDS` (900): never read
 first, then the oldest, one lookup per barcode, the interactive profile, **4 s** for all of them; each read is committed
 at once (`catalog.services.sync_stock`), so it is kept even when the checkout is then refused, and rows 7–9 run on it.
-A line Billz could not read keeps its cached stock; row 4a decides. With a fake Billz nothing is read (§2.3).
+A line Billz could not read keeps its cached stock; row 4a decides. Only the lines Billz **failed** to answer count for
+row 4a (transport error, 5xx, circuit open, or no answer at all within the 4 s); lines the 4 s budget, the rate limiter
+or a 429 pause left unread after Billz had answered are *deferred* and go on from the cache (GC-10). Nothing is read for
+a checkout without a well-formed `Idempotency-Key`, for a replayed key, or for lines whose product is not visible. With a
+fake Billz nothing is read (§2.3).
 
 **Serialisation.** Two checkouts of one customer (two taps, a retry with a renewed key, two app processes) must not
 both pass the open-order check. Checkout therefore runs, inside the `@idempotent` transaction:
@@ -1130,7 +1136,7 @@ Checks, in this order (the first failure answers):
 | 2 | Consent current (§2.2.4) | 409 `terms_update_required` · `error.terms_update_required`, `details {current_version}` |
 | 3 | Delivery: offered (§2.6; else 409 `delivery_unavailable` · `error.delivery_not_offered`, no BTS call), address own (`does_not_exist` `field.address_not_found`), region/city known (`address_incomplete`) | 409 / 400 |
 | 4 | Delivery: BTS quote (`quote(region_code, city_code)`, no row lock held; passed to `create_order` as `delivery_fee`) | 409 `delivery_unavailable` / 503 `provider_unavailable` |
-| 4a | Live Billz: every line the re-read above could not confirm has a cached stock read within `BILLZ_STOCK_STALE_REFUSE_SECONDS` (3600; a line never read from Billz fails). Otherwise the checkout proceeds on the cache | 503 `provider_unavailable` "Tashqi xizmat javob bermadi. Qayta urinib ko‘ring." · `error.provider_unavailable` (nothing written but the stock reads; a retry re-reads — the reads that succeeded are kept, the oldest lines are read first) |
+| 4a | Live Billz: every line the re-read above could not confirm because Billz failed (not merely *deferred*, GC-10) has a cached stock read within `BILLZ_STOCK_STALE_REFUSE_SECONDS` (3600; a line never read from Billz fails). Otherwise the checkout proceeds on the cache | 503 `provider_unavailable` "Tashqi xizmat javob bermadi. Qayta urinib ko‘ring." · `error.provider_unavailable` (nothing written but the stock reads; a retry re-reads — the reads that succeeded are kept, the oldest lines are read first) |
 | — | *Customer row locked (`select_for_update(no_key=True)`); customer still `active` (else 401 `SESSION_EXPIRED`)* | |
 | 5 | No other `awaiting_payment` order (`CHECKOUT_MAX_OPEN_ORDERS`, default 1) | 409 `open_order_exists` "Sizda to‘lanmagan buyurtma bor (№{order_id}). Avval uni to‘lang yoki bekor qiling." · `error.open_order_exists`, `details {order_id, pay_by}` |
 | 6 | Cart has lines (read under the lock) | 409 `cart_empty` "Savat bo‘sh." · `error.cart_empty` |

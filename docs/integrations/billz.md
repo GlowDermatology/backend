@@ -210,11 +210,15 @@ contract §2.5, §2.7.1). While Billz is live, `POST`/`PATCH cart/items/` and `P
 lines whose `ProductStock.synced_at` is older than `BILLZ_STOCK_MAX_AGE_SECONDS` (900) through
 `BillzPort.read_stock(billz_ids, budget_seconds=4, interactive=True)`: the exact-barcode lookup of `get_product` for
 each barcode (never read first, then the oldest), one deadline of 4 s for all of them, the interactive profile (a 429
-pause fails fast); the first failure ends the run and the rest are reported unavailable — never an exception. The views
-call it **before** their `@idempotent` transaction and every row lock; each row is written at once through
+pause fails fast); never an exception. A Billz failure (transport error, 5xx, auth, circuit open, or a request the
+deadline cut before any lookup of the call was answered) ends the run and reports the rest `unavailable`; the call's own
+budget running out (`BillzOutOfTime`: the deadline after an answer, the limiter wait, a 429 pause) ends it and reports
+the rest `deferred`; a barcode whose substring search fills `SEARCH_MAX_PAGES` without an exact match is `deferred` and
+the run goes on (GC-10). The views call it **before** their `@idempotent` transaction and every row lock, and not for a
+request they will refuse or replay anyway; each row is written at once through
 `catalog.services.sync_stock` (never backwards), a barcode Billz does not know as stock 0. Cart writes then carry on
-(from the cache for what was not read); a checkout refuses with 503 `provider_unavailable` only when a line Billz could
-not confirm was last read longer ago than `BILLZ_STOCK_STALE_REFUSE_SECONDS` (3600) or never. After a successful sale
+(from the cache for what was not read); a checkout refuses with 503 `provider_unavailable` only when a line Billz failed to
+answer (not a deferred one) was last read longer ago than `BILLZ_STOCK_STALE_REFUSE_SECONDS` (3600) or never. After a successful sale
 push, `billz.stock_reread` (outbox, 30 s later, handled by `commerce.tasks`) re-reads the sold products with the batch
 profile (60 s, best effort) and settles their units. A delta refreshes `synced_at` only for the products it lists
 (GC-8 asks Billz whether stock movements bump `last_updated_date`). Fake Billz: none of this runs.

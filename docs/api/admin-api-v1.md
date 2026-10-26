@@ -62,7 +62,7 @@ Examples use `jsonc`: `//` comments give types and nullability and are not part 
 | Absent value | Key always present with `null`; lists are `[]`; keys are never omitted | |
 | Query booleans | `true` / `false` (also `1` / `0`) | `?promo=true` |
 | Media URLs | Absolute, built from `PUBLIC_MEDIA_BASE_URL`, never from the request Host | `"https://media.example.uz/products/1/9f2c.webp"` |
-| Link URLs (banner / campaign destinations) | Absolute `https` URL ≤500, trimmed, no credentials, port 443 only; else `invalid` "Havolani https:// bilan to‘liq kiriting." (open question GC-3) | `"https://glowderma.uz/aksiya"` |
+| Link URLs (banner / campaign destinations) | Absolute `https` URL ≤500, trimmed, no credentials, port 443 only, no Unicode control/format characters; the scheme is matched case-insensitively and stored lower-cased (`HTTPS://x.uz/A` → `https://x.uz/A`); else `invalid` "Havolani https:// bilan to‘liq kiriting." (open questions GC-3, GC-9) | `"https://glowderma.uz/aksiya"` |
 | Name search folding | Every name `search` compares case-insensitively **and folded** on both sides: the Uzbek o‘/g‘ mark in any of its six encodings (U+0027 `'`, U+0060 `` ` ``, U+2018 `‘`, U+2019 `’`, U+02BB `ʻ`, U+02BC `ʼ`) is one character, and `ё` = `е` (`core.search.SearchFold`, GC-1) | `ko'pik` finds "Yumshoq tozalovchi ko‘pik" |
 
 Fields owned by slices that have not landed yet return `0`, `null` or `[]`, never an error.
@@ -179,9 +179,9 @@ The FE creates one key per form/dialog instance (`crypto.randomUUID()`), reuses 
 | products | `mahsulotlar` | `ID; Billz ID; Billz nomi; Nomi; Kategoriya; Narx (so‘m); Qoldiq; Aksiya; Holat; Yangi` |
 | customers | `mijozlar` | `ID; Ism; Telefon; Ro‘yxatdan o‘tgan; Jami xaridlar (so‘m); Cashback foizi; Balans (so‘m); Holat` |
 | payments | `tolovlar` | `ID; Buyurtma №; Mijoz; Telefon; Usul; Holat; Summa (so‘m); Tranzaksiya; Yaratilgan; Tasdiqlangan; Qaytarish` |
-| notifications | `bildirishnomalar` | `ID; Sana; Turi; Sarlavha; Auditoriya; Holat; Yuborildi; Yetkazildi` |
+| notifications | `bildirishnomalar` | `ID; Sana; Turi; Sarlavha; Auditoriya; Holat; Yuborildi; Yetkazildi; Havola` (`Havola`: `mahsulot #<id>`, the URL for kind `url`, else empty) |
 | segments, members | `guruhlar`, `guruh-azolari` | `ID; Nomi; A’zolar; Push qurilmalar` / customer columns |
-| categories, banners | `kategoriyalar`, `bannerlar` | `Slug; Nomi; Tartib; Faol; Mahsulotlar` / `ID; Sarlavha; Havola; Faol; Boshlanishi; Tugashi; Tartib` |
+| categories, banners | `kategoriyalar`, `bannerlar` | `Slug; Nomi; Tartib; Faol; Mahsulotlar; Rasm` (`Rasm`: `image_url`, else empty) / `ID; Sarlavha; Havola; Faol; Boshlanishi; Tugashi; Tartib` |
 | audit-log | `harakatlar-jurnali` | `ID; Sana; Xodim; Amal; Obyekt; Obyekt ID; IP; So‘rov ID` |
 
 ### 1.9 Throttles (Redis cache; defaults, configurable)
@@ -533,7 +533,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 - `GET categories/` (P E; ordered by `position`; filter `is_active`).
 - **Bodies** (gap ADM-5.1, open question GC-4): `POST` and `PATCH` take JSON **or** `multipart/form-data` (anything else → 415). Multipart names are dotted like the banners' (`slug`, `name.uz`, `name.ru`, `name.en`, `is_active`) plus the optional file part `image`:
   - `image`: the product-image rules of §2.3 — ≤5 MiB (`image` `file_too_large`), decoded by content as JPEG, PNG or WebP (`image` `unsupported_image`), re-encoded in the same format, EXIF stripped, longest side ≤2400 px; stored as `categories/{id}/<sha256 prefix>.<ext>` and served as `image_url` (absolute, §1.4); the customer catalogue's `catalog/categories/` `image_url` is the same file.
-  - `PATCH` with an `image` part replaces the stored image (the previous file is removed after the commit; the same bytes again change nothing); `remove_image: true` (JSON boolean, or `true`/`false` in multipart) drops it (`image_url: null`, file removed after commit; nothing to remove → 200 unchanged); both at once → 400 `remove_image` `invalid`. A JSON body never carries a file.
+  - `PATCH` with an `image` part replaces the stored image (the previous file is removed after the commit; the same bytes again change nothing); `remove_image: true` (JSON boolean, or `true`/`false`/`1`/`0` in multipart; any other value such as `"yes"` or `1` in JSON → `invalid`) drops it (`image_url: null`, file removed after commit; nothing to remove → 200 unchanged); both at once → 400 `remove_image` `invalid`. A JSON body never carries a file.
 - `POST categories/` → 201:
   - `slug`: `^[a-z0-9-]{2,40}$`, unique, not `order` or `none` (reserved → `slug` `invalid` "Bu slug band."), immutable afterwards; a lost unique race is reported as `slug` `unique` too;
   - `name.uz` 2..60 required; `name.ru`, `name.en` ≤60, optional (default `""`);
@@ -719,7 +719,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 | `image` | optional file, product-image rules | |
 | `link.kind` | `none` (default), `product` or `url` (gap ADM-10.1) | |
 | `link.product_id` | required for `product`; must be an active product | `does_not_exist` "Mahsulot topilmadi yoki yashirin." |
-| `link.url` | required for `url` (`""` counts as missing); an absolute `https` URL ≤500, no credentials, port 443 only (§1.4, GC-3); ignored for the other kinds | `required` "Majburiy maydon." / `invalid` "Havolani https:// bilan to‘liq kiriting." / `max_length` "500 belgidan oshmasin." |
+| `link.url` | required for `url` (`""` counts as missing); an absolute `https` URL ≤500, no credentials, port 443 only (§1.4, GC-3); ignored — and not validated — for the other kinds | `required` "Majburiy maydon." / `invalid` "Havolani https:// bilan to‘liq kiriting." / `max_length` "500 belgidan oshmasin." |
 | `audience.type` | `all`, `segment` or `customer` | |
 | `audience.segment_id` | required for `segment` | `does_not_exist` |
 | `audience.phone` | required for `customer`; `^\+998\d{9}$`; must belong to an active customer | `invalid` "Telefon raqamini to‘g‘ri kiriting." / `customer_not_found` "Bu raqam bilan mijoz topilmadi." |
