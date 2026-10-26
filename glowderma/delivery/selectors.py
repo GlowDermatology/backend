@@ -208,8 +208,12 @@ def untracked_parcels(status_before: datetime, *, limit: int) -> Finding:
     this reads "no new BTS status for N hours": a parcel stuck at BTS, or tracking (webhook and polling) that
     stopped. The ids are order ids.
 
-    Plan: ``order_status_idx`` range scans on the two open order statuses, then the shipment through its
-    unique ``order_id``; the state and the timestamps are filtered on those rows."""
+    Plan (EXPLAIN on 120 000 shipments, 240 open orders): a merge join — ``order_status_idx`` on the two open
+    order statuses (a few hundred rows, sorted by id) against a walk of the shipments' unique ``order_id``
+    index in order, the state and the timestamps filtered on every shipment row. The planner picks it for the
+    ``ORDER BY order_id LIMIT`` of :func:`~glowderma.core.consistency.finding` (an IN-subquery on the orders
+    gets the same plan), so the cost grows with all shipments ever created (~45 ms per 120 000): linear, far
+    inside the check's 60 s statement timeout for years of parcels."""
     queryset = (
         Shipment.objects.filter(
             state=Shipment.State.CREATED,
