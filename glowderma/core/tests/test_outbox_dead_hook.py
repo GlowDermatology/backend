@@ -74,3 +74,32 @@ def test_failure_before_dead_does_not_notify() -> None:
     OutboxMessage.objects.create(topic="test.fail", payload={}, dedupe_key="test.fail:2")
     dispatch_outbox(batch=1)
     assert calls == []
+
+
+def test_permanent_failure_goes_dead_at_the_first_attempt() -> None:
+    """A handler that raises ``PermanentFailure`` (the provider refused for good) is never retried: the
+    message is dead at once with the reason as ``last_error``, audited and handed to the dead hook."""
+    seen: list[str] = []
+
+    @outbox.register("test.fail")
+    def handler(message: OutboxMessage) -> None:
+        raise outbox.PermanentFailure("Billz refused the sale: product not found (20036)")
+
+    @outbox.on_dead("test.fail")
+    def dead(message: OutboxMessage) -> None:
+        seen.append(message.last_error)
+
+    message = OutboxMessage.objects.create(topic="test.fail", payload={}, dedupe_key="test.fail:3")
+    dispatch_outbox(batch=1)
+    message.refresh_from_db()
+    assert (message.status, message.attempts) == ("dead", 1)
+    assert message.last_error == "Billz refused the sale: product not found (20036)"
+    entry = AuditEntry.objects.get(action="outbox.dead")
+    assert entry.after == {
+        "topic": "test.fail",
+        "dedupe_key": "test.fail:3",
+        "attempts": 1,
+        "last_error": "Billz refused the sale: product not found (20036)",
+    }
+    assert seen == ["Billz refused the sale: product not found (20036)"]
+    assert outbox.MAX_ATTEMPTS == 10

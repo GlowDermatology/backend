@@ -16,6 +16,18 @@ Handler = Callable[[OutboxMessage], None]
 
 _handlers: dict[str, Handler] = {}
 _dead_handlers: dict[str, Handler] = {}
+# Attempts after which a failing message goes dead (``core.tasks.dispatch_outbox``).
+MAX_ATTEMPTS = 10
+
+
+class PermanentFailure(Exception):
+    """Raised by a handler when no retry can succeed (the provider refused the request for good).
+
+    The dispatcher dead-letters the message at once instead of retrying it up to :data:`MAX_ATTEMPTS`
+    times: ``status = "dead"``, ``last_error`` = the exception text (a clear reason for staff), the
+    ``outbox.dead`` audit row and the topic's :func:`on_dead` hook, exactly like a message that exhausted
+    its attempts. Transient failures keep raising any other exception and are retried with backoff.
+    """
 
 
 def register(topic: str) -> Callable[[Handler], Handler]:

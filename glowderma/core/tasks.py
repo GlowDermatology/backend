@@ -65,7 +65,12 @@ def dispatch_outbox(batch: int = 50) -> None:
             attempts += 1
             last_error = str(exc)
             available_at = timeutils.now() + timedelta(seconds=min(2**attempts, 3600))
-            status = "dead" if attempts >= 10 else "failed"
+            permanent = isinstance(exc, outbox.PermanentFailure)
+            status = "dead" if permanent or attempts >= outbox.MAX_ATTEMPTS else "failed"
+            if permanent:
+                logger.error(
+                    "Outbox message dead on a permanent failure topic=%s id=%s", message.topic, message.pk
+                )
             with transaction.atomic():
                 completed = _complete_outbox_message(
                     message,
