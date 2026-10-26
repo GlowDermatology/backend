@@ -25,7 +25,14 @@ each returning how many rows are wrong and the first ``CONSISTENCY_SAMPLE_SIZE``
 Outcome: the audit row ``report.consistency {checks, mismatches}`` (actor ``system``); when a count is not
 zero or a check failed, an ERROR line ``report.consistency_mismatch`` with the non-zero checks (counts and
 ids, never personal data) and the alert ``report.consistency_mismatch`` (counts). A check that fails is
-reported with ``error`` (its exception type) and never stops the others.
+reported with ``error`` and never stops the others.
+
+Time bounds: every check statement runs under a transaction-local ``statement_timeout``
+(:data:`CHECK_TIMEOUT_MS`; the ledger reconciliation :data:`LOYALTY_TIMEOUT_MS`), restored to the previous
+value once the check is done, so a caller's own transaction (``manage.py`` inside a test, a shell) keeps its
+setting. When the Celery soft time limit fires (``SoftTimeLimitExceeded``), the check that was running and
+every one after it are reported with ``error: time_limit`` and no further check starts; the audit row, the
+ERROR line and the alert are still written before the hard limit.
 """
 
 from __future__ import annotations
@@ -34,9 +41,11 @@ import json
 import logging
 from collections.abc import Callable
 from datetime import datetime, timedelta
+from functools import partial
 from typing import Any
 
 from celery import shared_task  # type: ignore[import-untyped]
+from celery.exceptions import SoftTimeLimitExceeded  # type: ignore[import-untyped]
 from django.conf import settings
 from django.db import connection, transaction
 
@@ -51,8 +60,12 @@ logger = logging.getLogger(__name__)
 
 # Every check statement is cut off after this long (a transaction-local statement_timeout in its savepoint).
 CHECK_TIMEOUT_MS = 60_000
+# The ledger reconciliation reads every entry by design (design 02 §1.9.3): a longer bound of its own, still
+# well inside the Celery soft time limit (CELERY_TASK_SOFT_TIME_LIMIT, 540 s).
+LOYALTY_TIMEOUT_MS = 240_000
 LOYALTY_CHECK = "loyalty_reconciliation"
 BILLZ_NOT_LIVE = "billz_not_live"
+TIME_LIMIT = "time_limit"
 
 Check = Callable[[], Finding]
 
@@ -129,23 +142,33 @@ def _checks(now: datetime) -> list[tuple[str, Check]]:
     ]
 
 
-def _guarded[T](name: str, run: Callable[[], T], *, timeout_ms: int | None = CHECK_TIMEOUT_MS) -> T | None:
+def _guarded[T](name: str, run: Callable[[], T], *, timeout_ms: int = CHECK_TIMEOUT_MS) -> T | None:
     """Run one check in its own savepoint (a failure never poisons the caller's transaction), its statements
-    cut off after ``timeout_ms``; ``None`` (logged with the traceback) when it failed."""
+    cut off after ``timeout_ms``; ``None`` (logged with the traceback) when it failed.
+
+    ``set_config(…, true)`` is transaction-local, not savepoint-local: a released savepoint would leave the
+    timeout on the caller's transaction, so the previous value is put back once the check succeeded (a
+    failed check's savepoint rollback reverts it already). ``SoftTimeLimitExceeded`` is not a check failure:
+    it propagates so the report stops starting checks (module doc)."""
     try:
         with transaction.atomic():
-            if timeout_ms is not None:
-                with connection.cursor() as cursor:
-                    cursor.execute("SELECT set_config('statement_timeout', %s, true)", [str(timeout_ms)])
-            return run()
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT current_setting('statement_timeout')")
+                previous = str(cursor.fetchone()[0])
+                cursor.execute("SELECT set_config('statement_timeout', %s, true)", [str(timeout_ms)])
+            result = run()
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT set_config('statement_timeout', %s, true)", [previous])
+            return result
+    except SoftTimeLimitExceeded:
+        raise
     except Exception:
         logger.exception("report.consistency_check_failed check=%s", name)
         return None
 
 
 def _loyalty() -> dict[str, Any]:
-    # the ledger reconciliation reads every entry by design (design 02 §1.9.3): no statement timeout
-    summary = _guarded(LOYALTY_CHECK, loyalty_tasks.reconcile_balances_now, timeout_ms=None)
+    summary = _guarded(LOYALTY_CHECK, loyalty_tasks.reconcile_balances_now, timeout_ms=LOYALTY_TIMEOUT_MS)
     if summary is None:
         return {"count": 0, "ids": [], "error": "reconciliation_failed"}
     return {
@@ -160,10 +183,22 @@ def run_consistency_report(now: datetime | None = None) -> dict[str, Any]:
     """Run every check once, record the audit row, log and alert on mismatches; returns the report."""
     instant = now or timeutils.now()
     checks: dict[str, dict[str, Any]] = {}
-    for name, run in _checks(instant):
-        result = _guarded(name, run)
-        checks[name] = result.as_dict() if result is not None else {"count": 0, "ids": [], "error": "failed"}
-    checks[LOYALTY_CHECK] = _loyalty()
+    planned: list[tuple[str, Callable[[], dict[str, Any]]]] = [
+        (name, partial(_check_result, name, run)) for name, run in _checks(instant)
+    ]
+    planned.append((LOYALTY_CHECK, _loyalty))
+    for position, (name, run_check) in enumerate(planned):
+        try:
+            checks[name] = run_check()
+        except SoftTimeLimitExceeded:
+            stopped = [later for later, _run in planned[position:]]
+            logger.error("report.consistency_time_limit stopped=%s", ",".join(stopped))
+            # a statement cut off mid-flight can leave the connection busy: the audit needs a usable one
+            if not connection.in_atomic_block:
+                connection.close_if_unusable_or_obsolete()
+            for later in stopped:
+                checks[later] = {"count": 0, "ids": [], "error": TIME_LIMIT}
+            break
     mismatches = {
         name: check["count"] for name, check in checks.items() if check["count"] or "error" in check
     }
@@ -184,10 +219,18 @@ def run_consistency_report(now: datetime | None = None) -> dict[str, Any]:
             for name in mismatches
         }
         logger.error("report.consistency_mismatch %s", json.dumps(details, sort_keys=True))
-        alerts.alert("report.consistency_mismatch", {"counts": mismatches})
+        errors = {name: check["error"] for name, check in checks.items() if "error" in check}
+        alerts.alert(
+            "report.consistency_mismatch", {"counts": mismatches, **({"errors": errors} if errors else {})}
+        )
     else:
         logger.info("report.consistency ok")
     return report
+
+
+def _check_result(name: str, run: Check) -> dict[str, Any]:
+    result = _guarded(name, run)
+    return result.as_dict() if result is not None else {"count": 0, "ids": [], "error": "failed"}
 
 
 @shared_task(name="reporting.consistency_report")  # type: ignore[untyped-decorator]
@@ -199,6 +242,8 @@ def consistency_report() -> dict[str, Any]:
 __all__ = [
     "CHECK_TIMEOUT_MS",
     "LOYALTY_CHECK",
+    "LOYALTY_TIMEOUT_MS",
+    "TIME_LIMIT",
     "consistency_report",
     "run_consistency_report",
 ]

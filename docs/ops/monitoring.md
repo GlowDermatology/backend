@@ -103,7 +103,8 @@ one `alerts.alert(...)` call next to each ERROR line with the fields shown; unti
 | `bts.poll_nothing_tracked` | no | a BTS polling run attempted parcels and tracked none | Check BTS credentials and status; the dashboard shows `bts_polling_failing` |
 | `push.payload_invalid` | no | FCM refused a malformed message (a deploy bug) | Escalate to the developers; devices are never pruned for it |
 | `apple.revoke_dead`, `apple.revoke_not_sent` | no | an Apple token revocation could not be done | Revoke in the Apple developer account if required |
-| `report.consistency_check_failed` | no (the report's alert lists the check with `error`) | one check of the nightly report failed (timeout, database error) | Read the traceback in the worker log; rerun `manage.py consistency_report` |
+| `report.consistency_check_failed` | no (the report's alert lists the check under `errors`) | one check of the nightly report failed (timeout, database error) | Read the traceback in the worker log; rerun `manage.py consistency_report` |
+| `report.consistency_time_limit stopped=<checks>` | no (the report's alert lists them under `errors: time_limit`) | the report hit its Celery soft time limit; the listed checks did not run | Rerun `manage.py consistency_report` (no task time limit); if it repeats, find the slow check with `--json` and its plan (§3.1) |
 | `alert.send_failed`, `alert.enqueue_failed` (WARNING) | no | the alert webhook is unreachable or refused, or an alert could not be queued | Check the receiver; dead `alert.send` messages are listed by `requeue_outbox --topic alert.send --dead --dry-run` |
 
 ## 3. Nightly consistency report
@@ -117,9 +118,13 @@ docker compose -f compose.prod.yaml exec api python manage.py consistency_report
 
 Both write the audit row `report.consistency {checks, mismatches}` (actor system); on any non-zero count (or a
 failed check) they log ERROR `report.consistency_mismatch` with the counts and sample ids and raise the alert of
-the same name. Each check runs in its own savepoint with a 60 s statement timeout; one that fails is reported with
-`error` and the others still run. The report also runs the loyalty ledger reconciliation (formerly its own beat
-at 03:10), which writes its own audit rows.
+the same name (its fields: `counts`, and `errors` naming the checks that failed or ran out of time). Each check
+runs in its own savepoint with a 60 s statement timeout, put back to the previous value after the check; one
+that fails is reported with `error: failed` and the others still run. The report also runs the loyalty ledger
+reconciliation (formerly its own beat at 03:10), last and with a 240 s statement timeout of its own, which writes
+its own audit rows. If the task reaches its Celery soft time limit (540 s), no further check starts: the running
+check and the remaining ones are reported with `error: time_limit` (ERROR `report.consistency_time_limit
+stopped=<checks>`), and the audit row, the ERROR line and the alert are still written.
 
 ### 3.1 Checks
 
@@ -143,7 +148,7 @@ first due row (no sort, no done row visited), and the outbox checks filter its f
 | `k6_outbox_dead` | outbox messages that went dead | in the last `CONSISTENCY_OUTBOX_DEAD_HOURS` (24) | message | `outbox_unfinished_idx`, filtered by status and `updated_at` |
 | `k6_outbox_overdue` | open messages (pending, failed, in flight) due for longer than `CONSISTENCY_OUTBOX_OVERDUE_MINUTES` (60), deferred ones excluded | — | message | `outbox_unfinished_idx` range on `available_at`, filtered by status |
 | `k6_outbox_deferred_past_window` | open deferred messages (`RetryLater`) deferred longer than their topic's window + the overdue grace | `billz.push_sale`: `BILLZ_SHIFT_RETRY_MAX_HOURS` (36); other topics `OUTBOX_DEFERRAL_WINDOW_HOURS` (24) | message | `outbox_unfinished_idx`, filtered by status and `deferred_since` |
-| `loyalty_reconciliation` | ledger mismatches (checks C1–C3, C5, C6 of design 02 §1.9.3) and the count of negative balances | — | (see its audit rows) | reads the whole ledger by design; no timeout |
+| `loyalty_reconciliation` | ledger mismatches (checks C1–C3, C5, C6 of design 02 §1.9.3) and the count of negative balances | — | (see its audit rows) | reads the whole ledger by design; 240 s statement timeout (`LOYALTY_TIMEOUT_MS`) |
 
 ### 3.2 What to do
 

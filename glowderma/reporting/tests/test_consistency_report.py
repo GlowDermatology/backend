@@ -10,8 +10,9 @@ from io import StringIO
 from typing import Any
 
 import pytest
+from celery.exceptions import SoftTimeLimitExceeded  # type: ignore[import-untyped]
 from django.core.management import call_command
-from django.db import connection
+from django.db import connection, transaction
 from django.test import override_settings
 
 from glowderma.commerce.models import Order
@@ -285,6 +286,63 @@ def test_each_check_runs_under_a_statement_timeout() -> None:
             return str(cursor.fetchone()[0])
 
     assert tasks._guarded("probe", show) == "1min"
+
+
+def show_timeout() -> str:
+    with connection.cursor() as cursor:
+        cursor.execute("SHOW statement_timeout")
+        return str(cursor.fetchone()[0])
+
+
+def test_the_statement_timeout_is_restored_after_each_check() -> None:
+    # set_config(..., true) outlives a released savepoint: the caller's own transaction gets its value back
+    with transaction.atomic():
+        with connection.cursor() as cursor:
+            cursor.execute("SET LOCAL statement_timeout = '5s'")
+        assert tasks._guarded("probe", show_timeout) == "1min"
+        assert show_timeout() == "5s"
+        assert tasks._guarded("probe", show_timeout, timeout_ms=tasks.LOYALTY_TIMEOUT_MS) == "4min"
+        assert show_timeout() == "5s"
+
+
+def test_the_ledger_reconciliation_has_its_own_time_bound(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[str] = []
+
+    def reconcile() -> dict[str, Any]:
+        seen.append(show_timeout())
+        return {"mismatches": 0, "checks": {}, "negative_balances": 0}
+
+    monkeypatch.setattr(loyalty_tasks, "reconcile_balances_now", reconcile)
+    run()
+    assert seen == ["4min"]
+
+
+def test_the_soft_time_limit_stops_the_checks_but_the_report_is_still_written(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    reconciled: list[bool] = []
+
+    def out_of_time(*args: Any, **kwargs: Any) -> Any:
+        raise SoftTimeLimitExceeded()
+
+    monkeypatch.setattr(payment_selectors, "open_refunds", out_of_time)
+    monkeypatch.setattr(loyalty_tasks, "reconcile_balances_now", lambda: reconciled.append(True))
+    with caplog.at_level(logging.ERROR, logger="glowderma.reporting.tasks"):
+        report = run(ALERT_WEBHOOK_URL="https://alerts.example.uz/hook")
+    names = list(report["checks"])
+    assert names == CHECKS  # every check is listed, in order
+    stopped = names[names.index("k3_refund_open") :]
+    for name in names:
+        expected_error = "time_limit" if name in stopped else None
+        assert report["checks"][name].get("error") == expected_error, name
+    assert reconciled == []  # nothing started after the soft limit
+    assert set(report["mismatches"]) == set(stopped)
+    entry = AuditEntry.objects.get(action="report.consistency")
+    assert (entry.after or {})["checks"]["loyalty_reconciliation"]["error"] == "time_limit"
+    (alert,) = OutboxMessage.objects.filter(topic=alerts.ALERT_TOPIC)
+    assert alert.payload["fields"]["errors"] == dict.fromkeys(stopped, "time_limit")
+    assert "report.consistency_time_limit stopped=k3_refund_open,k3_refund_failed" in caplog.text
+    assert "report.consistency_check_failed" not in caplog.text  # not swallowed as a check failure
 
 
 def test_the_command_prints_the_report() -> None:
