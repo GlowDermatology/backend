@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import binascii
 import os
+import re
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -18,7 +19,10 @@ from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 
 NONCE_BYTES = 12
+TAG_BYTES = 16
 KEY_BYTES = 32
+# The base64url alphabet only (plan §7): ``b64decode(altchars=b"-_")`` alone would also accept "+" and "/".
+BASE64URL = re.compile(r"[A-Za-z0-9_-]+={0,2}")
 
 
 class SecretboxError(Exception):
@@ -31,6 +35,8 @@ def _b64decode(value: str) -> bytes:
 
 def decode_key(encoded: str) -> bytes:
     """The raw key of a base64url ``SECRETBOX_KEY`` (padding optional); exactly 32 bytes or ``ValueError``."""
+    if not BASE64URL.fullmatch(encoded):
+        raise ValueError("SECRETBOX_KEY must be base64url")
     try:
         raw = base64.b64decode(encoded + "=" * (-len(encoded) % 4), altchars=b"-_", validate=True)
     except (binascii.Error, ValueError) as exc:
@@ -58,7 +64,7 @@ def open_(token: str, *, aad: bytes) -> bytes:
         raw = _b64decode(token)
     except (binascii.Error, ValueError) as exc:
         raise SecretboxError("malformed token") from exc
-    if len(raw) <= NONCE_BYTES + 16:
+    if len(raw) < NONCE_BYTES + TAG_BYTES:  # exactly nonce + tag is a sealed empty plaintext
         raise SecretboxError("malformed token")
     try:
         return _cipher().decrypt(raw[:NONCE_BYTES], raw[NONCE_BYTES:], aad)

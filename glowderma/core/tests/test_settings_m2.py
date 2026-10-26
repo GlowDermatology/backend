@@ -214,6 +214,7 @@ def test_production_refuses_short_hmac_keys(
         base64.urlsafe_b64encode(b"x" * 31).decode(),
         base64.urlsafe_b64encode(b"x" * 33).decode(),
         "not base64 !!",
+        base64.b64encode(bytes([0xFB] * 32)).decode(),  # 32 bytes in the standard alphabet ("+", "/")
         "Z2xvd2Rlcm1hLWxvY2FsLXNlY3JldGJveC1rZXktMzI",  # the committed local default
         "Z2xvd2Rlcm1hLWxvY2FsLXNlY3JldGJveC1rZXktMzI=",  # the same bytes, padded
     ],

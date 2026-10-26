@@ -41,10 +41,23 @@ def test_secretbox_refuses_tampering_wrong_aad_and_another_key() -> None:
         secretbox.open_(token, aad=b"identity:7")
 
 
-@pytest.mark.parametrize("key", ["", "c2hvcnQ", base64.urlsafe_b64encode(b"x" * 33).decode(), "!!!"])
+STANDARD_ALPHABET_KEY = base64.b64encode(bytes([0xFB] * 32)).decode()  # 32 bytes, but "+" and "/" in it
+
+
+def test_secretbox_round_trips_an_empty_plaintext() -> None:
+    token = secretbox.seal(b"", aad=b"empty")
+    assert secretbox.open_(token, aad=b"empty") == b""
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["", "c2hvcnQ", base64.urlsafe_b64encode(b"x" * 33).decode(), "!!!", STANDARD_ALPHABET_KEY],
+)
 def test_secretbox_requires_exactly_32_key_bytes(key: str) -> None:
+    """32 bytes in the base64url alphabet only: a standard-alphabet key ("+", "/") is refused (plan §7)."""
     with override_settings(SECRETBOX_KEY=key), pytest.raises(ImproperlyConfigured):
         secretbox.seal(b"x", aad=b"")
+    assert "+" in STANDARD_ALPHABET_KEY and "/" in STANDARD_ALPHABET_KEY
 
 
 def test_pii_ref_is_keyed_and_short() -> None:

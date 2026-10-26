@@ -1,6 +1,7 @@
 import base64
 import binascii
 import os
+import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -183,6 +184,8 @@ for _name in PROVIDER_SECRETS:
 SECRETBOX_KEY = env_str("SECRETBOX_KEY")
 _refuse_placeholder("SECRETBOX_KEY", SECRETBOX_KEY)
 try:
+    if not re.fullmatch(r"[A-Za-z0-9_-]+={0,2}", SECRETBOX_KEY):  # altchars alone also accept "+" and "/"
+        raise ValueError("not base64url")
     _secretbox_raw = base64.b64decode(
         SECRETBOX_KEY + "=" * (-len(SECRETBOX_KEY) % 4), altchars=b"-_", validate=True
     )
