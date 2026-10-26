@@ -1,11 +1,20 @@
-"""Transactional writes of `customers` (contract §2.6): the manual cashback adjustment.
+"""Transactional writes of `customers`, the top-layer orchestrator of the customer account.
 
-Thin orchestration over ``loyalty.services.adjust``, which runs the contract checks in order (``amount``
-1..10 000 000, ``reason`` 3..300 trimmed, then ``subtract`` > ``available`` under the ``LoyaltyAccount``
-lock), posts the ``adjustment`` entry through ``post_entry`` and audits ``cashback.adjusted``
-``{direction, amount, reason, balance_after, ledger_entry_id}`` with the staff actor in the same transaction
-— so this module adds no second audit row. Deleted customers are allowed: the balance is kept for a later
-re-registration (decision A1).
+Admin (admin contract §2.6): the manual cashback adjustment, a thin orchestration over
+``loyalty.services.adjust``, which runs the contract checks in order (``amount`` 1..10 000 000, ``reason``
+3..300 trimmed, then ``subtract`` > ``available`` under the ``LoyaltyAccount`` lock), posts the ``adjustment``
+entry through ``post_entry`` and audits ``cashback.adjusted`` ``{direction, amount, reason, balance_after,
+ledger_entry_id}`` with the staff actor in the same transaction — so this module adds no second audit row.
+Deleted customers are allowed: the balance is kept for a later re-registration (decision A1).
+
+Customer API (customer contract §2.1, §2.2; M2 plan §2 P1): the auth flows — ``register``, ``login`` (known
+and new device), ``reset_password`` with the dormant-account rule (``dormant_reset``), ``social_sign_in``,
+``complete_social`` and the Apple token exchange and revocation of refused flows — and the signed-in
+writes of ``me/*``: ``update_profile``, ``accept_consent``, ``set_image`` / ``delete_image``, the addresses,
+``link_social`` / ``unlink_social``, ``change_password`` and ``delete_account``. They take ids and scalars,
+write other modules only through their services (``accounts``, ``commerce``, ``appointments``) and take the
+customer-level lock (``FOR NO KEY UPDATE``) before any other row (C§2.7.1); a signed-in write re-checks the
+customer and the request's session under it (``accounts.services.lock_signed_in_customer``, C§6.17).
 """
 
 from __future__ import annotations
