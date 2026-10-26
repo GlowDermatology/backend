@@ -19,12 +19,13 @@ fake (`ESKIZ_MODE=fake`, default) is unchanged and `ESKIZ_FAKE_CODE` stays a fak
 
 | Step | Call | Notes |
 |---|---|---|
-| login | `POST {ESKIZ_BASE_URL}/auth/login`, form `email`, `password` → `{"data": {"token"}}` | token kept only in the Django cache `gd:eskiz:token` for 29 days; fetched single-flight across processes (`cache.add` lock) |
+| login | `POST {ESKIZ_BASE_URL}/auth/login`, form `email`, `password` → `{"data": {"token"}}` | token kept only in the Django cache `gd:eskiz:token:<sha256(base URL\|email)[:16]>` for 29 days (rotated credentials never reuse it); fetched single-flight across processes (`cache.add` lock, 45 s, the login bounded to half of it); a refused login is remembered 60 s; the cache down fails closed (one process-local login per token lifetime) |
 | refresh | `PATCH {ESKIZ_BASE_URL}/auth/refresh`, `Authorization: Bearer <old token>` → `{"data": {"token"}}` | only after a 401; a refused refresh falls back to a login |
 | send | `POST {ESKIZ_BASE_URL}/message/sms/send`, form `mobile_phone` (digits, no `+`), `message`, `from` = `ESKIZ_SENDER`, `callback_url` = `ESKIZ_CALLBACK_URL` (omitted when empty) → `{"id": "<uuid>", "status": "waiting"}` | the id goes to `SmsCode.provider_message_id` |
 
 Forms are `multipart/form-data`, as in the collection. A 401 on send renews the token once and repeats the send
-(a 401 means Eskiz did not accept the message); a second 401 is a rejection, never a loop.
+(a 401 means Eskiz did not accept the message); a second 401 is "not processed" (ERROR `eskiz.auth_failed`),
+never a loop.
 
 The text is sent exactly as `accounts.tasks.sms_text` renders it (catalog `sms.otp` in the request language, plus
 the Android SMS Retriever hash line when configured). Eskiz delivers only texts that match an approved template
@@ -36,13 +37,14 @@ character for character — each language, and the variant with the hash line, n
 |---|---|---|
 | 2xx with `id` | the id | stores it |
 | HTTP 4xx (invalid number, no balance, unapproved text) | `EskizRejected` | logs, records `IntegrationState(eskiz)` failure, never retries |
-| login refused (4xx) | `EskizRejected` + ERROR `eskiz.auth_failed` | as above |
+| **not processed**: a redirect, 408 / 425 / 429, 401 / 403 (also after a renewal), login refused (ERROR `eskiz.auth_failed`, remembered 60 s), no token to be had (lock busy, cache down) | `EskizUnavailable(sent=False)` | un-claims, the outbox retries (the OTP is never dropped for a rate limit) |
 | connect failure (nothing left the process; also a login that could not be reached) | `EskizUnavailable(sent=False)` | un-claims, the outbox retries |
-| timeout, broken answer, HTTP 5xx, 2xx without `id` after sending | `EskizUnavailable(sent=True)` | keeps the claim, never resends (the user resends after 60 s) |
+| timeout, broken or undecodable answer, HTTP 5xx, 2xx without `id` after sending | `EskizUnavailable(sent=True)` | keeps the claim, never resends (the user resends after 60 s) |
 
 The adapter repeats a request only when it provably never left (connect failure), so a code is never sent twice
 by it. No phone number, text, code, password or token is logged or put into an exception: log lines carry
-`sms_code_id` and `pii_ref(phone)`, and Eskiz's own messages pass through `httpclient.safe_text`.
+`sms_code_id` and `pii_ref(phone)`, and Eskiz's own messages pass through `httpclient.safe_text` with every
+digit run of four or more masked (Eskiz may echo the message, i.e. the OTP, into a stored error).
 
 ## Environment
 
@@ -51,7 +53,7 @@ by it. No phone number, text, code, password or token is logged or put into an e
 | `ESKIZ_MODE` | — | `live` | no |
 | `ESKIZ_EMAIL` | `ESKIZ_MODE=live` | cabinet e-mail | no (an identifier) |
 | `ESKIZ_PASSWORD` | `ESKIZ_MODE=live` (no placeholder) | cabinet secret | **yes** |
-| `ESKIZ_SENDER` | `ESKIZ_MODE=live` (set explicitly) | approved nickname; `4546` is Eskiz's shared test sender | no |
+| `ESKIZ_SENDER` | `ESKIZ_MODE=live` (set explicitly; production refuses `4546`, Eskiz's shared test sender, which other settings flag as a sandbox) | approved nickname | no |
 | `ESKIZ_BASE_URL` | has a default; production requires https | `https://notify.eskiz.uz/api` | no |
 | `ESKIZ_CALLBACK_URL` | optional; https when set | empty (no receiving endpoint exists yet) | no |
 
@@ -68,9 +70,10 @@ by it. No phone number, text, code, password or token is logged or put into an e
 
 ## Sandbox checklist (once credentials exist)
 
-- [ ] Staging: `ESKIZ_MODE=live`, e-mail, password, sender `4546` (test) — send the Eskiz test text through a
-      shell call of `LiveEskiz.send` and check the id comes back.
-- [ ] Wrong password → `EskizRejected` + ERROR `eskiz.auth_failed`; `IntegrationState(eskiz)` shows the failure.
+- [ ] Local settings (production refuses the test sender): `ESKIZ_MODE=live`, e-mail, password, sender `4546` —
+      send the Eskiz test text through a shell call of `LiveEskiz.send` and check the id comes back.
+- [ ] Wrong password → ERROR `eskiz.auth_failed` once, `EskizUnavailable(sent=False)`; the SMS is retried by the
+      outbox, no second login within a minute.
 - [ ] Delete `gd:eskiz:token` while sends run → one login only (single flight).
 - [ ] Production nickname and approved templates: register a test phone through `auth/send-code/`; the SMS
       arrives with the exact catalog text.

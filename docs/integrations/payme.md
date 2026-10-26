@@ -39,7 +39,7 @@ the cabinet's `TEST_KEY` (the callbacks' Basic auth), in production the `key`.
 | `PAYME_MODE` | — | `live` | no |
 | `PAYME_MERCHANT_ID` | `PAYME_MODE=live` (production: letters, digits, `_`, `-` only, no placeholder) | `587f72c72cac0d162c722ae2` | no |
 | `PAYME_KEY` | always in production (unchanged from M2) | cabinet `key` / `TEST_KEY` | **yes** |
-| `PAYME_TEST_MODE` | optional | `true` on staging | no |
+| `PAYME_TEST_MODE` | optional (a live Payme in test mode, or on the sandbox checkout host, logs a startup WARNING and is listed in `health/?ready=1` `sandbox`) | `true` on staging | no |
 | `PAYME_CHECKOUT_URL` | optional override; production with `PAYME_MODE=live` requires https | `https://checkout.paycom.uz` | no |
 | `PAYME_ACCOUNT_FIELD` | unchanged from M2 (must match the cabinet's account field) | `order_id` | no |
 

@@ -32,7 +32,8 @@ Code: `glowderma/integrations/fcm/live.py` (`LiveFcm`, the service-account loade
    it. It never reaches Redis, the database or a log.
 2. **Send.** `POST https://fcm.googleapis.com/v1/projects/{FCM_PROJECT_ID}/messages:send` with
    `{"message": …}` — one request per message, at most eight in flight per batch, each bounded (3 s connect,
-   10 s total). The document is the contract's: `notification` (title, body, `image` for campaigns; omitted for
+   10 s total) and the whole batch by 120 s (`BATCH_SECONDS`, far below the 300 s outbox lease): what is not
+   sent by then is `not_sent`. The document is the contract's: `notification` (title, body, `image` for campaigns; omitted for
    data-only), string `data`, `android.priority` / `android.notification.channel_id` / `collapse_key`,
    `apns.headers` (`apns-priority`, `apns-push-type`, `apns-collapse-id`) and `apns.payload.aps`
    (`sound` + `mutable-content`, or `content-available` for a data-only background push).
@@ -45,14 +46,19 @@ Code: `glowderma/integrations/fcm/live.py` (`LiveFcm`, the service-account loade
 | `UNREGISTERED` (404), `SENDER_ID_MISMATCH` (403), `INVALID_ARGUMENT` naming the token (field `message.token` or "registration token" in the message) | `error = "unregistered"` → the caller prunes the device |
 | any other `INVALID_ARGUMENT` / 400 / unexpected 4xx | `error = "payload_invalid"` → message failed, ERROR `push.payload_invalid` (caller), device untouched |
 | `THIRD_PARTY_AUTH_ERROR` (the project's APNs credentials) | `error = "third_party_auth_error"`, ERROR `fcm.third_party_auth_error`, device untouched |
-| `UNAVAILABLE`, `INTERNAL`, `QUOTA_EXCEEDED`, 429, 5xx, transport failure | the batch stops |
-| 401 without an FCM code (our access token) | token re-minted once; still 401 → the batch stops, ERROR `fcm.config_error` |
-| 403 / 404 without a token code (wrong project, missing permission), unreadable service account, token endpoint refusing the grant | the batch stops, ERROR `fcm.config_error` / `fcm.credentials_invalid` / `fcm.auth_failed` |
+| `QUOTA_EXCEEDED` (429: that device's or topic's rate) | `error = "not_sent"` for that message; the batch goes on |
+| `UNAVAILABLE`, `INTERNAL`, 429, 5xx; a request that never left | `error = "not_sent"`; the batch stops (the rest `not_sent`) |
+| 401 without an FCM code (our access token) | token re-minted once; still 401 → `not_sent`, the batch stops, ERROR `fcm.config_error` |
+| 403 / 404 without a token code (wrong project, missing permission), unreadable service account, token endpoint refusing the grant | `not_sent`, the batch stops, ERROR `fcm.config_error` / `fcm.credentials_invalid` / `fcm.auth_failed` |
+| token endpoint unreachable, 5xx or 429 | `not_sent`, the batch stops, WARNING `fcm.token_unavailable` (FCM unavailable, not a configuration error) |
+| no answer after the request may have left (timeout, undecodable body), anything unexpected while sending | `error = "unavailable"` (unknown outcome: failed, **never re-sent blindly**); the batch stops |
+| a batch of ≥ 5 messages that **all** answer `SENDER_ID_MISMATCH` | a configuration error (wrong `FCM_PROJECT_ID` / service account): ERROR `fcm.sender_id_mismatch`, nothing pruned, every message `not_sent` |
 
-**Batch rule.** When the batch stops and **no** message of it was accepted, `send()` raises `FcmUnavailable`: the
-callers give every claim back (`push_state` queued again) and the outbox retries. Once a message was accepted the
-batch cannot be retried without sending it twice, so the messages that did not go out answer
-`error = "unavailable"` (failed; the device is untouched). A device token is dropped **only** on a dead-token
+**Batch rule.** A call whose every message is `not_sent` raises `FcmUnavailable`: the callers give every claim back
+(`push_state` queued again) and the outbox retries. Otherwise the results come back one per message: the callers
+settle `ok` / `unregistered` / `payload_invalid` / `unavailable` / `third_party_auth_error` and give the `not_sent`
+ones back — a campaign batch keeps its cursor and is delivered again after one minute (`outbox.RetryLater`, no
+attempt spent, dead after six hours), a status push likewise. A device token is dropped **only** on a dead-token
 answer — never on a transient, quota, configuration or payload error.
 
 Logs carry counts and FCM's error code; never a device token, an access token, a title/body or the key file.
@@ -76,9 +82,9 @@ the project, and the FCM API (HTTP v1) must be enabled in Google Cloud.
    iOS app in the background; campaign images show on iOS (may need `fcm_options.image` and the notification
    service extension).
 3. Throughput: eight requests in flight per batch (500 recipients ≈ a few seconds); FCM's per-project quota.
-4. `QUOTA_EXCEEDED` asks for a back-off of at least one minute, while the outbox retries after 2, 4, 8 … s
-   (`core.tasks`, dead after ten attempts): fine for a short overload, but a campaign that hits the project quota
-   could dead-letter its batch within about half an hour (proposal to the lead: a topic-specific minimum delay).
+4. `QUOTA_EXCEEDED` asks for a back-off of at least one minute: a message given back as `not_sent` is delivered
+   again after one minute (`notifications.services.NOT_SENT_RETRY`); a whole batch FCM refused (`FcmUnavailable`)
+   still follows the outbox backoff (2, 4, 8 … s, dead after ten attempts).
 5. Data residency (compliance C1): only ids, the order number and texts without personal data are sent.
 
 ## Sandbox checklist (once credentials exist)
