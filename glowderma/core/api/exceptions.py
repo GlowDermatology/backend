@@ -21,6 +21,7 @@ endpoint-specific field codes take ``field_error(code, message_key="field.…")`
 """
 
 import logging
+import math
 import re
 from functools import lru_cache
 from string import Formatter
@@ -118,6 +119,13 @@ AUTH_FAILURE_CODES = frozenset(
 )
 
 
+def _uz_param(value: Any) -> Any:
+    """An ``int`` grouped the Uzbek way (re-grouped per language on render); anything else unchanged."""
+    if isinstance(value, int) and not isinstance(value, bool):
+        return i18n.format_number(value, "uz")
+    return value
+
+
 def field_error(
     code: str,
     message: str | None = None,
@@ -133,8 +141,8 @@ def field_error(
     invented one would ship silently. Customer views pass ``message_key`` (a ``field.*`` catalog key,
     customer contract §5.0) instead of a message: the detail carries the Uzbek text and the customer handler
     renders the key in the request language (``params`` and ``limit`` fill its placeholders). Pass amounts
-    as ``int``: they are grouped with ``i18n.format_number`` per language (``12 000`` in uz/ru, ``12,000`` in
-    en); a ``str`` param is copied unchanged into every language.
+    and limits as ``int``: they are grouped with ``i18n.format_number`` per language (``12 000`` in uz/ru,
+    ``12,000`` in en); a ``str`` param or limit is copied unchanged into every language.
     """
     if code not in FIELD_MESSAGES and code not in ENDPOINT_FIELD_CODES:
         raise ValueError(f"Unknown field code {code!r}")
@@ -143,14 +151,9 @@ def field_error(
             raise ValueError("Pass either message or message_key")
         if not message_key.startswith("field.") or message_key not in i18n.CATALOG:
             raise ValueError(f"Unknown field catalog key {message_key!r}")
-        values = {
-            name: i18n.format_number(value, "uz")
-            if isinstance(value, int) and not isinstance(value, bool)
-            else value
-            for name, value in (params or {}).items()
-        }
+        values = {name: _uz_param(value) for name, value in (params or {}).items()}
         if limit is not None:
-            values.setdefault("limit", limit)
+            values.setdefault("limit", _uz_param(limit))
         return exceptions.ErrorDetail(i18n.t(message_key, "uz", **values), code=code)
     if message is None:
         template = FIELD_MESSAGES.get(code)
@@ -288,12 +291,16 @@ class CustomerError(exceptions.APIException):
 
     ``key`` defaults to the class's ``default_key``, then ``error.<code>``; ``params`` fill the key's
     placeholders; ``details`` is the code's ``details`` object (``null`` otherwise); ``retry_after`` (seconds)
-    becomes the ``Retry-After`` header. The exception's own detail is the Uzbek text, so a misuse outside a
-    customer view still reads correctly; customer views render the key in the request language.
+    becomes the ``Retry-After`` header and, unless given, fills the key's ``{n}`` (seconds) or ``{m}``
+    (minutes, rounded up) and, for the codes whose ``details`` is ``{"retry_after": int}`` (C§1.6), the
+    ``details`` too, so ``OtpResendTooSoon(retry_after=30)`` is complete. The exception's own detail is the
+    Uzbek text, so a misuse outside a customer view still reads correctly; customer views render the key in
+    the request language.
     """
 
     error_code: ClassVar[str] = ""
     default_key: ClassVar[str | None] = None
+    retry_after_details: ClassVar[bool] = False
     status_code = 409
 
     def __init__(
@@ -315,9 +322,16 @@ class CustomerError(exceptions.APIException):
         if self.key not in i18n.CATALOG:
             raise ValueError(f"No catalog key {self.key!r} for code {code!r}")
         self.params: dict[str, Any] = dict(params or {})
-        self.details = details
         if retry_after is not None:
             self.wait = max(1, int(retry_after))
+            names = i18n.placeholders(i18n.CATALOG[self.key][i18n.DEFAULT_LANGUAGE])
+            if "n" in names:
+                self.params.setdefault("n", self.wait)
+            if "m" in names:
+                self.params.setdefault("m", math.ceil(self.wait / 60))
+            if details is None and self.retry_after_details:
+                details = {"retry_after": self.wait}
+        self.details = details
         super().__init__(i18n.t(self.key, "uz", **self.params), code=code)
 
 
@@ -528,6 +542,7 @@ class OtpResendTooSoon(CustomerError):
     """429 ``otp_resend_too_soon``: Resend wait not over."""
 
     error_code = "otp_resend_too_soon"
+    retry_after_details = True
     status_code = 429
 
 
@@ -535,6 +550,7 @@ class OtpDailyLimit(CustomerError):
     """429 ``otp_daily_limit``: Daily code cap reached."""
 
     error_code = "otp_daily_limit"
+    retry_after_details = True
     status_code = 429
 
 
@@ -542,6 +558,7 @@ class OtpNetworkLimit(CustomerError):
     """429 ``otp_network_limit``: IP day cap reached."""
 
     error_code = "otp_network_limit"
+    retry_after_details = True
     status_code = 429
 
 
@@ -549,6 +566,7 @@ class OtpLocked(CustomerError):
     """429 ``otp_locked``: Lockout or daily wrong-code cap."""
 
     error_code = "otp_locked"
+    retry_after_details = True
     status_code = 429
 
 
@@ -556,6 +574,7 @@ class SmsUnavailable(CustomerError):
     """503 ``sms_unavailable``: The global SMS budget tripped."""
 
     error_code = "sms_unavailable"
+    retry_after_details = True
     status_code = 503
 
 
@@ -723,8 +742,9 @@ _STATUS_FALLBACK_CODES = {
     429: "throttled",
     503: "provider_unavailable",
 }
-# Paths outside the customer audience: their 404/500 pages keep the admin envelope byte for byte.
-_NON_CUSTOMER_PREFIXES = ("/api/v1/admin/", "/api/v1/schema/", "/api/v1/docs/", "/api/v1/health/")
+# Paths outside the customer audience: their 404/500 pages keep the admin envelope byte for byte. Matched per
+# segment, with or without the trailing slash (``/api/v1/admin`` is not redirected: ``admin/`` is no route).
+_NON_CUSTOMER_PREFIXES = ("/api/v1/admin", "/api/v1/schema", "/api/v1/docs", "/api/v1/health")
 
 
 def _placeholder_pattern(template: str) -> re.Pattern[str]:
@@ -896,7 +916,9 @@ def customer_exception_handler(exc: Exception, context: dict[str, Any]) -> Respo
 
 
 def is_customer_path(path: str) -> bool:
-    return path.startswith("/api/v1/") and not path.startswith(_NON_CUSTOMER_PREFIXES)
+    if not path.startswith("/api/v1/"):
+        return False
+    return not any(path == prefix or path.startswith(prefix + "/") for prefix in _NON_CUSTOMER_PREFIXES)
 
 
 def _customer_page(request: HttpRequest, code: str, status: int) -> JsonResponse:

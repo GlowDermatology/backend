@@ -24,8 +24,12 @@ from glowderma.core.api.exceptions import (
     CustomerError,
     InvalidTransition,
     NotCancellable,
+    OtpDailyLimit,
     OtpLocked,
+    OtpNetworkLimit,
+    OtpResendTooSoon,
     OutOfStock,
+    SmsUnavailable,
     field_error,
     localize_field_message,
     not_cancellable,
@@ -347,3 +351,69 @@ def test_integer_field_params_are_grouped_per_language() -> None:
         localize_field_message("insufficient_balance", str(text), "en")
         == "Not enough cashback (available: abc so'm)."
     )
+
+
+@pytest.mark.parametrize(
+    ("cls", "uz"),
+    [
+        (OtpResendTooSoon, "Yangi kodni 30 soniyadan so‘ng so‘rashingiz mumkin."),
+        (OtpDailyLimit, "Bugungi SMS kodlar limiti tugadi. Ertaga qayta urinib ko‘ring."),
+        (OtpNetworkLimit, None),
+        (OtpLocked, "Urinishlar soni tugadi. 1 daqiqadan so‘ng qayta urinib ko‘ring."),
+        (SmsUnavailable, "SMS xizmati vaqtincha ishlamayapti. Birozdan so‘ng urinib ko‘ring."),
+    ],
+)
+def test_retry_after_alone_fills_the_placeholder_and_the_details(
+    cls: type[CustomerError], uz: str | None
+) -> None:
+    """Review nit (fix pass 2): ``retry_after`` fills ``{n}``/``{m}`` and ``details.retry_after``, so a
+    429/503 OTP error raised with the seconds alone is complete instead of a ``KeyError`` (a 500)."""
+    exc = cls(retry_after=30)
+    assert exc.wait == 30 and exc.details == {"retry_after": 30}
+    if uz is not None:
+        assert str(exc.detail) == uz
+    CustomerView.exc = cls(retry_after=30)
+    response = call(CustomerView, lang="en")
+    assert response.status_code == exc.status_code and response["Retry-After"] == "30"
+    assert response.data["details"] == {"retry_after": 30}
+
+
+def test_retry_after_keeps_explicit_params_and_details_and_rounds_minutes_up() -> None:
+    assert OtpResendTooSoon(details={"retry_after": 45}, params={"n": 45}, retry_after=45).params == {"n": 45}
+    assert OtpLocked(retry_after=61).params == {"m": 2}
+    assert OtpLocked(retry_after=900, params={"m": 15}, details={"x": 1}).details == {"x": 1}
+    # Codes whose details are not ``{"retry_after": int}`` keep ``null`` details.
+    assert CustomerError("conflict", 409, retry_after=5).details is None
+
+
+def test_integer_limits_are_grouped_like_integer_params() -> None:
+    """Review nit (fix pass 2): an ``int`` ``limit`` renders grouped per language, like an ``int`` param."""
+    by_limit = field_error("max_value", message_key="field.max_value", limit=12000)
+    by_param = field_error("max_value", message_key="field.max_value", params={"limit": 12000})
+    assert str(by_limit) == str(by_param) == "Qiymat 12\u00a0000 dan oshmasin."
+    assert localize_field_message("max_value", str(by_limit), "en") == i18n.t(
+        "field.max_value", "en", limit="12,000"
+    )
+    assert str(field_error("max_length", message_key="field.max_length", limit="1000")) == (
+        "1000 belgidan oshmasin."
+    )
+
+
+@pytest.mark.parametrize("path", ["/api/v1/admin", "/api/v1/health", "/api/v1/schema", "/api/v1/docs"])
+def test_not_found_page_without_the_trailing_slash_keeps_the_admin_envelope(path: str) -> None:
+    """Review nit (fix pass 2): the non-customer prefixes match per segment, with or without the slash."""
+    assert not api_exceptions.is_customer_path(path)
+    page = not_found_view(RequestFactory().get(path, HTTP_ACCEPT_LANGUAGE="ru"), Http404())
+    assert json.loads(page.content) == {
+        "code": "not_found",
+        "message": "Topilmadi.",
+        "errors": [],
+        "request_id": "",
+    }
+    assert not page.has_header("Content-Language")
+
+
+def test_customer_paths_that_only_share_a_prefix_with_admin_stay_customer() -> None:
+    assert api_exceptions.is_customer_path("/api/v1/administration/")
+    assert api_exceptions.is_customer_path("/api/v1/healthy")
+    assert not api_exceptions.is_customer_path("/api/v2/me/")
