@@ -325,7 +325,9 @@ P0. For the delete orchestration at integration time: P2 (`commerce.services.can
 api/dev/*}`, `glowderma/payments/{models.py, migrations/0002_payment_active_excludes_late_capture.py, services.py,
 selectors.py, topics.py}`, `glowderma/delivery/{services.py, selectors.py, api/customer/*}`,
 `glowderma/integrations/click/*`, `glowderma/integrations/payme/*`, `glowderma/integrations/bts/{ports,fake,registry}.py`,
-tests in those modules.
+`glowderma/integrations/services.py` (only the appended `set_state_data(provider, key, value)`: the BTS poll cursor needs
+a writer of `IntegrationState.data`, which the built module lacks; nothing else in the file changes), tests in those
+modules.
 
 ### Endpoints
 C§2.0 rows 24–35 and 50–53: `cart/*`, `delivery/regions/`, `delivery/calculate/`, `orders/checkout/`,
@@ -349,7 +351,8 @@ C§2.0 rows 24–35 and 50–53: `cart/*`, `delivery/regions/`, `delivery/calcul
 | `expire_reservation` / `expire_due_reservations` | `commerce.services` (B5, changed) | skip an order whose payment is in flight and was attached before `reservation_expires_at`, until the grace ends |
 | `customer_orders(customer_id, scope)`, `customer_order_detail(order_id, customer_id, lang)`, `customer_timeline(order, lang)`, `progress(order, lang)` | `commerce.selectors` | C§2.8, C§4; history horizon (`Customer.history_from`); live item names in the resolved language |
 | `build(order_id)`, `verify(ref) -> order_id \| None` | `commerce.payment_ref` | C§1.4/C§2.7.2 account reference, `compare_digest` |
-| `poll_bts()` | `commerce.tasks` | replaces the P0 stub; C§2.13.3: single flight (`cache.add` lock), round robin after `IntegrationState(bts).data["poll_cursor"]`, ≤ `BTS_POLL_BATCH` parcels and ≤ `BTS_POLL_MAX_SECONDS` per run, stable payload fields only (webhook re-track too) |
+| `poll_bts()` | `commerce.tasks` | replaces the P0 stub; C§2.13.3: single flight (`cache.add` lock), round robin after `IntegrationState(bts).data["poll_cursor"]`, the cursor written after **every attempted parcel** through `integrations.services.set_state_data`; per-parcel failures (`BtsUnavailable` and `BtsRejected` from `track()`) logged and skipped; the run stops only after `BTS_POLL_MAX_CONSECUTIVE_FAILURES` transport failures in a row (`record_failure`), else `record_sync_success`; ≤ `BTS_POLL_BATCH` parcels and ≤ `BTS_POLL_MAX_SECONDS` per run, stable payload fields only (webhook re-track too; a `BtsRejected` re-track answers 200 `ignored`) |
+| `set_state_data(provider, key, value)` | `integrations.services` | a single `UPDATE … SET data = data \|\| jsonb_build_object(key, value)` on the provider's `IntegrationState` row (no read-modify-write, so it cannot lose a concurrent `record_failure`) |
 | webhook inbox helper (`store_delivery`, `store_rejected` with the per-IP cap and 1 KiB truncation, `semantic_fingerprint`) | `commerce/api/webhooks/inbox.py` | C§2.13.0 |
 | fake-mode refusal: every webhook view first checks `core.providers.callbacks_refused(provider)` → Click `-1` / Payme `-32504` / BTS 401, bounded `rejected:` row with `error_code: "fake_mode"`, nothing else read or written | `commerce/api/webhooks/*` | C§2.13.0 (production may run fake adapters; fake mode never pays an order) |
 | checkout and pay accept only `core.providers.payable_providers()` (400 `invalid_choice` otherwise) | `commerce/api/customer/*` | C§2.4, C§2.7 |
@@ -446,7 +449,12 @@ create_refund}`, `payments.selectors.{active_payment, display_payment, refunds_f
   stale shipments only; regions cache. Polling: with 250 stale parcels and an unchanged status, three runs poll all
   250 (cursor wraps), none twice; an unchanged status with a changed volatile field in the tracked document appends no
   `ShipmentEvent`; a second run while the lock is held returns at once; a run stops at `BTS_POLL_MAX_SECONDS` (pinned
-  clock) and at the first transport failure, keeping the cursor.
+  clock). **Per-parcel failures:** one parcel whose `track()` always raises `BtsUnavailable` (scenario `bts.track:
+  "down"`) and another that raises `BtsRejected` (`"rejected"`) → every other stale parcel is still polled within two
+  runs, the cursor moves past both, WARNING `bts.poll_parcel_failed` per failure, `last_sync_at` set; three parcels in
+  a row down → the run stops after the third (`consecutive_failures` + 1) and the next run starts after it; a
+  `BtsRejected` between transport failures resets the streak; the webhook re-track answering `BtsRejected` → 200
+  `ignored`, nothing applied.
 - Display rule (C§2.8): an order with a Payme `paid` payment and a Click `late_capture` row shows Payme in the admin
   list, the admin `payment` filter (`paid` matches), the admin detail, `me/orders/` and `me/orders/{id}/`; an expired
   order whose only payment is a late capture shows it as `paid` + `refund.in_progress` (never `pending`) and `refunded`
@@ -633,7 +641,7 @@ behaviour: under the production settings the fakes run without scenarios, record
 | OAuth | token `fake:<sub>:<email>`, `fake-unverified:…`, `fake-apple:<sub>:<email>`, `fake-fail`, `fake-down`, `fake-expired`; Apple code `fake-code:…` / `fake-code-fail` / `fake-code-down` | valid / valid unverified / Apple valid / `social_token_invalid` / 503 / `social_token_invalid`; code exchanged / 400 / 503 |
 | BTS | `bts.quote`: `"rejected"` / `"down"`; `bts.tariff`: int | 409 `delivery_unavailable` / 503 / fixed fee |
 | BTS | `bts.fail_attempts`, `bts.down`, `bts.existing`, `bts.tracking_number`, `bts.status`, `bts.cancel` | B5 rules (create/cancel) |
-| BTS | `bts.track_status`: `"100"`/`"200"`/`"300"`/other | what `track()` answers (webhook re-track, polling) |
+| BTS | `bts.track_status`: `"100"`/`"200"`/`"300"`/other; `bts.track`: `"rejected"` / `"down"` | what `track()` answers (webhook re-track, polling); `track()` raises `BtsRejected` / `BtsUnavailable` |
 | Click | `click.refund`: `succeeded`/`failed`/`unknown`/`down` | B5 refund rules (also used by the late-capture reversal); the fake records the `click_paydoc_id` it was called with |
 | Click | `click.transaction_id`, `click.paydoc_id` | fixed ids for `dev/…/simulate/` |
 | Payme | `payme.transaction_id` | fixed Payme id for `dev/…/simulate/` |
@@ -764,10 +772,12 @@ behaviour: under the production settings the fakes run without scenarios, record
 # Shared secret of the BTS webhook (>= 32 characters; ours). Production requires a real value in every mode.
 #BTS_WEBHOOK_SECRET=
 # Polling fallback (C§2.13.3): parcels whose last status is older than this are polled round robin, at most
-# BTS_POLL_BATCH parcels and BTS_POLL_MAX_SECONDS per run (single flight).
+# BTS_POLL_BATCH parcels and BTS_POLL_MAX_SECONDS per run (single flight). A failing parcel is skipped (the cursor
+# moves past it); the run stops only after BTS_POLL_MAX_CONSECUTIVE_FAILURES transport failures in a row (BTS down).
 #BTS_POLL_STALE_MINUTES=30
 #BTS_POLL_BATCH=100
 #BTS_POLL_MAX_SECONDS=300
+#BTS_POLL_MAX_CONSECUTIVE_FAILURES=3
 # ---- FCM (live adapter M3: HTTP v1 over httpx with a service-account JWT) ------------
 #FCM_PROJECT_ID=change-me-firebase-project
 #FCM_CREDENTIALS_FILE=/run/secrets/fcm.json

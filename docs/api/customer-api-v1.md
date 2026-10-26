@@ -1734,8 +1734,10 @@ Payme id is `Payment.provider_txn_id`.
   others recorded only; events with source `bts`; `push.order_status`). A forged webhook can therefore only trigger a
   re-track of a parcel we created.
 - → 200 `{"ok": true}`; unknown parcel (no Shipment, or a Shipment without a tracking number yet) → 200 `{"ok": true,
-  "ignored": true}` + WARNING log (BTS must not retry forever); BTS transport failure during the re-track → 503
-  `{"ok": false}`, nothing stored (BTS retries; polling catches up).
+  "ignored": true}` + WARNING log (BTS must not retry forever); a definitive refusal of the re-track (`BtsRejected`,
+  e.g. BTS no longer knows our tracking number) → the same 200 `{"ok": true, "ignored": true}` + WARNING
+  `bts.track_rejected {order_id}`, nothing applied; BTS transport failure during the re-track → 503 `{"ok": false}`,
+  nothing stored (BTS retries; polling catches up).
 - **Polling** (beat `commerce.poll_bts`, every 600 s, P2) — the fallback when BTS webhooks do not arrive (Backend
   PDF §14):
   - **Single flight:** the run starts only if `cache.add("gd:lock:poll_bts", …, timeout=600)` succeeds and deletes
@@ -1744,17 +1746,26 @@ Payme id is `Payment.provider_txn_id`.
     by `last_status_at` would poll the same oldest parcels forever once more than one batch sits unchanged in transit.
     Candidates are shipments `created` whose order is `processing` or `handed_to_courier` and whose `last_status_at`
     (or creation, before the first status) is older than `BTS_POLL_STALE_MINUTES` (30), taken in `id` order **after
-    the cursor** `IntegrationState(bts).data["poll_cursor"]` (the last shipment id polled; no migration), wrapping to
-    the lowest id when the end is reached; the cursor is saved after each parcel, so every eligible parcel is polled
-    in turn.
+    the cursor** `IntegrationState(bts).data["poll_cursor"]` (the last shipment id attempted; no migration), wrapping
+    to the lowest id when the end is reached. The cursor is written after **every attempted parcel, whatever the
+    outcome**, through `integrations.services.set_state_data("bts", "poll_cursor", shipment_id)` (a single
+    `UPDATE … SET data = data || {…}`; the built `integrations.services` has no writer of `data`, P2 adds it), so every
+    eligible parcel is polled in turn and no single parcel can hold the cursor.
   - **Bounded:** at most `BTS_POLL_BATCH` (100) parcels and `BTS_POLL_MAX_SECONDS` (300, below the 600 s schedule) per
     run, whichever comes first (each `track()` is bounded at 10 s by the port).
   - Each parcel: `track()` → `apply_bts_status(…, via="polling", payload=<stable fields>)` where the stable fields are
     the tracking number, the status code and BTS's status time when it sends one — never the whole tracked document,
     whose volatile fields would make every poll a "new" status and append a `ShipmentEvent` every 10 minutes. The
     webhook re-track passes the same stable fields.
-  - `IntegrationState(bts).last_sync_at` after a run; transport failures counted in `consecutive_failures` (the run
-    stops at the first transport failure and keeps the cursor, so it resumes there).
+  - **Failures are per parcel.** `BtsUnavailable` (transport error, 5xx, timeout) for one parcel → WARNING
+    `bts.poll_parcel_failed {shipment_id, kind: "unavailable"}`, the cursor moves past it and the run continues; only
+    `BTS_POLL_MAX_CONSECUTIVE_FAILURES` (3) transport failures **in a row**, on different parcels, mean BTS itself is
+    down: the run stops there (the cursor stays after the last attempted parcel, so the parcels it skipped are polled
+    on the next pass) and calls `integrations.services.record_failure("bts", …)` (`consecutive_failures` + 1). A
+    definitive answer (`BtsRejected`, e.g. BTS does not know the parcel) → WARNING `bts.poll_parcel_failed
+    {shipment_id, kind: "rejected"}`, nothing applied, the cursor advances, and it resets the transport-failure streak
+    (BTS answered). A run that does not stop on the streak calls `record_sync_success("bts")` (`last_sync_at`). So a
+    parcel whose tracking always fails costs one `track()` per pass and never stops the others.
 
 ### 2.14 Outbound provider protocols (what the adapters send)
 
@@ -1849,11 +1860,12 @@ pushes are reported `sent` but reach no device (§6.14).
 | `find_by_client_id(client_id)` | before every create (B5) | `clientId` = order id |
 | `create(request)` | outbox `bts.create_shipment` (B5) | recipient = the order's recipient snapshot |
 | `cancel(parcel)` | admin cancel (B5) | succeeds only at status `100` (O1) |
-| `track(tracking_number)` | webhook re-track, polling (P2) | returns the parcel with its current status; always called with **our** stored tracking number |
+| `track(tracking_number)` | webhook re-track, polling (P2) | returns the parcel with its current status; always called with **our** stored tracking number; `BtsRejected` = a definitive per-parcel answer (unknown parcel), `BtsUnavailable` = transport error, 5xx or timeout (§2.13.3) |
 
 Fake additions (P2): `regions()` returns the four regions of the fake tariff table (`10` Toshkent shahri, `11`
 Toshkent viloyati, `12` Sirdaryo, `13` Samarqand) with two cities each; `track()` returns `scenario["track_status"]`
-or the parcel's last status; `scenario["quote"] == "rejected"` → `BtsRejected`, `"down"` → `BtsUnavailable`.
+or the parcel's last status, `scenario["track"] == "rejected"` → `BtsRejected`, `"down"` → `BtsUnavailable`;
+`scenario["quote"] == "rejected"` → `BtsRejected`, `"down"` → `BtsUnavailable`.
 
 ### 2.15 `POST dev/payments/{order_id}/simulate/` (local/test settings only)
 Mounted only when `DEV_FEATURES_ALLOWED` (local/test settings), `FAKE_PAYMENTS_ENABLED=true` **and** `CLICK_MODE` =
