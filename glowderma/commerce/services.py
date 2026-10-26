@@ -482,7 +482,8 @@ def create_order(
             problems = _problem_lines(lines, selectors.available_stock(product_ids), visible)
             if problems:
                 raise OutOfStock(problems)
-        # prices are read after the locks: the live subtotal of rows 8 and 9
+        # rows 8 and 9 use the prices read at the start of this transaction (the ProductStock locks do not
+        # serialise price edits, so a price may be milliseconds old; the customer confirmed expected_total)
         items_subtotal = sum(line.product.price * line.quantity for line in lines)
         promo_subtotal = sum(line.product.price * line.quantity for line in lines if line.product.promo)
         maximum = max(0, min(items_subtotal, items_subtotal + delivery_fee - min_payable))

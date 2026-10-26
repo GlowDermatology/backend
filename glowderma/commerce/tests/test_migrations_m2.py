@@ -34,6 +34,18 @@ def test_media_path_strips_a_custom_base_path() -> None:
     assert image_step.media_path("https://media.example.uz/assets/products/5/e.webp") == "products/5/e.webp"
 
 
+@override_settings(PUBLIC_MEDIA_BASE_URL="https://media.example.uz/m")
+def test_media_path_matches_prefixes_on_a_segment_boundary_longest_first() -> None:
+    # "/m" is a string prefix of "/media/…": it must not eat the "m" of "media"
+    assert image_step.media_path("https://media.example.uz/media/products/1/a.webp") == "products/1/a.webp"
+    assert image_step.media_path("https://media.example.uz/m/products/2/b.webp") == "products/2/b.webp"
+
+
+@override_settings(MEDIA_URL="https://static.example.uz/files/")
+def test_media_path_takes_the_path_of_an_absolute_media_url() -> None:
+    assert image_step.media_path("https://static.example.uz/files/products/3/c.webp") == "products/3/c.webp"
+
+
 @pytest.mark.django_db
 def test_the_data_step_rewrites_existing_rows() -> None:
     order = OrderFactory.create(items=[])

@@ -21,8 +21,15 @@ def media_path(value: str) -> str:
         return value
     parts = urlsplit(value)
     path = parts.path if (parts.scheme or parts.netloc) else value
-    for prefix in {str(settings.MEDIA_URL), urlsplit(str(settings.PUBLIC_MEDIA_BASE_URL)).path, "/media/"}:
-        if prefix and prefix != "/" and path.startswith(prefix):
+    candidates = {
+        urlsplit(str(settings.MEDIA_URL)).path,
+        urlsplit(str(settings.PUBLIC_MEDIA_BASE_URL)).path,
+        "/media/",
+    }
+    # each prefix ends with "/" so it matches only on a path-segment boundary; the longest wins
+    prefixes = {"/" + p.strip("/") + "/" for p in candidates if p.strip("/")}
+    for prefix in sorted(prefixes, key=len, reverse=True):
+        if path.startswith(prefix):
             path = path[len(prefix) :]
             break
     return path.lstrip("/")
