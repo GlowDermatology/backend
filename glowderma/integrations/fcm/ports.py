@@ -1,14 +1,21 @@
-"""The FCM port (design 03 §3.4–§3.6): one batch call, one result per message, never an exception per token.
+"""The FCM port (design 03 §3.4–§3.6, customer contract §2.14.2): one batch call, one result per message,
+never an exception per token.
 
-Compliance C1: a push carries no name or phone, only the rendered title/body and a small ``data`` map of ids.
+Compliance C1: a push carries no name, phone, address or amount, only the rendered title/body and a small
+``data`` map of ids (all values strings). ``data_only`` messages (``session_replaced``) have no notification
+block and go out as APNs background pushes (``content-available``, push type ``background``, priority 5).
 """
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import KW_ONLY, dataclass, field
 from typing import Protocol
 
-# FCM's error code for a token that is no longer registered (the device reinstalled or revoked the app).
+# Result errors (customer contract §2.14.2):
+# the token is dead (404 UNREGISTERED, SENDER_ID_MISMATCH, INVALID_ARGUMENT naming the token) → prune the
+# device;
 UNREGISTERED = "unregistered"
+# any other INVALID_ARGUMENT (a malformed message) → the message failed, the device is never touched.
+PAYLOAD_INVALID = "payload_invalid"
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,11 +24,34 @@ class PushMessage:
     title: str
     body: str
     data: dict[str, str] = field(default_factory=dict)
+    _: KW_ONLY
+    data_only: bool = False
+    android_channel: str = ""
+    android_priority: str = "high"
+    apns_push_type: str = "alert"
+    apns_priority: int = 10
+    image_url: str = ""
+    collapse_key: str = ""
+
+    @classmethod
+    def data_message(cls, token: str, data: dict[str, str], *, collapse_key: str = "") -> PushMessage:
+        """A data-only message (no notification block): APNs background push, priority 5."""
+        return cls(
+            token,
+            "",
+            "",
+            data,
+            data_only=True,
+            android_priority="high",
+            apns_push_type="background",
+            apns_priority=5,
+            collapse_key=collapse_key,
+        )
 
 
 @dataclass(frozen=True, slots=True)
 class PushResult:
-    """``ok`` with the provider ``message_id``, or ``error`` (an FCM error code such as ``unregistered``)."""
+    """``ok`` with the provider ``message_id``, or ``error`` (``unregistered``, ``payload_invalid``, …)."""
 
     ok: bool
     message_id: str = ""
@@ -29,7 +59,7 @@ class PushResult:
 
 
 class FcmUnavailable(Exception):
-    """The provider did not answer (transport error): the caller retries the whole batch later."""
+    """UNAVAILABLE, INTERNAL, QUOTA_EXCEEDED, 5xx or a transport error: the caller retries the batch later."""
 
 
 class FcmPort(Protocol):
