@@ -403,10 +403,10 @@ class PayView(CustomerAPIView):
         body.is_valid(raise_exception=True)
         order = services.lock_order(pk)  # every state read below runs under the Order lock
         now = timeutils.now()
+        if order.status == enums.OrderStatus.CANCELLED:  # also while a refund of its payment runs
+            raise NotPayable()
         if order.status in state.PAID_STATUSES or selectors.honoured_paid(order.pk):
             raise AlreadyPaid()
-        if order.status == enums.OrderStatus.CANCELLED:
-            raise NotPayable()
         if not selectors.is_payable(order, None, now, attaching=True):
             raise OrderExpired()
         provider = body.validated_data["provider"] or order.payment_provider
