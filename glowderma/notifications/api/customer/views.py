@@ -1,6 +1,7 @@
 """Customer inbox routes (customer contract §2.12): the feed with its unread badge, read one / all, and the
 delivery acknowledgement of the app's push handler. Every query starts from the signed-in customer and stays
-inside the history horizon; another customer's row answers 404 (read) or is ignored (ack)."""
+inside the history horizon; another customer's row answers 404 (read) or is ignored (ack). The three POSTs
+take an optional ``Idempotency-Key`` (customer contract §1.7: absolute writes, a retry converges)."""
 
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ from glowderma.accounts.api.customer_base import CustomerAPIView, CustomerGeneri
 from glowderma.accounts.models import Customer
 from glowderma.core.api.pagination import EnvelopePagination
 from glowderma.core.api.schema import ACCEPT_LANGUAGE_HEADER, CUSTOMER_ERRORS, DEVICE_HEADERS
+from glowderma.core.idempotency import idempotent
 from glowderma.notifications import selectors, services
 from glowderma.notifications.api.customer.serializers import (
     AckRequestSerializer,
@@ -97,6 +99,7 @@ class ReadView(CustomerAPIView):
         request=None,
         responses={200: ReadSerializer, **CUSTOMER_ERRORS},
     )
+    @idempotent(required=False)
     def post(self, request: Request, pk: int) -> Response:
         customer = _customer(request)
         result = services.mark_read(customer.pk, pk, horizon=customer.history_from)
@@ -111,6 +114,7 @@ class ReadAllView(CustomerAPIView):
         request=None,
         responses={200: ReadAllSerializer, **CUSTOMER_ERRORS},
     )
+    @idempotent(required=False)
     def post(self, request: Request) -> Response:
         customer = _customer(request)
         result = services.mark_all_read(customer.pk, horizon=customer.history_from)
@@ -128,6 +132,7 @@ class AckView(CustomerAPIView):
         request=AckRequestSerializer,
         responses={200: AckSerializer, **CUSTOMER_ERRORS},
     )
+    @idempotent(required=False)
     def post(self, request: Request) -> Response:
         customer = _customer(request)
         body = AckRequestSerializer(data=request.data)

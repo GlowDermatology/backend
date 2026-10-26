@@ -248,3 +248,13 @@ def test_concurrent_acks_count_once() -> None:
         thread.join(10)
     assert not errors
     assert Campaign.objects.get(pk=row.source_id).delivered == 1
+
+
+def test_an_optional_idempotency_key_replays_the_ack(customer: Customer, customer_client: APIClient) -> None:
+    row = order_row(customer)
+    key = "6f1c2a0e-9b8d-4c37-8f00-000000000001"
+    first = customer_client.post(ACK, {"inbox_ids": [row.pk]}, format="json", HTTP_IDEMPOTENCY_KEY=key)
+    again = customer_client.post(ACK, {"inbox_ids": [row.pk]}, format="json", HTTP_IDEMPOTENCY_KEY=key)
+    assert first.json() == again.json() == {"acknowledged": 1}
+    assert again["Idempotent-Replayed"] == "true"
+    assert customer_client.post(read_url(row.pk), HTTP_IDEMPOTENCY_KEY=key).status_code == 200
