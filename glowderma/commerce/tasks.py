@@ -390,6 +390,11 @@ def submit_refund(payload: dict[str, Any]) -> None:
     if not ref or integration_modes.callbacks_refused("click"):
         if refund.state == enums.RefundState.REQUESTED:
             payment_services.mark_manual_required(refund_id, timeutils.now())
+        else:
+            # ``submitting``: a worker may have sent the reversal before the switch (or crashed after Click
+            # answered), so its outcome at Click is unknown — never left ``submitting``, which no one sees
+            reason = "click fake: reversal outcome unknown" if ref else "no click_paydoc_id"
+            _unknown(refund_id, refund.order_id, reason, refund.attempts)
         return
     order = Order.objects.get(pk=refund.order_id)
     port = get_click(services.fake_scenario(order, "click"))

@@ -100,6 +100,22 @@ def test_submit_rechecks_before_any_port_call() -> None:
     )  # as written
 
 
+def test_a_submitting_refund_redelivered_after_a_switch_to_fake_becomes_unknown() -> None:
+    """The worker crashed between Click's answer and the commit, then Click was switched to fake: the
+    reversal's outcome is unknown, so the refund goes where staff see it, never stays ``submitting``."""
+    from glowderma.payments import services as payment_services
+    from glowderma.payments.models import ATTENTION_REFUND_STATES
+
+    order, refund = _cancelled()
+    payment_services.mark_submitting(refund.pk, AT + timedelta(minutes=31))
+    with override_settings(**PROD_FAKE_CLICK):
+        tasks.submit_refund({"refund_id": refund.pk})
+    refund.refresh_from_db()
+    assert refund.state == "unknown" and refund.state in ATTENTION_REFUND_STATES
+    assert fake_click.calls == []
+    assert OrderEvent.objects.filter(order=order, type="refund_failed").exists()
+
+
 def test_submit_of_a_payment_that_is_no_longer_paid() -> None:
     order, refund = _cancelled()
     Payment.objects.filter(order=order).update(status="refunded", refunded_at=AT + timedelta(hours=1))
