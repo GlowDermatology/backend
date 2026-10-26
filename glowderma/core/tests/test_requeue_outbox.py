@@ -76,3 +76,20 @@ def test_dry_run_changes_nothing_and_since_filters() -> None:
 def test_refuses_unclear_requests(args: list[str], message: str) -> None:
     with pytest.raises(CommandError, match=message):
         requeue(*args)
+
+
+def test_resolved_closes_the_chosen_dead_messages_without_running_them() -> None:
+    handled = dead("billz.push_sale:by-hand")
+    other = dead("billz.push_sale:other")
+    output = requeue("--topic", "billz.push_sale", "--dead", "--resolved", "--id", str(handled.pk))
+    assert f"resolve #{handled.pk} billz.push_sale:by-hand" in output
+    assert "billz.push_sale: 1 dead message(s) matched, 1 resolved." in output
+    handled.refresh_from_db()
+    other.refresh_from_db()
+    assert (handled.status, handled.attempts, other.status) == ("done", 1, "dead")
+    entry = AuditEntry.objects.get(action="outbox.resolved", entity_id=str(handled.pk))
+    assert entry.reason == "manage.py requeue_outbox --resolved"
+    assert entry.before is not None and entry.before["status"] == "dead"
+    assert not AuditEntry.objects.filter(action="outbox.requeued").exists()
+    dry = requeue("--topic", "billz.push_sale", "--dead", "--resolved", "--dry-run")
+    assert f"would resolve #{other.pk}" in dry and "0 resolved (dry run" in dry

@@ -23,8 +23,9 @@ app.conf.beat_schedule = {
     "accounts-cleanup-auth": {"task": "accounts.cleanup_auth", "schedule": 3600.0},
     # M2 BTS polling fallback (customer contract §2.13.3); the P0 stub returns [] until P2 implements it.
     "commerce-poll-bts": {"task": "commerce.poll_bts", "schedule": 600.0},
-    # M3 retention (docs/ops/compliance.md): done/dead outbox rows after OUTBOX_RETENTION_DAYS, raw provider
-    # callbacks (WebhookInbox) after WEBHOOK_INBOX_RETENTION_DAYS; batched, at most 5 minutes a night each.
+    # M3 retention (docs/ops/compliance.md): done outbox rows (never dead ones) after OUTBOX_RETENTION_DAYS,
+    # raw provider callbacks (WebhookInbox) after WEBHOOK_INBOX_RETENTION_DAYS; batched, at most 5 minutes a
+    # night each.
     "core-purge-outbox": {"task": "core.purge_outbox", "schedule": crontab(hour=3, minute=20)},
     "integrations-purge-webhook-inbox": {
         "task": "integrations.purge_webhook_inbox",

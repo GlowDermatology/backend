@@ -32,7 +32,7 @@ from the product owner (and, where marked, from legal counsel) before go-live.
 | Appointments | customer, specialist, service, time, customer note, staff note | Postgres `appointments_*` | |
 | Notifications | inbox rows (title, body), campaign texts, a campaign's single-phone audience snapshot | Postgres `notifications_*` | Retention not implemented (Q5) |
 | Raw provider callbacks | Click/Payme/BTS/Billz request bodies (`payload`, `raw_body` ≤ 64 KiB), allow-listed headers, remote IP | Postgres `integrations_webhookinbox` (append-only) | Purged after `WEBHOOK_INBOX_RETENTION_DAYS` (90) |
-| Outbox messages | ids; `apple.revoke` carries a sealed Apple token; `push.account_security` may carry FCM tokens until sent | Postgres `core_outboxmessage` | Done/dead rows purged after `OUTBOX_RETENTION_DAYS` (30); done/dead `sms.send` after 24 h |
+| Outbox messages | ids; `apple.revoke` carries a sealed Apple token; `push.account_security` may carry FCM tokens until sent | Postgres `core_outboxmessage` | Done rows purged after `OUTBOX_RETENTION_DAYS` (30); dead rows kept until requeued or resolved (§4); done/dead `sms.send` after 24 h |
 | Idempotency records | stored responses of customer and staff writes (may contain profile or address data) | Postgres `core_idempotencyrecord` | Deleted after 24 h; a deleted customer's are deleted at once |
 | Audit log | actor (staff name/email; customers as a masked phone `+998 90 *** ** 67`), action, before/after documents, IP, user agent, request id | Postgres `core_auditentry` (append-only) | Never purged (Q1) |
 | Cache | session tombstones, throttle counters keyed by `pii_ref` (HMAC) of phones and device ids, the sealed OTP (120 s), QR token HMACs (60 s), Billz client ids keyed by `pii_ref(phone)` (30 days), provider tokens | Redis DB 0 | No plain phone number is a cache key |
@@ -115,7 +115,8 @@ retention), raw provider callbacks (purged after 90 days), Billz's own client re
 | Data | Retention | Mechanism |
 |---|---|---|
 | Raw provider callbacks (`WebhookInbox`) | `WEBHOOK_INBOX_RETENTION_DAYS`, default 90 days | beat `integrations-purge-webhook-inbox` 03:25 Tashkent: batches inside `core.db.purge_window()` (the append-only trigger lets only that transaction delete), audit `integrations.inbox_purged {provider, rows, before}` |
-| Finished outbox messages (done, dead) | `OUTBOX_RETENTION_DAYS`, default 30 days | beat `core-purge-outbox` 03:20: ORM batches (shipments drop their link), audit `outbox.purged {rows, before}` |
+| Done outbox messages | `OUTBOX_RETENTION_DAYS`, default 30 days | beat `core-purge-outbox` 03:20: ORM batches (shipments drop their link), audit `outbox.purged {rows, before}` |
+| Dead outbox messages | kept until resolved | never purged by retention: a dead message is an action item (`requeue_outbox --dead` replays it from the row; the consistency report lists dead `billz.push_sale` rows of any age and K6 the recent ones). They hold ids; a dead `push.*` or `campaign.send_batch` row may hold FCM tokens. Once the cause is fixed, replay them; dead `sms.send` rows are the exception (deleted after 24 h, phone and code) |
 | Done/dead `sms.send` messages, SMS codes | 24 h | `accounts.cleanup_auth`, hourly |
 | Revoked/expired customer sessions | 90 days | `accounts.cleanup_auth` |
 | Idempotency records | 24 h | `core.purge_idempotency_records`, 03:00 |

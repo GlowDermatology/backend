@@ -1183,7 +1183,7 @@ def unrecorded_billz_sales(paid_since: datetime, paid_before: datetime, *, limit
 
 
 def dead_billz_sales(*, limit: int) -> Finding:
-    """K1: ``billz.push_sale`` messages that are ``dead`` (kept ``OUTBOX_RETENTION_DAYS``): staff record or
+    """K1: ``billz.push_sale`` messages that are ``dead`` (never purged: core.retention): staff record or
     complete the sale in Billz by hand, or replay it (``manage.py requeue_outbox --topic billz.push_sale
     --dead``). The ids are the orders named by the messages.
 

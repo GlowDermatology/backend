@@ -1,4 +1,4 @@
-"""``manage.py requeue_outbox --topic <topic> --dead [--since ISO] [--dry-run]``.
+"""``manage.py requeue_outbox --topic <topic> --dead [--since ISO] [--id N ...] [--resolved] [--dry-run]``.
 
 Puts the dead outbox messages of one topic back in the queue once staff fixed what killed them — typically a
 Billz configuration error (a revoked integration key, a cash box of another shop, a wrong base URL: decision
@@ -11,6 +11,12 @@ that instant (their ``updated_at``); ``--dry-run`` lists them and changes nothin
 Handlers are idempotent at the provider boundary, so a requeued message never repeats an effect that
 succeeded. It can still repeat one done **by hand** meanwhile: before requeueing ``billz.push_sale``, check
 that none of the listed orders was entered in Billz by hand (the list names each message's dedupe key).
+
+``--resolved`` closes dead messages that staff handled by hand instead (a sale entered in Billz, a refund paid
+out in a cabinet): each becomes ``done`` without running its handler, audited ``outbox.resolved``. Retention
+never purges a dead message (core.retention); a resolved one is purged with the done rows after
+``OUTBOX_RETENTION_DAYS`` and leaves the consistency report. ``--id`` (repeatable) limits either action to
+those message ids.
 """
 
 from __future__ import annotations
@@ -47,6 +53,14 @@ class Command(BaseCommand):
             "--dead", action="store_true", help="Requeue dead messages (the only kind requeued; required)."
         )
         parser.add_argument("--since", help="Only messages that went dead at or after this ISO datetime.")
+        parser.add_argument(
+            "--id", action="append", type=int, dest="ids", help="Only this message id (repeatable)."
+        )
+        parser.add_argument(
+            "--resolved",
+            action="store_true",
+            help="Mark the messages done (handled by hand) instead of requeueing them; audited.",
+        )
         parser.add_argument("--dry-run", action="store_true", help="List the messages; change nothing.")
 
     def handle(self, *args: Any, **options: Any) -> None:
@@ -58,7 +72,11 @@ class Command(BaseCommand):
         messages = OutboxMessage.objects.filter(topic=topic, status="dead")
         if options["since"]:
             messages = messages.filter(updated_at__gte=_instant(str(options["since"])))
+        if options["ids"]:
+            messages = messages.filter(pk__in=list(options["ids"]))
         dry_run = bool(options["dry_run"])
+        resolve = bool(options["resolved"])
+        verb = "resolve" if resolve else "requeue"
         requeued = 0
         matched = 0
         for message_id in list(messages.order_by("id").values_list("pk", flat=True)):
@@ -70,7 +88,7 @@ class Command(BaseCommand):
                     continue
                 matched += 1
                 self.stdout.write(
-                    f"{'would requeue' if dry_run else 'requeue'} #{message.pk} {message.dedupe_key} "
+                    f"{'would ' + verb if dry_run else verb} #{message.pk} {message.dedupe_key} "
                     f"(attempts {message.attempts}): {clean_text(message.last_error, 200)}"
                 )
                 if dry_run:
@@ -80,6 +98,20 @@ class Command(BaseCommand):
                     "attempts": message.attempts,
                     "last_error": message.last_error,
                 }
+                if resolve:
+                    OutboxMessage.objects.filter(pk=message.pk).update(
+                        status="done", lease_expires_at=None, claim_token=None, updated_at=timeutils.now()
+                    )
+                    audit.record(
+                        action="outbox.resolved",
+                        entity_type="outbox",
+                        entity_id=str(message.pk),
+                        before=before,
+                        after={"topic": message.topic, "dedupe_key": message.dedupe_key, "status": "done"},
+                        reason=REASON + " --resolved",
+                    )
+                    requeued += 1
+                    continue
                 OutboxMessage.objects.filter(pk=message.pk).update(
                     status="pending",
                     attempts=0,
@@ -99,4 +131,5 @@ class Command(BaseCommand):
                 )
                 requeued += 1
         suffix = " (dry run: nothing changed)" if dry_run else ""
-        self.stdout.write(f"{topic}: {matched} dead message(s) matched, {requeued} requeued{suffix}.")
+        done = "resolved" if resolve else "requeued"
+        self.stdout.write(f"{topic}: {matched} dead message(s) matched, {requeued} {done}{suffix}.")

@@ -52,8 +52,8 @@ def finding(queryset: QuerySet[Any], *, limit: int, id_field: str = "pk") -> Fin
 
 # --- K6: outbox -------------------------------------------------------------------------------------------
 # Plan (all three): the partial index ``outbox_unfinished_idx`` (status, available_at) WHERE status <> 'done'
-# (core.0010) holds only the rows that are not done — open messages and dead ones, which retention purges
-# after OUTBOX_RETENTION_DAYS — so no check reads the done rows that make up nearly the whole table.
+# (core.0010) holds only the rows that are not done — open messages and dead ones, which retention never
+# purges (core.retention) — so no check reads the done rows that make up nearly the whole table.
 
 
 def dead_messages(since: datetime, *, limit: int, topic: str | None = None) -> Finding:

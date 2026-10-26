@@ -1,4 +1,4 @@
-"""Retention of finished outbox messages (core.retention, beat ``core-purge-outbox``;
+"""Retention of done outbox messages (dead ones are kept) (core.retention, beat ``core-purge-outbox``;
 docs/ops/compliance.md)."""
 
 from __future__ import annotations
@@ -32,10 +32,11 @@ def test_finished_messages_older_than_the_retention_are_deleted_in_batches(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(timeutils, "now", lambda: NOW)
-    old = [message(f"done:{n}", "done", 31 + n) for n in range(5)] + [message("dead:1", "dead", 40)]
+    old = [message(f"done:{n}", "done", 31 + n) for n in range(5)]
     kept = [
         message("done:recent", "done", 29),
         message("dead:recent", "dead", 1),
+        message("dead:old", "dead", 400),  # an unresolved action item: never purged, whatever its age
         message("pending:old", "pending", 60),  # still open: never purged, whatever its age
         message("failed:old", "failed", 60),
         message("in_flight:old", "in_flight", 60),
@@ -45,7 +46,7 @@ def test_finished_messages_older_than_the_retention_are_deleted_in_batches(
     assert set(OutboxMessage.objects.values_list("dedupe_key", flat=True)) == {row.dedupe_key for row in kept}
     entry = AuditEntry.objects.get(action="outbox.purged")
     assert (entry.actor_type, entry.entity_type, entry.entity_id) == ("system", "outbox", "retention")
-    assert entry.after == {"rows": 6, "before": (NOW - timedelta(days=30)).isoformat()}
+    assert entry.after == {"rows": 5, "before": (NOW - timedelta(days=30)).isoformat()}
     assert purge_outbox.apply().get() == 0
     assert AuditEntry.objects.filter(action="outbox.purged").count() == 1  # nothing purged: no audit row
 
@@ -64,7 +65,7 @@ def test_a_purged_create_message_is_detached_from_its_shipment() -> None:
 
 
 def test_a_message_requeued_between_select_and_delete_is_kept(monkeypatch: pytest.MonkeyPatch) -> None:
-    row = message("dead:requeued", "dead", 40)
+    row = message("done:requeued", "done", 40)
     real_filter = OutboxMessage.objects.filter
     calls = {"n": 0}
 
