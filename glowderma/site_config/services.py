@@ -32,12 +32,28 @@ def settings_snapshot(row: SiteSettings) -> dict[str, Any]:
     }
 
 
+def leaf_diff(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
+    """Only the changed leaves of two snapshots, each as ``{"from", "to"}``, nested like the snapshot
+    (``{"pickup_address": {"ru": {"from": "", "to": "…"}}}``); ``{}`` when nothing changed."""
+    diff: dict[str, Any] = {}
+    for key, old in before.items():
+        new = after[key]
+        if isinstance(old, dict) and isinstance(new, dict):
+            nested = leaf_diff(old, new)
+            if nested:
+                diff[key] = nested
+        elif old != new:
+            diff[key] = {"from": old, "to": new}
+    return diff
+
+
 @transaction.atomic
 def update_settings(changes: dict[str, Any], *, actor: Any, request: Any = None) -> SiteSettings:
     """Apply ``changes`` (column name → value, ``support_phone`` may be ``None``) and audit the diff.
 
-    Audit ``settings.updated`` carries ``before``/``after`` restricted to the keys that actually changed;
-    an idempotent PATCH (nothing changed) writes no audit entry and keeps ``updated_at``.
+    Audit ``settings.updated`` (contract §2.11) carries :func:`leaf_diff` as its data: only the changed
+    leaves, each ``{"from", "to"}``. A PATCH that changes nothing writes no audit entry and keeps
+    ``updated_at`` / ``updated_by``.
     """
     row = SiteSettings.objects.select_for_update().get(pk=1)
     before = settings_snapshot(row)
@@ -45,11 +61,9 @@ def update_settings(changes: dict[str, Any], *, actor: Any, request: Any = None)
         if name not in EDITABLE_FIELDS:
             raise ValueError(f"{name} is not an editable setting")
         setattr(row, name, "" if value is None and name == "support_phone" else value)
-    after = settings_snapshot(row)
-    diff_before = {key: value for key, value in before.items() if after[key] != value}
-    if not diff_before:
+    diff = leaf_diff(before, settings_snapshot(row))
+    if not diff:
         return row
-    diff_after = {key: after[key] for key in diff_before}
     row.updated_at = timeutils.now()
     row.updated_by = actor
     row.save(update_fields=[*changes, "updated_at", "updated_by"])
@@ -59,7 +73,6 @@ def update_settings(changes: dict[str, Any], *, actor: Any, request: Any = None)
         entity_id="1",
         actor=actor,
         request=request,
-        before=diff_before,
-        after=diff_after,
+        after=diff,
     )
     return row
