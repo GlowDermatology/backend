@@ -316,12 +316,17 @@ row carries the reason). Staff then do **one** of:
    ```
 
    It sets the purchase's pushed marker through the push's own link path (`billz_pushed_at`, the draft's id by
-   default — `--billz-sale-id` only names that same draft; another id is refused), writes `billz_sale_recorded`
-   once and the audit row `billz.sale_recorded_by_hand` (actor = the staff member, the purchase before/after). It
-   refuses an unknown, cancelled or unpaid order, one already recorded, a push running right now
-   (`in_flight`) and an unknown or inactive staff email. From then on the push and `requeue_outbox` skip the order,
-   and its units stop counting against availability after the next Billz read. **Skipping this step subtracts the
-   unit twice for ever** (Billz's stock already counts the hand-entered sale).
+   default — `--billz-sale-id` only names that same draft, another id is refused; when the push died before
+   Billz created a draft, `--billz-sale-id` is required and names the sale staff entered), writes
+   `billz_sale_recorded` once and the audit row `billz.sale_recorded_by_hand` (actor = the staff member, the
+   purchase before/after). It refuses an unknown, cancelled or unpaid order, one already recorded, a push running
+   right now (`in_flight`), a missing sale id and an unknown or inactive staff email. From then on the push and
+   `requeue_outbox` skip the order, its units stop counting against availability after the next Billz read, and
+   the order leaves the consistency report's `k1_billz_sale_unrecorded` / `_backlog` (docs/ops/monitoring.md
+   §3). **Skipping this step subtracts the unit twice for ever** (Billz's stock already counts the hand-entered
+   sale). Finally close the dead message, which `k1_billz_sale_dead` lists until then:
+   `requeue_outbox --topic billz.push_sale --dead --resolved --order <order id>` (audited `outbox.resolved`;
+   refused for a sale not recorded yet).
 2. **Replay it** once the cause is fixed (a configuration error, D3):
    `uv run python manage.py requeue_outbox --topic billz.push_sale --dead [--since 2026-10-26T09:00:00+05:00]
    [--order ID] [--dry-run]`. It prints a WARNING ("confirm the sale was not entered by hand; use

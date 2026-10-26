@@ -157,7 +157,8 @@ def record_sale_by_hand(
 
     Under the Order lock: refuses a missing or cancelled order (a sale Billz holds for it is refunded by
     hand), an order without an online purchase, a purchase already recorded in Billz, a push running right now
-    (its outbox message ``in_flight``) and a sale id other than the Billz draft the push created. Otherwise it
+    (its outbox message ``in_flight``), a sale id other than the Billz draft the push created and no sale id
+    at all (the push died before Billz created a draft and staff named none). Otherwise it
     sets the purchase's pushed marker through the push's own link path (``loyalty.services.link_billz_sale``:
     ``billz_pushed_at`` = now, the sale id when known), writes ``billz_sale_recorded`` once (system, as the
     push does) and the audit row ``billz.sale_recorded_by_hand`` (the staff actor, the purchase before/after).
@@ -205,6 +206,13 @@ def record_sale_by_hand(
                 f"draft): pass that id, or none"
             )
         sale_id = sale_id or info.billz_sale_id
+        if not sale_id:
+            # the push died before Billz created a draft: without the id staff entered, the purchase would
+            # stay "not recorded" for the consistency report (K1 lists a purchase without a Billz sale id)
+            raise RecordByHandRefused(
+                f"order {order_id} has no Billz draft: pass --billz-sale-id with the id of the sale entered "
+                "in Billz"
+            )
         ref = info.billz_sale_ref if sale_id == info.billz_sale_id and info.billz_sale_ref else _ref(sale_id)
         record = HandRecord(
             order_id=order_id,

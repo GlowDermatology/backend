@@ -235,6 +235,38 @@ def test_billz_mark_recorded_refusals_and_dry_run() -> None:
         run("--order", str(paid.pk), "--actor", staff.email)
 
 
+@override_settings(BILLZ_MODE="live")
+def test_a_sale_without_a_billz_draft_needs_its_id_and_then_leaves_k1() -> None:
+    """A push that died before Billz created a draft: recording it without the id staff entered would keep the
+    order on K1 (a purchase without a Billz sale id), so it is refused; with the id the order leaves K1."""
+    order = pay(place(shopper(phone="+998901234570"), fulfilment="pickup"))
+    staff = admin()
+    purchase = Purchase.objects.get(order=order)
+    assert purchase.billz_sale_id == "" and purchase.billz_pushed_at is None
+    paid_before = timeutils.now() + timedelta(days=1)
+    assert order.pk in selectors.unrecorded_billz_sales_before(paid_before, limit=50).ids
+    with pytest.raises(CommandError, match="has no Billz draft: pass --billz-sale-id"):
+        call_command(
+            "billz_mark_recorded", "--order", str(order.pk), "--actor", staff.email, stdout=StringIO()
+        )
+    sale_id = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
+    call_command(
+        "billz_mark_recorded",
+        "--order",
+        str(order.pk),
+        "--actor",
+        staff.email,
+        "--billz-sale-id",
+        sale_id,
+        stdout=StringIO(),
+    )
+    recorded = Purchase.objects.get(pk=purchase.pk)
+    assert recorded.billz_sale_id == sale_id and recorded.billz_pushed_at is not None
+    assert order.pk not in selectors.unrecorded_billz_sales_before(paid_before, limit=50).ids
+    since = timeutils.now() - timedelta(days=1)
+    assert order.pk not in selectors.unrecorded_billz_sales(since, paid_before, limit=50).ids
+
+
 def test_settlement_stamps_only_what_never_counts_again() -> None:
     """NEW-2: ``settle_billz_reservations`` stamps a conversion once its sale is in Billz and the stock was
     read after it, or a cancelled order's that never reached Billz once read after the conversion."""

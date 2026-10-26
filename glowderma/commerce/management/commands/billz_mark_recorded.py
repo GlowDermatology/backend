@@ -9,7 +9,13 @@ Billz's stock — which already counts the hand-entered sale — for ever).
 
 Refused (exit status 1, nothing changed): an unknown or cancelled order, an order without an online purchase,
 one already recorded in Billz, a push running right now, a ``--billz-sale-id`` other than the draft the push
-created, an unknown or inactive staff email. ``--dry-run`` prints what would be recorded.
+created, no sale id at all (the push died before Billz created a draft: name the sale staff entered), an
+unknown or inactive staff email. ``--dry-run`` prints what would be recorded.
+
+The order then leaves the consistency report's ``k1_billz_sale_unrecorded`` (and ``_backlog``): its purchase
+has ``billz_pushed_at`` and a Billz sale id. Its dead ``billz.push_sale`` message stays listed under
+``k1_billz_sale_dead`` until staff close it with ``requeue_outbox --topic billz.push_sale --dead --resolved
+--order <id>``.
 """
 
 from __future__ import annotations
@@ -32,7 +38,8 @@ class Command(BaseCommand):
         parser.add_argument(
             "--billz-sale-id",
             default="",
-            help="The Billz sale id (UUID) staff entered, when known; default: the draft the push created.",
+            help="The Billz sale id (UUID) staff entered; default: the draft the push created (required when "
+            "the push created none).",
         )
         parser.add_argument("--actor", required=True, help="The email of the staff member who entered it.")
         parser.add_argument(

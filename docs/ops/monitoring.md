@@ -20,7 +20,8 @@ The admin audit log (`GET audit-log/`) keeps the durable trail: `outbox.dead`, `
 what `requeue_outbox` replays and what K1/K6 list) until staff either replay it (`requeue_outbox --topic <topic>
 --dead [--id N]`) or, when they handled it by hand (a sale entered in Billz, a refund paid out in a cabinet),
 close it: `manage.py requeue_outbox --topic <topic> --dead --resolved --id <message id>` (dry run first; audited
-`outbox.resolved`; the row becomes `done` and is purged with the others after `OUTBOX_RETENTION_DAYS`).
+`outbox.resolved`; the row becomes `done` and is purged with the others after `OUTBOX_RETENTION_DAYS`). A
+`billz.push_sale` closes only once its sale is recorded with `billz_mark_recorded` (docs/integrations/billz.md §7).
 
 ## 1. Alert webhook
 
@@ -156,9 +157,9 @@ first due row (no sort, no done row visited), and the outbox checks filter its f
 
 | Check | Action |
 |---|---|
-| `k1_billz_sale_unrecorded` | Look at the order's `billz.push_sale` message: deferred for a closed shift → it goes through when the shift opens; dead → `billz.sale_dead`; done without a sale → the order was paid while Billz was fake (`billz.sale_not_pushed`): enter the sale in Billz by hand. A sale entered by hand stays listed — after the look-back under `k1_billz_sale_unrecorded_backlog` — because nothing records it on our side yet (proposal: a "recorded by hand" mark) |
+| `k1_billz_sale_unrecorded` | Look at the order's `billz.push_sale` message: deferred for a closed shift → it goes through when the shift opens; dead → `billz.sale_dead`; done without a sale → the order was paid while Billz was fake (`billz.sale_not_pushed`): enter the sale in Billz by hand. Then record it with `manage.py billz_mark_recorded --order <id> --actor <staff email> [--billz-sale-id <uuid>]` (docs/integrations/billz.md §7): it sets the purchase's `billz_pushed_at` and Billz sale id, so the order leaves this check (and `_backlog`) at the next report; until then a sale entered by hand stays listed |
 | `k1_billz_sale_unrecorded_backlog` | as `k1_billz_sale_unrecorded`; these are older than the look-back, so their push message is usually dead (§2 `billz.sale_dead`) or was done while Billz was fake |
-| `k1_billz_sale_dead` | as `billz.sale_dead` (§2); a sale entered in Billz by hand → close its message with `requeue_outbox --topic billz.push_sale --dead --resolved --id <message id>` (the message id is in the `billz.sale_dead` line and the `outbox.dead` audit row) |
+| `k1_billz_sale_dead` | as `billz.sale_dead` (§2); a sale entered in Billz by hand → first `billz_mark_recorded` (above), then close its message with `requeue_outbox --topic billz.push_sale --dead --resolved --order <order id>` (or `--id <message id>`, named in the `billz.sale_dead` line and the `outbox.dead` audit row); `--resolved` refuses a sale not recorded yet |
 | `k2_payment_pending_stuck` | Check the transaction in the provider's cabinet. Payme keeps a state-1 transaction up to its 12 h timeout and then cancels it: a Payme row younger than ~13 h usually resolves itself. Money taken → follow the late-capture refund |
 | `k2_click_paid_without_paydoc` | The Click Complete arrived without `click_paydoc_id` (see the webhook inbox row `payment:<id>`): a protocol issue for the developers; refunds of such payments are paid out by hand |
 | `k3_refund_open` | Payments screen (`refund_state` filter): `manual_required` (Payme) → refund in the Payme cabinet, Payme confirms it; `unknown` → check the payment in the Click cabinet and *Resolve*; `requested` / `submitting` for a day → the outbox is stuck (K6) |
