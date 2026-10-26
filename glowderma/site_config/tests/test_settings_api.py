@@ -32,7 +32,7 @@ def test_get_returns_the_typed_singleton(staff_client: APIClient) -> None:
         "pickup_address": {"uz": "Toshkent, Chilonzor", "ru": "", "en": ""},
         "integrations": {
             "mode": "fake",
-            "providers": dict.fromkeys(("oauth", "billz", "fcm", "click", "payme", "bts"), "fake"),
+            "providers": dict.fromkeys(("oauth", "billz", "fcm", "click", "payme", "bts", "eskiz"), "fake"),
         },
         "updated_at": body["updated_at"],
         "updated_by": None,

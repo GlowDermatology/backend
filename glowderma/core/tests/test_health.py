@@ -50,7 +50,7 @@ def test_health_ready_other_failure_503(check: str, target: str, caplog: pytest.
 def test_health_ready_lists_every_provider_mode() -> None:
     from django.test import override_settings
 
-    modes = {f"{name}_MODE": "fake" for name in ("OAUTH", "BILLZ", "FCM", "PAYME", "BTS")}
+    modes = {f"{name}_MODE": "fake" for name in ("OAUTH", "BILLZ", "FCM", "PAYME", "BTS", "ESKIZ")}
     with override_settings(**modes, CLICK_MODE="live"):
         body = Client().get("/api/v1/health/?ready=1").json()
     assert body["integrations"] == {
@@ -60,6 +60,7 @@ def test_health_ready_lists_every_provider_mode() -> None:
         "click": "live",
         "payme": "fake",
         "bts": "fake",
+        "eskiz": "fake",
     }
     assert set(body) == {"status", "checks", "version", "integrations"}
     assert "integrations" not in Client().get("/api/v1/health/").json()
@@ -103,4 +104,13 @@ def test_provider_modes_serializer_follows_the_settings_map(monkeypatch: pytest.
 
     assert set(ProviderModesSerializer().fields) == set(integration_modes.PROVIDER_MODE_SETTINGS)
     monkeypatch.setitem(integration_modes.PROVIDER_MODE_SETTINGS, "sms", "SMS_MODE")
-    assert list(ProviderModesSerializer().fields) == ["oauth", "billz", "fcm", "click", "payme", "bts", "sms"]
+    assert list(ProviderModesSerializer().fields) == [
+        "oauth",
+        "billz",
+        "fcm",
+        "click",
+        "payme",
+        "bts",
+        "eskiz",
+        "sms",
+    ]

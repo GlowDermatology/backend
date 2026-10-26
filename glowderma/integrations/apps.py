@@ -29,14 +29,16 @@ def ensure_provider_rows(sender: AppConfig, *, using: str, apps: Any = global_ap
 
 
 def warn_fake_providers() -> bool:
-    """Log one WARNING per process listing the providers in ``fake`` mode when the settings are production.
+    """Log one WARNING per process listing the providers in ``fake`` mode outside the local/test settings.
 
     Fake providers are allowed in production (product owner decision 2026-10-26), so this is a log line,
-    never a system check (CI runs ``check --deploy --fail-level WARNING``) and never a refusal to start.
+    never a system check (CI runs ``check --deploy --fail-level WARNING``) and never a refusal to start. The
+    condition is ``not DEV_FEATURES_ALLOWED``, the same as ``integration_modes.fake_in_production`` (customer
+    contract §6.14), so the warning names exactly the providers that run in the restricted fake posture.
     Returns whether the line was emitted by this call.
     """
     global _fake_mode_warned
-    if _fake_mode_warned or not integration_modes.is_production():
+    if _fake_mode_warned or integration_modes.dev_features_allowed():
         return False
     fakes = integration_modes.fake_providers()
     if not fakes:
