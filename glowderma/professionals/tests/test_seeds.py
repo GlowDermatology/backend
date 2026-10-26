@@ -61,6 +61,13 @@ def test_seed_is_idempotent_and_reproduces_the_design() -> None:
         (4, "Kimyoviy pilling", "Kimyoviy pilling", 60),
         (5, "Namlantiruvchi parvarish", "Namlantiruvchi parvarish", 60),
     ]
+    assert list(Service.objects.values_list("category", flat=True)) == [
+        enums.ServiceCategory.DERMATOLOGY,
+        enums.ServiceCategory.DERMATOLOGY,
+        enums.ServiceCategory.COSMETOLOGY,
+        enums.ServiceCategory.COSMETOLOGY,
+        enums.ServiceCategory.COSMETOLOGY,
+    ]
     links = {
         (pid, sid): (price, duration)
         for pid, sid, price, duration in ProfessionalService.objects.values_list(

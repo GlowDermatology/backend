@@ -1,11 +1,17 @@
-"""professionals.0001_initial: dependencies, reversibility and the constraints it creates."""
+"""professionals.0001_initial / 0002: dependencies, reversibility, the constraints they create and the
+service categories 0002 infers."""
 
 from importlib import import_module
 
 import pytest
+from django.apps import apps
 from django.core.management import call_command
 from django.db import connection
 from django.db.migrations.recorder import MigrationRecorder
+
+from glowderma.core import enums
+from glowderma.professionals.models import Professional, Service
+from glowderma.professionals.tests.factories import ProfessionalServiceFactory, ServiceFactory
 
 TABLES = {
     "professionals_location",
@@ -85,7 +91,68 @@ def test_migrate_zero_and_forward_again() -> None:
     assert TABLES <= table_names()
     assert MigrationRecorder.Migration.objects.filter(app="professionals", name="0001_initial").exists()
     assert "workinghours_break_inside_day" in constraint_names("professionals_workinghours", "c")
+    assert MigrationRecorder.Migration.objects.filter(
+        app="professionals", name="0002_qualifications_staff_user_service_category"
+    ).exists()
+    assert {"qualifications_uz", "staff_user_id"} <= column_names("professionals_professional")
+    assert "category" in column_names("professionals_service")
     # ``migrate professionals zero`` also unapplied every app depending on professionals (appointments, ...);
     # the forward ``migrate professionals`` did not bring them back, so leave the test DB fully migrated
     call_command("migrate", verbosity=0)
     assert "appointments_appointment" in table_names()
+
+
+def column_names(table: str) -> set[str]:
+    with connection.cursor() as cursor:
+        return {column.name for column in connection.introspection.get_table_description(cursor, table)}
+
+
+def test_0002_depends_on_0001_and_accounts() -> None:
+    migration = import_module(
+        "glowderma.professionals.migrations.0002_qualifications_staff_user_service_category"
+    ).Migration
+    assert migration.dependencies == [("professionals", "0001_initial"), ("accounts", "0001_initial")]
+
+
+@pytest.mark.django_db
+def test_0002_infers_the_category_from_who_offers_the_service() -> None:
+    infer = import_module(
+        "glowderma.professionals.migrations.0002_qualifications_staff_user_service_category"
+    ).infer_categories
+    cosmetic = ProfessionalServiceFactory.create(professional__role="cosmetologist").service
+    both = ProfessionalServiceFactory.create(professional__role="cosmetologist").service
+    ProfessionalServiceFactory.create(service=both, professional__role="dermatologist")
+    dermatologic = ProfessionalServiceFactory.create(professional__role="dermatologist").service
+    nobody = ServiceFactory.create()
+    infer(apps, None)
+    infer(apps, None)  # deterministic: a second run changes nothing
+    categories = dict(Service.objects.values_list("pk", "category"))
+    assert categories == {
+        cosmetic.pk: enums.ServiceCategory.COSMETOLOGY,
+        both.pk: enums.ServiceCategory.DERMATOLOGY,
+        dermatologic.pk: enums.ServiceCategory.DERMATOLOGY,
+        nobody.pk: enums.ServiceCategory.DERMATOLOGY,
+    }
+
+
+@pytest.mark.django_db
+def test_the_previous_release_can_still_insert_rows() -> None:
+    """The new NOT NULL columns have database defaults: an INSERT without them (a process of the previous
+    release during the rollout) succeeds."""
+    location = Professional._meta.get_field("location").related_model.objects.create(name_uz="Klinika")
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO professionals_service (created_at, updated_at, name_uz, name_ru, name_en, "
+            "short_name_uz, short_name_ru, short_name_en, description_uz, description_ru, description_en, "
+            "default_duration_min, position, is_active) VALUES (now(), now(), 'Eski', '', '', 'Eski', "
+            "'', '', '', '', '', 30, 0, true) RETURNING category"
+        )
+        assert cursor.fetchone() == ("dermatology",)
+        cursor.execute(
+            "INSERT INTO professionals_professional (created_at, updated_at, location_id, name, role, photo, "
+            "bio_uz, bio_ru, bio_en, slot_step_min, position, is_active) VALUES (now(), now(), %s, 'Eski', "
+            "'dermatologist', '', '', '', '', 30, 0, true) RETURNING qualifications_uz, staff_user_id",
+            [location.pk],
+        )
+        assert cursor.fetchone() == ("", None)
+

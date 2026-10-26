@@ -59,7 +59,16 @@ class Professional(TimeStampedModel):
     bio_uz = models.TextField(blank=True)
     bio_ru = models.TextField(blank=True)
     bio_en = models.TextField(blank=True)
+    # Diplomas, certificates, memberships (FND-7), free text per language; "" = not filled.
+    # ``db_default``: a process still running the previous release inserts rows without these columns.
+    qualifications_uz = models.TextField(blank=True, default="", db_default="")
+    qualifications_ru = models.TextField(blank=True, default="", db_default="")
+    qualifications_en = models.TextField(blank=True, default="", db_default="")
     experience_years = models.PositiveSmallIntegerField(null=True)
+    # The specialist's own staff account, if any (FND-7): informational, grants nothing by itself.
+    staff_user = models.OneToOneField(
+        "accounts.StaffUser", null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
     slot_step_min = models.PositiveSmallIntegerField(default=30)  # slot grid used by M2 /slots
     position = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
@@ -92,6 +101,13 @@ class Service(TimeStampedModel):
     description_uz = models.TextField(blank=True)
     description_ru = models.TextField(blank=True)
     description_en = models.TextField(blank=True)
+    # The discipline (FND-7); the admin API requires it on create, the default keeps older writers working.
+    category = models.CharField(
+        max_length=16,
+        choices=enums.ServiceCategory.choices,
+        default=enums.ServiceCategory.DERMATOLOGY,
+        db_default=enums.ServiceCategory.DERMATOLOGY,
+    )
     default_duration_min = models.PositiveSmallIntegerField()
     default_price = models.BigIntegerField(null=True)  # suggested when assigning to a professional
     position = models.PositiveIntegerField(default=0)
