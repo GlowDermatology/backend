@@ -21,6 +21,7 @@ from glowderma.core.models import OutboxMessage
 from glowderma.integrations import services as integration_services
 from glowderma.integrations.eskiz import registry as eskiz_registry
 from glowderma.integrations.eskiz.fake import FakeEskiz
+from glowderma.integrations.eskiz.live import LiveEskiz
 from glowderma.integrations.eskiz.ports import EskizUnavailable, SmsMessage
 from glowderma.integrations.oauth import fake as oauth_fake
 from glowderma.integrations.oauth.registry import fake_apple
@@ -134,8 +135,9 @@ def test_fake_eskiz_in_production_keeps_nothing_and_the_fixed_code_is_off(
 def test_fixed_code_under_local_settings() -> None:
     assert eskiz_registry.new_code() == "123456"
     with override_settings(ESKIZ_MODE="live"):
-        with pytest.raises(Exception, match="M3"):
-            eskiz_registry.get_eskiz_port()
+        assert isinstance(eskiz_registry.get_eskiz_port(), LiveEskiz)
+        codes = {eskiz_registry.new_code() for _ in range(5)}  # the fixed code is a fake-mode switch only
+    assert codes != {"123456"} and all(len(code) == 6 and code.isdigit() for code in codes)
 
 
 # --- apple.revoke
