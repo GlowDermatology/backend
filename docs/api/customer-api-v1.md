@@ -1441,7 +1441,9 @@ links to active services (`professionals.selectors.booking_catalogue`).
 ```jsonc
 // Specialist
 {"id": 1, "name": "Nodira Rahimova", "role": "dermatologist", "role_label": "Dermatolog",
- "photo_url": null, "bio": "…", "experience_years": 8,
+ "photo_url": null, "bio": "…",
+ "qualifications": "…",                                // FND-7: diplomas, certificates (localized like bio; "" = none)
+ "experience_years": 8,
  "location": {"id": 1, "name": "Glow Derma Yunusobod", "address": "…", "phone": "+998712000000",
               "latitude": 41.36, "longitude": 69.28},
  "services": [{"id": 1, "name": "Dermatolog konsultatsiyasi", "short_name": "Konsultatsiya",
@@ -1449,8 +1451,12 @@ links to active services (`professionals.selectors.booking_catalogue`).
  "slot_step_min": 30}
 ```
 **`GET specialists/{id}/`** → `Specialist` (404 when inactive). **`GET services/`** (**O**) →
-`{"results": [{"id", "name", "short_name", "description", "duration_min" /* default */, "price_from", "price_to",
-"specialist_ids": [int]}]}` (active services offered by ≥1 active specialist).
+`{"results": [{"id", "name", "short_name", "description", "category" /* ServiceCategory, FND-7 */,
+"category_label", "duration_min" /* default */, "price_from", "price_to", "specialist_ids": [int]}]}` (active services
+offered by ≥1 active specialist). Staff manage all of it in the admin API (admin §2.17); the catalogue and the slots
+are read from the database on every request (no cache), so a change is visible at once: a deactivated specialist
+answers 404 here and on `slots/`, a deactivated service or offer disappears, a new price applies to the next
+booking (booked appointments keep their snapshots).
 
 **`GET specialists/{id}/slots/?date=YYYY-MM-DD&service_id=`** (**O**) — free start times.
 
@@ -1474,7 +1480,7 @@ the specialist (pending requests hold the slot, P1).
 
 | Check (in order) | Code · message (uz) · key |
 |---|---|
-| `specialist_id` active | `does_not_exist` "Mutaxassis topilmadi." · `field.specialist_not_found` |
+| `specialist_id` active (re-read under a `FOR KEY SHARE` lock of the specialist after the customer lock: a deactivation committed meanwhile answers the same) | `does_not_exist` "Mutaxassis topilmadi." · `field.specialist_not_found` |
 | `service_id` offered (active link, active service) | `does_not_exist` · `field.service_not_offered` |
 | consent current | 409 `terms_update_required` · `error.terms_update_required`, `details {current_version}` |
 | — *Customer row locked (`select_for_update(no_key=True)`, §2.7.1) before the next two checks, so concurrent bookings of one customer serialise* — | |
@@ -2139,6 +2145,7 @@ gains `refresh_reused` (§2.1.6).
 | LedgerKind | `credit`, `debit`, `adjustment`, `reversal` | ledger |
 | ContentLanguage | `uz`, `ru`, `en` | `me.language`, `Accept-Language` |
 | SpecialistRole | `dermatologist`, `cosmetologist` | specialists |
+| ServiceCategory (admin §3.1, FND-7) | `dermatology`, `cosmetology` | `services/` `category` |
 | AppointmentStatus | `requested`, `confirmed`, `rejected`, `attended`, `cancelled` (the `cancelled` literal reserved by T3 is now public) | appointments |
 | BannerLinkKind | `none`, `product`, `category` | banners |
 | **OtpPurpose** (new) | `register`, `login_new_device`, `reset_password`, `link_social` (`send-code` accepts all but `login_new_device`) | `auth/send-code/`, `auth/verify-code/` |
@@ -2440,6 +2447,7 @@ code a customer view can raise to an existing key.
 | `label.cashback.promo_rule` | Aksiyadagi mahsulotlarga cashback berilmaydi. | На акционные товары кешбэк не начисляется. | Promotional products do not earn cashback. |
 | `label.appointment_status.requested` / `.confirmed` / `.rejected` / `.attended` / `.cancelled` | Tasdiqlanishi kutilmoqda / Tasdiqlandi / Rad etildi / Qabul bo‘lib o‘tdi / Bekor qilindi | Ожидает подтверждения / Подтверждена / Отклонена / Состоялась / Отменена | Awaiting confirmation / Confirmed / Declined / Completed / Cancelled |
 | `label.role.dermatologist` / `.cosmetologist` | Dermatolog / Kosmetolog | Дерматолог / Косметолог | Dermatologist / Cosmetologist |
+| `label.service_category.dermatology` / `.cosmetology` | Dermatologiya / Kosmetologiya | Дерматология / Косметология | Dermatology / Cosmetology |
 | `push.account_security.social_linked.title` / `.body` | Hisobingizga yangi kirish usuli qo‘shildi / Hisobingizga {provider} profili bog‘landi. Agar bu siz bo‘lmasangiz, parolni tiklang. | Добавлен новый способ входа / К аккаунту привязан профиль {provider}. Если это были не вы, восстановите пароль. | A new sign-in method was added / A {provider} profile was linked to your account. If this wasn't you, reset your password. |
 | `push.account_security.social_unlinked.title` / `.body` | Kirish usuli o‘chirildi / {provider} profili hisobingizdan uzildi. | Способ входа удалён / Профиль {provider} отвязан от аккаунта. | A sign-in method was removed / The {provider} profile was unlinked from your account. |
 | `push.account_security.password_reset.title` / `.body` | Parol o‘zgartirildi / Hisobingiz paroli yangilandi. Agar bu siz bo‘lmasangiz, sotuvchi bilan bog‘laning. | Пароль изменён / Пароль аккаунта обновлён. Если это были не вы, свяжитесь с продавцом. | Password changed / Your account password was changed. If this wasn't you, contact the seller. |
