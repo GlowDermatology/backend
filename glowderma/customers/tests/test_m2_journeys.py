@@ -264,7 +264,8 @@ def world(commit: Commit, fcm: FakeFcm, staff_client: APIClient, clock: Clock) -
 def publish_terms(
     version: str, *, terms_uz: str = "Foydalanish shartlari", privacy_uz: str = "Maxfiylik"
 ) -> None:
-    """Staff publish the terms (no API exists for it): the singleton row, and the 60 s ``settings/public/``
+    """Publish the terms at a fixed version (written directly; the admin publish path, which stamps dated
+    versions, has its own journey): the singleton row, and the 60 s ``settings/public/``
     cache dropped as ``site_config.services.update_settings`` does on commit."""
     SiteSettings.objects.filter(pk=1).update(
         terms_version=version,
