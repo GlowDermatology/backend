@@ -849,3 +849,53 @@ def test_registry_builds_the_live_adapter_from_settings() -> None:
     assert adapter.client.limiter.interval == pytest.approx(1 / 1.5)
     with override_settings(BILLZ_PAYMENT_TYPE_ID=""):
         assert get_billz().is_configured() is False
+
+
+@pytest.mark.redis_integration
+def test_limiter_and_token_lock_on_the_real_redis_cache() -> None:
+    """Two RedisCache instances (two worker processes) against the development Redis: a slot and the renewal
+    lock are won by exactly one, and the token pair round-trips through Redis. Only this test's own keys (a
+    unique prefix) are deleted afterwards — never ``clear()``, which would flush the shared database."""
+    from uuid import uuid4
+
+    from django.core.cache.backends.redis import RedisCache
+    from redis.exceptions import RedisError
+
+    def backend(prefix: str) -> RedisCache:
+        return RedisCache(
+            "redis://localhost:6380/0",
+            {"KEY_PREFIX": prefix, "OPTIONS": {"socket_connect_timeout": 1, "socket_timeout": 1}},
+        )
+
+    prefix = f"billz-test-{uuid4().hex}"
+    first, second = backend(prefix), backend(prefix)
+    try:
+        first.get("ping")
+    except RedisError:
+        pytest.skip("Development Redis is unavailable on localhost:6380")
+    clock = Clock()
+    limiters = [
+        RateLimiter(2.0, cache=backend_, clock=clock, sleep=clock.sleep) for backend_ in (first, second)
+    ]
+    starts: list[float] = []
+    try:
+        starts = [limiters[index % 2].acquire() for index in range(6)]
+        assert all(b - a == pytest.approx(0.5) for a, b in zip(starts, starts[1:], strict=False))
+        assert first.add(billz_client.LOCK_KEY, "a", timeout=5) is True
+        assert second.add(billz_client.LOCK_KEY, "b", timeout=5) is False
+        first.delete(billz_client.LOCK_KEY)
+        server = BillzServer()
+        assert (
+            BillzClient(config(), transport=server.transport, cache=first).access_token()
+            == "access-from-login"
+        )
+        assert (
+            BillzClient(config(), transport=server.transport, cache=second).access_token()
+            == "access-from-login"
+        )
+        assert server.count("POST /v1/auth/login") == 1  # the second "process" read the pair from Redis
+    finally:
+        # the slot keys of the logins expire on their own within a minute; the token pair would live for days
+        own = [f"{billz_client.RATE_PREFIX}:{round(start / 0.5)}" for start in starts]
+        own += [billz_client.LOCK_KEY, billz_client.TOKENS_KEY, f"{billz_client.RATE_PREFIX}:pause"]
+        first.delete_many(own)
