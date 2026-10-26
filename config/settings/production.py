@@ -161,6 +161,8 @@ PROVIDER_SECRETS = ("CLICK_SECRET_KEY", "PAYME_KEY")
 
 
 def _refuse_placeholder(name: str, value: str) -> None:
+    if not value.strip():  # env_str returns a whitespace-only value unchanged
+        raise ImproperlyConfigured(f"{name} is required")
     if "change-me" in value.lower():
         raise ImproperlyConfigured(f"{name} is a placeholder value; set the real secret")
     if value in KNOWN_PLACEHOLDER_SECRETS:
@@ -177,7 +179,7 @@ PAYME_KEY = env_str("PAYME_KEY")
 for _name in CUSTOMER_HMAC_KEYS:
     _value = env_str(_name)
     _refuse_placeholder(_name, _value)
-    if len(_value) < 32:
+    if len(_value.strip()) < 32:
         raise ImproperlyConfigured(f"{_name} must be at least 32 characters")
 for _name in PROVIDER_SECRETS:
     _refuse_placeholder(_name, env_str(_name))

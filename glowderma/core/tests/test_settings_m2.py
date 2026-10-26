@@ -183,6 +183,32 @@ def test_production_requires_each_customer_key(
         load_fresh_production()
 
 
+@pytest.mark.parametrize("variable", [*KEY_NAMES, "CLICK_SECRET_KEY", "PAYME_KEY", "SECRETBOX_KEY"])
+def test_production_refuses_a_whitespace_only_customer_key(
+    production_env: None,
+    load_fresh_production: Callable[[], ModuleType],
+    monkeypatch: pytest.MonkeyPatch,
+    variable: str,
+) -> None:
+    """A blank Payme key would otherwise boot and fail every Basic-auth check at runtime (fix pass 2)."""
+    monkeypatch.setenv("INTEGRATIONS_MODE", "fake")
+    monkeypatch.setenv(variable, "   ")
+    with pytest.raises(ImproperlyConfigured, match=f"{variable} is required"):
+        load_fresh_production()
+
+
+@pytest.mark.parametrize("variable", KEY_NAMES)
+def test_production_measures_hmac_keys_without_surrounding_whitespace(
+    production_env: None,
+    load_fresh_production: Callable[[], ModuleType],
+    monkeypatch: pytest.MonkeyPatch,
+    variable: str,
+) -> None:
+    monkeypatch.setenv(variable, " " * 8 + "x" * 31 + " " * 8)
+    with pytest.raises(ImproperlyConfigured, match=f"{variable} must be at least 32 characters"):
+        load_fresh_production()
+
+
 @pytest.mark.parametrize("variable", sorted(LOCAL_DEFAULTS))
 def test_production_refuses_committed_key_values_even_with_fake_providers(
     production_env: None,
