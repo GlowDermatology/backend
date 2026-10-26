@@ -29,7 +29,17 @@ def test_get_returns_the_typed_singleton(staff_client: APIClient) -> None:
     assert body == {
         "reservation_minutes": 15,
         "support_phone": None,
+        "store_phone": None,
+        "cosmetologist_phone": None,
+        "telegram_url": None,
+        "instagram_url": None,
+        "website_url": None,
         "pickup_address": {"uz": "Toshkent, Chilonzor", "ru": "", "en": ""},
+        "terms": {"uz": "", "ru": "", "en": ""},
+        "privacy_policy": {"uz": "", "ru": "", "en": ""},
+        "booking_policy": {"uz": "", "ru": "", "en": ""},
+        "terms_version": None,
+        "terms_updated_at": None,
         "integrations": {
             "mode": "fake",
             "providers": dict.fromkeys(("oauth", "billz", "fcm", "click", "payme", "bts", "eskiz"), "fake"),
