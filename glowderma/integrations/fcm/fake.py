@@ -9,6 +9,8 @@ provider:
     Rejected with ``payload_invalid`` (a malformed message: the device is left alone).
 ``<anything>-down``
     The provider is unreachable: the whole batch raises :class:`FcmUnavailable`.
+``<anything>-busy``
+    Not sent (``not_sent``: FCM answered 429/5xx for that message); the caller sends it again later.
 anything else
     Accepted with the message id ``fake-<sha256(token)[:12]>-<n>`` (``n`` = position in the batch).
 
@@ -24,9 +26,10 @@ from hashlib import sha256
 
 from glowderma.core import integration_modes
 
-from .ports import PAYLOAD_INVALID, UNREGISTERED, FcmUnavailable, PushMessage, PushResult
+from .ports import NOT_SENT, PAYLOAD_INVALID, UNREGISTERED, FcmUnavailable, PushMessage, PushResult
 
 BAD_SUFFIX = "-bad"
+BUSY_SUFFIX = "-busy"
 PAYLOAD_SUFFIX = "-payload"
 DOWN_SUFFIX = "-down"
 
@@ -51,6 +54,9 @@ class FakeFcm:
             if message.token.endswith(PAYLOAD_SUFFIX):
                 results.append(PushResult(ok=False, error=PAYLOAD_INVALID))
                 continue
+            if message.token.endswith(BUSY_SUFFIX):
+                results.append(PushResult(ok=False, error=NOT_SENT))
+                continue
             digest = sha256(message.token.encode()).hexdigest()[:12]
             message_id = f"fake-{digest}-{index}"
             if record:
@@ -60,4 +66,6 @@ class FakeFcm:
                     "fcm.fake_accepted message_id=%s type=%s", message_id, message.data.get("type", "")
                 )
             results.append(PushResult(ok=True, message_id=message_id))
+        if results and all(result.error == NOT_SENT for result in results):
+            raise FcmUnavailable("fake provider busy: nothing was sent")
         return results

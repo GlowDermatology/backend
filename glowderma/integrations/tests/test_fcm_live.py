@@ -17,17 +17,19 @@ from cryptography.hazmat.primitives import serialization
 from django.test import override_settings
 
 from glowderma.integrations import httpclient
+from glowderma.integrations.fcm import live as fcm_live
 from glowderma.integrations.fcm import protocol
 from glowderma.integrations.fcm.live import (
     THIRD_PARTY_AUTH_ERROR,
-    UNAVAILABLE,
     LiveFcm,
     ServiceAccountError,
     access_tokens,
     load_service_account,
 )
 from glowderma.integrations.fcm.ports import (
+    NOT_SENT,
     PAYLOAD_INVALID,
+    UNAVAILABLE,
     UNREGISTERED,
     FcmUnavailable,
     PushMessage,
@@ -226,7 +228,6 @@ def test_only_a_dead_token_answer_prunes() -> None:
         reply("fcm", "error_internal", 500),
         reply("fcm", "error_quota", 429),
         httpx.Response(502, text="<html>bad gateway</html>"),
-        read_timeout,
         connect_error,
     ],
 )
@@ -236,13 +237,116 @@ def test_a_batch_nobody_accepted_raises_for_the_outbox_retry(credentials: Path, 
         fcm(script, credentials).send([order_push("a"), order_push("b")])
 
 
-def test_a_transient_failure_after_an_acceptance_fails_only_the_rest(credentials: Path) -> None:
+def test_a_transient_failure_after_an_acceptance_gives_the_rest_back(credentials: Path) -> None:
+    """R4: 503 stops the batch; the message FCM refused and the ones never sent are ``not_sent`` (re-queued
+    by the caller), never "failed"."""
     script = Script().on("POST", SEND_PATH, reply("fcm", "send_ok"), reply("fcm", "error_unavailable", 503))
     results = fcm(script, credentials, concurrency=1).send(
         [order_push("a"), order_push("b"), order_push("c")]
     )
-    assert results[0].ok and results[1:] == [PushResult(ok=False, error=UNAVAILABLE)] * 2
+    assert results[0].ok and results[1:] == [PushResult(ok=False, error=NOT_SENT)] * 2
     assert len(script.to("POST", SEND_PATH)) == 2  # the batch stopped at the first transient failure
+
+
+def test_a_device_quota_error_does_not_stop_the_batch(credentials: Path) -> None:
+    """A-S7: QUOTA_EXCEEDED may be that device's rate: that message is ``not_sent``, the rest go out."""
+    script = Script().on(
+        "POST",
+        SEND_PATH,
+        reply("fcm", "send_ok"),
+        reply("fcm", "error_quota", 429),
+        reply("fcm", "send_ok"),
+    )
+    results = fcm(script, credentials, concurrency=1).send([order_push(f"t{n}") for n in range(4)])
+    assert [r.ok for r in results] == [True, False, True, True] and results[1].error == NOT_SENT
+    assert len(script.to("POST", SEND_PATH)) == 4
+
+
+def test_a_big_batch_with_one_overloaded_answer_fails_nothing_it_never_sent(credentials: Path) -> None:
+    """R4: 500 messages, one 503: what was never sent is ``not_sent``, never ``unavailable``."""
+    sent: list[str] = []
+    lock = threading.Lock()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        token = json.loads(request.content)["message"]["token"]
+        with lock:
+            sent.append(token)
+        if token == "t5":  # noqa: S105 - a device token
+            return reply("fcm", "error_unavailable", 503)
+        return reply("fcm", "send_ok")
+
+    results = fcm(Script().on("POST", SEND_PATH, handler), credentials, concurrency=8).send(
+        [order_push(f"t{n}") for n in range(500)]
+    )
+    assert all(r.ok or r.error == NOT_SENT for r in results)
+    assert {f"t{n}" for n, r in enumerate(results) if r.ok} <= set(sent)
+    assert sum(1 for r in results if r.error == NOT_SENT) >= 500 - len(sent)
+
+
+def test_an_answer_lost_after_sending_is_unknown_and_never_resent(credentials: Path) -> None:
+    """R15 / A-M1: a timeout or an undecodable answer after the request left: ``unavailable`` (failed, never
+    re-sent blindly), the rest of the batch ``not_sent``; nothing raises."""
+
+    def garbled(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers={"Content-Encoding": "gzip"}, stream=httpx.ByteStream(b"not gzip"))
+
+    for failure in (read_timeout, garbled):
+        script = Script().on("POST", SEND_PATH, failure)
+        results = fcm(script, credentials, concurrency=1).send([order_push("a"), order_push("b")])
+        assert results == [PushResult(ok=False, error=UNAVAILABLE), PushResult(ok=False, error=NOT_SENT)]
+        assert len(script.to("POST", SEND_PATH)) == 1
+
+
+def test_an_unexpected_error_keeps_the_results_already_accepted(
+    credentials: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """R1: one worker's surprise does not discard the batch's accepted results."""
+    real = LiveFcm._send_one
+
+    def flaky(self: LiveFcm, http: httpx.Client, message: PushMessage, budget: httpclient.Deadline) -> object:
+        if message.token == "t2":  # noqa: S105 - a device token
+            raise KeyError("a bug")
+        return real(self, http, message, budget)
+
+    monkeypatch.setattr(LiveFcm, "_send_one", flaky)
+    script = Script().on("POST", SEND_PATH, reply("fcm", "send_ok"))
+    results = fcm(script, credentials, concurrency=1).send([order_push(f"t{n}") for n in range(4)])
+    assert [r.ok for r in results[:2]] == [True, True]
+    assert results[2:] == [PushResult(ok=False, error=UNAVAILABLE), PushResult(ok=False, error=NOT_SENT)]
+    assert "fcm.send unexpected failure" in caplog.text
+
+
+def test_the_batch_has_a_time_budget(credentials: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """R8: a slow FCM never stretches one batch past BATCH_SECONDS; the rest is ``not_sent``."""
+    monkeypatch.setattr(fcm_live, "BATCH_SECONDS", 0.3)
+    monkeypatch.setattr(fcm_live, "MIN_SEND_SECONDS", 0.05)
+
+    def slow(request: httpx.Request) -> httpx.Response:
+        time.sleep(0.1)
+        return reply("fcm", "send_ok")
+
+    started = time.monotonic()
+    results = fcm(Script().on("POST", SEND_PATH, slow), credentials, concurrency=1).send(
+        [order_push(f"t{n}") for n in range(20)]
+    )
+    assert time.monotonic() - started < 1.0
+    assert results[0].ok and results[-1].error == NOT_SENT
+
+
+def test_the_production_batch_budget_fits_the_outbox_lease() -> None:
+    assert fcm_live.BATCH_SECONDS <= 120 < 300
+
+
+def test_a_batch_that_all_answers_sender_id_mismatch_is_a_configuration_error(
+    credentials: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Nit: a wrong FCM_PROJECT_ID makes every token "mismatch": no device is pruned, ERROR, retried."""
+    script = Script().on("POST", SEND_PATH, reply("fcm", "error_sender_id_mismatch", 403))
+    with caplog.at_level(logging.ERROR), pytest.raises(FcmUnavailable):
+        fcm(script, credentials).send([order_push(f"t{n}") for n in range(5)])
+    assert "fcm.sender_id_mismatch" in caplog.text
+    few = fcm(script, credentials).send([order_push(f"t{n}") for n in range(4)])  # below the breaker
+    assert {r.error for r in few} == {UNREGISTERED}
 
 
 def test_a_refused_access_token_is_renewed_once(credentials: Path, caplog: pytest.LogCaptureFixture) -> None:
@@ -284,9 +388,12 @@ def test_token_endpoint_and_credential_failures(
     with caplog.at_level(logging.ERROR), pytest.raises(FcmUnavailable):
         fcm(script, credentials).send([order_push()])
     assert "fcm.auth_failed" in caplog.text and script.to("POST", SEND_PATH) == []
+    caplog.clear()
     script = Script().on("POST", TOKEN_PATH, connect_error)
-    with pytest.raises(FcmUnavailable):
+    with caplog.at_level(logging.WARNING), pytest.raises(FcmUnavailable):
         fcm(script, credentials).send([order_push()])
+    # nit: an unreachable token endpoint is a WARNING (FCM unavailable), never a configuration ERROR
+    assert "fcm.token_unavailable" in caplog.text and "fcm.config_error" not in caplog.text
     with caplog.at_level(logging.ERROR), pytest.raises(FcmUnavailable):
         fcm(Script(), tmp_path / "missing.json").send([order_push()])
     assert "fcm.credentials_invalid" in caplog.text

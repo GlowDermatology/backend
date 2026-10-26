@@ -7,7 +7,7 @@ from django.test import override_settings
 from glowderma.integrations.fcm import registry
 from glowderma.integrations.fcm.fake import FakeFcm
 from glowderma.integrations.fcm.live import LiveFcm
-from glowderma.integrations.fcm.ports import UNREGISTERED, FcmUnavailable, PushMessage
+from glowderma.integrations.fcm.ports import NOT_SENT, UNREGISTERED, FcmUnavailable, PushMessage
 
 
 def test_fake_accepts_rejects_bad_tokens_and_keeps_order() -> None:
@@ -33,6 +33,13 @@ def test_fake_down_token_fails_the_whole_batch() -> None:
     with pytest.raises(FcmUnavailable):
         fcm.send([PushMessage("ok", "A", "a"), PushMessage("x-down", "B", "b")])
     assert fcm.sent == []
+
+
+def test_fake_busy_token_is_not_sent_and_a_batch_of_only_busy_ones_raises() -> None:
+    results = FakeFcm().send([PushMessage("a-busy", "t", "b"), PushMessage("ok", "t", "b")])
+    assert (results[0].ok, results[0].error, results[1].ok) == (False, NOT_SENT, True)
+    with pytest.raises(FcmUnavailable):
+        FakeFcm().send([PushMessage("a-busy", "t", "b")])
 
 
 def test_registry_returns_the_shared_fake_or_the_live_adapter() -> None:

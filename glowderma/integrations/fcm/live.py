@@ -7,18 +7,27 @@ PyJWT RS256 JWT-bearer grant — no firebase SDK (customer contract §2.14.2, ``
   = the service account, ``scope`` firebase.messaging, ``aud`` the token endpoint, one hour). The token is
   cached **in the process** (never in Redis or the database) until five minutes before it expires, minted
   single-flight under a lock, and refreshed once when FCM answers 401 for it.
-* **Send:** one ``POST …/messages:send`` per message, at most :data:`MAX_CONCURRENCY` in flight; each call is
-  bounded (3 s connect, 10 s in total). Results come back in order, one :class:`PushResult` per message.
+* **Send:** one ``POST …/messages:send`` per message, at most :data:`MAX_CONCURRENCY` in flight, each call
+  bounded (3 s connect, 10 s in total) and the whole batch by :data:`BATCH_SECONDS` (what is not sent by then
+  is ``not_sent``). Results come back in order, one :class:`PushResult` per message.
 
 Outcomes per message (:func:`.protocol.classify`): accepted → ``PushResult(ok, message_id)``; a dead token
 (``UNREGISTERED``, ``SENDER_ID_MISMATCH``, ``INVALID_ARGUMENT`` naming the token) → ``unregistered`` (the
 caller prunes the device); any other ``INVALID_ARGUMENT`` → ``payload_invalid`` (device untouched);
 ``THIRD_PARTY_AUTH_ERROR`` → ``third_party_auth_error`` (ERROR log; the device is fine, the project's APNs
-credentials are not). Transport failures, 5xx, ``UNAVAILABLE`` / ``INTERNAL`` / ``QUOTA_EXCEEDED``, a refused
-access token and a project/permission error stop the batch: when **no** message of the batch was accepted the
-whole call raises :class:`FcmUnavailable` (the caller gives every claim back and the outbox retries); once a
-message was accepted the batch cannot be retried without sending it twice, so the messages that did not go out
-answer ``unavailable`` (failed, device untouched).
+credentials are not). **Not delivered** → ``not_sent`` (the caller gives the claim back and sends it later):
+FCM answered 429 / 5xx / ``UNAVAILABLE`` / ``INTERNAL`` / ``QUOTA_EXCEEDED``, refused our access token or
+project (ERROR ``fcm.config_error``), the token endpoint could not be reached (WARNING
+``fcm.token_unavailable``), or the message was never sent because the batch stopped or ran out of time. A
+per-message ``QUOTA_EXCEEDED`` (that device's rate) does not stop the batch; every other "not delivered"
+answer does. **Unknown** → ``unavailable`` (failed, never resent: a blind resend could push twice): the
+request may have reached FCM but no answer came back, or anything unexpected happened while sending (logged
+with its traceback).
+
+A batch of :data:`SENDER_ID_MISMATCH_BREAKER` or more messages that **all** answer ``SENDER_ID_MISMATCH`` is a
+configuration error (a wrong ``FCM_PROJECT_ID`` or service account), not that many dead devices: ERROR
+``fcm.sender_id_mismatch``, nothing is pruned, every message is ``not_sent``. A call whose every message is
+``not_sent`` raises :class:`FcmUnavailable` (nothing went out: the caller gives every claim back).
 """
 
 from __future__ import annotations
@@ -34,21 +43,38 @@ from pathlib import Path
 
 import httpx
 import jwt
+from celery.exceptions import SoftTimeLimitExceeded  # type: ignore[import-untyped]
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from django.conf import settings
 
 from .. import httpclient
 from . import protocol
-from .ports import PAYLOAD_INVALID, UNREGISTERED, FcmUnavailable, PushMessage, PushResult
+from .ports import (
+    NOT_SENT,
+    PAYLOAD_INVALID,
+    UNAVAILABLE,
+    UNREGISTERED,
+    FcmUnavailable,
+    PushMessage,
+    PushResult,
+)
 
 logger = logging.getLogger(__name__)
 PROVIDER = "fcm"
 MAX_CONCURRENCY = 8
 REFRESH_MARGIN_SECONDS = 300
-UNAVAILABLE = "unavailable"
+BATCH_SECONDS = 120.0  # far below the 300 s outbox lease and the 540 s soft time limit
+MIN_SEND_SECONDS = 1.0  # a message is not started with less of the batch budget left
+SENDER_ID_MISMATCH_BREAKER = 5
 THIRD_PARTY_AUTH_ERROR = "third_party_auth_error"
-STOPPING = frozenset({protocol.TRANSIENT, protocol.AUTH, protocol.CONFIG})
+# Outcome kinds besides protocol's: never delivered (give the claim back), and an unknown outcome.
+NOT_SENT_KIND = "not_sent"
+UNKNOWN_KIND = "unknown"
+
+
+class _TokenUnavailable(FcmUnavailable):
+    """The token endpoint did not answer usefully (transport, 5xx, 429): FCM is not misconfigured."""
 
 
 class ServiceAccountError(ValueError):
@@ -128,9 +154,13 @@ class _Outcome:
     kind: str
     message_id: str = ""
     code: str = ""
+    stop: bool = False  # the batch sends nothing more after this outcome
 
 
-SKIPPED = _Outcome(protocol.TRANSIENT, code="not sent: the batch stopped")
+SKIPPED = _Outcome(NOT_SENT_KIND, code="not sent: the batch stopped")
+OUT_OF_TIME = _Outcome(NOT_SENT_KIND, code="not sent: the batch ran out of time")
+# Outcomes of a message FCM provably did not deliver (the caller gives the claim back).
+NOT_DELIVERED = frozenset({NOT_SENT_KIND, protocol.AUTH, protocol.CONFIG})
 
 
 class LiveFcm:
@@ -188,27 +218,32 @@ class LiveFcm:
                 headers={"Accept": "application/json"},
             )
         except httpclient.TransportFailure as exc:
-            raise FcmUnavailable(f"Google token endpoint: {exc}") from exc
+            logger.warning("fcm.token_unavailable %s", exc)
+            raise _TokenUnavailable(f"Google token endpoint: {exc}") from exc
         body = answer.json_object()
         token, expires_in = body.get("access_token"), body.get("expires_in")
-        if answer.status == 200 and isinstance(token, str) and token:
+        if answer.ok and isinstance(token, str) and token:
             return token, expires_in if isinstance(expires_in, int) and expires_in > 0 else 3600
-        if 400 <= answer.status < 500:
+        if 400 <= answer.status < 500 and answer.status not in (408, 425, 429):
             error = httpclient.safe_text(body.get("error"))
             logger.error("fcm.auth_failed token endpoint HTTP %s %s", answer.status, error)
-        raise FcmUnavailable(f"Google token endpoint: HTTP {answer.status}")
+            raise FcmUnavailable(f"Google token endpoint: HTTP {answer.status}")
+        logger.warning("fcm.token_unavailable HTTP %s", answer.status)
+        raise _TokenUnavailable(f"Google token endpoint: HTTP {answer.status}")
 
     # --- one message ----------------------------------------------------------------------------------------
 
-    def _send_one(self, http: httpx.Client, message: PushMessage) -> _Outcome:
-        deadline = httpclient.Deadline()
+    def _send_one(self, http: httpx.Client, message: PushMessage, budget: httpclient.Deadline) -> _Outcome:
+        deadline = httpclient.Deadline(min(httpclient.TOTAL_TIMEOUT_SECONDS, budget.remaining()))
         url = protocol.SEND_URL.format(project_id=self.project_id)
         document = protocol.message_document(message)
         for attempt in (1, 2):
             try:
                 token = access_tokens.get(self._token_key, lambda: self._mint(http, deadline))
+            except _TokenUnavailable as exc:
+                return _Outcome(NOT_SENT_KIND, code=str(exc), stop=True)
             except FcmUnavailable as exc:
-                return _Outcome(protocol.CONFIG, code=str(exc))
+                return _Outcome(protocol.CONFIG, code=str(exc), stop=True)
             try:
                 answer = httpclient.send(
                     http,
@@ -220,11 +255,17 @@ class LiveFcm:
                     headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
                 )
             except httpclient.TransportFailure as exc:
-                return _Outcome(protocol.TRANSIENT, code=str(exc))
+                # never sent: give it back; may have reached FCM: unknown, never resent blindly
+                return _Outcome(NOT_SENT_KIND if not exc.sent else UNKNOWN_KIND, code=str(exc), stop=True)
             verdict = protocol.classify(answer.status, answer.data)
             if verdict.kind == protocol.AUTH and attempt == 1:
                 access_tokens.invalidate(self._token_key, token)
                 continue
+            if verdict.kind == protocol.TRANSIENT:
+                # QUOTA_EXCEEDED is that device's (or topic's) rate: the batch goes on; every other one stops
+                return _Outcome(NOT_SENT_KIND, code=verdict.code, stop=verdict.code != "QUOTA_EXCEEDED")
+            if verdict.kind in (protocol.AUTH, protocol.CONFIG):
+                return _Outcome(verdict.kind, code=verdict.code, stop=True)
             return _Outcome(verdict.kind, verdict.message_id, verdict.code)
         raise AssertionError("unreachable")  # pragma: no cover - the second attempt always returns
 
@@ -235,12 +276,21 @@ class LiveFcm:
         if not batch:
             return []
         stop = threading.Event()
+        budget = httpclient.Deadline(BATCH_SECONDS)
 
         def run(http: httpx.Client, message: PushMessage) -> _Outcome:
             if stop.is_set():
                 return SKIPPED
-            outcome = self._send_one(http, message)
-            if outcome.kind in STOPPING:
+            if budget.remaining() < MIN_SEND_SECONDS:
+                return OUT_OF_TIME
+            try:
+                outcome = self._send_one(http, message, budget)
+            except SoftTimeLimitExceeded:
+                raise  # the worker's time is up: the caller decides what an interrupted push means
+            except Exception:  # noqa: BLE001 - one message's surprise must not discard the batch's results
+                logger.exception("fcm.send unexpected failure; the batch stops")
+                outcome = _Outcome(UNKNOWN_KIND, code="unexpected error", stop=True)
+            if outcome.stop:
                 stop.set()
             return outcome
 
@@ -257,21 +307,28 @@ class LiveFcm:
         counts: dict[str, int] = {}
         for outcome in outcomes:
             counts[outcome.kind] = counts.get(outcome.kind, 0) + 1
-        stopped = [outcome for outcome in outcomes if outcome.kind in STOPPING]
-        for outcome in stopped:
-            if outcome.kind in (protocol.AUTH, protocol.CONFIG):
-                logger.error(
-                    "fcm.config_error %s (check FCM_PROJECT_ID and the service account)", outcome.code
-                )
-                break
+        config = next((o for o in outcomes if o.kind in (protocol.AUTH, protocol.CONFIG)), None)
+        if config is not None:
+            logger.error("fcm.config_error %s (check FCM_PROJECT_ID and the service account)", config.code)
         if counts.get(protocol.THIRD_PARTY_AUTH):
             logger.error(
                 "fcm.third_party_auth_error count=%s (APNs credentials of the Firebase project)",
                 counts[protocol.THIRD_PARTY_AUTH],
             )
+        mismatched = sum(
+            1 for o in outcomes if o.kind == protocol.DEAD_TOKEN and o.code == "SENDER_ID_MISMATCH"
+        )
+        if len(outcomes) >= SENDER_ID_MISMATCH_BREAKER and mismatched == len(outcomes):
+            logger.error(
+                "fcm.sender_id_mismatch count=%s: every message of the batch; a configuration error "
+                "(check FCM_PROJECT_ID and the service account), no device pruned",
+                mismatched,
+            )
+            outcomes = [_Outcome(NOT_SENT_KIND, code="SENDER_ID_MISMATCH") for _ in outcomes]
         logger.info("fcm.send %s", {kind: counts[kind] for kind in sorted(counts)})
-        if stopped and not counts.get(protocol.OK):
-            raise FcmUnavailable(f"FCM did not accept the batch: {stopped[0].code}")
+        if all(outcome.kind in NOT_DELIVERED for outcome in outcomes):
+            reason = next((o.code for o in outcomes if o.code), "nothing was sent")
+            raise FcmUnavailable(f"FCM did not take the batch: {reason}")
         results: list[PushResult] = []
         for outcome in outcomes:
             if outcome.kind == protocol.OK:
@@ -282,6 +339,8 @@ class LiveFcm:
                 results.append(PushResult(ok=False, error=PAYLOAD_INVALID))
             elif outcome.kind == protocol.THIRD_PARTY_AUTH:
                 results.append(PushResult(ok=False, error=THIRD_PARTY_AUTH_ERROR))
+            elif outcome.kind in NOT_DELIVERED:
+                results.append(PushResult(ok=False, error=NOT_SENT))
             else:
                 results.append(PushResult(ok=False, error=UNAVAILABLE))
         return results

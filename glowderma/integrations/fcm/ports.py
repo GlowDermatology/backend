@@ -16,6 +16,13 @@ from typing import Protocol
 UNREGISTERED = "unregistered"
 # any other INVALID_ARGUMENT (a malformed message) → the message failed, the device is never touched.
 PAYLOAD_INVALID = "payload_invalid"
+# the message was provably **not** delivered (never sent: the batch stopped or ran out of time; or FCM
+# answered 429 / 5xx / UNAVAILABLE / INTERNAL / QUOTA_EXCEEDED, or refused our credentials) → the caller gives
+# the claim back and sends it again later (never "failed").
+NOT_SENT = "not_sent"
+# the request may have reached FCM but no answer came back → the outcome is unknown: failed, never resent
+# (a blind resend could push twice).
+UNAVAILABLE = "unavailable"
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,12 +66,15 @@ class PushResult:
 
 
 class FcmUnavailable(Exception):
-    """UNAVAILABLE, INTERNAL, QUOTA_EXCEEDED, 5xx or a transport error: the caller retries the batch later."""
+    """Nothing of the batch went out (every result would be ``not_sent``: FCM unreachable, overloaded or
+    refusing our credentials): the caller gives every claim back and the outbox retries the batch later."""
 
 
 class FcmPort(Protocol):
     name: str
 
     def send(self, messages: Sequence[PushMessage]) -> list[PushResult]:
-        """One result per message, in order. Raises :class:`FcmUnavailable` only for transport failures."""
+        """One result per message, in order: ``ok``, or ``error`` ``unregistered`` / ``payload_invalid`` /
+        ``not_sent`` (give the claim back, send later) / ``unavailable`` (unknown: never resent) / another
+        adapter code. Raises :class:`FcmUnavailable` only when no message went out at all."""
         ...

@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import Any
 
 from django.conf import settings
@@ -30,6 +31,7 @@ from glowderma.core.api.exceptions import Conflict, field_error
 from glowderma.core.images import ImageError, process_image
 from glowderma.core.media import absolute_media_url, media_name
 from glowderma.integrations.fcm.ports import (
+    NOT_SENT,
     PAYLOAD_INVALID,
     UNREGISTERED,
     FcmUnavailable,
@@ -58,6 +60,11 @@ MESSAGES = {
 IMAGE_MESSAGES = {"file_too_large": None, "unsupported_image": None}
 INTERRUPTED = "interrupted"  # a claim left in ``sending`` by a crash: never resent (design 03 §3.6)
 NO_DEVICE = "no_device"
+# M3 live FCM: messages FCM did not take (``not_sent``: 429/5xx answers, the batch stopped or ran out of time)
+# are given back and the same outbox message is delivered again after NOT_SENT_RETRY, without spending its
+# attempts, for at most NOT_SENT_GIVE_UP; then it dies like any push (``notification.push_dead``).
+NOT_SENT_RETRY = timedelta(minutes=1)
+NOT_SENT_GIVE_UP = timedelta(hours=6)
 
 # Customer contract §2.14.2: Android channel and priority per ``data.type`` (APNs: alert, priority 10 for
 # "high", 5 for "normal").
@@ -414,6 +421,11 @@ def send_batch(campaign_id: int, batch_no: int) -> None:
     that still sees ``batches_dispatched == batch_no`` moves the cursor, bumps the counter and enqueues the
     next batch or finishes. A delivery that lost the race settles only its own claims, refreshes the final
     tally when the campaign already finished, and enqueues nothing.
+
+    Pushes FCM did not take (``not_sent``: a 429/5xx answer, a batch that stopped or ran out of time) are
+    given back (``queued``, recipient still ``pending``) while the others are settled; the cursor stays and
+    ``outbox.RetryLater`` delivers this same batch again after :data:`NOT_SENT_RETRY`, which claims only the
+    given-back recipients (no attempt spent; dead after :data:`NOT_SENT_GIVE_UP`).
     """
     with transaction.atomic():
         campaign = Campaign.objects.select_for_update().get(pk=campaign_id)
@@ -436,32 +448,47 @@ def send_batch(campaign_id: int, batch_no: int) -> None:
     except FcmUnavailable:
         _release(claims)
         raise
+    not_sent = [claim for claim, result in zip(claims, results, strict=True) if result.error == NOT_SENT]
     with transaction.atomic():
         campaign = Campaign.objects.select_for_update().get(pk=campaign_id)
         now = timeutils.now()
+        lost = campaign.state != Campaign.State.SENDING or campaign.batches_dispatched != batch_no
         for claim, result in zip(claims, results, strict=True):
-            _settle(claim, result, now)
-        if campaign.state != Campaign.State.SENDING or campaign.batches_dispatched != batch_no:
+            if result.error != NOT_SENT or lost:
+                _settle(claim, result, now)
+        if lost:
             # Another delivery of this batch already advanced it (compare-and-set lost).
             if campaign.state == Campaign.State.SENT:
                 _refresh_tally(campaign)
                 campaign.save(update_fields=["sent", "failed"])
             return
-        if recipients:
-            campaign.send_cursor = recipients[-1].pk
-        campaign.batches_dispatched += 1
-        remaining = CampaignRecipient.objects.filter(campaign=campaign, id__gt=campaign.send_cursor).exists()
-        if remaining:
-            outbox.enqueue(
-                topics.CAMPAIGN_SEND_BATCH,
-                {"campaign_id": campaign.pk, "batch_no": batch_no + 1},
-                dedupe_key=topics.campaign_send_batch_key(campaign.pk, batch_no + 1),
-            )
+        if not_sent:
+            # FCM did not take these: give them back and deliver this batch again later (the cursor stays)
+            _release(not_sent)
         else:
-            campaign.state = Campaign.State.SENT
-            campaign.sent_at = now
-            _refresh_tally(campaign)
-        campaign.save()
+            if recipients:
+                campaign.send_cursor = recipients[-1].pk
+            campaign.batches_dispatched += 1
+            remaining = CampaignRecipient.objects.filter(
+                campaign=campaign, id__gt=campaign.send_cursor
+            ).exists()
+            if remaining:
+                outbox.enqueue(
+                    topics.CAMPAIGN_SEND_BATCH,
+                    {"campaign_id": campaign.pk, "batch_no": batch_no + 1},
+                    dedupe_key=topics.campaign_send_batch_key(campaign.pk, batch_no + 1),
+                )
+            else:
+                campaign.state = Campaign.State.SENT
+                campaign.sent_at = now
+                _refresh_tally(campaign)
+            campaign.save()
+    if not_sent:
+        raise outbox.RetryLater(
+            NOT_SENT_RETRY,
+            f"campaign {campaign_id} batch {batch_no}: {len(not_sent)} push(es) not sent by FCM",
+            give_up_after=NOT_SENT_GIVE_UP,
+        )
 
 
 # --- status pushes (handler bodies of push.order_status / push.appointment) --------------------------------
@@ -488,7 +515,9 @@ def _deliver(
     ``data`` gets the row's ``inbox_id`` (C§2.14.2) and the message the channel/priority of its type. A dead
     token (``unregistered``) prunes the device; ``payload_invalid`` fails the row with ``push_error =
     "payload_invalid"`` and an ERROR log and returns normally (the outbox message ends ``done``), never
-    touching the device.
+    touching the device. ``FcmUnavailable`` gives the claim back and raises (outbox retry); ``not_sent`` gives
+    it back and defers the message (``outbox.RetryLater``); any other exception (a soft time limit) fails the
+    row ``interrupted`` — never resent, never left ``sending`` — and re-raises.
     """
     with transaction.atomic():
         device = selectors.customer_push_device(customer.pk)
@@ -519,13 +548,21 @@ def _deliver(
         inbox.save(update_fields=["push_state"])
         token, device_id = device.fcm_token, device.pk
     message = _typed_message(token, inbox.title, inbox.body, {**data, "inbox_id": str(inbox.pk)})
+    sending = InboxNotification.objects.filter(pk=inbox.pk, push_state=InboxNotification.PushState.SENDING)
     try:
         [result] = get_fcm_port().send([message])
     except FcmUnavailable:
-        InboxNotification.objects.filter(pk=inbox.pk, push_state=InboxNotification.PushState.SENDING).update(
-            push_state=InboxNotification.PushState.QUEUED
-        )
+        sending.update(push_state=InboxNotification.PushState.QUEUED)
         raise
+    except Exception:
+        # an outcome nobody knows (a soft time limit, a bug): failed, never resent, never stuck "sending"
+        sending.update(push_state=InboxNotification.PushState.FAILED, push_error=INTERRUPTED)
+        raise
+    if result.error == NOT_SENT:
+        sending.update(push_state=InboxNotification.PushState.QUEUED)
+        raise outbox.RetryLater(
+            NOT_SENT_RETRY, f"push {inbox.pk} not sent by FCM", give_up_after=NOT_SENT_GIVE_UP
+        )
     now = timeutils.now()
     if result.ok:
         inbox.push_state, inbox.pushed_at = InboxNotification.PushState.SENT, now

@@ -12,12 +12,14 @@ from typing import Any
 
 import httpx
 import pytest
+from celery.exceptions import SoftTimeLimitExceeded  # type: ignore[import-untyped]
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from django.test import override_settings
 
 from glowderma.accounts.tests.factories import CustomerFactory, DeviceFactory
 from glowderma.commerce.tests.factories import OrderFactory
+from glowderma.core import outbox
 from glowderma.integrations import httpclient
 from glowderma.integrations.fcm.live import access_tokens
 from glowderma.integrations.fcm.ports import FcmUnavailable
@@ -136,3 +138,65 @@ def test_a_campaign_batch_records_one_result_per_recipient(clock: Any, live_fcm:
     dead.refresh_from_db()
     kept.refresh_from_db()
     assert dead.fcm_token == "" and kept.fcm_token == "c-payload"
+
+
+def test_a_campaign_batch_gives_back_what_fcm_did_not_take(clock: Any, live_fcm: Script) -> None:
+    """R4 / A-S7: one recipient's QUOTA_EXCEEDED does not fail it (nor the rest): its claim is given back,
+    the cursor stays, and the outbox delivers the same batch again later for it alone."""
+    first, busy, last = CustomerFactory.create(), CustomerFactory.create(), CustomerFactory.create()
+    DeviceFactory.create(customer=first, fcm_token="q-first")
+    DeviceFactory.create(customer=busy, fcm_token="q-busy")
+    DeviceFactory.create(customer=last, fcm_token="q-last")
+    answers = {
+        "q-first": reply("fcm", "send_ok"),
+        "q-busy": reply("fcm", "error_quota", 429),
+        "q-last": reply("fcm", "send_ok"),
+    }
+    live_fcm.on("POST", SEND_PATH, by_token(answers))
+    campaign = CampaignFactory.create()
+    services.materialise(campaign)
+    campaign.save()
+    with pytest.raises(outbox.RetryLater) as deferred:
+        services.send_batch(campaign.pk, 0)
+    assert deferred.value.delay == services.NOT_SENT_RETRY
+    states = dict(CampaignRecipient.objects.filter(campaign=campaign).values_list("customer_id", "state"))
+    assert states == {first.pk: "sent", busy.pk: "pending", last.pk: "sent"}
+    campaign.refresh_from_db()
+    assert (campaign.batches_dispatched, campaign.send_cursor, campaign.state) == (0, 0, "sending")
+    assert InboxNotification.objects.get(customer=busy).push_state == "queued"
+    answers["q-busy"] = reply("fcm", "send_ok")
+    services.send_batch(campaign.pk, 0)  # the deferred redelivery claims only the given-back recipient
+    campaign.refresh_from_db()
+    assert (campaign.state, campaign.sent, campaign.failed) == ("sent", 3, 0)
+    sent = [json.loads(r.content)["message"]["token"] for r in live_fcm.to("POST", SEND_PATH)]
+    assert sorted(sent) == ["q-busy", "q-busy", "q-first", "q-last"]
+
+
+def test_a_status_push_whose_outcome_is_unknown_is_failed_never_stuck_sending(
+    clock: Any, live_fcm: Script
+) -> None:
+    """R1 / R15: an answer lost after sending fails the row (never resent); a soft time limit while sending
+    fails it ``interrupted`` and propagates — never ``sending`` forever."""
+    customer = CustomerFactory.create()
+    DeviceFactory.create(customer=customer, fcm_token="u-device")
+
+    def garbled(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers={"Content-Encoding": "gzip"}, stream=httpx.ByteStream(b"not gzip"))
+
+    live_fcm.on("POST", SEND_PATH, garbled)
+    inbox = services.deliver_order_status(order_push(customer.pk))
+    assert inbox is not None and (inbox.push_state, inbox.push_error) == ("failed", "unavailable")
+
+    def soft_limit(request: httpx.Request) -> httpx.Response:
+        raise SoftTimeLimitExceeded()
+
+    other = CustomerFactory.create()
+    DeviceFactory.create(customer=other, fcm_token="u-other")
+    live_fcm.on("POST", SEND_PATH, soft_limit)
+    OrderFactory.create(id=10249, customer_id=other.pk, created_at=ANCHOR)
+    with pytest.raises(SoftTimeLimitExceeded):
+        services.deliver_order_status(
+            {"order_id": 10249, "status": "processing", "event_id": 2, "customer_id": other.pk}
+        )
+    row = InboxNotification.objects.filter(customer=other).get()
+    assert (row.push_state, row.push_error) == ("failed", "interrupted")
