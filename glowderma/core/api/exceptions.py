@@ -12,13 +12,19 @@ Field error codes come in two groups:
   ``slot_unavailable``, ``outside_working_hours``) have no default: the view raises
   them with the explicit message its contract table lists, e.g.
   ``ValidationError({"amount": [field_error("insufficient_balance", "Balansdan ko‘p ayirib bo‘lmaydi.")]})``.
+
+Customer audience (customer contract §1.6, §5): views whose class carries ``audience`` in
+``CUSTOMER_AUDIENCES`` (the customer, public, auth, POS and webhook base views) get the envelope with an extra
+``details`` key, and every ``message`` (top level and per field) is rendered through ``core.i18n`` in the
+resolved request language. Customer codes are :class:`CustomerError` subclasses carrying their catalog key;
+endpoint-specific field codes take ``field_error(code, message_key="field.…")``. Admin bodies never change.
 """
 
 import logging
 import re
 from functools import lru_cache
 from string import Formatter
-from typing import Any
+from typing import Any, ClassVar
 
 from django.core.exceptions import BadRequest, RequestDataTooBig, SuspiciousOperation
 from django.http import Http404, HttpRequest, JsonResponse
@@ -26,6 +32,8 @@ from django.utils.translation import get_language, override
 from rest_framework import exceptions, fields, relations, serializers, validators
 from rest_framework.response import Response
 from rest_framework.views import exception_handler, set_rollback
+
+from glowderma.core import i18n
 
 logger = logging.getLogger(__name__)
 MESSAGES = {
@@ -83,8 +91,22 @@ ENDPOINT_FIELD_CODES = frozenset(
         "outside_working_hours",
         # cashback policy versions (§2.7): "no tiers"
         "min_items",
+        # customer API (customer contract §2): rendered from their catalog key (field_error(message_key=…))
+        "otp_invalid",
+        "password_too_short",
+        "password_too_common",
+        "password_entirely_numeric",
+        "password_too_similar",
+        "password_unchanged",
+        "password_incorrect",
+        "terms_outdated",
+        "push_token_missing",
+        "latlng_pair",
+        "address_incomplete",
     }
 )
+# View ``audience`` values whose errors use the customer envelope (``details``) and the i18n catalog.
+CUSTOMER_AUDIENCES = frozenset({"customer", "customer_auth", "public", "pos", "webhook"})
 AUTH_FAILURE_CODES = frozenset(
     {
         "not_authenticated",
@@ -97,16 +119,32 @@ AUTH_FAILURE_CODES = frozenset(
 
 
 def field_error(
-    code: str, message: str | None = None, *, limit: int | str | None = None
+    code: str,
+    message: str | None = None,
+    *,
+    limit: int | str | None = None,
+    message_key: str | None = None,
+    params: dict[str, Any] | None = None,
 ) -> exceptions.ErrorDetail:
     """An ``ErrorDetail`` with a contract code.
 
     Generic codes default to their ``FIELD_MESSAGES`` entry (``limit`` fills ``{limit}``); endpoint-specific
     codes require an explicit ``message``. Any other code is a typo: the frontend maps codes to UI, so an
-    invented one would ship silently.
+    invented one would ship silently. Customer views pass ``message_key`` (a ``field.*`` catalog key,
+    customer contract §5.0) instead of a message: the detail carries the Uzbek text and the customer handler
+    renders the key in the request language (``params`` and ``limit`` fill its placeholders).
     """
     if code not in FIELD_MESSAGES and code not in ENDPOINT_FIELD_CODES:
         raise ValueError(f"Unknown field code {code!r}")
+    if message_key is not None:
+        if message is not None:
+            raise ValueError("Pass either message or message_key")
+        if not message_key.startswith("field.") or message_key not in i18n.CATALOG:
+            raise ValueError(f"Unknown field catalog key {message_key!r}")
+        values = dict(params or {})
+        if limit is not None:
+            values.setdefault("limit", limit)
+        return exceptions.ErrorDetail(i18n.t(message_key, "uz", **values), code=code)
     if message is None:
         template = FIELD_MESSAGES.get(code)
         if template is None:
@@ -238,6 +276,316 @@ class AuthFailed(exceptions.APIException):
         super().__init__(MESSAGES[code], code=code)
 
 
+class CustomerError(exceptions.APIException):
+    """A customer-audience error code (customer contract §1.6) with its catalog key (§5.0).
+
+    ``key`` defaults to the class's ``default_key``, then ``error.<code>``; ``params`` fill the key's
+    placeholders; ``details`` is the code's ``details`` object (``null`` otherwise); ``retry_after`` (seconds)
+    becomes the ``Retry-After`` header. The exception's own detail is the Uzbek text, so a misuse outside a
+    customer view still reads correctly; customer views render the key in the request language.
+    """
+
+    error_code: ClassVar[str] = ""
+    default_key: ClassVar[str | None] = None
+    status_code = 409
+
+    def __init__(
+        self,
+        code: str | None = None,
+        status: int | None = None,
+        *,
+        key: str | None = None,
+        details: Any = None,
+        params: dict[str, Any] | None = None,
+        retry_after: int | None = None,
+    ) -> None:
+        code = code or self.error_code
+        if not code:
+            raise ValueError("CustomerError needs a code")
+        if status is not None:
+            self.status_code = status
+        self.key = key or self.default_key or f"error.{code}"
+        if self.key not in i18n.CATALOG:
+            raise ValueError(f"No catalog key {self.key!r} for code {code!r}")
+        self.params: dict[str, Any] = dict(params or {})
+        self.details = details
+        if retry_after is not None:
+            self.wait = max(1, int(retry_after))
+        super().__init__(i18n.t(self.key, "uz", **self.params), code=code)
+
+
+class DeviceRequired(CustomerError):
+    """400 ``device_required``: Device headers missing/malformed."""
+
+    error_code = "device_required"
+    status_code = 400
+
+
+class OtpInvalid(CustomerError):
+    """400 ``otp_invalid``: Wrong SMS code; details.attempts_left."""
+
+    error_code = "otp_invalid"
+    status_code = 400
+
+
+class OtpExpired(CustomerError):
+    """400 ``otp_expired``: No live code for (phone, purpose)."""
+
+    error_code = "otp_expired"
+    status_code = 400
+
+
+class VerificationInvalid(CustomerError):
+    """400 ``verification_invalid``: Verification token unusable."""
+
+    error_code = "verification_invalid"
+    status_code = 400
+
+
+class SocialTokenInvalid(CustomerError):
+    """400 ``social_token_invalid``: Provider token, nonce or pair refused."""
+
+    error_code = "social_token_invalid"
+    status_code = 400
+
+
+class SocialTicketInvalid(CustomerError):
+    """400 ``social_ticket_invalid``: Social ticket unusable or of another device."""
+
+    error_code = "social_ticket_invalid"
+    status_code = 400
+
+
+class PasswordChanged(CustomerError):
+    """401 ``password_changed``: Session revoked because the password was reset or changed."""
+
+    error_code = "password_changed"
+    status_code = 401
+
+
+class PhoneRegistered(CustomerError):
+    """409 ``phone_registered``: An active customer has it."""
+
+    error_code = "phone_registered"
+    status_code = 409
+
+
+class PhoneNotRegistered(CustomerError):
+    """409 ``phone_not_registered``: No active customer has this phone."""
+
+    error_code = "phone_not_registered"
+    status_code = 409
+
+
+class SocialProviderLinked(CustomerError):
+    """409 ``social_provider_linked``: The customer already has this provider."""
+
+    error_code = "social_provider_linked"
+    status_code = 409
+
+
+class SocialIdentityLinked(CustomerError):
+    """409 ``social_identity_linked``: The identity belongs to another customer."""
+
+    error_code = "social_identity_linked"
+    status_code = 409
+
+
+class LastSignInMethod(CustomerError):
+    """409 ``last_sign_in_method``: Unlinking the only way to sign in."""
+
+    error_code = "last_sign_in_method"
+    status_code = 409
+
+
+class TermsUpdateRequired(CustomerError):
+    """409 ``terms_update_required``: Consent older than the current terms."""
+
+    error_code = "terms_update_required"
+    status_code = 409
+
+
+class ProductUnavailable(CustomerError):
+    """409 ``product_unavailable``: Product not visible."""
+
+    error_code = "product_unavailable"
+    status_code = 409
+
+
+class CartFull(CustomerError):
+    """409 ``cart_full``: Too many distinct lines; details.max_lines."""
+
+    error_code = "cart_full"
+    status_code = 409
+
+
+class CartEmpty(CustomerError):
+    """409 ``cart_empty``: Checkout of an empty cart."""
+
+    error_code = "cart_empty"
+    status_code = 409
+
+
+class PriceChanged(CustomerError):
+    """409 ``price_changed``: expected_total differs."""
+
+    error_code = "price_changed"
+    status_code = 409
+
+
+class OpenOrderExists(CustomerError):
+    """409 ``open_order_exists``: An unpaid order exists."""
+
+    error_code = "open_order_exists"
+    status_code = 409
+
+
+class DeliveryUnavailable(CustomerError):
+    """409 ``delivery_unavailable``: BTS refuses the route or delivery is not offered."""
+
+    error_code = "delivery_unavailable"
+    status_code = 409
+
+
+class OnlineSalesUnavailable(CustomerError):
+    """409 ``online_sales_unavailable``: Online selling is off (fake Billz)."""
+
+    error_code = "online_sales_unavailable"
+    status_code = 409
+
+
+class NotPayable(CustomerError):
+    """409 ``not_payable``: The order cannot be paid."""
+
+    error_code = "not_payable"
+    status_code = 409
+
+
+class OrderExpired(CustomerError):
+    """409 ``order_expired``: The payment time ran out."""
+
+    error_code = "order_expired"
+    status_code = 409
+
+
+class AlreadyPaid(CustomerError):
+    """409 ``already_paid``: The order is paid."""
+
+    error_code = "already_paid"
+    status_code = 409
+
+
+class PaymentInProgress(CustomerError):
+    """409 ``payment_in_progress``: A provider transaction is in flight."""
+
+    error_code = "payment_in_progress"
+    status_code = 409
+
+
+class SlotTaken(CustomerError):
+    """409 ``slot_taken``: Booking race lost."""
+
+    error_code = "slot_taken"
+    status_code = 409
+
+
+class BookingLimit(CustomerError):
+    """409 ``booking_limit``: Too many open appointments."""
+
+    error_code = "booking_limit"
+    status_code = 409
+
+
+class AddressLimit(CustomerError):
+    """409 ``address_limit``: Too many saved addresses."""
+
+    error_code = "address_limit"
+    status_code = 409
+
+
+class QrInvalid(CustomerError):
+    """409 ``qr_invalid``: POS: token unusable (one answer for all)."""
+
+    error_code = "qr_invalid"
+    status_code = 409
+
+
+class AppUpdateRequired(CustomerError):
+    """426 ``app_update_required``: App below the minimum version."""
+
+    error_code = "app_update_required"
+    status_code = 426
+
+
+class OtpResendTooSoon(CustomerError):
+    """429 ``otp_resend_too_soon``: Resend wait not over."""
+
+    error_code = "otp_resend_too_soon"
+    status_code = 429
+
+
+class OtpDailyLimit(CustomerError):
+    """429 ``otp_daily_limit``: Daily code cap reached."""
+
+    error_code = "otp_daily_limit"
+    status_code = 429
+
+
+class OtpNetworkLimit(CustomerError):
+    """429 ``otp_network_limit``: IP day cap reached."""
+
+    error_code = "otp_network_limit"
+    status_code = 429
+
+
+class OtpLocked(CustomerError):
+    """429 ``otp_locked``: Lockout or daily wrong-code cap."""
+
+    error_code = "otp_locked"
+    status_code = 429
+
+
+class SmsUnavailable(CustomerError):
+    """503 ``sms_unavailable``: The global SMS budget tripped."""
+
+    error_code = "sms_unavailable"
+    status_code = 503
+
+
+class TermsNotPublished(CustomerError):
+    """503 ``terms_not_published``: Registration while the terms are unpublished."""
+
+    error_code = "terms_not_published"
+    status_code = 503
+
+
+class OutOfStock(CustomerError):
+    """409 ``OUT_OF_STOCK``: ``lines`` (checkout, key ``error.OUT_OF_STOCK``) or one product (cart add/patch,
+    key ``error.out_of_stock_one``), per customer contract §5.0."""
+
+    error_code = "OUT_OF_STOCK"
+
+    def __init__(self, *, details: Any = None, one: bool = False) -> None:
+        super().__init__(key="error.out_of_stock_one" if one else "error.OUT_OF_STOCK", details=details)
+
+
+# Codes whose catalog key depends on the resource (customer contract §5.0).
+NOT_CANCELLABLE_KEYS = {
+    "order": "error.order_not_cancellable",
+    "appointment": "error.appointment_not_cancellable",
+    "": "error.not_cancellable",
+}
+DELIVERY_UNAVAILABLE_KEYS = {
+    "route": "error.delivery_unavailable",
+    "not_offered": "error.delivery_not_offered",
+}
+
+
+def not_cancellable(resource: str = "") -> CustomerError:
+    """409 ``not_cancellable`` with the key of ``resource`` (``order``, ``appointment`` or any other)."""
+    return CustomerError("not_cancellable", 409, key=NOT_CANCELLABLE_KEYS[resource])
+
+
 def flatten_errors(detail: Any) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     seen: set[tuple[str | None, str]] = set()
@@ -293,6 +641,8 @@ def _uses_default_detail(exc: exceptions.APIException) -> bool:
 
 
 def envelope_exception_handler(exc: Exception, context: dict[str, Any]) -> Response:
+    if getattr(context.get("view"), "audience", None) in CUSTOMER_AUDIENCES:
+        return customer_exception_handler(exc, context)
     response = exception_handler(exc, context)
     request = context.get("request")
     if isinstance(exc, SuspiciousOperation):
@@ -351,7 +701,189 @@ def envelope_exception_handler(exc: Exception, context: dict[str, Any]) -> Respo
     return response
 
 
+# --- customer audience (customer contract §1.6, §5) ---
+
+_STATUS_FALLBACK_CODES = {
+    400: "bad_request",
+    401: "not_authenticated",
+    403: "permission_denied",
+    404: "not_found",
+    405: "method_not_allowed",
+    406: "not_acceptable",
+    409: "conflict",
+    413: "payload_too_large",
+    415: "unsupported_media_type",
+    429: "throttled",
+    503: "provider_unavailable",
+}
+# Paths outside the customer audience: their 404/500 pages keep the admin envelope byte for byte.
+_NON_CUSTOMER_PREFIXES = ("/api/v1/admin/", "/api/v1/schema/", "/api/v1/docs/", "/api/v1/health/")
+
+
+def _placeholder_pattern(template: str) -> re.Pattern[str]:
+    pattern = ""
+    names: set[str] = set()
+    for literal, name, _spec, _conversion in Formatter().parse(template):
+        pattern += re.escape(literal)
+        if name is not None:
+            pattern += f"(?P={name})" if name in names else f"(?P<{name}>.+?)"
+            names.add(name)
+    return re.compile(pattern)
+
+
+@lru_cache(maxsize=1)
+def _field_patterns() -> tuple[tuple[str, re.Pattern[str]], ...]:
+    return tuple(
+        (key, _placeholder_pattern(texts["uz"]))
+        for key, texts in i18n.CATALOG.items()
+        if key.startswith("field.")
+    )
+
+
+def localize_field_message(code: str, message: str, lang: str) -> str:
+    """Render a field error's Uzbek ``message`` in ``lang`` through the catalog.
+
+    The detail of a field error is its Uzbek text (``field_error`` renders the catalog key in Uzbek, DRF's own
+    texts are swapped for ``FIELD_MESSAGES`` first), so the key is found by matching the Uzbek templates:
+    ``field.<code>`` first, then every other ``field.*`` key; the placeholders read back from the text fill
+    the target language. A text that matches no template (a serializer-specific message) is returned
+    unchanged.
+    """
+    preferred = f"field.{code}"
+    patterns = sorted(_field_patterns(), key=lambda item: item[0] != preferred)
+    for key, pattern in patterns:
+        match = pattern.fullmatch(message)
+        if match is not None:
+            return i18n.t(key, lang, **match.groupdict())
+    return message
+
+
+def _request_customer(request: Any) -> Any:
+    """The authenticated customer of a DRF request without re-running authentication (else ``None``)."""
+    user = vars(request).get("_user") if request is not None and hasattr(request, "__dict__") else None
+    if getattr(user, "is_authenticated", False) and isinstance(getattr(user, "language", None), str):
+        return user
+    return None
+
+
+def request_language(request: Any) -> str:
+    return i18n.resolve_language(request, _request_customer(request))
+
+
+def customer_error_body(
+    code: str,
+    request: Any,
+    *,
+    lang: str | None = None,
+    key: str | None = None,
+    params: dict[str, Any] | None = None,
+    errors: list[dict[str, Any]] | None = None,
+    details: Any = None,
+    status: int | None = None,
+) -> dict[str, Any]:
+    """The customer envelope ``{code, message, errors, details, request_id}`` with a localized ``message``.
+
+    ``key`` defaults to ``error.<code>``; a code without a catalog key (never expected: a contract test maps
+    every code a customer view can raise) falls back to the key of its HTTP status and logs a warning.
+    """
+    if key is None:
+        key = f"error.{code}"
+        if key not in i18n.CATALOG:
+            fallback = _STATUS_FALLBACK_CODES.get(status or 0, "server_error")
+            logger.warning("No catalog key for customer error code=%s status=%s", code, status)
+            key = f"error.{fallback}"
+    values = dict(params or {})
+    if key == "error.throttled":
+        values.setdefault("n", 60)
+    return {
+        "code": code,
+        "message": i18n.t(key, lang or request_language(request), **values),
+        "errors": errors or [],
+        "details": details,
+        "request_id": getattr(request, "request_id", ""),
+    }
+
+
+def customer_exception_handler(exc: Exception, context: dict[str, Any]) -> Response:
+    """The envelope of customer, public, auth, POS and webhook views: ``details`` plus localized messages."""
+    response = exception_handler(exc, context)
+    request = context.get("request")
+    lang = request_language(request)
+    if isinstance(exc, SuspiciousOperation):
+        logging.getLogger(f"django.security.{type(exc).__name__}").error(
+            str(exc),
+            exc_info=exc,
+            extra={"status_code": 413 if isinstance(exc, RequestDataTooBig) else 400, "request": request},
+        )
+    if isinstance(exc, RequestDataTooBig):
+        set_rollback()
+        return Response(customer_error_body("payload_too_large", request, lang=lang), status=413)
+    if isinstance(exc, (BadRequest, SuspiciousOperation)):
+        set_rollback()
+        return Response(customer_error_body("bad_request", request, lang=lang), status=400)
+    if response is None:
+        set_rollback()
+        logger.exception(
+            "Unexpected API exception request_id=%s path=%s",
+            getattr(request, "request_id", ""),
+            getattr(request, "path", ""),
+            exc_info=exc,
+        )
+        return Response(customer_error_body("server_error", request, lang=lang), status=500)
+    key: str | None = None
+    params: dict[str, Any] = {}
+    details: Any = None
+    errors: list[dict[str, Any]] | None = None
+    if isinstance(exc, CustomerError):
+        code, key, params, details = str(exc.get_codes()), exc.key, exc.params, exc.details
+    elif isinstance(exc, exceptions.ValidationError):
+        code = "validation_error"
+        errors = [
+            {**item, "message": localize_field_message(item["code"], item["message"], lang)}
+            for item in flatten_errors(exc.detail)
+        ]
+    elif isinstance(exc, Http404) or isinstance(exc, exceptions.NotFound):
+        code = "not_found"
+    elif isinstance(exc, (exceptions.NotAuthenticated, exceptions.AuthenticationFailed)):
+        code = "not_authenticated"
+        response.status_code = 401
+    elif isinstance(exc, exceptions.Throttled):
+        code = "throttled"
+        wait = getattr(exc, "wait", None)
+        params = {"n": int(wait) if wait is not None else 60}
+    elif isinstance(exc, exceptions.APIException):
+        codes = exc.get_codes()
+        code = codes if isinstance(codes, str) else str(exc.default_code)
+    else:
+        code = "permission_denied"
+    response.data = customer_error_body(
+        code,
+        request,
+        lang=lang,
+        key=key,
+        params=params,
+        errors=errors,
+        details=details,
+        status=response.status_code,
+    )
+    return response
+
+
+def is_customer_path(path: str) -> bool:
+    return path.startswith("/api/v1/") and not path.startswith(_NON_CUSTOMER_PREFIXES)
+
+
+def _customer_page(request: HttpRequest, code: str, status: int) -> JsonResponse:
+    lang = i18n.resolve_language(request)
+    response = JsonResponse(customer_error_body(code, request, lang=lang), status=status)
+    response["Content-Language"] = lang
+    response["Cache-Control"] = "no-store"
+    return response
+
+
 def not_found_view(request: HttpRequest, exception: Exception) -> JsonResponse:
+    if is_customer_path(request.path):
+        return _customer_page(request, "not_found", 404)
     return JsonResponse(error_body("not_found", request), status=404)
 
 
@@ -359,4 +891,6 @@ def server_error_view(request: HttpRequest) -> JsonResponse:
     logger.exception(
         "Unexpected server exception request_id=%s path=%s", getattr(request, "request_id", ""), request.path
     )
+    if is_customer_path(request.path):
+        return _customer_page(request, "server_error", 500)
     return JsonResponse(error_body("server_error", request), status=500)

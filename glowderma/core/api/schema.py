@@ -43,3 +43,76 @@ ADMIN_ERRORS: dict[int, type[serializers.Serializer[Any]]] = dict.fromkeys(
 PUBLIC_ERRORS: dict[int, type[serializers.Serializer[Any]]] = dict.fromkeys(
     (400, 401, 429), ErrorEnvelopeSerializer
 )
+
+
+# --- Customer API (customer contract §1.2, §1.6) ---
+
+
+class CustomerErrorEnvelopeSerializer(serializers.Serializer[dict[str, Any]]):
+    """The customer envelope: the admin keys plus ``details`` (always present, ``null`` by default)."""
+
+    code = serializers.CharField()
+    message = serializers.CharField(help_text="Localized (Accept-Language → the customer's language → uz).")
+    errors = ErrorItemSerializer(many=True)  # type: ignore[assignment]
+    details = serializers.JSONField(allow_null=True, help_text="Code-specific object (§1.6) or null.")
+    request_id = serializers.CharField()
+
+
+# Every signed-in (C) customer route; the auth routes use it too (409 phone rules, 503 SMS budget).
+CUSTOMER_ERRORS: dict[int, type[serializers.Serializer[Any]]] = dict.fromkeys(
+    (400, 401, 404, 409, 422, 426, 429, 503), CustomerErrorEnvelopeSerializer
+)
+# Optional-auth (O) read routes: catalog, settings, regions, specialists.
+PUBLIC_CUSTOMER_ERRORS: dict[int, type[serializers.Serializer[Any]]] = dict.fromkeys(
+    (400, 401, 404, 426, 429), CustomerErrorEnvelopeSerializer
+)
+
+
+def device_headers(*, required: bool = True) -> list[OpenApiParameter]:
+    """``X-GD-Device-Id``, ``X-GD-Platform`` and ``X-GD-App-Version`` (§1.2): required on auth and C routes,
+    optional on O routes."""
+    return [
+        OpenApiParameter(
+            name="X-GD-Device-Id",
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.HEADER,
+            required=required,
+            pattern=r"^[A-Za-z0-9_-]{8,128}$",
+            description="Firebase installation id of this app install (an identifier, not a secret).",
+        ),
+        OpenApiParameter(
+            name="X-GD-Platform",
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.HEADER,
+            required=required,
+            enum=["ios", "android"],
+            description="Device platform (`OrderChannel` literals).",
+        ),
+        OpenApiParameter(
+            name="X-GD-App-Version",
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.HEADER,
+            required=required,
+            pattern=r"^\d{1,3}\.\d{1,3}\.\d{1,3}$",
+            description="App version; below the platform's minimum → 426 `app_update_required`.",
+        ),
+    ]
+
+
+DEVICE_HEADERS: list[OpenApiParameter] = device_headers(required=True)
+OPTIONAL_DEVICE_HEADERS: list[OpenApiParameter] = device_headers(required=False)
+DEVICE_KEY_HEADER = OpenApiParameter(
+    name="X-GD-Device-Key",
+    type=OpenApiTypes.STR,
+    location=OpenApiParameter.HEADER,
+    required=False,
+    pattern=r"^[A-Za-z0-9_-]{43}$",
+    description="The device key issued once in `AuthTokens.device_key`; proves a known device (§1.9).",
+)
+ACCEPT_LANGUAGE_HEADER = OpenApiParameter(
+    name="Accept-Language",
+    type=OpenApiTypes.STR,
+    location=OpenApiParameter.HEADER,
+    required=False,
+    description="First supported tag among uz, ru, en in q-order; else the customer's language, else uz.",
+)
