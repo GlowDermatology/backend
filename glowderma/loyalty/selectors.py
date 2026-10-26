@@ -16,6 +16,7 @@ from typing import Any
 from uuid import UUID
 
 from django.conf import settings
+from django.contrib.postgres.expressions import ArraySubquery
 from django.db.models import (
     BigIntegerField,
     Case,
@@ -489,13 +490,16 @@ def effective_holds(customer_id: int, now: datetime | None = None) -> list[Effec
     ``expires_at + PAYMENT_IN_FLIGHT_GRACE_SECONDS``; any other with ``expires_at``. No read of commerce or
     payments (layering).
     """
-    instant = timeutils.now() if now is None else now
-    grace = timedelta(seconds=int(settings.PAYMENT_IN_FLIGHT_GRACE_SECONDS))
     rows = (
         CashbackHold.objects.filter(account__customer_id=customer_id, state=enums.CashbackHoldState.ACTIVE)
         .order_by("expires_at", "id")
         .values_list("order_id", "amount", "expires_at")
     )
+    return _effective(rows, timeutils.now() if now is None else now)
+
+
+def _effective(rows: Any, instant: datetime) -> list[EffectiveHold]:
+    grace = timedelta(seconds=int(settings.PAYMENT_IN_FLIGHT_GRACE_SECONDS))
     return [
         EffectiveHold(
             order_id=int(order_id),
@@ -504,6 +508,29 @@ def effective_holds(customer_id: int, now: datetime | None = None) -> list[Effec
         )
         for order_id, amount, expires_at in rows
     ]
+
+
+def _account_with_holds(customer_id: int) -> tuple[int, list[tuple[int, int, datetime]]]:
+    """The balance and the active holds ``(order_id, amount, expires_at)`` (oldest first) in ONE statement,
+    so ``held``/``available`` and ``holds[]`` of one response come from the same snapshot (a hold captured
+    or released between two READ COMMITTED reads would otherwise make them disagree). No account → 0, []."""
+    active = CashbackHold.objects.filter(
+        account_id=OuterRef("pk"), state=enums.CashbackHoldState.ACTIVE
+    ).order_by("expires_at", "id")
+    row = (
+        LoyaltyAccount.objects.filter(customer_id=customer_id)
+        .annotate(
+            hold_orders=ArraySubquery(active.values("order_id")),
+            hold_amounts=ArraySubquery(active.values("amount")),
+            hold_expiries=ArraySubquery(active.values("expires_at")),
+        )
+        .values_list("balance", "hold_orders", "hold_amounts", "hold_expiries")
+        .first()
+    )
+    if row is None:
+        return 0, []
+    balance, orders, amounts, expiries = row
+    return int(balance), list(zip(orders, amounts, expiries, strict=True))
 
 
 @dataclass(frozen=True, slots=True)
@@ -530,11 +557,12 @@ class CashbackSummary:
 
 
 def cashback_summary(customer_id: int, now: datetime | None = None) -> CashbackSummary:
-    """The customer's cashback screen: the same numbers as the admin card (``account_summary``,
-    ``customer_totals``, ``tier_for`` under the active policy) plus the policy bands and the effective
-    holds."""
+    """The customer's cashback screen: the same numbers as the admin card (``account_summary``'s balance and
+    active-hold sum, ``customer_totals``, ``tier_for`` under the active policy) plus the policy bands and the
+    effective holds; balance, ``held`` and ``holds[]`` are read in one statement."""
     instant = timeutils.now() if now is None else now
-    summary = account_summary(customer_id)
+    balance, hold_rows = _account_with_holds(customer_id)
+    held = sum(amount for _order, amount, _expires in hold_rows)
     lifetime = customer_totals(customer_id).lifetime
     rules = rules_of(active_policy(instant))
     tiers: list[TierBandView] = []
@@ -551,16 +579,16 @@ def cashback_summary(customer_id: int, now: datetime | None = None) -> CashbackS
             info = tier_for(lifetime, rules)
             next_tier = info.next if info is not None else None
     return CashbackSummary(
-        balance=summary.balance,
-        held=summary.held,
-        available=summary.available,
-        negative=summary.balance < 0,
+        balance=balance,
+        held=held,
+        available=balance - held,
+        negative=balance < 0,
         lifetime_total=lifetime,
         tier=band,
         next_tier=next_tier,
         tiers=tiers,
         earn_on_cashback_paid=bool(rules.earn_on_cashback_paid) if rules is not None else False,
-        holds=effective_holds(customer_id, instant),
+        holds=_effective(hold_rows, instant),
     )
 
 

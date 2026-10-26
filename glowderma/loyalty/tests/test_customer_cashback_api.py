@@ -4,7 +4,9 @@ from datetime import timedelta
 from typing import Any
 
 import pytest
+from django.db import connection
 from django.test import override_settings
+from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 
 from glowderma.accounts.models import Customer
@@ -88,6 +90,23 @@ def test_negative_balance_flag_and_holds_with_the_effective_expiry(
         {"order_id": open_order.pk, "amount": 1_000, "expires_at": "2026-10-26T12:10:00+05:00"},
     ]
     assert CashbackHold.objects.get(order=graced_order).expires_at == past  # the stored value is unchanged
+
+
+def test_balance_held_and_holds_come_from_one_snapshot(customer: Customer) -> None:
+    """A hold captured or released between two READ COMMITTED reads cannot make ``held``/``available``
+    disagree with ``holds[]``: the account and its active holds are read by one statement."""
+    account = LoyaltyAccount.objects.create(customer=customer, balance=5_000)
+    future = NOW + timedelta(minutes=10)
+    for amount in (1_000, 1_500):
+        order = OrderFactory.create(customer=customer, reservation_expires_at=future)
+        CashbackHold.objects.create(account=account, order=order, amount=amount, expires_at=future)
+    with CaptureQueriesContext(connection) as queries, pinned_clock(NOW):
+        summary = selectors.cashback_summary(customer.pk)
+    hold_reads = [query["sql"] for query in queries if "loyalty_cashbackhold" in query["sql"]]
+    assert len(hold_reads) == 1 and "loyalty_loyaltyaccount" in hold_reads[0]
+    assert summary.held == sum(hold.amount for hold in summary.holds) == 2_500
+    assert (summary.balance, summary.available) == (5_000, 2_500)
+    assert selectors.cashback_summary(CustomerFactory.create().pk).holds == []
 
 
 def _full_ledger(customer: Customer) -> dict[str, Any]:
