@@ -219,3 +219,26 @@ transit (polling every 10 min).
 
 The beat is a singleton (never scale it). The retention runs stop starting new batches after 5 minutes; a large
 backlog is cleared over several nights.
+
+## 6. Indexes built concurrently (recovering a failed migration)
+
+Three M3 migrations build their index with `CREATE INDEX CONCURRENTLY` (non-atomic migrations, so a rolling deploy
+never blocks writes): `core.0010` (`outbox_unfinished_idx`), `payments.0003` (`payment_late_capture_open_idx`) and
+`loyalty.0005` (`purchase_unpushed_online_idx`). If such a build fails or is interrupted (a deadlock, a cancelled
+`migrate`, the container killed, a lock timeout), PostgreSQL leaves an **INVALID** index behind and Django does not
+record the migration; re-running `migrate` then fails with `relation "…" already exists`. Recover:
+
+```bash
+# 1. list invalid indexes
+docker compose -f compose.prod.yaml exec postgres psql -U glowderma -d glowderma -c \
+  "SELECT indexrelid::regclass AS index FROM pg_index WHERE NOT indisvalid;"
+# 2. drop each one the failed migration left (never inside a transaction block)
+docker compose -f compose.prod.yaml exec postgres psql -U glowderma -d glowderma -c \
+  "DROP INDEX CONCURRENTLY IF EXISTS outbox_unfinished_idx;"
+# 3. re-run the migrations: the index is built again from scratch
+docker compose -f compose.prod.yaml exec api python manage.py migrate
+```
+
+Check afterwards that the query in step 1 returns no row. A development database that applied an earlier draft of
+`core.0010` (keyed `(status, available_at)`) gets the current index with `manage.py migrate core 0009` followed by
+`manage.py migrate`.
