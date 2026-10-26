@@ -213,7 +213,7 @@ IP per minute, the rest only counted and sampled in the log).
 - A customer has at most **one active `AuthSession` and one active `Device`**. Every successful sign-in
   (`auth/set-password/`, `auth/login/`, `auth/reset-password/`, `auth/social/`, `auth/social/complete/`) runs
   `accounts.services.start_customer_session(customer_id, fid, platform, app_version, *, issue_device_key)` under
-  `select_for_update` of the customer row:
+  the customer-level lock (`select_for_update(no_key=True)` on the customer row, §2.7.1):
   1. upsert `Device(customer, fid)` → `is_active=True`, `platform`, `app_version`, `last_active_at=now`;
   2. every other device of the customer → `is_active=False`, `push_enabled=False`, `fcm_token=""` (the token is
      captured first into the farewell push of step 4 and is not kept on the row, so an inactive row can never receive
@@ -592,9 +592,12 @@ Body `{"password": str | null, "verification_token": str | null}`.
   alone cannot delete the account.
 
 → **204**. Orchestrated by `customers.services.delete_account(customer_id, …)` (top layer, one transaction, lock order
-Customer → Order → Payment → LoyaltyAccount; the **Customer row lock comes first**, the same lock checkout takes, so a
-concurrent checkout either finishes before the delete, whose step 1 then cancels it, or runs after it and is refused
-because the customer is no longer active):
+Customer → Order → Payment → LoyaltyAccount; the **customer-level lock comes first** — `FOR NO KEY UPDATE`, the same
+lock checkout takes (§2.7.1) — so a concurrent checkout either finishes before the delete, whose step 1 then cancels
+it, or runs after it and is refused because the customer is no longer active; a concurrent provider capture of one of
+the customer's orders, which holds Order → Payment → LoyaltyAccount and inserts a `Purchase` row (its foreign key
+takes `FOR KEY SHARE` on the customer row), is not blocked by that lock, finishes, and the delete then sees the order
+paid):
 1. an `awaiting_payment` order whose Click payment is **in flight** (§2.7.2) → 409 `payment_in_progress` (nothing
    written; the app asks the customer to finish or wait ≤2 minutes, `CLICK_INFLIGHT_SECONDS`);
 2. every `awaiting_payment` order → `commerce.services.cancel_by_customer` (P2; reason `customer_request`;
@@ -796,7 +799,9 @@ All writes answer 200 `Cart`. No audit, no events (the cart is ephemeral).
 Names in the resolved language when BTS provides it, else as BTS sends them **(verify M3)**.
 
 **`POST delivery/calculate/`** (**C**) — price and cashback cap shown before checkout (computed over the customer's
-current cart lines with status `ok`).
+current cart lines with status `ok`). Served by `commerce/api/customer/urls.py` (same path): it reads the cart,
+`loyalty` and `commerce.selectors.cashback_max`, which the `delivery` layer may not import; it uses
+`delivery.selectors.region_catalog` and the BTS port. `delivery/api/customer/` serves only `delivery/regions/`.
 Body `{"fulfilment": "delivery" | "pickup", "address_id": int | null, "region_code": str | null, "city_code": str | null, "cashback_to_use": int ≥ 0 | null}`.
 
 | Check | Code · message (uz) · key |
@@ -850,12 +855,19 @@ Body:
 **Serialisation.** Two checkouts of one customer (two taps, a retry with a renewed key, two app processes) must not
 both pass the open-order check. Checkout therefore runs, inside the `@idempotent` transaction:
 (a) body validation, consent, address checks and the BTS quote (an HTTP call while **no row lock** is held; the
-idempotency advisory lock of this key is the only lock), then (b) `SELECT … FOR UPDATE` on the **Customer row**, then
-the open-order check and the cart read **under that lock**, then (c) `create_order`. The lock order of the customer
-API is **Customer → Cart → ProductStock → Order → Payment → LoyaltyAccount** (the global Order → Payment →
-LoyaltyAccount rule with the two customer-level locks in front). Cart writes take only the Cart row lock, which
-checkout reaches after the Customer lock, so no cycle exists. `DELETE me/` takes the same Customer lock first
-(§2.2.3).
+idempotency advisory lock of this key is the only lock), then (b) the **customer-level lock** —
+`SELECT … FOR NO KEY UPDATE` on the Customer row (`select_for_update(no_key=True)`) — then the open-order check and
+the cart read **under that lock**, then (c) `create_order`. The lock order of the customer API is **Customer → Cart →
+ProductStock → Order → Payment → LoyaltyAccount** (the global Order → Payment → LoyaltyAccount rule with the two
+customer-level locks in front). Cart writes take only the Cart row lock, which checkout reaches after the Customer
+lock. The customer-level lock is `FOR NO KEY UPDATE`, **never** `FOR UPDATE`: every insert of a row that references
+the customer (`Purchase` on a capture, `Order`, `AuthSession`, `Appointment`) takes `FOR KEY SHARE` on the customer row
+through its foreign key, which conflicts with `FOR UPDATE` but not with `FOR NO KEY UPDATE`. With `FOR UPDATE`, a
+capture holding Order → Payment → LoyaltyAccount and inserting its `Purchase` would wait for the customer row while
+`DELETE me/` (or a second checkout once `CHECKOUT_MAX_OPEN_ORDERS` > 1) holds it and waits for that Order or
+LoyaltyAccount — a deadlock. `FOR NO KEY UPDATE` still serialises checkouts, bookings, sign-ins and `DELETE me/` of
+one customer against each other, and no cycle exists. `DELETE me/` takes the same lock first (§2.2.3); updating the
+customer's own non-key columns (status, name, consent) needs no stronger lock.
 
 Checks, in this order (the first failure answers):
 
@@ -865,7 +877,7 @@ Checks, in this order (the first failure answers):
 | 2 | Consent current (§2.2.4) | 409 `terms_update_required` · `error.terms_update_required`, `details {current_version}` |
 | 3 | Delivery: address own (`does_not_exist` `field.address_not_found`), region/city known (`address_incomplete`) | 400 |
 | 4 | Delivery: BTS quote (`quote(region_code, city_code)`, no row lock held; passed to `create_order` as `delivery_fee`) | 409 `delivery_unavailable` / 503 `provider_unavailable` |
-| — | *Customer row locked (`select_for_update`); customer still `active` (else 401 `SESSION_EXPIRED`)* | |
+| — | *Customer row locked (`select_for_update(no_key=True)`); customer still `active` (else 401 `SESSION_EXPIRED`)* | |
 | 5 | No other `awaiting_payment` order (`CHECKOUT_MAX_OPEN_ORDERS`, default 1) | 409 `open_order_exists` "Sizda to‘lanmagan buyurtma bor (№{order_id}). Avval uni to‘lang yoki bekor qiling." · `error.open_order_exists`, `details {order_id, pay_by}` |
 | 6 | Cart has lines (read under the lock) | 409 `cart_empty` "Savat bo‘sh." · `error.cart_empty` |
 | — | *inside `create_order`: `ProductStock` rows locked* | |
@@ -885,8 +897,10 @@ the view is a bug (500).
 **Side effects** — one transaction owned by `commerce` (the B5 service, extended, not a re-implementation):
 `commerce.services.create_order(customer_id, items=<cart lines>, fulfilment, payment_provider, channel=<session
 device platform>, address_id, cashback_used, delivery_fee=<quote>, expected_total, min_payable=CHECKOUT_MIN_PAYABLE,
-visible_only=True, metadata={"checkout": {"app_version", "device_id"}, "fake": <X-GD-Fake-Scenario>})`, which writes
-(B5, design 03 §4.1 row 1): `Order` (`awaiting_payment`, address + recipient snapshot, amounts, `reservation_minutes =
+visible_only=True, customer_note=<body customer_note>, metadata={"checkout": {"app_version", "device_id"}, "fake":
+<X-GD-Fake-Scenario>})`, which writes
+(B5, design 03 §4.1 row 1): `Order` (`awaiting_payment`, address + recipient snapshot, amounts, `customer_note`,
+`reservation_minutes =
 SiteSettings.reservation_minutes`, `reservation_expires_at`), `OrderItem` snapshots (name, billz id, image URL, unit
 price, promo), one active `StockReservation` per line, the `CashbackHold` (if `cashback_to_use > 0`, `expires_at =
 reservation_expires_at`), the `pending` `Payment` (`provider = payment_provider`, `amount = total`; one active payment
@@ -927,7 +941,7 @@ moves money, never creates order events and never expires an order.
 | Check | Result · message (uz) · key |
 |---|---|
 | Order of another customer | 404 |
-| Status `processing`/`handed_to_courier`/`delivered`, or a `paid` payment exists | 409 `already_paid` "Buyurtma allaqachon to‘langan." · `error.already_paid` |
+| Status `processing`/`handed_to_courier`/`delivered`, or a `paid` payment that is not a late capture (`error_code ≠ "late_capture"`) exists | 409 `already_paid` "Buyurtma allaqachon to‘langan." · `error.already_paid` |
 | Status `cancelled` | 409 `not_payable` "Bu buyurtmani to‘lab bo‘lmaydi." · `error.not_payable` |
 | Not payable with `attaching=True` (`now ≥ reservation_expires_at`; the job has not run yet) | 409 `order_expired` "To‘lov muddati tugadi. Mahsulotlarni savatga qaytarib, qaytadan rasmiylashtiring." · `error.order_expired` — **nothing is written** (§1.7); the expiry job cancels the order |
 | `provider` differs from the provider of an in-flight payment (Click prepared < `CLICK_INFLIGHT_SECONDS` ago without Complete, or Payme state 1) | 409 `payment_in_progress` "To‘lov {provider} ilovasida jarayonda. Uni yakunlang yoki biroz kuting." · `error.payment_in_progress`, `details {provider, order_id}` |
@@ -1040,8 +1054,15 @@ Only orders created at or after the history horizon (§2.2.3).
  "timeline": [ /* TimelineEntry[], newest first, §4.1 */ ],
  "actions": {"pay": false, "cancel": false, "reorder": true}}
 ```
-- `payment` is the display payment (B5 `payments.selectors.display_payment`, which ignores late-captured rows,
-  §2.13.0). `actions.pay` = `awaiting_payment` ∧ `is_payable(…, attaching=True)` ∧ no Payme payment in state 1 (a Click
+- **Display payment** (`payment` here and in `OrderSummary`, the admin order list, its `payment` filter and the admin
+  order detail — one rule, P2 changes `payments.selectors.display_payment`, `pick_display` and
+  `display_status_subquery` together): among the order's payments that are **not** late captures (`error_code ≠
+  "late_capture"`), the best rank (paid/refunded > pending > failed), newest id first; only when every payment of the
+  order is a late capture (an expired or cancelled order whose Click payment was captured too late, §2.13.0) the newest
+  late capture is shown, with its own status (`paid` until its refund succeeds, then `refunded`) and the `refund` block
+  `in_progress` / `completed` — never `pending`. A double payment therefore always shows the payment that paid the
+  order, in the list and in the detail alike. `active_payment` ignores late captures, and dashboard revenue
+  (`revenue_buckets`, O8) excludes them: they are never order revenue (admin §2.10). `actions.pay` = `awaiting_payment` ∧ `is_payable(…, attaching=True)` ∧ no Payme payment in state 1 (a Click
   payment in flight does not block it: paying again with Click supersedes, §2.7.2; a switch to Payme answers 409
   `payment_in_progress` for at most `CLICK_INFLIGHT_SECONDS`); `actions.cancel` = `awaiting_payment` ∧ no Click payment
   in flight (≤ 2 minutes after its Prepare); `actions.reorder` = not `awaiting_payment` (or
@@ -1218,7 +1239,7 @@ the specialist (pending requests hold the slot, P1).
 | `specialist_id` active | `does_not_exist` "Mutaxassis topilmadi." · `field.specialist_not_found` |
 | `service_id` offered (active link, active service) | `does_not_exist` · `field.service_not_offered` |
 | consent current | 409 `terms_update_required` · `error.terms_update_required`, `details {current_version}` |
-| — *Customer row locked (`select_for_update`) before the next two checks, so concurrent bookings of one customer serialise* — | |
+| — *Customer row locked (`select_for_update(no_key=True)`, §2.7.1) before the next two checks, so concurrent bookings of one customer serialise* — | |
 | open future appointments of the customer < `BOOKING_MAX_OPEN_PER_CUSTOMER` (3) | 409 `booking_limit` "Sizda {limit} ta faol qabul bor. Yangisini olishdan oldin birini bekor qiling." · `error.booking_limit` |
 | `start` aware | `invalid` (naive) |
 | `start ≥ now + BOOKING_MIN_LEAD_MINUTES` | `in_past` "Kamida {n} daqiqa oldin yoziling." · `field.booking_too_soon` |
@@ -1566,16 +1587,31 @@ Payme id is `Payment.provider_txn_id`.
   `track(tracking_number)` (P2 adds it). A payload tracking number that differs from ours is ignored with a WARNING
   `bts.webhook_tracking_mismatch {order_id}`, so a payload pairing order X with another parcel's number cannot move
   order X. The authoritative status is applied through `commerce.services.apply_bts_status(order_id, status,
-  via="webhook", payload=<tracked parcel>)` (B5: shipment event; `200` → `handed_to_courier`, `300` → `delivered`,
+  via="webhook", payload=<stable fields of the tracked parcel, as polling below>)` (B5: shipment event; `200` → `handed_to_courier`, `300` → `delivered`,
   others recorded only; events with source `bts`; `push.order_status`). A forged webhook can therefore only trigger a
   re-track of a parcel we created.
 - → 200 `{"ok": true}`; unknown parcel (no Shipment, or a Shipment without a tracking number yet) → 200 `{"ok": true,
   "ignored": true}` + WARNING log (BTS must not retry forever); BTS transport failure during the re-track → 503
   `{"ok": false}`, nothing stored (BTS retries; polling catches up).
-- **Polling** (beat `commerce.poll_bts`, every 600 s, P2): shipments `created` whose order is `processing` or
-  `handed_to_courier` and whose `last_status_at` is older than `BTS_POLL_STALE_MINUTES` (30), oldest first, at most
-  100 per run → `track()` → `apply_bts_status(…, via="polling")`; `IntegrationState(bts).last_sync_at`; transport
-  failures counted in `consecutive_failures`.
+- **Polling** (beat `commerce.poll_bts`, every 600 s, P2) — the fallback when BTS webhooks do not arrive (Backend
+  PDF §14):
+  - **Single flight:** the run starts only if `cache.add("gd:lock:poll_bts", …, timeout=600)` succeeds and deletes
+    the key at the end; a second run that overlaps (a slow run, two beat processes) returns at once.
+  - **Round robin, not by `last_status_at`:** `apply_status` writes nothing when the status is unchanged, so ordering
+    by `last_status_at` would poll the same oldest parcels forever once more than one batch sits unchanged in transit.
+    Candidates are shipments `created` whose order is `processing` or `handed_to_courier` and whose `last_status_at`
+    (or creation, before the first status) is older than `BTS_POLL_STALE_MINUTES` (30), taken in `id` order **after
+    the cursor** `IntegrationState(bts).data["poll_cursor"]` (the last shipment id polled; no migration), wrapping to
+    the lowest id when the end is reached; the cursor is saved after each parcel, so every eligible parcel is polled
+    in turn.
+  - **Bounded:** at most `BTS_POLL_BATCH` (100) parcels and `BTS_POLL_MAX_SECONDS` (300, below the 600 s schedule) per
+    run, whichever comes first (each `track()` is bounded at 10 s by the port).
+  - Each parcel: `track()` → `apply_bts_status(…, via="polling", payload=<stable fields>)` where the stable fields are
+    the tracking number, the status code and BTS's status time when it sends one — never the whole tracked document,
+    whose volatile fields would make every poll a "new" status and append a `ShipmentEvent` every 10 minutes. The
+    webhook re-track passes the same stable fields.
+  - `IntegrationState(bts).last_sync_at` after a run; transport failures counted in `consecutive_failures` (the run
+    stops at the first transport failure and keeps the cursor, so it resumes there).
 
 ### 2.14 Outbound provider protocols (what the adapters send)
 
@@ -2042,7 +2078,9 @@ handler renders through the catalog. Placeholders: `{n}`, `{m}`, `{limit}`, `{ma
 12. **Financial invariants** (spec): money as integer so'm (tiyin only inside the Payme adapter); lock order (Customer
     → Cart →) ProductStock → Order → Payment → LoyaltyAccount; the balance changes only in
     `loyalty.services.post_entry`; cashback holds are checked under the account lock; stock and visibility are
-    re-checked under `ProductStock` row locks; one unpaid order per customer is serialised by the Customer row lock;
+    re-checked under `ProductStock` row locks; one unpaid order per customer is serialised by the customer-level lock,
+    which is `FOR NO KEY UPDATE` so that foreign-key inserts (`Purchase` on a capture) never wait for it (no deadlock
+    with `DELETE me/`, §2.7.1);
     checkout, pay, cancel, reorder, booking and cart adds are idempotent; outbox handlers are idempotent at the provider
     boundary.
 13. **POS minimisation** (§2.10): hashed per-device keys with revoke/rotate commands, failed-auth throttling per IP,

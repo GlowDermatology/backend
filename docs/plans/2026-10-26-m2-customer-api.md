@@ -54,7 +54,9 @@ module because availability (`commerce.selectors.available_stock`) may not be im
 - Messages only through `core.i18n.t(key, lang, …)` with the keys of C§5 (P0 ships the whole catalog; a package that
   needs a new key stops and reports — the contract changes first).
 - Services take ids and scalars, return dataclasses; cross-module writes only through the lower module's services; lock
-  order Customer → Cart → ProductStock → Order → Payment → LoyaltyAccount (C§2.7.1); time via `timeutils.now()`.
+  order Customer → Cart → ProductStock → Order → Payment → LoyaltyAccount (C§2.7.1), where the customer-level lock is
+  always `select_for_update(no_key=True)` (`FOR NO KEY UPDATE`; a plain `FOR UPDATE` deadlocks with a capture's
+  `Purchase` insert, C§2.7.1); time via `timeutils.now()`.
 - Logs and throttle keys never carry a raw phone or fid: `core.pii.pii_ref(value)` (C§6.4).
 - Commits: small, imperative (`feat(customers): add the send-code endpoint`), never pushed.
 
@@ -173,7 +175,7 @@ C§2.0 rows 1–22: `auth/send-code/`, `auth/verify-code/`, `auth/set-password/`
 | `rotate_customer_refresh(raw, *, fid) -> RefreshResult` | `accounts.services` | C§2.1.6 steps 1–6: row lock on `refresh_hash OR previous_refresh_hash`, rotate / replay / re-rotate / reuse → revoke `refresh_reused` + audit; grace cache written before commit and deleted on rollback |
 | `logout_customer(raw)` | `accounts.services` | revoke + device inactive, token cleared, QR tokens revoked |
 | `issue_social_nonce(fid)`, `consume_social_nonce(nonce, fid)`, `remember_id_token(provider, claims)` | `accounts.services` | Redis, single use, replay cache until `exp` |
-| `register(...)`, `login(...)`, `reset_password(...)` (unlinks identities, clears other device keys, `push.account_security`), `social_sign_in(...)`, `complete_social(...)` (fid + ticket binding, password for password accounts), `link_social(...)`, `unlink_social(...)`, `accept_consent(...)`, `update_profile(...)`, `set_image(...)`, `delete_account(customer_id, *, password=None, verification_token=None)` | `customers.services` | orchestrators (need `site_config` for the terms version and publication check and, for delete, `commerce`/`appointments`); `delete_account` locks the Customer row first, refuses on `commerce.selectors.customer_inflight_order` |
+| `register(...)`, `login(...)`, `reset_password(...)` (unlinks identities, clears other device keys, `push.account_security`), `social_sign_in(...)`, `complete_social(...)` (fid + ticket binding, password for password accounts), `link_social(...)`, `unlink_social(...)`, `accept_consent(...)`, `update_profile(...)`, `set_image(...)`, `delete_account(customer_id, *, password=None, verification_token=None)` | `customers.services` | orchestrators (need `site_config` for the terms version and publication check and, for delete, `commerce`/`appointments`); `delete_account` takes the customer-level lock first (`select_for_update(no_key=True)`), refuses on `commerce.selectors.customer_inflight_order` |
 | `public_settings()` | `site_config.selectors` | cached 60 s, invalidated on `update_settings` commit; `terms_version` null while unpublished; `payment_providers = core.providers.payable_providers()` (C§2.4) |
 | `product_cards(qs, lang, customer_id=None)` | `customers.selectors` | one query for products + `available_stock` + main image + cart quantities |
 | `verify_app_token(token, token_type, nonce)` | `integrations.oauth` (Google, Facebook, Apple) | Apple: RS256 against Apple's JWKS, `aud` ∈ `APPLE_APP_BUNDLE_IDS`, nonce = SHA-256 of ours |
@@ -273,8 +275,8 @@ C§2.0 rows 23–34 and 49–52: `cart/*`, `delivery/regions/`, `delivery/calcul
 |---|---|---|
 | `cart_view(customer_id, lang)`, `add_to_cart`, `set_cart_quantity`, `remove_from_cart`, `clear_cart`, `reorder_into_cart(order_id, customer_id)` | `commerce.services` / `selectors` | Cart row lock; `price_at_add`; clamping to `max_quantity`; C§2.5/C§2.7.4 errors |
 | `cashback_max(items_subtotal, delivery_fee, available)` | `commerce.selectors` | the one formula of C§2.7 (cart, calculate, checkout) |
-| `create_order(…, delivery_fee: int, expected_total: int \| None = None, min_payable: int = 0, visible_only: bool = False)` | `commerce.services` (B5, changed) | **B5 changes, all of them:** (1) the BTS quote leaves `create_order` — the caller passes `delivery_fee` (no HTTP call under `ProductStock` locks; the seeder passes its fee); (2) visibility through `catalog.selectors.customer_visible_products()` when `visible_only` (status, price ≥ 1000, active category) under the stock locks; (3) `OutOfStock(lines=[{product_id, name, requested, available, status}])` with every problem line; (4) `CashbackAboveMax(max)` from `min_payable` evaluated on the live subtotal (replaces the bare `cashback_used ≤ items_subtotal` check); (5) `PriceChanged(totals)` when `expected_total` differs; (6) typed `AddressNotFound` / `AddressIncomplete` instead of the generic `CheckoutError`; (7) evaluation order stock → cashback max → expected total → rows → `create_hold` (`InsufficientCashback`) |
-| `checkout(customer_id, request) -> order_id` | `commerce.services` | quote first (no row lock), then `select_for_update` on the Customer row, open-order rule and cart read under it, `create_order`, cart emptied, `Cart.last_checkout_order` |
+| `create_order(…, delivery_fee: int, expected_total: int \| None = None, min_payable: int = 0, visible_only: bool = False)` | `commerce.services` (B5, changed) | **B5 changes, all of them:** (1) the BTS quote leaves `create_order` — the caller passes `delivery_fee` (no HTTP call under `ProductStock` locks; the seeder passes its fee); (2) visibility through `catalog.selectors.customer_visible_products()` when `visible_only` (status, price ≥ 1000, active category) under the stock locks; (3) `OutOfStock(lines=[{product_id, name, requested, available, status}])` with every problem line; (4) `CashbackAboveMax(max)` from `min_payable` evaluated on the live subtotal (replaces the bare `cashback_used ≤ items_subtotal` check); (5) `PriceChanged(totals)` when `expected_total` differs; (6) typed `AddressNotFound` / `AddressIncomplete` instead of the generic `CheckoutError`; (7) evaluation order stock → cashback max → expected total → rows → `create_hold` (`InsufficientCashback`); (8) `customer_note: str = ""` stored on `Order.customer_note` (C§2.7.1 body) |
+| `checkout(customer_id, request) -> order_id` | `commerce.services` | quote first (no row lock), then `select_for_update(no_key=True)` on the Customer row, open-order rule and cart read under it, `create_order(…, customer_note=…)`, cart emptied, `Cart.last_checkout_order` |
 | `is_payable(order, payment, now, *, attaching)`, `is_open(payment)`, `in_flight(payment, now)`, `customer_inflight_order(customer_id)` | `commerce.services` / `selectors` | C§2.7.2 definitions (open transaction vs in flight; `CLICK_INFLIGHT_SECONDS` = 120); the selector replaces the P0 stub |
 | `ensure_payable_payment(order_id, provider, *, superseding: str \| None = None) -> PaymentRow` | `commerce.services` | same provider → reuse as is (the pay endpoint never writes for it); `superseding=<click_trans_id>` (Click Prepare only) → an active Click payment attached to another transaction is failed `abandoned` and a new row created (C§2.7.2 supersede rule); other provider in flight → `PaymentInProgress`; other provider not in flight → switch (`abandoned`); new row after a failure; updates `Order.payment_provider`; under `lock_order` |
 | `cancel_by_customer(order_id, customer_id, *, at=None)` | `commerce.services` | replaces the P0 stub; state.py row 5; Click in flight → `PaymentInProgress` |
@@ -284,12 +286,14 @@ C§2.0 rows 23–34 and 49–52: `cart/*`, `delivery/regions/`, `delivery/calcul
 | `expire_reservation` / `expire_due_reservations` | `commerce.services` (B5, changed) | skip an order whose payment is in flight and was attached before `reservation_expires_at`, until the grace ends |
 | `customer_orders(customer_id, scope)`, `customer_order_detail(order_id, customer_id, lang)`, `customer_timeline(order, lang)`, `progress(order, lang)` | `commerce.selectors` | C§2.8, C§4; history horizon (`Customer.reactivated_at`); live item names in the resolved language |
 | `build(order_id)`, `verify(ref) -> order_id \| None` | `commerce.payment_ref` | C§1.4/C§2.7.2 account reference, `compare_digest` |
-| `poll_bts()` | `commerce.tasks` | replaces the P0 stub; C§2.13.3 |
+| `poll_bts()` | `commerce.tasks` | replaces the P0 stub; C§2.13.3: single flight (`cache.add` lock), round robin after `IntegrationState(bts).data["poll_cursor"]`, ≤ `BTS_POLL_BATCH` parcels and ≤ `BTS_POLL_MAX_SECONDS` per run, stable payload fields only (webhook re-track too) |
 | webhook inbox helper (`store_delivery`, `store_rejected` with the per-IP cap and 1 KiB truncation, `semantic_fingerprint`) | `commerce/api/webhooks/inbox.py` | C§2.13.0 |
 | fake-mode refusal: every webhook view first checks `core.providers.callbacks_refused(provider)` → Click `-1` / Payme `-32504` / BTS 401, bounded `rejected:` row with `error_code: "fake_mode"`, nothing else read or written | `commerce/api/webhooks/*` | C§2.13.0 (production may run fake adapters; fake mode never pays an order) |
 | checkout and pay accept only `core.providers.payable_providers()` (400 `invalid_choice` otherwise) | `commerce/api/customer/*` | C§2.4, C§2.7 |
 | `attach_transaction(payment_id, provider_txn_id, provider_state)` (refuses a different existing txn id → `TransactionTaken`), `merge_provider_state(payment_id, patch)`, `mark_late_captured(payment_id, provider_txn_id, at, raw=None)` (pending or failed-by-us → `paid`, `error_code="late_capture"`, `failed_at=None`) | `payments.services` | under the Payment lock |
-| `active_payment`, `display_payment` ignore `error_code = "late_capture"`; `payme_statement(from_ms, to_ms)` by `provider_state.time`; `payment_by_txn(provider, txn_id)` | `payments.selectors` (B5, changed) | |
+| one display rule for late captures (C§2.8): `display_payment`, `pick_display` and `display_status_subquery` rank only non-late rows and fall back to the newest late capture when every row is one; `active_payment` ignores late captures; `revenue_buckets` excludes them (admin §2.10); `payme_statement(from_ms, to_ms)` by `provider_state.time`; `payment_by_txn(provider, txn_id)` | `payments.selectors` (B5, changed); `commerce.selectors` order list/detail and the customer `OrderSummary` keep using `pick_display` / `display_status_subquery` | C§2.8, C§2.13.0 |
+| the `already_paid` check of pay counts only non-late `paid` payments | `commerce.services.ensure_payable_payment` | C§2.7.2 |
+| `delivery/calculate/` is served by `commerce/api/customer/urls.py` (it reads the cart, loyalty and `cashback_max`, which `delivery` may not import); `delivery/api/customer/` serves only `delivery/regions/` | `commerce/api/customer/*`, `delivery/api/customer/*` | C§2.6 |
 | Payme protocol reads `account[PAYME_ACCOUNT_FIELD]` and answers `data = PAYME_ACCOUNT_FIELD` (the same setting builds the checkout URL's `ac.` key) | `integrations.payme.protocol`, `commerce/api/webhooks/payme.py` | C§2.13.2 |
 | Click refunds keyed by `click_paydoc_id`: `RefundRow.provider_payment_ref` (= `Payment.provider_state["click_paydoc_id"]`, `""` when absent) in `payments.selectors.refund_row`; B5's `commerce.tasks.submit_refund`, `_resolve_after_failure` and `_reversed` pass it (never `provider_txn_id` = `click_trans_id`) to `ClickPort.refund` / `payment_status`; a Click refund whose payment has no `click_paydoc_id` is created `manual_required` and re-checked by `submit_refund` before any port call; the seeded Click payments of `commerce/seeds.py` get a `click_paydoc_id`. `resolve_refund` also accepts a `failed` Click refund → `succeeded` (staff payout after a refused reversal, admin §7 item 18) | `payments.selectors`, `payments.services`, `commerce.tasks`, `commerce.services` | C§2.13.0 (Click Merchant API reversal/status are keyed by the payment id) |
 | a Click refund is `manual_required` (created with `manual=True`, and re-checked by `submit_refund` before any port call) while the Click port is fake under the production settings (`core.providers.callbacks_refused("click")`): the fake would report a reversal that moved no money | `commerce.services` (refund creation call sites), `commerce.tasks.submit_refund` | C§2.13.0, C§6.14 |
@@ -324,7 +328,7 @@ create_refund}`, `payments.selectors.{active_payment, display_payment, refunds_f
 - Delivery calculate: own address, region unknown, BTS rejected → 409, BTS down → 503, pickup → 0, `cashback_max` and
   `expected_total` equal checkout's numbers for the same cart.
 - Checkout: every row of C§2.7.1 in order (incl. a product in a hidden category → `OUT_OF_STOCK` `unavailable`, a
-  1-so'm remainder → `cashback_max`); snapshots and events equal to B5's admin expectations; cart emptied; replay returns
+  1-so'm remainder → `cashback_max`); snapshots (incl. `customer_note`) and events equal to B5's admin expectations; cart emptied; replay returns
   the stored 201 with an empty cart; consent outdated → 409 `terms_update_required`; no HTTP call while a row lock is
   held (fake BTS asserts no open `select_for_update`).
 - **Race — two checkouts for the last unit** (threads, `transaction=True`): exactly one order, one reservation; the
@@ -372,7 +376,18 @@ create_refund}`, `payments.selectors.{active_payment, display_payment, refunds_f
 - BTS: webhook bad token 401 (bounded row); query-token stripped from the stored path; re-track is authoritative
   (payload says `300`, track says `200` → `handed_to_courier`); a payload tracking number of another parcel is ignored
   (track called with ours, WARNING); unknown parcel ignored; transport failure 503 and nothing stored; polling picks
-  stale shipments only; regions cache.
+  stale shipments only; regions cache. Polling: with 250 stale parcels and an unchanged status, three runs poll all
+  250 (cursor wraps), none twice; an unchanged status with a changed volatile field in the tracked document appends no
+  `ShipmentEvent`; a second run while the lock is held returns at once; a run stops at `BTS_POLL_MAX_SECONDS` (pinned
+  clock) and at the first transport failure, keeping the cursor.
+- Display rule (C§2.8): an order with a Payme `paid` payment and a Click `late_capture` row shows Payme in the admin
+  list, the admin `payment` filter (`paid` matches), the admin detail, `me/orders/` and `me/orders/{id}/`; an expired
+  order whose only payment is a late capture shows it as `paid` + `refund.in_progress` (never `pending`) and `refunded`
+  after the refund succeeds; `revenue_buckets` excludes the late capture; pay on a cancelled order being refunded answers
+  `not_payable`, never `already_paid`.
+- **Race — checkout vs a capture of another open order** (`CHECKOUT_MAX_OPEN_ORDERS=2`, threads, `transaction=True`): a
+  Click Complete holds Order → Payment → LoyaltyAccount and inserts its `Purchase` while a checkout of the same customer
+  holds the customer-level lock and waits in `create_hold` → both finish, no `40P01` deadlock.
 - Dev simulate: mounted only with `DEV_FEATURES_ALLOWED`, the flag and fake payment modes; runs the real views; absent
   under the production settings.
 - **Fake providers under the production settings** (`override_settings(DEV_FEATURES_ALLOWED=False)`, `CLICK_MODE =
@@ -413,7 +428,7 @@ C§2.0 rows 35–48: `me/cashback/`, `me/cashback/ledger/`, `me/qr/`, `pos/cashb
 | `customer_ledger_page(customer_id)`, `ledger_item_view(row, lang, horizon)` | `loyalty.selectors` | over `ledger_for_customer` rows, paginated in SQL; before-horizon rows without order links |
 | `effective_holds(customer_id, now)` | `loyalty.selectors` | C§2.9.1: an **active** hold whose `expires_at` has passed exists only while the expiry job skips its order for an in-flight payment (otherwise expiry would have released it), so the selector shows `expires_at + PAYMENT_IN_FLIGHT_GRACE_SECONDS` for such holds and `expires_at` otherwise — no read of commerce or payments (layering) |
 | `free_slots(professional_id, service_id, date, now)`, `check_customer_slot(...)` | `appointments.selectors` / `services` | C§2.11 algorithm (grid relative to the hours start, lead time, horizon, blocks, break, open appointments) |
-| `request_by_customer(customer_id, professional_id, service_id, start, note)` | `appointments.services` | Customer row lock first, then count + own overlap; exclusion race → 409 `slot_taken` (reuse `_lost_the_slot`); event `requested` source `customer`; audit |
+| `request_by_customer(customer_id, professional_id, service_id, start, note)` | `appointments.services` | customer-level lock first (`select_for_update(no_key=True)`), then count + own overlap; exclusion race → 409 `slot_taken` (reuse `_lost_the_slot`); event `requested` source `customer`; audit |
 | `cancel_by_customer(appointment_id, customer_id, *, reason="", at=None)` | `appointments.services` | replaces the P0 stub |
 | `customer_appointments(customer_id, scope)` | `appointments.selectors` | history horizon |
 | `inbox_page(customer_id)`, `unread_count(customer_id)` | `notifications.selectors` | `inbox_customer_unread_idx`; history horizon |
@@ -664,7 +679,11 @@ behaviour: under the production settings the fakes run without scenarios, record
 #BTS_DEFAULT_PARCEL_WEIGHT_G=1000
 # Shared secret of the BTS webhook (>= 32 characters; ours). Production requires a real value in every mode.
 #BTS_WEBHOOK_SECRET=
+# Polling fallback (C§2.13.3): parcels whose last status is older than this are polled round robin, at most
+# BTS_POLL_BATCH parcels and BTS_POLL_MAX_SECONDS per run (single flight).
 #BTS_POLL_STALE_MINUTES=30
+#BTS_POLL_BATCH=100
+#BTS_POLL_MAX_SECONDS=300
 # ---- FCM (live adapter M3: HTTP v1 over httpx with a service-account JWT) ------------
 #FCM_PROJECT_ID=change-me-firebase-project
 #FCM_CREDENTIALS_FILE=/run/secrets/fcm.json
@@ -737,6 +756,10 @@ No beat entry for `loyalty.services.expire_holds`: it must stay unscheduled whil
    - `DELETE me/` with an unpaid order and an open appointment → both cancelled → re-register → same id, balance kept,
      old orders, appointments and inbox rows invisible;
    - `DELETE me/` while a Click payment is in flight → 409;
+   - **race — `DELETE me/` vs a concurrent Click Complete / Payme Perform of the same customer's order** (threads,
+     `transaction=True`): the capture holds Order → Payment → LoyaltyAccount and inserts its `Purchase` while the delete
+     holds the customer-level lock and waits for the Order lock → no `40P01` deadlock; the capture commits, the delete
+     then sees the order paid and continues (processing orders are kept);
    - social link from settings → `account_security` push → reset-password → identity unlinked;
    - QR issue → POS resolve → second resolve `qr_invalid`;
    - booking → admin confirm (B6 endpoint) → push with `inbox_id` → ack → admin `delivered` counter.

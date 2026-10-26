@@ -820,7 +820,7 @@ Templates are editable in the admin UI through `GET` / `PUT` below.
                "refunds_needing_action": 0},              // refunds in failed|unknown|manual_required
  "generated_at": "2026-10-24T12:00:00+05:00"}
 ```
-- `revenue` = Σ `payment.amount` of payments confirmed in the bucket, minus the succeeded refunds of those payments. Refunds are attributed to the payment's bucket, so revenue is never negative.
+- `revenue` = Σ `payment.amount` of payments confirmed in the bucket, minus the succeeded refunds of those payments. Refunds are attributed to the payment's bucket, so revenue is never negative. Late-captured payments (M2, customer contract §2.13.0: money taken for an order we did not honour, always refunded) are excluded.
 - `orders` = orders created in the bucket, any status.
 
 **`GET nav-counts/`** → `{"orders_processing": 41, "appointments_pending": 3}`. These are all-time `processing` orders and the pending-summary count.
