@@ -819,12 +819,13 @@ Templates are editable in the admin UI through `GET` / `PUT` below.
  "attention": {"bts_failed": 1,                           // processing orders with shipment.state = failed
                "pending_appointments": 3, "next_appointment_at": "2026-10-26T09:00:00+05:00",  // = pending-summary
                "new_from_billz": 6,
-               "refunds_needing_action": 0,               // refunds in failed|unknown|manual_required
+               "refunds_needing_action": 0,               // refunds in failed|unknown|manual_required (a superseded failed one excluded, below)
                "bts_polling_failing": false},             // M2: the last BTS polling run tracked no parcel or stopped on transport failures (IntegrationState(bts).consecutive_failures > 0)
  "generated_at": "2026-10-24T12:00:00+05:00"}
 ```
 - `revenue` = Σ `payment.amount` of payments confirmed in the bucket, minus the succeeded refunds of those payments. Refunds are attributed to the payment's bucket, so revenue is never negative. Late-captured payments (M2, customer contract §2.13.0: money taken for an order we did not honour, always refunded) are excluded.
 - `orders` = orders created in the bucket, any status.
+- `attention.refunds_needing_action` counts refunds in `unknown` or `manual_required`, and `failed` refunds that still need staff: a `failed` refund is **not** counted when a later refund of the same payment `succeeded` (a staff retry returned the money) or when its payment is `refunded`. `payments/?refund_state=failed` (§2.12) applies the same rule.
 - `attention.bts_polling_failing` (M2, customer contract §2.13.3) = `IntegrationState(bts).consecutive_failures > 0`: a polling run stopped after consecutive transport failures, or attempted parcels and tracked none (every parcel refused). It turns false at the next run that tracks a parcel; BTS webhooks never change it.
 
 **`GET nav-counts/`** → `{"orders_processing": 41, "appointments_pending": 3}`. These are all-time `processing` orders and the pending-summary count.
@@ -850,7 +851,7 @@ Templates are editable in the admin UI through `GET` / `PUT` below.
 |---|---|
 | `status` | PaymentStatus |
 | `provider` | PaymentProvider |
-| `refund_state` | RefundState (any refund of the payment in that state) |
+| `refund_state` | RefundState (any refund of the payment in that state; for `failed`, only a failed refund that still needs staff — not one a later `succeeded` refund of the same payment superseded, and none of a `refunded` payment, the rule of §2.10 `attention.refunds_needing_action`) |
 | `period`, `date_from`, `date_to` | As in `orders/`, applied to `created_at` |
 | `search` | Order id, transaction id, or (≥3 digits) phone |
 | `ordering` | `-created_at` (default) or `created_at` |

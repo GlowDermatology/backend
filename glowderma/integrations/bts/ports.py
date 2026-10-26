@@ -17,7 +17,7 @@ admin cancel whose transaction rolled back after BTS agreed is repeated), and ``
 before every ``create`` (a create that reached BTS before the worker crashed is adopted, never duplicated).
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 # BTS status code of an accepted parcel that has not left the warehouse: the only status BTS cancels (O1).
@@ -36,6 +36,22 @@ class Parcel:
     bts_order_id: str
     tariff: int | None  # so'm; ``None`` when BTS does not echo it (the order's quoted fee is used)
     status: str  # raw BTS status code ("100", "200", …)
+    status_at: str = ""  # BTS's status time when ``track`` reports one (a stable payload field), else ""
+
+
+@dataclass(frozen=True, slots=True)
+class City:
+    code: str
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
+class Region:
+    """One region of BTS's reference list with its cities (``delivery/regions/``, address validation)."""
+
+    code: str
+    name: str
+    cities: tuple[City, ...] = field(default_factory=tuple)
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,7 +80,8 @@ class BtsError(Exception):
 
 
 class BtsRejected(BtsError):
-    """A definitive refusal of a create (bad address, unknown region, …)."""
+    """A definitive refusal (a create with a bad address, a quote for a route BTS does not serve, a track of a
+    parcel BTS does not know, …)."""
 
     def __init__(self, error_code: str, message: str = "") -> None:
         super().__init__(message or error_code)
@@ -77,8 +94,20 @@ class BtsUnavailable(BtsError):
 
 
 class BtsPort(Protocol):
+    def regions(self) -> list[Region]:
+        """BTS's region/city reference list (cached 24 h by ``delivery.selectors.region_catalog``)."""
+        ...
+
     def quote(self, region_code: str, city_code: str) -> int:
-        """The delivery tariff in so'm for an address (checkout's ``delivery_fee``)."""
+        """The delivery tariff in so'm for an address (``delivery/calculate/``, checkout's ``delivery_fee``):
+        sender city ``BTS_SENDER_CITY_CODE``, weight ``BTS_DEFAULT_PARCEL_WEIGHT_G``, one parcel. A route BTS
+        does not serve raises :class:`BtsRejected`; a transport failure :class:`BtsUnavailable`."""
+        ...
+
+    def track(self, tracking_number: str) -> Parcel:
+        """The parcel with its current status, asked with **our** stored tracking number (webhook re-track,
+        polling; customer contract §2.13.3). :class:`BtsRejected` = a definitive per-parcel answer (unknown
+        parcel), :class:`BtsUnavailable` = transport error, 5xx or timeout."""
         ...
 
     def find_by_client_id(self, client_id: str) -> Parcel | None:

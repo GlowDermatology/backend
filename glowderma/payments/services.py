@@ -35,7 +35,7 @@ from django.utils import timezone
 from glowderma.accounts.models import StaffUser
 from glowderma.core import audit, enums, outbox, timeutils
 from glowderma.core.api.exceptions import Conflict, InvalidTransition
-from glowderma.payments.models import OPEN_REFUND_STATES, Payment, Refund
+from glowderma.payments.models import LATE_CAPTURE, OPEN_REFUND_STATES, Payment, Refund
 from glowderma.payments.topics import REFUND_SUBMIT, refund_submit_key
 
 PAYME_STATE_CREATED = 1  # Payme transaction in state 1 is never failed unilaterally (02 P-2)
@@ -55,6 +55,11 @@ class RefundNotFound(PaymentError):
 
 class StaleRefundClaim(PaymentError):
     """The refund moved on since the worker read it (another worker claimed it, or it was resolved)."""
+
+
+class TransactionTaken(PaymentError):
+    """The payment already carries a different provider transaction id (customer contract §2.13.0 step 4), or
+    another payment of the provider holds this one (``payment_provider_txn_unique``)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,10 +221,94 @@ def fail_payment(
         return _payment_result(payment, changed=True)
 
 
+def attach_transaction(
+    payment_id: int, provider_txn_id: str, provider_state: dict[str, Any]
+) -> PaymentResult:
+    """Bind a provider transaction to a ``pending`` payment (Click Prepare, Payme ``CreateTransaction``).
+
+    ``provider_state`` is merged into the stored protocol fields. The same transaction id again is a merge
+    (``changed`` False when nothing changed); a **different** non-empty id already on the payment, or the
+    id held by another payment of the provider, raises :class:`TransactionTaken`; a payment that is not
+    ``pending`` raises ``InvalidTransition``. The caller holds the Order lock; the Payment row is locked here.
+    """
+    if not provider_txn_id:
+        raise ValueError("A provider transaction id is required")
+    with transaction.atomic():
+        payment = _lock_payment(payment_id)
+        if payment.provider_txn_id and payment.provider_txn_id != provider_txn_id:
+            raise TransactionTaken(f"Payment {payment_id} is bound to another transaction")
+        if payment.status != enums.PaymentStatus.PENDING:
+            raise InvalidTransition(f"Payment {payment_id} is {payment.status}, not pending")
+        merged = {**payment.provider_state, **provider_state}
+        if payment.provider_txn_id == provider_txn_id and merged == payment.provider_state:
+            return _payment_result(payment, changed=False)
+        payment.provider_txn_id = provider_txn_id
+        payment.provider_state = merged
+        try:
+            with transaction.atomic():
+                payment.save(update_fields=["provider_txn_id", "provider_state", "updated_at"])
+        except IntegrityError as exc:
+            if "payment_provider_txn_unique" in str(exc):
+                raise TransactionTaken(f"Transaction {provider_txn_id} belongs to another payment") from exc
+            raise
+        return _payment_result(payment, changed=True)
+
+
+def merge_provider_state(payment_id: int, patch: dict[str, Any]) -> PaymentResult:
+    """Merge structured protocol fields into ``Payment.provider_state`` (any status; never a raw payload)."""
+    with transaction.atomic():
+        payment = _lock_payment(payment_id)
+        merged = {**payment.provider_state, **patch}
+        if merged == payment.provider_state:
+            return _payment_result(payment, changed=False)
+        payment.provider_state = merged
+        payment.save(update_fields=["provider_state", "updated_at"])
+        return _payment_result(payment, changed=True)
+
+
+def mark_late_captured(
+    payment_id: int, provider_txn_id: str, at: datetime, raw: dict[str, Any] | None = None
+) -> PaymentResult:
+    """A refused capture (customer contract §2.13.0): the provider took the money for a payment we do not
+    honour. ``failed`` (failed by us) or ``pending`` → ``paid`` with ``error_code = "late_capture"``,
+    ``confirmed_at = at``, ``failed_at = None``; the **only** transition out of ``failed``. A payment that is
+    already a late capture of the same transaction is a no-op; any other state raises ``InvalidTransition``.
+    The late capture never counts as the order's active payment (``payment_one_active_per_order``)."""
+    _aware(at, "at")
+    if not provider_txn_id:
+        raise ValueError("A late capture needs the provider transaction id")
+    with transaction.atomic():
+        payment = _lock_payment(payment_id)
+        if payment.error_code == LATE_CAPTURE and payment.provider_txn_id == provider_txn_id:
+            if payment.status in (enums.PaymentStatus.PAID, enums.PaymentStatus.REFUNDED):
+                return _payment_result(payment, changed=False)
+        if payment.status not in (enums.PaymentStatus.FAILED, enums.PaymentStatus.PENDING):
+            raise InvalidTransition(f"Payment {payment_id} is {payment.status}, not failed or pending")
+        if payment.provider_txn_id and payment.provider_txn_id != provider_txn_id:
+            raise TransactionTaken(f"Payment {payment_id} is bound to another transaction")
+        payment.status = enums.PaymentStatus.PAID
+        payment.provider_txn_id = provider_txn_id
+        payment.confirmed_at = at
+        payment.failed_at = None
+        payment.error_code = LATE_CAPTURE
+        payment.error_message = ""
+        if raw:
+            payment.provider_state = {**payment.provider_state, **raw}
+        payment.save()
+        return _payment_result(payment, changed=True)
+
+
 # --- refunds ------------------------------------------------------------------------------------------------
 
 
-def _audit_state(refund: Refund, before: str, *, actor: StaffUser | None = None, request: Any = None) -> None:
+def _audit_state(
+    refund: Refund,
+    before: str,
+    *,
+    actor: StaffUser | None = None,
+    request: Any = None,
+    extra: dict[str, Any] | None = None,
+) -> None:
     audit.record(
         action="refund.state_changed",
         entity_type="refund",
@@ -233,6 +322,7 @@ def _audit_state(refund: Refund, before: str, *, actor: StaffUser | None = None,
             "to": refund.state,
             "attempts": refund.attempts,
             "error_code": refund.error_code or None,
+            **(extra or {}),
         },
     )
 
@@ -245,8 +335,9 @@ def _new_refund(
     requested_by: StaffUser | None,
     at: datetime,
     request: Any,
+    manual: bool = False,
 ) -> Refund:
-    manual = payment.provider == enums.PaymentProvider.PAYME
+    manual = manual or payment.provider == enums.PaymentProvider.PAYME
     refund = Refund.objects.create(
         payment=payment,
         amount=amount,
@@ -294,9 +385,12 @@ def create_refund(
     *,
     at: datetime | None = None,
     request: Any = None,
+    manual: bool = False,
 ) -> RefundResult:
     """Return a paid payment: Click ``requested`` (+ outbox ``refund.submit``), Payme ``manual_required``.
 
+    ``manual=True`` creates a Click refund ``manual_required`` too, without the outbox message (customer
+    contract §2.13.0: no ``click_paydoc_id``, or the Click port is fake under the production settings).
     M1 refunds are full (``amount == payment.amount``, O2). A payment with an open refund returns that one
     (``changed=False``), so a replayed cancel never asks twice. ``payment.status`` stays ``paid`` (O5).
     """
@@ -320,12 +414,18 @@ def create_refund(
             requested_by=staff,
             at=at or timeutils.now(),
             request=request,
+            manual=manual,
         )
         return _refund_result(refund, payment, changed=True)
 
 
 def retry_refund(
-    refund_id: int, requested_by: int | None, *, at: datetime | None = None, request: Any = None
+    refund_id: int,
+    requested_by: int | None,
+    *,
+    at: datetime | None = None,
+    request: Any = None,
+    manual: bool = False,
 ) -> RefundResult:
     """A ``failed`` refund is terminal: a retry is a **new** refund (``origin = manual``) of the payment."""
     _aware(at, "at")
@@ -347,6 +447,7 @@ def retry_refund(
             requested_by=staff,
             at=at or timeutils.now(),
             request=request,
+            manual=manual,
         )
         return _refund_result(new, payment, changed=True)
 
@@ -426,10 +527,15 @@ def mark_succeeded(
     provider_state: dict[str, Any] | None = None,
     actor_id: int | None = None,
     request: Any = None,
+    from_failed: bool = False,
+    audit_extra: dict[str, Any] | None = None,
 ) -> RefundResult:
     """The provider returned the money: ``succeeded`` (``completed_at``); the payment becomes ``refunded``
     when the succeeded refunds cover its amount. From ``submitting``, ``manual_required`` (Payme
-    ``CancelTransaction`` / staff) or ``unknown`` (reconciliation / staff); a succeeded refund is a no-op."""
+    ``CancelTransaction`` / staff) or ``unknown`` (reconciliation / staff); a succeeded refund is a no-op.
+    ``from_failed=True`` also accepts a ``failed`` refund — only the guarded staff resolve of a failed Click
+    refund passes it (``commerce.services.resolve_refund``, customer contract §2.13.0); ``audit_extra`` keys
+    are added to the ``refund.state_changed`` audit (``manual_payout``)."""
     _aware(at, "at")
     instant = at or timeutils.now()
     actor = _staff(actor_id)
@@ -437,7 +543,13 @@ def mark_succeeded(
         payment, refund = _locked_refund(refund_id)
         if refund.state == enums.RefundState.SUCCEEDED:
             return _refund_result(refund, payment, changed=False)
-        allowed = (enums.RefundState.SUBMITTING, enums.RefundState.MANUAL_REQUIRED, enums.RefundState.UNKNOWN)
+        allowed: tuple[str, ...] = (
+            enums.RefundState.SUBMITTING,
+            enums.RefundState.MANUAL_REQUIRED,
+            enums.RefundState.UNKNOWN,
+        )
+        if from_failed:
+            allowed = (*allowed, enums.RefundState.FAILED)
         if refund.state not in allowed:
             raise InvalidTransition(f"Refund {refund_id} is {refund.state}")
         before = refund.state
@@ -449,7 +561,7 @@ def mark_succeeded(
         if provider_state:
             refund.provider_state = {**refund.provider_state, **provider_state}
         refund.save()
-        _audit_state(refund, before, actor=actor, request=request)
+        _audit_state(refund, before, actor=actor, request=request, extra=audit_extra)
         refunded = False
         if payment.status == enums.PaymentStatus.PAID and _covered(payment):
             payment.status = enums.PaymentStatus.REFUNDED
@@ -498,6 +610,24 @@ def mark_failed(
         return _refund_result(refund, payment, changed=True)
 
 
+def mark_manual_required(refund_id: int, at: datetime | None = None) -> RefundResult:
+    """``requested → manual_required``: a Click refund that must never reach the provider (customer contract
+    §2.13.0: its payment has no ``click_paydoc_id``, or the Click port is fake under the production settings)
+    — the ``refund.submit`` handler's re-check before any port call. Any other state is left alone
+    (``changed=False``)."""
+    _aware(at, "at")
+    with transaction.atomic():
+        payment, refund = _locked_refund(refund_id)
+        if refund.state != enums.RefundState.REQUESTED:
+            return _refund_result(refund, payment, changed=False)
+        before = refund.state
+        refund.state = enums.RefundState.MANUAL_REQUIRED
+        refund.last_attempt_at = at or timeutils.now()
+        refund.save()
+        _audit_state(refund, before)
+        return _refund_result(refund, payment, changed=True)
+
+
 def mark_unknown(
     refund_id: int,
     last_error: str = "",
@@ -534,14 +664,19 @@ __all__ = [
     "RefundNotFound",
     "RefundResult",
     "StaleRefundClaim",
+    "TransactionTaken",
+    "attach_transaction",
     "can_fail_unilaterally",
     "confirm_payment",
     "create_payment",
     "create_refund",
     "fail_payment",
     "mark_failed",
+    "mark_late_captured",
+    "mark_manual_required",
     "mark_submitting",
     "mark_succeeded",
     "mark_unknown",
+    "merge_provider_state",
     "retry_refund",
 ]

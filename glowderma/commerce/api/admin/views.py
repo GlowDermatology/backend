@@ -219,10 +219,13 @@ class RefundRetryView(AdminAPIView):
 class RefundResolveView(AdminAPIView):
     @extend_schema(
         operation_id="admin_payments_refund_resolve",
-        description="Close an `unknown` / `manual_required` refund after a manual check (audited "
-        "`refund.state_changed` with the actor; order event `refund_succeeded` / `refund_failed`).",
+        description="Close an `unknown` / `manual_required` refund after a manual check, or a `failed` Click "
+        "refund as `succeeded` after a fresh Click status check (`manual_payout: true` when Click still "
+        "reports "
+        "the payment paid and staff paid the customer by hand; 503 when Click does not answer). Audited "
+        "`refund.state_changed` with the actor; order event `refund_succeeded` / `refund_failed`.",
         request=ResolveRefundSerializer,
-        responses={200: PaymentSerializer, **ADMIN_ERRORS},
+        responses={200: PaymentSerializer, **ACTION_ERRORS},
     )
     @idempotent(required=False)
     def post(self, request: Request, pk: int, refund_id: int) -> Response:
@@ -231,7 +234,11 @@ class RefundResolveView(AdminAPIView):
         body.is_valid(raise_exception=True)
         try:
             services.resolve_refund(
-                refund_id, body.validated_data["state"], _actor_id(request), request=request
+                refund_id,
+                body.validated_data["state"],
+                _actor_id(request),
+                manual_payout=bool(body.validated_data.get("manual_payout", False)),
+                request=request,
             )
         except RefundNotFound as exc:
             raise NotFound from exc
