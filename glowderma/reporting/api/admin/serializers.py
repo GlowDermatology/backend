@@ -117,6 +117,9 @@ class DashboardAttentionSerializer(serializers.Serializer[dict[str, Any]]):
     next_appointment_at = serializers.DateTimeField(allow_null=True)
     new_from_billz = serializers.IntegerField()
     refunds_needing_action = serializers.IntegerField()
+    bts_polling_failing = serializers.BooleanField(
+        help_text="The last BTS polling run tracked no parcel or stopped on transport failures (M2)."
+    )
 
 
 class DashboardSerializer(serializers.Serializer[dict[str, Any]]):

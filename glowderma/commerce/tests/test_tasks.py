@@ -411,10 +411,10 @@ def test_refund_claim_is_a_compare_and_set() -> None:
 def test_refund_refusal_of_a_duplicate_is_checked_against_the_status() -> None:
     """Click refuses a reversal it already performed: the follow-up status check makes it ``succeeded``."""
     order, refund = _cancelled_click_order()
-    txn = refund.payment.provider_txn_id
+    paydoc = refund.payment.provider_state["click_paydoc_id"]  # Click calls are keyed by click_paydoc_id
 
-    def duplicate(provider_txn_id: str, amount: int) -> Any:
-        fake_click._reversed.add(txn)  # the reversal of the other worker went through meanwhile
+    def duplicate(payment_ref: str, amount: int) -> Any:
+        fake_click._reversed.add(paydoc)  # the reversal of the other worker went through meanwhile
         raise ClickRefundRejected("duplicate", "already reversed")
 
     with mock.patch("glowderma.integrations.click.fake.FakeClick.refund", side_effect=duplicate):

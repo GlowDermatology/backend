@@ -169,13 +169,15 @@ Mechanism, fingerprint, storage and responses as admin §1.7 (`core.idempotency.
   `POST cart/items/` (an increment: a retried "add 1" must not add 2), `POST me/addresses/` (a retried create must not
   duplicate), `POST me/social/`, `POST me/password/` (a retried change would answer `password_unchanged` or find its
   verification token used).
-- **Optional** on every other **C** POST/PUT/PATCH/DELETE (they are absolute writes: a retry converges). `auth/*`
-  ignore the header (responses carry credentials).
+- **Optional** on every other **C** POST/PUT/PATCH/DELETE (they are absolute writes: a retry converges), documented
+  as the optional `Idempotency-Key` header of those operations. `auth/*` ignore the header (responses carry
+  credentials). The fingerprint is an HMAC (keyed by the server secret) over the body **and the query string**.
 - Webhooks do not use it: provider deliveries are de-duplicated by `integrations.WebhookInbox` and by provider state
   (§2.13.0). The POS resolve is not idempotent by design (the QR token is single-use).
 - **No side effects on refusal:** under `@idempotent` every non-2xx answer rolls the whole transaction back
   (`transaction.set_rollback(True)`). A 409 therefore never carries a write; a refusal that must change state (for
-  example an expiry) is left to the job that owns it (§2.7.2).
+  example an expiry) is left to the job that owns it (§2.7.2). State a refusal keeps on purpose lives outside that
+  transaction: the sign-in guard counters (Redis) and the revocation of a refused flow's Apple token (§2.1.8).
 - App rule: one key per user intent (one tap of "Savatga", "Saqlash", "Buyurtma berish", "To‘lash", "Qayta
   buyurtma", "Yozilish", "Bekor qilish"), reused on network retries, renewed after any 2xx or after 422
   `idempotency_key_reused`. Errors are never stored, so a retry after 409/503 runs again.
@@ -492,7 +494,9 @@ device learns of the reset even when the reset came from a stolen SIM (§2.14.2)
 `verification_invalid`; 409 `phone_not_registered` if the customer was deleted in between.
 
 #### 2.1.6 `POST auth/refresh/`
-Body `{"refresh": str}`. Device headers must match the session's device (else 401 `not_authenticated`).
+Body `{"refresh": str}`. Device headers must match the session's device for every answer that hands out tokens
+(rotation, grace replay, re-rotation; else 401 `not_authenticated`). A **reuse** (step 6, including a dead token of
+step 2) revokes the session whichever install presents it — a token from another install is the stronger signal.
 
 `accounts.services.rotate_customer_refresh(raw, fid)` runs in one transaction:
 1. `h = SHA-256(raw)`; `SELECT … FOR UPDATE` the session `WHERE audience='customer' AND (refresh_hash = h OR
@@ -605,9 +609,14 @@ The fakes' `*` nonce wildcard exists only under the local/test settings. `author
   does not exchange again. An exchange refused by Apple → 400 `social_token_invalid`; Apple unreachable → 503
   `provider_unavailable`; nothing is linked in either case. When an Apple identity is unlinked (`DELETE
   me/social/apple/`, the reset of §2.1.5, `DELETE me/` §2.2.3), the same transaction enqueues `apple.revoke
-  {identity_id, client_id, sealed_token}` (dedupe `apple.revoke:{identity_id}`); its handler (`accounts/tasks.py`)
+  {identity_id, customer_id, subject, subject_ref, client_id, sealed_token}` (dedupe `apple.revoke:{identity_id}`;
+  `subject` is blanked once the message reaches a final outcome). Tokens exchanged for a refused `POST me/social/`, or
+  for a completion refused with `social_provider_linked` / `social_identity_linked`, are revoked the same way unless
+  their `sub` is linked to a customer (one revocation ends Apple's whole authorization of the app); a ticket that is
+  never completed keeps its token until the ticket expires. Its handler (`accounts/tasks.py`)
   posts the token to `https://appleid.apple.com/auth/revoke` (`token_type_hint = refresh_token`); transport errors
-  retry through the outbox, an Apple 400 (token already invalid) is final with a WARNING, a dead message logs ERROR
+  retry through the outbox, an Apple 400 `invalid_grant` or `invalid_request` (token already invalid) is final with a
+  WARNING (every other 4xx — e.g. `invalid_client`, a misconfiguration — is retried and ends dead), a dead message logs ERROR
   `apple.revoke_dead` (alert; staff revoke in the Apple developer account). The fake records the revoke (local/test).
   Apple's server-to-server notifications (consent revoked, account deleted) are **not** handled in M2: the default is
   that the identity stays linked until the customer unlinks it or Apple refuses its next token; M3 adds the endpoint.
@@ -707,7 +716,10 @@ paid):
    written; the app asks the customer to finish or wait ≤2 minutes, `CLICK_INFLIGHT_SECONDS`);
 2. every `awaiting_payment` order → `commerce.services.cancel_by_customer` (P2; reason `customer_request`;
    processing/shipped orders continue: BTS uses the order's recipient snapshot);
-3. every open future appointment → `appointments.services.cancel_by_customer` (P3; `reason = "account_deleted"`);
+3. every open future appointment → `appointments.services.cancel_by_customer` (P3; `reason = "account_deleted"`,
+   `account_deleted=True`: the lead-time rule of §2.11 is skipped on this path only). An appointment that stopped being
+   cancellable between the selection and its row lock (staff cancelled, rejected or attended it, or it started) is
+   skipped and not counted; it never aborts the delete (integration, 2026-10-26);
 4. cart lines deleted (`commerce.services.delete_cart_lines`, P0);
 5. `accounts.services.delete_customer` (A1; P0 extends the built function): under the customer-level lock
    (`no_key=True`): `status=deleted`, `deleted_at`, name/image/address/password scrubbed, `language` reset to `uz`,
@@ -715,8 +727,8 @@ paid):
    addresses deleted, social identities deleted (an `apple.revoke` outbox message for each Apple identity holding a
    token, §2.1.8), devices `is_active=False, push_enabled=False, fcm_token="", key_hash=""`, every session revoked
    `deactivated` through `revoke_customer_sessions` (customer tombstone TTL), outstanding QR tokens deleted
-   (`core.qr_store.revoke_all`); key hashes and QR tokens are cleared in the same transaction, the Redis deletions on
-   commit;
+   (`core.qr_store.revoke_all`), the customer's `IdempotencyRecord` rows deleted; key hashes and QR tokens are cleared
+   in the same transaction, the Redis deletions on commit;
 6. audit `customer.deleted {orders_cancelled, appointments_cancelled}`.
 
 **Kept:** the row and phone (unique), `LoyaltyAccount` balance and ledger, `Purchase` rows, orders, appointments,
@@ -787,8 +799,15 @@ Body `{"fcm_token": str 0..512 | null, "push_enabled": bool, "model": str ≤80,
   (`fcm_token=""`, `push_enabled=False`, and `is_active=False` if it was active) first
   (`device_active_fcm_token_unique` backstop).
 - `fcm_invalidated_at` is cleared when a new token arrives.
+- **Locks:** the caller's customer row and the customer row of every device holding the token, in ascending pk
+  order, before any Device or AuthSession row; the holders are read without a lock first, and if the token moved in
+  the meantime the attempt rolls back and starts again (up to `REGISTER_DEVICE_ATTEMPTS = 3`, then 409
+  `request_in_progress` with `Retry-After: 1` — only reachable through a writer that bypasses this service). Each
+  attempt first takes a transaction advisory lock keyed on a hash of the token (lock order token → Customer → Device →
+  AuthSession), so two customers
+  registering the same fresh token at once never answer 500: one keeps it, the other's device loses it.
 → 200 `{"fid", "platform", "model", "os", "app_version", "push_enabled", "last_active_at"}`.
-Service: `accounts.services.register_device` (P0).
+Service: `accounts.services.register_device` (P0, lock order P1).
 
 #### 2.2.7 Addresses
 ```jsonc
@@ -1150,11 +1169,13 @@ moves money, never creates order events and never expires an order.
   order (a Click payment is failed `expired`; a Payme state-1 payment stays pending, P-2). A capture that still lands
   is a **refused capture** (§2.13.0) and is refunded.
 
+Checked in this order (a cancelled order that is being refunded answers `not_payable`, never `already_paid`):
+
 | Check | Result · message (uz) · key |
 |---|---|
 | Order of another customer | 404 |
-| Status `processing`/`handed_to_courier`/`delivered`, or a `paid` payment that is not a late capture (`error_code ≠ "late_capture"`) exists | 409 `already_paid` "Buyurtma allaqachon to‘langan." · `error.already_paid` |
 | Status `cancelled` | 409 `not_payable` "Bu buyurtmani to‘lab bo‘lmaydi." · `error.not_payable` |
+| Status `processing`/`handed_to_courier`/`delivered`, or a `paid` payment that is not a late capture (`error_code ≠ "late_capture"`) exists | 409 `already_paid` "Buyurtma allaqachon to‘langan." · `error.already_paid` |
 | Not payable with `attaching=True` (`now ≥ reservation_expires_at`; the job has not run yet) | 409 `order_expired` "To‘lov muddati tugadi. Mahsulotlarni savatga qaytarib, qaytadan rasmiylashtiring." · `error.order_expired` — **nothing is written** (§1.7); the expiry job cancels the order |
 | `provider` differs from the provider of an in-flight payment (Click prepared < `CLICK_INFLIGHT_SECONDS` ago without Complete, or Payme state 1) | 409 `payment_in_progress` "To‘lov {provider} ilovasida jarayonda. Uni yakunlang yoki biroz kuting." · `error.payment_in_progress`, `details {provider, order_id}` |
 | `provider` not in `settings/public` `payment_providers` (§2.4) | 400 `provider` `invalid_choice` |
@@ -1491,7 +1512,9 @@ customer`; audit `appointment.requested` (actor_type `customer`). No push (the c
 `requested`/`confirmed`, ascending by start; `past` = the rest, descending; both limited to the history horizon
 (§2.2.3). **`GET me/appointments/{id}/`** → `Appointment` (404 for another customer's or beyond the horizon).
 
-**`POST appointments/{id}/cancel/`** (**C**, **I**). Body `{"reason": str ≤300 | null}`.
+**`POST appointments/{id}/cancel/`** (**C**, **I**). Body `{"reason": str ≤300 | null}`; the value reserved for the
+account-deletion path, `"account_deleted"` (after trimming), is refused with 400 `reason` `invalid`, so the event and
+the audit never show a false deletion.
 Allowed for `requested`/`confirmed` with `start − now ≥ BOOKING_CANCEL_MIN_LEAD_MINUTES` (default 0; P3 terms are
 not enforced beyond that) → 200 `Appointment` (`status: cancelled`). Else 409 `not_cancellable` "Bu qabulni bekor
 qilib bo‘lmaydi." (`error.appointment_not_cancellable`). Side effects (`appointments.services.cancel_by_customer`,
@@ -1620,6 +1643,7 @@ admin-only by DB constraint).
   | Payme | `{method}:{params.id or "-"}:{uuid4}` — every delivery is its own row | never replayed: the Payme state machine below is idempotent on `params.id` (= `Payment.provider_txn_id`) and answers from the **current** state |
   | BTS | `{our tracking number}:{status}:{event_time}` from the payload, else `{uuid4}` | replay `{"ok": true}` and a `dup:` row; no re-track |
   | any | **auth/signature failure** → `rejected:{uuid4}` | a forged request can never occupy the key of a real delivery |
+  | Click | refusals after the signature but before any state is read (`action` `-3`, `service_id` `-8`, account reference `-5`) → `rejected:{uuid4}`, **uncapped**, payload and raw body kept | never stored under the delivery key, so the later correct delivery of the same transaction is not a fingerprint conflict (decided 2026-10-26, integration) |
 - Lock keys: Click `click:{click_trans_id}`; Payme `payme:{params.id}` (`payme:order:{order_id}` for
   `CheckPerformTransaction`); BTS `bts:{shipment id}`.
 - **Payable / open / in flight / attached / supersede:** exactly as defined in §2.7.2
@@ -1636,8 +1660,9 @@ admin-only by DB constraint).
   confirm a payment that was cancelled); if the goods cannot be provided, the merchant answers Complete **successfully**
   and cancels the payment through the Merchant API (`payment/reversal`); repeated error answers send the payment to
   manual investigation at Click. So: `commerce.services.record_late_capture(order_id, payment.id, "click",
-  click_trans_id, case=<"failed_by_us" | "not_payable" | "double_payment" | "fake_mode">)` under the Order → Payment
-  locks: `payments.services.mark_late_captured(payment_id, provider_txn_id, at)` — the **only** transition into `paid`
+  click_trans_id, case=<"failed_by_us" | "not_payable" | "double_payment" | "fake_mode">)` (when several cases
+  apply, the first of `double_payment`, `failed_by_us`, `not_payable` is recorded; `fake_mode` is set only by the fake
+  Click rule below) under the Order → Payment locks: `payments.services.mark_late_captured(payment_id, provider_txn_id, at)` — the **only** transition into `paid`
   from `failed` (case (a); case (b) once the order was cancelled) or from `pending` (case (b) while the expiry job has
   not run yet, case (c), and case (d), where the payment attached while Click was live is normally still `pending`)
   and only for this case: status `paid`, `confirmed_at = at`, `failed_at =
@@ -1755,8 +1780,13 @@ Responses are `application/json`.
 **Prepare (action 0).** Fake Click under the production settings → `-1` before anything else (§2.13.0). Steps 1 of §2.13.0 (params `-8` → content type `-8` → IP `-8` → signature `-1` → action `-3`
 → `service_id` `-8` → account reference `-5`), advisory lock, then:
 1. **duplicate / state replay:** an inbox row under `prepare:{click_trans_id}` with a conflicting fingerprint → `-8`
-   (`rejected:` row); a payment with `provider = click`, `provider_txn_id = click_trans_id` exists and is `pending` or
-   `paid` → `0` with the same `merchant_prepare_id` (a plain or re-signed retry; `dup:` row, §2.13.0);
+   (`rejected:` row); when a payment with `provider = click`, `provider_txn_id = click_trans_id` already exists, the
+   answer comes from its state with no write except the `dup:` row (§2.13.0), read **under the lock of that payment's
+   order** (`lock_order(payment.order_id)`, then the payment is re-read): bound to another order than
+   `merchant_trans_id` names → `-8`; `pending`, `paid` or `refunded` (captured, then returned — the same rule as
+   Complete step 1) → `0` with the same `merchant_prepare_id` (a plain or re-signed retry, or a delayed duplicate);
+   `failed` (by Click, superseded, expired or cancelled) → `-9`. A delayed or re-sent Prepare of an old transaction
+   therefore never supersedes the customer's live Click payment (decided 2026-10-26, integration);
 2. `lock_order(order_id)`; order exists (`-5`);
 3. already paid (`processing`+ or a non-late `paid` payment) → `-4`;
 4. not payable with `attaching=True` (cancelled, or `now ≥ reservation_expires_at`) → `-9`;
@@ -1770,8 +1800,9 @@ Responses are `application/json`.
    `abandoned` (unilateral, no `payment_failed` event, as B5's silent fails) and a new `pending` row is created — a later
    Complete of the old transaction is a refused capture (§2.13.0); then `attach_transaction(payment.id, click_trans_id,
    {merchant_trans_id, merchant_prepare_id: payment.id, click_trans_id, click_paydoc_id, service_id, prepare_at,
-   sign_time})` → `0` with `merchant_prepare_id = payment.id`. `TransactionTaken` (a concurrent prepare bound the row) cannot happen under the Order lock and maps to
-   `-8` defensively. No order event (a prepare is not a state change).
+   sign_time})` → `0` with `merchant_prepare_id = payment.id`. `ensure_payable_payment` and `attach_transaction` form
+   one unit: a refusal of the attach rolls back the supersede, so the old transaction stays attached. `TransactionTaken`
+   (a concurrent prepare bound the row) maps to `-8` defensively. No order event (a prepare is not a state change).
 
 **Complete (action 1).** Steps 1 of §2.13.0 (as prepare), advisory lock, then the steps below. Fake Click under the
 production settings: only a Complete that names a payment attached while Click was live gets past step 3 (otherwise
@@ -1789,7 +1820,9 @@ production settings: only a Complete that names a payment attached while Click w
    (payment `failed`, event `payment_failed {provider, transaction_id, error_code}`; the order stays payable until
    expiry and the app may pay again); → `-9` (no money was taken: Click reports the payment failed);
 5. amount ≠ `payment.amount` → `-2` (payment unchanged);
-6. the payment was failed **by Click** earlier (numeric `error_code`) → `-9`;
+6. the payment was failed **by Click** earlier (numeric `error_code`) → `-9` (a repeat of the same failed Complete;
+   `error` is part of the Complete fingerprint, so a Complete with `error = 0` after a stored Complete with
+   `error < 0` under the same key is a fingerprint conflict, `-8`, at step 1);
 7. **honoured capture:** the payment is `pending`, it is the order's active payment, the order is not paid by another
    payment, and `is_payable(order, payment, now, attaching=False)` → `mark_paid(order_id, payment.id, "click",
    click_trans_id)` (B5 `confirm_payment` + `confirm_payment_effects` — reservations converted, hold captured, purchase
@@ -1854,7 +1887,7 @@ the checkout URL's `ac.` key, §2.7.2) or from the payment found by
 | `CheckPerformTransaction` | `amount`, `account` | account reference (-31050) → order exists (-31050) → paid / cancelled / not payable with `attaching=True` (-31008) → another transaction in flight (-31051) → amount (-31001) | `{"allow": true}` (fiscal `detail` only when `PAYME_FISCAL_DETAIL_ENABLED`, §7 `M2-P5`) |
 | `CreateTransaction` | `id`, `time`, `amount`, `account` | **existing** `id`: state ≠ 1 → -31008; timed out → cancel (reason 4) and -31008; else the stored answer. **new** `id`: account (-31050) → paid / cancelled / not payable with `attaching=True` (-31008) → another Payme state-1 transaction or a Click transaction in flight (-31051) → amount (-31001) → `time` older than 12 h (-31008) → `ensure_payable_payment(order, "payme")` (reuses the pending Payme row only when it has no `provider_txn_id`) → `attach_transaction(provider_txn_id = id, provider_state = {transaction: id, time, create_time: now_ms, state: 1, account})`; `TransactionTaken` → -31051 | `{"create_time", "transaction": "<payment id>", "state": 1}` |
 | `PerformTransaction` | `id` | unknown (-31003) → state 2: the stored answer → state ≠ 1: -31008 → timed out: cancel (reason 4), -31008 → not payable with `attaching=False` (cancelled, paid by another payment, or expired beyond the grace): -31008, the transaction stays in state 1 and Payme cancels it **(verify M3)**; no money is taken, so this is not a refused capture → `mark_paid(order_id, payment.id, "payme", id)`; `provider_state += {state: 2, perform_time: now_ms}` | `{"transaction", "perform_time", "state": 2}` |
-| `CancelTransaction` | `id`, `reason` | (fake Payme under the production settings: `-32504` like every method, so a cabinet refund cannot complete, §2.13.0, §6.14) unknown (-31003) → state 1: state −1, `cancel_time`, `reason`; `fail_payment_effects(order_id, payment.id, str(reason), provider_txn_id=id)` (payment failed, `payment_failed` event; also on an already cancelled/expired order) → state 2 **with an open `manual_required` refund** (staff refunded in the Payme cabinet after an admin cancel, O5): state −2, `cancel_time`, `reason`; `commerce.services.resolve_refund(refund_id, "succeeded", actor_id=None)` (refund succeeded, payment `refunded`, event `refund_succeeded`) → state 2 without an open refund: -31007 → state −1/−2: the stored answer | `{"transaction", "cancel_time", "state"}` |
+| `CancelTransaction` | `id`, `reason` | (fake Payme under the production settings: `-32504` like every method, so a cabinet refund cannot complete, §2.13.0, §6.14) unknown (-31003) → state 1: state −1, `cancel_time`, `reason`; `fail_payment_effects(order_id, payment.id, str(reason), provider_txn_id=id)` (payment failed, `payment_failed` event; also on an already cancelled/expired order) → state 2 **with an open `manual_required` refund** (staff refunded in the Payme cabinet after an admin cancel, O5): state −2, `cancel_time`, `reason`; `commerce.services.resolve_refund(refund_id, "succeeded", actor_id=None)` (refund succeeded, payment `refunded`, event `refund_succeeded`) → state 2 whose payment is already `refunded` by a succeeded refund (staff resolved the manual refund before the cabinet cancel arrived): state −2, `cancel_time`, `reason` merged, no new refund → state 2, payment still `paid`, without an open refund: -31007 → state −1/−2: the stored answer | `{"transaction", "cancel_time", "state"}` |
 | `CheckTransaction` | `id` | unknown (-31003) | `{"create_time", "perform_time" (0 if none), "cancel_time" (0 if none), "transaction", "state", "reason" (null if none)}` |
 | `GetStatement` | `from`, `to` (ms) | Payme payments whose **Payme** transaction time `provider_state.time` (the `params.time` of `CreateTransaction`) ∈ [`from`, `to`], ascending by that time **(verify M3)**. M2 filters on the JSON key (volumes are small); M3 adds an expression index on `(provider_state->>'time')::bigint` for Payme rows if the statement is slow | `{"transactions": [{"id", "time", "amount", "account": {<PAYME_ACCOUNT_FIELD>: account_ref}, "create_time", "perform_time", "cancel_time", "transaction", "state", "reason", "receivers": null}]}` |
 
@@ -1981,7 +2014,7 @@ pushes are reported `sent` but reach no device (§6.14).
 | `data.type` | Other `data` keys | Notification block | Android channel / priority |
 |---|---|---|---|
 | `order_status` | `inbox_id`, `order_id`, `status` | title = customer label (§4.3) in the customer's language; body = template text (`{raqam}` only) | `orders` / high |
-| `appointment` | `inbox_id`, `appointment_id`, `action` | fixed texts (`notifications/texts.py`) | `appointments` / high |
+| `appointment` | `inbox_id`, `appointment_id`, `action` | fixed texts (`notifications/texts.py`); sent only while the action is still true when the outbox message is handled (`confirmed`/`rescheduled`: status `requested` or `confirmed`; `rejected`: `rejected`; `cancelled`: `cancelled`), otherwise no inbox row and no push (INFO log) | `appointments` / high |
 | `campaign` | `inbox_id`, `campaign_id`, `product_id` (or `""`) | as authored; `notification.image` = campaign image URL | `promo` or `general` / normal |
 | `account_security` | `inbox_id`, `event` (`social_linked`, `social_unlinked`, `password_reset`, `password_changed`), `provider` (or `""`) | catalog `push.account_security.<event>` (title + body; `{provider}` only) | `general` / high |
 | `session_replaced` | `sid` (the revoked session) | none (data-only; APNs `content-available: 1`, `apns-push-type: background`, priority 5) | – / high |

@@ -7,11 +7,13 @@ Billz import lives in ``catalog.tasks``); it is handed over through the outbox a
 ``integrations`` sits below every module that could do the work.
 """
 
+import json
 import logging
 from datetime import timedelta
 from typing import Any
 
-from django.db import IntegrityError, transaction
+from django.core.serializers.json import DjangoJSONEncoder
+from django.db import IntegrityError, connection, transaction
 from django.db.models import F
 
 from glowderma.core import audit, enums, outbox, timeutils
@@ -215,3 +217,17 @@ def record_failure(provider: str, message: str) -> IntegrationState:
     )
     state.refresh_from_db()
     return state
+
+
+def set_state_data(provider: str, key: str, value: Any) -> None:
+    """Set ``IntegrationState(provider).data[key] = value`` with one ``UPDATE … SET data = data ||
+    jsonb_build_object(key, value)`` (no read-modify-write, so a concurrent :func:`record_failure` or another
+    key's writer is never lost). The BTS poll cursor is its first user (customer contract §2.13.3)."""
+    get_state(provider)
+    table = IntegrationState._meta.db_table
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"UPDATE {table} SET data = data || jsonb_build_object(%s::text, %s::jsonb), "  # noqa: S608
+            "updated_at = %s WHERE provider = %s",
+            [key, json.dumps(value, cls=DjangoJSONEncoder), timeutils.now(), provider],
+        )

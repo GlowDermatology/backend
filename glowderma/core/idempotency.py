@@ -6,11 +6,13 @@ import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from functools import wraps
+from hmac import compare_digest
 from typing import Any
 
 from django.core.exceptions import ImproperlyConfigured
 from django.core.files.uploadedfile import UploadedFile
 from django.db import DatabaseError, connection, transaction
+from django.utils.crypto import salted_hmac
 from rest_framework.request import Request
 from rest_framework.response import Response
 
@@ -22,6 +24,28 @@ logger = logging.getLogger(__name__)
 
 
 def request_fingerprint(request: Request) -> str:
+    """HMAC-SHA256 (keyed by ``SECRET_KEY``) of the canonical body and query string.
+
+    Keyed, because a body can carry secrets (``me/password/`` holds both passwords) and the stored hash lives
+    for 24 h: a plain SHA-256 would let a database or backup reader test password guesses offline. The query
+    string is part of it, so a key reused on ``DELETE …?product_id=`` with other ids is a reuse (422).
+    """
+    canonical = _canonical_body(request)
+    query = sorted((key, sorted(request.query_params.getlist(key))) for key in request.query_params)
+    message = json.dumps({"body": canonical, "query": query}, sort_keys=True, separators=(",", ":"))
+    return salted_hmac(_FINGERPRINT_SALT, message, algorithm="sha256").hexdigest()
+
+
+def _legacy_fingerprint(request: Request) -> str:
+    """The unkeyed SHA-256 of the body that records written before the HMAC fingerprint carry (they expire
+    within ``IDEMPOTENCY_TTL``); computed only to compare, never stored."""
+    return hashlib.sha256(_canonical_body(request).encode("utf-8", "surrogatepass")).hexdigest()
+
+
+_FINGERPRINT_SALT = "glowderma.core.idempotency.request_fingerprint"
+
+
+def _canonical_body(request: Request) -> str:
     parsed: Any = request.data
     if (request.content_type or "").startswith("multipart/"):
         fields = {
@@ -45,10 +69,10 @@ def request_fingerprint(request: Request) -> str:
         parsed = {"fields": fields, "files": files}
     elif hasattr(parsed, "lists"):
         parsed = dict(parsed.lists())
-    canonical = json.dumps(parsed, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    # core.api.parsers.JSONParser already refuses lone surrogate escapes ("\ud800") with a 400; a view on
-    # another parser still gets a hash instead of a UnicodeEncodeError (500) here.
-    return hashlib.sha256(canonical.encode("utf-8", "surrogatepass")).hexdigest()
+    # The legacy form (ensure_ascii=False). core.api.parsers.JSONParser already refuses lone surrogate escapes
+    # ("\ud800") with a 400; on another parser the fingerprint's ASCII re-encoding and the legacy
+    # "surrogatepass" still give a hash instead of a UnicodeEncodeError (500).
+    return json.dumps(parsed, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
 _REFRESH_ATTR = "_gd_refresh_after_commit"
@@ -162,7 +186,9 @@ def idempotent(required: bool = True) -> Callable[[Callable[..., Response]], Cal
                         record.delete()
                         record = None
                     if record is not None:
-                        if record.request_hash != fingerprint:
+                        if record.request_hash != fingerprint and not compare_digest(
+                            record.request_hash, _legacy_fingerprint(request)
+                        ):
                             raise IdempotencyKeyReused()
                         return Response(
                             record.response_body,

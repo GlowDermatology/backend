@@ -34,7 +34,13 @@ class Command(BaseCommand):
             "--sequences-only", action="store_true", help="Only re-sync the id sequences; load nothing."
         )
         parser.add_argument(
-            "--force", action="store_true", help="Required outside DEBUG (the dataset is demo data)."
+            "--force",
+            action="store_true",
+            help=(
+                "Required outside DEBUG (the dataset is demo data). Under the production settings (staging) "
+                "the commerce seeder skips the demo orders: their effects would reach live providers or "
+                "fakes that report no effect. The run says so after its seeder list."
+            ),
         )
         parser.add_argument(
             "--reset",
@@ -69,9 +75,12 @@ class Command(BaseCommand):
                 problems = preflight_problems()
                 if problems:
                     raise CommandError("\n".join(["seed_demo cannot seed this database:", *problems]))
-                names = run_seeders(SeedContext(anchor=anchor, keep_open=not options["no_keep_open"]))
+                context = SeedContext(anchor=anchor, keep_open=not options["no_keep_open"])
+                names = run_seeders(context)
                 self.stdout.write(
                     f"Imported {len(modules)} seed module(s); ran: {', '.join(names) or 'none'}"
                 )
+                for note in context.notes:
+                    self.stdout.write(self.style.WARNING(note))
             touched = reset_sequences()
         self.stdout.write(self.style.SUCCESS(f"Sequences re-synced: {touched}"))

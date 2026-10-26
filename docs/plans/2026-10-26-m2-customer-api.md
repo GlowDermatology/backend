@@ -9,7 +9,8 @@ wins and this file is fixed. The review findings of revisions 1, 2, 3 and 4 and 
 reservation and a cashback hold, pay with Click or Payme (callbacks verified, idempotent from state, refused captures
 refunded), track BTS delivery, see cashback and show the personal QR, book specialists, and read its inbox — on the
 built M1 models with **four** small migrations (`accounts.0006`, `notifications.0003`, `commerce.0004`,
-`payments.0002`), reusing the
+`payments.0002`; the packages and the integration added `accounts.0007`, `commerce.0005` and `loyalty.0003`, §11.5),
+reusing the
 B4/B5/B6 services instead of redefining them.
 
 ---
@@ -1173,3 +1174,26 @@ in italics. Contract version 1.4.0-draft.
 | R3-5 | Major — a polling run in which BTS refused every parcel recorded success (fresh `last_sync_at`, `consecutive_failures` 0), hiding an outage; the webhook re-track ignored the same refusal (C§2.13.3, plan §3 `poll_bts`, P2 tests) | Adopted (lead direction 5): runs count `tracked`, `rejected` and `unavailable` separately; success needs ≥ 1 tracked parcel; a run that attempted parcels and tracked none records a failure and ERROR `bts.poll_nothing_tracked`; no candidate writes nothing; admin `GET dashboard/` gains `attention.bts_polling_failing` (`consecutive_failures > 0`, admin §2.10/§5.7; P2 owns the reporting field — `core/api/health.py` cannot read `integrations` under the layer contract); the webhook re-track never writes `IntegrationState(bts)` either way, so a tracked webhook cannot mask failing polls. P2 tests and the `.env` comment. |
 | R3-6 | Major — the dormant rule ignored appointments (staff bookings, attended visits) as activity and did not reset the account "as at deletion" (deletion also cancels open items and deletes the cart) (C§2.2.3, C§6.17, M2-A16, `last_activity_at`) | Adopted (lead direction 6, the first option, which is also the simpler one): last activity adds every appointment's `created_at` (staff bookings included) and the `start` of `requested`/`confirmed`/`attended` appointments, so a dormant account can never hold an open order or appointment — nothing to cancel; the reset also deletes the cart lines; C§2.2.3 lists why the result equals the deletion reset item by item (only the status stays `active`). P0 adds `appointments.selectors.last_activity_at` and `commerce.services.delete_cart_lines` (real functions, so P1 does not wait for P2/P3); P1 tests for a staff booking, an attended visit and an open appointment; M2-A16 in the contract and open questions, C§6.17, the `.env` comment. |
 | R3-8 | Major — the admin contract assumed `manual_required` means Payme, but M2 creates `manual_required` Click refunds (no `click_paydoc_id`, fake Click under production, fake_mode refused capture) (admin §2.2, §4, §5.1, §6, §7) | Adopted (lead direction 7): `refund_requested` carries `manual_reason` (`payme`, `no_paydoc`, `fake_mode`; null when not manual; M1 rows without it read as `payme`); the §5.1 note and the refund state line choose their text by reason and **provider** (Click: "Mijozga qo‘lda to‘lang, so‘ng «Qaytarildi» deb belgilang"; Payme: "Payme kabinetida qaytarish kerak"); admin §2.2 cancel effects, §6 and §7 item 3 updated; C§2.13.0 names the key; P2 owns `commerce/events.py` for it and tests the three reasons. A Click refund that `submit_refund` turns `manual_required` later keeps its event as written; the state line reads state and provider, so it still shows the right instruction. |
+
+### 11.5 Integration (lead, 2026-10-26)
+
+The three packages merged on `feat/m2-integration` (P3, then P2, then P1) without conflicts. A cross-package journey
+suite (`customers/tests/test_m2_journeys.py`, 17 journeys through the HTTP routes) found five seam defects; the
+package reviews' last findings in shared code were fixed on the integration branch.
+
+| # | Finding | Resolution |
+|---|---|---|
+| M2J-1 | Checkout compared the raw `terms_version`; booking, `me/` and `me/consent/` used the published terms (both uz texts filled), so an unpublished version blocked checkout for good | `site_config.selectors.outdated_consent` is the one rule; checkout and booking both call it |
+| M2J-2 | Booking treated whitespace-only terms texts as published | Same selector (it strips) |
+| M2J-3 | `DELETE me/` aborted with 409 `not_cancellable` when a Click capture committed while it waited for the order lock | Each cancel runs in a savepoint; a `not_cancellable` order is skipped and not counted (C§2.2.3 step 2) |
+| M2J-4 | `me/cashback` showed the payment grace on every overdue hold, also with no transaction attached | `loyalty.hold_grace` takes an oracle; commerce registers `orders_in_payment_grace`, the expiry job's own rule |
+| M2J-5 | `DELETE me/` aborted when staff settled an appointment between selection and its row lock | Same savepoint skip (C§2.2.3 step 3); `account_deleted=True` passed explicitly |
+| INT-1 | `IdempotencyRecord.request_hash` was an unsalted SHA-256 of the body (both passwords on `me/password/`), kept 24 h and shown in the admin | HMAC under `SECRET_KEY` over the body and the query string; old records still replay until they expire; the admin hides `request_hash` and `response_body` |
+| INT-2 | The outbox kick (`on_commit(dispatch_outbox.delay)`) turned a broker outage into a 500 after the commit | `robust=True`; the 10 s beat delivers the message |
+| INT-3 | `createposkey` could give two devices one prefix | `loyalty.0003` makes `PosDevice.key_prefix` unique (stops with the device ids if a database already shares one); a colliding draw retries |
+| INT-4 | Click/BTS webhooks answered 500 on an oversized body or too many query fields | `SuspiciousOperation` reaches core's handler (413/400) |
+
+Contract text recorded in the same pass: the Click Prepare replay of a bound transaction, the uncapped `rejected:`
+rows of authenticated Click refusals, a Payme cancel of an already refunded payment, the pay check order, the
+refused-capture case precedence, the appointment cancel/`DELETE me/`/`push.appointment` rules, the `apple.revoke`
+payload, the `PUT me/device/` lock order and the idempotency rows scrubbed on deletion.

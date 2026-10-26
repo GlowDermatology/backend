@@ -1364,6 +1364,7 @@ def _pos_key(prefix: str) -> str:
 
 
 def _new_pos_prefix() -> str:
+    """A prefix no device uses yet; the unique constraint on ``key_prefix`` settles a concurrent twin."""
     while True:
         prefix = "".join(secrets.choice(POS_PREFIX_ALPHABET) for _ in range(POS_PREFIX_LENGTH))
         if not PosDevice.objects.filter(key_prefix=prefix).exists():
@@ -1376,17 +1377,11 @@ def pos_key_hash(raw_key: str) -> str:
 
 
 def _pos_device(prefix: str) -> PosDevice:
-    """The one device with this key prefix, locked. ``key_prefix`` has no unique constraint, so a prefix
-    shared by two devices is refused (naming them) instead of acting on whichever sorts first."""
-    devices = list(
-        PosDevice.objects.select_for_update().filter(key_prefix=prefix.strip()).order_by("pk")[:10]
-    )
-    if not devices:
+    """The device with this key prefix (unique, ``loyalty.0003``), locked."""
+    device = PosDevice.objects.select_for_update().filter(key_prefix=prefix.strip()).first()
+    if device is None:
         raise PosDeviceError(f"No POS device with the key prefix {prefix!r}")
-    if len(devices) > 1:
-        ids = ", ".join(str(device.pk) for device in devices)
-        raise PosDeviceError(f"The key prefix {prefix!r} is shared by the POS devices {ids}; fix it by hand")
-    return devices[0]
+    return device
 
 
 def _audit_pos(action: str, device: PosDevice, actor: StaffUser, **extra: Any) -> None:
@@ -1407,17 +1402,25 @@ def create_pos_device(name: str, location_label: str, actor_email: str) -> tuple
     name = name.strip()
     if not name:
         raise PosDeviceError("--name is required")
-    prefix = _new_pos_prefix()
-    raw_key = _pos_key(prefix)
-    device = PosDevice.objects.create(
-        name=name[:100],
-        location_label=location_label.strip()[:100],
-        key_prefix=prefix,
-        key_hash=pos_key_hash(raw_key),
-        created_by=actor,
-    )
-    _audit_pos("pos.device_created", device, actor, name=device.name)
-    return device, raw_key
+    for attempt in range(3):
+        prefix = _new_pos_prefix()
+        raw_key = _pos_key(prefix)
+        try:
+            with transaction.atomic():
+                device = PosDevice.objects.create(
+                    name=name[:100],
+                    location_label=location_label.strip()[:100],
+                    key_prefix=prefix,
+                    key_hash=pos_key_hash(raw_key),
+                    created_by=actor,
+                )
+        except IntegrityError:  # a concurrent createposkey drew the same prefix
+            if attempt == 2:
+                raise
+            continue
+        _audit_pos("pos.device_created", device, actor, name=device.name)
+        return device, raw_key
+    raise AssertionError("unreachable: the last attempt re-raises")
 
 
 @transaction.atomic

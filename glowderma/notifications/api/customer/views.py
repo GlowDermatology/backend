@@ -7,8 +7,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from drf_spectacular.types import OpenApiTypes
-from drf_spectacular.utils import OpenApiParameter, extend_schema
+from drf_spectacular.utils import extend_schema
 from rest_framework import mixins
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -16,7 +15,12 @@ from rest_framework.response import Response
 from glowderma.accounts.api.customer_base import CustomerAPIView, CustomerGenericViewSet
 from glowderma.accounts.models import Customer
 from glowderma.core.api.pagination import EnvelopePagination
-from glowderma.core.api.schema import ACCEPT_LANGUAGE_HEADER, CUSTOMER_ERRORS, DEVICE_HEADERS
+from glowderma.core.api.schema import (
+    ACCEPT_LANGUAGE_HEADER,
+    CUSTOMER_ERRORS,
+    DEVICE_HEADERS,
+    OPTIONAL_IDEMPOTENCY_KEY_HEADER,
+)
 from glowderma.core.idempotency import idempotent
 from glowderma.notifications import selectors, services
 from glowderma.notifications.api.customer.serializers import (
@@ -29,16 +33,6 @@ from glowderma.notifications.api.customer.serializers import (
 )
 
 HEADERS = [*DEVICE_HEADERS, ACCEPT_LANGUAGE_HEADER]
-# C§1.7: the inbox writes accept an optional key (they are idempotent by themselves).
-OPTIONAL_IDEMPOTENCY_KEY_HEADER = OpenApiParameter(
-    name="Idempotency-Key",
-    type=OpenApiTypes.UUID,
-    location=OpenApiParameter.HEADER,
-    required=False,
-    description=(
-        "Optional client-generated UUID; replays return the stored response with `Idempotent-Replayed: true`."
-    ),
-)
 WRITE_HEADERS = [*HEADERS, OPTIONAL_IDEMPOTENCY_KEY_HEADER]
 
 

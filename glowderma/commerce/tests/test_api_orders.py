@@ -11,6 +11,7 @@ from rest_framework.test import APIClient
 from glowderma.commerce import services, topics
 from glowderma.commerce.models import Order
 from glowderma.commerce.tests.support import AT, at, deliver, pay, place, product, ship, shopper
+from glowderma.core.media import absolute_media_url
 from glowderma.core.models import AuditEntry, IdempotencyRecord
 from glowderma.core.seeding import pinned_clock
 from glowderma.payments.models import Refund
@@ -215,7 +216,7 @@ def test_detail_of_an_open_order_shows_the_active_hold_and_items(staff_client: A
             "product_id": item.pk,
             "name": item.name_uz,
             "billz_id": item.billz_id,
-            "image_url": order.items.get().image_url,
+            "image_url": absolute_media_url(order.items.get().image_url),
             "quantity": 2,
             "unit_price": 150_000,
             "promo": False,

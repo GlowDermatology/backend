@@ -26,6 +26,18 @@ IDEMPOTENCY_KEY_HEADER = OpenApiParameter(
     required=True,
     description="Client-generated UUID; replays return the stored response with `Idempotent-Replayed: true`.",
 )
+# Customer contract 1.7: optional on every other customer write, honoured when sent
+# (``@idempotent(required=False)``).
+OPTIONAL_IDEMPOTENCY_KEY_HEADER = OpenApiParameter(
+    name="Idempotency-Key",
+    type=OpenApiTypes.UUID,
+    location=OpenApiParameter.HEADER,
+    required=False,
+    description=(
+        "Optional client-generated UUID; when sent, a retry with the same body returns the stored 2xx "
+        "response with `Idempotent-Replayed: true` and another body answers 422 `idempotency_key_reused`."
+    ),
+)
 # Contract 1.8: "?export=csv|xlsx" on every list marked E.
 EXPORT_PARAM = OpenApiParameter(
     name="export",

@@ -42,6 +42,7 @@ from __future__ import annotations
 import functools
 import heapq
 import itertools
+import logging
 import math
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -59,16 +60,19 @@ from glowderma.accounts.seeds import MALIKA_ID, CustomerFacts
 from glowderma.catalog.models import Product
 from glowderma.commerce import services, tasks, topics
 from glowderma.commerce.models import Order, OrderEvent, StockReservation
-from glowderma.core import enums, timeutils
+from glowderma.core import enums, integration_modes, timeutils
 from glowderma.core.models import OutboxMessage
 from glowderma.core.seeding import MockRandom, SeedContext, pinned_clock, register_seeder
 from glowderma.core.timeutils import TASHKENT
+from glowderma.integrations.bts import fake as fake_bts
 from glowderma.integrations.click import fake as fake_click
 from glowderma.integrations.payme import fake as fake_payme
 from glowderma.loyalty import seeds as loyalty_seeds
 from glowderma.loyalty import selectors as loyalty_selectors
 from glowderma.loyalty import services as loyalty_services
 from glowderma.payments import selectors as payment_selectors
+
+logger = logging.getLogger(__name__)
 
 SEED_ADMIN_EMAIL = "admin@glowderma.uz"
 GENERATED_SEED = 1284
@@ -157,6 +161,34 @@ def _txn_id(plan: OrderPlan) -> str:
     if plan.provider == CLICK:
         return fake_click.transaction_id(plan.id, plan.fake.get("click"))
     return fake_payme.transaction_id(plan.id, plan.fake.get("payme"))
+
+
+def _pay(plan: OrderPlan) -> None:
+    """``mark_paid`` of the order's pending payment (M2 signature); a Click payment gets its
+    ``click_paydoc_id`` first, as a Prepare would store it (refunds are keyed by it, customer contract
+    §2.13.0)."""
+    pending = payment_selectors.active_payment(plan.id, enums.PaymentStatus.PENDING)
+    if pending is None:
+        return
+    raw = (
+        {"click_paydoc_id": fake_click.paydoc_id(plan.id, plan.fake.get("click"))}
+        if plan.provider == CLICK
+        else None
+    )
+    services.mark_paid(plan.id, pending.id, plan.provider, _txn_id(plan), raw=raw)
+
+
+def _delivery_fee(plan: OrderPlan) -> int:
+    """The fee the seeder passes to ``create_order``: the design's fake BTS tariff of the address region
+    (``scenario["tariff"]`` wins), read from the data — never through the port, which refuses every quote
+    while BTS is fake under the production settings (``seed_demo --force`` on staging)."""
+    if plan.fulfilment != DELIVERY or plan.address is None:
+        return 0
+    scenario = plan.fake.get("bts")
+    tariff = scenario.get("tariff") if isinstance(scenario, dict) else None
+    if isinstance(tariff, int):
+        return tariff
+    return fake_bts.TARIFFS.get(plan.address.region_code, fake_bts.DEFAULT_TARIFF)
 
 
 # --- the fixed design orders (03 §7.8) ----------------------------------------------------------------------
@@ -654,7 +686,7 @@ class Seeder:
             return
         add(
             plan.paid_at,
-            lambda: services.mark_paid(plan.id, _txn_id(plan)),
+            lambda: _pay(plan),
             ledger_id=plan.ledger_ids.get("pay"),
             events_of=events_of,
         )
@@ -719,6 +751,7 @@ class Seeder:
             plan.fulfilment,
             payment_provider=plan.provider,
             channel=plan.channel,
+            delivery_fee=_delivery_fee(plan),
             address_text=address.text if address else "",
             region_code=address.region_code if address else "",
             city_code=address.city_code if address else "",
@@ -825,6 +858,15 @@ def preflight() -> str | None:
 @register_seeder("commerce", order=70, preflight=preflight)
 def seed_commerce(context: SeedContext) -> None:
     admin: StaffUser | None = get_user_model().objects.filter(email=SEED_ADMIN_EMAIL).first()
+    if not integration_modes.dev_features_allowed():
+        # Under the production settings (staging, ``seed_demo --force``) the demo orders cannot be replayed:
+        # their effects run through the provider ports inline, which are either live (real parcels, real
+        # reversals) or fakes that report no effect (no parcel, no Billz sale, customer contract §2.14.3,
+        # §6.14). The other modules' demo data and loyalty's store sales are still seeded.
+        logger.warning("seed.commerce_orders_skipped %s", {"reason": "production settings"})
+        context.note("commerce: demo orders skipped under the production settings")
+        loyalty_seeds.seed_store_sales()
+        return
     if admin is None or not Product.objects.exists() or not Customer.objects.exists():
         # standalone run without the lower layers: still record the store sales loyalty hands to us
         loyalty_seeds.seed_store_sales()

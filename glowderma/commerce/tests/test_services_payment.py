@@ -8,7 +8,17 @@ import pytest
 
 from glowderma.commerce import services, tasks, topics
 from glowderma.commerce.models import OrderEvent, StockReservation
-from glowderma.commerce.tests.support import AT, credit, pay, place, product, seed_policies, shopper, txn
+from glowderma.commerce.tests.support import (
+    AT,
+    credit,
+    pay,
+    pending_payment_id,
+    place,
+    product,
+    seed_policies,
+    shopper,
+    txn,
+)
 from glowderma.core import enums
 from glowderma.core.api.exceptions import InvalidTransition
 from glowderma.core.models import OutboxMessage
@@ -100,17 +110,21 @@ def test_billz_uuid_pinned_at_checkout_is_used_by_the_purchase() -> None:
 
 
 def test_mark_paid_is_idempotent_and_refuses_late_captures() -> None:
-    order = pay(place())
+    order = place()
+    payment_id = pending_payment_id(order)
+    pay(order)
     with pinned_clock(AT + timedelta(minutes=9)):
-        services.mark_paid(order.pk, txn(order))  # same transaction: no-op
+        services.mark_paid(order.pk, payment_id, "click", txn(order))  # same transaction: no-op
         with pytest.raises(InvalidTransition):
-            services.mark_paid(order.pk, "CLK-OTHER")
+            services.mark_paid(order.pk, payment_id, "click", "CLK-OTHER")
+        with pytest.raises(InvalidTransition):
+            services.mark_paid(order.pk, payment_id, "payme", txn(order))  # another provider
     assert OrderEvent.objects.filter(order=order, type="payment_confirmed").count() == 1
     payment = Payment.objects.get(order=order)
     services.confirm_payment_effects(order.pk, payment.pk)  # replay of an applied capture
     assert OrderEvent.objects.filter(order=order, type="payment_confirmed").count() == 1
     with pytest.raises(services.OrderNotFound):
-        services.mark_paid(10**9, "x")
+        services.mark_paid(10**9, payment_id, "click", "x")
 
 
 def test_confirm_effects_guards_the_payment() -> None:
@@ -122,17 +136,23 @@ def test_confirm_effects_guards_the_payment() -> None:
     with pytest.raises(InvalidTransition):
         services.confirm_payment_effects(other.pk, pending.pk)  # another order's payment
     expired = place()
+    expired_payment = pending_payment_id(expired)
     with pinned_clock(AT + timedelta(minutes=20)):
         services.expire_reservation(expired.pk)
     with pytest.raises(InvalidTransition):
-        services.mark_paid(expired.pk, "CLK-1")
+        services.mark_paid(expired.pk, expired_payment, "click", "CLK-1")
+    with pytest.raises(InvalidTransition):  # a payment of another order
+        services.mark_paid(order.pk, Payment.objects.get(order=other).pk, "click", "CLK-2")
 
 
 def test_provider_failure_keeps_the_order_payable() -> None:
     order = place(provider=enums.PaymentProvider.PAYME)
+    payment_id = pending_payment_id(order)
     with pinned_clock(AT + timedelta(minutes=2)):
-        assert services.fail_payment_effects(order.pk, "-31008")
-        assert not services.fail_payment_effects(order.pk, "-31008")  # nothing pending any more
+        assert services.fail_payment_effects(order.pk, payment_id, "-31008")
+        assert not services.fail_payment_effects(order.pk, payment_id, "-31008")  # failed already
+        with pytest.raises(InvalidTransition):
+            services.fail_payment_effects(place().pk, payment_id, "-31008")  # another order's payment
     order.refresh_from_db()
     assert order.status == "awaiting_payment"
     event = OrderEvent.objects.get(order=order, type="payment_failed")
@@ -216,7 +236,7 @@ def test_an_entry_posted_before_the_capture_locks_the_account_does_not_fail_mark
         pinned_clock(instant),
         mock.patch.object(payment_services, "confirm_payment", confirm_with_a_pos_sale),
     ):
-        services.mark_paid(order.pk, txn(order))
+        services.mark_paid(order.pk, pending_payment_id(order), "click", txn(order))
     order.refresh_from_db()
     assert order.status == "processing" and order.paid_at == instant + timedelta(seconds=2)
     debit = LedgerEntry.objects.get(order_id=order.pk, kind="debit")

@@ -32,7 +32,8 @@ EVENT_DATA_KEYS: dict[str, tuple[str, ...]] = {
         "push_sent",
     ),
     _E.RESERVATION_EXPIRED: ("released_item_count", "payment_failed"),
-    _E.REFUND_REQUESTED: ("refund_id", "amount", "provider", "manual"),
+    # ``manual_reason`` (M2, admin §4): "payme" | "no_paydoc" | "fake_mode" when ``manual``, else null
+    _E.REFUND_REQUESTED: ("refund_id", "amount", "provider", "manual", "manual_reason"),
     _E.REFUND_SUCCEEDED: ("refund_id", "amount", "provider"),
     _E.REFUND_FAILED: ("refund_id", "amount", "provider", "state", "error_code"),
 }

@@ -4,14 +4,12 @@ the window and the Redis counter never loses its TTL."""
 
 import threading
 from datetime import timedelta
-from io import StringIO
 from typing import Any, Self, cast
 from uuid import uuid4
 
 import pytest
 from django.core.cache.backends.redis import RedisCache
-from django.core.management import CommandError, call_command
-from django.db import connection
+from django.db import IntegrityError, connection, transaction
 from django.test import override_settings
 from redis.exceptions import RedisError
 from rest_framework.exceptions import Throttled
@@ -20,7 +18,7 @@ from rest_framework.test import APIClient, APIRequestFactory
 
 from glowderma.accounts.tests.factories import StaffUserFactory
 from glowderma.core.models import AuditEntry
-from glowderma.loyalty import authentication, qr, seeds
+from glowderma.loyalty import authentication, qr, seeds, services
 from glowderma.loyalty.models import PosDevice
 from glowderma.loyalty.tests.support import at
 
@@ -220,14 +218,22 @@ def test_real_redis_counter_always_has_a_ttl(monkeypatch: pytest.MonkeyPatch) ->
 
 
 @pytest.mark.django_db
-def test_a_shared_prefix_is_refused_by_the_key_commands(pos_device: PosDevice) -> None:
+def test_a_second_device_on_one_prefix_is_refused_by_the_database(pos_device: PosDevice) -> None:
+    with pytest.raises(IntegrityError), transaction.atomic():
+        PosDevice.objects.create(name="Kassa 2", key_prefix=pos_device.key_prefix, key_hash="0" * 64)
+    assert PosDevice.objects.count() == 1
+
+
+@pytest.mark.django_db
+def test_createposkey_draws_again_when_a_concurrent_twin_took_the_prefix(
+    pos_device: PosDevice, monkeypatch: pytest.MonkeyPatch
+) -> None:
     staff = StaffUserFactory.create()
-    twin = PosDevice.objects.create(name="Kassa 2", key_prefix=pos_device.key_prefix, key_hash="0" * 64)
-    for command in ("revokeposkey", "rotateposkey"):
-        with pytest.raises(CommandError, match=f"{pos_device.pk}, {twin.pk}"):
-            call_command(command, pos_device.key_prefix, "--actor", staff.email, stdout=StringIO())
-    assert PosDevice.objects.filter(is_active=True).count() == 2
-    assert not AuditEntry.objects.filter(action__startswith="pos.device_").exists()
+    drawn = iter([pos_device.key_prefix, "fresh001"])
+    monkeypatch.setattr(services, "_new_pos_prefix", lambda: next(drawn))
+    device, raw_key = services.create_pos_device("Kassa 2", "", staff.email)
+    assert device.key_prefix == "fresh001" and raw_key.split("_")[1] == "fresh001"
+    assert AuditEntry.objects.filter(action="pos.device_created").count() == 1
 
 
 @pytest.mark.django_db

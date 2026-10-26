@@ -34,7 +34,7 @@ from django.db.models.functions import Coalesce
 
 from glowderma.core import enums, i18n, timeutils
 from glowderma.core.timeutils import TASHKENT
-from glowderma.loyalty import engine
+from glowderma.loyalty import engine, hold_grace
 from glowderma.loyalty.models import (
     CashbackHold,
     CashbackPolicy,
@@ -485,10 +485,9 @@ def effective_holds(customer_id: int, now: datetime | None = None) -> list[Effec
     """The customer's ``active`` holds with their effective expiry, oldest first.
 
     ``CashbackHold.expires_at`` stays at the order's ``reservation_expires_at``. An active hold whose
-    ``expires_at`` has passed exists only while the expiry job skips its order for an open transaction
-    attached in time (otherwise the expiry would have released it), so such a hold is shown with
-    ``expires_at + PAYMENT_IN_FLIGHT_GRACE_SECONDS``; any other with ``expires_at``. No read of commerce or
-    payments (layering).
+    ``expires_at`` has passed is shown with ``expires_at + PAYMENT_IN_FLIGHT_GRACE_SECONDS`` while its order
+    has an open transaction attached in time (``hold_grace``, answered by commerce: layering), otherwise
+    with its own ``expires_at`` until the expiry job releases it; any other with ``expires_at``.
     """
     rows = (
         CashbackHold.objects.filter(account__customer_id=customer_id, state=enums.CashbackHoldState.ACTIVE)
@@ -499,12 +498,15 @@ def effective_holds(customer_id: int, now: datetime | None = None) -> list[Effec
 
 
 def _effective(rows: Any, instant: datetime) -> list[EffectiveHold]:
+    rows = list(rows)
     grace = timedelta(seconds=int(settings.PAYMENT_IN_FLIGHT_GRACE_SECONDS))
+    overdue = {int(order_id) for order_id, _, expires_at in rows if expires_at <= instant}
+    kept = hold_grace.orders_in_grace(overdue, instant) if overdue else set()
     return [
         EffectiveHold(
             order_id=int(order_id),
             amount=int(amount),
-            expires_at=expires_at + grace if expires_at <= instant else expires_at,
+            expires_at=expires_at + grace if int(order_id) in kept else expires_at,
         )
         for order_id, amount, expires_at in rows
     ]

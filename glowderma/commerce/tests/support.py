@@ -16,10 +16,12 @@ from glowderma.core import enums
 from glowderma.core.models import OutboxMessage
 from glowderma.core.seeding import pinned_clock
 from glowderma.core.timeutils import TASHKENT
+from glowderma.integrations.bts.registry import get_bts
 from glowderma.integrations.click import fake as fake_click
 from glowderma.integrations.payme import fake as fake_payme
 from glowderma.loyalty import services as loyalty_services
 from glowderma.loyalty.tests.support import seed_policies
+from glowderma.payments import selectors as payment_selectors
 
 AT = datetime(2026, 10, 20, 12, 0, tzinfo=TASHKENT)
 ADDRESS = "Toshkent, Chilonzor tumani, 9-kvartal, 12-uy, 45-xonadon"
@@ -79,6 +81,9 @@ def place(
     customer = customer or shopper()
     lines = lines if lines is not None else [(product(), 1)]
     delivery = fulfilment == enums.FulfilmentMethod.DELIVERY
+    if "delivery_fee" not in kwargs:
+        bts = (fake or {}).get("bts")
+        kwargs["delivery_fee"] = get_bts(bts).quote(region_code, "1001") if delivery else 0
     with pinned_clock(when):
         order_id = services.create_order(
             customer.pk,
@@ -102,10 +107,21 @@ def txn(order: Order) -> str:
     return fake_payme.transaction_id(order.pk)
 
 
-def pay(order: Order, when: datetime | None = None) -> Order:
-    """``mark_paid`` three minutes after checkout (``processing``)."""
+def pending_payment_id(order: Order) -> int:
+    pending = payment_selectors.active_payment(order.pk, enums.PaymentStatus.PENDING)
+    assert pending is not None
+    return pending.id
+
+
+def pay(order: Order, when: datetime | None = None, *, paydoc: bool = True) -> Order:
+    """``mark_paid`` three minutes after checkout (``processing``); a Click payment gets a ``click_paydoc_id``
+    first (as its Prepare would store it) unless ``paydoc=False``."""
+    payment_id = pending_payment_id(order)
+    raw = None
+    if paydoc and order.payment_provider == enums.PaymentProvider.CLICK:
+        raw = {"click_paydoc_id": fake_click.paydoc_id(order.pk)}
     with pinned_clock(when or order.created_at + timedelta(minutes=3)):
-        services.mark_paid(order.pk, txn(order))
+        services.mark_paid(order.pk, payment_id, order.payment_provider, txn(order), raw=raw)
     order.refresh_from_db()
     return order
 

@@ -37,9 +37,9 @@ def test_customer_available_stock_clamps_and_follows_online_selling() -> None:
         assert selectors.customer_available_stock([product.pk]) == {product.pk: 3}
 
 
-def test_stubs_have_their_documented_neutral_values() -> None:
+def test_the_p0_seams_are_implemented() -> None:
     assert selectors.customer_inflight_order(CustomerFactory.create().pk) is None
-    with pytest.raises(NotImplementedError, match="P2"):
-        services.cancel_by_customer(1, 1)
-    assert tasks.poll_bts() == []
+    with pytest.raises(services.OrderNotFound):
+        services.cancel_by_customer(10**9, 1)
+    assert tasks.poll_bts() == []  # no candidate parcel
     assert tasks.poll_bts.name == "commerce.poll_bts"

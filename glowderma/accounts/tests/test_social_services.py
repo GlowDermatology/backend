@@ -14,6 +14,13 @@ from glowderma.core.api.exceptions import AuthFailed, Conflict
 from glowderma.core.models import AuditEntry
 from glowderma.integrations.oauth.ports import SocialClaims
 
+
+def password_sid(user: StaffUser) -> str:
+    """A password session of ``user`` (admin contract §2.1: only such a session links an identity)."""
+    session, _ = services.start_staff_session(user, device_label="pytest")
+    return str(session.pk)
+
+
 pytestmark = pytest.mark.django_db
 
 
@@ -164,7 +171,9 @@ class TestAutolink:
 
 
 def test_link_identity_creates_and_audits(staff: StaffUser) -> None:
-    identity = services.link_identity(staff, "google", google(email="ali@glowderma.uz", hd="glowderma.uz"))
+    identity = services.link_identity(
+        staff, "google", google(email="ali@glowderma.uz", hd="glowderma.uz"), session_id=password_sid(staff)
+    )
     assert identity.email_at_link == "ali@glowderma.uz"
     assert identity.last_login_at is None
     entry = AuditEntry.objects.get(action="auth.social_linked")
@@ -174,18 +183,18 @@ def test_link_identity_creates_and_audits(staff: StaffUser) -> None:
 
 def test_link_identity_conflicts(staff: StaffUser) -> None:
     other = StaffUserFactory.create()
-    services.link_identity(staff, "google", google(subject="g-1"))
+    services.link_identity(staff, "google", google(subject="g-1"), session_id=password_sid(staff))
     with pytest.raises(Conflict) as info:
-        services.link_identity(staff, "google", google(subject="g-2"))
+        services.link_identity(staff, "google", google(subject="g-2"), session_id=password_sid(staff))
     assert str(info.value.detail) == "Bu provayder allaqachon bog‘langan."
     with pytest.raises(Conflict) as info:
-        services.link_identity(other, "google", google(subject="g-1"))
+        services.link_identity(other, "google", google(subject="g-1"), session_id=password_sid(other))
     assert str(info.value.detail) == "Bu ijtimoiy hisob allaqachon bog‘langan."
     assert info.value.get_codes() == "conflict"
     assert SocialIdentity.objects.count() == 1
     assert AuditEntry.objects.filter(action="auth.social_linked").count() == 1
     # another provider for the same staff is fine
-    services.link_identity(staff, "facebook", facebook())
+    services.link_identity(staff, "facebook", facebook(), session_id=password_sid(staff))
     assert SocialIdentity.objects.filter(staff=staff).count() == 2
 
 
@@ -204,9 +213,9 @@ def test_unlink_identity_deletes_and_audits(staff: StaffUser) -> None:
 def test_link_identity_lost_race_is_conflict(staff: StaffUser, monkeypatch: pytest.MonkeyPatch) -> None:
     """Two concurrent links of one subject: the loser hits the unique constraint and still answers 409."""
     other = StaffUserFactory.create()
-    services.link_identity(other, "google", google(subject="g-1"))
+    services.link_identity(other, "google", google(subject="g-1"), session_id=password_sid(other))
     monkeypatch.setattr(QuerySet, "exists", lambda self: False)  # the pre-checks "miss" the winner's row
     with pytest.raises(Conflict) as info:
-        services.link_identity(staff, "google", google(subject="g-1"))
+        services.link_identity(staff, "google", google(subject="g-1"), session_id=password_sid(staff))
     assert str(info.value.detail) == "Bu ijtimoiy hisob allaqachon bog‘langan."
     assert SocialIdentity.objects.count() == 1

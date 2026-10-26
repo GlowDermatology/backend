@@ -164,6 +164,8 @@ register_read_only(
 )
 register_read_only(
     IdempotencyRecord,
+    # the body hash and the stored answer stay out of the admin: bodies can carry passwords, answers tokens
+    exclude=("request_hash", "response_body"),
     list_display=("id", "audience", "actor_id", "method", "path", "key", "response_status", "expires_at"),
     list_filter=("audience", "method", "response_status"),
     search_fields=("path", "key", "actor_id"),

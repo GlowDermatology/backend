@@ -141,22 +141,28 @@ PUBLIC_MEDIA_BASE_URL = env_str("PUBLIC_MEDIA_BASE_URL")
 _media = urlsplit(PUBLIC_MEDIA_BASE_URL)
 if _media.scheme not in {"http", "https"} or not _media.netloc or not PUBLIC_MEDIA_BASE_URL.endswith("/"):
     raise ImproperlyConfigured("PUBLIC_MEDIA_BASE_URL must be an http(s) URL ending with /")
-# Live staff social sign-in needs every provider credential and the exact callback URL (contract 2.1).
+# Live staff social sign-in needs every provider credential and each provider's exact callback URL (admin
+# contract 2.1): GOOGLE_OAUTH_REDIRECT_URI / FACEBOOK_OAUTH_REDIRECT_URI, or the deprecated OAUTH_REDIRECT_URI
+# (one release) as the fallback of both.
 LIVE_OAUTH_VARIABLES = (
     "GOOGLE_OAUTH_CLIENT_ID",
     "GOOGLE_OAUTH_CLIENT_SECRET",
     "FACEBOOK_APP_ID",
     "FACEBOOK_APP_SECRET",
-    "OAUTH_REDIRECT_URI",
 )
+LIVE_OAUTH_REDIRECT_VARIABLES = ("GOOGLE_OAUTH_REDIRECT_URI", "FACEBOOK_OAUTH_REDIRECT_URI")
 if OAUTH_MODE == "live":
     for name in LIVE_OAUTH_VARIABLES:
         value = env_str(name)  # raises ImproperlyConfigured("<name> is required")
         if "change-me" in value.lower():
             raise ImproperlyConfigured(f"{name} is a placeholder value; set the real credential")
-    _redirect = urlsplit(env_str("OAUTH_REDIRECT_URI"))
-    if _redirect.scheme not in {"http", "https"} or not _redirect.netloc:
-        raise ImproperlyConfigured("OAUTH_REDIRECT_URI must be an absolute http(s) URL")
+    for name in LIVE_OAUTH_REDIRECT_VARIABLES:
+        value = env_str(name, "") or env_str("OAUTH_REDIRECT_URI", "")
+        if not value:
+            raise ImproperlyConfigured(f"{name} is required")
+        _redirect = urlsplit(value)
+        if _redirect.scheme not in {"http", "https"} or not _redirect.netloc or "change-me" in value.lower():
+            raise ImproperlyConfigured(f"{name} must be an absolute http(s) URL")
 
 # --- Customer API keys (plan §7) ---
 # HMAC keys and our own webhook secret: required, at least 32 characters (used as their UTF-8 bytes).

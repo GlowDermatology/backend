@@ -32,7 +32,7 @@ from glowderma.core.api.exceptions import (
 )
 from glowderma.professionals.models import Professional, ProfessionalService, Service
 from glowderma.professionals.selectors import DAY_END_LABEL, day_schedules
-from glowderma.site_config.models import SiteSettings
+from glowderma.site_config import selectors as site_config_selectors
 
 SLOT_STEP_MIN = 5  # admin bookings sit on a 5-minute grid (open point A-4: not the professional's slot_step)
 MESSAGES = {
@@ -388,24 +388,10 @@ def cancel(appointment_id: int, *, reason: str = "", actor: Any, request: Any = 
 ACCOUNT_DELETED_REASON = "account_deleted"  # passed by ``DELETE me/`` (P1): open items are cancelled at once
 
 
-def current_terms_version() -> str | None:
-    """The published terms version (C§2.1.3: ``SiteSettings.terms_version`` non-empty **and** the uz texts of
-    the terms and the privacy policy non-empty), else ``None``. A read never creates the singleton."""
-    row = (
-        SiteSettings.objects.filter(pk=1)
-        .values_list("terms_version", "terms_uz", "privacy_policy_uz")
-        .first()
-    )
-    if row is None:
-        return None
-    version, terms, privacy = row
-    return version if version and terms and privacy else None
-
-
 def _check_consent(customer: Customer) -> None:
     """409 ``terms_update_required`` while the customer's consent is older than the published terms."""
-    current = current_terms_version()
-    if current is not None and customer.terms_version != current:
+    current = site_config_selectors.outdated_consent(customer.terms_version)
+    if current is not None:
         raise TermsUpdateRequired(details={"current_version": current})
 
 

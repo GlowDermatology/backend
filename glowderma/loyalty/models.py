@@ -509,7 +509,7 @@ class PosDevice(TimeStampedModel):
 
     name = models.CharField(max_length=100)
     location_label = models.CharField(max_length=100, blank=True)  # free text; no FK to professionals
-    key_prefix = models.CharField(max_length=12)  # first 8–12 chars of the key, for display/rotation
+    key_prefix = models.CharField(max_length=12, unique=True)  # first 8–12 chars of the key; names the device
     key_hash = models.CharField(max_length=64, unique=True)  # SHA-256 hex of the full key
     is_active = models.BooleanField(default=True)
     last_used_at = models.DateTimeField(null=True)

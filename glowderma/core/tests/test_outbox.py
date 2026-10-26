@@ -33,6 +33,17 @@ def test_enqueue_dedupes(django_capture_on_commit_callbacks: Any) -> None:
         assert delay.call_count >= 1
 
 
+def test_a_broker_outage_after_commit_never_fails_the_request(
+    django_capture_on_commit_callbacks: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The message is committed before the kick; a broker error is logged and the beat delivers it."""
+    with patch.object(dispatch_outbox, "delay", side_effect=OSError("broker down")):
+        with django_capture_on_commit_callbacks(execute=True):
+            message = enqueue()
+    assert OutboxMessage.objects.filter(pk=message.pk, status="pending").exists()
+    assert "broker down" in caplog.text
+
+
 def test_dispatch_runs_handler_and_marks_done() -> None:
     calls: list[int] = []
     outbox.register("test")(lambda message: calls.append(message.pk))

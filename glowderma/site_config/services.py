@@ -7,6 +7,7 @@ from typing import Any
 from django.db import transaction
 
 from glowderma.core import audit, timeutils
+from glowderma.site_config import selectors
 from glowderma.site_config.models import SiteSettings
 
 # Columns PATCH settings/ may change, keyed by their API names (contract §2.11).
@@ -67,6 +68,8 @@ def update_settings(changes: dict[str, Any], *, actor: Any, request: Any = None)
     row.updated_at = timeutils.now()
     row.updated_by = actor
     row.save(update_fields=[*changes, "updated_at", "updated_by"])
+    # GET settings/public/ caches the singleton for 60 s (customer contract §2.4): drop it once this commits.
+    transaction.on_commit(selectors.invalidate_public_settings, robust=True)
     audit.record(
         action="settings.updated",
         entity_type="settings",

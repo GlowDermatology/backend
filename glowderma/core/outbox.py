@@ -77,7 +77,9 @@ def enqueue(topic: str, payload: Any, *, dedupe_key: str, delay: timedelta | Non
             "available_at": timeutils.now() + (delay or timedelta()),
         },
     )
-    transaction.on_commit(dispatch_outbox.delay)
+    # robust: the message already committed, so a broker outage is logged, never turned into a 500 for the
+    # request that enqueued it; the beat (core.dispatch_outbox every 10 s) delivers it anyway.
+    transaction.on_commit(dispatch_outbox.delay, robust=True)
     return message
 
 
