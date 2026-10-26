@@ -4,10 +4,11 @@ from datetime import timedelta
 from typing import Any
 
 from celery import shared_task  # type: ignore[import-untyped]
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
 
-from glowderma.core import audit, outbox, timeutils
+from glowderma.core import audit, outbox, retention, timeutils
 from glowderma.core.models import IdempotencyRecord, OutboxMessage
 from glowderma.core.pii import clean_text
 
@@ -18,6 +19,14 @@ logger = logging.getLogger(__name__)
 def purge_idempotency_records() -> int:
     count, _ = IdempotencyRecord.objects.filter(expires_at__lte=timeutils.now()).delete()
     return count
+
+
+@shared_task(name="core.purge_outbox")  # type: ignore[untyped-decorator]
+def purge_outbox() -> int:
+    """Nightly retention (beat ``core-purge-outbox``): finished outbox messages older than
+    ``OUTBOX_RETENTION_DAYS`` (``core.retention``)."""
+    before = timeutils.now() - timedelta(days=int(settings.OUTBOX_RETENTION_DAYS))
+    return retention.purge_outbox_messages(before, batch_size=int(settings.RETENTION_BATCH_SIZE))
 
 
 def _claim_outbox_message() -> OutboxMessage | None:

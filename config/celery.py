@@ -27,6 +27,9 @@ app.conf.beat_schedule = {
         "task": "loyalty.reconcile_balances",
         "schedule": crontab(hour=3, minute=10),
     },
+    # M3 retention (docs/ops/compliance.md): done/dead outbox rows after OUTBOX_RETENTION_DAYS, raw provider
+    # callbacks (WebhookInbox) after WEBHOOK_INBOX_RETENTION_DAYS; batched, at most 5 minutes a night each.
+    "core-purge-outbox": {"task": "core.purge_outbox", "schedule": crontab(hour=3, minute=20)},
     # M3 Billz catalog sync (docs/integrations/billz.md): an hourly delta and a daily full reconciliation,
     # both through the billz_import job (single-flight with admin imports); no-ops while BILLZ_MODE=fake.
     # Off the hour so they never meet the other jobs' :00 load; the full at 04:23 Tashkent, away from the
