@@ -1,20 +1,39 @@
 import base64
 import binascii
 import os
+from pathlib import Path
 from urllib.parse import urlsplit
 
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 from django.core.exceptions import ImproperlyConfigured
 
 from config.env import env_bool, env_int, env_json, env_list, env_networks, env_str
 
 from .base import *  # noqa: F403
-from .base import OAUTH_MODE, database_config, redis_db_url
+from .base import APPLE_BUNDLE_IDS, OAUTH_MODE, database_config, redis_db_url
 
 DEBUG = False
 if os.environ.get("FAKE_NOW"):
     raise ImproperlyConfigured(
         "FAKE_NOW pins the clock for demos and tests; it must not be set in production"
     )
+# Development switches exist only under the local/test settings (customer contract §6.14): refused here
+# whatever the provider modes, so no internet-facing deployment (staging runs this module too) honours one.
+DEV_FEATURES_ALLOWED = False
+FAKE_PAYMENTS_ENABLED = False
+FAKE_SCENARIO_HEADER_ENABLED = False
+ESKIZ_FAKE_CODE = ""
+POS_API_KEYS = []
+DEV_ONLY_VARIABLES = (
+    "FAKE_PAYMENTS_ENABLED",
+    "FAKE_SCENARIO_HEADER_ENABLED",
+    "ESKIZ_FAKE_CODE",
+    "POS_API_KEYS",
+)
+for _name in DEV_ONLY_VARIABLES:
+    if os.environ.get(_name):
+        raise ImproperlyConfigured(f"{_name} is a local/test switch; the production settings refuse it")
 
 
 def _decode_jwt_key(encoded: str) -> bytes:
@@ -27,6 +46,18 @@ KNOWN_PLACEHOLDER_SECRETS = frozenset(
     {
         "OFMmKSy50zW12DnugPKJmF4b0rNGeIvkm9SNWNjO9NRAN97Dmlr3CJH0tfi4Z6Kr",
         "slqp9tXiEipMGqSzlvPcW9p0hBnle7sDTJSOQKgmZHNHdwYK",
+        # config.settings.local / test defaults (committed, so public)
+        "local-development-key-at-least-32-characters",
+        "local-internal-secret-at-least-32-characters",
+        "test-internal-secret-at-least-32-characters",
+        "local-sms-code-hmac-key-at-least-32-characters",
+        "Z2xvd2Rlcm1hLWxvY2FsLXNlY3JldGJveC1rZXktMzI",
+        "local-log-pii-key-at-least-32-characters",
+        "local-payment-ref-key-at-least-32-characters",
+        "local-qr-hmac-key-at-least-32-characters",
+        "local-bts-webhook-secret-at-least-32-characters",
+        "local-click-secret-key",
+        "local-payme-key",
     }
 )
 KNOWN_PLACEHOLDER_JWT_KEYS = frozenset(
@@ -113,3 +144,76 @@ if OAUTH_MODE == "live":
     _redirect = urlsplit(env_str("OAUTH_REDIRECT_URI"))
     if _redirect.scheme not in {"http", "https"} or not _redirect.netloc:
         raise ImproperlyConfigured("OAUTH_REDIRECT_URI must be an absolute http(s) URL")
+
+# --- Customer API keys (plan §7) ---
+# HMAC keys and our own webhook secret: required, at least 32 characters (used as their UTF-8 bytes).
+CUSTOMER_HMAC_KEYS = (
+    "SMS_CODE_HMAC_KEY",
+    "LOG_PII_KEY",
+    "PAYMENT_REF_KEY",
+    "QR_HMAC_KEY",
+    "BTS_WEBHOOK_SECRET",
+)
+# Issued by the providers: required in every mode (a fake Click still verifies the Completes of transactions
+# attached while it was live, C§2.13.0), no length floor.
+PROVIDER_SECRETS = ("CLICK_SECRET_KEY", "PAYME_KEY")
+
+
+def _refuse_placeholder(name: str, value: str) -> None:
+    if "change-me" in value.lower():
+        raise ImproperlyConfigured(f"{name} is a placeholder value; set the real secret")
+    if value in KNOWN_PLACEHOLDER_SECRETS:
+        raise ImproperlyConfigured(f"{name} is a committed placeholder value; generate a real secret")
+
+
+SMS_CODE_HMAC_KEY = env_str("SMS_CODE_HMAC_KEY")
+LOG_PII_KEY = env_str("LOG_PII_KEY")
+PAYMENT_REF_KEY = env_str("PAYMENT_REF_KEY")
+QR_HMAC_KEY = env_str("QR_HMAC_KEY")
+BTS_WEBHOOK_SECRET = env_str("BTS_WEBHOOK_SECRET")
+CLICK_SECRET_KEY = env_str("CLICK_SECRET_KEY")
+PAYME_KEY = env_str("PAYME_KEY")
+for _name in CUSTOMER_HMAC_KEYS:
+    _value = env_str(_name)
+    _refuse_placeholder(_name, _value)
+    if len(_value) < 32:
+        raise ImproperlyConfigured(f"{_name} must be at least 32 characters")
+for _name in PROVIDER_SECRETS:
+    _refuse_placeholder(_name, env_str(_name))
+SECRETBOX_KEY = env_str("SECRETBOX_KEY")
+_refuse_placeholder("SECRETBOX_KEY", SECRETBOX_KEY)
+try:
+    _secretbox_raw = base64.b64decode(
+        SECRETBOX_KEY + "=" * (-len(SECRETBOX_KEY) % 4), altchars=b"-_", validate=True
+    )
+except (ValueError, binascii.Error) as exc:
+    raise ImproperlyConfigured("SECRETBOX_KEY must be base64url of exactly 32 bytes") from exc
+if len(_secretbox_raw) != 32:
+    raise ImproperlyConfigured("SECRETBOX_KEY must be base64url of exactly 32 bytes")
+
+
+def _decoded_placeholders() -> set[bytes]:
+    decoded: set[bytes] = set()
+    for value in KNOWN_PLACEHOLDER_SECRETS:
+        try:
+            decoded.add(_decode_jwt_key(value))
+        except ValueError, binascii.Error:
+            continue
+    return decoded
+
+
+if _secretbox_raw in _decoded_placeholders():
+    raise ImproperlyConfigured("SECRETBOX_KEY is a committed placeholder value; generate a real secret")
+# Sign in with Apple, live: the ES256 client secret needs the team id, the key id and a P-256 private key.
+if OAUTH_MODE == "live" and APPLE_BUNDLE_IDS:
+    for _name in ("APPLE_TEAM_ID", "APPLE_KEY_ID"):
+        _refuse_placeholder(_name, env_str(_name))
+    try:
+        _apple_pem = Path(env_str("APPLE_PRIVATE_KEY_FILE")).read_bytes()
+        _apple_key = serialization.load_pem_private_key(_apple_pem, password=None)
+    except (OSError, ValueError, TypeError) as exc:
+        raise ImproperlyConfigured("APPLE_PRIVATE_KEY_FILE must be a readable PEM private key") from exc
+    if not isinstance(_apple_key, ec.EllipticCurvePrivateKey) or not isinstance(
+        _apple_key.curve, ec.SECP256R1
+    ):
+        raise ImproperlyConfigured("APPLE_PRIVATE_KEY_FILE must hold an EC P-256 key")

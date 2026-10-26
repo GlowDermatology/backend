@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -5,7 +6,7 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 
 from django.core.exceptions import ImproperlyConfigured
 
-from config.env import Network, env_bool, env_int, env_json, env_str
+from config.env import Network, env_bool, env_int, env_json, env_list, env_networks, env_str
 from glowderma.core.enums import enum_name_overrides
 from glowderma.core.throttling import validate_throttle_rates
 
@@ -272,3 +273,163 @@ if PAYME_MODE not in {"fake", "live"}:
     raise ImproperlyConfigured("PAYME_MODE must be 'fake' or 'live'")
 if BTS_MODE not in {"fake", "live"}:
     raise ImproperlyConfigured("BTS_MODE must be 'fake' or 'live'")
+# --- Customer API (M2, customer contract; plan §7) ---
+# A settings-module constant, never an environment variable: True only in config.settings.local (and therefore
+# test). It gates every development switch (fixed OTP, dev simulate, scenario header, seeded POS keys, the
+# OAuth fakes' "*" nonce) and decides what a fake provider may do (core.integration_modes.fake_in_production).
+DEV_FEATURES_ALLOWED = False
+
+
+def env_positive_int(name: str, default: int) -> int:
+    value = env_int(name, default)
+    if value < 1:
+        raise ImproperlyConfigured(f"{name} must be a positive integer")
+    return value
+
+
+def env_non_negative_int(name: str, default: int) -> int:
+    value = env_int(name, default)
+    if value < 0:
+        raise ImproperlyConfigured(f"{name} must be zero or a positive integer")
+    return value
+
+
+def env_mode(name: str) -> str:
+    value = env_str(name, INTEGRATIONS_MODE)
+    if value not in {"fake", "live"}:
+        raise ImproperlyConfigured(f"{name} must be 'fake' or 'live'")
+    return value
+
+
+APP_VERSION_PATTERN = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}$")
+
+
+def env_app_version(name: str) -> str:
+    value = env_str(name, "0.0.0")
+    if not APP_VERSION_PATTERN.fullmatch(value):
+        raise ImproperlyConfigured(f"{name} must look like 1.2.3")
+    return value
+
+
+# Sessions (C§1.9, §2.1.6): access JWT lifetime, sliding refresh window, refresh grace and re-rotation
+# windows.
+CUSTOMER_ACCESS_TTL = env_positive_int("CUSTOMER_ACCESS_TTL", 900)
+CUSTOMER_REFRESH_TTL_DAYS = env_positive_int("CUSTOMER_REFRESH_TTL_DAYS", 60)
+CUSTOMER_REFRESH_GRACE_SECONDS = env_positive_int("CUSTOMER_REFRESH_GRACE_SECONDS", 120)
+CUSTOMER_REFRESH_UNCONFIRMED_SECONDS = env_positive_int("CUSTOMER_REFRESH_UNCONFIRMED_SECONDS", 600)
+# OTP policy (A3, C§2.1.1).
+CUSTOMER_OTP_TTL_SECONDS = env_positive_int("CUSTOMER_OTP_TTL_SECONDS", 120)
+CUSTOMER_OTP_RESEND_SECONDS = env_positive_int("CUSTOMER_OTP_RESEND_SECONDS", 60)
+CUSTOMER_OTP_MAX_ATTEMPTS = env_positive_int("CUSTOMER_OTP_MAX_ATTEMPTS", 5)
+CUSTOMER_OTP_LOCKOUT_MINUTES = env_positive_int("CUSTOMER_OTP_LOCKOUT_MINUTES", 15)
+CUSTOMER_OTP_DAILY_LIMIT = env_positive_int("CUSTOMER_OTP_DAILY_LIMIT", 10)
+CUSTOMER_OTP_DAILY_WRONG_LIMIT = env_positive_int("CUSTOMER_OTP_DAILY_WRONG_LIMIT", 10)
+CUSTOMER_OTP_DEVICE_DAILY_LIMIT = env_positive_int("CUSTOMER_OTP_DEVICE_DAILY_LIMIT", 10)
+CUSTOMER_OTP_IP_DAILY_LIMIT = env_positive_int("CUSTOMER_OTP_IP_DAILY_LIMIT", 1000)
+SMS_GLOBAL_HOURLY_LIMIT = env_positive_int("SMS_GLOBAL_HOURLY_LIMIT", 500)
+CUSTOMER_VERIFICATION_TTL_SECONDS = env_positive_int("CUSTOMER_VERIFICATION_TTL_SECONDS", 600)
+CUSTOMER_PASSWORD_MIN_LENGTH = env_positive_int("CUSTOMER_PASSWORD_MIN_LENGTH", 8)
+CUSTOMER_DORMANT_DAYS = env_positive_int("CUSTOMER_DORMANT_DAYS", 180)
+# Keys: config.settings.local ships development defaults, config.settings.production requires real values.
+SMS_CODE_HMAC_KEY = ""
+SECRETBOX_KEY = ""
+LOG_PII_KEY = ""
+PAYMENT_REF_KEY = ""
+QR_HMAC_KEY = ""
+BTS_WEBHOOK_SECRET = ""
+CLICK_SECRET_KEY = ""
+PAYME_KEY = ""
+ANDROID_SMS_APP_HASH = env_str("ANDROID_SMS_APP_HASH", "")
+if ANDROID_SMS_APP_HASH and len(ANDROID_SMS_APP_HASH) != 11:
+    raise ImproperlyConfigured("ANDROID_SMS_APP_HASH must be the 11-character app hash or empty")
+SOCIAL_TICKET_TTL_SECONDS = env_positive_int("SOCIAL_TICKET_TTL_SECONDS", 600)
+SOCIAL_NONCE_TTL_SECONDS = env_positive_int("SOCIAL_NONCE_TTL_SECONDS", 600)
+GOOGLE_APP_CLIENT_IDS = env_list("GOOGLE_APP_CLIENT_IDS", [])
+# Sign in with Apple (product-owner decision 2026-10-26): empty = provider "apple" off (live) / fake
+# (local/test).
+APPLE_BUNDLE_IDS = env_list("APPLE_BUNDLE_IDS", [])
+APPLE_TEAM_ID = env_str("APPLE_TEAM_ID", "")
+APPLE_KEY_ID = env_str("APPLE_KEY_ID", "")
+APPLE_PRIVATE_KEY_FILE = env_str("APPLE_PRIVATE_KEY_FILE", "")
+MIN_APP_VERSION_IOS = env_app_version("MIN_APP_VERSION_IOS")
+MIN_APP_VERSION_ANDROID = env_app_version("MIN_APP_VERSION_ANDROID")
+APP_STORE_URL = env_str("APP_STORE_URL", "https://apps.apple.com/app/id0000000000")
+PLAY_STORE_URL = env_str("PLAY_STORE_URL", "https://play.google.com/store/apps/details?id=uz.glowderma.app")
+ADDRESS_MAX_PER_CUSTOMER = env_positive_int("ADDRESS_MAX_PER_CUSTOMER", 10)
+# Eskiz SMS (C§2.14.1); the fixed OTP ESKIZ_FAKE_CODE is read by config.settings.local only.
+ESKIZ_MODE = env_mode("ESKIZ_MODE")
+ESKIZ_BASE_URL = env_str("ESKIZ_BASE_URL", "https://notify.eskiz.uz/api")
+ESKIZ_EMAIL = env_str("ESKIZ_EMAIL", "")
+ESKIZ_PASSWORD = env_str("ESKIZ_PASSWORD", "")
+ESKIZ_SENDER = env_str("ESKIZ_SENDER", "4546")
+ESKIZ_CALLBACK_URL = env_str("ESKIZ_CALLBACK_URL", "")
+ESKIZ_FAKE_CODE = ""
+# Cart and checkout (C§2.5, §2.7).
+CART_MAX_LINES = env_positive_int("CART_MAX_LINES", 30)
+CART_MAX_QTY_PER_LINE = env_positive_int("CART_MAX_QTY_PER_LINE", 10)
+CHECKOUT_MAX_OPEN_ORDERS = env_positive_int("CHECKOUT_MAX_OPEN_ORDERS", 1)
+CHECKOUT_MIN_PAYABLE = env_positive_int("CHECKOUT_MIN_PAYABLE", 1000)
+PAYMENT_IN_FLIGHT_GRACE_SECONDS = env_positive_int("PAYMENT_IN_FLIGHT_GRACE_SECONDS", 300)
+PAYMENT_RETURN_URL = env_str("PAYMENT_RETURN_URL", "https://glowderma.uz/pay/return")
+PAYMENT_RETURN_FALLBACK_URL = env_str("PAYMENT_RETURN_FALLBACK_URL", "glowderma://payment/return")
+# Click SHOP API (C§2.13.1).
+CLICK_SERVICE_ID = env_str("CLICK_SERVICE_ID", "00000")
+CLICK_MERCHANT_ID = env_str("CLICK_MERCHANT_ID", "00000")
+CLICK_MERCHANT_USER_ID = env_str("CLICK_MERCHANT_USER_ID", "00000")
+CLICK_PAY_URL = env_str("CLICK_PAY_URL", "https://my.click.uz/services/pay")
+CLICK_ALLOWED_IPS = env_networks("CLICK_ALLOWED_IPS", [])
+CLICK_INFLIGHT_SECONDS = env_positive_int("CLICK_INFLIGHT_SECONDS", 120)
+if CLICK_INFLIGHT_SECONDS > PAYMENT_IN_FLIGHT_GRACE_SECONDS:
+    raise ImproperlyConfigured("CLICK_INFLIGHT_SECONDS must not exceed PAYMENT_IN_FLIGHT_GRACE_SECONDS")
+# Payme Merchant API (C§2.13.2).
+PAYME_MERCHANT_ID = env_str("PAYME_MERCHANT_ID", "")
+PAYME_CHECKOUT_URL = env_str("PAYME_CHECKOUT_URL", "https://checkout.paycom.uz")
+PAYME_ACCOUNT_FIELD = env_str("PAYME_ACCOUNT_FIELD", "order_id")
+if not re.fullmatch(r"[a-z][a-z0-9_]{0,31}", PAYME_ACCOUNT_FIELD):
+    raise ImproperlyConfigured("PAYME_ACCOUNT_FIELD must be a lower-case identifier")
+PAYME_ALLOWED_IPS = env_networks("PAYME_ALLOWED_IPS", [])
+PAYME_FISCAL_DETAIL_ENABLED = env_bool("PAYME_FISCAL_DETAIL_ENABLED", False)
+# Webhooks (C§2.13.0): stored rows per IP per minute for requests that fail provider authentication.
+WEBHOOK_REJECTED_PER_IP_PER_MIN = env_positive_int("WEBHOOK_REJECTED_PER_IP_PER_MIN", 10)
+# BTS (C§2.13.3, §2.14.3).
+BTS_BASE_URL = env_str("BTS_BASE_URL", "https://api.bts.uz")
+BTS_LOGIN = env_str("BTS_LOGIN", "")
+BTS_PASSWORD = env_str("BTS_PASSWORD", "")
+BTS_SENDER_CITY_CODE = env_str("BTS_SENDER_CITY_CODE", "1001")
+BTS_DEFAULT_PARCEL_WEIGHT_G = env_positive_int("BTS_DEFAULT_PARCEL_WEIGHT_G", 1000)
+BTS_POLL_STALE_MINUTES = env_positive_int("BTS_POLL_STALE_MINUTES", 30)
+BTS_POLL_BATCH = env_positive_int("BTS_POLL_BATCH", 100)
+BTS_POLL_MAX_SECONDS = env_positive_int("BTS_POLL_MAX_SECONDS", 300)
+BTS_POLL_MAX_CONSECUTIVE_FAILURES = env_positive_int("BTS_POLL_MAX_CONSECUTIVE_FAILURES", 3)
+# FCM live adapter (M3): HTTP v1 over httpx with a service-account JWT.
+FCM_PROJECT_ID = env_str("FCM_PROJECT_ID", "")
+FCM_CREDENTIALS_FILE = env_str("FCM_CREDENTIALS_FILE", "")
+# Loyalty QR and POS (C§2.9.3, §2.10); POS_API_KEYS is read by config.settings.local only.
+QR_TOKEN_TTL_SECONDS = env_positive_int("QR_TOKEN_TTL_SECONDS", 60)
+QR_MAX_LIVE_TOKENS = env_positive_int("QR_MAX_LIVE_TOKENS", 2)
+POS_FAILED_AUTH_PER_IP_PER_MIN = env_positive_int("POS_FAILED_AUTH_PER_IP_PER_MIN", 20)
+POS_API_KEYS: list[tuple[str, str]] = []
+# Appointments (C§2.11).
+BOOKING_MIN_LEAD_MINUTES = env_non_negative_int("BOOKING_MIN_LEAD_MINUTES", 60)
+BOOKING_HORIZON_DAYS = env_positive_int("BOOKING_HORIZON_DAYS", 30)
+BOOKING_MAX_OPEN_PER_CUSTOMER = env_positive_int("BOOKING_MAX_OPEN_PER_CUSTOMER", 3)
+BOOKING_CANCEL_MIN_LEAD_MINUTES = env_non_negative_int("BOOKING_CANCEL_MIN_LEAD_MINUTES", 0)
+# Development switches: honoured only while DEV_FEATURES_ALLOWED (the production settings refuse them
+# outright), and only with fake providers, so they can never sign a callback with a real key or reach a live
+# provider.
+FAKE_PAYMENTS_ENABLED = env_bool("FAKE_PAYMENTS_ENABLED", False)
+FAKE_SCENARIO_HEADER_ENABLED = env_bool("FAKE_SCENARIO_HEADER_ENABLED", False)
+if FAKE_PAYMENTS_ENABLED and not CLICK_MODE == PAYME_MODE == "fake":
+    raise ImproperlyConfigured("FAKE_PAYMENTS_ENABLED requires CLICK_MODE=fake and PAYME_MODE=fake")
+SCENARIO_PROVIDER_MODES = {
+    "ESKIZ_MODE": ESKIZ_MODE,
+    "CLICK_MODE": CLICK_MODE,
+    "PAYME_MODE": PAYME_MODE,
+    "BTS_MODE": BTS_MODE,
+    "FCM_MODE": FCM_MODE,
+}
+if FAKE_SCENARIO_HEADER_ENABLED and any(mode != "fake" for mode in SCENARIO_PROVIDER_MODES.values()):
+    raise ImproperlyConfigured(
+        "FAKE_SCENARIO_HEADER_ENABLED requires every provider mode to be fake: "
+        + ", ".join(SCENARIO_PROVIDER_MODES)
+    )

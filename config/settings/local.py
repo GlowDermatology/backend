@@ -1,3 +1,7 @@
+import re
+
+from django.core.exceptions import ImproperlyConfigured
+
 from config.env import env_bool, env_datetime, env_list, env_networks, env_str
 
 from .base import *  # noqa: F403
@@ -39,3 +43,37 @@ CACHES = {
         "VERSION": 1,
     }
 }
+# --- Customer API (M2): development defaults and the switches only local/test settings may honour ---
+# Every default below is a committed value: config.settings.production lists it in KNOWN_PLACEHOLDER_SECRETS
+# and refuses to boot with it.
+DEV_FEATURES_ALLOWED = True
+LOCAL_KEY_DEFAULTS = {
+    "SMS_CODE_HMAC_KEY": "local-sms-code-hmac-key-at-least-32-characters",
+    "SECRETBOX_KEY": "Z2xvd2Rlcm1hLWxvY2FsLXNlY3JldGJveC1rZXktMzI",  # base64url of 32 bytes
+    "LOG_PII_KEY": "local-log-pii-key-at-least-32-characters",
+    "PAYMENT_REF_KEY": "local-payment-ref-key-at-least-32-characters",
+    "QR_HMAC_KEY": "local-qr-hmac-key-at-least-32-characters",
+    "BTS_WEBHOOK_SECRET": "local-bts-webhook-secret-at-least-32-characters",
+    "CLICK_SECRET_KEY": "local-click-secret-key",
+    "PAYME_KEY": "local-payme-key",
+}
+SMS_CODE_HMAC_KEY = env_str("SMS_CODE_HMAC_KEY", LOCAL_KEY_DEFAULTS["SMS_CODE_HMAC_KEY"])
+SECRETBOX_KEY = env_str("SECRETBOX_KEY", LOCAL_KEY_DEFAULTS["SECRETBOX_KEY"])
+LOG_PII_KEY = env_str("LOG_PII_KEY", LOCAL_KEY_DEFAULTS["LOG_PII_KEY"])
+PAYMENT_REF_KEY = env_str("PAYMENT_REF_KEY", LOCAL_KEY_DEFAULTS["PAYMENT_REF_KEY"])
+QR_HMAC_KEY = env_str("QR_HMAC_KEY", LOCAL_KEY_DEFAULTS["QR_HMAC_KEY"])
+BTS_WEBHOOK_SECRET = env_str("BTS_WEBHOOK_SECRET", LOCAL_KEY_DEFAULTS["BTS_WEBHOOK_SECRET"])
+CLICK_SECRET_KEY = env_str("CLICK_SECRET_KEY", LOCAL_KEY_DEFAULTS["CLICK_SECRET_KEY"])
+PAYME_KEY = env_str("PAYME_KEY", LOCAL_KEY_DEFAULTS["PAYME_KEY"])
+# Fixed OTP for black-box e2e (C§2.14.1); never read by the production settings, which refuse the variable.
+ESKIZ_FAKE_CODE = env_str("ESKIZ_FAKE_CODE", "123456")
+if not re.fullmatch(r"\d{6}", ESKIZ_FAKE_CODE):
+    raise ImproperlyConfigured("ESKIZ_FAKE_CODE must be six digits")
+# Seeded POS devices "name:key,…" (C§2.10); key format gdpos_<8-char prefix>_<32 base64url chars>.
+POS_API_KEY_PATTERN = re.compile(r"^gdpos_[A-Za-z0-9]{8}_[A-Za-z0-9_-]{32}$")
+POS_API_KEYS = []
+for _entry in env_list("POS_API_KEYS", []):
+    _name, _sep, _key = _entry.rpartition(":")
+    if not _sep or not _name.strip() or not POS_API_KEY_PATTERN.fullmatch(_key.strip()):
+        raise ImproperlyConfigured("POS_API_KEYS must be comma separated name:gdpos_<prefix>_<secret> pairs")
+    POS_API_KEYS.append((_name.strip(), _key.strip()))

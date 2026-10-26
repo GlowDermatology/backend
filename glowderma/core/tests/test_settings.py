@@ -60,6 +60,15 @@ def production_env(monkeypatch: pytest.MonkeyPatch) -> None:
         ALLOWED_HOSTS="localhost",
         ADMIN_API_ALLOWED_NETS="127.0.0.0/8",
         PUBLIC_MEDIA_BASE_URL="https://media.example.uz/",
+        # M2 customer API keys (plan §7)
+        SMS_CODE_HMAC_KEY="valid-sms-code-hmac-key-at-least-32-chars",
+        LOG_PII_KEY="valid-log-pii-key-at-least-32-characters",
+        PAYMENT_REF_KEY="valid-payment-ref-key-at-least-32-chars",
+        QR_HMAC_KEY="valid-qr-hmac-key-at-least-32-characters",
+        BTS_WEBHOOK_SECRET="valid-bts-webhook-secret-at-least-32-chars",  # noqa: S106
+        SECRETBOX_KEY=base64.urlsafe_b64encode(b"s" * 32).decode().rstrip("="),
+        CLICK_SECRET_KEY="click-issued-secret",  # noqa: S106
+        PAYME_KEY="payme-issued-key",
     )
     for name, value in values.items():
         monkeypatch.setenv(name, value)
