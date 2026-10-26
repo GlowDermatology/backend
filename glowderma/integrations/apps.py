@@ -53,7 +53,12 @@ class IntegrationsConfig(AppConfig):
     label = "integrations"
 
     def ready(self) -> None:
+        from glowderma.core import readiness
+        from glowderma.integrations.readiness import PROBE
+
         post_migrate.connect(
             ensure_provider_rows, sender=self, dispatch_uid="integrations.ensure_provider_rows"
         )
         warn_fake_providers()
+        # health/?ready=1: live providers' configured flags and sync ages (core cannot import integrations)
+        readiness.register(PROBE)
