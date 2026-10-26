@@ -20,7 +20,7 @@ from glowderma.core import enums, outbox, timeutils
 from glowderma.delivery import bts
 from glowderma.delivery.models import Shipment, ShipmentEvent
 from glowderma.delivery.topics import BTS_CREATE_SHIPMENT, bts_create_shipment_key
-from glowderma.integrations.bts.ports import Parcel
+from glowderma.integrations.bts.ports import STATUS_ACCEPTED, Parcel
 from glowderma.integrations.bts.registry import get_bts
 
 
@@ -52,6 +52,17 @@ class CancelOutcome:
 def _aware(value: datetime | None, name: str) -> None:
     if value is not None and timezone.is_naive(value):
         raise ValueError(f"{name} must be timezone-aware")
+
+
+def _answered(shipment: Shipment, request_no: int | None) -> bool:
+    """BTS already answered create request ``request_no`` (a created / create_failed event names it)."""
+    if request_no is None:
+        return False
+    return ShipmentEvent.objects.filter(
+        shipment=shipment,
+        kind__in=[ShipmentEvent.Kind.CREATED, ShipmentEvent.Kind.CREATE_FAILED],
+        payload__request_no=request_no,
+    ).exists()
 
 
 def _shipment(order_id: int) -> Shipment:
@@ -100,11 +111,14 @@ def mark_created(
     at: datetime | None = None,
     manual: bool = False,
     payload: Mapping[str, Any] | None = None,
+    request_no: int | None = None,
 ) -> bool:
     """BTS created (or already had) the parcel: ``created``, ``via = polling`` (D-2), one ``ShipmentEvent``.
 
     ``tariff`` is the BTS answer, else the order's quoted fee (the caller decides, D-2). Idempotent: a row
-    that is already ``created``/``cancelled`` is left alone (returns ``False``).
+    that is already ``created``/``cancelled`` is left alone (returns ``False``). ``request_no`` (the outbox
+    payload's create request) is stored in the event payload, so a redelivered request is recognised as
+    answered (:func:`glowderma.delivery.selectors.create_request_answered`).
     """
     _aware(at, "at")
     instant = at or timeutils.now()
@@ -131,7 +145,7 @@ def mark_created(
             bts_status=bts_status,
             via=shipment.via,
             manual=manual,
-            payload=dict(payload or {}),
+            payload={**dict(payload or {}), **({"request_no": request_no} if request_no is not None else {})},
             at=instant,
         )
         return True
@@ -144,14 +158,19 @@ def mark_failed(
     error: str = "",
     at: datetime | None = None,
     manual: bool = False,
+    request_no: int | None = None,
 ) -> int | None:
     """A definitive BTS refusal (or the dead-letter hook): ``failed``, ``attempts += 1``; returns the attempt
-    number, or ``None`` when the parcel exists already (nothing written)."""
+    number, or ``None`` when nothing was written: the parcel exists already, or create request
+    ``request_no`` was answered before (a redelivery, or a second dead-letter notice of the same message).
+    """
     _aware(at, "at")
     instant = at or timeutils.now()
     with transaction.atomic():
         shipment = _shipment(order_id)
         if shipment.state in (Shipment.State.CREATED, Shipment.State.CANCELLED):
+            return None
+        if _answered(shipment, request_no):
             return None
         shipment.state = Shipment.State.FAILED
         shipment.attempts += 1
@@ -164,7 +183,10 @@ def mark_failed(
             kind=ShipmentEvent.Kind.CREATE_FAILED,
             manual=manual,
             error_code=error_code[:32],
-            payload={"error": error} if error else {},
+            payload={
+                **({"error": error} if error else {}),
+                **({"request_no": request_no} if request_no is not None else {}),
+            },
             at=instant,
         )
         return shipment.attempts
@@ -232,7 +254,9 @@ def cancel(
 
     Writes only when BTS cancelled (``cancelled``, ``cancelled_at``, a ``cancelled`` event); a refusal
     returns ``ok=False`` with BTS's reason and writes nothing; a transport failure raises
-    ``integrations.bts.ports.BtsUnavailable`` before any write (the caller answers 503).
+    ``integrations.bts.ports.BtsUnavailable`` before any write (the caller answers 503). The port answers
+    ``ok`` for a parcel BTS cancelled before (idempotent at the provider boundary), so a cancel whose
+    transaction rolled back after BTS agreed can simply be repeated.
     """
     _aware(at, "at")
     shipment = _shipment(order_id)
@@ -255,6 +279,62 @@ def cancel(
     return CancelOutcome(ok=True)
 
 
+def cancel_orphan(
+    order_id: int,
+    parcel: Parcel,
+    *,
+    scenario: Mapping[str, Any] | None = None,
+    at: datetime | None = None,
+    request_no: int | None = None,
+) -> CancelOutcome:
+    """A parcel BTS holds for an order that was cancelled while its create request was in flight.
+
+    (BTS created it, the worker crashed before committing, the admin cancelled the order seeing no parcel.)
+    The parcel is cancelled at BTS and recorded on the shipment (``created`` event + ``cancelled``), so the
+    order card shows it and no courier collects it. When BTS refuses, the parcel is recorded as ``created``
+    with a ``cancel_refused`` event (the caller alerts staff). A transport failure raises ``BtsUnavailable``
+    before any write (the outbox retries). Returns the BTS outcome.
+    """
+    _aware(at, "at")
+    shipment = _shipment(order_id)
+    if shipment.state in (Shipment.State.CREATED, Shipment.State.CANCELLED):
+        return CancelOutcome(ok=shipment.state == Shipment.State.CANCELLED)
+    result = get_bts(scenario).cancel(parcel)
+    instant = at or timeutils.now()
+    with transaction.atomic():
+        shipment.state = Shipment.State.CANCELLED if result.ok else Shipment.State.CREATED
+        shipment.tracking_number = parcel.tracking_number
+        shipment.tariff = parcel.tariff if parcel.tariff is not None else 0
+        shipment.bts_order_id = parcel.bts_order_id
+        shipment.bts_status = result.status or parcel.status or STATUS_ACCEPTED
+        shipment.via = enums.ShipmentVia.POLLING
+        shipment.bts_created_at = instant
+        shipment.last_status_at = instant
+        shipment.cancelled_at = instant if result.ok else None
+        shipment.save()
+        ShipmentEvent.objects.create(
+            shipment=shipment,
+            kind=ShipmentEvent.Kind.CREATED,
+            bts_status=parcel.status,
+            via=enums.ShipmentVia.POLLING,
+            payload={
+                "tracking_number": parcel.tracking_number,
+                "status": parcel.status,
+                "orphan": True,
+                **({"request_no": request_no} if request_no is not None else {}),
+            },
+            at=instant,
+        )
+        ShipmentEvent.objects.create(
+            shipment=shipment,
+            kind=ShipmentEvent.Kind.CANCELLED if result.ok else ShipmentEvent.Kind.CANCEL_REFUSED,
+            bts_status=result.status,
+            payload={} if result.ok else {"reason": result.reason},
+            at=instant,
+        )
+    return CancelOutcome(ok=result.ok, reason=result.reason)
+
+
 __all__ = [
     "CancelOutcome",
     "DeliveryError",
@@ -262,6 +342,7 @@ __all__ = [
     "StatusResult",
     "apply_status",
     "cancel",
+    "cancel_orphan",
     "ensure_shipment",
     "mark_created",
     "mark_failed",

@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import Any
 
 from glowderma.core import enums
-from glowderma.delivery.models import Shipment
+from glowderma.delivery.models import Shipment, ShipmentEvent
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +53,16 @@ def shipment_info(order_id: int) -> ShipmentInfo | None:
         attempts=row.attempts,
         create_requests=row.create_requests,
     )
+
+
+def create_request_answered(order_id: int, request_no: int) -> bool:
+    """BTS already gave a definitive answer (parcel created, or refused) to create request ``request_no``,
+    or the request's message died (``dead_letter``): a redelivery of it must not ask BTS again."""
+    return ShipmentEvent.objects.filter(
+        shipment__order_id=order_id,
+        kind__in=[ShipmentEvent.Kind.CREATED, ShipmentEvent.Kind.CREATE_FAILED],
+        payload__request_no=request_no,
+    ).exists()
 
 
 def api_state(shipment: Shipment | None, fulfilment: str) -> str:
@@ -117,6 +127,7 @@ __all__ = [
     "ShipmentInfo",
     "api_state",
     "bts_failed_count",
+    "create_request_answered",
     "shipment_for_order",
     "shipment_info",
     "shipment_view",
