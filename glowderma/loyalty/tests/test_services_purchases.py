@@ -486,3 +486,34 @@ def test_record_billz_order_persists_the_sale_without_marking_the_push() -> None
         paid = services.link_billz_sale(result.purchase_id, billz_order_uuid=uuid, billz_sale_id=sale_id, billz_sale_ref="5632631379")  # fmt: skip  # noqa: E501
     assert (paid.billz_sale_id, paid.billz_pushed_at, paid.changed) == (sale_id, at(10, 20, 9, 2), True)
     assert LedgerEntry.objects.count() == 1  # never credits
+
+
+def test_the_billz_payment_attempt_is_persisted_and_forgotten_only_for_its_sale() -> None:
+    """Review B2: the push journal stamps the payment attempt before ``POST /v2/order-payment`` (committed),
+    and clears it only when Billz certainly did not take the payment."""
+    seed_policies()
+    customer = CustomerFactory.create()
+    _, result = paid_order_with_cashback(customer, items_subtotal=185_000, promo=0, cashback_used=0, when=(10, 20, 9, 0))  # fmt: skip  # noqa: E501
+    uuid = result.billz_order_uuid
+    assert uuid is not None
+    sale_id = "38c3920a-ffdd-4233-a823-8af3266f5f4f"
+    with pytest.raises(services.BillzSaleConflict, match="not linked to Billz sale"):
+        services.record_billz_payment_attempt(result.purchase_id, billz_sale_id=sale_id, at=at(10, 20, 9, 1))
+    services.record_billz_order(result.purchase_id, billz_order_uuid=uuid, billz_sale_id=sale_id, billz_sale_ref="5632631379")  # fmt: skip  # noqa: E501
+    services.record_billz_payment_attempt(result.purchase_id, billz_sale_id=sale_id, at=at(10, 20, 9, 1))
+    info = selectors.billz_push_info(result.purchase_id)
+    assert info is not None and info.billz_payment_attempted_at == at(10, 20, 9, 1)
+    with pytest.raises(services.BillzSaleConflict):
+        services.clear_billz_payment_attempt(result.purchase_id, billz_sale_id="another-sale")
+    services.clear_billz_payment_attempt(result.purchase_id, billz_sale_id=sale_id)
+    info = selectors.billz_push_info(result.purchase_id)
+    assert info is not None and info.billz_payment_attempted_at is None
+    with pytest.raises(services.PurchaseNotFound):
+        services.clear_billz_payment_attempt(0, billz_sale_id=sale_id)
+    services.record_billz_payment_attempt(result.purchase_id, billz_sale_id=sale_id, at=at(10, 20, 9, 2))
+    with pinned_clock(at(10, 20, 9, 3)):
+        services.link_billz_sale(result.purchase_id, billz_order_uuid=uuid, billz_sale_id=sale_id)
+    with pytest.raises(services.BillzSaleConflict, match="pushed to Billz already"):
+        services.record_billz_payment_attempt(result.purchase_id, billz_sale_id=sale_id, at=at(10, 20, 9, 4))
+    services.clear_billz_payment_attempt(result.purchase_id, billz_sale_id=sale_id)  # pushed: kept as history
+    assert Purchase.objects.get(pk=result.purchase_id).billz_payment_attempted_at == at(10, 20, 9, 2)

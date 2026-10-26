@@ -81,6 +81,7 @@ def test_migrate_zero_and_forward_again() -> None:
         "0001_initial",
         "0002_append_only",
         "0003_posdevice_key_prefix_unique",
+        "0004_purchase_billz_payment_attempted_at",
     }
     call_command("migrate", verbosity=0)  # re-apply whatever depends on loyalty for the rest of the phase
 

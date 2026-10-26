@@ -1026,6 +1026,45 @@ def link_billz_sale(
     )
 
 
+def record_billz_payment_attempt(purchase_id: int, *, billz_sale_id: str, at: datetime) -> None:
+    """Persist that the payment of the online purchase's Billz sale is about to be sent (review B2).
+
+    Called by the ``billz.push_sale`` journal right before ``POST /v2/order-payment`` and committed before
+    it, so an answer lost in transit is never followed by a second payment: the next attempt finds the stamp
+    and re-reads the sale instead. Refuses (:class:`BillzSaleConflict`) a purchase that is not online, holds
+    another sale or was pushed already.
+    """
+    _aware(at, "at")
+    with transaction.atomic():
+        purchase = _locked_online_purchase(purchase_id, billz_sale_id)
+        if purchase.billz_pushed_at is not None:
+            raise BillzSaleConflict(f"Purchase {purchase_id} was pushed to Billz already")
+        Purchase.objects.filter(pk=purchase.pk).update(
+            billz_payment_attempted_at=at, updated_at=timeutils.now()
+        )
+
+
+def clear_billz_payment_attempt(purchase_id: int, *, billz_sale_id: str) -> None:
+    """Billz certainly did not take the payment (refused it, or it was never sent): forget the attempt."""
+    with transaction.atomic():
+        purchase = _locked_online_purchase(purchase_id, billz_sale_id)
+        if purchase.billz_payment_attempted_at is not None and purchase.billz_pushed_at is None:
+            Purchase.objects.filter(pk=purchase.pk).update(
+                billz_payment_attempted_at=None, updated_at=timeutils.now()
+            )
+
+
+def _locked_online_purchase(purchase_id: int, billz_sale_id: str) -> Purchase:
+    purchase = Purchase.objects.select_for_update(of=("self",)).filter(pk=purchase_id).first()
+    if purchase is None:
+        raise PurchaseNotFound(f"Purchase {purchase_id} does not exist")
+    if purchase.source != enums.PurchaseSource.ONLINE:
+        raise BillzSaleConflict(f"Purchase {purchase_id} is a store sale, not an online order")
+    if not billz_sale_id or purchase.billz_sale_id != billz_sale_id:
+        raise BillzSaleConflict(f"Purchase {purchase_id} is not linked to Billz sale {billz_sale_id!r}")
+    return purchase
+
+
 def _link_billz(
     purchase_id: int,
     *,
@@ -1494,6 +1533,7 @@ __all__ = [
     "active_policy",
     "adjust",
     "capture_hold",
+    "clear_billz_payment_attempt",
     "create_hold",
     "create_policy_version",
     "create_pos_device",
@@ -1506,6 +1546,7 @@ __all__ = [
     "pos_key_hash",
     "post_entry",
     "record_billz_order",
+    "record_billz_payment_attempt",
     "record_online_purchase",
     "record_store_purchase",
     "release_hold",
