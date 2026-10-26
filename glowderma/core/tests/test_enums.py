@@ -84,6 +84,7 @@ CONTRACT_TABLE: dict[str, list[str]] = {
     ],
     "LogoutScope": ["current", "others", "all"],
     "ExportFormat": ["csv", "xlsx"],
+    "IntegrationMode": ["fake", "live"],
 }
 
 

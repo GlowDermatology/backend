@@ -14,6 +14,8 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from glowderma.core import enums, integration_modes
+
 logger = logging.getLogger(__name__)
 
 
@@ -21,6 +23,11 @@ class HealthSerializer(serializers.Serializer[dict[str, Any]]):
     status = serializers.ChoiceField(choices=["ok", "error"])
     checks = serializers.DictField(child=serializers.ChoiceField(choices=["ok", "error"]), required=False)
     version = serializers.CharField(required=False)
+    integrations = serializers.DictField(
+        child=serializers.ChoiceField(choices=enums.IntegrationMode.values),
+        required=False,
+        help_text="`?ready=1` only: `{provider: mode}` for every provider with a `*_MODE` setting.",
+    )
 
 
 class HealthView(APIView):
@@ -65,6 +72,11 @@ class HealthView(APIView):
             logger.warning("health check %s failed", "broker", exc_info=True)
         ok = all(value == "ok" for value in checks.values())
         return Response(
-            {"status": "ok" if ok else "error", "checks": checks, "version": settings.GIT_SHA},
+            {
+                "status": "ok" if ok else "error",
+                "checks": checks,
+                "version": settings.GIT_SHA,
+                "integrations": integration_modes.provider_modes(),
+            },
             status=200 if ok else 503,
         )

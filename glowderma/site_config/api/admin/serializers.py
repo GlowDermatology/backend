@@ -8,6 +8,7 @@ from django.conf import settings
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
+from glowderma.core import enums, integration_modes
 from glowderma.core.api.exceptions import field_error
 from glowderma.core.api.fields import PhoneField
 from glowderma.core.api.serializers import ActorSerializer
@@ -20,8 +21,23 @@ class PickupAddressSerializer(serializers.Serializer[dict[str, str]]):
     en = serializers.CharField(max_length=200, allow_blank=True, required=False)
 
 
-class IntegrationsSerializer(serializers.Serializer[dict[str, str]]):
-    mode = serializers.ChoiceField(choices=["fake", "live"])
+class ProviderModesSerializer(serializers.Serializer[dict[str, str]]):
+    """Per-provider adapter modes (``*_MODE`` settings, each defaulting to ``INTEGRATIONS_MODE``)."""
+
+    oauth = serializers.ChoiceField(choices=enums.IntegrationMode.values)
+    billz = serializers.ChoiceField(choices=enums.IntegrationMode.values)
+    fcm = serializers.ChoiceField(choices=enums.IntegrationMode.values)
+    click = serializers.ChoiceField(choices=enums.IntegrationMode.values)
+    payme = serializers.ChoiceField(choices=enums.IntegrationMode.values)
+    bts = serializers.ChoiceField(choices=enums.IntegrationMode.values)
+
+
+class IntegrationsSerializer(serializers.Serializer[dict[str, Any]]):
+    """Read-only: ``mode`` = ``INTEGRATIONS_MODE`` (the default of every provider), ``providers`` = the
+    effective mode of each provider."""
+
+    mode = serializers.ChoiceField(choices=enums.IntegrationMode.values)
+    providers = ProviderModesSerializer()
 
 
 class SettingsSerializer(serializers.Serializer[SiteSettings]):
@@ -47,8 +63,8 @@ class SettingsSerializer(serializers.Serializer[SiteSettings]):
         }
 
     @extend_schema_field(IntegrationsSerializer())
-    def get_integrations(self, obj: SiteSettings) -> dict[str, str]:
-        return {"mode": str(settings.INTEGRATIONS_MODE)}
+    def get_integrations(self, obj: SiteSettings) -> dict[str, Any]:
+        return {"mode": str(settings.INTEGRATIONS_MODE), "providers": integration_modes.provider_modes()}
 
 
 class SettingsPatchSerializer(serializers.Serializer[dict[str, Any]]):

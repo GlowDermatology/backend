@@ -43,3 +43,22 @@ def test_health_ready_other_failure_503(check: str, target: str, caplog: pytest.
     assert response.json()["checks"] == expected
     assert "private-service-error" not in str(response.json())
     assert any(r.getMessage() == f"health check {check} failed" and r.exc_info for r in caplog.records)
+
+
+@pytest.mark.django_db
+def test_health_ready_lists_every_provider_mode() -> None:
+    from django.test import override_settings
+
+    modes = {f"{name}_MODE": "fake" for name in ("OAUTH", "BILLZ", "FCM", "PAYME", "BTS")}
+    with override_settings(**modes, CLICK_MODE="live"):
+        body = Client().get("/api/v1/health/?ready=1").json()
+    assert body["integrations"] == {
+        "oauth": "fake",
+        "billz": "fake",
+        "fcm": "fake",
+        "click": "live",
+        "payme": "fake",
+        "bts": "fake",
+    }
+    assert set(body) == {"status", "checks", "version", "integrations"}
+    assert "integrations" not in Client().get("/api/v1/health/").json()

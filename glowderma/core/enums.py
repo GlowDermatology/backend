@@ -295,6 +295,13 @@ class ExportFormat(TextChoices):
     XLSX = "xlsx"
 
 
+class IntegrationMode(TextChoices):
+    """A provider adapter's mode (``*_MODE`` settings): ``settings/`` integrations, ``health/?ready=1``."""
+
+    FAKE = "fake"
+    LIVE = "live"
+
+
 CONTRACT_ENUMS: tuple[type[TextChoices], ...] = (
     OrderStatus,
     PaymentStatus,
@@ -341,6 +348,7 @@ CONTRACT_ENUMS: tuple[type[TextChoices], ...] = (
     SessionRevokeReason,
     LogoutScope,
     ExportFormat,
+    IntegrationMode,
 )
 
 
