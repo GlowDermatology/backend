@@ -18,19 +18,25 @@ from the product owner (and, where marked, from legal counsel) before go-live.
 
 | Data | Fields | Store | Notes |
 |---|---|---|---|
-| Customer profile | phone (unique, the loyalty key), name, profile image, language, password hash (Argon2), consent (`terms_version`, `consent_at`, `consent_ip`), `registered_at`, `last_login_at`, `history_from`, status | Postgres `accounts_customer`; the image file in the media volume | Deletion scrubs everything but the phone and the dates (§3) |
-| Saved addresses | label, address text, BTS region/city codes, comment | Postgres `accounts_address` | Deleted with the account |
-| Devices | Firebase installation id (`fid`), FCM token, platform, model, OS, app version, locale, device-key hash | Postgres `accounts_device` | Token and key hash cleared on deletion |
-| Sessions | refresh-token hashes (SHA-256), device label, timestamps, revoke reason | Postgres `accounts_authsession`; revoke tombstones in Redis | Revoked or expired customer sessions deleted after 90 days |
-| SMS codes | phone, HMAC of the code, verification-token hash, Eskiz message id | Postgres `accounts_smscode`; the code itself only AES-GCM-sealed in Redis for 120 s | Rows deleted after 24 h |
-| Social sign-in | provider, provider subject, email at link time, Apple refresh token (sealed with `SECRETBOX_KEY`) | Postgres `accounts_customersocialidentity` (customers), `accounts_socialidentity` (staff) | Deleted with the account; Apple tokens revoked |
-| Staff | email, full name, password hash | Postgres `accounts_staffuser` | |
-| Orders | recipient name and phone, delivery address and comment, customer note, items, amounts, status history | Postgres `commerce_order`, `commerce_orderitem`, `commerce_orderevent` | The recipient snapshot is kept after account deletion (open question Q4) |
-| Payments and refunds | amounts, provider transaction ids, provider protocol state (Click `click_paydoc_id`, Payme times) | Postgres `payments_payment`, `payments_refund` | Card data never reaches the backend |
-| Shipments | tracking number, BTS ids, statuses (no name or phone) | Postgres `delivery_shipment`, `delivery_shipmentevent` | |
-| Loyalty | balance, ledger entries, holds, purchases (incl. in-store Billz sale ids) | Postgres `loyalty_*` | Kept after deletion (decision A1) |
-| Appointments | customer, specialist, service, time, customer note, staff note | Postgres `appointments_*` | |
-| Notifications | inbox rows (title, body), campaign texts, a campaign's single-phone audience snapshot | Postgres `notifications_*` | Retention not implemented (Q5) |
+| Customer profile | phone (unique, the loyalty key), name, profile image, the default delivery address (`address_text`), language, password hash (Argon2) and `password_changed_at`, consent (`terms_version`, `consent_at`, `consent_ip`), `registered_at`, `last_login_at`, `deleted_at`, `reactivated_at`, `history_from`, status | Postgres `accounts_customer`; the image file in the media volume | Deletion scrubs name, image, address text, password, consent and last sign-in; the phone and the other dates stay (§3) |
+| Saved addresses | label, address text, BTS region/city codes, comment, **map position (`latitude`, `longitude`)** — a precise location, usually the home | Postgres `accounts_address` | Deleted with the account |
+| Devices | Firebase installation id (`fid`), FCM token, platform, model, OS, app version, locale, device-key hash, push opt-in, `last_active_at` | Postgres `accounts_device` | Token and key hash cleared on deletion; the row (model, OS, `fid`) is kept, inactive |
+| Sessions | refresh-token hashes (SHA-256), device label, sign-in method, timestamps, revoke reason — customers and staff | Postgres `accounts_authsession`; revoke tombstones in Redis | Revoked or expired customer sessions deleted after 90 days; staff sessions are kept |
+| SMS codes | phone, purpose, HMAC of the code, verification-token hash, Eskiz message id, **the requesting IP (`request_ip`)** | Postgres `accounts_smscode`; the code itself only AES-GCM-sealed in Redis for 120 s | Rows deleted after 24 h |
+| Social sign-in | provider, provider subject, email at link time, last sign-in, Apple refresh token (sealed with `SECRETBOX_KEY`) | Postgres `accounts_customersocialidentity` (customers), `accounts_socialidentity` (staff) | Deleted with the account; Apple tokens revoked |
+| Staff | email, full name, role, password hash, last sign-in; staff ids as the actor of catalog, cashback, refund, schedule and campaign changes | Postgres `accounts_staffuser` (+ `*_by_id` / `actor_id` columns across modules) | |
+| Specialists (natural persons, published) | name, role, **photo**, **biography** (uz/ru/en), years of experience, the location they work at; their working hours, date overrides (with a staff note) and blocked periods (`busy`/`off` with a label) — an employee's schedule and absences | Postgres `professionals_professional`, `professionals_workinghours`, `professionals_workinghoursoverride`, `professionals_blockedperiod`; photos in the media volume | Shown in the app to everyone; staff edit and deactivate them; no deletion flow (Q9) |
+| Business contacts | location address and phone, support / cosmetologist / store phones | Postgres `professionals_location`, `site_config_sitesettings` | Business data; a phone that is a person's own mobile becomes personal data |
+| Carts | the customer's cart: products, quantities, the price at adding, timestamps, the last checkout order | Postgres `commerce_cart`, `commerce_cartitem` | Lines deleted with the account and by the dormant-account reset |
+| Orders | recipient name and phone, delivery address and comment, customer note, channel, items, amounts, status history (with staff actors and notes), cancellation note, provider `metadata` | Postgres `commerce_order`, `commerce_orderitem`, `commerce_orderevent`, `commerce_stockreservation` | The recipient snapshot is kept after account deletion (open question Q4) |
+| Payments and refunds | amounts, provider transaction ids, provider protocol state (Click `click_paydoc_id`, Payme times), provider error text (scrubbed), the staff member who requested a refund | Postgres `payments_payment`, `payments_refund` | Card data never reaches the backend |
+| Shipments | tracking number, BTS ids, statuses, error text, and each BTS status body as received (`delivery_shipmentevent.payload`: whatever BTS sends — it may echo the recipient's name, phone or address) | Postgres `delivery_shipment`, `delivery_shipmentevent` | |
+| Loyalty | balance, ledger entries (staff reason for adjustments), holds, purchases with their **items** (what the customer bought, in store too, with prices) and in-store Billz sale ids | Postgres `loyalty_*` | Kept after deletion (decision A1) |
+| Appointments | customer, specialist, service, time, customer note, staff note, status history | Postgres `appointments_*` | |
+| Customer segments (**profiling**) | segment rules (minimum online orders, minimum lifetime amount) evaluated over a customer's purchases, and manual memberships (`customer`, the staff member who added them, when) | Postgres `notifications_customersegment`, `notifications_segmentmember` | Manual memberships are **kept** after account deletion (the customer row stays); used only to target campaigns (Q10) |
+| Notifications | inbox rows (title, body, link, read/delivered times, push state), campaign texts and image, a campaign's single-customer / single-phone audience snapshot (`audience_customer`, `audience_phone`) | Postgres `notifications_inboxnotification`, `notifications_campaign` | Retention not implemented (Q5) |
+| Campaign deliveries | one row per customer and **device** a campaign reached: delivery state, error, FCM provider message id and state, sent/delivered times, the inbox row | Postgres `notifications_campaignrecipient` | Kept after deletion; retention not implemented (Q5) |
+| Background jobs | the staff member who started a Billz import, its parameters, progress and error text (no customer data) | Postgres `integrations_job` | |
 | Raw provider callbacks | Click/Payme/BTS/Billz request bodies (`payload`, `raw_body` ≤ 64 KiB), allow-listed headers, remote IP | Postgres `integrations_webhookinbox` (append-only) | Purged after `WEBHOOK_INBOX_RETENTION_DAYS` (180) |
 | Outbox messages | ids; `apple.revoke` carries a sealed Apple token; `push.account_security` may carry FCM tokens until sent | Postgres `core_outboxmessage` | Done rows purged after `OUTBOX_RETENTION_DAYS` (30); dead rows kept until requeued or resolved (§4); done/dead `sms.send` after 24 h |
 | Idempotency records | stored responses of customer and staff writes (may contain profile or address data) | Postgres `core_idempotencyrecord` | Deleted after 24 h; a deleted customer's are deleted at once |
@@ -39,6 +45,13 @@ from the product owner (and, where marked, from legal counsel) before go-live.
 | Task queue | task names and ids | Redis DB 1 (Celery broker) | |
 | Logs | key=value lines with `request_id`; phones only as `pii_ref`; provider free text scrubbed (`core.pii.scrub_free_text`) | container stdout (Docker json-file, rotated 5 × 20 MB) | httpx request lines are silenced (Billz URLs carry a phone) |
 | Backups | full `pg_dump` and a tarball of the media volume | host `/srv/backups` (14 days) plus the off-host copy | Contain everything above |
+
+Reviewed model by model (every table of `glowderma.*`, 2026-10-27). No personal data: `catalog_*` (products,
+categories, banners, images — `uploaded_by` / `last_change_actor` are staff ids), `professionals_service`,
+`professionals_professionalservice`, `loyalty_cashbackpolicy`/`loyalty_cashbacktier` (author: staff id),
+`loyalty_posdevice` (a till: name and location label), `notifications_statustemplate`,
+`integrations_integrationstate` (sync cursors and the last error text, scrubbed) and `core_outboxmessage` beyond
+what its row above lists.
 
 ### 1.2 What leaves the server, and to whom
 
@@ -159,3 +172,5 @@ Glow Derma), not something the software does:
 | Q6 | Backup retention off the host, and its location | not defined in code |
 | Q7 | Raw callback retention: settled at 180 days by customer contract §6 item 11 ("180-day retention, C4") and decision T13 | 180 days implemented (`WEBHOOK_INBOX_RETENTION_DAYS`); a shorter period needs a contract change first |
 | Q8 | Which alert receiver is used (§1.2) | none configured |
+| Q9 | Specialists' personal data (name, photo, biography, schedule and absences): the legal basis for publishing it (employment contract or consent) and what happens when a specialist leaves | staff deactivate the specialist; the row, photo and bookings are kept |
+| Q10 | Customer segments are profiling (rules over purchase history, manual memberships): does the privacy policy cover it, and should a deleted account's memberships and campaign deliveries be removed | kept |
