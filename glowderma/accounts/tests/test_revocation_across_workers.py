@@ -22,6 +22,7 @@ import threading
 import uuid
 from collections.abc import Iterator
 from typing import Any
+from unittest.mock import patch
 from urllib.parse import quote
 
 import pytest
@@ -115,11 +116,18 @@ def shared_redis() -> Iterator[RedisCache]:
             "OPTIONS": options,
         }
     }
+    # The QR store writes literal keys (no KEY_PREFIX): give it this test's prefix too, so the cleanup below
+    # deletes only this run's keys and never another concurrent run's.
+    qr_prefix = f"{prefix}:qr:"
     try:
-        with override_settings(CACHES=caches):
+        with (
+            override_settings(CACHES=caches),
+            patch.object(qr_store, "PREFIX", qr_prefix),
+            patch.object(qr_store, "LIVE_PREFIX", f"{qr_prefix}live:"),
+        ):
             yield probe
     finally:
-        for key in [*client.scan_iter(match=f"{prefix}:*"), *client.scan_iter(match=f"{qr_store.PREFIX}*")]:
+        for key in client.scan_iter(match=f"{prefix}:*"):
             client.delete(key)
         client.close()
 
