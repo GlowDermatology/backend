@@ -834,7 +834,15 @@ def enqueue_apple_revoke(identity: CustomerSocialIdentity) -> bool:
     return True
 
 
-@transaction.atomic
+# Attempts of ``register_device`` whose locked read may find a token holder the unlocked read missed; the
+# last one locks such a late holder's customer out of order instead of starting again.
+REGISTER_DEVICE_ATTEMPTS = 3
+
+
+class _TokenHoldersChanged(Exception):
+    """The token moved to another customer's device between the unlocked and the locked read."""
+
+
 def register_device(
     customer_id: int,
     fid: str,
@@ -857,9 +865,13 @@ def register_device(
     push: the token is this install's now), so that customer's app is signed out on every route instead of
     only on ``PUT me/device/``. ``fcm_invalidated_at`` is cleared when a new token arrives.
 
-    Lock order (customer contract §2.7.1): the customer-level lock first, then the device rows — this
-    device and the token's holders in one query ordered by primary key — so it serializes with
-    ``start_customer_session`` and ``delete_customer`` instead of deadlocking with them. Under the lock a
+    Lock order (customer contract §2.7.1): the customer-level locks first — this customer and every customer
+    whose device holds the token, in ascending primary key order — then the device rows (this device and the
+    token's holders in one query ordered by primary key), then the holders' sessions. Every other flow of a
+    holder (logout, a signed-in write, ``DELETE me/``, a reset) takes that holder's customer lock before its
+    sessions and devices, so they serialize with this one instead of deadlocking with it. The holders are
+    read without a lock first; when the locked read finds a holder whose customer is not locked (a token
+    moved meanwhile), the attempt rolls back and starts again. Under the lock a
     customer who is no longer active (401 ``SESSION_EXPIRED``) or a device another sign-in or a logout
     deactivated meanwhile (401 ``SESSION_REPLACED`` when its newest session was replaced, else
     ``SESSION_EXPIRED``) is refused before anything is written, so no token lands on a deleted or replaced
@@ -870,7 +882,47 @@ def register_device(
         raise ValidationError(
             {"push_enabled": [field_error("push_token_missing", message_key="field.push_token_missing")]}
         )
-    stored = lock_customer(customer_id)
+    for attempt in range(1, REGISTER_DEVICE_ATTEMPTS + 1):
+        try:
+            return _register_device_attempt(
+                customer_id,
+                fid,
+                token,
+                push_enabled=push_enabled,
+                model=model,
+                os=os,
+                locale=locale,
+                platform=platform,
+                app_version=app_version,
+                lock_late=attempt == REGISTER_DEVICE_ATTEMPTS,
+            )
+        except _TokenHoldersChanged:
+            continue
+    raise AssertionError("unreachable: the last attempt never raises _TokenHoldersChanged")
+
+
+@transaction.atomic
+def _register_device_attempt(
+    customer_id: int,
+    fid: str,
+    token: str,
+    *,
+    push_enabled: bool,
+    model: str,
+    os: str,
+    locale: str,
+    platform: str | None,
+    app_version: str | None,
+    lock_late: bool,
+) -> Device:
+    holder_customers: set[int] = set()
+    if token:
+        holder_customers = set(
+            Device.objects.filter(fcm_token=token).values_list("customer_id", flat=True).distinct()
+        )
+    locked_customers = sorted(holder_customers | {customer_id})
+    locked = {locked_id: lock_customer(locked_id) for locked_id in locked_customers}
+    stored = locked[customer_id]
     if stored.status != enums.CustomerStatus.ACTIVE:
         raise AuthFailed("SESSION_EXPIRED")
     instant = timeutils.now()
@@ -878,6 +930,12 @@ def register_device(
     if token:
         wanted |= Q(fcm_token=token)
     rows = list(Device.objects.select_for_update().filter(wanted).order_by("pk"))
+    late = sorted({row.customer_id for row in rows} - set(locked_customers))
+    if late:
+        if not lock_late:
+            raise _TokenHoldersChanged
+        for late_id in late:
+            lock_customer(late_id)
     device = next((row for row in rows if row.customer_id == customer_id and row.fid == fid), None)
     if device is None:
         raise Device.DoesNotExist(f"No device {pii_ref(fid)} for customer {customer_id}")
