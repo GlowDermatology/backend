@@ -1686,6 +1686,11 @@ admin-only by DB constraint).
     payment's only open one, `refund_one_open_per_payment`). As a second layer, `commerce.tasks.submit_refund` re-reads
     the payment before any port call and, when it is no longer `paid`, ends the refund `failed` (`error_code
     "payment_not_paid"`, event `refund_failed`) without calling Click.
+  - **No retry while Click is fake.** `…/retry/` of a `failed` Click refund while the Click port is fake under the
+    production settings answers 409 `invalid_transition` with `MESSAGE_REFUND_CLICK_FAKE`, nothing written: the retry
+    would create a `manual_required` refund whose resolve skips the status check, so a reversal Click may already have
+    performed could be paid out a second time. A new refund that never reached Click (a cancel while Click is fake)
+    stays `manual_required` and is resolved as before, because Click was never asked to reverse it.
 - **Refund and status calls for Click** are keyed by the Click payment id of the Merchant API (`DELETE
   …/payment/reversal/{service_id}/{payment_id}`, `GET …/payment/status/{service_id}/{payment_id}`), which is our
   `provider_state.click_paydoc_id` — never `click_trans_id` (`Payment.provider_txn_id`) **(verify M3)**. P2 exposes
