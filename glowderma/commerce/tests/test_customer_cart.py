@@ -214,3 +214,18 @@ def test_reorder_respects_the_history_horizon(customer_client: APIClient, custom
     assert (
         customer_client.post(f"/api/v1/orders/{order.pk}/reorder/", format="json", **key()).status_code == 404
     )
+
+
+@pytest.mark.parametrize("target", ["clear", "bulk", "one"])
+def test_cart_deletes_store_and_replay_a_sent_key(customer_client: APIClient, target: str) -> None:
+    item = product()
+    add(customer_client, item.pk)
+    url = {"clear": CART, "bulk": f"{ITEMS}?product_id={item.pk}", "one": f"{ITEMS}{item.pk}/"}[target]
+    headers = key()
+    first = customer_client.delete(url, **headers)
+    add(customer_client, item.pk)  # the cart changed since: a replay still answers the stored response
+    again = customer_client.delete(url, **headers)
+    assert first.status_code == again.status_code == 200
+    assert again.headers["Idempotent-Replayed"] == "true" and again.json() == first.json()
+    assert CartItem.objects.count() == 1  # the replay did not run the delete again
+    assert customer_client.delete(url).status_code == 200  # the key stays optional

@@ -131,6 +131,8 @@ def _delivery_address(
     region/city pair, known to BTS's reference list. Returns ``(address_id, region_code, city_code)``."""
     if not integration_modes.delivery_available():
         raise DeliveryUnavailable(key="error.delivery_not_offered")
+    if address_id is not None and (region_code or city_code):  # exactly one of the two (§2.6)
+        raise _field("address_id", "required", message_key="field.address_required")
     if address_id is not None:
         address = Address.objects.filter(pk=address_id, customer_id=customer.pk).first()
         if address is None:
@@ -186,6 +188,7 @@ class CartView(CustomerAPIView):
         parameters=DEVICE_HEADERS,
         responses={200: CustomerCartSerializer, **CUSTOMER_ERRORS},
     )
+    @idempotent(required=False)
     def delete(self, request: Request) -> Response:
         services.clear_cart(_customer(request).pk)
         return _cart_response(self)
@@ -218,6 +221,7 @@ class CartItemsView(CustomerAPIView):
         request=None,
         responses={200: CustomerCartSerializer, **CUSTOMER_ERRORS},
     )
+    @idempotent(required=False)
     def delete(self, request: Request) -> Response:
         raw = request.query_params.getlist("product_id")
         if not raw:
@@ -258,6 +262,7 @@ class CartItemView(CustomerAPIView):
         parameters=DEVICE_HEADERS,
         responses={200: CustomerCartSerializer, **CUSTOMER_ERRORS},
     )
+    @idempotent(required=False)
     def delete(self, request: Request, product_id: int) -> Response:
         services.remove_from_cart(_customer(request).pk, [product_id])
         return _cart_response(self)
@@ -274,6 +279,7 @@ class DeliveryCalculateView(CustomerAPIView):
         request=CustomerDeliveryCalculateSerializer,
         responses={200: CustomerDeliveryQuoteSerializer, **CUSTOMER_ERRORS},
     )
+    @idempotent(required=False)
     def post(self, request: Request) -> Response:
         body = CustomerDeliveryCalculateSerializer(data=request.data)
         body.is_valid(raise_exception=True)

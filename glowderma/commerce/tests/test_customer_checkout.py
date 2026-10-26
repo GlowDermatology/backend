@@ -390,3 +390,38 @@ def test_checkout_refuses_a_deleted_customer_under_the_lock(
         response = checkout(customer_client, pickup_body(100_000))
     assert response.status_code == 401 and response.json()["code"] == "SESSION_EXPIRED"
     assert not Order.objects.exists()
+
+
+def test_calculate_refuses_an_address_together_with_a_region_pair(
+    customer_client: APIClient, customer: Customer
+) -> None:
+    fill(customer, (product(), 1))
+    own = address(customer)
+    both = customer_client.post(
+        CALCULATE,
+        {"fulfilment": "delivery", "address_id": own.pk, "region_code": "13", "city_code": "1301"},
+        format="json",
+    )
+    assert both.status_code == 400
+    assert both.json()["errors"][0] == {
+        "field": "address_id",
+        "code": "required",
+        "message": "Yetkazib berish manzilini tanlang.",
+    }
+    half = customer_client.post(CALCULATE, {"fulfilment": "delivery", "region_code": "13"}, format="json")
+    assert half.status_code == 400 and half.json()["errors"][0]["code"] == "required"
+
+
+def test_calculate_honours_an_optional_idempotency_key(
+    customer_client: APIClient, customer: Customer
+) -> None:
+    fill(customer, (product(), 1))
+    headers = key()
+    first = customer_client.post(CALCULATE, {"fulfilment": "pickup"}, format="json", **headers)
+    again = customer_client.post(CALCULATE, {"fulfilment": "pickup"}, format="json", **headers)
+    assert first.status_code == again.status_code == 200
+    assert again.headers["Idempotent-Replayed"] == "true" and again.json() == first.json()
+    assert (
+        "Idempotent-Replayed"
+        not in customer_client.post(CALCULATE, {"fulfilment": "pickup"}, format="json").headers
+    )
