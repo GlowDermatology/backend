@@ -1,1 +1,1 @@
-"""Billz (POS / inventory) adapter behind a port: ``FakeBillz`` in M1, the live client arrives with M3."""
+"""Billz (POS / inventory) adapter behind a port: ``FakeBillz`` and the live client ``LiveBillz`` (M3)."""
