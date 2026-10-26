@@ -325,6 +325,67 @@ def test_members_add_validation(staff_client: APIClient, body: dict[str, Any], e
     assert SegmentMember.objects.count() == 0
 
 
+def test_members_add_by_phones_and_ids_combined(staff_client: APIClient) -> None:
+    segment = CustomerSegmentFactory.create()
+    by_id = CustomerFactory.create()
+    by_phone = CustomerFactory.create(phone="+998901112233")
+    both = CustomerFactory.create(phone="+998901112244")
+    response = staff_client.post(
+        f"{URL}{segment.pk}/members/",
+        {
+            "customer_ids": [by_id.pk, both.pk],
+            "phones": ["+998901112233", "+998901112244", "+998901112233"],  # duplicates collapse
+        },
+        format="json",
+    )
+    assert response.status_code == 200, response.data
+    assert response.data["manual_member_count"] == 3
+    assert set(SegmentMember.objects.filter(segment=segment).values_list("customer_id", flat=True)) == {
+        by_id.pk,
+        by_phone.pk,
+        both.pk,
+    }
+    expected_ids = sorted([by_id.pk, by_phone.pk, both.pk])
+    assert AuditEntry.objects.get(action="segment.members_added").after == {
+        "customer_ids": expected_ids,
+        "added": expected_ids,
+    }
+    only_phones = staff_client.post(
+        f"{URL}{segment.pk}/members/", {"customer_ids": [], "phones": ["+998901112233"]}, format="json"
+    )
+    assert only_phones.status_code == 200 and only_phones.data["manual_member_count"] == 3
+
+
+def test_members_add_by_phone_errors_name_the_element(staff_client: APIClient) -> None:
+    segment = CustomerSegmentFactory.create()
+    CustomerFactory.create(phone="+998901112233")
+    CustomerFactory.create(phone="+998901112255", status="deleted", deleted_at=ANCHOR)
+    unknown = staff_client.post(
+        f"{URL}{segment.pk}/members/",
+        {"phones": ["+998901112233", "+998909999999", "+998901112255", "+998909999999"]},
+        format="json",
+    )
+    assert unknown.status_code == 400
+    message = "Bu raqam bilan mijoz topilmadi."
+    assert errors(unknown) == [
+        ("phones.1", "customer_not_found", message),  # first occurrence of a duplicate only
+        ("phones.2", "customer_not_found", message),  # deleted customers are not resolved
+    ]
+    malformed = staff_client.post(
+        f"{URL}{segment.pk}/members/", {"phones": ["+998901112233", "998901112233"]}, format="json"
+    )
+    assert errors(malformed) == [("phones.1", "invalid", "Telefon raqamini to‘g‘ri kiriting.")]
+    too_many = staff_client.post(
+        f"{URL}{segment.pk}/members/", {"phones": ["+998901112233"] * 501}, format="json"
+    )
+    assert errors(too_many) == [("phones", "max_items", "Ko‘pi bilan 500 ta.")]
+    empty = staff_client.post(f"{URL}{segment.pk}/members/", {"phones": []}, format="json")
+    assert errors(empty) == [("customer_ids", "required", "Majburiy maydon.")]
+    not_a_list = staff_client.post(f"{URL}{segment.pk}/members/", {"phones": "+998901112233"}, format="json")
+    assert errors(not_a_list) == [("phones", "invalid", "Noto‘g‘ri qiymat.")]
+    assert SegmentMember.objects.count() == 0
+
+
 def test_deleted_customers_may_be_manual_members_but_never_count(staff_client: APIClient) -> None:
     segment = CustomerSegmentFactory.create()
     gone = CustomerFactory.create(status="deleted", deleted_at=ANCHOR)

@@ -361,9 +361,13 @@ class SegmentWriteSerializer(serializers.Serializer[dict[str, Any]]):
         return changes
 
 
+MEMBERS_MAX_ITEMS = 500
+
+
 class CustomerIdsField(BoundedListField):
-    """``customer_ids``: DRF's ``not_a_list`` / ``empty`` are not contract codes (and carry English stock
-    text), so they answer the generic ``invalid`` / ``required`` (contract §1.6)."""
+    """A members list (``customer_ids`` / ``phones``): DRF's ``not_a_list`` is not a contract code (and
+    carries English stock text), so it answers the generic ``invalid`` (contract §1.6). An empty list is
+    returned as ``[]``: the serializer answers ``required`` when neither list names anybody."""
 
     def to_internal_value(self, data: Any) -> list[Any]:
         if html.is_html_input(data):
@@ -371,12 +375,19 @@ class CustomerIdsField(BoundedListField):
         if isinstance(data, (str, bytes, Mapping)) or not hasattr(data, "__iter__"):
             raise serializers.ValidationError([field_error("invalid")])
         if len(data) == 0:
-            raise serializers.ValidationError([field_error("required")])
+            return []
         return super().to_internal_value(data)
 
 
 class SegmentMembersInputSerializer(serializers.Serializer[dict[str, Any]]):
-    customer_ids = CustomerIdsField(child=serializers.IntegerField(), max_items=500)
+    """``POST segments/{id}/members/`` (contract §2.8): ``customer_ids`` (any status, must exist) and/or
+    ``phones`` (E.164, resolved to **active** customers), each ≤ 500 and deduplicated. ``validated_data``
+    carries the resolved, sorted ``customer_ids`` only."""
+
+    customer_ids = CustomerIdsField(
+        child=serializers.IntegerField(), max_items=MEMBERS_MAX_ITEMS, required=False
+    )
+    phones = CustomerIdsField(child=PhoneField(), max_items=MEMBERS_MAX_ITEMS, required=False)
 
     def validate_customer_ids(self, value: list[int]) -> list[int]:
         ids = sorted(set(value))
@@ -384,6 +395,31 @@ class SegmentMembersInputSerializer(serializers.Serializer[dict[str, Any]]):
         if len(known) != len(ids):
             raise serializers.ValidationError([field_error("does_not_exist")])
         return ids
+
+    def validate_phones(self, value: list[str]) -> list[int]:
+        first_index: dict[str, int] = {}
+        for index, phone in enumerate(value):
+            first_index.setdefault(phone, index)
+        found = dict(
+            Customer.objects.filter(
+                phone__in=list(first_index), status=enums.CustomerStatus.ACTIVE
+            ).values_list("phone", "pk")
+        )
+        missing: dict[str, Any] = {
+            str(index): [field_error("customer_not_found", MESSAGES["customer_not_found"])]
+            for phone, index in first_index.items()
+            if phone not in found
+        }
+        if missing:
+            raise serializers.ValidationError(missing)
+        return sorted(set(found.values()))
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        ids = set(attrs.pop("customer_ids", [])) | set(attrs.pop("phones", []))
+        if not ids:
+            raise serializers.ValidationError({"customer_ids": [field_error("required")]})
+        attrs["customer_ids"] = sorted(ids)
+        return attrs
 
 
 class CustomerListItemSerializer(serializers.Serializer[Customer]):
