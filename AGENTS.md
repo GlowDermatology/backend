@@ -58,7 +58,12 @@ uv run python manage.py makemigrations --check --dry-run
 uv run python manage.py spectacular --validate --fail-on-warn --file openapi/schema.yaml
 ```
 `config.settings.test` uses the dev Postgres on 5433, `CELERY_TASK_ALWAYS_EAGER=True` and LocMem cache. Every
-task that changes the API regenerates and commits `openapi/schema.yaml`. Coverage must stay ≥ 85 %
+task that changes the API regenerates and commits `openapi/schema.yaml`.
+**M2 exception (packages P0–P3 of `docs/plans/2026-10-26-m2-customer-api.md`, branches `feat/m2-p*`):** a package
+runs the `spectacular --validate --fail-on-warn` step above but does **not** commit `openapi/schema.yaml` (write it
+to a scratch path, e.g. `--file /tmp/m2-schema.yaml`, or restore the tracked file before committing); the lead
+regenerates, diffs and commits the schema once on `feat/m2-integration`. Every other branch keeps the rule above.
+Coverage must stay ≥ 85 %
 (`uv run coverage run -m pytest` then `uv run coverage report --fail-under=85`). A task is done only when all of
 the above pass; report the commit SHA and the command outputs' summary.
 

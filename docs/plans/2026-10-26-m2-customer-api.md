@@ -44,9 +44,10 @@ module because availability (`commerce.selectors.available_stock`) may not be im
   lint-imports (the layer contract is unchanged).
 - **Schema file.** `AGENTS.md` asks every API-changing task to regenerate and commit `openapi/schema.yaml`, and the
   spec's slice gate diffs it. Three parallel packages cannot each commit one generated file without hand-merging it,
-  so **before P0 starts the lead amends `AGENTS.md` and the review gate for M2**: a package runs `spectacular
-  --validate --fail-on-warn` (validation only) and does not commit the schema; the schema is regenerated, diffed and
-  committed once on `feat/m2-integration`. (The lead owns `AGENTS.md`; this plan only records the required change.)
+  so `AGENTS.md` (Dev loop, **"M2 exception"**) scopes the rule for M2: a package runs `spectacular --validate
+  --fail-on-warn` (validation only, written to a scratch path) and does not commit the schema; the lead regenerates,
+  diffs and commits it once on `feat/m2-integration`. The review gate of each package checks validation, not the
+  diff.
 - Only the files listed under "Owns" (plus new test files in the module's `tests/`). Anything else → stop and report.
 - Every handler: `@extend_schema` with the operationId of C§1.1, `CUSTOMER_ERRORS`/`PUBLIC_CUSTOMER_ERRORS`, the
   device-header parameters (P0 helper), `IDEMPOTENCY_KEY_HEADER` on **I** routes, `@idempotent()` on **I** routes.
@@ -126,7 +127,7 @@ module because availability (`commerce.selectors.available_stock`) may not be im
   classified **C**/**O**/**S**/**K** from its base class and probed accordingly.
 
 ### Depends on
-`feat/m2-base` green and the `AGENTS.md` amendment of §0.1.
+`feat/m2-base` green (the `AGENTS.md` "M2 exception" of §0.1 is already in place).
 
 ---
 
@@ -674,7 +675,8 @@ The Click status check is an outbox message with a delay (`outbox.enqueue(…, d
    - social link from settings → `account_security` push → reset-password → identity unlinked;
    - QR issue → POS resolve → second resolve `qr_invalid`;
    - booking → admin confirm (B6 endpoint) → push with `inbox_id` → ack → admin `delivered` counter.
-3. Update `AGENTS.md` (customer base views, fixtures, i18n rule, fake switches, `pii_ref`, the M2 schema rule of §0.1),
+3. Update `AGENTS.md` (customer base views, fixtures, i18n rule, fake switches, `pii_ref`; drop the "M2 exception" of
+   §0.1 once the schema is committed on `feat/m2-integration`),
    `docs/decisions/open-questions.md` (the `M2-*` rows of C§7) and the spec's M2 section if a decision changed it
    (refused-capture default, device key for A2, history horizon for A1).
 4. Ops: the website serves `apple-app-site-association` / `assetlinks.json` for `PAYMENT_RETURN_URL`; the edge proxy
@@ -687,7 +689,7 @@ The Click status check is an outbox message with a delay (`outbox.enqueue(…, d
 
 | From | Needs | Why |
 |---|---|---|
-| P0 | `feat/m2-base` (B5 + followups merged), the `AGENTS.md` amendment | commerce services/selectors, Click/Payme/BTS ports; schema rule |
+| P0 | `feat/m2-base` (B5 + followups merged) | commerce services/selectors, Click/Payme/BTS ports (the `AGENTS.md` schema rule is already amended) |
 | P1 | P0 | auth class, device key, `accounts.0006`, catalog, i18n, settings, `secretbox`, `pii`, `qr_store`, `start_customer_session` |
 | P1 (`DELETE me/` integration) | P2 `cancel_by_customer` + `customer_inflight_order`, P3 `appointments.cancel_by_customer` | stubs in P0 keep P1 independent until merge |
 | P2 | P0, B5 | `create_order`, `mark_paid`, `fail_payment_effects`, `apply_bts_status`, `resolve_refund` (signatures changed by P2 itself) |
