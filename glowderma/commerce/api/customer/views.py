@@ -56,7 +56,7 @@ from glowderma.core.api.schema import (
     IDEMPOTENCY_KEY_HEADER,
     OPTIONAL_IDEMPOTENCY_KEY_HEADER,
 )
-from glowderma.core.idempotency import idempotent
+from glowderma.core.idempotency import already_answered, idempotency_key, idempotent
 from glowderma.delivery import selectors as delivery_selectors
 from glowderma.integrations.bts.ports import BtsUnavailable
 from glowderma.integrations.click.registry import get_click
@@ -166,25 +166,24 @@ def _localized_lines(lines: list[dict[str, Any]], lang: str) -> list[dict[str, A
     ]
 
 
-def _refresh_stock(product_ids: list[int]) -> services.StockCheck:
+def _refresh_stock(request: Request, product_ids: list[int], *, key_required: bool) -> services.StockCheck:
     """Gap X-STOCK-FRESHNESS: re-read the stale lines from Billz **before** the ``@idempotent``
     transaction (``services.refresh_stale_stock``: no row lock is held during the Billz call and each read
-    commits at once, so a later refusal or rollback keeps it). Live Billz only; a replayed request may read
-    again (harmless)."""
+    commits at once, so a later refusal or rollback keeps it). Live Billz only.
+
+    Nothing is read for a request the view will refuse or replay anyway (review fix: the Billz limiter and
+    circuit are shared with the sale push and the imports): a missing or malformed ``Idempotency-Key`` where
+    one is required, a key whose stored response will be replayed, or a product the customer cannot see.
+    The callers pass only ids of a valid body (and, for a PATCH, of a line already in the cart)."""
     if not product_ids or not services.stock_freshness_on():
         return services.FRESH
-    return services.refresh_stale_stock(product_ids)
-
-
-def _body_product_id(request: Request) -> list[int]:
-    """The ``product_id`` of a ``POST cart/items/`` body when it is a plain id (else the serializer
-    answers)."""
-    data = request.data
-    value = data.get("product_id") if isinstance(data, dict) else None
-    if isinstance(value, bool) or not isinstance(value, (int, str)):
-        return []
-    text = str(value).strip()
-    return [int(text)] if text.isascii() and text.isdigit() and len(text) <= 18 else []
+    if key_required and idempotency_key(request) is None:
+        return services.FRESH
+    if already_answered(request):
+        return services.FRESH
+    visible = selectors.visible_ids(product_ids)
+    wanted = [product_id for product_id in product_ids if product_id in visible]
+    return services.refresh_stale_stock(wanted) if wanted else services.FRESH
 
 
 def _return_url(order_id: int) -> str:
@@ -225,7 +224,10 @@ class CartItemsView(CustomerAPIView):
         responses={200: CustomerCartSerializer, **CUSTOMER_ERRORS},
     )
     def post(self, request: Request) -> Response:
-        _refresh_stock(_body_product_id(request))  # stale stock re-read from Billz (§2.5); never refuses
+        # stale stock re-read from Billz (§2.5); never refuses; nothing read for a body that cannot pass
+        body = CustomerCartAddSerializer(data=request.data)
+        if services.stock_freshness_on() and body.is_valid():
+            _refresh_stock(request, [body.validated_data["product_id"]], key_required=True)
         return self._add(request)
 
     @idempotent()
@@ -271,7 +273,13 @@ class CartItemView(CustomerAPIView):
         responses={200: CustomerCartSerializer, **CUSTOMER_ERRORS},
     )
     def patch(self, request: Request, product_id: int) -> Response:
-        _refresh_stock([product_id])  # stale stock re-read from Billz (§2.5); never refuses
+        # stale stock re-read from Billz (§2.5); never refuses; only a line already in the cart, valid body
+        if (
+            services.stock_freshness_on()
+            and CustomerCartQuantitySerializer(data=request.data).is_valid()
+            and product_id in selectors.cart_product_ids(_customer(request).pk)
+        ):
+            _refresh_stock(request, [product_id], key_required=False)
         return self._set_quantity(request, product_id)
 
     @idempotent(required=False)
@@ -368,7 +376,9 @@ class CheckoutView(CustomerAPIView):
         # (503) is decided in services.checkout after the BTS quote. A body that cannot pass reads nothing.
         stock = services.FRESH
         if services.stock_freshness_on() and CustomerCheckoutSerializer(data=request.data).is_valid():
-            stock = _refresh_stock(selectors.cart_product_ids(_customer(request).pk))
+            stock = _refresh_stock(
+                request, selectors.cart_product_ids(_customer(request).pk), key_required=True
+            )
         return self._checkout(request, stock)
 
     @idempotent()

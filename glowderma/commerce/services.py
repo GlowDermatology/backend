@@ -1467,13 +1467,17 @@ SOLD_STOCK_READ_BUDGET_SECONDS = 60.0
 class StockCheck:
     """What :func:`refresh_stale_stock` did: the stale products it re-read from Billz (``refreshed``; a
     barcode Billz does not know is written as stock 0) and those it could not read (``unread``: product id →
-    the cached ``ProductStock.synced_at``, ``None`` when Billz was never read for it)."""
+    the cached ``ProductStock.synced_at``, ``None`` when Billz was never read for it). ``deferred``: the stale
+    products Billz did not reach although it was answering (the 4 s budget or the limiter wait ran out, an
+    ambiguous barcode search) — they go on from the cache and never refuse a checkout (review fix)."""
 
     refreshed: frozenset[int] = frozenset()
     unread: Mapping[int, datetime | None] = field(default_factory=dict)
+    deferred: frozenset[int] = frozenset()
 
     def refuses_checkout(self, now: datetime) -> bool:
-        """Billz could not confirm a line whose cache is older than ``BILLZ_STOCK_STALE_REFUSE_SECONDS``."""
+        """Billz failed (not merely ran out of budget) for a line whose cache is older than
+        ``BILLZ_STOCK_STALE_REFUSE_SECONDS``."""
         bound = now - timedelta(seconds=int(settings.BILLZ_STOCK_STALE_REFUSE_SECONDS))
         return any(synced_at is None or synced_at < bound for synced_at in self.unread.values())
 
@@ -1527,6 +1531,7 @@ def refresh_stale_stock(
     )
     refreshed: set[int] = set()
     unread: dict[int, datetime | None] = {}
+    deferred: set[int] = set()
     for product, synced_at in stale:
         row = read.rows.get(product.billz_id)
         if row is not None:
@@ -1538,10 +1543,14 @@ def refresh_stale_stock(
             logger.warning("billz.stock_unknown product_id=%s: stock read as 0", product.pk)
             catalog_services.sync_stock(product, 0, now)
             refreshed.add(product.pk)
+        elif product.billz_id in read.deferred:
+            deferred.add(product.pk)  # Billz answers but the budget ran out: the cache stands, no refusal
         else:
             unread[product.pk] = synced_at
-    logger.info("billz.stock_refreshed read=%d unread=%d", len(refreshed), len(unread))
-    return StockCheck(frozenset(refreshed), unread)
+    logger.info(
+        "billz.stock_refreshed read=%d unread=%d deferred=%d", len(refreshed), len(unread), len(deferred)
+    )
+    return StockCheck(frozenset(refreshed), unread, frozenset(deferred))
 
 
 def reread_sold_stock(product_ids: Collection[int]) -> StockCheck:
@@ -1556,8 +1565,12 @@ def reread_sold_stock(product_ids: Collection[int]) -> StockCheck:
     )
     if check.refreshed:
         settle_billz_reservations(sorted(check.refreshed))
-    if check.unread:
-        logger.info("billz.stock_reread_incomplete unread=%s", sorted(check.unread))
+    if check.unread or check.deferred:
+        logger.info(
+            "billz.stock_reread_incomplete unread=%s deferred=%s",
+            sorted(check.unread),
+            sorted(check.deferred),
+        )
     return check
 
 

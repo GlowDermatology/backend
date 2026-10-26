@@ -17,6 +17,7 @@ from unittest.mock import patch
 
 import httpx
 import pytest
+from django.db import connection
 from django.test import override_settings
 from rest_framework.test import APIClient
 
@@ -28,7 +29,7 @@ from glowderma.commerce.tests.support import pay, place, product, shopper
 from glowderma.core import timeutils
 from glowderma.core.models import OutboxMessage
 from glowderma.integrations.billz.live import LiveBillz
-from glowderma.integrations.tests.billz_support import BillzServer, fixture, live
+from glowderma.integrations.tests.billz_support import BillzServer, Clock, fixture, live
 from glowderma.loyalty.models import Purchase
 
 pytestmark = pytest.mark.django_db
@@ -36,6 +37,7 @@ LIVE = {"BILLZ_MODE": "live"}
 ITEMS = "/api/v1/cart/items/"
 CHECKOUT = "/api/v1/orders/checkout/"
 SERUM, FOAM = "4607012301", "4607012302"  # Billz (recorded): 12 and 0 in our shop
+CREAM = "4607012303"  # Billz (recorded): listed, but no entry for our shop
 
 
 def aged(item: Product, *, minutes: float | None) -> None:
@@ -247,6 +249,99 @@ def test_a_partial_read_is_kept_when_the_checkout_is_refused(
     assert serum_row.quantity == 12 and serum_row.synced_at is not None
     assert serum_row.synced_at > timeutils.now() - timedelta(minutes=1)  # committed before the 503
     assert stock(foam).quantity == 3  # not read: untouched
+
+
+@override_settings(**LIVE)
+def test_a_slow_but_healthy_billz_does_not_refuse_the_checkout(
+    customer: Customer, customer_client: APIClient, server: BillzServer
+) -> None:
+    """Review fix: the lines the 4 s budget did not reach are *deferred* (the cache stands), not refused."""
+    clock = Clock()
+    port = live(server, clock)
+    serum = product(185_000, billz_id=SERUM, stock=1)  # Billz: 12
+    foam = product(95_000, billz_id=FOAM, stock=4)
+    cream = product(60_000, billz_id=CREAM, stock=3)
+    fill(customer, (serum, 2), (foam, 1), (cream, 1))
+    for item in (serum, foam, cream):
+        aged(item, minutes=120)  # far beyond BILLZ_STOCK_STALE_REFUSE_SECONDS
+    original = server._products
+
+    def slow(request: httpx.Request) -> httpx.Response:
+        if request.url.params.get("search") == SERUM:
+            clock.now += 1.5
+            return original(request)
+        clock.now += 10  # the read timeout was capped by the deadline: the budget ran out
+        raise httpx.ReadTimeout("slow", request=request)
+
+    server.overrides["GET /v2/products"] = slow
+    with patch("glowderma.catalog.billz.get_port", return_value=port):
+        response = checkout(customer_client, 2 * 185_000 + 95_000 + 60_000)
+    assert response.status_code == 201, response.json()
+    assert billz_searches(server) == [SERUM, FOAM]  # the cream was never asked: no time left
+    assert (stock(serum).quantity, stock(foam).quantity, stock(cream).quantity) == (12, 4, 3)
+
+
+@override_settings(**LIVE)
+def test_nothing_is_read_for_a_request_that_will_be_refused_or_replayed(
+    customer: Customer, customer_client: APIClient, server: BillzServer, adapter: LiveBillz
+) -> None:
+    """Review fix: no Billz lookup for a hidden product, a missing / malformed key, an invalid body, a line
+    that is not in the cart, or a replayed key (the Billz limiter and circuit are shared)."""
+    hidden = product(95_000, billz_id=FOAM, stock=4, status="hidden")
+    serum = product(185_000, billz_id=SERUM, stock=4)
+    aged(hidden, minutes=None)
+    aged(serum, minutes=None)
+
+    def add(body: dict[str, Any], key: str | None) -> Any:
+        if key is None:
+            return customer_client.post(ITEMS, body, format="json")
+        return customer_client.post(ITEMS, body, format="json", HTTP_IDEMPOTENCY_KEY=key)
+
+    assert add({"product_id": hidden.pk}, str(uuid.uuid4())).status_code == 409
+    assert add({"product_id": serum.pk}, None).status_code == 400
+    assert add({"product_id": serum.pk}, "not-a-uuid").status_code == 400
+    assert add({"product_id": serum.pk, "quantity": 0}, str(uuid.uuid4())).status_code == 400
+    assert customer_client.patch(f"{ITEMS}{serum.pk}/", {"quantity": 2}, format="json").status_code == 404
+    assert customer_client.post(CHECKOUT, {"fulfilment": "pickup"}, format="json").status_code == 400
+    assert billz_searches(server) == []
+    # a replay answers from the stored response without asking Billz again
+    replay = str(uuid.uuid4())
+    assert add({"product_id": serum.pk}, replay).status_code == 200
+    assert billz_searches(server) == [SERUM]
+    aged(serum, minutes=None)
+    response = add({"product_id": serum.pk}, replay)
+    assert response.status_code == 200 and response.headers.get("Idempotent-Replayed") == "true"
+    assert billz_searches(server) == [SERUM]
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(**LIVE)
+def test_billz_is_read_outside_every_transaction(
+    customer: Customer, customer_client: APIClient, server: BillzServer
+) -> None:
+    """The brief: the re-read runs before ``@idempotent`` and every row lock (no transaction open)."""
+    port = live(server)
+    serum = product(185_000, billz_id=SERUM, stock=40)
+    original = port.read_stock
+    calls: list[bool] = []
+
+    def outside(*args: Any, **kwargs: Any) -> Any:
+        calls.append(connection.in_atomic_block)
+        return original(*args, **kwargs)
+
+    with (
+        patch("glowderma.catalog.billz.get_port", return_value=port),
+        patch.object(port, "read_stock", side_effect=outside),
+    ):
+        aged(serum, minutes=None)
+        body = {"product_id": serum.pk}
+        response = customer_client.post(ITEMS, body, format="json", HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()))
+        assert response.status_code == 200
+        aged(serum, minutes=None)
+        assert customer_client.patch(f"{ITEMS}{serum.pk}/", {"quantity": 2}, format="json").status_code == 200
+        aged(serum, minutes=None)
+        assert checkout(customer_client, 2 * 185_000).status_code == 201
+    assert calls == [False, False, False]
 
 
 def test_fake_billz_changes_nothing(customer: Customer, customer_client: APIClient) -> None:

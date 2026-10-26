@@ -143,6 +143,41 @@ def _key_lock(lock_scope: str) -> Iterator[None]:
                 connection.close()
 
 
+def _parse_key(request: Request) -> uuid.UUID:
+    raw_key = request.headers.get("Idempotency-Key", "")
+    key = uuid.UUID(raw_key)
+    if len(raw_key) != 36 or raw_key.lower() != str(key):
+        raise ValueError("Idempotency-Key must be a standard 36-character UUID")
+    return key
+
+
+def idempotency_key(request: Request) -> uuid.UUID | None:
+    """The request's well-formed ``Idempotency-Key`` (a standard 36-character UUID), else ``None`` — what
+    :func:`idempotent` accepts. For work a view does *before* the decorated call (an external read), so a
+    request the decorator will refuse spends nothing."""
+    try:
+        return _parse_key(request)
+    except ValueError:
+        return None
+
+
+def already_answered(request: Request) -> bool:
+    """A live stored response exists for this request's key and scope: :func:`idempotent` will replay it
+    (or refuse a reused key) without running the view, so pre-call work can be skipped. No lock: a race only
+    means the pre-call work runs once more."""
+    key = idempotency_key(request)
+    if key is None or not request.user.is_authenticated or not isinstance(request.auth, dict):
+        return False
+    return IdempotencyRecord.objects.filter(
+        audience=request.auth.get("aud", ""),
+        actor_id=request.user.pk,
+        method=request.method,
+        path=request.path_info,
+        key=key,
+        expires_at__gt=timeutils.now(),
+    ).exists()
+
+
 def idempotent(required: bool = True) -> Callable[[Callable[..., Response]], Callable[..., Response]]:
     def decorate(view: Callable[..., Response]) -> Callable[..., Response]:
         @wraps(view)
@@ -150,10 +185,7 @@ def idempotent(required: bool = True) -> Callable[[Callable[..., Response]], Cal
             if not request.user.is_authenticated or request.user.pk is None:
                 raise ImproperlyConfigured("Idempotency requires an authenticated actor")
             try:
-                raw_key = request.headers.get("Idempotency-Key", "")
-                key = uuid.UUID(raw_key)
-                if len(raw_key) != 36 or raw_key.lower() != str(key):
-                    raise ValueError("Idempotency-Key must be a standard 36-character UUID")
+                key = _parse_key(request)
             except ValueError as exc:
                 if required:
                     raise IdempotencyKeyRequired() from exc
