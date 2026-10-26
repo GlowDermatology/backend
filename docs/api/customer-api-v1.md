@@ -1861,7 +1861,10 @@ Payme id is `Payment.provider_txn_id`.
   "ignored": true}` + WARNING log (BTS must not retry forever); a definitive refusal of the re-track (`BtsRejected`,
   e.g. BTS no longer knows our tracking number) → the same 200 `{"ok": true, "ignored": true}` + WARNING
   `bts.track_rejected {order_id}`, nothing applied; BTS transport failure during the re-track → 503 `{"ok": false}`,
-  nothing stored (BTS retries; polling catches up).
+  nothing stored (BTS retries; polling catches up). The webhook **never writes `IntegrationState(bts)`**: neither a
+  successful re-track nor a refusal moves `last_sync_at` or `consecutive_failures`, so one webhook that tracked a
+  parcel can never hide polling runs in which BTS refused every parcel; the health of the BTS link is the polling
+  outcome below alone.
 - **Polling** (beat `commerce.poll_bts`, every 600 s, P2) — the fallback when BTS webhooks do not arrive (Backend
   PDF §14):
   - **Single flight:** the run starts only if `cache.add("gd:lock:poll_bts", …, timeout=600)` succeeds and deletes
@@ -1888,8 +1891,16 @@ Payme id is `Payment.provider_txn_id`.
     on the next pass) and calls `integrations.services.record_failure("bts", …)` (`consecutive_failures` + 1). A
     definitive answer (`BtsRejected`, e.g. BTS does not know the parcel) → WARNING `bts.poll_parcel_failed
     {shipment_id, kind: "rejected"}`, nothing applied, the cursor advances, and it resets the transport-failure streak
-    (BTS answered). A run that does not stop on the streak calls `record_sync_success("bts")` (`last_sync_at`). So a
-    parcel whose tracking always fails costs one `track()` per pass and never stops the others.
+    (BTS answered). So a parcel whose tracking always fails costs one `track()` per pass and never stops the others.
+  - **Run outcome — success needs a tracked parcel.** The run counts `tracked` (a `track()` that returned a parcel),
+    `rejected` (`BtsRejected`) and `unavailable` (`BtsUnavailable`) separately. A run that stopped on the streak →
+    `record_failure("bts", "poll stopped: N transport failures in a row")`; otherwise a run with **at least one**
+    tracked parcel → `record_sync_success("bts")` (`last_sync_at`, `consecutive_failures` 0); a run that attempted
+    parcels but tracked **none** (every one refused, or refused and unavailable without reaching the streak — a BTS
+    outage that answers "unknown parcel", a wrong account) → `record_failure("bts", "poll: no parcel tracked
+    (rejected R, unavailable U)")` and ERROR `bts.poll_nothing_tracked {rejected, unavailable}` (alert); a run with no
+    candidate writes nothing (no evidence either way). `consecutive_failures > 0` is shown to staff as admin
+    `GET dashboard/` `attention.bts_polling_failing: true` (admin §2.10) until a run tracks a parcel again.
 
 ### 2.14 Outbound provider protocols (what the adapters send)
 

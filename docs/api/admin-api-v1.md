@@ -819,11 +819,13 @@ Templates are editable in the admin UI through `GET` / `PUT` below.
  "attention": {"bts_failed": 1,                           // processing orders with shipment.state = failed
                "pending_appointments": 3, "next_appointment_at": "2026-10-26T09:00:00+05:00",  // = pending-summary
                "new_from_billz": 6,
-               "refunds_needing_action": 0},              // refunds in failed|unknown|manual_required
+               "refunds_needing_action": 0,               // refunds in failed|unknown|manual_required
+               "bts_polling_failing": false},             // M2: the last BTS polling run tracked no parcel or stopped on transport failures (IntegrationState(bts).consecutive_failures > 0)
  "generated_at": "2026-10-24T12:00:00+05:00"}
 ```
 - `revenue` = Σ `payment.amount` of payments confirmed in the bucket, minus the succeeded refunds of those payments. Refunds are attributed to the payment's bucket, so revenue is never negative. Late-captured payments (M2, customer contract §2.13.0: money taken for an order we did not honour, always refunded) are excluded.
 - `orders` = orders created in the bucket, any status.
+- `attention.bts_polling_failing` (M2, customer contract §2.13.3) = `IntegrationState(bts).consecutive_failures > 0`: a polling run stopped after consecutive transport failures, or attempted parcels and tracked none (every parcel refused). It turns false at the next run that tracks a parcel; BTS webhooks never change it.
 
 **`GET nav-counts/`** → `{"orders_processing": 41, "appointments_pending": 3}`. These are all-time `processing` orders and the pending-summary count.
 
@@ -1155,7 +1157,7 @@ Generic mapping applies throughout: snake_case → camelCase; integer ids → `S
 | `axisLabels` | the windowed series | `[s[0], s[floor((n−1)/2)], s[n−1]]`. Hour → the label; day → `DM(start)` ("18-okt", "21-okt", "24-okt"; month "25-sen", "9-okt", "24-okt") |
 | `stats.ordersNote` | `previous_period_orders`, `range` | today `` `Kecha: ${n} ta` ``; week `` `O‘tgan hafta: ${n} ta` ``; month `` `O‘tgan oy: ${n} ta` ``; custom `` `Oldingi davr: ${n} ta` `` |
 | `stats.*` | `stats.new_customers`, `total_customers`, `deleted_customers`, `out_of_stock` | Camel-case |
-| `attention.*` | `attention.*` | Camel-case; `refundsNeedingAction` is new; "Eng yaqini: …" stays `formatWeekdayShortDateTime` |
+| `attention.*` | `attention.*` | Camel-case; `refundsNeedingAction` is new; `btsPollingFailing` (M2) is new: when true the attention block shows "BTS kuzatuvi ishlamayapti · buyurtma holatlari yangilanmayapti"; "Eng yaqini: …" stays `formatWeekdayShortDateTime` |
 | Recent orders | `orders/?page_size=6` | `results` |
 | Sidebar badges | `nav-counts/` | orders = `orders_processing`; appointments = `appointments_pending` |
 | Sidebar user | `auth/me/` | name = `display_name`; secondary = `email`; initials = first letters of the first two words, else the first two letters, uppercased ("Administrator" → "AD") |
