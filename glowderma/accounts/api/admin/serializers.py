@@ -6,6 +6,8 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
 from glowderma.core.api.exceptions import field_error
+from glowderma.core.api.fields import QueryBooleanField
+from glowderma.core.api.serializers import ActorSerializer
 
 
 class LoginSerializer(serializers.Serializer[dict[str, Any]]):
@@ -92,3 +94,27 @@ class OAuthCallbackSerializer(serializers.Serializer[dict[str, Any]]):
         if self.context.get("provider") == "google" and "nonce" not in attrs:
             raise serializers.ValidationError({"nonce": [field_error("required")]})
         return attrs
+
+
+# --- staff directory (contract §2.16) ----------------------------------------------------------------------
+
+STAFF_SEARCH_MAX_LENGTH = 64
+
+
+class StaffListQuerySerializer(serializers.Serializer[dict[str, Any]]):
+    """``GET staff/``: ``search`` (name or email, trimmed, ≤ 64), ``is_active`` (default ``true``)."""
+
+    search = serializers.CharField(required=False, max_length=STAFF_SEARCH_MAX_LENGTH, allow_blank=True)
+    is_active = QueryBooleanField(required=False, default=True)
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        if not attrs.get("search"):
+            attrs.pop("search", None)
+        return attrs
+
+
+class StaffListItemSerializer(ActorSerializer):
+    """One ``GET staff/`` row: the ``Actor`` keys plus ``email`` and ``is_active``."""
+
+    email = serializers.EmailField()
+    is_active = serializers.BooleanField()

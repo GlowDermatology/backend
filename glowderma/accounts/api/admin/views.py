@@ -4,9 +4,11 @@ from typing import Any, cast
 
 from django.contrib.auth import authenticate
 from django.db import transaction
+from django.db.models import QuerySet
 from django.http import HttpRequest
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
+from rest_framework import mixins
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import ErrorDetail, NotFound, ValidationError
 from rest_framework.permissions import AllowAny, BasePermission
@@ -15,7 +17,7 @@ from rest_framework.response import Response
 from rest_framework.throttling import BaseThrottle
 from rest_framework.views import APIView
 
-from glowderma.accounts import services, tokens
+from glowderma.accounts import selectors, services, tokens
 from glowderma.accounts.api.admin.serializers import (
     AccessSerializer,
     ChangePasswordSerializer,
@@ -25,8 +27,10 @@ from glowderma.accounts.api.admin.serializers import (
     MeSerializer,
     OAuthCallbackSerializer,
     RefreshSerializer,
+    StaffListItemSerializer,
+    StaffListQuerySerializer,
 )
-from glowderma.accounts.api.base import AdminAPIView
+from glowderma.accounts.api.base import AdminAPIView, AdminGenericViewSet
 from glowderma.accounts.api.guard import LoginGuard, email_hash
 from glowderma.accounts.api.throttles import (
     AuthClientIPThrottle,
@@ -319,3 +323,24 @@ class OAuthLinkView(AdminAPIView):
         services.link_identity(user, provider, claims, request=request)
         session = AuthSession.objects.get(pk=cast(dict[str, Any], request.auth)["sid"])
         return Response(_me(user, session))
+
+
+class StaffViewSet(mixins.ListModelMixin, AdminGenericViewSet):
+    """``GET staff/`` (contract §2.16): the staff directory behind the audit-log actor filter."""
+
+    serializer_class = StaffListItemSerializer
+    page_size_options = (20, 50, 100)
+    default_page_size = 50
+
+    def get_queryset(self) -> QuerySet[StaffUser]:
+        query = StaffListQuerySerializer(data=self.request.query_params.dict())
+        query.is_valid(raise_exception=True)
+        return selectors.staff_list(cast(selectors.StaffFilters, dict(query.validated_data)))
+
+    @extend_schema(
+        operation_id="admin_staff_list",
+        parameters=[StaffListQuerySerializer],
+        responses={200: StaffListItemSerializer(many=True), **ADMIN_ERRORS},
+    )
+    def list(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        return super().list(request, *args, **kwargs)

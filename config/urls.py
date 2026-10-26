@@ -40,6 +40,7 @@ ADMIN_API_MODULES = (
 urlpatterns: list[URLPattern | URLResolver] = [
     path("api/v1/health/", HealthView.as_view()),
     path("api/v1/admin/auth/", include("glowderma.accounts.api.admin.urls")),
+    path("api/v1/admin/", include("glowderma.accounts.api.admin.staff_urls")),
     # One include per module, all mounted at the admin root: each module's urls.py carries its own prefixes
     # (products/, categories/, orders/, …) so slices never edit this file or each other's route tables.
     *(
