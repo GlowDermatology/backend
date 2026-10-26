@@ -12,6 +12,7 @@ from typing import Any
 from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
 from django.core.cache import cache
+from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
 from django.db.models import Q, Sum
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
@@ -1721,6 +1722,26 @@ def scrub_deleted_for_reactivation(customer_id: int) -> None:
     Address.objects.filter(customer_id=customer_id).delete()
     for identity in list(CustomerSocialIdentity.objects.filter(customer_id=customer_id)):
         unlink_customer_identity(identity)
+
+
+def set_customer_image(customer: Customer, filename: str, content: bytes) -> str:
+    """``PUT me/image/`` on the locked ``customer``: store the processed file, delete the previous one on
+    commit. Returns the new storage name."""
+    previous = str(customer.image.name) if customer.image else ""
+    storage = customer.image.storage
+    customer.image.save(filename, ContentFile(content), save=True)
+    new_name = str(customer.image.name)
+    if previous and previous != new_name:
+        transaction.on_commit(lambda: storage.delete(previous), robust=True)
+    return new_name
+
+
+def clear_customer_image(customer_id: int) -> None:
+    """``DELETE me/image/``: the column cleared now, the file deleted on commit."""
+    stored = Customer.objects.get(pk=customer_id)
+    if stored.image:
+        _delete_image_on_commit(stored)
+        Customer.objects.filter(pk=customer_id).update(image="", updated_at=timeutils.now())
 
 
 def link_customer_identity(

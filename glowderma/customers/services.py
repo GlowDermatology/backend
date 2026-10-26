@@ -24,8 +24,6 @@ from django.contrib.auth.hashers import check_password, make_password
 from django.core import signing
 from django.core.cache import cache
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.core.files.base import ContentFile
-from django.core.files.storage import default_storage
 from django.db import IntegrityError, transaction
 from rest_framework.exceptions import ValidationError
 
@@ -1047,22 +1045,15 @@ def set_image(customer_id: int, upload: Any, *, sid: str | None = None) -> str:
         raise _field("file", exc.code) from exc
     with transaction.atomic():
         customer = account_services.lock_signed_in_customer(customer_id, sid)
-        previous = customer.image.name if customer.image else ""
         name = media_name("customers", customer_id, processed.content, processed.extension)
-        customer.image.save(PurePosixPath(name).name, ContentFile(processed.content), save=True)
-        new_name = str(customer.image.name)
-        if previous and previous != new_name:
-            transaction.on_commit(lambda: default_storage.delete(previous), robust=True)
+        new_name = account_services.set_customer_image(customer, PurePosixPath(name).name, processed.content)
     return absolute_media_url(new_name)
 
 
 def delete_image(customer_id: int, *, sid: str | None = None) -> None:
     with transaction.atomic():
-        customer = account_services.lock_signed_in_customer(customer_id, sid)
-        if customer.image:
-            previous = str(customer.image.name)
-            Customer.objects.filter(pk=customer_id).update(image="", updated_at=timeutils.now())
-            transaction.on_commit(lambda: default_storage.delete(previous), robust=True)
+        account_services.lock_signed_in_customer(customer_id, sid)
+        account_services.clear_customer_image(customer_id)
 
 
 def add_address(customer_id: int, *, sid: str | None = None, **fields: Any) -> Address:
