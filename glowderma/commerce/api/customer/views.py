@@ -166,6 +166,27 @@ def _localized_lines(lines: list[dict[str, Any]], lang: str) -> list[dict[str, A
     ]
 
 
+def _refresh_stock(product_ids: list[int]) -> services.StockCheck:
+    """Gap X-STOCK-FRESHNESS: re-read the stale lines from Billz **before** the ``@idempotent``
+    transaction (``services.refresh_stale_stock``: no row lock is held during the Billz call and each read
+    commits at once, so a later refusal or rollback keeps it). Live Billz only; a replayed request may read
+    again (harmless)."""
+    if not product_ids or not services.stock_freshness_on():
+        return services.FRESH
+    return services.refresh_stale_stock(product_ids)
+
+
+def _body_product_id(request: Request) -> list[int]:
+    """The ``product_id`` of a ``POST cart/items/`` body when it is a plain id (else the serializer
+    answers)."""
+    data = request.data
+    value = data.get("product_id") if isinstance(data, dict) else None
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        return []
+    text = str(value).strip()
+    return [int(text)] if text.isascii() and text.isdigit() and len(text) <= 18 else []
+
+
 def _return_url(order_id: int) -> str:
     base = str(settings.PAYMENT_RETURN_URL)
     separator = "&" if "?" in base else "?"
@@ -203,8 +224,12 @@ class CartItemsView(CustomerAPIView):
         request=CustomerCartAddSerializer,
         responses={200: CustomerCartSerializer, **CUSTOMER_ERRORS},
     )
-    @idempotent()
     def post(self, request: Request) -> Response:
+        _refresh_stock(_body_product_id(request))  # stale stock re-read from Billz (§2.5); never refuses
+        return self._add(request)
+
+    @idempotent()
+    def _add(self, request: Request) -> Response:
         if not integration_modes.online_sales_enabled():
             raise OnlineSalesUnavailable()
         body = CustomerCartAddSerializer(data=request.data)
@@ -245,8 +270,12 @@ class CartItemView(CustomerAPIView):
         request=CustomerCartQuantitySerializer,
         responses={200: CustomerCartSerializer, **CUSTOMER_ERRORS},
     )
-    @idempotent(required=False)
     def patch(self, request: Request, product_id: int) -> Response:
+        _refresh_stock([product_id])  # stale stock re-read from Billz (§2.5); never refuses
+        return self._set_quantity(request, product_id)
+
+    @idempotent(required=False)
+    def _set_quantity(self, request: Request, product_id: int) -> Response:
         if not integration_modes.online_sales_enabled():
             raise OnlineSalesUnavailable()
         body = CustomerCartQuantitySerializer(data=request.data)
@@ -334,8 +363,16 @@ class CheckoutView(CustomerAPIView):
         request=CustomerCheckoutSerializer,
         responses={201: CustomerOrderDetailSerializer, **CUSTOMER_ERRORS},
     )
-    @idempotent()
     def post(self, request: Request) -> Response:
+        # §2.7.1 row 4a: the cart's stale lines are re-read from Billz before the transaction; the refusal
+        # (503) is decided in services.checkout after the BTS quote. A body that cannot pass reads nothing.
+        stock = services.FRESH
+        if services.stock_freshness_on() and CustomerCheckoutSerializer(data=request.data).is_valid():
+            stock = _refresh_stock(selectors.cart_product_ids(_customer(request).pk))
+        return self._checkout(request, stock)
+
+    @idempotent()
+    def _checkout(self, request: Request, stock: services.StockCheck) -> Response:
         if not integration_modes.online_sales_enabled():  # row 0: nothing read or quoted
             raise OnlineSalesUnavailable()
         body = CustomerCheckoutSerializer(data=request.data)
@@ -375,6 +412,7 @@ class CheckoutView(CustomerAPIView):
                         "device_id": session.device_id if session is not None else None,
                     },
                 ),
+                stock=stock,
             )
         except services.OutOfStock as exc:
             raise OutOfStockError(details={"lines": _localized_lines(exc.lines, self.language)}) from exc

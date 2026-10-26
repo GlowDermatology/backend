@@ -125,7 +125,8 @@ def product_counts() -> dict[str, int]:
     return {key: int(value or 0) for key, value in counts.items()}
 
 
-def _stock_of(product: Product) -> ProductStock | None:
+def stock_of(product: Product) -> ProductStock | None:
+    """The product's stock row (``select_related("stock")``), ``None`` when Billz never wrote one."""
     try:
         return product.stock
     except ProductStock.DoesNotExist:
@@ -134,7 +135,7 @@ def _stock_of(product: Product) -> ProductStock | None:
 
 def billz_view(product: Product) -> BillzProduct:
     """The Billz-owned fields of a product as a port row (what Billz "currently says" about it)."""
-    stock = _stock_of(product)
+    stock = stock_of(product)
     return BillzProduct(
         billz_id=product.billz_id,
         billz_name=product.billz_name,

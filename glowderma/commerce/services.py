@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
@@ -32,7 +32,9 @@ from django.db.models import F, Q
 from django.utils import timezone
 
 from glowderma.accounts.models import Address, Customer, Device, StaffUser
+from glowderma.catalog import billz as catalog_billz
 from glowderma.catalog import selectors as catalog_selectors
+from glowderma.catalog import services as catalog_services
 from glowderma.catalog.models import Product, ProductStock
 from glowderma.commerce import events, selectors, state, topics
 from glowderma.commerce.models import (
@@ -66,6 +68,7 @@ from glowderma.core.api.exceptions import OutOfStock as OutOfStockError
 from glowderma.delivery import selectors as delivery_selectors
 from glowderma.delivery import services as delivery_services
 from glowderma.delivery.models import Shipment
+from glowderma.integrations.billz.registry import billz_mode
 from glowderma.integrations.bts.ports import BtsRejected, BtsUnavailable
 from glowderma.integrations.bts.registry import get_bts
 from glowderma.integrations.click.ports import ClickUnavailable
@@ -1451,6 +1454,113 @@ AUDIT_PAYMENT_LATE_CAPTURE = "payment.late_capture"
 FAILED_BY_US = ("expired", "abandoned", "cancelled")
 
 
+# --- Billz stock freshness (gap X-STOCK-FRESHNESS, decision GC-5; customer contract §2.5, §2.7.1)
+# ---------------------------------------------------------------------
+
+# One customer request re-reads its stale lines within this (AGENTS.md: 4 s on a customer request path).
+STOCK_READ_BUDGET_SECONDS = 4.0
+# The worker's re-read of what a pushed sale took (batch client profile).
+SOLD_STOCK_READ_BUDGET_SECONDS = 60.0
+
+
+@dataclass(frozen=True, slots=True)
+class StockCheck:
+    """What :func:`refresh_stale_stock` did: the stale products it re-read from Billz (``refreshed``; a
+    barcode Billz does not know is written as stock 0) and those it could not read (``unread``: product id →
+    the cached ``ProductStock.synced_at``, ``None`` when Billz was never read for it)."""
+
+    refreshed: frozenset[int] = frozenset()
+    unread: Mapping[int, datetime | None] = field(default_factory=dict)
+
+    def refuses_checkout(self, now: datetime) -> bool:
+        """Billz could not confirm a line whose cache is older than ``BILLZ_STOCK_STALE_REFUSE_SECONDS``."""
+        bound = now - timedelta(seconds=int(settings.BILLZ_STOCK_STALE_REFUSE_SECONDS))
+        return any(synced_at is None or synced_at < bound for synced_at in self.unread.values())
+
+
+FRESH = StockCheck()
+
+
+def stock_freshness_on() -> bool:
+    """The freshness re-read applies only while Billz is live and online selling is on (fake: no change)."""
+    return billz_mode() == "live" and integration_modes.online_sales_enabled()
+
+
+def refresh_stale_stock(
+    product_ids: Collection[int],
+    *,
+    budget_seconds: float = STOCK_READ_BUDGET_SECONDS,
+    interactive: bool = True,
+    max_age: timedelta | None = None,
+) -> StockCheck:
+    """Re-read from Billz the stock of every product whose ``ProductStock.synced_at`` is older than
+    ``max_age`` (default ``BILLZ_STOCK_MAX_AGE_SECONDS``) — never read first, then the oldest — through the
+    Billz port (one lookup per barcode, all within ``budget_seconds``) and write it with
+    ``catalog.services.sync_stock`` (each in its own short transaction; never backwards).
+
+    Only while Billz is live and online selling is on (fake mode: nothing changes, :data:`FRESH`). **Must run
+    outside every row lock and outside the request's transaction** (the cart and checkout views call it before
+    their ``@idempotent`` transaction): the Billz call holds no lock, and each ``sync_stock`` commits at once,
+    so a later ``503`` or rollback keeps what was read and no stock row lock is held ahead of the customer API
+    lock order (Customer → Cart → ProductStock). Never raises for a Billz failure: what it could not read is
+    :attr:`StockCheck.unread` (the caller decides: cart writes carry on from the cache, checkout may refuse).
+    """
+    if not stock_freshness_on():
+        return FRESH
+    ids = list(dict.fromkeys(product_ids))
+    if not ids:
+        return FRESH
+    now = timeutils.now()
+    age = max_age if max_age is not None else timedelta(seconds=int(settings.BILLZ_STOCK_MAX_AGE_SECONDS))
+    bound = now - age
+    stale: list[tuple[Product, datetime | None]] = []
+    for product in Product.objects.filter(pk__in=ids).select_related("stock").order_by("pk"):
+        stock = catalog_selectors.stock_of(product)
+        synced_at = stock.synced_at if stock is not None else None
+        if synced_at is None or synced_at < bound:
+            stale.append((product, synced_at))
+    if not stale:
+        return FRESH
+    stale.sort(key=lambda item: (item[1] is not None, item[1] or now, item[0].pk))
+    read = catalog_billz.get_port().read_stock(
+        [product.billz_id for product, _ in stale], budget_seconds=budget_seconds, interactive=interactive
+    )
+    refreshed: set[int] = set()
+    unread: dict[int, datetime | None] = {}
+    for product, synced_at in stale:
+        row = read.rows.get(product.billz_id)
+        if row is not None:
+            catalog_services.sync_stock(product, row.stock, row.synced_at)
+            refreshed.add(product.pk)
+        elif product.billz_id in read.unknown:
+            # Billz no longer knows the barcode: nothing of it can be sold (its sale would be refused) — the
+            # daily full sync hides the product
+            logger.warning("billz.stock_unknown product_id=%s: stock read as 0", product.pk)
+            catalog_services.sync_stock(product, 0, now)
+            refreshed.add(product.pk)
+        else:
+            unread[product.pk] = synced_at
+    logger.info("billz.stock_refreshed read=%d unread=%d", len(refreshed), len(unread))
+    return StockCheck(frozenset(refreshed), unread)
+
+
+def reread_sold_stock(product_ids: Collection[int]) -> StockCheck:
+    """``billz.stock_reread`` (after a pushed sale): read the sold products from Billz again whatever their
+    age (batch profile, a minute), then settle the sold units the new read reflects. Best effort: what Billz
+    could not answer waits for the next delta or cart read (the unsettled units keep counting meanwhile)."""
+    check = refresh_stale_stock(
+        product_ids,
+        budget_seconds=SOLD_STOCK_READ_BUDGET_SECONDS,
+        interactive=False,
+        max_age=timedelta(0),
+    )
+    if check.refreshed:
+        settle_billz_reservations(sorted(check.refreshed))
+    if check.unread:
+        logger.info("billz.stock_reread_incomplete unread=%s", sorted(check.unread))
+    return check
+
+
 # --- cart (customer contract §2.5, §2.7.4)
 # ---------------------------------------------------------------------
 
@@ -1675,17 +1785,25 @@ def lock_customer(customer_id: int) -> Customer | None:
     return Customer.objects.select_for_update(no_key=True, of=("self",)).filter(pk=customer_id).first()
 
 
-def checkout(customer_id: int, data: CheckoutInput) -> int:
+def checkout(customer_id: int, data: CheckoutInput, *, stock: StockCheck = FRESH) -> int:
     """``POST orders/checkout/`` after the view's body, consent and address checks (rows 1–3): row 0 (online
-    selling), row 4 (the BTS quote, no row lock held), then the customer-level lock (``FOR NO KEY UPDATE``; an
-    inactive customer → 401 ``SESSION_EXPIRED``), row 5 (open orders), row 6 (cart read under the lock and the
-    Cart lock) and :func:`create_order` (rows 7–10); the cart is emptied and ``Cart.last_checkout_order`` set
-    in the same transaction. Returns the order id."""
+    selling), row 4 (the BTS quote, no row lock held), row 4a (the Billz stock freshness of the lines:
+    ``stock`` is what the view's :func:`refresh_stale_stock` could not read before the transaction — a line
+    Billz could not confirm whose cache is older than ``BILLZ_STOCK_STALE_REFUSE_SECONDS`` → 503
+    ``provider_unavailable``), then the customer-level lock (``FOR NO KEY UPDATE``; an inactive customer → 401
+    ``SESSION_EXPIRED``), row 5 (open orders), row 6 (cart read under the lock and the Cart lock) and
+    :func:`create_order` (rows 7–10); the cart is emptied and ``Cart.last_checkout_order`` set in the same
+    transaction. Returns the order id."""
     _sales_on()
     delivery = data.fulfilment == enums.FulfilmentMethod.DELIVERY
     scenario = dict(data.scenario or {})
     bts_scenario = scenario.get("bts") if isinstance(scenario.get("bts"), dict) else None
     fee = quote_delivery(data.region_code, data.city_code, bts_scenario) if delivery else 0
+    if stock.refuses_checkout(timeutils.now()):
+        logger.warning(
+            "checkout.stock_unconfirmed customer_id=%s products=%s", customer_id, sorted(stock.unread)
+        )
+        raise ProviderUnavailable()
     with transaction.atomic():
         customer = lock_customer(customer_id)
         if customer is None or customer.status != enums.CustomerStatus.ACTIVE:

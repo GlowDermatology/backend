@@ -663,6 +663,15 @@ def line_status(visible: bool, available: int, quantity: int) -> str:
     return enums.CartLineStatus.OK
 
 
+def cart_product_ids(customer_id: int) -> list[int]:
+    """The products of the customer's cart lines in cart order (no lock: checkout's stale-stock re-read)."""
+    return list(
+        CartItem.objects.filter(cart__customer_id=customer_id)
+        .order_by("added_at", "id")
+        .values_list("product_id", flat=True)
+    )
+
+
 def visible_ids(product_ids: Iterable[int]) -> set[int]:
     return set(
         catalog_selectors.customer_visible_products()
