@@ -1111,7 +1111,7 @@ Staff manage the bookable side of the clinic here (until now only the disabled D
 
 | Param | Values | Rule |
 |---|---|---|
-| `search` | str (trimmed, cut to 64) | Case-insensitive substring of `name` |
+| `search` | str (trimmed, cut to 64) | Substring of `name`, case-insensitive and folded (§1.4) |
 | `is_active` | query boolean | |
 | `role` | SpecialistRole | an unknown value → 400 `invalid_choice` |
 | `ordering` | DirectoryOrdering, default `position` | `position` = position, name, id; `name` / `-name` case-insensitive (ICU collation); `created_at` / `-created_at` |
@@ -1197,7 +1197,7 @@ Audit `schedule.hours_updated` (entity `professional`) with the week before and 
  "specialist_count": 1,                                                         // active specialists offering it through an active offer
  "created_at": "…", "updated_at": "…"}
 ```
-- **`GET services/`** (P E) → `Page<ClinicService>`; page sizes 20, 50; `search` (trimmed, ≤64: name or short name in any language contains, case-insensitive), `is_active`, `category` (ServiceCategory), `ordering` (DirectoryOrdering, default `position` = position, Uzbek name, id; `name` / `-name` by the Uzbek name); export `xizmatlar` (§1.8). Two queries for any page.
+- **`GET services/`** (P E) → `Page<ClinicService>`; page sizes 20, 50; `search` (trimmed, ≤64: name or short name in any language contains, case-insensitive and folded, §1.4), `is_active`, `category` (ServiceCategory), `ordering` (DirectoryOrdering, default `position` = position, Uzbek name, id; `name` / `-name` by the Uzbek name); export `xizmatlar` (§1.8). Two queries for any page.
 - **`POST services/`** → 201; **`GET services/{id}/`**; **`PATCH services/{id}/`** → 200 (every field optional, texts merge leaf by leaf). There is **no delete** (405): `is_active: false` retires a service.
 
 | Field | Rule | Field errors |

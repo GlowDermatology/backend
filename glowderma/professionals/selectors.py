@@ -12,10 +12,12 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from typing import Any
 
-from django.db.models import Count, F, Model, Prefetch, Q, QuerySet
+from django.db.models import Count, F, Model, Prefetch, Q, QuerySet, Value
 from django.db.models.functions import Collate
+from django.db.models.lookups import Contains
 
 from glowderma.core import enums, timeutils
+from glowderma.core.search import SearchFold
 from glowderma.professionals.models import (
     BlockedPeriod,
     Location,
@@ -210,6 +212,12 @@ def _search_term(raw: str) -> str:
     return raw.strip()[:SEARCH_MAX_LENGTH]
 
 
+def _folded_contains(field_name: str, term: str) -> Q:
+    """``field_name`` contains ``term``, both folded like every name search (decision GC-1: case, the six
+    apostrophe encodings of o‘/g‘, ``ё`` = ``е``). The tables are small, so no index is needed."""
+    return Q(Contains(SearchFold(F(field_name)), SearchFold(Value(term))))
+
+
 def _order[M: Model](
     qs: QuerySet[M], ordering: str, name_field: str, position: tuple[str, ...]
 ) -> QuerySet[M]:
@@ -225,11 +233,11 @@ def _order[M: Model](
 
 
 def filter_specialists(qs: QuerySet[Professional], filters: dict[str, Any]) -> QuerySet[Professional]:
-    """``GET specialists/``: ``search`` (name contains, case-insensitive), ``is_active``, ``role`` and
+    """``GET specialists/``: ``search`` (name contains, folded), ``is_active``, ``role`` and
     ``ordering`` (``position`` = position, name, id)."""
     term = _search_term(filters.get("search", ""))
     if term:
-        qs = qs.filter(name__icontains=term)
+        qs = qs.filter(_folded_contains("name", term))
     if "is_active" in filters:
         qs = qs.filter(is_active=filters["is_active"])
     if "role" in filters:
@@ -251,14 +259,14 @@ def get_service(pk: int) -> Service | None:
 
 
 def filter_services(qs: QuerySet[Service], filters: dict[str, Any]) -> QuerySet[Service]:
-    """``GET services/``: ``search`` (name or short name in any language contains), ``is_active``,
+    """``GET services/``: ``search`` (name or short name in any language contains, folded), ``is_active``,
     ``category`` and ``ordering`` (``position`` = position, Uzbek name, id)."""
     term = _search_term(filters.get("search", ""))
     if term:
         condition = Q()
         for language in ("uz", "ru", "en"):
-            condition |= Q(**{f"name_{language}__icontains": term})
-            condition |= Q(**{f"short_name_{language}__icontains": term})
+            condition |= _folded_contains(f"name_{language}", term)
+            condition |= _folded_contains(f"short_name_{language}", term)
         qs = qs.filter(condition)
     if "is_active" in filters:
         qs = qs.filter(is_active=filters["is_active"])

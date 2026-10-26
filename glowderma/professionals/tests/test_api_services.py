@@ -246,3 +246,12 @@ def test_deactivation_hides_the_service_and_keeps_its_appointments(
     assert (stored.status, stored.service_id, stored.price) == ("requested", link.service_id, 150_000)
     assert staff_client.patch(f"{BASE}{link.service_id}/", {"is_active": True}).status_code == 200
     assert AuditEntry.objects.filter(action="service.activated").count() == 1
+
+
+def test_search_is_folded_like_every_name_search(staff_client: APIClient) -> None:
+    """Decision GC-1 on the integrated branch: the Uzbek o‘/g‘ mark in any encoding and ``ё`` = ``е``."""
+    peel = ServiceFactory.create(name_uz="Yuzni to‘liq tozalash", short_name_ru="Чистка ёлочкой")
+    ServiceFactory.create(name_uz="Lazer")
+    for term in ("to'liq", "to`liq", "toʻliq", "TO’LIQ", "елочкой"):
+        assert names(staff_client, search=term) == [peel.name_uz], term
+    assert names(staff_client, search="toliq") == []  # an omitted mark is not matched (GC-1)

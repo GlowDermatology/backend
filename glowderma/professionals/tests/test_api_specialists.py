@@ -815,3 +815,19 @@ def test_a_lost_race_for_a_staff_account_is_a_unique_error(staff: StaffUser) -> 
         services.create_specialist(data, actor=staff)
     assert caught.value.get_codes() == {"staff_user_id": ["unique"]}
     assert Professional.objects.count() == 1
+
+
+def test_search_is_folded_like_every_name_search(staff_client: APIClient) -> None:
+    """Decision GC-1 on the integrated branch: the Uzbek o‘/g‘ mark in any encoding and ``ё`` = ``е``."""
+    ProfessionalFactory.create(name="G‘ulom Fyodorov")
+    ProfessionalFactory.create(name="Пётр Иванов")
+
+    def names(search: str) -> list[str]:
+        response = staff_client.get(BASE, {"search": search})
+        assert response.status_code == 200, response.json()
+        return [row["name"] for row in response.json()["results"]]
+
+    for term in ("g'ulom", "gʼulom", "G`ULOM"):
+        assert names(term) == ["G‘ulom Fyodorov"], term
+    assert names("петр") == names("ПЁТР") == ["Пётр Иванов"]
+    assert names("gulom") == []
