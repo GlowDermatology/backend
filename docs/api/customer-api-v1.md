@@ -1150,11 +1150,13 @@ moves money, never creates order events and never expires an order.
   order (a Click payment is failed `expired`; a Payme state-1 payment stays pending, P-2). A capture that still lands
   is a **refused capture** (§2.13.0) and is refunded.
 
+Checked in this order (a cancelled order that is being refunded answers `not_payable`, never `already_paid`):
+
 | Check | Result · message (uz) · key |
 |---|---|
 | Order of another customer | 404 |
-| Status `processing`/`handed_to_courier`/`delivered`, or a `paid` payment that is not a late capture (`error_code ≠ "late_capture"`) exists | 409 `already_paid` "Buyurtma allaqachon to‘langan." · `error.already_paid` |
 | Status `cancelled` | 409 `not_payable` "Bu buyurtmani to‘lab bo‘lmaydi." · `error.not_payable` |
+| Status `processing`/`handed_to_courier`/`delivered`, or a `paid` payment that is not a late capture (`error_code ≠ "late_capture"`) exists | 409 `already_paid` "Buyurtma allaqachon to‘langan." · `error.already_paid` |
 | Not payable with `attaching=True` (`now ≥ reservation_expires_at`; the job has not run yet) | 409 `order_expired` "To‘lov muddati tugadi. Mahsulotlarni savatga qaytarib, qaytadan rasmiylashtiring." · `error.order_expired` — **nothing is written** (§1.7); the expiry job cancels the order |
 | `provider` differs from the provider of an in-flight payment (Click prepared < `CLICK_INFLIGHT_SECONDS` ago without Complete, or Payme state 1) | 409 `payment_in_progress` "To‘lov {provider} ilovasida jarayonda. Uni yakunlang yoki biroz kuting." · `error.payment_in_progress`, `details {provider, order_id}` |
 | `provider` not in `settings/public` `payment_providers` (§2.4) | 400 `provider` `invalid_choice` |
@@ -1620,6 +1622,7 @@ admin-only by DB constraint).
   | Payme | `{method}:{params.id or "-"}:{uuid4}` — every delivery is its own row | never replayed: the Payme state machine below is idempotent on `params.id` (= `Payment.provider_txn_id`) and answers from the **current** state |
   | BTS | `{our tracking number}:{status}:{event_time}` from the payload, else `{uuid4}` | replay `{"ok": true}` and a `dup:` row; no re-track |
   | any | **auth/signature failure** → `rejected:{uuid4}` | a forged request can never occupy the key of a real delivery |
+  | Click | refusals after the signature but before any state is read (`action` `-3`, `service_id` `-8`, account reference `-5`) → `rejected:{uuid4}`, **uncapped**, payload and raw body kept | never stored under the delivery key, so the later correct delivery of the same transaction is not a fingerprint conflict (decided 2026-10-26, integration) |
 - Lock keys: Click `click:{click_trans_id}`; Payme `payme:{params.id}` (`payme:order:{order_id}` for
   `CheckPerformTransaction`); BTS `bts:{shipment id}`.
 - **Payable / open / in flight / attached / supersede:** exactly as defined in §2.7.2
@@ -1636,8 +1639,9 @@ admin-only by DB constraint).
   confirm a payment that was cancelled); if the goods cannot be provided, the merchant answers Complete **successfully**
   and cancels the payment through the Merchant API (`payment/reversal`); repeated error answers send the payment to
   manual investigation at Click. So: `commerce.services.record_late_capture(order_id, payment.id, "click",
-  click_trans_id, case=<"failed_by_us" | "not_payable" | "double_payment" | "fake_mode">)` under the Order → Payment
-  locks: `payments.services.mark_late_captured(payment_id, provider_txn_id, at)` — the **only** transition into `paid`
+  click_trans_id, case=<"failed_by_us" | "not_payable" | "double_payment" | "fake_mode">)` (when several cases
+  apply, the first of `double_payment`, `failed_by_us`, `not_payable` is recorded; `fake_mode` is set only by the fake
+  Click rule below) under the Order → Payment locks: `payments.services.mark_late_captured(payment_id, provider_txn_id, at)` — the **only** transition into `paid`
   from `failed` (case (a); case (b) once the order was cancelled) or from `pending` (case (b) while the expiry job has
   not run yet, case (c), and case (d), where the payment attached while Click was live is normally still `pending`)
   and only for this case: status `paid`, `confirmed_at = at`, `failed_at =
@@ -1755,8 +1759,13 @@ Responses are `application/json`.
 **Prepare (action 0).** Fake Click under the production settings → `-1` before anything else (§2.13.0). Steps 1 of §2.13.0 (params `-8` → content type `-8` → IP `-8` → signature `-1` → action `-3`
 → `service_id` `-8` → account reference `-5`), advisory lock, then:
 1. **duplicate / state replay:** an inbox row under `prepare:{click_trans_id}` with a conflicting fingerprint → `-8`
-   (`rejected:` row); a payment with `provider = click`, `provider_txn_id = click_trans_id` exists and is `pending` or
-   `paid` → `0` with the same `merchant_prepare_id` (a plain or re-signed retry; `dup:` row, §2.13.0);
+   (`rejected:` row); when a payment with `provider = click`, `provider_txn_id = click_trans_id` already exists, the
+   answer comes from its state with no write except the `dup:` row (§2.13.0), read **under the lock of that payment's
+   order** (`lock_order(payment.order_id)`, then the payment is re-read): bound to another order than
+   `merchant_trans_id` names → `-8`; `pending`, `paid` or `refunded` (captured, then returned — the same rule as
+   Complete step 1) → `0` with the same `merchant_prepare_id` (a plain or re-signed retry, or a delayed duplicate);
+   `failed` (by Click, superseded, expired or cancelled) → `-9`. A delayed or re-sent Prepare of an old transaction
+   therefore never supersedes the customer's live Click payment (decided 2026-10-26, integration);
 2. `lock_order(order_id)`; order exists (`-5`);
 3. already paid (`processing`+ or a non-late `paid` payment) → `-4`;
 4. not payable with `attaching=True` (cancelled, or `now ≥ reservation_expires_at`) → `-9`;
@@ -1770,8 +1779,9 @@ Responses are `application/json`.
    `abandoned` (unilateral, no `payment_failed` event, as B5's silent fails) and a new `pending` row is created — a later
    Complete of the old transaction is a refused capture (§2.13.0); then `attach_transaction(payment.id, click_trans_id,
    {merchant_trans_id, merchant_prepare_id: payment.id, click_trans_id, click_paydoc_id, service_id, prepare_at,
-   sign_time})` → `0` with `merchant_prepare_id = payment.id`. `TransactionTaken` (a concurrent prepare bound the row) cannot happen under the Order lock and maps to
-   `-8` defensively. No order event (a prepare is not a state change).
+   sign_time})` → `0` with `merchant_prepare_id = payment.id`. `ensure_payable_payment` and `attach_transaction` form
+   one unit: a refusal of the attach rolls back the supersede, so the old transaction stays attached. `TransactionTaken`
+   (a concurrent prepare bound the row) maps to `-8` defensively. No order event (a prepare is not a state change).
 
 **Complete (action 1).** Steps 1 of §2.13.0 (as prepare), advisory lock, then the steps below. Fake Click under the
 production settings: only a Complete that names a payment attached while Click was live gets past step 3 (otherwise
@@ -1789,7 +1799,9 @@ production settings: only a Complete that names a payment attached while Click w
    (payment `failed`, event `payment_failed {provider, transaction_id, error_code}`; the order stays payable until
    expiry and the app may pay again); → `-9` (no money was taken: Click reports the payment failed);
 5. amount ≠ `payment.amount` → `-2` (payment unchanged);
-6. the payment was failed **by Click** earlier (numeric `error_code`) → `-9`;
+6. the payment was failed **by Click** earlier (numeric `error_code`) → `-9` (a repeat of the same failed Complete;
+   `error` is part of the Complete fingerprint, so a Complete with `error = 0` after a stored Complete with
+   `error < 0` under the same key is a fingerprint conflict, `-8`, at step 1);
 7. **honoured capture:** the payment is `pending`, it is the order's active payment, the order is not paid by another
    payment, and `is_payable(order, payment, now, attaching=False)` → `mark_paid(order_id, payment.id, "click",
    click_trans_id)` (B5 `confirm_payment` + `confirm_payment_effects` — reservations converted, hold captured, purchase
@@ -1854,7 +1866,7 @@ the checkout URL's `ac.` key, §2.7.2) or from the payment found by
 | `CheckPerformTransaction` | `amount`, `account` | account reference (-31050) → order exists (-31050) → paid / cancelled / not payable with `attaching=True` (-31008) → another transaction in flight (-31051) → amount (-31001) | `{"allow": true}` (fiscal `detail` only when `PAYME_FISCAL_DETAIL_ENABLED`, §7 `M2-P5`) |
 | `CreateTransaction` | `id`, `time`, `amount`, `account` | **existing** `id`: state ≠ 1 → -31008; timed out → cancel (reason 4) and -31008; else the stored answer. **new** `id`: account (-31050) → paid / cancelled / not payable with `attaching=True` (-31008) → another Payme state-1 transaction or a Click transaction in flight (-31051) → amount (-31001) → `time` older than 12 h (-31008) → `ensure_payable_payment(order, "payme")` (reuses the pending Payme row only when it has no `provider_txn_id`) → `attach_transaction(provider_txn_id = id, provider_state = {transaction: id, time, create_time: now_ms, state: 1, account})`; `TransactionTaken` → -31051 | `{"create_time", "transaction": "<payment id>", "state": 1}` |
 | `PerformTransaction` | `id` | unknown (-31003) → state 2: the stored answer → state ≠ 1: -31008 → timed out: cancel (reason 4), -31008 → not payable with `attaching=False` (cancelled, paid by another payment, or expired beyond the grace): -31008, the transaction stays in state 1 and Payme cancels it **(verify M3)**; no money is taken, so this is not a refused capture → `mark_paid(order_id, payment.id, "payme", id)`; `provider_state += {state: 2, perform_time: now_ms}` | `{"transaction", "perform_time", "state": 2}` |
-| `CancelTransaction` | `id`, `reason` | (fake Payme under the production settings: `-32504` like every method, so a cabinet refund cannot complete, §2.13.0, §6.14) unknown (-31003) → state 1: state −1, `cancel_time`, `reason`; `fail_payment_effects(order_id, payment.id, str(reason), provider_txn_id=id)` (payment failed, `payment_failed` event; also on an already cancelled/expired order) → state 2 **with an open `manual_required` refund** (staff refunded in the Payme cabinet after an admin cancel, O5): state −2, `cancel_time`, `reason`; `commerce.services.resolve_refund(refund_id, "succeeded", actor_id=None)` (refund succeeded, payment `refunded`, event `refund_succeeded`) → state 2 without an open refund: -31007 → state −1/−2: the stored answer | `{"transaction", "cancel_time", "state"}` |
+| `CancelTransaction` | `id`, `reason` | (fake Payme under the production settings: `-32504` like every method, so a cabinet refund cannot complete, §2.13.0, §6.14) unknown (-31003) → state 1: state −1, `cancel_time`, `reason`; `fail_payment_effects(order_id, payment.id, str(reason), provider_txn_id=id)` (payment failed, `payment_failed` event; also on an already cancelled/expired order) → state 2 **with an open `manual_required` refund** (staff refunded in the Payme cabinet after an admin cancel, O5): state −2, `cancel_time`, `reason`; `commerce.services.resolve_refund(refund_id, "succeeded", actor_id=None)` (refund succeeded, payment `refunded`, event `refund_succeeded`) → state 2 whose payment is already `refunded` by a succeeded refund (staff resolved the manual refund before the cabinet cancel arrived): state −2, `cancel_time`, `reason` merged, no new refund → state 2, payment still `paid`, without an open refund: -31007 → state −1/−2: the stored answer | `{"transaction", "cancel_time", "state"}` |
 | `CheckTransaction` | `id` | unknown (-31003) | `{"create_time", "perform_time" (0 if none), "cancel_time" (0 if none), "transaction", "state", "reason" (null if none)}` |
 | `GetStatement` | `from`, `to` (ms) | Payme payments whose **Payme** transaction time `provider_state.time` (the `params.time` of `CreateTransaction`) ∈ [`from`, `to`], ascending by that time **(verify M3)**. M2 filters on the JSON key (volumes are small); M3 adds an expression index on `(provider_state->>'time')::bigint` for Payme rows if the statement is slow | `{"transactions": [{"id", "time", "amount", "account": {<PAYME_ACCOUNT_FIELD>: account_ref}, "create_time", "perform_time", "cancel_time", "transaction", "state", "reason", "receivers": null}]}` |
 
