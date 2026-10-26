@@ -10,32 +10,53 @@ is the Billz **barcode** (Billz's own product id is a UUID); a product without s
 the catalog and is skipped. Stock and price are read for ``BILLZ_SHOP_ID`` only:
 ``shop_measurement_values[].active_measurement_value`` (sellable stock, holds excluded) and
 ``shop_prices[].retail_price`` (UZS; reference only, Glow Derma's price stays authoritative, O6). The volume
-comes from the attribute or custom field named ``BILLZ_VOLUME_FIELD`` ("" when unset).
+comes from the attribute or custom field named ``BILLZ_VOLUME_FIELD``; without that setting the volume is not
+asserted at all (``None``: the stored volume is left alone). A barcode listed twice keeps the **first**
+product, for the row and for the cached product UUID alike.
 
 * ``delta`` asks for ``last_updated_date`` = the start of the last successful run (UTC) minus
   :data:`DELTA_OVERLAP`; without a cursor it lists everything. The cursor moves only in
-  :meth:`LiveBillz.sync_succeeded`, i.e. after the catalog applied the whole run.
+  :meth:`LiveBillz.sync_succeeded`, i.e. after the catalog applied the whole run — and not even then when the
+  run saw fewer distinct products than Billz counted (pages shifted under it), so the next delta re-reads.
 * ``full`` is the reconciliation listing: every page must arrive, the count must not change while paging
-  (pages are offsets), and it must be plausible (> 0 and ≥ ``BILLZ_FULL_SYNC_MIN_RATIO`` × the previous
-  full count); otherwise
-  :class:`BillzListingIncomplete` is raised before a single row is yielded, so nothing is applied and
-  nothing hidden.
+  (pages are offsets), the pages must not overlap (the **distinct** Billz product ids must equal the count),
+  at least one listed product must carry an entry for ``BILLZ_SHOP_ID`` (a wrong shop id would zero every
+  stock), and the count must be plausible (> 0 and ≥ ``BILLZ_FULL_SYNC_MIN_RATIO`` × the previous full
+  count); otherwise :class:`BillzListingIncomplete` is raised before a single row is yielded, so nothing is
+  applied and nothing hidden.
 
-**Sale push** (``push_sale``; llms-full "Интернет-заказ из внешней системы"), each step safe to resume:
+**Lookup** (``get_product``, admin create / ``billz_id`` change): the interactive client profile (bounded to
+seconds, :data:`.client.INTERACTIVE`), ``search`` paged until the exact barcode is found.
 
-a. ``request.billz_order_id`` set (an earlier attempt created the sale): ``GET /v2/order/{id}``; deleted →
-   permanent; ``finished_at`` set → already paid, nothing is sent again. Billz has no lookup of a sale by an
-   external reference and no idempotency header, so the persisted id **is** the lookup;
-b. otherwise ``POST /v2/order {shop_id, cashbox_id}`` with ``Billz-Response-Channel: HTTP`` and
-   ``journal.order_created(id, order_number)`` — the caller commits the id before anything else is sent;
-c. ``POST /v2/order-product/{id}`` per line (an upsert with the absolute quantity), skipped when the sale
-   already holds that quantity; the barcode → product UUID lookup is cached;
+**Sale push** (``push_sale``; llms-full "Интернет-заказ из внешней системы"), under a per-sale lock owned by
+this worker (:class:`SaleLock`) and a push-wide deadline (:data:`PUSH_DEADLINE_SECONDS`, below the outbox
+lease), each step safe to resume:
+
+0. ``journal.progress()`` re-read under the lock: an attempt that finished meanwhile ends here; every barcode
+   is resolved to its Billz product UUID **before** anything is written (an unknown product leaves no draft);
+a. a Billz sale an earlier attempt created: ``GET /v2/order/{id}``; deleted → permanent; paid (a real
+   ``finished_at`` or ``sold_at`` and no contradicting empty payment list) → nothing is sent again;
+   contradicting signals → retry later with an ERROR, never pay; a payment sent earlier whose outcome is
+   still unknown → wait :data:`PAYMENT_QUIET_PERIOD` (deferral), then stop for staff, never pay twice.
+   Billz has no lookup of a sale by an external reference and no idempotency header, so the persisted id
+   **is** the lookup;
+b. otherwise ``POST /v2/order {shop_id, cashbox_id}`` (async, result over HTTP) and
+   ``journal.order_created(data.id, order_number)`` — the caller commits the id before anything else is sent;
+c. items: lines in the draft that are not ours (a cashier's) are set to 0; then
+   ``POST /v2/order-product/{id}`` per product — an upsert with the absolute quantity **and the price the
+   customer was charged** (``use_free_price: true``, ``free_price`` = the order line's ``unit_price``;
+   decision D1);
 d. the customer: ``GET /v1/client?phone_number=`` (an exact match on the digits), ``POST /v1/client`` only
    when none exists (Billz does not de-duplicate phones; the new id is cached to bridge Billz's search lag),
-   then ``PUT /v2/order-customer-new/{id} {customer_id, check_auth_code: false}``;
-e. ``POST /v1/recalculate-order-bill/{id}`` for the bill total (payment must equal it, 20020);
-f. ``POST /v2/order-payment/{id}`` with ``BILLZ_PAYMENT_TYPE_ID``, ``paid_amount`` = the bill total,
-   ``without_cashback: true`` and ``Glow Derma #<order>`` as the comment.
+   then ``PUT /v2/order-customer-new/{id} {customer_id, check_auth_code: false}``; a cached client id Billz
+   refuses is forgotten, looked up once more and linked once more;
+e. ``POST /v1/recalculate-order-bill/{id}``: the bill must equal Σ ``unit_price`` × ``quantity`` **exactly**
+   (no rounding, no tolerance); otherwise :class:`BillzCheckByHand` and nothing is paid;
+f. the lock is re-checked, ``journal.before_payment()`` re-checks the order (cancelled →
+   :class:`SaleCancelled`) and commits the payment attempt, then ``POST /v2/order-payment/{id}`` with
+   ``BILLZ_PAYMENT_TYPE_ID``, ``paid_amount`` = that total, ``without_cashback: true`` and
+   ``Glow Derma #<order>`` as the comment. A payment Billz certainly did not apply (refused, or never sent)
+   is forgotten again (``journal.payment_not_applied()``).
 
 The window that cannot be closed: Billz creates the sale (b) and the worker dies before the id is committed;
 the retry then creates a second, empty draft (no items, no stock effect) that staff delete in Billz.
@@ -47,9 +68,11 @@ import logging
 import math
 import re
 import time
+import uuid
 from collections.abc import Iterator, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from django.core.cache import cache as default_cache
@@ -60,15 +83,20 @@ from glowderma.core.pii import pii_ref
 from glowderma.integrations import selectors, services
 from glowderma.integrations.models import IntegrationState
 
-from .client import BillzClient, BillzConfig
+from .client import INTERACTIVE, BillzClient, BillzConfig, SafeCache
 from .ports import (
+    BillzCheckByHand,
+    BillzError,
     BillzListingIncomplete,
+    BillzPaymentPending,
     BillzProduct,
     BillzRejected,
+    BillzShiftClosed,
     BillzUnavailable,
     ImportMode,
     SaleJournal,
     SaleLine,
+    SaleProgress,
     SaleReceipt,
     SaleRequest,
     refuse_refund,
@@ -91,12 +119,21 @@ CLIENT_ID_KEY = "billz:client:{ref}"  # keyed by pii_ref(phone), never the numbe
 CLIENT_ID_TTL = 30 * 86_400
 SALE_LOCK_KEY = "billz:sale:lock:{order_uuid}"
 SALE_LOCK_TTL = 600
+# One push ends within this (every wait and timeout honours it): below the outbox lease of core.tasks (5 min),
+# so a redelivery never meets a push still running, and well below SALE_LOCK_TTL, so the lock cannot expire.
+PUSH_DEADLINE_SECONDS = 240.0
+# A payment whose answer was lost is looked at again only after this quiet period (review B2).
+PAYMENT_QUIET_PERIOD = timedelta(minutes=10)
 SEARCH_LIMIT = 50
+SEARCH_MAX_PAGES = 10
 STOCK_LIMIT = 2_000_000_000
 NAME_MAX = 255
 VOLUME_MAX = 40
 REF_MAX = 32
 PROVIDER = IntegrationState.Provider.BILLZ
+ZERO_TIME_PREFIX = "0001-"  # Go's zero time: "0001-01-01T00:00:00Z"
+
+type SaleState = Literal["open", "paid", "unclear"]
 
 
 def _str(value: Any) -> str:
@@ -117,6 +154,14 @@ def _shop_entry(entries: Any, shop_id: str) -> Mapping[str, Any] | None:
         if isinstance(entry, Mapping) and _str(entry.get("shop_id")).lower() == shop_id.lower():
             return entry
     return None
+
+
+def in_shop(product: Mapping[str, Any], shop_id: str) -> bool:
+    """The product carries a stock or a price entry for ``shop_id``."""
+    return (
+        _shop_entry(product.get("shop_measurement_values"), shop_id) is not None
+        or _shop_entry(product.get("shop_prices"), shop_id) is not None
+    )
 
 
 def barcode_of(product: Mapping[str, Any]) -> str | None:
@@ -145,11 +190,12 @@ def stock_of(product: Mapping[str, Any], shop_id: str) -> int:
     return max(-STOCK_LIMIT, min(STOCK_LIMIT, math.floor(value)))
 
 
-def volume_of(product: Mapping[str, Any], field_name: str) -> str:
-    """The value of the attribute or custom field named ``field_name`` (case-insensitive), else ""."""
+def volume_of(product: Mapping[str, Any], field_name: str) -> str | None:
+    """The value of the attribute or custom field named ``field_name`` (case-insensitive), "" when the product
+    lacks it; ``None`` when no field is configured (the volume is then not synced at all)."""
     wanted = field_name.strip().casefold()
     if not wanted:
-        return ""
+        return None
     for attribute in product.get("product_attributes") or []:
         if isinstance(attribute, Mapping) and _str(attribute.get("attribute_name")).casefold() == wanted:
             return _str(attribute.get("attribute_value"))[:VOLUME_MAX]
@@ -162,10 +208,36 @@ def volume_of(product: Mapping[str, Any], field_name: str) -> str:
     return ""
 
 
+def _real_time(value: Any) -> bool:
+    text = _str(value)
+    return bool(text) and not text.startswith(ZERO_TIME_PREFIX) and text.lower() not in ("null", "0")
+
+
+def _payments(order: Mapping[str, Any]) -> list[Mapping[str, Any]] | None:
+    """``order_detail.order_payments`` (the docs list it in the detail); ``None`` when Billz sent none."""
+    detail = order.get("order_detail")
+    payments = detail.get("order_payments") if isinstance(detail, Mapping) else None
+    if payments is None:
+        payments = order.get("order_payments")
+    if not isinstance(payments, list):
+        return None
+    return [payment for payment in payments if isinstance(payment, Mapping)]
+
+
+def sale_state(order: Mapping[str, Any]) -> SaleState:
+    """``paid`` when the sale is closed (a real ``finished_at`` or ``sold_at``) and no empty payment list says
+    otherwise; ``open`` when it is not closed and holds no payment; ``unclear`` when the signals contradict
+    each other (closed without payments, or payments on an open sale) — never paid again then (review S3)."""
+    closed = _real_time(order.get("finished_at")) or _real_time(order.get("sold_at"))
+    payments = _payments(order)
+    if closed:
+        return "paid" if payments is None or payments else "unclear"
+    return "unclear" if payments else "open"
+
+
 def is_finished(order: Mapping[str, Any]) -> bool:
-    """A paid (closed) sale: ``finished_at`` holds a real date (Go's zero time ``0001-…`` is not one)."""
-    finished = _str(order.get("finished_at"))
-    return bool(finished) and not finished.startswith("0001-") and finished.lower() != "null"
+    """A paid (closed) sale (:func:`sale_state`)."""
+    return sale_state(order) == "paid"
 
 
 def _order_items(order: Mapping[str, Any] | None) -> dict[str, float]:
@@ -205,6 +277,49 @@ def aggregate(lines: Sequence[SaleLine]) -> list[tuple[str, int, int]]:
     return [(billz_id, quantity, amount) for billz_id, (quantity, amount) in totals.items()]
 
 
+@dataclass(frozen=True, slots=True)
+class _Line:
+    """One product of the sale as Billz receives it: the resolved product UUID and the free unit price."""
+
+    barcode: str
+    product_id: str
+    quantity: int
+    unit_price: int
+
+    @property
+    def amount(self) -> int:
+        return self.quantity * self.unit_price
+
+
+class SaleLock:
+    """The per-sale cache lock, owned by one worker: released (and renewed) only by its owner (review S4)."""
+
+    def __init__(self, cache: SafeCache, key: str, ttl: int) -> None:
+        self.cache = cache
+        self.key = key
+        self.ttl = ttl
+        self.owner = uuid.uuid4().hex
+
+    def acquire(self) -> bool:
+        return self.cache.add(self.key, self.owner, timeout=self.ttl)
+
+    def owned(self) -> bool:
+        return bool(self.cache.get(self.key) == self.owner)
+
+    def renew(self) -> None:
+        """Still ours → extend it; otherwise stop before anything irreversible is sent."""
+        if not self.owned():
+            raise BillzUnavailable(f"the sale lock {self.key} expired under this worker", not_applied=True)
+        self.cache.touch(self.key, timeout=self.ttl)
+
+    def release(self) -> None:
+        try:
+            if self.owned():
+                self.cache.delete(self.key)
+        except BillzUnavailable:  # the cache went away: the lock expires on its own
+            logger.warning("Could not release the Billz sale lock %s", self.key)
+
+
 class LiveBillz:
     name = "billz"
 
@@ -213,12 +328,14 @@ class LiveBillz:
         config: BillzConfig,
         *,
         client: BillzClient | None = None,
-        cache: BaseCache | None = None,
+        interactive: BillzClient | None = None,
+        cache: BaseCache | SafeCache | None = None,
         clock: Any = time.time,
     ) -> None:
         self.config = config
-        self.cache = cache if cache is not None else default_cache
+        self.cache = SafeCache(cache if cache is not None else default_cache)
         self.client = client if client is not None else BillzClient(config, cache=self.cache, clock=clock)
+        self.interactive = interactive if interactive is not None else self.client.with_profile(INTERACTIVE)
         self._pending: dict[str, Any] | None = None
 
     @classmethod
@@ -233,7 +350,8 @@ class LiveBillz:
         if not self.config.configured:
             raise BillzUnavailable(
                 "the live Billz adapter is not configured "
-                "(BILLZ_SECRET_KEY, BILLZ_SHOP_ID, BILLZ_CASHBOX_ID, BILLZ_PAYMENT_TYPE_ID)"
+                "(BILLZ_SECRET_KEY, BILLZ_SHOP_ID, BILLZ_CASHBOX_ID, BILLZ_PAYMENT_TYPE_ID)",
+                not_applied=True,
             )
 
     # --- catalog --------------------------------------------------------------------------------------------
@@ -248,8 +366,10 @@ class LiveBillz:
             synced_at=synced_at,
         )
 
-    def _products_page(self, params: Mapping[str, Any]) -> tuple[int, list[Mapping[str, Any]]]:
-        body = self.client.call(
+    def _products_page(
+        self, params: Mapping[str, Any], client: BillzClient | None = None
+    ) -> tuple[int, list[Mapping[str, Any]]]:
+        body = (client or self.client).call(
             "GET", "/v2/products", label="GET /v2/products", params=params, idempotent=True
         )
         count = body.get("count")
@@ -263,38 +383,47 @@ class LiveBillz:
         )
         return count, listed
 
-    def _remember_product_ids(self, products: Sequence[Mapping[str, Any]]) -> None:
-        ids = {}
-        for product in products:
-            barcode = barcode_of(product)
-            product_id = _str(product.get("id"))
-            if barcode and UUID_PATTERN.fullmatch(product_id):
-                ids[PRODUCT_ID_KEY.format(barcode=barcode)] = product_id
-        if ids:
-            self.cache.set_many(ids, timeout=PRODUCT_ID_TTL)
+    def _remember_product_id(self, barcode: str, product: Mapping[str, Any]) -> None:
+        product_id = _str(product.get("id"))
+        if UUID_PATTERN.fullmatch(product_id):
+            self.cache.set(PRODUCT_ID_KEY.format(barcode=barcode), product_id, timeout=PRODUCT_ID_TTL)
 
-    def _find_by_barcode(self, barcode: str) -> Mapping[str, Any] | None:
-        _, products = self._products_page(
-            {
-                "search": barcode,
-                "fields": "barcode",
-                "limit": SEARCH_LIMIT,
-                "page": 1,
-                "include_empty_stocks": "true",
-            }
+    def _find_by_barcode(self, barcode: str, client: BillzClient | None = None) -> Mapping[str, Any] | None:
+        """The first product whose barcode is exactly ``barcode``; ``search`` is a substring match, so its
+        pages are read until the exact one turns up or the result ends (review N3)."""
+        seen = 0
+        for page in range(1, SEARCH_MAX_PAGES + 1):
+            count, products = self._products_page(
+                {
+                    "search": barcode,
+                    "fields": "barcode",
+                    "limit": SEARCH_LIMIT,
+                    "page": page,
+                    "include_empty_stocks": "true",
+                },
+                client,
+            )
+            matches = [product for product in products if barcode_of(product) == barcode]
+            if matches:
+                if len(matches) > 1:
+                    logger.warning(
+                        "Billz lists %d products with barcode %s; using the first", len(matches), barcode
+                    )
+                self._remember_product_id(barcode, matches[0])
+                return matches[0]
+            seen += len(products)
+            if not products or seen >= count:
+                return None
+        raise BillzUnavailable(
+            f"GET /v2/products: the search for barcode {barcode} matched more than "
+            f"{SEARCH_LIMIT * SEARCH_MAX_PAGES} products without an exact match"
         )
-        matches = [product for product in products if barcode_of(product) == barcode]
-        if len(matches) > 1:
-            logger.warning("Billz lists %d products with barcode %s; using the first", len(matches), barcode)
-        if matches:
-            self._remember_product_ids(matches[:1])
-        return matches[0] if matches else None
 
     def get_product(self, billz_id: str) -> BillzProduct | None:
         self._require_configured()
         if not BILLZ_ID.fullmatch(billz_id):
             return None
-        product = self._find_by_barcode(billz_id)
+        product = self._find_by_barcode(billz_id, self.interactive)
         return None if product is None else self._row(product, billz_id, timeutils.now())
 
     def iter_products(self, mode: ImportMode) -> Iterator[BillzProduct]:
@@ -308,6 +437,10 @@ class LiveBillz:
         if since is not None:
             params["last_updated_date"] = (since - DELTA_OVERLAP).astimezone(UTC).strftime(WATERMARK_FORMAT)
         rows: dict[str, BillzProduct] = {}
+        product_ids: dict[str, str] = {}  # cache key → the UUID of the product each row was built from
+        distinct: set[str] = set()  # Billz product ids seen (a repeat = overlapping pages)
+        repeats = 0
+        in_our_shop = 0
         expected: int | None = None
         received = 0
         skipped = 0
@@ -323,8 +456,14 @@ class LiveBillz:
                 )
             expected = count
             received += len(products)
-            self._remember_product_ids(products)
-            for product in products:
+            for index, product in enumerate(products):
+                identity = _str(product.get("id")).lower() or f"#{page}:{index}"
+                if identity in distinct:
+                    repeats += 1
+                    continue
+                distinct.add(identity)
+                if in_shop(product, self.config.shop_id):
+                    in_our_shop += 1
                 barcode = barcode_of(product)
                 if barcode is None:
                     skipped += 1
@@ -333,6 +472,9 @@ class LiveBillz:
                     logger.warning("Billz lists barcode %s twice; keeping the first product", barcode)
                     continue
                 rows[barcode] = self._row(product, barcode, synced_at)
+                product_id = _str(product.get("id"))
+                if UUID_PATTERN.fullmatch(product_id):
+                    product_ids[PRODUCT_ID_KEY.format(barcode=barcode)] = product_id
             if not products or received >= expected:
                 break
             page += 1
@@ -340,14 +482,34 @@ class LiveBillz:
                 raise BillzListingIncomplete("Billz listing exceeds 10 000 pages")
         if expected is None or received < expected:
             raise BillzListingIncomplete(f"only {received} of {expected} Billz products arrived")
+        complete = repeats == 0 and len(distinct) >= expected
         if mode == "full":
+            if not complete:
+                raise BillzListingIncomplete(
+                    f"Billz listed {len(distinct)} distinct products for a count of {expected} ({repeats} "
+                    "repeated across pages: the paging shifted); not reconciling"
+                )
             self._check_plausible(expected, cursor)
+            if not in_our_shop:
+                raise BillzListingIncomplete(
+                    "no listed product carries an entry for the configured shop (check BILLZ_SHOP_ID); "
+                    "not reconciling"
+                )
         if skipped:
             logger.info("Billz sync skipped %d products without a 6–14 digit barcode", skipped)
-        pending: dict[str, Any] = {"delta_since": started.isoformat()}
-        if mode == "full":
-            pending.update(full_count=expected, full_synced_at=started.isoformat())
-        self._pending = pending
+        if product_ids:
+            self.cache.set_many(product_ids, timeout=PRODUCT_ID_TTL)
+        if complete:
+            pending: dict[str, Any] = {"delta_since": started.isoformat()}
+            if mode == "full":
+                pending.update(full_count=expected, full_synced_at=started.isoformat())
+            self._pending = pending
+        else:
+            logger.warning(
+                "Billz delta saw %d distinct products for a count of %d; the watermark stays",
+                len(distinct),
+                expected,
+            )
         yield from rows.values()
 
     def _watermark(self, cursor: Mapping[str, Any]) -> datetime | None:
@@ -383,17 +545,20 @@ class LiveBillz:
 
     def push_sale(self, request: SaleRequest, journal: SaleJournal) -> SaleReceipt:
         self._require_configured()
-        lock = SALE_LOCK_KEY.format(order_uuid=request.order_uuid)
-        if not self.cache.add(lock, 1, timeout=SALE_LOCK_TTL):
-            raise BillzUnavailable(f"another worker is pushing the sale of order {request.order_id}")
+        lock = SaleLock(self.cache, SALE_LOCK_KEY.format(order_uuid=request.order_uuid), SALE_LOCK_TTL)
+        if not lock.acquire():
+            raise BillzUnavailable(
+                f"another worker is pushing the sale of order {request.order_id}", not_applied=True
+            )
         try:
-            return self._push(request, journal)
+            with self.client.deadline(PUSH_DEADLINE_SECONDS):
+                return self._push(request, journal, lock)
         finally:
-            self.cache.delete(lock)
+            lock.release()
 
     def _order(self, billz_order_id: str) -> dict[str, Any]:
         return self.client.call(
-            "GET", f"/v2/order/{billz_order_id}", label="GET /v2/order/{id}", idempotent=True
+            "GET", f"/v2/order/{billz_order_id}", label="GET /v2/order/{id}", idempotent=True, resource=True
         )
 
     def _create_order(self) -> tuple[str, str]:
@@ -407,7 +572,13 @@ class LiveBillz:
         )
         raw = body.get("data")
         data: Mapping[str, Any] = raw if isinstance(raw, Mapping) else {}
-        order_id = _str(body.get("id")) or _str(data.get("id"))
+        # openapi post_v2_order_result: data.id is the sale; the envelope's own id names the reply message
+        order_id = _str(data.get("id"))
+        envelope_id = _str(body.get("id"))
+        if envelope_id and envelope_id.lower() != order_id.lower():
+            logger.info(
+                "Billz answered the sale create with message id %s for sale %s", envelope_id, order_id
+            )
         if not UUID_PATTERN.fullmatch(order_id):
             raise BillzUnavailable("POST /v2/order: the answer names no sale id")
         return order_id, _str(data.get("order_number"))
@@ -416,7 +587,7 @@ class LiveBillz:
         key = PRODUCT_ID_KEY.format(barcode=barcode)
         if not fresh:
             cached = self.cache.get(key)
-            if isinstance(cached, str) and cached:
+            if isinstance(cached, str) and UUID_PATTERN.fullmatch(cached):
                 return cached
         product = self._find_by_barcode(barcode)
         product_id = _str(product.get("id")) if product is not None else ""
@@ -425,41 +596,75 @@ class LiveBillz:
             raise BillzRejected(f"product {barcode} not found in Billz", error_code=20036)
         return product_id
 
-    def _add_item(self, billz_order_id: str, product_id: str, quantity: int) -> None:
+    def _resolve(self, request: SaleRequest) -> list[_Line]:
+        """Every line as Billz receives it, resolved before anything is written (review B10)."""
+        prices: dict[str, set[int]] = {}
+        for line in request.lines:
+            prices.setdefault(line.billz_id, set()).add(line.unit_price)
+        lines = []
+        for barcode, quantity, amount in aggregate(request.lines):
+            if quantity <= 0:
+                raise BillzCheckByHand(f"order {request.order_id}: product {barcode} has no quantity")
+            if len(prices[barcode]) > 1:
+                # Billz takes one free price per product (an upsert per product): lines of one product at
+                # different prices cannot each be recorded at what the customer paid for them
+                raise BillzCheckByHand(
+                    f"order {request.order_id}: product {barcode} is sold at different unit prices"
+                )
+            lines.append(_Line(barcode, self._product_id(barcode), quantity, amount // quantity))
+        return lines
+
+    def _add_item(self, billz_order_id: str, product_id: str, quantity: int, unit_price: int | None) -> None:
+        item: dict[str, Any] = {
+            "product_id": product_id,
+            "sold_measurement_value": quantity,
+            "used_wholesale_price": False,
+        }
+        if unit_price is not None:
+            # decision D1: the price the customer was charged (O6, PRICE_SOURCE=admin), not Billz's own
+            item.update(use_free_price=True, free_price=unit_price)
         self.client.call(
             "POST",
             f"/v2/order-product/{billz_order_id}",
             label="POST /v2/order-product/{order_id}",
-            json={
-                "product_id": product_id,
-                "sold_measurement_value": quantity,
-                "used_wholesale_price": False,
-            },
-            idempotent=True,  # an upsert with the absolute quantity
+            json=item,
+            idempotent=True,  # an upsert with the absolute quantity and price
             wait_result=True,
         )
 
-    def _put_line(
-        self, billz_order_id: str, barcode: str, quantity: int, present: Mapping[str, float]
-    ) -> None:
-        product_id = self._product_id(barcode)
-        if present.get(product_id.lower()) == quantity:
-            return
+    def _put_line(self, billz_order_id: str, line: _Line) -> None:
         try:
-            self._add_item(billz_order_id, product_id, quantity)
+            self._add_item(billz_order_id, line.product_id, line.quantity, line.unit_price)
         except BillzRejected as exc:
-            if exc.error_code != 20036:
+            if exc.error_code not in (20036, 20037):
                 raise
-            refreshed = self._product_id(barcode, fresh=True)  # a cached id Billz no longer knows
-            if refreshed == product_id:
+            # a cached id Billz no longer knows, or a product archived and replaced: look it up once more
+            refreshed = self._product_id(line.barcode, fresh=True)
+            if refreshed.lower() == line.product_id.lower():
                 raise
-            self._add_item(billz_order_id, refreshed, quantity)
+            self._add_item(billz_order_id, refreshed, line.quantity, line.unit_price)
 
-    def _client_id(self, phone: str) -> str:
+    def _remove_foreign_items(
+        self, billz_order_id: str, order: Mapping[str, Any] | None, lines: Sequence[_Line]
+    ) -> None:
+        """A product in the draft that the order does not hold (a cashier's, a replaced id): quantity 0."""
+        ours = {line.product_id.lower() for line in lines}
+        for product_id, quantity in _order_items(order).items():
+            if product_id not in ours and quantity:
+                logger.warning(
+                    "Billz sale %s holds a product the order does not (%s); setting it to 0",
+                    billz_order_id,
+                    product_id,
+                )
+                self._add_item(billz_order_id, product_id, 0, None)
+
+    def _client_id(self, phone: str, *, fresh: bool = False) -> tuple[str, bool]:
+        """``(Billz client id, taken from the cache)``."""
         key = CLIENT_ID_KEY.format(ref=pii_ref(phone))
-        cached = self.cache.get(key)
-        if isinstance(cached, str) and cached:
-            return cached
+        if not fresh:
+            cached = self.cache.get(key)
+            if isinstance(cached, str) and UUID_PATTERN.fullmatch(cached):
+                return cached, True
         body = self.client.call(
             "GET",
             "/v1/client",
@@ -485,12 +690,9 @@ class LiveBillz:
         if not UUID_PATTERN.fullmatch(client_id):
             raise BillzUnavailable("Billz client lookup: no client id in the answer")
         self.cache.set(key, client_id, timeout=CLIENT_ID_TTL)
-        return client_id
+        return client_id, False
 
-    def _link_customer(self, billz_order_id: str, phone: str, order: Mapping[str, Any] | None) -> None:
-        client_id = self._client_id(phone)
-        if order is not None and _str(order.get("customer_id")).lower() == client_id.lower():
-            return
+    def _put_customer(self, billz_order_id: str, client_id: str) -> None:
         self.client.call(
             "PUT",
             f"/v2/order-customer-new/{billz_order_id}",
@@ -500,17 +702,45 @@ class LiveBillz:
             wait_result=True,
         )
 
-    def _bill_total(self, billz_order_id: str) -> int:
+    def _link_customer(self, billz_order_id: str, phone: str, order: Mapping[str, Any] | None) -> None:
+        client_id, cached = self._client_id(phone)
+        if order is not None and _str(order.get("customer_id")).lower() == client_id.lower():
+            return
+        try:
+            self._put_customer(billz_order_id, client_id)
+        except BillzError as exc:
+            status = exc.http_status
+            refused = status is not None and 400 <= status < 500 and status != 429
+            if not cached or not refused or isinstance(exc, BillzShiftClosed):
+                raise
+            # a cached client Billz no longer accepts (merged, deleted): forget it, look it up once more
+            # (review B9) instead of failing every sale of this customer for 30 days
+            logger.warning(
+                "Billz refused the cached client of phone ref %s (%s); looking it up again",
+                pii_ref(phone),
+                exc,
+            )
+            self.cache.delete(CLIENT_ID_KEY.format(ref=pii_ref(phone)))
+            fresh, _ = self._client_id(phone, fresh=True)
+            if fresh.lower() == client_id.lower():
+                raise
+            self._put_customer(billz_order_id, fresh)
+
+    def _bill_total(self, billz_order_id: str) -> float:
         bill = self.client.call(
             "POST",
             f"/v1/recalculate-order-bill/{billz_order_id}",
             label="POST /v1/recalculate-order-bill/{order_id}",
             idempotent=True,
         )
+        if bill.get("is_calculated") is False:
+            raise BillzUnavailable(
+                "POST /v1/recalculate-order-bill: the bill is not calculated yet", error_code=20084
+            )
         total = _number(bill.get("total_price"))
         if total is None or total < 0:
             raise BillzUnavailable("POST /v1/recalculate-order-bill: the answer carries no total")
-        return round(total)
+        return total
 
     def _pay(self, billz_order_id: str, order_id: int, amount: int) -> None:
         self.client.call(
@@ -528,43 +758,96 @@ class LiveBillz:
                 "comment": f"Glow Derma #{order_id}",
                 "without_cashback": True,
             },
-            idempotent=False,  # an unknown outcome is re-checked (step a) before paying again
+            idempotent=False,  # never repeated: the journal's payment attempt guards the next one
         )
 
-    def _push(self, request: SaleRequest, journal: SaleJournal) -> SaleReceipt:
-        billz_order_id = request.billz_order_id
+    def _payment_outcome_unknown(
+        self, request: SaleRequest, billz_order_id: str, attempted_at: datetime
+    ) -> None:
+        """A payment was sent earlier and Billz still shows the sale open: wait, then stop for staff."""
+        elapsed = timeutils.now() - attempted_at
+        sent = attempted_at.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
+        if elapsed < PAYMENT_QUIET_PERIOD:
+            raise BillzPaymentPending(
+                f"the payment of Billz sale {billz_order_id} (order {request.order_id}) was sent at {sent}; "
+                "its outcome is not known yet",
+                retry_after=PAYMENT_QUIET_PERIOD - elapsed,
+            )
+        raise BillzCheckByHand(
+            f"the payment of Billz sale {billz_order_id} (order {request.order_id}) was sent at {sent} and "
+            "Billz still shows the sale open; not paying again: check the sale in Billz, complete it by hand"
+        )
+
+    def _push(self, request: SaleRequest, journal: SaleJournal, lock: SaleLock) -> SaleReceipt:
+        progress: SaleProgress = journal.progress()  # re-read under the lock (another attempt may have run)
+        if progress.pushed:
+            logger.info("Billz sale of order %s was recorded by another attempt", request.order_id)
+            return SaleReceipt(
+                billz_order_id=progress.billz_order_id or str(request.order_uuid),
+                billz_sale_id=progress.billz_order_id,
+                billz_sale_ref=progress.billz_sale_ref,
+            )
+        lines = self._resolve(request)
+        expected = sum(line.amount for line in lines)
+        billz_order_id = progress.billz_order_id
         order: dict[str, Any] | None = None
         if billz_order_id:
             order = self._order(billz_order_id)
             if order.get("deleted") is True:
                 raise BillzRejected(f"the Billz sale {billz_order_id} was deleted", error_code=20017)
             ref = sale_ref(_str(order.get("order_number")), billz_order_id)
-            if is_finished(order):
+            state = sale_state(order)
+            if state == "paid":
                 logger.info("Billz sale %s of order %s is already paid", billz_order_id, request.order_id)
                 return SaleReceipt(
                     billz_order_id=billz_order_id, billz_sale_id=billz_order_id, billz_sale_ref=ref
                 )
+            if state == "unclear":
+                logger.error(
+                    "billz.sale_state_unclear order_id=%s billz_order_id=%s finished_at=%r sold_at=%r "
+                    "payments=%s: not paying; check the sale in Billz",
+                    request.order_id,
+                    billz_order_id,
+                    _str(order.get("finished_at")),
+                    _str(order.get("sold_at")),
+                    len(_payments(order) or []),
+                )
+                raise BillzUnavailable(
+                    f"the Billz sale {billz_order_id} shows contradicting paid/open signals; not paying"
+                )
+            if progress.payment_attempted_at is not None:
+                self._payment_outcome_unknown(request, billz_order_id, progress.payment_attempted_at)
         else:
             billz_order_id, number = self._create_order()
             ref = sale_ref(number, billz_order_id)
             journal.order_created(billz_order_id, ref)
-        present = _order_items(order)
-        expected = 0
-        for barcode, quantity, amount in aggregate(request.lines):
-            self._put_line(billz_order_id, barcode, quantity, present)
-            expected += amount
+        self._remove_foreign_items(billz_order_id, order, lines)
+        for line in lines:
+            self._put_line(billz_order_id, line)
         if request.customer_phone:
             self._link_customer(billz_order_id, request.customer_phone, order)
         total = self._bill_total(billz_order_id)
         if total != expected:
-            logger.warning(
-                "billz.sale_total_differs order_id=%s billz_order_id=%s billz_total=%s glowderma_total=%s",
+            # decision D1: pay exactly what the customer was charged for the goods, or nothing
+            logger.error(
+                "billz.sale_total_differs order_id=%s billz_order_id=%s billz_total=%s expected=%s",
                 request.order_id,
                 billz_order_id,
-                total,
+                f"{total:g}",
                 expected,
             )
-        self._pay(billz_order_id, request.order_id, total)
+            raise BillzCheckByHand(
+                f"Billz bills {total:g} so'm for sale {billz_order_id} of order {request.order_id}, but the "
+                f"customer was charged {expected} so'm for the goods; not paid: check the draft in Billz"
+            )
+        lock.renew()  # still ours, right before the one request that must never run twice
+        journal.before_payment()
+        try:
+            self._pay(billz_order_id, request.order_id, expected)
+        except BillzError as exc:
+            if exc.not_applied:
+                journal.payment_not_applied()
+            raise
         logger.info("Billz sale %s recorded for order %s", billz_order_id, request.order_id)
         return SaleReceipt(billz_order_id=billz_order_id, billz_sale_id=billz_order_id, billz_sale_ref=ref)
 

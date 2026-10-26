@@ -143,7 +143,8 @@ def product_snapshot(product: Product) -> dict[str, Any]:
 def _apply_billz(product: Product, row: BillzProduct) -> None:
     product.billz_id = row.billz_id
     product.billz_name = row.billz_name
-    product.volume = row.volume
+    if row.volume is not None:  # None: Billz asserted no volume (no BILLZ_VOLUME_FIELD); keep the stored one
+        product.volume = row.volume
     product.billz_price = row.price
     product.billz_synced_at = row.synced_at
 
@@ -707,8 +708,9 @@ def upsert_from_billz(row: BillzProduct) -> UpsertOutcome:
     """The import's upsert by ``billz_id`` (contract §2.3).
 
     New → ``hidden`` with ``is_new_from_billz=True``, ``price = billz price or 0``, empty texts, no images.
-    Existing → only ``billz_name``, ``volume``, ``billz_price``, ``billz_synced_at`` and the stock row change;
-    texts, images, price, status, promo, ``last_change`` and ``updated_at`` are never touched.
+    Existing → only ``billz_name``, ``volume``, ``billz_price``, ``billz_synced_at`` and the stock row change
+    (``volume`` only when Billz asserts one: ``row.volume is None`` leaves it alone); texts, images, price,
+    status, promo, ``last_change`` and ``updated_at`` are never touched.
     """
     require_live_billz()
     with transaction.atomic():
@@ -721,12 +723,17 @@ def upsert_from_billz(row: BillzProduct) -> UpsertOutcome:
             return "created"
         changed = (
             product.billz_name != row.billz_name
-            or product.volume != row.volume
+            or (row.volume is not None and product.volume != row.volume)
             or product.billz_price != row.price
         )
-        Product.objects.filter(pk=product.pk).update(
-            billz_name=row.billz_name, volume=row.volume, billz_price=row.price, billz_synced_at=row.synced_at
-        )
+        fields: dict[str, Any] = {
+            "billz_name": row.billz_name,
+            "billz_price": row.price,
+            "billz_synced_at": row.synced_at,
+        }
+        if row.volume is not None:  # None = not asserted (no BILLZ_VOLUME_FIELD): never blank a stored volume
+            fields["volume"] = row.volume
+        Product.objects.filter(pk=product.pk).update(**fields)
         stock_changed = sync_stock(product, row.stock, row.synced_at)
         return "updated" if changed or stock_changed else "unchanged"
 

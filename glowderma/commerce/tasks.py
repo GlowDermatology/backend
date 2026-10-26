@@ -11,12 +11,17 @@ outbox. Delivery is at-least-once: each handler is idempotent at the provider bo
   transport errors raise (the dispatcher retries).
 * ``billz.push_sale`` — skip when the purchase is already pushed; never call a fake Billz under the
   production settings (customer contract §6.14: WARNING ``billz.sale_not_pushed``, the sale is entered by
-  hand) and never complete the sale of an order cancelled meanwhile; otherwise push through the Billz port,
-  which persists the Billz sale id the moment Billz created it (``billz_sales.PurchaseJournal``) so a retry
-  resumes on it, then ``loyalty.services.link_billz_sale`` and ``billz_sale_recorded`` once. Billz refusing
-  for good (``BillzRejected``: unknown product, closed shift, …) dead-letters the message at once with the
-  reason (``outbox.PermanentFailure``); a transient failure raises and is retried; a conflict raises, never a
-  silent success.
+  hand) and never complete the sale of an order cancelled meanwhile (checked before the push, again under
+  the Order lock right before the payment through ``PurchaseJournal.before_payment``, and after it: a sale
+  paid while the order was being cancelled is linked but gets no ``billz_sale_recorded``, ERROR
+  ``billz.sale_of_cancelled_order`` asks for a refund by hand); otherwise push through the Billz port, which
+  persists the Billz sale id the moment Billz created it (``billz_sales.PurchaseJournal``) so a retry resumes
+  on it, then ``loyalty.services.link_billz_sale`` and ``billz_sale_recorded`` once. Billz refusing for good
+  (``BillzRejected``: unknown product, a bill that is not what the customer paid, …) dead-letters the
+  message at once with the reason (``outbox.PermanentFailure``); a closed shift is deferred every
+  ``BILLZ_SHIFT_RETRY_MINUTES`` for ``BILLZ_SHIFT_RETRY_MAX_HOURS`` and a payment whose answer was lost
+  waits its quiet period (``outbox.RetryLater``: no attempt spent); any other failure raises and is
+  retried; a conflict raises, never a silent success.
 * ``refund.submit`` — Click: status check by ``provider_txn_id`` before any reversal; ``mark_submitting``
   (a fenced compare-and-set) is committed before the reversal call; ``succeeded`` / ``failed`` / ``unknown``
   (+ events); ``unknown`` is never retried automatically. Raises only on a transport error **before**
@@ -24,8 +29,8 @@ outbox. Delivery is at-least-once: each handler is idempotent at the provider bo
 
 Dead letters (``outbox.on_dead``): ``bts.create_shipment`` → shipment ``failed`` (``dead_letter``) +
 ``shipment_failed``; ``refund.submit`` → refund ``failed`` (``dead_letter``, never ``unknown``) +
-``refund_failed``; ``billz.push_sale`` → an ERROR line naming the order (the ``outbox.dead`` audit row
-carries the reason; staff record the sale in Billz by hand).
+``refund_failed``; ``billz.push_sale`` → an ERROR line naming the order and the Billz draft, if any (the
+``outbox.dead`` audit row carries the reason; staff complete or record the sale in Billz by hand).
 """
 
 from __future__ import annotations
@@ -53,7 +58,12 @@ from glowderma.delivery import services as delivery_services
 from glowderma.delivery.models import Shipment
 from glowderma.integrations import selectors as integration_selectors
 from glowderma.integrations import services as integration_services
-from glowderma.integrations.billz.ports import BillzRejected
+from glowderma.integrations.billz.ports import (
+    BillzPaymentPending,
+    BillzRejected,
+    BillzShiftClosed,
+    SaleCancelled,
+)
 from glowderma.integrations.bts.ports import BtsRejected, BtsUnavailable, CreateRequest, Parcel
 from glowderma.integrations.bts.registry import get_bts
 from glowderma.integrations.click.ports import ClickRefundRejected, ClickUnavailable
@@ -273,8 +283,32 @@ def push_sale(payload: dict[str, Any]) -> None:
     port = get_sale_port(services.fake_scenario(order, "billz"))
     try:
         receipt = port.push_sale(
-            sale_request(order, order_uuid, info.billz_sale_id), PurchaseJournal(purchase_id, order_uuid)
+            sale_request(order, order_uuid), PurchaseJournal(purchase_id, order_uuid, order_id)
         )
+    except SaleCancelled:
+        # cancelled after the push started: nothing was paid; the draft (if any) is named for staff
+        draft = loyalty_selectors.billz_push_info(purchase_id)
+        logger.error(
+            "billz.sale_of_cancelled_order order_id=%s billz_order_id=%s: the order was cancelled during the "
+            "push; nothing was paid, delete the draft in Billz",
+            order_id,
+            draft.billz_sale_id if draft is not None else "",
+        )
+        return
+    except BillzShiftClosed as exc:
+        # decision D2: wait for the next shift without spending the attempts, then give up "shift closed"
+        logger.warning(
+            "billz.sale_deferred order_id=%s reason=shift_closed error_code=%s", order_id, exc.error_code
+        )
+        raise outbox.RetryLater(
+            timedelta(minutes=settings.BILLZ_SHIFT_RETRY_MINUTES),
+            f"shift closed: Billz refused the sale of order {order_id} for now: {exc}",
+            give_up_after=timedelta(hours=settings.BILLZ_SHIFT_RETRY_MAX_HOURS),
+        ) from exc
+    except BillzPaymentPending as exc:
+        # review B2: a payment whose answer was lost is looked at again after a quiet period, never resent
+        logger.warning("billz.sale_deferred order_id=%s reason=payment_pending", order_id)
+        raise outbox.RetryLater(exc.retry_after, f"Billz payment of order {order_id} pending: {exc}") from exc
     except BillzRejected as exc:
         logger.error("billz.sale_rejected order_id=%s error_code=%s", order_id, exc.error_code)
         raise outbox.PermanentFailure(f"Billz refused the sale of order {order_id}: {exc}") from exc
@@ -288,7 +322,16 @@ def push_sale(payload: dict[str, Any]) -> None:
             billz_sale_ref=receipt.billz_sale_ref,
             pushed_at=now,
         )
-        if not locked.events.filter(type=_E.BILLZ_SALE_RECORDED).exists():
+        if locked.status == enums.OrderStatus.CANCELLED:
+            # cancelled while the payment was in flight (review A S5): Billz holds a paid sale of a cancelled
+            # order; no billz_sale_recorded event — staff refund the sale in Billz by hand
+            logger.error(
+                "billz.sale_of_cancelled_order order_id=%s billz_order_id=%s: the order was cancelled while "
+                "its sale was paid in Billz; refund the sale in Billz by hand",
+                order_id,
+                receipt.billz_order_id,
+            )
+        elif not locked.events.filter(type=_E.BILLZ_SALE_RECORDED).exists():
             services.record_event(
                 locked, _E.BILLZ_SALE_RECORDED, {"billz_order_id": receipt.billz_order_id}, at=now
             )
@@ -306,10 +349,13 @@ def on_billz_push_dead(message: OutboxMessage) -> None:
     alerts on. Nothing else changes: the purchase keeps ``billz_pushed_at`` null (unpushed online sale).
     """
     payload = _payload(message)
+    purchase_id = payload.get("purchase_id")
+    info = loyalty_selectors.billz_push_info(int(purchase_id)) if isinstance(purchase_id, int) else None
     logger.error(
-        "billz.sale_dead order_id=%s purchase_id=%s reason=%s",
+        "billz.sale_dead order_id=%s purchase_id=%s billz_order_id=%s reason=%s",
         payload.get("order_id"),
-        payload.get("purchase_id"),
+        purchase_id,
+        (info.billz_sale_id if info is not None else "") or "-",  # the draft staff complete or delete
         message.last_error,
     )
 

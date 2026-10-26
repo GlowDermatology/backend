@@ -10,7 +10,7 @@ import json
 import logging
 import threading
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -34,11 +34,16 @@ from glowderma.integrations.billz.client import (
 from glowderma.integrations.billz.fake import FakeBillz
 from glowderma.integrations.billz.live import LiveBillz, is_finished, sale_ref
 from glowderma.integrations.billz.ports import (
+    BillzCheckByHand,
     BillzListingIncomplete,
+    BillzMisconfigured,
     BillzNotSupported,
+    BillzPaymentPending,
     BillzProduct,
     BillzRejected,
+    BillzShiftClosed,
     BillzUnavailable,
+    SaleCancelled,
     SaleLine,
     SaleRequest,
 )
@@ -57,6 +62,7 @@ from glowderma.integrations.tests.billz_support import (
     SHOP_ID,
     BillzServer,
     Clock,
+    Journal,
     Sale,
     WorkerCrash,
     config,
@@ -90,7 +96,7 @@ def test_first_call_logs_in_and_keeps_the_pair_only_in_the_cache(caplog: pytest.
     assert server.labels() == ["POST /v1/auth/login", "GET /v2/products", "GET /v2/products"]
     login = server.requests[0]
     assert json.loads(login.content) == {"secret_token": SECRET}
-    assert "platform-id" not in login.headers  # only the refresh needs it (openapi.yaml info)
+    assert login.headers["platform-id"] == PLATFORM_ID  # openapi.yaml declares it on the login too (N4)
     assert "Authorization" not in login.headers
     assert all(r.headers["Authorization"] == "Bearer access-from-login" for r in server.requests[1:])
     stored = tokens_in_cache()
@@ -331,7 +337,7 @@ def test_429_without_retry_after_backs_off_and_gives_up() -> None:
     server.overrides["GET /v2/products"] = lambda request: httpx.Response(429, json=fixture("rate_limited"))
     with pytest.raises(BillzUnavailable, match="429"):
         products_call(adapter)
-    assert server.count("GET /v2/products") == 1 + billz_client.MAX_THROTTLED + 1
+    assert server.count("GET /v2/products") == 1 + billz_client.BATCH.max_throttled + 1
 
 
 def test_retry_after_parsing() -> None:
@@ -352,7 +358,7 @@ def test_5xx_on_a_read_is_retried_with_jittered_backoff_then_unavailable() -> No
     clock.sleeps.clear()
     with pytest.raises(BillzUnavailable, match="HTTP 500"):
         products_call(adapter)
-    assert server.count("GET /v2/products") == 1 + billz_client.MAX_ATTEMPTS
+    assert server.count("GET /v2/products") == 1 + billz_client.BATCH.max_attempts
     backoffs = [s for s in clock.sleeps if s >= 0.3]  # the limiter's own waits are slot-sized (≤ 1 ms here)
     assert backoffs == [0.375, 0.75, 1.5]  # base·2^(n-1)·(0.5 + jitter/2) with jitter 0.5
 
@@ -411,18 +417,28 @@ def _payment_error(code: int) -> dict[str, Any]:
         (400, _payment_error(20084), BillzUnavailable, "not calculated"),
         (400, _payment_error(20020), BillzUnavailable, "do not match"),
         (400, _payment_error(20015), BillzUnavailable, "no items"),
-        (400, _payment_error(20010), BillzRejected, "shift closed"),
-        (400, _payment_error(20082), BillzRejected, "cash box is closed"),
-        (400, _payment_error(20033), BillzRejected, "no open shift"),
+        # decision D2: a closed shift waits for the next one (deferred, never dead at once)
+        (400, _payment_error(20010), BillzShiftClosed, "shift closed"),
+        (400, _payment_error(20082), BillzShiftClosed, "cash box is closed"),
+        (400, _payment_error(20033), BillzShiftClosed, "no open shift"),
         (400, _payment_error(20016), BillzRejected, "not enough stock"),
         (400, _payment_error(20017), BillzRejected, "deleted"),
         (400, _payment_error(20036), BillzRejected, "product not found"),
         (400, _payment_error(20037), BillzRejected, "archived"),
         (400, _payment_error(20063), BillzRejected, "OFD"),
-        (400, _payment_error(20009), BillzRejected, "another shop"),
+        # decision D3: configuration-type refusals are retryable (and alert) until a setting is fixed
+        (400, _payment_error(20009), BillzMisconfigured, "another shop"),
+        (400, _payment_error(20085), BillzMisconfigured, "no access to the shop"),
         (400, _payment_error(20999), BillzRejected, "payment is possible only"),  # unknown → permanent
-        (403, fixture("forbidden"), BillzRejected, "may not call this route (access denied)"),
-        (404, {"code": 404, "message": "not found", "error": "", "data": None}, BillzRejected, "not found"),
+        (403, fixture("forbidden"), BillzMisconfigured, "may not call this route (access denied)"),
+        (
+            404,
+            {"code": 404, "message": "no route", "error": "", "data": None},
+            BillzMisconfigured,
+            "no route",
+        ),
+        (301, {}, BillzMisconfigured, "redirect (HTTP 301)"),
+        (308, {}, BillzMisconfigured, "check BILLZ_BASE_URL"),
         (400, {"error": {"code": "BAD_REQUEST", "message": "shop_id is required"}}, BillzRejected, "shop_id"),
         (
             422,
@@ -435,10 +451,38 @@ def _payment_error(code: int) -> dict[str, Any]:
     ],
 )
 def test_error_mapping(status: int, body: dict[str, Any], kind: type[Exception], text: str) -> None:
+    """Review B8 (probes test_redirects_and_route_errors_are_permanent and
+    test_configuration_and_shift_codes_are_permanent): only refusals staff cannot cure by a setting or by
+    waiting are permanent."""
     error = classify("POST /v2/order-payment/{order_id}", status, body)
     assert type(error) is kind and text in str(error)
-    if isinstance(error, BillzRejected) and "data" in body and isinstance(body["data"], dict):
+    if "data" in body and isinstance(body["data"], dict):
         assert error.error_code == body["data"].get("error_code")
+    assert error.http_status == status
+
+
+def test_a_404_of_one_resource_is_permanent_but_a_404_of_a_route_is_configuration() -> None:
+    gone = classify("GET /v2/order/{id}", 404, {"message": "not found"}, resource=True)
+    assert type(gone) is BillzRejected and gone.not_applied
+    route = classify("POST /v2/order", 404, {"message": "not found"})
+    assert type(route) is BillzMisconfigured and route.not_applied
+
+
+def test_what_an_error_says_about_the_outcome() -> None:
+    """``not_applied``: Billz certainly did not apply the request (the payment attempt is then forgotten)."""
+    assert classify("x", 400, _payment_error(20020)).not_applied  # refused: nothing was paid
+    assert classify("x", 429, {}).not_applied
+    assert not classify("x", 500, {}).not_applied  # Billz may have applied it
+    assert not classify("x", 408, fixture("async_timeout")).not_applied
+
+
+def test_billz_free_text_is_scrubbed_before_it_is_kept_anywhere() -> None:
+    """Review B13 (probe test_billz_free_text_lands_in_the_exception_text): a phone Billz echoes and control
+    characters never reach last_error, the outbox.dead audit row or a log line."""
+    body = {"code": 400, "message": "client with phone_number +998901234567 already exists\x00", "data": None}
+    error = classify("POST /v1/client", 400, body)
+    assert "+998901234567" not in str(error) and "998901234567" not in str(error)
+    assert "<number>" in str(error) and "\x00" not in str(error)
 
 
 # --- catalog sync -------------------------------------------------------------------------------------------
@@ -514,10 +558,26 @@ def test_full_sync_records_its_count_for_the_plausibility_guard() -> None:
         ("count_changed", "count changed while paging"),
         ("empty", "no product at all"),
         ("implausible", "fewer than 80"),
+        ("overlapping_pages", "3 distinct products for a count of 4 \\(1 repeated"),
+        ("other_shop", "no listed product carries an entry for the configured shop"),
     ],
 )
 def test_incomplete_or_implausible_full_listing_yields_nothing(scenario: str, message: str) -> None:
+    """Also review A M4 (probe test_full_listing_with_overlapping_pages_is_accepted_as_complete): page 2
+    repeats a product of page 1 while the count stays, so one product was never listed — the reconciliation
+    would hide it; and review B3: a shop id no product carries would zero every stock."""
     server = BillzServer()
+    if scenario == "overlapping_pages":
+        first, second = server.product_pages
+        second["products"][0] = first["products"][1]  # unstable order: page 2 repeats page 1's last product
+    elif scenario == "other_shop":
+        server.product_pages = [fixture("products_page1"), fixture("products_page2")]
+        adapter_shop = "6f244db4-75d6-4fac-9841-14867d45e36b"  # a valid UUID no product carries
+        listing: list[BillzProduct] = []
+        with pytest.raises(BillzListingIncomplete, match=message):
+            listing.extend(live(server, shop_id=adapter_shop).iter_products("full"))
+        assert listing == []
+        return
     if scenario == "short_page":
         server.product_pages = [fixture("products_page1")]
     elif scenario == "count_changed":
@@ -578,33 +638,19 @@ def test_unconfigured_adapter_refuses_every_call() -> None:
 # --- sale push ----------------------------------------------------------------------------------------------
 
 
-class Journal:
-    def __init__(self, server: BillzServer, fail: bool = False) -> None:
-        self.server = server
-        self.fail = fail
-        self.recorded: list[tuple[str, str]] = []
-        self.requests_before: list[str] = []
-
-    def order_created(self, billz_order_id: str, billz_sale_ref: str) -> None:
-        self.requests_before = self.server.labels()
-        if self.fail:
-            raise RuntimeError("database unavailable")
-        self.recorded.append((billz_order_id, billz_sale_ref))
-
-
-def sale(billz_order_id: str = "", phone: str = PHONE) -> SaleRequest:
+def sale(phone: str = PHONE, *lines: SaleLine) -> SaleRequest:
     from uuid import UUID
 
     return SaleRequest(
         order_id=10248,
         order_uuid=UUID(ORDER_UUID),
-        lines=[
+        lines=lines
+        or [
             SaleLine("4607012301", 2, 185_000),
             SaleLine("4607012302", 1, 95_000),
             SaleLine("4607012301", 1, 185_000),  # a second line of the same product: one upsert of 3
         ],
         customer_phone=phone,
-        billz_order_id=billz_order_id,
     )
 
 
@@ -620,27 +666,42 @@ def test_sale_push_happy_path(caplog: pytest.LogCaptureFixture) -> None:
         "5632631379",
     )
     assert journal.recorded == [(SALE_ID, "5632631379")]
+    # every barcode is resolved before the sale exists (review B10), the id persisted before anything else
     assert journal.requests_before == [
         "POST /v1/auth/login",
-        "POST /v2/order",
-    ]  # persisted before anything else
-    assert server.labels()[1:] == [
-        "POST /v2/order",
-        "GET /v2/products",  # barcode → product id (then cached)
-        "POST /v2/order-product/{order_id}",
         "GET /v2/products",
+        "GET /v2/products",
+        "POST /v2/order",
+    ]
+    assert server.labels()[3:] == [
+        "POST /v2/order",
+        "POST /v2/order-product/{order_id}",
         "POST /v2/order-product/{order_id}",
         "GET /v1/client",
         "PUT /v2/order-customer-new/{order_id}",
         "POST /v1/recalculate-order-bill/{order_id}",
         "POST /v2/order-payment/{order_id}",
     ]
-    create = server.requests[1]
+    create = server.requests[3]
     assert create.headers["Billz-Response-Channel"] == "HTTP"
+    assert create.url.params["Billz-Response-Channel"] == "HTTP"  # header and query parameter (N10)
     assert json.loads(create.content) == {"shop_id": SHOP_ID, "cashbox_id": CASHBOX_ID}
+    # decision D1: each product at the price the customer was charged
     assert server.bodies("POST /v2/order-product/{order_id}") == [
-        {"product_id": SERUM_ID, "sold_measurement_value": 3, "used_wholesale_price": False},
-        {"product_id": FOAM_ID, "sold_measurement_value": 1, "used_wholesale_price": False},
+        {
+            "product_id": SERUM_ID,
+            "sold_measurement_value": 3,
+            "used_wholesale_price": False,
+            "use_free_price": True,
+            "free_price": 185_000,
+        },
+        {
+            "product_id": FOAM_ID,
+            "sold_measurement_value": 1,
+            "used_wholesale_price": False,
+            "use_free_price": True,
+            "free_price": 95_000,
+        },
     ]
     assert all(
         r.headers["Billz-Response-Channel"] == "HTTP"
@@ -653,7 +714,7 @@ def test_sale_push_happy_path(caplog: pytest.LogCaptureFixture) -> None:
     assert server.bodies("POST /v2/order-payment/{order_id}") == [
         {
             "payments": [
-                {"company_payment_type_id": PAYMENT_TYPE_ID, "paid_amount": 654_000, "returned_amount": 0}
+                {"company_payment_type_id": PAYMENT_TYPE_ID, "paid_amount": 650_000, "returned_amount": 0}
             ],
             "comment": "Glow Derma #10248",
             "without_cashback": True,
@@ -661,12 +722,90 @@ def test_sale_push_happy_path(caplog: pytest.LogCaptureFixture) -> None:
     ]
     payment = [r for r in server.requests if server.label(r) == "POST /v2/order-payment/{order_id}"][0]
     assert "Billz-Response-Channel" not in payment.headers  # a synchronous method
-    # Billz's bill (654 000 at Billz prices) differs from ours (650 000): paid as billed, logged without PII
-    assert "billz.sale_total_differs" in caplog.text and "billz_total=654000" in caplog.text
+    assert journal.payments_announced == 1 and journal.payment_attempted_at is not None
     assert PHONE not in caplog.text and PHONE[1:] not in caplog.text
     assert server.sales[SALE_ID].payments and server.sales[SALE_ID].customer_id == CLIENT_ID
     assert cache.get(f"billz:client:{pii_ref(PHONE)}") == CLIENT_ID
     assert cache.get(billz_live.SALE_LOCK_KEY.format(order_uuid=ORDER_UUID)) is None
+
+
+def test_a_bill_other_than_what_the_customer_paid_is_never_paid(caplog: pytest.LogCaptureFixture) -> None:
+    """Decision D1 (review A M2, probe test_bill_total_differing_from_glowderma_total_is_paid_as_billed):
+    Billz ignoring the free price (or a Billz client discount) makes the bill differ from what the customer
+    paid; nothing is paid and staff check the draft."""
+    server = BillzServer()
+
+    def billz_prices(request: httpx.Request) -> httpx.Response:
+        bill = fixture("recalculate")
+        bill["total_price"] = 370_000  # 2 × 185 000 at Billz's own price, the customer paid 2 × 150 000
+        return httpx.Response(200, json=bill)
+
+    server.overrides["POST /v1/recalculate-order-bill/{order_id}"] = billz_prices
+    journal = Journal(server)
+    with caplog.at_level(logging.ERROR), pytest.raises(BillzCheckByHand, match="customer was charged 300000"):
+        live(server).push_sale(sale(PHONE, SaleLine("4607012301", 2, 150_000)), journal)
+    assert server.count("POST /v2/order-payment/{order_id}") == 0
+    assert journal.payments_announced == 0
+    assert server.bodies("POST /v2/order-product/{order_id}")[0]["free_price"] == 150_000
+    assert "billz.sale_total_differs" in caplog.text and "billz_total=370000" in caplog.text
+
+
+def test_a_fractional_bill_is_never_rounded_nor_paid() -> None:
+    """Review A S2 (probe test_fractional_bill_total_is_rounded_before_paying): a 99 000.4 bill is not paid
+    as 99 000 (Billz would answer 20020 ten times); D1 refuses it at once for staff."""
+    server = BillzServer()
+
+    def fractional(request: httpx.Request) -> httpx.Response:
+        bill = fixture("recalculate")
+        bill["total_price"] = 99_000.4
+        return httpx.Response(200, json=bill)
+
+    server.overrides["POST /v1/recalculate-order-bill/{order_id}"] = fractional
+    with pytest.raises(BillzCheckByHand, match="Billz bills 99000.4"):
+        live(server).push_sale(sale(PHONE, SaleLine("4607012302", 1, 99_000)), Journal(server))
+    assert server.count("POST /v2/order-payment/{order_id}") == 0
+
+
+def test_an_uncalculated_bill_is_retried_later() -> None:
+    server = BillzServer()
+
+    def uncalculated(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={**fixture("recalculate"), "is_calculated": False})
+
+    server.overrides["POST /v1/recalculate-order-bill/{order_id}"] = uncalculated
+    with pytest.raises(BillzUnavailable, match="not calculated") as caught:
+        live(server).push_sale(sale(), Journal(server))
+    assert not isinstance(caught.value, BillzRejected) and caught.value.error_code == 20084
+    assert server.count("POST /v2/order-payment/{order_id}") == 0
+
+
+def test_lines_of_one_product_at_different_prices_need_a_check_by_hand() -> None:
+    server = BillzServer()
+    with pytest.raises(BillzCheckByHand, match="different unit prices"):
+        live(server).push_sale(
+            sale(PHONE, SaleLine("4607012301", 1, 185_000), SaleLine("4607012301", 1, 180_000)),
+            Journal(server),
+        )
+    assert server.count("POST /v2/order") == 0
+
+
+def test_create_takes_the_sale_id_from_data_not_from_the_envelope() -> None:
+    """Review A S1 (probe test_create_prefers_envelope_id_over_data_id): openapi post_v2_order_result names
+    the reply message in the envelope's ``id`` and the sale in ``data.id``."""
+    server = BillzServer()
+    original = server._default
+
+    def create(request: httpx.Request) -> httpx.Response:
+        response = original("POST /v2/order", request)
+        body = response.json()
+        body["id"] = "99999999-0000-4000-8000-000000000099"
+        return httpx.Response(200, json=body)
+
+    server.overrides["POST /v2/order"] = create
+    journal = Journal(server)
+    live(server).push_sale(sale(), journal)
+    assert journal.recorded == [(SALE_ID, "5632631379")]
+    assert server.sales[SALE_ID].payments
 
 
 def test_sale_push_creates_a_missing_client_once() -> None:
@@ -681,6 +820,37 @@ def test_sale_push_creates_a_missing_client_once() -> None:
     server.sales.clear()
     adapter.push_sale(sale(phone="+998935550011"), Journal(server))
     assert server.created_clients == 1
+
+
+def test_a_stale_cached_client_id_is_looked_up_again_once() -> None:
+    """Review B9 / A N9 (probe test_a_stale_cached_client_id_is_never_looked_up_again): a cached client Billz
+    refuses is forgotten and resolved once more instead of failing every sale of the customer for 30 days."""
+    server = BillzServer()
+    key = billz_live.CLIENT_ID_KEY.format(ref=pii_ref(PHONE))
+    stale = "11111111-2222-4333-8444-555555555555"  # merged or deleted in Billz since it was cached
+    cache.set(key, stale, timeout=3600)
+    original = server._default
+
+    def link(request: httpx.Request) -> httpx.Response:
+        if json.loads(request.content)["customer_id"] == stale:
+            return httpx.Response(404, json={"code": 404, "message": "customer not found", "data": None})
+        return original("PUT /v2/order-customer-new/{order_id}", request)
+
+    server.overrides["PUT /v2/order-customer-new/{order_id}"] = link
+    live(server).push_sale(sale(), Journal(server))
+    assert server.count("GET /v1/client") == 1
+    assert cache.get(key) == CLIENT_ID and server.sales[SALE_ID].customer_id == CLIENT_ID
+    assert server.sales[SALE_ID].payments
+
+
+def test_a_freshly_resolved_client_billz_refuses_is_not_retried_again() -> None:
+    server = BillzServer()
+    server.overrides["PUT /v2/order-customer-new/{order_id}"] = lambda request: httpx.Response(
+        404, json={"code": 404, "message": "customer not found", "data": None}
+    )
+    with pytest.raises(BillzMisconfigured):
+        live(server).push_sale(sale(), Journal(server))
+    assert server.count("PUT /v2/order-customer-new/{order_id}") == 1  # not from the cache: no second try
 
 
 def test_sale_without_a_phone_links_no_client() -> None:
@@ -699,8 +869,8 @@ def test_sale_without_a_phone_links_no_client() -> None:
     ],
 )
 def test_a_crash_at_any_step_resumes_without_duplicates(crash_after: str) -> None:
-    """Billz applied the step, the worker died before it saw the answer; the outbox redelivers with the
-    persisted Billz sale id: one sale, the right quantities, one client link, one payment."""
+    """Billz applied the step, the worker died before it saw the answer; the outbox redelivers and the journal
+    names the persisted Billz sale: one sale, the right quantities, one client link, one payment."""
     server = BillzServer()
     journal = Journal(server)
     server.crash_after.add(crash_after)
@@ -709,8 +879,8 @@ def test_a_crash_at_any_step_resumes_without_duplicates(crash_after: str) -> Non
     assert (
         cache.get(billz_live.SALE_LOCK_KEY.format(order_uuid=ORDER_UUID)) is None
     )  # released on the way out
-    ((billz_order_id, _),) = journal.recorded
-    receipt = live(server).push_sale(sale(billz_order_id), Journal(server))
+    assert journal.recorded == [(SALE_ID, "5632631379")]
+    receipt = live(server).push_sale(sale(), journal)
     assert receipt.billz_order_id == SALE_ID
     assert list(server.sales) == [SALE_ID]
     assert server.sales[SALE_ID].items == {SERUM_ID: 3.0, FOAM_ID: 1.0}
@@ -724,78 +894,267 @@ def test_a_crash_at_any_step_resumes_without_duplicates(crash_after: str) -> Non
         assert server.labels()[-1] == "GET /v2/order/{id}"
 
 
-def test_resume_tops_up_only_the_missing_items() -> None:
+def test_resume_reasserts_every_line_at_the_customers_price() -> None:
+    """On resume every line is upserted again (absolute quantity and free price): a line Billz holds at its
+    own price is corrected before the bill is read; a product the order does not hold (a cashier's) is set to
+    0 (review A N5) instead of being paid."""
     server = BillzServer()
-    server.sales[SALE_ID] = billz_sale = Sale(SALE_ID, "5632631379", items={SERUM_ID: 3.0})
-    live(server).push_sale(sale(SALE_ID), Journal(server))
-    assert server.bodies("POST /v2/order-product/{order_id}") == [
-        {"product_id": FOAM_ID, "sold_measurement_value": 1, "used_wholesale_price": False}
+    cashier_product = "77777777-0000-4000-8000-000000000077"
+    server.prices[cashier_product] = 10_000
+    server.sales[SALE_ID] = billz_sale = Sale(
+        SALE_ID, "5632631379", items={SERUM_ID: 3.0, cashier_product: 1.0}
+    )
+    live(server).push_sale(sale(), Journal(server, billz_order_id=SALE_ID))
+    bodies = server.bodies("POST /v2/order-product/{order_id}")
+    assert bodies[0] == {
+        "product_id": cashier_product,
+        "sold_measurement_value": 0,
+        "used_wholesale_price": False,
+    }
+    assert [(body["product_id"], body["free_price"]) for body in bodies[1:]] == [
+        (SERUM_ID, 185_000),
+        (FOAM_ID, 95_000),
     ]
     assert billz_sale.items == {SERUM_ID: 3.0, FOAM_ID: 1.0}
+    assert billz_sale.payments[0]["payments"][0]["paid_amount"] == 650_000
 
 
 def test_journal_failure_stops_before_any_item_is_sent() -> None:
     server = BillzServer()
     with pytest.raises(RuntimeError, match="database unavailable"):
         live(server).push_sale(sale(), Journal(server, fail=True))
-    assert server.labels() == ["POST /v1/auth/login", "POST /v2/order"]  # the documented orphan draft window
+    # the documented orphan-draft window
+    assert server.labels() == [
+        "POST /v1/auth/login",
+        "GET /v2/products",
+        "GET /v2/products",
+        "POST /v2/order",
+    ]
 
 
 def test_deleted_or_unknown_sale_is_permanent() -> None:
     server = BillzServer()
     server.sales[SALE_ID] = Sale(SALE_ID, "5632631379", deleted=True)
     with pytest.raises(BillzRejected, match="was deleted") as deleted:
-        live(server).push_sale(sale(SALE_ID), Journal(server))
+        live(server).push_sale(sale(), Journal(server, billz_order_id=SALE_ID))
     assert deleted.value.error_code == 20017
     with pytest.raises(BillzRejected, match="not found"):
-        live(server).push_sale(sale("11111111-2222-4333-8444-555555555555"), Journal(server))
+        live(server).push_sale(sale(), Journal(server, billz_order_id="11111111-2222-4333-8444-555555555555"))
     assert server.count("POST /v2/order-payment/{order_id}") == 0
 
 
-def test_unknown_product_is_permanent_and_stops_before_payment() -> None:
+def test_an_unknown_product_is_permanent_and_leaves_no_draft() -> None:
+    """Review B10 (probe test_unknown_barcode_leaves_an_orphan_draft): every barcode is resolved before the
+    sale is created, so an unknown product dead-letters without an orphan draft in Billz."""
     server = BillzServer()
-    request = SaleRequest(
-        order_id=1, order_uuid=sale().order_uuid, lines=[SaleLine("4607099999", 1, 1000)], customer_phone=""
-    )
+    journal = Journal(server)
     with pytest.raises(BillzRejected, match="4607099999 not found") as rejected:
-        live(server).push_sale(request, Journal(server))
+        live(server).push_sale(sale(PHONE, SaleLine("4607099999", 1, 1000)), journal)
     assert rejected.value.error_code == 20036
-    assert server.count("POST /v2/order-payment/{order_id}") == 0
+    assert server.count("POST /v2/order") == 0 and journal.recorded == []
 
 
-def test_a_stale_cached_product_id_is_looked_up_again_once() -> None:
+@pytest.mark.parametrize("code", [20036, 20037])
+def test_a_stale_cached_product_id_is_looked_up_again_once(code: int) -> None:
+    """Also on 20037 (archived): review A N1 (probe test_cached_archived_product_id_is_not_refreshed_on_…)."""
     server = BillzServer()
-    cache.set("billz:product:4607012301", "aaaaaaaa-0000-4000-8000-000000000000", timeout=60)
+    stale = "aaaaaaaa-0000-4000-8000-000000000000"
+    cache.set("billz:product:4607012301", stale, timeout=60)
 
     def add(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content)
-        if payload["product_id"].startswith("aaaaaaaa"):
-            return httpx.Response(400, json=_payment_error(20036))
-        server.sales[SALE_ID].items[payload["product_id"]] = float(payload["sold_measurement_value"])
+        if payload["product_id"] == stale:
+            return httpx.Response(400, json=_payment_error(code))
+        server.apply_item(SALE_ID, payload)
         return httpx.Response(200, json=fixture("async_ok"))
 
     server.overrides["POST /v2/order-product/{order_id}"] = add
     live(server).push_sale(sale(), Journal(server))
     assert server.sales[SALE_ID].items == {SERUM_ID: 3.0, FOAM_ID: 1.0}
     assert cache.get("billz:product:4607012301") == SERUM_ID
+    assert server.sales[SALE_ID].payments
 
 
-@pytest.mark.parametrize(("code", "kind"), [(20084, BillzUnavailable), (20010, BillzRejected)])
-def test_payment_refusals_are_typed(code: int, kind: type[Exception]) -> None:
+@pytest.mark.parametrize(("code", "kind"), [(20084, BillzUnavailable), (20010, BillzShiftClosed)])
+def test_payment_refusals_are_typed_and_forget_the_attempt(code: int, kind: type[Exception]) -> None:
     server = BillzServer()
     server.overrides["POST /v2/order-payment/{order_id}"] = lambda request: httpx.Response(
         400, json=_payment_error(code)
     )
+    journal = Journal(server)
     with pytest.raises(kind):
-        live(server).push_sale(sale(), Journal(server))
+        live(server).push_sale(sale(), journal)
+    # Billz answered with a refusal: certainly not paid, so the next attempt may pay
+    assert (journal.payments_announced, journal.forgotten, journal.payment_attempted_at) == (1, 1, None)
+
+
+def test_a_lost_payment_answer_is_never_followed_by_a_second_payment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review B2 (probe test_lost_payment_answer_is_followed_by_a_second_payment_post): the payment attempt is
+    persisted before the request; while Billz still shows the sale open the next attempts wait for the quiet
+    period (a deferral, not a retry) and then stop for staff — a second POST is never sent."""
+    server = BillzServer()
+    calls: list[int] = []
+
+    def slow_payment(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        raise httpx.ReadTimeout("timed out", request=request)  # Billz may still be processing it
+
+    server.overrides["POST /v2/order-payment/{order_id}"] = slow_payment
+    journal = Journal(server)
+    with pytest.raises(BillzUnavailable, match="ReadTimeout") as first:
+        live(server).push_sale(sale(), journal)
+    assert not first.value.not_applied and journal.payment_attempted_at is not None
+    sent = journal.payment_attempted_at
+    # the outbox retries seconds later: GET /v2/order shows no payment yet → deferred, nothing sent
+    monkeypatch.setattr(timeutils, "now", lambda: sent + timedelta(seconds=10))
+    with pytest.raises(BillzPaymentPending) as pending:
+        live(server).push_sale(sale(), journal)
+    assert pending.value.retry_after == billz_live.PAYMENT_QUIET_PERIOD - timedelta(seconds=10)
+    # after the quiet period the sale is still open: stop for a check by hand, never pay again
+    monkeypatch.setattr(timeutils, "now", lambda: sent + billz_live.PAYMENT_QUIET_PERIOD)
+    with pytest.raises(BillzCheckByHand, match="not paying again"):
+        live(server).push_sale(sale(), journal)
+    assert len(calls) == 1 and server.count("POST /v2/order-payment/{order_id}") == 1
+
+
+def test_a_lost_payment_that_went_through_is_found_paid() -> None:
+    server = BillzServer()
+    server.crash_after.add("POST /v2/order-payment/{order_id}")
+    journal = Journal(server)
+    with pytest.raises(WorkerCrash):
+        live(server).push_sale(sale(), journal)
+    assert journal.payment_attempted_at is not None  # a crash keeps the attempt
+    receipt = live(server).push_sale(sale(), journal)
+    assert receipt.billz_sale_id == SALE_ID and server.count("POST /v2/order-payment/{order_id}") == 1
+
+
+@pytest.mark.parametrize(
+    ("finished_at", "sold_at", "payments", "state"),
+    [
+        ("0001-01-01T00:00:00Z", "", None, "open"),
+        ("2026-10-26 14:05:20", "", None, "paid"),
+        ("", "2026-10-26 14:05:20", None, "paid"),  # closed reported through sold_at (review A S3)
+        ("2026-10-26 14:05:20", "", [{"paid_amount": 650_000}], "paid"),
+        ("2026-10-26 14:05:20", "", [], "unclear"),  # closed, yet no payment
+        ("", "", [{"paid_amount": 650_000}], "unclear"),  # a payment on an open sale
+        ("", "", [], "open"),
+    ],
+)
+def test_sale_state_reads_every_paid_signal(
+    finished_at: str, sold_at: str, payments: list[dict[str, Any]] | None, state: str
+) -> None:
+    order: dict[str, Any] = {"finished_at": finished_at, "sold_at": sold_at, "order_detail": {}}
+    if payments is not None:
+        order["order_detail"]["order_payments"] = payments
+    assert billz_live.sale_state(order) == state
+
+
+def test_resume_never_pays_a_sale_billz_reports_sold() -> None:
+    """Review A S3 (probe test_resume_pays_again_when_finished_at_stays_zero_but_payments_exist)."""
+    server = BillzServer()
+    original = server._detail
+
+    def detail(sale_: Sale) -> dict[str, Any]:
+        body = original(sale_)
+        body["finished_at"] = ""  # Billz reports the close in sold_at instead
+        if sale_.payments:
+            body["sold_at"] = "2026-10-26 14:05:20"
+        return body
+
+    server._detail = detail  # type: ignore[method-assign,assignment]
+    journal = Journal(server)
+    live(server).push_sale(sale(), journal)
+    live(server).push_sale(sale(), journal)
+    assert server.count("POST /v2/order-payment/{order_id}") == 1
+
+
+def test_contradicting_paid_signals_retry_with_an_error_and_never_pay(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    server = BillzServer()
+    server.sales[SALE_ID] = Sale(SALE_ID, "5632631379", items={SERUM_ID: 3.0, FOAM_ID: 1.0})
+    original = server._detail
+
+    def detail(sale_: Sale) -> dict[str, Any]:
+        body = original(sale_)
+        body["order_detail"]["order_payments"] = [{"paid_amount": 650_000}]  # yet finished_at is zero
+        return body
+
+    server._detail = detail  # type: ignore[method-assign,assignment]
+    with caplog.at_level(logging.ERROR), pytest.raises(BillzUnavailable, match="contradicting"):
+        live(server).push_sale(sale(), Journal(server, billz_order_id=SALE_ID))
+    assert "billz.sale_state_unclear" in caplog.text
+    assert server.count("POST /v2/order-payment/{order_id}") == 0
+
+
+def test_an_order_cancelled_meanwhile_stops_before_the_payment() -> None:
+    """Review B11: the journal re-checks the order right before the payment request."""
+    server = BillzServer()
+    journal = Journal(server, cancelled=True)
+    with pytest.raises(SaleCancelled):
+        live(server).push_sale(sale(), journal)
+    assert server.count("POST /v2/order-payment/{order_id}") == 0
+    assert journal.recorded == [(SALE_ID, "5632631379")]  # the draft the caller names for staff
+
+
+def test_a_push_another_attempt_finished_returns_its_receipt() -> None:
+    server = BillzServer()
+    journal = Journal(server, billz_order_id=SALE_ID)
+    journal.billz_sale_ref = "5632631379"
+    journal.pushed = True
+    receipt = live(server).push_sale(sale(), journal)
+    assert (receipt.billz_sale_id, receipt.billz_sale_ref) == (SALE_ID, "5632631379")
+    assert server.requests == []
 
 
 def test_a_push_in_progress_elsewhere_is_retried_later() -> None:
     server = BillzServer()
-    cache.add(billz_live.SALE_LOCK_KEY.format(order_uuid=ORDER_UUID), 1, timeout=60)
-    with pytest.raises(BillzUnavailable, match="another worker"):
+    cache.add(billz_live.SALE_LOCK_KEY.format(order_uuid=ORDER_UUID), "another-worker", timeout=60)
+    with pytest.raises(BillzUnavailable, match="another worker") as caught:
         live(server).push_sale(sale(), Journal(server))
-    assert server.requests == []
+    assert caught.value.not_applied and server.requests == []
+    assert cache.get(billz_live.SALE_LOCK_KEY.format(order_uuid=ORDER_UUID)) == "another-worker"
+
+
+def test_the_sale_lock_is_released_and_renewed_only_by_its_owner() -> None:
+    """Review A S4 (probes test_sale_lock_is_deleted_even_when_another_worker_owns_it and
+    test_sale_lock_release_is_not_owner_checked): a worker whose lock expired and was taken by another never
+    deletes the other's lock, and stops before paying."""
+    server = BillzServer()
+    key = billz_live.SALE_LOCK_KEY.format(order_uuid=ORDER_UUID)
+    original = server._default
+
+    def recalc(request: httpx.Request) -> httpx.Response:
+        cache.set(key, "worker-B", 600)  # our lock expired and worker B took it meanwhile
+        return original("POST /v1/recalculate-order-bill/{order_id}", request)
+
+    server.overrides["POST /v1/recalculate-order-bill/{order_id}"] = recalc
+    journal = Journal(server)
+    with pytest.raises(BillzUnavailable, match="expired under this worker"):
+        live(server).push_sale(sale(), journal)
+    assert cache.get(key) == "worker-B"
+    assert server.count("POST /v2/order-payment/{order_id}") == 0 and journal.payments_announced == 0
+
+
+def test_the_push_ends_within_its_deadline() -> None:
+    """Review B5: one push never outlives the outbox lease; every wait honours the push deadline."""
+    clock = Clock()
+    server = BillzServer(clock)
+    adapter = live(server, clock)
+
+    def slow(request: httpx.Request) -> httpx.Response:
+        clock.now += 130  # each answer takes 130 s
+        server.apply_item(SALE_ID, json.loads(request.content))
+        return httpx.Response(200, json={**fixture("async_ok"), "id": SALE_ID})
+
+    server.overrides["POST /v2/order-product/{order_id}"] = slow
+    with pytest.raises(BillzUnavailable, match="deadline") as caught:
+        adapter.push_sale(sale(), Journal(server))
+    assert caught.value.not_applied
+    # after 260 s the next request (the client lookup) is never started, let alone the payment
+    assert server.labels()[-1] == "POST /v2/order-product/{order_id}"
+    assert server.count("POST /v2/order-payment/{order_id}") == 0
+    assert billz_live.PUSH_DEADLINE_SECONDS < 300 < billz_live.SALE_LOCK_TTL  # below the outbox lease
 
 
 def test_helpers() -> None:
@@ -809,7 +1168,8 @@ def test_helpers() -> None:
     assert billz_live.stock_of({"shop_measurement_values": [{"shop_id": SHOP_ID, "active_measurement_value": -1.5}]}, SHOP_ID) == -2  # fmt: skip  # noqa: E501
     assert billz_live.stock_of({"shop_measurement_values": "junk"}, SHOP_ID) == 0
     assert billz_live.volume_of({"custom_fields": [{"custom_field_system_name": "volume", "custom_field_value": "5 ml"}]}, "VOLUME") == "5 ml"  # fmt: skip  # noqa: E501
-    assert billz_live.volume_of({"product_attributes": []}, "") == ""
+    assert billz_live.volume_of({"product_attributes": []}, "") is None  # no field configured: not asserted
+    assert billz_live.volume_of({"product_attributes": []}, "Объём") == ""
     assert billz_live.aggregate([SaleLine("1", 1, 10), SaleLine("2", 2, 5), SaleLine("1", 2, 10)]) == [
         ("1", 3, 30),
         ("2", 2, 10),

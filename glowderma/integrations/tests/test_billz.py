@@ -20,6 +20,7 @@ from glowderma.integrations.billz.ports import (
     BillzRejected,
     BillzUnavailable,
     SaleLine,
+    SaleProgress,
     SaleReceipt,
     SaleRequest,
 )
@@ -139,8 +140,19 @@ def test_registry_live_is_the_live_adapter() -> None:
 
 
 class NoJournal:
+    """The fake never touches the journal."""
+
+    def progress(self) -> SaleProgress:
+        raise AssertionError("the fake keeps no progress")
+
     def order_created(self, billz_order_id: str, billz_sale_ref: str) -> None:
         raise AssertionError("the fake creates no Billz sale")
+
+    def before_payment(self) -> None:
+        raise AssertionError("the fake pays nothing")
+
+    def payment_not_applied(self) -> None:
+        raise AssertionError("the fake pays nothing")
 
 
 SALE = SaleRequest(

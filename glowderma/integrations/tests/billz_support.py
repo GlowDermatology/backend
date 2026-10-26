@@ -13,13 +13,16 @@ import re
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import httpx
 
+from glowderma.core import timeutils
 from glowderma.integrations.billz.client import BillzClient, BillzConfig
 from glowderma.integrations.billz.live import LiveBillz
+from glowderma.integrations.billz.ports import SaleCancelled, SaleProgress
 
 FIXTURES = Path(__file__).parent / "fixtures" / "billz"
 SHOP_ID = "c1056fcc-539b-47ea-8bc4-d9e337c433f0"
@@ -87,6 +90,58 @@ class Sale:
     customer_id: str = ""
     payments: list[dict[str, Any]] = field(default_factory=list)
     deleted: bool = False
+    free_prices: dict[str, float] = field(default_factory=dict)  # product id → use_free_price's free_price
+
+
+class Journal:
+    """An in-memory ``SaleJournal``: what the purchase row would persist. A test resumes a push by passing the
+    same journal again (``billz_order_id`` / ``payment_attempted_at`` survive like committed columns)."""
+
+    def __init__(
+        self,
+        server: BillzServer | None = None,
+        *,
+        billz_order_id: str = "",
+        fail: bool = False,
+        cancelled: bool = False,
+    ) -> None:
+        self.server = server
+        self.fail = fail
+        self.cancelled = cancelled
+        self.billz_order_id = billz_order_id
+        self.billz_sale_ref = ""
+        self.payment_attempted_at: datetime | None = None
+        self.pushed = False
+        self.recorded: list[tuple[str, str]] = []
+        self.requests_before: list[str] = []
+        self.payments_announced = 0
+        self.forgotten = 0
+
+    def progress(self) -> SaleProgress:
+        return SaleProgress(
+            billz_order_id=self.billz_order_id,
+            billz_sale_ref=self.billz_sale_ref,
+            payment_attempted_at=self.payment_attempted_at,
+            pushed=self.pushed,
+        )
+
+    def order_created(self, billz_order_id: str, billz_sale_ref: str) -> None:
+        if self.server is not None:
+            self.requests_before = self.server.labels()
+        if self.fail:
+            raise RuntimeError("database unavailable")
+        self.recorded.append((billz_order_id, billz_sale_ref))
+        self.billz_order_id, self.billz_sale_ref = billz_order_id, billz_sale_ref
+
+    def before_payment(self) -> None:
+        if self.cancelled:
+            raise SaleCancelled("order cancelled")
+        self.payments_announced += 1
+        self.payment_attempted_at = timeutils.now()
+
+    def payment_not_applied(self) -> None:
+        self.forgotten += 1
+        self.payment_attempted_at = None
 
 
 Handler = Callable[[httpx.Request], httpx.Response]
@@ -197,13 +252,7 @@ class BillzServer:
                 )
             return httpx.Response(200, json=self._detail(sale))
         if label == "POST /v2/order-product/{order_id}":
-            payload = json.loads(request.content)
-            sale = self.sales[sale_id]
-            quantity = float(payload["sold_measurement_value"])
-            if quantity == 0:
-                sale.items.pop(payload["product_id"], None)
-            else:
-                sale.items[payload["product_id"]] = quantity  # Billz: an upsert with the absolute quantity
+            self.apply_item(sale_id, json.loads(request.content))
             return httpx.Response(200, json={**fixture("async_ok"), "id": sale_id})
         if label == "GET /v1/client":
             phone = request.url.params.get("phone_number", "")
@@ -226,7 +275,7 @@ class BillzServer:
             sale = self.sales[sale_id]
             bill = fixture("recalculate")
             bill["order_id"] = sale_id
-            bill["total_price"] = sum(self.prices.get(pid, 0) * qty for pid, qty in sale.items.items())
+            bill["total_price"] = self.bill_total(sale)
             bill["items"] = [{"product_id": pid, "measurement_value": qty} for pid, qty in sale.items.items()]
             return httpx.Response(200, json=bill)
         if label == "POST /v2/order-payment/{order_id}":
@@ -239,6 +288,27 @@ class BillzServer:
             sale.payments.append(payload)
             return httpx.Response(200, json=fixture("payment_ok"))
         return httpx.Response(404, json={"code": 404, "message": "no route", "error": "", "data": None})
+
+    def apply_item(self, sale_id: str, payload: dict[str, Any]) -> None:
+        """Billz's ``POST /v2/order-product``: an upsert with the absolute quantity (and the free price)."""
+        sale = self.sales[sale_id]
+        product_id = payload["product_id"]
+        quantity = float(payload["sold_measurement_value"])
+        if quantity == 0:
+            sale.items.pop(product_id, None)
+            sale.free_prices.pop(product_id, None)
+            return
+        sale.items[product_id] = quantity
+        if payload.get("use_free_price"):
+            sale.free_prices[product_id] = float(payload["free_price"])
+        else:
+            sale.free_prices.pop(product_id, None)
+
+    def bill_total(self, sale: Sale) -> float:
+        """Σ quantity × (the item's free price, else Billz's retail price)."""
+        return sum(
+            qty * sale.free_prices.get(pid, self.prices.get(pid, 0)) for pid, qty in sale.items.items()
+        )
 
     def _products(self, request: httpx.Request) -> httpx.Response:
         params = request.url.params
@@ -271,10 +341,15 @@ class BillzServer:
         return detail
 
 
-def live(server: BillzServer, clock: Clock | None = None, **overrides: Any) -> LiveBillz:
-    """A ``LiveBillz`` against ``server`` (fake clock and sleeps when ``clock`` is given)."""
+def live(
+    server: BillzServer, clock: Clock | None = None, *, cache: Any = None, **overrides: Any
+) -> LiveBillz:
+    """A ``LiveBillz`` against ``server`` (fake clock and sleeps when ``clock`` is given; ``cache`` replaces
+    the Django cache everywhere the adapter uses one)."""
     cfg = config(**overrides)
     kwargs: dict[str, Any] = {"transport": server.transport, "jitter": lambda: 0.5}
     if clock is not None:
         kwargs.update(clock=clock, sleep=clock.sleep)
-    return LiveBillz(cfg, client=BillzClient(cfg, **kwargs))
+    if cache is not None:
+        kwargs["cache"] = cache
+    return LiveBillz(cfg, client=BillzClient(cfg, **kwargs), cache=cache)
