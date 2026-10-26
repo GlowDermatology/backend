@@ -29,6 +29,7 @@ from glowderma.core.idempotency import idempotent
 from glowderma.customers import selectors, services
 from glowderma.customers.api.customer import serializers as s
 from glowderma.customers.api.customer.auth_views import client_ip, require_social_available
+from glowderma.customers.api.customer.schema import DeleteBodyAutoSchema
 from glowderma.integrations.oauth.registry import CUSTOMER_PROVIDERS
 
 PARAMETERS = [*DEVICE_HEADERS, ACCEPT_LANGUAGE_HEADER]
@@ -53,6 +54,8 @@ class MeBase(CustomerAPIView):
 
 
 class MeView(MeBase):
+    schema = DeleteBodyAutoSchema()  # DELETE me/ carries the re-authentication body
+
     @extend_schema(
         operation_id="customer_me_retrieve",
         parameters=PARAMETERS,
@@ -234,6 +237,8 @@ class SocialLinkView(MeBase):
 
 
 class SocialUnlinkView(MeBase):
+    schema = DeleteBodyAutoSchema()  # DELETE carries the re-authentication body
+
     @extend_schema(
         operation_id="customer_me_social_unlink",
         parameters=[*PARAMETERS, PROVIDER_PARAM],

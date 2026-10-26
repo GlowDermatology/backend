@@ -64,17 +64,15 @@ class CategoriesView(PublicAPIView):
 
 class ProductListView(PublicAPIView):
     public_cache_seconds = 30
+    # Declared so drf-spectacular wraps the 200 in the ``Page<ProductCard>`` envelope (C§2.3) and documents
+    # ``page`` / ``page_size`` from the paginator; the view paginates explicitly below.
+    pagination_class = EnvelopePagination
     page_size_options = (20, 50)
     default_page_size = 20
 
     @extend_schema(
         operation_id="customer_catalog_products_list",
-        parameters=[
-            *PARAMETERS,
-            s.ProductListQuerySerializer,
-            OpenApiParameter("page", OpenApiTypes.INT, OpenApiParameter.QUERY),
-            OpenApiParameter("page_size", OpenApiTypes.INT, OpenApiParameter.QUERY, enum=[20, 50]),
-        ],
+        parameters=[*PARAMETERS, s.ProductListQuerySerializer],
         responses={200: s.ProductCardSerializer(many=True), **PUBLIC_CUSTOMER_ERRORS},
     )
     def get(self, request: Request) -> Response:
@@ -95,7 +93,7 @@ class ProductListView(PublicAPIView):
         if "in_stock" in filters:
             qs = selectors.filter_in_stock(qs, filters["in_stock"])
         qs = selectors.order_customer_products(qs, filters["ordering"], lang)
-        paginator = EnvelopePagination()
+        paginator = self.pagination_class()
         page: list[Product] = paginator.paginate_queryset(qs, request, view=self)
         return paginator.get_paginated_response(selectors.product_cards(page, lang, customer_id(request)))
 
