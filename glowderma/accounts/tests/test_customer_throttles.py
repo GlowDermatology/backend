@@ -97,7 +97,7 @@ def test_auth_throttles_key_on_the_hashed_fid_phone_and_ip() -> None:
         throttles.CustomerAuthIPThrottle().get_cache_key(req, VIEW) == "throttle_customer_auth_ip_203.0.113.9"
     )
     bare = request(data={"phone": 5})
-    assert throttles.SmsPhoneThrottle().get_cache_key(bare, VIEW) == "throttle_sms_phone_invalid"
+    assert throttles.SmsPhoneThrottle().get_cache_key(bare, VIEW) == "throttle_sms_phone_invalid:203.0.113.9"
     assert throttles.SmsPhoneThrottle().get_cache_key(request(data={"phone": "  "}), VIEW) is None
     assert throttles.SmsPhoneThrottle().get_cache_key(request(data={}), VIEW) is None
     assert throttles.SmsDeviceThrottle().get_cache_key(bare, VIEW) is None
@@ -154,3 +154,17 @@ def test_values_that_are_not_a_phone_share_one_invalid_bucket(value: object) -> 
     assert throttles.canonical_phone(value) is None
     assert throttles.phone_throttle_ident(value) == throttles.INVALID_PHONE_BUCKET
     assert throttles.phone_throttle_ident(None) is None and throttles.phone_throttle_ident(" ") is None
+
+
+@override_settings(THROTTLE_RATES={"sms_phone": "2/min"})
+def test_malformed_phones_of_one_device_do_not_throttle_another_devices_typo() -> None:
+    """Review nit (fix pass 2): the ``invalid`` bucket is per device (else per IP), so a client flooding
+    malformed phones cannot make an honest typo answer 429 instead of 400 ``invalid``."""
+    noisy = request(data={"phone": "x"}, **device_headers(fid="fid-noisy-0001"))
+    for _ in range(2):
+        assert throttles.SmsPhoneThrottle().allow_request(noisy, VIEW)
+    assert not throttles.SmsPhoneThrottle().allow_request(noisy, VIEW)
+    typo = request(data={"phone": "+99890123456"}, **device_headers(fid="fid-honest-001"))
+    assert throttles.SmsPhoneThrottle().allow_request(typo, VIEW)
+    key = str(throttles.SmsPhoneThrottle().get_cache_key(noisy, VIEW))
+    assert key == f"throttle_sms_phone_invalid:{pii_ref('fid-noisy-0001')}" and "fid-noisy" not in key

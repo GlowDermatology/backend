@@ -147,9 +147,9 @@ def canonical_phone(value: object) -> str | None:
 
 def phone_throttle_ident(value: object) -> str | None:
     """The per-phone throttle or guard ident of a submitted ``phone``: ``pii_ref`` of the canonical number;
-    one shared ``invalid`` bucket for any other present value (fail closed: no spelling escapes the per-phone
-    limits); ``None`` when the field is absent or blank (the view answers 400 ``required``). P1 keys the
-    ``customer_login`` guard with it too."""
+    ``invalid`` for any other present value (fail closed: no spelling escapes the per-phone limits;
+    :class:`SmsPhoneThrottle` scopes that bucket per device); ``None`` when the field is absent or blank (the
+    view answers 400 ``required``). P1 keys the ``customer_login`` guard with it too."""
     if value is None or (isinstance(value, str) and not value.strip()):
         return None
     canonical = canonical_phone(value)
@@ -158,7 +158,11 @@ def phone_throttle_ident(value: object) -> str | None:
 
 class SmsPhoneThrottle(ClientIPThrottle):
     """``auth/send-code/`` per phone (:func:`phone_throttle_ident`: the canonical number, never the raw
-    string, so Unicode-digit variants of one number share its key)."""
+    string, so Unicode-digit variants of one number share its key).
+
+    The ``invalid`` bucket is split per device (else per client IP): a malformed phone never reaches the SMS
+    provider (400 ``invalid``), so one client sending malformed values cannot turn every other user's typo
+    into a 429 (``sms_device`` and ``sms_ip`` still bound that client)."""
 
     scope = "sms_phone"
 
@@ -167,6 +171,8 @@ class SmsPhoneThrottle(ClientIPThrottle):
         ident = phone_throttle_ident(data.get("phone") if isinstance(data, dict) else None)
         if ident is None:
             return None
+        if ident == INVALID_PHONE_BUCKET:
+            ident = f"{INVALID_PHONE_BUCKET}:{device_ref(request) or self.get_ident(request)}"
         return self.cache_format % {"scope": self.scope, "ident": ident}
 
 
