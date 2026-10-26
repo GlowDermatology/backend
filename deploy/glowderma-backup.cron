@@ -1,0 +1,6 @@
+# /etc/cron.d/glowderma-backup — install: install -m 0644 -o root -g root deploy/glowderma-backup.cron /etc/cron.d/glowderma-backup
+# Cron has no line continuation: every entry is ONE line. The host clock is used: on a UTC host 21:15 is
+# 02:15 Tashkent, before the nightly jobs (03:00–04:23 Tashkent). Check: timedatectl.
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+15 21 * * * root /srv/glowderma/backend/deploy/backup.sh nightly >>/var/log/glowderma-backup.log 2>&1
