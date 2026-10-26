@@ -96,3 +96,29 @@ def _fresh(order: Order) -> None:
     Order.objects.filter(pk=order.pk).update(
         created_at=timeutils.now(), reservation_expires_at=timeutils.now() + timedelta(minutes=15)
     )
+
+
+@pytest.mark.parametrize("provider", ["click", "payme"])
+def test_simulate_fail_then_success_pays_the_order(
+    dev_routes: None, customer_client: APIClient, customer: Customer, provider: str
+) -> None:
+    """ "Payment failed, pay again": every run after the first uses a fresh provider transaction id."""
+    seed_policies()
+    order = place(customer, fulfilment="pickup", provider=provider)
+    _fresh(order)
+    url = f"/api/v1/dev/payments/{order.pk}/simulate/"
+    failed = customer_client.post(url, {"outcome": "fail", "provider": provider}, format="json")
+    assert failed.status_code == 200
+    succeeded = customer_client.post(url, {"outcome": "success", "provider": provider}, format="json")
+    assert succeeded.status_code == 200
+    for step in succeeded.json()["steps"]:
+        answer = step["response"]
+        assert answer.get("error", 0) == 0 if provider == "click" else "error" not in answer, step
+    order.refresh_from_db()
+    assert order.status == "processing"
+    attempts = list(Payment.objects.filter(order=order).order_by("id"))
+    assert [p.status for p in attempts] == ["failed", "paid"]
+    assert attempts[0].provider_txn_id != attempts[1].provider_txn_id
+    if provider == "click":
+        paydocs = {p.provider_state["click_paydoc_id"] for p in attempts}
+        assert len(paydocs) == 2

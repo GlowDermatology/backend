@@ -61,10 +61,30 @@ def _digits(value: str) -> str:
     return "".join(ch for ch in value if ch.isdigit()) or "1"
 
 
+def _attempt(order: Order) -> int:
+    """How many provider transactions the order has seen: the first run keeps the design's ids, every later
+    run (a "payment failed, pay again" retry) gets fresh ones, because a provider transaction id is never
+    reused (a closed one answers Click ``-9`` / Payme ``-31008``)."""
+    return order.payments.exclude(provider_txn_id="").count()
+
+
+def _fresh_id(base: str, attempt: int, *, pinned: bool, separator: str = "") -> str:
+    """``base`` on the first attempt or when the scenario pins the id; else ``base`` + a fixed-width attempt
+    suffix (fixed width keeps ids of different orders apart)."""
+    return base if pinned or attempt == 0 else f"{base}{separator}{attempt:03d}"
+
+
 def _click(order: Order, success: bool) -> list[dict[str, Any]]:
     scenario = services.fake_scenario(order, "click")
-    txn = _digits(fake_click.transaction_id(order.pk, scenario))
-    paydoc = _digits(fake_click.paydoc_id(order.pk, scenario))
+    attempt = _attempt(order)
+    txn = _fresh_id(
+        _digits(fake_click.transaction_id(order.pk, scenario)),
+        attempt,
+        pinned=bool(scenario.get("transaction_id")),
+    )
+    paydoc = _fresh_id(
+        _digits(fake_click.paydoc_id(order.pk, scenario)), attempt, pinned=bool(scenario.get("paydoc_id"))
+    )
     reference = payment_ref.build(order.pk)
     factory = RequestFactory()
     steps: list[dict[str, Any]] = []
@@ -104,7 +124,12 @@ def _click(order: Order, success: bool) -> list[dict[str, Any]]:
 
 def _payme(order: Order, success: bool) -> list[dict[str, Any]]:
     scenario = services.fake_scenario(order, "payme")
-    txn = fake_payme.transaction_id(order.pk, scenario)
+    txn = _fresh_id(
+        fake_payme.transaction_id(order.pk, scenario),
+        _attempt(order),
+        pinned=bool(scenario.get("transaction_id")),
+        separator="-",
+    )
     reference = payment_ref.build(order.pk)
     tiyin = order.total * 100
     factory = RequestFactory()
