@@ -719,3 +719,27 @@ def test_fake_click_in_production_refuses_a_malformed_complete_with_minus_1(
     assert row.event_key.startswith("rejected:") and row.raw_body == ""
     assert row.result["error_code"] == "fake_mode" and row.result["body"]["error"] == -1
     assert Payment.objects.get(pk=payment_id).status == "pending"
+
+
+def test_a_late_capture_alerts_once_committed_with_ids_only(
+    order: Order, now: datetime, django_capture_on_commit_callbacks: Any
+) -> None:
+    old_id = _prepared(order, now, seconds=10)
+    later = now + timedelta(seconds=40)
+    with at(later):
+        assert prepare(order, txn=TXN + 1)["error"] == 0  # the first payment is failed by us
+    with (
+        override_settings(ALERT_WEBHOOK_URL="https://alerts.example.uz/hook"),
+        django_capture_on_commit_callbacks(execute=True),
+        at(later + timedelta(seconds=5)),
+    ):
+        assert complete(order, old_id)["error"] == 0  # accepted and reversed: a late capture
+    (alert,) = OutboxMessage.objects.filter(topic="alert.send")
+    assert alert.payload["event"] == "payment.late_capture"
+    assert alert.payload["fields"] == {
+        "order_id": order.pk,
+        "payment_id": old_id,
+        "provider": "click",
+        "case": "failed_by_us",
+    }
+    assert alert.dedupe_key.startswith(f"alert:payment.late_capture:{old_id}:")

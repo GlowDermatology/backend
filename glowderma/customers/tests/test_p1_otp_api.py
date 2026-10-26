@@ -211,6 +211,15 @@ def test_global_budget_trips_with_an_error_log(caplog: pytest.LogCaptureFixture)
     assert any("otp.budget_tripped" in record.getMessage() for record in caplog.records)
 
 
+@override_settings(SMS_GLOBAL_HOURLY_LIMIT=1, ALERT_WEBHOOK_URL="https://alerts.example.uz/hook")
+def test_global_budget_trip_raises_one_alert_per_window() -> None:
+    assert send(app_client()).status_code == 200
+    for phone in ("+998907770042", "+998907770043"):
+        assert send(app_client(fid=OTHER_FID), phone=phone).status_code == 503
+    (alert,) = OutboxMessage.objects.filter(topic="alert.send")
+    assert (alert.payload["event"], alert.payload["fields"]) == ("otp.budget_tripped", {"limit": 1})
+
+
 def code_of(phone: str = PHONE) -> str:
     return "123456"
 

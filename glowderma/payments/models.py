@@ -120,6 +120,12 @@ class Payment(TimeStampedModel):
                 condition=Q(status__in=list(SETTLED_PAYMENT_STATUSES)),
                 name="payment_confirmed_idx",
             ),
+            # late captures whose money is not back yet (consistency report K5; payments.0003)
+            models.Index(
+                fields=["confirmed_at"],
+                condition=Q(error_code=LATE_CAPTURE, status=enums.PaymentStatus.PAID),
+                name="payment_late_capture_open_idx",
+            ),
         ]
 
     def __str__(self) -> str:

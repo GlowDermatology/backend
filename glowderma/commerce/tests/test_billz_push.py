@@ -578,6 +578,28 @@ def test_a_requeue_skips_a_sale_recorded_by_hand() -> None:
 
 
 @override_settings(BILLZ_MODE="live")
+def test_resolved_closes_a_dead_sale_only_once_it_is_recorded_by_hand() -> None:
+    """Integration of ``--resolved`` (ops) with billz_mark_recorded (NEW-2): closing a dead push alone would
+    leave the order on K1 and its units subtracted from stock, so it is refused until the sale is recorded."""
+    order = paid_order()
+    server = refusing_payment()
+    with patch("glowderma.commerce.billz_sales.get_billz", side_effect=lambda **kwargs: live(server)):
+        dead = dispatch(message_of(order.pk))
+    assert dead.status == "dead"
+    text = requeue("--resolved", "--order", str(order.pk))
+    assert f"refuse #{dead.pk}" in text and "billz_mark_recorded first" in text
+    assert "1 dead message(s) matched, 0 resolved, 1 refused." in text
+    dead.refresh_from_db()
+    assert dead.status == "dead"
+    call_command("billz_mark_recorded", "--order", str(order.pk), "--actor", admin().email, stdout=StringIO())
+    text = requeue("--resolved", "--order", str(order.pk))
+    assert f"resolve #{dead.pk}" in text and "1 resolved, 0 refused." in text
+    dead.refresh_from_db()
+    assert dead.status == "done"
+    assert AuditEntry.objects.filter(action="outbox.resolved", entity_id=str(dead.pk)).exists()
+
+
+@override_settings(BILLZ_MODE="live")
 def test_a_lost_payment_is_replayed_only_with_forget_payment_attempt(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

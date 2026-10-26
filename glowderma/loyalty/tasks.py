@@ -4,7 +4,9 @@ Each check is one SQL statement (one snapshot under READ COMMITTED), so concurre
 false mismatches. Every finding is written as an audit entry ``loyalty.reconciliation_mismatch`` (actor
 ``system``, ``entity_type="loyalty_account"``), then a summary ``loyalty.reconciliation_completed``. Nothing
 is corrected automatically: the ledger is append-only and a mismatch means a bug or a raw write, which staff
-investigate.
+investigate. Any mismatch also logs one ERROR ``loyalty.reconciliation_mismatch`` with the counts per check
+and raises the alert of the same name (``core.alerts``). The nightly run is part of the consistency report
+(``reporting.consistency_report``, 03:40 Tashkent), which calls :func:`reconcile_balances_now`.
 
 C2 and C3 follow **posting order**, i.e. ``id`` order per account: every posting holds the account row lock,
 so ids grow in insert order within an account, while ``at`` is business time (``post_entry`` keeps it
@@ -19,7 +21,7 @@ from typing import Any
 from celery import shared_task  # type: ignore[import-untyped]
 from django.db import connection
 
-from glowderma.core import audit
+from glowderma.core import alerts, audit
 from glowderma.loyalty.models import LoyaltyAccount
 
 logger = logging.getLogger(__name__)
@@ -133,6 +135,10 @@ def reconcile_balances_now() -> dict[str, Any]:
     audit.record(
         action="loyalty.reconciliation_completed", entity_type="loyalty", entity_id="ledger", after=summary
     )
+    if mismatches:
+        failing = {check: count for check, count in per_check.items() if count}
+        logger.error("loyalty.reconciliation_mismatch mismatches=%s checks=%s", mismatches, failing)
+        alerts.alert("loyalty.reconciliation_mismatch", {"mismatches": mismatches, "checks": failing})
     return summary
 
 

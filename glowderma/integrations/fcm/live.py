@@ -185,6 +185,12 @@ class LiveFcm:
             project_id=str(settings.FCM_PROJECT_ID), credentials_file=str(settings.FCM_CREDENTIALS_FILE)
         )
 
+    def is_configured(self) -> bool:
+        """The readiness probe (``health/?ready=1``; nothing is sent): the project id is set and the
+        service-account key file exists (the production settings parse it at boot)."""
+        path = self.credentials_file.strip()
+        return bool(self.project_id.strip() and path and Path(path).is_file())
+
     @property
     def _token_key(self) -> str:
         return f"{self.project_id}:{self.credentials_file}"

@@ -29,7 +29,7 @@ from glowderma.accounts.models import (
     SocialIdentity,
     StaffUser,
 )
-from glowderma.core import audit, enums, outbox, qr_store, secretbox, timeutils
+from glowderma.core import alerts, audit, enums, outbox, qr_store, secretbox, timeutils
 from glowderma.core.api.exceptions import (
     AuthFailed,
     Conflict,
@@ -1215,9 +1215,13 @@ def _cap_block(phone: str, *, fid: str, ip: str, now: datetime) -> Exception | N
 
 
 def _budget_block(now: datetime) -> Exception | None:
-    """The global hourly SMS breaker (503 ``sms_unavailable`` + ERROR ``otp.budget_tripped``)."""
+    """The global hourly SMS breaker (503 ``sms_unavailable`` + ERROR ``otp.budget_tripped`` + the alert of
+    the same name, once per dedupe window). The alert insert belongs to the caller's transaction:
+    ``auth/login/`` rolls its transaction back with the refusal (the ERROR line stays), ``auth/send-code/``
+    has none."""
     if _counter(_global_counter_key(now)) >= int(settings.SMS_GLOBAL_HOURLY_LIMIT):
         logger.error("otp.budget_tripped limit=%s", settings.SMS_GLOBAL_HOURLY_LIMIT)
+        alerts.alert("otp.budget_tripped", {"limit": int(settings.SMS_GLOBAL_HOURLY_LIMIT)})
         return SmsUnavailable(retry_after=_seconds_to_next_hour(now))
     return None
 

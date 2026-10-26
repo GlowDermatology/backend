@@ -125,6 +125,14 @@ class LiveBts:
             ready_to_take=bool(getattr(settings, "BTS_READY_TO_TAKE", True)),
         )
 
+    def is_configured(self) -> bool:
+        """The readiness probe (``health/?ready=1``; settings only, nothing is sent): the login, the password
+        and the sender's city code are set (and the branch code for a branch pickup)."""
+        required = [self.login, self.password, self.sender.city_code]
+        if self.pickup_type == "branch":
+            required.append(self.sender.branch_code)
+        return all(value.strip() for value in required)
+
     # --- transport ------------------------------------------------------------------------------------------
 
     def _headers(self, token: str | None = None) -> dict[str, str]:

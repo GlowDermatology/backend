@@ -4,6 +4,7 @@ from typing import Any, TypeVar
 
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
+from django.db.models import Q
 
 from glowderma.core import timeutils
 
@@ -131,6 +132,17 @@ class OutboxMessage(TimeStampedModel):
     last_error = models.TextField(blank=True)
     # first ``outbox.RetryLater`` of this message (``give_up_after`` counts from here); null = never deferred
     deferred_since = models.DateTimeField(null=True)
+
+    class Meta:
+        indexes = [
+            # every row that is not done (open and dead ones), in the dispatcher's claim order: the claim
+            # (status pending/failed/in_flight, ORDER BY available_at, id LIMIT 1) reads it in order and stops
+            # at the first due row, and the consistency report (K1 dead sales, K6) and requeue_outbox scan
+            # only these few rows instead of the done ones that make up the table (core.0010)
+            models.Index(
+                fields=["available_at", "id"], condition=~Q(status="done"), name="outbox_unfinished_idx"
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"{self.topic}: {self.dedupe_key} ({self.status})"

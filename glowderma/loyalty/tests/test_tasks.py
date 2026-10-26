@@ -107,12 +107,16 @@ def test_broken_chain_links_and_holds_are_reported_per_row() -> None:
     assert LedgerEntry.objects.count() == 6 and summary["mismatches"] == 5
 
 
-def test_reconciliation_is_scheduled_nightly_at_03_10_tashkent() -> None:
+def test_reconciliation_runs_nightly_inside_the_consistency_report_at_03_40_tashkent() -> None:
+    """M3: the nightly consistency report calls ``reconcile_balances_now`` itself, so the ledger
+    reconciliation has no beat entry of its own (it would run twice a night)."""
     from config.celery import app
 
-    entry = app.conf.beat_schedule["loyalty-reconcile-balances"]
-    assert entry["task"] == "loyalty.reconcile_balances" == tasks.reconcile_balances.name
-    assert (entry["schedule"].hour, entry["schedule"].minute) == ({3}, {10})
+    schedule = app.conf.beat_schedule
+    assert not any(entry["task"] == tasks.reconcile_balances.name for entry in schedule.values())
+    entry = schedule["reporting-consistency-report"]
+    assert entry["task"] == "reporting.consistency_report"
+    assert (entry["schedule"].hour, entry["schedule"].minute) == ({3}, {40})
     assert app.conf.timezone == "Asia/Tashkent"
 
 
@@ -173,3 +177,30 @@ def test_broken_reversal_links_and_hold_orders_are_reported_per_row() -> None:
         store_reversal.credit_reversal_entry_id is not None
         and online_reversal.credit_reversal_entry_id is not None
     )
+
+
+def test_mismatches_log_one_error_line_and_raise_one_alert(caplog: pytest.LogCaptureFixture) -> None:
+    """M3 (docs/ops/monitoring.md): any mismatch logs ERROR ``loyalty.reconciliation_mismatch`` with the
+    counts per failing check and queues the alert of the same name (ids and counts only)."""
+    import logging
+
+    from django.test import override_settings
+
+    from glowderma.core.models import OutboxMessage
+
+    account, _purchase, _ = build_chains()
+    assert tasks.reconcile_balances_now()["mismatches"] == 0
+    with connection.cursor() as cursor:
+        cursor.execute("UPDATE loyalty_loyaltyaccount SET balance = balance + 1 WHERE id = %s", [account.pk])
+    with (
+        override_settings(ALERT_WEBHOOK_URL="https://alerts.example.uz/hook"),
+        caplog.at_level(logging.ERROR, logger="glowderma.loyalty.tasks"),
+    ):
+        tasks.reconcile_balances_now()
+    assert (
+        "loyalty.reconciliation_mismatch mismatches=2 checks={'ledger_sum': 1, 'last_balance_after': 1}"
+        in caplog.text
+    )
+    (alert,) = OutboxMessage.objects.filter(topic="alert.send")
+    assert alert.payload["event"] == "loyalty.reconciliation_mismatch"
+    assert alert.payload["fields"] == {"mismatches": 2, "checks": {"ledger_sum": 1, "last_balance_after": 1}}

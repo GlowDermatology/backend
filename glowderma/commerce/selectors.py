@@ -15,16 +15,31 @@ from datetime import date, datetime, timedelta
 from typing import Any, Protocol, TypedDict
 
 from django.conf import settings
-from django.db.models import Count, IntegerField, OuterRef, Q, QuerySet, Subquery, Sum, TextField, Value
+from django.db.models import (
+    BigIntegerField,
+    Count,
+    Exists,
+    IntegerField,
+    OuterRef,
+    Q,
+    QuerySet,
+    Subquery,
+    Sum,
+    TextField,
+    Value,
+)
+from django.db.models.fields.json import KeyTextTransform
 from django.db.models.functions import Cast, Coalesce, TruncDay, TruncHour
 
 from glowderma.accounts.models import Customer
 from glowderma.catalog import selectors as catalog_selectors
 from glowderma.catalog.models import Product, ProductStock
-from glowderma.commerce import state
+from glowderma.commerce import state, topics
 from glowderma.commerce.models import Cart, CartItem, Order, OrderEvent, StockReservation
 from glowderma.core import enums, i18n, integration_modes, timeutils
+from glowderma.core.consistency import Finding, finding
 from glowderma.core.media import absolute_media_url
+from glowderma.core.models import OutboxMessage
 from glowderma.core.timeutils import TASHKENT
 from glowderma.delivery import selectors as delivery_selectors
 from glowderma.delivery.models import Shipment
@@ -377,6 +392,7 @@ __all__ = [
     "customer_order_detail",
     "customer_orders",
     "customer_timeline",
+    "dead_billz_sales",
     "honoured_paid",
     "in_flight",
     "inflight_payment",
@@ -407,6 +423,9 @@ __all__ = [
     "shipment_summary",
     "status_counts",
     "tracking_number",
+    "unrecorded_billz_sales",
+    "unrecorded_billz_sales_before",
+    "unshipped_paid_orders",
 ]
 
 
@@ -1141,3 +1160,76 @@ def provider_open_money(provider: str) -> OpenMoney:
         open_refunds=len(open_refunds),
         order_ids=order_ids[:OPEN_MONEY_MAX_ORDER_IDS],
     )
+
+
+# --- nightly consistency report (reporting.consistency_report, docs/ops/monitoring.md) ----------------------
+# Each returns a core.consistency.Finding (count + the first order ids, one statement); the docstring names
+# the index that bounds the scan.
+
+# Order statuses of an order that was paid and not cancelled.
+_PAID_STATUSES: tuple[str, ...] = (_S.PROCESSING, _S.HANDED_TO_COURIER, _S.DELIVERED)
+# Created-at slack of K1: an order is paid within its reservation (≤ 60 min) plus the in-flight grace, so its
+# creation precedes its payment by far less than a day; the bound only lets the index skip older history.
+_PAID_AFTER_CREATION = timedelta(days=1)
+
+
+def unrecorded_billz_sales(paid_since: datetime, paid_before: datetime, *, limit: int) -> Finding:
+    """K1: orders paid in ``[paid_since, paid_before)`` and not cancelled whose Billz sale is not recorded —
+    the online purchase has no ``billz_pushed_at`` or no Billz sale id (docs/integrations/billz.md §6). A
+    sale deferred for a closed Billz shift shows here until the shift opens (its outbox message is deferred,
+    K6 counts it once its window is over).
+
+    Plan: ``order_created_idx`` range scan on ``created_at >= paid_since − 1 day`` (implied by the payment
+    window, see :data:`_PAID_AFTER_CREATION`), then the purchase through its unique ``order_id``."""
+    queryset = Order.objects.filter(
+        created_at__gte=paid_since - _PAID_AFTER_CREATION,
+        paid_at__gte=paid_since,
+        paid_at__lt=paid_before,
+        status__in=list(_PAID_STATUSES),
+        purchase__source=enums.PurchaseSource.ONLINE,
+        purchase__reversed=False,
+    ).filter(Q(purchase__billz_pushed_at__isnull=True) | Q(purchase__billz_sale_id=""))
+    return finding(queryset, limit=limit)
+
+
+def unrecorded_billz_sales_before(paid_before: datetime, *, limit: int) -> Finding:
+    """K1 without a look-back: orders paid before ``paid_before`` and not cancelled whose Billz sale is not
+    recorded, however old — the report passes the start of :func:`unrecorded_billz_sales`' look-back, so the
+    two checks together cover every paid order and an old unpushed sale never drops out of the report.
+
+    Plan: the partial index ``purchase_unpushed_online_idx`` (loyalty.0005: the unrecorded online purchases
+    only) drives a semi-join to the order by its primary key; neither table is walked."""
+    queryset = Order.objects.filter(
+        pk__in=loyalty_selectors.unpushed_online_order_ids(),
+        paid_at__lt=paid_before,
+        status__in=list(_PAID_STATUSES),
+    )
+    return finding(queryset, limit=limit)
+
+
+def dead_billz_sales(*, limit: int) -> Finding:
+    """K1: ``billz.push_sale`` messages that are ``dead`` (never purged: core.retention): staff record or
+    complete the sale in Billz by hand, or replay it (``manage.py requeue_outbox --topic billz.push_sale
+    --dead``). The ids are the orders named by the messages.
+
+    Plan: ``outbox_unfinished_idx`` (core.0010, partial on NOT status = 'done': open and dead rows only),
+    filtered by status and topic."""
+    queryset = OutboxMessage.objects.filter(topic=topics.BILLZ_PUSH_SALE, status="dead").annotate(
+        order_ref=Cast(KeyTextTransform("order_id", "payload"), BigIntegerField())
+    )
+    return finding(queryset.filter(order_ref__isnull=False), limit=limit, id_field="order_ref")
+
+
+def unshipped_paid_orders(paid_before: datetime, *, limit: int) -> Finding:
+    """K4: delivery orders still ``processing`` that were paid before ``paid_before`` and have no BTS parcel:
+    no shipment row, or one ``not_created`` / ``failed`` (the dashboard's ``bts_failed`` is a subset).
+
+    Plan: ``order_status_idx`` range scan on ``status = 'processing'`` (open orders only), the shipment
+    through its unique ``order_id``."""
+    parcel = Shipment.objects.filter(
+        order_id=OuterRef("pk"), state__in=[Shipment.State.CREATED, Shipment.State.CANCELLED]
+    )
+    queryset = Order.objects.filter(
+        status=_S.PROCESSING, fulfilment=enums.FulfilmentMethod.DELIVERY, paid_at__lt=paid_before
+    ).exclude(Exists(parcel))
+    return finding(queryset, limit=limit)

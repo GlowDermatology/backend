@@ -24,6 +24,7 @@ from django.db.models import Q
 from django.db.models.functions import Coalesce
 
 from glowderma.core import enums, integration_modes, timeutils
+from glowderma.core.consistency import Finding, finding
 from glowderma.delivery.models import Shipment, ShipmentEvent
 from glowderma.integrations.bts.ports import BtsUnavailable, City, Region
 from glowderma.integrations.bts.registry import get_bts
@@ -242,6 +243,30 @@ def shipment_by_tracking(tracking_number: str) -> ShipmentInfo | None:
     return None if order_id is None else shipment_info(int(order_id))
 
 
+def untracked_parcels(status_before: datetime, *, limit: int) -> Finding:
+    """Consistency report K4: parcels created at BTS for orders not delivered yet (``processing`` or
+    ``handed_to_courier``) whose last BTS status — or their creation, before any — is older than
+    ``status_before``. A status equal to the previous one writes nothing (:func:`services.apply_status`), so
+    this reads "no new BTS status for N hours": a parcel stuck at BTS, or tracking (webhook and polling) that
+    stopped. The ids are order ids.
+
+    Plan (EXPLAIN on 120 000 shipments, 240 open orders): a merge join — ``order_status_idx`` on the two open
+    order statuses (a few hundred rows, sorted by id) against a walk of the shipments' unique ``order_id``
+    index in order, the state and the timestamps filtered on every shipment row. The planner picks it for the
+    ``ORDER BY order_id LIMIT`` of :func:`~glowderma.core.consistency.finding` (an IN-subquery on the orders
+    gets the same plan), so the cost grows with all shipments ever created (~45 ms per 120 000): linear, far
+    inside the check's 60 s statement timeout for years of parcels."""
+    queryset = (
+        Shipment.objects.filter(
+            state=Shipment.State.CREATED,
+            order__status__in=[enums.OrderStatus.PROCESSING, enums.OrderStatus.HANDED_TO_COURIER],
+        )
+        .annotate(reference=Coalesce("last_status_at", "bts_created_at"))
+        .filter(reference__lt=status_before)
+    )
+    return finding(queryset, limit=limit, id_field="order_id")
+
+
 __all__ = [
     "REGIONS_CACHE_KEY",
     "RegionCatalog",
@@ -256,6 +281,7 @@ __all__ = [
     "shipment_by_tracking",
     "stale_shipments",
     "shipment_for_order",
+    "untracked_parcels",
     "shipment_info",
     "shipment_view",
     "updated_at",

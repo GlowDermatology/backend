@@ -95,6 +95,11 @@ class LiveEskiz:
             callback_url=str(settings.ESKIZ_CALLBACK_URL or ""),
         )
 
+    def is_configured(self) -> bool:
+        """The readiness probe (``health/?ready=1``; settings only, nothing is sent): the account email and
+        password and the sender nickname are set."""
+        return all(value.strip() for value in (self.email, self.password, self.sender))
+
     # --- token ----------------------------------------------------------------------------------------------
 
     @staticmethod

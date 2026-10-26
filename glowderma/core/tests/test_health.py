@@ -52,7 +52,8 @@ def test_health_ready_lists_every_provider_mode() -> None:
 
     modes = {f"{name}_MODE": "fake" for name in ("OAUTH", "BILLZ", "FCM", "PAYME", "BTS", "ESKIZ")}
     with override_settings(**modes, CLICK_MODE="live"):
-        body = Client().get("/api/v1/health/?ready=1").json()
+        response = Client().get("/api/v1/health/?ready=1")
+    body = response.json()
     assert body["integrations"] == {
         "oauth": "fake",
         "billz": "fake",
@@ -62,7 +63,15 @@ def test_health_ready_lists_every_provider_mode() -> None:
         "bts": "fake",
         "eskiz": "fake",
     }
-    assert set(body) == {"status", "checks", "version", "integrations", "sandbox"} and body["sandbox"] == []
+    assert set(body) == {"status", "checks", "version", "integrations", "sandbox", "providers"}
+    assert body["sandbox"] == []
+    # live Click without its merchant settings (the test settings leave them empty) is not configured, so
+    # readiness fails for every caller
+    assert response.status_code == 503 and body["status"] == "error"
+    assert body["providers"] == {
+        "click": {"configured": False, "last_sync_at": None, "last_sync_age_seconds": None}
+    }
+    assert body["checks"] == dict.fromkeys(("database", "cache", "broker"), "ok")
     assert "integrations" not in Client().get("/api/v1/health/").json()
 
 
@@ -140,3 +149,122 @@ def test_provider_modes_serializer_follows_the_settings_map(monkeypatch: pytest.
         "eskiz",
         "sms",
     ]
+
+
+# --- M3 readiness: live providers' configured flags and sync ages (docs/ops/monitoring.md) -----------------
+
+ALL_FAKE = {f"{name}_MODE": "fake" for name in ("OAUTH", "BILLZ", "FCM", "CLICK", "PAYME", "BTS", "ESKIZ")}
+LIVE_BILLZ = {
+    "BILLZ_MODE": "live",
+    "BILLZ_SECRET_KEY": "billz-integration-key",
+    "BILLZ_SHOP_ID": "6b3c0e9a-1d2f-4a5b-8c7d-9e0f1a2b3c4d",
+    "BILLZ_CASHBOX_ID": "7c4d1f0b-2e3a-4b6c-9d8e-0f1a2b3c4d5e",
+    "BILLZ_PAYMENT_TYPE_ID": "8d5e2a1c-3f4b-4c7d-8e9f-1a2b3c4d5e6f",
+}
+
+
+@pytest.mark.django_db
+def test_ready_with_every_provider_fake_lists_no_provider() -> None:
+    from django.test import override_settings
+
+    with override_settings(**ALL_FAKE):
+        response = Client().get("/api/v1/health/?ready=1")
+    assert response.status_code == 200 and response.json()["providers"] == {}
+
+
+@pytest.mark.django_db
+def test_ready_reports_a_configured_live_billz_with_its_sync_age(monkeypatch: pytest.MonkeyPatch) -> None:
+    from datetime import datetime, timedelta
+
+    from django.test import override_settings
+
+    from glowderma.core import timeutils
+    from glowderma.integrations.models import IntegrationState
+
+    now = datetime.fromisoformat("2026-10-27T10:00:00+05:00")
+    monkeypatch.setattr(timeutils, "now", lambda: now)
+    IntegrationState.objects.filter(provider="billz").update(
+        last_sync_at=now - timedelta(minutes=53, seconds=7)
+    )
+    with override_settings(**{**ALL_FAKE, **LIVE_BILLZ}):
+        response = Client().get("/api/v1/health/?ready=1")
+    assert response.status_code == 200
+    assert response.json()["providers"] == {
+        "billz": {
+            "configured": True,
+            "last_sync_at": "2026-10-27T09:06:53+05:00",
+            "last_sync_age_seconds": 3187,
+        }
+    }
+
+
+@pytest.mark.django_db
+def test_a_live_provider_that_is_not_configured_fails_readiness_for_everyone() -> None:
+    """Outside the admin gate the 503 carries no reason (which provider is unconfigured is reconnaissance)."""
+    from django.test import override_settings
+
+    unconfigured = {**ALL_FAKE, **LIVE_BILLZ, "BILLZ_SHOP_ID": ""}
+    with override_settings(**unconfigured, ADMIN_API_ALLOWED_NETS=[ip_network("10.0.0.0/8")]):
+        outside = Client(REMOTE_ADDR="203.0.113.7").get("/api/v1/health/?ready=1")
+        inside = Client(REMOTE_ADDR="10.1.2.3").get("/api/v1/health/?ready=1")
+        shallow = Client(REMOTE_ADDR="203.0.113.7").get("/api/v1/health/")
+    assert outside.status_code == inside.status_code == 503
+    assert outside.json() == {
+        "status": "error",
+        "checks": dict.fromkeys(("database", "cache", "broker"), "ok"),
+        "version": settings.GIT_SHA,
+    }
+    assert inside.json()["providers"]["billz"] == {
+        "configured": False,
+        "last_sync_at": None,
+        "last_sync_age_seconds": None,
+    }
+    assert shallow.status_code == 200 and shallow.json() == {"status": "ok"}
+
+
+@pytest.mark.django_db
+def test_a_failing_probe_or_sync_read_is_logged_never_raised(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from datetime import datetime
+
+    from django.test import override_settings
+
+    from glowderma.core import readiness
+
+    class Broken:
+        def configured(self) -> dict[str, bool]:
+            raise RuntimeError("probe broke")
+
+        def last_syncs(self) -> dict[str, datetime | None]:
+            raise RuntimeError("sync read broke")
+
+    class Half(Broken):
+        def configured(self) -> dict[str, bool]:
+            return {"billz": True}
+
+    original = readiness.probe()
+    try:
+        readiness.register(Broken())
+        with override_settings(**ALL_FAKE):
+            broken = Client().get("/api/v1/health/?ready=1")
+        readiness.register(Half())
+        half = Client().get("/api/v1/health/?ready=1")
+    finally:
+        assert original is not None
+        readiness.register(original)
+    assert broken.status_code == 200 and broken.json()["providers"] == {}
+    assert half.status_code == 200
+    assert half.json()["providers"] == {
+        "billz": {"configured": True, "last_sync_at": None, "last_sync_age_seconds": None}
+    }
+    assert "health check providers failed" in caplog.text
+    assert "health check provider syncs failed" in caplog.text
+
+
+def test_readiness_without_a_probe_is_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    from glowderma.core import readiness
+
+    monkeypatch.setattr(readiness, "_probe", None)
+    assert readiness.probe() is None
+    assert readiness.live_configured() == {} and readiness.last_syncs() == {}

@@ -45,7 +45,7 @@ from glowderma.commerce.models import (
     OrderItem,
     StockReservation,
 )
-from glowderma.core import audit, enums, integration_modes, outbox, timeutils
+from glowderma.core import alerts, audit, enums, integration_modes, outbox, timeutils
 from glowderma.core.api.exceptions import (
     AlreadyPaid,
     AuthFailed,
@@ -904,15 +904,22 @@ def _announce_billz_refund(order_id: int, purchase_id: int) -> None:
     if info is None or not info.billz_sale_id:
         return
     sale_id, pushed = info.billz_sale_id, info.billz_pushed_at is not None
-    transaction.on_commit(
-        lambda: logger.error(
+
+    def announce() -> None:
+        logger.error(
             "billz.refund_by_hand order_id=%s billz_order_id=%s pushed=%s: the order was cancelled; "
             "refund the Billz sale (or delete its draft) in Billz by hand",
             order_id,
             sale_id,
             pushed,
         )
-    )
+        alerts.alert(
+            "billz.refund_by_hand",
+            {"order_id": order_id, "purchase_id": purchase_id, "pushed": pushed},
+            scope=str(order_id),  # one alert per order: each is a refund staff make by hand
+        )
+
+    transaction.on_commit(announce)
 
 
 def cancel_order(
@@ -1865,8 +1872,9 @@ def record_late_capture(
     ``payments.mark_late_captured`` (``paid`` + ``late_capture``), ``Refund(origin=late_capture)`` (Click
     ``requested`` + outbox ``refund.submit``, or ``manual_required`` without ``click_paydoc_id`` / with fake
     Click), event ``refund_requested`` (source system, with ``manual_reason``), audit ``payment.late_capture
-    {order_id, payment_id, provider, case}`` and ERROR ``payment.late_capture``. The order never changes
-    status. ``None`` when the payment was already recorded as a late capture (a replay)."""
+    {order_id, payment_id, provider, case}``, ERROR ``payment.late_capture`` and, after the commit, the alert
+    of the same name (scope: the payment). The order never changes status. ``None`` when the payment was
+    already recorded as a late capture (a replay)."""
     if case not in LATE_CAPTURE_CASES:
         raise ValueError(f"Unknown late-capture case {case!r}")
     _aware(at, "at")
@@ -1899,4 +1907,8 @@ def record_late_capture(
             after=details,
         )
         logger.error("payment.late_capture %s", details)
+        # ids and short codes only; once the refund is committed, one alert per payment
+        transaction.on_commit(
+            lambda: alerts.alert("payment.late_capture", details, scope=str(payment_id)), robust=True
+        )
         return refund

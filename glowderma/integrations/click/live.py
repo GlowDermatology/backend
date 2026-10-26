@@ -91,6 +91,13 @@ class LiveClick:
             pay_url=str(settings.CLICK_PAY_URL),
         )
 
+    def is_configured(self) -> bool:
+        """The readiness probe (``health/?ready=1``; settings only, nothing is sent): the three numeric Click
+        ids are real (not the ``00000`` default) and the secret key is set."""
+        ids = (self.service_id, self.merchant_id, self.merchant_user_id)
+        real_ids = all(value.strip().isdigit() and value.strip().strip("0") for value in ids)
+        return bool(real_ids and self.secret_key.strip())
+
     # --- helpers --------------------------------------------------------------------------------------------
 
     def _headers(self) -> dict[str, str]:

@@ -26,6 +26,7 @@ Handler = Callable[[OutboxMessage], None]
 
 _handlers: dict[str, Handler] = {}
 _dead_handlers: dict[str, Handler] = {}
+_deferral_windows: dict[str, Callable[[], timedelta]] = {}
 # Attempts after which a failing message goes dead (``core.tasks.dispatch_outbox``).
 MAX_ATTEMPTS = 10
 
@@ -97,6 +98,8 @@ class RequeueHooks:
       provider's draft staff look up);
     * ``skip_reason(message)`` — non-empty: the message is listed but not requeued (its effect was already
       done another way, e.g. by hand);
+    * ``resolve_refusal(message)`` — ``--resolved`` only; non-empty: the message is listed but not closed
+      (closing it alone would leave the effect undone, e.g. a Billz sale not yet recorded by hand);
     * ``warning`` — printed once before the listing;
     * ``forget_payment_attempt(message, actor)`` — ``--forget-payment-attempt``: clears the topic's guard
       against a second payment once staff confirmed the provider never took the first one; audited by the
@@ -107,6 +110,7 @@ class RequeueHooks:
     skip_reason: Callable[[OutboxMessage], str]
     warning: str = ""
     forget_payment_attempt: Callable[[OutboxMessage, Any], str] | None = None
+    resolve_refusal: Callable[[OutboxMessage], str] | None = None
 
 
 _requeue_hooks: dict[str, RequeueHooks] = {}
@@ -121,12 +125,38 @@ def requeue_hooks(topic: str) -> RequeueHooks | None:
     return _requeue_hooks.get(topic)
 
 
+def register_deferral_window(topic: str, window: Callable[[], timedelta]) -> None:
+    """Declare how long a message of ``topic`` may stay deferred (:class:`RetryLater`) before it counts as
+    stuck — the ``give_up_after`` its handler passes. The nightly consistency report (K6) reads it; topics
+    that declare nothing get ``settings.OUTBOX_DEFERRAL_WINDOW_HOURS``."""
+    _deferral_windows[topic] = window
+
+
+def deferral_windows() -> dict[str, timedelta]:
+    """``{topic: window}`` of every topic that declared one (:func:`register_deferral_window`)."""
+    return {topic: window() for topic, window in _deferral_windows.items()}
+
+
 def notify_dead(message: OutboxMessage) -> None:
+    """Called once after ``message`` went dead and was audited: the ``outbox.dead`` alert (every topic but the
+    alert topic itself, so a broken alert webhook cannot loop) and the topic's :func:`on_dead` hook."""
+    from glowderma.core import alerts
+
+    try:
+        message.refresh_from_db()
+    except Exception:
+        logger.exception("Dead-letter hook failed topic=%s id=%s", message.topic, message.pk)
+        return
+    if message.topic != alerts.ALERT_TOPIC:
+        alerts.alert(
+            "outbox.dead",
+            {"topic": message.topic, "message_id": message.pk, "attempts": message.attempts},
+            scope=message.topic,
+        )
     handler = _dead_handlers.get(message.topic)
     if handler is None:
         return
     try:
-        message.refresh_from_db()
         handler(message)
     except Exception:
         logger.exception("Dead-letter hook failed topic=%s id=%s", message.topic, message.pk)

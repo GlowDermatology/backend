@@ -128,3 +128,55 @@ def test_topic_hooks_describe_skip_and_warn() -> None:
         assert done.status == "dead"
     finally:
         outbox._requeue_hooks.pop("demo.hooked", None)
+
+
+def test_resolved_closes_the_chosen_dead_messages_without_running_them() -> None:
+    handled = dead("demo.sync:by-hand")
+    other = dead("demo.sync:other")
+    output = requeue("--topic", "demo.sync", "--dead", "--resolved", "--id", str(handled.pk))
+    assert f"resolve #{handled.pk} demo.sync:by-hand" in output
+    assert "demo.sync: 1 dead message(s) matched, 1 resolved, 0 refused." in output
+    handled.refresh_from_db()
+    other.refresh_from_db()
+    assert (handled.status, handled.attempts, other.status) == ("done", 1, "dead")
+    entry = AuditEntry.objects.get(action="outbox.resolved", entity_id=str(handled.pk))
+    assert entry.reason == "manage.py requeue_outbox --resolved"
+    assert entry.before is not None and entry.before["status"] == "dead"
+    assert not AuditEntry.objects.filter(action="outbox.requeued").exists()
+    dry = requeue("--topic", "demo.sync", "--dead", "--resolved", "--dry-run")
+    assert f"would resolve #{other.pk}" in dry and "0 resolved, 0 refused (dry run" in dry
+
+
+def test_resolved_honours_the_topic_refusal_and_never_skips() -> None:
+    """A topic's hooks refuse to close a message whose effect is not done yet; ``skip_reason`` (a requeue
+    guard) does not apply to ``--resolved``, and the requeue warning is not printed."""
+    outbox.on_requeue(
+        "demo.hooked",
+        outbox.RequeueHooks(
+            describe=lambda message: f"order {message.payload['order_id']}",
+            skip_reason=lambda message: "done by hand",
+            warning="check the provider first",
+            resolve_refusal=lambda message: "record it first" if message.payload["order_id"] == 2 else "",
+        ),
+    )
+    try:
+        done = dead("demo.hooked:1", topic="demo.hooked")
+        pending = dead("demo.hooked:2", topic="demo.hooked")
+        OutboxMessage.objects.filter(pk=pending.pk).update(payload={"order_id": 2})
+        output = requeue("--topic", "demo.hooked", "--dead", "--resolved")
+        assert "WARNING" not in output
+        assert f"resolve #{done.pk} demo.hooked:1 [order 1]" in output
+        assert f"refuse #{pending.pk} demo.hooked:2 [order 2]: record it first" in output
+        assert "2 dead message(s) matched, 1 resolved, 1 refused." in output
+        done.refresh_from_db()
+        pending.refresh_from_db()
+        assert (done.status, pending.status) == ("done", "dead")
+    finally:
+        outbox._requeue_hooks.pop("demo.hooked", None)
+
+
+def test_forget_payment_attempt_cannot_resolve() -> None:
+    with pytest.raises(CommandError, match="cannot be combined with --resolved"):
+        requeue(
+            "--topic", "billz.push_sale", "--dead", "--resolved", "--forget-payment-attempt", "--order", "1"
+        )

@@ -61,7 +61,7 @@ from glowderma.catalog import topics as catalog_topics
 from glowderma.commerce import selectors, services, topics
 from glowderma.commerce.billz_sales import PurchaseJournal, get_sale_port, sale_request
 from glowderma.commerce.models import Order, StockReservation
-from glowderma.core import audit, enums, integration_modes, outbox, timeutils
+from glowderma.core import alerts, audit, enums, integration_modes, outbox, timeutils
 from glowderma.core.api.exceptions import InvalidTransition
 from glowderma.core.models import OutboxMessage
 from glowderma.delivery import selectors as delivery_selectors
@@ -386,6 +386,7 @@ def push_sale(payload: dict[str, Any]) -> None:
                 order_id,
                 info.billz_sale_id,
             )
+            _alert_cancelled_sale(order_id, purchase_id, "push_stopped")
         else:
             logger.warning("billz.sale_skipped_cancelled order_id=%s purchase_id=%s", order_id, purchase_id)
         return
@@ -403,6 +404,7 @@ def push_sale(payload: dict[str, Any]) -> None:
             order_id,
             draft.billz_sale_id if draft is not None else "",
         )
+        _alert_cancelled_sale(order_id, purchase_id, "cancelled_during_push")
         return
     except BillzShiftClosed as exc:
         # decision D2: wait for the next shift without spending the attempts, then give up "shift closed"
@@ -444,6 +446,7 @@ def push_sale(payload: dict[str, Any]) -> None:
                 order_id,
                 receipt.billz_order_id,
             )
+            transaction.on_commit(lambda: _alert_cancelled_sale(order_id, purchase_id, "paid_after_cancel"))
         elif not locked.events.filter(type=_E.BILLZ_SALE_RECORDED).exists():
             services.record_event(
                 locked, _E.BILLZ_SALE_RECORDED, {"billz_order_id": receipt.billz_order_id}, at=now
@@ -459,6 +462,15 @@ def _order_product_ids(order_id: int) -> list[int]:
     )
 
 
+def _alert_cancelled_sale(order_id: int, purchase_id: int, case: str) -> None:
+    """The ``billz.sale_of_cancelled_order`` alert (ids only; the ERROR line names the Billz sale)."""
+    alerts.alert(
+        "billz.sale_of_cancelled_order",
+        {"order_id": order_id, "purchase_id": purchase_id, "case": case},
+        scope=str(order_id),  # one alert per order: another order's sale is another action for staff
+    )
+
+
 @outbox.register(topics.BILLZ_PUSH_SALE)
 def handle_billz_push_sale(message: OutboxMessage) -> None:
     push_sale(_payload(message))
@@ -470,6 +482,13 @@ def handle_stock_synced(message: OutboxMessage) -> None:
     settled = services.settle_billz_reservations()
     if settled:
         logger.info("billz.reservations_settled count=%s", settled)
+
+
+# A deferred sale (closed shift, decision D2) gives up after BILLZ_SHIFT_RETRY_MAX_HOURS: past that the
+# nightly consistency report (K6) counts a message still deferred as stuck.
+outbox.register_deferral_window(
+    topics.BILLZ_PUSH_SALE, lambda: timedelta(hours=int(settings.BILLZ_SHIFT_RETRY_MAX_HOURS))
+)
 
 
 def on_billz_push_dead(message: OutboxMessage) -> None:
@@ -487,6 +506,11 @@ def on_billz_push_dead(message: OutboxMessage) -> None:
         purchase_id,
         (info.billz_sale_id if info is not None else "") or "-",  # the draft staff complete or delete
         message.last_error,
+    )
+    alerts.alert(
+        "billz.sale_dead",
+        {"order_id": payload.get("order_id"), "purchase_id": purchase_id, "message_id": message.pk},
+        scope=str(payload.get("order_id")),  # one alert per order (a sale each staff enters by hand)
     )
 
 
@@ -522,6 +546,16 @@ def push_already_recorded(message: OutboxMessage) -> str:
     if info is None or info.billz_pushed_at is None:
         return ""
     return f"already recorded in Billz at {info.billz_pushed_at.isoformat()} (by hand or by an earlier push)"
+
+
+def push_not_recorded(message: OutboxMessage) -> str:
+    """``requeue_outbox --resolved``: a dead push closes only once its sale is recorded by hand
+    (``billz_mark_recorded`` takes the order off K1 and stops its units counting against stock; closing the
+    message alone would not)."""
+    _, info = _push_info(message)
+    if info is None or info.billz_pushed_at is not None:
+        return ""
+    return "not recorded in Billz yet: record the hand-entered sale with manage.py billz_mark_recorded first"
 
 
 def forget_payment_attempt(message: OutboxMessage, actor: Any) -> str:
@@ -569,6 +603,7 @@ outbox.on_requeue(
         skip_reason=push_already_recorded,
         warning=REQUEUE_WARNING,
         forget_payment_attempt=forget_payment_attempt,
+        resolve_refusal=push_not_recorded,
     ),
 )
 
@@ -993,8 +1028,9 @@ def poll_bts() -> list[int]:
 
 def report_fake_provider_open_money() -> list[str]:
     """At worker start: one ERROR ``providers.fake_with_open_money {provider, open_transactions, open_refunds,
-    order_ids}`` per payment provider that is fake under the production settings and still holds open money
-    (the operator procedure of §6.14 was skipped). Writes nothing; returns the providers reported."""
+    order_ids}`` and the alert of the same name (scope: the provider) per payment provider that is fake under
+    the production settings and still holds open money (the operator procedure of §6.14 was skipped). Changes
+    no payment; returns the providers reported."""
     reported = []
     for provider in (enums.PaymentProvider.CLICK, enums.PaymentProvider.PAYME):
         if not integration_modes.fake_in_production(provider):
@@ -1002,15 +1038,14 @@ def report_fake_provider_open_money() -> list[str]:
         money = selectors.provider_open_money(provider)
         if money.open_transactions == 0 and money.open_refunds == 0:
             continue
-        logger.error(
-            "providers.fake_with_open_money %s",
-            {
-                "provider": str(provider),
-                "open_transactions": money.open_transactions,
-                "open_refunds": money.open_refunds,
-                "order_ids": money.order_ids,
-            },
-        )
+        details = {
+            "provider": str(provider),
+            "open_transactions": money.open_transactions,
+            "open_refunds": money.open_refunds,
+            "order_ids": money.order_ids,
+        }
+        logger.error("providers.fake_with_open_money %s", details)
+        alerts.alert("providers.fake_with_open_money", details, scope=str(provider))
         reported.append(str(provider))
     return reported
 

@@ -188,6 +188,34 @@ def test_open_money_at_worker_start(caplog: pytest.LogCaptureFixture) -> None:
     assert Payment.objects.filter(order=click_order).get().status == "pending"
 
 
+def test_open_money_at_worker_start_raises_one_alert_per_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    from glowderma.commerce import selectors
+
+    held = {
+        "click": selectors.OpenMoney(open_transactions=1, open_refunds=0, order_ids=[10248]),
+        "payme": selectors.OpenMoney(open_transactions=0, open_refunds=2, order_ids=[10249, 10250]),
+    }
+    monkeypatch.setattr(selectors, "provider_open_money", lambda provider: held[str(provider)])
+    with override_settings(
+        DEV_FEATURES_ALLOWED=False,
+        CLICK_MODE="fake",
+        PAYME_MODE="fake",
+        ALERT_WEBHOOK_URL="https://alerts.example.uz/hook",
+    ):
+        assert tasks.report_fake_provider_open_money() == ["click", "payme"]
+    alerts = OutboxMessage.objects.filter(topic="alert.send").order_by("id")
+    assert [(a.payload["event"], a.payload["fields"]) for a in alerts] == [
+        (
+            "providers.fake_with_open_money",
+            {"provider": "click", "open_transactions": 1, "open_refunds": 0, "order_ids": [10248]},
+        ),
+        (
+            "providers.fake_with_open_money",
+            {"provider": "payme", "open_transactions": 0, "open_refunds": 2, "order_ids": [10249, 10250]},
+        ),
+    ]
+
+
 def test_no_open_money_no_alarm(caplog: pytest.LogCaptureFixture) -> None:
     with override_settings(DEV_FEATURES_ALLOWED=False, CLICK_MODE="fake", PAYME_MODE="fake"):
         with caplog.at_level(logging.ERROR):
