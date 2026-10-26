@@ -18,6 +18,7 @@ from glowderma.commerce import services, tasks, topics
 from glowderma.commerce.models import OrderEvent
 from glowderma.commerce.tests.support import AT, admin, pay, place, product, shopper
 from glowderma.core import timeutils
+from glowderma.core.api.exceptions import Conflict
 from glowderma.core.models import AuditEntry, OutboxMessage
 from glowderma.core.seeding import pinned_clock
 from glowderma.core.tasks import dispatch_outbox
@@ -410,3 +411,19 @@ def test_cancelling_an_order_whose_billz_sale_exists_asks_for_a_refund_by_hand(
     with caplog.at_level(logging.ERROR), django_capture_on_commit_callbacks(execute=True):
         services.cancel_order(order.pk, "Mijoz so‘rovi bilan", admin().pk)
     assert f"billz.refund_by_hand order_id={order.pk} billz_order_id={SALE_ID} pushed=True" in caplog.text
+
+
+def test_the_payment_recheck_waits_for_the_order_row_only_briefly() -> None:
+    """An admin cancel holding the Order row (a BTS call) makes the push fail and retry before paying,
+    instead of holding the push past its deadline."""
+    from glowderma.commerce import billz_sales
+
+    order = paid_order()
+    purchase = Purchase.objects.get(order=order)
+    assert purchase.billz_order_uuid is not None
+    journal = billz_sales.PurchaseJournal(purchase.pk, purchase.billz_order_uuid, order.pk)
+    with patch.object(services, "lock_order", side_effect=Conflict("busy")) as lock:
+        with pytest.raises(Conflict):
+            journal.before_payment()
+    assert lock.call_args.kwargs == {"wait": billz_sales.ORDER_LOCK_WAIT}
+    assert Purchase.objects.get(pk=purchase.pk).billz_payment_attempted_at is None

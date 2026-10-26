@@ -25,6 +25,7 @@ Pushed sales are ``without_cashback`` (design spec "Billz sale"): cashback lives
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import timedelta
 from typing import Any
 from uuid import UUID
 
@@ -47,6 +48,8 @@ from glowderma.loyalty import services as loyalty_services
 
 # M2's name for a transient push failure (transport error, Billz down): the outbox retries it.
 BillzPushUnavailable = BillzUnavailable
+# How long the payment re-check waits for the Order row (409 Conflict after it: the outbox retries).
+ORDER_LOCK_WAIT = timedelta(seconds=20)
 
 
 class PurchaseJournal:
@@ -80,7 +83,9 @@ class PurchaseJournal:
         """Under the Order lock (the lock ``cancel_order`` takes): a cancelled order stops the push; otherwise
         the attempt is committed, so a cancel from now on sees a Billz sale that may be paid."""
         with transaction.atomic():
-            order = services.lock_order(self.order_id)
+            # bounded: an admin cancel holding the row (a BTS call) makes this attempt fail and retry later,
+            # before anything is paid, instead of holding the push past its deadline
+            order = services.lock_order(self.order_id, wait=ORDER_LOCK_WAIT)
             if order.status == enums.OrderStatus.CANCELLED:
                 raise SaleCancelled(f"order {self.order_id} was cancelled before its Billz sale was paid")
             info = loyalty_selectors.billz_push_info(self.purchase_id)
