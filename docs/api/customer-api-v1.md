@@ -49,7 +49,7 @@ Everything in admin §1 applies unless a row below says otherwise.
 
 | Header | Required | Rule and what the server does with it |
 |---|---|---|
-| `Authorization: Bearer <access JWT>` | **C** routes; optional on **O** routes; absent on `auth/*` (except `auth/logout/`, where it is optional) | HS256, `kid` header, claims `iss, aud="customer", sub (customer id), sid, rot, iat, exp, jti`, all required. `rot` = the session's `rotated_at` (epoch seconds, `0` before the first rotation) when the token was issued (§2.1.6). TTL `CUSTOMER_ACCESS_TTL` (900 s), capped at the session's `absolute_expires_at`. A staff token fails decoding (`aud`) → 401 `not_authenticated`. On an **O** route a present but invalid header is a 401, never silently anonymous. |
+| `Authorization: Bearer <access JWT>` | **C** routes; optional on **O** routes; absent on `auth/*` (except `auth/logout/`, where it is optional) | HS256, `kid` header, claims `iss, aud="customer", sub (customer id), sid, rot, iat, exp, jti`, all required. `rot` = the session's rotation counter `AuthSession.rotation` (integer, `0` before the first rotation) when the token was issued (§2.1.6). TTL `CUSTOMER_ACCESS_TTL` (900 s), capped at the session's `absolute_expires_at`. A staff token fails decoding (`aud`) → 401 `not_authenticated`. On an **O** route a present but invalid header is a 401, never silently anonymous. |
 | `X-GD-Device-Id` | `auth/*` and **C** routes | The Firebase installation id (`fid`) of this app install, `^[A-Za-z0-9_-]{8,128}$`. Missing or malformed → 400 `device_required`. `auth/*`: the session is bound to `Device(customer, fid)` (created or reactivated on success). **C** routes: must equal the fid of the session's device, else 401 `not_authenticated` and audit `auth.device_mismatch` (at most one row per session per hour). The fid is an identifier, **not** a secret (§6.8). |
 | `X-GD-Device-Key` | `auth/login/`, `auth/social/` when the app holds one | The device secret issued once in `AuthTokens.device_key` (§1.9), 43 base64url chars. Proves that this install completed a verified sign-in before; it is what makes a device **known** for A2 (§2.1.4). Never logged; compared as SHA-256 with `compare_digest`. Absent or wrong → the device is treated as unknown (no error by itself). |
 | `X-GD-Platform` | with `X-GD-Device-Id` | `ios` \| `android` (else 400 `device_required`). Stored on `Device.platform`; `Order.channel` is taken from the **session's device**, never from a body field. A different platform for an existing `(customer, fid)` → 401 `not_authenticated`. |
@@ -465,28 +465,43 @@ Body `{"refresh": str}`. Device headers must match the session's device (else 40
 1. `h = SHA-256(raw)`; `SELECT … FOR UPDATE` the session `WHERE audience='customer' AND (refresh_hash = h OR
    previous_refresh_hash = h)` (index `accounts_authsession_prev_refresh`, partial `WHERE previous_refresh_hash <>
    ''`, migration `accounts.0006`). Every check below runs on the locked row, so two concurrent refreshes serialise.
-2. No row → 401 `not_authenticated`, and the `refresh_unknown` per-IP throttle counts the miss.
+2. No row → if `auth:refresh_dead:{h}` names a session (a token replaced by a re-rotation, step 5), that session is
+   locked and treated as **reuse** (step 6); otherwise 401 `not_authenticated`, and the `refresh_unknown` per-IP
+   throttle counts the miss. A token two or more rotations old is simply unknown: its holder never had the current one.
 3. Revoked → 401 `SESSION_REPLACED` for reason `replaced`, else `SESSION_EXPIRED`; past `absolute_expires_at` or
    customer not active → 401 `SESSION_EXPIRED`.
-4. `refresh_hash = h` → **rotate**: new 256-bit refresh; `previous_refresh_hash = h`, `refresh_hash = new`, `rotated_at
-   = now`, `last_used_at = now`, `absolute_expires_at = now + 60 days` (sliding); the new access token carries `rot =
-   rotated_at`. Before commit the full response body is written to `auth:refresh_grace:{h}` (TTL
-   `CUSTOMER_REFRESH_GRACE_SECONDS`, 120 s; deleted again if the transaction rolls back) → 200.
-5. `previous_refresh_hash = h` and the rotation is **unconfirmed** (`last_used_at ≤ rotated_at`: neither the new
-   refresh nor an access token carrying the current `rot` has been seen) → the response of that rotation was lost or
-   a concurrent request raced: return the cached grace body when it exists (identical tokens), otherwise **re-rotate**
-   (a fresh refresh replaces `refresh_hash`, `previous_refresh_hash` stays `h`, `rotated_at = now`) → 200. No time
-   limit other than the session's own expiry: a mobile retry minutes later still succeeds.
-6. `previous_refresh_hash = h` and the rotation is **confirmed** (`last_used_at > rotated_at`) → **reuse**: the old
-   token came back after the new one was used, so one of the two holders is not the app. Session revoked with reason
-   `refresh_reused` (tombstone on commit); audit `customer.refresh_reused {sid}`; WARNING log → 401 `SESSION_EXPIRED`
-   (not `SESSION_REPLACED`: nobody signed in elsewhere).
+4. `refresh_hash = h` → **rotate**: new 256-bit refresh; `previous_refresh_hash = h`, `refresh_hash = new`, `rotation
+   += 1`, `rotation_confirmed = false`, `rotated_at = last_used_at = now` (one instant), `absolute_expires_at = now + 60
+   days` (sliding); the new access token carries `rot = rotation`. Before commit the full response body is written to
+   `auth:refresh_grace:{h}` (TTL `CUSTOMER_REFRESH_GRACE_SECONDS`, 120 s; deleted again if the transaction rolls back)
+   → 200.
+5. `previous_refresh_hash = h`, the rotation is **unconfirmed** (`rotation_confirmed = false`: no access token carrying
+   the current `rot` has been seen) **and** `now − rotated_at ≤ CUSTOMER_REFRESH_UNCONFIRMED_SECONDS` (600) → the
+   response of that rotation was lost or a concurrent request raced: return the cached grace body when it exists
+   (identical tokens); otherwise **re-rotate**: the current `refresh_hash` (issued but never used) is remembered as dead
+   (`auth:refresh_dead:{that hash}` = sid, TTL until `absolute_expires_at`), a fresh refresh replaces it,
+   `previous_refresh_hash` stays `h`, `rotation += 1`, `rotation_confirmed = false`, `rotated_at` **unchanged** (the
+   window stays anchored to the rotation that replaced `h`), and the new body is written to `auth:refresh_grace:{h}`
+   (overwriting the expired entry) so a concurrent second retry gets the same tokens instead of forking again → 200.
+6. `previous_refresh_hash = h` and the rotation is **confirmed** (`rotation_confirmed = true`) **or** the unconfirmed
+   window is over (`now − rotated_at > CUSTOMER_REFRESH_UNCONFIRMED_SECONDS`), or a dead token came back (step 2) →
+   **reuse**: one of the holders is not the app. Session revoked with reason `refresh_reused` (tombstone on commit);
+   audit `customer.refresh_reused {sid}`; WARNING log → 401 `SESSION_EXPIRED` (not `SESSION_REPLACED`: nobody signed in
+   elsewhere). This is the spec's "reuse after a short grace window revokes the session", with the window ended early
+   by the first use of the new tokens.
 
-Confirmation is recorded by `CustomerJWTAuthentication`: the first access token whose `rot` equals the session's
-current `rotated_at` runs one conditional `UPDATE auth_session SET last_used_at = now WHERE id = sid AND rotated_at =
-<rot> AND last_used_at <= rotated_at` (at most one write per rotation; the cached `auth:sid:{sid}` entry holds
-`rot` and a `confirmed` flag so later requests skip it). A refresh with the new token also confirms (step 4 sets
-`last_used_at`).
+**Rotation counter and confirmation.** `rot` is the integer `AuthSession.rotation` (migration `accounts.0006`, `0`
+before the first rotation), compared exactly — never a timestamp, so clock precision and a pinned `FAKE_NOW` cannot
+break it. `CustomerJWTAuthentication` records the confirmation: when the add-only flag `auth:sidrot:{sid}:{rot}` is
+absent, it runs one conditional `UPDATE accounts_authsession SET rotation_confirmed = true WHERE id = sid AND rotation
+= <rot> AND NOT rotation_confirmed` (at most one write per rotation; an access token of an older rotation matches no
+row and writes nothing), then `cache.add("auth:sidrot:{sid}:{rot}", 1, timeout=CUSTOMER_ACCESS_TTL)`. The active-sid
+entry `auth:sid:{sid}` = `active:{abs_expiry}:{pii_ref(fid)}:{platform}` stays **immutable and add-only** (spec: filled
+with `cache.add`, TTL ≤ 60 s; every revoke writes a `revoked:<reason>` tombstone on commit): no rotation or
+confirmation ever writes it, so a confirmation can never overwrite a concurrent tombstone. Its `abs_expiry` may lag a
+slide by at most its 60 s TTL, which matters only for a session that was within a minute of expiring. Presenting the
+**new refresh token** is not a confirmation step: it rotates again (step 4), after which the old token is neither
+current nor previous and gets 401 `not_authenticated`.
 
 ```jsonc
 // 200
@@ -494,7 +509,7 @@ current `rotated_at` runs one conditional `UPDATE auth_session SET last_used_at 
  "refresh": "new…43 chars", "refresh_expires_at": "2026-12-25T12:00:00+05:00"}
 ```
 The raw rotated token lives in Redis only for the grace window (internal network, TTL 120 s); this is the only place a
-raw refresh token is stored (§6).
+raw refresh token is stored (§6). `auth:refresh_dead:*` holds hashes only.
 
 #### 2.1.7 `POST auth/logout/`
 Body `{"refresh": str}` → **204**. Revokes the session owning the token (`logout`), tombstone on commit, device
@@ -2048,10 +2063,12 @@ handler renders through the catalog. Placeholders: `{n}`, `{m}`, `{limit}`, `{ma
    the next sign-in on this install skips the SMS; it is deleted on account deletion). The QR token is never persisted
    and the QR screen is excluded from screenshots/recents where the OS allows (`FLAG_SECURE` on Android). Server side
    the only raw refresh token ever stored is the 120-second rotation-grace cache entry in Redis.
-7. **Refresh rotation** with reuse detection (§2.1.6): the old token keeps working until the new one (or an access
-   token from it) is first used, so a lost response on a mobile network never signs the user out; an old token that
-   comes back **after** the new one was used kills the session (`refresh_reused` → `SESSION_EXPIRED`). Rotation runs
-   under a row lock, so concurrent refreshes cannot fork the chain.
+7. **Refresh rotation** with reuse detection (§2.1.6): the old token keeps working for at most
+   `CUSTOMER_REFRESH_UNCONFIRMED_SECONDS` (10 minutes) and only until an access token of the new rotation is first
+   used, so a lost response on a mobile network does not sign the user out; an old token that comes back **after**
+   that, or a token replaced by a re-rotation, kills the session (`refresh_reused` → `SESSION_EXPIRED`). Rotation runs
+   under a row lock and re-rotation rewrites the grace cache, so concurrent refreshes cannot fork the chain; the
+   rotation is an integer counter, so confirmation does not depend on clock precision.
 8. **Device binding and A2.** `X-GD-Device-Id`/`X-GD-Platform` must match the session's device; a token copied to
    another install is refused (§1.2). The fid is not a secret; A2's "known device" is proven by the device key
    (§1.9), so someone who has the password and learns the fid still needs the SMS code.

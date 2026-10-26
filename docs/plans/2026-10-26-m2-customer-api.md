@@ -80,9 +80,9 @@ module because availability (`commerce.selectors.available_stock`) may not be im
 | `glowderma/core/api/schema.py` | `CUSTOMER_ERRORS`, `PUBLIC_CUSTOMER_ERRORS`, `DEVICE_HEADERS` (`X-GD-Device-Id`, `X-GD-Platform`, `X-GD-App-Version`), `DEVICE_KEY_HEADER`, `ACCEPT_LANGUAGE_HEADER` |
 | `glowderma/core/throttling.py` | new scopes `sms_device: 10/min`, `customer_auth_device: 30/min`, `customer_auth_ip: 1200/min`, `refresh_unknown: 60/min`, `qr: 6/min`, `public: 300/min`, `public_ip: 3000/min`; `sms_ip` default `600/min` (used only by `auth/send-code/`) |
 | `glowderma/core/audit.py` | `record()` accepts a `Customer` or `PosDevice` actor: `actor_type` `customer`/`integration`, `actor_label` = masked phone / device name (no `get_username` on non-staff) |
-| `glowderma/accounts/models.py` + `migrations/0006_customer_auth_hardening.py` | `Device.key_hash = CharField(64, blank=True)`; partial index `accounts_authsession_prev_refresh` on `AuthSession.previous_refresh_hash` `WHERE previous_refresh_hash <> ''`; `AuthSession.revoke_reason` choice `refresh_reused`; `CustomerSocialIdentity.provider` choice `apple`; `Customer.is_authenticated = True`, `is_anonymous = False` (properties, no SQL) |
-| `glowderma/accounts/tokens.py` | access TTL by audience (`STAFF_ACCESS_TTL` / `CUSTOMER_ACCESS_TTL`); customer access claim `rot` |
-| `glowderma/accounts/authentication.py` | `CustomerJWTAuthentication` (aud `customer`; `auth:sid:{sid}` cache value `active:{abs_expiry}:{pii_ref(fid)}:{rot}:{confirmed}` so the device check needs no query; tombstones `revoked:<reason>`; device/platform header match; `last_active_at`/`app_version` bump ≤ every 5 min; first sighting of the current `rot` → the conditional confirmation UPDATE of C§2.1.6); `OptionalCustomerAuthentication` |
+| `glowderma/accounts/models.py` + `migrations/0006_customer_auth_hardening.py` | `Device.key_hash = CharField(64, blank=True)`; partial index `accounts_authsession_prev_refresh` on `AuthSession.previous_refresh_hash` `WHERE previous_refresh_hash <> ''`; `AuthSession.revoke_reason` choice `refresh_reused`; `AuthSession.rotation = PositiveIntegerField(default=0)` and `AuthSession.rotation_confirmed = BooleanField(default=False)` (C§2.1.6: the `rot` claim is this counter, never a timestamp); `CustomerSocialIdentity.provider` choice `apple`; `Customer.is_authenticated = True`, `is_anonymous = False` (properties, no SQL) |
+| `glowderma/accounts/tokens.py` | access TTL by audience (`STAFF_ACCESS_TTL` / `CUSTOMER_ACCESS_TTL`); customer access claim `rot` = `AuthSession.rotation` (integer) |
+| `glowderma/accounts/authentication.py` | `CustomerJWTAuthentication` (aud `customer`; `auth:sid:{sid}` cache value `active:{abs_expiry}:{pii_ref(fid)}:{platform}`, filled with `cache.add` only and never rewritten, so the device and platform checks need no query and no write can overwrite a tombstone; tombstones `revoked:<reason>`; device/platform header match; `last_active_at`/`app_version` bump ≤ every 5 min; when the add-only flag `auth:sidrot:{sid}:{rot}` is absent → the conditional confirmation UPDATE of C§2.1.6 (`rotation = rot AND NOT rotation_confirmed`), then `cache.add` of the flag); `OptionalCustomerAuthentication` |
 | `glowderma/accounts/permissions.py` | `IsActiveCustomer` |
 | `glowderma/accounts/api/customer_base.py` (new) | `CustomerAPIView`, `CustomerGenericViewSet`, `PublicAPIView`, `WebhookAPIView` (CSRF-exempt, parsers set per view, no auth, provider-native responses), device-header parsing + 400 `device_required` + 426 `app_update_required` gate (a mixin used by the auth views too). **Not** `PosAPIView` (P3, `loyalty/api/pos/base.py`) |
 | `glowderma/accounts/api/throttles.py` | `CustomerRateThrottle` (`customer`), `PublicDeviceThrottle` (`public`), `PublicIPThrottle` (`public_ip`), `CheckoutThrottle`, `PayThrottle`, `QrThrottle`, `SmsPhoneThrottle`, `SmsDeviceThrottle`, `SmsIPThrottle`, `CustomerAuthDeviceThrottle`, `CustomerAuthIPThrottle`, `RefreshUnknownThrottle` (counts only misses), `PosRateThrottle` |
@@ -112,8 +112,10 @@ module because availability (`commerce.selectors.available_stock`) may not be im
   device; device key issued only with `issue_device_key`, stored as SHA-256; `device_is_known` false for fid-only and
   for a wrong key; **race:** two concurrent sign-ins of one customer on two devices (threads, `transaction=True`) end
   with exactly one open session and one active device.
-- Access-token confirmation: the first request with the current `rot` writes `last_used_at` once; later requests do
-  not write.
+- Access-token confirmation: the first request with the current `rot` sets `rotation_confirmed` once (one UPDATE);
+  later requests and access tokens of an older rotation do not write; it works under a pinned `FAKE_NOW` (no timestamp
+  comparison); **race:** a confirmation and a revocation (logout) run concurrently → the `revoked:` tombstone survives
+  (the active entry is add-only) and the next request answers 401.
 - `register_device`: a token held by another row is removed there; `push_enabled` without a token → error.
 - `secretbox` round trip, tamper and wrong-AAD failure; `pii_ref` keyed (differs with another key); `qr_store`
   `take` is single-use under two threads, `max_live` evicts the oldest, `revoke_all` empties.
@@ -172,7 +174,7 @@ C§2.0 rows 1–22: `auth/send-code/`, `auth/verify-code/`, `auth/set-password/`
 | `otp_blocked(phone, now) -> OtpBlock \| None` | `accounts.services` | the pre-password check of login step 3 |
 | `verify_code(phone, purpose, code) -> raw verification token` | `accounts.services` | advisory lock + `select_for_update`; attempts, exhaustion, daily wrong cap |
 | `consume_verification(token, *, purpose, phone=None) -> (phone, sms_code_id)` | `accounts.services` | single use under lock |
-| `rotate_customer_refresh(raw, *, fid) -> RefreshResult` | `accounts.services` | C§2.1.6 steps 1–6: row lock on `refresh_hash OR previous_refresh_hash`, rotate / replay / re-rotate / reuse → revoke `refresh_reused` + audit; grace cache written before commit and deleted on rollback |
+| `rotate_customer_refresh(raw, *, fid) -> RefreshResult` | `accounts.services` | C§2.1.6 steps 1–6: row lock on `refresh_hash OR previous_refresh_hash`, rotate / replay / re-rotate (bounded by `CUSTOMER_REFRESH_UNCONFIRMED_SECONDS`, dead hash remembered in `auth:refresh_dead:{hash}`, grace cache rewritten) / reuse → revoke `refresh_reused` + audit; grace cache written before commit and deleted on rollback |
 | `logout_customer(raw)` | `accounts.services` | revoke + device inactive, token cleared, QR tokens revoked |
 | `issue_social_nonce(fid)`, `consume_social_nonce(nonce, fid)`, `remember_id_token(provider, claims)` | `accounts.services` | Redis, single use, replay cache until `exp` |
 | `register(...)`, `login(...)`, `reset_password(...)` (unlinks identities, clears other device keys, `push.account_security`), `social_sign_in(...)`, `complete_social(...)` (fid + ticket binding, password for password accounts), `link_social(...)`, `unlink_social(...)`, `accept_consent(...)`, `update_profile(...)`, `set_image(...)`, `delete_account(customer_id, *, password=None, verification_token=None)` | `customers.services` | orchestrators (need `site_config` for the terms version and publication check and, for delete, `commerce`/`appointments`); `delete_account` takes the customer-level lock first (`select_for_update(no_key=True)`), refuses on `commerce.selectors.customer_inflight_order` |
@@ -219,10 +221,13 @@ None (P0 owns `accounts.0006`). The link-social ticket binding and the OTP fid/I
   token → tokens, new device key, the old session `SESSION_REPLACED`; wrong password timing parity (hasher called for
   unknown phones); guard lockout; **oracle test:** with the phone's code cap exhausted, a right and a wrong password
   get the same 429 body.
-- Refresh: rotation; concurrent refresh threads → identical tokens and one chain; lost response → retry after 45 s and
-  after 10 min with the old token → 200 (re-rotation, nothing revoked); grace-cache miss → re-rotate; old token after
-  the new access token was used → 401 `SESSION_EXPIRED`, audit `customer.refresh_reused`, session dead for the new token
-  too; sliding expiry; device mismatch; junk tokens hit `refresh_unknown`.
+- Refresh: rotation (counter +1, `rotated_at` = `last_used_at` from one instant); concurrent refresh threads →
+  identical tokens and one chain; lost response → retry after 45 s with the old token → the grace body (identical
+  tokens); after 5 min → 200 by re-rotation, nothing revoked, the grace cache rewritten so two concurrent retries get
+  the same tokens; after 11 min still unconfirmed → reuse: 401 `SESSION_EXPIRED`, audit `customer.refresh_reused`; the
+  token replaced by a re-rotation presented later → reuse (dead-hash entry); old token after the first access token of
+  the new `rot` → 401 `SESSION_EXPIRED` + audit, session dead for the new token too; a token two rotations old → 401
+  `not_authenticated`; sliding expiry; device mismatch; junk tokens hit `refresh_unknown`.
 - Social: nonce issue/consume single use and fid binding; replayed ID token refused; linked → tokens; unknown →
   ticket bound to the fid (another fid → `social_ticket_invalid`); send-code with ticket; complete for active
   (password required when set, wrong → `password_incorrect`), social-only, no and deleted customer; a verification token
@@ -582,6 +587,9 @@ behaviour: under the production settings the fakes run without scenarios, record
 #CUSTOMER_ACCESS_TTL=900
 #CUSTOMER_REFRESH_TTL_DAYS=60
 #CUSTOMER_REFRESH_GRACE_SECONDS=120
+# How long an unconfirmed rotation lets the previous refresh token replay or re-rotate; after it (or once an access
+# token of the new rotation was used) the previous token counts as reuse and revokes the session.
+#CUSTOMER_REFRESH_UNCONFIRMED_SECONDS=600
 # OTP policy (A3): code TTL, resend wait, attempts, lockout, daily caps per phone / device / IP, wrong codes per day.
 #CUSTOMER_OTP_TTL_SECONDS=120
 #CUSTOMER_OTP_RESEND_SECONDS=60
