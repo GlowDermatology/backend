@@ -454,3 +454,35 @@ def test_reverse_purchase_links_a_credit_reversal_posted_earlier() -> None:
     repaired = services.reverse_purchase(sale.purchase_id, at(10, 11))
     assert repaired.already_reversed and repaired.credit_reversal_entry_id == early.entry_id
     assert Purchase.objects.get(pk=sale.purchase_id).reversal_entry_id == early.entry_id
+
+
+def test_record_billz_order_persists_the_sale_without_marking_the_push() -> None:
+    """M3 live push (design "Billz sale"): the Billz sale id is stored the moment Billz created it; the push
+    counts as done only once the sale is paid (``link_billz_sale``)."""
+    seed_policies()
+    customer = CustomerFactory.create()
+    _, result = paid_order_with_cashback(customer, items_subtotal=185_000, promo=0, cashback_used=0, when=(10, 20, 9, 0))  # fmt: skip  # noqa: E501
+    uuid = result.billz_order_uuid
+    assert uuid is not None
+    sale_id = "38c3920a-ffdd-4233-a823-8af3266f5f4f"
+    recorded = services.record_billz_order(result.purchase_id, billz_order_uuid=uuid, billz_sale_id=sale_id, billz_sale_ref="5632631379")  # fmt: skip  # noqa: E501
+    assert recorded == services.LinkResult(result.purchase_id, uuid, sale_id, "5632631379", None, True)
+    info = selectors.billz_push_info(result.purchase_id)
+    assert info is not None and (info.billz_sale_id, info.billz_pushed_at) == (sale_id, None)
+    again = services.record_billz_order(result.purchase_id, billz_order_uuid=uuid, billz_sale_id=sale_id, billz_sale_ref="5632631379")  # fmt: skip  # noqa: E501
+    assert not again.changed
+    with pytest.raises(services.BillzSaleConflict, match="already linked"):
+        services.record_billz_order(result.purchase_id, billz_order_uuid=uuid, billz_sale_id="other-sale", billz_sale_ref="1")  # fmt: skip  # noqa: E501
+    with pytest.raises(services.BillzSaleConflict, match="pushed as Billz order"):
+        services.record_billz_order(result.purchase_id, billz_order_uuid=uuid4(), billz_sale_id=sale_id, billz_sale_ref="1")  # fmt: skip  # noqa: E501
+    with pytest.raises(ValueError, match="needs the Billz sale id"):
+        services.record_billz_order(
+            result.purchase_id, billz_order_uuid=uuid, billz_sale_id="", billz_sale_ref=""
+        )
+    with pytest.raises(ValueError):
+        services.record_billz_order(result.purchase_id, billz_order_uuid=uuid, billz_sale_id=sale_id, billz_sale_ref="r" * 33)  # fmt: skip  # noqa: E501
+    # the paid sale then completes the link: the same id, the push instant set
+    with pinned_clock(at(10, 20, 9, 2)):
+        paid = services.link_billz_sale(result.purchase_id, billz_order_uuid=uuid, billz_sale_id=sale_id, billz_sale_ref="5632631379")  # fmt: skip  # noqa: E501
+    assert (paid.billz_sale_id, paid.billz_pushed_at, paid.changed) == (sale_id, at(10, 20, 9, 2), True)
+    assert LedgerEntry.objects.count() == 1  # never credits

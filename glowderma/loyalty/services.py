@@ -972,6 +972,30 @@ def reverse_purchase(purchase_id: int, at: datetime, actor_id: int | None = None
         )
 
 
+def record_billz_order(
+    purchase_id: int, *, billz_order_uuid: UUID, billz_sale_id: str, billz_sale_ref: str
+) -> LinkResult:
+    """Persist the sale Billz just created for an online purchase (design "Billz sale"), nothing more.
+
+    The live push (``integrations.billz``) calls this through the ``billz.push_sale`` handler the moment
+    Billz answered the create, **before** any item is sent, so a retry after a crash at any later step resumes
+    on that sale instead of creating another one. ``billz_pushed_at`` stays null until the sale is paid in
+    Billz (:func:`link_billz_sale`). Same checks and idempotency as :func:`link_billz_sale`: the same id again
+    is a no-op; another id on the purchase, an id of another purchase or a wrong ``billz_order_uuid`` raise
+    :class:`BillzSaleConflict`.
+    """
+    if not billz_sale_id:
+        raise ValueError("record_billz_order needs the Billz sale id")
+    return _link_billz(
+        purchase_id,
+        billz_order_uuid=billz_order_uuid,
+        billz_sale_id=billz_sale_id,
+        billz_sale_ref=billz_sale_ref,
+        pushed_at=None,
+        mark_pushed=False,
+    )
+
+
 def link_billz_sale(
     purchase_id: int,
     *,
@@ -992,6 +1016,25 @@ def link_billz_sale(
     an already linked purchase, or a sale id that already belongs to another purchase, raises
     :class:`BillzSaleConflict`.
     """
+    return _link_billz(
+        purchase_id,
+        billz_order_uuid=billz_order_uuid,
+        billz_sale_id=billz_sale_id,
+        billz_sale_ref=billz_sale_ref,
+        pushed_at=pushed_at,
+        mark_pushed=True,
+    )
+
+
+def _link_billz(
+    purchase_id: int,
+    *,
+    billz_order_uuid: UUID | None,
+    billz_sale_id: str,
+    billz_sale_ref: str,
+    pushed_at: datetime | None,
+    mark_pushed: bool,
+) -> LinkResult:
     _check_billz_refs(billz_sale_id, billz_sale_ref)
     _aware(pushed_at, "pushed_at")
     with transaction.atomic():
@@ -1012,7 +1055,7 @@ def link_billz_sale(
         sale_id = billz_sale_id or purchase.billz_sale_id
         ref = billz_sale_ref or purchase.billz_sale_ref or sale_id
         _check_billz_refs(sale_id, ref)  # a defaulted ref (the sale id) must fit too
-        pushed = purchase.billz_pushed_at or pushed_at or timeutils.now()
+        pushed = purchase.billz_pushed_at or ((pushed_at or timeutils.now()) if mark_pushed else None)
         changed = (sale_id, ref, pushed) != (
             purchase.billz_sale_id,
             purchase.billz_sale_ref,
@@ -1459,6 +1502,7 @@ __all__ = [
     "policy_at",
     "pos_key_hash",
     "post_entry",
+    "record_billz_order",
     "record_online_purchase",
     "record_store_purchase",
     "release_hold",
