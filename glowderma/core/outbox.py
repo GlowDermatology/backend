@@ -1,4 +1,13 @@
-"""At-least-once delivery: handlers must be idempotent at the provider boundary."""
+"""At-least-once delivery: handlers must be idempotent at the provider boundary.
+
+A handler signals its outcome to ``core.tasks.dispatch_outbox`` by returning (``done``) or raising:
+
+* :class:`PermanentFailure` — no retry can succeed: ``dead`` at once;
+* :class:`RetryLater` — the provider cannot take the message *now* but will later (a closed Billz shift, a
+  payment outcome that needs a quiet period): re-scheduled after ``delay`` **without** counting an attempt,
+  dead with the reason once it has been deferred for longer than ``give_up_after``;
+* anything else — a transient failure: retried with backoff, ``dead`` after :data:`MAX_ATTEMPTS`.
+"""
 
 import logging
 from collections.abc import Callable
@@ -28,6 +37,25 @@ class PermanentFailure(Exception):
     ``outbox.dead`` audit row and the topic's :func:`on_dead` hook, exactly like a message that exhausted
     its attempts. Transient failures keep raising any other exception and are retried with backoff.
     """
+
+
+class RetryLater(Exception):
+    """Raised by a handler when the provider refused *for now* (docs/integrations/billz.md, decision D2).
+
+    The dispatcher sets ``available_at = now + delay`` and ``last_error = reason`` (status ``failed``) and
+    leaves ``attempts`` alone, so a deferral never consumes the retry budget of :data:`MAX_ATTEMPTS`. The
+    first deferral stamps ``OutboxMessage.deferred_since``; when ``give_up_after`` is set and the message has
+    been deferred for that long, it goes ``dead`` like a :class:`PermanentFailure` (audit ``outbox.dead``, the
+    topic's :func:`on_dead` hook) with ``reason`` and the deferral window in ``last_error``.
+    """
+
+    def __init__(self, delay: timedelta, reason: str, *, give_up_after: timedelta | None = None) -> None:
+        if delay <= timedelta():
+            raise ValueError("RetryLater needs a positive delay")
+        super().__init__(reason)
+        self.delay = delay
+        self.reason = reason
+        self.give_up_after = give_up_after
 
 
 def register(topic: str) -> Callable[[Handler], Handler]:

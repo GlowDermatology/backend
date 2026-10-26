@@ -129,6 +129,8 @@ class OutboxMessage(TimeStampedModel):
     lease_expires_at = models.DateTimeField(null=True)
     claim_token = models.UUIDField(null=True, editable=False)
     last_error = models.TextField(blank=True)
+    # first ``outbox.RetryLater`` of this message (``give_up_after`` counts from here); null = never deferred
+    deferred_since = models.DateTimeField(null=True)
 
     def __str__(self) -> str:
         return f"{self.topic}: {self.dedupe_key} ({self.status})"
