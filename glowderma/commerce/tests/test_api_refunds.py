@@ -14,6 +14,7 @@ from glowderma.commerce.models import Order, OrderEvent
 from glowderma.commerce.tests.support import AT, admin, deliver, pay, place
 from glowderma.core.models import AuditEntry, OutboxMessage
 from glowderma.core.seeding import pinned_clock
+from glowderma.loyalty import services as loyalty_services
 from glowderma.loyalty.services import PurchaseConflict
 from glowderma.payments.models import Payment, Refund
 
@@ -136,3 +137,37 @@ def test_a_loyalty_purchase_conflict_is_answered_in_uzbek(staff_client: APIClien
     assert response.json()["code"] == "conflict"
     assert response.json()["message"] == services.MESSAGE_PURCHASE_CONFLICT
     assert "already belongs" not in response.content.decode()
+
+
+def test_retry_is_refused_while_a_later_retry_is_unknown(staff_client: APIClient) -> None:
+    """Contract §2.12: an ``unknown`` refund counts as open (``OPEN_REFUND_STATES``), so retrying the old
+    failed refund again answers 409 ``conflict``, not a second refund of the still-``paid`` payment."""
+    order, refund = _cancelled("click", refund="failed")
+    deliver(topics.REFUND_SUBMIT, order.pk)
+    assert staff_client.post(_url(refund, "retry"), {}, format="json").status_code == 200
+    Order.objects.filter(pk=order.pk).update(metadata={"fake": {"click": {"refund": "unknown"}}})
+    deliver(topics.REFUND_SUBMIT, order.pk)
+    later = Refund.objects.exclude(pk=refund.pk).get()
+    assert later.state == "unknown" and Payment.objects.get(order=order).status == "paid"
+    response = staff_client.post(_url(refund, "retry"), {}, format="json")
+    assert response.status_code == 409
+    assert response.json()["code"] == "conflict"
+    assert response.json()["message"] == "Bu to‘lov uchun qaytarish allaqachon jarayonda."
+    assert Refund.objects.filter(payment__order=order).count() == 2
+
+
+def test_the_refund_operations_never_touch_the_loyalty_purchase(staff_client: APIClient) -> None:
+    """Contract §2.2/§2.12: the purchase-conflict outcome belongs to cancel/transition/retry-shipment only;
+    retry and resolve neither record nor reverse a loyalty purchase."""
+    order, refund = _cancelled("click", refund="failed")
+    deliver(topics.REFUND_SUBMIT, order.pk)
+    _, payme = _cancelled("payme")
+    conflict = PurchaseConflict("never raised by the refund operations")
+    with (
+        mock.patch.object(loyalty_services, "record_online_purchase", side_effect=conflict),
+        mock.patch.object(loyalty_services, "reverse_purchase", side_effect=conflict),
+    ):
+        retried = staff_client.post(_url(refund, "retry"), {}, format="json")
+        assert retried.status_code == 200, retried.json()
+        resolved = staff_client.post(_url(payme, "resolve"), {"state": "succeeded"}, format="json")
+        assert resolved.status_code == 200, resolved.json()
