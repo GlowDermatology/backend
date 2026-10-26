@@ -34,6 +34,7 @@ def test_login_success_returns_tokens_and_audits(user: StaffUser) -> None:
         "email",
         "display_name",
         "is_superuser",
+        "is_manager",
         "linked_providers",
         "session_expires_at",
         "auth_method",

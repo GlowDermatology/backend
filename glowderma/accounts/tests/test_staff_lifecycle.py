@@ -32,14 +32,14 @@ def test_deactivate_revokes_every_session_and_audits(staff: StaffUser, actor: St
         session.refresh_from_db()
         assert session.revoked_at is not None
         assert session.revoke_reason == "deactivated"
-    entry = AuditEntry.objects.get(action="auth.staff_deactivated")
+    entry = AuditEntry.objects.get(action="staff.deactivated")
     assert (entry.actor_id, entry.actor_label, entry.entity_type, entry.entity_id) == (
         actor.pk,
         "Actor",
         "staff",
         str(staff.pk),
     )
-    assert entry.after == {"revoked_count": 2}
+    assert (entry.before, entry.after) == ({"is_active": True}, {"is_active": False, "revoked_count": 2})
     assert entry.ip == "203.0.113.9"
     revoked = [
         cast(dict[str, Any], item.after)
@@ -57,12 +57,19 @@ def test_deactivate_revokes_every_session_and_audits(staff: StaffUser, actor: St
 def test_deactivate_is_idempotent(staff: StaffUser, actor: StaffUser) -> None:
     # Active user without sessions: the state changes, nothing is revoked.
     assert services.deactivate_staff(staff, actor=actor) == 0
-    assert AuditEntry.objects.get(action="auth.staff_deactivated").after == {"revoked_count": 0}
-    # Already inactive: revokes nothing (even a stray open session), returns 0, writes nothing.
+    assert AuditEntry.objects.get(action="staff.deactivated").after == {
+        "is_active": False,
+        "revoked_count": 0,
+    }
+    # Already inactive: revokes nothing (even a stray open session), returns 0, writes nothing. The service
+    # refuses to open a session for an inactive account, so the stray one is opened while it is active.
+    StaffUser.objects.filter(pk=staff.pk).update(is_active=True)
+    staff.refresh_from_db()
     AuthSessionFactory.create(staff=staff)
+    StaffUser.objects.filter(pk=staff.pk).update(is_active=False)
     assert services.deactivate_staff(staff, actor=actor) == 0
     assert AuthSession.objects.filter(revoked_at__isnull=True).count() == 1
-    assert AuditEntry.objects.filter(action="auth.staff_deactivated").count() == 1
+    assert AuditEntry.objects.filter(action="staff.deactivated").count() == 1
     assert AuditEntry.objects.filter(action="auth.session_revoked").count() == 0
     staff.refresh_from_db()
     assert staff.is_active is False
@@ -98,7 +105,7 @@ def test_reactivate_restores_login_and_audits(staff: StaffUser, actor: StaffUser
     assert staff.is_active is True
     staff.refresh_from_db()
     assert staff.is_active is True
-    entry = AuditEntry.objects.get(action="auth.staff_reactivated")
+    entry = AuditEntry.objects.get(action="staff.reactivated")
     assert (entry.actor_id, entry.entity_type, entry.entity_id) == (actor.pk, "staff", str(staff.pk))
     assert entry.after == {"is_active": True}
     # Old sessions stay revoked; a fresh login works again.
@@ -109,4 +116,4 @@ def test_reactivate_restores_login_and_audits(staff: StaffUser, actor: StaffUser
 
 def test_reactivate_is_idempotent(staff: StaffUser, actor: StaffUser) -> None:
     assert services.reactivate_staff(staff, actor=actor) is False
-    assert AuditEntry.objects.filter(action="auth.staff_reactivated").count() == 0
+    assert AuditEntry.objects.filter(action="staff.reactivated").count() == 0

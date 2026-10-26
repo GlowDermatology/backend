@@ -30,3 +30,16 @@ def test_createstaff_preserves_password_whitespace(password: str) -> None:
     with patch("sys.stdin", StringIO(password + "\r\n")):
         call_command("createstaff", "admin@x.uz", password_stdin=True)
     assert StaffUser.objects.get().check_password(password)
+
+
+@pytest.mark.parametrize("name,stored", [("  Ali Valiyev  ", "Ali Valiyev"), ("   ", "")])
+def test_createstaff_trims_the_full_name(name: str, stored: str) -> None:
+    with patch("sys.stdin", StringIO("Long!Saffron-Harbor-72\n")):
+        call_command("createstaff", "a@x.uz", password_stdin=True, full_name=name)
+    assert StaffUser.objects.get().full_name == stored
+
+
+def test_createstaff_refuses_a_one_character_full_name() -> None:
+    with patch("sys.stdin", StringIO("Long!Saffron-Harbor-72\n")), pytest.raises(CommandError, match="2"):
+        call_command("createstaff", "a@x.uz", password_stdin=True, full_name=" A ")
+    assert not StaffUser.objects.exists()

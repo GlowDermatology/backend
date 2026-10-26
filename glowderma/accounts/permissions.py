@@ -31,3 +31,17 @@ class IsActiveCustomer(BasePermission):
             and isinstance(request.auth, dict)
             and request.auth.get("aud") == "customer"
         )
+
+
+class IsManager(IsActiveStaff):
+    """An active staff member signed in with a staff token whose account may manage staff (admin contract
+    §2.16, ``StaffUser.is_manager``); anyone else gets 403 ``permission_denied`` before the handler runs.
+
+    ``request.user`` is read from the database on every request (``StaffJWTAuthentication``), so a removed
+    manager role takes effect on the next request. A superuser always passes (decision GST-1)."""
+
+    def has_permission(self, request: Request, view: APIView) -> bool:
+        user = request.user
+        return super().has_permission(request, view) and bool(
+            getattr(user, "is_manager", False) or getattr(user, "is_superuser", False)
+        )

@@ -16,7 +16,7 @@ from rest_framework.response import Response
 from rest_framework.test import APIRequestFactory
 from rest_framework.views import APIView
 
-from glowderma.core import audit, timeutils
+from glowderma.core import audit, idempotency, timeutils
 from glowderma.core.idempotency import idempotent, refresh_after_commit
 from glowderma.core.models import AuditEntry, IdempotencyRecord
 
@@ -433,3 +433,35 @@ def test_the_admin_never_shows_the_body_hash_or_the_stored_answer() -> None:
 
     model_admin = admin.site._registry[IdempotencyRecord]
     assert {"request_hash", "response_body"} <= set(model_admin.exclude or ())
+
+
+# --- sealed credential fields (contract §1.7 "Stored credentials") -----------------------------------------
+
+
+class SealedWriteView(WriteView):
+    @idempotent(sealed=("secret", "missing"))
+    def post(self, request: Request) -> Response:
+        secret = f"pw-{uuid4().hex[:8]}"  # a new value on every run: a replay must return the stored one
+        return Response({"secret": secret, "plain": "visible", "missing": None}, status=201)
+
+
+def test_a_sealed_field_is_stored_sealed_and_replayed_opened() -> None:
+    key = str(uuid4())
+    first = post(key, view=SealedWriteView)
+    stored: Any = IdempotencyRecord.objects.get().response_body
+    assert first.data["secret"] not in str(stored)
+    assert set(stored["secret"]) == {idempotency.SEALED_MARK} and stored["plain"] == "visible"
+    assert stored["missing"] is None
+    replay = post(key, view=SealedWriteView)
+    assert replay["Idempotent-Replayed"] == "true"
+    assert replay.data == first.data
+
+
+def test_a_sealed_value_opens_only_under_its_own_key_scope() -> None:
+    body = {"secret": "pw-1", "other": 1}  # noqa: S105 - test-only
+    stored = idempotency._seal_body(body, ("secret",), "staff|7|POST|/a/|k1")
+    assert stored["other"] == 1 and body["secret"] == "pw-1"  # noqa: S105 - the response body is untouched
+    assert idempotency._open_body(stored, ("secret",), "staff|7|POST|/a/|k1") == body
+    assert idempotency._open_body(stored, ("secret",), "staff|8|POST|/a/|k1") == {**body, "secret": None}
+    assert idempotency._seal_body([1], ("secret",), "scope") == [1]
+    assert idempotency._open_body(body, (), "scope") is body

@@ -61,6 +61,12 @@ class LoginGuard:
         cache.delete(f"auth:fail:{scope}:{hashed_email}")
         cache.delete(f"auth:attempt:{scope}:{hashed_email}")
 
+    def unlock(self, scope: str, hashed_email: str) -> None:
+        """End a running lockout too (a manager reset the password: the guessed one is gone). The escalation
+        counter ``auth:lockn`` stays, so guessing on afterwards still locks for longer each time."""
+        self.reset(scope, hashed_email)
+        cache.delete(f"auth:lock:{scope}:{hashed_email}")
+
 
 class GuardedAdminAuthenticationForm(AdminAuthenticationForm):
     def clean(self) -> dict[str, Any]:

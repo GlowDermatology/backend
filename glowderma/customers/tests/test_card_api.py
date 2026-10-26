@@ -1,6 +1,7 @@
 """Contract §2.6 ``GET customers/{id}/``: the full card built through the loyalty services (store sale, paid
 online orders, an adjustment, a reversal, an active hold), the source_ref rule, groups, upcoming
-appointments, the active device, the newest order of any status, deleted customers and 404."""
+appointments, the active device and every device (gap ADM-8.1), the newest order of any status and the
+count of every order, deleted customers and 404."""
 
 from __future__ import annotations
 
@@ -12,6 +13,7 @@ from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 
+from glowderma.accounts import services as accounts_services
 from glowderma.accounts.models import Customer, StaffUser
 from glowderma.accounts.tests.factories import DeviceFactory
 from glowderma.appointments.tests.factories import AppointmentFactory
@@ -90,8 +92,15 @@ def test_full_card(staff_client: APIClient, history: dict[str, Any]) -> None:
     customer: Customer = history["customer"]
     staff: StaffUser = history["staff"]
     device = DeviceFactory.create(customer=customer, last_active_at=at(24, 9, 12), push_enabled=True)
-    DeviceFactory.create(  # logged out later: never the card's device
-        customer=customer, is_active=False, fcm_token="", push_enabled=False, last_active_at=at(24, 11)
+    logged_out = DeviceFactory.create(  # logged out later: never the card's device, still listed
+        customer=customer,
+        platform="android",
+        model="Galaxy A54",
+        os="Android 14",
+        is_active=False,
+        fcm_token="",
+        push_enabled=False,
+        last_active_at=at(24, 11),
     )
     rule = CustomerSegmentFactory.create(name="Bir martalik", min_online_orders=1, min_lifetime_amount=None)
     manual = CustomerSegmentFactory.create(name="Qo‘lda", min_online_orders=None, min_lifetime_amount=None)
@@ -256,6 +265,7 @@ def test_full_card(staff_client: APIClient, history: dict[str, Any]) -> None:
             "count": 1,
             "last_order_id": history["order_c"].pk,
             "last_order_at": iso(at(24, 11)),
+            "all_count": 3,  # every order: delivered, cancelled and awaiting payment
         },
         "tier": {
             "policy_version": 3,
@@ -268,12 +278,38 @@ def test_full_card(staff_client: APIClient, history: dict[str, Any]) -> None:
         "groups": [{"id": rule.pk, "name": "Bir martalik"}, {"id": manual.pk, "name": "Qo‘lda"}],
         "upcoming_appointments": 2,
         "device": {
+            "platform": "ios",
             "model": device.model,
             "os": device.os,
             "app_version": device.app_version,
             "last_active_at": iso(at(24, 9, 12)),
             "push_enabled": True,
         },
+        # every installation, the active ones first; never the FCM token, the device key or the fid
+        "devices": [
+            {
+                "id": device.pk,
+                "platform": "ios",
+                "model": "iPhone 14",
+                "os": "iOS 18.1",
+                "app_version": "1.0.0",
+                "push_enabled": True,
+                "is_active": True,
+                "last_active_at": iso(at(24, 9, 12)),
+                "created_at": iso(ANCHOR),
+            },
+            {
+                "id": logged_out.pk,
+                "platform": "android",
+                "model": "Galaxy A54",
+                "os": "Android 14",
+                "app_version": "1.0.0",
+                "push_enabled": False,
+                "is_active": False,
+                "last_active_at": iso(at(24, 11)),
+                "created_at": iso(ANCHOR),
+            },
+        ],
         "ledger": expected_ledger,
         "purchases": expected_purchases,
     }
@@ -310,7 +346,8 @@ def test_customer_without_history(staff_client: APIClient, policies: dict[int, C
     data = staff_client.get(url(customer.pk)).json()
     assert data["address"] is None and data["device"] is None
     assert data["totals"] == {"store": 0, "online": 0, "lifetime": 0}
-    assert data["online_orders"] == {"count": 0, "last_order_id": None, "last_order_at": None}
+    assert data["online_orders"] == {"count": 0, "last_order_id": None, "last_order_at": None, "all_count": 0}
+    assert data["devices"] == []
     assert data["tier"] == {
         "policy_version": 3,
         "percent": "1.00",
@@ -358,6 +395,37 @@ def test_deleted_customer_renders_scrubbed(
     assert data["groups"] == []  # membership needs an active customer
     assert data["balance"] == 4_000 and len(data["ledger"]) == 1  # kept for a re-registration
     assert data["totals"]["lifetime"] == 400_000
+
+
+def test_devices_never_carry_secrets_and_are_capped(staff_client: APIClient, clock: Any) -> None:
+    customer = make_customer("Ko‘p qurilma")
+    for day in range(1, 26):
+        DeviceFactory.create(
+            customer=customer,
+            fid=f"fid-many-{day:02d}",
+            is_active=day == 3,
+            fcm_token=f"fcm-many-{day}" if day == 3 else "",
+            push_enabled=day == 3,
+            key_hash="k" * 64,
+            last_active_at=at(day),
+        )
+    data = staff_client.get(url(customer.pk)).json()
+    devices = data["devices"]
+    assert len(devices) == 20  # CARD_DEVICES_LIMIT
+    assert devices[0]["is_active"] is True and devices[0]["last_active_at"] == iso(at(3))
+    assert [row["last_active_at"] for row in devices[1:]] == [iso(at(day)) for day in range(25, 6, -1)]
+    assert data["device"]["last_active_at"] == iso(at(3))
+    body = str(data)
+    assert "fcm-many" not in body and "fid-many" not in body and "k" * 64 not in body
+
+
+def test_a_deleted_customer_keeps_the_device_history(staff_client: APIClient, clock: Any) -> None:
+    customer = make_customer("Ketgan mijoz")
+    DeviceFactory.create(customer=customer, last_active_at=at(20))
+    accounts_services.delete_customer(customer)
+    data = staff_client.get(url(customer.pk)).json()
+    assert data["device"] is None
+    assert [(row["is_active"], row["push_enabled"]) for row in data["devices"]] == [(False, False)]
 
 
 def test_unknown_customer_is_404(staff_client: APIClient, clock: Any) -> None:

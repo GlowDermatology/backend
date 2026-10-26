@@ -3,6 +3,7 @@ from typing import Any
 from django.conf import settings
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from glowderma.accounts.models import AuthSession
@@ -58,6 +59,9 @@ class MeSerializer(serializers.Serializer[dict[str, Any]]):
     email = serializers.EmailField()
     display_name = serializers.CharField()
     is_superuser = serializers.BooleanField()
+    is_manager = serializers.BooleanField(
+        help_text="May manage staff (`staff/` writes, §2.16); the UI shows the staff screen only then."
+    )
     linked_providers = serializers.ListField(child=serializers.ChoiceField(choices=["google", "facebook"]))
     session_expires_at = serializers.DateTimeField()
     auth_method = serializers.ChoiceField(
@@ -135,8 +139,121 @@ class StaffListQuerySerializer(serializers.Serializer[dict[str, Any]]):
         return attrs
 
 
+LINKED_PROVIDERS = ["google", "facebook"]
+STAFF_FULL_NAME_MIN_LENGTH = 2
+STAFF_FULL_NAME_MAX_LENGTH = 150
+# Keys a ``StaffListItem`` fills only for a manager (``null`` for everyone else, §2.16).
+MANAGER_ONLY_KEYS = ("full_name", "is_manager", "last_login_at", "linked_providers", "created_at")
+
+
+def linked_providers(user: Any) -> list[str]:
+    """The providers of the user's prefetched social identities (``selectors.with_member_columns``)."""
+    return [identity.provider for identity in user.social_identities.all()]
+
+
 class StaffListItemSerializer(ActorSerializer):
-    """One ``GET staff/`` row: the ``Actor`` keys plus ``email`` and ``is_active``."""
+    """One ``GET staff/`` row: the ``Actor`` keys plus ``email`` and ``is_active`` for every caller (the
+    audit-log actor filter), and the manager's columns, which are ``null`` unless the caller is a manager
+    (``context["manager"]``)."""
 
     email = serializers.EmailField()
     is_active = serializers.BooleanField()
+    full_name = serializers.CharField(allow_null=True, help_text="Manager only, else `null`.")
+    is_manager = serializers.BooleanField(allow_null=True, help_text="Manager only, else `null`.")
+    last_login_at = serializers.DateTimeField(
+        allow_null=True, help_text="Manager only, else `null`; `null` for a manager too when never signed in."
+    )
+    linked_providers = serializers.SerializerMethodField(help_text="Manager only, else `null`.")
+    created_at = serializers.DateTimeField(
+        source="date_joined", allow_null=True, help_text="Manager only, else `null`."
+    )
+
+    @extend_schema_field(
+        serializers.ListField(child=serializers.ChoiceField(choices=LINKED_PROVIDERS), allow_null=True)
+    )
+    def get_linked_providers(self, obj: Any) -> list[str] | None:
+        return linked_providers(obj)
+
+    def to_representation(self, instance: Any) -> dict[str, Any]:
+        if self.context.get("manager"):
+            return dict(super().to_representation(instance))
+        # Built by hand so a non-manager's page never reads the manager's columns.
+        return {
+            "id": instance.pk,
+            "display_name": self.get_display_name(instance),
+            "email": instance.email,
+            "is_active": instance.is_active,
+            **dict.fromkeys(MANAGER_ONLY_KEYS),
+        }
+
+
+class StaffMemberSerializer(ActorSerializer):
+    """``StaffMember`` (§2.16): a staff account as managers see it; every write of ``staff/`` returns it."""
+
+    email = serializers.EmailField()
+    full_name = serializers.CharField(allow_blank=True)
+    is_active = serializers.BooleanField()
+    is_manager = serializers.BooleanField()
+    last_login_at = serializers.DateTimeField(allow_null=True, help_text="`null`: never signed in.")
+    linked_providers = serializers.SerializerMethodField()
+    created_at = serializers.DateTimeField(source="date_joined")
+
+    @extend_schema_field(serializers.ListField(child=serializers.ChoiceField(choices=LINKED_PROVIDERS)))
+    def get_linked_providers(self, obj: Any) -> list[str]:
+        return linked_providers(obj)
+
+
+class StaffCredentialsSerializer(serializers.Serializer[dict[str, Any]]):
+    """``POST staff/`` (201) and ``POST staff/{id}/reset-password/`` (200): the account and its temporary
+    password, shown once."""
+
+    staff = StaffMemberSerializer()
+    temporary_password = serializers.CharField(
+        help_text="Shown once; the person signs in with it and changes it under «Parolni o‘zgartirish». "
+        "A replay of the same `Idempotency-Key` returns it again (stored sealed, §1.7)."
+    )
+
+
+def _full_name_field(*, required: bool) -> serializers.CharField:
+    return serializers.CharField(
+        required=required,
+        min_length=STAFF_FULL_NAME_MIN_LENGTH,
+        max_length=STAFF_FULL_NAME_MAX_LENGTH,
+    )
+
+
+class StaffCreateSerializer(serializers.Serializer[dict[str, Any]]):
+    """``POST staff/`` body: ``email`` (trimmed, lower-cased, unique), ``full_name`` (trimmed 2..150),
+    ``is_manager`` (default ``false``)."""
+
+    email = serializers.EmailField(max_length=254)
+    full_name = _full_name_field(required=True)
+    is_manager = serializers.BooleanField(required=False, default=False)
+
+    def validate_email(self, value: str) -> str:
+        return value.strip().lower()
+
+
+# Keys of a staff account that ``PATCH staff/{id}/`` refuses with ``read_only`` (the email is the sign-in
+# identity; the state and the password have their own actions).
+STAFF_READ_ONLY_KEYS = ("email", "is_active", "password")
+
+
+class StaffUpdateSerializer(serializers.Serializer[dict[str, Any]]):
+    """``PATCH staff/{id}/`` body: ``full_name`` and/or ``is_manager``; ``email``, ``is_active`` and
+    ``password`` → ``read_only``."""
+
+    full_name = _full_name_field(required=False)
+    is_manager = serializers.BooleanField(required=False)
+
+    def to_internal_value(self, data: Any) -> dict[str, Any]:
+        body = data if isinstance(data, dict) else {}
+        refused = {key: [field_error("read_only")] for key in STAFF_READ_ONLY_KEYS if key in body}
+        try:
+            value: dict[str, Any] = super().to_internal_value(data)
+        except serializers.ValidationError as exc:
+            detail = exc.detail if isinstance(exc.detail, dict) else {}
+            raise serializers.ValidationError({**detail, **refused}) from exc
+        if refused:
+            raise serializers.ValidationError(refused)
+        return value

@@ -62,6 +62,7 @@ def check_malika_profile(staff_client: APIClient) -> None:
     assert data["groups"][0]["name"] == "Doimiy mijozlar"
     assert data["upcoming_appointments"] == 1
     assert data["device"] == {
+        "platform": "ios",
         "model": "iPhone 14",
         "os": "iOS 18.1",
         "app_version": data["device"]["app_version"],
@@ -91,6 +92,7 @@ def test_malika_full_contract_vector(staff_client: APIClient, seeded: None) -> N
         "count": 12,
         "last_order_id": 10248,
         "last_order_at": "2026-10-23T14:02:00+05:00",
+        "all_count": 13,  # every seeded order of Malika, any status (what orders/?customer=5 lists)
     }
     assert data["tier"] == {
         "policy_version": 3,
