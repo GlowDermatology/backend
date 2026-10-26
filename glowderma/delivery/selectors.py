@@ -14,12 +14,22 @@ The contract's ``shipment`` union (``OrderSummary.shipment``):
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any
 
-from glowderma.core import enums
+from django.core.cache import cache
+from django.db.models import Q
+from django.db.models.functions import Coalesce
+
+from glowderma.core import enums, integration_modes, timeutils
 from glowderma.delivery.models import Shipment, ShipmentEvent
+from glowderma.integrations.bts.ports import City, Region
+from glowderma.integrations.bts.registry import get_bts
+
+# BTS's region/city reference list (customer contract §2.6): cached 24 h under this key.
+REGIONS_CACHE_KEY = "gd:bts:regions"
+REGIONS_CACHE_SECONDS = 24 * 3600
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,11 +133,84 @@ def bts_failed_count() -> int:
     ).count()
 
 
+@dataclass(frozen=True, slots=True)
+class RegionCatalog:
+    regions: list[Region]
+    updated_at: datetime | None
+
+
+def region_catalog() -> RegionCatalog:
+    """``delivery/regions/``: BTS ``regions()`` cached 24 h (``gd:bts:regions``); empty with ``updated_at``
+    null (nothing cached, no BTS call) while delivery is not offered (customer contract §2.6). A transport
+    failure of the first fetch raises ``BtsUnavailable`` (the caller answers 503)."""
+    if not integration_modes.delivery_available():
+        return RegionCatalog(regions=[], updated_at=None)
+    cached = cache.get(REGIONS_CACHE_KEY)
+    if isinstance(cached, dict):
+        regions = [
+            Region(code=r["code"], name=r["name"], cities=tuple(City(**c) for c in r["cities"]))
+            for r in cached["regions"]
+        ]
+        return RegionCatalog(regions=regions, updated_at=datetime.fromisoformat(cached["updated_at"]))
+    regions = get_bts().regions()
+    now = timeutils.now()
+    cache.set(
+        REGIONS_CACHE_KEY,
+        {"regions": [asdict(region) for region in regions], "updated_at": now.isoformat()},
+        REGIONS_CACHE_SECONDS,
+    )
+    return RegionCatalog(regions=list(regions), updated_at=now)
+
+
+def region_known(region_code: str, city_code: str) -> bool:
+    """``region_code`` / ``city_code`` are a pair of BTS's reference list (address checks, §2.6)."""
+    if not region_code or not city_code:
+        return False
+    for region in region_catalog().regions:
+        if region.code == region_code:
+            return any(city.code == city_code for city in region.cities)
+    return False
+
+
+def stale_shipments(stale_before: datetime) -> list[tuple[int, int, str]]:
+    """BTS polling candidates (customer contract §2.13.3): ``created`` shipments with a tracking number whose
+    order is ``processing`` / ``handed_to_courier`` and whose ``last_status_at`` (or creation) is older than
+    ``stale_before``; ``(shipment_id, order_id, tracking_number)`` in id order."""
+    rows = (
+        Shipment.objects.filter(
+            state=Shipment.State.CREATED,
+            order__status__in=[enums.OrderStatus.PROCESSING, enums.OrderStatus.HANDED_TO_COURIER],
+        )
+        .exclude(tracking_number="")
+        .annotate(reference=Coalesce("last_status_at", "bts_created_at"))
+        .filter(Q(reference__lt=stale_before) | Q(reference__isnull=True))
+        .order_by("id")
+        .values_list("id", "order_id", "tracking_number")
+    )
+    return [(int(pk), int(order_id), str(tracking)) for pk, order_id, tracking in rows]
+
+
+def shipment_by_tracking(tracking_number: str) -> ShipmentInfo | None:
+    """The shipment whose stored tracking number is ``tracking_number`` (BTS webhook lookup)."""
+    if not tracking_number:
+        return None
+    order_id = (
+        Shipment.objects.filter(tracking_number=tracking_number).values_list("order_id", flat=True).first()
+    )
+    return None if order_id is None else shipment_info(int(order_id))
+
+
 __all__ = [
+    "REGIONS_CACHE_KEY",
+    "RegionCatalog",
     "ShipmentInfo",
     "api_state",
     "bts_failed_count",
     "create_request_answered",
+    "region_catalog",
+    "region_known",
+    "shipment_by_tracking",
+    "stale_shipments",
     "shipment_for_order",
     "shipment_info",
     "shipment_view",

@@ -155,7 +155,8 @@ def test_payment_ordering_and_order_protect() -> None:
 
 def test_payment_indexes_and_constraints_in_pg_catalog() -> None:
     indexes = index_definitions("payments_payment")
-    assert "(order_id) WHERE ((status)::text = ANY" in indexes["payment_one_active_per_order"]
+    assert "(order_id) WHERE (((status)::text = ANY" in indexes["payment_one_active_per_order"]
+    assert "'late_capture'" in indexes["payment_one_active_per_order"]  # payments.0002
     assert indexes["payment_one_active_per_order"].startswith("CREATE UNIQUE INDEX")
     assert "'pending'" in indexes["payment_one_active_per_order"]
     assert "'paid'" in indexes["payment_one_active_per_order"]
