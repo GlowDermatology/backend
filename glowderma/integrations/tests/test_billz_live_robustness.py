@@ -15,6 +15,7 @@ from typing import Any
 
 import httpx
 import pytest
+from celery.exceptions import SoftTimeLimitExceeded  # type: ignore[import-untyped]
 from django.core.cache import cache
 from redis.exceptions import ConnectionError as RedisConnectionError
 
@@ -23,7 +24,12 @@ from glowderma.integrations import selectors
 from glowderma.integrations.billz import client as billz_client
 from glowderma.integrations.billz import live as billz_live
 from glowderma.integrations.billz.client import INTERACTIVE, BillzClient, SafeCache
-from glowderma.integrations.billz.ports import BillzListingIncomplete, BillzUnavailable, SaleRequest
+from glowderma.integrations.billz.ports import (
+    BillzListingIncomplete,
+    BillzUnavailable,
+    SaleLine,
+    SaleRequest,
+)
 from glowderma.integrations.tests.billz_support import (
     SERUM_ID,
     BillzServer,
@@ -336,3 +342,113 @@ def test_the_live_volume_is_not_asserted_without_a_volume_field() -> None:
     """Review A S6 (the adapter side): no ``BILLZ_VOLUME_FIELD`` → ``volume=None`` (not "")."""
     row = live(BillzServer(), volume_field="")._row(product(*A), A[1], timeutils.now())
     assert row.volume is None
+
+
+# --- NEW-1: a cache failure after the payment went out never says "not applied" -----------------------------
+
+
+def _request() -> SaleRequest:
+    return SaleRequest(
+        order_id=1, order_uuid=uuid.uuid4(), lines=[SaleLine("4607012301", 1, 185_000)], customer_phone=""
+    )
+
+
+class FlakyCache:
+    """The Django cache, whose operations named in ``fail_ops`` raise like a Redis blip once ``armed``."""
+
+    def __init__(self) -> None:
+        self.armed = False
+        self.fail_ops: set[str] = set()
+
+    def __getattr__(self, name: str) -> Any:
+        real = getattr(cache, name)
+
+        def call(*args: Any, **kwargs: Any) -> Any:
+            if self.armed and name in self.fail_ops:
+                raise RedisConnectionError("Redis blip")
+            return real(*args, **kwargs)
+
+        return call
+
+
+def test_a_cache_blip_after_a_paid_answer_keeps_the_payment_attempt() -> None:
+    """NEW-1 (probe test_defect_cache_blip_after_successful_payment_forgets_the_attempt): Billz paid; the
+    circuit bookkeeping right after the answer meets a Redis blip. The push succeeds (the bookkeeping is
+    best effort) and the attempt stamp is never forgotten."""
+    server = BillzServer()
+    flaky = FlakyCache()
+    original = server._default
+
+    def payment(request: httpx.Request) -> httpx.Response:
+        response = original("POST /v2/order-payment/{order_id}", request)
+        flaky.armed, flaky.fail_ops = True, {"delete", "add", "incr", "set"}
+        return response
+
+    server.overrides["POST /v2/order-payment/{order_id}"] = payment
+    journal = Journal()
+    receipt = live(server, cache=flaky).push_sale(_request(), journal)
+    assert receipt.billz_sale_id
+    assert server.sales[receipt.billz_sale_id].payments
+    assert journal.forgotten == 0 and journal.payment_attempted_at is not None
+
+
+def test_a_cache_blip_after_a_payment_timeout_keeps_the_payment_attempt() -> None:
+    """NEW-1 (probe test_defect_cache_blip_after_payment_timeout_forgets_the_attempt): the payment times out
+    (outcome unknown) and counting the failure meets a Redis blip: still unknown, the stamp stays."""
+    server = BillzServer()
+    flaky = FlakyCache()
+
+    def payment(request: httpx.Request) -> httpx.Response:
+        flaky.armed, flaky.fail_ops = True, {"add", "incr"}
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    server.overrides["POST /v2/order-payment/{order_id}"] = payment
+    journal = Journal()
+    with pytest.raises(BillzUnavailable) as caught:
+        live(server, cache=flaky).push_sale(_request(), journal)
+    assert not caught.value.not_applied
+    assert journal.forgotten == 0 and journal.payment_attempted_at is not None
+
+
+def test_no_error_after_an_answer_that_may_have_applied_says_not_applied() -> None:
+    """NEW-1: a 5xx of a repeatable call is retried; when the retry cannot start (the circuit or the cache
+    stops it), the error must not claim that nothing reached Billz."""
+    server = BillzServer()
+    flaky = FlakyCache()
+    adapter = live(server, cache=flaky)
+    products_call(adapter)  # log in
+
+    def failing(request: httpx.Request) -> httpx.Response:
+        flaky.armed, flaky.fail_ops = True, {"get"}  # the retry's circuit check cannot read the cache
+        return httpx.Response(502, json={})
+
+    server.overrides["GET /v2/products"] = failing
+    with pytest.raises(BillzUnavailable, match="shared cache unavailable") as caught:
+        products_call(adapter)
+    assert not caught.value.not_applied
+
+
+def test_safe_cache_lets_a_celery_soft_time_limit_through() -> None:
+    """NEW-1 (probe test_defect_safecache_turns_celery_soft_time_limit_into_not_applied): only backend
+    errors are "cache unavailable"; Celery's soft time limit (and any bug) propagates as itself."""
+
+    class Slow:
+        def __getattr__(self, name: str) -> Any:
+            def call(*args: Any, **kwargs: Any) -> Any:
+                raise SoftTimeLimitExceeded()
+
+            return call
+
+    with pytest.raises(SoftTimeLimitExceeded):
+        SafeCache(Slow()).delete(billz_client.CIRCUIT_FAILURES_KEY)  # type: ignore[arg-type]
+    for error in (RedisConnectionError("down"), ConnectionRefusedError(), TimeoutError()):
+
+        class Down:
+            def __getattr__(self, name: str, error: BaseException = error) -> Any:
+                def call(*args: Any, **kwargs: Any) -> Any:
+                    raise error
+
+                return call
+
+        with pytest.raises(BillzUnavailable, match="shared cache unavailable"):
+            SafeCache(Down()).get("key")  # type: ignore[arg-type]

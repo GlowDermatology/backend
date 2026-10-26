@@ -10,8 +10,10 @@ from unittest.mock import patch
 
 import httpx
 import pytest
+from django.core.cache import cache
 from django.core.management import call_command
 from django.test import override_settings
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 from glowderma.catalog.models import Product
 from glowderma.commerce import services, tasks, topics
@@ -22,12 +24,15 @@ from glowderma.core.api.exceptions import Conflict
 from glowderma.core.models import AuditEntry, OutboxMessage
 from glowderma.core.seeding import pinned_clock
 from glowderma.core.tasks import dispatch_outbox
+from glowderma.integrations.billz.client import BillzClient
+from glowderma.integrations.billz.live import LiveBillz
 from glowderma.integrations.tests.billz_support import (
     CLIENT_ID,
     FOAM_ID,
     SALE_ID,
     SERUM_ID,
     BillzServer,
+    config,
     fixture,
     live,
 )
@@ -295,6 +300,54 @@ def test_a_lost_payment_answer_is_deferred_never_paid_twice() -> None:
     assert third.status == "done"
     assert server.count("POST /v2/order-payment/{order_id}") == 1 and len(server.sales[SALE_ID].payments) == 1
     assert OrderEvent.objects.filter(order=order, type="billz_sale_recorded").count() == 1
+
+
+class OneShotBlip:
+    """The Django cache, failing the next call of each operation named in ``ops`` like a Redis blip."""
+
+    def __init__(self) -> None:
+        self.ops: set[str] = set()
+
+    def __getattr__(self, name: str) -> Any:
+        real = getattr(cache, name)
+
+        def call(*args: Any, **kwargs: Any) -> Any:
+            if name in self.ops:
+                self.ops.discard(name)
+                raise RedisConnectionError("Redis blip")
+            return real(*args, **kwargs)
+
+        return call
+
+
+@override_settings(BILLZ_MODE="live")
+def test_a_cache_blip_right_after_the_payment_never_pays_twice() -> None:
+    """NEW-1 end to end (probe test_defect_e2e_cache_blip_after_payment_pays_twice): Billz takes the payment
+    and Redis blips during the circuit bookkeeping right after the answer. The push completes on that answer;
+    the attempt is never forgotten and Billz is paid once."""
+    order = paid_order()
+    server = BillzServer()
+    blip = OneShotBlip()
+    original = server._default
+
+    def payment(request: httpx.Request) -> httpx.Response:
+        response = original("POST /v2/order-payment/{order_id}", request)
+        blip.ops = {"delete"}
+        return response
+
+    server.overrides["POST /v2/order-payment/{order_id}"] = payment
+    cfg = config()
+
+    def adapter(**_: Any) -> LiveBillz:
+        return LiveBillz(cfg, cache=blip, client=BillzClient(cfg, transport=server.transport, cache=blip))
+
+    with patch("glowderma.commerce.billz_sales.get_billz", side_effect=adapter):
+        first = dispatch(message_of(order.pk))
+        assert first.status == "done", first.last_error
+        dispatch(first)
+    assert len(server.sales[SALE_ID].payments) == 1
+    purchase = Purchase.objects.get(order=order)
+    assert purchase.billz_pushed_at is not None and purchase.billz_payment_attempted_at is not None
 
 
 @override_settings(BILLZ_MODE="live")
