@@ -67,8 +67,9 @@ builds it (the contract cannot be edited into compliance after the fact):
 - Payme: `-31051` (account-error range) for "another active transaction / a Click transaction in flight"; `-31008`
   stays for paid, cancelled and non-payable orders (spec line "−31008 for a second active transaction").
 - Customer refresh: "reuse after a short grace window revokes the session" made precise — identical replay for
-  `CUSTOMER_REFRESH_GRACE_SECONDS`, replay or re-rotation while the rotation is unconfirmed and younger than
-  `CUSTOMER_REFRESH_UNCONFIRMED_SECONDS`, reuse (revoke) after that or once an access token of the new rotation was used.
+  `CUSTOMER_REFRESH_GRACE_SECONDS` after a rotation, confirmed or not; re-rotation while the rotation is unconfirmed and
+  younger than `CUSTOMER_REFRESH_UNCONFIRMED_SECONDS`; reuse (revoke) after that, or after the grace once an access
+  token of the new rotation was used; the app refreshes single-flight.
 - Libraries: firebase-admin is **not** added; the FCM live adapter uses httpx + PyJWT (C§2.14.2).
 - Customer social login: Google, Facebook **and Apple** (product-owner decision 2026-10-26), with Apple token
   revocation on unlink and deletion.
@@ -207,7 +208,7 @@ C§2.0 rows 1–23: `auth/send-code/`, `auth/verify-code/`, `auth/set-password/`
 | `otp_blocked(phone, *, fid, ip, now) -> OtpBlock \| None` | `accounts.services` | the pre-password check of login step 3: takes the per-phone advisory lock (held to commit), then every refusal `send_code` could meet — phone lockout, daily code cap, daily wrong-code cap, fid cap, IP cap (`otp_network_limit`), global budget (`sms_unavailable`) |
 | `verify_code(phone, purpose, code) -> raw verification token` | `accounts.services` | advisory lock + `select_for_update`; attempts, exhaustion, daily wrong cap |
 | `consume_verification(token, *, purpose, phone=None) -> (phone, sms_code_id)` | `accounts.services` | single use under lock |
-| `rotate_customer_refresh(raw, *, fid) -> RefreshResult` | `accounts.services` | C§2.1.6 steps 1–6: row lock on `refresh_hash OR previous_refresh_hash`, rotate / replay / re-rotate (bounded by `CUSTOMER_REFRESH_UNCONFIRMED_SECONDS`, dead hash remembered in `auth:refresh_dead:{hash}`, grace cache rewritten) / reuse → revoke `refresh_reused` + audit; grace cache written before commit and deleted on rollback |
+| `rotate_customer_refresh(raw, *, fid) -> RefreshResult` | `accounts.services` | C§2.1.6 steps 1–6: row lock on `refresh_hash OR previous_refresh_hash`, rotate / grace replay (whenever `auth:refresh_grace:{h}` exists, confirmed or not) / re-rotate (unconfirmed only, bounded by `CUSTOMER_REFRESH_UNCONFIRMED_SECONDS`, dead hash remembered in `auth:refresh_dead:{hash}`, grace cache rewritten) / reuse → revoke `refresh_reused` + audit; grace cache written before commit and deleted on rollback |
 | `logout_customer(raw)` | `accounts.services` | revoke + device inactive, token cleared, QR tokens revoked |
 | `issue_social_nonce(fid)`, `consume_social_nonce(nonce, fid)`, `remember_id_token(provider, claims)` | `accounts.services` | Redis, single use, replay cache until `exp` |
 | `register(...)` (reactivation → `move_history_horizon`), `login(...)` (device key evaluated first, guard scope by device knowledge, dummy hash whenever no stored hash is compared), `reset_password(...)` (unlinks identities, clears other device keys, dormant rule, `push.account_security` with `farewell_tokens`), `social_sign_in(...)`, `complete_social(...)` (fid + ticket binding, password for password accounts, dormant rule for SMS-only links, `farewell_tokens`), `link_social(...)` / `unlink_social(...)` (re-authentication: password, or a `reset_password` verification token when the account has none), `change_password(...)` (`me/password/`: current password or verification token; keeps session, device key and identities), `accept_consent(...)`, `update_profile(...)`, `set_image(...)`, `delete_account(customer_id, *, password=None, verification_token=None)`; `customers.selectors.last_activity_at(customer_id)` (newest of last login, session use, purchase, order) | `customers.services` | orchestrators (need `site_config` for the terms version and publication check and, for delete, `commerce`/`appointments`); `delete_account` takes the customer-level lock first (`select_for_update(no_key=True)`), refuses on `commerce.selectors.customer_inflight_order` |
@@ -270,8 +271,10 @@ None (P0 owns `accounts.0006`). The link-social ticket binding and the OTP fid/I
   identical tokens and one chain; lost response → retry after 45 s with the old token → the grace body (identical
   tokens); after 5 min → 200 by re-rotation, nothing revoked, the grace cache rewritten so two concurrent retries get
   the same tokens; after 11 min still unconfirmed → reuse: 401 `SESSION_EXPIRED`, audit `customer.refresh_reused`; the
-  token replaced by a re-rotation presented later → reuse (dead-hash entry); old token after the first access token of
-  the new `rot` → 401 `SESSION_EXPIRED` + audit, session dead for the new token too; a token two rotations old → 401
+  token replaced by a re-rotation presented later → reuse (dead-hash entry); **parallel 401s:** rotate R1 → R2, use A2
+  (rotation confirmed), then present R1 again within 120 s → 200 with the same tokens (R2/A2), session alive, no audit
+  row; old token after the first access token of the new `rot` **and** after the 120 s grace → 401 `SESSION_EXPIRED`
+  + audit, session dead for the new token too; a token two rotations old → 401
   `not_authenticated`; sliding expiry; device mismatch; junk tokens hit `refresh_unknown`.
 - Social: nonce issue/consume single use and fid binding; replayed ID token refused; linked → tokens; unknown →
   ticket bound to the fid (another fid → `social_ticket_invalid`); send-code with ticket; complete for active
@@ -696,8 +699,9 @@ recorded; C§6.14).
 #CUSTOMER_ACCESS_TTL=900
 #CUSTOMER_REFRESH_TTL_DAYS=60
 #CUSTOMER_REFRESH_GRACE_SECONDS=120
-# How long an unconfirmed rotation lets the previous refresh token replay or re-rotate; after it (or once an access
-# token of the new rotation was used) the previous token counts as reuse and revokes the session.
+# The previous refresh token replays the same tokens for CUSTOMER_REFRESH_GRACE_SECONDS after a rotation (confirmed or
+# not); after that it re-rotates while the rotation is unconfirmed and younger than this; beyond it (or once an access
+# token of the new rotation was used) it counts as reuse and revokes the session.
 #CUSTOMER_REFRESH_UNCONFIRMED_SECONDS=600
 # OTP policy (A3): code TTL, resend wait, attempts, lockout, daily caps per phone / device / IP, wrong codes per day.
 #CUSTOMER_OTP_TTL_SECONDS=120

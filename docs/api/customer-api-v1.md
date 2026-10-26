@@ -64,7 +64,7 @@ Everything in admin §1 applies unless a row below says otherwise.
 
 | `code` | Cause | App reaction |
 |---|---|---|
-| `not_authenticated` | Header missing or malformed; bad signature, `aud` or `iss`; access JWT expired; device id/platform mismatch; unknown refresh token on `auth/refresh/` | Call `auth/refresh/` once and retry. Any 401 from `auth/refresh/` → delete tokens, go to sign-in. |
+| `not_authenticated` | Header missing or malformed; bad signature, `aud` or `iss`; access JWT expired; device id/platform mismatch; unknown refresh token on `auth/refresh/` | Refresh once and retry, **single-flight**: the app runs at most one `auth/refresh/` at a time; every request that failed with an access token older than the stored one, or while a refresh is running, waits for it and retries with the newer stored tokens instead of refreshing again; the new refresh token is persisted (Keychain/Keystore, atomically replacing the old one) before the old one is discarded and before any retry. Any 401 from `auth/refresh/` → delete tokens, go to sign-in. |
 | `SESSION_EXPIRED` | Session revoked (`logout`, `deactivated`, `refresh_reused`, `expired`, `admin_revoked`) or past `absolute_expires_at` (60 days idle); customer deleted; unknown/revoked refresh on `auth/logout/` | Delete tokens; sign-in screen with the phone pre-filled; no message. |
 | `password_changed` | Session revoked with reason `password_changed`: the password was reset (`auth/reset-password/`) or changed (`me/password/`) on another device. **Only** this cause. | Delete tokens; show "Parolingiz o‘zgartirildi. Qayta kiring. Bu siz bo‘lmasangiz, sotuvchi bilan bog‘laning." (`error.password_changed`) and the sign-in screen. |
 | `SESSION_REPLACED` | Session revoked with reason `replaced`: the account signed in on another device (single-device rule, §1.9). **Only** this cause. | Delete tokens; show "Hisobingizga boshqa qurilmadan kirildi." and the sign-in screen. |
@@ -485,9 +485,9 @@ session of the customer revoked with `password_changed` (tombstones on commit; t
 victim does after an account takeover and a linked identity would otherwise keep the attacker in; every other
 device's key hash cleared; the **dormant-account rule** (§2.2.3, `M2-A16`) applies; then `start_customer_session(…,
 issue_device_key=True)` on this device; outbox `push.account_security` (payload §2.14.2: `event: "password_reset"`,
-`provider: ""`, `farewell_tokens` = the captured tokens) — inbox row + push to the new device **and** a visible push to every token captured from the devices
-this reset deactivated (`SessionStart.farewell_tokens`, §1.9), so the previous device learns of the reset even when the
-reset came from a stolen SIM (§2.14.2); audit `customer.password_reset`. 400 `verification_invalid`; 409
+`provider: ""`, `farewell_tokens` = the captured tokens) — inbox row + push to the new device **and** a visible push to
+every token captured from the devices this reset deactivated (`SessionStart.farewell_tokens`, §1.9), so the previous
+device learns of the reset even when the reset came from a stolen SIM (§2.14.2); audit `customer.password_reset`. 400 `verification_invalid`; 409
 `phone_not_registered` if the customer was deleted in between.
 
 #### 2.1.6 `POST auth/refresh/`
@@ -497,7 +497,7 @@ Body `{"refresh": str}`. Device headers must match the session's device (else 40
 1. `h = SHA-256(raw)`; `SELECT … FOR UPDATE` the session `WHERE audience='customer' AND (refresh_hash = h OR
    previous_refresh_hash = h)` (index `accounts_authsession_prev_refresh`, partial `WHERE previous_refresh_hash <>
    ''`, migration `accounts.0006`). Every check below runs on the locked row, so two concurrent refreshes serialise.
-2. No row → if `auth:refresh_dead:{h}` names a session (a token replaced by a re-rotation, step 5), that session is
+2. No row → if `auth:refresh_dead:{h}` names a session (a token replaced by a re-rotation, step 5b), that session is
    locked and treated as **reuse** (step 6); otherwise 401 `not_authenticated`, and the `refresh_unknown` per-IP
    throttle counts the miss. A token two or more rotations old is simply unknown: its holder never had the current one.
 3. Revoked → 401 `SESSION_REPLACED` for reason `replaced`, `password_changed` for reason `password_changed`, else
@@ -507,20 +507,27 @@ Body `{"refresh": str}`. Device headers must match the session's device (else 40
    days` (sliding); the new access token carries `rot = rotation`. Before commit the full response body is written to
    `auth:refresh_grace:{h}` (TTL `CUSTOMER_REFRESH_GRACE_SECONDS`, 120 s; deleted again if the transaction rolls back)
    → 200.
-5. `previous_refresh_hash = h`, the rotation is **unconfirmed** (`rotation_confirmed = false`: no access token carrying
-   the current `rot` has been seen) **and** `now − rotated_at ≤ CUSTOMER_REFRESH_UNCONFIRMED_SECONDS` (600) → the
-   response of that rotation was lost or a concurrent request raced: return the cached grace body when it exists
-   (identical tokens); otherwise **re-rotate**: the current `refresh_hash` (issued but never used) is remembered as dead
-   (`auth:refresh_dead:{that hash}` = sid, TTL until `absolute_expires_at`), a fresh refresh replaces it,
-   `previous_refresh_hash` stays `h`, `rotation += 1`, `rotation_confirmed = false`, `rotated_at` **unchanged** (the
-   window stays anchored to the rotation that replaced `h`), and the new body is written to `auth:refresh_grace:{h}`
-   (overwriting the expired entry) so a concurrent second retry gets the same tokens instead of forking again → 200.
-6. `previous_refresh_hash = h` and the rotation is **confirmed** (`rotation_confirmed = true`) **or** the unconfirmed
-   window is over (`now − rotated_at > CUSTOMER_REFRESH_UNCONFIRMED_SECONDS`), or a dead token came back (step 2) →
-   **reuse**: one of the holders is not the app. Session revoked with reason `refresh_reused` (tombstone on commit);
-   audit `customer.refresh_reused {sid}`; WARNING log → 401 `SESSION_EXPIRED` (not `SESSION_REPLACED`: nobody signed in
-   elsewhere). This is the spec's "reuse after a short grace window revokes the session", with the window ended early
-   by the first use of the new tokens.
+5. `previous_refresh_hash = h`:
+   - (a) **grace replay** — the grace body `auth:refresh_grace:{h}` exists (written by the rotation or re-rotation that
+     replaced `h`, TTL `CUSTOMER_REFRESH_GRACE_SECONDS`, 120 s) → return it (identical tokens, nothing written),
+     **whether or not the rotation is confirmed**. This is the common mobile case: when the access token expires, the
+     app's parallel requests all get 401 and, without single flight, several refreshes carry the same old token; the
+     first rotates and its retried request confirms the rotation within milliseconds, and the later ones must still get
+     the same tokens, not a revocation;
+   - (b) otherwise, the rotation is **unconfirmed** (`rotation_confirmed = false`: no access token carrying the current
+     `rot` has been seen) **and** `now − rotated_at ≤ CUSTOMER_REFRESH_UNCONFIRMED_SECONDS` (600) → the response of that
+     rotation was lost and the grace body has expired: **re-rotate**: the current `refresh_hash` (issued but never
+     used) is remembered as dead (`auth:refresh_dead:{that hash}` = sid, TTL until `absolute_expires_at`), a fresh
+     refresh replaces it, `previous_refresh_hash` stays `h`, `rotation += 1`, `rotation_confirmed = false`, `rotated_at`
+     **unchanged** (the window stays anchored to the rotation that replaced `h`), and the new body is written to
+     `auth:refresh_grace:{h}` (overwriting the expired entry) so a concurrent second retry gets the same tokens instead
+     of forking again → 200.
+6. `previous_refresh_hash = h`, no grace body (5a), and the rotation is **confirmed** (`rotation_confirmed = true`)
+   **or** the unconfirmed window is over (`now − rotated_at > CUSTOMER_REFRESH_UNCONFIRMED_SECONDS`), or a dead token
+   came back (step 2) → **reuse**: one of the holders is not the app. Session revoked with reason `refresh_reused`
+   (tombstone on commit); audit `customer.refresh_reused {sid}`; WARNING log → 401 `SESSION_EXPIRED` (not
+   `SESSION_REPLACED`: nobody signed in elsewhere). This is the spec's "reuse after a short grace window revokes the session": the grace window is the
+   120 s replay of 5a; the first use of the new tokens ends only the longer re-rotation window of 5b.
 
 **Rotation counter and confirmation.** `rot` is the integer `AuthSession.rotation` (migration `accounts.0006`, `0`
 before the first rotation), compared exactly — never a timestamp, so clock precision and a pinned `FAKE_NOW` cannot
@@ -531,9 +538,11 @@ row and writes nothing), then `cache.add("auth:sidrot:{sid}:{rot}", 1, timeout=C
 entry `auth:sid:{sid}` = `active:{abs_expiry}:{pii_ref(fid)}:{platform}` stays **immutable and add-only** (spec: filled
 with `cache.add`, TTL ≤ 60 s; every revoke writes a `revoked:<reason>` tombstone on commit): no rotation or
 confirmation ever writes it, so a confirmation can never overwrite a concurrent tombstone. Its `abs_expiry` may lag a
-slide by at most its 60 s TTL, which matters only for a session that was within a minute of expiring. Presenting the
-**new refresh token** is not a confirmation step: it rotates again (step 4), after which the old token is neither
-current nor previous and gets 401 `not_authenticated`.
+slide by at most its 60 s TTL, which matters only for a session that was within a minute of expiring. Confirmation
+ends only the re-rotation window (step 5b); the grace replay (step 5a) still answers until its 120 s are over.
+Presenting the **new refresh token** is not a confirmation step: it rotates again (step 4), after which the old token
+is neither current nor previous and gets 401 `not_authenticated` (the app's single-flight rule of §1.2 means it never
+presents that old token).
 
 ```jsonc
 // 200
@@ -2326,10 +2335,14 @@ code a customer view can raise to an existing key.
    the next sign-in on this install skips the SMS; it is deleted on account deletion). The QR token is never persisted
    and the QR screen is excluded from screenshots/recents where the OS allows (`FLAG_SECURE` on Android). Server side
    the only raw refresh token ever stored is the 120-second rotation-grace cache entry in Redis.
-7. **Refresh rotation** with reuse detection (§2.1.6): the old token keeps working for at most
-   `CUSTOMER_REFRESH_UNCONFIRMED_SECONDS` (10 minutes) and only until an access token of the new rotation is first
-   used, so a lost response on a mobile network does not sign the user out; an old token that comes back **after**
-   that, or a token replaced by a re-rotation, kills the session (`refresh_reused` → `SESSION_EXPIRED`). Rotation runs
+7. **Refresh rotation** with reuse detection (§2.1.6): for `CUSTOMER_REFRESH_GRACE_SECONDS` (120 s) after a rotation the
+   old token returns the very same tokens (concurrent refreshes of one app never revoke), and after that it re-rotates
+   for at most `CUSTOMER_REFRESH_UNCONFIRMED_SECONDS` (10 minutes) and only until an access token of the new rotation is
+   first used, so a lost response on a mobile network does not sign the user out; an old token that comes back **after**
+   that, or a token replaced by a re-rotation, kills the session (`refresh_reused` → `SESSION_EXPIRED`). Within the
+   120 s a thief presenting a stolen old token gets the same tokens as the app instead of a revocation — the grace the
+   spec allows; their next presentation after it is reuse. The app refreshes single-flight and persists the new refresh
+   token before discarding the old one (§1.2), so it never presents a stale token itself. Rotation runs
    under a row lock and re-rotation rewrites the grace cache, so concurrent refreshes cannot fork the chain; the
    rotation is an integer counter, so confirmation does not depend on clock precision.
 8. **Device binding and A2.** `X-GD-Device-Id`/`X-GD-Platform` must match the session's device; a token copied to
