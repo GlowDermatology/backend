@@ -65,7 +65,8 @@ Everything in admin §1 applies unless a row below says otherwise.
 | `code` | Cause | App reaction |
 |---|---|---|
 | `not_authenticated` | Header missing or malformed; bad signature, `aud` or `iss`; access JWT expired; device id/platform mismatch; unknown refresh token on `auth/refresh/` | Call `auth/refresh/` once and retry. Any 401 from `auth/refresh/` → delete tokens, go to sign-in. |
-| `SESSION_EXPIRED` | Session revoked (`logout`, `password_changed`, `deactivated`, `refresh_reused`) or past `absolute_expires_at` (60 days idle); customer deleted; unknown/revoked refresh on `auth/logout/` | Delete tokens; sign-in screen with the phone pre-filled; no message. |
+| `SESSION_EXPIRED` | Session revoked (`logout`, `deactivated`, `refresh_reused`, `expired`, `admin_revoked`) or past `absolute_expires_at` (60 days idle); customer deleted; unknown/revoked refresh on `auth/logout/` | Delete tokens; sign-in screen with the phone pre-filled; no message. |
+| `password_changed` | Session revoked with reason `password_changed`: the password was reset (`auth/reset-password/`) or changed (`me/password/`) on another device. **Only** this cause. | Delete tokens; show "Parolingiz o‘zgartirildi. Qayta kiring. Bu siz bo‘lmasangiz, sotuvchi bilan bog‘laning." (`error.password_changed`) and the sign-in screen. |
 | `SESSION_REPLACED` | Session revoked with reason `replaced`: the account signed in on another device (single-device rule, §1.9). **Only** this cause. | Delete tokens; show "Hisobingizga boshqa qurilmadan kirildi." and the sign-in screen. |
 | `invalid_credentials` | `auth/login/` only | Form error. |
 
@@ -132,6 +133,7 @@ Codes added for this audience (admin §1.6 codes keep their meaning):
 | 400 | `verification_invalid` | `verification_token` unknown, expired, used, or bound to another phone/purpose/ticket | null |
 | 400 | `social_token_invalid` | Provider token rejected, nonce missing/unknown/used, or token replayed (§2.1.8) | null |
 | 400 | `social_ticket_invalid` | `social_ticket` unknown, expired, used or issued to another device | null |
+| 401 | `password_changed` | The session was revoked because the password was reset or changed on another device (§1.2, §2.1.5) | null |
 | 409 | `phone_registered` · `phone_not_registered` | Purpose does not fit the phone (§2.1.1) | null |
 | 409 | `social_provider_linked` · `social_identity_linked` | Link refused (§2.1.9, §2.2.8) | `{"provider": str}` |
 | 409 | `last_sign_in_method` | Unlinking the only way to sign in (§2.2.8) | `{"provider": str}` |
@@ -163,7 +165,8 @@ Mechanism, fingerprint, storage and responses as admin §1.7 (`core.idempotency.
 - **Required** (400 `idempotency_key_required` without it): `POST orders/checkout/`, `POST orders/{id}/pay/`,
   `POST orders/{id}/cancel/`, `POST orders/{id}/reorder/`, `POST appointments/`, `POST appointments/{id}/cancel/`,
   `POST cart/items/` (an increment: a retried "add 1" must not add 2), `POST me/addresses/` (a retried create must not
-  duplicate), `POST me/social/`.
+  duplicate), `POST me/social/`, `POST me/password/` (a retried change would answer `password_unchanged` or find its
+  verification token used).
 - **Optional** on every other **C** POST/PUT/PATCH/DELETE (they are absolute writes: a retry converges). `auth/*`
   ignore the header (responses carry credentials).
 - Webhooks do not use it: provider deliveries are de-duplicated by `integrations.WebhookInbox` and by provider state
@@ -190,8 +193,8 @@ high pure-IP ceiling as a backstop; the per-phone rules are the main protection 
 | OTP rules (not a DRF throttle; §2.1.1) | phone (DB-derived, survive a cache flush); fid and IP daily counters in Redis | resend ≥ 60 s per (phone, purpose); ≤ 10 codes per phone per Tashkent day; ≤ 10 wrong codes per phone per day; 15 min lockout after 5 wrong codes on one code; ≤ 10 codes per fid and ≤ 200 per IP per day; global ≤ `SMS_GLOBAL_HOURLY_LIMIT` per hour | `auth/send-code/`, `auth/verify-code/`, `auth/login/` |
 | **`customer_auth_device`** (new) | fid | 30/min | `auth/verify-code/`, `auth/set-password/`, `auth/login/`, `auth/reset-password/`, `auth/social/`, `auth/social/nonce/`, `auth/social/complete/` |
 | **`customer_auth_ip`** (new) | client IP (backstop) | 1200/min | the same routes |
-| customer login guard (`LoginGuard`, scope `customer_login`) | `pii_ref(phone)` | 5 failures/min, then lockout 1 → 15 min exponential | `auth/login/`, the password of `auth/social/complete/` |
-| customer delete guard (`LoginGuard`, scope `customer_delete`) | customer id | 5 failures/min, then lockout | `DELETE me/` password |
+| customer login guard (`LoginGuard`, scope `customer_login`) | `pii_ref(phone)` | 5 failures/min, then lockout 1 → 15 min exponential | `auth/login/` on a device without a valid device key; every other password check of the customer — `auth/social/complete/`, `me/social/` (POST and DELETE), `me/password/`, `DELETE me/` — so a stolen access token gets no second guessing budget |
+| **known-device login guard** (new; `LoginGuard`, scope `customer_login_device`) | device row id | 5 failures/min, then lockout 1 → 15 min exponential | `auth/login/` with a valid `X-GD-Device-Key` (§2.1.4): someone who only knows the phone cannot lock the owner out of their own known device |
 | `refresh` | SHA-256 of the presented refresh token | 120/min | `auth/refresh/` |
 | **`refresh_unknown`** (new) | client IP, counted only when the presented token matches no session | 60/min | `auth/refresh/` (junk-token rotation cannot bypass the per-token key) |
 | `auth_client_ip` | client IP | 600/min | `auth/refresh/`, `auth/logout/` |
@@ -242,6 +245,10 @@ IP per minute, the rest only counted and sampled in the log).
 - `auth/logout/` revokes the session (`logout`) and sets the device `is_active=False`, `push_enabled=False`,
   `fcm_token=""` (the key hash stays, so signing in again on this install skips the SMS).
 - `DELETE me/` revokes with `deactivated` and clears every device token and key hash (A1, §2.2.3).
+- `start_customer_session` returns, with the new session, the FCM tokens it took from the devices step 2 deactivated
+  (`SessionStart.farewell_tokens`, captured before they are cleared). `auth/reset-password/` and
+  `auth/social/complete/` pass them to their `push.account_security` notice, so the **previous** device — the one
+  the legitimate owner may still hold after a takeover — gets a visible notice too (§2.14.2).
 
 ---
 ## 2. Endpoints
@@ -266,44 +273,45 @@ IP per minute, the rest only counted and sampled in the log).
 | 12 | POST | `me/consent/` | C | | 200 | P1 |
 | 13 | PUT / DELETE | `me/image/` | C | multipart / – | 200 / 204 | P1 |
 | 14 | PUT | `me/device/` | C | | 200 | P1 |
-| 15 | POST / DELETE | `me/social/`, `me/social/{provider}/` | C | I (POST) | 200 / 200 | P1 |
-| 16 | GET / POST | `me/addresses/` | C | I (POST) | 200 / 201 | P1 |
-| 17 | PATCH / DELETE | `me/addresses/{id}/` | C | | 200 / 204 | P1 |
-| 18 | POST | `me/addresses/{id}/default/` | C | | 200 | P1 |
-| 19 | GET | `catalog/banners/`, `catalog/categories/` | O | | 200 | P1 |
-| 20 | GET | `catalog/products/` | O | P | 200 | P1 |
-| 21 | GET | `catalog/products/{id}/` | O | | 200 | P1 |
-| 22 | GET | `settings/public/` | O | | 200 | P1 |
-| 23 | GET / DELETE | `cart/` | C | | 200 | P2 |
-| 24 | POST | `cart/items/` | C | I | 200 | P2 |
-| 25 | PATCH / DELETE | `cart/items/{product_id}/` | C | | 200 | P2 |
-| 26 | DELETE | `cart/items/?product_id=…` (bulk) | C | | 200 | P2 |
-| 27 | GET | `delivery/regions/` | O | | 200 | P2 |
-| 28 | POST | `delivery/calculate/` | C | | 200 | P2 |
-| 29 | POST | `orders/checkout/` | C | I | 201 | P2 |
-| 30 | POST | `orders/{id}/pay/` | C | I | 200 | P2 |
-| 31 | POST | `orders/{id}/cancel/` | C | I | 200 | P2 |
-| 32 | POST | `orders/{id}/reorder/` | C | I | 200 | P2 |
-| 33 | GET | `me/orders/` | C | P | 200 | P2 |
-| 34 | GET | `me/orders/{id}/` | C | | 200 | P2 |
-| 35 | GET | `me/cashback/` | C | | 200 | P3 |
-| 36 | GET | `me/cashback/ledger/` | C | P | 200 | P3 |
-| 37 | GET | `me/qr/` | C | | 200 | P3 |
-| 38 | POST | `pos/cashback/resolve-qr/` | K | | 200 | P3 |
-| 39 | GET | `specialists/`, `specialists/{id}/`, `services/` | O | | 200 | P3 |
-| 40 | GET | `specialists/{id}/slots/?date=&service_id=` | O | | 200 | P3 |
-| 41 | POST | `appointments/` | C | I | 201 | P3 |
-| 42 | GET | `me/appointments/` | C | P | 200 | P3 |
-| 43 | GET | `me/appointments/{id}/` | C | | 200 | P3 |
-| 44 | POST | `appointments/{id}/cancel/` | C | I | 200 | P3 |
-| 45 | GET | `me/notifications/` | C | P | 200 | P3 |
-| 46 | GET | `me/notifications/unread-count/` | C | | 200 | P3 |
-| 47 | POST | `me/notifications/{id}/read/`, `me/notifications/read-all/` | C | | 200 | P3 |
-| 48 | POST | `me/notifications/ack/` | C | | 200 | P3 |
-| 49 | POST | `webhooks/click/prepare/`, `webhooks/click/complete/` | S | | 200 | P2 |
-| 50 | POST | `webhooks/payme/` | S | | 200 | P2 |
-| 51 | POST | `webhooks/bts/` | S | | 200 | P2 |
-| 52 | POST | `dev/payments/{order_id}/simulate/` | C | fake only | 200 | P2 |
+| 15 | POST | `me/password/` | C | I | 200 | P1 |
+| 16 | POST / DELETE | `me/social/`, `me/social/{provider}/` (DELETE with a JSON body) | C | I (POST) | 200 / 200 | P1 |
+| 17 | GET / POST | `me/addresses/` | C | I (POST) | 200 / 201 | P1 |
+| 18 | PATCH / DELETE | `me/addresses/{id}/` | C | | 200 / 204 | P1 |
+| 19 | POST | `me/addresses/{id}/default/` | C | | 200 | P1 |
+| 20 | GET | `catalog/banners/`, `catalog/categories/` | O | | 200 | P1 |
+| 21 | GET | `catalog/products/` | O | P | 200 | P1 |
+| 22 | GET | `catalog/products/{id}/` | O | | 200 | P1 |
+| 23 | GET | `settings/public/` | O | | 200 | P1 |
+| 24 | GET / DELETE | `cart/` | C | | 200 | P2 |
+| 25 | POST | `cart/items/` | C | I | 200 | P2 |
+| 26 | PATCH / DELETE | `cart/items/{product_id}/` | C | | 200 | P2 |
+| 27 | DELETE | `cart/items/?product_id=…` (bulk) | C | | 200 | P2 |
+| 28 | GET | `delivery/regions/` | O | | 200 | P2 |
+| 29 | POST | `delivery/calculate/` | C | | 200 | P2 |
+| 30 | POST | `orders/checkout/` | C | I | 201 | P2 |
+| 31 | POST | `orders/{id}/pay/` | C | I | 200 | P2 |
+| 32 | POST | `orders/{id}/cancel/` | C | I | 200 | P2 |
+| 33 | POST | `orders/{id}/reorder/` | C | I | 200 | P2 |
+| 34 | GET | `me/orders/` | C | P | 200 | P2 |
+| 35 | GET | `me/orders/{id}/` | C | | 200 | P2 |
+| 36 | GET | `me/cashback/` | C | | 200 | P3 |
+| 37 | GET | `me/cashback/ledger/` | C | P | 200 | P3 |
+| 38 | GET | `me/qr/` | C | | 200 | P3 |
+| 39 | POST | `pos/cashback/resolve-qr/` | K | | 200 | P3 |
+| 40 | GET | `specialists/`, `specialists/{id}/`, `services/` | O | | 200 | P3 |
+| 41 | GET | `specialists/{id}/slots/?date=&service_id=` | O | | 200 | P3 |
+| 42 | POST | `appointments/` | C | I | 201 | P3 |
+| 43 | GET | `me/appointments/` | C | P | 200 | P3 |
+| 44 | GET | `me/appointments/{id}/` | C | | 200 | P3 |
+| 45 | POST | `appointments/{id}/cancel/` | C | I | 200 | P3 |
+| 46 | GET | `me/notifications/` | C | P | 200 | P3 |
+| 47 | GET | `me/notifications/unread-count/` | C | | 200 | P3 |
+| 48 | POST | `me/notifications/{id}/read/`, `me/notifications/read-all/` | C | | 200 | P3 |
+| 49 | POST | `me/notifications/ack/` | C | | 200 | P3 |
+| 50 | POST | `webhooks/click/prepare/`, `webhooks/click/complete/` | S | | 200 | P2 |
+| 51 | POST | `webhooks/payme/` | S | | 200 | P2 |
+| 52 | POST | `webhooks/bts/` | S | | 200 | P2 |
+| 53 | POST | `dev/payments/{order_id}/simulate/` | C | local/test settings only | 200 | P2 |
 
 **Shared shapes.**
 ```jsonc
@@ -338,8 +346,10 @@ OTP purposes (`OtpPurpose`) map to `SmsCode.Purpose`: `register` → `signup`, `
 `auth/login/` after the password check (§2.1.4); `send-code` refuses that purpose, so nobody can make the server text
 a registered phone without its password.
 
-**Change password while signed in** (no separate endpoint): `send-code` (`reset_password`) → `verify-code` →
-`reset-password`. The current device receives new tokens and a new device key; every other session is revoked.
+**Set or change the password while signed in:** `POST me/password/` (§2.2.9) — with the current password, or with an
+SMS verification token when the account has none (social-only). It keeps the current session, device key and social
+identities. `auth/reset-password/` (§2.1.5) is the **unauthenticated recovery** path only (forgotten password, account
+takeover): it revokes every session and unlinks every social identity.
 
 #### 2.1.1 `POST auth/send-code/`
 Body `{"phone": str, "purpose": "register" | "reset_password" | "link_social", "social_ticket": str | null}`.
@@ -418,7 +428,8 @@ Body `{"verification_token": str (purpose register), "password": str, "name": st
 → **201 `AuthTokens`** (with a `device_key`). Side effects (one transaction, `customers.services.register`):
 - new `Customer(phone, name, language)` or, for a deleted row, `accounts.services.reactivate_customer(name=…)`
   (same id; `registered_at` kept, `reactivated_at=now`; `LoyaltyAccount`, `Purchase`, `Order` history intact, A1 —
-  but the history shown to the new holder of the number starts at `reactivated_at`, §2.2.3);
+  but the history shown to the new holder of the number starts at the **history horizon** `Customer.history_from`,
+  which `accounts.services.move_history_horizon(customer_id, at=now)` sets to `reactivated_at`, §2.2.3);
 - `set_customer_password`; consent `terms_version`, `consent_at=now`, `consent_ip=client IP` (C3);
 - `start_customer_session(…, issue_device_key=True)` (§1.9); verification token marked used;
 - audit `customer.registered {reactivated: bool, terms_version}`.
@@ -426,15 +437,20 @@ Body `{"verification_token": str (purpose register), "password": str, "name": st
 #### 2.1.4 `POST auth/login/`
 Body `{"phone": str, "password": str 1..128, "verification_token": str | null}`; header `X-GD-Device-Key` when the app
 holds one.
-1. Customer login guard (per phone) → 429 `throttled`.
-2. The device is **known** when the active customer of this phone has `Device(customer, fid)` with `key_hash =
-   SHA-256(X-GD-Device-Key)` (§1.9); an unknown phone, a missing key or a wrong key = unknown device.
+1. The device is **known** when the active customer of this phone has `Device(customer, fid)` with `key_hash =
+   SHA-256(X-GD-Device-Key)` (§1.9); an unknown phone, a missing, malformed or wrong key = unknown device. This is
+   evaluated first and reveals nothing by itself (the answer does not differ until the password is checked).
+2. Login guard → 429 `throttled`: a **known** device counts its failures in scope `customer_login_device` keyed by the
+   device row; an unknown device in scope `customer_login` keyed by `pii_ref(phone)` (§1.8). Someone who only knows the
+   phone can lock the unknown-device path for that phone (residual risk, §6.3) but never the owner's known device.
 3. **Unknown device without `verification_token`:** if the phone cannot receive a code right now (lockout, daily code
    cap, daily wrong-code cap, §2.1.1) → 429 `otp_locked` / `otp_daily_limit` **before the password is checked**, with
    the same body for every password and for unknown phones, so a capped phone gives no password-correctness oracle.
 4. Unknown phone, deleted customer, no password set (social-only account) or wrong password → **401
-   `invalid_credentials`** "Telefon raqami yoki parol noto‘g‘ri." (same body and timing: the hasher runs for unknown
-   phones too). Audit `customer.login_failed {method: "password"}` with `actor_id` when the customer exists.
+   `invalid_credentials`** "Telefon raqami yoki parol noto‘g‘ri." (same body and timing: whenever no stored hash is
+   compared — unknown phone, deleted customer, empty password — the login service runs a dummy Argon2 check against a
+   fixed hash, so all four cases cost one hash; `check_customer_password` itself is unchanged). Audit
+   `customer.login_failed {method: "password"}` with `actor_id` when the customer exists.
 5. **Known device** → **200 `AuthTokens`** (`device_key: null`; single-device rule applies). Audit
    `customer.login_succeeded {method: "password", new_device: false}`.
 6. **Unknown device, no `verification_token`** → **200 `NextStep`** `verify_device`. The server issues a
@@ -450,13 +466,19 @@ The app keeps the typed password in memory only until step 7 (≤10 minutes) and
 #### 2.1.5 `POST auth/reset-password/`
 Body `{"verification_token": str (purpose reset_password), "password": str}`. Password rules as §2.1.3, plus
 `password_unchanged` "Yangi parol eskisidan farq qilsin." (`field.password_unchanged`).
+This is the **unauthenticated recovery** path (forgotten password, account takeover); a signed-in customer changes or
+sets the password with `POST me/password/` (§2.2.9), which unlinks nothing.
 → **200 `AuthTokens`** (with a new `device_key`). Side effects: password set (`password_changed_at`); **every**
-session of the customer revoked with `password_changed` (tombstones on commit); **every social identity unlinked**
-(audit `customer.social_unlinked {provider, reason: "password_reset"}` each), because a reset is what a victim does
-after an account takeover and a linked identity would otherwise keep the attacker in; every other device's key hash
-cleared; then `start_customer_session(…, issue_device_key=True)` on this device; outbox `push.account_security
-{customer_id, event: "password_reset"}` (inbox + push to the new device, §2.14.2); audit `customer.password_reset`.
-400 `verification_invalid`; 409 `phone_not_registered` if the customer was deleted in between.
+session of the customer revoked with `password_changed` (tombstones on commit; the old device's next request answers
+401 `password_changed` with a message, §1.2); **every social identity unlinked** (audit `customer.social_unlinked
+{provider, reason: "password_reset"}` each; Apple identities are revoked at Apple, §2.1.8), because a reset is what a
+victim does after an account takeover and a linked identity would otherwise keep the attacker in; every other
+device's key hash cleared; the **dormant-account rule** (§2.2.3, `M2-A16`) applies; then `start_customer_session(…,
+issue_device_key=True)` on this device; outbox `push.account_security {customer_id, event: "password_reset",
+farewell_tokens}` — inbox row + push to the new device **and** a visible push to every token captured from the devices
+this reset deactivated (`SessionStart.farewell_tokens`, §1.9), so the previous device learns of the reset even when the
+reset came from a stolen SIM (§2.14.2); audit `customer.password_reset`. 400 `verification_invalid`; 409
+`phone_not_registered` if the customer was deleted in between.
 
 #### 2.1.6 `POST auth/refresh/`
 Body `{"refresh": str}`. Device headers must match the session's device (else 401 `not_authenticated`).
@@ -468,8 +490,8 @@ Body `{"refresh": str}`. Device headers must match the session's device (else 40
 2. No row → if `auth:refresh_dead:{h}` names a session (a token replaced by a re-rotation, step 5), that session is
    locked and treated as **reuse** (step 6); otherwise 401 `not_authenticated`, and the `refresh_unknown` per-IP
    throttle counts the miss. A token two or more rotations old is simply unknown: its holder never had the current one.
-3. Revoked → 401 `SESSION_REPLACED` for reason `replaced`, else `SESSION_EXPIRED`; past `absolute_expires_at` or
-   customer not active → 401 `SESSION_EXPIRED`.
+3. Revoked → 401 `SESSION_REPLACED` for reason `replaced`, `password_changed` for reason `password_changed`, else
+   `SESSION_EXPIRED`; past `absolute_expires_at` or customer not active → 401 `SESSION_EXPIRED`.
 4. `refresh_hash = h` → **rotate**: new 256-bit refresh; `previous_refresh_hash = h`, `refresh_hash = new`, `rotation
    += 1`, `rotation_confirmed = false`, `rotated_at = last_used_at = now` (one instant), `absolute_expires_at = now + 60
    days` (sliding); the new access token carries `rot = rotation`. Before commit the full response body is written to
@@ -540,8 +562,9 @@ foreign nonce → 400 `social_token_invalid`.
 - Linked identity `(provider, subject)` whose customer is active → **200 `AuthTokens`**; `last_login_at` on the
   identity; `issue_device_key=True` (the provider authentication counts as a verified sign-in); audit
   `customer.login_succeeded {method: provider}`. Social sign-in does **not** require the new-device SMS code (§7
-  `M2-A10`): an identity can only be linked with the password **and** an SMS code, or from a signed-in session
-  (§2.1.9, §2.2.8), so it is at least as strong as the A2 path.
+  `M2-A10`): an identity can only be linked by proving the account's strongest factor — at completion the SMS code
+  **and** the password when the account has one (§2.1.9); from a signed-in session the password, or an SMS code when
+  the account has no password (§2.2.8), never the bearer token alone — so it is at least as strong as the A2 path.
 - Unknown identity → **200 `NextStep`** `verify_phone` with a `social_ticket` = `TimestampSigner(salt="gd.social")`
   over `{provider, subject, email, jti, fid: pii_ref(fid)}`, 10 min. Single use is durable: completing consumes a
   verification token (`verification_used_at`, DB) and creates a unique `(provider, subject)` row; the `jti` claim in
@@ -559,8 +582,8 @@ The phone is the one the verification token is bound to. Checks: ticket valid an
 | Phone state | Requirements | Result |
 |---|---|---|
 | Active customer **with** a password | `password` required and correct (`required` / `password_incorrect` "Parol noto‘g‘ri." · `field.password_incorrect`; LoginGuard scope `customer_login`) | Identity linked → **200 `AuthTokens`** (`is_new_customer: false`) |
-| Active customer without a password (social-only) | — (the SMS code proves the phone; the account has no stronger factor) | Identity linked → **200** |
-| No customer | `name` (2..150) and `terms_version` required (`required`, `terms_outdated`); terms published (503 `terms_not_published`) | Customer created without a password (`has_password: false`; a password can be added with `reset_password`) → **201** |
+| Active customer without a password (social-only) | — (the SMS code proves the phone; the account has no stronger factor). The dormant-account rule applies (§2.2.3, `M2-A16`) | Identity linked → **200** |
+| No customer | `name` (2..150) and `terms_version` required (`required`, `terms_outdated`); terms published (503 `terms_not_published`) | Customer created without a password (`has_password: false`; a password can be added later with `POST me/password/` and an SMS code, §2.2.9) → **201** |
 | Deleted customer | as above | Reactivated (A1) → **201** with `reactivated: true` |
 
 Errors: 400 `social_ticket_invalid`, 400 `verification_invalid`; 409 `social_provider_linked` "Bu hisobga boshqa
@@ -568,17 +591,18 @@ Errors: 400 `social_ticket_invalid`, 400 `verification_invalid`; 409 `social_pro
 `social_identity_linked` "Bu {provider} profili boshqa hisobga bog‘langan." when the subject was linked meanwhile
 (unique-violation race too). Side effects: `CustomerSocialIdentity(provider, subject, email_at_link)`; consent when
 creating/reactivating; `start_customer_session(…, issue_device_key=True)`; outbox `push.account_security
-{customer_id, event: "social_linked", provider}` when an existing account was linked; audit `customer.social_linked
-{provider}` (+ `customer.registered`).
+{customer_id, event: "social_linked", provider, farewell_tokens}` when an existing account was linked — the inbox row,
+the push to the new device and a visible push to the device this sign-in replaced (`SessionStart.farewell_tokens`,
+§1.9), which besides gets `SESSION_REPLACED`; audit `customer.social_linked {provider}` (+ `customer.registered`).
 
-### 2.2 Me (profile, consent, image, device, social identities, addresses)
+### 2.2 Me (profile, consent, image, device, addresses, social identities, password)
 
 #### 2.2.1 `GET me/` → `Me`
 ```jsonc
 {"id": 5, "phone": "+998901234567", "name": "Malika Karimova",
  "language": "uz",                                  // ContentLanguage: push texts and the default Accept-Language
  "image_url": null,                                  // absolute URL | null
- "registered_at": "2025-03-12T10:20:00+05:00",
+ "registered_at": "2025-03-12T10:20:00+05:00",      // Customer.history_from when set (reactivated or dormant-reset account, §2.2.3), else registered_at
  "has_password": true, "linked_providers": ["google"],   // SocialProvider[]
  "push_enabled": true,                               // of the CURRENT device
  "consent": {"terms_version": "2026-10-01", "accepted_at": "2025-03-12T10:20:00+05:00",
@@ -601,7 +625,9 @@ created keep the language they were rendered in (§2.12).
 #### 2.2.3 `DELETE me/`
 Body `{"password": str | null, "verification_token": str | null}`.
 - `has_password` → `password` required (`required`; wrong → `password_incorrect` "Parol noto‘g‘ri." ·
-  `field.password_incorrect`), guarded by `LoginGuard` scope `customer_delete` (429 `throttled` after 5 failures).
+  `field.password_incorrect`), guarded by `LoginGuard` scope `customer_login` keyed by the customer's `pii_ref(phone)`
+  — the same budget as `auth/login/` (429 `throttled` after 5 failures), so a stolen access token gets no separate
+  guessing budget (§1.8).
 - No password (social-only) → `verification_token` of purpose `reset_password` for the customer's own phone required
   (`required` / 400 `verification_invalid`); the app asks for an SMS code first, so a stolen 15-minute access token
   alone cannot delete the account.
@@ -619,20 +645,37 @@ paid):
    processing/shipped orders continue: BTS uses the order's recipient snapshot);
 3. every open future appointment → `appointments.services.cancel_by_customer` (P3; `reason = "account_deleted"`);
 4. cart lines deleted;
-5. `accounts.services.delete_customer` (A1): `status=deleted`, `deleted_at`, name/image/address/password scrubbed,
-   addresses and social identities deleted, devices `is_active=False, push_enabled=False, fcm_token="", key_hash=""`,
-   every session revoked `deactivated` with tombstones, outstanding QR tokens deleted;
+5. `accounts.services.delete_customer` (A1; P0 extends the built function): under the customer-level lock
+   (`no_key=True`): `status=deleted`, `deleted_at`, name/image/address/password scrubbed, `language` reset to `uz`,
+   `terms_version=""`, `consent_at`/`consent_ip`/`last_login_at` cleared (the audit log keeps the consent history),
+   addresses deleted, social identities deleted (an `apple.revoke` outbox message for each Apple identity holding a
+   token, §2.1.8), devices `is_active=False, push_enabled=False, fcm_token="", key_hash=""`, every session revoked
+   `deactivated` through `revoke_customer_sessions` (customer tombstone TTL), outstanding QR tokens deleted
+   (`core.qr_store.revoke_all`); key hashes and QR tokens are cleared in the same transaction, the Redis deletions on
+   commit;
 6. audit `customer.deleted {orders_cancelled, appointments_cancelled}`.
 
 **Kept:** the row and phone (unique), `LoyaltyAccount` balance and ledger, `Purchase` rows, orders, appointments,
 inbox rows (deleted by the M3 retention job, N-9). **Re-registration** with the same phone goes through `register`
 (or social completion) and reactivates the same id (§2.1.3) with its balance and purchases (A1). Because Uzbek
 operators recycle numbers, the person who reactivates may not be the person who deleted, so the **history horizon**
-applies (§7 `M2-A15`): after a reactivation, `me/orders/`, `me/orders/{id}/` (404 beyond it), `me/appointments/`,
-`me/appointments/{id}/`, `me/notifications/` and the unread count show only rows created at or after
-`Customer.reactivated_at`; ledger items before the horizon keep their amounts (the balance must add up) but show
-`order_id: null` and the subtitle "Avvalgi hisob" (`label.ledger.sub_previous`); order-status pushes for orders created
-before the horizon are not sent (P3, `deliver_order_status`). Social identities must be linked again.
+applies (§7 `M2-A15`): the horizon is `Customer.history_from` (migration `accounts.0006`; set to `reactivated_at` on
+a reactivation, and by the dormant-account rule below; existing reactivated rows are back-filled from
+`reactivated_at`). `me/orders/`, `me/orders/{id}/` (404 beyond it), `me/appointments/`, `me/appointments/{id}/`,
+`me/notifications/` and the unread count show only rows created at or after it; ledger items before the horizon keep
+their amounts (the balance must add up) but show `order_id: null` and the subtitle "Avvalgi hisob"
+(`label.ledger.sub_previous`); order-status pushes for orders created before the horizon are not sent (P3,
+`deliver_order_status`); `Me.registered_at` shows the horizon (§2.2.1). Social identities must be linked again.
+
+**Dormant-account rule** (§7 `M2-A16`, provisional). Operators also recycle the numbers of customers who never deleted
+their account. When `auth/reset-password/`, or an SMS-only link of a social identity to an account without a password
+(`auth/social/complete/`), succeeds on an account whose **last activity** is older than `CUSTOMER_DORMANT_DAYS` (180),
+the same transaction moves the history horizon to now (`move_history_horizon`) and scrubs the profile as at deletion —
+`name` (the app asks for a name when `Me.name` is empty), image, saved addresses (`address_text`); balance, ledger and
+purchases are kept (A1). Last activity = the newest of `Customer.last_login_at`, the newest customer session
+`last_used_at`, the newest `Purchase` and the newest order of the customer (`customers.selectors.last_activity_at`, top
+layer), so an in-store customer who activates the app after recent purchases is not affected. Audit
+`customer.history_reset {reason: "dormant", last_activity_at}`.
 
 #### 2.2.4 `POST me/consent/`
 Body `{"terms_version": str}` equal to the current version (else `terms_outdated`) → 200 `Me`. Stamps
@@ -687,17 +730,44 @@ Service: `accounts.services.register_device` (P0).
 | count | ≤ `ADDRESS_MAX_PER_CUSTOMER` (10) on create | 409 `address_limit` "Ko‘pi bilan {limit} ta manzil saqlash mumkin." · `error.address_limit` |
 
 #### 2.2.8 Social identities of a signed-in customer
+**Re-authentication** (`POST` and `DELETE` alike): a bearer token alone never changes how the account signs in.
+`has_password` → `password` required and checked (`required` / `password_incorrect` "Parol noto‘g‘ri." ·
+`field.password_incorrect`; LoginGuard scope `customer_login`, §1.8); no password (social-only) → `verification_token`
+of purpose `reset_password` for the customer's **own** phone required (`required` / 400 `verification_invalid`),
+consumed under the customer-level lock — the app asks for an SMS code first (`send-code` `reset_password` →
+`verify-code`). Otherwise a stolen session (even a 15-minute access token) could attach the thief's own Google,
+Facebook or Apple identity, which then signs in on any device without SMS (`M2-A10`).
+
 - **`POST me/social/`** (**C**, **I**). Body `{"provider": SocialProvider, "token": str, "token_type": SocialTokenType |
-  null, "nonce": str | null, "password": str | null}`. The token is verified exactly as in §2.1.8 (nonce, replay
-  cache). When `has_password`, `password` is required and checked (`required` / `password_incorrect`, LoginGuard scope
-  `customer_login`). → 200 `Me`. Errors: 400 `social_token_invalid`; 409 `social_provider_linked` /
-  `social_identity_linked`; 503 `provider_unavailable`. Side effects: identity row; outbox `push.account_security
-  {customer_id, event: "social_linked", provider}`; audit `customer.social_linked {provider, via: "settings"}`.
-- **`DELETE me/social/{provider}/`** (**C**) → 200 `Me`; idempotent (not linked → 200). Refused with 409
+  null, "nonce": str | null, "password": str | null, "verification_token": str | null}`. The token is verified exactly
+  as in §2.1.8 (nonce, replay cache) and the caller re-authenticated as above. → 200 `Me`. Errors: 400
+  `social_token_invalid`, 400 `verification_invalid`; 409 `social_provider_linked` / `social_identity_linked`; 429
+  `throttled`; 503 `provider_unavailable`. Side effects: identity row; outbox `push.account_security {customer_id,
+  event: "social_linked", provider}`; audit `customer.social_linked {provider, via: "settings"}`.
+- **`DELETE me/social/{provider}/`** (**C**). Body `{"password": str | null, "verification_token": str | null}`,
+  re-authenticated as above (checked first). → 200 `Me`; idempotent (not linked → 200). Refused with 409
   `last_sign_in_method` "Bu yagona kirish usuli. Avval parol o‘rnating." (`error.last_sign_in_method`, `details
-  {provider}`) when the customer has no password and this is the only identity. Side effects: identity deleted; audit
+  {provider}`) when the customer has no password and this is the only identity; the app then offers `POST me/password/`
+  (§2.2.9), which keeps the identity. Side effects: identity deleted (Apple: `apple.revoke`, §2.1.8); audit
   `customer.social_unlinked {provider, reason: "customer"}`; outbox `push.account_security {customer_id, event:
   "social_unlinked", provider}`.
+
+#### 2.2.9 `POST me/password/` (**C**, **I**) — set or change the password while signed in
+Body `{"current_password": str | null, "verification_token": str | null, "password": str}`.
+
+| Field / check | Code · message (uz) · key |
+|---|---|
+| `has_password` → `current_password` required and correct (LoginGuard scope `customer_login`, §1.8) | `required`; `password_incorrect` "Parol noto‘g‘ri." · `field.password_incorrect`; 429 `throttled` |
+| no password (social-only) → `verification_token` of purpose `reset_password` for the customer's own phone, consumed under the customer-level lock | `required`; 400 `verification_invalid` · `error.verification_invalid` |
+| `password` rules as §2.1.3, plus not equal to the current password | `password_too_short` · `password_too_common` · `password_entirely_numeric` · `password_too_similar` · `max_length` · `password_unchanged` "Yangi parol eskisidan farq qilsin." · `field.password_unchanged` |
+
+→ **200 `Me`** (`has_password: true`). Side effects (`customers.services.change_password`, P1):
+`set_customer_password` (`password_changed_at`); every **other** session of the customer revoked with
+`password_changed` (none under the single-device rule unless a revocation is pending); the **current session, its
+device key and every social identity are kept**; outbox `push.account_security {customer_id, event:
+"password_changed"}` (inbox + push to this device); audit `customer.password_changed {first_password: bool}`. This is
+the route the `last_sign_in_method` message points to, and the way a social-only customer adds a password; the
+unauthenticated `auth/reset-password/` stays the recovery path that unlinks everything (§2.1.5).
 
 ---
 ### 2.3 Catalog (public, **O**)
@@ -1690,9 +1760,15 @@ pushes are reported `sent` but reach no device (§6.14).
 | `order_status` | `inbox_id`, `order_id`, `status` | title = customer label (§4.3) in the customer's language; body = template text (`{raqam}` only) | `orders` / high |
 | `appointment` | `inbox_id`, `appointment_id`, `action` | fixed texts (`notifications/texts.py`) | `appointments` / high |
 | `campaign` | `inbox_id`, `campaign_id`, `product_id` (or `""`) | as authored; `notification.image` = campaign image URL | `promo` or `general` / normal |
-| `account_security` | `inbox_id`, `event` (`social_linked`, `social_unlinked`, `password_reset`), `provider` (or `""`) | catalog `push.account_security.<event>` (title + body; `{provider}` only) | `general` / high |
+| `account_security` | `inbox_id`, `event` (`social_linked`, `social_unlinked`, `password_reset`, `password_changed`), `provider` (or `""`) | catalog `push.account_security.<event>` (title + body; `{provider}` only) | `general` / high |
 | `session_replaced` | `sid` (the revoked session) | none (data-only; APNs `content-available: 1`, `apns-push-type: background`, priority 5) | – / high |
 
+- **Farewell notices.** A `push.account_security` payload may carry `farewell_tokens`: the FCM tokens captured from the
+  devices that a reset or a social completion deactivated (§1.9). The handler sends each the same visible notice as the
+  current device (same `inbox_id`; an app without a session shows it and opens the sign-in screen), then blanks the
+  tokens in the payload, as `push.session_replaced` does. There is no SMS notice (`M2-N3`): a reset or an SMS-only link
+  needs the SMS code, so whoever did it already receives that SIM's messages; the previous device is the channel the
+  owner still holds.
 - **C1:** no names, phones, addresses or amounts in `title`, `body` or `data` — ids, the order number and the provider
   name only.
 - **Token pruning** — only when FCM says the **token** is dead: HTTP 404 `UNREGISTERED`, `SENDER_ID_MISMATCH`, or
@@ -1767,13 +1843,13 @@ Literals live in `glowderma/core/enums.py` (P0 adds the new classes); labels in 
 | **InboxKind** (new; = `InboxNotification.Kind`) | `promo`, `general`, `order_status`, `appointment` | inbox |
 | **InboxLinkKind** (new) | `none`, `product`, `order`, `appointment` | inbox |
 | **PushDataType** (new; FCM `data.type`) | `order_status`, `appointment`, `campaign`, `account_security`, `session_replaced` | §2.14.2 |
-| **AccountSecurityEvent** (new) | `social_linked`, `social_unlinked`, `password_reset` | `push.account_security`, §2.14.2 |
+| **AccountSecurityEvent** (new) | `social_linked`, `social_unlinked`, `password_reset`, `password_changed` | `push.account_security`, §2.14.2 |
 
 **Audit actions added in M2** (shown by the admin `audit-log/`; `actor_type` in brackets):
 
 | Area | `action` values |
 |---|---|
-| Customer auth (`customer`) | `customer.registered` (`{reactivated, terms_version}`), `customer.login_succeeded` (`{method, new_device}`), `customer.login_failed` (`{method}`), `customer.logout`, `customer.password_reset`, `customer.refresh_reused` (`{sid}`), `customer.social_linked` (`{provider, via?}`), `customer.social_unlinked` (`{provider, reason: "customer" \| "password_reset"}`), `customer.consent_accepted` (`{terms_version}`), `customer.deleted` (`{orders_cancelled, appointments_cancelled}`), `auth.device_mismatch` (`{sid}`, ≤1 per session per hour) |
+| Customer auth (`customer`) | `customer.registered` (`{reactivated, terms_version}`), `customer.login_succeeded` (`{method, new_device}`), `customer.login_failed` (`{method}`), `customer.logout`, `customer.password_reset`, `customer.password_changed` (`{first_password}`), `customer.history_reset` (`{reason: "dormant", last_activity_at}`), `customer.refresh_reused` (`{sid}`), `customer.social_linked` (`{provider, via?}`), `customer.social_unlinked` (`{provider, reason: "customer" \| "password_reset"}`), `customer.consent_accepted` (`{terms_version}`), `customer.deleted` (`{orders_cancelled, appointments_cancelled}`), `auth.device_mismatch` (`{sid}`, ≤1 per session per hour) |
 | Appointments (`customer`) | `appointment.requested`, `appointment.cancelled` (with `by: "customer"`) |
 | Payments (`system`) | `payment.late_capture` (`{order_id, payment_id, provider, case: "failed_by_us" \| "not_payable" \| "double_payment"}`) |
 | POS (`integration` for resolves; `staff` for the commands) | `pos.qr_resolved` (`{pos_device_id, customer_id, sale_ref}`), `pos.qr_rejected` (`{pos_device_id, reason}`), `pos.device_created` (`{pos_device_id, name}`), `pos.device_revoked` (`{pos_device_id}`), `pos.device_rotated` (`{pos_device_id}`) — the three command actions carry the `--actor` staff user |
@@ -1873,6 +1949,7 @@ handler renders through the catalog. Placeholders: `{n}`, `{m}`, `{limit}`, `{ma
 | `error.not_authenticated` | Avtorizatsiya talab qilinadi. | Требуется авторизация. | Please sign in. |
 | `error.SESSION_EXPIRED` | Sessiya tugadi. Qayta kiring. | Сессия истекла. Войдите снова. | Your session has ended. Please sign in again. |
 | `error.SESSION_REPLACED` | Hisobingizga boshqa qurilmadan kirildi. | В ваш аккаунт вошли с другого устройства. | Your account was signed in on another device. |
+| `error.password_changed` | Parolingiz o‘zgartirildi. Qayta kiring. Bu siz bo‘lmasangiz, sotuvchi bilan bog‘laning. | Пароль изменён. Войдите снова. Если это были не вы, свяжитесь с продавцом. | Your password was changed. Please sign in again. If this wasn't you, contact the seller. |
 | `error.invalid_credentials` | Telefon raqami yoki parol noto‘g‘ri. | Неверный номер телефона или пароль. | Wrong phone number or password. |
 | `error.permission_denied` | Ruxsat yo‘q. | Доступ запрещён. | Access denied. |
 | `error.not_found` | Topilmadi. | Не найдено. | Not found. |
@@ -2024,6 +2101,7 @@ handler renders through the catalog. Placeholders: `{n}`, `{m}`, `{limit}`, `{ma
 | `push.account_security.social_linked.title` / `.body` | Hisobingizga yangi kirish usuli qo‘shildi / Hisobingizga {provider} profili bog‘landi. Agar bu siz bo‘lmasangiz, parolni tiklang. | Добавлен новый способ входа / К аккаунту привязан профиль {provider}. Если это были не вы, восстановите пароль. | A new sign-in method was added / A {provider} profile was linked to your account. If this wasn't you, reset your password. |
 | `push.account_security.social_unlinked.title` / `.body` | Kirish usuli o‘chirildi / {provider} profili hisobingizdan uzildi. | Способ входа удалён / Профиль {provider} отвязан от аккаунта. | A sign-in method was removed / The {provider} profile was unlinked from your account. |
 | `push.account_security.password_reset.title` / `.body` | Parol o‘zgartirildi / Hisobingiz paroli yangilandi. Agar bu siz bo‘lmasangiz, sotuvchi bilan bog‘laning. | Пароль изменён / Пароль аккаунта обновлён. Если это были не вы, свяжитесь с продавцом. | Password changed / Your account password was changed. If this wasn't you, contact the seller. |
+| `push.account_security.password_changed.title` / `.body` | Parol o‘rnatildi / Hisobingiz uchun yangi parol o‘rnatildi. Agar bu siz bo‘lmasangiz, sotuvchi bilan bog‘laning. | Пароль задан / Для аккаунта задан новый пароль. Если это были не вы, свяжитесь с продавцом. | Password set / A new password was set for your account. If this wasn't you, contact the seller. |
 | `sms.otp` | Glow Derma: tasdiqlash kodingiz {code}. Kodni hech kimga bermang. | Glow Derma: ваш код подтверждения {code}. Никому его не сообщайте. | Glow Derma: your verification code is {code}. Do not share it with anyone. |
 
 ---
@@ -2044,8 +2122,10 @@ handler renders through the catalog. Placeholders: `{n}`, `{m}`, `{limit}`, `{ma
    checkout, pay, QR, POS (including failed key auth) and anonymous reads, keyed on the device first because of CGNAT.
    OTP day caps, the daily wrong-code cap and lockouts are derived from `SmsCode` rows so a cache flush does not reset
    them; the global SMS budget is a circuit breaker with an alert (§2.1.1). Residual risk: a distributed attacker can
-   still exhaust one victim's daily SMS cap (denial of reset/new-device sign-in for that day); M3 evaluates App Attest
-   / Play Integrity attestation on `auth/send-code/` and `auth/login/`.
+   still exhaust one victim's daily SMS cap (denial of reset/new-device sign-in for that day), and anyone who knows a
+   phone can keep its **unknown-device** password sign-in locked by sending 5 wrong passwords per lock cycle (1 to 15
+   minutes) — the owner's known device has its own guard and stays usable (§2.1.4); M3 evaluates App Attest / Play
+   Integrity attestation on `auth/send-code/` and `auth/login/`.
 4. **OTP storage.** Codes only as `HMAC-SHA256(code, SMS_CODE_HMAC_KEY)` (key ≥32 characters, required in production
    and refused when it is a placeholder or a committed value, plan §7), compared with `compare_digest`; the plain code
    exists only in memory, in the AES-GCM ciphertext in Redis for its 120 s lifetime (`SECRETBOX_KEY`, exactly 32 bytes,
@@ -2055,8 +2135,11 @@ handler renders through the catalog. Placeholders: `{n}`, `{m}`, `{limit}`, `{ma
    and, for `link_social`, to the ticket, 10 min. Logs and throttle keys carry `pii_ref(x)` = first 16 hex chars of
    `HMAC-SHA256(LOG_PII_KEY, x)` for phones and fids (a plain SHA-256 of a +998 number is brute-forced in seconds).
    `SmsCode` rows and done `sms.send` outbox rows are deleted after 24 h (`accounts.cleanup_auth`).
-5. **Passwords:** Argon2 (`PASSWORD_HASHERS`), checked for unknown phones too (timing), min 8 + Django validators,
-   never returned or logged; reset revokes all sessions, unlinks social identities and rotates the device key.
+5. **Passwords:** Argon2 (`PASSWORD_HASHERS`); a dummy hash check runs whenever no stored hash is compared (unknown
+   phone, deleted customer, empty password), so `auth/login/` costs the same for every phone state (§2.1.4); min 8 +
+   Django validators, never returned or logged. Every password check of a signed-in customer shares the
+   `customer_login` guard. `auth/reset-password/` (recovery) revokes all sessions, unlinks social identities and rotates
+   the device key; `me/password/` (signed in, current password or SMS code) keeps the session and identities.
 6. **Secrets on the device.** Refresh token and device key: iOS Keychain (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`,
    no iCloud sync) / Android Keystore-backed EncryptedSharedPreferences; access token in memory; the refresh and
    access tokens are deleted on any `SESSION_*`, on logout and on a 401 from `auth/refresh/` (the device key is kept so
@@ -2123,10 +2206,15 @@ handler renders through the catalog. Placeholders: `{n}`, `{m}`, `{limit}`, `{ma
 15. **Enumeration.** Customer ids in URLs are sequential but always ownership-checked; phone existence is revealed only
     by the register/reset branches of `send-code` under SMS throttles (§7 `M2-A9`); a capped phone answers `auth/login/`
     the same way for any password; POS failures reveal nothing.
-16. **Account takeover recovery.** Linking a social identity needs the password and an SMS code (or a signed-in
-    session plus the password); every link, unlink and reset sends an `account_security` push; `reset-password`
-    revokes every session and unlinks every identity (§2.1.5).
-17. **Recycled numbers (PD law).** A reactivated account sees only history created after `reactivated_at` (§2.2.3).
+16. **Account takeover recovery.** Linking a social identity needs the account's strongest factor: the SMS code plus
+    the password when one is set (completion), or, from a signed-in session, the password — or an SMS code when the
+    account has none (§2.2.8); unlinking needs the same. Every link, unlink, reset and password change sends an
+    `account_security` push and inbox row; a reset and a social completion also notify the device they replaced
+    (`farewell_tokens`, §2.14.2), and that device's next request answers 401 `password_changed` /
+    `SESSION_REPLACED` with a message (§1.2). `reset-password` revokes every session and unlinks every identity
+    (§2.1.5).
+17. **Recycled numbers (PD law).** A reactivated account, and a dormant account recovered by SMS (`M2-A16`), sees only
+    history created after `Customer.history_from`, with the previous holder's name and addresses scrubbed (§2.2.3).
 18. **Uploads** (`me/image/`) go through `core.images.process_image` (re-encode, EXIF strip, 5 MiB, type sniffing).
 
 ---
@@ -2137,7 +2225,7 @@ Existing points this contract implements (`docs/decisions/open-questions.md`):
 
 | # | Provisional default used here |
 |---|---|
-| A1 | Delete scrubs and deactivates; the phone stays unique; re-registration reactivates the same row with balance and purchases; history shown from `reactivated_at` (§2.2.3, §2.1.3, `M2-A15`) |
+| A1 | Delete scrubs and deactivates (incl. language, consent fields, device keys, QR tokens, Apple tokens revoked); the phone stays unique; re-registration reactivates the same row with balance and purchases; history shown from `Customer.history_from` (§2.2.3, §2.1.3, `M2-A15`, `M2-A16`) |
 | A2 | Password login; SMS code for sign-up, reset and **password** login on a device without a valid device key (§2.1.4, §1.9) |
 | A3 | 5 attempts per code, 15-minute lockout, 10 codes and 10 wrong codes per phone per day (`CUSTOMER_OTP_*`) |
 | A6 | Social sign-in allowed (Google, Facebook, Apple); the first sign-in verifies a phone by SMS and links to that phone's customer, with the password when the account has one (§2.1.8–9) |
@@ -2159,12 +2247,14 @@ New M2 points (the plan adds them to `open-questions.md`; each default is implem
 | # | Question for the client | Provisional default |
 |---|---|---|
 | M2-A9 | May the app reveal whether a phone is registered (register / reset flows)? | Yes, throttled (`phone_registered` / `phone_not_registered`) |
-| M2-A10 | Does a social sign-in on a new phone also need the SMS code? | No: linking already required the password (if set) and an SMS code, so the provider sign-in is a second factor of equal strength; only password sign-in on a device without a device key needs the code |
+| M2-A10 | Does a social sign-in on a new phone also need the SMS code? | No: linking requires the account's strongest factor — the SMS code plus the password if set (completion), or from a signed-in session the password, or an SMS code for accounts without one (never the bearer alone) — so the provider sign-in is a factor of equal strength; only password sign-in on a device without a device key needs the code |
 | M2-A11 | Customer password rule | ≥8 characters, not only digits, not common, not similar to the phone |
-| M2-A12 | Deleting an account: confirmation and open items | Password (or an SMS code for social-only accounts) required; unpaid orders and open appointments are cancelled; paid orders continue; refused while a Click payment is in flight |
+| M2-A12 | Deleting an account: confirmation and open items | Password (or an SMS code for social-only accounts) required, guarded like sign-in; unpaid orders and open appointments are cancelled; paid orders continue; refused while a Click payment is in flight (≤ 2 minutes) |
 | M2-A13 | Minimum app version enforcement | Off (`MIN_APP_VERSION_*=0.0.0`) until the first store release |
 | M2-A14 | Apple App Store guideline 4.8: Google/Facebook sign-in on iOS requires an equivalent privacy-focused option (Sign in with Apple) | Offer Sign in with Apple on iOS (`apple` provider; needs the bundle id and the capability, A7); the alternative — hiding social sign-in on iOS — is a client decision |
-| M2-A15 | Recycled phone numbers: what does the person who reactivates a deleted account see? | Balance and purchases kept (A1); orders, appointments, inbox and ledger order links only from `reactivated_at` |
+| M2-A15 | Recycled phone numbers: what does the person who reactivates a deleted account see? | Balance and purchases kept (A1); orders, appointments, inbox and ledger order links only from the reactivation (`Customer.history_from`) |
+| M2-A16 | Recycled numbers of accounts that were never deleted: what does a new holder who recovers the account by SMS see? | After a password reset or an SMS-only social link on an account inactive for more than 180 days (`CUSTOMER_DORMANT_DAYS`; last sign-in, refresh, purchase or order), the history horizon moves to now and name, image and addresses are scrubbed; balance and purchases are kept (A1) |
+| M2-A17 | How does a signed-in customer change or add a password? | `POST me/password/` with the current password, or an SMS code when the account has none; the session and social identities are kept. `auth/reset-password/` stays the recovery path that unlinks every identity |
 | M2-C12 | Show "price changed since you added it" in the cart | Yes — needs `CartItem.price_at_add` (migration `commerce.0004`) |
 | M2-C13 | Several unpaid orders at once? | No: one `awaiting_payment` order per customer (`CHECKOUT_MAX_OPEN_ORDERS=1`, serialised by the Customer row lock) |
 | M2-C14 | Minimum amount paid by card when cashback is used | 1 000 so'm (`CHECKOUT_MIN_PAYABLE`), so cashback can never make an order free |
@@ -2183,5 +2273,5 @@ New M2 points (the plan adds them to `open-questions.md`; each default is implem
 | M2-B1 | Booking limits | ≥60 min ahead, ≤30 days ahead, ≤3 open appointments, cancellation any time before the start |
 | M2-N1 | Show the admin's adjustment reason to the customer? | No (generic "Bonus qo‘shildi" / "Balans tuzatildi") |
 | M2-N2 | Push for a customer's own order cancellation | Yes (state machine row 5 pushes `cancelled`) |
-| M2-N3 | Security notices (social link/unlink, password reset) | Push + inbox row (`account_security`), no SMS (an SMS template would need Eskiz approval) |
+| M2-N3 | Security notices (social link/unlink, password reset and change) | Push + inbox row (`account_security`), and for a reset or a social completion a visible push to the replaced device plus a 401 message there; no SMS (re-evaluated in revision 2: a reset needs the SMS code, so an SMS notice would reach whoever did it; an SMS template would also need Eskiz approval) |
 | M2-T1 | Terms not yet versioned in settings | Registration answers 503 `terms_not_published` until staff publish `terms_version` with the uz terms and privacy texts |

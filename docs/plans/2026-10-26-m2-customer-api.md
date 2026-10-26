@@ -29,7 +29,7 @@ merge order into feat/m2-integration: P2 → P3 → P1 → lead e2e + schema reg
 | Package | Scope | Worktree / branch | Test DB |
 |---|---|---|---|
 | **P0 seams** | Everything two packages would otherwise both edit: customer auth class + base views, device headers and device key, the `accounts.0006` migration, i18n catalog, error codes + `details`, throttle scopes, enums, settings/env/beat, URL mounts, fixtures, the FCM port extension, small core helpers (`secretbox`, `pii`, `qr_store`), the cross-package service stubs | `/home/user/wt/m2-p0`, `feat/m2-p0-seams` | `test_gd_m2_p0` |
-| **P1 accounts** | Customer auth (OTP, register, login, reset, refresh, logout, social incl. Apple and the nonce), `me/*` incl. delete + addresses + device + social identities, public catalog, `settings/public/`, Eskiz port | `/home/user/wt/m2-p1`, `feat/m2-p1-accounts` | `test_gd_m2_p1` |
+| **P1 accounts** | Customer auth (OTP, register, login, reset, refresh, logout, social incl. Apple and the nonce), `me/*` incl. delete + addresses + device + social identities + password change, public catalog, `settings/public/`, Eskiz port | `/home/user/wt/m2-p1`, `feat/m2-p1-accounts` | `test_gd_m2_p1` |
 | **P2 commerce** | Cart, delivery regions/calculate, checkout, pay, customer cancel, reorder, Click/Payme callbacks, refused-capture reversals (accept and reverse), expiry grace, customer orders + timeline, BTS webhook + polling, dev simulate | `/home/user/wt/m2-p2`, `feat/m2-p2-commerce` | `test_gd_m2_p2` |
 | **P3 engagement** | Loyalty summary/ledger, QR + POS resolve + POS key commands, specialists/services/slots, booking + customer cancel, inbox list/read/ack, push senders (`inbox_id`, customer titles, account-security notices, token pruning rules) | `/home/user/wt/m2-p3`, `feat/m2-p3-engagement` | `test_gd_m2_p3` |
 
@@ -80,13 +80,13 @@ module because availability (`commerce.selectors.available_stock`) may not be im
 | `glowderma/core/api/schema.py` | `CUSTOMER_ERRORS`, `PUBLIC_CUSTOMER_ERRORS`, `DEVICE_HEADERS` (`X-GD-Device-Id`, `X-GD-Platform`, `X-GD-App-Version`), `DEVICE_KEY_HEADER`, `ACCEPT_LANGUAGE_HEADER` |
 | `glowderma/core/throttling.py` | new scopes `sms_device: 10/min`, `customer_auth_device: 30/min`, `customer_auth_ip: 1200/min`, `refresh_unknown: 60/min`, `qr: 6/min`, `public: 300/min`, `public_ip: 3000/min`; `sms_ip` default `600/min` (used only by `auth/send-code/`) |
 | `glowderma/core/audit.py` | `record()` accepts a `Customer` or `PosDevice` actor: `actor_type` `customer`/`integration`, `actor_label` = masked phone / device name (no `get_username` on non-staff) |
-| `glowderma/accounts/models.py` + `migrations/0006_customer_auth_hardening.py` | `Device.key_hash = CharField(64, blank=True)`; partial index `accounts_authsession_prev_refresh` on `AuthSession.previous_refresh_hash` `WHERE previous_refresh_hash <> ''`; `AuthSession.revoke_reason` choice `refresh_reused`; `AuthSession.rotation = PositiveIntegerField(default=0)` and `AuthSession.rotation_confirmed = BooleanField(default=False)` (C§2.1.6: the `rot` claim is this counter, never a timestamp); `CustomerSocialIdentity.provider` choice `apple`; `Customer.is_authenticated = True`, `is_anonymous = False` (properties, no SQL) |
+| `glowderma/accounts/models.py` + `migrations/0006_customer_auth_hardening.py` | `Device.key_hash = CharField(64, blank=True)`; partial index `accounts_authsession_prev_refresh` on `AuthSession.previous_refresh_hash` `WHERE previous_refresh_hash <> ''`; `AuthSession.revoke_reason` choice `refresh_reused`; `AuthSession.rotation = PositiveIntegerField(default=0)` and `AuthSession.rotation_confirmed = BooleanField(default=False)` (C§2.1.6: the `rot` claim is this counter, never a timestamp); `CustomerSocialIdentity.provider` choice `apple`; `Customer.history_from = DateTimeField(null=True)` (the history horizon, C§2.2.3; a data step back-fills it from `reactivated_at`); `Customer.is_authenticated = True`, `is_anonymous = False` (properties, no SQL) |
 | `glowderma/accounts/tokens.py` | access TTL by audience (`STAFF_ACCESS_TTL` / `CUSTOMER_ACCESS_TTL`); customer access claim `rot` = `AuthSession.rotation` (integer) |
 | `glowderma/accounts/authentication.py` | `CustomerJWTAuthentication` (aud `customer`; `auth:sid:{sid}` cache value `active:{abs_expiry}:{pii_ref(fid)}:{platform}`, filled with `cache.add` only and never rewritten, so the device and platform checks need no query and no write can overwrite a tombstone; tombstones `revoked:<reason>`; device/platform header match; `last_active_at`/`app_version` bump ≤ every 5 min; when the add-only flag `auth:sidrot:{sid}:{rot}` is absent → the conditional confirmation UPDATE of C§2.1.6 (`rotation = rot AND NOT rotation_confirmed`), then `cache.add` of the flag); `OptionalCustomerAuthentication` |
 | `glowderma/accounts/permissions.py` | `IsActiveCustomer` |
 | `glowderma/accounts/api/customer_base.py` (new) | `CustomerAPIView`, `CustomerGenericViewSet`, `PublicAPIView`, `WebhookAPIView` (CSRF-exempt, parsers set per view, no auth, provider-native responses), device-header parsing + 400 `device_required` + 426 `app_update_required` gate (a mixin used by the auth views too). **Not** `PosAPIView` (P3, `loyalty/api/pos/base.py`) |
 | `glowderma/accounts/api/throttles.py` | `CustomerRateThrottle` (`customer`), `PublicDeviceThrottle` (`public`), `PublicIPThrottle` (`public_ip`), `CheckoutThrottle`, `PayThrottle`, `QrThrottle`, `SmsPhoneThrottle`, `SmsDeviceThrottle`, `SmsIPThrottle`, `CustomerAuthDeviceThrottle`, `CustomerAuthIPThrottle`, `RefreshUnknownThrottle` (counts only misses), `PosRateThrottle` |
-| `glowderma/accounts/services.py` | `start_customer_session(customer_id, *, fid, platform, app_version, issue_device_key) -> SessionStart(session, raw_refresh, raw_device_key \| None)` (C§1.9 steps 1–6: deactivated devices lose their token, farewell payload carries `sid` + token, skipped when the token is held by another active row, `core.qr_store.revoke_all`), `revoke_customer_sessions(customer_id, reason, except_sid=None)` (also `qr_store.revoke_all`), `register_device(customer_id, fid, …)` (a token taken from another row clears it there), `device_is_known(customer_id, fid, raw_device_key) -> bool` (`compare_digest`), `invalidate_fcm_token(device_id)`, tombstone TTL = max(staff, customer access TTL) + 60 |
+| `glowderma/accounts/services.py` | `start_customer_session(customer_id, *, fid, platform, app_version, issue_device_key) -> SessionStart(session, raw_refresh, raw_device_key \| None, farewell_tokens: list[str])` (C§1.9 steps 1–6 under `select_for_update(no_key=True)` of the customer: deactivated devices lose their token — captured first into `farewell_tokens` —, farewell payload carries `sid` + token, skipped when the token is held by another active row, `core.qr_store.revoke_all`), `revoke_customer_sessions(customer_id, reason, except_sid=None)` (also `qr_store.revoke_all`), `move_history_horizon(customer_id, *, at)` (`Customer.history_from`), **`delete_customer` (the built B2 function, changed here; no other package owns it):** customer-level lock `no_key=True`, `key_hash=""` on every device, sessions revoked through `revoke_customer_sessions(…, "deactivated")` (customer tombstone TTL), `core.qr_store.revoke_all` on commit, `language="uz"`, `terms_version=""`, `consent_at`/`consent_ip`/`last_login_at` cleared, one `apple.revoke` outbox message per Apple identity holding a token (C§2.2.3 step 5), `register_device(customer_id, fid, …)` (a token taken from another row clears it there), `device_is_known(customer_id, fid, raw_device_key) -> bool` (`compare_digest`), `invalidate_fcm_token(device_id)`, tombstone TTL = max(staff, customer access TTL) + 60 |
 | `glowderma/accounts/topics.py` (new) | `SMS_SEND = "sms.send"`, `PUSH_SESSION_REPLACED = "push.session_replaced"`, `PUSH_ACCOUNT_SECURITY = "push.account_security"` + dedupe-key builders (`sms.send:{sms_code_id}`, `push.session_replaced:{session_id}`, `push.account_security:{customer_id}:{event}:{uuid}`) |
 | `glowderma/accounts/tasks.py` (new) | handler `push.session_replaced` (data-only FCM message through the extended port; blanks the token in the payload after the send; `unregistered` → `invalidate_fcm_token`); beat task `accounts.cleanup_auth` (delete `SmsCode` older than 24 h, `done`/`dead` `sms.send` outbox rows older than 24 h, customer `AuthSession` rows revoked or expired for >90 days) |
 | `glowderma/integrations/fcm/{ports,fake}.py` | `PushMessage(token, title, body, data, *, data_only, android_channel, android_priority, apns_push_type, apns_priority, image_url, collapse_key)`; `PushResult.error` ∈ {`unregistered`, `payload_invalid`, …}; the fake records every field **only when `DEV_FEATURES_ALLOWED`** (otherwise it keeps nothing and logs one INFO line with ids, C§2.14.2) and maps tokens `…-bad` → `unregistered`, `…-payload` → `payload_invalid`, `…-down` → `FcmUnavailable` (moved here from P3 so P0's session-replaced push can be built) |
@@ -103,8 +103,12 @@ module because availability (`commerce.selectors.available_stock`) may not be im
 
 ### Tests (P0)
 - Audience separation both ways; customer token on admin routes → 401; staff token on a dummy customer route → 401.
-- Revocation codes through the cache (`replaced` → `SESSION_REPLACED`; `refresh_reused`, `logout`, … →
-  `SESSION_EXPIRED`) without a DB hit; deleted customer → `SESSION_EXPIRED`.
+- Revocation codes through the cache (`replaced` → `SESSION_REPLACED`; `password_changed` → `password_changed`;
+  `refresh_reused`, `logout`, … → `SESSION_EXPIRED`) without a DB hit; deleted customer → `SESSION_EXPIRED`.
+- `delete_customer` (changed by P0): device key hashes cleared, QR tokens revoked on commit, sessions revoked with the
+  customer tombstone TTL, language/consent/last login cleared, `apple.revoke` enqueued per Apple identity with a token;
+  idempotent; it takes `FOR NO KEY UPDATE`, not `FOR UPDATE` (a concurrent `Purchase` insert for the customer does not
+  wait). `start_customer_session` returns the deactivated devices' tokens in `farewell_tokens`; `move_history_horizon`.
 - Device headers: missing → 400 `device_required`; fid mismatch → 401 + one audit row per hour; platform mismatch;
   `X-GD-App-Version` below the floor → 426 with `details`.
 - `start_customer_session`: second device revokes the first (`replaced`), deactivates its device **and clears its
@@ -160,9 +164,9 @@ module because availability (`commerce.selectors.available_stock`) may not be im
 P0's function), tests in `customers/tests/`, `accounts/tests/`, `integrations/tests/`, `site_config/tests/`.
 
 ### Endpoints
-C§2.0 rows 1–22: `auth/send-code/`, `auth/verify-code/`, `auth/set-password/`, `auth/login/`, `auth/reset-password/`,
+C§2.0 rows 1–23: `auth/send-code/`, `auth/verify-code/`, `auth/set-password/`, `auth/login/`, `auth/reset-password/`,
 `auth/refresh/`, `auth/logout/`, `auth/social/nonce/`, `auth/social/`, `auth/social/complete/`, `me/`
-(GET/PATCH/DELETE), `me/consent/`, `me/image/`, `me/device/`, `me/social/` + `me/social/{provider}/`,
+(GET/PATCH/DELETE), `me/consent/`, `me/image/`, `me/device/`, `me/password/`, `me/social/` + `me/social/{provider}/`,
 `me/addresses/*`, `catalog/banners/`, `catalog/categories/`, `catalog/products/`, `catalog/products/{id}/`,
 `settings/public/`.
 
@@ -177,15 +181,16 @@ C§2.0 rows 1–22: `auth/send-code/`, `auth/verify-code/`, `auth/set-password/`
 | `rotate_customer_refresh(raw, *, fid) -> RefreshResult` | `accounts.services` | C§2.1.6 steps 1–6: row lock on `refresh_hash OR previous_refresh_hash`, rotate / replay / re-rotate (bounded by `CUSTOMER_REFRESH_UNCONFIRMED_SECONDS`, dead hash remembered in `auth:refresh_dead:{hash}`, grace cache rewritten) / reuse → revoke `refresh_reused` + audit; grace cache written before commit and deleted on rollback |
 | `logout_customer(raw)` | `accounts.services` | revoke + device inactive, token cleared, QR tokens revoked |
 | `issue_social_nonce(fid)`, `consume_social_nonce(nonce, fid)`, `remember_id_token(provider, claims)` | `accounts.services` | Redis, single use, replay cache until `exp` |
-| `register(...)`, `login(...)`, `reset_password(...)` (unlinks identities, clears other device keys, `push.account_security`), `social_sign_in(...)`, `complete_social(...)` (fid + ticket binding, password for password accounts), `link_social(...)`, `unlink_social(...)`, `accept_consent(...)`, `update_profile(...)`, `set_image(...)`, `delete_account(customer_id, *, password=None, verification_token=None)` | `customers.services` | orchestrators (need `site_config` for the terms version and publication check and, for delete, `commerce`/`appointments`); `delete_account` takes the customer-level lock first (`select_for_update(no_key=True)`), refuses on `commerce.selectors.customer_inflight_order` |
+| `register(...)` (reactivation → `move_history_horizon`), `login(...)` (device key evaluated first, guard scope by device knowledge, dummy hash whenever no stored hash is compared), `reset_password(...)` (unlinks identities, clears other device keys, dormant rule, `push.account_security` with `farewell_tokens`), `social_sign_in(...)`, `complete_social(...)` (fid + ticket binding, password for password accounts, dormant rule for SMS-only links, `farewell_tokens`), `link_social(...)` / `unlink_social(...)` (re-authentication: password, or a `reset_password` verification token when the account has none), `change_password(...)` (`me/password/`: current password or verification token; keeps session, device key and identities), `accept_consent(...)`, `update_profile(...)`, `set_image(...)`, `delete_account(customer_id, *, password=None, verification_token=None)`; `customers.selectors.last_activity_at(customer_id)` (newest of last login, session use, purchase, order) | `customers.services` | orchestrators (need `site_config` for the terms version and publication check and, for delete, `commerce`/`appointments`); `delete_account` takes the customer-level lock first (`select_for_update(no_key=True)`), refuses on `commerce.selectors.customer_inflight_order` |
 | `public_settings()` | `site_config.selectors` | cached 60 s, invalidated on `update_settings` commit; `terms_version` null while unpublished; `payment_providers = core.providers.payable_providers()` (C§2.4) |
 | `product_cards(qs, lang, customer_id=None)` | `customers.selectors` | one query for products + `available_stock` + main image + cart quantities |
 | `verify_app_token(token, token_type, nonce)` | `integrations.oauth` (Google, Facebook, Apple) | Apple: RS256 against Apple's JWKS, `aud` ∈ `APPLE_APP_BUNDLE_IDS`, nonce = SHA-256 of ours |
 
 **Reused (do not redefine):** `accounts.services.{add_address, update_address, set_default_address, remove_address,
-set_customer_password, check_customer_password, delete_customer, reactivate_customer, start_customer_session (P0),
-register_device (P0), revoke_customer_sessions (P0), device_is_known (P0)}`, `accounts.api.guard.LoginGuard` (scopes
-`customer_login`, `customer_delete`), `catalog.selectors.{filter_products_search, customer_visible_products,
+set_customer_password, check_customer_password, delete_customer (changed by P0), reactivate_customer,
+start_customer_session (P0), register_device (P0), revoke_customer_sessions (P0), device_is_known (P0),
+move_history_horizon (P0)}`, `accounts.api.guard.LoginGuard` (scope `customer_login` per phone for every password
+check of the customer, `customer_login_device` per device row for a login with a valid device key), `catalog.selectors.{filter_products_search, customer_visible_products,
 category_queryset, banner_queryset}`, `commerce.selectors.available_stock` (B5), `site_config.models.SiteSettings.load`,
 `core.images.process_image`, `core.secretbox`, `core.pii`, `commerce.services.cancel_by_customer` (P2) and
 `appointments.services.cancel_by_customer` (P3) from `delete_account` (called only when the customer has open items;
@@ -218,9 +223,11 @@ None (P0 owns `accounts.0006`). The link-social ticket binding and the OTP fid/I
   "delete → reactivate keeps balance and purchases"), `reactivated_at` set; consent stamped; outdated terms; terms
   unpublished → 503 `terms_not_published`.
 - Login: device key known → tokens; fid known but key missing/wrong → `verify_device` + SMS; second call with the
-  token → tokens, new device key, the old session `SESSION_REPLACED`; wrong password timing parity (hasher called for
-  unknown phones); guard lockout; **oracle test:** with the phone's code cap exhausted, a right and a wrong password
-  get the same 429 body.
+  token → tokens, new device key, the old session `SESSION_REPLACED`; timing parity: unknown phone, deleted customer,
+  social-only (empty password) and wrong password each run exactly one hash (the dummy hash counted with a spy
+  hasher); guard lockout; the unknown-device guard locked by 5 wrong passwords does not lock a login with a valid device
+  key (`customer_login_device`), and vice versa; **oracle test:** with the phone's code cap exhausted, a right and a
+  wrong password get the same 429 body.
 - Refresh: rotation (counter +1, `rotated_at` = `last_used_at` from one instant); concurrent refresh threads →
   identical tokens and one chain; lost response → retry after 45 s with the old token → the grace body (identical
   tokens); after 5 min → 200 by re-rotation, nothing revoked, the grace cache rewritten so two concurrent retries get
@@ -234,10 +241,22 @@ None (P0 owns `accounts.0006`). The link-social ticket binding and the OTP fid/I
   from a code requested without/with another ticket → `verification_invalid`; `social_provider_linked`,
   `social_identity_linked` (unique-race); Apple happy path and missing bundle id → 404; `push.account_security`
   enqueued on link.
-- `me/social/`: link with password, without password on a social-only account, unlink, `last_sign_in_method`.
-- Reset: sessions revoked, identities unlinked with audit rows, other device keys cleared, new device key returned,
-  `push.account_security` enqueued.
-- `DELETE me/`: password check + `customer_delete` guard; social-only needs a `reset_password` verification token;
+- `me/social/`: link with password (wrong → `password_incorrect`, shares the `customer_login` budget); a social-only
+  account linking without `verification_token` → 400 `verification_token` `required`, with a used or foreign token →
+  400 `verification_invalid`, with a fresh `reset_password` token of its own phone → 200; unlink needs the same
+  re-authentication (checked before the idempotent no-op); `last_sign_in_method`.
+- `me/password/`: change with the current password (wrong → `password_incorrect`, guard); a social-only account sets a
+  first password with a `reset_password` verification token; `password_unchanged`; requires an Idempotency-Key and a
+  retry replays the 200; the current session and device key keep working, social identities stay linked, other
+  sessions get 401 `password_changed`; `push.account_security password_changed` enqueued; audit.
+- Reset: sessions revoked (the old device then gets 401 `password_changed`), identities unlinked with audit rows (Apple:
+  `apple.revoke` enqueued), other device keys cleared, new device key returned, `push.account_security` enqueued with
+  the old device's token in `farewell_tokens`; dormant rule: last activity 181 days ago → `history_from = now`, name,
+  image and addresses scrubbed, balance and purchases kept, audit `customer.history_reset`; 179 days ago, or a purchase
+  last week → untouched. Social completion on a social-only dormant account applies the same rule; completion on a new
+  device puts the replaced device's token in `farewell_tokens`.
+- `DELETE me/`: password check sharing the `customer_login` guard (5 failures on `DELETE me/` also lock `auth/login/` on
+  an unknown device); social-only needs a `reset_password` verification token;
   in-flight order (stub returning an id) → 409 `payment_in_progress` and nothing written; scrub (name, image file,
   addresses, identities, device tokens and keys), sessions revoked with tombstones, QR tokens revoked, audit;
   re-registration afterwards.
@@ -270,7 +289,7 @@ selectors.py, topics.py}`, `glowderma/delivery/{services.py, selectors.py, api/c
 tests in those modules.
 
 ### Endpoints
-C§2.0 rows 23–34 and 49–52: `cart/*`, `delivery/regions/`, `delivery/calculate/`, `orders/checkout/`,
+C§2.0 rows 24–35 and 50–53: `cart/*`, `delivery/regions/`, `delivery/calculate/`, `orders/checkout/`,
 `orders/{id}/pay/`, `orders/{id}/cancel/`, `orders/{id}/reorder/`, `me/orders/`, `me/orders/{id}/`,
 `webhooks/click/prepare/`, `webhooks/click/complete/`, `webhooks/payme/`, `webhooks/bts/`,
 `dev/payments/{order_id}/simulate/`.
@@ -289,7 +308,7 @@ C§2.0 rows 23–34 and 49–52: `cart/*`, `delivery/regions/`, `delivery/calcul
 | `fail_payment_effects(order_id, payment_id, error_code, at=None, *, provider_txn_id=None)` | `commerce.services` (B5, **signature changed**) | acts on that payment only |
 | `record_late_capture(order_id, payment_id, provider, provider_txn_id, *, case, at=None)` | `commerce.services` | refused-capture rule (C§2.13.0): `payments.mark_late_captured` + `create_refund(origin=late_capture)` + `refund_requested` event + audit `payment.late_capture` + ERROR log |
 | `expire_reservation` / `expire_due_reservations` | `commerce.services` (B5, changed) | skip an order whose payment is in flight and was attached before `reservation_expires_at`, until the grace ends |
-| `customer_orders(customer_id, scope)`, `customer_order_detail(order_id, customer_id, lang)`, `customer_timeline(order, lang)`, `progress(order, lang)` | `commerce.selectors` | C§2.8, C§4; history horizon (`Customer.reactivated_at`); live item names in the resolved language |
+| `customer_orders(customer_id, scope)`, `customer_order_detail(order_id, customer_id, lang)`, `customer_timeline(order, lang)`, `progress(order, lang)` | `commerce.selectors` | C§2.8, C§4; history horizon (`Customer.history_from`); live item names in the resolved language |
 | `build(order_id)`, `verify(ref) -> order_id \| None` | `commerce.payment_ref` | C§1.4/C§2.7.2 account reference, `compare_digest` |
 | `poll_bts()` | `commerce.tasks` | replaces the P0 stub; C§2.13.3: single flight (`cache.add` lock), round robin after `IntegrationState(bts).data["poll_cursor"]`, ≤ `BTS_POLL_BATCH` parcels and ≤ `BTS_POLL_MAX_SECONDS` per run, stable payload fields only (webhook re-track too) |
 | webhook inbox helper (`store_delivery`, `store_rejected` with the per-IP cap and 1 KiB truncation, `semantic_fingerprint`) | `commerce/api/webhooks/inbox.py` | C§2.13.0 |
@@ -349,7 +368,7 @@ create_refund}`, `payments.selectors.{active_payment, display_payment, refunds_f
   `account_ref`), `return_url` https.
 - Customer cancel: from `awaiting_payment` (Click pending failed; Payme state-1 left pending), Click in flight → 409,
   refused otherwise.
-- Customer orders: scope filters, ownership 404, history horizon (orders before `reactivated_at` invisible and 404),
+- Customer orders: scope filters, ownership 404, history horizon (orders before `history_from` invisible and 404),
   №10248 timeline vector (C§4.1) in uz/ru/en, progress for delivery, pickup and cancelled orders, refund mapping,
   `payment.in_progress`, `actions`, item names in ru/en.
 - **Click sandbox suite (offline, §5.1)** and **Payme sandbox suite (offline, §5.2)** — every row.
@@ -419,7 +438,7 @@ local/test settings only)}`,
 selectors.py, tasks.py (the `push.account_security` handler), texts.py, api/customer/*}`, tests in those modules.
 
 ### Endpoints
-C§2.0 rows 35–48: `me/cashback/`, `me/cashback/ledger/`, `me/qr/`, `pos/cashback/resolve-qr/`, `specialists/`,
+C§2.0 rows 36–49: `me/cashback/`, `me/cashback/ledger/`, `me/qr/`, `pos/cashback/resolve-qr/`, `specialists/`,
 `specialists/{id}/`, `services/`, `specialists/{id}/slots/`, `appointments/`, `me/appointments/`,
 `me/appointments/{id}/`, `appointments/{id}/cancel/`, `me/notifications/`, `me/notifications/unread-count/`,
 `me/notifications/{id}/read/`, `me/notifications/read-all/`, `me/notifications/ack/`.
@@ -438,7 +457,7 @@ C§2.0 rows 35–48: `me/cashback/`, `me/cashback/ledger/`, `me/qr/`, `pos/cashb
 | `customer_appointments(customer_id, scope)` | `appointments.selectors` | history horizon |
 | `inbox_page(customer_id)`, `unread_count(customer_id)` | `notifications.selectors` | `inbox_customer_unread_idx`; history horizon |
 | `acknowledge(customer_id, inbox_ids)`, `mark_read(customer_id, inbox_id)`, `mark_all_read(customer_id)` | `notifications.services` | read and read-all call `acknowledge` first; campaign `delivered` increment only on a real transition |
-| `deliver_order_status` (changed): title = `t('label.order_status[_pickup].<status>', customer.language)`; skip orders created before `customer.reactivated_at`; `deliver_appointment` unchanged texts; `deliver_account_security(payload)` (new, handler of `push.account_security`) | `notifications.services` / `tasks` | C§2.14.2, C§4.3 |
+| `deliver_order_status` (changed): title = `t('label.order_status[_pickup].<status>', customer.language)`; skip orders created before `customer.history_from`; `deliver_appointment` unchanged texts; `deliver_account_security(payload)` (new, handler of `push.account_security`) | `notifications.services` / `tasks` | C§2.14.2, C§4.3 |
 | push payloads with `inbox_id`; channel/priority per `data.type`; `unregistered` → `accounts.services.invalidate_fcm_token`; `payload_invalid` → message failed + ERROR, device untouched | `notifications.services` (`_push_messages`, `_deliver`, `_settle`) | C§2.14.2, using the P0 port |
 
 **Reused (do not redefine):** `loyalty.selectors.{account_summary, customer_totals, tier_for, active_policy,
@@ -603,6 +622,9 @@ behaviour: under the production settings the fakes run without scenarios, record
 #SMS_GLOBAL_HOURLY_LIMIT=500
 #CUSTOMER_VERIFICATION_TTL_SECONDS=600
 #CUSTOMER_PASSWORD_MIN_LENGTH=8
+# Dormant-account rule (C§2.2.3, M2-A16): an SMS recovery of an account inactive for longer moves the history horizon
+# to now and scrubs name, image and addresses.
+#CUSTOMER_DORMANT_DAYS=180
 # Keys of the customer API. Local/test settings ship valid development defaults, so these stay commented here;
 # production requires real values and refuses "change-me", committed values (these lines, the local defaults) and
 # short keys. Generate each with: python -c "import secrets; print(secrets.token_urlsafe(32))"
@@ -768,7 +790,10 @@ No beat entry for `loyalty.services.expire_holds`: it must stay unscheduled whil
      `transaction=True`): the capture holds Order → Payment → LoyaltyAccount and inserts its `Purchase` while the delete
      holds the customer-level lock and waits for the Order lock → no `40P01` deadlock; the capture commits, the delete
      then sees the order paid and continues (processing orders are kept);
-   - social link from settings → `account_security` push → reset-password → identity unlinked;
+   - social link from settings (password re-authentication) → `account_security` push → reset-password on a second
+     device → identity unlinked, the first device gets the visible `password_reset` notice (farewell token) and then 401
+     `password_changed`;
+   - social-only account → `me/password/` with an SMS code → identity kept, password sign-in works;
    - QR issue → POS resolve → second resolve `qr_invalid`;
    - booking → admin confirm (B6 endpoint) → push with `inbox_id` → ack → admin `delivered` counter.
 3. Update `AGENTS.md` (customer base views, fixtures, i18n rule, fake switches, `pii_ref`; drop the "M2 exception" of
