@@ -78,3 +78,18 @@ def test_page_size_allow_list_up_to_100(staff_client: APIClient) -> None:
 
 def test_requires_a_staff_token(anon_client: APIClient) -> None:
     assert anon_client.get(URL).status_code == 401
+
+
+def test_the_directory_never_reads_the_password_hash(django_assert_num_queries: Any) -> None:
+    """The selector loads only the directory columns, and rendering them triggers no deferred-field query."""
+    from glowderma.accounts import selectors
+    from glowderma.accounts.api.admin.serializers import StaffListItemSerializer
+
+    StaffUserFactory.create(full_name="", email="kassa@glowderma.uz")
+    StaffUserFactory.create(full_name="Nodira", email="nodira@glowderma.uz")
+    rows = selectors.staff_list({"is_active": True})
+    sql = str(rows.query)
+    assert "password" not in sql and "last_login" not in sql and "is_superuser" not in sql
+    with django_assert_num_queries(1):
+        data = StaffListItemSerializer(rows, many=True).data
+    assert [item["display_name"] for item in data] == ["kassa@glowderma.uz", "Nodira"]

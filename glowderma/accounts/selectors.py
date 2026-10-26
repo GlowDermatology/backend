@@ -21,7 +21,8 @@ def staff_list(filters: StaffFilters) -> QuerySet[StaffUser]:
     ``search`` matches the full name or the email (case-insensitive substring); ``is_active`` filters
     when given (the API defaults it to ``true``).
     """
-    rows = StaffUser.objects.all()
+    # Only the directory columns: never load the password hash (or last_login, is_superuser) per row.
+    rows = StaffUser.objects.only("id", "full_name", "email", "is_active")
     if "is_active" in filters:
         rows = rows.filter(is_active=filters["is_active"])
     term = filters.get("search")
