@@ -1,3 +1,4 @@
+import enum
 import hashlib
 import hmac
 import logging
@@ -45,6 +46,7 @@ from glowderma.core.api.exceptions import (
     VerificationInvalid,
     field_error,
 )
+from glowderma.core.models import IdempotencyRecord
 from glowderma.core.pii import pii_ref
 from glowderma.integrations.eskiz import registry as eskiz_registry
 from glowderma.integrations.oauth.ports import SocialClaims
@@ -511,7 +513,8 @@ def delete_customer(customer: Customer | int) -> Customer:
     consent (``terms_version``, ``consent_at``, ``consent_ip``) and ``last_login_at`` cleared (the audit log
     keeps the consent history); addresses and social identities deleted (one ``apple.revoke`` outbox message
     per Apple identity holding a token); every device inactive with no push, token or key hash; every session
-    revoked ``deactivated`` (tombstones and the QR keys' deletion on commit). ``LoyaltyAccount``,
+    revoked ``deactivated`` (tombstones and the QR keys' deletion on commit); the customer's stored
+    Idempotency-Key responses deleted (they hold Me and Address payloads). ``LoyaltyAccount``,
     ``Purchase``, ``Order`` and ``Appointment`` rows keep pointing at it (``PROTECT``). Idempotent: an already
     deleted customer is returned unchanged.
     """
@@ -556,6 +559,9 @@ def delete_customer(customer: Customer | int) -> Customer:
         is_active=False, push_enabled=False, fcm_token="", key_hash="", updated_at=instant
     )
     revoke_customer_sessions(stored.pk, enums.SessionRevokeReason.DEACTIVATED)
+    # The stored responses of the customer's Idempotency-Key requests (Me and Address payloads: phone, name,
+    # address text, coordinates) go with the scrub instead of outliving it by up to 24 h.
+    IdempotencyRecord.objects.filter(audience="customer", actor_id=stored.pk).delete()
     return _refreshed(customer, stored)
 
 
@@ -1695,12 +1701,23 @@ def lock_customer_by_phone(phone: str) -> Customer | None:
     return Customer.objects.select_for_update(no_key=True).filter(phone=phone).first()
 
 
-def lock_signed_in_customer(customer_id: int, sid: uuid.UUID | str | None) -> Customer:
+class NoSession(enum.Enum):
+    """The explicit "no session" of a signed-in write service called outside a customer request (staff,
+    tasks): the session re-check is skipped only when a caller says so, never because ``sid`` was omitted."""
+
+    NO_SESSION = "no_session"
+
+
+NO_SESSION = NoSession.NO_SESSION
+
+
+def lock_signed_in_customer(customer_id: int, sid: uuid.UUID | str | NoSession) -> Customer:
     """The customer-level lock of a signed-in write (customer contract §2.2, §6.17), re-checked under it.
 
     A request authenticated before a concurrent ``DELETE me/``, a reset or a sign-in elsewhere committed must
     not write to the account afterwards: the customer must still be ``active`` and the request's session
-    (``sid``) still open and unexpired, else 401 (``SESSION_REPLACED`` / ``password_changed`` for those
+    (``sid``, required: :data:`NO_SESSION` only for a caller without a customer session) still open and
+    unexpired, else 401 (``SESSION_REPLACED`` / ``password_changed`` for those
     revocations, ``SESSION_EXPIRED`` otherwise). The session row is locked (``FOR NO KEY UPDATE``) after the
     customer, the order ``start_customer_session`` uses, so a revocation either committed before (refused
     here) or waits for this write.
@@ -1708,7 +1725,7 @@ def lock_signed_in_customer(customer_id: int, sid: uuid.UUID | str | None) -> Cu
     stored = lock_customer(customer_id)
     if stored.status != enums.CustomerStatus.ACTIVE:
         raise AuthFailed("SESSION_EXPIRED")
-    if sid is not None:
+    if not isinstance(sid, NoSession):
         session = (
             AuthSession.objects.select_for_update(no_key=True)
             .filter(pk=sid, audience="customer", customer_id=customer_id)

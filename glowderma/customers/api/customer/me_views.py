@@ -297,7 +297,6 @@ class AddressListView(MeBase):
         serializer = s.AddressWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         address = services.add_address(self.customer.pk, sid=self.sid, **serializer.validated_data)
-        address.refresh_from_db()
         return Response(selectors.address_payload(address), status=201)
 
 
@@ -317,7 +316,6 @@ class AddressDetailView(MeBase):
         serializer = s.AddressWriteSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         updated = services.update_address(self.customer.pk, pk, sid=self.sid, **serializer.validated_data)
-        updated.refresh_from_db()
         return Response(selectors.address_payload(updated))
 
     @extend_schema(
@@ -339,5 +337,4 @@ class AddressDefaultView(MeBase):
     )
     def post(self, request: Request, pk: int) -> Response:
         address = services.set_default_address(self.customer.pk, pk, sid=self.sid)
-        address.refresh_from_db()
         return Response(selectors.address_payload(address))

@@ -949,7 +949,7 @@ def _consume_reauth(customer: Customer, verification_token: str | None, needed: 
 
 def _lock_reauthenticated(
     customer_id: int,
-    sid: str | None,
+    sid: str | account_services.NoSession,
     snapshot: Customer,
     verification_token: str | None,
     needed: bool,
@@ -980,7 +980,7 @@ def link_social(
     password: str | None,
     verification_token: str | None,
     fid: str,
-    sid: str | None = None,
+    sid: str | account_services.NoSession,
     request: Any = None,
 ) -> None:
     """``POST me/social/`` (customer contract §2.2.8). The slow provider checks run before any lock; under
@@ -1029,7 +1029,7 @@ def unlink_social(
     *,
     password: str | None,
     verification_token: str | None,
-    sid: str | None = None,
+    sid: str | account_services.NoSession,
     request: Any = None,
 ) -> None:
     """``DELETE me/social/{provider}/`` (customer contract §2.2.8): re-authentication first, then the
@@ -1097,7 +1097,12 @@ def change_password(
 
 
 def accept_consent(
-    customer_id: int, *, terms_version: str, ip: str, sid: str | None = None, request: Any = None
+    customer_id: int,
+    *,
+    terms_version: str,
+    ip: str,
+    sid: str | account_services.NoSession,
+    request: Any = None,
 ) -> None:
     terms = site_config_selectors.current_terms()
     if not terms.published:
@@ -1109,7 +1114,9 @@ def accept_consent(
         _audit("customer.consent_accepted", customer, request, {"terms_version": terms_version})
 
 
-def update_profile(customer_id: int, changes: dict[str, Any], *, fid: str, sid: str | None = None) -> None:
+def update_profile(
+    customer_id: int, changes: dict[str, Any], *, fid: str, sid: str | account_services.NoSession
+) -> None:
     """``PATCH me/``: name and language on the customer, ``push_enabled`` on the current device (requires a
     stored FCM token: ``push_token_missing``). No audit (own profile)."""
     fields = {name: changes[name] for name in ("name", "language", "push_enabled") if name in changes}
@@ -1119,7 +1126,7 @@ def update_profile(customer_id: int, changes: dict[str, Any], *, fid: str, sid: 
     logger.info("customer.profile_updated customer_id=%s fields=%s", customer_id, sorted(changes))
 
 
-def set_image(customer_id: int, upload: Any, *, sid: str | None = None) -> str:
+def set_image(customer_id: int, upload: Any, *, sid: str | account_services.NoSession) -> str:
     """``PUT me/image/``: re-encoded and EXIF-stripped (``core.images``), the previous file deleted."""
     try:
         processed = process_image(upload)
@@ -1132,36 +1139,47 @@ def set_image(customer_id: int, upload: Any, *, sid: str | None = None) -> str:
     return absolute_media_url(new_name)
 
 
-def delete_image(customer_id: int, *, sid: str | None = None) -> None:
+def delete_image(customer_id: int, *, sid: str | account_services.NoSession) -> None:
     with transaction.atomic():
         account_services.lock_signed_in_customer(customer_id, sid)
         account_services.clear_customer_image(customer_id)
 
 
-def add_address(customer_id: int, *, sid: str | None = None, **fields: Any) -> Address:
+def add_address(customer_id: int, *, sid: str | account_services.NoSession, **fields: Any) -> Address:
     """``POST me/addresses/``: at most ``ADDRESS_MAX_PER_CUSTOMER`` (409 ``address_limit``)."""
     limit = int(settings.ADDRESS_MAX_PER_CUSTOMER)
     with transaction.atomic():
         account_services.lock_signed_in_customer(customer_id, sid)
         if Address.objects.filter(customer_id=customer_id).count() >= limit:
             raise AddressLimit(details={"limit": limit}, params={"limit": limit})
-        return account_services.add_address(customer_id, **fields)
+        return _reread(account_services.add_address(customer_id, **fields))
 
 
-def update_address(customer_id: int, address_id: int, *, sid: str | None = None, **fields: Any) -> Address:
+def update_address(
+    customer_id: int, address_id: int, *, sid: str | account_services.NoSession, **fields: Any
+) -> Address:
     """``PATCH me/addresses/{id}/``: the row re-read under the lock (404 when it was removed meanwhile)."""
     with transaction.atomic():
         account_services.lock_signed_in_customer(customer_id, sid)
-        return account_services.update_customer_address(address_id, customer_id, **fields)
+        return _reread(account_services.update_customer_address(address_id, customer_id, **fields))
 
 
-def set_default_address(customer_id: int, address_id: int, *, sid: str | None = None) -> Address:
+def set_default_address(
+    customer_id: int, address_id: int, *, sid: str | account_services.NoSession
+) -> Address:
     with transaction.atomic():
         account_services.lock_signed_in_customer(customer_id, sid)
-        return account_services.set_customer_default_address(address_id, customer_id)
+        return _reread(account_services.set_customer_default_address(address_id, customer_id))
 
 
-def remove_address(customer_id: int, address_id: int, *, sid: str | None = None) -> None:
+def _reread(address: Address) -> Address:
+    """The stored row (database defaults and normalised decimals), read under the caller's customer-level
+    lock: the view builds its response from it, never from a read after commit, which a concurrent ``DELETE
+    me/addresses/{id}/`` or ``DELETE me/`` could answer with ``DoesNotExist`` (a 500)."""
+    return Address.objects.get(pk=address.pk)
+
+
+def remove_address(customer_id: int, address_id: int, *, sid: str | account_services.NoSession) -> None:
     with transaction.atomic():
         account_services.lock_signed_in_customer(customer_id, sid)
         account_services.remove_customer_address(address_id, customer_id)
@@ -1184,7 +1202,7 @@ def delete_account(
     *,
     password: str | None = None,
     verification_token: str | None = None,
-    sid: str | None = None,
+    sid: str | account_services.NoSession,
     request: Any = None,
 ) -> DeletionResult:
     """``DELETE me/`` steps 1–6: re-authentication (``customer_reauth``), then in one transaction under the

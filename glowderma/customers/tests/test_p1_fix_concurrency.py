@@ -353,7 +353,13 @@ def test_social_sign_in_vs_unlink_does_not_deadlock(monkeypatch: pytest.MonkeyPa
     assert touched.wait(WAIT)
     second = run(
         "unlink",
-        lambda: services.unlink_social(customer.pk, "google", password=PASSWORD, verification_token=None),
+        lambda: services.unlink_social(
+            customer.pk,
+            "google",
+            password=PASSWORD,
+            verification_token=None,
+            sid=account_services.NO_SESSION,
+        ),
         out,
     )
     time.sleep(1)
