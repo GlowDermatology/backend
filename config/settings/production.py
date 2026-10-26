@@ -125,6 +125,10 @@ if JWT_ACTIVE_KID not in JWT_SIGNING_KEYS:
     raise ImproperlyConfigured("JWT_ACTIVE_KID must identify a signing key")
 DATABASE_URL = env_str("DATABASE_URL")
 DATABASES = {"default": database_config(DATABASE_URL, pool=env_bool("DB_POOL", True))}
+# compose.prod.yaml builds DATABASE_URL from POSTGRES_PASSWORD; the placeholder of
+# deploy/env.production.example must not initialise a real database.
+if "change-me" in str(DATABASES["default"]["PASSWORD"]).lower():
+    raise ImproperlyConfigured("DATABASE_URL has a placeholder password; set a generated POSTGRES_PASSWORD")
 REDIS_URL = env_str("REDIS_URL")
 CELERY_BROKER_URL = env_str("CELERY_BROKER_URL", redis_db_url(REDIS_URL, 1))
 ALLOWED_HOSTS = env_list("ALLOWED_HOSTS") + ["localhost"]

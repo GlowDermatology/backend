@@ -269,6 +269,16 @@ def test_production_pools_by_default(production_env: None, monkeypatch: pytest.M
     assert "pool" not in load_production().DATABASES["default"]["OPTIONS"]
 
 
+@pytest.mark.parametrize("password", ["change-me", "Change-Me-postgres", "change-me-password"])
+def test_production_refuses_a_placeholder_database_password(
+    production_env: None, monkeypatch: pytest.MonkeyPatch, password: str
+) -> None:
+    """compose.prod.yaml builds DATABASE_URL from POSTGRES_PASSWORD, whose example value is change-me."""
+    monkeypatch.setenv("DATABASE_URL", f"postgres://glowderma:{password}@postgres:5432/glowderma")
+    with pytest.raises(ImproperlyConfigured, match="DATABASE_URL has a placeholder password"):
+        load_production()
+
+
 def test_test_settings_cache_and_broker() -> None:
     from django.conf import settings
 
