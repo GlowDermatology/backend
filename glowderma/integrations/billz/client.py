@@ -583,9 +583,42 @@ class BillzClient:
         wait = self.profile.limiter_wait if remaining is None else min(self.profile.limiter_wait, remaining)
         self.limiter.acquire(max_wait=wait, wait_on_pause=self.profile.wait_on_pause)
         with httpx.Client(timeout=self._timeout(), transport=self.transport) as http:
-            return http.request(
+            request = http.build_request(
                 method, f"{self.config.base_url}{path}", params=params, json=json, headers=dict(headers)
             )
+            response = http.send(request, stream=True)
+            try:
+                return self._read_within_deadline(request, response)
+            finally:
+                response.close()
+
+    def _read_within_deadline(self, request: httpx.Request, response: httpx.Response) -> httpx.Response:
+        """Read the body, giving up once the deadline passed while it still drips in (review NEW-9).
+
+        The read timeout bounds each wait for the next chunk only; an answer sent a few bytes at a time could
+        otherwise hold a push far past its deadline (and the outbox lease). Past the deadline the read is
+        abandoned as a :class:`httpx.ReadTimeout` — an unknown outcome, like any other read timeout.
+        """
+        body = bytearray()
+        for chunk in response.iter_bytes():  # decoded (a corrupt gzip body raises httpx.DecodingError)
+            body.extend(chunk)
+            remaining = self._remaining()
+            if remaining is not None and remaining < 0:
+                raise httpx.ReadTimeout(
+                    "the answer was still arriving at the Billz deadline", request=request
+                )
+        headers = [
+            (name, value)
+            for name, value in response.headers.multi_items()
+            if name.lower() not in ("content-encoding", "content-length", "transfer-encoding")
+        ]
+        return httpx.Response(
+            response.status_code,
+            headers=headers,
+            content=bytes(body),
+            request=request,
+            extensions=response.extensions,
+        )
 
     def _exchange(
         self,

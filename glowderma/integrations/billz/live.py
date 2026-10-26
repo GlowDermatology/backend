@@ -26,7 +26,8 @@ product, for the row and for the cached product UUID alike.
   applied and nothing hidden.
 
 **Lookup** (``get_product``, admin create / ``billz_id`` change): the interactive client profile (bounded to
-seconds, :data:`.client.INTERACTIVE`), ``search`` paged until the exact barcode is found.
+seconds, :data:`.client.INTERACTIVE`), ``search`` paged until the exact barcode is found — every page within
+one budget of :data:`LOOKUP_BUDGET_SECONDS` in total.
 
 **Sale push** (``push_sale``; llms-full "Интернет-заказ из внешней системы"), under a per-sale lock owned by
 this worker (:class:`SaleLock`) and a push-wide deadline (:data:`PUSH_DEADLINE_SECONDS`, below the outbox
@@ -126,6 +127,8 @@ PUSH_DEADLINE_SECONDS = 240.0
 PAYMENT_QUIET_PERIOD = timedelta(minutes=10)
 SEARCH_LIMIT = 50
 SEARCH_MAX_PAGES = 10
+# The admin lookup (every search page together) ends within the interactive profile's budget.
+LOOKUP_BUDGET_SECONDS = INTERACTIVE.call_budget or 25.0
 STOCK_LIMIT = 2_000_000_000
 NAME_MAX = 255
 VOLUME_MAX = 40
@@ -423,7 +426,10 @@ class LiveBillz:
         self._require_configured()
         if not BILLZ_ID.fullmatch(billz_id):
             return None
-        product = self._find_by_barcode(billz_id, self.interactive)
+        # one budget for the whole lookup (up to SEARCH_MAX_PAGES calls), not one per call (review NEW-3): it
+        # runs inside the idempotency transaction of POST products/
+        with self.interactive.deadline(LOOKUP_BUDGET_SECONDS):
+            product = self._find_by_barcode(billz_id, self.interactive)
         return None if product is None else self._row(product, billz_id, timeutils.now())
 
     def iter_products(self, mode: ImportMode) -> Iterator[BillzProduct]:

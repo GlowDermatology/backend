@@ -6,11 +6,13 @@ asserts the fixed behaviour. Recorded answers only (``billz_support.BillzServer`
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import json
 import threading
 import time
 import uuid
+from collections.abc import Iterator
 from typing import Any
 
 import httpx
@@ -150,8 +152,16 @@ def test_a_slow_renewal_never_lets_another_worker_present_the_same_refresh_token
         except BaseException as exc:  # pragma: no cover - surfaced by the assertion below
             errors.append(exc)
 
+    @contextlib.contextmanager
+    def no_deadline(self: BillzClient, seconds: float) -> Iterator[None]:
+        yield
+
     original_ttl = billz_client.LOCK_TTL_SECONDS
     billz_client.LOCK_TTL_SECONDS = 1
+    # The renewal's own deadline (half the lock's TTL) makes this impossible; the test switches it off to
+    # check the defence behind it: a renewal that outlives its lock never stores its pair.
+    patch = pytest.MonkeyPatch()
+    patch.setattr(BillzClient, "deadline", no_deadline)
     try:
         first = threading.Thread(target=worker, args=("a",))
         first.start()
@@ -163,6 +173,7 @@ def test_a_slow_renewal_never_lets_another_worker_present_the_same_refresh_token
         second.join(10)
     finally:
         billz_client.LOCK_TTL_SECONDS = original_ttl
+        patch.undo()
     assert not errors
     assert presented == ["refresh-from-login"]  # never twice
     assert server.count("POST /v1/auth/login") == 1  # the second worker logged in
@@ -452,3 +463,70 @@ def test_safe_cache_lets_a_celery_soft_time_limit_through() -> None:
 
         with pytest.raises(BillzUnavailable, match="shared cache unavailable"):
             SafeCache(Down()).get("key")  # type: ignore[arg-type]
+
+
+# --- NEW-3: one budget for the whole admin lookup -----------------------------------------------------------
+
+
+def test_the_admin_lookup_ends_within_its_budget_over_every_search_page() -> None:
+    """NEW-3 (probe test_defect_admin_lookup_total_time_exceeds_its_25_s_bound): up to ten search pages, each
+    just under the 10 s read cap, used to take 90 s inside the idempotency transaction; the whole lookup now
+    ends within the interactive budget (each read is cut to what is left, like a real socket timeout)."""
+    clock = Clock()
+    server = BillzServer(clock)
+    others = [
+        product(f"aaaaaaaa-0000-4000-8000-{index:012d}", f"9{index:03d}4607012301") for index in range(50)
+    ]
+
+    def search(request: httpx.Request) -> httpx.Response:
+        read = float(request.extensions["timeout"]["read"])
+        if read < 9.0:
+            clock.now += read
+            raise httpx.ReadTimeout("timed out", request=request)
+        clock.now += 9.0  # just under the interactive read cap of 10 s
+        return httpx.Response(200, json={"count": 500, "products": others})
+
+    server.overrides["GET /v2/products"] = search
+    adapter = live(server, clock)
+    start = clock()
+    with pytest.raises(BillzUnavailable):
+        adapter.get_product("4607012301")
+    assert clock() - start <= billz_live.LOOKUP_BUDGET_SECONDS + 0.01
+    assert billz_live.LOOKUP_BUDGET_SECONDS == INTERACTIVE.call_budget == 25.0
+
+
+# --- NEW-9: an answer that drips in is cut at the deadline --------------------------------------------------
+
+
+class Drip(httpx.SyncByteStream):
+    """A body sent a few bytes at a time, each chunk ``every`` seconds of the fake clock apart."""
+
+    def __init__(self, clock: Clock, body: bytes, every: float) -> None:
+        self.clock, self.body, self.every = clock, body, every
+
+    def __iter__(self) -> Iterator[bytes]:
+        for start in range(0, len(self.body), 4):
+            self.clock.now += self.every
+            yield self.body[start : start + 4]
+
+
+def test_an_answer_dripping_past_the_push_deadline_is_abandoned() -> None:
+    """NEW-9: the read timeout bounds each chunk only; a body dripping in under it is abandoned once the
+    deadline passed — an unknown outcome (a payment keeps its attempt), never a push that outlives the
+    outbox lease."""
+    clock = Clock()
+    server = BillzServer(clock)
+    original = server._default
+
+    def payment(request: httpx.Request) -> httpx.Response:
+        answer = original("POST /v2/order-payment/{order_id}", request)
+        return httpx.Response(200, stream=Drip(clock, answer.content, every=20.0))
+
+    server.overrides["POST /v2/order-payment/{order_id}"] = payment
+    journal = Journal()
+    start = clock()
+    with pytest.raises(BillzUnavailable, match="ReadTimeout") as caught:
+        live(server, clock).push_sale(_request(), journal)
+    assert not caught.value.not_applied
+    assert journal.payment_attempted_at is not None and journal.forgotten == 0
+    assert clock() - start <= billz_live.PUSH_DEADLINE_SECONDS + 20.0  # at most one chunk past it

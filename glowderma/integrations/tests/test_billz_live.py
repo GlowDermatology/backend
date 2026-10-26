@@ -1150,7 +1150,9 @@ def test_the_push_ends_within_its_deadline() -> None:
     server.overrides["POST /v2/order-product/{order_id}"] = slow
     with pytest.raises(BillzUnavailable, match="deadline") as caught:
         adapter.push_sale(sale(), Journal(server))
-    assert caught.value.not_applied
+    # the second item add answered past the deadline: abandoned as a read timeout (review NEW-9), so its
+    # outcome is unknown — harmless for an upsert, which the next attempt sends again
+    assert not caught.value.not_applied
     # after 260 s the next request (the client lookup) is never started, let alone the payment
     assert server.labels()[-1] == "POST /v2/order-product/{order_id}"
     assert server.count("POST /v2/order-payment/{order_id}") == 0
