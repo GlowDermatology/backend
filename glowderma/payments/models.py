@@ -16,6 +16,9 @@ from glowderma.core.models import TimeStampedModel, timestamp_default
 
 # Payment statuses that make a payment "active" for the one-active-per-order partial unique.
 ACTIVE_PAYMENT_STATUSES: tuple[str, ...] = (enums.PaymentStatus.PENDING, enums.PaymentStatus.PAID)
+# ``Payment.error_code`` of a refused capture (customer contract §2.13.0): money a provider took for a payment we
+# did not honour; the row is ``paid`` until its refund succeeds and never counts as the order's active payment.
+LATE_CAPTURE = "late_capture"
 # Payment statuses that require a provider transaction id (the money moved under that id).
 SETTLED_PAYMENT_STATUSES: tuple[str, ...] = (enums.PaymentStatus.PAID, enums.PaymentStatus.REFUNDED)
 # Refund states that keep a refund "open" for the one-open-per-payment partial unique.
@@ -52,7 +55,7 @@ class Payment(TimeStampedModel):
     refunded_at = models.DateTimeField(null=True)
     error_code = models.CharField(
         max_length=32, blank=True
-    )  # provider error code as text ("-9", "-31008", "cancelled", "abandoned", "expired")
+    )  # provider error code as text ("-9", "-31008", "cancelled", "abandoned", "expired", "late_capture")
     error_message = models.CharField(max_length=254, blank=True)
     provider_state = models.JSONField(
         default=dict, blank=True
@@ -63,7 +66,7 @@ class Payment(TimeStampedModel):
         constraints = [
             models.UniqueConstraint(
                 fields=["order"],
-                condition=Q(status__in=list(ACTIVE_PAYMENT_STATUSES)),
+                condition=Q(status__in=list(ACTIVE_PAYMENT_STATUSES)) & ~Q(error_code=LATE_CAPTURE),
                 name="payment_one_active_per_order",
             ),
             models.UniqueConstraint(

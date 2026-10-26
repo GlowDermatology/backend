@@ -35,6 +35,7 @@ from glowderma.core import enums, timeutils
 from glowderma.core.timeutils import TASHKENT
 from glowderma.payments.models import (
     ATTENTION_REFUND_STATES,
+    LATE_CAPTURE,
     SETTLED_PAYMENT_STATUSES,
     Payment,
     Refund,
@@ -54,6 +55,12 @@ class PaymentRow:
     created_at: datetime
     confirmed_at: datetime | None
     provider_state: dict[str, Any]
+    error_code: str = ""
+    failed_at: datetime | None = None
+
+    @property
+    def late_capture(self) -> bool:
+        return self.error_code == LATE_CAPTURE
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +80,15 @@ class RefundRow:
     attempts: int
     submitted_at: datetime | None
     error_code: str
+    # The provider's payment reference for refund/status calls: Click's ``click_paydoc_id`` (customer contract
+    # §2.13.0, never ``click_trans_id``); ``""`` when the payment has none (seeded/legacy rows).
+    provider_payment_ref: str = ""
+
+
+def click_paydoc_id(provider_state: Any) -> str:
+    """``provider_state["click_paydoc_id"]`` as text, ``""`` when absent."""
+    value = provider_state.get("click_paydoc_id") if isinstance(provider_state, dict) else None
+    return "" if value in (None, "") else str(value)
 
 
 def payment_row(payment: Payment) -> PaymentRow:
@@ -86,6 +102,8 @@ def payment_row(payment: Payment) -> PaymentRow:
         created_at=payment.created_at,
         confirmed_at=payment.confirmed_at,
         provider_state=dict(payment.provider_state or {}),
+        error_code=payment.error_code,
+        failed_at=payment.failed_at,
     )
 
 
@@ -105,16 +123,23 @@ def refund_row(refund: Refund, payment: Payment | None = None) -> RefundRow:
         attempts=refund.attempts,
         submitted_at=refund.submitted_at,
         error_code=refund.error_code,
+        provider_payment_ref=click_paydoc_id(owner.provider_state)
+        if owner.provider == enums.PaymentProvider.CLICK
+        else "",
     )
 
 
-# --- display payment (02 §2.1): rank refunded/paid 2 > pending 1 > failed 0, newest id first ---------------
+# --- display payment (customer contract §2.8): one ranking, newest id first within a rank -------------------
+# (3) not a late capture and paid/refunded · (2) not a late capture and pending · (1) a late capture (its own
+# status: paid until its refund succeeds, then refunded) · (0) failed. A double payment shows the payment that paid
+# the order; an order whose only money-taking payment was captured too late shows that late capture.
 
 
 def _rank() -> Case:
     return Case(
-        When(status__in=list(SETTLED_PAYMENT_STATUSES), then=Value(2)),
-        When(status=enums.PaymentStatus.PENDING, then=Value(1)),
+        When(error_code=LATE_CAPTURE, then=Value(1)),
+        When(status__in=list(SETTLED_PAYMENT_STATUSES), then=Value(3)),
+        When(status=enums.PaymentStatus.PENDING, then=Value(2)),
         default=Value(0),
         output_field=IntegerField(),
     )
@@ -122,6 +147,17 @@ def _rank() -> Case:
 
 def _ranked(qs: QuerySet[Payment]) -> QuerySet[Payment]:
     return qs.annotate(rank=_rank()).order_by("-rank", "-id")
+
+
+def display_rank(payment: Payment | PaymentRow) -> int:
+    """The rank of one payment under the display rule (see above)."""
+    if payment.error_code == LATE_CAPTURE:
+        return 1
+    if payment.status in SETTLED_PAYMENT_STATUSES:
+        return 3
+    if payment.status == enums.PaymentStatus.PENDING:
+        return 2
+    return 0
 
 
 def display_payment(order_id: int) -> PaymentRow | None:
@@ -132,18 +168,8 @@ def display_payment(order_id: int) -> PaymentRow | None:
 
 def pick_display(payments: Iterable[Payment]) -> Payment | None:
     """The display payment among an order's prefetched payments (same rank as :func:`display_payment`)."""
-
-    def rank(payment: Payment) -> tuple[int, int]:
-        if payment.status in SETTLED_PAYMENT_STATUSES:
-            value = 2
-        elif payment.status == enums.PaymentStatus.PENDING:
-            value = 1
-        else:
-            value = 0
-        return value, payment.pk
-
     rows = list(payments)
-    return max(rows, key=rank) if rows else None
+    return max(rows, key=lambda payment: (display_rank(payment), payment.pk)) if rows else None
 
 
 def display_status_subquery(order_ref: str = "pk") -> Coalesce:
@@ -153,9 +179,42 @@ def display_status_subquery(order_ref: str = "pk") -> Coalesce:
 
 
 def active_payment(order_id: int, status: str) -> PaymentRow | None:
-    """The order's newest payment in ``status`` (``pending``: to confirm or fail; ``paid``: to refund)."""
-    payment = Payment.objects.filter(order_id=order_id, status=status).order_by("-id").first()
+    """The order's newest payment in ``status`` (``pending``: to confirm or fail; ``paid``: to refund).
+
+    Late captures (customer contract §2.13.0) are never the order's active payment."""
+    payment = (
+        Payment.objects.filter(order_id=order_id, status=status)
+        .exclude(error_code=LATE_CAPTURE)
+        .order_by("-id")
+        .first()
+    )
     return None if payment is None else payment_row(payment)
+
+
+def payments_of_order(order_id: int) -> list[PaymentRow]:
+    """Every payment of the order, newest first."""
+    return [payment_row(p) for p in Payment.objects.filter(order_id=order_id).order_by("-id")]
+
+
+def payment_by_txn(provider: str, provider_txn_id: str) -> PaymentRow | None:
+    """The payment a provider transaction id is bound to (``payment_provider_txn_unique``)."""
+    if not provider_txn_id:
+        return None
+    payment = Payment.objects.filter(provider=provider, provider_txn_id=provider_txn_id).first()
+    return None if payment is None else payment_row(payment)
+
+
+def payme_statement(from_ms: int, to_ms: int) -> list[PaymentRow]:
+    """Payme ``GetStatement``: Payme payments whose Payme transaction time ``provider_state.time`` lies in
+    ``[from_ms, to_ms]``, ascending by that time (customer contract §2.13.2; M2 filters on the JSON key)."""
+    rows = []
+    for payment in Payment.objects.filter(
+        provider=enums.PaymentProvider.PAYME, provider_state__has_key="time"
+    ).exclude(provider_txn_id=""):
+        value = payment.provider_state.get("time")
+        if isinstance(value, int) and not isinstance(value, bool) and from_ms <= value <= to_ms:
+            rows.append(payment_row(payment))
+    return sorted(rows, key=lambda row: (int(row.provider_state["time"]), row.id))
 
 
 def get_payment(payment_id: int) -> PaymentRow | None:
@@ -194,9 +253,24 @@ def refunds_by_payment(payment_ids: Iterable[int]) -> dict[int, list[RefundRow]]
     return result
 
 
+def _superseded_failure() -> Q:
+    """A ``failed`` refund that needs no action any more (admin contract §2.10, §2.12): a **later** refund of the
+    same payment succeeded (a staff retry returned the money), or the payment is ``refunded``."""
+    later_succeeded = Refund.objects.filter(
+        payment_id=OuterRef("payment_id"), state=enums.RefundState.SUCCEEDED, pk__gt=OuterRef("pk")
+    )
+    return Q(state=enums.RefundState.FAILED) & (
+        Q(payment__status=enums.PaymentStatus.REFUNDED) | Q(Exists(later_succeeded))
+    )
+
+
 def refunds_needing_action() -> int:
-    """Dashboard ``attention.refunds_needing_action``: refunds ``failed``/``unknown``/``manual_required``."""
-    return Refund.objects.filter(state__in=list(ATTENTION_REFUND_STATES)).count()
+    """Dashboard ``attention.refunds_needing_action``: refunds ``failed``/``unknown``/``manual_required``,
+    without the ``failed`` ones a later succeeded refund of the payment superseded or whose payment is
+    ``refunded`` (admin contract §2.10)."""
+    return (
+        Refund.objects.filter(state__in=list(ATTENTION_REFUND_STATES)).exclude(_superseded_failure()).count()
+    )
 
 
 # --- payments list (contract §2.12) -------------------------------------------------------------------------
@@ -234,9 +308,10 @@ def payments_list(filters: PaymentFilters, now: datetime | None = None) -> Query
     if "provider" in filters:
         qs = qs.filter(provider=filters["provider"])
     if "refund_state" in filters:
-        qs = qs.filter(
-            Exists(Refund.objects.filter(payment_id=OuterRef("pk"), state=filters["refund_state"]))
-        )
+        refunds = Refund.objects.filter(payment_id=OuterRef("pk"), state=filters["refund_state"])
+        if filters["refund_state"] == enums.RefundState.FAILED:
+            refunds = refunds.exclude(_superseded_failure())  # admin contract §2.12: same rule as §2.10
+        qs = qs.filter(Exists(refunds))
     bounds = timeutils.period_bounds(filters.get("period", enums.OrderPeriod.ALL), instant)
     qs = qs.filter(**{f"created_at__{key}": value for key, value in bounds.items()})
     date_bounds = timeutils.date_range_bounds(filters.get("date_from"), filters.get("date_to"))
@@ -259,8 +334,8 @@ def revenue_buckets(start: datetime, end: datetime, unit: str) -> dict[datetime,
     """``{bucket start (Tashkent, aware): revenue}`` for payments confirmed in ``[start, end)``.
 
     Revenue = Σ ``amount`` of ``paid``/``refunded`` payments by confirmation time **minus** their succeeded
-    refunds, attributed to the payment's own bucket — never negative (refunds ≤ amount). ``unit`` is
-    ``hour`` or ``day``.
+    refunds, attributed to the payment's own bucket — never negative (refunds ≤ amount). Late captures are
+    excluded (customer contract §2.13.0: never order revenue). ``unit`` is ``hour`` or ``day``.
     """
     trunc = TruncHour if unit == enums.DashboardBucket.HOUR else TruncDay
     refunded = (
@@ -274,6 +349,7 @@ def revenue_buckets(start: datetime, end: datetime, unit: str) -> dict[datetime,
         Payment.objects.filter(
             status__in=list(SETTLED_PAYMENT_STATUSES), confirmed_at__gte=start, confirmed_at__lt=end
         )
+        .exclude(error_code=LATE_CAPTURE)
         .annotate(
             bucket=trunc("confirmed_at", tzinfo=TASHKENT),
             net=F("amount") - Coalesce(Subquery(refunded, output_field=BigIntegerField()), Value(0)),
@@ -291,11 +367,16 @@ __all__ = [
     "PaymentRow",
     "RefundRow",
     "active_payment",
+    "click_paydoc_id",
     "display_payment",
+    "display_rank",
     "display_status_subquery",
     "get_payment",
     "get_refund",
+    "payme_statement",
+    "payment_by_txn",
     "payment_row",
+    "payments_of_order",
     "payments_list",
     "pick_display",
     "refund_row",
