@@ -326,6 +326,25 @@ def test_create_queued_sends_end_to_end(
     assert Campaign.objects.count() == 1
 
 
+@pytest.mark.django_db(transaction=True)
+def test_create_body_is_the_campaign_after_the_eager_send(
+    staff_client: APIClient, clock: Any, fcm: FakeFcm
+) -> None:
+    """Contract §2.8: the 201 body is the campaign as stored when the response is built — after the commit,
+    once the eager on-commit send ran (with a real worker it would still read ``queued``)."""
+    for _ in range(2):
+        DeviceFactory.create(customer=CustomerFactory.create())
+    response = post(staff_client, form())
+    assert response.status_code == 201, response.data
+    body = response.data
+    assert (body["state"], body["sent"], body["failed"]) == ("sent", 2, 0)
+    assert body["sent_at"] == "2026-10-24T12:05:00+05:00" and body["recipient_count"] == 2
+    replay = post(staff_client, form())
+    assert replay.status_code == 201 and replay["Idempotent-Replayed"] == "true"
+    assert replay.data == body
+    assert Campaign.objects.count() == 1
+
+
 def test_create_scheduled_waits_for_beat(staff_client: APIClient, clock: Any) -> None:
     segment = CustomerSegmentFactory.create(name="Doimiy mijozlar", min_online_orders=None)
     member = CustomerFactory.create()

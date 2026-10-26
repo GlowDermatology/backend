@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import connection
+from django.db import connection, transaction
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny
@@ -17,7 +17,7 @@ from rest_framework.test import APIRequestFactory
 from rest_framework.views import APIView
 
 from glowderma.core import audit, timeutils
-from glowderma.core.idempotency import idempotent
+from glowderma.core.idempotency import idempotent, refresh_after_commit
 from glowderma.core.models import AuditEntry, IdempotencyRecord
 
 pytestmark = pytest.mark.django_db
@@ -271,3 +271,58 @@ def test_a_lone_surrogate_in_the_body_is_a_parse_error_before_any_effect() -> No
     assert response.data["code"] == "parse_error"
     assert not AuditEntry.objects.filter(action="test.idempotent_write").exists()
     assert not IdempotencyRecord.objects.filter(key=key).exists()
+
+
+# --- refresh_after_commit -----------------------------------------------------------------------------------
+
+_STORE: dict[str, str] = {}
+
+
+class AfterCommitView(APIView):
+    """A write whose effect finishes in an on-commit callback (like an eager Celery send)."""
+
+    authentication_classes = [StubAuthentication]
+    permission_classes = [AllowAny]
+
+    def write(self, request: Request) -> Response:
+        _STORE["state"] = "queued"
+        transaction.on_commit(lambda: _STORE.update(state="sent"))
+
+        def body() -> dict[str, str]:
+            return {"state": _STORE["state"]}
+
+        return refresh_after_commit(Response(body(), status=201), body)
+
+    @idempotent()
+    def post(self, request: Request) -> Response:
+        return self.write(request)
+
+
+class OptionalAfterCommitView(AfterCommitView):
+    @idempotent(required=False)
+    def post(self, request: Request) -> Response:
+        return self.write(request)
+
+
+def _after_commit_post(view: type[APIView], key: str | None) -> Response:
+    headers = {"HTTP_IDEMPOTENCY_KEY": key} if key is not None else {}
+    request = APIRequestFactory().post("/api/test/after-commit/", {}, format="json", **headers)
+    response: Response = view.as_view()(request)
+    return response
+
+
+@pytest.mark.django_db(transaction=True)
+def test_refresh_after_commit_rebuilds_the_body_and_the_replay() -> None:
+    key = str(uuid4())
+    first = _after_commit_post(AfterCommitView, key)
+    assert first.status_code == 201 and first.data == {"state": "sent"}
+    assert IdempotencyRecord.objects.get().response_body == {"state": "sent"}
+    replay = _after_commit_post(AfterCommitView, key)
+    assert replay["Idempotent-Replayed"] == "true" and replay.data == {"state": "sent"}
+    assert _after_commit_post(OptionalAfterCommitView, None).data == {"state": "sent"}
+
+
+def test_refresh_after_commit_keeps_the_body_inside_an_outer_transaction() -> None:
+    first = _after_commit_post(AfterCommitView, str(uuid4()))
+    assert first.data == {"state": "queued"}  # nothing committed yet: the body is the stored state
+    assert IdempotencyRecord.objects.get().response_body == {"state": "queued"}

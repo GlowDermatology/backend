@@ -22,7 +22,7 @@ from glowderma.core import enums, labels
 from glowderma.core.api.parsers import JSONParser
 from glowderma.core.api.schema import ADMIN_ERRORS, EXPORT_PARAM, IDEMPOTENCY_KEY_HEADER
 from glowderma.core.exports import ExportMixin, format_export_datetime
-from glowderma.core.idempotency import idempotent
+from glowderma.core.idempotency import idempotent, refresh_after_commit
 from glowderma.loyalty import selectors as loyalty_selectors
 from glowderma.notifications import selectors, services
 from glowderma.notifications.api.admin.serializers import (
@@ -165,7 +165,13 @@ class NotificationViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSe
         campaign = services.create_campaign(
             serializer.to_input(), request.FILES.get("image"), actor=request.user, request=request
         )
-        return Response(NotificationRecordSerializer(selectors.get_campaign(campaign.pk)).data, status=201)
+
+        # The 201 body is the campaign as stored when the response is built (contract §2.8): re-read after
+        # the transaction committed and its on-commit dispatch ran (an eager send already finished it).
+        def body() -> Any:
+            return NotificationRecordSerializer(selectors.get_campaign(campaign.pk)).data
+
+        return refresh_after_commit(Response(body(), status=201), body)
 
 
 class NotificationMetaView(AdminAPIView):

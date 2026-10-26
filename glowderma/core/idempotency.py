@@ -46,6 +46,32 @@ def request_fingerprint(request: Request) -> str:
     return hashlib.sha256(canonical.encode("utf-8", "surrogatepass")).hexdigest()
 
 
+_REFRESH_ATTR = "_gd_refresh_after_commit"
+
+
+def refresh_after_commit(response: Response, build: Callable[[], Any]) -> Response:
+    """Mark a 2xx ``response`` whose body is rebuilt by ``build()`` once the request's transaction committed.
+
+    For a view whose effect continues in on-commit callbacks within the same request (an eager Celery task in
+    local settings): :func:`idempotent` exits its transaction (the callbacks run), then replaces the body
+    with ``build()`` — a fresh read — and stores that body as the key's replay body too. Inside an outer
+    transaction (nothing committed yet) the body built by the view stays. Never fakes a state: with a real
+    worker the fresh read still shows what is stored.
+    """
+    setattr(response, _REFRESH_ATTR, build)
+    return response
+
+
+def _refresh(response: Response, record_id: int | None) -> Response:
+    build = getattr(response, _REFRESH_ATTR, None)
+    if build is None or connection.in_atomic_block or not 200 <= response.status_code < 300:
+        return response
+    response.data = build()
+    if record_id is not None:
+        IdempotencyRecord.objects.filter(pk=record_id).update(response_body=response.data)
+    return response
+
+
 def idempotent(required: bool = True) -> Callable[[Callable[..., Response]], Callable[..., Response]]:
     def decorate(view: Callable[..., Response]) -> Callable[..., Response]:
         @wraps(view)
@@ -60,7 +86,7 @@ def idempotent(required: bool = True) -> Callable[[Callable[..., Response]], Cal
             except ValueError as exc:
                 if required:
                     raise IdempotencyKeyRequired() from exc
-                return view(self, request, *args, **kwargs)
+                return _refresh(view(self, request, *args, **kwargs), None)
             if not isinstance(request.auth, dict) or not request.auth.get("aud"):
                 raise ImproperlyConfigured("Idempotency requires an authenticated audience")
             scope = {
@@ -71,6 +97,7 @@ def idempotent(required: bool = True) -> Callable[[Callable[..., Response]], Cal
                 "key": key,
             }
             lock_scope = f"{scope['audience']}|{scope['actor_id']}|{scope['method']}|{scope['path']}|{key}"
+            record_id: int | None = None
             with transaction.atomic():
                 with connection.cursor() as cursor:
                     cursor.execute("SELECT pg_try_advisory_xact_lock(hashtextextended(%s, 0))", [lock_scope])
@@ -92,15 +119,15 @@ def idempotent(required: bool = True) -> Callable[[Callable[..., Response]], Cal
                     )
                 response = view(self, request, *args, **kwargs)
                 if 200 <= response.status_code < 300:
-                    IdempotencyRecord.objects.create(
+                    record_id = IdempotencyRecord.objects.create(
                         **scope,
                         request_hash=fingerprint,
                         response_status=response.status_code,
                         response_body=response.data,
-                    )
+                    ).pk
                 else:
                     transaction.set_rollback(True)
-                return response
+            return _refresh(response, record_id)
 
         return wrapped
 
