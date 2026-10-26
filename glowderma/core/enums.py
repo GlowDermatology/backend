@@ -202,6 +202,16 @@ class ServiceCategory(TextChoices):
     COSMETOLOGY = "cosmetology"
 
 
+class DirectoryOrdering(TextChoices):
+    """``ordering`` of the admin ``specialists/`` and ``services/`` lists (default ``position``)."""
+
+    POSITION = "position"
+    NAME = "name"
+    NAME_DESC = "-name"
+    CREATED_AT = "created_at"
+    CREATED_AT_DESC = "-created_at"
+
+
 class AppointmentStatus(TextChoices):
     REQUESTED = "requested"
     CONFIRMED = "confirmed"
@@ -495,6 +505,7 @@ CONTRACT_ENUMS: tuple[type[TextChoices], ...] = (
     CustomerStatus,
     SpecialistRole,
     ServiceCategory,
+    DirectoryOrdering,
     AppointmentStatus,
     AppointmentAction,
     RequestedVia,

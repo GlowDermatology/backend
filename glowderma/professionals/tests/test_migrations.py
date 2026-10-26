@@ -11,6 +11,7 @@ from django.db.migrations.recorder import MigrationRecorder
 
 from glowderma.core import enums
 from glowderma.professionals.models import Professional, Service
+from glowderma.professionals.services import OVERRIDE_CONSTRAINT, STAFF_USER_CONSTRAINT
 from glowderma.professionals.tests.factories import ProfessionalServiceFactory, ServiceFactory
 
 TABLES = {
@@ -156,3 +157,10 @@ def test_the_previous_release_can_still_insert_rows() -> None:
         )
         assert cursor.fetchone() == ("", None)
 
+
+@pytest.mark.django_db
+def test_the_unique_names_the_services_translate_exist() -> None:
+    """``services._save_unique`` maps a lost race on these constraints to a 400 ``unique``: the names must be
+    PostgreSQL's (the one-to-one gets the default ``<table>_<column>_key``)."""
+    assert STAFF_USER_CONSTRAINT in constraint_names("professionals_professional", "u")
+    assert OVERRIDE_CONSTRAINT in constraint_names("professionals_workinghoursoverride", "u")

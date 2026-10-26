@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Any
@@ -52,6 +53,20 @@ def pending_summary(now: datetime | None = None) -> dict[str, Any]:
         status=enums.AppointmentStatus.REQUESTED, start__gte=today_start
     ).aggregate(count=Count("id"), next_at=Min("start"))
     return {"count": int(summary["count"] or 0), "next_at": summary["next_at"]}
+
+
+def upcoming_counts_by_professional(professional_ids: Collection[int], instant: datetime) -> dict[int, int]:
+    """``{professional_id: n}`` of the open (requested|confirmed) appointments starting at or after
+    ``instant`` — the counter ``professionals.bookings`` asks before deactivating a specialist (one query)."""
+    rows = (
+        Appointment.objects.filter(
+            professional_id__in=list(professional_ids), status__in=OPEN_STATUSES, start__gte=instant
+        )
+        .values("professional_id")
+        .annotate(n=Count("id"))
+        .order_by()
+    )
+    return {int(row["professional_id"]): int(row["n"]) for row in rows}
 
 
 def upcoming_count(customer_id: int, now: datetime | None = None) -> int:
