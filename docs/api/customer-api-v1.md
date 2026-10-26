@@ -1199,12 +1199,17 @@ Only orders created at or after the history horizon (§2.2.3).
 ```
 - **Display payment** (`payment` here and in `OrderSummary`, the admin order list, its `payment` filter and the admin
   order detail — one rule, P2 changes `payments.selectors.display_payment`, `pick_display` and
-  `display_status_subquery` together): among the order's payments that are **not** late captures (`error_code ≠
-  "late_capture"`), the best rank (paid/refunded > pending > failed), newest id first; only when every payment of the
-  order is a late capture (an expired or cancelled order whose Click payment was captured too late, §2.13.0) the newest
-  late capture is shown, with its own status (`paid` until its refund succeeds, then `refunded`) and the `refund` block
-  `in_progress` / `completed` — never `pending`. A double payment therefore always shows the payment that paid the
-  order, in the list and in the detail alike. `active_payment` ignores late captures, and dashboard revenue
+  `display_status_subquery` together): one ranking, newest id first within a rank — (1) a payment that is **not** a
+  late capture (`error_code ≠ "late_capture"`) and is `paid` or `refunded`; (2) one that is not a late capture and is
+  `pending`; (3) a **late capture** (§2.13.0; shown with its own status, `paid` until its refund succeeds, then
+  `refunded` — never `pending`); (4) a `failed` payment. A double payment therefore always shows the payment that paid
+  the order, in the list and in the detail alike; and an order whose only money-taking payment was captured too late
+  shows that late capture — also when its other attempts failed (a superseded Click attachment captured late next to
+  a newer attempt that then expired, sandbox rows 11–12; a declined first attempt) — so it never reads "To‘lov
+  o‘tmadi" while taken money is being returned. While a newer attempt is still `pending` (or paid the order), that
+  attempt is shown and the late capture's refund appears in the timeline (§4.1). `refund` is the newest refund of the
+  **displayed** payment (null when it has none), so a displayed late capture always carries its refund `in_progress` /
+  `completed`. `active_payment` ignores late captures, and dashboard revenue
   (`revenue_buckets`, O8) excludes them: they are never order revenue (admin §2.10). `actions.pay` = `awaiting_payment` ∧ `is_payable(…, attaching=True)` ∧ no Payme payment in state 1 (a Click
   payment in flight does not block it: paying again with Click supersedes, §2.7.2; a switch to Payme answers 409
   `payment_in_progress` for at most `CLICK_INFLIGHT_SECONDS`); `actions.cancel` = `awaiting_payment` ∧ no Click payment
