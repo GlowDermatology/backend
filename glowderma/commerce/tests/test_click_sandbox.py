@@ -6,6 +6,7 @@ now.
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timedelta
 from typing import Any
@@ -681,3 +682,32 @@ def test_a_json_body_nested_too_deep_answers_minus_8(order: Order, monkeypatch: 
     assert response.status_code == 200 and response.json()["error"] == -8
     (row,) = rows("click")
     assert row.event_key.startswith("rejected:") and row.result["error_code"] == "bad_request"
+
+
+@pytest.mark.parametrize("variant", ["unparsable", "missing", "ip"])
+def test_fake_click_in_production_refuses_a_malformed_complete_with_minus_1(
+    order: Order, now: datetime, variant: str
+) -> None:
+    """C§2.13.0: every Complete that does not name a payment attached while Click was live answers -1 with a
+    bounded ``fake_mode`` row — also one refused before the signature (body, parameters, IP allow-list)."""
+    from ipaddress import ip_network
+
+    payment_id = _prepared(order, now)
+    params = complete_params(order, payment_id)
+    allowed: list[Any] = []
+    if variant == "missing":
+        del params["sign_time"]
+    if variant == "ip":
+        allowed = [ip_network("203.0.113.0/24")]
+    with override_settings(**PROD_FAKE_CLICK, CLICK_ALLOWED_IPS=allowed):
+        if variant == "unparsable":
+            response = _post_raw(CLICK_COMPLETE, json.dumps(params), "application/json")
+            answer = response.json()
+            assert response.status_code == 200
+        else:
+            answer = click(CLICK_COMPLETE, params)
+    assert answer["error"] == -1 and answer["error_note"] == "SIGN CHECK FAILED!"
+    row = rows("click")[-1]
+    assert row.event_key.startswith("rejected:") and row.raw_body == ""
+    assert row.result["error_code"] == "fake_mode" and row.result["body"]["error"] == -1
+    assert Payment.objects.get(pk=payment_id).status == "pending"

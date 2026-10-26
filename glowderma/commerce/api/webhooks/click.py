@@ -81,7 +81,15 @@ class _ClickCallback(WebhookAPIView):
     def _event_prefix(self) -> str:
         return "complete" if self.complete else "prepare"
 
-    def _rejected(self, request: Request, params: Any, error: int, code: str, started: float) -> Response:
+    def _rejected(
+        self, request: Request, params: Any, error: int, code: str, started: float, *, fake: bool = False
+    ) -> Response:
+        """A bounded ``rejected:`` row (capped per IP). ``fake``: Click is fake under the production settings,
+        where a refused Complete names no payment attached while Click was live — whatever the refusal
+        (body, parameters, IP allow-list, signature) it answers ``-1`` with ``error_code`` ``fake_mode``
+        (§2.13.0)."""
+        if fake:
+            error, code = protocol.SIGN_FAILED, FAKE_MODE
         body = self._answer(params if isinstance(params, dict) else {}, error)
         inbox.store_rejected(
             PROVIDER, request, params, status=200, body=body, error_code=code, started=started
@@ -103,16 +111,19 @@ class _ClickCallback(WebhookAPIView):
         params, raw = _parse(request)
         if params is None:
             return self._rejected(
-                request, raw[: inbox.REJECTED_PAYLOAD_MAX], protocol.BAD_REQUEST, "bad_request", started
+                request,
+                raw[: inbox.REJECTED_PAYLOAD_MAX],
+                protocol.BAD_REQUEST,
+                "bad_request",
+                started,
+                fake=fake,
             )
         if protocol.missing_or_malformed(params, complete=self.complete):
-            return self._rejected(request, params, protocol.BAD_REQUEST, "bad_request", started)
+            return self._rejected(request, params, protocol.BAD_REQUEST, "bad_request", started, fake=fake)
         if not inbox.ip_allowed(request, settings.CLICK_ALLOWED_IPS):
-            return self._rejected(request, params, protocol.BAD_REQUEST, "ip_not_allowed", started)
+            return self._rejected(request, params, protocol.BAD_REQUEST, "ip_not_allowed", started, fake=fake)
         if not protocol.sign_ok(params, str(settings.CLICK_SECRET_KEY), complete=self.complete):
-            return self._rejected(
-                request, params, protocol.SIGN_FAILED, FAKE_MODE if fake else BAD_SIGNATURE, started
-            )
+            return self._rejected(request, params, protocol.SIGN_FAILED, BAD_SIGNATURE, started, fake=fake)
         # Past the signature the request is authenticated: these refusals are stored uncapped, with the raw
         # body, as their own ``rejected:{uuid4}`` rows — never under the delivery's key, where their foreign
         # action / service id / reference would make the correct delivery a fingerprint conflict (-8).
