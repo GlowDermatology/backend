@@ -48,6 +48,22 @@ def warn_fake_providers() -> bool:
     return True
 
 
+_sandbox_warned = False
+
+
+def warn_sandbox_providers() -> bool:
+    """Log one WARNING per process naming the live providers configured against a sandbox (BTS's test host,
+    ``PAYME_TEST_MODE`` / Payme's sandbox checkout, Eskiz's test sender); never a refusal to start (staging
+    runs the production settings against sandboxes). Returns whether the line was emitted by this call."""
+    global _sandbox_warned
+    sandboxes = integration_modes.sandbox_providers()
+    if _sandbox_warned or not sandboxes:
+        return False
+    _sandbox_warned = True
+    logger.warning("integrations running against a sandbox: %s", ", ".join(sandboxes))
+    return True
+
+
 class IntegrationsConfig(AppConfig):
     name = "glowderma.integrations"
     label = "integrations"
@@ -57,3 +73,4 @@ class IntegrationsConfig(AppConfig):
             ensure_provider_rows, sender=self, dispatch_uid="integrations.ensure_provider_rows"
         )
         warn_fake_providers()
+        warn_sandbox_providers()

@@ -21,6 +21,19 @@ ALL_FAKE = {f"{name}_MODE": "fake" for name in ("OAUTH", "BILLZ", "FCM", "CLICK"
 @pytest.fixture(autouse=True)
 def fresh_process(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(integrations_apps, "_fake_mode_warned", False)
+    monkeypatch.setattr(integrations_apps, "_sandbox_warned", False)
+
+
+def test_a_live_provider_on_a_sandbox_warns_once(caplog: pytest.LogCaptureFixture) -> None:
+    """R9 / nit: a staging-like deployment against BTS's test host or Payme's sandbox says so at startup."""
+    sandboxes = {"BTS_MODE": "live", "BTS_BASE_URL": "https://apitest.bts.uz:28345", "PAYME_MODE": "live"}
+    with (
+        override_settings(**PRODUCTION, **sandboxes, PAYME_TEST_MODE=True),
+        caplog.at_level(logging.WARNING, logger="glowderma.integrations"),
+    ):
+        assert integrations_apps.warn_sandbox_providers() is True
+        assert integrations_apps.warn_sandbox_providers() is False
+    assert ("WARNING", "integrations running against a sandbox: bts, payme") in _lines(caplog)
 
 
 def _lines(caplog: pytest.LogCaptureFixture) -> list[tuple[str, str]]:

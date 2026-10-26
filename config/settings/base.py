@@ -286,6 +286,12 @@ def env_billz_value(name: str, default: str = "") -> str:
     return env_str(name, default).strip()
 
 
+def env_value(name: str, default: str = "") -> str:
+    """A provider setting with surrounding whitespace removed (a CRLF ``.env``, a stray space): the adapters
+    use exactly the value the production settings validated."""
+    return env_str(name, default).strip()
+
+
 # Live client only; the fake needs none of these (config.settings.production requires the ids and the key when
 # BILLZ_MODE=live). The base URL and the platform id are the documented public values of openapi.yaml.
 BILLZ_BASE_URL = env_str("BILLZ_BASE_URL", "https://api-admin.billz.ai").strip().rstrip("/")
@@ -324,7 +330,7 @@ BILLZ_SHIFT_RETRY_MAX_HOURS = env_bounded_int("BILLZ_SHIFT_RETRY_MAX_HOURS", 36,
 # FCM_MODE: "fake" (deterministic in-process push adapter, see integrations.fcm.fake; tokens ending in "-bad"
 # fail) or "live" (M3); defaults to INTEGRATIONS_MODE. CAMPAIGN_BATCH_SIZE is the number of recipients one
 # ``campaign.send_batch`` outbox message hands to the adapter (design 03 §3.4, default 500).
-FCM_MODE = env_str("FCM_MODE", INTEGRATIONS_MODE)
+FCM_MODE = env_value("FCM_MODE", INTEGRATIONS_MODE)
 if FCM_MODE not in {"fake", "live"}:
     raise ImproperlyConfigured("FCM_MODE must be 'fake' or 'live'")
 CAMPAIGN_BATCH_SIZE = env_int("CAMPAIGN_BATCH_SIZE", 500)
@@ -333,9 +339,9 @@ if CAMPAIGN_BATCH_SIZE < 1:
 # --- Orders, payments and delivery adapters (contract 2.2 / 2.12, M1c) ---
 # CLICK_MODE / PAYME_MODE / BTS_MODE: "fake" (deterministic in-process providers driven by Order.metadata
 # ["fake"], see integrations.{click,payme,bts}.fake) or "live" (M3); each defaults to INTEGRATIONS_MODE.
-CLICK_MODE = env_str("CLICK_MODE", INTEGRATIONS_MODE)
-PAYME_MODE = env_str("PAYME_MODE", INTEGRATIONS_MODE)
-BTS_MODE = env_str("BTS_MODE", INTEGRATIONS_MODE)
+CLICK_MODE = env_value("CLICK_MODE", INTEGRATIONS_MODE)
+PAYME_MODE = env_value("PAYME_MODE", INTEGRATIONS_MODE)
+BTS_MODE = env_value("BTS_MODE", INTEGRATIONS_MODE)
 if CLICK_MODE not in {"fake", "live"}:
     raise ImproperlyConfigured("CLICK_MODE must be 'fake' or 'live'")
 if PAYME_MODE not in {"fake", "live"}:
@@ -364,7 +370,7 @@ def env_non_negative_int(name: str, default: int) -> int:
 
 
 def env_mode(name: str) -> str:
-    value = env_str(name, INTEGRATIONS_MODE)
+    value = env_str(name, INTEGRATIONS_MODE).strip()
     if value not in {"fake", "live"}:
         raise ImproperlyConfigured(f"{name} must be 'fake' or 'live'")
     return value
@@ -427,11 +433,11 @@ PLAY_STORE_URL = env_str("PLAY_STORE_URL", "https://play.google.com/store/apps/d
 ADDRESS_MAX_PER_CUSTOMER = env_positive_int("ADDRESS_MAX_PER_CUSTOMER", 10)
 # Eskiz SMS (C§2.14.1); the fixed OTP ESKIZ_FAKE_CODE is read by config.settings.local only.
 ESKIZ_MODE = env_mode("ESKIZ_MODE")
-ESKIZ_BASE_URL = env_str("ESKIZ_BASE_URL", "https://notify.eskiz.uz/api")
-ESKIZ_EMAIL = env_str("ESKIZ_EMAIL", "")
-ESKIZ_PASSWORD = env_str("ESKIZ_PASSWORD", "")
-ESKIZ_SENDER = env_str("ESKIZ_SENDER", "4546")
-ESKIZ_CALLBACK_URL = env_str("ESKIZ_CALLBACK_URL", "")
+ESKIZ_BASE_URL = env_value("ESKIZ_BASE_URL", "https://notify.eskiz.uz/api")
+ESKIZ_EMAIL = env_value("ESKIZ_EMAIL", "")
+ESKIZ_PASSWORD = env_value("ESKIZ_PASSWORD", "")
+ESKIZ_SENDER = env_value("ESKIZ_SENDER", "4546")
+ESKIZ_CALLBACK_URL = env_value("ESKIZ_CALLBACK_URL", "")
 ESKIZ_FAKE_CODE = ""
 # Cart and checkout (C§2.5, §2.7).
 CART_MAX_LINES = env_positive_int("CART_MAX_LINES", 30)
@@ -442,26 +448,26 @@ PAYMENT_IN_FLIGHT_GRACE_SECONDS = env_positive_int("PAYMENT_IN_FLIGHT_GRACE_SECO
 PAYMENT_RETURN_URL = env_str("PAYMENT_RETURN_URL", "https://glowderma.uz/pay/return")
 PAYMENT_RETURN_FALLBACK_URL = env_str("PAYMENT_RETURN_FALLBACK_URL", "glowderma://payment/return")
 # Click SHOP API (C§2.13.1).
-CLICK_SERVICE_ID = env_str("CLICK_SERVICE_ID", "00000")
-CLICK_MERCHANT_ID = env_str("CLICK_MERCHANT_ID", "00000")
-CLICK_MERCHANT_USER_ID = env_str("CLICK_MERCHANT_USER_ID", "00000")
-CLICK_PAY_URL = env_str("CLICK_PAY_URL", "https://my.click.uz/services/pay")
+CLICK_SERVICE_ID = env_value("CLICK_SERVICE_ID", "00000")
+CLICK_MERCHANT_ID = env_value("CLICK_MERCHANT_ID", "00000")
+CLICK_MERCHANT_USER_ID = env_value("CLICK_MERCHANT_USER_ID", "00000")
+CLICK_PAY_URL = env_value("CLICK_PAY_URL", "https://my.click.uz/services/pay")
 # Click Merchant API (M3 live adapter: payment status and reversal by click_paydoc_id, C§2.13.0), signed with
 # CLICK_MERCHANT_USER_ID and CLICK_SECRET_KEY.
-CLICK_MERCHANT_API_URL = env_str("CLICK_MERCHANT_API_URL", "https://api.click.uz/v2/merchant")
+CLICK_MERCHANT_API_URL = env_value("CLICK_MERCHANT_API_URL", "https://api.click.uz/v2/merchant")
 CLICK_ALLOWED_IPS = env_networks("CLICK_ALLOWED_IPS", [])
 CLICK_INFLIGHT_SECONDS = env_positive_int("CLICK_INFLIGHT_SECONDS", 120)
 if CLICK_INFLIGHT_SECONDS > PAYMENT_IN_FLIGHT_GRACE_SECONDS:
     raise ImproperlyConfigured("CLICK_INFLIGHT_SECONDS must not exceed PAYMENT_IN_FLIGHT_GRACE_SECONDS")
 # Payme Merchant API (C§2.13.2).
-PAYME_MERCHANT_ID = env_str("PAYME_MERCHANT_ID", "")
+PAYME_MERCHANT_ID = env_value("PAYME_MERCHANT_ID", "")
 # PAYME_TEST_MODE picks the checkout host of the sandbox (test.paycom.uz) instead of production
 # (checkout.paycom.uz); PAYME_CHECKOUT_URL overrides either.
 PAYME_TEST_MODE = env_bool("PAYME_TEST_MODE", False)
-PAYME_CHECKOUT_URL = env_str(
+PAYME_CHECKOUT_URL = env_value(
     "PAYME_CHECKOUT_URL", "https://test.paycom.uz" if PAYME_TEST_MODE else "https://checkout.paycom.uz"
 )
-PAYME_ACCOUNT_FIELD = env_str("PAYME_ACCOUNT_FIELD", "order_id")
+PAYME_ACCOUNT_FIELD = env_value("PAYME_ACCOUNT_FIELD", "order_id")
 if not re.fullmatch(r"[a-z][a-z0-9_]{0,31}", PAYME_ACCOUNT_FIELD):
     raise ImproperlyConfigured("PAYME_ACCOUNT_FIELD must be a lower-case identifier")
 PAYME_ALLOWED_IPS = env_networks("PAYME_ALLOWED_IPS", [])
@@ -469,18 +475,18 @@ PAYME_FISCAL_DETAIL_ENABLED = env_bool("PAYME_FISCAL_DETAIL_ENABLED", False)
 # Webhooks (C§2.13.0): stored rows per IP per minute for requests that fail provider authentication.
 WEBHOOK_REJECTED_PER_IP_PER_MIN = env_positive_int("WEBHOOK_REJECTED_PER_IP_PER_MIN", 10)
 # BTS (C§2.13.3, §2.14.3).
-BTS_BASE_URL = env_str("BTS_BASE_URL", "https://api.bts.uz")
-BTS_LOGIN = env_str("BTS_LOGIN", "")
-BTS_PASSWORD = env_str("BTS_PASSWORD", "")
-BTS_SENDER_CITY_CODE = env_str("BTS_SENDER_CITY_CODE", "1001")
+BTS_BASE_URL = env_value("BTS_BASE_URL", "https://api.bts.uz")
+BTS_LOGIN = env_value("BTS_LOGIN", "")
+BTS_PASSWORD = env_value("BTS_PASSWORD", "")
+BTS_SENDER_CITY_CODE = env_value("BTS_SENDER_CITY_CODE", "1001")
 BTS_DEFAULT_PARCEL_WEIGHT_G = env_positive_int("BTS_DEFAULT_PARCEL_WEIGHT_G", 1000)
 # Live adapter (M3, C§2.14.3): our side of every parcel, how BTS collects it (courier = a BTS courier picks it
 # up at the sender address, branch = staff bring it to BTS_SENDER_BRANCH_CODE).
-BTS_SENDER_NAME = env_str("BTS_SENDER_NAME", "")
-BTS_SENDER_PHONE = env_str("BTS_SENDER_PHONE", "")
-BTS_SENDER_ADDRESS = env_str("BTS_SENDER_ADDRESS", "")
-BTS_SENDER_BRANCH_CODE = env_str("BTS_SENDER_BRANCH_CODE", "")
-BTS_PICKUP_TYPE = env_str("BTS_PICKUP_TYPE", "courier")
+BTS_SENDER_NAME = env_value("BTS_SENDER_NAME", "")
+BTS_SENDER_PHONE = env_value("BTS_SENDER_PHONE", "")
+BTS_SENDER_ADDRESS = env_value("BTS_SENDER_ADDRESS", "")
+BTS_SENDER_BRANCH_CODE = env_value("BTS_SENDER_BRANCH_CODE", "")
+BTS_PICKUP_TYPE = env_value("BTS_PICKUP_TYPE", "courier")
 if BTS_PICKUP_TYPE not in {"courier", "branch"}:
     raise ImproperlyConfigured("BTS_PICKUP_TYPE must be 'courier' or 'branch'")
 # clientId = BTS_CLIENT_ID_PREFIX + our order id. Empty (default) = the bare order id, as every parcel created
@@ -499,8 +505,8 @@ BTS_POLL_BATCH = env_positive_int("BTS_POLL_BATCH", 100)
 BTS_POLL_MAX_SECONDS = env_positive_int("BTS_POLL_MAX_SECONDS", 300)
 BTS_POLL_MAX_CONSECUTIVE_FAILURES = env_positive_int("BTS_POLL_MAX_CONSECUTIVE_FAILURES", 3)
 # FCM live adapter (M3): HTTP v1 over httpx with a service-account JWT.
-FCM_PROJECT_ID = env_str("FCM_PROJECT_ID", "")
-FCM_CREDENTIALS_FILE = env_str("FCM_CREDENTIALS_FILE", "")
+FCM_PROJECT_ID = env_value("FCM_PROJECT_ID", "")
+FCM_CREDENTIALS_FILE = env_value("FCM_CREDENTIALS_FILE", "")
 # Loyalty QR and POS (C§2.9.3, §2.10); POS_API_KEYS is read by config.settings.local only.
 QR_TOKEN_TTL_SECONDS = env_positive_int("QR_TOKEN_TTL_SECONDS", 60)
 QR_MAX_LIVE_TOKENS = env_positive_int("QR_MAX_LIVE_TOKENS", 2)

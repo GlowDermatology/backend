@@ -135,6 +135,12 @@ def test_a_live_provider_refuses_to_start_without_each_value(
         ("ESKIZ_MODE", "ESKIZ_BASE_URL", "http://notify.eskiz.uz/api"),
         ("ESKIZ_MODE", "ESKIZ_CALLBACK_URL", "http://glowderma.uz/sms"),
         ("FCM_MODE", "FCM_PROJECT_ID", "Glow Derma"),
+        # R9: non-ASCII digits are not a Click id; the committed example values never reach a provider
+        ("CLICK_MODE", "CLICK_SERVICE_ID", "٣٦١٢٣"),
+        ("CLICK_MODE", "CLICK_MERCHANT_ID", "²0456"),
+        ("ESKIZ_MODE", "ESKIZ_SENDER", "4546"),
+        ("BTS_MODE", "BTS_SENDER_PHONE", "+998901234567"),
+        ("BTS_MODE", "BTS_CLIENT_ID_PREFIX", "stg-1"),
     ],
 )
 def test_a_live_provider_refuses_placeholders_and_malformed_values(
@@ -152,6 +158,38 @@ def test_a_live_provider_refuses_placeholders_and_malformed_values(
         load_fresh_production()
     if "password" in name.lower():
         assert value not in str(refusal.value)
+
+
+def test_the_adapters_get_the_values_without_surrounding_whitespace(
+    production_env: None,
+    load_fresh_production: Callable[[], ModuleType],
+    live: Callable[[str], None],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """R9: a CRLF ``.env`` or a stray space is validated and used stripped — never validated stripped and
+    sent raw (a login BTS refuses, a Click id in a URL, an unreadable credentials path)."""
+    for mode in ("CLICK_MODE", "BTS_MODE", "ESKIZ_MODE", "FCM_MODE"):
+        live(mode)
+    path = service_account(tmp_path / "padded.json")
+    for name, value in {
+        "BTS_LOGIN": " glowderma ",
+        "BTS_BASE_URL": "https://api.bts.uz ",
+        "ESKIZ_PASSWORD": "pw\r\n",
+        "CLICK_SERVICE_ID": " 36123",
+        "CLICK_MERCHANT_USER_ID": "40789 ",
+        "FCM_CREDENTIALS_FILE": f"{path} ",
+        "BTS_MODE": "live\r",
+    }.items():
+        monkeypatch.setenv(name, value)
+    production = load_fresh_production()
+    assert (production.BTS_LOGIN, production.BTS_BASE_URL, production.ESKIZ_PASSWORD) == (
+        "glowderma",
+        "https://api.bts.uz",
+        "pw",
+    )
+    assert (production.CLICK_SERVICE_ID, production.CLICK_MERCHANT_USER_ID) == ("36123", "40789")
+    assert production.FCM_CREDENTIALS_FILE == str(path) and production.BTS_MODE == "live"
 
 
 def test_branch_pickup_needs_the_branch_code(

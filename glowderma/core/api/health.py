@@ -30,6 +30,12 @@ class HealthSerializer(serializers.Serializer[dict[str, Any]]):
         help_text="`?ready=1` only, and only for a caller that passes the admin network gate (§1): the mode "
         "of every provider with a `*_MODE` setting.",
     )
+    sandbox = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        help_text="With `integrations`: the live providers configured against a sandbox (BTS test host, "
+        "Payme sandbox checkout / `PAYME_TEST_MODE`, Eskiz test sender); empty in a real deployment.",
+    )
 
 
 class HealthView(APIView):
@@ -82,4 +88,5 @@ class HealthView(APIView):
         # production): only a caller that would pass the admin network gate sees it (contract §2.15).
         if passes_admin_gate(request):
             body["integrations"] = integration_modes.provider_modes()
+            body["sandbox"] = integration_modes.sandbox_providers()
         return Response(body, status=200 if ok else 503)

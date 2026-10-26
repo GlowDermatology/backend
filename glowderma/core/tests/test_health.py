@@ -62,8 +62,34 @@ def test_health_ready_lists_every_provider_mode() -> None:
         "bts": "fake",
         "eskiz": "fake",
     }
-    assert set(body) == {"status", "checks", "version", "integrations"}
+    assert set(body) == {"status", "checks", "version", "integrations", "sandbox"} and body["sandbox"] == []
     assert "integrations" not in Client().get("/api/v1/health/").json()
+
+
+@pytest.mark.django_db
+def test_health_ready_flags_live_providers_on_a_sandbox() -> None:
+    """R9 / nit: BTS's test host, PAYME_TEST_MODE and Eskiz's test sender are visible to operators."""
+    from django.test import override_settings
+
+    with override_settings(
+        BTS_MODE="live",
+        BTS_BASE_URL="https://apitest.bts.uz:28345",
+        PAYME_MODE="live",
+        PAYME_TEST_MODE=True,
+        ESKIZ_MODE="live",
+        ESKIZ_SENDER="4546",
+    ):
+        assert Client().get("/api/v1/health/?ready=1").json()["sandbox"] == ["bts", "payme", "eskiz"]
+    with override_settings(
+        BTS_MODE="live",
+        BTS_BASE_URL="https://api.bts.uz",
+        PAYME_MODE="live",
+        PAYME_TEST_MODE=False,
+        PAYME_CHECKOUT_URL="https://checkout.paycom.uz",
+        ESKIZ_MODE="live",
+        ESKIZ_SENDER="GlowDerma",
+    ):
+        assert Client().get("/api/v1/health/?ready=1").json()["sandbox"] == []
 
 
 @pytest.mark.django_db

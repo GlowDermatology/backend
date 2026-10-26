@@ -271,10 +271,20 @@ def _required(name: str) -> str:
     return value.strip()
 
 
+# Values of .env.example (and Eskiz's test sender) that would reach the provider as if they were ours.
+COMMITTED_EXAMPLES = {"ESKIZ_SENDER": {"4546"}, "BTS_SENDER_PHONE": {"+998901234567"}}
+
+
+def _not_an_example(name: str, value: str) -> str:
+    if value in COMMITTED_EXAMPLES.get(name, set()):
+        raise ImproperlyConfigured(f"{name} is the committed example value; set the real one")
+    return value
+
+
 if CLICK_MODE == "live":
     for _name in ("CLICK_SERVICE_ID", "CLICK_MERCHANT_ID", "CLICK_MERCHANT_USER_ID"):
         _value = _required(_name)
-        if not _value.isdigit() or not _value.strip("0"):
+        if not re.fullmatch(r"[0-9]{1,18}", _value) or not _value.strip("0"):
             raise ImproperlyConfigured(f"{_name} must be the numeric id Click issued")
     _https_url("CLICK_MERCHANT_API_URL", CLICK_MERCHANT_API_URL)
     _https_url("CLICK_PAY_URL", CLICK_PAY_URL)
@@ -294,14 +304,14 @@ if BTS_MODE == "live":
         "BTS_SENDER_CITY_CODE",
     ):
         _required(_name)
-    if not re.fullmatch(r"\+998[0-9]{9}", BTS_SENDER_PHONE):
+    if not re.fullmatch(r"\+998[0-9]{9}", _not_an_example("BTS_SENDER_PHONE", BTS_SENDER_PHONE)):
         raise ImproperlyConfigured("BTS_SENDER_PHONE must be an E.164 Uzbek number (+998XXXXXXXXX)")
     if BTS_PICKUP_TYPE == "branch":
         _required("BTS_SENDER_BRANCH_CODE")
     _https_url("BTS_BASE_URL", BTS_BASE_URL)
 if ESKIZ_MODE == "live":
     for _name in ("ESKIZ_EMAIL", "ESKIZ_PASSWORD", "ESKIZ_SENDER"):
-        _required(_name)
+        _not_an_example(_name, _required(_name))
     _https_url("ESKIZ_BASE_URL", ESKIZ_BASE_URL)
     if ESKIZ_CALLBACK_URL:
         _https_url("ESKIZ_CALLBACK_URL", ESKIZ_CALLBACK_URL)

@@ -11,6 +11,8 @@ which staging runs too); the other predicates derive from it.
 
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 from django.conf import settings
 
 from glowderma.core import enums
@@ -89,3 +91,27 @@ def fulfilment_methods() -> list[str]:
 def online_sales_enabled() -> bool:
     """Online selling needs live Billz stock (§2.3): off while Billz is fake under the production settings."""
     return not fake_in_production("billz")
+
+
+# Live providers pointed at a sandbox: BTS's documented test host, Payme's sandbox checkout, Eskiz's test
+# sender (the production settings refuse it; other settings only warn).
+BTS_SANDBOX_HOSTS = frozenset({"apitest.bts.uz"})
+PAYME_SANDBOX_HOSTS = frozenset({"test.paycom.uz"})
+ESKIZ_TEST_SENDER = "4546"
+
+
+def sandbox_providers() -> list[str]:
+    """The live providers configured against a sandbox (a startup WARNING and the health check's
+    ``sandbox`` list; M3): money and parcels there are not real."""
+    found: list[str] = []
+    if provider_mode("bts") == enums.IntegrationMode.LIVE:
+        if (urlsplit(str(getattr(settings, "BTS_BASE_URL", ""))).hostname or "") in BTS_SANDBOX_HOSTS:
+            found.append("bts")
+    if provider_mode("payme") == enums.IntegrationMode.LIVE:
+        host = urlsplit(str(getattr(settings, "PAYME_CHECKOUT_URL", ""))).hostname or ""
+        if bool(getattr(settings, "PAYME_TEST_MODE", False)) or host in PAYME_SANDBOX_HOSTS:
+            found.append("payme")
+    if provider_mode("eskiz") == enums.IntegrationMode.LIVE:
+        if str(getattr(settings, "ESKIZ_SENDER", "")) == ESKIZ_TEST_SENDER:
+            found.append("eskiz")
+    return found
