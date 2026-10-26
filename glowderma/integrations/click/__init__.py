@@ -1,1 +1,1 @@
-"""Click (payments) adapter behind a port: ``FakeClick`` in M1, the live client arrives with M3."""
+"""Click (payments) adapter behind a port: ``FakeClick`` (M1) and ``LiveClick`` (M3, Merchant API)."""

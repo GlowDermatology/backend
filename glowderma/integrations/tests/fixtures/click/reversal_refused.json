@@ -1,0 +1,5 @@
+{
+  "_source": "docs.click.uz/en/merchant-api/requests (shape only; code and note illustrative: Click refuses reversals of a previous month, of offline cards, or when UZCARD declines)",
+  "error_code": -5014,
+  "error_note": "Reversal is not available for card 8600 12** **** 1234 holder 998901234567"
+}

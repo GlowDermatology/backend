@@ -12,6 +12,10 @@ M3). The refund handler always asks :meth:`ClickPort.payment_status` before reve
 crash must find an already reversed payment instead of reversing twice). :class:`ClickUnavailable` is a
 transport error; :class:`ClickRefundRejected` a definitive refusal.
 
+The live adapter (:mod:`.live`, ``CLICK_MODE=live``) calls Click's Merchant API with the signed ``Auth``
+header; an answer it cannot map to ``paid`` / ``reversed`` raises :class:`ClickStatusUnknown` (a
+:class:`ClickUnavailable`), so an unverified status code can never close or skip a refund.
+
 Bounded calls (normative for every adapter, M3 live included): no call blocks longer than
 :data:`CONNECT_TIMEOUT_SECONDS` to connect and :data:`TOTAL_TIMEOUT_SECONDS` in total (a timeout is a
 :class:`ClickUnavailable`). The ``refund.submit`` handler relies on it: a refund claimed longer ago than the
@@ -39,6 +43,12 @@ class ClickError(Exception):
 
 class ClickUnavailable(ClickError):
     """Click did not answer (transport error); the outcome of a call in flight is unknown."""
+
+
+class ClickStatusUnknown(ClickUnavailable):
+    """Click answered a status check, but not with a state the port can name (an ``error_code`` ≠ 0, an
+    unknown ``payment_status``). A subclass of :class:`ClickUnavailable` on purpose: every caller treats it as
+    "Click's state is unknown" (no reversal decided, no refund closed), never as ``paid`` or ``reversed``."""
 
 
 class ClickRefundRejected(ClickError):

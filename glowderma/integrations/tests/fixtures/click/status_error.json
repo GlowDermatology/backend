@@ -1,0 +1,5 @@
+{
+  "_source": "docs.click.uz/en/merchant-api/requests (shape only: Click documents no Merchant API error_code list; the code is illustrative)",
+  "error_code": -16,
+  "error_note": "Payment not found"
+}

@@ -12,7 +12,7 @@ import hashlib
 import hmac
 import re
 from collections.abc import Mapping
-from typing import Final
+from typing import Final, Literal
 from urllib.parse import urlencode
 
 ACTION_PREPARE: Final = "0"
@@ -165,3 +165,44 @@ def pay_url(
 
 def valid_sign_time(value: str) -> bool:
     return bool(_SIGN_TIME.fullmatch(value))
+
+
+# --- Merchant API (outbound: status check and reversal; customer contract §2.13.0) --------------------------
+# Source: docs.click.uz/en/merchant-api/requests (read 2026-10-26). Requests carry ``Accept`` /
+# ``Content-Type: application/json`` and ``Auth: merchant_user_id:sha1(timestamp + secret_key):timestamp``
+# (10-digit UNIX seconds). The secret is the one ``secret_key`` Click issues per service (the SHOP API's
+# ``CLICK_SECRET_KEY``; Click's own PHP library configures that one key for both). Transport-level errors come
+# as HTTP statuses (400, 401, 403, 404, 406, 410, 500, 503 — docs.click.uz/en/merchant-api/errors); a
+# processed request answers 200 with ``error_code`` (0 = success) and ``error_note``.
+MERCHANT_API_OK: Final = 0
+MERCHANT_PATH_STATUS: Final = "payment/status/{service_id}/{payment_id}"
+MERCHANT_PATH_REVERSAL: Final = "payment/reversal/{service_id}/{payment_id}"
+# ``payment_status`` codes (verify M3): docs.click.uz shows the field but documents no values. Click's own PHP
+# library (github.com/click-llc/click-integration-php, ``BasePayments::on_invoice_checked``) reads a positive
+# status as confirmed and ``-99`` as rejected (cancelled). Only those two readings are trusted; every other
+# code is "unknown" (ClickStatusUnknown), so an unverified code can never close or skip a refund.
+MERCHANT_STATUS_REVERSED: Final = frozenset({-99})
+# Click reversal conditions (docs.click.uz): a completed payment of the current reporting month (the previous
+# month only on the 1st), made with an online card; UZCARD may refuse.
+
+
+def merchant_auth_header(merchant_user_id: str, secret_key: str, timestamp: int) -> str:
+    """``merchant_user_id:sha1(timestamp + secret_key):timestamp`` (lower-case hex digest)."""
+    digest = hashlib.sha1(f"{timestamp}{secret_key}".encode(), usedforsecurity=False).hexdigest()
+    return f"{merchant_user_id}:{digest}:{timestamp}"
+
+
+def merchant_payment_state(code: object) -> Literal["paid", "reversed"] | None:
+    """The port state of a Merchant API ``payment_status`` (see :data:`MERCHANT_STATUS_REVERSED`), else
+    ``None`` (unknown: never treated as paid or reversed)."""
+    if isinstance(code, bool) or not isinstance(code, int | str):
+        return None
+    try:
+        value = int(code)
+    except ValueError:
+        return None
+    if value in MERCHANT_STATUS_REVERSED:
+        return "reversed"
+    if value > 0:
+        return "paid"
+    return None
