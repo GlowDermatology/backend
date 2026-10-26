@@ -12,7 +12,7 @@ from rest_framework.test import APIClient
 from glowderma.accounts.models import Customer
 from glowderma.accounts.tests.factories import CustomerFactory, StaffUserFactory
 from glowderma.core.seeding import pinned_clock
-from glowderma.loyalty import selectors, services
+from glowderma.loyalty import hold_grace, selectors, services
 from glowderma.loyalty.models import CashbackHold, LoyaltyAccount, Purchase
 from glowderma.loyalty.tests.support import OrderFactory, at, seed_policies
 from glowderma.loyalty.tests.test_selectors import ADJUSTMENT_REASON, replay_malika
@@ -85,8 +85,9 @@ def test_negative_balance_flag_and_holds_with_the_effective_expiry(
         body = customer_client.get(CASHBACK).json()
     assert (body["balance"], body["held"], body["available"], body["negative"]) == (-700, 3_000, -3_700, True)
     assert body["holds"] == [
-        # expired but still active: shown with the in-flight grace (C§2.9.1)
-        {"order_id": graced_order.pk, "amount": 2_000, "expires_at": "2026-10-26T12:03:00+05:00"},
+        # overdue with no transaction attached: its own expiry until the job releases it (C§2.9.1); the grace
+        # for an open transaction attached in time is commerce's answer (commerce/tests/test_hold_grace.py)
+        {"order_id": graced_order.pk, "amount": 2_000, "expires_at": "2026-10-26T11:58:00+05:00"},
         {"order_id": open_order.pk, "amount": 1_000, "expires_at": "2026-10-26T12:10:00+05:00"},
     ]
     assert CashbackHold.objects.get(order=graced_order).expires_at == past  # the stored value is unchanged
@@ -288,3 +289,9 @@ def test_ledger_shows_only_the_own_entries(customer: Customer, customer_client: 
     services.adjust(other.pk, "add", 5_000, "Boshqa mijoz uchun bonus", staff.pk)
     assert customer_client.get(LEDGER).json()["count"] == 0
     assert customer_client.get(CASHBACK).json()["balance"] == 0
+
+
+def test_without_an_oracle_every_overdue_hold_keeps_the_grace(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(hold_grace, "_oracle", None)
+    assert hold_grace.orders_in_grace({4, 9}, NOW) == {4, 9}
+    assert hold_grace.orders_in_grace(set(), NOW) == set()

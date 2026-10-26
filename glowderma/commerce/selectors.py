@@ -9,7 +9,7 @@ over rows loaded with ``prefetch_related("payments")`` and ``select_related("shi
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any, Protocol, TypedDict
@@ -490,6 +490,25 @@ def is_payable(order: OrderLike, payment: PaymentLike | None, now: datetime, *, 
     attached = attached_at(payment)
     grace = timedelta(seconds=settings.PAYMENT_IN_FLIGHT_GRACE_SECONDS)
     return attached is not None and attached < expires and now < expires + grace
+
+
+def orders_in_payment_grace(order_ids: Collection[int], now: datetime) -> set[int]:
+    """The ``awaiting_payment`` orders among ``order_ids`` past ``reservation_expires_at`` whose pending
+    payment has an open transaction attached before it, within ``PAYMENT_IN_FLIGHT_GRACE_SECONDS`` — the
+    orders the expiry job skips (``services._in_grace``). Registered as ``loyalty.hold_grace``'s oracle."""
+    grace = timedelta(seconds=settings.PAYMENT_IN_FLIGHT_GRACE_SECONDS)
+    kept: set[int] = set()
+    overdue = Order.objects.filter(
+        id__in=list(order_ids), status=_S.AWAITING_PAYMENT, reservation_expires_at__lte=now
+    ).values_list("id", "reservation_expires_at")
+    for order_id, expires in overdue:
+        payment = payment_selectors.active_payment(order_id, enums.PaymentStatus.PENDING)
+        if payment is None or not is_open(payment):
+            continue
+        attached = attached_at(payment)
+        if expires is not None and attached is not None and attached < expires and now < expires + grace:
+            kept.add(order_id)
+    return kept
 
 
 def _pending_payments(order_id: int) -> list[payment_selectors.PaymentRow]:
