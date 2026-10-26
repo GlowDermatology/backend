@@ -142,7 +142,7 @@ Codes added for this audience (admin §1.6 codes keep their meaning):
 | 409 | `product_unavailable` · `cart_full` · `cart_empty` | Cart and checkout (§2.5, §2.7) | `cart_full`: `{"max_lines": int}` |
 | 409 | `price_changed` | `expected_total` differs (§2.7.1) | `{"total", "items_subtotal", "delivery_fee", "cashback_used", "cart": Cart}` |
 | 409 | `open_order_exists` | An unpaid order already exists (§2.7.1) | `{"order_id": int, "pay_by": datetime}` |
-| 409 | `delivery_unavailable` | BTS does not deliver to the address (§2.6) | null |
+| 409 | `delivery_unavailable` | BTS does not deliver to the address, or delivery is not offered at all (§2.6: fake BTS under the production settings) | null |
 | 409 | `not_payable` · `order_expired` · `already_paid` | `orders/{id}/pay/` refusals (§2.7.2) | null |
 | 409 | `payment_in_progress` | A provider transaction of this order is in flight (§2.7.2): pay with the other provider, customer cancel, `DELETE me/` | `{"provider": str, "order_id": int}` |
 | 409 | `not_cancellable` | Order or appointment cancel refused (catalog key per resource, §5.0) | null |
@@ -868,6 +868,7 @@ is 404 here and `unavailable` in the cart. Availability (`available`) comes from
  "terms_updated_at": "2026-10-01T00:00:00+05:00",     // | null
  "reservation_minutes": 15,
  "payment_providers": ["click", "payme"],             // providers that can take a payment now; [] = online payment unavailable (the app hides checkout)
+ "fulfilment_methods": ["delivery", "pickup"],        // FulfilmentMethod[] the app may offer at checkout; "delivery" is absent while BTS is fake under the production settings (§2.6)
  "min_app_version": {"ios": "1.0.0", "android": "1.0.0"},
  "store_urls": {"ios": "https://apps.apple.com/…", "android": "https://play.google.com/…"}}
 ```
@@ -875,6 +876,8 @@ is 404 here and `unavailable` in the cart. Availability (`available`) comes from
 mode is `fake` is listed under the local/test settings and **omitted under the production settings**, where its
 callbacks are refused (§2.13.0, §6.14). Checkout and pay refuse a provider outside the list (400 `invalid_choice`,
 §2.7.1 row 1, §2.7.2). With an empty list the app shows the cart without the checkout button.
+`fulfilment_methods` lists `delivery` and `pickup` in this order; `delivery` is omitted while delivery is not offered
+(§2.6: the BTS port is fake under the production settings), and then the app offers pickup only.
 
 ### 2.5 Cart (server cart, **C**)
 
@@ -916,13 +919,24 @@ All writes answer 200 `Cart`. No audit, no events (the cart is ephemeral).
 
 ### 2.6 Delivery
 
+**Delivery availability** (`core.providers.delivery_available()`, P0). Home delivery is offered only when a real
+courier can carry the parcel: while `BTS_MODE=fake` under the production settings (`DEV_FEATURES_ALLOWED` false;
+product-owner decision 4 allows that mode), a fake quote would charge a made-up tariff and a fake create would show a
+made-up tracking number for a parcel nobody ships. In that posture `settings/public/` omits `delivery` from
+`fulfilment_methods` (§2.4), `delivery/regions/` answers `{"regions": [], "updated_at": null}`, and
+`delivery/calculate/` and checkout answer **409 `delivery_unavailable`** "Yetkazib berish hozircha mavjud emas. Olib
+ketishni tanlang." (`error.delivery_not_offered`) for `fulfilment = delivery` before any BTS call; pickup works as
+usual. What the fake port does with orders placed before the switch is §2.14.3. Under the local/test settings the
+fake BTS serves delivery normally.
+
 **`GET delivery/regions/`** (**O**) — the BTS reference list for the address form, from the BTS port
-`regions()` cached 24 h under `gd:bts:regions` (fake: 4 regions below).
+`regions()` cached 24 h under `gd:bts:regions` (fake: 4 regions below, local/test settings only; empty while delivery
+is not offered).
 ```jsonc
 {"regions": [{"code": "10", "name": "Toshkent shahri",
               "cities": [{"code": "1001", "name": "Chilonzor tumani"}, {"code": "1002", "name": "Yunusobod tumani"}]},
              {"code": "11", "name": "Toshkent viloyati", "cities": [ /* … */ ]}],
- "updated_at": "2026-10-26T03:00:00+05:00"}
+ "updated_at": "2026-10-26T03:00:00+05:00"}      // | null while delivery is not offered
 ```
 Names in the resolved language when BTS provides it, else as BTS sends them **(verify M3)**.
 
@@ -935,6 +949,7 @@ Body `{"fulfilment": "delivery" | "pickup", "address_id": int | null, "region_co
 | Check | Code · message (uz) · key |
 |---|---|
 | `fulfilment` | `required`, `invalid_choice` |
+| delivery offered (above; else no BTS call) | 409 `delivery_unavailable` "Yetkazib berish hozircha mavjud emas. Olib ketishni tanlang." · `error.delivery_not_offered` |
 | delivery: exactly one of `address_id` or (`region_code` + `city_code`) | `address_id` `required` "Yetkazib berish manzilini tanlang." · `field.address_required` |
 | `address_id` of this customer | `does_not_exist` "Manzil topilmadi." · `field.address_not_found` |
 | region/city present and in the BTS reference list | `address_incomplete` "Manzilda viloyat va tumanni tanlang." · `field.address_incomplete` |
@@ -1003,7 +1018,7 @@ Checks, in this order (the first failure answers):
 |---|---|---|
 | 1 | Body fields | 400: `fulfilment` `invalid_choice`; `payment_provider` `invalid_choice` (also when it is not in `payment_providers`, §2.4); `address_id` `required` (`field.address_required`) / `invalid` (pickup with an address); `cashback_to_use` `min_value`; `expected_total` `required`/`min_value`; `customer_note` `max_length` |
 | 2 | Consent current (§2.2.4) | 409 `terms_update_required` · `error.terms_update_required`, `details {current_version}` |
-| 3 | Delivery: address own (`does_not_exist` `field.address_not_found`), region/city known (`address_incomplete`) | 400 |
+| 3 | Delivery: offered (§2.6; else 409 `delivery_unavailable` · `error.delivery_not_offered`, no BTS call), address own (`does_not_exist` `field.address_not_found`), region/city known (`address_incomplete`) | 409 / 400 |
 | 4 | Delivery: BTS quote (`quote(region_code, city_code)`, no row lock held; passed to `create_order` as `delivery_fee`) | 409 `delivery_unavailable` / 503 `provider_unavailable` |
 | — | *Customer row locked (`select_for_update(no_key=True)`); customer still `active` (else 401 `SESSION_EXPIRED`)* | |
 | 5 | No other `awaiting_payment` order (`CHECKOUT_MAX_OPEN_ORDERS`, default 1) | 409 `open_order_exists` "Sizda to‘lanmagan buyurtma bor (№{order_id}). Avval uni to‘lang yoki bekor qiling." · `error.open_order_exists`, `details {order_id, pay_by}` |
@@ -1867,6 +1882,15 @@ Toshkent viloyati, `12` Sirdaryo, `13` Samarqand) with two cities each; `track()
 or the parcel's last status, `scenario["track"] == "rejected"` → `BtsRejected`, `"down"` → `BtsUnavailable`;
 `scenario["quote"] == "rejected"` → `BtsRejected`, `"down"` → `BtsUnavailable`.
 
+**Fake BTS under the production settings** (`core.providers.fake_in_production("bts")`; P2 owns `bts/fake.py`). The
+fake never reports a remote effect that did not happen and keeps nothing in its per-process parcel table: `regions()`
+→ `[]`; `quote()` → `BtsRejected("fake_mode")` (delivery is not offered anyway, §2.6); `create()` →
+`BtsRejected("fake_mode")`, so the B5 handler marks the shipment `failed` with `shipment_failed {error_code:
+"fake_mode"}` (admin `attention.bts_failed`; staff ship by hand) and no tracking number is ever made up;
+`find_by_client_id()` → `None`; `cancel()` and `track()` → `BtsUnavailable` (an admin cancel of a parcel created while
+BTS was live answers 503 until BTS is live again, never a false `bts_cancelled: true`), and `commerce.poll_bts`
+returns at once without polling.
+
 ### 2.15 `POST dev/payments/{order_id}/simulate/` (local/test settings only)
 Mounted only when `DEV_FEATURES_ALLOWED` (local/test settings), `FAKE_PAYMENTS_ENABLED=true` **and** `CLICK_MODE` =
 `PAYME_MODE` = `fake`; settings validation refuses `FAKE_PAYMENTS_ENABLED` together with any live payment mode, and the
@@ -2024,6 +2048,7 @@ A top-level code renders `error.<code>` and a field code `field.<code>`, unless 
 | `not_cancellable` | `orders/{id}/cancel/` · `appointments/{id}/cancel/` · any other (a reused B5/B6 service raising `NotCancellable`) | `error.order_not_cancellable` · `error.appointment_not_cancellable` · `error.not_cancellable` |
 | `OUT_OF_STOCK` | cart add / patch (one product) · checkout (lines) | `error.out_of_stock_one` · `error.OUT_OF_STOCK` |
 | `invalid_transition` | any customer view (a reused service raising `InvalidTransition`) | `error.invalid_transition` |
+| `delivery_unavailable` | BTS refuses the route · delivery not offered (§2.6) | `error.delivery_unavailable` · `error.delivery_not_offered` |
 | field `otp_invalid` (on `code`) | `auth/verify-code/` | `field.otp_invalid` |
 | field `invalid` | `phone` (every auth body) · `code` (verify) · booking grid | `field.phone_invalid` · `field.otp_format` · `field.booking_grid` |
 | field `does_not_exist` / `min_length` / `max_value` / `in_past` / `out_of_range` / `required` | as named in the endpoint tables (e.g. `field.address_not_found`, `field.name_min`, `field.cashback_max`, `field.booking_too_soon`, `field.booking_horizon`, `field.address_required`) | the key in the table; elsewhere the generic `field.<code>` |
@@ -2082,6 +2107,7 @@ code a customer view can raise to an existing key.
 | `error.cart_full` | Savatga ko‘pi bilan {limit} xil mahsulot qo‘shish mumkin. | В корзину можно добавить не более {limit} разных товаров. | You can add up to {limit} different products to the cart. |
 | `error.cart_empty` | Savat bo‘sh. | Корзина пуста. | Your cart is empty. |
 | `error.delivery_unavailable` | Bu hududga yetkazib berish mavjud emas. | Доставка в этот регион недоступна. | Delivery to this area is not available. |
+| `error.delivery_not_offered` | Yetkazib berish hozircha mavjud emas. Olib ketishni tanlang. | Доставка пока недоступна. Выберите самовывоз. | Delivery is not available right now. Please choose pickup. |
 | `error.open_order_exists` | Sizda to‘lanmagan buyurtma bor (№{order_id}). Avval uni to‘lang yoki bekor qiling. | У вас есть неоплаченный заказ (№{order_id}). Оплатите или отмените его. | You have an unpaid order (№{order_id}). Please pay or cancel it first. |
 | `error.price_changed` | Narxlar yangilandi. Buyurtmani qayta tekshiring. | Цены обновились. Проверьте заказ ещё раз. | Prices have changed. Please review your order. |
 | `error.already_paid` | Buyurtma allaqachon to‘langan. | Заказ уже оплачен. | This order is already paid. |
@@ -2293,11 +2319,18 @@ code a customer view can raise to an existing key.
       (staging included) runs. Each fake provider logs one WARNING `providers.fake_in_production {provider}` at process
       start, and the effective mode of every provider (`billz`, `click`, `payme`, `bts`, `eskiz`, `fcm`, `oauth`) is
       reported by `GET /api/v1/health/?ready=1` (`providers`) and by admin `GET settings/` (`integrations.providers`,
-      admin §2.11, §2.15). In that posture a fake adapter can never hand out a free order or accept a known secret:
-      fake Click/Payme/BTS accept no callback (§2.13.0) and fake payment providers are not offered (§2.4), so no order
-      can be paid online; a Click refund through the fake port becomes `manual_required`, never `succeeded` (§2.13.0);
-      fake OAuth turns customer social sign-in off (404, §2.1.8); fake Eskiz delivers no SMS (demo/staging posture,
-      §2.14.1); fake FCM delivers no push; fakes keep no message history (§2.14.1, §2.14.2).
+      admin §2.11, §2.15). Fake and live providers may be **mixed** (live adapters arrive one at a time in M3), so the
+      rule is per provider: in that posture a fake adapter never reports a real-money or real-world effect that did not
+      happen. Fake Click/Payme/BTS accept no callback (§2.13.0) and fake payment providers are not offered (§2.4), so
+      no order is ever paid through a fake provider; a Click refund through the fake port becomes `manual_required`,
+      never `succeeded` (§2.13.0); fake BTS turns home delivery off (§2.6: pickup only, `fulfilment_methods`) and never
+      makes up a tariff, a parcel, a tracking number or a cancellation (§2.14.3), so a customer paying through a live
+      provider is never charged a fake tariff for a parcel nobody ships; fake Billz never records a sale it did not
+      send: the `billz.push_sale` handler does not call it, leaves the purchase's `billz_pushed_at` null (no
+      `billz_sale_id`, no `billz_sale_recorded` event) and logs WARNING `billz.sale_not_pushed {order_id,
+      purchase_id}`, so staff enter the sale in Billz by hand and the M3 live adapter can find every unpushed online
+      sale; fake OAuth turns customer social sign-in off (404, §2.1.8); fake Eskiz delivers no SMS (demo/staging
+      posture, §2.14.1); fake FCM delivers no push; fakes keep no message history (§2.14.1, §2.14.2).
     - **Dev switches** — `FAKE_PAYMENTS_ENABLED` (dev simulate, §2.15), `FAKE_SCENARIO_HEADER_ENABLED` (§1.2),
       `ESKIZ_FAKE_CODE` (fixed OTP), `POS_API_KEYS` (seeded POS keys, §2.10), `FAKE_NOW` and the `*` nonce wildcard of
       the OAuth fakes — work only under the local/test settings (`DEV_FEATURES_ALLOWED`, a settings-module constant,
@@ -2377,5 +2410,5 @@ the client may still revise it later through a setting or a data field:
 | M2-N1 | Show the admin's adjustment reason to the customer? | No (generic "Bonus qo‘shildi" / "Balans tuzatildi") |
 | M2-N2 | Push for a customer's own order cancellation | Yes (state machine row 5 pushes `cancelled`) |
 | M2-N3 | Security notices (social link/unlink, password reset and change) | Push + inbox row (`account_security`), and for a reset or a social completion a visible push to the replaced device plus a 401 message there; no SMS (re-evaluated in revision 2: a reset needs the SMS code, so an SMS notice would reach whoever did it; an SMS template would also need Eskiz approval) |
-| M2-F1 | May production run fake provider adapters? | **Decided by the product owner (2026-10-26):** yes, warned at startup and reported per provider in `health/?ready=1` and admin settings; fake callbacks are refused, fake payment providers are not offered, the dev simulate endpoint and the fixed OTP exist only under local/test settings, and fake Eskiz delivers no SMS (demo/staging posture, §6.14) |
+| M2-F1 | May production run fake provider adapters? | **Decided by the product owner (2026-10-26):** yes, warned at startup and reported per provider in `health/?ready=1` and admin settings; fake callbacks are refused, fake payment providers are not offered, the dev simulate endpoint and the fixed OTP exist only under local/test settings, and fake Eskiz delivers no SMS (demo/staging posture, §6.14). Mixed with live providers, a fake never reports an effect that did not happen: fake BTS turns home delivery off (pickup only) and makes up no parcel; fake Billz records no sale (pushed by hand) (§2.6, §2.14.3, §6.14) |
 | M2-T1 | Terms not yet versioned in settings | Registration answers 503 `terms_not_published` until staff publish `terms_version` with the uz terms and privacy texts |
