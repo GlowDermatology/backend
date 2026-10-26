@@ -13,7 +13,13 @@ from django.db.models import Count, Max, Min, Q, QuerySet
 from glowderma.appointments.models import OPEN_STATUSES, Appointment
 from glowderma.core import enums, timeutils
 from glowderma.professionals.models import Professional, ProfessionalService, Service
-from glowderma.professionals.selectors import DAY_END_LABEL, DaySchedule, booking_catalogue, day_schedules
+from glowderma.professionals.selectors import (
+    DAY_END_LABEL,
+    DaySchedule,
+    booking_catalogue,
+    day_schedules,
+    schedules_for_days,
+)
 
 
 def appointment_queryset() -> QuerySet[Appointment]:
@@ -38,8 +44,13 @@ class DayView:
 
 
 def day_view(day: date) -> DayView:
-    """``GET appointments/?date=``: the active specialists' schedules (01 §5.8) and the day's appointments."""
-    return DayView(date=day, specialists=day_schedules(day), appointments=list(day_appointments(day)))
+    """``GET appointments/?date=``: the schedules (01 §5.8) of the active specialists and of every inactive
+    one that still has an appointment that day (a specialist deactivated with ``force`` keeps a column for
+    the appointments it left behind), and the day's appointments."""
+    appointments = list(day_appointments(day))
+    with_rows = {appointment.professional_id for appointment in appointments}
+    professionals = Professional.objects.filter(Q(is_active=True) | Q(pk__in=with_rows))
+    return DayView(date=day, specialists=day_schedules(day, professionals), appointments=appointments)
 
 
 def pending_summary(now: datetime | None = None) -> dict[str, Any]:
@@ -67,6 +78,35 @@ def upcoming_counts_by_professional(professional_ids: Collection[int], instant: 
         .order_by()
     )
     return {int(row["professional_id"]): int(row["n"]) for row in rows}
+
+
+def schedule_conflicts(professional: Professional, now: datetime | None = None) -> list[Appointment]:
+    """``GET specialists/{id}/conflicts/``: the specialist's open appointments starting now or later that its
+    current schedule no longer covers — a day without hours (day off, no weekly row), a range outside that
+    day's hours (an override wins), or an overlap with a blocked period or the recurring break. Schedule
+    changes never move or cancel appointments; this is how staff find the ones to reschedule. Four queries
+    whatever the number of days."""
+    instant = timeutils.now() if now is None else now
+    rows = list(
+        appointment_queryset()
+        .filter(professional=professional, status__in=OPEN_STATUSES, start__gte=instant)
+        .order_by("start", "id")
+    )
+    if not rows:
+        return []
+    schedules = schedules_for_days(professional, {timeutils.local_date(row.start) for row in rows})
+    conflicts: list[Appointment] = []
+    for row in rows:
+        day = timeutils.local_date(row.start)
+        schedule = schedules[day]
+        if schedule.working_hours is None:
+            conflicts.append(row)
+            continue
+        hours_start, hours_end = (clock(day, label) for label in schedule.working_hours)
+        blocks = [(clock(day, block.start), clock(day, block.end)) for block in schedule.blocks]
+        if row.start < hours_start or row.end > hours_end or _overlaps(row.start, row.end, blocks):
+            conflicts.append(row)
+    return conflicts
 
 
 def upcoming_count(customer_id: int, now: datetime | None = None) -> int:

@@ -60,6 +60,8 @@ class SpecialistDaySerializer(serializers.Serializer[DaySchedule]):
     id = serializers.IntegerField(source="professional.pk")
     name = serializers.CharField(source="professional.name")
     role = serializers.ChoiceField(choices=enums.SpecialistRole.values, source="professional.role")
+    # false for a deactivated specialist still listed for the appointments it has that day
+    is_active = serializers.BooleanField(source="professional.is_active")
     working_hours = serializers.SerializerMethodField()
     blocks = DayBlockSerializer(many=True)
 
@@ -68,6 +70,12 @@ class SpecialistDaySerializer(serializers.Serializer[DaySchedule]):
         if obj.working_hours is None:
             return None
         return {"start": obj.working_hours[0], "end": obj.working_hours[1]}
+
+
+class ScheduleConflictsSerializer(serializers.Serializer[dict[str, Any]]):
+    """``GET specialists/{id}/conflicts/``: open future appointments the schedule no longer covers."""
+
+    results = AppointmentItemSerializer(many=True)
 
 
 class DayScheduleSerializer(serializers.Serializer[DayView]):

@@ -21,12 +21,14 @@ from glowderma.appointments.api.admin.serializers import (
     DayQuerySerializer,
     DayScheduleSerializer,
     PendingSummarySerializer,
+    ScheduleConflictsSerializer,
 )
 from glowderma.appointments.models import Appointment
 from glowderma.core import enums, timeutils
 from glowderma.core.api.schema import ADMIN_ERRORS, IDEMPOTENCY_KEY_HEADER
 from glowderma.core.idempotency import idempotent
 from glowderma.professionals import selectors as professionals_selectors
+from glowderma.professionals.models import Professional
 
 ACTION_PARAM = OpenApiParameter(
     name="action",
@@ -170,3 +172,24 @@ class AppointmentsMetaView(AdminAPIView):
             "slot_step_min": services.SLOT_STEP_MIN,
         }
         return Response(AppointmentsMetaSerializer(data).data)
+
+
+class SpecialistConflictsView(AdminAPIView):
+    """Declared here, not in ``professionals``: it renders appointments (the layers forbid the import)."""
+
+    @extend_schema(
+        operation_id="admin_specialists_conflicts",
+        description=(
+            "The specialist's requested/confirmed appointments starting now or later that its current "
+            "schedule no longer covers (a day without hours, outside that day's hours, inside a blocked "
+            "period or the recurring break), by start. Schedule changes never move or cancel appointments; "
+            "reschedule or cancel these through appointments/{id}/reschedule|cancel/."
+        ),
+        responses={200: ScheduleConflictsSerializer, **ADMIN_ERRORS},
+    )
+    def get(self, request: Request, pk: int) -> Response:
+        professional = Professional.objects.filter(pk=pk).first()
+        if professional is None:
+            raise NotFound
+        conflicts = selectors.schedule_conflicts(professional)
+        return Response(ScheduleConflictsSerializer({"results": conflicts}).data)

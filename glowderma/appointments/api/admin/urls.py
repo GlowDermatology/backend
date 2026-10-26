@@ -14,6 +14,7 @@ from .views import (
     AppointmentsMetaView,
     AppointmentsView,
     PendingSummaryView,
+    SpecialistConflictsView,
 )
 
 urlpatterns: list[URLPattern | URLResolver] = [
@@ -34,5 +35,12 @@ urlpatterns: list[URLPattern | URLResolver] = [
         "appointments/<int:pk>/<str:action>/",
         AppointmentActionView.as_view(),
         name="admin-appointments-action",
+    ),
+    # The specialists API lives in ``professionals``; its conflicts route renders appointments, so it is
+    # declared here (contract "Mutaxassislar va xizmatlar").
+    path(
+        "specialists/<int:pk>/conflicts/",
+        SpecialistConflictsView.as_view(),
+        name="admin-specialists-conflicts",
     ),
 ]
