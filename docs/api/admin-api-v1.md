@@ -62,6 +62,8 @@ Examples use `jsonc`: `//` comments give types and nullability and are not part 
 | Absent value | Key always present with `null`; lists are `[]`; keys are never omitted | |
 | Query booleans | `true` / `false` (also `1` / `0`) | `?promo=true` |
 | Media URLs | Absolute, built from `PUBLIC_MEDIA_BASE_URL`, never from the request Host | `"https://media.example.uz/products/1/9f2c.webp"` |
+| Link URLs (banner / campaign destinations) | Absolute `https` URL ≤500, trimmed, no credentials, port 443 only; else `invalid` "Havolani https:// bilan to‘liq kiriting." (open question GC-3) | `"https://glowderma.uz/aksiya"` |
+| Name search folding | Every name `search` compares case-insensitively **and folded** on both sides: the Uzbek o‘/g‘ mark in any of its six encodings (U+0027 `'`, U+0060 `` ` ``, U+2018 `‘`, U+2019 `’`, U+02BB `ʻ`, U+02BC `ʼ`) is one character, and `ё` = `е` (`core.search.SearchFold`, GC-1) | `ko'pik` finds "Yumshoq tozalovchi ko‘pik" |
 
 Fields owned by slices that have not landed yet return `0`, `null` or `[]`, never an error.
 
@@ -222,8 +224,8 @@ The FE creates one key per form/dialog instance (`crypto.randomUUID()`), reuses 
 | PUT | `products/{id}/images/order/` | | 200 |
 | POST | `integrations/billz/import/` | | 202 |
 | GET | `jobs/{id}/` | | 200 |
-| GET / POST | `categories/` | P E / – | 200 / 201 |
-| GET / PATCH / DELETE | `categories/{slug}/` | | 200 / 200 / 204 |
+| GET / POST | `categories/` | P E / JSON or multipart (gap ADM-5.1) | 200 / 201 |
+| GET / PATCH / DELETE | `categories/{slug}/` | PATCH JSON or multipart | 200 / 200 / 204 |
 | PUT | `categories/order/` | | 200 |
 | GET / POST | `banners/` | P E / multipart | 200 / 201 |
 | GET / PATCH / DELETE | `banners/{id}/` | PATCH multipart or JSON | 200 / 200 / 204 |
@@ -327,7 +329,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 | Param | Values | Default | Rule |
 |---|---|---|---|
 | `status` | OrderStatus | – | |
-| `search` | str ≤64, trimmed, case-insensitive | – | Matches if any holds: order id contains the term without a leading `№`; the term has ≥3 digits and the customer phone contains them; the customer name contains the term |
+| `search` | str ≤64, trimmed, case-insensitive | – | Matches if any holds: order id contains the term without a leading `№`; the term has ≥3 digits and the customer phone contains them; the customer name contains the term (folded, §1.4) |
 | `fulfilment` | `delivery`, `pickup` | – | |
 | `payment` | PaymentStatus | – | |
 | `period` | `today`, `week`, `month`, `all` | `all` | `today` = current Tashkent day; `week` = rolling `(now−7×24h, now]`; `month` = Tashkent calendar month to date |
@@ -464,7 +466,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 
 | Param | Values | Rule |
 |---|---|---|
-| `search` | str ≤64 (longer input is trimmed to 64) | Case-insensitive substring over `texts.{uz,ru,en}.name`, `billz_name` and `billz_id` (pg_trgm GIN). An ASCII-digit term of ≤18 digits also matches `id` exactly. |
+| `search` | str ≤64 (longer input is trimmed to 64) | Case-insensitive substring over `texts.{uz,ru,en}.name`, `billz_name` and `billz_id` (pg_trgm GIN), folded on both sides (§1.4: apostrophe variants, `ё` = `е`; the stored `search_text` column is folded since `catalog.0002`). An ASCII-digit term of ≤18 digits also matches `id` exactly. |
 | `category` | slug or `none` | `none` = no category (hence `none` is a reserved slug, §2.4); an unknown slug → 400 `invalid_choice` |
 | `status` | `active`, `hidden` | |
 | `promo`, `out_of_stock`, `is_new` | bool | `out_of_stock` = `stock ≤ 0`; `is_new` = `is_new_from_billz` |
@@ -524,10 +526,14 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 ### 2.4 Categories (addressed by slug)
 ```jsonc
 // Category
-{"slug": "serums", "name": {"uz": "Serumlar", "ru": "Сыворотки", "en": "Serums"}, "position": 0,
- "is_active": true, "product_count": 42, "created_at": "…", "updated_at": "…"}
+{"slug": "serums", "name": {"uz": "Serumlar", "ru": "Сыворотки", "en": "Serums"},
+ "image_url": "https://media.example.uz/categories/2/77aa1b2c3d4e5f60.webp",   // gap ADM-5.1 | null
+ "position": 0, "is_active": true, "product_count": 42, "created_at": "…", "updated_at": "…"}
 ```
 - `GET categories/` (P E; ordered by `position`; filter `is_active`).
+- **Bodies** (gap ADM-5.1, open question GC-4): `POST` and `PATCH` take JSON **or** `multipart/form-data` (anything else → 415). Multipart names are dotted like the banners' (`slug`, `name.uz`, `name.ru`, `name.en`, `is_active`) plus the optional file part `image`:
+  - `image`: the product-image rules of §2.3 — ≤5 MiB (`image` `file_too_large`), decoded by content as JPEG, PNG or WebP (`image` `unsupported_image`), re-encoded in the same format, EXIF stripped, longest side ≤2400 px; stored as `categories/{id}/<sha256 prefix>.<ext>` and served as `image_url` (absolute, §1.4); the customer catalogue's `catalog/categories/` `image_url` is the same file.
+  - `PATCH` with an `image` part replaces the stored image (the previous file is removed after the commit; the same bytes again change nothing); `remove_image: true` (JSON boolean, or `true`/`false` in multipart) drops it (`image_url: null`, file removed after commit; nothing to remove → 200 unchanged); both at once → 400 `remove_image` `invalid`. A JSON body never carries a file.
 - `POST categories/` → 201:
   - `slug`: `^[a-z0-9-]{2,40}$`, unique, not `order` or `none` (reserved → `slug` `invalid` "Bu slug band."), immutable afterwards; a lost unique race is reported as `slug` `unique` too;
   - `name.uz` 2..60 required; `name.ru`, `name.en` ≤60, optional (default `""`);
@@ -536,22 +542,25 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 - `GET`/`PATCH categories/{slug}/`. Sending `slug` in PATCH → `read_only`.
 - `DELETE categories/{slug}/` → 204, or 409 `conflict` "Kategoriyada mahsulotlar bor." when `product_count > 0`.
 - `PUT categories/order/` `{"slugs": [...]}` (exact set, `mismatch`; `[]` only when there are no categories) → 200 `{"results": [Category…]}`.
-- Audit `category.created|updated|deleted|reordered`.
+- Audit `category.created|updated|deleted|reordered`; the snapshot carries `image` (the stored file name or `null`), so an image upload, replacement or removal shows in `category.updated` as `{image: old}` → `{image: new}`.
 
 ### 2.5 Banners (API only in M1)
 ```jsonc
 // Banner
 {"id": 3, "title": {"uz": "Kuzgi chegirmalar", "ru": "", "en": ""},
  "image_url": "https://media.example.uz/banners/3/77aa.webp",
- "link": {"kind": "product", "product_id": 4, "category": null},   // kind none|product|category
+ "link": {"kind": "product", "product_id": 4, "category": null, "url": null},   // kind none|product|category|url
+ // gap X-BANNER-URL: {"kind": "url", "product_id": null, "category": null, "url": "https://glowderma.uz/aksiya"}
  "is_active": true, "starts_at": null, "ends_at": null, "position": 0, "created_at": "…", "updated_at": "…"}
 ```
 - `GET banners/` (P E; ordered by `position`; filter `is_active`).
-- `POST banners/` (multipart): `image` (required; product-image rules), `title.uz` (1..80, required), `title.ru`, `title.en` (≤80, optional, default `""`), `link.kind`, `link.product_id`, `link.category`, `is_active`, `starts_at`, `ends_at` → 201.
-  - Form encoding: nested keys are dotted form fields (`title.uz`, `link.kind`, `link.product_id`, `link.category`); `""` means `null` for the nullable keys (`link.product_id`, `link.category`, `starts_at`, `ends_at`); booleans are `true`/`false`. Only `multipart/form-data` (and JSON for PATCH) is accepted — never `application/x-www-form-urlencoded`.
+- `POST banners/` (multipart): `image` (required; product-image rules), `title.uz` (1..80, required), `title.ru`, `title.en` (≤80, optional, default `""`), `link.kind`, `link.product_id`, `link.category`, `link.url`, `is_active`, `starts_at`, `ends_at` → 201.
+  - Form encoding: nested keys are dotted form fields (`title.uz`, `link.kind`, `link.product_id`, `link.category`, `link.url`); `""` means `null` for the nullable keys (`link.product_id`, `link.category`, `link.url`, `starts_at`, `ends_at`); booleans are `true`/`false`. Only `multipart/form-data` (and JSON for PATCH) is accepted — never `application/x-www-form-urlencoded`.
   - `link.product_id` must be an active product, `link.category` an existing slug (`does_not_exist`).
+  - Gap X-BANNER-URL (open question GC-3): `link.kind = "url"` opens `link.url` in the app — required for that kind (`link.url` `required`; multipart `""` is null, JSON `""` is `blank`), an absolute `https` URL ≤500 without credentials and with no port other than 443 (`link.url` `invalid` "Havolani https:// bilan to‘liq kiriting.", `max_length` "500 belgidan oshmasin."). Ignored for the other kinds; switching a banner to another kind clears it. A `PATCH` that keeps the kind `url` without sending `link.url` keeps the stored URL. The database check `banner_link_kind_targets` admits a URL only with kind `url` and only when it starts with `https://` (`catalog.0004`).
   - `ends_at` must be after `starts_at` (`invalid`).
 - `PATCH banners/{id}/` takes multipart or JSON; `image` is optional; `title` merges leaf by leaf (every leaf optional). An unchanged `link.product_id` is not re-checked against the active products, so a banner whose product was hidden later can still be edited or switched off; a different product must be active.
+- Export column `Havola`: `mahsulot #<id>`, `kategoriya <slug>`, the URL itself for kind `url`, else empty. The audit snapshot carries `link.url`.
 - `DELETE banners/{id}/` → 204.
 - `PUT banners/order/` `{"ids": [...]}` (exact set, `mismatch`; `[]` only when there are no banners) → 200 `{"results": [Banner…]}`.
 - Audit `banner.created|updated|deleted|reordered`.
@@ -561,7 +570,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 
 | Param | Values | Rule |
 |---|---|---|
-| `search` | str ≤64 | Name contains the term, or (≥3 digits) the phone contains them |
+| `search` | str ≤64 | Name contains the term (case-insensitive and folded, §1.4; index `accounts_customer_fold_trgm`, `accounts.0008`), or (≥3 digits) the phone contains them |
 | `status` | `active`, `deleted` | |
 | `segment` | int | Segment membership (§2.8) |
 | `ordering` | `-registered_at` (default), `registered_at`, `name`, `-name`, `lifetime_total`, `-lifetime_total`, `balance`, `-balance` | Ties by `id` |
@@ -677,7 +686,8 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 // NotificationRecord
 {"id": 4, "kind": "general", "title": "Yangi dermatolog qabuli ochildi", "body": "…",
  "image_url": null,
- "link": {"kind": "none", "product_id": null, "label": null},          // product: {"kind":"product","product_id":4,"label":"Seramidli namlantiruvchi krem"}
+ "link": {"kind": "none", "product_id": null, "label": null, "url": null},   // product: {"kind":"product","product_id":4,"label":"Seramidli namlantiruvchi krem","url":null}
+                                                                       // url (gap ADM-10.1): {"kind":"url","product_id":null,"label":null,"url":"https://glowderma.uz/aksiya"}
  "audience": {"type": "segment", "segment_id": 1, "segment_name": "Doimiy mijozlar", "phone": null},  // name snapshot; phone for type customer
  "recipient_count": 612,          // devices with push on, snapshot at creation; recomputed when the send starts
  "state": "scheduled",            // scheduled|queued|sent
@@ -707,14 +717,16 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 | `title` | trimmed 3..60 | `min_length` "Sarlavhani kiriting." / `max_length` "60 belgidan oshmasin." |
 | `body` | trimmed 5..180 | `min_length` "Matnni kiriting." / `max_length` "180 belgidan oshmasin." |
 | `image` | optional file, product-image rules | |
-| `link.kind` | `none` (default) or `product` | |
+| `link.kind` | `none` (default), `product` or `url` (gap ADM-10.1) | |
 | `link.product_id` | required for `product`; must be an active product | `does_not_exist` "Mahsulot topilmadi yoki yashirin." |
+| `link.url` | required for `url` (`""` counts as missing); an absolute `https` URL ≤500, no credentials, port 443 only (§1.4, GC-3); ignored for the other kinds | `required` "Majburiy maydon." / `invalid` "Havolani https:// bilan to‘liq kiriting." / `max_length` "500 belgidan oshmasin." |
 | `audience.type` | `all`, `segment` or `customer` | |
 | `audience.segment_id` | required for `segment` | `does_not_exist` |
 | `audience.phone` | required for `customer`; `^\+998\d{9}$`; must belong to an active customer | `invalid` "Telefon raqamini to‘g‘ri kiriting." / `customer_not_found` "Bu raqam bilan mijoz topilmadi." |
 | `scheduled_at` | optional datetime, must be > now | `in_past` "Kelajakdagi vaqtni tanlang." |
 
 - Without `scheduled_at` → state `queued`; recipients are materialised and a Celery batched send runs (fake FCM in M1). Each recipient also gets an inbox item.
+- A `url` campaign (gap ADM-10.1) gives every inbox item `link {"kind": "url", "url": …}` and every push the FCM data key `link_url` (customer contract §2.12, §2.14.2); `link_url` is `""` for the other kinds. The audit row `notification.created` carries `link_url`. The database check `campaign_link_fields` admits a URL only with kind `url` and only when it starts with `https://` (`notifications.0005`). The UI's "Bosilganda ochiladigan sahifa" offers a URL next to the products (`link_options` stays the product list).
 - With `scheduled_at` → state `scheduled`; beat starts the send when due.
 - Audit `notification.created`.
 - 201 `NotificationRecord`. **The 201 body is the campaign as stored when the response is built**: it is read after the request's transaction committed and its on-commit dispatch ran. With an eager Celery (local settings) the send already finished inside the request, so the body says `state: "sent"` with `sent`, `failed` and `sent_at`; with a real worker it normally still says `queued` (a fast worker may already have advanced it). The key stays held until that body is stored: a retry racing the first response gets 409 `request_in_progress` (§1.7), and a replay afterwards returns that same body.
@@ -934,7 +946,7 @@ Export `tolovlar` (§1.8): the `Qaytarish` column is the §5.1 refund-state line
 
 | Param | Values | Default | Rule |
 |---|---|---|---|
-| `search` | str ≤64, trimmed, case-insensitive | – | Full name or email contains the term |
+| `search` | str ≤64, trimmed, case-insensitive | – | Full name (folded, §1.4) or email contains the term |
 | `is_active` | query boolean | `true` | `false` lists the deactivated staff |
 | `page`, `page_size` | §1.5 (20, 50, 100) | 50 | |
 
@@ -985,8 +997,8 @@ Export `tolovlar` (§1.8): the `Qaytarish` column is the §5.1 refund-state line
 | NotificationKind | `promo`, `general` | |
 | NotificationState | `scheduled`, `queued`, `sent`, `cancelled` (M3) | |
 | AudienceType | `all`, `segment`, `customer` | |
-| LinkKind | `none`, `product` | notifications |
-| BannerLinkKind | `none`, `product`, `category` | banners |
+| LinkKind | `none`, `product`, `url` (gap ADM-10.1) | notifications |
+| BannerLinkKind | `none`, `product`, `category`, `url` (gap X-BANNER-URL) | banners |
 | TemplateStatus | `processing`, `handed_to_courier`, `delivered`, `cancelled` | notification-templates |
 | DashboardRange / Bucket | `today`, `week`, `month`, `custom` / `hour`, `day` | |
 | JobKind / JobState | `billz_import` / `queued`, `running`, `succeeded`, `failed` | |
@@ -1003,7 +1015,7 @@ Export `tolovlar` (§1.8): the `Qaytarish` column is the §5.1 refund-state line
 | Auth | `auth.login_succeeded`, `auth.login_failed`, `auth.logout` (`{scope, revoked_count}`), `auth.password_changed`, `auth.session_revoked` (`{sid, reason}`), `auth.staff_deactivated` (`{revoked_count}`), `auth.staff_reactivated`, `auth.social_linked`, `auth.social_unlinked` |
 | System | `outbox.dead` (`{topic, dedupe_key, attempts, last_error}`), `outbox.requeued` (M3, actor `system`, reason "manage.py requeue_outbox"; before `{status, attempts, last_error}`, after `{topic, dedupe_key, status: "pending"}`), `outbox.resolved` (M3, `requeue_outbox --resolved`: a dead message handled by hand is closed as `done` without running it — a `billz.push_sale` only once its sale is recorded with `billz_mark_recorded`; reason "manage.py requeue_outbox --resolved", before as above, after `{topic, dedupe_key, status: "done"}`); `billz.sale_recorded_by_hand` (M3, entity `order`, actor = the staff member named by `manage.py billz_mark_recorded --actor`, reason "manage.py billz_mark_recorded"; before `{purchase_id, billz_sale_id, billz_pushed_at: null, billz_payment_attempted_at, push_status}`, after `{purchase_id, billz_sale_id, billz_sale_ref, billz_pushed_at}`), `billz.payment_attempt_forgotten` (M3, entity `order`, actor = `requeue_outbox --forget-payment-attempt --actor`, reason "manage.py requeue_outbox --forget-payment-attempt"; before `{purchase_id, billz_sale_id, billz_payment_attempted_at}`, after `{purchase_id, billz_payment_attempted_at: null}`) |
 | Orders | `order.cancelled`, `order.status_changed`, `order.shipment_retry_requested`, `refund.requested`, `refund.state_changed` (system) |
-| Catalog | `product.created`, `product.updated`, `product.image_added`, `product.image_deleted`, `product.images_reordered`, `billz.import_started`, `billz.import_finished`, `category.created`, `category.updated`, `category.deleted`, `category.reordered`, `banner.created`, `banner.updated`, `banner.deleted`, `banner.reordered` |
+| Catalog | `product.created`, `product.updated`, `product.image_added`, `product.image_deleted`, `product.images_reordered`, `billz.import_started`, `billz.import_finished`, `category.created`, `category.updated`, `category.deleted`, `category.reordered`, `banner.created`, `banner.updated`, `banner.deleted`, `banner.reordered`. Gap closure (catalog): the `category.*` snapshot carries `image` (file name or `null`), the `banner.*` snapshot `link.url`, `notification.created` `link_url`; no new action |
 | Loyalty | `cashback.adjusted`, `cashback.policy_version_created`, `cashback.policy_version_superseded` |
 | Notifications | `notification.created`, `notification.cancelled` (M3; before `{state: "scheduled", scheduled_at}`, after `{state: "cancelled", cancelled_at}`), `notification_template.updated`, `segment.created`, `segment.updated`, `segment.deleted`, `segment.members_added`, `segment.member_removed`, `notification.push_dead` (system; a dead `push.order_status` / `push.appointment` / `campaign.send_batch` message: `{topic, dedupe_key, attempts, last_error, customer_id, campaign_id}`) |
 | Appointments | `appointment.confirmed`, `appointment.rejected`, `appointment.attended`, `appointment.created`, `appointment.rescheduled` (`{…, from_start, from_end, reschedule_no}`), `appointment.cancelled` (`{…, reason}`) |
@@ -1299,3 +1311,8 @@ Provisional, configurable rules that shape payloads:
     - Refund operations for the Payments screen (M1c, consumed by F3): `POST payments/{id}/refunds/{refund_id}/retry/` (from `failed`) and `…/resolve/` `{state: succeeded|failed}` (from `unknown` / `manual_required`, audited `refund.state_changed` with the actor). M2 (customer contract §2.13.0): `…/resolve/ {state: succeeded, manual_payout?: bool}` also closes a `failed` **Click** refund (Click refuses reversals of a previous month, of offline/Humo cards, or when UZCARD declines). The server first asks Click for the payment's status (a fresh check through the port, never under a row lock): `reversed` → closed `succeeded` (Click returned the money; do not pay out); still `paid` → 409 **`click_not_reversed`** (M3; `invalid_transition` before) "Click to‘lovni qaytarmagan. Avval mijozga qo‘lda to‘lang, so‘ng «qo‘lda to‘landi» belgisi bilan yakunlang yoki qaytarishni qayta urinib ko‘ring." unless the body carries `manual_payout: true` (staff paid the customer outside Click; then closed `succeeded`, audited with `manual_payout: true`); Click unreachable → 503 `provider_unavailable`; Click fake under the production settings → 409 `invalid_transition` "Click sinov rejimida: to‘lov holatini tekshirib bo‘lmaydi. Click ulanganidan keyin yakunlang."; a payment without a Click payment id is **not checked** (Click cannot be asked about it) and needs `manual_payout: true` — without it 409 `conflict` "Bu to‘lovda Click to‘lov raqami yo‘q, shuning uchun Click’dan holatini tekshirib bo‘lmaydi. Mijozga qo‘lda to‘lang, so‘ng «qo‘lda to‘landi» belgisi bilan yakunlang." (M3: never the "Click to‘lovni qaytarmagan" answer, since Click was not asked). The UI therefore offers "Yakunlash" (no flag) first and, after the 409 `click_not_reversed` (or this `conflict`), "Qo‘lda to‘landi" (`manual_payout: true`) once the payout is done. The close is allowed only while it is the payment's newest refund, the payment is still `paid` and no other refund of the payment is open or succeeded (otherwise 409 `invalid_transition` "Bu qaytarishni yakunlab bo‘lmaydi.", so a refund retried with `…/retry/` cannot be paid out twice); M3: this guard runs **before** the Click status check (a refund that can no longer be closed is refused without asking Click) and again under the row locks. `manual_payout` is ignored for `unknown` / `manual_required` refunds, whose resolve is unchanged. While Click is fake under the production settings, `…/retry/` of a `failed` Click refund also answers 409 `invalid_transition` "Click sinov rejimida: to‘lov holatini tekshirib bo‘lmaydi. Click ulanganidan keyin yakunlang." (nothing written), so a retried refund can never skip the status check.
     - The logout action posts `{refresh: <gd_admin_refresh cookie>, scope: "current"}` and clears both cookies whatever the response (a 401 `SESSION_EXPIRED` counts as logged out). Settings (A1) can offer "others" and "all".
     - The login page, `auth.actions.ts`, cookies and `proxy.ts` follow the spec's "Auth" section.
+19. **Gap closure — catalog package (`feat/gap-catalog`; open questions GC-1–GC-8).**
+    - Search: nothing to change in the UI; every name `search` now folds the six encodings of the Uzbek o‘/g‘ mark and `ё`/`е` on both sides (§1.4).
+    - Categories (gap ADM-5.1): `CategoryDialog` gains an image picker with a preview and the limits of §2.3 ("JPEG, PNG yoki WebP, 5 MB gacha"); a picked file is sent as multipart (`slug`, `name.uz`, `name.ru`, `name.en`, `is_active`, `image`) to `POST categories/` / `PATCH categories/{slug}/`, a "Rasmni olib tashlash" action sends `{"remove_image": true}`; the table shows `image_url` as a thumbnail. Map `image` errors to the picker.
+    - Banners (gap X-BANNER-URL): `BANNER_LINK_KINDS` gains `url`; `BannerDialog` offers "Havola (URL)" with a text input sent as `link.url`; the domain `BannerLink` gains `{kind: "url", url}`; map `link.url` errors to that input.
+    - Notifications (gap ADM-10.1): `NotificationLink` gains `{kind: "url", url}`; the "Bosilganda ochiladigan sahifa" picker offers a URL input next to the products (`link_options` unchanged) and sends `link.kind = "url"`, `link.url`; history rows render `link.url`.

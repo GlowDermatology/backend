@@ -197,8 +197,9 @@ docker compose -f compose.prod.yaml exec api python manage.py shell -c \
 ```
 
 Useful thresholds for an external monitor reading `providers` from inside the gate: Billz
-`last_sync_age_seconds` above ~2 h (the delta sync runs hourly at :07), BTS above ~30 min while parcels are in
-transit (polling every 10 min).
+`last_sync_age_seconds` above ~30 min (the delta sync runs every `BILLZ_DELTA_SYNC_SECONDS`, 300 s by default;
+while Billz is unreachable for longer than `BILLZ_STOCK_STALE_REFUSE_SECONDS` checkouts of lines Billz cannot confirm
+answer 503, open question GC-6), BTS above ~30 min while parcels are in transit (polling every 10 min).
 
 ## 5. Beat schedule (`config/celery.py`, Asia/Tashkent)
 
@@ -211,7 +212,7 @@ transit (polling every 10 min).
 | `commerce-poll-bts` | `commerce.poll_bts` | every 10 minutes |
 | `accounts-cleanup-auth` | `accounts.cleanup_auth` | hourly |
 | `delivery-refresh-bts-regions` | `delivery.refresh_bts_regions` | every 6 hours (M3; BTS's region list, served stale up to 24 h) |
-| `billz-sync-delta` | `catalog.billz_sync_delta` | hourly at :07 |
+| `billz-sync-delta` | `catalog.billz_sync_delta` | every `BILLZ_DELTA_SYNC_SECONDS` (300 s; gap X-STOCK-FRESHNESS) |
 | `purge-idempotency-records` | `core.purge_idempotency_records` | 03:00 |
 | `core-purge-outbox` | `core.purge_outbox` | 03:20 (M3) |
 | `integrations-purge-webhook-inbox` | `integrations.purge_webhook_inbox` | 03:25 (M3) |
