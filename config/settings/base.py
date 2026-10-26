@@ -504,3 +504,46 @@ if FAKE_SCENARIO_HEADER_ENABLED and any(mode != "fake" for mode in SCENARIO_PROV
         "FAKE_SCENARIO_HEADER_ENABLED requires every provider mode to be fake: "
         + ", ".join(SCENARIO_PROVIDER_MODES)
     )
+# --- M3 operations: alerts, retention, the nightly consistency report (docs/ops/monitoring.md) ---
+# Optional alert webhook (core.alerts): every alert is a compact JSON POST {event, env, at, fields, host}
+# signed with HMAC-SHA256 over the body (header X-GD-Signature: sha256=<hex>). Empty URL = alerts disabled
+# (nothing is queued). The destination receives ids and counts only; it must be hosted in Uzbekistan or
+# receive no personal data (docs/ops/compliance.md). Production requires https and a secret when it is set.
+ALERT_WEBHOOK_URL = env_str("ALERT_WEBHOOK_URL", "").strip()
+if ALERT_WEBHOOK_URL:
+    _alert_url = urlsplit(ALERT_WEBHOOK_URL)
+    if _alert_url.scheme not in {"http", "https"} or not _alert_url.netloc:
+        raise ImproperlyConfigured("ALERT_WEBHOOK_URL must be an absolute http(s) URL")
+ALERT_WEBHOOK_SECRET = env_str("ALERT_WEBHOOK_SECRET", "")
+# One alert per event (and scope, e.g. the outbox topic) per window of this many minutes.
+ALERT_DEDUPE_MINUTES = env_bounded_int("ALERT_DEDUPE_MINUTES", 30, minimum=1, maximum=24 * 60)
+# The "env" of every alert (e.g. production, staging); defaults to the settings module's name.
+ALERT_ENV = env_str("ALERT_ENV", "local").strip()
+# Retention (docs/ops/compliance.md): raw provider callbacks hold personal data; done/dead outbox rows are
+# delivery bookkeeping. Purged nightly in batches (core.purge_outbox, integrations.purge_webhook_inbox).
+WEBHOOK_INBOX_RETENTION_DAYS = env_bounded_int("WEBHOOK_INBOX_RETENTION_DAYS", 90, minimum=1, maximum=3650)
+OUTBOX_RETENTION_DAYS = env_bounded_int("OUTBOX_RETENTION_DAYS", 30, minimum=1, maximum=3650)
+RETENTION_BATCH_SIZE = env_bounded_int("RETENTION_BATCH_SIZE", 1000, minimum=100, maximum=10000)
+# A deferred outbox message (outbox.RetryLater) of a topic that declares no window of its own counts as stuck
+# once it has been deferred for this long (billz.push_sale declares BILLZ_SHIFT_RETRY_MAX_HOURS).
+OUTBOX_DEFERRAL_WINDOW_HOURS = env_bounded_int("OUTBOX_DEFERRAL_WINDOW_HOURS", 24, minimum=1, maximum=7 * 24)
+# Nightly consistency report (reporting.consistency_report, 03:40 Tashkent): thresholds of the checks K1-K6,
+# the sample of ids each check reports and the look-back of the checks that read history (K1, K2).
+CONSISTENCY_SAMPLE_SIZE = env_bounded_int("CONSISTENCY_SAMPLE_SIZE", 20, minimum=1, maximum=200)
+CONSISTENCY_LOOKBACK_DAYS = env_bounded_int("CONSISTENCY_LOOKBACK_DAYS", 7, minimum=1, maximum=90)
+CONSISTENCY_BILLZ_SALE_MINUTES = env_bounded_int(
+    "CONSISTENCY_BILLZ_SALE_MINUTES", 120, minimum=1, maximum=10080
+)
+CONSISTENCY_PAYMENT_PENDING_MINUTES = env_bounded_int(
+    "CONSISTENCY_PAYMENT_PENDING_MINUTES", 60, minimum=1, maximum=10080
+)
+CONSISTENCY_REFUND_OPEN_HOURS = env_bounded_int("CONSISTENCY_REFUND_OPEN_HOURS", 24, minimum=1, maximum=720)
+CONSISTENCY_SHIPMENT_MINUTES = env_bounded_int("CONSISTENCY_SHIPMENT_MINUTES", 60, minimum=1, maximum=10080)
+CONSISTENCY_PARCEL_UNTRACKED_HOURS = env_bounded_int(
+    "CONSISTENCY_PARCEL_UNTRACKED_HOURS", 48, minimum=1, maximum=720
+)
+CONSISTENCY_LATE_CAPTURE_HOURS = env_bounded_int("CONSISTENCY_LATE_CAPTURE_HOURS", 24, minimum=1, maximum=720)
+CONSISTENCY_OUTBOX_DEAD_HOURS = env_bounded_int("CONSISTENCY_OUTBOX_DEAD_HOURS", 24, minimum=1, maximum=720)
+CONSISTENCY_OUTBOX_OVERDUE_MINUTES = env_bounded_int(
+    "CONSISTENCY_OUTBOX_OVERDUE_MINUTES", 60, minimum=1, maximum=10080
+)

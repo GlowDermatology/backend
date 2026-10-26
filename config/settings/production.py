@@ -263,3 +263,16 @@ if BILLZ_MODE == "live":
             raise ImproperlyConfigured(f"{_name} is the .env.example placeholder; set the real Billz id")
     if urlsplit(BILLZ_BASE_URL).scheme != "https":
         raise ImproperlyConfigured("BILLZ_BASE_URL must be an https URL")
+# --- Alert webhook (core.alerts, docs/ops/monitoring.md) ---
+# Optional. When set it must be https (alerts carry ids and counts, but the URL itself often embeds a token)
+# and signed with a real secret of at least 32 characters.
+ALERT_ENV = env_str("ALERT_ENV", "production").strip()
+ALERT_WEBHOOK_URL = env_str("ALERT_WEBHOOK_URL", "").strip()
+ALERT_WEBHOOK_SECRET = env_str("ALERT_WEBHOOK_SECRET", "")
+if ALERT_WEBHOOK_URL:
+    _alert_url = urlsplit(ALERT_WEBHOOK_URL)
+    if _alert_url.scheme != "https" or not _alert_url.netloc:
+        raise ImproperlyConfigured("ALERT_WEBHOOK_URL must be an https URL in production")
+    _refuse_placeholder("ALERT_WEBHOOK_SECRET", ALERT_WEBHOOK_SECRET)
+    if len(ALERT_WEBHOOK_SECRET.strip()) < 32:
+        raise ImproperlyConfigured("ALERT_WEBHOOK_SECRET must be at least 32 characters")
