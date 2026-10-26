@@ -870,7 +870,7 @@ is 404 here and `unavailable` in the cart. Availability (`available`) comes from
 selling is off, below) — which is why these views live in the top-layer `customers` module (catalog may not import
 commerce).
 
-**Online selling requires live Billz** (`core.providers.online_sales_enabled()` = ¬`fake_in_production("billz")`, P0).
+**Online selling requires live Billz** (`core.integration_modes.online_sales_enabled()` = ¬`fake_in_production("billz")`, P0).
 Billz owns the stock every reservation is checked against (§1.4); a fake Billz under the production settings knows no
 real quantity, so the stock is **unknown** and nothing is sold online against it. In that posture: the catalog still
 lists every visible product, but `available` is 0, `stock_status` `out_of_stock` and `max_quantity` 0 for all of them
@@ -942,7 +942,7 @@ callbacks are refused (§2.13.0, §6.14). Checkout and pay refuse a provider out
 §2.7.1 row 1, §2.7.2). With an empty list the app shows the cart without the checkout button.
 `fulfilment_methods` lists `delivery` and `pickup` in this order; `delivery` is omitted while delivery is not offered
 (§2.6: the BTS port is fake under the production settings), and then the app offers pickup only.
-`online_sales_enabled` = `core.providers.online_sales_enabled()`: false while the Billz port is fake under the
+`online_sales_enabled` = `core.integration_modes.online_sales_enabled()`: false while the Billz port is fake under the
 production settings (§2.3); the app then hides "Savatga" and checkout and shows the catalog for browsing only (the
 server refuses those writes with `online_sales_unavailable` anyway). It does not hide the "To‘lash" button of an order
 placed earlier.
@@ -987,7 +987,7 @@ All writes answer 200 `Cart`. No audit, no events (the cart is ephemeral).
 
 ### 2.6 Delivery
 
-**Delivery availability** (`core.providers.delivery_available()`, P0). Home delivery is offered only when a real
+**Delivery availability** (`core.integration_modes.delivery_available()`, P0). Home delivery is offered only when a real
 courier can carry the parcel: while `BTS_MODE=fake` under the production settings (`DEV_FEATURES_ALLOWED` false;
 product-owner decision 4 allows that mode), a fake quote would charge a made-up tariff and a fake create would show a
 made-up tracking number for a parcel nobody ships. In that posture `settings/public/` omits `delivery` from
@@ -2034,7 +2034,7 @@ Toshkent viloyati, `12` Sirdaryo, `13` Samarqand) with two cities each; `track()
 or the parcel's last status, `scenario["track"] == "rejected"` → `BtsRejected`, `"down"` → `BtsUnavailable`;
 `scenario["quote"] == "rejected"` → `BtsRejected`, `"down"` → `BtsUnavailable`.
 
-**Fake BTS under the production settings** (`core.providers.fake_in_production("bts")`; P2 owns `bts/fake.py`). The
+**Fake BTS under the production settings** (`core.integration_modes.fake_in_production("bts")`; P2 owns `bts/fake.py`). The
 fake never reports a remote effect that did not happen and keeps nothing in its per-process parcel table: `regions()`
 → `[]`; `quote()` → `BtsRejected("fake_mode")` (delivery is not offered anyway, §2.6); `create()` →
 `BtsRejected("fake_mode")`, so the B5 handler marks the shipment `failed` with `shipment_failed {error_code:
@@ -2479,10 +2479,10 @@ code a customer view can raise to an existing key.
 14. **Fake providers and dev switches** (product-owner decision 2026-10-26). Two different things:
     - **Fake provider adapters** (`CLICK_MODE`, `PAYME_MODE`, `BTS_MODE`, `ESKIZ_MODE`, `FCM_MODE`, `BILLZ_MODE`,
       `OAUTH_MODE` = `fake`) are **allowed** under `config.settings.production`, which every internet-facing deployment
-      (staging included) runs. Each fake provider logs one WARNING `providers.fake_in_production {provider}` at process
-      start, and the effective mode of every provider (`billz`, `click`, `payme`, `bts`, `eskiz`, `fcm`, `oauth`) is
-      reported by `GET /api/v1/health/?ready=1` (`providers`) and by admin `GET settings/` (`integrations.providers`,
-      admin §2.11, §2.15). Fake and live providers may be **mixed** (live adapters arrive one at a time in M3), so the
+      (staging included) runs. Each process logs one startup WARNING listing every fake provider (logger
+      `glowderma.integrations`, built in M1), and the effective mode of every provider (`billz`, `click`, `payme`, `bts`,
+      `eskiz`, `fcm`, `oauth`) is reported by `GET /api/v1/health/?ready=1` (`integrations`, shown only to callers that
+      pass the admin network gate) and by admin `GET settings/` (`integrations.providers`, admin §2.11, §2.15). Fake and live providers may be **mixed** (live adapters arrive one at a time in M3), so the
       rule is per provider: in that posture a fake adapter never reports a real-money or real-world effect that did not
       happen and never accepts a made-up credential. Fake Click/Payme/BTS start no transaction and honour no capture
       (§2.13.0: a Click Complete of a transaction attached while Click was live is accepted and reversed by hand; what a
