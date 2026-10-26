@@ -34,7 +34,7 @@ from celery import shared_task  # type: ignore[import-untyped]
 from celery.signals import worker_ready  # type: ignore[import-untyped]
 from django.conf import settings
 from django.core.cache import cache
-from django.db import transaction
+from django.db import connection, transaction
 
 from glowderma.commerce import selectors, services, topics
 from glowderma.commerce.billz_sales import SaleLine, get_sale_port
@@ -525,6 +525,24 @@ def stable_payload(parcel: Parcel) -> dict[str, Any]:
     return payload
 
 
+def lock_parcel(order_id: int) -> None:
+    """``pg_advisory_xact_lock`` of one order's parcel, taken by the BTS webhook and by polling around
+    ``track()`` + ``apply_bts_status``: re-tracks are serialised, so a slower track can never apply a status
+    older than one applied meanwhile. An advisory lock, not a row lock (no HTTP under a row lock)."""
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", [f"bts:{order_id}"])
+
+
+def _track_and_apply(order_id: int, tracking_number: str, scenario: dict[str, Any]) -> Parcel:
+    with transaction.atomic():
+        lock_parcel(order_id)
+        parcel = get_bts(scenario).track(tracking_number)
+        services.apply_bts_status(
+            order_id, parcel.status, enums.ShipmentVia.POLLING, payload=stable_payload(parcel)
+        )
+    return parcel
+
+
 def run_bts_poll() -> PollResult:
     """One polling run: single flight (``cache.add`` lock), round robin after
     ``IntegrationState(bts).data["poll_cursor"]`` (written after every attempted parcel), at most
@@ -568,7 +586,7 @@ def _poll() -> PollResult:
             break
         order = Order.objects.get(pk=order_id)
         try:
-            parcel = get_bts(services.fake_scenario(order, "bts")).track(tracking_number)
+            _track_and_apply(order_id, tracking_number, services.fake_scenario(order, "bts"))
         except BtsUnavailable:
             unavailable += 1
             streak += 1
@@ -584,11 +602,13 @@ def _poll() -> PollResult:
             logger.warning("bts.poll_parcel_failed %s", {"shipment_id": shipment_id, "kind": "rejected"})
             integration_services.set_state_data("bts", POLL_CURSOR_KEY, shipment_id)
             continue
+        except Exception:  # noqa: BLE001 - a poison parcel must not hold the cursor (§2.13.3)
+            streak = 0
+            logger.exception("bts.poll_parcel_failed %s", {"shipment_id": shipment_id, "kind": "apply"})
+            integration_services.set_state_data("bts", POLL_CURSOR_KEY, shipment_id)
+            continue
         streak = 0
         tracked.append(order_id)
-        services.apply_bts_status(
-            order_id, parcel.status, enums.ShipmentVia.POLLING, payload=stable_payload(parcel)
-        )
         integration_services.set_state_data("bts", POLL_CURSOR_KEY, shipment_id)
     if stopped:
         integration_services.record_failure("bts", f"poll stopped: {streak} transport failures in a row")

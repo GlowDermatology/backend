@@ -263,3 +263,69 @@ def test_expiry_job_vs_a_complete_holding_the_order_lock() -> None:
     assert results[0]["error"] == 0 and results[1] == []
     order.refresh_from_db()
     assert order.status == "processing"
+
+
+def test_a_poll_never_applies_a_status_older_than_a_concurrent_webhook() -> None:
+    """The poll tracks 200; a webhook arriving meanwhile waits for the parcel lock, re-tracks 300 and applies
+    it after the poll, so the shipment ends at the newer status."""
+    from glowderma.commerce import tasks
+    from glowderma.commerce.tests.factories import OrderFactory
+    from glowderma.commerce.tests.test_bts import SECRET
+    from glowderma.commerce.tests.webhook_support import BTS_URL
+    from glowderma.delivery.models import Shipment, ShipmentEvent
+    from glowderma.delivery.tests.factories import ShipmentFactory
+    from glowderma.integrations.bts.fake import FakeBts
+    from glowderma.integrations.bts.ports import Parcel
+
+    order = OrderFactory.create(paid=True)
+    old = real_now() - timedelta(minutes=60)
+    shipment = ShipmentFactory.create(
+        order=order, created=True, bts_status="100", bts_created_at=old, last_status_at=old
+    )
+    Order.objects.filter(pk=order.pk).update(status="processing")
+    poll_tracked = threading.Event()
+    webhook_done = threading.Event()
+
+    def track(self: Any, number: str) -> Parcel:
+        if threading.current_thread().name == "poll":
+            poll_tracked.set()
+            # without the parcel lock the webhook finishes (300) before the poll applies its older 200;
+            # with it the webhook waits for the poll, so this wait times out
+            webhook_done.wait(2)
+            status = "200"
+        else:
+            status = "300"
+        return Parcel(client_id="", tracking_number=number, bts_order_id="", tariff=None, status=status)
+
+    def poll() -> None:
+        try:
+            tasks.run_bts_poll()
+        finally:
+            connection.close()
+
+    def webhook() -> None:
+        try:
+            poll_tracked.wait(TIMEOUT)
+            response = APIClient().post(
+                BTS_URL, {"clientId": str(order.pk)}, format="json", HTTP_X_GD_WEBHOOK_TOKEN=SECRET
+            )
+            assert response.status_code == 200, response.content
+            webhook_done.set()
+        finally:
+            connection.close()
+
+    with mock.patch.object(FakeBts, "track", track):
+        threads = [threading.Thread(target=poll, name="poll"), threading.Thread(target=webhook)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(TIMEOUT)
+    shipment = Shipment.objects.get(pk=shipment.pk)
+    assert shipment.bts_status == "300"
+    statuses = list(
+        ShipmentEvent.objects.filter(shipment=shipment, kind="status_received")
+        .order_by("id")
+        .values_list("bts_status", flat=True)
+    )
+    assert statuses[-1] == "300"
+    assert Order.objects.get(pk=order.pk).status == "delivered"

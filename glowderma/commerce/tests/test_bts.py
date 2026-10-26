@@ -14,7 +14,7 @@ from django.core.cache import cache
 from django.test import override_settings
 from rest_framework.test import APIClient
 
-from glowderma.commerce import tasks
+from glowderma.commerce import services, tasks
 from glowderma.commerce.models import Order, OrderEvent
 from glowderma.commerce.tests.factories import OrderFactory
 from glowderma.commerce.tests.webhook_support import BTS_URL, real_now, rows
@@ -221,6 +221,25 @@ def test_per_parcel_failures_are_skipped(tracked: list[str], caplog: pytest.LogC
     assert caplog.text.count("bts.poll_parcel_failed") == 2
     assert state().data["poll_cursor"] == last.pk and state().last_sync_at is not None
     assert state().consecutive_failures == 0 and down.pk < rejected.pk
+
+
+def test_a_parcel_whose_apply_fails_never_holds_the_cursor(
+    tracked: list[str], caplog: pytest.LogCaptureFixture
+) -> None:
+    poison = parcel()
+    last = parcel()
+    real_apply = services.apply_bts_status
+
+    def apply(order_id: int, *args: Any, **kwargs: Any) -> Any:
+        if order_id == poison.order_id:
+            raise RuntimeError("cannot apply")
+        return real_apply(order_id, *args, **kwargs)
+
+    with mock.patch.object(services, "apply_bts_status", apply), caplog.at_level(logging.ERROR):
+        result = tasks.run_bts_poll()
+    assert result.tracked == [last.order_id]
+    assert "bts.poll_parcel_failed" in caplog.text and "'kind': 'apply'" in caplog.text
+    assert state().data["poll_cursor"] == last.pk and state().last_sync_at is not None
 
 
 def test_three_transport_failures_in_a_row_stop_the_run(tracked: list[str]) -> None:

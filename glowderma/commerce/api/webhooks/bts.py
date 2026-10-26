@@ -30,7 +30,6 @@ from rest_framework.response import Response
 from glowderma.accounts.api.customer_base import WebhookAPIView
 from glowderma.commerce import services, tasks
 from glowderma.commerce.api.webhooks import inbox
-from glowderma.commerce.api.webhooks.click import advisory_lock
 from glowderma.commerce.models import Order
 from glowderma.core import enums, integration_modes
 from glowderma.delivery import selectors as delivery_selectors
@@ -124,7 +123,7 @@ class BtsWebhookView(WebhookAPIView):
         )
         entity = f"order:{order_id}"
         with transaction.atomic():
-            advisory_lock(f"bts:{order_id}")
+            tasks.lock_parcel(order_id)  # the key polling takes too: re-tracks never apply out of order
             if inbox.exists(PROVIDER, event_key) is not None:
                 inbox.store_delivery(
                     PROVIDER,
