@@ -22,6 +22,7 @@ import logging
 from typing import Any
 
 from celery import shared_task  # type: ignore[import-untyped]
+from django.conf import settings
 
 from glowderma.catalog import billz, services
 from glowderma.core import audit, enums, integration_modes, outbox, timeutils
@@ -99,7 +100,10 @@ def run_billz_import(job_id: int) -> None:
             if index % PROGRESS_EVERY == 0 or index == total:
                 job_services.report_progress(job, index, total)
         if port_mode == "full":
-            counters["hidden"] = len(services.hide_missing_from_billz({row.billz_id for row in rows}))
+            listed = {row.billz_id for row in rows}
+            counters["hidden"] = len(
+                services.hide_missing_from_billz(listed, min_ratio=settings.BILLZ_FULL_SYNC_MIN_RATIO)
+            )
         port.sync_succeeded(port_mode)
         job_services.record_sync_success(IntegrationState.Provider.BILLZ, synced_at=timeutils.now())
         finished = job_services.finish_job(job, counters)

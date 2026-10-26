@@ -109,7 +109,10 @@ daily full catches anything a shifted page skipped.
 * it is plausible: `count > 0` and `count ≥ ceil(BILLZ_FULL_SYNC_MIN_RATIO × previous full count)`.
 
 Then the job upserts every row and `catalog.services.hide_missing_from_billz` turns every **active** product whose
-`billz_id` Billz no longer lists into `hidden` — **never deleted** (texts, images, orders and history stay; staff
+`billz_id` Billz no longer lists into `hidden` — unless that would hide more than
+`max(3, active products − ceil(BILLZ_FULL_SYNC_MIN_RATIO × active products))` in one run (a barcode-keying
+mismatch or a wrong `BILLZ_SHOP_ID` would "lose" most of the catalog): then nothing is hidden, the job fails with
+`billz_listing_incomplete` and the cursor stays. Hidden products are **never deleted** (texts, images, orders and history stay; staff
 re-activate it when it returns). Each hide sets `last_change = hidden` without an actor and writes
 `product.updated` (`status` diff, actor `system`, reason `billz_missing: …`). `Job.result` of a full run gains
 `hidden` (count); a delta's result is unchanged.

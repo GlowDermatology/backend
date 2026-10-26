@@ -168,6 +168,27 @@ def test_hide_service_ignores_listed_and_hidden_products() -> None:
     assert Product.objects.count() == 3
 
 
+def test_hiding_most_of_the_catalog_is_refused() -> None:
+    """A barcode-keying mismatch or a wrong shop would make Billz "lose" most products: nothing is hidden."""
+    products = ProductFactory.create_batch(10, status="active")
+    with pytest.raises(services.TooManyMissing, match="refusing to hide more than 3"):
+        services.hide_missing_from_billz({products[0].billz_id}, min_ratio=0.8)
+    assert Product.objects.filter(status="active").count() == 10
+    # up to the floor (3) or the share (here 20 % of 20 = 4) is fine
+    ProductFactory.create_batch(10, status="active")
+    listed = set(Product.objects.values_list("billz_id", flat=True)[4:])
+    assert len(services.hide_missing_from_billz(listed, min_ratio=0.8)) == 4
+
+
+@override_settings(**LIVE)
+def test_a_full_job_that_would_hide_too_much_fails_and_moves_no_cursor() -> None:
+    ProductFactory.create_batch(5, status="active")  # none of them is listed by Billz
+    job = run(live(BillzServer()))
+    assert job.state == "failed" and (job.error or {})["code"] == "billz_listing_incomplete"
+    assert Product.objects.filter(status="active").count() == 5
+    assert "full_count" not in integration_selectors.provider_data("billz")
+
+
 # --- beat ---------------------------------------------------------------------------------------------------
 
 

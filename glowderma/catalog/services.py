@@ -9,6 +9,7 @@ rules that need the resulting state — the product **active rule** and the exac
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
@@ -25,7 +26,7 @@ from glowderma.core import audit, enums, integration_modes, timeutils
 from glowderma.core.api.exceptions import Conflict, field_error
 from glowderma.core.images import ImageError, ProcessedImage, process_image
 from glowderma.core.media import media_name
-from glowderma.integrations.billz.ports import BillzProduct
+from glowderma.integrations.billz.ports import BillzListingIncomplete, BillzProduct
 
 logger = logging.getLogger(__name__)
 
@@ -734,10 +735,23 @@ def upsert_from_billz(row: BillzProduct) -> UpsertOutcome:
 BILLZ_MISSING_REASON = "billz_missing: Billz no longer lists this product (daily full sync)"
 
 
-def hide_missing_from_billz(listed: Collection[str]) -> list[int]:
+# A full sync may always hide this many products, whatever the share (a few discontinued items a day).
+HIDE_ALWAYS_ALLOWED = 3
+
+
+class TooManyMissing(BillzListingIncomplete):
+    """Billz no longer lists an implausibly large share of the active catalog: nothing is hidden."""
+
+
+def hide_missing_from_billz(listed: Collection[str], *, min_ratio: float = 1.0) -> list[int]:
     """The full sync's reconciliation: every **active** product whose ``billz_id`` is not in ``listed`` (the
     complete Billz listing) becomes ``hidden``; returns their ids. Products are never deleted, so a product
     Billz lists again keeps its texts, images and history and staff re-activate it.
+
+    Second plausibility guard (the first is the adapter's, on Billz's own count): when more than
+    ``max(HIDE_ALWAYS_ALLOWED, (1 − min_ratio) × active products)`` would be hidden — e.g. the catalog's
+    Billz ids are not the barcodes Billz lists, or the wrong shop is configured — :class:`TooManyMissing` is
+    raised and nothing is hidden.
 
     Hiding is an admin-owned change made by the system: ``last_change`` = ``hidden`` without an actor and the
     ``product.updated`` audit row (``status`` diff, actor ``system``) with :data:`BILLZ_MISSING_REASON`. Each
@@ -747,13 +761,16 @@ def hide_missing_from_billz(listed: Collection[str]) -> list[int]:
     require_live_billz()
     wanted = frozenset(listed)
     hidden: list[int] = []
-    candidates = (
-        Product.objects.filter(status=enums.ProductStatus.ACTIVE)
-        .exclude(billz_id__in=wanted)
-        .order_by("id")
-        .values_list("pk", flat=True)
-    )
-    for product_id in list(candidates):
+    active = Product.objects.filter(status=enums.ProductStatus.ACTIVE)
+    candidates = list(active.exclude(billz_id__in=wanted).order_by("id").values_list("pk", flat=True))
+    total = active.count()
+    allowed = max(HIDE_ALWAYS_ALLOWED, total - math.ceil(round(total * min_ratio, 6)))
+    if len(candidates) > allowed:
+        raise TooManyMissing(
+            f"Billz no longer lists {len(candidates)} active products; refusing to hide more than {allowed} "
+            "in one run"
+        )
+    for product_id in candidates:
         with transaction.atomic():
             product = (
                 Product.objects.select_for_update(of=("self",))
