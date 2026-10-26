@@ -1,23 +1,30 @@
-"""The appointments side of the specialists admin API (FND-1): ``specialists/{id}/conflicts/`` and the
-upcoming-appointments counter registered for ``professionals.bookings``."""
+"""The appointments side of the specialists admin API (FND-1): ``specialists/{id}/conflicts/``, the
+upcoming-appointments counter registered for ``professionals.bookings``, and the booking guard against a
+concurrent deactivation (``FOR KEY SHARE`` on the specialist vs the deactivation's ``FOR UPDATE``)."""
 
+import threading
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
 import pytest
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
+from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIClient
 
-from glowderma.appointments import selectors
+from glowderma.accounts.tests.factories import CustomerFactory, StaffUserFactory
+from glowderma.appointments import selectors, services
 from glowderma.appointments.models import Appointment
 from glowderma.appointments.tests.factories import AppointmentFactory
+from glowderma.core.api.exceptions import Conflict
 from glowderma.core.timeutils import TASHKENT
 from glowderma.professionals import bookings
-from glowderma.professionals.models import Professional
+from glowderma.professionals import services as professionals_services
+from glowderma.professionals.models import Professional, ProfessionalService
 from glowderma.professionals.tests.factories import (
     BlockedPeriodFactory,
     ProfessionalFactory,
+    ProfessionalServiceFactory,
     WorkingHoursFactory,
     WorkingHoursOverrideFactory,
 )
@@ -111,3 +118,152 @@ def test_the_counter_is_registered_and_counts_open_future_appointments(clock: An
     AppointmentFactory.create(professional=busy, start=ANCHOR - timedelta(minutes=1))
     assert bookings.upcoming_counts([busy.pk, idle.pk], ANCHOR) == {busy.pk: 2, idle.pk: 0}
     assert bookings.upcoming_counts([], ANCHOR) == {}
+
+
+# --- the booking guard --------------------------------------------------------------------------------------
+
+
+def bookable() -> ProfessionalService:
+    link = ProfessionalServiceFactory.create(price=150_000, duration_min=30)
+    WorkingHoursFactory.create(professional=link.professional, weekday=0)
+    return link
+
+
+def test_an_admin_booking_of_a_specialist_deactivated_meanwhile_is_refused(
+    staff_client: APIClient, clock: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    link = bookable()
+    customer = CustomerFactory.create()
+
+    def deactivate() -> None:
+        Professional.objects.filter(pk=link.professional_id).update(is_active=False)
+
+    monkeypatch.setattr(services, "_before_write", deactivate)
+    response = staff_client.post(
+        "/api/v1/admin/appointments/",
+        {
+            "specialist_id": link.professional_id,
+            "service_id": link.service_id,
+            "customer_id": customer.pk,
+            "start": at(MONDAY, 10).isoformat(),
+        },
+        format="json",
+    )
+    assert response.status_code == 400
+    assert response.json()["errors"] == [
+        {"field": "specialist_id", "code": "does_not_exist", "message": "Mutaxassis topilmadi."}
+    ]
+    assert not Appointment.objects.exists()
+
+
+def test_a_reschedule_to_a_deactivated_specialist_is_refused(clock: Any) -> None:
+    link = bookable()
+    appointment = AppointmentFactory.create(
+        professional=link.professional, service=link.service, start=at(MONDAY, 10)
+    )
+    target = ProfessionalServiceFactory.create(
+        service=link.service, professional__is_active=False
+    ).professional
+    with pytest.raises(ValidationError) as caught:
+        services.reschedule(
+            appointment.pk, start=at(MONDAY, 11), professional=target, actor=StaffUserFactory.create()
+        )
+    assert caught.value.get_codes() == {"specialist_id": ["does_not_exist"]}
+    assert Appointment.objects.get(pk=appointment.pk).professional_id == link.professional_id
+
+
+def _run(outcomes: dict[str, Any], key: str, call: Any) -> threading.Thread:
+    def target() -> None:
+        try:
+            outcomes[key] = call()
+        except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
+            outcomes[key] = exc
+        finally:
+            connection.close()
+
+    thread = threading.Thread(target=target)
+    thread.start()
+    return thread
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_booking_waits_for_a_deactivation_and_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("glowderma.core.timeutils.now", lambda: ANCHOR)
+    link = bookable()
+    customer, staff = CustomerFactory.create(), StaffUserFactory.create()
+    counted, release = threading.Event(), threading.Event()
+    count = bookings.upcoming_counts
+
+    def count_then_hold(ids: Any, instant: datetime) -> dict[int, int]:
+        result = count(ids, instant)
+        counted.set()
+        release.wait(10)
+        return result
+
+    monkeypatch.setattr(bookings, "upcoming_counts", count_then_hold)
+    outcomes: dict[str, Any] = {}
+    deactivation = _run(
+        outcomes,
+        "deactivation",
+        lambda: professionals_services.update_specialist(
+            link.professional_id, {"is_active": False}, actor=staff
+        ),
+    )
+    assert counted.wait(10)  # counted 0 and holds the specialist's row
+    booking = _run(
+        outcomes,
+        "booking",
+        lambda: services.request_by_customer(
+            customer.pk, link.professional_id, link.service_id, at(MONDAY, 10)
+        ),
+    )
+    booking.join(timeout=1)
+    assert booking.is_alive()  # waits on the specialist's row lock
+    release.set()
+    deactivation.join(timeout=10)
+    booking.join(timeout=10)
+    assert isinstance(outcomes["deactivation"], Professional), outcomes
+    refused = outcomes["booking"]
+    assert isinstance(refused, ValidationError), outcomes
+    assert refused.get_codes() == {"specialist_id": ["does_not_exist"]}
+    assert not Appointment.objects.exists()
+    assert Professional.objects.get().is_active is False
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_deactivation_waits_for_a_booking_and_counts_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("glowderma.core.timeutils.now", lambda: ANCHOR)
+    link = bookable()
+    customer, staff = CustomerFactory.create(), StaffUserFactory.create()
+    inside, release = threading.Event(), threading.Event()
+
+    def hold() -> None:
+        inside.set()
+        release.wait(10)
+
+    monkeypatch.setattr(services, "_before_write", hold)
+    outcomes: dict[str, Any] = {}
+    booking = _run(
+        outcomes,
+        "booking",
+        lambda: services.request_by_customer(
+            customer.pk, link.professional_id, link.service_id, at(MONDAY, 10)
+        ),
+    )
+    assert inside.wait(10)  # checked, holds the specialist FOR KEY SHARE, not yet written
+    deactivation = _run(
+        outcomes,
+        "deactivation",
+        lambda: professionals_services.update_specialist(
+            link.professional_id, {"is_active": False}, actor=staff
+        ),
+    )
+    deactivation.join(timeout=1)
+    assert deactivation.is_alive()  # FOR UPDATE waits for the booking
+    release.set()
+    booking.join(timeout=10)
+    deactivation.join(timeout=10)
+    assert isinstance(outcomes["booking"], Appointment), outcomes
+    refused = outcomes["deactivation"]
+    assert isinstance(refused, Conflict) and "1 ta kelgusi qabul" in str(refused.detail), outcomes
+    assert Professional.objects.get().is_active is True
