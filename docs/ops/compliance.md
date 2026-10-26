@@ -162,6 +162,8 @@ Glow Derma), not something the software does:
 
 ## 6. Open questions for the product owner
 
+Tracked in `docs/decisions/open-questions.md`: Q1 under C4, Q2–Q6 and Q8–Q10 as M3-R1–M3-R8; Q7 is settled (T13).
+
 | # | Question | Today |
 |---|---|---|
 | Q1 | Legal retention of the audit log (it holds staff names, masked phones, IPs and user agents) | kept indefinitely; the purge window could delete it once a period is decided |
