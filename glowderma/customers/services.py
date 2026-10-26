@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import secrets
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -44,6 +44,7 @@ from glowderma.core import audit, enums, integration_modes, outbox, timeutils
 from glowderma.core.api.exceptions import (
     AddressLimit,
     AuthFailed,
+    CustomerError,
     LastSignInMethod,
     PaymentInProgress,
     PhoneNotRegistered,
@@ -1197,6 +1198,18 @@ class DeletionResult:
 OPEN_APPOINTMENT_STATUSES = (enums.AppointmentStatus.REQUESTED, enums.AppointmentStatus.CONFIRMED)
 
 
+def _cancel_unless_settled(cancel: Callable[..., object], *args: Any, **kwargs: Any) -> bool:
+    """Run one ``DELETE me/`` cancel in a savepoint; ``False`` when it answered 409 ``not_cancellable``."""
+    try:
+        with transaction.atomic():
+            cancel(*args, **kwargs)
+    except CustomerError as exc:
+        if exc.get_codes() != "not_cancellable":
+            raise
+        return False
+    return True
+
+
 def delete_account(
     customer_id: int,
     *,
@@ -1226,8 +1239,13 @@ def delete_account(
             .order_by("pk")
             .values_list("pk", flat=True)
         )
-        for order_id in order_ids:
-            commerce_services.cancel_by_customer(order_id, customer_id, at=now)
+        # An order or appointment selected here can stop being cancellable before its own row lock is taken
+        # (a Click capture committed, staff settled the visit, it started): it is skipped and not counted,
+        # never a reason to abort the delete (C§2.2.3 steps 2–3). Each cancel runs in a savepoint.
+        orders_cancelled = sum(
+            _cancel_unless_settled(commerce_services.cancel_by_customer, order_id, customer_id, at=now)
+            for order_id in order_ids
+        )
         appointment_ids = list(
             Appointment.objects.filter(
                 customer_id=customer_id, status__in=OPEN_APPOINTMENT_STATUSES, start__gt=now
@@ -1235,13 +1253,20 @@ def delete_account(
             .order_by("pk")
             .values_list("pk", flat=True)
         )
-        for appointment_id in appointment_ids:
-            appointment_services.cancel_by_customer(
-                appointment_id, customer_id, reason="account_deleted", at=now
+        appointments_cancelled = sum(
+            _cancel_unless_settled(
+                appointment_services.cancel_by_customer,
+                appointment_id,
+                customer_id,
+                reason="account_deleted",
+                at=now,
+                account_deleted=True,
             )
+            for appointment_id in appointment_ids
+        )
         commerce_services.delete_cart_lines(customer_id)
         account_services.delete_customer(customer_id)
-        result = DeletionResult(len(order_ids), len(appointment_ids))
+        result = DeletionResult(orders_cancelled, appointments_cancelled)
         _audit(
             "customer.deleted",
             customer,
