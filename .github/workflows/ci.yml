@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:18-trixie
+        image: postgres:18.6-trixie  # the version compose.prod.yaml pins
         env:
           POSTGRES_USER: glowderma
           POSTGRES_PASSWORD: glowderma
@@ -22,7 +22,7 @@ jobs:
           --health-cmd "pg_isready -U glowderma -d glowderma"
           --health-interval 5s --health-timeout 5s --health-retries 10
       redis:
-        image: redis:8-alpine
+        image: redis:8.10-alpine
         ports: ["6380:6379"]
         options: >-
           --health-cmd "redis-cli ping"
@@ -40,6 +40,24 @@ jobs:
       - run: uv run mypy .
       - run: uv run lint-imports
       - run: uv run python manage.py makemigrations --check --dry-run
+      - name: Migrations run as the non-superuser application role
+        # Production connects as glowderma_app (deploy/postgres/app-role.psql): database owner, not a superuser.
+        # Every migration (extensions, collation, triggers, concurrent indexes) must work under it on PostgreSQL 18.
+        env:
+          PGHOST: localhost
+          PGPORT: "5433"
+          PGUSER: glowderma
+          PGPASSWORD: glowderma
+          POSTGRES_USER: glowderma
+          POSTGRES_DB: gd_app_role
+        run: |
+          psql -v ON_ERROR_STOP=1 -d glowderma -c "DROP DATABASE IF EXISTS gd_app_role" -c "CREATE DATABASE gd_app_role"
+          export POSTGRES_APP_PASSWORD="$(openssl rand -hex 24)"
+          deploy/postgres/10-app-role.sh
+          test "$(psql -At -d gd_app_role -c "SELECT rolsuper FROM pg_roles WHERE rolname = 'glowderma_app'")" = f
+          DATABASE_URL="postgres://glowderma_app:${POSTGRES_APP_PASSWORD}@localhost:5433/gd_app_role" \
+            uv run python manage.py migrate --noinput -v 1
+          psql -v ON_ERROR_STOP=1 -d glowderma -c "DROP DATABASE gd_app_role"
       - run: uv run coverage run -m pytest
       - run: uv run coverage report --fail-under=85
       - run: uv run python manage.py spectacular --validate --fail-on-warn --file /tmp/schema.yaml
@@ -79,12 +97,32 @@ jobs:
       - uses: actions/checkout@v4
       - run: docker build -t glowderma-backend:ci .
       - name: Production compose file resolves
+        # An unedited copy of the template must be refused (empty passwords, no release tags); filled with
+        # generated passwords and the tags deploy/pin-release.sh writes, it must resolve.
         run: |
           cp deploy/env.production.example .env
+          if docker compose -f compose.prod.yaml config --quiet 2>/dev/null; then
+            echo "an unedited copy of deploy/env.production.example was accepted" >&2
+            exit 1
+          fi
+          for name in POSTGRES_PASSWORD POSTGRES_APP_PASSWORD REDIS_PASSWORD; do
+            sed -i "s/^${name}=\$/${name}=$(openssl rand -hex 24)/" .env
+          done
+          deploy/pin-release.sh "ci-${GITHUB_SHA::7}" ci
           docker compose -f compose.prod.yaml config --quiet
+          rm .env
       - name: Edge Caddyfile is valid
         run: >-
-          docker run --rm -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro"
+          docker run --rm -v "$PWD/deploy:/etc/caddy:ro"
           -e ACME_EMAIL=ci@example.com -e SITE_DOMAIN=example.com -e ADMIN_DOMAIN=admin.example.com
           -e API_DOMAIN=api.example.com caddy:2.10.2-alpine
           caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+      - name: Edge behaviour probe
+        # The Caddyfile in the pinned Caddy, in front of a stub: callbacks forwarded with their query string,
+        # private paths 404, body limits and buffering, headers, and no query string, Referer query or token
+        # header in the access or error logs (a 502 included).
+        run: |
+          docker create --name caddy-bin caddy:2.10.2-alpine >/dev/null
+          docker cp caddy-bin:/usr/bin/caddy "$RUNNER_TEMP/caddy"
+          docker rm caddy-bin >/dev/null
+          python3 deploy/edge_probe.py --caddy "$RUNNER_TEMP/caddy"
