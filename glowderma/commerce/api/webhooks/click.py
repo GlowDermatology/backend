@@ -32,7 +32,7 @@ from glowderma.accounts.api.customer_base import WebhookAPIView
 from glowderma.commerce import payment_ref, selectors, services, state
 from glowderma.commerce.api.webhooks import inbox
 from glowderma.core import enums, integration_modes, timeutils
-from glowderma.core.api.exceptions import AlreadyPaid, PaymentInProgress
+from glowderma.core.api.exceptions import AlreadyPaid, InvalidTransition, PaymentInProgress
 from glowderma.integrations.click import protocol
 from glowderma.payments import selectors as payment_selectors
 from glowderma.payments import services as payment_services
@@ -42,6 +42,7 @@ PROVIDER = "click"
 FORM_CONTENT_TYPE = "application/x-www-form-urlencoded"
 FAKE_MODE = "fake_mode"
 BAD_SIGNATURE = "bad_signature"
+_PREPARED = (enums.PaymentStatus.PENDING, enums.PaymentStatus.PAID, enums.PaymentStatus.REFUNDED)
 
 
 def advisory_lock(key: str) -> None:
@@ -183,16 +184,17 @@ class _ClickCallback(WebhookAPIView):
             return self._conflict(request, params, started)
         txn = params["click_trans_id"]
         bound = payment_selectors.payment_by_txn(PROVIDER, txn)
-        if (
-            bound is not None
-            and bound.order_id == order_id
-            and bound.status
-            in (
-                enums.PaymentStatus.PENDING,
-                enums.PaymentStatus.PAID,
+        if bound is not None:
+            # A transaction we already bound is answered from state, never re-attached: re-running step 8
+            # would supersede the order's live attempt for a transaction that can no longer be attached.
+            if bound.order_id != order_id:
+                return self._store(request, params, protocol.BAD_REQUEST, raw, started, order_id=order_id)
+            if bound.status in _PREPARED:  # a plain or re-signed retry (refunded: captured, then returned)
+                return self._store(request, params, protocol.OK, raw, started, payment_id=bound.id)
+            # failed (by Click, superseded, expired or cancelled): a repeated attempt of a cancelled payment
+            return self._store(
+                request, params, protocol.TRANSACTION_CANCELLED, raw, started, payment_id=bound.id
             )
-        ):
-            return self._store(request, params, protocol.OK, raw, started, payment_id=bound.id)
         try:
             order = services.lock_order(order_id)
         except services.OrderNotFound:
@@ -217,21 +219,24 @@ class _ClickCallback(WebhookAPIView):
         if protocol.parse_amount(params["amount"]) != order.total:
             return self._store(request, params, protocol.BAD_AMOUNT, raw, started, order_id=order.pk)
         try:
-            payment = services.ensure_payable_payment(order.pk, PROVIDER, superseding=txn, at=now)
-            payment_services.attach_transaction(
-                payment.id,
-                txn,
-                {
-                    "merchant_trans_id": params["merchant_trans_id"],
-                    "merchant_prepare_id": payment.id,
-                    "click_trans_id": txn,
-                    "click_paydoc_id": params["click_paydoc_id"],
-                    "service_id": params["service_id"],
-                    "prepare_at": now.isoformat(),
-                    "sign_time": params["sign_time"],
-                },
-            )
-        except payment_services.TransactionTaken, PaymentInProgress, AlreadyPaid:
+            # One savepoint: a refusal rolls back the supersede and the new row (§2.13.0, nothing
+            # half-applied), and only the inbox row of the -8 answer is written.
+            with transaction.atomic():
+                payment = services.ensure_payable_payment(order.pk, PROVIDER, superseding=txn, at=now)
+                payment_services.attach_transaction(
+                    payment.id,
+                    txn,
+                    {
+                        "merchant_trans_id": params["merchant_trans_id"],
+                        "merchant_prepare_id": payment.id,
+                        "click_trans_id": txn,
+                        "click_paydoc_id": params["click_paydoc_id"],
+                        "service_id": params["service_id"],
+                        "prepare_at": now.isoformat(),
+                        "sign_time": params["sign_time"],
+                    },
+                )
+        except payment_services.TransactionTaken, PaymentInProgress, AlreadyPaid, InvalidTransition:
             return self._store(request, params, protocol.BAD_REQUEST, raw, started, order_id=order.pk)
         return self._store(request, params, protocol.OK, raw, started, payment_id=payment.id)
 

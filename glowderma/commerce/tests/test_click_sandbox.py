@@ -531,3 +531,84 @@ def test_rejected_rows_are_capped_per_ip(order: Order) -> None:
     for _ in range(12):
         assert click(CLICK_PREPARE, params)["error"] == -1
     assert len(rows("click")) == 10  # WEBHOOK_REJECTED_PER_IP_PER_MIN
+
+
+# --- Prepare of a transaction already bound to a closed payment (fix pass 1) -----------------------------
+
+
+def _state(order: Order) -> list[tuple[str, str, str]]:
+    return [(p.status, p.error_code, p.provider_txn_id) for p in payments(order)]
+
+
+def test_row_3_variant_a_stale_prepare_retry_after_a_supersede_answers_minus_9(
+    order: Order, now: datetime
+) -> None:
+    old_id = _prepared(order, now, txn=TXN)
+    new_id = _prepared(order, now, txn=TXN + 1, seconds=90)
+    before = _state(order)
+    with at(now + timedelta(seconds=120)):
+        replay = prepare(order, txn=TXN)  # Click re-sends the old Prepare with the same payload
+    assert replay["error"] == -9 and replay["merchant_prepare_id"] is None
+    assert _state(order) == before  # nothing superseded, no new row
+    new = Payment.objects.get(pk=new_id)
+    assert new.status == "pending" and new.provider_txn_id == str(TXN + 1)
+    assert Payment.objects.get(pk=old_id).error_code == "abandoned"
+    assert keys("click")[-1].startswith(f"dup:prepare:{TXN}:")
+    with at(now + timedelta(seconds=150)):
+        assert complete(order, new_id, txn=TXN + 1)["error"] == 0
+    order.refresh_from_db()
+    assert order.status == "processing"
+    assert not Refund.objects.filter(payment__order=order).exists()
+
+
+def test_row_3_variant_retry_of_a_prepare_click_failed_while_a_newer_one_is_attached(
+    order: Order, now: datetime
+) -> None:
+    failed_id = _prepared(order, now, txn=TXN)
+    with at(now + timedelta(seconds=70)):
+        assert complete(order, failed_id, error=-5017)["error"] == -9
+    newer_id = _prepared(order, now, txn=TXN + 1, seconds=80)
+    before = _state(order)
+    with at(now + timedelta(seconds=90)):
+        assert prepare(order, txn=TXN)["error"] == -9
+    assert _state(order) == before
+    newer = Payment.objects.get(pk=newer_id)
+    assert newer.status == "pending" and newer.provider_txn_id == str(TXN + 1)
+
+
+def test_row_3_variant_retry_of_a_prepare_click_failed_writes_no_payment(order: Order, now: datetime) -> None:
+    failed_id = _prepared(order, now, txn=TXN)
+    with at(now + timedelta(seconds=70)):
+        assert complete(order, failed_id, error=-5017)["error"] == -9
+    count = len(payments(order))
+    with at(now + timedelta(seconds=80)):
+        assert prepare(order, txn=TXN)["error"] == -9
+    assert len(payments(order)) == count
+
+
+def test_prepare_of_a_transaction_bound_to_another_order_answers_minus_8(now: datetime) -> None:
+    first = place(shopper(), fulfilment="pickup", when=now)
+    second = place(shopper(), fulfilment="pickup", when=now)
+    _prepared(first, now, txn=TXN)
+    before = _state(second)
+    with at(now + timedelta(seconds=90)):
+        assert prepare(second, txn=TXN)["error"] == -8
+    assert _state(second) == before
+
+
+def test_a_refused_attach_rolls_back_the_supersede(
+    order: Order, now: datetime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from glowderma.payments import services as payment_services
+
+    _prepared(order, now, txn=TXN)
+    before = _state(order)
+
+    def taken(*args: Any, **kwargs: Any) -> Any:
+        raise payment_services.TransactionTaken("bound elsewhere")
+
+    monkeypatch.setattr(payment_services, "attach_transaction", taken)
+    with at(now + timedelta(seconds=90)):
+        assert prepare(order, txn=TXN + 1)["error"] == -8
+    assert _state(order) == before  # the old attempt is still pending and attached, no new row
+    assert rows("click")[-1].result["error_code"] == "-8"
