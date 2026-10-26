@@ -12,7 +12,7 @@ from typing import Any
 from celery import shared_task  # type: ignore[import-untyped]
 
 from glowderma.catalog import billz, services
-from glowderma.core import audit, enums, outbox, timeutils
+from glowderma.core import audit, enums, integration_modes, outbox, timeutils
 from glowderma.core.api.exceptions import MESSAGES
 from glowderma.core.models import OutboxMessage
 from glowderma.integrations import services as job_services
@@ -58,6 +58,15 @@ def run_billz_import(job_id: int) -> None:
     job = job_services.claim_job(job_id)
     if job is None:
         logger.info("Billz import job %s is not queued; nothing to do", job_id)
+        return
+    if integration_modes.fake_in_production("billz"):
+        # Queued before a switch to fake under the production settings: no port call, last_sync_at unchanged.
+        logger.warning("Billz import job %s refused: Billz is fake under the production settings", job_id)
+        try:
+            failed = job_services.fail_job(job, services.BILLZ_FAKE_MODE_CODE, services.BILLZ_FAKE_MODE)
+        except job_services.JobNotActive:
+            return
+        _finished(failed, error=failed.error)
         return
     mode = (
         str(job.params.get("mode", enums.BillzImportMode.DELTA)) if isinstance(job.params, dict) else "delta"

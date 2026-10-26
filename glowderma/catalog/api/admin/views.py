@@ -98,6 +98,7 @@ class ProductViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
     )
     @idempotent(required=False)
     def create(self, request: Request) -> Response:
+        services.require_live_billz()  # before the serializer's Billz lookup (customer contract §6.14)
         serializer = ProductWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         product = services.create_product(serializer.to_input(), actor=request.user, request=request)
@@ -120,6 +121,9 @@ class ProductViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
         product = Product.objects.filter(pk=pk).first()
         if product is None:
             raise NotFound
+        data = request.data
+        if isinstance(data, dict) and "billz_id" in data and str(data["billz_id"]) != product.billz_id:
+            services.require_live_billz()  # before the serializer's Billz lookup (customer contract §6.14)
         serializer = ProductPatchSerializer(instance=product, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         updated = services.update_product(
@@ -507,6 +511,7 @@ class BillzImportView(AdminAPIView):
     )
     @idempotent(required=False)
     def post(self, request: Request) -> Response:
+        services.require_live_billz()  # no job while Billz is fake under the production settings
         serializer = BillzImportSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         job, _created = job_services.start_job(

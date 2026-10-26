@@ -21,7 +21,7 @@ from rest_framework.exceptions import NotFound, ValidationError
 
 from glowderma.catalog import selectors
 from glowderma.catalog.models import Banner, Category, Product, ProductImage, ProductStock
-from glowderma.core import audit, enums, timeutils
+from glowderma.core import audit, enums, integration_modes, timeutils
 from glowderma.core.api.exceptions import Conflict, field_error
 from glowderma.core.images import ImageError, ProcessedImage, process_image
 from glowderma.core.media import media_name
@@ -38,6 +38,12 @@ CATEGORY_HAS_PRODUCTS = "Kategoriyada mahsulotlar bor."
 CATEGORY_LOCK = "catalog_category_position"
 BANNER_LOCK = "catalog_banner_position"
 BILLZ_ID_TAKEN = "Bu Billz ID bilan mahsulot allaqachon bor."
+# Admin contract §2.3/§2.14, customer contract §2.3/§6.14: a fake Billz under the production settings never
+# invents or refreshes Billz fields or stock.
+BILLZ_FAKE_MODE = (
+    "Billz sinov rejimida: Billz ma’lumotlarini olib bo‘lmaydi. Billz ulanganidan keyin qayta urinib ko‘ring."
+)
+BILLZ_FAKE_MODE_CODE = "billz_fake_mode"
 # PostgreSQL names of the two ``unique=True`` columns (``<table>_<column>_key``, see the 0001 migration).
 PRODUCT_BILLZ_ID_CONSTRAINT = "catalog_product_billz_id_key"
 CATEGORY_SLUG_CONSTRAINT = "catalog_category_slug_key"
@@ -191,8 +197,23 @@ def _set_last_change(product: Product, kind: str, actor: Any, before: dict[str, 
         product.last_change_new_price = None
 
 
+class BillzNotLive(Conflict):
+    """409 ``conflict``: the Billz port is fake under the production settings (admin contract §2.3)."""
+
+    default_detail = BILLZ_FAKE_MODE
+
+
+def require_live_billz() -> None:
+    """Refuse (``BillzNotLive``) every write of Billz-owned data while Billz is fake under the production
+    settings (``core.integration_modes.fake_in_production("billz")``): online selling needs live Billz
+    stock."""
+    if integration_modes.fake_in_production("billz"):
+        raise BillzNotLive(BILLZ_FAKE_MODE)
+
+
 def create_product(data: ProductInput, *, actor: Any, request: Any = None) -> Product:
     """``POST products/`` → the created product (the active rule always fails here: no images yet)."""
+    require_live_billz()
     if data.billz_product is None or data.price is None:
         raise ValueError("create_product needs the Billz product and the price")
     with transaction.atomic():
@@ -236,6 +257,7 @@ def update_product(product_id: int, data: ProductInput, *, actor: Any, request: 
             raise NotFound
         before = product_snapshot(product)
         if data.billz_product is not None and data.billz_product.billz_id != product.billz_id:
+            require_live_billz()
             _apply_billz(product, data.billz_product)
             sync_stock(product, data.billz_product.stock, data.billz_product.synced_at)
         if data.texts:
@@ -665,7 +687,11 @@ def _reload_banner(banner_id: int) -> Banner:
 
 
 def sync_stock(product: Product, quantity: int, synced_at: Any) -> bool:
-    """Write the Billz stock of ``product``; returns whether the quantity changed (row always touched)."""
+    """Write the Billz stock of ``product``; returns whether the quantity changed (row always touched).
+
+    The last layer of the fake-Billz guard: refused while Billz is fake under the production settings.
+    """
+    require_live_billz()
     stock, created = ProductStock.objects.get_or_create(
         product=product, defaults={"quantity": quantity, "synced_at": synced_at}
     )
@@ -683,6 +709,7 @@ def upsert_from_billz(row: BillzProduct) -> UpsertOutcome:
     Existing → only ``billz_name``, ``volume``, ``billz_price``, ``billz_synced_at`` and the stock row change;
     texts, images, price, status, promo, ``last_change`` and ``updated_at`` are never touched.
     """
+    require_live_billz()
     with transaction.atomic():
         product = Product.objects.select_for_update(of=("self",)).filter(billz_id=row.billz_id).first()
         if product is None:
