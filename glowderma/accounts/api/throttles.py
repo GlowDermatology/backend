@@ -1,4 +1,6 @@
 import hashlib
+import re
+import unicodedata
 from typing import Any
 
 from rest_framework.request import Request
@@ -125,17 +127,47 @@ class _DeviceThrottle(ClientIPThrottle):
         return self.cache_format % {"scope": self.scope, "ident": ref}
 
 
+ASCII_PHONE = re.compile(r"\+998[0-9]{9}")
+INVALID_PHONE_BUCKET = "invalid"
+
+
+def canonical_phone(value: object) -> str | None:
+    """The ASCII E.164 form (``+998`` and nine ASCII digits) of a submitted phone, or ``None``.
+
+    Every Unicode decimal digit (``str.isdecimal``: Arabic-Indic, fullwidth, …, exactly what a Unicode
+    ``\\d`` matches) is folded to ASCII first, so look-alike spellings of one number share one canonical
+    value and therefore one per-phone throttle key (customer contract §1.8: the per-phone rules are the main
+    protection of the auth flows).
+    """
+    if not isinstance(value, str):
+        return None
+    folded = "".join(str(unicodedata.decimal(char)) if char.isdecimal() else char for char in value.strip())
+    return folded if ASCII_PHONE.fullmatch(folded) else None
+
+
+def phone_throttle_ident(value: object) -> str | None:
+    """The per-phone throttle or guard ident of a submitted ``phone``: ``pii_ref`` of the canonical number;
+    one shared ``invalid`` bucket for any other present value (fail closed: no spelling escapes the per-phone
+    limits); ``None`` when the field is absent or blank (the view answers 400 ``required``). P1 keys the
+    ``customer_login`` guard with it too."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    canonical = canonical_phone(value)
+    return pii_ref(canonical) if canonical is not None else INVALID_PHONE_BUCKET
+
+
 class SmsPhoneThrottle(ClientIPThrottle):
-    """``auth/send-code/`` per phone (``pii_ref`` of the submitted value)."""
+    """``auth/send-code/`` per phone (:func:`phone_throttle_ident`: the canonical number, never the raw
+    string, so Unicode-digit variants of one number share its key)."""
 
     scope = "sms_phone"
 
     def get_cache_key(self, request: Request, view: Any) -> str | None:
         data = request.data
-        phone = data.get("phone") if isinstance(data, dict) else None
-        if not isinstance(phone, str) or not phone.strip():
+        ident = phone_throttle_ident(data.get("phone") if isinstance(data, dict) else None)
+        if ident is None:
             return None
-        return self.cache_format % {"scope": self.scope, "ident": pii_ref(phone.strip())}
+        return self.cache_format % {"scope": self.scope, "ident": ident}
 
 
 class SmsDeviceThrottle(_DeviceThrottle):

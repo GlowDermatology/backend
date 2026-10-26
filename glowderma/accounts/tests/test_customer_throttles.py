@@ -97,7 +97,9 @@ def test_auth_throttles_key_on_the_hashed_fid_phone_and_ip() -> None:
         throttles.CustomerAuthIPThrottle().get_cache_key(req, VIEW) == "throttle_customer_auth_ip_203.0.113.9"
     )
     bare = request(data={"phone": 5})
-    assert throttles.SmsPhoneThrottle().get_cache_key(bare, VIEW) is None
+    assert throttles.SmsPhoneThrottle().get_cache_key(bare, VIEW) == "throttle_sms_phone_invalid"
+    assert throttles.SmsPhoneThrottle().get_cache_key(request(data={"phone": "  "}), VIEW) is None
+    assert throttles.SmsPhoneThrottle().get_cache_key(request(data={}), VIEW) is None
     assert throttles.SmsDeviceThrottle().get_cache_key(bare, VIEW) is None
 
 
@@ -124,3 +126,31 @@ def test_customer_base_view_throttles_per_customer(customer_client: Any) -> None
     from glowderma.accounts.api.customer_base import CustomerAPIView
 
     assert CustomerAPIView.throttle_classes == [throttles.CustomerRateThrottle]
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        "+998901234567",
+        " +998901234567 ",
+        "+998\u0669\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667",  # Arabic-Indic 9 0 1 2 3 4 5 6 7
+        "+998\uff19\uff10\uff11\uff12\uff13\uff14\uff15\uff16\uff17",  # fullwidth
+        "+99890123456\u0667",  # mixed
+        "+\u0669\u0669\u0668901234567",  # the country code too
+    ],
+)
+def test_every_unicode_digit_spelling_of_a_phone_shares_one_sms_phone_key(spelling: str) -> None:
+    """Review finding (security): the per-phone key is the canonical ASCII number, so Unicode-digit
+    look-alikes of one number cannot multiply its ``sms_phone`` budget (customer contract §1.8)."""
+    assert throttles.canonical_phone(spelling) == "+998901234567"
+    key = throttles.SmsPhoneThrottle().get_cache_key(request(data={"phone": spelling}), VIEW)
+    assert key == f"throttle_sms_phone_{pii_ref('+998901234567')}"
+
+
+@pytest.mark.parametrize(
+    "value", ["+99890123456", "+9989012345678", "998901234567", "+998 90 123 45 67", "x", 5]
+)
+def test_values_that_are_not_a_phone_share_one_invalid_bucket(value: object) -> None:
+    assert throttles.canonical_phone(value) is None
+    assert throttles.phone_throttle_ident(value) == throttles.INVALID_PHONE_BUCKET
+    assert throttles.phone_throttle_ident(None) is None and throttles.phone_throttle_ident(" ") is None
