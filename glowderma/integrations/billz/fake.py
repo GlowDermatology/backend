@@ -9,6 +9,11 @@ The admin e2e scripts rely on these rules; change them only together with the fr
     * anything else → a synthetic product ``{billz_name: "BILLZ ITEM <id>", volume: "50 ml",
       price: 50_000 + (int(id) % 400) * 1_000, stock: int(id) % 37}``.
 
+``read_stock(billz_ids, …)``
+    * each barcode as ``get_product`` answers it (a known product: its stored stock, unchanged); ``…0000`` is
+      unknown; nothing is ever unavailable. The catalog never calls it while Billz is fake (the stock
+      freshness re-read is live only: "fake mode: no change").
+
 ``iter_products(mode)`` (``delta`` and ``full`` yield the same rows)
     * first the three NEW products ``4607019901`` "NEW SERUM 30ML" (199 000, stock 11, "30 ml"),
       ``4607019902`` "NEW CREAM 50ML" (249 000, stock 7, "50 ml") and ``4607019903`` "NEW TONER 200ML"
@@ -33,7 +38,7 @@ The stubs (``refund_sale``, ``find_store_sale``, ``parse_webhook``) refuse exact
 fake never invents what Billz cannot do.
 """
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -48,6 +53,7 @@ from .ports import (
     SaleJournal,
     SaleReceipt,
     SaleRequest,
+    StockRead,
     refuse_refund,
     refuse_store_sale,
     refuse_webhook,
@@ -111,6 +117,19 @@ class FakeBillz:
         if billz_id.endswith(NOT_FOUND_SUFFIX):
             return None
         return synthetic_product(billz_id)
+
+    def read_stock(
+        self, billz_ids: Sequence[str], *, budget_seconds: float, interactive: bool = True
+    ) -> StockRead:
+        rows: dict[str, BillzProduct] = {}
+        unknown: set[str] = set()
+        for billz_id in dict.fromkeys(billz_ids):
+            row = self.get_product(billz_id)
+            if row is None:
+                unknown.add(billz_id)
+            else:
+                rows[billz_id] = row
+        return StockRead(rows=rows, unknown=frozenset(unknown), unavailable=frozenset())
 
     def iter_products(self, mode: ImportMode) -> Iterator[BillzProduct]:
         synced_at = timeutils.now()

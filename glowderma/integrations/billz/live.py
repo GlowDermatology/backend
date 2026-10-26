@@ -30,6 +30,11 @@ product, for the row and for the cached product UUID alike.
 seconds, :data:`.client.INTERACTIVE`), ``search`` paged until the exact barcode is found — every page within
 one budget of :data:`LOOKUP_BUDGET_SECONDS` in total.
 
+**Stock re-read** (``read_stock``, gap X-STOCK-FRESHNESS): the same exact-barcode lookup for each barcode in
+turn, all within one deadline (the caller's budget: 4 s on a customer request with the interactive profile,
+a minute in the worker with the batch one); the first Billz failure (or the deadline) ends the run and every
+barcode not read yet is reported unavailable — never an exception.
+
 **Sale push** (``push_sale``; llms-full "Интернет-заказ из внешней системы"), under a per-sale lock owned by
 this worker (:class:`SaleLock`) and a push-wide deadline (:data:`PUSH_DEADLINE_SECONDS`, below the outbox
 lease), each step safe to resume:
@@ -102,6 +107,7 @@ from .ports import (
     SaleProgress,
     SaleReceipt,
     SaleRequest,
+    StockRead,
     refuse_refund,
     refuse_store_sale,
     refuse_webhook,
@@ -435,6 +441,36 @@ class LiveBillz:
         with self.interactive.deadline(LOOKUP_BUDGET_SECONDS):
             product = self._find_by_barcode(billz_id, self.interactive)
         return None if product is None else self._row(product, billz_id, timeutils.now())
+
+    def read_stock(
+        self, billz_ids: Sequence[str], *, budget_seconds: float, interactive: bool = True
+    ) -> StockRead:
+        """Re-read each barcode's row (module doc "Stock re-read"); never raises for a Billz failure."""
+        wanted = list(dict.fromkeys(billz_ids))
+        if not self.config.configured:
+            logger.warning("billz.stock_read_skipped: the live adapter is not configured")
+            return StockRead(rows={}, unknown=frozenset(), unavailable=frozenset(wanted))
+        client = self.interactive if interactive else self.client
+        rows: dict[str, BillzProduct] = {}
+        unknown: set[str] = set()
+        done = 0
+        try:
+            with client.deadline(budget_seconds):
+                for barcode in wanted:
+                    asked_at = (
+                        timeutils.now()
+                    )  # the stock is at least this fresh (never later than the answer)
+                    product = self._find_by_barcode(barcode, client) if BILLZ_ID.fullmatch(barcode) else None
+                    if product is None:
+                        unknown.add(barcode)
+                    else:
+                        rows[barcode] = self._row(product, barcode, asked_at)
+                    done += 1
+        except BillzError as exc:
+            logger.warning(
+                "billz.stock_read_incomplete read=%d of %d: %s", done, len(wanted), type(exc).__name__
+            )
+        return StockRead(rows=rows, unknown=frozenset(unknown), unavailable=frozenset(wanted[done:]))
 
     def iter_products(self, mode: ImportMode) -> Iterator[BillzProduct]:
         """Fetch the whole run first (see the module doc), then yield its rows."""
