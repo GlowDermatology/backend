@@ -6,7 +6,8 @@ logs hosted in Uzbekistan; database registration; no personal data to foreign Sa
 and audit). Everything here describes what the code does today; the open questions at the end need an answer
 from the product owner (and, where marked, from legal counsel) before go-live.
 
-`docs/ops/deploy.md` and `compose.prod.yaml` are the deployment runbook and stack of branch `feat/ops-deploy`.
+`docs/ops/deploy.md` and `compose.prod.yaml` are the deployment runbook and stack; `deploy/env.production.example`
+lists every production variable.
 
 > This document is not legal advice. It names the obligations the project brief and the design spec record and
 > what the system does about each. Confirm the current legal requirements, the competent authority and its
@@ -89,7 +90,7 @@ Everything that stores or processes personal data runs on infrastructure physica
 - **PostgreSQL** (all tables above) and its WAL/archives.
 - **Redis** (cache and broker; it holds sealed OTPs, session tombstones and `pii_ref` keys).
 - **Media volume** (customer profile images, product and campaign images).
-- **Backups** — the local copy and every off-host copy (`docs/ops/deploy.md` §8 "copy the directory off the
+- **Backups** — the local copy and every off-host copy (`docs/ops/deploy.md` §11 "copied off the
   VPS": that destination must be in Uzbekistan too).
 - **Logs** — container logs on the host and any log shipping or aggregation.
 - The api, worker and beat containers, and the edge proxy that terminates TLS (it sees request bodies).
@@ -135,7 +136,7 @@ retention), raw provider callbacks (purged after 180 days), Billz's own client r
 | Idempotency records | 24 h | `core.purge_idempotency_records`, 03:00 |
 | Sealed OTP, QR tokens, refresh grace entries (Redis) | 120 s / 60 s / 120 s | key TTL |
 | Container logs | 5 × 20 MB per container | Docker json-file rotation (`compose.prod.yaml`) |
-| Backups | 14 days on the host | cron in `docs/ops/deploy.md` §8; the off-host copy needs its own rule (Q6) |
+| Backups | 14 days on the host | cron in `docs/ops/deploy.md` §11; the off-host copy needs its own rule (Q6) |
 | Audit log (`AuditEntry`) | kept indefinitely | **not purged** — legal retention unknown (Q1). The purge window allows `core_auditentry`, but no job uses it |
 | Orders, payments, refunds, ledger, purchases, appointments | kept indefinitely | accounting and loyalty history (Q2) |
 | Customer row and phone after deletion | kept | decision A1 (Q3) |

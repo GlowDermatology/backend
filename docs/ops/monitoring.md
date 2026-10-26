@@ -1,7 +1,7 @@
 # Monitoring, alerts and the nightly consistency report (operator runbook)
 
 Status: M3 operations package, 2026-10-27. Companion of `docs/ops/compliance.md` (personal data, hosting,
-retention) and `docs/ops/deploy.md` (branch `feat/ops-deploy`: the Compose stack, logs, backups).
+retention) and `docs/ops/deploy.md` (the Compose stack, first deploy and upgrades, logs, backups).
 
 The backend gives an operator four signals:
 

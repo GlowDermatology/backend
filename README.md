@@ -8,7 +8,13 @@ integrations (Billz, BTS, Click, Payme, Eskiz, Firebase).
 - Open business questions: [`docs/decisions/open-questions.md`](docs/decisions/open-questions.md)
 - Implementation plans: [`docs/plans/`](docs/plans/)
 - Agent instructions and local commands: [`AGENTS.md`](AGENTS.md)
-- Production deployment (Compose on a VPS, Caddy edge, backups): [`docs/ops/deploy.md`](docs/ops/deploy.md)
+- Production deployment (Compose on a VPS, Caddy edge, first deploy, upgrades, backups, smoke test):
+  [`docs/ops/deploy.md`](docs/ops/deploy.md); every production variable:
+  [`deploy/env.production.example`](deploy/env.production.example)
+- Monitoring, alerts and the nightly consistency report: [`docs/ops/monitoring.md`](docs/ops/monitoring.md)
+- Personal data, hosting in Uzbekistan, retention, database registration: [`docs/ops/compliance.md`](docs/ops/compliance.md)
+- Provider adapters and their go-live checklists: [`docs/integrations/`](docs/integrations/) (Billz, Click, Payme,
+  BTS, Eskiz, FCM)
 
 ## Quick start (Docker)
 ```bash
