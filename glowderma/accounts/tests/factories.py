@@ -150,3 +150,54 @@ class CustomerSessionFactory(DjangoModelFactory[AuthSession]):
     device_label = "pytest"
     refresh_hash = Sequence(lambda n: hashlib.sha256(f"customer-refresh-{n}".encode()).hexdigest())  # type: ignore[no-untyped-call]
     absolute_expires_at = LazyFunction(lambda: timeutils.now() + timedelta(days=30))  # type: ignore[no-untyped-call]
+
+
+# --- M2 customer sessions (plan §1 P0) ----------------------------------------------------------------------
+
+TEST_FID = "fid-test-0001"
+TEST_PLATFORM = "ios"
+TEST_APP_VERSION = "1.0.0"
+
+# Raw device keys issued by :func:`start_test_session`, keyed by device pk (the server stores only the hash).
+_device_keys: dict[int, str] = {}
+
+
+def start_test_session(
+    customer: Customer,
+    *,
+    fid: str = TEST_FID,
+    platform: str = TEST_PLATFORM,
+    app_version: str = TEST_APP_VERSION,
+    issue_device_key: bool = True,
+) -> services.SessionStart:
+    """Sign ``customer`` in through ``services.start_customer_session`` and remember the raw secrets, so
+    :func:`raw_refresh` and :func:`raw_device_key` can read them later."""
+    started = services.start_customer_session(
+        customer.pk, fid=fid, platform=platform, app_version=app_version, issue_device_key=issue_device_key
+    )
+    _refresh_tokens[started.session.pk] = started.raw_refresh
+    if started.raw_device_key is not None and started.session.device_id is not None:
+        _device_keys[started.session.device_id] = started.raw_device_key
+    return started
+
+
+def raw_device_key(device: Device) -> str:
+    """The raw device key :func:`start_test_session` issued for ``device``."""
+    return _device_keys[device.pk]
+
+
+def device_headers(
+    fid: str = TEST_FID,
+    platform: str = TEST_PLATFORM,
+    version: str = TEST_APP_VERSION,
+    key: str | None = None,
+) -> dict[str, str]:
+    """``APIClient`` keyword arguments for the customer device headers (customer contract §1.2)."""
+    headers = {
+        "HTTP_X_GD_DEVICE_ID": fid,
+        "HTTP_X_GD_PLATFORM": platform,
+        "HTTP_X_GD_APP_VERSION": version,
+    }
+    if key is not None:
+        headers["HTTP_X_GD_DEVICE_KEY"] = key
+    return headers
