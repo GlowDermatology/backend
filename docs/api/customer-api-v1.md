@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Version | 1.1.0-draft (2026-10-26, review revision 1), milestone M2: the iOS/Android customer app, provider callbacks and the cashier QR endpoint |
+| Version | 1.2.0-draft (2026-10-26, review revision 2 and the product-owner decisions of 2026-10-26), milestone M2: the iOS/Android customer app, provider callbacks and the cashier QR endpoint |
 | Implemented by | the Django 6.1 / DRF 3.18 backend (Codex, packages P0–P3 of `docs/plans/2026-10-26-m2-customer-api.md`); consumed by the native iOS and Android apps (not in this repo) |
 | Source of truth | `docs/specs/2026-10-24-backend-foundation-design.md` (Auth and request security → Customer (M2); Financial integrity; Milestones → M2; Provisional business rules). If this file and the spec disagree, the spec wins and this file gets fixed. |
 | Shared rules | `docs/api/admin-api-v1.md` §1 (envelope, pagination, idempotency, values), §3 (enums), §4 (OrderEvent types), §5.8 (Uzbek labels). This file **references** them and lists only what is different for the customer audience. |
@@ -2221,7 +2221,7 @@ code a customer view can raise to an existing key.
    the device key; `me/password/` (signed in, current password or SMS code) keeps the session and identities.
 6. **Secrets on the device.** Refresh token and device key: iOS Keychain (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`,
    no iCloud sync) / Android Keystore-backed EncryptedSharedPreferences; access token in memory; the refresh and
-   access tokens are deleted on any `SESSION_*`, on logout and on a 401 from `auth/refresh/` (the device key is kept so
+   access tokens are deleted on any `SESSION_*` or `password_changed`, on logout and on a 401 from `auth/refresh/` (the device key is kept so
    the next sign-in on this install skips the SMS; it is deleted on account deletion). The QR token is never persisted
    and the QR screen is excluded from screenshots/recents where the OS allows (`FLAG_SECURE` on Android). Server side
    the only raw refresh token ever stored is the 120-second rotation-grace cache entry in Redis.
@@ -2355,4 +2355,5 @@ the client may still revise it later through a setting or a data field:
 | M2-N1 | Show the admin's adjustment reason to the customer? | No (generic "Bonus qo‘shildi" / "Balans tuzatildi") |
 | M2-N2 | Push for a customer's own order cancellation | Yes (state machine row 5 pushes `cancelled`) |
 | M2-N3 | Security notices (social link/unlink, password reset and change) | Push + inbox row (`account_security`), and for a reset or a social completion a visible push to the replaced device plus a 401 message there; no SMS (re-evaluated in revision 2: a reset needs the SMS code, so an SMS notice would reach whoever did it; an SMS template would also need Eskiz approval) |
+| M2-F1 | May production run fake provider adapters? | **Decided by the product owner (2026-10-26):** yes, warned at startup and reported per provider in `health/?ready=1` and admin settings; fake callbacks are refused, fake payment providers are not offered, the dev simulate endpoint and the fixed OTP exist only under local/test settings, and fake Eskiz delivers no SMS (demo/staging posture, §6.14) |
 | M2-T1 | Terms not yet versioned in settings | Registration answers 503 `terms_not_published` until staff publish `terms_version` with the uz terms and privacy texts |
