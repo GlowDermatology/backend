@@ -442,7 +442,8 @@ LIVE_OAUTH_ENV = {
     "GOOGLE_OAUTH_CLIENT_SECRET": "google-secret-value",
     "FACEBOOK_APP_ID": "1234567890",
     "FACEBOOK_APP_SECRET": "facebook-secret-value",
-    "OAUTH_REDIRECT_URI": "https://admin.example.uz/admin/auth/callback",
+    "GOOGLE_OAUTH_REDIRECT_URI": "https://admin.example.uz/admin/auth/oauth/google/callback",
+    "FACEBOOK_OAUTH_REDIRECT_URI": "https://admin.example.uz/admin/auth/oauth/facebook/callback",
 }
 
 
@@ -498,8 +499,25 @@ def test_live_oauth_follows_integrations_mode_and_rejects_placeholders(
     with pytest.raises(ImproperlyConfigured, match="FACEBOOK_APP_SECRET.*placeholder"):
         load_fresh_production()
     monkeypatch.setenv("FACEBOOK_APP_SECRET", LIVE_OAUTH_ENV["FACEBOOK_APP_SECRET"])
-    monkeypatch.setenv("OAUTH_REDIRECT_URI", "admin/auth/callback")
-    with pytest.raises(ImproperlyConfigured, match="OAUTH_REDIRECT_URI"):
+    monkeypatch.setenv("GOOGLE_OAUTH_REDIRECT_URI", "admin/auth/oauth/google/callback")
+    with pytest.raises(ImproperlyConfigured, match="GOOGLE_OAUTH_REDIRECT_URI"):
+        load_fresh_production()
+
+
+def test_live_oauth_redirect_uris_fall_back_to_the_deprecated_single_value(
+    production_env: None, load_fresh_production: Callable[[], ModuleType], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Admin contract §2.1: one release keeps OAUTH_REDIRECT_URI as the fallback of a provider's own value."""
+    monkeypatch.setenv("OAUTH_MODE", "live")
+    for name, value in LIVE_OAUTH_ENV.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.delenv("FACEBOOK_OAUTH_REDIRECT_URI")
+    monkeypatch.setenv("OAUTH_REDIRECT_URI", "https://admin.example.uz/admin/auth/callback")
+    production = load_fresh_production()
+    assert production.GOOGLE_OAUTH_REDIRECT_URI == LIVE_OAUTH_ENV["GOOGLE_OAUTH_REDIRECT_URI"]
+    assert production.FACEBOOK_OAUTH_REDIRECT_URI == "https://admin.example.uz/admin/auth/callback"
+    monkeypatch.delenv("OAUTH_REDIRECT_URI")
+    with pytest.raises(ImproperlyConfigured, match="FACEBOOK_OAUTH_REDIRECT_URI is required"):
         load_fresh_production()
 
 
