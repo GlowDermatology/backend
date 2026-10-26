@@ -92,8 +92,9 @@ def test_happy_path_exchanges_debugs_and_reads_profile(recorder: Recorder) -> No
         "code_verifier": [VERIFIER],
         "redirect_uri": [REDIRECT],
     }
-    assert debug.method == "GET" and debug.url.path == DEBUG_PATH
-    assert dict(debug.url.params) == {"input_token": ACCESS_TOKEN}
+    # customer contract §2.1.8 (P1): the user's token travels in a form-encoded POST body, never in the URL
+    assert debug.method == "POST" and debug.url.path == DEBUG_PATH and not debug.url.params
+    assert parse_qs(debug.content.decode()) == {"input_token": [ACCESS_TOKEN]}
     assert debug.headers["Authorization"] == f"Bearer {APP_ID}|{APP_SECRET}"
     assert me.method == "GET" and me.url.path == ME_PATH
     assert dict(me.url.params) == {
