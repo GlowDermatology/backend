@@ -173,3 +173,30 @@ def test_broken_reversal_links_and_hold_orders_are_reported_per_row() -> None:
         store_reversal.credit_reversal_entry_id is not None
         and online_reversal.credit_reversal_entry_id is not None
     )
+
+
+def test_mismatches_log_one_error_line_and_raise_one_alert(caplog: pytest.LogCaptureFixture) -> None:
+    """M3 (docs/ops/monitoring.md): any mismatch logs ERROR ``loyalty.reconciliation_mismatch`` with the
+    counts per failing check and queues the alert of the same name (ids and counts only)."""
+    import logging
+
+    from django.test import override_settings
+
+    from glowderma.core.models import OutboxMessage
+
+    account, _purchase, _ = build_chains()
+    assert tasks.reconcile_balances_now()["mismatches"] == 0
+    with connection.cursor() as cursor:
+        cursor.execute("UPDATE loyalty_loyaltyaccount SET balance = balance + 1 WHERE id = %s", [account.pk])
+    with (
+        override_settings(ALERT_WEBHOOK_URL="https://alerts.example.uz/hook"),
+        caplog.at_level(logging.ERROR, logger="glowderma.loyalty.tasks"),
+    ):
+        tasks.reconcile_balances_now()
+    assert (
+        "loyalty.reconciliation_mismatch mismatches=2 checks={'ledger_sum': 1, 'last_balance_after': 1}"
+        in caplog.text
+    )
+    (alert,) = OutboxMessage.objects.filter(topic="alert.send")
+    assert alert.payload["event"] == "loyalty.reconciliation_mismatch"
+    assert alert.payload["fields"] == {"mismatches": 2, "checks": {"ledger_sum": 1, "last_balance_after": 1}}
