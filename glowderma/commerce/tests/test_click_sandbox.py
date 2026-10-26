@@ -480,3 +480,26 @@ def test_an_unexpected_exception_answers_500_and_rolls_back(order: Order, monkey
     )
     assert response.status_code == 500
     assert rows("click") == [] and payments(order)[0].provider_txn_id == ""
+
+
+def test_expiry_c_prime_and_e(order: Order, now: datetime) -> None:
+    """(c′) prepare at T−30 s, expiry at T, complete at T+60 s → paid (grace); (e) prepare at T+10 s → -9."""
+    expires = order.reservation_expires_at
+    assert expires is not None
+    payment_id = _prepared(order, now, seconds=int((expires - now).total_seconds()) - 30)
+    with at(expires):
+        assert services.expire_due_reservations() == []
+    with at(expires + timedelta(seconds=60)):
+        assert complete(order, payment_id)["error"] == 0
+    assert Order.objects.get(pk=order.pk).status == "processing"
+    late = place(shopper(), fulfilment="pickup", when=now)
+    with at(late.reservation_expires_at + timedelta(seconds=10)):  # type: ignore[operator]
+        assert prepare(late, txn=TXN + 50)["error"] == -9
+
+
+def test_rejected_rows_are_capped_per_ip(order: Order) -> None:
+    params = prepare_params(order)
+    params["sign_string"] = "0" * 32
+    for _ in range(12):
+        assert click(CLICK_PREPARE, params)["error"] == -1
+    assert len(rows("click")) == 10  # WEBHOOK_REJECTED_PER_IP_PER_MIN
