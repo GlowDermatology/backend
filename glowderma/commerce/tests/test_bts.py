@@ -212,7 +212,8 @@ def bts_document(shipment: Shipment, **changes: Any) -> dict[str, Any]:
 
 
 def post_raw(body: bytes | str, content_type: str, *, query: str = f"?token={SECRET}") -> Any:
-    return APIClient().generic("POST", f"{BTS_URL}{query}", body, content_type=content_type)
+    text = body.decode() if isinstance(body, bytes) else body
+    return APIClient().generic("POST", f"{BTS_URL}{query}", text, content_type=content_type)
 
 
 def delivered(shipment: Shipment) -> None:

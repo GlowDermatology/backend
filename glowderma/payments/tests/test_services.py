@@ -64,7 +64,8 @@ def test_a_claim_click_did_not_process_is_released_by_its_owner_only() -> None:
     assert (released.state, released.changed) == ("requested", True)
     assert not services.release_claim(refund_id, "again", AT, expected_attempts=claim.attempts).changed
     audit = AuditEntry.objects.filter(action="refund.state_changed").order_by("-id").first()
-    assert audit is not None and (audit.after["from"], audit.after["to"]) == ("submitting", "requested")
+    assert audit is not None and isinstance(audit.after, dict)
+    assert (audit.after["from"], audit.after["to"]) == ("submitting", "requested")
     assert services.mark_submitting(refund_id, AT).attempts == claim.attempts + 1  # claimed again
 
 
