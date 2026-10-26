@@ -301,6 +301,8 @@ class InboxNotification(TimeStampedModel):
         CAMPAIGN = "campaign"
         ORDER = "order"
         APPOINTMENT = "appointment"
+        # M2 account_security notices (customer contract §2.12): source_id = the customer id.
+        ACCOUNT = "account"
 
     class PushState(models.TextChoices):  # internal
         NO_DEVICE = "no_device"
@@ -318,7 +320,7 @@ class InboxNotification(TimeStampedModel):
     )  # {"kind":"none"} | {"kind":"product","product_id":4} | {"kind":"order","order_id":10248} | …
     image_url = models.CharField(max_length=500, blank=True)
     source_type = models.CharField(max_length=16, choices=SourceType.choices)
-    source_id = models.BigIntegerField()  # campaign / order / appointment id
+    source_id = models.BigIntegerField()  # campaign / order / appointment / customer (account) id
     template_status = models.CharField(
         max_length=24, blank=True, choices=enums.TemplateStatus.choices
     )  # order_status only
@@ -338,6 +340,7 @@ class InboxNotification(TimeStampedModel):
                     Q(kind="order_status", source_type="order") & ~Q(template_status="")
                     | Q(kind="appointment", source_type="appointment", template_status="")
                     | Q(kind__in=["promo", "general"], source_type="campaign", template_status="")
+                    | Q(kind="general", source_type="account", template_status="")
                 ),
                 name="inbox_kind_source_fields",
             ),
