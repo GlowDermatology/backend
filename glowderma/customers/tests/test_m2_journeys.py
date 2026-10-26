@@ -10,8 +10,9 @@ as in production. State that has no customer route is arranged through the admin
 and the catalogue rows are written directly (they have no API). Time moves through ``timeutils.now`` only
 (no freezegun), and never before a token is issued: PyJWT checks ``iat``/``exp`` against the real clock.
 
-A journey that fails because of a product defect keeps asserting the contract and is marked
-``xfail(strict=True)`` with the defect id of the integration report.
+The integration review found five seam defects with these journeys (M2J-1…5: one published-terms rule for
+checkout and booking, the hold grace shown only for orders really in it, and ``DELETE me/`` skipping an order or
+appointment settled under it); the tests that pinned them now pass.
 """
 
 from __future__ import annotations
@@ -1101,9 +1102,6 @@ def test_journey_4_expiry_then_late_click_complete_is_accepted_and_reversed(worl
     outbox_clean()
 
 
-@pytest.mark.xfail(
-    strict=True, reason="M2J-4: effective hold expiry adds the grace without an attached transaction"
-)
 @pytest.mark.django_db
 def test_journey_4b_hold_without_an_attached_transaction_shows_its_own_expiry(world: World) -> None:
     """C§2.9.1: a hold's EFFECTIVE expiry is ``reservation_expires_at``, plus the grace only "while a
@@ -1567,9 +1565,6 @@ def test_journey_7b_delete_waits_for_click_in_flight_then_the_late_capture_is_re
     outbox_clean()
 
 
-@pytest.mark.xfail(
-    strict=True, reason="M2J-3: DELETE me/ answers 409 not_cancellable when a capture lands first"
-)
 @pytest.mark.django_db(transaction=True)
 def test_journey_7c_delete_racing_a_click_capture_keeps_the_paid_order(
     monkeypatch: pytest.MonkeyPatch, fcm: FakeFcm, staff_client: APIClient, clock: Clock
@@ -1667,9 +1662,6 @@ def test_journey_7c_delete_racing_a_click_capture_keeps_the_paid_order(
     }
 
 
-@pytest.mark.xfail(
-    strict=True, reason="M2J-5: DELETE me/ answers 409 not_cancellable when staff settle an appointment first"
-)
 @pytest.mark.django_db(transaction=True)
 def test_journey_7d_delete_racing_a_staff_appointment_action_is_not_aborted(
     monkeypatch: pytest.MonkeyPatch, fcm: FakeFcm, staff_client: APIClient, clock: Clock
@@ -1780,7 +1772,6 @@ def test_journey_8_checkout_and_booking_refuse_stale_consent_alike(world: World)
     outbox_clean()
 
 
-@pytest.mark.xfail(strict=True, reason="M2J-1: checkout reads the raw terms_version, not the published terms")
 @pytest.mark.django_db
 def test_journey_8b_unpublished_terms_change_blocks_neither_checkout_nor_booking(world: World) -> None:
     """C§2.4 (``terms_version`` is null while the terms are not published), §2.2.1/§2.2.4: the one consent
@@ -1814,7 +1805,6 @@ def test_journey_8b_unpublished_terms_change_blocks_neither_checkout_nor_booking
     assert (placed.status_code, booked.status_code) == (201, 201), (placed.content, booked.content)
 
 
-@pytest.mark.xfail(strict=True, reason="M2J-2: booking treats whitespace-only terms texts as published")
 @pytest.mark.django_db
 def test_journey_8c_blank_terms_text_is_unpublished_for_booking_too(world: World) -> None:
     """C§2.1.3 publication rule ("the uz texts non-empty") as P1 and ``settings/public/`` apply it (trimmed):
