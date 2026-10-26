@@ -1575,6 +1575,9 @@ paths:
           description: ''
     post:
       operationId: admin_categories_create
+      description: JSON, or multipart with dotted `name.uz`/`name.ru`/`name.en` and
+        an optional `image` (JPEG, PNG or WebP, ≤ 5 MiB; re-encoded, EXIF stripped,
+        ≤ 2400 px).
       tags:
       - admin
       requestBody:
@@ -1582,6 +1585,9 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CategoryWriteRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CategoryFormRequest'
         required: true
       security:
       - StaffJWT: []
@@ -1698,6 +1704,9 @@ paths:
           description: ''
     patch:
       operationId: admin_categories_partial_update
+      description: 'JSON or multipart (dotted names). A multipart `image` replaces
+        the stored image (the old file is removed); `remove_image: true` drops it;
+        both at once → `remove_image` `invalid`.'
       parameters:
       - in: path
         name: slug
@@ -1710,7 +1719,10 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchedCategoryWriteRequest'
+              $ref: '#/components/schemas/PatchedCategoryPatchRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedCategoryPatchFormRequest'
       security:
       - StaffJWT: []
       responses:
@@ -2317,6 +2329,126 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Job'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/location/:
+    get:
+      operationId: admin_location_retrieve
+      description: The clinic (one location, decision P4); 404 until the first PATCH
+        entered it.
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClinicLocation'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    patch:
+      operationId: admin_location_partial_update
+      description: Texts merge leaf by leaf; the first PATCH creates the clinic and
+        needs `name.uz`.
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedClinicLocationPatchRequest'
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClinicLocation'
           description: ''
         '400':
           content:
@@ -4870,6 +5002,314 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
+  /api/v1/admin/services/:
+    get:
+      operationId: admin_services_list
+      parameters:
+      - in: query
+        name: category
+        schema:
+          enum:
+          - dermatology
+          - cosmetology
+          type: string
+          minLength: 1
+        description: |-
+          * `dermatology` - dermatology
+          * `cosmetology` - cosmetology
+      - in: query
+        name: export
+        schema:
+          type: string
+          enum:
+          - csv
+          - xlsx
+        description: Download the filtered list as a file instead of the JSON page.
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+      - in: query
+        name: ordering
+        schema:
+          enum:
+          - position
+          - name
+          - -name
+          - created_at
+          - -created_at
+          type: string
+          default: position
+          minLength: 1
+        description: |-
+          * `position` - position
+          * `name` - name
+          * `-name` - -name
+          * `created_at` - created_at
+          * `-created_at` - -created_at
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          enum:
+          - 20
+          - 50
+      - in: query
+        name: search
+        schema:
+          type: string
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedClinicServiceList'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    post:
+      operationId: admin_services_create
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClinicServiceWriteRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClinicService'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/services/{id}/:
+    get:
+      operationId: admin_services_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClinicService'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    patch:
+      operationId: admin_services_partial_update
+      description: 'Every field optional; texts merge leaf by leaf. There is no delete:
+        `is_active: false` retires a service (it leaves the customer catalogue at
+        once; its appointments are kept).'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedClinicServiceWriteRequest'
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClinicService'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/admin/settings/:
     get:
       operationId: admin_settings_retrieve
@@ -4928,6 +5368,12 @@ paths:
           description: ''
     patch:
       operationId: admin_settings_partial_update
+      description: 'Changes the sent fields only (each language of an i18n object
+        separately; keys other than `uz`, `ru`, `en` answer `invalid`). `terms` and
+        `privacy_policy` are drafts: customers keep seeing the published copy until
+        `POST settings/terms/publish/` (`terms_unpublished_changes` tells whether
+        a draft differs from it). The booking policy is not versioned and is served
+        as soon as it is saved.'
       tags:
       - admin
       requestBody:
@@ -4986,11 +5432,1168 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
+  /api/v1/admin/settings/terms/publish/:
+    post:
+      operationId: admin_settings_terms_publish
+      description: Publishes the terms and privacy drafts (copied into the published
+        texts) as a new `terms_version` (`YYYYMMDD-n`, the Tashkent day and its publication
+        count) and sets `terms_updated_at`. Registration then accepts only the new
+        version and every customer is asked to accept it again at checkout and booking
+        (409 `terms_update_required`). 409 `conflict` while the uz terms or the uz
+        privacy draft has no visible character. Empty body.
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Settings'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialists/:
+    get:
+      operationId: admin_specialists_list
+      parameters:
+      - in: query
+        name: export
+        schema:
+          type: string
+          enum:
+          - csv
+          - xlsx
+        description: Download the filtered list as a file instead of the JSON page.
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+      - in: query
+        name: ordering
+        schema:
+          enum:
+          - position
+          - name
+          - -name
+          - created_at
+          - -created_at
+          type: string
+          default: position
+          minLength: 1
+        description: |-
+          * `position` - position
+          * `name` - name
+          * `-name` - -name
+          * `created_at` - created_at
+          * `-created_at` - -created_at
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          enum:
+          - 20
+          - 50
+      - in: query
+        name: role
+        schema:
+          enum:
+          - dermatologist
+          - cosmetologist
+          type: string
+          minLength: 1
+        description: |-
+          * `dermatologist` - dermatologist
+          * `cosmetologist` - cosmetologist
+      - in: query
+        name: search
+        schema:
+          type: string
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedClinicSpecialistList'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    post:
+      operationId: admin_specialists_create
+      description: 'Create a specialist (inactive unless `is_active: true`; the location
+        defaults to the clinic). Add the offered services and the working hours, then
+        activate.'
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClinicSpecialistWriteRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClinicSpecialist'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialists/{id}/:
+    get:
+      operationId: admin_specialists_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClinicSpecialist'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    patch:
+      operationId: admin_specialists_partial_update
+      description: 'Every field optional; texts merge leaf by leaf. `is_active: false`
+        with requested/confirmed appointments ahead answers 409 `conflict` naming
+        their count unless `force: true` (the appointments are kept either way).'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedClinicSpecialistPatchRequest'
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClinicSpecialist'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialists/{id}/blocks/:
+    get:
+      operationId: admin_specialists_blocks_list
+      description: Blocked periods touching the days `date_from` … `date_to`, by start;
+        default today on.
+      parameters:
+      - in: query
+        name: date_from
+        schema:
+          type: string
+          format: date
+      - in: query
+        name: date_to
+        schema:
+          type: string
+          format: date
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          enum:
+          - 20
+          - 50
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedBlockedPeriodList'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    post:
+      operationId: admin_specialists_blocks_create
+      description: An absolute busy/off range; it may not overlap another block of
+        the specialist.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BlockedPeriodCreateRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlockedPeriod'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialists/{id}/blocks/{block_id}/:
+    delete:
+      operationId: admin_specialists_blocks_destroy
+      parameters:
+      - in: path
+        name: block_id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '204':
+          description: No response body
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialists/{id}/conflicts/:
+    get:
+      operationId: admin_specialists_conflicts
+      description: The specialist's requested/confirmed appointments starting now
+        or later that its current schedule no longer covers (a day without hours,
+        outside that day's hours, inside a blocked period or the recurring break),
+        by start. Schedule changes never move or cancel appointments; reschedule or
+        cancel these through appointments/{id}/reschedule|cancel/.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleConflicts'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialists/{id}/overrides/:
+    get:
+      operationId: admin_specialists_overrides_list
+      description: Date overrides by date; default from today (Tashkent).
+      parameters:
+      - in: query
+        name: date_from
+        schema:
+          type: string
+          format: date
+      - in: query
+        name: date_to
+        schema:
+          type: string
+          format: date
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          enum:
+          - 20
+          - 50
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedHoursOverrideList'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    post:
+      operationId: admin_specialists_overrides_create
+      description: One date's own hours, or a day off (`start` and `end` null); one
+        per date.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HoursOverrideCreateRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HoursOverride'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialists/{id}/overrides/{override_id}/:
+    delete:
+      operationId: admin_specialists_overrides_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: override_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '204':
+          description: No response body
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialists/{id}/photo/:
+    put:
+      operationId: admin_specialists_photo_update
+      description: One multipart part `file` (JPEG, PNG or WebP, ≤ 5 MiB); replaces
+        the current photo.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SpecialistPhotoUploadRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClinicSpecialist'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    delete:
+      operationId: admin_specialists_photo_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '204':
+          description: No response body
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialists/{id}/services/:
+    put:
+      operationId: admin_specialists_services_update
+      description: The exact set of offered services with the price and duration a
+        booking snapshots; a service left out stops being offered. Existing appointments
+        keep their snapshots.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OfferedServicesRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClinicSpecialist'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialists/{id}/working-hours/:
+    put:
+      operationId: admin_specialists_working_hours_update
+      description: 'The whole week: a weekday left out is not a working day. Appointments
+        already booked outside the new hours are kept (see `specialists/{id}/conflicts/`).'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkingWeekRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClinicSpecialist'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/admin/staff/:
     get:
       operationId: admin_staff_list
-      description: '``GET staff/`` (contract §2.16): the staff directory behind the
-        audit-log actor filter.'
+      description: 'Every staff member: the directory behind the audit-log actor filter.
+        A manager''s rows also carry `full_name`, `is_manager`, `last_login_at`, `linked_providers`
+        and `created_at`; for anyone else these keys are `null`.'
       parameters:
       - in: query
         name: is_active
@@ -5027,6 +6630,440 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PaginatedStaffListItemList'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    post:
+      operationId: admin_staff_create
+      description: Manager only (403 `permission_denied` otherwise). Creates an active
+        staff account with a generated temporary password, shown once in the answer.
+        `email` already used by any account → `unique`.
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffCreateRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffCredentials'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/staff/{id}/:
+    get:
+      operationId: admin_staff_retrieve
+      description: Manager only (403 `permission_denied` otherwise).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffMember'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    patch:
+      operationId: admin_staff_partial_update
+      description: Manager only (403 `permission_denied` otherwise). Changes `full_name`
+        and/or `is_manager` (`email`, `is_active`, `password` → `read_only`). Removing
+        the manager role of the caller or of the last active manager → 409 `conflict`.
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Optional client-generated UUID; when sent, a retry with the
+          same body returns the stored 2xx response with `Idempotent-Replayed: true`
+          and another body answers 422 `idempotency_key_reused`.'
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedStaffUpdateRequest'
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffMember'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/staff/{id}/deactivate/:
+    post:
+      operationId: admin_staff_deactivate
+      description: 'Manager only (403 `permission_denied` otherwise). The account
+        can no longer sign in: every open session is revoked (`deactivated`), linked
+        identities stay. The caller''s own account or the last active manager → 409
+        `conflict`; an inactive account → 200 unchanged.'
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffMember'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/staff/{id}/reactivate/:
+    post:
+      operationId: admin_staff_reactivate
+      description: Manager only (403 `permission_denied` otherwise). The account may
+        sign in again (password, identities and manager role kept); an active account
+        → 200 unchanged.
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Optional client-generated UUID; when sent, a retry with the
+          same body returns the stored 2xx response with `Idempotent-Replayed: true`
+          and another body answers 422 `idempotency_key_reused`.'
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffMember'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/staff/{id}/reset-password/:
+    post:
+      operationId: admin_staff_reset_password
+      description: Manager only (403 `permission_denied` otherwise). Replaces the
+        password with a generated temporary one (shown once) and revokes every open
+        session (`password_changed`); linked identities stay. The caller's own account
+        → 409 `conflict` (use `auth/change-password/`).
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffCredentials'
           description: ''
         '400':
           content:
@@ -11739,6 +13776,11 @@ components:
           nullable: true
           minLength: 1
           maxLength: 40
+        link.url:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 500
         is_active:
           type: boolean
         starts_at:
@@ -11763,16 +13805,22 @@ components:
           type: string
           nullable: true
           maxLength: 40
+        url:
+          type: string
+          nullable: true
+          maxLength: 500
     BannerLinkKindEnum:
       enum:
       - none
       - product
       - category
+      - url
       type: string
       description: |-
         * `none` - none
         * `product` - product
         * `category` - category
+        * `url` - url
     BannerLinkRequest:
       type: object
       properties:
@@ -11786,6 +13834,11 @@ components:
           nullable: true
           minLength: 1
           maxLength: 40
+        url:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 500
     BannerResults:
       type: object
       properties:
@@ -11847,6 +13900,74 @@ components:
       description: |-
         * `busy` - busy
         * `off` - off
+    BlockedPeriod:
+      type: object
+      description: An absolute busy / off range of the specialist (``label`` null
+        = none).
+      properties:
+        id:
+          type: integer
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+        kind:
+          $ref: '#/components/schemas/BlockKindEnum'
+        label:
+          type: string
+          nullable: true
+          readOnly: true
+        created_by:
+          allOf:
+          - $ref: '#/components/schemas/Actor'
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+      required:
+      - created_at
+      - created_by
+      - end
+      - id
+      - kind
+      - label
+      - start
+    BlockedPeriodCreateRequest:
+      type: object
+      description: Body of ``POST specialists/{id}/blocks/``.
+      properties:
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+        kind:
+          $ref: '#/components/schemas/BlockKindEnum'
+        label:
+          type: string
+          nullable: true
+          maxLength: 80
+      required:
+      - end
+      - kind
+      - start
+    BookingPolicyPatchRequest:
+      type: object
+      description: '``booking_policy`` of a PATCH: each language optional, ≤ 5 000
+        characters, trimmed.'
+      properties:
+        uz:
+          type: string
+          maxLength: 5000
+        ru:
+          type: string
+          maxLength: 5000
+        en:
+          type: string
+          maxLength: 5000
     BookingRequest:
       type: object
       properties:
@@ -12206,6 +14327,11 @@ components:
           allOf:
           - $ref: '#/components/schemas/I18nText60'
           readOnly: true
+        image_url:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
         position:
           type: integer
         is_active:
@@ -12220,12 +14346,38 @@ components:
           format: date-time
       required:
       - created_at
+      - image_url
       - is_active
       - name
       - position
       - product_count
       - slug
       - updated_at
+    CategoryFormRequest:
+      type: object
+      properties:
+        slug:
+          type: string
+          minLength: 1
+          maxLength: 40
+        name.uz:
+          type: string
+          minLength: 2
+          maxLength: 60
+        name.ru:
+          type: string
+          maxLength: 60
+        name.en:
+          type: string
+          maxLength: 60
+        is_active:
+          type: boolean
+        image:
+          type: string
+          format: binary
+      required:
+      - name.uz
+      - slug
     CategoryNameRequest:
       type: object
       description: |-
@@ -12258,8 +14410,12 @@ components:
       - results
     CategoryWriteRequest:
       type: object
-      description: '``POST categories/`` and ``PATCH categories/{slug}/`` (``partial``;
-        ``slug`` is then ``read_only``).'
+      description: |-
+        ``POST categories/`` and ``PATCH categories/{slug}/`` (``partial``; ``slug`` is then ``read_only``).
+
+        JSON, or multipart with the dotted names ``name.uz``, ``name.ru``, ``name.en`` next to ``slug``,
+        ``is_active`` and the optional file part ``image`` (gap ADM-5.1; the view reads the file and un-dots the
+        names with ``views.form_to_nested``).
       properties:
         slug:
           type: string
@@ -12299,6 +14455,258 @@ components:
       required:
       - code
       - name
+    ClinicLocation:
+      type: object
+      description: 'The clinic (decision P4: one location), shown to customers with
+        every specialist.'
+      properties:
+        id:
+          type: integer
+        name:
+          allOf:
+          - $ref: '#/components/schemas/I18nText120'
+          readOnly: true
+        address:
+          allOf:
+          - $ref: '#/components/schemas/I18nText300'
+          readOnly: true
+        phone:
+          type: string
+          nullable: true
+          readOnly: true
+        latitude:
+          type: number
+          format: double
+          nullable: true
+          readOnly: true
+        longitude:
+          type: number
+          format: double
+          nullable: true
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+      required:
+      - address
+      - id
+      - latitude
+      - longitude
+      - name
+      - phone
+      - updated_at
+    ClinicService:
+      type: object
+      description: |-
+        The admin ``ClinicService``; instances come from ``selectors.service_queryset()``
+        (``specialist_count`` = active specialists offering it through an active link).
+      properties:
+        id:
+          type: integer
+        name:
+          allOf:
+          - $ref: '#/components/schemas/I18nText120'
+          readOnly: true
+        short_name:
+          allOf:
+          - $ref: '#/components/schemas/I18nText40'
+          readOnly: true
+        description:
+          allOf:
+          - $ref: '#/components/schemas/I18nText2000'
+          readOnly: true
+        category:
+          $ref: '#/components/schemas/ServiceCategoryEnum'
+        default_duration_min:
+          type: integer
+        default_price:
+          type: integer
+          nullable: true
+        position:
+          type: integer
+        is_active:
+          type: boolean
+        specialist_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+      - category
+      - created_at
+      - default_duration_min
+      - default_price
+      - description
+      - id
+      - is_active
+      - name
+      - position
+      - short_name
+      - specialist_count
+      - updated_at
+    ClinicServiceWriteRequest:
+      type: object
+      description: Body of ``POST services/`` and (``partial``) ``PATCH services/{id}/``
+        (texts merge leaf by leaf).
+      properties:
+        name:
+          $ref: '#/components/schemas/ServiceNameRequest'
+        short_name:
+          $ref: '#/components/schemas/ServiceShortNameRequest'
+        description:
+          $ref: '#/components/schemas/ServiceDescriptionRequest'
+        category:
+          $ref: '#/components/schemas/ServiceCategoryEnum'
+        default_duration_min:
+          type: integer
+          maximum: 480
+          minimum: 5
+          description: Minutes, a multiple of 5 (5 … 480).
+        default_price:
+          type: integer
+          maximum: 100000000
+          minimum: 0
+          nullable: true
+          description: Suggested price when offering it; null = none.
+        position:
+          type: integer
+          maximum: 100000
+          minimum: 0
+        is_active:
+          type: boolean
+          default: true
+      required:
+      - category
+      - default_duration_min
+      - name
+    ClinicSpecialist:
+      type: object
+      description: |-
+        The admin ``ClinicSpecialist``; instances come from ``selectors.specialist_queryset()``.
+
+        ``upcoming_appointments`` (``requested`` / ``confirmed`` appointments starting now or later) comes from
+        the view's context (``upcoming``), counted once per page.
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        role:
+          $ref: '#/components/schemas/SpecialistRoleEnum'
+        qualifications:
+          allOf:
+          - $ref: '#/components/schemas/I18nText2000'
+          readOnly: true
+        bio:
+          allOf:
+          - $ref: '#/components/schemas/I18nText2000'
+          readOnly: true
+        experience_years:
+          type: integer
+          nullable: true
+        photo_url:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
+        location_id:
+          type: integer
+        staff_user:
+          allOf:
+          - $ref: '#/components/schemas/Actor'
+          nullable: true
+        slot_step_min:
+          type: integer
+        position:
+          type: integer
+        is_active:
+          type: boolean
+        services:
+          type: array
+          items:
+            $ref: '#/components/schemas/OfferedService'
+        working_hours:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkingDay'
+        upcoming_appointments:
+          type: integer
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+      - bio
+      - created_at
+      - experience_years
+      - id
+      - is_active
+      - location_id
+      - name
+      - photo_url
+      - position
+      - qualifications
+      - role
+      - services
+      - slot_step_min
+      - staff_user
+      - upcoming_appointments
+      - updated_at
+      - working_hours
+    ClinicSpecialistWriteRequest:
+      type: object
+      description: |-
+        Body of ``POST specialists/`` and (``partial``, see the subclass) ``PATCH specialists/{id}/``.
+
+        ``context["professional_id"]`` is the edited specialist (a staff account already linked to it is not a
+        conflict with itself). The validated data carries ``location`` and ``staff_user`` instances.
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 150
+        role:
+          $ref: '#/components/schemas/SpecialistRoleEnum'
+        qualifications:
+          $ref: '#/components/schemas/SpecialistTextRequest'
+        bio:
+          $ref: '#/components/schemas/SpecialistTextRequest'
+        experience_years:
+          type: integer
+          maximum: 80
+          minimum: 0
+          nullable: true
+        slot_step_min:
+          type: integer
+          description: 'The customer slot grid in minutes: 10, 15, 20, 30 (default)
+            or 60.'
+        location_id:
+          type: integer
+          maximum: 2147483647
+          minimum: 1
+          description: 'Default: the clinic (GET location/).'
+        staff_user_id:
+          type: integer
+          maximum: 2147483647
+          minimum: 1
+          nullable: true
+          description: An active staff account, or null.
+        position:
+          type: integer
+          maximum: 100000
+          minimum: 0
+        is_active:
+          type: boolean
+          default: false
+      required:
+      - name
+      - role
     CodeIssue:
       type: object
       properties:
@@ -12516,10 +14924,15 @@ components:
         category:
           type: string
           nullable: true
+        url:
+          type: string
+          nullable: true
+          description: 'Kind `url`: the https link the app opens; else null.'
       required:
       - category
       - kind
       - product_id
+      - url
     CustomerBannerList:
       type: object
       properties:
@@ -12587,6 +15000,10 @@ components:
           allOf:
           - $ref: '#/components/schemas/CustomerDevice'
           nullable: true
+        devices:
+          type: array
+          items:
+            $ref: '#/components/schemas/CustomerDeviceRow'
         ledger:
           type: array
           items:
@@ -12601,6 +15018,7 @@ components:
       - balance
       - deleted_at
       - device
+      - devices
       - groups
       - held
       - id
@@ -12911,7 +15329,11 @@ components:
       - status_label
     CustomerDevice:
       type: object
+      description: 'The card''s current ``device``: the most recently active of the
+        customer''s active devices.'
       properties:
+        platform:
+          $ref: '#/components/schemas/OrderChannelEnum'
         model:
           type: string
         os:
@@ -12928,6 +15350,45 @@ components:
       - last_active_at
       - model
       - os
+      - platform
+      - push_enabled
+    CustomerDeviceRow:
+      type: object
+      description: |-
+        One of the card's ``devices`` (gap ADM-8.1): every installation, active ones first; never the FCM
+        token, the device key or the Firebase installation id.
+      properties:
+        id:
+          type: integer
+        platform:
+          $ref: '#/components/schemas/OrderChannelEnum'
+        model:
+          type: string
+        os:
+          type: string
+        app_version:
+          type: string
+        push_enabled:
+          type: boolean
+        is_active:
+          type: boolean
+          description: '`false` after a logout, a sign-in elsewhere or the deletion.'
+        last_active_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+          description: When the installation first signed in.
+      required:
+      - app_version
+      - created_at
+      - id
+      - is_active
+      - last_active_at
+      - model
+      - os
+      - platform
       - push_enabled
     CustomerErrorEnvelope:
       type: object
@@ -13525,9 +15986,14 @@ components:
           type: boolean
           description: The last BTS polling run tracked no parcel or stopped on transport
             failures (M2).
+        cashback_policy_missing:
+          type: boolean
+          description: 'No cashback policy version is in force now (none exists, or
+            only a future one): purchases earn no cashback until one starts.'
       required:
       - bts_failed
       - bts_polling_failing
+      - cashback_policy_missing
       - new_from_billz
       - next_appointment_at
       - pending_appointments
@@ -13793,6 +16259,12 @@ components:
             network gate (§1): one entry per provider whose mode is `live`. A live
             provider that is not configured makes `status` `error` (503) for every
             caller.'
+        cashback_policy_missing:
+          type: boolean
+          nullable: true
+          description: 'With `integrations`: no cashback policy version is in force,
+            so purchases earn nothing. Informational, never fails readiness; `null`
+            while the database check fails.'
       required:
       - status
     HealthStatusEnum:
@@ -13803,6 +16275,178 @@ components:
       description: |-
         * `ok` - ok
         * `error` - error
+    HoursOverride:
+      type: object
+      description: One date's own hours; ``day_off`` = no hours that day (``start``
+        / ``end`` null).
+      properties:
+        id:
+          type: integer
+        date:
+          type: string
+          format: date
+        start:
+          type: string
+          format: time
+          nullable: true
+        end:
+          type: string
+          format: time
+          nullable: true
+        day_off:
+          type: boolean
+          readOnly: true
+        note:
+          type: string
+        created_by:
+          allOf:
+          - $ref: '#/components/schemas/Actor'
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+      required:
+      - created_at
+      - created_by
+      - date
+      - day_off
+      - end
+      - id
+      - note
+      - start
+    HoursOverrideCreateRequest:
+      type: object
+      description: |-
+        Body of ``POST specialists/{id}/overrides/``: ``start`` and ``end`` both set (that date's hours) or
+        both null / omitted (a day off).
+      properties:
+        date:
+          type: string
+          format: date
+          description: Tashkent calendar day, today … today + 365.
+        start:
+          type: string
+          format: time
+          nullable: true
+          description: '"HH:MM", Tashkent, minutes a multiple of 5.'
+        end:
+          type: string
+          format: time
+          nullable: true
+          description: '"HH:MM", Tashkent, minutes a multiple of 5.'
+        note:
+          type: string
+          maxLength: 120
+      required:
+      - date
+    I18nText120:
+      type: object
+      description: 'Contract 1.4: i18n text is {"uz", "ru", "en"}; "" means not filled,
+        never null.'
+      properties:
+        uz:
+          type: string
+          maxLength: 120
+        ru:
+          type: string
+          maxLength: 120
+        en:
+          type: string
+          maxLength: 120
+      required:
+      - en
+      - ru
+      - uz
+    I18nText2000:
+      type: object
+      description: 'Contract 1.4: i18n text is {"uz", "ru", "en"}; "" means not filled,
+        never null.'
+      properties:
+        uz:
+          type: string
+          maxLength: 2000
+        ru:
+          type: string
+          maxLength: 2000
+        en:
+          type: string
+          maxLength: 2000
+      required:
+      - en
+      - ru
+      - uz
+    I18nText300:
+      type: object
+      description: 'Contract 1.4: i18n text is {"uz", "ru", "en"}; "" means not filled,
+        never null.'
+      properties:
+        uz:
+          type: string
+          maxLength: 300
+        ru:
+          type: string
+          maxLength: 300
+        en:
+          type: string
+          maxLength: 300
+      required:
+      - en
+      - ru
+      - uz
+    I18nText40:
+      type: object
+      description: 'Contract 1.4: i18n text is {"uz", "ru", "en"}; "" means not filled,
+        never null.'
+      properties:
+        uz:
+          type: string
+          maxLength: 40
+        ru:
+          type: string
+          maxLength: 40
+        en:
+          type: string
+          maxLength: 40
+      required:
+      - en
+      - ru
+      - uz
+    I18nText5000:
+      type: object
+      description: 'Contract 1.4: i18n text is {"uz", "ru", "en"}; "" means not filled,
+        never null.'
+      properties:
+        uz:
+          type: string
+          maxLength: 5000
+        ru:
+          type: string
+          maxLength: 5000
+        en:
+          type: string
+          maxLength: 5000
+      required:
+      - en
+      - ru
+      - uz
+    I18nText50000:
+      type: object
+      description: 'Contract 1.4: i18n text is {"uz", "ru", "en"}; "" means not filled,
+        never null.'
+      properties:
+        uz:
+          type: string
+          maxLength: 50000
+        ru:
+          type: string
+          maxLength: 50000
+        en:
+          type: string
+          maxLength: 50000
+      required:
+      - en
+      - ru
+      - uz
     I18nText60:
       type: object
       description: 'Contract 1.4: i18n text is {"uz", "ru", "en"}; "" means not filled,
@@ -13944,23 +16588,31 @@ components:
         appointment_id:
           type: integer
           nullable: true
+        url:
+          type: string
+          nullable: true
+          description: 'Kind `url`: the campaign''s https link the app opens (gap
+            ADM-10.1).'
       required:
       - appointment_id
       - kind
       - order_id
       - product_id
+      - url
     InboxLinkKindEnum:
       enum:
       - none
       - product
       - order
       - appointment
+      - url
       type: string
       description: |-
         * `none` - none
         * `product` - product
         * `order` - order
         * `appointment` - appointment
+        * `url` - url
     IntegrationModeEnum:
       enum:
       - fake
@@ -14197,14 +16849,30 @@ components:
         * `order` - order
         * `billz_sale` - billz_sale
         * `admin` - admin
+    LegalTextPatchRequest:
+      type: object
+      description: '``terms`` / ``privacy_policy`` of a PATCH: each language optional,
+        ≤ 50 000 characters, trimmed.'
+      properties:
+        uz:
+          type: string
+          maxLength: 50000
+        ru:
+          type: string
+          maxLength: 50000
+        en:
+          type: string
+          maxLength: 50000
     LinkKindEnum:
       enum:
       - none
       - product
+      - url
       type: string
       description: |-
         * `none` - none
         * `product` - product
+        * `url` - url
     LinkOption:
       type: object
       properties:
@@ -14247,6 +16915,34 @@ components:
       - longitude
       - name
       - phone
+    LocationAddressRequest:
+      type: object
+      description: '``address``: ``{uz, ru, en}``, each ≤ 300, optional.'
+      properties:
+        uz:
+          type: string
+          maxLength: 300
+        ru:
+          type: string
+          maxLength: 300
+        en:
+          type: string
+          maxLength: 300
+    LocationNameRequest:
+      type: object
+      description: '``name``: ``uz`` trimmed 2..120 (required by the first PATCH);
+        ``ru`` / ``en`` ≤ 120.'
+      properties:
+        uz:
+          type: string
+          minLength: 2
+          maxLength: 120
+        ru:
+          type: string
+          maxLength: 120
+        en:
+          type: string
+          maxLength: 120
     LoginRequest:
       type: object
       properties:
@@ -14328,6 +17024,10 @@ components:
           type: string
         is_superuser:
           type: boolean
+        is_manager:
+          type: boolean
+          description: May manage staff (`staff/` writes, §2.16); the UI shows the
+            staff screen only then.
         linked_providers:
           type: array
           items:
@@ -14352,6 +17052,7 @@ components:
       - display_name
       - email
       - id
+      - is_manager
       - is_superuser
       - linked_providers
       - session_expires_at
@@ -14548,6 +17249,10 @@ components:
           $ref: '#/components/schemas/LinkKindEnum'
         link.product_id:
           type: integer
+        link.url:
+          type: string
+          minLength: 1
+          maxLength: 500
         audience.type:
           $ref: '#/components/schemas/AudienceTypeEnum'
         audience.segment_id:
@@ -14582,10 +17287,15 @@ components:
         label:
           type: string
           nullable: true
+        url:
+          type: string
+          nullable: true
+          description: 'Kind `url` (gap ADM-10.1): the https link.'
       required:
       - kind
       - label
       - product_id
+      - url
     NotificationMeta:
       type: object
       properties:
@@ -14729,19 +17439,94 @@ components:
       - code
       - code_verifier
       - redirect_uri
+    OfferedService:
+      type: object
+      description: |-
+        One service the specialist offers: the price and duration a booking snapshots (``is_active`` = the
+        link; ``service_is_active`` = the service itself; bookable only when both are true).
+      properties:
+        service_id:
+          type: integer
+        name:
+          type: string
+        short_name:
+          type: string
+        category:
+          $ref: '#/components/schemas/ServiceCategoryEnum'
+        price:
+          type: integer
+        duration_min:
+          type: integer
+        is_active:
+          type: boolean
+        service_is_active:
+          type: boolean
+      required:
+      - category
+      - duration_min
+      - is_active
+      - name
+      - price
+      - service_id
+      - service_is_active
+      - short_name
+    OfferedServiceInputRequest:
+      type: object
+      properties:
+        service_id:
+          type: integer
+          maximum: 2147483647
+          minimum: 1
+        price:
+          type: integer
+          maximum: 100000000
+          minimum: 0
+          description: So'm, 0 … 100 000 000.
+        duration_min:
+          type: integer
+          maximum: 480
+          minimum: 5
+          nullable: true
+          description: Minutes, a multiple of 5; omitted or null = the service's default
+            duration.
+        is_active:
+          type: boolean
+          default: true
+      required:
+      - price
+      - service_id
+    OfferedServicesRequest:
+      type: object
+      description: 'Body of ``PUT specialists/{id}/services/``: the exact set (``[]``
+        = offers nothing).'
+      properties:
+        services:
+          type: array
+          items:
+            $ref: '#/components/schemas/OfferedServiceInputRequest'
+          maxItems: 50
+      required:
+      - services
     OnlineOrders:
       type: object
       properties:
         count:
           type: integer
+          description: Paid, non-reversed online purchases.
         last_order_id:
           type: integer
           nullable: true
+          description: The newest order of any status.
         last_order_at:
           type: string
           format: date-time
           nullable: true
+        all_count:
+          type: integer
+          description: 'Every order of any status: what `orders/?customer={id}` lists
+            (the card''s orders link).'
       required:
+      - all_count
       - count
       - last_order_at
       - last_order_id
@@ -15119,6 +17904,27 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Banner'
+    PaginatedBlockedPeriodList:
+      type: object
+      required:
+      - count
+      - page
+      - page_size
+      - page_count
+      - results
+      properties:
+        count:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+        page_count:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/BlockedPeriod'
     PaginatedCategoryList:
       type: object
       required:
@@ -15140,6 +17946,48 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Category'
+    PaginatedClinicServiceList:
+      type: object
+      required:
+      - count
+      - page
+      - page_size
+      - page_count
+      - results
+      properties:
+        count:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+        page_count:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClinicService'
+    PaginatedClinicSpecialistList:
+      type: object
+      required:
+      - count
+      - page
+      - page_size
+      - page_count
+      - results
+      properties:
+        count:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+        page_count:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClinicSpecialist'
     PaginatedCustomerAppointmentList:
       type: object
       required:
@@ -15203,6 +18051,27 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CustomerOrderSummary'
+    PaginatedHoursOverrideList:
+      type: object
+      required:
+      - count
+      - page
+      - page_size
+      - page_count
+      - results
+      properties:
+        count:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+        page_count:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/HoursOverride'
     PaginatedInboxItemList:
       type: object
       required:
@@ -15455,6 +18324,11 @@ components:
           nullable: true
           minLength: 1
           maxLength: 40
+        link.url:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 500
         is_active:
           type: boolean
         starts_at:
@@ -15488,10 +18362,31 @@ components:
           type: string
           format: date-time
           nullable: true
-    PatchedCategoryWriteRequest:
+    PatchedCategoryPatchFormRequest:
       type: object
-      description: '``POST categories/`` and ``PATCH categories/{slug}/`` (``partial``;
-        ``slug`` is then ``read_only``).'
+      properties:
+        name.uz:
+          type: string
+          minLength: 2
+          maxLength: 60
+        name.ru:
+          type: string
+          maxLength: 60
+        name.en:
+          type: string
+          maxLength: 60
+        is_active:
+          type: boolean
+        image:
+          type: string
+          format: binary
+        remove_image:
+          type: boolean
+    PatchedCategoryPatchRequest:
+      type: object
+      description: |-
+        ``PATCH categories/{slug}/``: every field optional; ``remove_image: true`` drops the stored image
+        (gap ADM-5.1; refused together with a new ``image`` part: ``remove_image`` ``invalid``).
       properties:
         slug:
           type: string
@@ -15502,6 +18397,115 @@ components:
         is_active:
           type: boolean
           default: true
+        remove_image:
+          type: boolean
+          default: false
+    PatchedClinicLocationPatchRequest:
+      type: object
+      description: |-
+        Body of ``PATCH location/`` (validated with ``partial=True``; texts merge leaf by leaf). The first
+        PATCH creates the clinic and then needs ``name.uz``; ``latitude`` and ``longitude`` are a pair.
+      properties:
+        name:
+          $ref: '#/components/schemas/LocationNameRequest'
+        address:
+          $ref: '#/components/schemas/LocationAddressRequest'
+        phone:
+          type: string
+          nullable: true
+          minLength: 1
+          pattern: ^\+998\d{9}$
+        latitude:
+          type: number
+          format: double
+          maximum: 90
+          minimum: -90
+          nullable: true
+        longitude:
+          type: number
+          format: double
+          maximum: 180
+          minimum: -180
+          nullable: true
+    PatchedClinicServiceWriteRequest:
+      type: object
+      description: Body of ``POST services/`` and (``partial``) ``PATCH services/{id}/``
+        (texts merge leaf by leaf).
+      properties:
+        name:
+          $ref: '#/components/schemas/ServiceNameRequest'
+        short_name:
+          $ref: '#/components/schemas/ServiceShortNameRequest'
+        description:
+          $ref: '#/components/schemas/ServiceDescriptionRequest'
+        category:
+          $ref: '#/components/schemas/ServiceCategoryEnum'
+        default_duration_min:
+          type: integer
+          maximum: 480
+          minimum: 5
+          description: Minutes, a multiple of 5 (5 … 480).
+        default_price:
+          type: integer
+          maximum: 100000000
+          minimum: 0
+          nullable: true
+          description: Suggested price when offering it; null = none.
+        position:
+          type: integer
+          maximum: 100000
+          minimum: 0
+        is_active:
+          type: boolean
+          default: true
+    PatchedClinicSpecialistPatchRequest:
+      type: object
+      description: |-
+        ``PATCH specialists/{id}/`` (validated with ``partial=True``): every field optional; ``qualifications``
+        and ``bio`` merge leaf by leaf; ``force`` confirms a deactivation despite upcoming appointments.
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 150
+        role:
+          $ref: '#/components/schemas/SpecialistRoleEnum'
+        qualifications:
+          $ref: '#/components/schemas/SpecialistTextRequest'
+        bio:
+          $ref: '#/components/schemas/SpecialistTextRequest'
+        experience_years:
+          type: integer
+          maximum: 80
+          minimum: 0
+          nullable: true
+        slot_step_min:
+          type: integer
+          description: 'The customer slot grid in minutes: 10, 15, 20, 30 (default)
+            or 60.'
+        location_id:
+          type: integer
+          maximum: 2147483647
+          minimum: 1
+          description: 'Default: the clinic (GET location/).'
+        staff_user_id:
+          type: integer
+          maximum: 2147483647
+          minimum: 1
+          nullable: true
+          description: An active staff account, or null.
+        position:
+          type: integer
+          maximum: 100000
+          minimum: 0
+        is_active:
+          type: boolean
+          default: false
+        force:
+          type: boolean
+          default: false
+          description: 'With is_active=false: deactivate even with requested/confirmed
+            appointments ahead.'
     PatchedCustomerCartQuantityRequest:
       type: object
       properties:
@@ -15563,8 +18567,11 @@ components:
     PatchedSettingsPatchRequest:
       type: object
       description: |-
-        ``PATCH settings/``: ``reservation_minutes`` 5..60, ``support_phone`` E.164 | null,
-        ``pickup_address.*`` ≤ 200; ``integrations`` is read-only (``read_only`` field error).
+        ``PATCH settings/`` (contract §2.11): ``reservation_minutes`` 5..60; the phones E.164 | null; the links
+        https | null (Telegram ``t.me`` / ``telegram.me``, Instagram ``instagram.com``); ``pickup_address.*``
+        ≤ 200; ``terms.*`` / ``privacy_policy.*`` ≤ 50 000 and ``booking_policy.*`` ≤ 5 000, trimmed (each
+        language optional); ``integrations``, ``terms_version`` and ``terms_updated_at`` are read-only
+        (``read_only`` field error).
       properties:
         reservation_minutes:
           type: integer
@@ -15575,8 +18582,48 @@ components:
           nullable: true
           minLength: 1
           pattern: ^\+998\d{9}$
+        store_phone:
+          type: string
+          nullable: true
+          minLength: 1
+          pattern: ^\+998\d{9}$
+        cosmetologist_phone:
+          type: string
+          nullable: true
+          minLength: 1
+          pattern: ^\+998\d{9}$
+        telegram_url:
+          type: string
+          nullable: true
+          maxLength: 200
+        instagram_url:
+          type: string
+          nullable: true
+          maxLength: 200
+        website_url:
+          type: string
+          nullable: true
+          maxLength: 200
         pickup_address:
           $ref: '#/components/schemas/PickupAddressRequest'
+        terms:
+          $ref: '#/components/schemas/LegalTextPatchRequest'
+        privacy_policy:
+          $ref: '#/components/schemas/LegalTextPatchRequest'
+        booking_policy:
+          $ref: '#/components/schemas/BookingPolicyPatchRequest'
+    PatchedStaffUpdateRequest:
+      type: object
+      description: |-
+        ``PATCH staff/{id}/`` body: ``full_name`` and/or ``is_manager``; ``email``, ``is_active`` and
+        ``password`` → ``read_only``.
+      properties:
+        full_name:
+          type: string
+          minLength: 2
+          maxLength: 150
+        is_manager:
+          type: boolean
     Payment:
       type: object
       description: One ``GET payments/`` row; ``refunds`` come from the view's per-page
@@ -15665,6 +18712,10 @@ components:
       - next_at
     PickupAddress:
       type: object
+      description: |-
+        An i18n object of a PATCH: a JSON object whose keys are ``uz`` / ``ru`` / ``en`` only (each optional).
+        Any other value answers ``invalid`` on the object's own field; an unknown key (``"UZ"``, ``"xx"``)
+        answers ``invalid`` on that key, never a silent no-op.
       properties:
         uz:
           type: string
@@ -15677,6 +18728,10 @@ components:
           maxLength: 200
     PickupAddressRequest:
       type: object
+      description: |-
+        An i18n object of a PATCH: a JSON object whose keys are ``uz`` / ``ru`` / ``en`` only (each optional).
+        Any other value answers ``invalid`` on the object's own field; an unknown key (``"UZ"``, ``"xx"``)
+        answers ``invalid`` on that key, never a silent no-op.
       properties:
         uz:
           type: string
@@ -16660,6 +19715,17 @@ components:
       - phone
       - phone_mask
       - resolved_at
+    ScheduleConflicts:
+      type: object
+      description: '``GET specialists/{id}/conflicts/``: open future appointments
+        the schedule no longer covers.'
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AppointmentItem'
+      required:
+      - results
     Segment:
       type: object
       description: Contract §2.8 ``Segment``; the counts come from ``selectors.segment_stats``.
@@ -16765,6 +19831,30 @@ components:
       required:
       - phone
       - purpose
+    ServiceCategoryEnum:
+      enum:
+      - dermatology
+      - cosmetology
+      type: string
+      description: |-
+        * `dermatology` - dermatology
+        * `cosmetology` - cosmetology
+    ServiceDescriptionRequest:
+      type: object
+      description: '``description``: ``{uz, ru, en}``, each ≤ 2000, optional.'
+      properties:
+        uz:
+          type: string
+          default: ''
+          maxLength: 2000
+        ru:
+          type: string
+          default: ''
+          maxLength: 2000
+        en:
+          type: string
+          default: ''
+          maxLength: 2000
     ServiceList:
       type: object
       properties:
@@ -16774,6 +19864,25 @@ components:
             $ref: '#/components/schemas/ServiceOffer'
       required:
       - results
+    ServiceNameRequest:
+      type: object
+      description: '``name``: ``uz`` trimmed 2..120 required on create; ``ru`` / ``en``
+        ≤ 120 optional.'
+      properties:
+        uz:
+          type: string
+          minLength: 2
+          maxLength: 120
+        ru:
+          type: string
+          default: ''
+          maxLength: 120
+        en:
+          type: string
+          default: ''
+          maxLength: 120
+      required:
+      - uz
     ServiceOffer:
       type: object
       properties:
@@ -16788,6 +19897,11 @@ components:
         description:
           type: string
           readOnly: true
+        category:
+          $ref: '#/components/schemas/ServiceCategoryEnum'
+        category_label:
+          type: string
+          readOnly: true
         duration_min:
           type: integer
           description: Default duration.
@@ -16800,6 +19914,8 @@ components:
           items:
             type: integer
       required:
+      - category
+      - category_label
       - description
       - duration_min
       - id
@@ -16808,6 +19924,26 @@ components:
       - price_to
       - short_name
       - specialist_ids
+    ServiceShortNameRequest:
+      type: object
+      description: |-
+        ``short_name``: ``uz`` 1..40 (defaults to the first 40 characters of ``name.uz`` on create); ``ru`` /
+        ``en`` ≤ 40 optional.
+      properties:
+        uz:
+          type: string
+          minLength: 1
+          maxLength: 40
+        ru:
+          type: string
+          default: ''
+          maxLength: 40
+        en:
+          type: string
+          default: ''
+          maxLength: 40
+      required:
+      - uz
     SetPasswordRequest:
       type: object
       properties:
@@ -16847,9 +19983,55 @@ components:
           type: string
           nullable: true
           readOnly: true
+        store_phone:
+          type: string
+          nullable: true
+          readOnly: true
+        cosmetologist_phone:
+          type: string
+          nullable: true
+          readOnly: true
+        telegram_url:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
+        instagram_url:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
+        website_url:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
         pickup_address:
           allOf:
           - $ref: '#/components/schemas/PickupAddress'
+          readOnly: true
+        terms:
+          allOf:
+          - $ref: '#/components/schemas/I18nText50000'
+          readOnly: true
+        privacy_policy:
+          allOf:
+          - $ref: '#/components/schemas/I18nText50000'
+          readOnly: true
+        booking_policy:
+          allOf:
+          - $ref: '#/components/schemas/I18nText5000'
+          readOnly: true
+        terms_version:
+          type: string
+          nullable: true
+          readOnly: true
+        terms_updated_at:
+          type: string
+          format: date-time
+          nullable: true
+        terms_unpublished_changes:
+          type: boolean
           readOnly: true
         integrations:
           allOf:
@@ -16863,12 +20045,23 @@ components:
           - $ref: '#/components/schemas/Actor'
           nullable: true
       required:
+      - booking_policy
+      - cosmetologist_phone
+      - instagram_url
       - integrations
       - pickup_address
+      - privacy_policy
       - reservation_minutes
+      - store_phone
       - support_phone
+      - telegram_url
+      - terms
+      - terms_unpublished_changes
+      - terms_updated_at
+      - terms_version
       - updated_at
       - updated_by
+      - website_url
     Shipment:
       oneOf:
       - $ref: '#/components/schemas/ShipmentNotRequired'
@@ -17082,6 +20275,9 @@ components:
         bio:
           type: string
           readOnly: true
+        qualifications:
+          type: string
+          readOnly: true
         experience_years:
           type: integer
           nullable: true
@@ -17101,6 +20297,7 @@ components:
       - location
       - name
       - photo_url
+      - qualifications
       - role
       - role_label
       - services
@@ -17114,6 +20311,8 @@ components:
           type: string
         role:
           $ref: '#/components/schemas/SpecialistRoleEnum'
+        is_active:
+          type: boolean
         working_hours:
           allOf:
           - $ref: '#/components/schemas/WorkingHours'
@@ -17126,6 +20325,7 @@ components:
       required:
       - blocks
       - id
+      - is_active
       - name
       - role
       - working_hours
@@ -17138,6 +20338,14 @@ components:
             $ref: '#/components/schemas/Specialist'
       required:
       - results
+    SpecialistPhotoUploadRequest:
+      type: object
+      properties:
+        file:
+          type: string
+          format: binary
+      required:
+      - file
     SpecialistRoleEnum:
       enum:
       - dermatologist
@@ -17167,10 +20375,67 @@ components:
       - name
       - price
       - short_name
+    SpecialistTextRequest:
+      type: object
+      description: |-
+        ``qualifications`` / ``bio``: ``{uz, ru, en}``, each ≤ 2000, every language optional (missing on
+        create → ``""``; a PATCH changes only the languages sent).
+      properties:
+        uz:
+          type: string
+          default: ''
+          maxLength: 2000
+        ru:
+          type: string
+          default: ''
+          maxLength: 2000
+        en:
+          type: string
+          default: ''
+          maxLength: 2000
+    StaffCreateRequest:
+      type: object
+      description: |-
+        ``POST staff/`` body: ``email`` (trimmed, lower-cased, unique), ``full_name`` (trimmed 2..150),
+        ``is_manager`` (default ``false``).
+      properties:
+        email:
+          type: string
+          format: email
+          minLength: 1
+          maxLength: 254
+        full_name:
+          type: string
+          minLength: 2
+          maxLength: 150
+        is_manager:
+          type: boolean
+          default: false
+      required:
+      - email
+      - full_name
+    StaffCredentials:
+      type: object
+      description: |-
+        ``POST staff/`` (201) and ``POST staff/{id}/reset-password/`` (200): the account and its temporary
+        password, shown once.
+      properties:
+        staff:
+          $ref: '#/components/schemas/StaffMember'
+        temporary_password:
+          type: string
+          description: Shown once; the person signs in with it and changes it under
+            «Parolni o‘zgartirish». A replay of the same `Idempotency-Key` returns
+            it again (stored sealed, §1.7).
+      required:
+      - staff
+      - temporary_password
     StaffListItem:
       type: object
-      description: 'One ``GET staff/`` row: the ``Actor`` keys plus ``email`` and
-        ``is_active``.'
+      description: |-
+        One ``GET staff/`` row: the ``Actor`` keys plus ``email`` and ``is_active`` for every caller (the
+        audit-log actor filter), and the manager's columns, which are ``null`` unless the caller is a manager
+        (``context["manager"]``).
       properties:
         id:
           type: integer
@@ -17182,11 +20447,84 @@ components:
           format: email
         is_active:
           type: boolean
+        full_name:
+          type: string
+          nullable: true
+          description: Manager only, else `null`.
+        is_manager:
+          type: boolean
+          nullable: true
+          description: Manager only, else `null`.
+        last_login_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Manager only, else `null`; `null` for a manager too when never
+            signed in.
+        linked_providers:
+          type: array
+          items:
+            $ref: '#/components/schemas/SocialProviderEnum'
+          nullable: true
+          readOnly: true
+          description: Manager only, else `null`.
+        created_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Manager only, else `null`.
       required:
+      - created_at
       - display_name
       - email
+      - full_name
       - id
       - is_active
+      - is_manager
+      - last_login_at
+      - linked_providers
+    StaffMember:
+      type: object
+      description: '``StaffMember`` (§2.16): a staff account as managers see it; every
+        write of ``staff/`` returns it.'
+      properties:
+        id:
+          type: integer
+        display_name:
+          type: string
+          readOnly: true
+        email:
+          type: string
+          format: email
+        full_name:
+          type: string
+        is_active:
+          type: boolean
+        is_manager:
+          type: boolean
+        last_login_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: '`null`: never signed in.'
+        linked_providers:
+          type: array
+          items:
+            $ref: '#/components/schemas/SocialProviderEnum'
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+      required:
+      - created_at
+      - display_name
+      - email
+      - full_name
+      - id
+      - is_active
+      - is_manager
+      - last_login_at
+      - linked_providers
     StatusCounts:
       type: object
       properties:
@@ -17384,6 +20722,63 @@ components:
       - code
       - phone
       - purpose
+    WorkingDay:
+      type: object
+      description: One working weekday (0 = Monday … 6 = Sunday) with its optional
+        recurring break.
+      properties:
+        weekday:
+          type: integer
+        start:
+          type: string
+          format: time
+        end:
+          type: string
+          format: time
+        break_start:
+          type: string
+          format: time
+          nullable: true
+        break_end:
+          type: string
+          format: time
+          nullable: true
+      required:
+      - break_end
+      - break_start
+      - end
+      - start
+      - weekday
+    WorkingDayInputRequest:
+      type: object
+      properties:
+        weekday:
+          type: integer
+          maximum: 6
+          minimum: 0
+          description: 0 = Monday … 6 = Sunday.
+        start:
+          type: string
+          format: time
+          description: '"HH:MM", Tashkent, minutes a multiple of 5.'
+        end:
+          type: string
+          format: time
+          description: '"HH:MM", Tashkent, minutes a multiple of 5.'
+        break_start:
+          type: string
+          format: time
+          nullable: true
+          description: '"HH:MM", Tashkent, minutes a multiple of 5.'
+        break_end:
+          type: string
+          format: time
+          nullable: true
+          description: '"HH:MM", Tashkent, minutes a multiple of 5.'
+      required:
+      - end
+      - start
+      - weekday
     WorkingHours:
       type: object
       properties:
@@ -17394,6 +20789,19 @@ components:
       required:
       - end
       - start
+    WorkingWeekRequest:
+      type: object
+      description: |-
+        Body of ``PUT specialists/{id}/working-hours/``: the working weekdays (a weekday left out is a day
+        off every week).
+      properties:
+        days:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkingDayInputRequest'
+          maxItems: 7
+      required:
+      - days
   securitySchemes:
     CustomerJWT:
       type: http
