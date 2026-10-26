@@ -150,3 +150,23 @@ class CatalogKnownProducts:
     def all(self) -> Iterator[BillzProduct]:
         for product in Product.objects.select_related("stock").order_by("id").iterator(chunk_size=200):
             yield billz_view(product)
+
+
+# --- M2: customer catalog visibility (customer contract §2.3; P0, P1 appends its helpers below) ---
+
+# A product is sold online only at or above this price (customer contract §2.3).
+CUSTOMER_MIN_PRICE = 1000
+
+
+def customer_visible_products() -> QuerySet[Product]:
+    """Products a customer may see and buy: ``active``, ``price ≥ 1000``, in an active category.
+
+    A hidden category hides its products (design 01 open point 12). Anything else is 404 in the catalog and
+    ``unavailable`` in the cart; checkout re-checks it under the stock locks.
+    """
+    return Product.objects.filter(
+        status=enums.ProductStatus.ACTIVE,
+        price__gte=CUSTOMER_MIN_PRICE,
+        category__isnull=False,
+        category__is_active=True,
+    )
