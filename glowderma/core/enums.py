@@ -282,6 +282,8 @@ class SessionRevokeReason(TextChoices):
     DEACTIVATED = "deactivated"
     REPLACED = "replaced"
     ADMIN_REVOKED = "admin_revoked"
+    # M2 (customer contract §2.1.6): an old customer refresh token came back after the grace window.
+    REFRESH_REUSED = "refresh_reused"
 
 
 class LogoutScope(TextChoices):
@@ -300,6 +302,152 @@ class IntegrationMode(TextChoices):
 
     FAKE = "fake"
     LIVE = "live"
+
+
+# --- Customer API (M2, customer contract §3) --------------------------------------------------------------
+# Every class below has a choice set of its own: drf-spectacular 0.30 refuses two override names for one set
+# (``--fail-on-warn``), which is why the device platform reuses ``OrderChannel`` instead of a second enum.
+
+
+class OtpPurpose(TextChoices):
+    REGISTER = "register"
+    LOGIN_NEW_DEVICE = "login_new_device"
+    RESET_PASSWORD = "reset_password"  # noqa: S105
+    LINK_SOCIAL = "link_social"
+
+
+class NextStep(TextChoices):
+    VERIFY_DEVICE = "verify_device"
+    VERIFY_PHONE = "verify_phone"
+
+
+class CustomerSocialProvider(TextChoices):
+    """Customer social sign-in providers; the staff routes keep their own ``SocialProviderEnum``."""
+
+    GOOGLE = "google"
+    FACEBOOK = "facebook"
+    APPLE = "apple"
+
+
+class SocialTokenType(TextChoices):
+    ID_TOKEN = "id_token"  # noqa: S105
+    ACCESS_TOKEN = "access_token"  # noqa: S105
+
+
+class StockStatus(TextChoices):
+    IN_STOCK = "in_stock"
+    OUT_OF_STOCK = "out_of_stock"
+
+
+class CustomerProductOrdering(TextChoices):
+    DEFAULT = "default"
+    PRICE = "price"
+    PRICE_DESC = "-price"
+    NAME = "name"
+
+
+class CartLineStatus(TextChoices):
+    OK = "ok"
+    INSUFFICIENT = "insufficient"
+    OUT_OF_STOCK = "out_of_stock"
+    UNAVAILABLE = "unavailable"
+
+
+class OrderScope(TextChoices):
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+    ALL = "all"
+
+
+class CustomerRefundState(TextChoices):
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+
+
+class CashbackEarnedState(TextChoices):
+    NONE = "none"
+    CREDITED = "credited"
+    REVERSED = "reversed"
+
+
+class TimelineType(TextChoices):
+    ORDER_CREATED = "order_created"
+    PAYMENT_CONFIRMED = "payment_confirmed"
+    PAYMENT_FAILED = "payment_failed"
+    SHIPMENT_CREATED = "shipment_created"
+    HANDED_TO_COURIER = "handed_to_courier"
+    DELIVERED = "delivered"
+    CANCELLED = "cancelled"
+    REFUND_IN_PROGRESS = "refund_in_progress"
+    REFUND_SUCCEEDED = "refund_succeeded"
+
+
+class ProgressStep(TextChoices):
+    PLACED = "placed"
+    PAID = "paid"
+    WITH_COURIER = "with_courier"
+    DELIVERED = "delivered"
+    PICKED_UP = "picked_up"
+    CANCELLED = "cancelled"
+
+
+class ProgressState(TextChoices):
+    DONE = "done"
+    CURRENT = "current"
+    UPCOMING = "upcoming"
+    SKIPPED = "skipped"
+
+
+class LedgerSource(TextChoices):
+    ONLINE = "online"
+    STORE = "store"
+    ADMIN = "admin"
+
+
+class AppointmentScope(TextChoices):
+    UPCOMING = "upcoming"
+    PAST = "past"
+
+
+class AppointmentCancelledBy(TextChoices):
+    """The literals of ``appointments.Appointment.CancelledBy``."""
+
+    CUSTOMER = "customer"
+    ADMIN = "admin"
+
+
+class InboxKind(TextChoices):
+    """The literals of ``notifications.InboxNotification.Kind``."""
+
+    PROMO = "promo"
+    GENERAL = "general"
+    ORDER_STATUS = "order_status"
+    APPOINTMENT = "appointment"
+
+
+class InboxLinkKind(TextChoices):
+    NONE = "none"
+    PRODUCT = "product"
+    ORDER = "order"
+    APPOINTMENT = "appointment"
+
+
+class PushDataType(TextChoices):
+    """FCM ``data.type`` (customer contract §2.14.2)."""
+
+    ORDER_STATUS = "order_status"
+    APPOINTMENT = "appointment"
+    CAMPAIGN = "campaign"
+    ACCOUNT_SECURITY = "account_security"
+    SESSION_REPLACED = "session_replaced"
+
+
+class AccountSecurityEvent(TextChoices):
+    SOCIAL_LINKED = "social_linked"
+    SOCIAL_UNLINKED = "social_unlinked"
+    PASSWORD_RESET = "password_reset"  # noqa: S105
+    PASSWORD_CHANGED = "password_changed"  # noqa: S105
 
 
 CONTRACT_ENUMS: tuple[type[TextChoices], ...] = (
@@ -349,6 +497,26 @@ CONTRACT_ENUMS: tuple[type[TextChoices], ...] = (
     LogoutScope,
     ExportFormat,
     IntegrationMode,
+    OtpPurpose,
+    NextStep,
+    CustomerSocialProvider,
+    SocialTokenType,
+    StockStatus,
+    CustomerProductOrdering,
+    CartLineStatus,
+    OrderScope,
+    CustomerRefundState,
+    CashbackEarnedState,
+    TimelineType,
+    ProgressStep,
+    ProgressState,
+    LedgerSource,
+    AppointmentScope,
+    AppointmentCancelledBy,
+    InboxKind,
+    InboxLinkKind,
+    PushDataType,
+    AccountSecurityEvent,
 )
 
 

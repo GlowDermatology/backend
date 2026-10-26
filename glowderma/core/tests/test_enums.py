@@ -81,20 +81,55 @@ CONTRACT_TABLE: dict[str, list[str]] = {
         "deactivated",
         "replaced",
         "admin_revoked",
+        "refresh_reused",  # M2 (customer contract §2.1.6, admin §3.1)
     ],
     "LogoutScope": ["current", "others", "all"],
     "ExportFormat": ["csv", "xlsx"],
     "IntegrationMode": ["fake", "live"],
 }
+# Copied literally from docs/api/customer-api-v1.md section 3 (the enums marked new).
+CUSTOMER_TABLE: dict[str, list[str]] = {
+    "OtpPurpose": ["register", "login_new_device", "reset_password", "link_social"],
+    "NextStep": ["verify_device", "verify_phone"],
+    "CustomerSocialProvider": ["google", "facebook", "apple"],
+    "SocialTokenType": ["id_token", "access_token"],
+    "StockStatus": ["in_stock", "out_of_stock"],
+    "CustomerProductOrdering": ["default", "price", "-price", "name"],
+    "CartLineStatus": ["ok", "insufficient", "out_of_stock", "unavailable"],
+    "OrderScope": ["active", "completed", "cancelled", "all"],
+    "CustomerRefundState": ["in_progress", "completed"],
+    "CashbackEarnedState": ["none", "credited", "reversed"],
+    "TimelineType": [
+        "order_created",
+        "payment_confirmed",
+        "payment_failed",
+        "shipment_created",
+        "handed_to_courier",
+        "delivered",
+        "cancelled",
+        "refund_in_progress",
+        "refund_succeeded",
+    ],
+    "ProgressStep": ["placed", "paid", "with_courier", "delivered", "picked_up", "cancelled"],
+    "ProgressState": ["done", "current", "upcoming", "skipped"],
+    "LedgerSource": ["online", "store", "admin"],
+    "AppointmentScope": ["upcoming", "past"],
+    "AppointmentCancelledBy": ["customer", "admin"],
+    "InboxKind": ["promo", "general", "order_status", "appointment"],
+    "InboxLinkKind": ["none", "product", "order", "appointment"],
+    "PushDataType": ["order_status", "appointment", "campaign", "account_security", "session_replaced"],
+    "AccountSecurityEvent": ["social_linked", "social_unlinked", "password_reset", "password_changed"],
+}
+ALL_TABLES = {**CONTRACT_TABLE, **CUSTOMER_TABLE}
 
 
 def test_every_contract_enum_has_the_contract_literals() -> None:
     """Contract 3.1: "Enums: literals from §3, identical to the frontend"."""
-    for name, literals in CONTRACT_TABLE.items():
+    for name, literals in ALL_TABLES.items():
         enum = getattr(enums, name)
         assert issubclass(enum, TextChoices), name
         assert list(enum.values) == literals, name
-    assert {enum.__name__ for enum in enums.CONTRACT_ENUMS} == set(CONTRACT_TABLE)
+    assert {enum.__name__ for enum in enums.CONTRACT_ENUMS} == set(ALL_TABLES)
     assert len(CONTRACT_TABLE["OrderEventType"]) == 16
 
 
@@ -102,7 +137,7 @@ def test_enum_name_overrides_point_at_values() -> None:
     """Each ``<Name>Enum`` component is pinned to the enum's literal list (``.values``)."""
     overrides = enums.enum_name_overrides()
     assert overrides["OrderStatusEnum"] == "glowderma.core.enums.OrderStatus.values"
-    assert set(overrides) == {f"{name}Enum" for name in CONTRACT_TABLE}
+    assert set(overrides) == {f"{name}Enum" for name in ALL_TABLES}
     assert len(set(overrides.values())) == len(overrides)
 
 
@@ -116,3 +151,15 @@ def test_enum_overrides_hash_like_the_schema_hook() -> None:
         assert field_side == list_hash([(value, value) for value in enum.values if value not in ("", None)])
         assert field_side != list_hash(list(enum.choices)), enum.__name__
     assert set(enums.enum_name_overrides()) <= set(spectacular_settings.ENUM_NAME_OVERRIDES)
+
+
+def test_customer_enums_have_choice_sets_of_their_own() -> None:
+    """Customer contract §3: drf-spectacular 0.30 refuses two override names for one choice set, so no new
+    enum repeats another one's literals (the device platform reuses ``OrderChannel`` instead of a copy) and
+    the staff ``SocialProviderEnum`` (google, facebook) stays distinct from ``CustomerSocialProviderEnum``."""
+    choice_sets = [frozenset(enum.values) for enum in enums.CONTRACT_ENUMS]
+    assert len(choice_sets) == len(set(choice_sets))
+    assert not hasattr(enums, "DevicePlatform")
+    overrides = spectacular_settings.ENUM_NAME_OVERRIDES
+    assert overrides["SocialProviderEnum"] == ["google", "facebook"]
+    assert overrides["CustomerSocialProviderEnum"] == "glowderma.core.enums.CustomerSocialProvider.values"
