@@ -46,7 +46,11 @@ jobs:
       - run: diff -u openapi/schema.yaml /tmp/schema.yaml
       - name: Production deploy checks
         # Secrets are generated per run (production refuses the values committed in .env.example); the rest
-        # are non-secret placeholders that satisfy production settings validation.
+        # are non-secret placeholders that satisfy production settings validation. Every provider runs fake
+        # here (INTEGRATIONS_MODE defaults to fake): M3's live-only variables (Billz, Click ids, Payme merchant,
+        # BTS, Eskiz, FCM, Apple) are required only when their *_MODE is live; the list below is what
+        # config/settings/production.py requires in every mode (the secrets of deploy/env.production.example
+        # plus what compose.prod.yaml sets).
         env:
           DJANGO_SETTINGS_MODULE: config.settings.production
           JWT_ACTIVE_KID: ci
