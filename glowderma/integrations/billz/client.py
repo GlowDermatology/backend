@@ -36,10 +36,12 @@ retries once, reads for at most 10 s, fails fast while a 429 pause is in force a
 total. :meth:`BillzClient.deadline` sets an absolute deadline (the sale push: 240 s, below the outbox lease)
 that every wait, sleep and timeout honours.
 
-**Circuit breaker** (review B6): :data:`CIRCUIT_FAILURES` transport errors, timeouts or 5xx answers in a row
-(across every worker) open the circuit for :data:`CIRCUIT_OPEN_SECONDS`: calls then fail fast with
+**Circuit breaker** (review B6): :data:`CIRCUIT_FAILURES` transport errors, timeouts or 5xx/408 answers in a
+row (across every worker) open the circuit for :data:`CIRCUIT_OPEN_SECONDS`: calls then fail fast with
 :class:`BillzUnavailable` instead of holding a worker for minutes (ERROR ``billz.circuit_open``). Any other
-answer closes it again.
+answer resets the count of failures in a row; an open circuit always runs its full time (nothing is sent
+while it is open, so nothing can close it early). The bookkeeping is best effort: a cache error there is
+logged, never the outcome of the request it follows.
 
 **Retries**: transport errors and 5xx are retried (bounded, exponential backoff with jitter) only for calls
 that are safe to repeat — reads and absolute upserts — or when the request certainly never reached Billz

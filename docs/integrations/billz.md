@@ -123,7 +123,10 @@ Setup only (by hand, to fill the settings): `GET /v1/shop` (`get_v1_shop`), `GET
 * **Circuit breaker**: 5 transport errors, timeouts or `5xx`/`408` answers in a row (across every worker, counted in
   the cache) open the circuit for 90 s (ERROR `billz.circuit_open`): every call then fails fast with
   `BillzUnavailable` (nothing sent) instead of holding a worker of the shared outbox pool for minutes. Any other
-  answer closes it.
+  answer **resets the count** of failures in a row; an open circuit always runs its full 90 s (nothing is sent
+  while it is open, so no answer can close it early) and the first call after it is a normal call. The
+  bookkeeping is best effort: it runs after the request, so a cache error there is logged
+  (`billz.circuit_bookkeeping_skipped`) and never decides the outcome of the request (§6 f).
 * httpx's own request log lines (full URL) are silenced (`LOGGING`: `httpx`/`httpcore` at WARNING) because
   `GET /v1/client?phone_number=…` carries a phone number. Our log lines use `pii_ref(phone)`; Billz's own free text is
   scrubbed (control characters and lone surrogates dropped, runs of ≥ 7 digits masked as `<number>`) before it

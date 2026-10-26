@@ -253,7 +253,7 @@ def test_the_admin_lookup_uses_the_interactive_profile() -> None:
 # --- B6: circuit breaker ------------------------------------------------------------------------------------
 
 
-def test_consecutive_failures_open_the_circuit_and_an_answer_closes_it(
+def test_consecutive_failures_open_the_circuit_for_its_full_time_then_an_answer_resets_it(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Review B6: a hung Billz no longer holds every worker of the shared pool for minutes."""
@@ -276,8 +276,11 @@ def test_consecutive_failures_open_the_circuit_and_an_answer_closes_it(
         products_call(adapter)
     assert fast.value.not_applied and len(server.requests) == sent  # nothing sent while open
     server.overrides.pop("GET /v2/products")
-    clock.now += billz_client.CIRCUIT_OPEN_SECONDS + 1
-    products_call(adapter)  # half-open: one answer closes it
+    clock.now += billz_client.CIRCUIT_OPEN_SECONDS - 5
+    with pytest.raises(BillzUnavailable, match="calls are paused"):
+        products_call(adapter)  # NEW-7: Billz answering again does not shorten an open circuit
+    clock.now += 6
+    products_call(adapter)  # the circuit ran its 90 s; the answer resets the count of failures
     assert cache.get(billz_client.CIRCUIT_FAILURES_KEY) is None
 
 
