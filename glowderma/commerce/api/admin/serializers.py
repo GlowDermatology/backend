@@ -247,8 +247,7 @@ RESOLVE_STATES = (enums.RefundState.SUCCEEDED, enums.RefundState.FAILED)
 class ResolveRefundSerializer(serializers.Serializer[dict[str, Any]]):
     """``{state: succeeded | failed, manual_payout?: bool}`` (a ``CharField`` so the schema keeps one
     ``RefundStateEnum``); ``manual_payout`` (admin §7 item 18, M2) closes a ``failed`` Click refund Click
-    still
-    reports ``paid`` after staff paid the customer outside Click; ignored for other refunds."""
+    still reports ``paid`` after staff paid the customer outside Click; ignored for other refunds."""
 
     state = serializers.CharField(help_text="`succeeded` or `failed`")
     manual_payout = serializers.BooleanField(

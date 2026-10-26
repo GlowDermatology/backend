@@ -1,9 +1,7 @@
 """Customer routes of `commerce` (customer contract §2.5–§2.8): the server cart, ``delivery/calculate/``,
 checkout, pay, customer cancel, reorder and the customer's orders. ``delivery/calculate/`` lives here (it
-reads
-the cart, ``loyalty`` and ``commerce.selectors.cashback_max``, which ``delivery`` may not import);
-``delivery``
-serves ``delivery/regions/``."""
+reads the cart, ``loyalty`` and ``commerce.selectors.cashback_max``, which ``delivery`` may not import);
+``delivery`` serves ``delivery/regions/``."""
 
 from __future__ import annotations
 
@@ -126,9 +124,8 @@ def _consent_current(customer: Customer) -> None:
 def _delivery_address(
     customer: Customer, address_id: int | None, region_code: str | None, city_code: str | None
 ) -> tuple[int | None, str, str]:
-    """Rows 3 of checkout / the address checks of ``delivery/calculate/``: delivery offered, an own address
-    or a
-    region/city pair, known to BTS's reference list. Returns ``(address_id, region_code, city_code)``."""
+    """Rows 3 of checkout / the address checks of ``delivery/calculate/``: delivery offered, an own address or
+    a region/city pair, known to BTS's reference list. Returns ``(address_id, region_code, city_code)``."""
     if not integration_modes.delivery_available():
         raise DeliveryUnavailable(key="error.delivery_not_offered")
     if address_id is not None and (region_code or city_code):  # exactly one of the two (§2.6)

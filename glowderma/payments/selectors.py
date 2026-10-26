@@ -256,8 +256,7 @@ def refunds_by_payment(payment_ids: Iterable[int]) -> dict[int, list[RefundRow]]
 
 def _superseded_failure() -> Q:
     """A ``failed`` refund that needs no action any more (admin contract §2.10, §2.12): a **later** refund of
-    the
-    same payment succeeded (a staff retry returned the money), or the payment is ``refunded``."""
+    the same payment succeeded (a staff retry returned the money), or the payment is ``refunded``."""
     later_succeeded = Refund.objects.filter(
         payment_id=OuterRef("payment_id"), state=enums.RefundState.SUCCEEDED, pk__gt=OuterRef("pk")
     )

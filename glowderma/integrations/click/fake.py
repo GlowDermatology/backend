@@ -18,8 +18,7 @@ refund
 Reversed and "lost" payments are remembered per process (the fake's "Click database"). Under the local/test
 settings (``DEV_FEATURES_ALLOWED``) every refund/status call is recorded in :data:`calls` (``(method,
 payment_ref)``) so tests assert the ``click_paydoc_id`` the handlers used; under the production settings the
-fake
-records nothing (customer contract §6.14).
+fake records nothing (customer contract §6.14).
 
 Transaction ids (design 03 §7.8): ``CLK-`` + ``str(7_741_000_000 + order_id × 37)[:10]`` unless
 ``scenario["transaction_id"]`` is set (the design's ``CLK-7741920385`` for №10248).

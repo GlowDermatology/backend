@@ -1,12 +1,9 @@
 """``POST dev/payments/{order_id}/simulate/`` (customer contract §2.15; local/test settings only).
 
-Mounted by ``config.urls`` only with ``DEV_FEATURES_ALLOWED``, ``FAKE_PAYMENTS_ENABLED`` and fake
-Click/Payme. It
-builds a correctly signed Click Prepare + Complete (or Payme ``CheckPerformTransaction`` +
-``CreateTransaction`` +
-``PerformTransaction`` / ``CancelTransaction``) and runs it through the **real webhook views** in-process, so
-the
-mobile team can finish a purchase without provider accounts."""
+Mounted by ``config.urls`` only with ``DEV_FEATURES_ALLOWED``, ``FAKE_PAYMENTS_ENABLED`` and fake Click/Payme.
+It builds a correctly signed Click Prepare + Complete (or Payme ``CheckPerformTransaction`` +
+``CreateTransaction`` + ``PerformTransaction`` / ``CancelTransaction``) and runs it through the **real webhook
+views** in-process, so the mobile team can finish a purchase without provider accounts."""
 
 from __future__ import annotations
 

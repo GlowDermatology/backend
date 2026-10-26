@@ -1,11 +1,9 @@
 """The provider account reference ``"<order_id>-<ref>"`` (customer contract §1.4, §2.7.2).
 
 ``ref`` = the first 10 lower-case hex characters of ``HMAC-SHA256(PAYMENT_REF_KEY, str(order_id))``. Nothing
-is
-stored: the value is recomputed. Click Prepare, Payme ``CheckPerformTransaction`` and ``CreateTransaction``
+is stored: the value is recomputed. Click Prepare, Payme ``CheckPerformTransaction`` and ``CreateTransaction``
 :func:`verify` it with ``hmac.compare_digest`` before any order lookup, so nobody can open or block a payment
-for
-someone else's order by guessing sequential ids.
+for someone else's order by guessing sequential ids.
 """
 
 from __future__ import annotations

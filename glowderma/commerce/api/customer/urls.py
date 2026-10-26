@@ -2,8 +2,7 @@
 ``api/v1/``.
 
 ``delivery/calculate/`` is served here (it reads the cart, loyalty and ``cashback_max``);
-``delivery/regions/``
-is ``delivery``'s."""
+``delivery/regions/`` is ``delivery``'s."""
 
 from django.urls import URLPattern, URLResolver, path
 

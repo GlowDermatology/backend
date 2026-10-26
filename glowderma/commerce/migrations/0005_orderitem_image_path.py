@@ -1,11 +1,10 @@
 """``OrderItem.image_url`` holds the media storage path, not an absolute URL.
 
-Snapshots taken before held ``absolute_media_url(name)`` (e.g. ``http://127.0.0.1:8000/media/products/1/a.webp``),
-which broke whenever ``PUBLIC_MEDIA_BASE_URL`` changed. The URL is now rendered at serialization time; this
-data
-step strips the scheme, the host and the ``MEDIA_URL`` prefix from existing rows. Reversing keeps the path
-(the
-absolute form is derived, never stored again).
+Snapshots taken before held ``absolute_media_url(name)`` (e.g.
+``http://127.0.0.1:8000/media/products/1/a.webp``), which broke whenever ``PUBLIC_MEDIA_BASE_URL`` changed.
+The URL is now rendered at serialization time; this data step strips the scheme, the host and the
+``MEDIA_URL`` prefix from existing rows. Reversing keeps the path (the absolute form is derived, never stored
+again).
 """
 
 from typing import Any

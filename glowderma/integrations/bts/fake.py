@@ -2,8 +2,7 @@
 
 The admin e2e scripts and ``commerce.seeds`` rely on these rules; change them only together with them. Every
 rule may be overridden per order through ``Order.metadata["fake"]["bts"]`` (design 03 §1.3, plan §6), handed
-in
-as ``scenario``:
+in as ``scenario``:
 
 ``regions()``
     the four regions of the tariff table (``10`` Toshkent shahri, ``11`` Toshkent viloyati, ``12`` Sirdaryo,

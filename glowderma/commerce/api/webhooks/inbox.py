@@ -2,13 +2,11 @@
 
 Every delivery is stored with how it was answered, in the transaction of its effect, **last**: a first
 delivery under its own ``event_key``, a replay of a key that already has a row under
-``dup:{event_key}:{uuid4}``,
-an authentication/signature failure under ``rejected:{uuid4}`` as a bounded row (allow-listed headers, the
-payload cut to 1 KiB of its JSON text, no raw body) and at most ``WEBHOOK_REJECTED_PER_IP_PER_MIN`` such rows
-per
-IP per minute (beyond that nothing is stored and one sampled WARNING per IP per minute carries the count).
-Credentials (``Authorization``, tokens, the BTS secret) never reach a stored row; ``path`` has no query
-string.
+``dup:{event_key}:{uuid4}``, an authentication/signature failure under ``rejected:{uuid4}`` as a bounded row
+(allow-listed headers, the payload cut to 1 KiB of its JSON text, no raw body) and at most
+``WEBHOOK_REJECTED_PER_IP_PER_MIN`` such rows per IP per minute (beyond that nothing is stored and one sampled
+WARNING per IP per minute carries the count). Credentials (``Authorization``, tokens, the BTS secret) never
+reach a stored row; ``path`` has no query string.
 """
 
 from __future__ import annotations
@@ -115,9 +113,8 @@ def store_delivery(
     raw_body: str = "",
     started: float,
 ) -> WebhookInbox:
-    """An authenticated delivery: under ``event_key``, or ``dup:{event_key}:{uuid4}`` when the key already
-    has a
-    row (never a second row under one key); a duplicate keeps no raw body."""
+    """An authenticated delivery: under ``event_key``, or ``dup:{event_key}:{uuid4}`` when the key already has
+    a row (never a second row under one key); a duplicate keeps no raw body."""
     key = normalise_key(event_key)
     if exists(provider, key) is not None:
         key = f"dup:{key}:{uuid.uuid4().hex}"
@@ -168,9 +165,8 @@ def store_rejected(
     provider: str, request: Any, payload: Any, *, status: int, body: Any, error_code: str, started: float
 ) -> WebhookInbox | None:
     """An authentication/signature failure (or a fake provider under the production settings): a bounded
-    ``rejected:{uuid4}`` row, at most ``WEBHOOK_REJECTED_PER_IP_PER_MIN`` per IP per minute (``None`` when
-    the cap
-    is reached: nothing stored, one sampled WARNING per IP per minute)."""
+    ``rejected:{uuid4}`` row, at most ``WEBHOOK_REJECTED_PER_IP_PER_MIN`` per IP per minute (``None`` when the
+    cap is reached: nothing stored, one sampled WARNING per IP per minute)."""
     ip = client_ip(request) or "-"
     minute = int(timeutils.now().timestamp() // 60)
     counter = f"gd:webhook:rejected:{ip}:{minute}"

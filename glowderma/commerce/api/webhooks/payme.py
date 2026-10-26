@@ -1,14 +1,11 @@
 """Payme Merchant API (JSON-RPC 2.0) callbacks (customer contract §2.13.2): ``webhooks/payme/``.
 
 Every answer is HTTP 200 with a JSON-RPC body; amounts are tiyin and exist only here; times are epoch ms.
-Basic
-auth with ``PAYME_KEY`` first (``-32504``), then the JSON-RPC envelope, then the method — each method takes
-the
-advisory lock of its Payme transaction and ``commerce.services.lock_order`` before reading state, and the
-``WebhookInbox`` row is written last (every delivery its own row; read-only methods without the raw body). An
-unexpected exception rolls everything back and answers ``-32400``. A Payme port that is fake under the
-production
-settings answers ``-32504`` to every call before anything is read.
+Basic auth with ``PAYME_KEY`` first (``-32504``), then the JSON-RPC envelope, then the method — each method
+takes the advisory lock of its Payme transaction and ``commerce.services.lock_order`` before reading state,
+and the ``WebhookInbox`` row is written last (every delivery its own row; read-only methods without the raw
+body). An unexpected exception rolls everything back and answers ``-32400``. A Payme port that is fake under
+the production settings answers ``-32504`` to every call before anything is read.
 """
 
 from __future__ import annotations

@@ -547,13 +547,10 @@ def run_bts_poll() -> PollResult:
     """One polling run: single flight (``cache.add`` lock), round robin after
     ``IntegrationState(bts).data["poll_cursor"]`` (written after every attempted parcel), at most
     ``BTS_POLL_BATCH`` parcels and ``BTS_POLL_MAX_SECONDS``; per-parcel failures are skipped, the run stops
-    only
-    after ``BTS_POLL_MAX_CONSECUTIVE_FAILURES`` transport failures in a row. Outcome: stopped →
-    ``record_failure``; ≥ 1 tracked → ``record_sync_success``; attempted but none tracked →
-    ``record_failure`` +
-    ERROR ``bts.poll_nothing_tracked``; no candidate → nothing written. Returns at once while BTS is fake
-    under
-    the production settings."""
+    only after ``BTS_POLL_MAX_CONSECUTIVE_FAILURES`` transport failures in a row. Outcome: stopped →
+    ``record_failure``; ≥ 1 tracked → ``record_sync_success``; attempted but none tracked → ``record_failure``
+    + ERROR ``bts.poll_nothing_tracked``; no candidate → nothing written. Returns at once while BTS is fake
+    under the production settings."""
     empty = PollResult(tracked=[], rejected=0, unavailable=0, stopped=False)
     if integration_modes.fake_in_production("bts"):
         return empty

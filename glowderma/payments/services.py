@@ -613,8 +613,7 @@ def mark_failed(
 def mark_manual_required(refund_id: int, at: datetime | None = None) -> RefundResult:
     """``requested → manual_required``: a Click refund that must never reach the provider (customer contract
     §2.13.0: its payment has no ``click_paydoc_id``, or the Click port is fake under the production settings)
-    —
-    the ``refund.submit`` handler's re-check before any port call. Any other state is left alone
+    — the ``refund.submit`` handler's re-check before any port call. Any other state is left alone
     (``changed=False``)."""
     _aware(at, "at")
     with transaction.atomic():

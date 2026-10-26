@@ -1,10 +1,9 @@
 """Click SHOP API protocol helpers (customer contract §2.13.1) — pure functions and constants, no database.
 
 The webhook views of ``commerce/api/webhooks/click.py`` call these before taking any lock: required
-parameters,
-the MD5 signature over the **raw received strings**, the amount format and the semantic fingerprint used for
-the
-duplicate check. Every choice marked *verify M3* in the contract sits behind a constant here.
+parameters, the MD5 signature over the **raw received strings**, the amount format and the semantic
+fingerprint used for the duplicate check. Every choice marked *verify M3* in the contract sits behind a
+constant here.
 """
 
 from __future__ import annotations

@@ -478,8 +478,7 @@ def in_flight(payment: PaymentLike, now: datetime) -> bool:
 
 def is_payable(order: OrderLike, payment: PaymentLike | None, now: datetime, *, attaching: bool) -> bool:
     """``awaiting_payment`` ∧ (``now < reservation_expires_at`` ∨ (completing a transaction attached before
-    it,
-    within ``PAYMENT_IN_FLIGHT_GRACE_SECONDS``)). Starting a transaction (``attaching``) never gets the
+    it, within ``PAYMENT_IN_FLIGHT_GRACE_SECONDS``)). Starting a transaction (``attaching``) never gets the
     grace."""
     expires = order.reservation_expires_at
     if order.status != _S.AWAITING_PAYMENT or expires is None:
@@ -509,8 +508,7 @@ def inflight_payment(order_id: int, now: datetime | None = None) -> payment_sele
 
 def customer_inflight_order(customer_id: int) -> int | None:
     """The customer's ``awaiting_payment`` order whose **Click** payment is in flight (customer contract
-    §2.2.3
-    step 1: ``DELETE me/`` answers 409 ``payment_in_progress``), else ``None``."""
+    §2.2.3 step 1: ``DELETE me/`` answers 409 ``payment_in_progress``), else ``None``."""
     now = timeutils.now()
     for order_id in Order.objects.filter(customer_id=customer_id, status=_S.AWAITING_PAYMENT).values_list(
         "id", flat=True

@@ -1,6 +1,5 @@
 """Serializers of the commerce customer routes (customer contract §2.5–§2.8): request bodies with the
-contract's
-field codes, and the response shapes (``Cart``, ``DeliveryQuote``, ``PayLink``, ``OrderSummary``,
+contract's field codes, and the response shapes (``Cart``, ``DeliveryQuote``, ``PayLink``, ``OrderSummary``,
 ``OrderDetail``) rendered from the dictionaries ``commerce.selectors`` builds."""
 
 from __future__ import annotations
