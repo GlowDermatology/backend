@@ -114,8 +114,8 @@ def test_custom_range_validation(staff_client: APIClient, params: dict[str, str]
 def test_custom_range_error_codes(
     staff_client: APIClient, params: dict[str, str], expected: list[tuple[str, str]]
 ) -> None:
-    """Contract §2.10: missing → ``required``; from > to → ``invalid`` on from; to > today or a span over
-    366 days → ``invalid`` on to."""
+    """Contract §2.10: missing → ``required``; from > to → ``invalid`` on from; to > today or an inclusive
+    span of more than 366 days (to − from + 1 > 366) → ``invalid`` on to."""
     errors = _get(staff_client, **params).json()["errors"]
     assert [(e["field"], e["code"]) for e in errors] == expected
 

@@ -156,7 +156,7 @@ Default top-level messages: `not_authenticated` "Avtorizatsiya talab qilinadi." 
 | First request | Runs; a 2xx stores (status, body) |
 | Same key, same fingerprint, completed | The stored status and body, plus `Idempotent-Replayed: true` |
 | Same key, different fingerprint | 422 `idempotency_key_reused` |
-| Same key, first request still running | 409 `request_in_progress`, `Retry-After: 1` |
+| Same key, first request still running (until its response body is final, including the after-commit rebuild of §2.8) | 409 `request_in_progress`, `Retry-After: 1` |
 
 The FE creates one key per form/dialog instance (`crypto.randomUUID()`), reuses it on retries and across re-opens until a success (including a replay), and renews it after a success or after 422 `idempotency_key_reused`. A replay counts as success.
 
@@ -430,9 +430,9 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 - Effect: an outbox BTS create; the handler looks the order up by `clientId` before creating. Audit `order.shipment_retry_requested`.
 - 202 `Order` with `shipment.pending=true`. The outcome arrives later as `shipment_created` or `shipment_failed` with `manual=true`.
 
-**Shared outcomes of the order actions** (`cancel`, `transition`, `retry-shipment`, and the refund `retry` / `resolve` of §2.12):
+**Shared outcomes of the order actions** (`cancel`, `transition`, `retry-shipment`; the busy-order outcome also covers the refund `retry` / `resolve` of §2.12):
 - **Busy order.** Every action locks the order row first and waits at most `ADMIN_LOCK_WAIT` (5 s; a BTS create holds the row across its bounded calls). When the row stays locked → 409 `conflict` "Buyurtma boshqa amal bilan band. Birozdan so‘ng qayta urinib ko‘ring.". Nothing is written; retry with the same `Idempotency-Key`.
-- **Purchase conflict.** When the order's loyalty purchase belongs to another customer (data inconsistency surfaced by `loyalty`) → 409 `conflict` "Buyurtma xaridi boshqa mijozga tegishli. Ma’lumotlarni tekshiring.". Nothing is written.
+- **Purchase conflict** (`cancel`, `transition`, `retry-shipment` only; the refund operations never touch the loyalty purchase). When the order's loyalty purchase belongs to another customer (data inconsistency surfaced by `loyalty`) → 409 `conflict` "Buyurtma xaridi boshqa mijozga tegishli. Ma’lumotlarni tekshiring.". Nothing is written.
 
 ### 2.3 Products and Billz
 ```jsonc
@@ -702,7 +702,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 - Without `scheduled_at` → state `queued`; recipients are materialised and a Celery batched send runs (fake FCM in M1). Each recipient also gets an inbox item.
 - With `scheduled_at` → state `scheduled`; beat starts the send when due.
 - Audit `notification.created`.
-- 201 `NotificationRecord`. **The 201 body is the campaign as stored when the response is built**: it is read after the request's transaction committed and its on-commit dispatch ran. With an eager Celery (local settings) the send already finished inside the request, so the body says `state: "sent"` with `sent`, `failed` and `sent_at`; with a real worker it still says `queued`. A replay of the key returns that same body.
+- 201 `NotificationRecord`. **The 201 body is the campaign as stored when the response is built**: it is read after the request's transaction committed and its on-commit dispatch ran. With an eager Celery (local settings) the send already finished inside the request, so the body says `state: "sent"` with `sent`, `failed` and `sent_at`; with a real worker it normally still says `queued` (a fast worker may already have advanced it). The key stays held until that body is stored: a retry racing the first response gets 409 `request_in_progress` (§1.7), and a replay afterwards returns that same body.
 
 Templates are editable in the admin UI through `GET` / `PUT` below.
 
@@ -796,7 +796,7 @@ Templates are editable in the admin UI through `GET` / `PUT` below.
 | Param | Values | Rule |
 |---|---|---|
 | `range` | `today`, `week`, `month`, `custom` | Default `today` |
-| `from`, `to` | date | Read only when `range=custom` (otherwise ignored, not even parsed). With `custom`: a missing `from` / `to` → `required` on that field; `from > to` → `invalid` on `from`; `to > today` (Tashkent) or a span over 366 days → `invalid` on `to` |
+| `from`, `to` | date | Read only when `range=custom` (otherwise ignored, not even parsed). With `custom`: a missing `from` / `to` → `required` on that field; `from > to` → `invalid` on `from`; `to > today` (Tashkent) or an inclusive span of more than 366 days (`to − from + 1 > 366`) → `invalid` on `to` |
 
 | `range` | `bucket` | Buckets (Tashkent) | Previous period |
 |---|---|---|---|
@@ -861,9 +861,9 @@ Templates are editable in the admin UI through `GET` / `PUT` below.
 **Refund operations** (M1c, the Payments screen; declared by `commerce` because they write order events). `Idempotency-Key` is optional (honoured when sent, §1.7). Both answer **200 with the payment row above** (`refunds` included, newest first); 404 when the payment or the refund is unknown or the refund belongs to another payment.
 - **`POST payments/{id}/refunds/{refund_id}/retry/`** (empty body): retries a `failed` refund as a **new** refund of the payment (Click `requested` and submitted through the outbox; Payme `manual_required`) and records its `refund_requested` order event (actor = caller); audit `refund.requested`. Refusals, checked under the order lock:
   - the refund is not `failed`, or the payment is no longer `paid` → 409 `invalid_transition` "Bu qaytarishni qayta yuborib bo‘lmaydi.";
-  - another refund of the order is open (`requested`, `submitting`, `manual_required`) → 409 `conflict` "Bu to‘lov uchun qaytarish allaqachon jarayonda.".
+  - another refund of the order is open (`requested`, `submitting`, `manual_required`, `unknown`) → 409 `conflict` "Bu to‘lov uchun qaytarish allaqachon jarayonda.".
 - **`POST payments/{id}/refunds/{refund_id}/resolve/`** `{"state": "succeeded" | "failed"}` (any other value → 400 `state` `invalid_choice`): closes an `unknown` / `manual_required` refund after a manual check; audit `refund.state_changed` with the actor; order event `refund_succeeded` / `refund_failed`. A refund in any other state (also the loser of two concurrent resolves) → 409 `invalid_transition` "Bu qaytarishni yakunlab bo‘lmaydi.".
-- Both share the busy-order and purchase-conflict outcomes of §2.2.
+- Both share the busy-order outcome of §2.2.
 
 ### 2.13 Audit log
 **`GET audit-log/`** (P E). Filters `actor` (staff id; the picker lists `GET staff/`, §2.16), `action` (§3.2), `object_type`, `object_id`, `date_from`, `date_to`; `ordering` `-at` (default) or `at`.
@@ -892,7 +892,7 @@ Templates are editable in the admin UI through `GET` / `PUT` below.
 ### 2.15 Health
 **`GET /api/v1/health/`**: no auth, no network gate, no throttle; not in the error envelope.
 - Without params → 200 `{"status": "ok"}`.
-- `?ready=1` checks the database, cache and broker → 200 `{"status": "ok", "checks": {"database": "ok", "cache": "ok", "broker": "ok"}, "version": "<git sha>", "integrations": {"oauth": "fake", "billz": "fake", "fcm": "fake", "click": "fake", "payme": "fake", "bts": "fake"}}`, or 503 with `"status": "error"` and the failing check set to `"error"`. `integrations` = `{provider: IntegrationMode}` for every provider with a `*_MODE` setting (informational; a fake provider never fails readiness).
+- `?ready=1` checks the database, cache and broker → 200 `{"status": "ok", "checks": {"database": "ok", "cache": "ok", "broker": "ok"}, "version": "<git sha>", "integrations": {"oauth": "fake", "billz": "fake", "fcm": "fake", "click": "fake", "payme": "fake", "bts": "fake"}}`, or 503 with `"status": "error"` and the failing check set to `"error"`. `integrations` = `{provider: IntegrationMode}` for every provider with a `*_MODE` setting (informational; a fake provider never fails readiness). It is present **only when the caller would pass the admin network gate of §1** (peer in `ADMIN_API_ALLOWED_NETS` and, in production, a matching `X-GD-Internal-Secret`): which payment and shipping providers are fake is reconnaissance for an attacker. Other callers (load-balancer and container probes) get `status`, `checks` and `version` only.
 
 ### 2.16 Staff directory
 **`GET staff/`** (P; read-only) → `Page<StaffListItem>`, the options of the audit-log `actor` filter.
