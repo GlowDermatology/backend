@@ -13,22 +13,39 @@ from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
 from django.core.cache import cache
 from django.db import IntegrityError, transaction
-from django.db.models import Q
-from rest_framework.exceptions import NotFound, ValidationError
+from django.db.models import Q, Sum
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 
-from glowderma.accounts import topics
+from glowderma.accounts import tokens, topics
 from glowderma.accounts.models import (
     Address,
     AuthSession,
     Customer,
     CustomerSocialIdentity,
     Device,
+    SmsCode,
     SocialIdentity,
     StaffUser,
 )
-from glowderma.core import audit, enums, outbox, qr_store, timeutils
-from glowderma.core.api.exceptions import AuthFailed, Conflict, field_error
+from glowderma.core import audit, enums, outbox, qr_store, secretbox, timeutils
+from glowderma.core.api.exceptions import (
+    AuthFailed,
+    Conflict,
+    OtpDailyLimit,
+    OtpExpired,
+    OtpInvalid,
+    OtpLocked,
+    OtpNetworkLimit,
+    OtpResendTooSoon,
+    PasswordChanged,
+    PhoneNotRegistered,
+    PhoneRegistered,
+    SmsUnavailable,
+    VerificationInvalid,
+    field_error,
+)
 from glowderma.core.pii import pii_ref
+from glowderma.integrations.eskiz import registry as eskiz_registry
 from glowderma.integrations.oauth.ports import SocialClaims
 
 logger = logging.getLogger(__name__)
@@ -37,7 +54,13 @@ SOCIAL_SUBJECT_LINKED = "Bu ijtimoiy hisob allaqachon bog‘langan."
 SOCIAL_PROVIDER_LINKED = "Bu provayder allaqachon bog‘langan."
 
 
-def start_staff_session(user: StaffUser, *, device_label: str) -> tuple[AuthSession, str]:
+def start_staff_session(
+    user: StaffUser, *, device_label: str, auth_method: str = AuthSession.AuthMethod.PASSWORD
+) -> tuple[AuthSession, str]:
+    """Open a staff session; ``auth_method`` records how the sign-in was proven (``password`` for email +
+    password, the provider for a social sign-in): only a password session may link an identity (§2.1)."""
+    if auth_method not in AuthSession.AuthMethod.values:
+        raise ValueError(f"Unknown auth method {auth_method!r}")
     refresh = secrets.token_urlsafe(32)
     session = AuthSession.objects.create(
         audience="staff",
@@ -45,6 +68,7 @@ def start_staff_session(user: StaffUser, *, device_label: str) -> tuple[AuthSess
         device_label=device_label[:100],
         refresh_hash=hashlib.sha256(refresh.encode()).hexdigest(),
         absolute_expires_at=timeutils.now() + timedelta(seconds=settings.STAFF_REFRESH_TTL),
+        auth_method=auth_method,
     )
     return session, refresh
 
@@ -242,7 +266,7 @@ def social_login(
                 )
                 _record_link(user, provider, claims, auto=True, request=request)
         if user is not None and identity is not None:
-            session, refresh = start_staff_session(user, device_label=device_label)
+            session, refresh = start_staff_session(user, device_label=device_label, auth_method=provider)
             identity.last_login_at = timeutils.now()
             identity.save(update_fields=["last_login_at"])
             audit.record(
@@ -265,14 +289,34 @@ def social_login(
     raise AuthFailed("social_account_not_allowed")
 
 
+def require_password_session(session_id: uuid.UUID | str) -> AuthSession:
+    """The staff session ``session_id`` when its sign-in was an email + password one (admin contract §2.1:
+    identities are linked only by a staff member signed in with the password), else 403
+    ``permission_denied``. A session from before ``accounts.0007`` (no recorded method) is refused too."""
+    session = AuthSession.objects.filter(pk=session_id, audience="staff").first()
+    if session is None or session.auth_method != AuthSession.AuthMethod.PASSWORD:
+        raise PermissionDenied
+    return session
+
+
 @transaction.atomic
 def link_identity(
-    user: StaffUser, provider: str, claims: SocialClaims, *, request: Any = None
+    user: StaffUser,
+    provider: str,
+    claims: SocialClaims,
+    *,
+    session_id: uuid.UUID | str | None = None,
+    request: Any = None,
 ) -> SocialIdentity:
     """Link ``(provider, subject)`` to ``user`` (contract 2.1 ``POST auth/oauth/{provider}/link/``).
 
-    One identity per ``(staff, provider)`` and per ``(provider, subject)``; either duplicate is a 409.
+    Only from a password session (``session_id``; 403 ``permission_denied`` for a social one, so a social
+    sign-in cannot attach a second identity). One identity per ``(staff, provider)`` and per ``(provider,
+    subject)``; either duplicate is a 409.
     """
+    if session_id is None:
+        raise PermissionDenied
+    require_password_session(session_id)
     if SocialIdentity.objects.filter(staff=user, provider=provider).exists():
         raise Conflict(SOCIAL_PROVIDER_LINKED)
     if SocialIdentity.objects.filter(provider=provider, subject=claims.subject).exists():
@@ -570,6 +614,7 @@ def start_customer_session(
     app_version: str,
     *,
     issue_device_key: bool,
+    auth_method: str = AuthSession.AuthMethod.PASSWORD,
 ) -> SessionStart:
     """Sign a customer in on one device (customer contract §1.9 steps 1–6, the single-device rule).
 
@@ -663,6 +708,7 @@ def start_customer_session(
         created_at=instant,
         last_used_at=instant,
         absolute_expires_at=instant + timedelta(days=int(settings.CUSTOMER_REFRESH_TTL_DAYS)),
+        auth_method=auth_method,
     )
     Customer.objects.filter(pk=customer_id).update(last_login_at=instant, updated_at=instant)
     _revoke_qr_on_commit(customer_id)
@@ -714,10 +760,33 @@ def move_history_horizon(customer_id: int, *, at: datetime) -> None:
     Customer.objects.filter(pk=customer_id).update(history_from=at, updated_at=timeutils.now())
 
 
-def apple_client_id() -> str:
-    """The bundle id Apple tokens are revoked for: the first ``APPLE_BUNDLE_IDS`` entry, ``""`` when unset."""
+def apple_client_id(identity: CustomerSocialIdentity | None = None) -> str:
+    """The ``client_id`` an Apple refresh token is revoked with (customer contract §2.1.8).
+
+    Apple binds a refresh token to the client it was issued to: the ID token's ``aud`` bundle id, which the
+    code exchange used as ``client_id``. It is kept on the identity (``provider_client_id``, and bound to the
+    sealed token as its associated data, :func:`seal_apple_refresh`), so the revocation uses the right
+    ``client_id`` when ``APPLE_BUNDLE_IDS`` lists several bundle ids. An identity from before
+    ``accounts.0007`` falls back to the first configured bundle id (``""`` when none).
+    """
+    if identity is not None and identity.provider_client_id:
+        return identity.provider_client_id
     bundle_ids = list(settings.APPLE_BUNDLE_IDS)
     return str(bundle_ids[0]) if bundle_ids else ""
+
+
+def apple_token_aad(client_id: str) -> bytes:
+    """Associated data of a sealed Apple refresh token: its ``client_id`` (a token cannot be replayed under
+    another bundle id, and the revocation payload's ``client_id`` is authenticated by the seal)."""
+    return f"apple.refresh_token:{client_id}".encode()
+
+
+def seal_apple_refresh(refresh_token: str, *, client_id: str) -> str:
+    return secretbox.seal(refresh_token.encode("utf-8"), aad=apple_token_aad(client_id))
+
+
+def open_apple_refresh(sealed: str, *, client_id: str) -> str:
+    return secretbox.open_(sealed, aad=apple_token_aad(client_id)).decode("utf-8")
 
 
 def enqueue_apple_revoke(identity: CustomerSocialIdentity) -> bool:
@@ -732,7 +801,7 @@ def enqueue_apple_revoke(identity: CustomerSocialIdentity) -> bool:
         topics.APPLE_REVOKE,
         {
             "identity_id": identity.pk,
-            "client_id": apple_client_id(),
+            "client_id": apple_client_id(identity),
             "sealed_token": identity.provider_refresh_token,
         },
         dedupe_key=topics.apple_revoke_key(identity.pk),
@@ -858,3 +927,617 @@ def invalidate_fcm_token(device_id: int, *, token: str | None = None) -> bool:
             fcm_token="", push_enabled=False, fcm_invalidated_at=instant, updated_at=instant
         )
     )
+
+
+# --- P1: OTP, verification tokens, rotating refresh, logout, social nonce (customer contract §2.1) ---------
+
+# OtpPurpose (API) → SmsCode.Purpose (stored), customer contract §2.1.
+OTP_PURPOSES: dict[str, str] = {
+    enums.OtpPurpose.REGISTER: SmsCode.Purpose.SIGNUP,
+    enums.OtpPurpose.LOGIN_NEW_DEVICE: SmsCode.Purpose.NEW_DEVICE,
+    enums.OtpPurpose.RESET_PASSWORD: SmsCode.Purpose.RESET,
+    enums.OtpPurpose.LINK_SOCIAL: SmsCode.Purpose.SOCIAL_LINK,
+}
+OTP_CODE_LENGTH = 6
+OTP_PAYLOAD_KEY = "gd:otp:payload:{sms_code_id}"
+SOCIAL_OTP_KEY = "gd:social:otp:{sms_code_id}"
+SOCIAL_OTP_TTL_SECONDS = 15 * 60
+SOCIAL_NONCE_KEY = "gd:social:nonce:{digest}"
+SOCIAL_SEEN_KEY = "gd:social:seen:{digest}"
+REFRESH_GRACE_KEY = "auth:refresh_grace:{digest}"
+REFRESH_DEAD_KEY = "auth:refresh_dead:{digest}"
+
+
+@dataclass(frozen=True, slots=True)
+class CodeIssue:
+    """``auth/send-code/`` 200 and the ``otp`` block of ``NextStep`` (customer contract §2.1.1, §2.1.4)."""
+
+    sms_code_id: int
+    phone: str
+    purpose: str
+    expires_in: int
+    resend_in: int
+    attempts: int
+    length: int = OTP_CODE_LENGTH
+
+
+@dataclass(frozen=True, slots=True)
+class Verification:
+    """``auth/verify-code/`` 200: the raw token is returned once; only its SHA-256 is stored."""
+
+    token: str
+    expires_in: int
+    purpose: str
+    customer_exists: bool
+
+
+def _seconds(delta: timedelta) -> int:
+    return max(1, int(delta.total_seconds() + 0.999))
+
+
+def _day_start(now: datetime) -> datetime:
+    return timeutils.day_bounds(timeutils.local_date(now))[0]
+
+
+def _to_midnight(now: datetime) -> int:
+    return _seconds(timeutils.day_bounds(timeutils.local_date(now))[1] - now)
+
+
+def _day_tag(now: datetime) -> str:
+    return timeutils.local_date(now).strftime("%Y%m%d")
+
+
+def _fid_counter_key(fid: str, now: datetime) -> str:
+    return f"gd:otp:fid:{pii_ref(fid)}:{_day_tag(now)}"
+
+
+def _ip_counter_key(ip: str, now: datetime) -> str:
+    return f"gd:otp:ip:{ip}:{_day_tag(now)}"
+
+
+def _global_counter_key(now: datetime) -> str:
+    return f"gd:otp:global:{now.astimezone(timeutils.TASHKENT).strftime('%Y%m%d%H')}"
+
+
+def _seconds_to_next_hour(now: datetime) -> int:
+    local = now.astimezone(timeutils.TASHKENT)
+    nxt = local.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    return _seconds(nxt - local)
+
+
+def _counter(key: str) -> int:
+    try:
+        return int(cache.get(key) or 0)
+    except TypeError, ValueError:
+        return 0
+
+
+def _incr(key: str, timeout: int) -> int:
+    """Atomic increment of a Redis day/hour counter (created with ``timeout`` on first use)."""
+    cache.add(key, 0, timeout=timeout)
+    try:
+        return int(cache.incr(key))
+    except ValueError:  # expired between add and incr
+        cache.add(key, 1, timeout=timeout)
+        return 1
+
+
+def code_hmac(code: str) -> str:
+    """``HMAC-SHA256(code, SMS_CODE_HMAC_KEY)`` hex: the only stored form of an SMS code (§6.4)."""
+    return hmac.new(
+        str(settings.SMS_CODE_HMAC_KEY).encode("utf-8"), code.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+
+
+def otp_payload_key(sms_code_id: int) -> str:
+    return OTP_PAYLOAD_KEY.format(sms_code_id=sms_code_id)
+
+
+def social_otp_key(sms_code_id: int) -> str:
+    return SOCIAL_OTP_KEY.format(sms_code_id=sms_code_id)
+
+
+def _lock_phone(phone: str) -> None:
+    """``pg_advisory_xact_lock(hashtext('otp:' + phone))``: serialises every OTP decision of one phone until
+    the surrounding transaction ends (customer contract §2.1.1)."""
+    if not transaction.get_connection().in_atomic_block:
+        raise RuntimeError("the per-phone OTP lock needs a transaction")
+    with transaction.get_connection().cursor() as cursor:
+        cursor.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ["otp:" + phone])
+
+
+def active_customer_by_phone(phone: str) -> Customer | None:
+    return Customer.objects.filter(phone=phone, status=enums.CustomerStatus.ACTIVE).first()
+
+
+def _phone_block(phone: str, now: datetime) -> Exception | None:
+    """The phone-derived refusals (DB rows, they survive a cache flush): lockout, daily wrong-code cap."""
+    lockout = timedelta(minutes=int(settings.CUSTOMER_OTP_LOCKOUT_MINUTES))
+    exhausted = (
+        SmsCode.objects.filter(phone=phone, exhausted_at__gt=now - lockout)
+        .order_by("-exhausted_at")
+        .values_list("exhausted_at", flat=True)
+        .first()
+    )
+    if exhausted is not None:
+        return OtpLocked(retry_after=_seconds(exhausted + lockout - now))
+    if wrong_codes_today(phone, now) >= int(settings.CUSTOMER_OTP_DAILY_WRONG_LIMIT):
+        return OtpLocked(retry_after=_to_midnight(now))
+    return None
+
+
+def wrong_codes_today(phone: str, now: datetime) -> int:
+    return int(
+        SmsCode.objects.filter(phone=phone, created_at__gte=_day_start(now)).aggregate(total=Sum("attempts"))[
+            "total"
+        ]
+        or 0
+    )
+
+
+def _cap_block(phone: str, *, fid: str, ip: str, now: datetime) -> Exception | None:
+    """The day caps: codes per phone (DB), per fid and per client IP (Redis counters)."""
+    if SmsCode.objects.filter(phone=phone, created_at__gte=_day_start(now)).count() >= int(
+        settings.CUSTOMER_OTP_DAILY_LIMIT
+    ) or _counter(_fid_counter_key(fid, now)) >= int(settings.CUSTOMER_OTP_DEVICE_DAILY_LIMIT):
+        return OtpDailyLimit(retry_after=_to_midnight(now))
+    if ip and _counter(_ip_counter_key(ip, now)) >= int(settings.CUSTOMER_OTP_IP_DAILY_LIMIT):
+        return OtpNetworkLimit(retry_after=_to_midnight(now))
+    return None
+
+
+def _budget_block(now: datetime) -> Exception | None:
+    """The global hourly SMS breaker (503 ``sms_unavailable`` + ERROR ``otp.budget_tripped``)."""
+    if _counter(_global_counter_key(now)) >= int(settings.SMS_GLOBAL_HOURLY_LIMIT):
+        logger.error("otp.budget_tripped limit=%s", settings.SMS_GLOBAL_HOURLY_LIMIT)
+        return SmsUnavailable(retry_after=_seconds_to_next_hour(now))
+    return None
+
+
+def _count_issue(*, fid: str, ip: str, now: datetime) -> None:
+    _incr(_global_counter_key(now), 3600 + 60)
+    _incr(_fid_counter_key(fid, now), 2 * 86400)
+    if ip:
+        _incr(_ip_counter_key(ip, now), 2 * 86400)
+
+
+def _create_code(
+    phone: str, stored_purpose: str, *, ip: str, fid: str, lang: str, platform: str, now: datetime
+) -> SmsCode:
+    """Supersede the live code, store a new HMAC row, seal the plain code into Redis for the handler, count it
+    and enqueue ``sms.send`` (no phone, no text, no code in the payload)."""
+    SmsCode.objects.filter(
+        phone=phone, purpose=stored_purpose, consumed_at__isnull=True, expires_at__gt=now
+    ).update(expires_at=now)
+    code = eskiz_registry.new_code()
+    ttl = int(settings.CUSTOMER_OTP_TTL_SECONDS)
+    row = SmsCode.objects.create(
+        phone=phone,
+        purpose=stored_purpose,
+        code_hmac=code_hmac(code),
+        max_attempts=int(settings.CUSTOMER_OTP_MAX_ATTEMPTS),
+        created_at=now,
+        expires_at=now + timedelta(seconds=ttl),
+        request_ip=ip or None,
+    )
+    cache.set(otp_payload_key(row.pk), secretbox.seal(code.encode("ascii"), aad=str(row.pk).encode()), ttl)
+    _count_issue(fid=fid, ip=ip, now=now)
+    outbox.enqueue(
+        topics.SMS_SEND,
+        {"sms_code_id": row.pk, "lang": lang, "platform": platform},
+        dedupe_key=topics.sms_send_key(row.pk),
+    )
+    logger.info("otp.issued purpose=%s phone_ref=%s", stored_purpose, pii_ref(phone))
+    return row
+
+
+def _issue(row: SmsCode, purpose: str, now: datetime) -> CodeIssue:
+    resend_at = row.created_at + timedelta(seconds=int(settings.CUSTOMER_OTP_RESEND_SECONDS))
+    return CodeIssue(
+        sms_code_id=row.pk,
+        phone=row.phone,
+        purpose=purpose,
+        expires_in=max(0, int((row.expires_at - now).total_seconds())),
+        resend_in=max(0, int((resend_at - now).total_seconds() + 0.999)),
+        attempts=row.max_attempts - row.attempts,
+    )
+
+
+def send_code(
+    phone: str,
+    purpose: str,
+    *,
+    ip: str,
+    fid: str,
+    lang: str,
+    platform: str,
+    social_jti: str | None = None,
+) -> CodeIssue:
+    """``auth/send-code/`` (customer contract §2.1.1), checks in contract order.
+
+    ``login_new_device`` is refused (only ``auth/login/`` issues it, after the password). Phone state
+    (``phone_registered`` / ``phone_not_registered``), the global hourly budget, then under the per-phone
+    advisory lock: lockout, daily wrong-code cap, resend window, phone and fid day caps, IP day cap. For
+    ``link_social`` the ticket's ``jti`` is remembered for the code (``gd:social:otp:{id}``, 15 min).
+    """
+    if purpose not in OTP_PURPOSES or purpose == enums.OtpPurpose.LOGIN_NEW_DEVICE:
+        raise ValueError(f"send_code cannot issue {purpose!r}")
+    if purpose == enums.OtpPurpose.LINK_SOCIAL and not social_jti:
+        raise ValueError("link_social codes need the ticket jti")
+    customer = active_customer_by_phone(phone)
+    if purpose == enums.OtpPurpose.REGISTER and customer is not None:
+        raise PhoneRegistered()
+    if purpose == enums.OtpPurpose.RESET_PASSWORD and customer is None:
+        raise PhoneNotRegistered()
+    now = timeutils.now()
+    budget = _budget_block(now)
+    if budget is not None:
+        raise budget
+    stored = OTP_PURPOSES[purpose]
+    with transaction.atomic():
+        _lock_phone(phone)
+        block = _phone_block(phone, now)
+        if block is not None:
+            raise block
+        newest = SmsCode.objects.filter(phone=phone, purpose=stored).order_by("-created_at", "-id").first()
+        resend = timedelta(seconds=int(settings.CUSTOMER_OTP_RESEND_SECONDS))
+        if newest is not None and newest.created_at > now - resend:
+            raise OtpResendTooSoon(retry_after=_seconds(newest.created_at + resend - now))
+        block = _cap_block(phone, fid=fid, ip=ip, now=now)
+        if block is not None:
+            raise block
+        row = _create_code(phone, stored, ip=ip, fid=fid, lang=lang, platform=platform, now=now)
+        if social_jti:
+            cache.set(social_otp_key(row.pk), social_jti, SOCIAL_OTP_TTL_SECONDS)
+        return _issue(row, purpose, now)
+
+
+def otp_blocked(phone: str, *, fid: str, ip: str, now: datetime) -> Exception | None:
+    """The pre-password check of ``auth/login/`` step 3 (customer contract §2.1.4): takes the per-phone
+    advisory lock (held until the caller's transaction ends) and returns the refusal ``send_code`` could
+    meet — lockout, daily code cap, daily wrong-code cap, fid cap, IP cap (``otp_network_limit``), global
+    budget (``sms_unavailable``) — or ``None``. The same answer for every password and for unknown phones."""
+    _lock_phone(phone)
+    return _phone_block(phone, now) or _cap_block(phone, fid=fid, ip=ip, now=now) or _budget_block(now)
+
+
+def issue_login_code(phone: str, *, ip: str, fid: str, lang: str, platform: str) -> CodeIssue:
+    """The ``login_new_device`` code of ``auth/login/`` step 6, after the password check.
+
+    Runs under the advisory lock :func:`otp_blocked` took (the caller's transaction). A live code younger than
+    the resend window is reused (no SMS; ``resend_in`` = the remaining wait); otherwise a new one is issued.
+    The fid, IP and global counters are incremented without a second check, so this never answers a cap
+    error after the password was checked (a concurrent request may overshoot one of those cost caps by one).
+    """
+    now = timeutils.now()
+    _lock_phone(phone)
+    stored = SmsCode.Purpose.NEW_DEVICE
+    resend = timedelta(seconds=int(settings.CUSTOMER_OTP_RESEND_SECONDS))
+    live = (
+        SmsCode.objects.filter(
+            phone=phone,
+            purpose=stored,
+            consumed_at__isnull=True,
+            exhausted_at__isnull=True,
+            expires_at__gt=now,
+            created_at__gt=now - resend,
+        )
+        .order_by("-created_at", "-id")
+        .first()
+    )
+    if live is None:
+        live = _create_code(phone, stored, ip=ip, fid=fid, lang=lang, platform=platform, now=now)
+    return _issue(live, enums.OtpPurpose.LOGIN_NEW_DEVICE, now)
+
+
+def verify_code(phone: str, purpose: str, code: str) -> Verification:
+    """``auth/verify-code/`` (customer contract §2.1.2) under the per-phone advisory lock and a row lock.
+
+    No live code (none, expired, consumed, superseded) → ``otp_expired``; exhausted row, lockout or daily
+    wrong-code cap → ``otp_locked``; HMAC mismatch → ``attempts += 1`` (``exhausted_at`` at the max) is
+    **committed** and then ``otp_invalid`` (``attempts_left`` = min(this code's, the day's)) or, at 0 left,
+    ``otp_locked``. A match issues the single-use verification token (SHA-256 stored, 10 min).
+    """
+    stored = OTP_PURPOSES[purpose]
+    now = timeutils.now()
+    refusal: Exception | None = None
+    with transaction.atomic():
+        _lock_phone(phone)
+        row = (
+            SmsCode.objects.select_for_update()
+            .filter(phone=phone, purpose=stored)
+            .order_by("-created_at", "-id")
+            .first()
+        )
+        if row is None or row.consumed_at is not None or row.expires_at <= now:
+            raise OtpExpired()
+        block = _phone_block(phone, now)
+        if row.exhausted_at is not None or block is not None:
+            raise block or OtpLocked(retry_after=60 * int(settings.CUSTOMER_OTP_LOCKOUT_MINUTES))
+        if not hmac.compare_digest(row.code_hmac, code_hmac(code)):
+            row.attempts += 1
+            if row.attempts >= row.max_attempts:
+                row.exhausted_at = now
+            row.save(update_fields=["attempts", "exhausted_at"])
+            day_left = int(settings.CUSTOMER_OTP_DAILY_WRONG_LIMIT) - wrong_codes_today(phone, now)
+            left = min(row.max_attempts - row.attempts, day_left)
+            if left <= 0:
+                refusal = _phone_block(phone, now) or OtpLocked(retry_after=_to_midnight(now))
+            else:
+                refusal = OtpInvalid(details={"attempts_left": left}, params={"n": left})
+        else:
+            token = secrets.token_urlsafe(32)
+            ttl = int(settings.CUSTOMER_VERIFICATION_TTL_SECONDS)
+            row.consumed_at = now
+            row.verification_token_hash = hash_secret(token)
+            row.verification_expires_at = now + timedelta(seconds=ttl)
+            row.save(update_fields=["consumed_at", "verification_token_hash", "verification_expires_at"])
+            return Verification(token, ttl, purpose, active_customer_by_phone(phone) is not None)
+    raise refusal
+
+
+def verification_row(token: str, *, purpose: str, phone: str | None = None, lock: bool = False) -> SmsCode:
+    """The usable ``SmsCode`` of a verification token (unused, unexpired, of ``purpose`` and ``phone``), else
+    400 ``verification_invalid``. With ``lock`` the row is locked (``FOR UPDATE``) for
+    :func:`consume_verification`."""
+    if not token:
+        raise VerificationInvalid()
+    queryset = SmsCode.objects.filter(verification_token_hash=hash_secret(token))
+    if lock:
+        queryset = queryset.select_for_update()
+    row = queryset.first()
+    if (
+        row is None
+        or row.purpose != OTP_PURPOSES.get(purpose)
+        or row.verification_used_at is not None
+        or row.verification_expires_at is None
+        or row.verification_expires_at <= timeutils.now()
+        or (phone is not None and row.phone != phone)
+    ):
+        raise VerificationInvalid()
+    return row
+
+
+def consume_verification(token: str, *, purpose: str, phone: str | None = None) -> tuple[str, int]:
+    """Mark a verification token used under its row lock (single use; part of the caller's transaction, so a
+    refusal later in the flow rolls the use back). Returns ``(phone, sms_code_id)``."""
+    if not transaction.get_connection().in_atomic_block:
+        raise RuntimeError("consume_verification needs the caller's transaction")
+    row = verification_row(token, purpose=purpose, phone=phone, lock=True)
+    row.verification_used_at = timeutils.now()
+    row.save(update_fields=["verification_used_at"])
+    return row.phone, row.pk
+
+
+# --- rotating customer refresh (customer contract §2.1.6) ---
+
+
+@dataclass(frozen=True, slots=True)
+class RefreshResult:
+    body: dict[str, Any]
+    session_id: str
+
+
+class RefreshUnknown(AuthFailed):
+    """No session for the presented token (the view counts the miss in ``refresh_unknown``)."""
+
+    def __init__(self) -> None:
+        super().__init__("not_authenticated")
+
+
+def _grace_key(digest: str) -> str:
+    return REFRESH_GRACE_KEY.format(digest=digest)
+
+
+def _dead_key(digest: str) -> str:
+    return REFRESH_DEAD_KEY.format(digest=digest)
+
+
+def refresh_body(session: AuthSession, raw_refresh: str) -> dict[str, Any]:
+    access, expires = tokens.issue_access(session)
+    return {
+        "access": access,
+        "access_expires_at": timeutils.isoformat(expires),
+        "refresh": raw_refresh,
+        "refresh_expires_at": timeutils.isoformat(session.absolute_expires_at),
+    }
+
+
+def _check_refresh_device(session: AuthSession, fid: str, platform: str | None) -> None:
+    device = session.device
+    if device is None or device.fid != fid or (platform is not None and device.platform != platform):
+        raise AuthFailed("not_authenticated")
+
+
+def rotate_customer_refresh(raw: str, *, fid: str, platform: str | None = None) -> RefreshResult:
+    """``auth/refresh/`` steps 1–6 (customer contract §2.1.6) in one transaction on the locked row.
+
+    Rotate (current token), grace replay (``auth:refresh_grace:{h}`` exists: identical tokens, nothing
+    written, confirmed or not), re-rotation (previous token, rotation unconfirmed and younger than
+    ``CUSTOMER_REFRESH_UNCONFIRMED_SECONDS``: the unused current hash is remembered as dead), else reuse → the
+    session is revoked ``refresh_reused`` (committed, audited) and 401 ``SESSION_EXPIRED``. The grace body is
+    written before commit and deleted again when the transaction rolls back.
+    """
+    digest = hash_secret(raw)
+    written: list[str] = []
+    refusal: Exception | None = None
+    try:
+        with transaction.atomic():
+            session = (
+                AuthSession.objects.select_for_update(of=("self",))
+                .select_related("device", "customer")
+                .filter(audience="customer")
+                .filter(Q(refresh_hash=digest) | Q(previous_refresh_hash=digest))
+                .first()
+            )
+            reuse = False
+            if session is None:
+                dead_sid = cache.get(_dead_key(digest))
+                if not dead_sid:
+                    raise RefreshUnknown()
+                session = (
+                    AuthSession.objects.select_for_update(of=("self",))
+                    .select_related("device", "customer")
+                    .filter(pk=dead_sid, audience="customer")
+                    .first()
+                )
+                if session is None:
+                    raise RefreshUnknown()
+                reuse = True
+            if session.revoked_at is not None:
+                raise_revoked_session(session.revoke_reason)
+            now = timeutils.now()
+            customer = session.customer
+            if (
+                session.absolute_expires_at <= now
+                or customer is None
+                or customer.status != enums.CustomerStatus.ACTIVE
+            ):
+                raise AuthFailed("SESSION_EXPIRED")
+            _check_refresh_device(session, fid, platform)
+            grace_ttl = int(settings.CUSTOMER_REFRESH_GRACE_SECONDS)
+            if not reuse and session.refresh_hash == digest:
+                new_raw = secrets.token_urlsafe(32)
+                session.previous_refresh_hash = digest
+                session.refresh_hash = hash_secret(new_raw)
+                session.rotation += 1
+                session.rotation_confirmed = False
+                session.rotated_at = session.last_used_at = now
+                session.absolute_expires_at = now + timedelta(days=int(settings.CUSTOMER_REFRESH_TTL_DAYS))
+                session.save(
+                    update_fields=[
+                        "previous_refresh_hash",
+                        "refresh_hash",
+                        "rotation",
+                        "rotation_confirmed",
+                        "rotated_at",
+                        "last_used_at",
+                        "absolute_expires_at",
+                    ]
+                )
+                body = refresh_body(session, new_raw)
+                cache.set(_grace_key(digest), body, grace_ttl)
+                written.append(_grace_key(digest))
+                return RefreshResult(body, str(session.pk))
+            if not reuse:
+                grace = cache.get(_grace_key(digest))
+                if isinstance(grace, dict):
+                    return RefreshResult(grace, str(session.pk))
+                window = timedelta(seconds=int(settings.CUSTOMER_REFRESH_UNCONFIRMED_SECONDS))
+                if (
+                    not session.rotation_confirmed
+                    and session.rotated_at is not None
+                    and now - session.rotated_at <= window
+                ):
+                    remaining = max(1, int((session.absolute_expires_at - now).total_seconds()))
+                    cache.set(_dead_key(session.refresh_hash), str(session.pk), remaining)
+                    new_raw = secrets.token_urlsafe(32)
+                    session.refresh_hash = hash_secret(new_raw)
+                    session.rotation += 1
+                    session.rotation_confirmed = False
+                    session.last_used_at = now
+                    session.save(
+                        update_fields=["refresh_hash", "rotation", "rotation_confirmed", "last_used_at"]
+                    )
+                    body = refresh_body(session, new_raw)
+                    cache.set(_grace_key(digest), body, grace_ttl)
+                    written.append(_grace_key(digest))
+                    return RefreshResult(body, str(session.pk))
+            # reuse: one of the holders is not the app
+            _revoke_open_customer_sessions(
+                AuthSession.objects.filter(pk=session.pk), enums.SessionRevokeReason.REFRESH_REUSED, at=now
+            )
+            _revoke_qr_on_commit(session.customer_id or 0)
+            audit.record(
+                action="customer.refresh_reused",
+                entity_type="customer",
+                entity_id=str(session.customer_id),
+                actor=customer,
+                after={"sid": str(session.pk)},
+            )
+            logger.warning("customer.refresh_reused sid=%s", session.pk)
+            refusal = AuthFailed("SESSION_EXPIRED")
+    except Exception:
+        for key in written:
+            cache.delete(key)
+        raise
+    raise refusal
+
+
+def raise_revoked_session(reason: str) -> None:
+    """The 401 of a revoked customer session (``replaced`` / ``password_changed`` / else expired)."""
+    if reason == enums.SessionRevokeReason.REPLACED:
+        raise AuthFailed("SESSION_REPLACED")
+    if reason == enums.SessionRevokeReason.PASSWORD_CHANGED:
+        raise PasswordChanged()
+    raise AuthFailed("SESSION_EXPIRED")
+
+
+@transaction.atomic
+def logout_customer(raw: str, *, request: Any = None) -> AuthSession:
+    """``auth/logout/`` (customer contract §2.1.7): revoke the session owning the refresh token (``logout``,
+    tombstone on commit), the device inactive with no push and no token (its key hash kept), the customer's QR
+    keys deleted on commit; audit ``customer.logout``. Unknown, revoked or expired → 401
+    ``SESSION_EXPIRED``."""
+    digest = hash_secret(raw)
+    session = (
+        AuthSession.objects.select_for_update(of=("self",))
+        .select_related("customer")
+        .filter(audience="customer")
+        .filter(Q(refresh_hash=digest) | Q(previous_refresh_hash=digest))
+        .first()
+    )
+    if session is None or session.revoked_at is not None or session.absolute_expires_at <= timeutils.now():
+        raise AuthFailed("SESSION_EXPIRED")
+    _revoke_open_customer_sessions(
+        AuthSession.objects.filter(pk=session.pk), enums.SessionRevokeReason.LOGOUT
+    )
+    if session.device_id is not None:
+        Device.objects.filter(pk=session.device_id).update(
+            is_active=False, push_enabled=False, fcm_token="", updated_at=timeutils.now()
+        )
+    _revoke_qr_on_commit(session.customer_id or 0)
+    audit.record(
+        action="customer.logout",
+        entity_type="customer",
+        entity_id=str(session.customer_id),
+        actor=session.customer,
+        request=request,
+        after={"sid": str(session.pk)},
+    )
+    return session
+
+
+# --- social sign-in helpers (customer contract §2.1.8) ---
+
+
+def _sha256(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def issue_social_nonce(fid: str) -> tuple[str, int]:
+    """A 256-bit nonce bound to this install (``gd:social:nonce:{sha256(nonce)}`` = ``pii_ref(fid)``)."""
+    nonce = secrets.token_urlsafe(32)
+    ttl = int(settings.SOCIAL_NONCE_TTL_SECONDS)
+    cache.set(SOCIAL_NONCE_KEY.format(digest=_sha256(nonce)), pii_ref(fid), ttl)
+    return nonce, ttl
+
+
+def consume_social_nonce(nonce: str, fid: str) -> bool:
+    """Single use: the nonce must exist, be bound to ``fid``, and its deletion must succeed (a concurrent use
+    of the same nonce deletes nothing and fails)."""
+    if not nonce:
+        return False
+    key = SOCIAL_NONCE_KEY.format(digest=_sha256(nonce))
+    if cache.get(key) != pii_ref(fid):
+        return False
+    return bool(cache.delete(key))
+
+
+def remember_id_token(provider: str, raw_token: str, *, expires_at: int) -> bool:
+    """The replay cache (``gd:social:seen:{sha256(provider + ":" + token)}`` until ``exp``); ``False``
+    when the
+    token was seen before. Keyed by the raw token: Apple's token has no ``jti`` and two tokens of one second
+    share every claim."""
+    ttl = max(1, int(expires_at - timeutils.now().timestamp()))
+    return bool(cache.add(SOCIAL_SEEN_KEY.format(digest=_sha256(f"{provider}:{raw_token}")), 1, ttl))
