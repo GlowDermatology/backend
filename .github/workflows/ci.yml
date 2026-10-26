@@ -62,6 +62,12 @@ jobs:
           export SECRET_KEY="$(openssl rand -hex 32)"
           export INTERNAL_API_SECRET="$(openssl rand -hex 24)"
           export JWT_SIGNING_KEYS="{\"ci\":\"$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')\"}"
+          # M2 customer API keys (required by production settings; generated per run).
+          export SMS_CODE_HMAC_KEY="$(openssl rand -hex 32)" LOG_PII_KEY="$(openssl rand -hex 32)"
+          export PAYMENT_REF_KEY="$(openssl rand -hex 32)" QR_HMAC_KEY="$(openssl rand -hex 32)"
+          export BTS_WEBHOOK_SECRET="$(openssl rand -hex 32)"
+          export CLICK_SECRET_KEY="$(openssl rand -hex 16)" PAYME_KEY="$(openssl rand -hex 16)"
+          export SECRETBOX_KEY="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')"
           uv run python manage.py check --deploy --fail-level WARNING
   docker:
     runs-on: ubuntu-latest

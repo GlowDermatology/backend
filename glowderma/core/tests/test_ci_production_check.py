@@ -1,16 +1,8 @@
-"""The CI "Production deploy checks" step boots the production settings (review finding, P0 fix pass 1).
+"""The CI "Production deploy checks" step and the Dockerfile collectstatic step boot production settings.
 
-P0 made eight keys mandatory under the production settings, and ``.github/workflows/ci.yml`` is lead-owned,
-so the step runs here exactly as CI runs it (its ``env`` and ``run`` block, ``uv run python`` replaced by
-this interpreter). The strict ``xfail`` documents that the step is red until the lead adds the keys and fails
-the moment it passes, so the marker goes in the same change. The second test proves that the exports
-proposed to the lead are enough.
-
-The image build (``Dockerfile``, the ``collectstatic`` RUN line under ``config.settings.production``, the CI
-``docker`` job) is lead-owned too and is checked the same way (P0 fix pass 2): it already lacked
-``PUBLIC_MEDIA_BASE_URL`` on the base branch and now also needs the eight M2 keys. The proposed prefix
-generates them per build (like the CI step) instead of committing build-only values, which production would
-then have to refuse as committed placeholders.
+Both run here exactly as committed (their env and commands, the interpreter swapped for this one), so a new
+required production setting that the CI step or the image build does not provide fails this suite instead of
+CI or ``docker build``. The ``PROPOSED_*`` tests keep the generated-per-run values honest on their own.
 """
 
 import os
@@ -20,7 +12,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import pytest
 import yaml
 from django.conf import settings
 
@@ -64,11 +55,6 @@ def run_step(extra_exports: str = "") -> subprocess.CompletedProcess[str]:
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="ci.yml is lead-owned: the lead adds the M2 production keys to the step (P0 fix pass 1 report); "
-    "remove this marker in that change",
-)
 def test_the_ci_production_deploy_step_passes_as_committed() -> None:
     result = run_step()
     assert result.returncode == 0, result.stderr[-2000:]
@@ -127,12 +113,6 @@ def run_dockerfile_collectstatic(prefix: str = "") -> subprocess.CompletedProces
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Dockerfile is lead-owned: the lead adds PUBLIC_MEDIA_BASE_URL and the M2 keys to the "
-    "collectstatic RUN line (P0 fix pass 2 report); remove this marker and the failure-reason test below "
-    "in that change",
-)
 def test_the_dockerfile_collectstatic_step_passes_as_committed() -> None:
     result = run_dockerfile_collectstatic()
     assert result.returncode == 0, result.stderr[-2000:]
@@ -142,11 +122,3 @@ def test_the_proposed_prefix_makes_the_dockerfile_collectstatic_step_pass() -> N
     result = run_dockerfile_collectstatic(PROPOSED_DOCKER_PREFIX)
     assert result.returncode == 0, result.stderr[-2000:]
     assert "Pretending to copy" in result.stdout or "static file" in result.stdout
-
-
-def test_the_committed_dockerfile_step_fails_on_the_missing_production_variables() -> None:
-    """What the strict xfail above stands for: the image build stops at the production settings import (so the
-    xfail cannot hide another failure). Deleted together with that marker."""
-    result = run_dockerfile_collectstatic()
-    assert result.returncode != 0
-    assert "ImproperlyConfigured" in result.stderr and "is required" in result.stderr
