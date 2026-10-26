@@ -29,7 +29,10 @@ def test_test_settings_default_to_the_fake_with_documented_values() -> None:
     assert settings.BILLZ_BASE_URL == "https://api-admin.billz.ai"
     assert settings.BILLZ_PLATFORM_ID == "7d4a4c38-dd84-4902-b744-0488b80a4c01"
     assert (settings.BILLZ_SECRET_KEY, settings.BILLZ_SHOP_ID) == ("", "")
-    assert settings.BILLZ_RATE_LIMIT_PER_SECOND == 2.0 and settings.BILLZ_PAGE_SIZE == 300
+    assert (
+        settings.BILLZ_RATE_LIMIT_PER_SECOND == 1.5 and settings.BILLZ_PAGE_SIZE == 300
+    )  # below Billz's 2/s
+    assert (settings.BILLZ_SHIFT_RETRY_MINUTES, settings.BILLZ_SHIFT_RETRY_MAX_HOURS) == (15, 36)
     assert settings.BILLZ_FULL_SYNC_MIN_RATIO == 0.8 and settings.BILLZ_VOLUME_FIELD == ""
     assert (settings.BILLZ_CONNECT_TIMEOUT_SECONDS, settings.BILLZ_READ_TIMEOUT_SECONDS) == (5.0, 30.0)
     assert settings.LOGGING["loggers"]["httpx"] == {"level": "WARNING"}  # request URLs can carry phones
@@ -87,6 +90,10 @@ def test_live_billz_in_production_refuses_a_missing_value(
         ("BILLZ_CASHBOX_ID", "42", "BILLZ_CASHBOX_ID must be a Billz UUID"),
         ("BILLZ_PAYMENT_TYPE_ID", "card", "BILLZ_PAYMENT_TYPE_ID must be a Billz UUID"),
         ("BILLZ_PLATFORM_ID", "web", "BILLZ_PLATFORM_ID must be a Billz UUID"),
+        # review B16: the all-zero placeholders of .env.example are refused
+        ("BILLZ_SHOP_ID", "00000000-0000-0000-0000-000000000000", "BILLZ_SHOP_ID is the .env.example"),
+        ("BILLZ_CASHBOX_ID", "00000000-0000-0000-0000-000000000000", "BILLZ_CASHBOX_ID is the .env"),
+        ("BILLZ_PAYMENT_TYPE_ID", "00000000-0000-0000-0000-000000000000", "BILLZ_PAYMENT_TYPE_ID is the"),
         ("BILLZ_BASE_URL", "http://api-admin.billz.ai", "https"),
     ],
 )
@@ -118,6 +125,13 @@ def test_live_billz_in_production_refuses_bad_values(
         ("BILLZ_PAGE_SIZE", "0", "BILLZ_PAGE_SIZE"),
         ("BILLZ_FULL_SYNC_MIN_RATIO", "1.5", "BILLZ_FULL_SYNC_MIN_RATIO"),
         ("BILLZ_FULL_SYNC_MIN_RATIO", "0", "BILLZ_FULL_SYNC_MIN_RATIO"),
+        # review B nit: unbounded values let one call outlive the push deadline and the renewal lock
+        ("BILLZ_RATE_LIMIT_PER_SECOND", "500", "BILLZ_RATE_LIMIT_PER_SECOND must be at most 2"),
+        ("BILLZ_READ_TIMEOUT_SECONDS", "900", "BILLZ_READ_TIMEOUT_SECONDS must be at most 60"),
+        ("BILLZ_CONNECT_TIMEOUT_SECONDS", "31", "BILLZ_CONNECT_TIMEOUT_SECONDS must be at most 30"),
+        ("BILLZ_SHIFT_RETRY_MINUTES", "0", "BILLZ_SHIFT_RETRY_MINUTES must be between 1 and 1440"),
+        ("BILLZ_SHIFT_RETRY_MAX_HOURS", "169", "BILLZ_SHIFT_RETRY_MAX_HOURS must be between 1 and 168"),
+        ("BILLZ_SHIFT_RETRY_MAX_HOURS", "two", "BILLZ_SHIFT_RETRY_MAX_HOURS must be an integer"),
     ],
 )
 def test_billz_settings_are_validated_in_every_module(
@@ -141,3 +155,26 @@ def test_local_settings_accept_tuned_values(
     local = load_fresh_local()
     assert (local.BILLZ_RATE_LIMIT_PER_SECOND, local.BILLZ_PAGE_SIZE) == (1.5, 200)
     assert local.BILLZ_BASE_URL == "https://billz.example"
+
+
+def test_crlf_values_are_stripped_before_they_are_validated_and_used(
+    production_env: None, load_fresh_production: Callable[[], ModuleType], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review B3 (probe test_a_crlf_shop_id_passes_validation_and_zeroes_every_stock): a ``.env`` saved with
+    CRLF line endings leaves ``\\r`` on every value; the adapter must use the very value that was validated,
+    or no Billz shop entry ever matches and every product syncs to stock 0 and no price."""
+    from glowderma.integrations.billz.live import price_of, stock_of
+    from glowderma.integrations.tests.billz_support import fixture
+
+    for name, value in LIVE_ENV.items():
+        monkeypatch.setenv(name, f"{value}\r")
+    monkeypatch.setenv("BILLZ_BASE_URL", "https://api-admin.billz.ai/ \r")
+    production = load_fresh_production()
+    assert production.BILLZ_SHOP_ID == LIVE_ENV["BILLZ_SHOP_ID"]
+    assert production.BILLZ_SECRET_KEY == LIVE_ENV["BILLZ_SECRET_KEY"]
+    assert production.BILLZ_CASHBOX_ID == LIVE_ENV["BILLZ_CASHBOX_ID"]
+    assert production.BILLZ_PAYMENT_TYPE_ID == LIVE_ENV["BILLZ_PAYMENT_TYPE_ID"]
+    assert production.BILLZ_BASE_URL == "https://api-admin.billz.ai"
+    product = fixture("products_page1")["products"][0]
+    assert stock_of(product, production.BILLZ_SHOP_ID) == 12
+    assert price_of(product, production.BILLZ_SHOP_ID) == 185_000

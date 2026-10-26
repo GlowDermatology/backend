@@ -250,11 +250,16 @@ LIVE_BILLZ_IDS = {
     "BILLZ_CASHBOX_ID": BILLZ_CASHBOX_ID,
     "BILLZ_PAYMENT_TYPE_ID": BILLZ_PAYMENT_TYPE_ID,
 }
+# The all-zero UUID is the placeholder of .env.example: syntactically valid, never a real Billz id.
+_NIL_UUID = "00000000-0000-0000-0000-000000000000"
 if BILLZ_MODE == "live":
     for _name, _value in {**LIVE_BILLZ_SECRETS, **LIVE_BILLZ_IDS}.items():
         _refuse_placeholder(_name, _value)
     for _name, _value in {**LIVE_BILLZ_IDS, "BILLZ_PLATFORM_ID": BILLZ_PLATFORM_ID}.items():
-        if not _UUID_PATTERN.fullmatch(_value.strip()):
+        # the exact value the adapter uses (base.py strips it), never a stripped copy of it
+        if not _UUID_PATTERN.fullmatch(_value):
             raise ImproperlyConfigured(f"{_name} must be a Billz UUID")
+        if _value == _NIL_UUID:
+            raise ImproperlyConfigured(f"{_name} is the .env.example placeholder; set the real Billz id")
     if urlsplit(BILLZ_BASE_URL).scheme != "https":
         raise ImproperlyConfigured("BILLZ_BASE_URL must be an https URL")
