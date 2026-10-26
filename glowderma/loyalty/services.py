@@ -27,6 +27,8 @@ replay that names another customer, or a sale/order that belongs to another purc
 
 from __future__ import annotations
 
+import hashlib
+import secrets
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -50,6 +52,7 @@ from glowderma.loyalty.models import (
     CashbackTier,
     LedgerEntry,
     LoyaltyAccount,
+    PosDevice,
     Purchase,
     PurchaseItem,
 )
@@ -1290,6 +1293,121 @@ def create_policy_version(
         )
 
 
+# --- POS devices (customer contract §2.10; plan §4 P3) ---
+
+POS_KEY_PREFIX = "gdpos"
+POS_PREFIX_LENGTH = 8
+POS_SECRET_BYTES = 24  # secrets.token_urlsafe(24) → 32 base64url characters
+POS_PREFIX_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+
+class PosDeviceError(LoyaltyError):
+    """A POS key command that cannot run (unknown actor or prefix, inactive device); the message is for the
+    operator's terminal."""
+
+
+def _pos_actor(actor_email: str) -> StaffUser:
+    actor = StaffUser.objects.filter(email__iexact=actor_email.strip(), is_active=True).first()
+    if actor is None:
+        raise PosDeviceError(f"--actor must name an active staff user (got {actor_email!r})")
+    return actor
+
+
+def _pos_key(prefix: str) -> str:
+    return f"{POS_KEY_PREFIX}_{prefix}_{secrets.token_urlsafe(POS_SECRET_BYTES)}"
+
+
+def _new_pos_prefix() -> str:
+    while True:
+        prefix = "".join(secrets.choice(POS_PREFIX_ALPHABET) for _ in range(POS_PREFIX_LENGTH))
+        if not PosDevice.objects.filter(key_prefix=prefix).exists():
+            return prefix
+
+
+def pos_key_hash(raw_key: str) -> str:
+    """The stored form of a POS key (SHA-256 hex); the raw key is never stored."""
+    return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
+
+
+def _pos_device(prefix: str) -> PosDevice:
+    device = PosDevice.objects.select_for_update().filter(key_prefix=prefix.strip()).first()
+    if device is None:
+        raise PosDeviceError(f"No POS device with the key prefix {prefix!r}")
+    return device
+
+
+def _audit_pos(action: str, device: PosDevice, actor: StaffUser, **extra: Any) -> None:
+    audit.record(
+        action=action,
+        entity_type="pos_device",
+        entity_id=str(device.pk),
+        actor=actor,
+        after={"pos_device_id": device.pk, **extra},
+    )
+
+
+@transaction.atomic
+def create_pos_device(name: str, location_label: str, actor_email: str) -> tuple[PosDevice, str]:
+    """``manage.py createposkey``: a new active device and its raw key (shown once, stored as SHA-256).
+    Audit ``pos.device_created {pos_device_id, name}`` with the staff actor."""
+    actor = _pos_actor(actor_email)
+    name = name.strip()
+    if not name:
+        raise PosDeviceError("--name is required")
+    prefix = _new_pos_prefix()
+    raw_key = _pos_key(prefix)
+    device = PosDevice.objects.create(
+        name=name[:100],
+        location_label=location_label.strip()[:100],
+        key_prefix=prefix,
+        key_hash=pos_key_hash(raw_key),
+        created_by=actor,
+    )
+    _audit_pos("pos.device_created", device, actor, name=device.name)
+    return device, raw_key
+
+
+@transaction.atomic
+def revoke_pos_device(prefix: str, actor_email: str) -> PosDevice:
+    """``manage.py revokeposkey``: ``is_active=False`` (the next call answers 401); audit
+    ``pos.device_revoked``. Revoking a revoked device changes nothing and audits nothing."""
+    actor = _pos_actor(actor_email)
+    device = _pos_device(prefix)
+    if device.is_active:
+        device.is_active = False
+        device.save(update_fields=["is_active", "updated_at"])
+        _audit_pos("pos.device_revoked", device, actor)
+    return device
+
+
+@transaction.atomic
+def rotate_pos_key(prefix: str, actor_email: str) -> str:
+    """``manage.py rotateposkey``: a new key with the same prefix replaces the old hash (the old key answers
+    401 at once); returns the raw key (shown once). Audit ``pos.device_rotated``. A revoked device is not
+    rotated."""
+    actor = _pos_actor(actor_email)
+    device = _pos_device(prefix)
+    if not device.is_active:
+        raise PosDeviceError(f"The POS device {prefix!r} is revoked")
+    raw_key = _pos_key(device.key_prefix)
+    device.key_hash = pos_key_hash(raw_key)
+    device.save(update_fields=["key_hash", "updated_at"])
+    _audit_pos("pos.device_rotated", device, actor)
+    return raw_key
+
+
+def ensure_pos_device(name: str, raw_key: str, actor: StaffUser | None) -> bool:
+    """Insert a device for a known key unless its hash exists (the local/test ``POS_API_KEYS`` seeding);
+    returns whether a row was created."""
+    digest = pos_key_hash(raw_key)
+    if PosDevice.objects.filter(key_hash=digest).exists():
+        return False
+    PosDevice.objects.create(
+        name=name[:100], key_prefix=raw_key.split("_")[1][:12], key_hash=digest, created_by=actor
+    )
+    return True
+
+
 __all__ = [
     "ADJUSTMENT_MAX_AMOUNT",
     "ADJUSTMENT_MIN_AMOUNT",
@@ -1304,6 +1422,7 @@ __all__ = [
     "LoyaltyValidationError",
     "OutOfOrderPosting",
     "PolicyValidationError",
+    "PosDeviceError",
     "PolicyVersionResult",
     "PostedEntry",
     "PurchaseConflict",
@@ -1318,16 +1437,21 @@ __all__ = [
     "capture_hold",
     "create_hold",
     "create_policy_version",
+    "create_pos_device",
+    "ensure_pos_device",
     "expire_holds",
     "get_or_create_account",
     "link_billz_sale",
     "next_effective_from",
     "policy_at",
+    "pos_key_hash",
     "post_entry",
     "record_online_purchase",
     "record_store_purchase",
     "release_hold",
     "reverse_purchase",
+    "revoke_pos_device",
+    "rotate_pos_key",
     "scheduled_policy",
     "tier_warnings",
     "validate_policy_version",
