@@ -11,7 +11,8 @@ The admin e2e scripts rely on these rules; change them only together with the fr
 
 ``read_stock(billz_ids, …)``
     * each barcode as ``get_product`` answers it (a known product: its stored stock, unchanged); ``…0000`` is
-      unknown; nothing is ever unavailable. The catalog never calls it while Billz is fake (the stock
+      unknown; nothing is ever unavailable or deferred.
+      The catalog never calls it while Billz is fake (the stock
       freshness re-read is live only: "fake mode: no change").
 
 ``iter_products(mode)`` (``delta`` and ``full`` yield the same rows)

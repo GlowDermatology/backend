@@ -13,7 +13,11 @@ catalog module implements over its own selectors.
 
 Stock freshness (gap X-STOCK-FRESHNESS): ``read_stock(billz_ids, budget_seconds=…)`` reads the current Billz
 row of each barcode (one lookup per barcode, one deadline for all of them) and never raises for a Billz
-failure: what it could not read is reported :attr:`StockRead.unavailable`, what Billz does not know
+failure: what it could not read because Billz failed (transport error, 5xx, auth, circuit open) is
+reported :attr:`StockRead.unavailable`; what it did not reach because the call's own budget ran out
+(:class:`BillzOutOfTime`: the deadline, the limiter wait, a 429 pause) or because one barcode's search was too
+ambiguous is :attr:`StockRead.deferred` — except a request the deadline cut short before Billz answered any
+lookup of the call, which is Billz not answering (unavailable); what Billz does not know
 :attr:`StockRead.unknown`.
 
 Catalog sync: ``iter_products(mode)`` yields every row of one run. A ``full`` run yields the **complete**
@@ -70,7 +74,9 @@ class StockRead:
 
     rows: Mapping[str, BillzProduct]  # barcode → Billz's row (``synced_at`` = when that barcode was asked)
     unknown: frozenset[str]  # Billz does not know the barcode (no sellable stock)
-    unavailable: frozenset[str]  # not read: Billz down, refusing, rate-limited or out of time
+    unavailable: frozenset[str]  # not read because Billz failed: transport error, 5xx, auth, circuit open
+    # not reached because the call's own budget ran out (BillzOutOfTime) or the search was ambiguous
+    deferred: frozenset[str] = frozenset()
 
 
 class BillzError(Exception):
@@ -102,6 +108,16 @@ class BillzUnavailable(BillzError):
 
     The request may be retried later; a write whose outcome is unknown is re-checked before it is repeated.
     """
+
+
+class BillzOutOfTime(BillzUnavailable):
+    """The call's own budget ran out, not Billz: the deadline passed, the limiter's wait (our shared rate
+    limit, or Billz's 429 pause) was used up, or a read was cut short by the deadline. ``read_stock`` reports
+    the barcodes it did not reach :attr:`StockRead.deferred` rather than unavailable (review: a healthy but
+    slow or rate-limited Billz must not refuse a checkout). ``cut_short``: a request was in flight when the
+    deadline cut it (Billz had not answered yet), as opposed to a wait that never sent anything."""
+
+    cut_short = False
 
 
 class BillzMisconfigured(BillzUnavailable):

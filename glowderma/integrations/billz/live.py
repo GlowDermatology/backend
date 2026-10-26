@@ -95,6 +95,7 @@ from .ports import (
     BillzCheckByHand,
     BillzError,
     BillzListingIncomplete,
+    BillzOutOfTime,
     BillzPaymentPending,
     BillzProduct,
     BillzRejected,
@@ -147,6 +148,11 @@ PROVIDER = IntegrationState.Provider.BILLZ
 ZERO_TIME_PREFIX = "0001-"  # Go's zero time: "0001-01-01T00:00:00Z"
 
 type SaleState = Literal["open", "paid", "unclear"]
+
+
+class BillzSearchExhausted(BillzUnavailable):
+    """One barcode's substring search filled every page Billz allows without an exact match: Billz answered,
+    only that barcode cannot be confirmed (``read_stock`` reports it deferred and goes on)."""
 
 
 def _str(value: Any) -> str:
@@ -427,7 +433,7 @@ class LiveBillz:
             seen += len(products)
             if not products or seen >= count:
                 return None
-        raise BillzUnavailable(
+        raise BillzSearchExhausted(
             f"GET /v2/products: the search for barcode {barcode} matched more than "
             f"{SEARCH_LIMIT * SEARCH_MAX_PAGES} products without an exact match"
         )
@@ -453,24 +459,42 @@ class LiveBillz:
         client = self.interactive if interactive else self.client
         rows: dict[str, BillzProduct] = {}
         unknown: set[str] = set()
+        ambiguous: set[str] = set()
         done = 0
+        stop: BillzError | None = None
         try:
             with client.deadline(budget_seconds):
                 for barcode in wanted:
-                    asked_at = (
-                        timeutils.now()
-                    )  # the stock is at least this fresh (never later than the answer)
-                    product = self._find_by_barcode(barcode, client) if BILLZ_ID.fullmatch(barcode) else None
-                    if product is None:
-                        unknown.add(barcode)
+                    # the stock is at least this fresh (never later than the answer)
+                    asked_at = timeutils.now()
+                    try:
+                        product = (
+                            self._find_by_barcode(barcode, client) if BILLZ_ID.fullmatch(barcode) else None
+                        )
+                    except BillzSearchExhausted:
+                        # Billz answered every page; only this barcode cannot be confirmed (review nit)
+                        logger.warning("billz.stock_read_ambiguous barcode=%s", barcode)
+                        ambiguous.add(barcode)
                     else:
-                        rows[barcode] = self._row(product, barcode, asked_at)
+                        if product is None:
+                            unknown.add(barcode)
+                        else:
+                            rows[barcode] = self._row(product, barcode, asked_at)
                     done += 1
         except BillzError as exc:
+            stop = exc
             logger.warning(
                 "billz.stock_read_incomplete read=%d of %d: %s", done, len(wanted), type(exc).__name__
             )
-        return StockRead(rows=rows, unknown=frozenset(unknown), unavailable=frozenset(wanted[done:]))
+        rest = frozenset(wanted[done:])
+        budget_ran_out = isinstance(stop, BillzOutOfTime) and (done > 0 or not stop.cut_short)
+        if stop is not None and not budget_ran_out:
+            return StockRead(
+                rows=rows, unknown=frozenset(unknown), unavailable=rest, deferred=frozenset(ambiguous)
+            )
+        return StockRead(
+            rows=rows, unknown=frozenset(unknown), unavailable=frozenset(), deferred=rest | ambiguous
+        )
 
     def iter_products(self, mode: ImportMode) -> Iterator[BillzProduct]:
         """Fetch the whole run first (see the module doc), then yield its rows."""
