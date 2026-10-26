@@ -268,6 +268,25 @@ def test_a_parcel_whose_apply_fails_never_holds_the_cursor(
     assert state().data["poll_cursor"] == last.pk and state().last_sync_at is not None
 
 
+def test_a_run_whose_every_apply_fails_is_a_failure(caplog: pytest.LogCaptureFixture) -> None:
+    """Every tracked parcel's apply raised: nothing was applied, so the run is no success (no
+    ``last_sync_at``) and counts a failure with the ERROR alert, like a run that tracked nothing."""
+    first, second = parcel(), parcel()
+    before = state()
+
+    def apply(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("cannot apply")
+
+    with mock.patch.object(services, "apply_bts_status", apply), caplog.at_level(logging.ERROR):
+        result = tasks.run_bts_poll()
+    assert result.tracked == [] and result.apply_failed == 2 and not result.stopped
+    after = state()
+    assert after.consecutive_failures == 1 and after.last_sync_at == before.last_sync_at
+    assert after.data["poll_cursor"] == second.pk and first.pk < second.pk
+    assert "bts.poll_nothing_tracked" in caplog.text and "'apply_failed': 2" in caplog.text
+    assert bts_polling_failing() is True
+
+
 def test_three_transport_failures_in_a_row_stop_the_run(tracked: list[str]) -> None:
     downs = [parcel(track="down") for _ in range(3)]
     after = parcel()
