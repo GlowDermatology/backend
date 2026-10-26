@@ -169,13 +169,15 @@ Mechanism, fingerprint, storage and responses as admin §1.7 (`core.idempotency.
   `POST cart/items/` (an increment: a retried "add 1" must not add 2), `POST me/addresses/` (a retried create must not
   duplicate), `POST me/social/`, `POST me/password/` (a retried change would answer `password_unchanged` or find its
   verification token used).
-- **Optional** on every other **C** POST/PUT/PATCH/DELETE (they are absolute writes: a retry converges). `auth/*`
-  ignore the header (responses carry credentials).
+- **Optional** on every other **C** POST/PUT/PATCH/DELETE (they are absolute writes: a retry converges), documented
+  as the optional `Idempotency-Key` header of those operations. `auth/*` ignore the header (responses carry
+  credentials). The fingerprint is an HMAC (keyed by the server secret) over the body **and the query string**.
 - Webhooks do not use it: provider deliveries are de-duplicated by `integrations.WebhookInbox` and by provider state
   (§2.13.0). The POS resolve is not idempotent by design (the QR token is single-use).
 - **No side effects on refusal:** under `@idempotent` every non-2xx answer rolls the whole transaction back
   (`transaction.set_rollback(True)`). A 409 therefore never carries a write; a refusal that must change state (for
-  example an expiry) is left to the job that owns it (§2.7.2).
+  example an expiry) is left to the job that owns it (§2.7.2). State a refusal keeps on purpose lives outside that
+  transaction: the sign-in guard counters (Redis) and the revocation of a refused flow's Apple token (§2.1.8).
 - App rule: one key per user intent (one tap of "Savatga", "Saqlash", "Buyurtma berish", "To‘lash", "Qayta
   buyurtma", "Yozilish", "Bekor qilish"), reused on network retries, renewed after any 2xx or after 422
   `idempotency_key_reused`. Errors are never stored, so a retry after 409/503 runs again.
@@ -492,7 +494,9 @@ device learns of the reset even when the reset came from a stolen SIM (§2.14.2)
 `verification_invalid`; 409 `phone_not_registered` if the customer was deleted in between.
 
 #### 2.1.6 `POST auth/refresh/`
-Body `{"refresh": str}`. Device headers must match the session's device (else 401 `not_authenticated`).
+Body `{"refresh": str}`. Device headers must match the session's device for every answer that hands out tokens
+(rotation, grace replay, re-rotation; else 401 `not_authenticated`). A **reuse** (step 6, including a dead token of
+step 2) revokes the session whichever install presents it — a token from another install is the stronger signal.
 
 `accounts.services.rotate_customer_refresh(raw, fid)` runs in one transaction:
 1. `h = SHA-256(raw)`; `SELECT … FOR UPDATE` the session `WHERE audience='customer' AND (refresh_hash = h OR
@@ -611,7 +615,8 @@ The fakes' `*` nonce wildcard exists only under the local/test settings. `author
   their `sub` is linked to a customer (one revocation ends Apple's whole authorization of the app); a ticket that is
   never completed keeps its token until the ticket expires. Its handler (`accounts/tasks.py`)
   posts the token to `https://appleid.apple.com/auth/revoke` (`token_type_hint = refresh_token`); transport errors
-  retry through the outbox, an Apple 400 (token already invalid) is final with a WARNING, a dead message logs ERROR
+  retry through the outbox, an Apple 400 `invalid_grant` or `invalid_request` (token already invalid) is final with a
+  WARNING (every other 4xx — e.g. `invalid_client`, a misconfiguration — is retried and ends dead), a dead message logs ERROR
   `apple.revoke_dead` (alert; staff revoke in the Apple developer account). The fake records the revoke (local/test).
   Apple's server-to-server notifications (consent revoked, account deleted) are **not** handled in M2: the default is
   that the identity stays linked until the customer unlinks it or Apple refuses its next token; M3 adds the endpoint.
@@ -796,7 +801,10 @@ Body `{"fcm_token": str 0..512 | null, "push_enabled": bool, "model": str ≤80,
 - `fcm_invalidated_at` is cleared when a new token arrives.
 - **Locks:** the caller's customer row and the customer row of every device holding the token, in ascending pk
   order, before any Device or AuthSession row; the holders are read without a lock first, and if the token moved in
-  the meantime the attempt rolls back and starts again (up to `REGISTER_DEVICE_ATTEMPTS = 3`). Two customers
+  the meantime the attempt rolls back and starts again (up to `REGISTER_DEVICE_ATTEMPTS = 3`, then 409
+  `request_in_progress` with `Retry-After: 1` — only reachable through a writer that bypasses this service). Each
+  attempt first takes a transaction advisory lock keyed on a hash of the token (lock order token → Customer → Device →
+  AuthSession), so two customers
   registering the same fresh token at once never answer 500: one keeps it, the other's device loses it.
 → 200 `{"fid", "platform", "model", "os", "app_version", "push_enabled", "last_active_at"}`.
 Service: `accounts.services.register_device` (P0, lock order P1).
