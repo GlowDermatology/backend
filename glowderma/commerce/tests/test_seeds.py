@@ -317,6 +317,7 @@ def test_seed_demo_refuses_a_database_seeded_before_the_orders_slice() -> None:
             customer.pk, "add", 1_000, "Oldingi demo yozuvi", StaffUserFactory.create().pk
         )
     assert commerce_seeds.preflight() == commerce_seeds.MESSAGE_SEEDED_BEFORE_ORDERS
-    with pytest.raises(CommandError, match=r"seed_demo --reset"):
+    with pytest.raises(CommandError, match=r"seed_demo --reset") as refused:
         call_command("seed_demo", force=True)
+    assert "seed_store_sales or manual QA" in str(refused.value)  # the refusal says how broad it is
     assert not Order.objects.exists() and LedgerEntry.objects.count() == 1

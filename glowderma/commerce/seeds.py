@@ -807,9 +807,10 @@ def keep_open(now: datetime) -> int:
 
 
 MESSAGE_SEEDED_BEFORE_ORDERS = (
-    "the database holds loyalty ledger rows but none of the demo orders (it was seeded before the orders "
-    "slice existed); replaying the orders would reuse their ledger ids. Run `manage.py seed_demo --reset` "
-    "(it empties the database first)."
+    "the database holds loyalty ledger rows but none of the demo orders (seeded before the orders slice "
+    "existed, or ledger rows from seed_store_sales or manual QA); replaying the orders pins ledger ids that "
+    "such rows may already hold. Run `manage.py seed_demo --reset` (it empties the database first) or seed "
+    "a fresh database."
 )
 
 
