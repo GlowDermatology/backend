@@ -4666,7 +4666,6 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/SegmentMembersInputRequest'
-        required: true
       security:
       - StaffJWT: []
       responses:
@@ -4898,6 +4897,90 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
+  /api/v1/admin/staff/:
+    get:
+      operationId: admin_staff_list
+      description: '``GET staff/`` (contract §2.16): the staff directory behind the
+        audit-log actor filter.'
+      parameters:
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+          default: true
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          enum:
+          - 20
+          - 50
+          - 100
+      - in: query
+        name: search
+        schema:
+          type: string
+          maxLength: 64
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedStaffListItemList'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/health/:
     get:
       operationId: health_retrieve
@@ -4968,7 +5051,6 @@ components:
       properties:
         reason:
           type: string
-          default: ''
           maxLength: 300
     AppointmentCreateRequest:
       type: object
@@ -4991,7 +5073,6 @@ components:
           format: date-time
         note:
           type: string
-          default: ''
           maxLength: 300
       required:
       - service_id
@@ -5774,8 +5855,9 @@ components:
       - status
     CustomerRef:
       type: object
-      description: Contract §2.0 ``CustomerRef``; ``name`` is ``""`` once the customer
-        is deleted (scrubbed).
+      description: |-
+        ``CustomerRef = {"id", "name", "phone"}`` (contract §2.0); ``name`` is ``""`` once the customer is
+        deleted (scrubbed).
       properties:
         id:
           type: integer
@@ -6041,6 +6123,18 @@ components:
               * `error` - error
         version:
           type: string
+        integrations:
+          type: object
+          additionalProperties:
+            enum:
+            - fake
+            - live
+            type: string
+            description: |-
+              * `fake` - fake
+              * `live` - live
+          description: '`?ready=1` only: `{provider: mode}` for every provider with
+            a `*_MODE` setting.'
       required:
       - status
     HealthStatusEnum:
@@ -6116,14 +6210,7 @@ components:
             $ref: '#/components/schemas/ProductImage'
       required:
       - images
-    Integrations:
-      type: object
-      properties:
-        mode:
-          $ref: '#/components/schemas/IntegrationsModeEnum'
-      required:
-      - mode
-    IntegrationsModeEnum:
+    IntegrationModeEnum:
       enum:
       - fake
       - live
@@ -6131,6 +6218,19 @@ components:
       description: |-
         * `fake` - fake
         * `live` - live
+    Integrations:
+      type: object
+      description: |-
+        Read-only: ``mode`` = ``INTEGRATIONS_MODE`` (the default of every provider), ``providers`` = the
+        effective mode of each provider.
+      properties:
+        mode:
+          $ref: '#/components/schemas/IntegrationModeEnum'
+        providers:
+          $ref: '#/components/schemas/ProviderModes'
+      required:
+      - mode
+      - providers
     Job:
       type: object
       description: Contract §2.14 ``Job``.
@@ -6725,24 +6825,6 @@ components:
       description: |-
         * `ios` - ios
         * `android` - android
-    OrderCustomerRef:
-      type: object
-      description: |-
-        ``CustomerRef = {id, name, phone}``; ``name`` is ``""`` once the customer is deleted (§2.0).
-
-        Same shape as ``appointments``' ``CustomerRef`` (a sibling module this one cannot import); the component
-        is named ``OrderCustomerRef`` until the shape moves to ``core.api.serializers`` (proposed to the lead).
-      properties:
-        id:
-          type: integer
-        name:
-          type: string
-        phone:
-          type: string
-      required:
-      - id
-      - name
-      - phone
     OrderDetail:
       type: object
       description: Contract ``Order`` = ``OrderSummary`` + the detail keys (rendered
@@ -6751,7 +6833,7 @@ components:
         id:
           type: integer
         customer:
-          $ref: '#/components/schemas/OrderCustomerRef'
+          $ref: '#/components/schemas/CustomerRef'
         created_at:
           type: string
           format: date-time
@@ -6968,7 +7050,7 @@ components:
         id:
           type: integer
         customer:
-          $ref: '#/components/schemas/OrderCustomerRef'
+          $ref: '#/components/schemas/CustomerRef'
         created_at:
           type: string
           format: date-time
@@ -7190,6 +7272,27 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Segment'
+    PaginatedStaffListItemList:
+      type: object
+      required:
+      - count
+      - page
+      - page_size
+      - page_count
+      - results
+      properties:
+        count:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+        page_count:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/StaffListItem'
     PatchedBannerPatchFormRequest:
       type: object
       properties:
@@ -7331,7 +7434,7 @@ components:
         order_id:
           type: integer
         customer:
-          $ref: '#/components/schemas/OrderCustomerRef'
+          $ref: '#/components/schemas/CustomerRef'
         provider:
           $ref: '#/components/schemas/PaymentProviderEnum'
         status:
@@ -7832,6 +7935,30 @@ components:
       - billz_id
       - price
       - texts
+    ProviderModes:
+      type: object
+      description: Per-provider adapter modes (``*_MODE`` settings, each defaulting
+        to ``INTEGRATIONS_MODE``).
+      properties:
+        oauth:
+          $ref: '#/components/schemas/IntegrationModeEnum'
+        billz:
+          $ref: '#/components/schemas/IntegrationModeEnum'
+        fcm:
+          $ref: '#/components/schemas/IntegrationModeEnum'
+        click:
+          $ref: '#/components/schemas/IntegrationModeEnum'
+        payme:
+          $ref: '#/components/schemas/IntegrationModeEnum'
+        bts:
+          $ref: '#/components/schemas/IntegrationModeEnum'
+      required:
+      - billz
+      - bts
+      - click
+      - fcm
+      - oauth
+      - payme
     Purchase:
       type: object
       description: Contract §2.6 ``Purchase``.
@@ -7999,14 +8126,23 @@ components:
       - updated_at
     SegmentMembersInputRequest:
       type: object
+      description: |-
+        ``POST segments/{id}/members/`` (contract §2.8): ``customer_ids`` (any status, must exist) and/or
+        ``phones`` (E.164, resolved to **active** customers), each ≤ 500 and deduplicated. ``validated_data``
+        carries the resolved, sorted ``customer_ids`` only.
       properties:
         customer_ids:
           type: array
           items:
             type: integer
           maxItems: 500
-      required:
-      - customer_ids
+        phones:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            pattern: ^\+998\d{9}$
+          maxItems: 500
     SegmentRules:
       type: object
       properties:
@@ -8205,6 +8341,26 @@ components:
       description: |-
         * `dermatologist` - dermatologist
         * `cosmetologist` - cosmetologist
+    StaffListItem:
+      type: object
+      description: 'One ``GET staff/`` row: the ``Actor`` keys plus ``email`` and
+        ``is_active``.'
+      properties:
+        id:
+          type: integer
+        display_name:
+          type: string
+          readOnly: true
+        email:
+          type: string
+          format: email
+        is_active:
+          type: boolean
+      required:
+      - display_name
+      - email
+      - id
+      - is_active
     StatusCounts:
       type: object
       properties:
