@@ -16,7 +16,7 @@ from django.utils.crypto import salted_hmac
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from glowderma.core import timeutils
+from glowderma.core import secretbox, timeutils
 from glowderma.core.api.exceptions import IdempotencyKeyRequired, IdempotencyKeyReused, RequestInProgress
 from glowderma.core.models import IdempotencyRecord
 
@@ -91,14 +91,63 @@ def refresh_after_commit(response: Response, build: Callable[[], Any]) -> Respon
     return response
 
 
-def _refresh(response: Response, record_id: int | None) -> Response:
+def _refresh(
+    response: Response, record_id: int | None, sealed: tuple[str, ...] = (), lock_scope: str = ""
+) -> Response:
     build = getattr(response, _REFRESH_ATTR, None)
     if build is None or connection.in_atomic_block or not 200 <= response.status_code < 300:
         return response
     response.data = build()
     if record_id is not None:
-        IdempotencyRecord.objects.filter(pk=record_id).update(response_body=response.data)
+        IdempotencyRecord.objects.filter(pk=record_id).update(
+            response_body=_seal_body(response.data, sealed, lock_scope)
+        )
     return response
+
+
+# A credential in a stored response (``sealed=``) is kept as ``{SEALED_MARK: <secretbox token>}``.
+SEALED_MARK = "__sealed__"
+
+
+def _sealing_aad(lock_scope: str, field: str) -> bytes:
+    return f"idempotency|{lock_scope}|{field}".encode()
+
+
+def _seal_body(body: Any, fields: tuple[str, ...], lock_scope: str) -> Any:
+    """``body`` with each top-level ``fields`` value sealed (AES-GCM, ``SECRETBOX_KEY``) for storage.
+
+    The associated data is the key's scope and the field, so a sealed value opens only on a replay of the
+    same key, actor, method and path. Only strings are sealed; ``None`` and absent fields stay as they are.
+    """
+    if not fields or not isinstance(body, dict):
+        return body
+    stored = dict(body)
+    for field in fields:
+        value = stored.get(field)
+        if isinstance(value, str):
+            token = secretbox.seal(value.encode("utf-8"), aad=_sealing_aad(lock_scope, field))
+            stored[field] = {SEALED_MARK: token}
+    return stored
+
+
+def _open_body(body: Any, fields: tuple[str, ...], lock_scope: str) -> Any:
+    """The replay body: each sealed ``fields`` value opened. A value that no longer opens (``SECRETBOX_KEY``
+    rotated within the key's lifetime) is replayed as ``null`` and logged; the caller then issues a new
+    credential (for staff, ``reset-password``)."""
+    if not fields or not isinstance(body, dict):
+        return body
+    replay = dict(body)
+    for field in fields:
+        value = replay.get(field)
+        if isinstance(value, dict) and SEALED_MARK in value:
+            try:
+                replay[field] = secretbox.open_(
+                    str(value[SEALED_MARK]), aad=_sealing_aad(lock_scope, field)
+                ).decode("utf-8")
+            except secretbox.SecretboxError:
+                logger.error("idempotency.sealed_field_unreadable field=%s", field)
+                replay[field] = None
+    return replay
 
 
 _held = threading.local()
@@ -143,7 +192,16 @@ def _key_lock(lock_scope: str) -> Iterator[None]:
                 connection.close()
 
 
-def idempotent(required: bool = True) -> Callable[[Callable[..., Response]], Callable[..., Response]]:
+def idempotent(
+    required: bool = True, sealed: tuple[str, ...] = ()
+) -> Callable[[Callable[..., Response]], Callable[..., Response]]:
+    """Admin contract §1.7 / customer contract §1.7 replay of a keyed write.
+
+    ``sealed`` names top-level response fields that carry a credential (a temporary password): the stored
+    copy keeps them sealed with ``core.secretbox`` and a replay opens them, so the database never holds the
+    credential in clear (contract §1.7 "Stored credentials").
+    """
+
     def decorate(view: Callable[..., Response]) -> Callable[..., Response]:
         @wraps(view)
         def wrapped(self: Any, request: Request, *args: Any, **kwargs: Any) -> Response:
@@ -191,7 +249,7 @@ def idempotent(required: bool = True) -> Callable[[Callable[..., Response]], Cal
                         ):
                             raise IdempotencyKeyReused()
                         return Response(
-                            record.response_body,
+                            _open_body(record.response_body, sealed, lock_scope),
                             status=record.response_status,
                             headers={"Idempotent-Replayed": "true"},
                         )
@@ -201,11 +259,11 @@ def idempotent(required: bool = True) -> Callable[[Callable[..., Response]], Cal
                             **scope,
                             request_hash=fingerprint,
                             response_status=response.status_code,
-                            response_body=response.data,
+                            response_body=_seal_body(response.data, sealed, lock_scope),
                         ).pk
                     else:
                         transaction.set_rollback(True)
-                return _refresh(response, record_id)
+                return _refresh(response, record_id, sealed, lock_scope)
 
         return wrapped
 
