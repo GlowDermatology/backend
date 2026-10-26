@@ -77,6 +77,7 @@ Fields owned by slices that have not landed yet return `0`, `null` or `[]`, neve
 |---|---|---|
 | `orders/` | 6, 10, 25, 50 | 10 |
 | `products/` | 8 | 8 |
+| `staff/` | 20, 50, 100 | 50 |
 | Every other paginated list (`customers/`, `categories/`, `banners/`, `notifications/`, `segments/`, `segments/{id}/members/`, `payments/`, `audit-log/`) | 20, 50 | 20 |
 
 Collections embedded in a resource (customer ledger and purchases, order items, history, refunds, cashback) are never paginated.
@@ -246,9 +247,11 @@ The FE creates one key per form/dialog instance (`crypto.randomUUID()`), reuses 
 | GET | `dashboard/`, `nav-counts/` | | 200 |
 | GET / PATCH | `settings/` | | 200 |
 | GET | `payments/`, `audit-log/` | P E | 200 |
+| POST | `payments/{id}/refunds/{refund_id}/retry/`, `…/resolve/` (§2.12) | I optional | 200 |
+| GET | `staff/` (§2.16) | P | 200 |
 | GET | `/api/v1/health/` | no auth | 200 / 503 |
 
-Shared shapes: `Actor` = `{"id": int, "display_name": str}`, where `display_name` is the staff full name, else the email. `null` actor means system. `CustomerRef` = `{"id": int, "name": str, "phone": str}`; `name` is `""` once the customer is deleted (scrubbed).
+Shared shapes: `Actor` = `{"id": int, "display_name": str}`, where `display_name` is the staff full name, else the email. `null` actor means system. `CustomerRef` = `{"id": int, "name": str, "phone": str}`; `name` is `""` once the customer is deleted (scrubbed). Both are single OpenAPI components (`Actor`, `CustomerRef`) used by every module (orders, payments, appointments).
 
 ### 2.1 Auth
 **`POST auth/login/`** (no bearer). Body `{"email": str (email, ≤254; trimmed and lower-cased before lookup), "password": str 1..128}`.
@@ -322,7 +325,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 | `fulfilment` | `delivery`, `pickup` | – | |
 | `payment` | PaymentStatus | – | |
 | `period` | `today`, `week`, `month`, `all` | `all` | `today` = current Tashkent day; `week` = rolling `(now−7×24h, now]`; `month` = Tashkent calendar month to date |
-| `date_from`, `date_to` | date | – | Inclusive Tashkent days on `created_at`, ANDed with `period`; `date_from > date_to` → 400 |
+| `date_from`, `date_to` | date | – | Inclusive Tashkent days on `created_at`, ANDed with `period`; `date_from > date_to` → 400, field `date_from`, code `invalid` |
 | `customer` | int | – | Customer id |
 | `ordering` | `-created_at`, `created_at` | `-created_at` | Ties broken by `id` in the same direction |
 | `page`, `page_size`, `export` | §1.5, §1.8 | | |
@@ -379,7 +382,8 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
    {"ledger_entry_id": 121, "kind": "credit", "amount": 5680, "at": "2026-10-23T14:05:00+05:00",
     "base": 568000, "percent": "1.00", "reverses_id": null}],
  "history": [ /* OrderEvent[], newest first (at desc, id desc); see §4 */ ],
- "available_actions": {"transitions": ["delivered"], "cancel": true, "retry_shipment": false}}
+ "available_actions": {"transitions": ["delivered"],   // handed_to_courier (delivery) → ["delivered"]
+                       "cancel": true, "retry_shipment": false}}
 ```
 ```jsonc
 // Refund
@@ -425,6 +429,10 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 - While `pending` → 409 `conflict` "BTS so‘rovi allaqachon yuborilmoqda.".
 - Effect: an outbox BTS create; the handler looks the order up by `clientId` before creating. Audit `order.shipment_retry_requested`.
 - 202 `Order` with `shipment.pending=true`. The outcome arrives later as `shipment_created` or `shipment_failed` with `manual=true`.
+
+**Shared outcomes of the order actions** (`cancel`, `transition`, `retry-shipment`, and the refund `retry` / `resolve` of §2.12):
+- **Busy order.** Every action locks the order row first and waits at most `ADMIN_LOCK_WAIT` (5 s; a BTS create holds the row across its bounded calls). When the row stays locked → 409 `conflict` "Buyurtma boshqa amal bilan band. Birozdan so‘ng qayta urinib ko‘ring.". Nothing is written; retry with the same `Idempotency-Key`.
+- **Purchase conflict.** When the order's loyalty purchase belongs to another customer (data inconsistency surfaced by `loyalty`) → 409 `conflict` "Buyurtma xaridi boshqa mijozga tegishli. Ma’lumotlarni tekshiring.". Nothing is written.
 
 ### 2.3 Products and Billz
 ```jsonc
@@ -694,7 +702,9 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 - Without `scheduled_at` → state `queued`; recipients are materialised and a Celery batched send runs (fake FCM in M1). Each recipient also gets an inbox item.
 - With `scheduled_at` → state `scheduled`; beat starts the send when due.
 - Audit `notification.created`.
-- 201 `NotificationRecord`.
+- 201 `NotificationRecord`. **The 201 body is the campaign as stored when the response is built**: it is read after the request's transaction committed and its on-commit dispatch ran. With an eager Celery (local settings) the send already finished inside the request, so the body says `state: "sent"` with `sent`, `failed` and `sent_at`; with a real worker it still says `queued`. A replay of the key returns that same body.
+
+Templates are editable in the admin UI through `GET` / `PUT` below.
 
 **`GET notification-templates/{status}/`**, where `status` ∈ `processing`, `handed_to_courier`, `delivered`, `cancelled` (else 404) → `{"status", "texts", "updated_at", "updated_by"}`.
 
@@ -717,10 +727,10 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 - `GET`/`PATCH segments/{id}/`.
 - `DELETE segments/{id}/` → 204, or 409 `conflict` "Rejalashtirilgan xabar bu guruhga yuboriladi." while a scheduled notification targets it.
 - `GET segments/{id}/members/` (P E, CustomerListItem).
-- `POST segments/{id}/members/` `{"customer_ids": [int] ≤500}` → 200 Segment.
+- `POST segments/{id}/members/` `{"customer_ids": [int] ≤500, "phones": [str] ≤500}` → 200 Segment. Either list or both may be sent; the members added are the union of the ids and the customers the phones resolve to.
 - `DELETE segments/{id}/members/{customer_id}/` → 204. It removes manual membership only; a rule-only member → 409 `conflict` "Mijoz guruhga qoida orqali kiradi.".
-- `POST segments/{id}/members/`: `customer_ids` non-empty, ≤500, every id must exist (any status) — errors `customer_ids` `required` / `max_items` "Ko‘pi bilan 500 ta." / `does_not_exist`, a bad element `customer_ids.{i}` `invalid`. `DELETE …/members/{customer_id}/` for a customer who is neither a manual nor a rule member → 404.
-- `size` (and `notifications/meta/` `total_devices`) count reachable customers — active members with at least one push-enabled device — because a campaign sends one push per customer (to the most recently active device); each figure equals the `recipient_count` a campaign to that audience would get. A non-list or empty `customer_ids` answers `invalid` / `required`.
+- `POST segments/{id}/members/`: `customer_ids` ≤500, every id must exist (any status) — errors `customer_ids` `max_items` "Ko‘pi bilan 500 ta." / `does_not_exist`, a bad element `customer_ids.{i}` `invalid`. `phones` ≤500 E.164 numbers (`max_items`), deduplicated, each resolved to an **active** customer — a malformed element → `phones.{i}` `invalid` "Telefon raqamini to‘g‘ri kiriting.", no active customer with that number → `phones.{i}` `customer_not_found` "Bu raqam bilan mijoz topilmadi." (`i` = the first submitted index of a duplicated number). Neither list naming anybody (both absent or empty) → `customer_ids` `required`. Membership added this way is manual (the `DELETE` rules below apply); audit `segment.members_added` `{customer_ids, added}` carries the resolved ids. `DELETE …/members/{customer_id}/` for a customer who is neither a manual nor a rule member → 404.
+- `size` (and `notifications/meta/` `total_devices`) count reachable customers — active members with at least one push-enabled device — because a campaign sends one push per customer (to the most recently active device); each figure equals the `recipient_count` a campaign to that audience would get. A non-list `customer_ids` or `phones` answers `invalid`.
 - Audit `segment.*`.
 
 ### 2.9 Appointments
@@ -769,14 +779,14 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 | `service_id` | int, an **active** service the specialist offers (duration and price are snapshotted from that link) | `required` · `does_not_exist` "Xizmat topilmadi." · `does_not_exist` "Mutaxassis bu xizmatni ko‘rsatmaydi." |
 | `customer_id` \| `phone` | exactly one; the customer must be `active` | both missing → `customer_id` `required`; both sent → `customer_id` `invalid` "customer_id yoki phone dan faqat bittasini yuboring."; unknown/deleted id → `customer_id` `does_not_exist` "Mijoz topilmadi."; `phone` not E.164 → `invalid` "Telefon raqamini to‘g‘ri kiriting."; no active customer → `phone` `customer_not_found` "Bu raqam bilan mijoz topilmadi." |
 | `start` | aware datetime, 5-minute grid, not in the past, inside that day's working hours (date override wins; `end = start + duration` must fit), outside blocked periods and the recurring break, not overlapping another `requested`/`confirmed` appointment of the specialist | `required` · `invalid` "Noto‘g‘ri qiymat." (naive) · `invalid` "Vaqt 5 daqiqalik qadamda bo‘lsin." · `in_past` "Kelajakdagi vaqtni tanlang." · `outside_working_hours` "Mutaxassis bu vaqtda ishlamaydi." · `slot_unavailable` "Bu vaqt band." |
-| `note` | optional, ≤300 (staff note) | `max_length` "300 belgidan oshmasin." |
+| `note` | optional (omitted = `""`; not required and without a `default` in the OpenAPI schema), ≤300 (staff note) | `max_length` "300 belgidan oshmasin." |
 
 - 409 `conflict` "Bu vaqt band." when a concurrent booking wins the slot (exclusion constraint; nothing is written).
 - Effects: events `requested {via: "admin", …}` + `confirmed {push_sent: false}`; audit `appointment.created`. No push (the customer is on the phone).
 
 **`POST appointments/{id}/reschedule/`** `{"start", "specialist_id"?}` → 200 day-item, status unchanged. Same `start` rules (the appointment itself is excluded from the overlap check). Changing the specialist re-snapshots duration and price from that specialist's link (`specialist_id` `does_not_exist`, or `service_id` `does_not_exist` "Mutaxassis bu xizmatni ko‘rsatmaydi."). 409 `invalid_transition` "Bu amal ushbu holatda mumkin emas." unless `requested`/`confirmed`; 409 `conflict` "Bu vaqt band." on the race. Effects: event `rescheduled {from_start, from_end, to_start, to_end, from_professional_id, to_professional_id, by: "admin", push_sent}`, push `rescheduled`, audit `appointment.rescheduled`.
 
-**`POST appointments/{id}/cancel/`** `{"reason"?: str ≤300}` → 200 day-item with `status: "cancelled"`. 409 `invalid_transition` unless `requested`/`confirmed`. Effects: event `cancelled {by: "admin", reason, push_sent}`, push `cancelled`, audit `appointment.cancelled`; the slot is free again.
+**`POST appointments/{id}/cancel/`** `{"reason"?: str ≤300}` (omitted = `""`; optional in the OpenAPI schema too) → 200 day-item with `status: "cancelled"`. 409 `invalid_transition` unless `requested`/`confirmed`. Effects: event `cancelled {by: "admin", reason, push_sent}`, push `cancelled`, audit `appointment.cancelled`; the slot is free again.
 
 `push_sent` on appointment events = the customer had an active push-enabled device at event time; the push itself is asynchronous (outbox `push.appointment`).
 
@@ -786,7 +796,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 | Param | Values | Rule |
 |---|---|---|
 | `range` | `today`, `week`, `month`, `custom` | Default `today` |
-| `from`, `to` | date | Required iff `custom`; `from ≤ to ≤ today`; span ≤366 days |
+| `from`, `to` | date | Read only when `range=custom` (otherwise ignored, not even parsed). With `custom`: a missing `from` / `to` → `required` on that field; `from > to` → `invalid` on `from`; `to > today` (Tashkent) or a span over 366 days → `invalid` on `to` |
 
 | `range` | `bucket` | Buckets (Tashkent) | Previous period |
 |---|---|---|---|
@@ -820,10 +830,14 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 ```jsonc
 {"reservation_minutes": 15, "support_phone": "+998712000000",   // str | null
  "pickup_address": {"uz": "Toshkent, …", "ru": "", "en": ""},
- "integrations": {"mode": "fake"},                              // read-only, from INTEGRATIONS_MODE
+ "integrations": {"mode": "fake",                               // read-only, from INTEGRATIONS_MODE (every provider's default)
+                  "providers": {"oauth": "fake", "billz": "fake", "fcm": "fake",
+                                "click": "fake", "payme": "fake", "bts": "fake"}},   // read-only, each provider's *_MODE
  "updated_at": "…", "updated_by": null}                         // Actor | null
 ```
-**`PATCH settings/`**: `reservation_minutes` int 5..60; `support_phone` E.164 or null; `pickup_address.*` ≤200. → 200. Audit `settings.updated` (diff).
+**`PATCH settings/`**: `reservation_minutes` int 5..60; `support_phone` E.164 or null; `pickup_address.*` ≤200 (each language optional: a leaf PATCH changes only the languages sent); `integrations` → `read_only`. → 200.
+- Audit `settings.updated`: `data` is a diff of **only the changed leaves**, each `{"from", "to"}`, nested like the resource. A PATCH of `pickup_address.ru` alone logs `{"pickup_address": {"ru": {"from": "", "to": "Ташкент, …"}}}`; `{"reservation_minutes": {"from": 15, "to": 20}, "support_phone": {"from": "+998712000000", "to": null}}`. A PATCH that changes nothing writes no audit row and keeps `updated_at` / `updated_by`.
+- `integrations` values are `IntegrationMode` literals. Fake providers are allowed in production (product owner decision 2026-10-26): the process logs one startup warning listing them, and never refuses to start.
 
 ### 2.12 Payments
 **`GET payments/`** (P E)
@@ -844,8 +858,15 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
  "refunds": []}                                   // Refund[]
 ```
 
+**Refund operations** (M1c, the Payments screen; declared by `commerce` because they write order events). `Idempotency-Key` is optional (honoured when sent, §1.7). Both answer **200 with the payment row above** (`refunds` included, newest first); 404 when the payment or the refund is unknown or the refund belongs to another payment.
+- **`POST payments/{id}/refunds/{refund_id}/retry/`** (empty body): retries a `failed` refund as a **new** refund of the payment (Click `requested` and submitted through the outbox; Payme `manual_required`) and records its `refund_requested` order event (actor = caller); audit `refund.requested`. Refusals, checked under the order lock:
+  - the refund is not `failed`, or the payment is no longer `paid` → 409 `invalid_transition` "Bu qaytarishni qayta yuborib bo‘lmaydi.";
+  - another refund of the order is open (`requested`, `submitting`, `manual_required`) → 409 `conflict` "Bu to‘lov uchun qaytarish allaqachon jarayonda.".
+- **`POST payments/{id}/refunds/{refund_id}/resolve/`** `{"state": "succeeded" | "failed"}` (any other value → 400 `state` `invalid_choice`): closes an `unknown` / `manual_required` refund after a manual check; audit `refund.state_changed` with the actor; order event `refund_succeeded` / `refund_failed`. A refund in any other state (also the loser of two concurrent resolves) → 409 `invalid_transition` "Bu qaytarishni yakunlab bo‘lmaydi.".
+- Both share the busy-order and purchase-conflict outcomes of §2.2.
+
 ### 2.13 Audit log
-**`GET audit-log/`** (P E). Filters `actor` (staff id), `action` (§3.2), `object_type`, `object_id`, `date_from`, `date_to`; `ordering` `-at` (default) or `at`.
+**`GET audit-log/`** (P E). Filters `actor` (staff id; the picker lists `GET staff/`, §2.16), `action` (§3.2), `object_type`, `object_id`, `date_from`, `date_to`; `ordering` `-at` (default) or `at`.
 ```jsonc
 {"id": 9001, "at": "2026-10-24T12:03:00+05:00", "actor": {"id": 1, "display_name": "Administrator"},   // null = system
  "action": "cashback.adjusted", "object_type": "customer", "object_id": "5",   // object_id is a string (slugs)
@@ -871,7 +892,21 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 ### 2.15 Health
 **`GET /api/v1/health/`**: no auth, no network gate, no throttle; not in the error envelope.
 - Without params → 200 `{"status": "ok"}`.
-- `?ready=1` checks the database, cache and broker → 200 `{"status": "ok", "checks": {"database": "ok", "cache": "ok", "broker": "ok"}, "version": "<git sha>"}`, or 503 with `"status": "error"` and the failing check set to `"error"`.
+- `?ready=1` checks the database, cache and broker → 200 `{"status": "ok", "checks": {"database": "ok", "cache": "ok", "broker": "ok"}, "version": "<git sha>", "integrations": {"oauth": "fake", "billz": "fake", "fcm": "fake", "click": "fake", "payme": "fake", "bts": "fake"}}`, or 503 with `"status": "error"` and the failing check set to `"error"`. `integrations` = `{provider: IntegrationMode}` for every provider with a `*_MODE` setting (informational; a fake provider never fails readiness).
+
+### 2.16 Staff directory
+**`GET staff/`** (P; read-only) → `Page<StaffListItem>`, the options of the audit-log `actor` filter.
+
+| Param | Values | Default | Rule |
+|---|---|---|---|
+| `search` | str ≤64, trimmed, case-insensitive | – | Full name or email contains the term |
+| `is_active` | query boolean | `true` | `false` lists the deactivated staff |
+| `page`, `page_size` | §1.5 (20, 50, 100) | 50 | |
+
+```jsonc
+// StaffListItem — Actor plus email and is_active; ordered by display_name (case-insensitive), then id
+{"id": 1, "display_name": "Administrator", "email": "admin@glowderma.uz", "is_active": true}
+```
 
 ---
 
@@ -924,6 +959,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 | SessionRevokeReason | `logout`, `expired`, `password_changed`, `deactivated`, `replaced`, `admin_revoked` | AuthSession, audit |
 | LogoutScope | `current`, `others`, `all` | `auth/logout/` |
 | ExportFormat | `csv`, `xlsx` | |
+| IntegrationMode | `fake`, `live` | `settings/` `integrations`, `health/?ready=1` |
 
 ### 3.2 Audit actions (M1)
 
@@ -936,7 +972,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 | Loyalty | `cashback.adjusted`, `cashback.policy_version_created`, `cashback.policy_version_superseded` |
 | Notifications | `notification.created`, `notification_template.updated`, `segment.created`, `segment.updated`, `segment.deleted`, `segment.members_added`, `segment.member_removed`, `notification.push_dead` (system; a dead `push.order_status` / `push.appointment` / `campaign.send_batch` message: `{topic, dedupe_key, attempts, last_error, customer_id, campaign_id}`) |
 | Appointments | `appointment.confirmed`, `appointment.rejected`, `appointment.attended`, `appointment.created`, `appointment.rescheduled` (`{…, from_start, from_end, reschedule_no}`), `appointment.cancelled` (`{…, reason}`) |
-| Shell | `settings.updated`, `export.downloaded` |
+| Shell | `settings.updated` (changed leaves only, each `{from, to}`, §2.11), `export.downloaded` |
 | Django admin (editable models) | `<model>.created`, `<model>.updated`, `<model>.deleted` for `location`, `professional`, `service`, `professional_service`, `working_hours`, `blocked_period`; `working_hours_override.created`, `working_hours_override.updated`, `working_hours_override.deleted` (the override is the seventh editable model, T13) |
 
 ---
@@ -1197,7 +1233,7 @@ Provisional, configurable rules that shape payloads:
     - Audience mapping: `group`→`segment`, `one`→`customer`; the phone is sent as `+998…`.
     - The view keeps the picked `File` and posts FormData.
     - `defaultSchedule` and `draft: null` are mapper-side. `history` is the first page.
-    - Templates are read-only in the UI; PUT exists for A1.
+    - Templates are editable in the UI through `GET` / `PUT notification-templates/{status}/` (as built by the frontend).
 13. **Appointments.**
     - Map `requested_via`, `role`, and null `working_hours` (§5.6).
     - `DEFAULT_APPOINTMENT_DAY` → today (`parseDay`/`dayHref` take `today`).
