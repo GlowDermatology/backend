@@ -1263,3 +1263,30 @@ def test_limiter_and_token_lock_on_the_real_redis_cache() -> None:
         own = [f"{billz_client.RATE_PREFIX}:{round(start / 0.5)}" for start in starts]
         own += [billz_client.LOCK_KEY, billz_client.TOKENS_KEY, f"{billz_client.RATE_PREFIX}:pause"]
         first.delete_many(own)
+
+
+def test_a_payment_that_could_not_get_a_token_was_never_sent() -> None:
+    """The payment answered 401 and the renewal then failed: the payment request was refused or never sent,
+    so the attempt is forgotten (the next attempt may pay) instead of waiting for a check by hand."""
+    server = BillzServer()
+    original = server._default
+
+    def recalc(request: httpx.Request) -> httpx.Response:
+        response = original("POST /v1/recalculate-order-bill/{order_id}", request)
+        server.access_tokens = set()  # Billz revokes the token right after the bill
+        return response
+
+    server.overrides["POST /v1/recalculate-order-bill/{order_id}"] = recalc
+    server.overrides["POST /v2/auth/refresh"] = lambda request: httpx.Response(
+        500, json=fixture("internal_error")
+    )
+    logins = iter([httpx.Response(200, json=fixture("login_ok"))])
+    server.overrides["POST /v1/auth/login"] = lambda request: next(
+        logins, httpx.Response(503, json=fixture("internal_error"))
+    )
+    journal = Journal(server)
+    with pytest.raises(BillzUnavailable) as caught:
+        live(server, Clock()).push_sale(sale(), journal)
+    assert caught.value.not_applied
+    assert (journal.payments_announced, journal.forgotten, journal.payment_attempted_at) == (1, 1, None)
+    assert not server.sales[SALE_ID].payments

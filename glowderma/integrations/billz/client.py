@@ -69,6 +69,7 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from email.utils import parsedate_to_datetime
+from functools import partial
 from typing import Any
 
 import httpx
@@ -817,7 +818,7 @@ class BillzClient:
     ) -> dict[str, Any]:
         headers = {RESPONSE_CHANNEL_HEADER: "HTTP"} if wait_result else {}
         query = {**(params or {}), RESPONSE_CHANNEL_HEADER: "HTTP"} if wait_result else params
-        token = self.access_token()
+        token = self._token(self.access_token)
         renewed = False
         while True:
             response = self._exchange(
@@ -837,7 +838,7 @@ class BillzClient:
                         not_applied=True,
                     )
                 renewed = True
-                token = self.renew(stale=token)
+                token = self._token(partial(self.renew, stale=token))
                 continue
             body = _body(response)
             status = response.status_code
@@ -853,6 +854,15 @@ class BillzClient:
                 if string_code:
                     raise self._failure(label, 500 if string_code == "TIMEOUT" else 400, body, resource)
             return body
+
+    @staticmethod
+    def _token(get: Callable[[], str]) -> str:
+        """A token for the call; a failure to get one means the call itself was never sent."""
+        try:
+            return get()
+        except BillzError as exc:
+            exc.not_applied = True
+            raise
 
     @staticmethod
     def _failure(label: str, status: int, body: Mapping[str, Any], resource: bool) -> BillzError:
