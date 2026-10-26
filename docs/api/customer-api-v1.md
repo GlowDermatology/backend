@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Version | 1.3.0-draft (2026-10-26, review revision 3 on top of revision 2 and the product-owner decisions of 2026-10-26), milestone M2: the iOS/Android customer app, provider callbacks and the cashier QR endpoint |
+| Version | 1.4.0-draft (2026-10-26, review revision 4 on top of revisions 2–3 and the product-owner decisions of 2026-10-26), milestone M2: the iOS/Android customer app, provider callbacks and the cashier QR endpoint |
 | Implemented by | the Django 6.1 / DRF 3.18 backend (Codex, packages P0–P3 of `docs/plans/2026-10-26-m2-customer-api.md`); consumed by the native iOS and Android apps (not in this repo) |
 | Source of truth | `docs/specs/2026-10-24-backend-foundation-design.md` (Auth and request security → Customer (M2); Financial integrity; Milestones → M2; Provisional business rules). If this file and the spec disagree, the spec wins and this file gets fixed. |
 | Shared rules | `docs/api/admin-api-v1.md` §1 (envelope, pagination, idempotency, values), §3 (enums), §4 (OrderEvent types), §5.8 (Uzbek labels). This file **references** them and lists only what is different for the customer audience. |

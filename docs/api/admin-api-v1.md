@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Version | 1.0.1 (2026-10-26), M1 admin vertical; M2 cross-references from `docs/api/customer-api-v1.md` in §2.1 (staff OAuth under fake OAuth in production), §2.10 (revenue), §2.11 (`integrations.providers`), §2.15 (`providers`), §3.1 (`refresh_reused`), §3.2 and §7 item 18 (refund resolve) |
+| Version | 1.0.2 (2026-10-26), M1 admin vertical; M2 cross-references from `docs/api/customer-api-v1.md` in §2.1 (staff OAuth under fake OAuth in production), §2.2 (manual Click refunds on cancel), §2.3 (Billz import and product create refused while Billz is fake in production), §2.10 (revenue, `attention.bts_polling_failing`), §2.11 (`integrations.providers`), §2.14 (`billz_fake_mode`), §2.15 (`providers`), §3.1 (`refresh_reused`), §3.2, §4 (`refund_requested.manual_reason`), §5.1/§5.7 (refund lines by provider, BTS polling attention), §6 (refund pending display, live-to-fake switch) and §7 items 3 and 18 (refund state line, refund resolve with a fresh Click status check) |
 | Implemented by | Django 6.1 / DRF 3.18 backend (Codex) and the Next.js admin data layer (`frontend/src/data/api/*`, Claude) |
 | Source of truth | `docs/specs/2026-10-24-backend-foundation-design.md`. Where this file and the spec disagree, the spec wins and this file is fixed. |
 | Enforced by | drf-spectacular schema (`openapi/schema.yaml`, `--validate --fail-on-warn`), backend contract tests, frontend mapper tests (order №10248, Malika's ledger) |
