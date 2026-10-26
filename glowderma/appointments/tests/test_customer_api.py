@@ -119,6 +119,7 @@ def test_specialists_list_and_detail(public_client: APIClient) -> None:
         "role_label": "Dermatolog",
         "photo_url": None,
         "bio": "Tajribali dermatolog",
+        "qualifications": "",
         "experience_years": 8,
         "location": {
             "id": link.professional.location_id,
@@ -145,6 +146,17 @@ def test_specialists_list_and_detail(public_client: APIClient) -> None:
         "Дерматолог",
         "Консультация дерматолога",
     )
+    # FND-7: the qualifications, localized like the biography (uz fallback)
+    link.professional.qualifications_uz = "Toshkent tibbiyot akademiyasi"
+    link.professional.qualifications_en = "Tashkent Medical Academy"
+    link.professional.save()
+    detail = f"/api/v1/specialists/{link.professional_id}/"
+    assert public_client.get(detail, HTTP_ACCEPT_LANGUAGE="en").json()["qualifications"] == (
+        "Tashkent Medical Academy"
+    )
+    assert public_client.get(detail, HTTP_ACCEPT_LANGUAGE="ru").json()["qualifications"] == (
+        "Toshkent tibbiyot akademiyasi"
+    )
     assert ru["services"][0]["short_name"] == "Konsultatsiya"  # no ru text → uz
     assert public_client.get(f"/api/v1/specialists/{inactive.pk}/").status_code == 404
     assert public_client.get("/api/v1/specialists/999999/").json()["code"] == "not_found"
@@ -166,6 +178,8 @@ def test_services_list_with_price_range(public_client: APIClient) -> None:
                 "name": "Dermatolog konsultatsiyasi",
                 "short_name": "Konsultatsiya",
                 "description": "",
+                "category": "dermatology",
+                "category_label": "Dermatologiya",
                 "duration_min": 30,
                 "price_from": 150_000,
                 "price_to": 200_000,
@@ -173,6 +187,10 @@ def test_services_list_with_price_range(public_client: APIClient) -> None:
             }
         ]
     }
+    link.service.category = "cosmetology"
+    link.service.save()
+    ru = public_client.get("/api/v1/services/", HTTP_ACCEPT_LANGUAGE="ru").json()["results"][0]
+    assert (ru["category"], ru["category_label"]) == ("cosmetology", "Косметология")
 
 
 # --- free slots -------------------------------------------------------------------------------------------

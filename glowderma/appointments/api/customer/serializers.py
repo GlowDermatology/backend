@@ -84,6 +84,7 @@ class SpecialistSerializer(serializers.Serializer[Professional]):
     role_label = serializers.SerializerMethodField()
     photo_url = serializers.SerializerMethodField()
     bio = serializers.SerializerMethodField()
+    qualifications = serializers.SerializerMethodField()
     experience_years = serializers.IntegerField(allow_null=True)
     location = LocationSerializer()
     services = serializers.SerializerMethodField()
@@ -97,6 +98,9 @@ class SpecialistSerializer(serializers.Serializer[Professional]):
 
     def get_bio(self, obj: Professional) -> str:
         return pick(obj, "bio", _lang(self))
+
+    def get_qualifications(self, obj: Professional) -> str:
+        return pick(obj, "qualifications", _lang(self))
 
     @extend_schema_field(SpecialistServiceSerializer(many=True))
     def get_services(self, obj: Professional) -> list[dict[str, Any]]:
@@ -114,6 +118,8 @@ class ServiceOfferSerializer(serializers.Serializer[selectors.ServiceOffer]):
     name = serializers.SerializerMethodField()
     short_name = serializers.SerializerMethodField()
     description = serializers.SerializerMethodField()
+    category = serializers.ChoiceField(choices=enums.ServiceCategory.values, source="service.category")
+    category_label = serializers.SerializerMethodField()
     duration_min = serializers.IntegerField(
         source="service.default_duration_min", help_text="Default duration."
     )
@@ -129,6 +135,9 @@ class ServiceOfferSerializer(serializers.Serializer[selectors.ServiceOffer]):
 
     def get_description(self, obj: selectors.ServiceOffer) -> str:
         return pick(obj.service, "description", _lang(self))
+
+    def get_category_label(self, obj: selectors.ServiceOffer) -> str:
+        return i18n.t(f"label.service_category.{obj.service.category}", _lang(self))
 
 
 class ServiceListSerializer(serializers.Serializer[Any]):
