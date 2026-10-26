@@ -1819,8 +1819,9 @@ def record_late_capture(
     ``payments.mark_late_captured`` (``paid`` + ``late_capture``), ``Refund(origin=late_capture)`` (Click
     ``requested`` + outbox ``refund.submit``, or ``manual_required`` without ``click_paydoc_id`` / with fake
     Click), event ``refund_requested`` (source system, with ``manual_reason``), audit ``payment.late_capture
-    {order_id, payment_id, provider, case}`` and ERROR ``payment.late_capture``. The order never changes
-    status. ``None`` when the payment was already recorded as a late capture (a replay)."""
+    {order_id, payment_id, provider, case}``, ERROR ``payment.late_capture`` and, after the commit, the alert
+    of the same name (scope: the payment). The order never changes status. ``None`` when the payment was
+    already recorded as a late capture (a replay)."""
     if case not in LATE_CAPTURE_CASES:
         raise ValueError(f"Unknown late-capture case {case!r}")
     _aware(at, "at")
@@ -1853,4 +1854,8 @@ def record_late_capture(
             after=details,
         )
         logger.error("payment.late_capture %s", details)
+        # ids and short codes only; once the refund is committed, one alert per payment
+        transaction.on_commit(
+            lambda: alerts.alert("payment.late_capture", details, scope=str(payment_id)), robust=True
+        )
         return refund

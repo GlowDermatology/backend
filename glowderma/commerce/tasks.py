@@ -762,8 +762,9 @@ def poll_bts() -> list[int]:
 
 def report_fake_provider_open_money() -> list[str]:
     """At worker start: one ERROR ``providers.fake_with_open_money {provider, open_transactions, open_refunds,
-    order_ids}`` per payment provider that is fake under the production settings and still holds open money
-    (the operator procedure of §6.14 was skipped). Writes nothing; returns the providers reported."""
+    order_ids}`` and the alert of the same name (scope: the provider) per payment provider that is fake under
+    the production settings and still holds open money (the operator procedure of §6.14 was skipped). Changes
+    no payment; returns the providers reported."""
     reported = []
     for provider in (enums.PaymentProvider.CLICK, enums.PaymentProvider.PAYME):
         if not integration_modes.fake_in_production(provider):
@@ -771,15 +772,14 @@ def report_fake_provider_open_money() -> list[str]:
         money = selectors.provider_open_money(provider)
         if money.open_transactions == 0 and money.open_refunds == 0:
             continue
-        logger.error(
-            "providers.fake_with_open_money %s",
-            {
-                "provider": str(provider),
-                "open_transactions": money.open_transactions,
-                "open_refunds": money.open_refunds,
-                "order_ids": money.order_ids,
-            },
-        )
+        details = {
+            "provider": str(provider),
+            "open_transactions": money.open_transactions,
+            "open_refunds": money.open_refunds,
+            "order_ids": money.order_ids,
+        }
+        logger.error("providers.fake_with_open_money %s", details)
+        alerts.alert("providers.fake_with_open_money", details, scope=str(provider))
         reported.append(str(provider))
     return reported
 
