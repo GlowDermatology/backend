@@ -2314,14 +2314,16 @@ Existing points this contract implements (`docs/decisions/open-questions.md`):
 | O4 | Pickup reuses `delivered`, labelled "Olib ketildi" for customers |
 | O7 | Only Click and Payme; `payment_providers` in `settings/public/` keeps the app generic |
 | L1–L5 | Engine defaults unchanged (rate before purchase, cashback-paid part does not earn, seed tiers, spendable immediately, negative balance allowed and shown as `negative`) |
-| L6 / L7 | No POS redemption; how a resolved in-store sale is discovered stays open (M3); M2 only resolves and audits |
+| L6 / L7 | No POS redemption; how a resolved in-store sale is discovered stays open (M3); M2 only resolves and audits. The M3 Billz live adapter follows docs.billz.io (`openapi.yaml`); refunds of paid sales, per-receipt sale discovery and webhooks (none exist) stay explicit stubs (decision 2026-10-26) |
 | P1 | A `requested` appointment holds the slot (exclusion constraint) |
 | P2 / P3 | No deposits; cancellation terms are free text (`booking_policy`), enforced only by `BOOKING_CANCEL_MIN_LEAD_MINUTES` (0) |
 | C-4 | Cashback never pays the delivery fee |
 | C-6 | Customer cancel only from `awaiting_payment` (and not while a Click payment is in flight) |
 | T5 | WebhookInbox written after processing in the same transaction; replay rules per provider in §2.13.0 |
 
-New M2 points (the plan adds them to `open-questions.md`; each default is implement-ready):
+New M2 points. The product owner decided on 2026-10-26 that every M2 open question uses the default below; each is
+recorded in `docs/decisions/open-questions.md` as a **provisional default (decided 2026-10-26)** — implement-ready, and
+the client may still revise it later through a setting or a data field:
 
 | # | Question for the client | Provisional default |
 |---|---|---|

@@ -2,7 +2,9 @@
 
 Business rules that are **not confirmed by the client**. Each has a provisional default that the code implements
 behind a setting or a data field, so changing it later does not rewrite history.
-Status: `open` (default in use, awaiting decision) · `decided` (confirmed; move the row to the log at the bottom).
+Status: `open` (default in use, awaiting decision) · `provisional default (decided 2026-10-26)` (the product owner
+accepted the default for M2; the client may still revise it, which changes a setting or data field, not history) ·
+`decided` (confirmed; move the row to the log at the bottom).
 
 ## Loyalty / cashback
 | # | Question | Provisional default | Where it lives | Status |
@@ -12,8 +14,8 @@ Status: `open` (default in use, awaiting decision) · `decided` (confirmed; move
 | L3 | First tier 0–10 mln or 0–20 mln? Rate above 50 mln? | Seed 0–20M 1%, 20–30M 2%, 30–50M 3%, top band open-ended (admin edits) | policy tiers | open |
 | L4 | When do newly earned points become spendable? | Immediately on payment confirmation | `LOYALTY_PENDING_DAYS=0` | open |
 | L5 | Refund larger than the remaining balance? | Reversal is always posted; balance may go negative and is flagged for staff | `LOYALTY_ALLOW_NEGATIVE=True` | open |
-| L6 | Can cashiers redeem cashback inside Billz? | Not supported until Billz confirms | M3 | open (blocks M3) |
-| L7 | How is an in-store sale discovered after the QR is resolved (Billz has no webhooks or sales feed)? | Polling scheme to be agreed with Billz | M3 | open (blocks M3) |
+| L6 | Can cashiers redeem cashback inside Billz? | Not supported until Billz confirms; the M3 Billz adapter keeps it an explicit stub (decision 2026-10-26) | M3 | open (blocks M3) |
+| L7 | How is an in-store sale discovered after the QR is resolved (Billz has no webhooks or sales feed)? | Polling scheme to be agreed with Billz; the M3 adapter is built from docs.billz.io (`openapi.yaml` is the source of truth) and keeps per-receipt discovery, refunds of paid sales and webhooks (none exist) as explicit stubs (decision 2026-10-26) | M3 | open (blocks M3) |
 | L8 | Percent precision | Max 2 decimal places; integer basis-point math | `CashbackTier.percent` | decided (tech) |
 
 ## Orders / payments / delivery
@@ -32,21 +34,58 @@ Status: `open` (default in use, awaiting decision) · `decided` (confirmed; move
 | # | Question | Provisional default | Where | Status |
 |---|---|---|---|---|
 | A1 | Account deletion and re-registration | `phone` stays unique; delete marks `deleted`, scrubs name/image/address, revokes sessions, removes devices; re-registration reactivates the same row, keeping ledger and purchases | `accounts` services | decided (tech) |
-| A2 | Does every login require OTP + password? | Password login; OTP for sign-up, reset, and login on a new device | M2 auth | open |
-| A3 | OTP lockout duration / daily resend cap | 5 attempts per code, 15-minute lockout, 10 sends per phone per day | M2 settings | open |
+| A2 | Does every login require OTP + password? | Password login; OTP for sign-up, reset, and password login on a device without a valid device key (customer contract §1.9, §2.1.4) | M2 auth | provisional default (decided 2026-10-26) |
+| A3 | OTP lockout duration / daily resend cap | 5 attempts per code, 15-minute lockout, 10 sends and 10 wrong codes per phone per day; day caps per device (10) and per IP (1000, its own message) and a global hourly breaker (500) | M2 settings (`CUSTOMER_OTP_*`, `SMS_GLOBAL_HOURLY_LIMIT`) | provisional default (decided 2026-10-26) |
 | A4 | Admin web token model | **BFF** (user decision 2026-10-24): browser JS never sees tokens. Access cookie HttpOnly+Secure+SameSite=Strict, Path=/admin; refresh cookie HttpOnly+Secure+SameSite=Strict, Path=/admin/auth (refresh + logout route handlers only); full CSRF on every state-changing Server Action and route handler | frontend | decided |
 
 | A5 | Staff identity | Email + password (no usernames); Google/Facebook sign-in only for pre-created staff whose verified email matches; no self-registration | `accounts` | decided (user, 2026-10-24) |
-| A6 | Customer social login | Google/Facebook allowed; first social sign-in must verify a phone by SMS, then the identity links to that phone's customer | M2 auth | decided (user, 2026-10-24) |
-| A7 | OAuth credentials | Google OAuth clients (web for admin; Android/iOS for the app) and a Facebook app (id + secret, redirect URIs) — needed from the client; fake providers until then | settings | open |
+| A6 | Customer social login | Google, Facebook and **Apple** (Apple added by the product owner 2026-10-26); first social sign-in must verify a phone by SMS, then the identity links to that phone's customer (with the password when the account has one) | M2 auth | decided (user, 2026-10-24; Apple 2026-10-26) |
+| A7 | OAuth credentials | Google OAuth clients (web for admin; Android/iOS for the app), a Facebook app (id + secret, redirect URIs) and for Sign in with Apple the iOS bundle id (`APPLE_BUNDLE_IDS`), team id, key id and private key — needed from the client; fake providers until then (`APPLE_BUNDLE_IDS` empty = Apple disabled in live mode) | settings | open |
 | A8 | Restrict staff Google sign-in to a Workspace domain? | No restriction (`GOOGLE_ALLOWED_HD` empty) | settings | open |
+
+## Customer app (M2) — provisional defaults decided 2026-10-26
+Product-owner decision 1 (2026-10-26): every M2 open question uses the default of `docs/api/customer-api-v1.md` §7.
+Each row below is implement-ready; the client may still revise it (the "Where" column says what changes).
+
+| # | Question | Provisional default | Where | Status |
+|---|---|---|---|---|
+| M2-A9 | May the app reveal whether a phone is registered (register / reset flows)? | Yes, throttled (`phone_registered` / `phone_not_registered`) | `auth/send-code/` | provisional default (decided 2026-10-26) |
+| M2-A10 | Does a social sign-in on a new phone also need the SMS code? | No: linking requires the account's strongest factor (SMS code + password if set at completion; from a session the password, or an SMS code without one), so the provider sign-in is a factor of equal strength | M2 auth | provisional default (decided 2026-10-26) |
+| M2-A11 | Customer password rule | ≥8 characters, not only digits, not common, not similar to the phone | `CUSTOMER_PASSWORD_MIN_LENGTH` + validators | provisional default (decided 2026-10-26) |
+| M2-A12 | Deleting an account: confirmation and open items | Password (or an SMS code for social-only accounts), guarded like sign-in; unpaid orders and open appointments cancelled; paid orders continue; refused while a Click payment is in flight (≤2 min) | `customers.services.delete_account` | provisional default (decided 2026-10-26) |
+| M2-A13 | Minimum app version enforcement | Off until the first store release | `MIN_APP_VERSION_*` | provisional default (decided 2026-10-26) |
+| M2-A14 | Apple guideline 4.8: an equivalent privacy-focused sign-in on iOS | Offer Sign in with Apple on iOS (ID token with nonce; tokens revoked on unlink and deletion, guideline 5.1.1(v)); disabled (live) / fake (local/test) while `APPLE_BUNDLE_IDS` is empty | `APPLE_BUNDLE_IDS` | decided (product owner, 2026-10-26) |
+| M2-A15 | Recycled numbers: what does the person who reactivates a deleted account see? | Balance and purchases kept (A1); orders, appointments, inbox and ledger order links only from the reactivation | `Customer.history_from` | provisional default (decided 2026-10-26) |
+| M2-A16 | Recycled numbers of accounts never deleted: what does a new holder who recovers the account by SMS see? | After a reset or an SMS-only social link on an account inactive >180 days, the history horizon moves to now and name, image and addresses are scrubbed; balance and purchases kept | `CUSTOMER_DORMANT_DAYS` | provisional default (decided 2026-10-26) |
+| M2-A17 | How does a signed-in customer change or add a password? | `POST me/password/` (current password, or an SMS code without one); session and identities kept; reset stays the recovery path | M2 auth | provisional default (decided 2026-10-26) |
+| M2-C12 | Show "price changed since you added it" in the cart | Yes (`CartItem.price_at_add`, `commerce.0004`) | cart | provisional default (decided 2026-10-26) |
+| M2-C13 | Several unpaid orders at once? | No: one `awaiting_payment` order per customer | `CHECKOUT_MAX_OPEN_ORDERS=1` | provisional default (decided 2026-10-26) |
+| M2-C14 | Minimum amount paid by card when cashback is used | 1 000 so'm | `CHECKOUT_MIN_PAYABLE` | provisional default (decided 2026-10-26) |
+| M2-C15 | Per-line quantity ceiling (C-2) and distinct lines | 10 per line, 30 lines | `CART_MAX_QTY_PER_LINE`, `CART_MAX_LINES` | provisional default (decided 2026-10-26) |
+| M2-C16 | Refill the cart after an expired or cancelled order? | Not automatically; `orders/{id}/reorder/` on request | commerce | provisional default (decided 2026-10-26) |
+| M2-O9 | Parcel weight for the BTS tariff | 1 000 g per order; product weights not modelled | `BTS_DEFAULT_PARCEL_WEIGHT_G` | provisional default (decided 2026-10-26) |
+| M2-O10 | Pickup "ready to collect" notification | None in M2; staff mark pickup orders delivered | order statuses | provisional default (decided 2026-10-26) |
+| M2-P5 | Payme fiscal receipt data (IKPU / package codes) | Not sent; enabling needs product fiscal codes | `PAYME_FISCAL_DETAIL_ENABLED=false` | provisional default (decided 2026-10-26) |
+| M2-P6 | Payme `ChangePassword` | Not supported (-32601); keys rotate through env | Payme adapter | provisional default (decided 2026-10-26) |
+| M2-P7 | Click Complete that we cannot honour | Accept and reverse through `payment/reversal` by `click_paydoc_id`; a refused reversal → refund `failed` → staff payout | Click adapter | decided (provider protocol, 2026-10-26) |
+| M2-P8 | Grace for a payment started at the provider when the reservation ends | 5 min after `reservation_expires_at` for completing a transaction started before it; Click in flight 2 min after Prepare (blocks only a provider switch, cancel and delete) | `PAYMENT_IN_FLIGHT_GRACE_SECONDS=300`, `CLICK_INFLIGHT_SECONDS=120` | provisional default (decided 2026-10-26) |
+| M2-P9 | Provider deep links and the return address | No `app_url` in v1; system browser; https return link with the `glowderma://` fallback | `PAYMENT_RETURN_URL`, `PAYMENT_RETURN_FALLBACK_URL` | provisional default (decided 2026-10-26) |
+| M2-P10 | Payme error for "order awaiting another transaction" | `-31051`, confirmed against test.paycom.uz in M3 | Payme protocol constant | provisional default (decided 2026-10-26) |
+| M2-L9 | What the cashier sees after scanning | Phone (full for Billz, masked for display), available cashback, tier percent, opaque `customer_ref` | POS resolve | provisional default (decided 2026-10-26) |
+| M2-L10 | QR refresh | New token every 50 s and on focus; ≤2 live tokens, 60 s, single use | `QR_TOKEN_TTL_SECONDS`, `QR_MAX_LIVE_TOKENS` | provisional default (decided 2026-10-26) |
+| M2-B1 | Booking limits | ≥60 min ahead, ≤30 days ahead, ≤3 open appointments, cancellation any time before the start | `BOOKING_*` | provisional default (decided 2026-10-26) |
+| M2-N1 | Show the admin's adjustment reason to the customer? | No (generic texts) | ledger labels | provisional default (decided 2026-10-26) |
+| M2-N2 | Push for a customer's own order cancellation | Yes | state machine row 5 | provisional default (decided 2026-10-26) |
+| M2-N3 | Security notices | Push + inbox row; a reset or social completion also notifies the replaced device; no SMS | notifications | provisional default (decided 2026-10-26) |
+| M2-T1 | Terms not yet versioned in settings | Registration answers 503 `terms_not_published` until staff publish the version and the uz texts | `SiteSettings.terms_version` | provisional default (decided 2026-10-26) |
+| M2-F1 | Fake provider adapters in production | Allowed: startup WARNING, modes in `health/?ready=1` and admin settings; fake callbacks refused, fake payments not offered, no simulate and no fixed OTP outside local/test, no SMS with fake Eskiz (demo/staging posture) | `*_MODE`, customer contract §6.14 | decided (product owner, 2026-10-26) |
 
 ## Appointments
 | # | Question | Provisional default | Where | Status |
 |---|---|---|---|---|
-| P1 | Does a pending request hold the slot? | Yes | M2 booking | open |
-| P2 | Deposits / prepayment | None | — | open |
-| P3 | Cancellation and reschedule terms | Not enforced; free-text policy in settings | `SiteSettings` | open |
+| P1 | Does a pending request hold the slot? | Yes | M2 booking | provisional default (decided 2026-10-26) |
+| P2 | Deposits / prepayment | None | — | provisional default (decided 2026-10-26) |
+| P3 | Cancellation and reschedule terms | Not enforced; free-text policy in settings (`BOOKING_CANCEL_MIN_LEAD_MINUTES=0`) | `SiteSettings` | provisional default (decided 2026-10-26) |
 | P4 | One location or several branches? | One location record; model supports several | `professionals.Location` | open |
 
 ## Compliance (gates M3 / production)
@@ -94,3 +133,7 @@ _(move rows here with date and who decided)_
 | 2026-10-25 | — | Undesigned admin sections (categories, banners, customer list + groups, payments, settings, audit log) are built now in the existing design system | user |
 | 2026-10-25 | — | Delivery as stacked slice PRs, gated locally; the user reviews and merges | user |
 | 2026-10-25 | I2 | Production target is Docker Compose on a VPS behind an edge proxy; `docs/ops/deploy.md` documents it | user |
+| 2026-10-26 | M2-* | Every M2 open question uses the customer contract's documented default, recorded above as a provisional default | product owner |
+| 2026-10-26 | A6, M2-A14 | Sign in with Apple is in scope (provider `apple`, ID token with nonce; `APPLE_BUNDLE_IDS` empty = disabled/fake until the client provides the bundle id); offer it on iOS | product owner |
+| 2026-10-26 | L6, L7 | The M3 Billz live adapter is built from docs.billz.io (`openapi.yaml` is the source of truth); refunds of paid sales, per-receipt discovery of in-store sales after a QR scan and webhooks (none exist) stay explicit stubs; L6/L7 stay open | product owner |
+| 2026-10-26 | M2-F1 | Fake provider adapters are allowed in production (warned and reported); the dev simulate endpoint and the fixed fake OTP exist only under local/test settings, so fake mode never hands out free orders or accepts a fixed code | product owner |
