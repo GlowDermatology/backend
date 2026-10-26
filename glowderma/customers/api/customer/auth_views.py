@@ -299,7 +299,10 @@ class RefreshView(CustomerAuthAPIView):
         device = cast(DeviceHeaders, self.device)
         try:
             result = account_services.rotate_customer_refresh(
-                serializer.validated_data["refresh"], fid=device.fid, platform=device.platform
+                serializer.validated_data["refresh"],
+                fid=device.fid,
+                platform=device.platform,
+                request=request,
             )
         except account_services.RefreshUnknown:
             RefreshUnknownThrottle().record_miss(request, self)

@@ -1494,14 +1494,22 @@ def _check_refresh_device(session: AuthSession, fid: str, platform: str | None) 
         raise AuthFailed("not_authenticated")
 
 
-def rotate_customer_refresh(raw: str, *, fid: str, platform: str | None = None) -> RefreshResult:
+def rotate_customer_refresh(
+    raw: str, *, fid: str, platform: str | None = None, request: Any = None
+) -> RefreshResult:
     """``auth/refresh/`` steps 1–6 (customer contract §2.1.6) in one transaction on the locked row.
 
     Rotate (current token), grace replay (``auth:refresh_grace:{h}`` exists: identical tokens, nothing
     written, confirmed or not), re-rotation (previous token, rotation unconfirmed and younger than
     ``CUSTOMER_REFRESH_UNCONFIRMED_SECONDS``: the unused current hash is remembered as dead), else reuse → the
-    session is revoked ``refresh_reused`` (committed, audited) and 401 ``SESSION_EXPIRED``. The grace body is
-    written before commit and deleted again when the transaction rolls back.
+    session is revoked ``refresh_reused`` (committed, audited with the request) and 401 ``SESSION_EXPIRED``.
+    The grace body is written before commit and deleted again when the transaction rolls back.
+
+    Reuse is decided before the device check: a stale token (previous without a grace body outside the
+    re-rotation window, or dead) revokes the session whichever install presents it — one from another
+    install is the stronger theft signal, and its presenter gets nothing either way. Only the answers that
+    hand out tokens (rotate, grace replay, re-rotation) require the session's device (else 401
+    ``not_authenticated``).
     """
     digest = hash_secret(raw)
     written: list[str] = []
@@ -1539,7 +1547,23 @@ def rotate_customer_refresh(raw: str, *, fid: str, platform: str | None = None) 
                 or customer.status != enums.CustomerStatus.ACTIVE
             ):
                 raise AuthFailed("SESSION_EXPIRED")
-            _check_refresh_device(session, fid, platform)
+            grace: Any = None
+            window = timedelta(seconds=int(settings.CUSTOMER_REFRESH_UNCONFIRMED_SECONDS))
+            unconfirmed = (
+                not session.rotation_confirmed
+                and session.rotated_at is not None
+                and now - session.rotated_at <= window
+            )
+            if not reuse and session.refresh_hash != digest:
+                grace = cache.get(_grace_key(digest))
+                reuse = not isinstance(grace, dict) and not unconfirmed
+            foreign_device = False
+            try:
+                _check_refresh_device(session, fid, platform)
+            except AuthFailed:
+                if not reuse:
+                    raise
+                foreign_device = True
             grace_ttl = int(settings.CUSTOMER_REFRESH_GRACE_SECONDS)
             if not reuse and session.refresh_hash == digest:
                 new_raw = secrets.token_urlsafe(32)
@@ -1564,32 +1588,23 @@ def rotate_customer_refresh(raw: str, *, fid: str, platform: str | None = None) 
                 cache.set(_grace_key(digest), body, grace_ttl)
                 written.append(_grace_key(digest))
                 return RefreshResult(body, str(session.pk))
-            if not reuse:
-                grace = cache.get(_grace_key(digest))
-                if isinstance(grace, dict):
-                    return RefreshResult(grace, str(session.pk))
-                window = timedelta(seconds=int(settings.CUSTOMER_REFRESH_UNCONFIRMED_SECONDS))
-                if (
-                    not session.rotation_confirmed
-                    and session.rotated_at is not None
-                    and now - session.rotated_at <= window
-                ):
-                    remaining = max(1, int((session.absolute_expires_at - now).total_seconds()))
-                    cache.set(_dead_key(session.refresh_hash), str(session.pk), remaining)
-                    written.append(_dead_key(session.refresh_hash))  # removed again on rollback
-                    new_raw = secrets.token_urlsafe(32)
-                    session.refresh_hash = hash_secret(new_raw)
-                    session.rotation += 1
-                    session.rotation_confirmed = False
-                    session.last_used_at = now
-                    session.save(
-                        update_fields=["refresh_hash", "rotation", "rotation_confirmed", "last_used_at"]
-                    )
-                    body = refresh_body(session, new_raw)
-                    cache.set(_grace_key(digest), body, grace_ttl)
-                    written.append(_grace_key(digest))
-                    return RefreshResult(body, str(session.pk))
-            # reuse: one of the holders is not the app
+            if not reuse and isinstance(grace, dict):
+                return RefreshResult(grace, str(session.pk))
+            if not reuse:  # the previous token, no grace body, the rotation unconfirmed: re-rotate
+                remaining = max(1, int((session.absolute_expires_at - now).total_seconds()))
+                cache.set(_dead_key(session.refresh_hash), str(session.pk), remaining)
+                written.append(_dead_key(session.refresh_hash))  # removed again on rollback
+                new_raw = secrets.token_urlsafe(32)
+                session.refresh_hash = hash_secret(new_raw)
+                session.rotation += 1
+                session.rotation_confirmed = False
+                session.last_used_at = now
+                session.save(update_fields=["refresh_hash", "rotation", "rotation_confirmed", "last_used_at"])
+                body = refresh_body(session, new_raw)
+                cache.set(_grace_key(digest), body, grace_ttl)
+                written.append(_grace_key(digest))
+                return RefreshResult(body, str(session.pk))
+            # reuse: one of the holders is not the app (from this install or another one)
             _revoke_open_customer_sessions(
                 AuthSession.objects.filter(pk=session.pk), enums.SessionRevokeReason.REFRESH_REUSED, at=now
             )
@@ -1599,9 +1614,10 @@ def rotate_customer_refresh(raw: str, *, fid: str, platform: str | None = None) 
                 entity_type="customer",
                 entity_id=str(session.customer_id),
                 actor=customer,
+                request=request,
                 after={"sid": str(session.pk)},
             )
-            logger.warning("customer.refresh_reused sid=%s", session.pk)
+            logger.warning("customer.refresh_reused sid=%s foreign_device=%s", session.pk, foreign_device)
             refusal = AuthFailed("SESSION_EXPIRED")
     except Exception:
         for key in written:
