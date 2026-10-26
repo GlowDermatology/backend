@@ -10,15 +10,17 @@ an open session or a push token, and ``register_device`` never deadlocks with ``
 import threading
 import time
 from collections.abc import Callable
+from typing import Any
 
 import pytest
+import redis
 from django.db import connection, transaction
 from django.test.utils import CaptureQueriesContext
 
 from glowderma.accounts import services
 from glowderma.accounts.models import AuthSession, Customer, Device
 from glowderma.accounts.tests.factories import CustomerFactory, DeviceFactory, start_test_session
-from glowderma.core import enums
+from glowderma.core import enums, qr_store
 from glowderma.core.api.exceptions import AuthFailed
 
 pytestmark = pytest.mark.django_db
@@ -263,3 +265,24 @@ def test_register_device_racing_the_deletion_writes_no_token() -> None:
         False,
         "",
     )
+
+
+def test_a_redis_error_in_the_qr_revocation_does_not_fail_a_committed_sign_in(
+    django_capture_on_commit_callbacks: Any, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Review nit: the QR revocation runs after the commit; a Redis outage is logged, never a 500."""
+
+    def redis_down(customer_id: int) -> int:
+        raise redis.exceptions.ConnectionError("redis down")
+
+    monkeypatch.setattr(qr_store, "revoke_all", redis_down)
+    customer = CustomerFactory.create()
+    with django_capture_on_commit_callbacks(execute=True):
+        started = services.start_customer_session(
+            customer.pk, "fid-redis-down1", "ios", "1.0.0", issue_device_key=True
+        )
+    assert started.session.revoked_at is None and open_sessions(customer.pk) == 1
+    with django_capture_on_commit_callbacks(execute=True):
+        services.delete_customer(customer.pk)
+    assert Customer.objects.get(pk=customer.pk).status == enums.CustomerStatus.DELETED
+    assert "redis down" in caplog.text
