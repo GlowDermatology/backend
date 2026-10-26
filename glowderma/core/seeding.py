@@ -19,7 +19,7 @@ import importlib.util
 import math
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from io import BytesIO
 
@@ -125,6 +125,11 @@ class SeedContext:
     """The demo "now": the design dataset is dated relative to it (Saturday 24 Oct 2026, 12:05 Tashkent)."""
     keep_open: bool
     """Push seeded open reservations/holds past the real clock so the expiry job does not cancel them."""
+    notes: list[str] = field(default_factory=list, compare=False)
+    """What a seeder left out on purpose (``"<module>: …"``), printed by ``seed_demo`` after the run."""
+
+    def note(self, message: str) -> None:
+        self.notes.append(message)
 
     def at(self, instant: datetime) -> AbstractContextManager[None]:
         """``with ctx.at(instant):`` — run services with ``timeutils.now()`` pinned to a design instant."""

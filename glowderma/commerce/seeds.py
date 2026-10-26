@@ -864,6 +864,7 @@ def seed_commerce(context: SeedContext) -> None:
         # reversals) or fakes that report no effect (no parcel, no Billz sale, customer contract §2.14.3,
         # §6.14). The other modules' demo data and loyalty's store sales are still seeded.
         logger.warning("seed.commerce_orders_skipped %s", {"reason": "production settings"})
+        context.note("commerce: demo orders skipped under the production settings")
         loyalty_seeds.seed_store_sales()
         return
     if admin is None or not Product.objects.exists() or not Customer.objects.exists():
