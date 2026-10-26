@@ -247,7 +247,9 @@ def test_link_then_me_then_unlink(staff_client: APIClient, staff: StaffUser) -> 
         "is_superuser",
         "linked_providers",
         "session_expires_at",
+        "auth_method",
     }
+    assert response.data["auth_method"] == "password"  # the staff_client session signed in with the password
     identity = SocialIdentity.objects.get()
     assert (identity.staff, identity.provider, identity.subject, identity.email_at_link) == (
         staff,
@@ -317,3 +319,17 @@ def test_link_and_unlink_require_bearer_while_login_does_not(
     assert anon_client.options(BASE + "google/").status_code == 401
     link(staff, "google", "1")
     assert anon_client.post(BASE + "google/", body(f"fake:1:{staff.email}")).status_code == 200
+
+
+def test_me_reports_how_the_current_session_signed_in(anon_client: APIClient, staff: StaffUser) -> None:
+    """Contract §2.1 ``Me.auth_method`` (M3): the provider for a social sign-in (the UI then hides
+    "Bog‘lash"), ``null`` for a session from before the method was recorded."""
+    link(staff, "google", "42")
+    response = anon_client.post(BASE + "google/", body(f"fake:42:{staff.email}"))
+    assert response.status_code == 200, response.data
+    assert response.data["user"]["auth_method"] == "google"
+    client = APIClient()
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {response.data['access']}")
+    assert client.get("/api/v1/admin/auth/me/").data["auth_method"] == "google"
+    AuthSession.objects.filter(staff=staff).update(auth_method="")
+    assert client.get("/api/v1/admin/auth/me/").data["auth_method"] is None

@@ -64,6 +64,8 @@ def _me(user: StaffUser, session: AuthSession) -> dict[str, Any]:
             user.social_identities.order_by("provider").values_list("provider", flat=True)
         ),
         "session_expires_at": timeutils.isoformat(session.absolute_expires_at),
+        # how the current session's sign-in was proven (contract §2.1); null for a session from before 0007
+        "auth_method": session.auth_method or None,
     }
 
 

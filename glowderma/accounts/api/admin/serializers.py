@@ -5,6 +5,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
+from glowderma.accounts.models import AuthSession
 from glowderma.core.api.exceptions import field_error
 from glowderma.core.api.fields import QueryBooleanField
 from glowderma.core.api.serializers import ActorSerializer
@@ -59,6 +60,13 @@ class MeSerializer(serializers.Serializer[dict[str, Any]]):
     is_superuser = serializers.BooleanField()
     linked_providers = serializers.ListField(child=serializers.ChoiceField(choices=["google", "facebook"]))
     session_expires_at = serializers.DateTimeField()
+    auth_method = serializers.ChoiceField(
+        choices=AuthSession.AuthMethod.values,
+        allow_null=True,
+        help_text="How the current session's sign-in was proven: `password` (email + password) or the social "
+        "provider (`google`, `facebook`); `null` for a session opened before the method was recorded. Only a "
+        "`password` session may link a social identity (`auth/oauth/{provider}/link/`).",
+    )
 
 
 class AccessSerializer(serializers.Serializer[dict[str, Any]]):

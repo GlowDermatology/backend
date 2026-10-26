@@ -315,8 +315,10 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 ```jsonc
 {"id": 1, "email": "admin@glowderma.uz", "display_name": "Administrator", "is_superuser": false,
  "linked_providers": ["google"],                       // social identities linked to this staff account
- "session_expires_at": "2026-10-25T00:00:00+05:00"}
+ "session_expires_at": "2026-10-25T00:00:00+05:00",
+ "auth_method": "password"}                            // M3: how the current session's sign-in was proven
 ```
+- `auth_method` (M3) = `AuthSession.auth_method` of the caller's session: `password` (`auth/login/`) or the provider of a social sign-in (`google`, `facebook`); `null` for a session opened before the method was recorded (`accounts.0007`). The same `Me` is the `user` of the `auth/login/` and `auth/oauth/{provider}/` answers. Only a `password` session may link an identity (`link/` → 403 otherwise, above), so the UI hides "Bog‘lash" unless `auth_method` is `password`.
 
 ### 2.2 Orders
 **`GET orders/`** → `Page<OrderSummary>`
