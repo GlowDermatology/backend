@@ -1753,14 +1753,14 @@ def cancel_by_customer(order_id: int, customer_id: int, *, at: datetime | None =
 
 
 def late_capture_case(order: Order, payment: payment_selectors.PaymentRow, now: datetime) -> str | None:
-    """The refused-capture case of a capture the provider reports for ``payment`` (``None`` = honour it):
-    ``failed_by_us`` (failed by us for a non-provider reason, incl. a superseded attachment), ``not_payable``
-    (cancelled, or past the grace), ``double_payment`` (paid by another payment); a payment that is not the
-    order's active pending one is never honoured."""
-    if payment.status == enums.PaymentStatus.FAILED and payment.error_code in FAILED_BY_US:
-        return "failed_by_us"
+    """The refused-capture case of a capture the provider reports for ``payment`` (``None`` = honour it),
+    customer contract §2.13.0: ``double_payment`` (the order is paid by another payment), ``failed_by_us``
+    (failed by us for a non-provider reason, incl. a superseded attachment), ``not_payable`` (cancelled, or past
+    the grace); a payment that is not the order's pending one is never honoured."""
     if selectors.paid_by_other(order.pk, payment.id) or order.status in state.PAID_STATUSES:
         return "double_payment"
+    if payment.status == enums.PaymentStatus.FAILED and payment.error_code in FAILED_BY_US:
+        return "failed_by_us"
     if not is_payable(order, payment, now, attaching=False):
         return "not_payable"
     if payment.status != enums.PaymentStatus.PENDING:
