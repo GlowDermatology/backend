@@ -3,6 +3,7 @@
 import pytest
 from django.core.management import call_command
 from django.db import IntegrityError, connection, transaction
+from django.db.migrations.exceptions import IrreversibleError
 
 from glowderma.accounts.tests.factories import CustomerFactory
 from glowderma.notifications.models import InboxNotification
@@ -52,4 +53,25 @@ def test_0003_round_trip() -> None:
     assert "'account'" not in check_definition()
     call_command("migrate", "notifications", verbosity=0)
     assert "'account'" in check_definition()
+    call_command("migrate", verbosity=0)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_0003_reverse_refuses_while_account_rows_exist() -> None:
+    """Review nit: the old CHECK cannot hold ``account`` rows, so the reverse refuses by name instead of
+    failing with an IntegrityError (or dropping notices silently)."""
+    customer = CustomerFactory.create()
+    row = InboxNotificationFactory.create(
+        customer=customer,
+        kind=InboxNotification.Kind.GENERAL,
+        source_type=InboxNotification.SourceType.ACCOUNT,
+        source_id=customer.pk,
+        link={"kind": "none"},
+        dedupe_key=f"account:{customer.pk}:password_changed:{'b' * 32}",
+    )
+    with pytest.raises(IrreversibleError, match="source_type='account'"):
+        call_command("migrate", "notifications", "0002", verbosity=0)
+    assert "'account'" in check_definition() and InboxNotification.objects.filter(pk=row.pk).exists()
+    InboxNotification.objects.filter(pk=row.pk).delete()
+    call_command("migrate", "notifications", "0002", verbosity=0)
     call_command("migrate", verbosity=0)

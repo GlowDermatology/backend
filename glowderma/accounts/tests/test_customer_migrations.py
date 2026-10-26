@@ -1,10 +1,15 @@
 """accounts.0006_customer_auth_hardening (customer contract §1.9, §2.1.6, §2.1.8, §2.2.3)."""
 
+from datetime import timedelta
+
 import pytest
 from django.core.management import call_command
 from django.db import connection
+from django.db.migrations.exceptions import IrreversibleError
 
 from glowderma.accounts.models import AuthSession, Customer, CustomerSocialIdentity, Device
+from glowderma.accounts.tests.factories import CustomerFactory, CustomerSocialIdentityFactory
+from glowderma.core import timeutils
 
 
 def columns(table: str) -> set[str]:
@@ -53,3 +58,23 @@ def test_new_fields_and_choices() -> None:
     assert Device._meta.get_field("key_hash").max_length == 64
     customer = Customer(phone="+998900000000")
     assert customer.is_authenticated is True and customer.is_anonymous is False
+
+
+@pytest.mark.django_db(transaction=True)
+def test_0006_reverse_refuses_to_lose_apple_tokens_or_history_horizons() -> None:
+    """Review nit: reversing would drop sealed Apple tokens and dormant-reset horizons (a re-forward
+    back-fills only from ``reactivated_at``), so it refuses while such rows exist; a back-filled horizon is
+    no loss."""
+    instant = timeutils.now()
+    CustomerFactory.create(reactivated_at=instant, history_from=instant)  # back-filled shape: reversible
+    apple = CustomerSocialIdentityFactory.create(provider="apple", provider_refresh_token="sealed")  # noqa: S106
+    with pytest.raises(IrreversibleError, match="1 Apple identity"):
+        call_command("migrate", "accounts", "0005", verbosity=0)
+    apple.delete()
+    horizon = CustomerFactory.create(history_from=instant - timedelta(days=3))
+    with pytest.raises(IrreversibleError, match="1 customer"):
+        call_command("migrate", "accounts", "0005", verbosity=0)
+    assert "history_from" in columns("accounts_customer")
+    Customer.objects.filter(pk=horizon.pk).update(history_from=None)
+    call_command("migrate", "accounts", "0005", verbosity=0)
+    call_command("migrate", verbosity=0)

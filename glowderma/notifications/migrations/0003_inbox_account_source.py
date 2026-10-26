@@ -2,9 +2,28 @@
 
 Source ``account`` (``source_id`` = the customer id) and the CHECK ``inbox_kind_source_fields`` extended with
 ``kind = 'general' AND source_type = 'account' AND template_status = ''``.
+
+Reversible only while no ``account`` row exists: the old CHECK cannot hold them, so the reverse refuses
+with :class:`IrreversibleError` naming the count instead of failing on the constraint (or deleting notices
+silently).
 """
 
+from typing import Any
+
 from django.db import migrations, models
+from django.db.migrations.exceptions import IrreversibleError
+
+
+def refuse_with_account_rows(apps: Any, schema_editor: Any) -> None:
+    InboxNotification = apps.get_model("notifications", "InboxNotification")
+    count = (
+        InboxNotification.objects.using(schema_editor.connection.alias).filter(source_type="account").count()
+    )
+    if count:
+        raise IrreversibleError(
+            f"notifications.0003 cannot be reversed: {count} inbox row(s) with source_type='account' exist "
+            "(account-security notices); delete them first if losing them is intended."
+        )
 
 
 class Migration(migrations.Migration):
@@ -59,4 +78,6 @@ class Migration(migrations.Migration):
                 name="inbox_kind_source_fields",
             ),
         ),
+        # Last, so that it runs first when the migration is reversed.
+        migrations.RunPython(migrations.RunPython.noop, refuse_with_account_rows, elidable=True),
     ]
