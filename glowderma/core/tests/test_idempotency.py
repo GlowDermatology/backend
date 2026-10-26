@@ -389,3 +389,47 @@ def test_a_retry_while_the_body_is_refreshed_is_in_progress_never_the_pre_send_b
     with connection.cursor() as cursor:  # the session lock was released
         cursor.execute("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND pid = pg_backend_pid()")
         assert cursor.fetchone() == (0,)
+
+
+# --- the stored fingerprint (integration review: bodies can carry passwords) --------------------------------
+
+
+def test_the_stored_fingerprint_is_keyed_so_a_body_cannot_be_guessed_back() -> None:
+    import hashlib
+    import json
+
+    body = {"current_password": "Old-Secret-1", "password": "New-Secret-2"}
+    assert post(str(uuid4()), body).status_code == 201
+    stored = IdempotencyRecord.objects.get().request_hash
+    plain = json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    assert len(stored) == 64 and stored != hashlib.sha256(plain.encode()).hexdigest()
+
+
+def test_the_query_string_is_part_of_the_fingerprint() -> None:
+    key = str(uuid4())
+    assert post(key, path="/api/test/1/?product_id=4&product_id=9").status_code == 201
+    replay = post(key, path="/api/test/1/?product_id=9&product_id=4")  # same ids, other order: a retry
+    assert replay.status_code == 201 and replay["Idempotent-Replayed"] == "true"
+    reused = post(key, path="/api/test/1/?product_id=5")
+    assert reused.status_code == 422 and reused.data["code"] == "idempotency_key_reused"
+    assert AuditEntry.objects.count() == 1
+
+
+def test_a_record_written_before_the_keyed_fingerprint_still_replays() -> None:
+    import hashlib
+    import json
+
+    key = str(uuid4())
+    first = post(key, {"value": "one"})
+    legacy = json.dumps({"value": "one"}, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    IdempotencyRecord.objects.update(request_hash=hashlib.sha256(legacy.encode()).hexdigest())
+    replay = post(key, {"value": "one"})
+    assert replay.status_code == 201 and replay.data == first.data and replay["Idempotent-Replayed"] == "true"
+    assert post(key, {"value": "two"}).status_code == 422
+
+
+def test_the_admin_never_shows_the_body_hash_or_the_stored_answer() -> None:
+    from django.contrib import admin
+
+    model_admin = admin.site._registry[IdempotencyRecord]
+    assert {"request_hash", "response_body"} <= set(model_admin.exclude or ())
