@@ -70,7 +70,7 @@ def _state(payment: payment_selectors.PaymentRow) -> dict[str, Any]:
 
 
 class PaymeView(WebhookAPIView):
-    http_method_names = ["post", "get", "put", "patch", "delete"]
+    http_method_names = ["post", "get", "put", "patch", "delete", "head", "options"]
 
     @extend_schema(
         operation_id="webhook_payme_rpc",
@@ -124,10 +124,17 @@ class PaymeView(WebhookAPIView):
 
     @extend_schema(exclude=True)
     def get(self, request: Request) -> Response:
-        """Any non-POST: JSON-RPC ``-32300`` (HTTP 200, as the protocol requires)."""
+        """Any non-POST: JSON-RPC ``-32300`` (HTTP 200, as the protocol requires); a fake Payme under the
+        production settings answers ``-32504`` to every call first (§2.13.0)."""
+        if integration_modes.callbacks_refused(PROVIDER):
+            return self._rejected(request, None, None, "fake_mode", time.monotonic())
         return Response(rpc.rpc_error(None, rpc.ERR_TRANSPORT))
 
-    put = patch = delete = get
+    put = patch = delete = head = get
+
+    @extend_schema(exclude=True)
+    def options(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        return self.get(request)
 
     # --- inbox
     # -----------------------------------------------------------------------------------------------
@@ -326,19 +333,22 @@ class PaymeView(WebhookAPIView):
         if created - int(payme_time) > rpc.TIMEOUT_MS:
             raise RpcError(rpc.ERR_CANNOT_PERFORM)
         try:
-            payment = services.ensure_payable_payment(order.pk, PAYME)
-            payment_services.attach_transaction(
-                payment.id,
-                txn,
-                {
-                    "transaction": txn,
-                    "time": int(payme_time),
-                    "create_time": created,
-                    "state": rpc.STATE_CREATED,
-                    "account": params.get("account"),
-                },
-            )
-        except (payment_services.TransactionTaken, PaymentInProgress) as exc:
+            # One savepoint: a refusal rolls back a provider switch and the new row (§2.13.0, nothing
+            # half-applied); the answer's inbox row is written by the caller.
+            with transaction.atomic():
+                payment = services.ensure_payable_payment(order.pk, PAYME)
+                payment_services.attach_transaction(
+                    payment.id,
+                    txn,
+                    {
+                        "transaction": txn,
+                        "time": int(payme_time),
+                        "create_time": created,
+                        "state": rpc.STATE_CREATED,
+                        "account": params.get("account"),
+                    },
+                )
+        except (payment_services.TransactionTaken, PaymentInProgress, InvalidTransition) as exc:
             raise _busy() from exc
         except AlreadyPaid as exc:
             raise RpcError(rpc.ERR_CANNOT_PERFORM) from exc
@@ -400,7 +410,10 @@ class PaymeView(WebhookAPIView):
                 ),
                 None,
             )
-            if refund is None:
+            # Staff may have closed the manual refund (admin resolve ``succeeded``) before cancelling in the
+            # Payme cabinet: the payment is already ``refunded``, and refusing would stop Payme from paying
+            # the customer back. Only a performed, still ``paid`` payment without an open refund is -31007.
+            if refund is None and payment.status != enums.PaymentStatus.REFUNDED:
                 raise RpcError(rpc.ERR_CANNOT_CANCEL)
             cancel_time = now_ms()
             payment_services.merge_provider_state(
@@ -411,7 +424,8 @@ class PaymeView(WebhookAPIView):
                     "reason": int(reason),
                 },
             )
-            services.resolve_refund(refund.id, enums.RefundState.SUCCEEDED, None)
+            if refund is not None:
+                services.resolve_refund(refund.id, enums.RefundState.SUCCEEDED, None)
             return {
                 "transaction": str(payment.id),
                 "cancel_time": cancel_time,

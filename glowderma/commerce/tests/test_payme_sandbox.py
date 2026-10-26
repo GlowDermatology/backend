@@ -316,3 +316,63 @@ def test_cancel_of_a_performed_transaction_while_payme_is_fake(order: Order, now
     with override_settings(DEV_FEATURES_ALLOWED=False, PAYME_MODE="fake"):
         assert _code(payme(sandbox.cancel(TXN, 5))) == -32504
     assert Refund.objects.get(payment__order=order).state == "manual_required"
+
+
+# --- fix pass 1
+# ---------------------------------------------------------------------------------------------------
+
+
+def test_row_18_variant_cabinet_cancel_after_staff_resolved_the_refund(order: Order, now: datetime) -> None:
+    """Staff closed the manual refund first (admin resolve ``succeeded``), then cancelled in the cabinet."""
+    _performed(order, now)
+    services.cancel_order(order.pk, "Mijoz so‘rovi", admin().pk)
+    refund = Refund.objects.get(payment__order=order)
+    services.resolve_refund(refund.pk, "succeeded", admin().pk)
+    assert Payment.objects.get(order=order).status == "refunded"
+    with at(now + timedelta(minutes=5)):
+        answer = payme(sandbox.cancel(TXN, 5))
+    assert answer["result"]["state"] == -2 and answer["result"]["cancel_time"] > 0
+    payment = Payment.objects.get(order=order)
+    assert payment.status == "refunded"
+    assert payment.provider_state["state"] == -2 and payment.provider_state["reason"] == 5
+    assert Refund.objects.filter(payment__order=order).count() == 1
+    assert OrderEvent.objects.filter(order=order, type="refund_succeeded").count() == 1
+    assert payme(sandbox.cancel(TXN, 5))["result"] == answer["result"]  # replay: the stored answer
+
+
+def _attempts(order: Order) -> list[tuple[str, str, str]]:
+    return [(p.provider, p.status, p.error_code) for p in Payment.objects.filter(order=order).order_by("id")]
+
+
+def test_create_refusal_rolls_back_the_provider_switch(
+    now: datetime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from glowderma.payments import services as payment_services
+
+    order = place(shopper(), fulfilment="pickup", provider="click", when=now)
+    before = _attempts(order)
+
+    def taken(*args: Any, **kwargs: Any) -> Any:
+        raise payment_services.TransactionTaken("bound elsewhere")
+
+    monkeypatch.setattr(payment_services, "attach_transaction", taken)
+    assert _code(_create(order, now)) == -31051
+    assert _attempts(order) == before  # the Click row is not abandoned and no Payme row is left behind
+    order.refresh_from_db()
+    assert order.payment_provider == "click"
+
+
+@pytest.mark.parametrize("method", ["get", "put", "patch", "delete", "head", "options"])
+def test_every_non_post_method_answers_32300(method: str) -> None:
+    response = getattr(APIClient(), method)(PAYME_URL)
+    assert response.status_code == 200
+    if method != "head":
+        assert response.json()["error"]["code"] == -32300
+
+
+def test_non_post_while_payme_is_fake_in_production_answers_32504() -> None:
+    with override_settings(DEV_FEATURES_ALLOWED=False, PAYME_MODE="fake"):
+        response = APIClient().get(PAYME_URL)
+    assert response.status_code == 200 and response.json()["error"]["code"] == -32504
+    (row,) = rows("payme")
+    assert row.result["error_code"] == "fake_mode"
