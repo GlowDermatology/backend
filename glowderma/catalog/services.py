@@ -415,7 +415,31 @@ def _category_snapshot(category: Category) -> dict[str, Any]:
         "name.en": category.name_en,
         "is_active": category.is_active,
         "position": category.position,
+        "image": category.image.name or None,  # content-addressed: categories/<id>/<sha256[:16]>.<ext>
     }
+
+
+def _store_category_image(category: Category, processed: ProcessedImage) -> None:
+    """Store the re-encoded image under ``categories/<id>/<sha256[:16]>.<ext>`` (gap ADM-5.1); the previous
+    file is removed after commit. The same bytes again change nothing (the name is content-addressed)."""
+    previous = category.image.name or ""
+    name = media_name("categories", category.pk, processed.content, processed.extension)
+    if previous == name:
+        return
+    category.image.save(_basename(name), ContentFile(processed.content, name=_basename(name)), save=False)
+    category.save(update_fields=["image"])
+    if previous:
+        storage = category.image.storage
+        transaction.on_commit(lambda: storage.delete(previous))
+
+
+def _remove_category_image(category: Category) -> None:
+    """Drop the stored image (``remove_image``); the file is removed after commit. No image: nothing."""
+    if not category.image.name:
+        return
+    _delete_file_on_commit(category.image)
+    category.image = ""  # a FieldFile is cleared by assigning its empty name
+    category.save(update_fields=["image"])
 
 
 def _next_position(model: type[Category] | type[Banner]) -> int:
@@ -424,8 +448,17 @@ def _next_position(model: type[Category] | type[Banner]) -> int:
 
 
 def create_category(
-    slug: str, name: dict[str, str], *, is_active: bool = True, actor: Any, request: Any = None
+    slug: str,
+    name: dict[str, str],
+    *,
+    is_active: bool = True,
+    image: Any = None,
+    actor: Any,
+    request: Any = None,
 ) -> Category:
+    """``POST categories/``; ``image`` (optional upload, gap ADM-5.1) goes through ``core.images`` (the
+    product-image limits) and is stored once the row has its id, in the same transaction."""
+    processed = _process(image, "image") if image is not None else None
     with transaction.atomic():
         _advisory_lock(CATEGORY_LOCK)
         category = Category(
@@ -437,6 +470,8 @@ def create_category(
             position=_next_position(Category),
         )
         _save_unique(category.save, CATEGORY_SLUG_CONSTRAINT, "slug")
+        if processed is not None:
+            _store_category_image(category, processed)
         audit.record(
             action="category.created",
             entity_type="category",
@@ -453,9 +488,16 @@ def update_category(
     *,
     name: dict[str, str] | None = None,
     is_active: bool | None = None,
+    image: Any = None,
+    remove_image: bool = False,
     actor: Any,
     request: Any = None,
 ) -> Category:
+    """``PATCH categories/{slug}/``: ``image`` replaces the stored one (the old file is removed after commit),
+    ``remove_image`` drops it (gap ADM-5.1); the serializer refuses both at once."""
+    if image is not None and remove_image:
+        raise ValueError("Either a new image or remove_image, not both")
+    processed = _process(image, "image") if image is not None else None
     with transaction.atomic():
         locked = Category.objects.select_for_update().get(pk=category.pk)
         before = _category_snapshot(locked)
@@ -464,6 +506,10 @@ def update_category(
         if is_active is not None:
             locked.is_active = is_active
         locked.save()
+        if processed is not None:
+            _store_category_image(locked, processed)
+        elif remove_image:
+            _remove_category_image(locked)
         diff_before, diff_after = _diff(before, _category_snapshot(locked))
         audit.record(
             action="category.updated",

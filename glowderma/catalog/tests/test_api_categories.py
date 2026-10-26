@@ -6,18 +6,21 @@ Shapes, codes and messages follow the contract table literally.
 import csv
 import threading
 from io import StringIO
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 import pytest
+from django.conf import settings
 from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIClient
 
 from glowderma.accounts.models import StaffUser
 from glowderma.catalog.models import Banner, Category
 from glowderma.catalog.tests.factories import BannerFactory, CategoryFactory, ProductFactory
-from glowderma.catalog.tests.helpers import errors_of
+from glowderma.catalog.tests.helpers import errors_of, upload
 from glowderma.core import timeutils
 from glowderma.core.api.exceptions import field_error
 from glowderma.core.models import AuditEntry
@@ -43,6 +46,7 @@ def test_list_ordered_by_position_with_product_count_and_filter(staff_client: AP
     assert body["results"][0] == {
         "slug": "serums",
         "name": {"uz": "Serumlar", "ru": "Сыворотки", "en": ""},
+        "image_url": None,
         "position": 0,
         "is_active": True,
         "product_count": 2,
@@ -84,6 +88,7 @@ def test_create_appends_last_and_audits(staff_client: APIClient, staff: StaffUse
     assert response.json() == {
         "slug": "toners",
         "name": {"uz": "Tonerlar", "ru": "", "en": ""},
+        "image_url": None,
         "position": 1,
         "is_active": True,
         "product_count": 0,
@@ -222,6 +227,7 @@ def test_reorder(staff_client: APIClient) -> None:
     assert set(response.json()["results"][0]) == {
         "slug",
         "name",
+        "image_url",
         "position",
         "is_active",
         "product_count",
@@ -319,3 +325,146 @@ def test_concurrent_creates_with_the_same_slug(staff: StaffUser) -> None:
         assert not thread.is_alive()
     assert sorted(outcomes) == ["ok", "unique"]
     assert Category.objects.filter(slug="serums").count() == 1
+
+
+# --- gap ADM-5.1: the category image (decision GC-4) ------------------------------------------------------
+
+
+def media_url(name: str) -> str:
+    return f"{settings.PUBLIC_MEDIA_BASE_URL.rstrip('/')}/{name}"
+
+
+def test_create_multipart_with_an_image(staff_client: APIClient, staff: StaffUser) -> None:
+    response = staff_client.post(
+        CATEGORIES,
+        {
+            "slug": "masks",
+            "name.uz": "Niqoblar",
+            "name.ru": "Маски",
+            "is_active": "false",
+            "image": upload("JPEG", size=(3000, 1500)),
+        },
+        format="multipart",
+    )
+    assert response.status_code == 201, response.json()
+    category = Category.objects.get(slug="masks")
+    name = str(category.image.name)
+    assert name.startswith(f"categories/{category.pk}/") and name.endswith(".jpg")
+    assert response.json()["image_url"] == media_url(name)
+    assert response.json()["name"] == {"uz": "Niqoblar", "ru": "Маски", "en": ""}
+    assert response.json()["is_active"] is False
+    from PIL import Image
+
+    with Image.open(category.image.path) as stored:  # re-encoded, longest side ≤ 2400 px
+        assert stored.size == (2400, 1200)
+    after = AuditEntry.objects.get(action="category.created").after or {}
+    assert after["image"] == name
+    # the customer catalogue shows it (customer contract §2.3 catalog/categories/ image_url)
+    ProductFactory.create(category=category, status="active", price=50_000)
+    category.is_active = True
+    category.save()
+    rows = APIClient().get("/api/v1/catalog/categories/").json()["results"]
+    assert rows[0]["image_url"] == media_url(name)
+
+
+@pytest.mark.parametrize(
+    ("image", "code", "message"),
+    [
+        (
+            upload(content=b"not an image", name="x.png"),
+            "unsupported_image",
+            "Faqat JPEG, PNG yoki WebP rasm.",
+        ),
+        (
+            upload(content=b"\x89PNG" + b"\0" * (5 * 1024 * 1024 - 3), name="big.png"),
+            "file_too_large",
+            "Rasm 5 MB dan oshmasin.",
+        ),
+    ],
+)
+def test_create_refuses_a_bad_image_and_writes_nothing(
+    staff_client: APIClient, image: Any, code: str, message: str
+) -> None:
+    response = staff_client.post(
+        CATEGORIES, {"slug": "masks", "name.uz": "Niqoblar", "image": image}, format="multipart"
+    )
+    assert response.status_code == 400
+    assert errors_of(response)["image"] == (code, message)
+    assert not Category.objects.exists() and not AuditEntry.objects.filter(action="category.created").exists()
+
+
+def test_patch_replaces_and_removes_the_image(
+    staff_client: APIClient, django_capture_on_commit_callbacks: Any
+) -> None:
+    CategoryFactory.create(slug="serums", name_uz="Serumlar")
+    url = f"{CATEGORIES}serums/"
+    with django_capture_on_commit_callbacks(execute=True):
+        first = staff_client.patch(url, {"image": upload("PNG", size=(40, 20))}, format="multipart")
+    assert first.status_code == 200, first.json()
+    category = Category.objects.get(slug="serums")
+    old_path = Path(category.image.path)
+    assert old_path.exists() and first.json()["image_url"] == media_url(str(category.image.name))
+    # the same bytes again: nothing moves (content-addressed name), the file stays
+    with django_capture_on_commit_callbacks(execute=True):
+        again = staff_client.patch(url, {"image": upload("PNG", size=(40, 20))}, format="multipart")
+    assert again.json()["image_url"] == first.json()["image_url"] and old_path.exists()
+    # a new image replaces it; the old file is removed after commit; the names arrive dotted in multipart
+    with django_capture_on_commit_callbacks(execute=True):
+        second = staff_client.patch(
+            url, {"image": upload("WEBP", size=(30, 30)), "name.en": "Serums"}, format="multipart"
+        )
+    assert second.status_code == 200, second.json()
+    category.refresh_from_db()
+    new_path = Path(category.image.path)
+    assert str(category.image.name).endswith(".webp") and new_path.exists() and not old_path.exists()
+    assert second.json()["name"]["en"] == "Serums"
+    entry = AuditEntry.objects.filter(action="category.updated").latest("id")
+    assert entry.before == {"name.en": "", "image": str(old_path.relative_to(settings.MEDIA_ROOT))}
+    assert entry.after == {"name.en": "Serums", "image": category.image.name}
+    # both at once is refused
+    response = staff_client.patch(url, {"image": upload("PNG"), "remove_image": "true"}, format="multipart")
+    assert errors_of(response)["remove_image"] == ("invalid", "Noto‘g‘ri qiymat.")
+    # remove (JSON): image_url null, the file removed after commit
+    with django_capture_on_commit_callbacks(execute=True):
+        removed = staff_client.patch(url, {"remove_image": True})
+    assert removed.status_code == 200 and removed.json()["image_url"] is None
+    assert Category.objects.get(slug="serums").image.name == "" and not new_path.exists()
+    entry = AuditEntry.objects.filter(action="category.updated").latest("id")
+    assert entry.after == {"image": None}
+    # removing again: nothing to remove, still 200
+    assert staff_client.patch(url, {"remove_image": True}).json()["image_url"] is None
+    response = staff_client.patch(url, {"remove_image": "maybe"})
+    assert errors_of(response)["remove_image"] == ("invalid", "Noto‘g‘ri qiymat.")
+
+
+def test_category_bodies_are_json_or_multipart_only(staff_client: APIClient) -> None:
+    CategoryFactory.create(slug="serums")
+    body = "slug=masks&name.uz=Niqoblar"
+    for response in (
+        staff_client.post(CATEGORIES, body, content_type="application/x-www-form-urlencoded"),
+        staff_client.patch(f"{CATEGORIES}serums/", body, content_type="application/x-www-form-urlencoded"),
+        staff_client.put(f"{CATEGORIES}order/", {"slugs": ["serums"]}, format="multipart"),
+    ):
+        assert response.status_code == 415, response.json()
+
+
+def test_list_renders_images_without_extra_queries(staff_client: APIClient) -> None:
+    for index in range(3):
+        CategoryFactory.create(slug=f"cat-{index}", position=index)
+
+    def count() -> int:
+        with CaptureQueriesContext(connection) as queries:
+            assert staff_client.get(CATEGORIES).status_code == 200
+        return len(queries)
+
+    count()  # warm-up: the first authenticated request of the session touches it
+    baseline = count()
+    for index, category in enumerate(Category.objects.order_by("position")):
+        staff_client.patch(
+            f"{CATEGORIES}{category.slug}/",
+            {"image": upload("PNG", size=(10 + index, 10))},
+            format="multipart",
+        )
+        CategoryFactory.create(slug=f"more-{index}", position=10 + index)
+    assert count() == baseline
+    assert all(item["image_url"] for item in staff_client.get(CATEGORIES).json()["results"][:3])

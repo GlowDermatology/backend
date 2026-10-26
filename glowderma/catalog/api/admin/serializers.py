@@ -336,6 +336,7 @@ class CategorySerializer(serializers.Serializer[Category]):
 
     slug = serializers.CharField()
     name = serializers.SerializerMethodField()
+    image_url = serializers.SerializerMethodField()
     position = serializers.IntegerField()
     is_active = serializers.BooleanField()
     product_count = serializers.IntegerField()
@@ -346,13 +347,23 @@ class CategorySerializer(serializers.Serializer[Category]):
     def get_name(self, obj: Category) -> dict[str, str]:
         return i18n_dict(obj, "name")
 
+    @extend_schema_field(serializers.URLField(allow_null=True))
+    def get_image_url(self, obj: Category) -> str | None:
+        """Gap ADM-5.1: the category image (absolute, ``PUBLIC_MEDIA_BASE_URL``) | ``null``."""
+        return absolute_media_url(obj.image.name) if obj.image.name else None
+
 
 class CategoryListQuerySerializer(serializers.Serializer[dict[str, Any]]):
     is_active = QueryBooleanField(required=False)
 
 
 class CategoryWriteSerializer(serializers.Serializer[Any]):
-    """``POST categories/`` and ``PATCH categories/{slug}/`` (``partial``; ``slug`` is then ``read_only``)."""
+    """``POST categories/`` and ``PATCH categories/{slug}/`` (``partial``; ``slug`` is then ``read_only``).
+
+    JSON, or multipart with the dotted names ``name.uz``, ``name.ru``, ``name.en`` next to ``slug``,
+    ``is_active`` and the optional file part ``image`` (gap ADM-5.1; the view reads the file and un-dots the
+    names with ``views.form_to_nested``).
+    """
 
     slug = SlugField()
     name = CategoryNameSerializer()
@@ -367,6 +378,13 @@ class CategoryWriteSerializer(serializers.Serializer[Any]):
         if Category.objects.filter(slug=value).exists():
             raise serializers.ValidationError([field_error("unique")])
         return value
+
+
+class CategoryPatchSerializer(CategoryWriteSerializer):
+    """``PATCH categories/{slug}/``: every field optional; ``remove_image: true`` drops the stored image
+    (gap ADM-5.1; refused together with a new ``image`` part: ``remove_image`` ``invalid``)."""
+
+    remove_image = serializers.BooleanField(required=False, default=False)
 
 
 class SlugOrderSerializer(serializers.Serializer[dict[str, Any]]):
