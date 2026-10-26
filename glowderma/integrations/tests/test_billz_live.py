@@ -41,6 +41,7 @@ from glowderma.integrations.billz.ports import (
     BillzPaymentPending,
     BillzProduct,
     BillzRejected,
+    BillzSaleBusy,
     BillzShiftClosed,
     BillzUnavailable,
     SaleCancelled,
@@ -1110,9 +1111,10 @@ def test_a_push_another_attempt_finished_returns_its_receipt() -> None:
 def test_a_push_in_progress_elsewhere_is_retried_later() -> None:
     server = BillzServer()
     cache.add(billz_live.SALE_LOCK_KEY.format(order_uuid=ORDER_UUID), "another-worker", timeout=60)
-    with pytest.raises(BillzUnavailable, match="another worker") as caught:
+    with pytest.raises(BillzSaleBusy, match="another worker") as caught:
         live(server).push_sale(sale(), Journal(server))
     assert caught.value.not_applied and server.requests == []
+    assert caught.value.retry_after == billz_live.SALE_BUSY_RETRY  # NEW-9: deferred, no attempt spent
     assert cache.get(billz_live.SALE_LOCK_KEY.format(order_uuid=ORDER_UUID)) == "another-worker"
 
 
@@ -1150,7 +1152,9 @@ def test_the_push_ends_within_its_deadline() -> None:
     server.overrides["POST /v2/order-product/{order_id}"] = slow
     with pytest.raises(BillzUnavailable, match="deadline") as caught:
         adapter.push_sale(sale(), Journal(server))
-    assert caught.value.not_applied
+    # the second item add answered past the deadline: abandoned as a read timeout (review NEW-9), so its
+    # outcome is unknown — harmless for an upsert, which the next attempt sends again
+    assert not caught.value.not_applied
     # after 260 s the next request (the client lookup) is never started, let alone the payment
     assert server.labels()[-1] == "POST /v2/order-product/{order_id}"
     assert server.count("POST /v2/order-payment/{order_id}") == 0

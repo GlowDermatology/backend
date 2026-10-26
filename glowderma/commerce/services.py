@@ -20,7 +20,7 @@ Errors: request-level refusals raise the contract exceptions of ``core.api.excep
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -28,6 +28,7 @@ from uuid import UUID
 
 from django.conf import settings
 from django.db import IntegrityError, OperationalError, connection, transaction
+from django.db.models import F, Q
 from django.utils import timezone
 
 from glowderma.accounts.models import Address, Customer, Device, StaffUser
@@ -825,6 +826,56 @@ def expire_due_reservations(now: datetime | None = None) -> list[int]:
     return [order_id for order_id in due if expire_reservation(order_id, instant, skip_locked=True)]
 
 
+# --- Billz settlement of sold units (03 §1.6, review NEW-2) -------------------------------------------------
+
+
+def settle_billz_reservations(
+    product_ids: Collection[int] | None = None, *, at: datetime | None = None
+) -> int:
+    """Mark the converted reservations Billz's stock already reflects as settled; returns how many.
+
+    ``selectors.available_stock`` subtracts a converted reservation until its sale is in Billz (the purchase's
+    ``billz_pushed_at``: the live push, or staff recording it by hand) **and** the stock was read after that
+    (``billz_pushed_at < ProductStock.synced_at``, the reservation converted before that read), or — for a
+    cancelled order whose sale never reached Billz and whose payment was never attempted there — once the
+    stock was read after the conversion. Once true, that never becomes false again, so the reservation is
+    stamped ``billz_settled_at`` and the availability read (``reservation_unsettled_prod_idx``) never looks at
+    it again. Run after every Billz import (outbox ``catalog.stock_synced``), after a push succeeded and after
+    a sale was recorded by hand; idempotent. ``product_ids`` limits it to those products.
+    """
+    _aware(at, "at")
+    instant = at or timeutils.now()
+    synced = F("product__stock__synced_at")
+    eligible = StockReservation.objects.filter(
+        Q(order__purchase__billz_pushed_at__lt=synced)
+        | Q(
+            order__purchase__billz_pushed_at__isnull=True,
+            order__purchase__billz_payment_attempted_at__isnull=True,
+            order__status=_S.CANCELLED,
+        ),
+        state=StockReservation.State.CONVERTED,
+        billz_settled_at__isnull=True,
+        product__stock__synced_at__isnull=False,
+        converted_at__lte=synced,
+    )
+    if product_ids is not None:
+        eligible = eligible.filter(product_id__in=list(product_ids))
+    return StockReservation.objects.filter(
+        pk__in=eligible.values("pk"), billz_settled_at__isnull=True
+    ).update(billz_settled_at=instant, updated_at=instant)
+
+
+def settle_order_reservations(order_id: int, *, at: datetime | None = None) -> int:
+    """Settle every converted reservation of one order at once: its sale will never reach a Billz this
+    system reads stock from (Billz is fake under the production settings: staff enter the sale by hand,
+    customer contract §6.14), so the units must never start counting at the first live read."""
+    _aware(at, "at")
+    instant = at or timeutils.now()
+    return StockReservation.objects.filter(
+        order_id=order_id, state=StockReservation.State.CONVERTED, billz_settled_at__isnull=True
+    ).update(billz_settled_at=instant, updated_at=instant)
+
+
 # --- admin cancel (rows 4, 6, 7) ----------------------------------------------------------------------------
 
 
@@ -1356,6 +1407,8 @@ __all__ = [
     "resolve_refund",
     "retry_refund",
     "retry_shipment",
+    "settle_billz_reservations",
+    "settle_order_reservations",
     "transition",
 ]
 

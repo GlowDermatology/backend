@@ -11,6 +11,7 @@ A handler signals its outcome to ``core.tasks.dispatch_outbox`` by returning (``
 
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
@@ -81,6 +82,43 @@ def on_dead(topic: str) -> Callable[[Handler], Handler]:
         return handler
 
     return decorate
+
+
+class RequeueRefused(Exception):
+    """A :class:`RequeueHooks` callback refused (``manage.py requeue_outbox`` stops with its message)."""
+
+
+@dataclass(frozen=True, slots=True)
+class RequeueHooks:
+    """How ``manage.py requeue_outbox`` treats the dead messages of one topic, registered by the module that
+    owns the topic (``core`` knows no module above it):
+
+    * ``describe(message)`` — what the message is about, appended to its listing line (e.g. the order and the
+      provider's draft staff look up);
+    * ``skip_reason(message)`` — non-empty: the message is listed but not requeued (its effect was already
+      done another way, e.g. by hand);
+    * ``warning`` — printed once before the listing;
+    * ``forget_payment_attempt(message, actor)`` — ``--forget-payment-attempt``: clears the topic's guard
+      against a second payment once staff confirmed the provider never took the first one; audited by the
+      callback; returns a line to print; raises :class:`RequeueRefused` to stop.
+    """
+
+    describe: Callable[[OutboxMessage], str]
+    skip_reason: Callable[[OutboxMessage], str]
+    warning: str = ""
+    forget_payment_attempt: Callable[[OutboxMessage, Any], str] | None = None
+
+
+_requeue_hooks: dict[str, RequeueHooks] = {}
+
+
+def on_requeue(topic: str, hooks: RequeueHooks) -> None:
+    """Register the :class:`RequeueHooks` of ``topic``."""
+    _requeue_hooks[topic] = hooks
+
+
+def requeue_hooks(topic: str) -> RequeueHooks | None:
+    return _requeue_hooks.get(topic)
 
 
 def notify_dead(message: OutboxMessage) -> None:

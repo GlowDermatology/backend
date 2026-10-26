@@ -15,8 +15,9 @@ breaker, retries, error mapping), `registry.py`. Orchestration: `glowderma/catal
 `glowderma/catalog/services.py` (`upsert_from_billz`, `hide_missing_from_billz`), `glowderma/commerce/tasks.py`
 (`billz.push_sale`), `glowderma/commerce/billz_sales.py` (`PurchaseJournal`), `glowderma/commerce/selectors.py`
 (`available_stock`), `glowderma/loyalty/services.py` (`record_billz_order`, `record_billz_payment_attempt`,
-`clear_billz_payment_attempt`, `link_billz_sale`), `glowderma/core/outbox.py` (`RetryLater`),
-`glowderma/core/management/commands/requeue_outbox.py`.
+`clear_billz_payment_attempt`, `link_billz_sale`), `glowderma/core/outbox.py` (`RetryLater`, `RequeueHooks`),
+`glowderma/core/management/commands/requeue_outbox.py`,
+`glowderma/commerce/management/commands/billz_mark_recorded.py`.
 
 **Lead decisions (2026-10-26, provisional; `docs/decisions/open-questions.md` BZ-D1–BZ-D4):**
 
@@ -32,14 +33,15 @@ breaker, retries, error mapping), `registry.py`. Orchestration: `glowderma/catal
 * **D3 — configuration-type failures.** 3xx, 403, a 404 of a route (not `GET /v2/order/{id}`), 20009, 20085 and a
   refused key are `BillzMisconfigured` (retryable) with an ERROR `billz.configuration_error` so monitoring alerts; a
   circuit breaker stops a failing Billz from holding workers; once the setting is fixed,
-  `manage.py requeue_outbox --topic billz.push_sale --dead [--since ISO] [--dry-run]` replays the dead sales.
+  `manage.py requeue_outbox --topic billz.push_sale --dead [--since ISO] [--order ID] [--dry-run]` replays the dead
+  sales (§7).
 * **D4 — `skip_ofd`** stays `false` (not sent) until the product owner decides (§12).
 
 ## 1. Modes
 
 | `BILLZ_MODE` | Adapter | Behaviour |
 |---|---|---|
-| `fake` (default, `INTEGRATIONS_MODE`) | `FakeBillz` | Deterministic catalog (unchanged M1 rules). Sale push accepted without a Billz sale id; scenario `{"push": "down"}` → transient, `{"push": "rejected"}` → permanent. Under the production settings the fake records no sale and no stock (customer contract §6.14): the import is refused, the `billz.push_sale` handler never calls it (WARNING `billz.sale_not_pushed`). The beat syncs do nothing. |
+| `fake` (default, `INTEGRATIONS_MODE`) | `FakeBillz` | Deterministic catalog (unchanged M1 rules). Sale push accepted without a Billz sale id; scenario `{"push": "down"}` → transient, `{"push": "rejected"}` → permanent. Under the production settings the fake records no sale and no stock (customer contract §6.14): the import is refused, the `billz.push_sale` handler never calls it (WARNING `billz.sale_not_pushed`; the order's reservations are settled at once, §6). The beat syncs do nothing. |
 | `live` | `LiveBillz` | The BILLZ 2.0 public API. The production settings refuse to start without the key and the three ids (§10). |
 
 ## 2. Endpoints used
@@ -89,7 +91,12 @@ Setup only (by hand, to fill the settings): `GET /v1/shop` (`get_v1_shop`), `GET
 * **Shared cache.** Tokens, the limiter, the circuit breaker, the cached product and client ids and the sale lock
   live in the Django cache. Every operation goes through `client.SafeCache`: Redis down is `BillzUnavailable`
   ("Billz: shared cache unavailable", ERROR `billz.cache_unavailable`) before anything is sent — an admin product
-  create/PATCH answers 503 `provider_unavailable`, the outbox retries a push.
+  create/PATCH answers 503 `provider_unavailable`, the outbox retries a push. Only backend errors are mapped
+  (`redis.RedisError`, `OSError`, `ConnectionError`, `TimeoutError`): Celery's `SoftTimeLimitExceeded` or a bug
+  propagates as itself. **After a request went out** nothing a cache error causes may say "not sent": the circuit
+  bookkeeping is best effort (logged, swallowed), and once a request of a call may have reached Billz (a timeout,
+  a 5xx, an unreadable answer) every later error of that call carries `not_applied = false` — a payment keeps its
+  attempt stamp (§6 f; review NEW-1).
 * **Rate limit.** Billz answers `429` above about **2 requests/second per IP**, counted over the whole integration.
   One limiter in the cache serves every worker: time is cut into slots of `1 / BILLZ_RATE_LIMIT_PER_SECOND` seconds
   (default 1.5/s, at most 2) and a request may start only at the beginning of a slot it won with `cache.add`
@@ -113,17 +120,24 @@ Setup only (by hand, to fill the settings): `GET /v1/shop` (`get_v1_shop`), `GET
   slot and retries 4 times. The **interactive** profile of the admin lookups (`POST products/`, a `billz_id`
   change — they run inside the idempotency transaction that holds the key's lock) waits 3 s for a slot, retries
   once, reads for at most 10 s, fails at once while a 429 pause is in force, waits 5 s for another worker's token
-  renewal and gives up after **25 s in total**.
+  renewal and gives up after **25 s in total** — for the whole lookup, every search page together
+  (`live.LOOKUP_BUDGET_SECONDS`, review NEW-3), not 25 s per call.
 * **Deadlines**: a sale push ends within **240 s** (`live.PUSH_DEADLINE_SECONDS`, below the outbox lease of 5 minutes
   and the 10-minute sale lock): every limiter wait, backoff sleep and HTTP timeout is cut to what is left, and a
-  request that cannot start in time is not sent (`BillzUnavailable`).
+  request that cannot start in time is not sent (`BillzUnavailable`). The read timeout bounds each wait for the
+  next chunk only, so the body is read chunk by chunk and an answer still dripping in when the deadline passed is
+  abandoned as a read timeout (an unknown outcome; review NEW-9): a push ends at most one read timeout after its
+  deadline.
 * **Timeouts**: connect `BILLZ_CONNECT_TIMEOUT_SECONDS` (5, ≤ 30), read/write `BILLZ_READ_TIMEOUT_SECONDS` (30, ≤ 60).
   Billz holds an async call open for up to 600 s before its own `408`; a read timeout before that is an unknown
   outcome.
 * **Circuit breaker**: 5 transport errors, timeouts or `5xx`/`408` answers in a row (across every worker, counted in
   the cache) open the circuit for 90 s (ERROR `billz.circuit_open`): every call then fails fast with
   `BillzUnavailable` (nothing sent) instead of holding a worker of the shared outbox pool for minutes. Any other
-  answer closes it.
+  answer **resets the count** of failures in a row; an open circuit always runs its full 90 s (nothing is sent
+  while it is open, so no answer can close it early) and the first call after it is a normal call. The
+  bookkeeping is best effort: it runs after the request, so a cache error there is logged
+  (`billz.circuit_bookkeeping_skipped`) and never decides the outcome of the request (§6 f).
 * httpx's own request log lines (full URL) are silenced (`LOGGING`: `httpx`/`httpcore` at WARNING) because
   `GET /v1/client?phone_number=…` carries a phone number. Our log lines use `pii_ref(phone)`; Billz's own free text is
   scrubbed (control characters and lone surrogates dropped, runs of ≥ 7 digits masked as `<number>`) before it
@@ -158,7 +172,9 @@ watermark, so the next delta re-reads; the daily full catches anything a shifted
 * every page arrived (`received ≥ count`, at most 10 000 pages),
 * `count` did not change while paging (pages are offsets: a shift could skip a product and hide it wrongly),
 * the pages did not overlap: the **distinct** Billz product ids equal `count` (a repeated product means another one
-  was never listed — it would be hidden although Billz still sells it),
+  was never listed — it would be hidden although Billz still sells it); a product Billz lists without an id is
+  identified by its barcode, so the same barcode on **another page** is a repeat too, while twice on one page it is
+  a duplicate barcode (first kept; review NEW-6),
 * it is plausible: `count > 0` and `count ≥ ceil(BILLZ_FULL_SYNC_MIN_RATIO × previous full count)`,
 * at least one listed product carries a stock or price entry for `BILLZ_SHOP_ID` (a wrong — but well-formed — shop
   id would zero every stock).
@@ -200,7 +216,8 @@ billz_order_id=… pushed=…` once the cancel commits whenever the purchase hol
 
 A per-sale cache lock (`billz:sale:lock:<order uuid>`, 10 min) **owned by one worker** keeps two workers off the
 same sale: only the owner releases it, and it is re-checked and renewed right before the payment (a worker whose
-lock expired stops there). Under the lock the journal re-reads the purchase (`SaleJournal.progress`), so an attempt
+lock expired stops there). A delivery that meets another worker's lock is deferred a minute (`BillzSaleBusy` →
+`outbox.RetryLater`, no attempt spent; review NEW-9). Under the lock the journal re-reads the purchase (`SaleJournal.progress`), so an attempt
 that read it before another attempt finished the push returns that sale instead of creating a second one. A push
 ends within 240 s (§4).
 
@@ -214,7 +231,7 @@ Steps (llms-full "Интернет-заказ из внешней системы
 | c. items | lines in the draft the order does not hold (a cashier's, a replaced product id) → `sold_measurement_value: 0`; then `POST /v2/order-product/{id} {product_id, sold_measurement_value, used_wholesale_price: false, use_free_price: true, free_price: <unit_price>}` + header | One call per product (lines of one product summed). An upsert with the absolute quantity **and the price the customer was charged** (D1), re-sent for every line on every attempt (so a line Billz holds at its own price is corrected before the bill is read). A cached id Billz rejects with 20036 or 20037 is looked up once more. |
 | d. customer | `GET /v1/client?phone_number=<+998…>` (exact digits match on `phone_numbers`), `POST /v1/client {phone_number}` only when none, then `PUT /v2/order-customer-new/{id} {customer_id, check_auth_code: false}` + header | The client id is cached by `pii_ref(phone)` for 30 days (Billz's search lags behind a create: "Только что созданный клиент может не найтись сразу"). A cached id Billz refuses (4xx: merged, deleted) is forgotten, looked up once more and linked once more. Skipped when the sale already carries that client. No name or other PII is sent. |
 | e. bill | `POST /v1/recalculate-order-bill/{id}` → `total_price`, `is_calculated` | Not calculated yet → retry. The total must equal Σ `unit_price` × `quantity` **exactly** (D1); otherwise ERROR `billz.sale_total_differs` and `BillzCheckByHand` (dead with "Billz bills X so'm … the customer was charged Y"), nothing paid. |
-| f. pay | `POST /v2/order-payment/{id} {payments: [{company_payment_type_id: BILLZ_PAYMENT_TYPE_ID, paid_amount: <expected>, returned_amount: 0}], comment: "Glow Derma #<order>", without_cashback: true}` | First the lock is renewed and `journal.before_payment()` re-checks the order and **commits the attempt** (`record_billz_payment_attempt`). A refusal Billz answered (a business code, 4xx, 429) or a request never sent forgets the attempt (`payment_not_applied`); an unknown outcome (timeout, 5xx) keeps it → step a on the next attempt. |
+| f. pay | `POST /v2/order-payment/{id} {payments: [{company_payment_type_id: BILLZ_PAYMENT_TYPE_ID, paid_amount: <expected>, returned_amount: 0}], comment: "Glow Derma #<order>", without_cashback: true}` | First the lock is renewed and `journal.before_payment()` re-checks the order and **commits the attempt** (`record_billz_payment_attempt`) — a compare-and-set under the Order lock: a stamp another attempt set meanwhile defers this one (`BillzPaymentPending`, review NEW-5). A refusal Billz answered (a business code, 4xx, 429) or a request never sent forgets the attempt (`payment_not_applied`); an unknown outcome (timeout, 5xx, an answer cut at the deadline) keeps it → step a on the next attempt — and so does any error that follows the request (a cache error during the bookkeeping: NEW-1). |
 
 Then the handler links the purchase (`link_billz_sale`, `billz_pushed_at` = now) and writes `billz_sale_recorded`
 once with `billz_order_id` = Billz's sale UUID (the fake echoes our `billz_order_uuid`, as in M2).
@@ -222,7 +239,21 @@ once with `billz_order_id` = Billz's sale UUID (the fake echoes our `billz_order
 **Available stock** (`commerce.selectors.available_stock`): the units of a paid order keep counting against
 Billz's stock until its sale is in Billz **and** the stock was read after the push (`billz_pushed_at <
 ProductStock.synced_at`) — a sale deferred for a closed shift or dead for staff never puts the bought unit back on
-sale at the next sync. A cancelled order whose sale never reached Billz stops counting at the next sync.
+sale at the next sync. A cancelled order whose sale never reached Billz stops counting at the next sync. A dead
+sale staff entered in Billz by hand is recorded with `manage.py billz_mark_recorded` (§7): it sets
+`billz_pushed_at`, so the unit stops counting after the next read — without it, Billz's own (hand-entered) sale
+and our reservation would both be subtracted for ever (review NEW-2).
+
+**Settled reservations** (review NEW-2): once a converted reservation stops counting for good, it is stamped
+`StockReservation.billz_settled_at` (`commerce.services.settle_billz_reservations`) and the availability read —
+one query on the catalog, cart and checkout paths, counts unchanged — only looks at the unsettled ones (partial
+index `reservation_unsettled_prod_idx`), so its cost no longer grows with the sales history. Settling runs after
+every Billz import (outbox topic `catalog.stock_synced`, announced by `catalog.run_billz_import` and handled by
+commerce), after a successful push and after `billz_mark_recorded` (each settles what the products' last read
+already reflects; the sale itself settles at the next read). A sale not pushed because Billz is fake under the
+production settings (§1) is settled at once: staff enter it by hand and Billz's stock reflects it. Migration
+`commerce.0007` settled the existing rows the rule no longer counted (pushed and read after, a cancelled order's
+sale that never reached Billz, the fake era: stock never read from Billz).
 
 **The window that cannot be closed**: Billz created the sale (b) and the worker died before our commit — or Billz
 answered the create with the correlation id only — so the retry creates a second, empty draft (no items, no stock
@@ -238,13 +269,14 @@ Business codes come from `data.error_code` (the async envelope and the sale meth
 * **Retryable** → `BillzUnavailable` → the outbox retries with backoff; ten failures make the message dead.
 * **Deferred** (no attempt spent, `outbox.RetryLater`): `BillzShiftClosed` every `BILLZ_SHIFT_RETRY_MINUTES` for up
   to `BILLZ_SHIFT_RETRY_MAX_HOURS` after the first refusal (`OutboxMessage.deferred_since`), then dead "shift closed:
-  … (deferred since …, gave up after 36 h)" (D2); `BillzPaymentPending` until the payment's quiet period ends.
+  … (deferred since …, gave up after 36 h)" (D2); `BillzPaymentPending` until the payment's quiet period ends;
+  `BillzSaleBusy` (another worker holds the sale lock) a minute later.
 * **Configuration** → `BillzMisconfigured` (retryable, ERROR `billz.configuration_error` on every occurrence, D3).
 * **Permanent** → `BillzRejected` (incl. `BillzCheckByHand`) → the handler raises `outbox.PermanentFailure` → the
   message is **dead at the first attempt**, `last_error` = "Billz refused the sale of order N: <reason> (Billz error
   <code>) [HTTP 400]", audited `outbox.dead` (admin audit log), ERROR lines `billz.sale_rejected` and
   `billz.sale_dead … billz_order_id=<the draft, if any>`; the purchase stays unpushed and staff record (or complete)
-  the sale in Billz by hand.
+  the sale in Billz by hand, then run `manage.py billz_mark_recorded` (runbook below).
 
 | Code / status | Meaning (docs) | Class |
 |---|---|---|
@@ -269,11 +301,42 @@ Business codes come from `data.error_code` (the async envelope and the sale meth
 | Redis (shared cache) down | — | retryable, nothing sent |
 | bill ≠ expected, payment outcome still unknown after 10 min | our own stop (`BillzCheckByHand`) | permanent, staff check |
 
-**Replaying dead sales** (D3): after fixing the setting, `uv run python manage.py requeue_outbox --topic
-billz.push_sale --dead [--since 2026-10-26T09:00:00+05:00] [--dry-run]` lists the dead messages (dedupe key, attempts,
-reason), puts them back to `pending` with a fresh attempt budget and audits each (`outbox.requeued`). Run it with
-`--dry-run` first and check that none of the listed orders was entered in Billz by hand meanwhile (a replay would
-record it a second time); a sale whose draft exists resumes on that draft.
+### Dead-letter runbook (`billz.push_sale`)
+
+A dead sale raises ERROR `billz.sale_dead order_id=… billz_order_id=<draft or -> reason=…` (the `outbox.dead` audit
+row carries the reason). Staff then do **one** of:
+
+1. **Enter (or complete) the sale in Billz by hand** — the reason is a bill that differs from what the customer
+   paid, a payment whose outcome stayed unknown ("not paying again"), a refused product, a long holiday ("shift
+   closed") … Complete the draft named in the log (or delete it and enter a new sale), then record it:
+
+   ```
+   uv run python manage.py billz_mark_recorded --order <order id> --actor <your staff email> --dry-run
+   uv run python manage.py billz_mark_recorded --order <order id> --actor <your staff email> [--billz-sale-id <uuid>]
+   ```
+
+   It sets the purchase's pushed marker through the push's own link path (`billz_pushed_at`, the draft's id by
+   default — `--billz-sale-id` only names that same draft; another id is refused), writes `billz_sale_recorded`
+   once and the audit row `billz.sale_recorded_by_hand` (actor = the staff member, the purchase before/after). It
+   refuses an unknown, cancelled or unpaid order, one already recorded, a push running right now
+   (`in_flight`) and an unknown or inactive staff email. From then on the push and `requeue_outbox` skip the order,
+   and its units stop counting against availability after the next Billz read. **Skipping this step subtracts the
+   unit twice for ever** (Billz's stock already counts the hand-entered sale).
+2. **Replay it** once the cause is fixed (a configuration error, D3):
+   `uv run python manage.py requeue_outbox --topic billz.push_sale --dead [--since 2026-10-26T09:00:00+05:00]
+   [--order ID] [--dry-run]`. It prints a WARNING ("confirm the sale was not entered by hand; use
+   billz_mark_recorded for those"), lists every dead message with its order and Billz draft (`[order 10042, Billz
+   draft 3fa8…]`, plus the payment attempt when one was stamped), **skips** a purchase already recorded in Billz
+   (by hand or by an earlier push), puts the others back to `pending` with a fresh attempt budget and audits each
+   (`outbox.requeued`). Run it with `--dry-run` first; a sale whose draft exists resumes on that draft.
+3. **A lost payment answer** (dead "the payment … was sent at … and Billz still shows the sale open; not paying
+   again"): open the draft in Billz. If Billz **holds the payment**, complete the sale there if needed and use (1).
+   If staff **confirmed Billz never took it** (still an unpaid draft), replay it with
+   `requeue_outbox --topic billz.push_sale --dead --order <id> --forget-payment-attempt --actor <staff email>`:
+   it clears `billz_payment_attempted_at` under the Order lock (audited `billz.payment_attempt_forgotten`, refused
+   without `--order`/`--actor`, for a purchase already recorded or without an attempt) and requeues the message,
+   so the next attempt pays the draft once. Without the flag such a replay dies again at once (the stamp guards
+   against a second payment).
 
 ## 8. Explicit stubs (product-owner decision 2026-10-26)
 
@@ -314,8 +377,9 @@ that the shop id never matches), and the production settings validate exactly th
 | `BILLZ_SHIFT_RETRY_MAX_HOURS` | no (`36`; 1..168) | how long a closed shift is waited for (D2) | no |
 
 `is_configured()` (admin `products/stats` `billz.connected`) is true for live only when the key and the three ids
-are set. Constants (not settings): push deadline 240 s, payment quiet period 10 min, sale lock 10 min, circuit
-breaker 5 failures / 90 s, renewal bound 40 s within a 90 s lock, interactive lookup budget 25 s.
+are set. Constants (not settings): push deadline 240 s, payment quiet period 10 min, sale lock 10 min (a busy
+lock defers 1 min), circuit breaker 5 failures / 90 s, renewal bound 40 s within a 90 s lock, interactive lookup
+budget 25 s for the whole lookup.
 
 ## 11. Verifying against a real Billz account
 
@@ -367,7 +431,7 @@ Decided provisionally by the lead (2026-10-26, `docs/decisions/open-questions.md
 3. **Billz refunds**: no API — every online refund needs a manual refund in Billz (ERROR `billz.refund_by_hand`);
    an admin attention item is proposed.
 4. **Night orders**: with D2 a sale paid at night waits up to 36 h for the shift; orders paid on a long holiday are
-   dead-lettered "shift closed" and entered by hand (or replayed with `requeue_outbox`).
+   dead-lettered "shift closed" and entered by hand (then `billz_mark_recorded`) or replayed with `requeue_outbox`.
 
 ## 13. Tests and fixtures
 
@@ -383,8 +447,10 @@ token lifetimes, the interactive profile, circuit breaker, search paging, listin
 `integrations/tests/test_billz_settings.py`, `catalog/tests/test_billz_live_sync.py` (hide-not-delete, partial
 failure, plausibility, overlapping pages, products created during a run, volume, job codes, beat, 503 answers),
 `commerce/tests/test_billz_push.py` (dispatcher end to end, dead letters, deferrals, cancel races, requeue, §6.14),
-`commerce/tests/test_billz_stock.py` (available stock while a sale is unpushed), `core/tests/test_outbox_retry_later.py`
-and `core/tests/test_requeue_outbox.py`. Each finding of the two reviews has a regression test that names it.
+`commerce/tests/test_billz_stock.py` (available stock while a sale is unpushed, `billz_mark_recorded`, settlement,
+the `commerce.0007` data step, query counts of catalog/cart/checkout), `core/tests/test_outbox_retry_later.py` and
+`core/tests/test_requeue_outbox.py`. Each finding of the reviews and of the verification pass (NEW-1 … NEW-9) has a
+regression test that names it.
 
 Where the docs disagree, the stricter reading is implemented: `GET /v1/client` `phone_number` is "exact" in
 `openapi.yaml` but "substring" in the guide, so results are filtered on an exact digits match.

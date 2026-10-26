@@ -19,14 +19,16 @@ product, for the row and for the cached product UUID alike.
   :meth:`LiveBillz.sync_succeeded`, i.e. after the catalog applied the whole run — and not even then when the
   run saw fewer distinct products than Billz counted (pages shifted under it), so the next delta re-reads.
 * ``full`` is the reconciliation listing: every page must arrive, the count must not change while paging
-  (pages are offsets), the pages must not overlap (the **distinct** Billz product ids must equal the count),
+  (pages are offsets), the pages must not overlap (the **distinct** Billz product ids — the barcode of a
+  product without one — must equal the count),
   at least one listed product must carry an entry for ``BILLZ_SHOP_ID`` (a wrong shop id would zero every
   stock), and the count must be plausible (> 0 and ≥ ``BILLZ_FULL_SYNC_MIN_RATIO`` × the previous full
   count); otherwise :class:`BillzListingIncomplete` is raised before a single row is yielded, so nothing is
   applied and nothing hidden.
 
 **Lookup** (``get_product``, admin create / ``billz_id`` change): the interactive client profile (bounded to
-seconds, :data:`.client.INTERACTIVE`), ``search`` paged until the exact barcode is found.
+seconds, :data:`.client.INTERACTIVE`), ``search`` paged until the exact barcode is found — every page within
+one budget of :data:`LOOKUP_BUDGET_SECONDS` in total.
 
 **Sale push** (``push_sale``; llms-full "Интернет-заказ из внешней системы"), under a per-sale lock owned by
 this worker (:class:`SaleLock`) and a push-wide deadline (:data:`PUSH_DEADLINE_SECONDS`, below the outbox
@@ -91,6 +93,7 @@ from .ports import (
     BillzPaymentPending,
     BillzProduct,
     BillzRejected,
+    BillzSaleBusy,
     BillzShiftClosed,
     BillzUnavailable,
     ImportMode,
@@ -122,10 +125,14 @@ SALE_LOCK_TTL = 600
 # One push ends within this (every wait and timeout honours it): below the outbox lease of core.tasks (5 min),
 # so a redelivery never meets a push still running, and well below SALE_LOCK_TTL, so the lock cannot expire.
 PUSH_DEADLINE_SECONDS = 240.0
+# Another worker holds the sale lock: look again this much later (no attempt spent; the lock expires anyway).
+SALE_BUSY_RETRY = timedelta(minutes=1)
 # A payment whose answer was lost is looked at again only after this quiet period (review B2).
 PAYMENT_QUIET_PERIOD = timedelta(minutes=10)
 SEARCH_LIMIT = 50
 SEARCH_MAX_PAGES = 10
+# The admin lookup (every search page together) ends within the interactive profile's budget.
+LOOKUP_BUDGET_SECONDS = INTERACTIVE.call_budget or 25.0
 STOCK_LIMIT = 2_000_000_000
 NAME_MAX = 255
 VOLUME_MAX = 40
@@ -423,7 +430,10 @@ class LiveBillz:
         self._require_configured()
         if not BILLZ_ID.fullmatch(billz_id):
             return None
-        product = self._find_by_barcode(billz_id, self.interactive)
+        # one budget for the whole lookup (up to SEARCH_MAX_PAGES calls), not one per call (review NEW-3): it
+        # runs inside the idempotency transaction of POST products/
+        with self.interactive.deadline(LOOKUP_BUDGET_SECONDS):
+            product = self._find_by_barcode(billz_id, self.interactive)
         return None if product is None else self._row(product, billz_id, timeutils.now())
 
     def iter_products(self, mode: ImportMode) -> Iterator[BillzProduct]:
@@ -438,7 +448,7 @@ class LiveBillz:
             params["last_updated_date"] = (since - DELTA_OVERLAP).astimezone(UTC).strftime(WATERMARK_FORMAT)
         rows: dict[str, BillzProduct] = {}
         product_ids: dict[str, str] = {}  # cache key → the UUID of the product each row was built from
-        distinct: set[str] = set()  # Billz product ids seen (a repeat = overlapping pages)
+        distinct: dict[str, int] = {}  # product identity → the page it was first seen on (a repeat = overlap)
         repeats = 0
         in_our_shop = 0
         expected: int | None = None
@@ -457,11 +467,11 @@ class LiveBillz:
             expected = count
             received += len(products)
             for index, product in enumerate(products):
-                identity = _str(product.get("id")).lower() or f"#{page}:{index}"
+                identity = self._identity(product, page, index, distinct)
                 if identity in distinct:
                     repeats += 1
                     continue
-                distinct.add(identity)
+                distinct[identity] = page
                 if in_shop(product, self.config.shop_id):
                     in_our_shop += 1
                 barcode = barcode_of(product)
@@ -512,6 +522,19 @@ class LiveBillz:
             )
         yield from rows.values()
 
+    @staticmethod
+    def _identity(product: Mapping[str, Any], page: int, index: int, seen: Mapping[str, int]) -> str:
+        """What tells a repeated product from another one: Billz's product id; without one, its barcode — a
+        barcode met again **on another page** is a shifted page repeating it (review NEW-6), while one listed
+        twice on the same page is a duplicate barcode (kept once, the first); else its position."""
+        product_id = _str(product.get("id")).lower()
+        if product_id:
+            return product_id
+        barcode = barcode_of(product)
+        if barcode is not None and seen.get(f"barcode:{barcode}") != page:
+            return f"barcode:{barcode}"  # new, or first seen on another page (then a repeat)
+        return f"#{page}:{index}"
+
     def _watermark(self, cursor: Mapping[str, Any]) -> datetime | None:
         value = cursor.get("delta_since")
         if not isinstance(value, str):
@@ -547,8 +570,8 @@ class LiveBillz:
         self._require_configured()
         lock = SaleLock(self.cache, SALE_LOCK_KEY.format(order_uuid=request.order_uuid), SALE_LOCK_TTL)
         if not lock.acquire():
-            raise BillzUnavailable(
-                f"another worker is pushing the sale of order {request.order_id}", not_applied=True
+            raise BillzSaleBusy(
+                f"another worker is pushing the sale of order {request.order_id}", retry_after=SALE_BUSY_RETRY
             )
         try:
             with self.client.deadline(PUSH_DEADLINE_SECONDS):

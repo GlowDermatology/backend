@@ -36,10 +36,12 @@ retries once, reads for at most 10 s, fails fast while a 429 pause is in force a
 total. :meth:`BillzClient.deadline` sets an absolute deadline (the sale push: 240 s, below the outbox lease)
 that every wait, sleep and timeout honours.
 
-**Circuit breaker** (review B6): :data:`CIRCUIT_FAILURES` transport errors, timeouts or 5xx answers in a row
-(across every worker) open the circuit for :data:`CIRCUIT_OPEN_SECONDS`: calls then fail fast with
+**Circuit breaker** (review B6): :data:`CIRCUIT_FAILURES` transport errors, timeouts or 5xx/408 answers in a
+row (across every worker) open the circuit for :data:`CIRCUIT_OPEN_SECONDS`: calls then fail fast with
 :class:`BillzUnavailable` instead of holding a worker for minutes (ERROR ``billz.circuit_open``). Any other
-answer closes it again.
+answer resets the count of failures in a row; an open circuit always runs its full time (nothing is sent
+while it is open, so nothing can close it early). The bookkeeping is best effort: a cache error there is
+logged, never the outcome of the request it follows.
 
 **Retries**: transport errors and 5xx are retried (bounded, exponential backoff with jitter) only for calls
 that are safe to repeat — reads and absolute upserts — or when the request certainly never reached Billz
@@ -76,6 +78,7 @@ import httpx
 from django.conf import settings
 from django.core.cache import cache as default_cache
 from django.core.cache.backends.base import BaseCache
+from redis.exceptions import RedisError
 
 from glowderma.core.pii import clean_text, scrub_free_text
 
@@ -227,11 +230,19 @@ class BillzAuthError(BillzMisconfigured):
     code = "billz_auth_failed"
 
 
+# What a cache backend raises when Redis is unreachable or slow (redis-py's errors; a socket error of
+# another backend). Nothing else is caught: Celery's SoftTimeLimitExceeded, a bug or an interrupt must
+# propagate as what it is — never turn into "nothing was sent" (review NEW-1).
+CACHE_BACKEND_ERRORS: tuple[type[BaseException], ...] = (RedisError, OSError, ConnectionError, TimeoutError)
+
+
 class SafeCache:
-    """The cache as the adapter uses it: any backend failure (Redis down) is :class:`BillzUnavailable`.
+    """The cache as the adapter uses it: a backend failure (Redis down) is :class:`BillzUnavailable`.
 
     Only the operations the adapter needs; ``timeout`` is always passed explicitly (Django reads ``None`` as
-    "never expires").
+    "never expires"). Only :data:`CACHE_BACKEND_ERRORS` are mapped; the error says ``not_applied`` (no cache
+    operation sends anything to Billz) — :meth:`BillzClient._exchange` clears that flag when the failing
+    operation ran after a request that Billz may have applied.
     """
 
     def __init__(self, cache: BaseCache | SafeCache) -> None:
@@ -240,7 +251,7 @@ class SafeCache:
     def _run(self, operation: str, call: Callable[[], Any]) -> Any:
         try:
             return call()
-        except Exception as exc:
+        except CACHE_BACKEND_ERRORS as exc:
             logger.error("billz.cache_unavailable operation=%s error=%s", operation, type(exc).__name__)
             raise BillzUnavailable("Billz: shared cache unavailable", not_applied=True) from exc
 
@@ -531,22 +542,32 @@ class BillzClient:
             )
 
     def _record_failure(self, label: str) -> None:
-        self.cache.add(CIRCUIT_FAILURES_KEY, 0, timeout=CIRCUIT_OPEN_SECONDS * 2)
-        failures = self.cache.incr(CIRCUIT_FAILURES_KEY)
-        if failures >= CIRCUIT_FAILURES:
-            self.cache.set(
-                CIRCUIT_OPEN_KEY, self.clock() + CIRCUIT_OPEN_SECONDS, timeout=CIRCUIT_OPEN_SECONDS + 5
-            )
-            self.cache.delete(CIRCUIT_FAILURES_KEY)
-            logger.error(
-                "billz.circuit_open after %d failures in a row (last: %s); calls fail fast for %d s",
-                failures,
-                label,
-                CIRCUIT_OPEN_SECONDS,
-            )
+        """Count a failure towards the circuit breaker. Best effort: it runs after a request went out, so a
+        cache error here is logged and swallowed — it must never decide the request's outcome (NEW-1)."""
+        try:
+            self.cache.add(CIRCUIT_FAILURES_KEY, 0, timeout=CIRCUIT_OPEN_SECONDS * 2)
+            failures = self.cache.incr(CIRCUIT_FAILURES_KEY)
+            if failures >= CIRCUIT_FAILURES:
+                self.cache.set(
+                    CIRCUIT_OPEN_KEY, self.clock() + CIRCUIT_OPEN_SECONDS, timeout=CIRCUIT_OPEN_SECONDS + 5
+                )
+                self.cache.delete(CIRCUIT_FAILURES_KEY)
+                logger.error(
+                    "billz.circuit_open after %d failures in a row (last: %s); calls fail fast for %d s",
+                    failures,
+                    label,
+                    CIRCUIT_OPEN_SECONDS,
+                )
+        except BillzUnavailable:
+            logger.warning("billz.circuit_bookkeeping_skipped %s: the shared cache is unavailable", label)
 
-    def _record_answer(self) -> None:
-        self.cache.delete(CIRCUIT_FAILURES_KEY)
+    def _record_answer(self, label: str) -> None:
+        """An answer resets the failure count (an open circuit still runs its time). Best effort, like
+        :meth:`_record_failure`."""
+        try:
+            self.cache.delete(CIRCUIT_FAILURES_KEY)
+        except BillzUnavailable:
+            logger.warning("billz.circuit_bookkeeping_skipped %s: the shared cache is unavailable", label)
 
     def _send(
         self,
@@ -564,9 +585,42 @@ class BillzClient:
         wait = self.profile.limiter_wait if remaining is None else min(self.profile.limiter_wait, remaining)
         self.limiter.acquire(max_wait=wait, wait_on_pause=self.profile.wait_on_pause)
         with httpx.Client(timeout=self._timeout(), transport=self.transport) as http:
-            return http.request(
+            request = http.build_request(
                 method, f"{self.config.base_url}{path}", params=params, json=json, headers=dict(headers)
             )
+            response = http.send(request, stream=True)
+            try:
+                return self._read_within_deadline(request, response)
+            finally:
+                response.close()
+
+    def _read_within_deadline(self, request: httpx.Request, response: httpx.Response) -> httpx.Response:
+        """Read the body, giving up once the deadline passed while it still drips in (review NEW-9).
+
+        The read timeout bounds each wait for the next chunk only; an answer sent a few bytes at a time could
+        otherwise hold a push far past its deadline (and the outbox lease). Past the deadline the read is
+        abandoned as a :class:`httpx.ReadTimeout` — an unknown outcome, like any other read timeout.
+        """
+        body = bytearray()
+        for chunk in response.iter_bytes():  # decoded (a corrupt gzip body raises httpx.DecodingError)
+            body.extend(chunk)
+            remaining = self._remaining()
+            if remaining is not None and remaining < 0:
+                raise httpx.ReadTimeout(
+                    "the answer was still arriving at the Billz deadline", request=request
+                )
+        headers = [
+            (name, value)
+            for name, value in response.headers.multi_items()
+            if name.lower() not in ("content-encoding", "content-length", "transfer-encoding")
+        ]
+        return httpx.Response(
+            response.status_code,
+            headers=headers,
+            content=bytes(body),
+            request=request,
+            extensions=response.extensions,
+        )
 
     def _exchange(
         self,
@@ -580,45 +634,80 @@ class BillzClient:
         idempotent: bool,
         max_attempts: int | None = None,
     ) -> httpx.Response:
-        """Send with the retries of the module doc; returns any response that is not 429/5xx-retried."""
+        """Send with the retries of the module doc; returns any response that is not 429/5xx-retried.
+
+        ``not_applied`` (review NEW-1): once a request of this exchange may have reached Billz (a transport
+        error other than a connect error, an unreadable answer, a 5xx/408 answer), no error raised by the
+        exchange afterwards — a retry that cannot start, a cache failure, the deadline — says "not applied":
+        the caller must treat the outcome as unknown (a payment keeps its attempt stamp).
+        """
         attempts_allowed = max_attempts if max_attempts is not None else self.profile.max_attempts
         attempt = 0
         throttled = 0
-        while True:
-            try:
-                response = self._send(method, path, label, params=params, json=json, headers=headers or {})
-            except httpx.TransportError as exc:
-                never_sent = isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout))
-                self._record_failure(label)
-                attempt += 1
-                if (idempotent or never_sent) and attempt < attempts_allowed:
-                    self._nap(self._backoff(attempt), label)
-                    continue
-                raise BillzUnavailable(f"{label}: {type(exc).__name__}", not_applied=never_sent) from exc
-            except httpx.HTTPError as exc:
-                # the answer arrived but could not be read (a corrupt gzip body …): unknown outcome
-                self._record_failure(label)
-                raise BillzUnavailable(f"{label}: unreadable answer ({type(exc).__name__})") from exc
-            if response.status_code == 429:
-                self._record_answer()
-                throttled += 1
-                if throttled > self.profile.max_throttled:
-                    raise BillzUnavailable(
-                        f"{label}: rate limited by Billz (HTTP 429)", http_status=429, not_applied=True
+        maybe_applied = False
+        try:
+            while True:
+                try:
+                    response = self._send(
+                        method, path, label, params=params, json=json, headers=headers or {}
                     )
-                delay = retry_after_seconds(response, now=self.clock())
-                self.limiter.pause(delay if delay is not None else self._backoff(throttled))
-                continue
-            if response.status_code >= 500 or response.status_code == 408:
-                self._record_failure(label)
-            else:
-                self._record_answer()
-            if response.status_code >= 500 and idempotent:
-                attempt += 1
-                if attempt < attempts_allowed:
-                    self._nap(self._backoff(attempt), label)
-                    continue
-            return response
+                except httpx.TransportError as exc:
+                    never_sent = isinstance(
+                        exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
+                    )
+                    maybe_applied = maybe_applied or not never_sent
+                    self._record_failure(label)
+                    attempt += 1
+                    if (idempotent or never_sent) and attempt < attempts_allowed:
+                        self._nap(self._backoff(attempt), label)
+                        continue
+                    raise BillzUnavailable(f"{label}: {type(exc).__name__}", not_applied=never_sent) from exc
+                except httpx.HTTPError as exc:
+                    # the answer arrived but could not be read (a corrupt gzip body …): unknown outcome
+                    maybe_applied = True
+                    self._record_failure(label)
+                    raise BillzUnavailable(f"{label}: unreadable answer ({type(exc).__name__})") from exc
+                # anything but a 429 may have been applied (a 5xx retried below, a 4xx returned)
+                maybe_applied = maybe_applied or response.status_code != 429
+                outcome = self._answered(response, label, attempt, attempts_allowed, throttled, idempotent)
+                if outcome is None:
+                    return response
+                attempt, throttled = outcome
+        except BillzError as exc:
+            if maybe_applied:
+                exc.not_applied = False
+            raise
+
+    def _answered(
+        self,
+        response: httpx.Response,
+        label: str,
+        attempt: int,
+        attempts_allowed: int,
+        throttled: int,
+        idempotent: bool,
+    ) -> tuple[int, int] | None:
+        """Book an answer; ``None`` → return it, else ``(attempt, throttled)`` of the retry to send."""
+        if response.status_code == 429:
+            self._record_answer(label)
+            throttled += 1
+            if throttled > self.profile.max_throttled:
+                raise BillzUnavailable(
+                    f"{label}: rate limited by Billz (HTTP 429)", http_status=429, not_applied=True
+                )
+            delay = retry_after_seconds(response, now=self.clock())
+            self.limiter.pause(delay if delay is not None else self._backoff(throttled))
+            return attempt, throttled
+        if response.status_code >= 500 or response.status_code == 408:
+            self._record_failure(label)
+        else:
+            self._record_answer(label)
+        if response.status_code >= 500 and idempotent:
+            attempt += 1
+            if attempt < attempts_allowed:
+                self._nap(self._backoff(attempt), label)
+                return attempt, throttled
+        return None
 
     # --- tokens ---------------------------------------------------------------------------------------------
 

@@ -6,15 +6,18 @@ asserts the fixed behaviour. Recorded answers only (``billz_support.BillzServer`
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import json
 import threading
 import time
 import uuid
+from collections.abc import Iterator
 from typing import Any
 
 import httpx
 import pytest
+from celery.exceptions import SoftTimeLimitExceeded  # type: ignore[import-untyped]
 from django.core.cache import cache
 from redis.exceptions import ConnectionError as RedisConnectionError
 
@@ -23,7 +26,12 @@ from glowderma.integrations import selectors
 from glowderma.integrations.billz import client as billz_client
 from glowderma.integrations.billz import live as billz_live
 from glowderma.integrations.billz.client import INTERACTIVE, BillzClient, SafeCache
-from glowderma.integrations.billz.ports import BillzListingIncomplete, BillzUnavailable, SaleRequest
+from glowderma.integrations.billz.ports import (
+    BillzListingIncomplete,
+    BillzUnavailable,
+    SaleLine,
+    SaleRequest,
+)
 from glowderma.integrations.tests.billz_support import (
     SERUM_ID,
     BillzServer,
@@ -144,8 +152,16 @@ def test_a_slow_renewal_never_lets_another_worker_present_the_same_refresh_token
         except BaseException as exc:  # pragma: no cover - surfaced by the assertion below
             errors.append(exc)
 
+    @contextlib.contextmanager
+    def no_deadline(self: BillzClient, seconds: float) -> Iterator[None]:
+        yield
+
     original_ttl = billz_client.LOCK_TTL_SECONDS
     billz_client.LOCK_TTL_SECONDS = 1
+    # The renewal's own deadline (half the lock's TTL) makes this impossible; the test switches it off to
+    # check the defence behind it: a renewal that outlives its lock never stores its pair.
+    patch = pytest.MonkeyPatch()
+    patch.setattr(BillzClient, "deadline", no_deadline)
     try:
         first = threading.Thread(target=worker, args=("a",))
         first.start()
@@ -157,6 +173,7 @@ def test_a_slow_renewal_never_lets_another_worker_present_the_same_refresh_token
         second.join(10)
     finally:
         billz_client.LOCK_TTL_SECONDS = original_ttl
+        patch.undo()
     assert not errors
     assert presented == ["refresh-from-login"]  # never twice
     assert server.count("POST /v1/auth/login") == 1  # the second worker logged in
@@ -236,7 +253,7 @@ def test_the_admin_lookup_uses_the_interactive_profile() -> None:
 # --- B6: circuit breaker ------------------------------------------------------------------------------------
 
 
-def test_consecutive_failures_open_the_circuit_and_an_answer_closes_it(
+def test_consecutive_failures_open_the_circuit_for_its_full_time_then_an_answer_resets_it(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Review B6: a hung Billz no longer holds every worker of the shared pool for minutes."""
@@ -259,8 +276,11 @@ def test_consecutive_failures_open_the_circuit_and_an_answer_closes_it(
         products_call(adapter)
     assert fast.value.not_applied and len(server.requests) == sent  # nothing sent while open
     server.overrides.pop("GET /v2/products")
-    clock.now += billz_client.CIRCUIT_OPEN_SECONDS + 1
-    products_call(adapter)  # half-open: one answer closes it
+    clock.now += billz_client.CIRCUIT_OPEN_SECONDS - 5
+    with pytest.raises(BillzUnavailable, match="calls are paused"):
+        products_call(adapter)  # NEW-7: Billz answering again does not shorten an open circuit
+    clock.now += 6
+    products_call(adapter)  # the circuit ran its 90 s; the answer resets the count of failures
     assert cache.get(billz_client.CIRCUIT_FAILURES_KEY) is None
 
 
@@ -332,7 +352,214 @@ def test_a_full_listing_with_overlapping_pages_is_refused() -> None:
         list(live(server).iter_products("full"))
 
 
+@pytest.mark.django_db
+def test_a_full_listing_repeating_a_product_without_an_id_on_another_page_is_refused() -> None:
+    """NEW-6 (probe test_m4_variation_products_without_id_overlap_by_barcode): without Billz ids the overlap
+    check fell back to positions, so a shifted page repeating B (and never listing C) was accepted."""
+    server = BillzServer()
+    a, b, b_again, d = product(*A), product(*B), product(*B), product(*D)
+    for item in (a, b, b_again, d):
+        item["id"] = ""
+    server.product_pages = [{"count": 4, "products": [a, b]}, {"count": 4, "products": [b_again, d]}]
+    with pytest.raises(BillzListingIncomplete, match="1 repeated across pages"):
+        list(live(server).iter_products("full"))
+    adapter = live(server)
+    assert {row.billz_id for row in adapter.iter_products("delta")} == {A[1], B[1], D[1]}
+    adapter.sync_succeeded("delta")
+    assert selectors.provider_data("billz") == {}  # the delta keeps its watermark
+
+
+@pytest.mark.django_db
+def test_a_duplicate_barcode_on_one_page_without_ids_is_not_an_overlap() -> None:
+    """NEW-6: two id-less products sharing a barcode on the same page are a duplicate (first kept, S7), not a
+    shifted page: the full listing is accepted."""
+    server = BillzServer()
+    first, second, d = product(*A, stock=7), product(*A, stock=0), product(*D)
+    for item in (first, second, d):
+        item["id"] = ""
+    server.product_pages = [{"count": 3, "products": [first, second, d]}]
+    rows = list(live(server).iter_products("full"))
+    assert [(row.billz_id, row.stock) for row in rows] == [(A[1], 7), (D[1], 1)]
+
+
 def test_the_live_volume_is_not_asserted_without_a_volume_field() -> None:
     """Review A S6 (the adapter side): no ``BILLZ_VOLUME_FIELD`` → ``volume=None`` (not "")."""
     row = live(BillzServer(), volume_field="")._row(product(*A), A[1], timeutils.now())
     assert row.volume is None
+
+
+# --- NEW-1: a cache failure after the payment went out never says "not applied" -----------------------------
+
+
+def _request() -> SaleRequest:
+    return SaleRequest(
+        order_id=1, order_uuid=uuid.uuid4(), lines=[SaleLine("4607012301", 1, 185_000)], customer_phone=""
+    )
+
+
+class FlakyCache:
+    """The Django cache, whose operations named in ``fail_ops`` raise like a Redis blip once ``armed``."""
+
+    def __init__(self) -> None:
+        self.armed = False
+        self.fail_ops: set[str] = set()
+
+    def __getattr__(self, name: str) -> Any:
+        real = getattr(cache, name)
+
+        def call(*args: Any, **kwargs: Any) -> Any:
+            if self.armed and name in self.fail_ops:
+                raise RedisConnectionError("Redis blip")
+            return real(*args, **kwargs)
+
+        return call
+
+
+def test_a_cache_blip_after_a_paid_answer_keeps_the_payment_attempt() -> None:
+    """NEW-1 (probe test_defect_cache_blip_after_successful_payment_forgets_the_attempt): Billz paid; the
+    circuit bookkeeping right after the answer meets a Redis blip. The push succeeds (the bookkeeping is
+    best effort) and the attempt stamp is never forgotten."""
+    server = BillzServer()
+    flaky = FlakyCache()
+    original = server._default
+
+    def payment(request: httpx.Request) -> httpx.Response:
+        response = original("POST /v2/order-payment/{order_id}", request)
+        flaky.armed, flaky.fail_ops = True, {"delete", "add", "incr", "set"}
+        return response
+
+    server.overrides["POST /v2/order-payment/{order_id}"] = payment
+    journal = Journal()
+    receipt = live(server, cache=flaky).push_sale(_request(), journal)
+    assert receipt.billz_sale_id
+    assert server.sales[receipt.billz_sale_id].payments
+    assert journal.forgotten == 0 and journal.payment_attempted_at is not None
+
+
+def test_a_cache_blip_after_a_payment_timeout_keeps_the_payment_attempt() -> None:
+    """NEW-1 (probe test_defect_cache_blip_after_payment_timeout_forgets_the_attempt): the payment times out
+    (outcome unknown) and counting the failure meets a Redis blip: still unknown, the stamp stays."""
+    server = BillzServer()
+    flaky = FlakyCache()
+
+    def payment(request: httpx.Request) -> httpx.Response:
+        flaky.armed, flaky.fail_ops = True, {"add", "incr"}
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    server.overrides["POST /v2/order-payment/{order_id}"] = payment
+    journal = Journal()
+    with pytest.raises(BillzUnavailable) as caught:
+        live(server, cache=flaky).push_sale(_request(), journal)
+    assert not caught.value.not_applied
+    assert journal.forgotten == 0 and journal.payment_attempted_at is not None
+
+
+def test_no_error_after_an_answer_that_may_have_applied_says_not_applied() -> None:
+    """NEW-1: a 5xx of a repeatable call is retried; when the retry cannot start (the circuit or the cache
+    stops it), the error must not claim that nothing reached Billz."""
+    server = BillzServer()
+    flaky = FlakyCache()
+    adapter = live(server, cache=flaky)
+    products_call(adapter)  # log in
+
+    def failing(request: httpx.Request) -> httpx.Response:
+        flaky.armed, flaky.fail_ops = True, {"get"}  # the retry's circuit check cannot read the cache
+        return httpx.Response(502, json={})
+
+    server.overrides["GET /v2/products"] = failing
+    with pytest.raises(BillzUnavailable, match="shared cache unavailable") as caught:
+        products_call(adapter)
+    assert not caught.value.not_applied
+
+
+def test_safe_cache_lets_a_celery_soft_time_limit_through() -> None:
+    """NEW-1 (probe test_defect_safecache_turns_celery_soft_time_limit_into_not_applied): only backend
+    errors are "cache unavailable"; Celery's soft time limit (and any bug) propagates as itself."""
+
+    class Slow:
+        def __getattr__(self, name: str) -> Any:
+            def call(*args: Any, **kwargs: Any) -> Any:
+                raise SoftTimeLimitExceeded()
+
+            return call
+
+    with pytest.raises(SoftTimeLimitExceeded):
+        SafeCache(Slow()).delete(billz_client.CIRCUIT_FAILURES_KEY)  # type: ignore[arg-type]
+    for error in (RedisConnectionError("down"), ConnectionRefusedError(), TimeoutError()):
+
+        class Down:
+            def __getattr__(self, name: str, error: BaseException = error) -> Any:
+                def call(*args: Any, **kwargs: Any) -> Any:
+                    raise error
+
+                return call
+
+        with pytest.raises(BillzUnavailable, match="shared cache unavailable"):
+            SafeCache(Down()).get("key")  # type: ignore[arg-type]
+
+
+# --- NEW-3: one budget for the whole admin lookup -----------------------------------------------------------
+
+
+def test_the_admin_lookup_ends_within_its_budget_over_every_search_page() -> None:
+    """NEW-3 (probe test_defect_admin_lookup_total_time_exceeds_its_25_s_bound): up to ten search pages, each
+    just under the 10 s read cap, used to take 90 s inside the idempotency transaction; the whole lookup now
+    ends within the interactive budget (each read is cut to what is left, like a real socket timeout)."""
+    clock = Clock()
+    server = BillzServer(clock)
+    others = [
+        product(f"aaaaaaaa-0000-4000-8000-{index:012d}", f"9{index:03d}4607012301") for index in range(50)
+    ]
+
+    def search(request: httpx.Request) -> httpx.Response:
+        read = float(request.extensions["timeout"]["read"])
+        if read < 9.0:
+            clock.now += read
+            raise httpx.ReadTimeout("timed out", request=request)
+        clock.now += 9.0  # just under the interactive read cap of 10 s
+        return httpx.Response(200, json={"count": 500, "products": others})
+
+    server.overrides["GET /v2/products"] = search
+    adapter = live(server, clock)
+    start = clock()
+    with pytest.raises(BillzUnavailable):
+        adapter.get_product("4607012301")
+    assert clock() - start <= billz_live.LOOKUP_BUDGET_SECONDS + 0.01
+    assert billz_live.LOOKUP_BUDGET_SECONDS == INTERACTIVE.call_budget == 25.0
+
+
+# --- NEW-9: an answer that drips in is cut at the deadline --------------------------------------------------
+
+
+class Drip(httpx.SyncByteStream):
+    """A body sent a few bytes at a time, each chunk ``every`` seconds of the fake clock apart."""
+
+    def __init__(self, clock: Clock, body: bytes, every: float) -> None:
+        self.clock, self.body, self.every = clock, body, every
+
+    def __iter__(self) -> Iterator[bytes]:
+        for start in range(0, len(self.body), 4):
+            self.clock.now += self.every
+            yield self.body[start : start + 4]
+
+
+def test_an_answer_dripping_past_the_push_deadline_is_abandoned() -> None:
+    """NEW-9: the read timeout bounds each chunk only; a body dripping in under it is abandoned once the
+    deadline passed — an unknown outcome (a payment keeps its attempt), never a push that outlives the
+    outbox lease."""
+    clock = Clock()
+    server = BillzServer(clock)
+    original = server._default
+
+    def payment(request: httpx.Request) -> httpx.Response:
+        answer = original("POST /v2/order-payment/{order_id}", request)
+        return httpx.Response(200, stream=Drip(clock, answer.content, every=20.0))
+
+    server.overrides["POST /v2/order-payment/{order_id}"] = payment
+    journal = Journal()
+    start = clock()
+    with pytest.raises(BillzUnavailable, match="ReadTimeout") as caught:
+        live(server, clock).push_sale(_request(), journal)
+    assert not caught.value.not_applied
+    assert journal.payment_attempted_at is not None and journal.forgotten == 0
+    assert clock() - start <= billz_live.PUSH_DEADLINE_SECONDS + 20.0  # at most one chunk past it

@@ -22,8 +22,9 @@ outbox. Delivery is at-least-once: each handler is idempotent at the provider bo
   (``BillzRejected``: unknown product, a bill that is not what the customer paid, …) dead-letters the
   message at once with the reason (``outbox.PermanentFailure``); a closed shift is deferred every
   ``BILLZ_SHIFT_RETRY_MINUTES`` for ``BILLZ_SHIFT_RETRY_MAX_HOURS`` and a payment whose answer was lost
-  waits its quiet period (``outbox.RetryLater``: no attempt spent); any other failure raises and is
-  retried; a conflict raises, never a silent success.
+  waits its quiet period and a sale another worker is pushing (its lock held) is looked at a minute later
+  (``outbox.RetryLater``: no attempt spent); any other failure raises and is retried; a conflict raises,
+  never a silent success.
 * ``refund.submit`` — Click: status check by ``provider_txn_id`` before any reversal; ``mark_submitting``
   (a fenced compare-and-set) is committed before the reversal call; ``succeeded`` / ``failed`` / ``unknown``
   (+ events); ``unknown`` is never retried automatically. Click answering that it did **not** process the
@@ -56,10 +57,11 @@ from django.conf import settings
 from django.core.cache import cache
 from django.db import connection, transaction
 
+from glowderma.catalog import topics as catalog_topics
 from glowderma.commerce import selectors, services, topics
 from glowderma.commerce.billz_sales import PurchaseJournal, get_sale_port, sale_request
-from glowderma.commerce.models import Order
-from glowderma.core import enums, integration_modes, outbox, timeutils
+from glowderma.commerce.models import Order, StockReservation
+from glowderma.core import audit, enums, integration_modes, outbox, timeutils
 from glowderma.core.api.exceptions import InvalidTransition
 from glowderma.core.models import OutboxMessage
 from glowderma.delivery import selectors as delivery_selectors
@@ -70,6 +72,7 @@ from glowderma.integrations import services as integration_services
 from glowderma.integrations.billz.ports import (
     BillzPaymentPending,
     BillzRejected,
+    BillzSaleBusy,
     BillzShiftClosed,
     SaleCancelled,
 )
@@ -369,7 +372,9 @@ def push_sale(payload: dict[str, Any]) -> None:
             f"Purchase {purchase_id} was pushed as Billz order {info.billz_order_uuid}, not {order_uuid}"
         )
     if integration_modes.fake_in_production("billz"):
-        # §6.14: a fake records no Billz sale; billz_pushed_at stays null so the sale is entered by hand
+        # §6.14: a fake records no Billz sale; billz_pushed_at stays null so the sale is entered by hand — and
+        # its units are settled now, so they never start counting at the first live stock read (NEW-2)
+        services.settle_order_reservations(order_id)
         logger.warning("billz.sale_not_pushed order_id=%s purchase_id=%s", order_id, purchase_id)
         return
     order = Order.objects.select_related("customer").get(pk=order_id)
@@ -413,6 +418,10 @@ def push_sale(payload: dict[str, Any]) -> None:
         # review B2: a payment whose answer was lost is looked at again after a quiet period, never resent
         logger.warning("billz.sale_deferred order_id=%s reason=payment_pending", order_id)
         raise outbox.RetryLater(exc.retry_after, f"Billz payment of order {order_id} pending: {exc}") from exc
+    except BillzSaleBusy as exc:
+        # NEW-9: another worker is pushing this sale (its lock expires by itself): no attempt spent
+        logger.info("billz.sale_deferred order_id=%s reason=sale_busy", order_id)
+        raise outbox.RetryLater(exc.retry_after, f"Billz sale of order {order_id} busy: {exc}") from exc
     except BillzRejected as exc:
         logger.error("billz.sale_rejected order_id=%s error_code=%s", order_id, exc.error_code)
         raise outbox.PermanentFailure(f"Billz refused the sale of order {order_id}: {exc}") from exc
@@ -439,11 +448,28 @@ def push_sale(payload: dict[str, Any]) -> None:
             services.record_event(
                 locked, _E.BILLZ_SALE_RECORDED, {"billz_order_id": receipt.billz_order_id}, at=now
             )
+    # NEW-2: settle what Billz's stock already reflects for these products (this sale settles after the next
+    # read, at the next catalog.stock_synced)
+    services.settle_billz_reservations(_order_product_ids(order_id))
+
+
+def _order_product_ids(order_id: int) -> list[int]:
+    return list(
+        StockReservation.objects.filter(order_id=order_id).values_list("product_id", flat=True).distinct()
+    )
 
 
 @outbox.register(topics.BILLZ_PUSH_SALE)
 def handle_billz_push_sale(message: OutboxMessage) -> None:
     push_sale(_payload(message))
+
+
+@outbox.register(catalog_topics.STOCK_SYNCED)
+def handle_stock_synced(message: OutboxMessage) -> None:
+    """A Billz import read the stock again: settle the sold units it now reflects (NEW-2; idempotent)."""
+    settled = services.settle_billz_reservations()
+    if settled:
+        logger.info("billz.reservations_settled count=%s", settled)
 
 
 def on_billz_push_dead(message: OutboxMessage) -> None:
@@ -462,6 +488,89 @@ def on_billz_push_dead(message: OutboxMessage) -> None:
         (info.billz_sale_id if info is not None else "") or "-",  # the draft staff complete or delete
         message.last_error,
     )
+
+
+# --- manage.py requeue_outbox of billz.push_sale (review NEW-4) ---------------------------------------------
+
+AUDIT_PAYMENT_ATTEMPT_FORGOTTEN = "billz.payment_attempt_forgotten"
+REQUEUE_WARNING = (
+    "confirm the sale was not entered by hand; use billz_mark_recorded for those "
+    "(a requeue would record it in Billz a second time)"
+)
+
+
+def _push_info(message: OutboxMessage) -> tuple[Any, Any]:
+    payload = _payload(message)
+    purchase_id = payload.get("purchase_id")
+    info = loyalty_selectors.billz_push_info(int(purchase_id)) if isinstance(purchase_id, int) else None
+    return payload.get("order_id"), info
+
+
+def describe_push(message: OutboxMessage) -> str:
+    """The order and the Billz draft staff look up before a replay."""
+    order_id, info = _push_info(message)
+    text = f"order {order_id if order_id is not None else '-'}, Billz draft "
+    text += (info.billz_sale_id if info is not None else "") or "-"
+    if info is not None and info.billz_payment_attempted_at is not None:
+        text += f", payment attempted at {info.billz_payment_attempted_at.isoformat()}"
+    return text
+
+
+def push_already_recorded(message: OutboxMessage) -> str:
+    """A purchase recorded in Billz meanwhile (by hand with billz_mark_recorded, or by another push)."""
+    _, info = _push_info(message)
+    if info is None or info.billz_pushed_at is None:
+        return ""
+    return f"already recorded in Billz at {info.billz_pushed_at.isoformat()} (by hand or by an earlier push)"
+
+
+def forget_payment_attempt(message: OutboxMessage, actor: Any) -> str:
+    """``requeue_outbox --forget-payment-attempt``: staff confirmed in Billz that the payment never arrived;
+    clear the stamp that stops a second payment (under the Order lock, audited with the staff actor)."""
+    order_id, info = _push_info(message)
+    if info is None or not isinstance(order_id, int):
+        raise outbox.RequeueRefused(f"message #{message.pk} names no purchase")
+    with transaction.atomic():
+        services.lock_order(order_id, wait=services.ADMIN_LOCK_WAIT)
+        _, info = _push_info(message)  # re-read under the lock
+        if info is None:
+            raise outbox.RequeueRefused(f"message #{message.pk} names no purchase")
+        if info.billz_pushed_at is not None:
+            raise outbox.RequeueRefused(f"order {order_id} is already recorded in Billz: nothing to forget")
+        if info.billz_payment_attempted_at is None:
+            raise outbox.RequeueRefused(f"order {order_id} has no payment attempt to forget")
+        loyalty_services.clear_billz_payment_attempt(info.purchase_id, billz_sale_id=info.billz_sale_id)
+        audit.record(
+            action=AUDIT_PAYMENT_ATTEMPT_FORGOTTEN,
+            entity_type="order",
+            entity_id=str(order_id),
+            actor=actor,
+            before={
+                "purchase_id": info.purchase_id,
+                "billz_sale_id": info.billz_sale_id,
+                "billz_payment_attempted_at": info.billz_payment_attempted_at.isoformat(),
+            },
+            after={"purchase_id": info.purchase_id, "billz_payment_attempted_at": None},
+            reason="manage.py requeue_outbox --forget-payment-attempt",
+        )
+    logger.warning(
+        "billz.payment_attempt_forgotten order_id=%s billz_order_id=%s", order_id, info.billz_sale_id or "-"
+    )
+    return (
+        f"forgot the payment attempt of order {order_id} (Billz draft {info.billz_sale_id or '-'}): "
+        "the next attempt pays the draft"
+    )
+
+
+outbox.on_requeue(
+    topics.BILLZ_PUSH_SALE,
+    outbox.RequeueHooks(
+        describe=describe_push,
+        skip_reason=push_already_recorded,
+        warning=REQUEUE_WARNING,
+        forget_payment_attempt=forget_payment_attempt,
+    ),
+)
 
 
 # --- refund.submit ------------------------------------------------------------------------------------------
@@ -704,6 +813,10 @@ __all__ = [
     "create_shipment",
     "expire_reservations",
     "handle_billz_push_sale",
+    "handle_stock_synced",
+    "describe_push",
+    "forget_payment_attempt",
+    "push_already_recorded",
     "handle_bts_create_shipment",
     "handle_refund_submit",
     "on_billz_push_dead",
