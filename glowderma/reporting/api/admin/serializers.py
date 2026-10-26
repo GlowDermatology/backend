@@ -67,6 +67,13 @@ class DashboardQuerySerializer(serializers.Serializer[dict[str, Any]]):
         fields["from"] = fields.pop("from_")  # ``from`` is a Python keyword
         return fields
 
+    def to_internal_value(self, data: Any) -> dict[str, Any]:
+        # ``from``/``to`` are ignored (not even parsed) unless ``range=custom`` (contract §2.10).
+        if isinstance(data, dict) and data.get("range") != enums.DashboardRange.CUSTOM:
+            data = {key: value for key, value in data.items() if key not in ("from", "to")}
+        validated: dict[str, Any] = super().to_internal_value(data)
+        return validated
+
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         if attrs["range"] != enums.DashboardRange.CUSTOM:
             attrs.pop("from", None)

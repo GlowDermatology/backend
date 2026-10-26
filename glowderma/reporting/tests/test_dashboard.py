@@ -102,9 +102,29 @@ def test_custom_range_validation(staff_client: APIClient, params: dict[str, str]
     assert response.status_code == 400 and response.json()["errors"][0]["field"] == field
 
 
+@pytest.mark.parametrize(
+    ("params", "expected"),
+    [
+        ({"range": "custom"}, [("from", "required"), ("to", "required")]),
+        ({"range": "custom", "from": "2026-10-21", "to": "2026-10-20"}, [("from", "invalid")]),
+        ({"range": "custom", "from": "2026-10-20", "to": "2026-10-25"}, [("to", "invalid")]),
+        ({"range": "custom", "from": "2025-10-23", "to": "2026-10-24"}, [("to", "invalid")]),
+    ],
+)
+def test_custom_range_error_codes(
+    staff_client: APIClient, params: dict[str, str], expected: list[tuple[str, str]]
+) -> None:
+    """Contract §2.10: missing → ``required``; from > to → ``invalid`` on from; to > today or a span over
+    366 days → ``invalid`` on to."""
+    errors = _get(staff_client, **params).json()["errors"]
+    assert [(e["field"], e["code"]) for e in errors] == expected
+
+
 def test_from_and_to_are_ignored_outside_custom(staff_client: APIClient) -> None:
     body = _get(staff_client, range="week", **{"from": "2020-01-01"}).json()
     assert body["from"] == "2026-10-18"
+    for params in ({"from": "not-a-date", "to": "2099-01-01"}, {"range": "month", "to": "x"}):
+        assert _get(staff_client, **params).status_code == 200  # not even parsed
 
 
 def test_refunds_are_attributed_to_the_payment_bucket_and_never_negative(staff_client: APIClient) -> None:
