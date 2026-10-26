@@ -232,10 +232,15 @@ def test_checkout_row_1_body(customer_client: APIClient, customer: Customer) -> 
 
 def test_checkout_row_2_consent(customer_client: APIClient, customer: Customer) -> None:
     fill(customer, (product(), 1))
-    SiteSettings.objects.filter(pk=SiteSettings.load().pk).update(terms_version="2026-10-01")
+    row = SiteSettings.objects.filter(pk=SiteSettings.load().pk)
+    # a version without both uz texts is not published (C§2.1.3): it never blocks checkout (M2J-1)
+    row.update(terms_version="2026-10-01", terms_uz="", privacy_policy_uz="  ")
+    assert checkout(customer_client, pickup_body(100_000)).json().get("code") != "terms_update_required"
+    fill(customer, (product(), 1))
+    row.update(terms_version="2026-11-01", terms_uz="Shartlar", privacy_policy_uz="Maxfiylik")
     response = checkout(customer_client, pickup_body(100_000))
     assert response.status_code == 409 and response.json()["code"] == "terms_update_required"
-    assert response.json()["details"] == {"current_version": "2026-10-01"}
+    assert response.json()["details"] == {"current_version": "2026-11-01"}
 
 
 def test_checkout_rows_3_4_delivery(customer_client: APIClient, customer: Customer) -> None:
