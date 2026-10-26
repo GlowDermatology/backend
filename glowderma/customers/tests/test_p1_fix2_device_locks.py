@@ -16,8 +16,15 @@ from django.db import connection
 from glowderma.accounts import services as account_services
 from glowderma.accounts.models import AuthSession, Customer, Device
 from glowderma.accounts.tests.factories import start_test_session
+from glowderma.core.api.exceptions import RequestInProgress
 from glowderma.customers import services
-from glowderma.customers.tests.p1_support import NEW_PASSWORD, PASSWORD, password_customer, verification
+from glowderma.customers.tests.p1_support import (
+    NEW_PASSWORD,
+    PASSWORD,
+    Signed,
+    password_customer,
+    verification,
+)
 from glowderma.customers.tests.p1_support import reset_fakes as reset_provider_fakes
 
 WAIT = 10
@@ -167,9 +174,10 @@ def test_reset_vs_a_foreign_put_device_does_not_deadlock(monkeypatch: pytest.Mon
 def test_a_token_holder_appearing_after_the_unlocked_read_is_locked_too(
     monkeypatch: pytest.MonkeyPatch, attempts: int
 ) -> None:
-    """Another install takes the token between the unlocked read and the device lock: the attempt starts
-    again with that customer locked first (or, on the last attempt, locks it late) and the token still moves
-    to the caller's device."""
+    """A writer that bypasses ``register_device`` (and so its per-token lock) gives the token to another
+    install between the unlocked read and the device lock: the attempt starts again with that customer locked
+    first and the token still moves to the caller's device. The last attempt never locks a customer after
+    the devices: it answers 409 ``request_in_progress`` with nothing written."""
     late = password_customer("+998905551003")
     start_test_session(late, fid=FID_C)
     taker = password_customer("+998905551004")
@@ -196,11 +204,78 @@ def test_a_token_holder_appearing_after_the_unlocked_read_is_locked_too(
         return original(customer_id)
 
     monkeypatch.setattr(account_services, "lock_customer", patched)
+    if attempts == 1:
+        with pytest.raises(RequestInProgress):
+            account_services.register_device(taker.pk, FID_A, fcm_token=TOKEN, push_enabled=True)
+        assert calls == [taker.pk]  # the late holder's customer is never locked after the devices
+        assert Device.objects.get(customer=taker, fid=FID_A).fcm_token == ""
+        late_device = Device.objects.get(customer=late, fid=FID_C)
+        assert (late_device.fcm_token, late_device.is_active) == (TOKEN, True)
+        return
     device = account_services.register_device(taker.pk, FID_A, fcm_token=TOKEN, push_enabled=True)
     assert device.fcm_token == TOKEN
     late_device = Device.objects.get(customer=late, fid=FID_C)
     assert (late_device.fcm_token, late_device.is_active) == ("", False)
-    assert late.pk in calls
-    if attempts > 1:
-        # the second attempt locked both customers in ascending order before any device row
-        assert calls[1:] == sorted({late.pk, taker.pk})
+    # the second attempt locked both customers in ascending order before any device row
+    assert calls[1:] == sorted({late.pk, taker.pk})
+
+
+# --- two customers registering the same new token (verification round 2) ---------------------------------
+
+
+def waiting_lock_seen() -> bool:
+    """Whether some backend waits for a lock (the second PUT queued behind the first one's transaction)."""
+    deadline = time.monotonic() + WAIT
+    with connection.cursor() as cursor:
+        while time.monotonic() < deadline:
+            cursor.execute("SELECT count(*) FROM pg_locks WHERE NOT granted")
+            row = cursor.fetchone()
+            if row is not None and row[0]:
+                return True
+            time.sleep(0.05)
+    return False
+
+
+@pytest.mark.django_db(transaction=True)
+def test_two_customers_put_the_same_new_token_concurrently(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A and B PUT me/device/ with a token no row holds yet. A pauses after saving the token on its device
+    (inside its transaction); B's PUT then waits for A instead of saving the token too and failing on
+    ``device_active_fcm_token_unique`` (500). Both answer 200; B, the later one, holds the token and A's
+    install is signed out with ``SESSION_REPLACED`` (customer contract §2.2.6, §1.9)."""
+    first = Signed(password_customer("+998905551011"), fid=FID_A)
+    second = Signed(password_customer("+998905551012"), fid=FID_B)
+    original_save = Device.save
+    saved, go = threading.Event(), threading.Event()
+
+    def save(self: Device, *args: Any, **kwargs: Any) -> None:
+        original_save(self, *args, **kwargs)
+        if threading.current_thread().name == "first" and self.fcm_token == TOKEN and not saved.is_set():
+            saved.set()
+            go.wait(WAIT)
+
+    monkeypatch.setattr(Device, "save", save)
+    body = {"fcm_token": TOKEN, "push_enabled": True, "model": "iPhone 15", "os": "iOS 18", "locale": "uz"}
+    out: dict[str, Any] = {}
+    one = run("first", lambda: first.client.put("/api/v1/me/device/", body), out)
+    try:
+        assert saved.wait(WAIT)
+        two = run("second", lambda: second.client.put("/api/v1/me/device/", body), out)
+        assert waiting_lock_seen()
+    finally:
+        go.set()
+    one.join(WAIT + 5)
+    two.join(WAIT + 5)
+    assert not one.is_alive() and not two.is_alive()
+    for name in ("first", "second"):
+        state, response = out[name]
+        assert state == "ok", response
+        assert response.status_code == 200, (name, response.data)
+    holders = Device.objects.filter(fcm_token=TOKEN)
+    assert [(row.customer_id, row.fid, row.is_active) for row in holders] == [
+        (second.customer.pk, FID_B, True)
+    ]
+    loser = Device.objects.get(customer=first.customer, fid=FID_A)
+    assert (loser.fcm_token, loser.push_enabled, loser.is_active) == ("", False, False)
+    assert AuthSession.objects.get(pk=first.started.session.pk).revoke_reason == "replaced"
+    replaced = first.client.get("/api/v1/me/")
+    assert (replaced.status_code, replaced.data["code"]) == (401, "SESSION_REPLACED")
