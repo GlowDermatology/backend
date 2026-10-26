@@ -1,0 +1,20 @@
+{
+  "status": true,
+  "message": "Ma’lumot muvaffaqiyatli olindi.",
+  "status_code": 200,
+  "data": {
+    "items": [
+      {
+        "code": "1002",
+        "name": "Zangiota tumani",
+        "office_exists": false
+      }
+    ],
+    "_meta": {
+      "totalCount": 2,
+      "pageCount": 2,
+      "currentPage": 2,
+      "perPage": 1
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "status": false,
+  "message": "error.validation",
+  "status_code": 422,
+  "errors": {
+    "receiverCityCode": [
+      "«Receiver City Code» to`ldirish shart."
+    ]
+  }
+}

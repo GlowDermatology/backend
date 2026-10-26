@@ -6,6 +6,7 @@ import pytest
 from django.test import override_settings
 
 from glowderma.integrations.bts import fake as fake_bts
+from glowderma.integrations.bts.live import LiveBts
 from glowderma.integrations.bts.ports import BtsRejected, BtsUnavailable, CreateRequest, Parcel
 from glowderma.integrations.bts.registry import get_bts
 from glowderma.integrations.click import fake as fake_click
@@ -111,18 +112,14 @@ def test_transaction_ids_follow_the_design_rule() -> None:
 @pytest.mark.parametrize(
     ("setting", "factory", "live"),
     [
-        ("BTS_MODE", get_bts, None),
+        ("BTS_MODE", get_bts, LiveBts),
         ("CLICK_MODE", get_click, LiveClick),
         ("PAYME_MODE", get_payme, LivePayme),
     ],
 )
-def test_registries_follow_the_mode_settings(setting: str, factory: object, live: type | None) -> None:
-    if live is None:
-        with override_settings(**{setting: "live"}), pytest.raises(NotImplementedError, match="M3"):
-            factory()  # type: ignore[operator]
-    else:
-        with override_settings(**{setting: "live"}):
-            assert isinstance(factory(), live)  # type: ignore[operator]
+def test_registries_follow_the_mode_settings(setting: str, factory: object, live: type) -> None:
+    with override_settings(**{setting: "live"}):
+        assert isinstance(factory(), live)  # type: ignore[operator]
     with override_settings(**{setting: "bogus"}), pytest.raises(ValueError):
         factory()  # type: ignore[operator]
     with override_settings(**{setting: None, "INTEGRATIONS_MODE": "fake"}):

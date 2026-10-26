@@ -1,0 +1,12 @@
+{
+  "status": true,
+  "message": "Данные успешно получены.",
+  "status_code": 200,
+  "data": {
+    "orderId": 4293644,
+    "status": {
+      "code": 1100,
+      "name": "Курьер доставляет"
+    }
+  }
+}

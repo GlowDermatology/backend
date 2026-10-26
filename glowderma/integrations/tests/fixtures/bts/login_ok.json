@@ -1,0 +1,9 @@
+{
+  "status": true,
+  "message": "Kirish muvaffaqiyatli amalga oshdi.",
+  "status_code": 200,
+  "data": {
+    "access_token": "bts-access-token-1",
+    "refresh_token": "bts-refresh-token-1"
+  }
+}

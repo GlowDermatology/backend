@@ -1,0 +1,35 @@
+{
+  "status": true,
+  "message": "success.created",
+  "status_code": 200,
+  "data": {
+    "orderId": 4293644,
+    "clientId": "10248",
+    "wcs_code": "900001",
+    "barcode": "019914293644",
+    "customer": {
+      "id": 4722,
+      "name": "GLOW DERMA"
+    },
+    "status": {
+      "code": null,
+      "info": "У отправителя (У ОТПРАВИТЕЛЯ)"
+    },
+    "pickup_type": "courier",
+    "dropoff_type": "courier",
+    "sender": {
+      "name": null,
+      "phone": "+998712000000",
+      "address": "Toshkent sh., Glow Derma"
+    },
+    "receiver": {
+      "name": "Malika Karimova",
+      "phone": "+998901234567",
+      "address": "Chilonzor 9, 12-uy"
+    },
+    "cost": 227000,
+    "senderDate": "2026-10-26",
+    "receiverDate": "2026-10-27",
+    "tracking": "https://bts.uz/uz/waybill-tracking?term=..."
+  }
+}

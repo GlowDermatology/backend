@@ -1,0 +1,24 @@
+{
+  "status": true,
+  "message": "success.retrieved",
+  "status_code": 200,
+  "data": {
+    "branch_to_branch": {
+      "available": true,
+      "price": 76000,
+      "reason": null
+    },
+    "branch_to_courier": {
+      "available": true,
+      "price": 83000
+    },
+    "courier_to_branch": {
+      "available": true,
+      "price": 108000
+    },
+    "courier_to_courier": {
+      "available": true,
+      "price": 138000
+    }
+  }
+}

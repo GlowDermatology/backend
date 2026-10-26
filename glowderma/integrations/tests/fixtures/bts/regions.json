@@ -1,0 +1,27 @@
+{
+  "status": true,
+  "message": "Ma’lumot muvaffaqiyatli olindi.",
+  "status_code": 200,
+  "data": {
+    "items": [
+      {
+        "code": "01",
+        "name": "город Ташкент"
+      },
+      {
+        "code": "10",
+        "name": "Ташкентская область"
+      }
+    ],
+    "_links": {
+      "self": "/v1/directory/regions?page=1",
+      "next": null
+    },
+    "_meta": {
+      "totalCount": 2,
+      "pageCount": 1,
+      "currentPage": 1,
+      "perPage": 50
+    }
+  }
+}

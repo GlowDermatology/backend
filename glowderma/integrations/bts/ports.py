@@ -32,10 +32,12 @@ class Parcel:
     """A BTS parcel as the provider reports it (create answer or ``clientId`` lookup)."""
 
     client_id: str  # our order id as text (BTS ``clientId``)
-    tracking_number: str
+    tracking_number: str  # live: BTS's ``orderId`` (the waybill number ``track`` and ``cancel`` take)
     bts_order_id: str
     tariff: int | None  # so'm; ``None`` when BTS does not echo it (the order's quoted fee is used)
-    status: str  # raw BTS status code ("100", "200", …)
+    # Port status code ("100" accepted, "200" handed to the courier, "300" delivered, anything else recorded
+    # only; ``delivery/bts.py``). The live adapter translates BTS's own codes (``protocol.port_status``).
+    status: str
     status_at: str = ""  # BTS's status time when ``track`` reports one (a stable payload field), else ""
 
 
