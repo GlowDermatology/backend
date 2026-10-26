@@ -130,6 +130,30 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
   codes `fake:<subject>:<email>[:hd]`, `fake-unverified:…`, `fake-fail`, `fake-down`; FakeGoogle nonce
   `nonce-<subject>` or `*`). Adapters never put a secret or bearer token in a URL (POST bodies / `Authorization`
   headers only), retry only on transport errors, and map failures to `OAuthExchangeError`-style typed errors.
+  **Billz is the documented exception** (`integrations/billz/client.py`): its 429 is Billz's documented rate-limit
+  signal (a shared limiter pauses every worker), and transport errors / 5xx are retried only for calls that are
+  safe to repeat (reads, absolute upserts) or that certainly never reached Billz.
+- **Live adapters (M3: Click, Payme, BTS, Eskiz, FCM)** share `glowderma/integrations/httpclient.py`: one
+  `Deadline` per port call (10 s; 4 s on a customer request path), `send()` retries only what never left
+  (`TransportFailure(sent=False)`), and **every** other failure once the request may have left — a timeout, a body
+  that does not decode, any unexpected exception — is `TransportFailure(sent=True)` ("outcome unknown", never
+  resent by the adapter); a watchdog shuts the socket down at the deadline (headers included); a Celery soft time
+  limit is re-raised as it is. `Answer.ok` is any 2xx, `Answer.not_processed` a redirect (never followed),
+  401/403/408/425/429: map it to the provider's "unavailable, nothing happened" error, never to a definitive
+  refusal. Parse provider codes with `httpclient.int_code` (strict ASCII digits) and every answer shape
+  defensively: an unexpected shape is the provider's Unavailable error, never an untyped exception; provider
+  free text goes through `httpclient.safe_text` (Eskiz also masks 4-digit runs: an echoed OTP). Bearer tokens
+  (BTS, Eskiz) live only in the cache through `integrations.tokens.SharedToken` (key scoped by
+  `account_scope(base_url, login)`, single-flight `cache.add` lock of 45 s with the fetch bounded to half of it,
+  owner-checked unlock, a `LoginRefused` remembered 60 s, a cache outage fails closed with a process-local
+  single-flight fallback). Click's port types the outcomes the refund state machine relies on:
+  `ClickRefundRejected` (definitive), `ClickNotProcessed` (nothing happened: the handler releases its claim),
+  `ClickUnavailable` (unknown) and `ClickStatusUnknown` (a status it cannot name: never `paid`/`reversed`); any
+  other exception after the refund claim records `unknown`. FCM results add `not_sent` (give the claim back,
+  send later) and `unavailable` (unknown: never resent). No BTS call runs under the Order row lock. Tests replay
+  documented answers with `integrations/tests/live_fixtures.Script` (`Script().on(method, path, *responders)`
+  over `httpx.MockTransport`; an unscripted route answers 599) and `monkeypatch.setattr(httpclient, "new_client",
+  …)` for code that builds its own client — never the network.
 - Demo data: each module registers one idempotent seeder in `glowderma/<module>/seeds.py`
   (`core.seeding.register_seeder(name, order=…)`, orders accounts 10 · integrations 20 · site_config 30 · catalog 40 ·
   professionals 50 · loyalty 60 · commerce 70 · appointments 80 · notifications 90); `manage.py seed_demo` runs them in
