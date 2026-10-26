@@ -94,3 +94,20 @@ def test_search_index_migration_is_concurrent() -> None:
     migration = import_module("glowderma.catalog.migrations.0003_product_search_trgm_concurrently").Migration
     assert migration.atomic is False
     assert [type(op).__name__ for op in migration.operations] == ["AddIndexConcurrently"]
+
+
+@pytest.mark.django_db(transaction=True)
+def test_banner_url_migration_reverses_url_links_to_none() -> None:
+    """0004 (gap X-BANNER-URL): the reverse turns URL banners into banners without a link first."""
+    from glowderma.catalog.models import Banner
+    from glowderma.catalog.tests.factories import BannerFactory
+
+    banner = BannerFactory.create(link_kind="url", link_url="https://glowderma.uz/aksiya")
+    try:
+        call_command("migrate", "catalog", "0003", verbosity=0)
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT link_kind FROM catalog_banner WHERE id = %s", [banner.pk])
+            assert cursor.fetchone() == ("none",)
+    finally:
+        call_command("migrate", verbosity=0)
+    assert Banner.objects.get(pk=banner.pk).link_url == ""

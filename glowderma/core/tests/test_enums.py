@@ -67,7 +67,7 @@ CONTRACT_TABLE: dict[str, list[str]] = {
     "NotificationState": ["scheduled", "queued", "sent", "cancelled"],
     "AudienceType": ["all", "segment", "customer"],
     "LinkKind": ["none", "product"],
-    "BannerLinkKind": ["none", "product", "category"],
+    "BannerLinkKind": ["none", "product", "category", "url"],
     "TemplateStatus": ["processing", "handed_to_courier", "delivered", "cancelled"],
     "DashboardRange": ["today", "week", "month", "custom"],
     "DashboardBucket": ["hour", "day"],

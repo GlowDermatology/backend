@@ -13,6 +13,7 @@ from rest_framework.views import APIView
 from glowderma.core.api.fields import (
     AwareDateTimeField,
     BoundedListField,
+    HttpsUrlField,
     PercentField,
     PhoneField,
     QueryBooleanField,
@@ -135,6 +136,51 @@ class TestPhoneField:
         assert errors(single(PhoneField(), {"value": raw})) == [
             {"field": "value", "code": "invalid", "message": "Telefon raqamini to‘g‘ri kiriting."}
         ]
+
+
+class TestHttpsUrlField:
+    """Banner and campaign destinations (gaps X-BANNER-URL, ADM-10.1; decision GC-3)."""
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "https://glowderma.uz",
+            " https://glowderma.uz/aksiya?utm=app#top ",
+            "https://t.me/glowderma",
+            "https://glowderma.uz:443/x",
+            "https://xn--80ak6aa92e.com/",
+        ],
+    )
+    def test_valid(self, raw: str) -> None:
+        serializer = single(HttpsUrlField(), {"value": raw})
+        assert serializer.is_valid(), serializer.errors
+        assert serializer.validated_data["value"] == raw.strip()
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "http://glowderma.uz",
+            "glowderma.uz",
+            "//glowderma.uz",
+            "javascript:alert(1)",
+            "https://",
+            "https://user:pass@glowderma.uz/",
+            "https://user@glowderma.uz/",
+            "https://glowderma.uz:8443/",
+            "https://glowderma.uz:99999/",
+            "https://glow derma.uz/",
+            "ftp://glowderma.uz/",
+        ],
+    )
+    def test_invalid(self, raw: str) -> None:
+        assert errors(single(HttpsUrlField(), {"value": raw})) == [
+            {"field": "value", "code": "invalid", "message": "Havolani https:// bilan to‘liq kiriting."}
+        ]
+
+    def test_max_length(self) -> None:
+        raw = "https://glowderma.uz/" + "a" * 480
+        assert errors(single(HttpsUrlField(), {"value": raw}))[0]["code"] == "max_length"
+        assert single(HttpsUrlField(), {"value": raw[:-1]}).is_valid()
 
 
 class TestSlugField:

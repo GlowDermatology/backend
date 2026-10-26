@@ -323,7 +323,7 @@ class CategoryViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
 # --- banners ------------------------------------------------------------------------------------------------
 
 # Multipart keys whose empty string means ``null`` (see BannerWriteSerializer's docstring).
-NULLABLE_FORM_KEYS = frozenset({"link.product_id", "link.category", "starts_at", "ends_at"})
+NULLABLE_FORM_KEYS = frozenset({"link.product_id", "link.category", "link.url", "starts_at", "ends_at"})
 
 
 def form_to_nested(data: Any) -> dict[str, Any]:
@@ -361,6 +361,7 @@ BannerFormSerializer = inline_serializer(
         "link.kind": serializers.ChoiceField(choices=enums.BannerLinkKind.values, required=False),
         "link.product_id": serializers.IntegerField(required=False, allow_null=True),
         "link.category": serializers.CharField(required=False, allow_null=True, max_length=40),
+        "link.url": serializers.CharField(required=False, allow_null=True, max_length=500),
         "is_active": serializers.BooleanField(required=False),
         "starts_at": serializers.DateTimeField(required=False, allow_null=True),
         "ends_at": serializers.DateTimeField(required=False, allow_null=True),
@@ -378,6 +379,7 @@ BannerPatchFormSerializer = inline_serializer(
         "link.kind": serializers.ChoiceField(choices=enums.BannerLinkKind.values, required=False),
         "link.product_id": serializers.IntegerField(required=False, allow_null=True),
         "link.category": serializers.CharField(required=False, allow_null=True, max_length=40),
+        "link.url": serializers.CharField(required=False, allow_null=True, max_length=500),
         "is_active": serializers.BooleanField(required=False),
         "starts_at": serializers.DateTimeField(required=False, allow_null=True),
         "ends_at": serializers.DateTimeField(required=False, allow_null=True),
@@ -422,6 +424,8 @@ class BannerViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
                 link = f"mahsulot #{banner.link_product_id}"
             elif banner.link_kind == enums.BannerLinkKind.CATEGORY and banner.link_category_id:
                 link = f"kategoriya {banner.link_category.slug if banner.link_category else ''}"
+            elif banner.link_kind == enums.BannerLinkKind.URL and banner.link_url:
+                link = banner.link_url
             else:
                 link = ""
             yield (

@@ -16,7 +16,14 @@ from glowderma.catalog import billz, selectors, services
 from glowderma.catalog.models import Banner, Category, Product, ProductImage
 from glowderma.core import enums
 from glowderma.core.api.exceptions import ProviderUnavailable, field_error
-from glowderma.core.api.fields import AwareDateTimeField, QueryBooleanField, SlugField, i18n_dict, i18n_text
+from glowderma.core.api.fields import (
+    AwareDateTimeField,
+    HttpsUrlField,
+    QueryBooleanField,
+    SlugField,
+    i18n_dict,
+    i18n_text,
+)
 from glowderma.core.api.serializers import ActorSerializer
 from glowderma.core.media import absolute_media_url
 from glowderma.integrations.billz.ports import BillzError, BillzPort, BillzProduct
@@ -379,6 +386,8 @@ class BannerLinkSerializer(serializers.Serializer[dict[str, Any]]):
     kind = serializers.ChoiceField(choices=enums.BannerLinkKind.values, required=False)
     product_id = serializers.IntegerField(required=False, allow_null=True)
     category = serializers.CharField(required=False, allow_null=True, max_length=40)
+    # gap X-BANNER-URL (decision GC-3): kind "url" only; an absolute https link ≤ 500
+    url = HttpsUrlField(required=False, allow_null=True)
 
 
 class BannerSerializer(serializers.Serializer[Banner]):
@@ -414,6 +423,7 @@ class BannerSerializer(serializers.Serializer[Banner]):
                 if kind == enums.BannerLinkKind.CATEGORY and obj.link_category_id and obj.link_category
                 else None
             ),
+            "url": (obj.link_url or None) if kind == enums.BannerLinkKind.URL else None,
         }
 
 
@@ -425,11 +435,11 @@ class BannerWriteSerializer(serializers.Serializer[Any]):
     """Fields of ``POST banners/`` (multipart) and ``PATCH banners/{id}/`` (multipart or JSON; ``partial``).
 
     Accepted form encoding (multipart): nested keys arrive as dotted form names — ``title.uz``, ``title.ru``,
-    ``title.en``, ``link.kind``, ``link.product_id``, ``link.category`` — next to the flat ``is_active``,
-    ``starts_at``, ``ends_at`` and the file part ``image``. The view un-dots them into this nested shape
-    (``views.form_to_nested``); an empty string for ``link.product_id``, ``link.category``, ``starts_at`` or
-    ``ends_at`` means ``null``. Booleans are ``true``/``false``/``1``/``0``. Error paths use the same dotted
-    names, so multipart and JSON callers map errors identically.
+    ``title.en``, ``link.kind``, ``link.product_id``, ``link.category``, ``link.url`` — next to the flat
+    ``is_active``, ``starts_at``, ``ends_at`` and the file part ``image``. The view un-dots them into this
+    nested shape (``views.form_to_nested``); an empty string for ``link.product_id``, ``link.category``,
+    ``link.url``, ``starts_at`` or ``ends_at`` means ``null``. Booleans are ``true``/``false``/``1``/``0``.
+    Error paths use the same dotted names, so multipart and JSON callers map errors identically.
 
     The ``image`` part is read from the request by the view (it is not a field here); the link targets and
     the date order are validated against the merged state (``instance`` on PATCH).
@@ -445,6 +455,7 @@ class BannerWriteSerializer(serializers.Serializer[Any]):
         super().__init__(*args, **kwargs)
         self.link_product: Product | None = None
         self.link_category: Category | None = None
+        self.link_url = ""
         self.link_kind: str | None = None
 
     @property
@@ -480,6 +491,14 @@ class BannerWriteSerializer(serializers.Serializer[Any]):
             if category is None:
                 raise serializers.ValidationError({"link": {"category": [field_error("does_not_exist")]}})
             self.link_category = category
+        elif kind == enums.BannerLinkKind.URL:
+            if "url" in link:
+                url = link["url"]
+            else:  # PATCH without link.url keeps the stored one (only while the kind stays url)
+                url = current.link_url if current is not None and current.link_kind == kind else None
+            if not url:
+                raise serializers.ValidationError({"link": {"url": [field_error("required")]}})
+            self.link_url = url
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         current = self.banner
@@ -498,6 +517,7 @@ class BannerWriteSerializer(serializers.Serializer[Any]):
             link_kind=self.link_kind,
             link_product=self.link_product,
             link_category=self.link_category,
+            link_url=self.link_url,
             is_active=data.get("is_active"),
             starts_at=data.get("starts_at"),
             starts_at_set="starts_at" in data,

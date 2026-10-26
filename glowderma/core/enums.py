@@ -247,6 +247,7 @@ class BannerLinkKind(TextChoices):
     NONE = "none"
     PRODUCT = "product"
     CATEGORY = "category"
+    URL = "url"  # gap X-BANNER-URL: an https link (Banner.link_url, decision GC-3)
 
 
 class TemplateStatus(TextChoices):

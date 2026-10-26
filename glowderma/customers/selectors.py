@@ -414,16 +414,29 @@ BANNER_LIMIT = 20
 
 
 def banner_payload(banner: Banner, lang: str, visible_ids: set[int]) -> dict[str, Any]:
-    """A link to an invisible product or an inactive category renders ``kind: "none"``."""
-    link: dict[str, Any] = {"kind": enums.BannerLinkKind.NONE.value, "product_id": None, "category": None}
+    """A link to an invisible product or an inactive category renders ``kind: "none"``; a URL link
+    (``kind: "url"``, gap X-BANNER-URL) carries the https ``url`` the app opens."""
+    link: dict[str, Any] = {
+        "kind": enums.BannerLinkKind.NONE.value,
+        "product_id": None,
+        "category": None,
+        "url": None,
+    }
     if banner.link_kind == enums.BannerLinkKind.PRODUCT and banner.link_product_id in visible_ids:
-        link = {"kind": banner.link_kind, "product_id": banner.link_product_id, "category": None}
+        link = {"kind": banner.link_kind, "product_id": banner.link_product_id, "category": None, "url": None}
     elif (
         banner.link_kind == enums.BannerLinkKind.CATEGORY
         and banner.link_category is not None
         and banner.link_category.is_active
     ):
-        link = {"kind": banner.link_kind, "product_id": None, "category": banner.link_category.slug}
+        link = {
+            "kind": banner.link_kind,
+            "product_id": None,
+            "category": banner.link_category.slug,
+            "url": None,
+        }
+    elif banner.link_kind == enums.BannerLinkKind.URL and banner.link_url:
+        link = {"kind": banner.link_kind, "product_id": None, "category": None, "url": banner.link_url}
     return {
         "id": banner.pk,
         "title": localized_field(banner, "title", lang),

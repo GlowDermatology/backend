@@ -4,7 +4,10 @@ from datetime import datetime
 from decimal import Decimal
 from functools import cache
 from typing import Any, cast
+from urllib.parse import urlsplit
 
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.validators import URLValidator
 from rest_framework import serializers
 
 from glowderma.core.api.exceptions import FIELD_MESSAGES, field_error
@@ -14,6 +17,9 @@ SLUG_PATTERN = r"^[a-z0-9-]{2,40}$"
 # ``order`` is a route segment (``categories/order/``); ``none`` is the "no category" filter keyword (2.3).
 RESERVED_SLUGS = frozenset({"order", "none"})
 LANGUAGES = ("uz", "ru", "en")
+# Click destinations of banners and campaigns (gaps X-BANNER-URL, ADM-10.1; decision GC-3).
+LINK_URL_MAX_LENGTH = 500
+HTTPS_URL_INVALID = "Havolani https:// bilan to‘liq kiriting."
 
 
 class AwareDateTimeField(serializers.DateTimeField):
@@ -91,6 +97,28 @@ class SlugField(serializers.RegexField):
         value = super().to_internal_value(data)
         if value in RESERVED_SLUGS:
             raise serializers.ValidationError(self.error_messages["reserved"], code="invalid")
+        return value
+
+
+class HttpsUrlField(serializers.CharField):
+    """An absolute ``https`` link the app opens (banner and campaign destinations, decision GC-3): trimmed,
+    ≤ ``max_length`` (default 500, ``max_length``), a valid URL with a host, no credentials (``user@``) and no
+    port other than 443; anything else → ``invalid`` "Havolani https:// bilan to‘liq kiriting."."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        kwargs.setdefault("max_length", LINK_URL_MAX_LENGTH)
+        super().__init__(**kwargs)
+
+    def to_internal_value(self, data: Any) -> str:
+        value = super().to_internal_value(data)
+        try:
+            URLValidator(schemes=["https"])(value)
+            parts = urlsplit(value)
+            port = parts.port
+        except DjangoValidationError, ValueError:
+            raise serializers.ValidationError(field_error("invalid", HTTPS_URL_INVALID)) from None
+        if parts.username is not None or parts.password is not None or port not in (None, 443):
+            raise serializers.ValidationError(field_error("invalid", HTTPS_URL_INVALID))
         return value
 
 

@@ -534,13 +534,15 @@ def _reload_category(slug: str) -> Category:
 class BannerInput:
     """Validated body of ``POST banners/`` / ``PATCH banners/{id}/`` (unset keys stay ``None``).
 
-    ``link`` is already resolved: ``kind`` plus the target rows (the serializer checked they exist).
+    ``link`` is already resolved: ``kind`` plus the target rows (the serializer checked they exist) or the
+    validated https URL (kind ``url``, decision GC-3).
     """
 
     title: dict[str, str] | None = None
     link_kind: str | None = None
     link_product: Product | None = None
     link_category: Category | None = None
+    link_url: str = ""
     is_active: bool | None = None
     starts_at: Any = None
     starts_at_set: bool = False
@@ -559,6 +561,7 @@ def _banner_snapshot(banner: Banner) -> dict[str, Any]:
         "link.category": banner.link_category.slug
         if banner.link_category_id and banner.link_category
         else None,
+        "link.url": banner.link_url or None,
         "is_active": banner.is_active,
         "starts_at": banner.starts_at,
         "ends_at": banner.ends_at,
@@ -573,6 +576,7 @@ def _apply_banner(banner: Banner, data: BannerInput) -> None:
         banner.link_kind = data.link_kind
         banner.link_product = data.link_product if data.link_kind == enums.BannerLinkKind.PRODUCT else None
         banner.link_category = data.link_category if data.link_kind == enums.BannerLinkKind.CATEGORY else None
+        banner.link_url = data.link_url if data.link_kind == enums.BannerLinkKind.URL else ""
     if data.is_active is not None:
         banner.is_active = data.is_active
     if data.starts_at_set:

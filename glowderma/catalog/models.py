@@ -241,6 +241,8 @@ class Banner(TimeStampedModel):
     link_category = models.ForeignKey(
         "catalog.Category", null=True, on_delete=models.SET_NULL, related_name="banners"
     )
+    # gap X-BANNER-URL: an https link the app opens (kind "url" only; "" otherwise; decision GC-3)
+    link_url = models.CharField(max_length=500, blank=True, default="")
     is_active = models.BooleanField(default=True)
     starts_at = models.DateTimeField(null=True)
     ends_at = models.DateTimeField(null=True)
@@ -259,9 +261,16 @@ class Banner(TimeStampedModel):
                         link_kind=enums.BannerLinkKind.NONE,
                         link_product__isnull=True,
                         link_category__isnull=True,
+                        link_url="",
                     )
-                    | Q(link_kind=enums.BannerLinkKind.PRODUCT, link_category__isnull=True)
-                    | Q(link_kind=enums.BannerLinkKind.CATEGORY, link_product__isnull=True)
+                    | Q(link_kind=enums.BannerLinkKind.PRODUCT, link_category__isnull=True, link_url="")
+                    | Q(link_kind=enums.BannerLinkKind.CATEGORY, link_product__isnull=True, link_url="")
+                    | Q(
+                        link_kind=enums.BannerLinkKind.URL,
+                        link_product__isnull=True,
+                        link_category__isnull=True,
+                        link_url__startswith="https://",
+                    )
                 ),
                 name="banner_link_kind_targets",
             ),
