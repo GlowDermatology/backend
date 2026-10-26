@@ -65,7 +65,9 @@ ok = hmac.compare_digest(expected, request.headers["X-GD-Signature"])
 
 **Delivery.** `alert()` queues one outbox message `alert.send` (dedupe key `alert:<event>:<scope>:<window>`) and
 never breaks the code that raised it: a failure to queue is logged at WARNING (`alert.enqueue_failed`). The
-dispatcher POSTs it with a 5 s timeout, no redirects: 2xx → done; a transport error, 408, 429 or 5xx → retried with
+dispatcher POSTs it with a 5 s timeout per connect/read/write and a 15 s deadline for the whole request (far inside
+the 5-minute outbox lease, so a slow receiver never gets the alert posted twice in parallel), no redirects: 2xx →
+done; a transport error, a missed deadline, 408, 429 or 5xx → retried with
 backoff (dead after 10 attempts, about 17 minutes); any other status → dead at once. A dead `alert.send` raises
 no further alert. An alert raised inside a transaction that rolls back is rolled back with it — the ERROR line
 stays, which is why log-based alerting is the primary path and the webhook the push channel.

@@ -22,10 +22,13 @@ body bytes (header ``X-GD-Signature: sha256=<hex>``, key ``ALERT_WEBHOOK_SECRET`
   Callers pass ids, counts and short codes — never names, phone numbers, addresses, tokens or a provider's
   free text. The destination must be hosted in Uzbekistan or receive no personal data
   (docs/ops/compliance.md).
-* **Delivery** (``alert.send``): one POST with a 5 s timeout through httpx, redirects not followed, the URL
-  never logged. 2xx → done; a transport error, 408, 429 or 5xx → retried by the outbox with backoff (dead
-  after ``outbox.MAX_ATTEMPTS``); any other answer → :class:`~glowderma.core.outbox.PermanentFailure` (dead
-  at once). A dead ``alert.send`` raises no ``outbox.dead`` alert of its own, so a broken webhook cannot loop.
+* **Delivery** (``alert.send``): one POST through httpx, redirects not followed, the URL never logged; a 5 s
+  timeout per connect/read/write and an overall deadline of :data:`DEADLINE_SECONDS` (a receiver trickling
+  bytes cannot hold the worker), far inside the outbox lease, so a slow receiver never makes the dispatcher
+  hand the message to a second worker while the first is still posting. 2xx → done; a transport error, a
+  missed deadline, 408, 429 or 5xx → retried by the outbox with backoff (dead after ``outbox.MAX_ATTEMPTS``);
+  any other answer → :class:`~glowderma.core.outbox.PermanentFailure` (dead at once). A dead ``alert.send``
+  raises no ``outbox.dead`` alert of its own, so a broken webhook cannot loop.
 """
 
 from __future__ import annotations
@@ -37,6 +40,7 @@ import logging
 import math
 import re
 import socket
+import threading
 from collections.abc import Mapping
 from typing import Any
 
@@ -53,6 +57,8 @@ logger = logging.getLogger(__name__)
 ALERT_TOPIC = "alert.send"
 SIGNATURE_HEADER = "X-GD-Signature"
 TIMEOUT_SECONDS = 5.0
+# The whole POST, from connect to the last byte of the answer; well below the outbox lease (5 minutes).
+DEADLINE_SECONDS = 15.0
 MAX_ITEMS = 50
 MAX_DEPTH = 3
 REDACTED = "<redacted>"
@@ -203,6 +209,33 @@ def signature(body: bytes, secret: str) -> str:
     return "sha256=" + hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
 
 
+def _post_within_deadline(url: str, body: bytes, headers: dict[str, str]) -> httpx.Response:
+    """``httpx.post`` in a daemon thread, given up after :data:`DEADLINE_SECONDS` (httpx's own timeouts
+    bound each operation, not the request: a receiver sending one byte every few seconds would never time
+    out). A request given up keeps its thread until httpx's per-operation timeouts end it; the worker never
+    waits for it, and the outbox retries the alert."""
+    outcome: dict[str, Any] = {}
+    finished = threading.Event()
+
+    def post() -> None:
+        try:
+            outcome["response"] = httpx.post(
+                url, content=body, headers=headers, timeout=TIMEOUT_SECONDS, follow_redirects=False
+            )
+        except BaseException as exc:  # noqa: BLE001 - handed to the waiting thread as is
+            outcome["error"] = exc
+        finally:
+            finished.set()
+
+    threading.Thread(target=post, name="alert-send", daemon=True).start()
+    if not finished.wait(DEADLINE_SECONDS):
+        raise httpx.TimeoutException(f"no complete answer within {DEADLINE_SECONDS:g} s")
+    if "error" in outcome:
+        raise outcome["error"]
+    response: httpx.Response = outcome["response"]
+    return response
+
+
 @outbox.register(ALERT_TOPIC)
 def send_alert(message: OutboxMessage) -> None:
     """``alert.send``: POST the alert (module doc). Nothing is sent once the URL was removed."""
@@ -218,9 +251,7 @@ def send_alert(message: OutboxMessage) -> None:
     if secret:
         headers[SIGNATURE_HEADER] = signature(body, secret)
     try:
-        response = httpx.post(
-            url, content=body, headers=headers, timeout=TIMEOUT_SECONDS, follow_redirects=False
-        )
+        response = _post_within_deadline(url, body, headers)
     except httpx.HTTPError as exc:
         # the exception text may carry the URL (which can embed a token): only its type is kept
         logger.warning("alert.send_failed event=%s error=%s", event, type(exc).__name__)
@@ -237,6 +268,7 @@ def send_alert(message: OutboxMessage) -> None:
 
 __all__ = [
     "ALERT_TOPIC",
+    "DEADLINE_SECONDS",
     "SIGNATURE_HEADER",
     "AlertDeliveryError",
     "alert",

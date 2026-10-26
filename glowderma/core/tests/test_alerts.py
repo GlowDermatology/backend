@@ -7,6 +7,8 @@ import hashlib
 import hmac
 import json
 import logging
+import threading
+import time
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -395,3 +397,30 @@ def test_non_finite_floats_become_null_and_the_alert_is_queued(enabled: None, va
     assert alerts.alert("probe.nan", {"ratio": value}) is True
     (message,) = alert_messages()
     assert message.payload["fields"] == {"ratio": None}
+
+
+def test_a_receiver_that_never_finishes_is_given_up_within_the_deadline(
+    enabled: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    alerts.alert("billz.sale_dead", {"order_id": 1})
+    release = threading.Event()
+
+    def trickle(url: str, **kwargs: Any) -> httpx.Response:
+        release.wait(10)  # a receiver that keeps the connection busy past every per-operation timeout
+        return httpx.Response(200, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(alerts, "DEADLINE_SECONDS", 0.2)
+    monkeypatch.setattr(httpx, "post", trickle)
+    started = time.monotonic()
+    try:
+        with pytest.raises(alerts.AlertDeliveryError, match=r"unreachable \(TimeoutException\)"):
+            alerts.send_alert(alert_messages()[0])
+    finally:
+        release.set()
+    assert time.monotonic() - started < 2
+
+
+def test_the_deadline_is_far_inside_the_outbox_lease() -> None:
+    from glowderma.core import tasks as core_tasks
+
+    assert alerts.DEADLINE_SECONDS * 10 <= core_tasks.LEASE.total_seconds()
