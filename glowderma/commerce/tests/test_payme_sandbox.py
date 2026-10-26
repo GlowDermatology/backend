@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import logging
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -376,3 +378,58 @@ def test_non_post_while_payme_is_fake_in_production_answers_32504() -> None:
     assert response.status_code == 200 and response.json()["error"]["code"] == -32504
     (row,) = rows("payme")
     assert row.result["error_code"] == "fake_mode"
+
+
+# --- fix pass 2: auth and parse failures never escape the JSON-RPC protocol
+# --------------------------------------------
+
+
+def _post_raw(raw: str, *, auth: str) -> Any:
+    return APIClient().generic(
+        "POST", PAYME_URL, raw, content_type="application/json", HTTP_AUTHORIZATION=auth
+    )
+
+
+DEEP = "[" * 200_000  # json.loads raises RecursionError, not ValueError
+
+
+def test_a_non_ascii_basic_header_answers_32504_with_a_bounded_row(order: Order) -> None:
+    body = {**sandbox.check_perform(ref(order), tiyin(order)), "id": 7}
+    response = _post_raw(json.dumps(body), auth="Basic é" + "A" * 20)  # b64decode: plain ValueError
+    assert response.status_code == 200 and response.json()["error"]["code"] == -32504
+    assert response.json()["id"] == 7  # the peeked id is echoed
+    (row,) = rows("payme")
+    assert row.event_key.startswith("rejected:") and row.raw_body == ""
+    assert row.result["error_code"] == "bad_auth" and len(str(row.payload)) <= 1024
+
+
+def test_a_body_nested_too_deep_without_auth_answers_32504(order: Order) -> None:
+    response = _post_raw(DEEP, auth="")
+    assert response.status_code == 200 and response.json()["error"]["code"] == -32504
+    assert response.json()["id"] is None
+    (row,) = rows("payme")
+    assert row.event_key.startswith("rejected:") and row.result["error_code"] == "bad_auth"
+
+
+def test_a_body_nested_too_deep_with_auth_answers_32700(order: Order) -> None:
+    response = _post_raw(DEEP, auth=sandbox.auth_header())
+    assert response.status_code == 200 and response.json()["error"]["code"] == -32700
+    (row,) = rows("payme")
+    assert row.result["error_code"] == "-32700" and row.payload is None
+
+
+def test_an_unexpected_failure_before_dispatch_answers_32400(
+    order: Order, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from glowderma.integrations.payme import protocol
+
+    def boom(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(protocol, "auth_ok", boom)
+    with caplog.at_level(logging.ERROR):
+        response = _post_raw(json.dumps(sandbox.check_perform(ref(order), tiyin(order))), auth="")
+    assert response.status_code == 200
+    assert response.json() == protocol.rpc_error(None, protocol.ERR_SYSTEM)
+    assert protocol.INTERNAL_ERROR_RESPONSE == "rpc_-32400"
+    assert rows("payme") == [] and "payme.request failed" in caplog.text

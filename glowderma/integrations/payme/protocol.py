@@ -8,7 +8,6 @@ checklist).
 from __future__ import annotations
 
 import base64
-import binascii
 import hmac
 from typing import Any, Final, TypeIs
 from urllib.parse import quote
@@ -93,7 +92,7 @@ def auth_ok(header: str, key: str) -> bool:
         return False
     try:
         decoded = base64.b64decode(header[len("Basic ") :].strip(), validate=True).decode()
-    except binascii.Error, UnicodeDecodeError:
+    except ValueError:  # binascii.Error, UnicodeDecodeError, and a non-ASCII header (plain ValueError)
         return False
     return hmac.compare_digest(decoded.encode(), f"{PAYME_LOGIN}:{key}".encode())
 
