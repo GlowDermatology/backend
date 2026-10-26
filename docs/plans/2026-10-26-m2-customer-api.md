@@ -80,14 +80,14 @@ module because availability (`commerce.selectors.available_stock`) may not be im
 | `glowderma/core/api/schema.py` | `CUSTOMER_ERRORS`, `PUBLIC_CUSTOMER_ERRORS`, `DEVICE_HEADERS` (`X-GD-Device-Id`, `X-GD-Platform`, `X-GD-App-Version`), `DEVICE_KEY_HEADER`, `ACCEPT_LANGUAGE_HEADER` |
 | `glowderma/core/throttling.py` | new scopes `sms_device: 10/min`, `customer_auth_device: 30/min`, `customer_auth_ip: 1200/min`, `refresh_unknown: 60/min`, `qr: 6/min`, `public: 300/min`, `public_ip: 3000/min`; `sms_ip` default `600/min` (used only by `auth/send-code/`) |
 | `glowderma/core/audit.py` | `record()` accepts a `Customer` or `PosDevice` actor: `actor_type` `customer`/`integration`, `actor_label` = masked phone / device name (no `get_username` on non-staff) |
-| `glowderma/accounts/models.py` + `migrations/0006_customer_auth_hardening.py` | `Device.key_hash = CharField(64, blank=True)`; partial index `accounts_authsession_prev_refresh` on `AuthSession.previous_refresh_hash` `WHERE previous_refresh_hash <> ''`; `AuthSession.revoke_reason` choice `refresh_reused`; `AuthSession.rotation = PositiveIntegerField(default=0)` and `AuthSession.rotation_confirmed = BooleanField(default=False)` (C§2.1.6: the `rot` claim is this counter, never a timestamp); `CustomerSocialIdentity.provider` choice `apple`; `Customer.history_from = DateTimeField(null=True)` (the history horizon, C§2.2.3; a data step back-fills it from `reactivated_at`); `Customer.is_authenticated = True`, `is_anonymous = False` (properties, no SQL) |
+| `glowderma/accounts/models.py` + `migrations/0006_customer_auth_hardening.py` | `Device.key_hash = CharField(64, blank=True)`; partial index `accounts_authsession_prev_refresh` on `AuthSession.previous_refresh_hash` `WHERE previous_refresh_hash <> ''`; `AuthSession.revoke_reason` choice `refresh_reused`; `AuthSession.rotation = PositiveIntegerField(default=0)` and `AuthSession.rotation_confirmed = BooleanField(default=False)` (C§2.1.6: the `rot` claim is this counter, never a timestamp); `CustomerSocialIdentity.provider` choice `apple`; `CustomerSocialIdentity.provider_refresh_token = TextField(blank=True)` (Apple's refresh token sealed with `core.secretbox`, C§2.1.8); `Customer.history_from = DateTimeField(null=True)` (the history horizon, C§2.2.3; a data step back-fills it from `reactivated_at`); `Customer.is_authenticated = True`, `is_anonymous = False` (properties, no SQL) |
 | `glowderma/accounts/tokens.py` | access TTL by audience (`STAFF_ACCESS_TTL` / `CUSTOMER_ACCESS_TTL`); customer access claim `rot` = `AuthSession.rotation` (integer) |
 | `glowderma/accounts/authentication.py` | `CustomerJWTAuthentication` (aud `customer`; `auth:sid:{sid}` cache value `active:{abs_expiry}:{pii_ref(fid)}:{platform}`, filled with `cache.add` only and never rewritten, so the device and platform checks need no query and no write can overwrite a tombstone; tombstones `revoked:<reason>`; device/platform header match; `last_active_at`/`app_version` bump ≤ every 5 min; when the add-only flag `auth:sidrot:{sid}:{rot}` is absent → the conditional confirmation UPDATE of C§2.1.6 (`rotation = rot AND NOT rotation_confirmed`), then `cache.add` of the flag); `OptionalCustomerAuthentication` |
 | `glowderma/accounts/permissions.py` | `IsActiveCustomer` |
 | `glowderma/accounts/api/customer_base.py` (new) | `CustomerAPIView`, `CustomerGenericViewSet`, `PublicAPIView`, `WebhookAPIView` (CSRF-exempt, parsers set per view, no auth, provider-native responses), device-header parsing + 400 `device_required` + 426 `app_update_required` gate (a mixin used by the auth views too). **Not** `PosAPIView` (P3, `loyalty/api/pos/base.py`) |
 | `glowderma/accounts/api/throttles.py` | `CustomerRateThrottle` (`customer`), `PublicDeviceThrottle` (`public`), `PublicIPThrottle` (`public_ip`), `CheckoutThrottle`, `PayThrottle`, `QrThrottle`, `SmsPhoneThrottle`, `SmsDeviceThrottle`, `SmsIPThrottle`, `CustomerAuthDeviceThrottle`, `CustomerAuthIPThrottle`, `RefreshUnknownThrottle` (counts only misses), `PosRateThrottle` |
 | `glowderma/accounts/services.py` | `start_customer_session(customer_id, *, fid, platform, app_version, issue_device_key) -> SessionStart(session, raw_refresh, raw_device_key \| None, farewell_tokens: list[str])` (C§1.9 steps 1–6 under `select_for_update(no_key=True)` of the customer: deactivated devices lose their token — captured first into `farewell_tokens` —, farewell payload carries `sid` + token, skipped when the token is held by another active row, `core.qr_store.revoke_all`), `revoke_customer_sessions(customer_id, reason, except_sid=None)` (also `qr_store.revoke_all`), `move_history_horizon(customer_id, *, at)` (`Customer.history_from`), **`delete_customer` (the built B2 function, changed here; no other package owns it):** customer-level lock `no_key=True`, `key_hash=""` on every device, sessions revoked through `revoke_customer_sessions(…, "deactivated")` (customer tombstone TTL), `core.qr_store.revoke_all` on commit, `language="uz"`, `terms_version=""`, `consent_at`/`consent_ip`/`last_login_at` cleared, one `apple.revoke` outbox message per Apple identity holding a token (C§2.2.3 step 5), `register_device(customer_id, fid, …)` (a token taken from another row clears it there), `device_is_known(customer_id, fid, raw_device_key) -> bool` (`compare_digest`), `invalidate_fcm_token(device_id)`, tombstone TTL = max(staff, customer access TTL) + 60 |
-| `glowderma/accounts/topics.py` (new) | `SMS_SEND = "sms.send"`, `PUSH_SESSION_REPLACED = "push.session_replaced"`, `PUSH_ACCOUNT_SECURITY = "push.account_security"` + dedupe-key builders (`sms.send:{sms_code_id}`, `push.session_replaced:{session_id}`, `push.account_security:{customer_id}:{event}:{uuid}`) |
+| `glowderma/accounts/topics.py` (new) | `SMS_SEND = "sms.send"`, `PUSH_SESSION_REPLACED = "push.session_replaced"`, `PUSH_ACCOUNT_SECURITY = "push.account_security"`, `APPLE_REVOKE = "apple.revoke"` + dedupe-key builders (`sms.send:{sms_code_id}`, `push.session_replaced:{session_id}`, `push.account_security:{customer_id}:{event}:{uuid}`, `apple.revoke:{identity_id}`) |
 | `glowderma/accounts/tasks.py` (new) | handler `push.session_replaced` (data-only FCM message through the extended port; blanks the token in the payload after the send; `unregistered` → `invalidate_fcm_token`); beat task `accounts.cleanup_auth` (delete `SmsCode` older than 24 h, `done`/`dead` `sms.send` outbox rows older than 24 h, customer `AuthSession` rows revoked or expired for >90 days) |
 | `glowderma/integrations/fcm/{ports,fake}.py` | `PushMessage(token, title, body, data, *, data_only, android_channel, android_priority, apns_push_type, apns_priority, image_url, collapse_key)`; `PushResult.error` ∈ {`unregistered`, `payload_invalid`, …}; the fake records every field **only when `DEV_FEATURES_ALLOWED`** (otherwise it keeps nothing and logs one INFO line with ids, C§2.14.2) and maps tokens `…-bad` → `unregistered`, `…-payload` → `payload_invalid`, `…-down` → `FcmUnavailable` (moved here from P3 so P0's session-replaced push can be built) |
 | `glowderma/catalog/selectors.py` | `customer_visible_products()` (C§2.3 visibility) |
@@ -158,7 +158,7 @@ module because availability (`commerce.selectors.available_stock`) may not be im
 ### Owns
 `glowderma/customers/{services.py, selectors.py, api/customer/*}` (new views: auth, me, social, catalog, delete),
 `glowderma/accounts/services.py` (OTP and credential flows only — below the P0 block), `glowderma/accounts/tasks.py`
-(the `sms.send` handler, appended), `glowderma/integrations/eskiz/{__init__,ports,fake,registry}.py` (new),
+(the `sms.send` and `apple.revoke` handlers and the `apple.revoke` dead-letter hook, appended), `glowderma/integrations/eskiz/{__init__,ports,fake,registry}.py` (new),
 `glowderma/integrations/oauth/{ports,fake,google,facebook,apple (new),registry}.py` (`verify_app_token`, Apple),
 `glowderma/site_config/{selectors.py, api/customer/*}`, `glowderma/catalog/selectors.py` (customer list helpers, after
 P0's function), tests in `customers/tests/`, `accounts/tests/`, `integrations/tests/`, `site_config/tests/`.
@@ -184,7 +184,7 @@ C§2.0 rows 1–23: `auth/send-code/`, `auth/verify-code/`, `auth/set-password/`
 | `register(...)` (reactivation → `move_history_horizon`), `login(...)` (device key evaluated first, guard scope by device knowledge, dummy hash whenever no stored hash is compared), `reset_password(...)` (unlinks identities, clears other device keys, dormant rule, `push.account_security` with `farewell_tokens`), `social_sign_in(...)`, `complete_social(...)` (fid + ticket binding, password for password accounts, dormant rule for SMS-only links, `farewell_tokens`), `link_social(...)` / `unlink_social(...)` (re-authentication: password, or a `reset_password` verification token when the account has none), `change_password(...)` (`me/password/`: current password or verification token; keeps session, device key and identities), `accept_consent(...)`, `update_profile(...)`, `set_image(...)`, `delete_account(customer_id, *, password=None, verification_token=None)`; `customers.selectors.last_activity_at(customer_id)` (newest of last login, session use, purchase, order) | `customers.services` | orchestrators (need `site_config` for the terms version and publication check and, for delete, `commerce`/`appointments`); `delete_account` takes the customer-level lock first (`select_for_update(no_key=True)`), refuses on `commerce.selectors.customer_inflight_order` |
 | `public_settings()` | `site_config.selectors` | cached 60 s, invalidated on `update_settings` commit; `terms_version` null while unpublished; `payment_providers = core.providers.payable_providers()` (C§2.4) |
 | `product_cards(qs, lang, customer_id=None)` | `customers.selectors` | one query for products + `available_stock` + main image + cart quantities |
-| `verify_app_token(token, token_type, nonce)` | `integrations.oauth` (Google, Facebook, Apple) | Apple: RS256 against Apple's JWKS, `aud` ∈ `APPLE_APP_BUNDLE_IDS`, nonce = SHA-256 of ours |
+| `verify_app_token(token, token_type, nonce)`, `exchange_apple_code(code, client_id) -> refresh_token`, `revoke_apple_token(refresh_token, client_id)` | `integrations.oauth` (Google, Facebook, Apple) | C§2.1.8: only the four (provider, token type) pairs; per-provider required claims (`email` optional, `email_verified` ignored — the staff Google adapter keeps its own list); Apple: RS256 against Apple's JWKS, `aud` ∈ `APPLE_BUNDLE_IDS`, `nonce == sha256(raw).hexdigest()`, ES256 client secret from `APPLE_TEAM_ID`/`APPLE_KEY_ID`/`APPLE_PRIVATE_KEY_FILE` for the code exchange and the revoke; Facebook `debug_token` with `input_token` in a POST form body (the staff `_debug_token` changed the same way); replay key `sha256(provider + ":" + raw token)`; ticket `jti` server-generated; customer social routes 404 while OAuth is fake under the production settings |
 
 **Reused (do not redefine):** `accounts.services.{add_address, update_address, set_default_address, remove_address,
 set_customer_password, check_customer_password, delete_customer (changed by P0), reactivate_customer,
@@ -204,9 +204,13 @@ None (P0 owns `accounts.0006`). The link-social ticket binding and the OTP fid/I
   `fake-<sms_code_id>`; `FakeEskiz.sent` list (rendered texts, so tests can read the code without a DB lookup) **only
   when `DEV_FEATURES_ALLOWED`** — under the production settings the fake keeps nothing and logs `sms.fake_accepted
   {sms_code_id}`; the code generator returns `ESKIZ_FAKE_CODE` only under local/test settings.
-- **OAuth `verify_app_token` fakes**: `fake:<subject>:<email>` valid (nonce must equal the issued nonce or `*` in unit
-  tests), `fake-unverified:…` valid without verified email, `fake-fail` → `exchange_failed`, `fake-down` →
-  `unavailable`, `fake-expired` → `invalid_token`; Apple `fake-apple:<subject>:<email>` (relay addresses allowed).
+- **OAuth `verify_app_token` fakes**: `fake:<subject>:<email>` valid (nonce must equal the issued nonce, or `*` only
+  when `DEV_FEATURES_ALLOWED`), `fake-unverified:…` valid without verified email, `fake-fail` → `exchange_failed`,
+  `fake-down` → `unavailable`, `fake-expired` → `invalid_token`; Apple `fake-apple:<subject>:<email>` (relay addresses
+  allowed; available with `OAUTH_MODE=fake` even while `APPLE_BUNDLE_IDS` is empty); Apple authorization code
+  `fake-code:<anything>` → refresh token `fake-apple-refresh-<subject>`, `fake-code-fail` → refused, `fake-code-down` →
+  unavailable; the fake records every revoke. Under the production settings the routes answer 404 before any fake is
+  called (C§2.1.8).
 
 ### Tests (P1)
 - Every validation row of C§2.1–§2.4 and C§2.2.8 (one test per code, uz message; one ru and one en rendering per
@@ -239,8 +243,16 @@ None (P0 owns `accounts.0006`). The link-social ticket binding and the OTP fid/I
   ticket bound to the fid (another fid → `social_ticket_invalid`); send-code with ticket; complete for active
   (password required when set, wrong → `password_incorrect`), social-only, no and deleted customer; a verification token
   from a code requested without/with another ticket → `verification_invalid`; `social_provider_linked`,
-  `social_identity_linked` (unique-race); Apple happy path and missing bundle id → 404; `push.account_security`
-  enqueued on link.
+  `social_identity_linked` (unique-race); `push.account_security` enqueued on link. Pairs: google+`access_token` and
+  apple+`access_token` → 400 `social_token_invalid`. Replay: the same raw token twice → refused; two different tokens
+  with equal `sub` and `iat` → both accepted. Apple: happy path with nonce hashing; `authorization_code` missing → 400
+  `required`; the code exchanged once and the sealed refresh token stored on the identity (at completion for an unknown
+  identity, from `gd:social:apple:{jti}`; a missing cache entry → `social_ticket_invalid`); exchange refused → 400,
+  Apple down → 503, nothing linked; `APPLE_BUNDLE_IDS` empty → 404 with `OAUTH_MODE=live`, fake adapter with
+  `OAUTH_MODE=fake`; unlink, reset and `DELETE me/` enqueue `apple.revoke`; the handler revokes, retries on transport
+  errors, treats Apple 400 as final, and the dead hook logs ERROR `apple.revoke_dead`. Fake OAuth under
+  `override_settings(DEV_FEATURES_ALLOWED=False)` → 404 on the four routes and the `*` nonce refused. Facebook: the live
+  adapter (recorded fixtures) sends `input_token` only in the POST body, never in a URL (staff path too).
 - `me/social/`: link with password (wrong → `password_incorrect`, shares the `customer_login` budget); a social-only
   account linking without `verification_token` → 400 `verification_token` `required`, with a used or foreign token →
   400 `verification_invalid`, with a fresh `reset_password` token of its own phone → 200; unlink needs the same
@@ -585,7 +597,7 @@ behaviour: under the production settings the fakes run without scenarios, record
 | Provider | Switch | Effect |
 |---|---|---|
 | Eskiz | phone `…0000` / `…9999` / other | rejected / transport down / accepted; code = `ESKIZ_FAKE_CODE` (local/test settings only) |
-| OAuth | token `fake:<sub>:<email>`, `fake-unverified:…`, `fake-apple:<sub>:<email>`, `fake-fail`, `fake-down`, `fake-expired` | valid / valid unverified / Apple valid / `social_token_invalid` / 503 / `social_token_invalid` |
+| OAuth | token `fake:<sub>:<email>`, `fake-unverified:…`, `fake-apple:<sub>:<email>`, `fake-fail`, `fake-down`, `fake-expired`; Apple code `fake-code:…` / `fake-code-fail` / `fake-code-down` | valid / valid unverified / Apple valid / `social_token_invalid` / 503 / `social_token_invalid`; code exchanged / 400 / 503 |
 | BTS | `bts.quote`: `"rejected"` / `"down"`; `bts.tariff`: int | 409 `delivery_unavailable` / 503 / fixed fee |
 | BTS | `bts.fail_attempts`, `bts.down`, `bts.existing`, `bts.tracking_number`, `bts.status`, `bts.cancel` | B5 rules (create/cancel) |
 | BTS | `bts.track_status`: `"100"`/`"200"`/`"300"`/other | what `track()` answers (webhook re-track, polling) |
@@ -641,8 +653,15 @@ behaviour: under the production settings the fakes run without scenarios, record
 #SOCIAL_NONCE_TTL_SECONDS=600
 # Google client ids the app's ID tokens are issued for (iOS client id, web/server client id used by Android), comma separated.
 #GOOGLE_APP_CLIENT_IDS=change-me-ios.apps.googleusercontent.com,change-me-web.apps.googleusercontent.com
-# Sign in with Apple: the iOS bundle id(s) Apple ID tokens are issued for; empty = provider "apple" disabled (404).
-#APPLE_APP_BUNDLE_IDS=uz.glowderma.app
+# Sign in with Apple (product-owner decision 2026-10-26): the iOS bundle id(s) Apple ID tokens are issued for, comma
+# separated; empty = provider "apple" disabled (404) with OAUTH_MODE=live, the fake Apple adapter with OAUTH_MODE=fake
+# (local/test only: production answers 404 on customer social routes while OAuth is fake).
+#APPLE_BUNDLE_IDS=uz.glowderma.app
+# Apple developer team id, Sign in with Apple key id and the .p8 private key file (ES256 client secret for the code
+# exchange and token revocation). Required in production when OAUTH_MODE=live and APPLE_BUNDLE_IDS is set.
+#APPLE_TEAM_ID=change-me-team-id
+#APPLE_KEY_ID=change-me-key-id
+#APPLE_PRIVATE_KEY_FILE=/run/secrets/apple-signin.p8
 # Minimum app versions (426 app_update_required below them) and store links.
 #MIN_APP_VERSION_IOS=0.0.0
 #MIN_APP_VERSION_ANDROID=0.0.0
@@ -754,6 +773,8 @@ Validation (P0):
   callbacks are refused anyway; the check is a second layer), with no length floor because the provider issues them.
   Every one of these is refused when it contains `change-me` (case-insensitive) or equals a committed value (the
   existing `production.py` rule for `SECRET_KEY`/`INTERNAL_API_SECRET`, extended).
+- `OAUTH_MODE=live` with a non-empty `APPLE_BUNDLE_IDS` requires `APPLE_TEAM_ID`, `APPLE_KEY_ID` (no `change-me`) and a
+  readable `APPLE_PRIVATE_KEY_FILE` that loads as an EC P-256 key.
 - Staging runs the production settings module.
 
 ## 8. Beat entries (`config/celery.py`, P0)

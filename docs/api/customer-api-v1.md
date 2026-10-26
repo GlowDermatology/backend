@@ -51,7 +51,7 @@ Everything in admin §1 applies unless a row below says otherwise.
 |---|---|---|
 | `Authorization: Bearer <access JWT>` | **C** routes; optional on **O** routes; absent on `auth/*` (except `auth/logout/`, where it is optional) | HS256, `kid` header, claims `iss, aud="customer", sub (customer id), sid, rot, iat, exp, jti`, all required. `rot` = the session's rotation counter `AuthSession.rotation` (integer, `0` before the first rotation) when the token was issued (§2.1.6). TTL `CUSTOMER_ACCESS_TTL` (900 s), capped at the session's `absolute_expires_at`. A staff token fails decoding (`aud`) → 401 `not_authenticated`. On an **O** route a present but invalid header is a 401, never silently anonymous. |
 | `X-GD-Device-Id` | `auth/*` and **C** routes | The Firebase installation id (`fid`) of this app install, `^[A-Za-z0-9_-]{8,128}$`. Missing or malformed → 400 `device_required`. `auth/*`: the session is bound to `Device(customer, fid)` (created or reactivated on success). **C** routes: must equal the fid of the session's device, else 401 `not_authenticated` and audit `auth.device_mismatch` (at most one row per session per hour). The fid is an identifier, **not** a secret (§6.8). |
-| `X-GD-Device-Key` | `auth/login/`, `auth/social/` when the app holds one | The device secret issued once in `AuthTokens.device_key` (§1.9), 43 base64url chars. Proves that this install completed a verified sign-in before; it is what makes a device **known** for A2 (§2.1.4). Never logged; compared as SHA-256 with `compare_digest`. Absent or wrong → the device is treated as unknown (no error by itself). |
+| `X-GD-Device-Key` | `auth/login/` when the app holds one (social sign-in never reads it: `M2-A10`) | The device secret issued once in `AuthTokens.device_key` (§1.9): exactly 43 base64url characters, `^[A-Za-z0-9_-]{43}$`, no prefix (`secrets.token_urlsafe(32)`). Proves that this install completed a verified sign-in before; it is what makes a device **known** for A2 (§2.1.4). Never logged; compared as SHA-256 with `compare_digest`. Absent, malformed, over-long or wrong → the device is treated as unknown (never a 400). |
 | `X-GD-Platform` | with `X-GD-Device-Id` | `ios` \| `android` (else 400 `device_required`). Stored on `Device.platform`; `Order.channel` is taken from the **session's device**, never from a body field. A different platform for an existing `(customer, fid)` → 401 `not_authenticated`. |
 | `X-GD-App-Version` | with `X-GD-Device-Id` | `^\d{1,3}\.\d{1,3}\.\d{1,3}$`. Below `MIN_APP_VERSION_IOS` / `MIN_APP_VERSION_ANDROID` (default `0.0.0` = no floor) → 426 `app_update_required` with `details: {"min_version", "store_url"}`. Written to `Device.app_version` together with the `last_active_at` bump (at most every 5 minutes). |
 | `Accept-Language` | optional | First supported tag in q-order among `uz`, `ru`, `en` (region subtags ignored: `ru-RU` → `ru`). Absent or unsupported → the signed-in customer's `language`, else `uz`. Selects every `message`, every server-rendered label and every i18n data field (§1.4). Response header `Content-Language`. |
@@ -230,7 +230,7 @@ IP per minute, the rest only counted and sampled in the log).
      app acts on it only when `sid` equals the session it holds, so a push that reaches another account on the same
      install is ignored. The handler blanks `fcm_token` in the payload after the send;
   5. when `issue_device_key` (every sign-in verified by SMS, by a social provider or by registration, and every
-     reset): a new 256-bit `device_key` (base64url, 43 chars) is generated, `Device.key_hash = SHA-256(device_key)`
+     reset): a new 256-bit `device_key` (`secrets.token_urlsafe(32)`: 43 base64url chars, no prefix) is generated, `Device.key_hash = SHA-256(device_key)`
      replaces the old hash, and the raw key is returned **once** in `AuthTokens.device_key`; a known-device password
      sign-in keeps the existing key (`device_key: null`);
   6. a new session: `refresh_hash = SHA-256(refresh)`, `absolute_expires_at = now + CUSTOMER_REFRESH_TTL_DAYS`,
@@ -320,7 +320,7 @@ IP per minute, the rest only counted and sampled in the log).
  "access_expires_at": "2026-10-26T12:15:00+05:00",
  "refresh": "Qm9n…43 chars",                     // opaque 256-bit base64url; stored as SHA-256; ROTATES on every refresh
  "refresh_expires_at": "2026-12-25T12:00:00+05:00",   // now + 60 days, sliding
- "device_key": "dk_7Hq…43 chars",                // | null: issued once on a verified sign-in (§1.9 step 5); store it in the Keychain/Keystore, replacing the old one; null = keep the stored key
+ "device_key": "7HqZr2…43 base64url chars",      // | null (no prefix): issued once on a verified sign-in (§1.9 step 5); store it in the Keychain/Keystore, replacing the old one; null = keep the stored key
  "customer": { /* Me, §2.2.1 */ },
  "is_new_customer": false,                       // true when this call created the Customer row
  "reactivated": false}                           // true when this call reactivated a deleted Customer (A1)
@@ -401,7 +401,7 @@ Body `{"phone": str, "purpose": OtpPurpose, "code": str}`.
 
 ```jsonc
 // 200
-{"verification_token": "vt_Zx…43 chars",   // 256-bit, returned once; SHA-256 stored on the SmsCode row
+{"verification_token": "Zx3kq…43 chars",   // 256-bit base64url, no prefix, returned once; SHA-256 stored on the SmsCode row
  "expires_in": 600, "purpose": "register",
  "customer_exists": false}                 // an active customer has this phone (lets register/link screens branch)
 ```
@@ -539,26 +539,58 @@ Body `{"refresh": str}` → **204**. Revokes the session owning the token (`logo
 revoked or expired token → 401 `SESSION_EXPIRED` (the app treats it as logged out). Audit `customer.logout`.
 
 #### 2.1.8 `GET auth/social/nonce/` and `POST auth/social/`
-**Nonce.** `GET auth/social/nonce/` → 200 `{"nonce": "n_…43 chars", "expires_in": 600}`: 256-bit random, stored as
-`gd:social:nonce:{sha256(nonce)}` = `pii_ref(fid)`, TTL `SOCIAL_NONCE_TTL_SECONDS` (600). The app passes it to the
-provider SDK (Google `nonce`, Apple `SHA-256(nonce)` as the request nonce, Facebook Limited Login `nonce`) and then to
-`auth/social/`. Throttles `customer_auth_device` / `customer_auth_ip`.
+**Availability.** Customer social sign-in (`auth/social/nonce/`, `auth/social/`, `auth/social/complete/`, `POST
+me/social/`) answers **404** when `OAUTH_MODE=fake` under the production settings (`DEV_FEATURES_ALLOWED` false): the
+fake verifier accepts made-up subjects, which would let anyone sign in to an account linked while it was on — the OAuth
+equivalent of a fixed OTP (§6.14). `DELETE me/social/{provider}/` keeps working. Provider `apple` additionally needs
+`APPLE_BUNDLE_IDS` (product-owner decision 2026-10-26): empty + `OAUTH_MODE=live` → 404 for `apple`; empty +
+`OAUTH_MODE=fake` (local/test) → the fake Apple adapter (`fake-apple:…`, plan §6) answers, so the app can be built
+before the client provides the bundle id.
+
+**Nonce.** `GET auth/social/nonce/` → 200 `{"nonce": "<43 base64url chars>", "expires_in": 600}`: 256-bit random,
+stored as `gd:social:nonce:{sha256(nonce)}` = `pii_ref(fid)`, TTL `SOCIAL_NONCE_TTL_SECONDS` (600). The app passes it
+to the provider SDK — Google `nonce` and Facebook Limited Login `nonce` as is; Apple: the request nonce is
+`sha256(nonce.encode("utf-8")).hexdigest()` (lowercase hex), because Apple puts the request value into the token — and
+then sends the raw nonce to `auth/social/`. Throttles `customer_auth_device` / `customer_auth_ip`.
 
 **Sign-in.** Body `{"provider": "google" | "facebook" | "apple", "token": str 1..4096, "token_type": "id_token" |
-"access_token" | null, "nonce": str | null}`. `token_type` defaults to `id_token` for Google and Apple and
-`access_token` for Facebook. For every `id_token` the `nonce` is **required**: it must exist in the nonce cache, be
-bound to this fid, and is deleted on use (`cache.delete` result checked, so it is single-use); a missing, unknown or
-foreign nonce → 400 `social_token_invalid`.
+"access_token" | null, "nonce": str | null, "authorization_code": str ≤1024 | null}`. `token_type` defaults to
+`id_token` for Google and Apple and `access_token` for Facebook. **Only four (provider, token type) pairs exist**:
+`google`/`id_token`, `apple`/`id_token`, `facebook`/`access_token`, `facebook`/`id_token`; any other pair (for example a
+Google or Apple access token, which proves nothing about our audience) → 400 `social_token_invalid`. For every
+`id_token` the `nonce` is **required**: it must exist in the nonce cache, be bound to this fid, and is deleted on use
+(`cache.delete` result checked, so it is single-use); a missing, unknown or foreign nonce → 400 `social_token_invalid`.
+The fakes' `*` nonce wildcard exists only under the local/test settings. `authorization_code` is **required for
+`apple`** (`required`) and ignored otherwise (Apple token revocation, below).
 
 | Provider | Server-side verification (P1 extends the OAuth port with `verify_app_token(token, token_type, nonce)`) |
 |---|---|
-| `google` (`id_token`) | RS256 against Google's JWKS (cached by `kid`); `iss` ∈ {`https://accounts.google.com`, `accounts.google.com`}; `aud` ∈ `GOOGLE_APP_CLIENT_IDS` (the iOS client id and the web/server client id the Android SDK requests tokens for); `exp`; `nonce` equal. `email_verified` is **not** required (the phone is the identity). |
-| `apple` (`id_token`) | RS256 against `https://appleid.apple.com/auth/keys` (cached by `kid`); `iss = https://appleid.apple.com`, `aud` ∈ `APPLE_APP_BUNDLE_IDS`, `exp`, `nonce` = SHA-256 hex of our nonce **(verify M3)**; `sub` is the subject; `email` may be a private relay address. |
-| `facebook` (`access_token`) | `GET https://graph.facebook.com/{FACEBOOK_GRAPH_VERSION}/debug_token?input_token=…` with the app token `app_id|app_secret` (POST body / header, never in a logged URL): `is_valid`, `app_id == FACEBOOK_APP_ID`; then `GET /me?fields=id,email` with `appsecret_proof`. No nonce (the token is bound to our app id). |
-| `facebook` (`id_token`, iOS Limited Login) | RS256 against Facebook's OIDC JWKS; `iss = https://www.facebook.com`, `aud = FACEBOOK_APP_ID`, `exp`, `nonce` **(verify M3)** |
+| `google` (`id_token`) | RS256 against Google's JWKS (cached by `kid`); `iss` ∈ {`https://accounts.google.com`, `accounts.google.com`}; `aud` ∈ `GOOGLE_APP_CLIENT_IDS` (the iOS client id and the web/server client id the Android SDK requests tokens for); required claims `iss, aud, exp, iat, sub, nonce`; `nonce` equal to the raw nonce (`compare_digest`). `email` is optional and `email_verified` ignored (the phone is the identity; the staff adapter's required `email` does not apply to customers). |
+| `apple` (`id_token`) | RS256 against `https://appleid.apple.com/auth/keys` (cached by `kid`); `iss = https://appleid.apple.com`, `aud` ∈ `APPLE_BUNDLE_IDS`; required claims `iss, aud, exp, iat, sub, nonce`; `nonce == sha256(raw_nonce.encode("utf-8")).hexdigest()` (lowercase hex) **(verify M3)**; `sub` is the subject; `email` optional (may be a private relay address); `email_verified` ignored (Apple may send it as the string `"true"`). Apple's token has no `jti`. |
+| `facebook` (`access_token`) | `debug_token` with the app token `app_id|app_secret` in the `Authorization` header and the user's `input_token` in a **form-encoded POST body** to `https://graph.facebook.com/{FACEBOOK_GRAPH_VERSION}/debug_token` **(verify M3** that Graph accepts the POST form; if it does not, the GET is the documented exception: the httpx/httpcore request loggers of the OAuth client are set to WARNING so no URL with `input_token=` is logged, and no egress proxy logs query strings**)**: `is_valid`, `app_id == FACEBOOK_APP_ID`; then `GET /me?fields=id,email` with the user token in the `Authorization` header and `appsecret_proof`. No nonce (the token is bound to our app id). P1 changes the staff adapter's `_debug_token` the same way (it passes `input_token` as a query parameter today). |
+| `facebook` (`id_token`, iOS Limited Login) | RS256 against Facebook's OIDC JWKS; `iss = https://www.facebook.com`, `aud = FACEBOOK_APP_ID`; required claims `iss, aud, exp, iat, sub, nonce`; `nonce` equal to the raw nonce **(verify M3)**; `email` optional |
 
-- **Replay cache:** every accepted ID token is remembered as `gd:social:seen:{provider}:{sha256(sub + iat + jti)}` until
-  its `exp`; a second use → 400 `social_token_invalid`.
+- **Replay cache:** every accepted ID token is remembered as `gd:social:seen:{sha256(provider + ":" + raw token)}` until
+  its `exp`; a second use → 400 `social_token_invalid`. (A key built from claims would collide for two tokens issued in
+  the same second, since Apple's token carries no `jti`.)
+- **Apple token revocation** (App Store Review Guideline 5.1.1(v): apps offering Sign in with Apple revoke the user's
+  tokens when the account is deleted). The app sends the single-use `authorizationCode` Apple returned with the
+  identity token. Before any row lock the server exchanges it at `https://appleid.apple.com/auth/token` (`grant_type =
+  authorization_code`, `client_id` = the token's `aud` bundle id, `client_secret` = an ES256 JWT signed with the key
+  `APPLE_KEY_ID` of team `APPLE_TEAM_ID`, `APPLE_PRIVATE_KEY_FILE`) **(verify M3)** and keeps Apple's refresh token,
+  sealed with `core.secretbox` (§2.1.1), on `CustomerSocialIdentity.provider_refresh_token` (migration
+  `accounts.0006`). A linked identity whose stored token is empty gets one at its next sign-in; one that has a token
+  does not exchange again. An exchange refused by Apple → 400 `social_token_invalid`; Apple unreachable → 503
+  `provider_unavailable`; nothing is linked in either case. When an Apple identity is unlinked (`DELETE
+  me/social/apple/`, the reset of §2.1.5, `DELETE me/` §2.2.3), the same transaction enqueues `apple.revoke
+  {identity_id, client_id, sealed_token}` (dedupe `apple.revoke:{identity_id}`); its handler (`accounts/tasks.py`)
+  posts the token to `https://appleid.apple.com/auth/revoke` (`token_type_hint = refresh_token`); transport errors
+  retry through the outbox, an Apple 400 (token already invalid) is final with a WARNING, a dead message logs ERROR
+  `apple.revoke_dead` (alert; staff revoke in the Apple developer account). The fake records the revoke (local/test).
+  Apple's server-to-server notifications (consent revoked, account deleted) are **not** handled in M2: the default is
+  that the identity stays linked until the customer unlinks it or Apple refuses its next token; M3 adds the endpoint.
+- **Apple's name.** Apple sends the user's name only on the first authorization and never in the token. The app keeps
+  `fullName` locally from that first callback until `auth/social/complete/` succeeds and pre-fills it as `name`.
 - Linked identity `(provider, subject)` whose customer is active → **200 `AuthTokens`**; `last_login_at` on the
   identity; `issue_device_key=True` (the provider authentication counts as a verified sign-in); audit
   `customer.login_succeeded {method: provider}`. Social sign-in does **not** require the new-device SMS code (§7
@@ -566,12 +598,17 @@ foreign nonce → 400 `social_token_invalid`.
   **and** the password when the account has one (§2.1.9); from a signed-in session the password, or an SMS code when
   the account has no password (§2.2.8), never the bearer token alone — so it is at least as strong as the A2 path.
 - Unknown identity → **200 `NextStep`** `verify_phone` with a `social_ticket` = `TimestampSigner(salt="gd.social")`
-  over `{provider, subject, email, jti, fid: pii_ref(fid)}`, 10 min. Single use is durable: completing consumes a
-  verification token (`verification_used_at`, DB) and creates a unique `(provider, subject)` row; the `jti` claim in
-  the cache (`cache.add`) only stops a second concurrent completion early.
+  over `{provider, subject, email, jti, fid: pii_ref(fid)}`, 10 min, where `jti` is a **server-generated** 128-bit id
+  (`secrets.token_hex(16)`), never a token claim; it keys `gd:social:otp:{sms_code_id}` (§2.1.1) and, for Apple, the
+  sealed refresh token waiting for completion (`gd:social:apple:{jti}`, 10 min; Apple's authorization code is valid
+  for 5 minutes only, so it is exchanged now). Single use is durable: completing consumes a verification token
+  (`verification_used_at`, DB) and creates a unique `(provider, subject)` row; the `jti` in the cache (`cache.add`)
+  only stops a second concurrent completion early.
 - 400 `social_token_invalid` "Kirish amalga oshmadi. Qayta urinib ko‘ring." (`exchange_failed`, `invalid_token`, nonce
-  and replay failures); 503 `provider_unavailable` (`unavailable`); 404 for an unknown provider (or `apple` while
-  `APPLE_APP_BUNDLE_IDS` is empty); 429 `throttled`.
+  and replay failures, an unsupported (provider, token type) pair, a refused Apple code exchange); 400
+  `authorization_code` `required` (Apple); 503 `provider_unavailable` (`unavailable`); 404 for an unknown provider,
+  for `apple` while `APPLE_BUNDLE_IDS` is empty in live mode, and for every provider while OAuth is fake under the
+  production settings; 429 `throttled`.
 
 #### 2.1.9 `POST auth/social/complete/`
 Body `{"social_ticket": str, "verification_token": str (purpose link_social), "password": str | null, "name": str | null, "terms_version": str | null, "language": ContentLanguage | null}`.
@@ -589,7 +626,10 @@ The phone is the one the verification token is bound to. Checks: ticket valid an
 Errors: 400 `social_ticket_invalid`, 400 `verification_invalid`; 409 `social_provider_linked` "Bu hisobga boshqa
 {provider} profili bog‘langan." when the customer already has an identity for that provider; 409
 `social_identity_linked` "Bu {provider} profili boshqa hisobga bog‘langan." when the subject was linked meanwhile
-(unique-violation race too). Side effects: `CustomerSocialIdentity(provider, subject, email_at_link)`; consent when
+(unique-violation race too). Side effects: `CustomerSocialIdentity(provider, subject, email_at_link)` (Apple: the
+sealed refresh token moved from `gd:social:apple:{jti}` onto the row; missing — a cache flush — → 400
+`social_ticket_invalid`, the app restarts the sign-in, so no Apple identity is ever linked without a revocable token);
+consent when
 creating/reactivating; `start_customer_session(…, issue_device_key=True)`; outbox `push.account_security
 {customer_id, event: "social_linked", provider, farewell_tokens}` when an existing account was linked — the inbox row,
 the push to the new device and a visible push to the device this sign-in replaced (`SessionStart.farewell_tokens`,
@@ -739,8 +779,9 @@ consumed under the customer-level lock — the app asks for an SMS code first (`
 Facebook or Apple identity, which then signs in on any device without SMS (`M2-A10`).
 
 - **`POST me/social/`** (**C**, **I**). Body `{"provider": SocialProvider, "token": str, "token_type": SocialTokenType |
-  null, "nonce": str | null, "password": str | null, "verification_token": str | null}`. The token is verified exactly
-  as in §2.1.8 (nonce, replay cache) and the caller re-authenticated as above. → 200 `Me`. Errors: 400
+  null, "nonce": str | null, "authorization_code": str | null, "password": str | null, "verification_token": str |
+  null}`. The token is verified exactly as in §2.1.8 (allowed pairs, nonce, replay cache; Apple: the authorization code
+  is required and exchanged, the refresh token stored sealed) and the caller re-authenticated as above. → 200 `Me`. Errors: 400
   `social_token_invalid`, 400 `verification_invalid`; 409 `social_provider_linked` / `social_identity_linked`; 429
   `throttled`; 503 `provider_unavailable`. Side effects: identity row; outbox `push.account_security {customer_id,
   event: "social_linked", provider}`; audit `customer.social_linked {provider, via: "settings"}`.
@@ -2229,7 +2270,7 @@ Existing points this contract implements (`docs/decisions/open-questions.md`):
 | A2 | Password login; SMS code for sign-up, reset and **password** login on a device without a valid device key (§2.1.4, §1.9) |
 | A3 | 5 attempts per code, 15-minute lockout, 10 codes and 10 wrong codes per phone per day (`CUSTOMER_OTP_*`) |
 | A6 | Social sign-in allowed (Google, Facebook, Apple); the first sign-in verifies a phone by SMS and links to that phone's customer, with the password when the account has one (§2.1.8–9) |
-| A7 | Google iOS/Android client ids, the Facebook app and the Apple bundle id / Sign in with Apple capability are needed from the client; fake providers until then (`GOOGLE_APP_CLIENT_IDS`, `APPLE_APP_BUNDLE_IDS`) |
+| A7 | Google iOS/Android client ids, the Facebook app, and for Sign in with Apple the bundle id (`APPLE_BUNDLE_IDS`), team id, key id and private key are needed from the client; fake providers until then (`GOOGLE_APP_CLIENT_IDS`, `APPLE_BUNDLE_IDS` empty = Apple disabled in live mode, fake in local/test) |
 | O1 / O5 | Admin cancel rules and refund display unchanged; the customer sees "To‘lov qaytarilmoqda" until `succeeded` |
 | O3 | Reservation 15 minutes (`SiteSettings.reservation_minutes`), extended only by the in-flight payment grace (`M2-P8`) |
 | O4 | Pickup reuses `delivered`, labelled "Olib ketildi" for customers |
@@ -2251,7 +2292,7 @@ New M2 points (the plan adds them to `open-questions.md`; each default is implem
 | M2-A11 | Customer password rule | ≥8 characters, not only digits, not common, not similar to the phone |
 | M2-A12 | Deleting an account: confirmation and open items | Password (or an SMS code for social-only accounts) required, guarded like sign-in; unpaid orders and open appointments are cancelled; paid orders continue; refused while a Click payment is in flight (≤ 2 minutes) |
 | M2-A13 | Minimum app version enforcement | Off (`MIN_APP_VERSION_*=0.0.0`) until the first store release |
-| M2-A14 | Apple App Store guideline 4.8: Google/Facebook sign-in on iOS requires an equivalent privacy-focused option (Sign in with Apple) | Offer Sign in with Apple on iOS (`apple` provider; needs the bundle id and the capability, A7); the alternative — hiding social sign-in on iOS — is a client decision |
+| M2-A14 | Apple App Store guideline 4.8: Google/Facebook sign-in on iOS requires an equivalent privacy-focused option (Sign in with Apple) | **Decided by the product owner (2026-10-26):** offer Sign in with Apple on iOS (`apple` provider, ID token with nonce, token revocation on unlink and deletion per guideline 5.1.1(v)); `APPLE_BUNDLE_IDS` empty keeps it disabled (live) or fake (local/test) until the client provides the bundle id (A7) |
 | M2-A15 | Recycled phone numbers: what does the person who reactivates a deleted account see? | Balance and purchases kept (A1); orders, appointments, inbox and ledger order links only from the reactivation (`Customer.history_from`) |
 | M2-A16 | Recycled numbers of accounts that were never deleted: what does a new holder who recovers the account by SMS see? | After a password reset or an SMS-only social link on an account inactive for more than 180 days (`CUSTOMER_DORMANT_DAYS`; last sign-in, refresh, purchase or order), the history horizon moves to now and name, image and addresses are scrubbed; balance and purchases are kept (A1) |
 | M2-A17 | How does a signed-in customer change or add a password? | `POST me/password/` with the current password, or an SMS code when the account has none; the session and social identities are kept. `auth/reset-password/` stays the recovery path that unlinks every identity |
