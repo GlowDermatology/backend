@@ -380,7 +380,7 @@ class BillzClient:
             return None
         return access
 
-    def _store(self, data: Mapping[str, Any], *, previous_refresh: str = "") -> dict[str, Any]:
+    def _store(self, data: Mapping[str, Any]) -> dict[str, Any]:
         access = data.get("access_token")
         if not isinstance(access, str) or not access:
             raise BillzUnavailable("Billz auth: the answer carries no access token")

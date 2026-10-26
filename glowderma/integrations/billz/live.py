@@ -78,7 +78,7 @@ from .ports import (
 
 logger = logging.getLogger(__name__)
 
-BILLZ_ID = re.compile(r"\d{6,14}")
+BILLZ_ID = re.compile(r"[0-9]{6,14}")  # ASCII digits only, like the catalog's billz_id check
 UUID_PATTERN = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 # Billz refuses page > 10 000 (llms-full "Синхронизация каталога").
 MAX_PAGE = 10_000
@@ -185,7 +185,7 @@ def _order_items(order: Mapping[str, Any] | None) -> dict[str, float]:
 
 
 def _digits(phone: str) -> str:
-    return "".join(char for char in phone if char.isdigit())
+    return "".join(char for char in phone if char in "0123456789")
 
 
 def sale_ref(order_number: str, billz_order_id: str) -> str:

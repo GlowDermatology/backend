@@ -795,6 +795,21 @@ def test_a_push_in_progress_elsewhere_is_retried_later() -> None:
 
 
 def test_helpers() -> None:
+    assert billz_live.barcode_of({"barcode": " 4607012301 "}) == "4607012301"
+    assert billz_live.barcode_of({"barcode": "\u0664\u0666\u0660\u0667\u0660\u0661\u0662\u0663"}) is None
+    assert billz_live.barcode_of({"barcode": "ABC-1"}) is None and billz_live.barcode_of({}) is None
+    assert billz_live.price_of({"shop_prices": [{"shop_id": SHOP_ID, "retail_price": 5, "retail_currency": "USD"}]}, SHOP_ID) is None  # fmt: skip  # noqa: E501
+    assert (
+        billz_live.price_of({"shop_prices": [{"shop_id": SHOP_ID.upper(), "retail_price": 7}]}, SHOP_ID) == 7
+    )
+    assert billz_live.stock_of({"shop_measurement_values": [{"shop_id": SHOP_ID, "active_measurement_value": -1.5}]}, SHOP_ID) == -2  # fmt: skip  # noqa: E501
+    assert billz_live.stock_of({"shop_measurement_values": "junk"}, SHOP_ID) == 0
+    assert billz_live.volume_of({"custom_fields": [{"custom_field_system_name": "volume", "custom_field_value": "5 ml"}]}, "VOLUME") == "5 ml"  # fmt: skip  # noqa: E501
+    assert billz_live.volume_of({"product_attributes": []}, "") == ""
+    assert billz_live.aggregate([SaleLine("1", 1, 10), SaleLine("2", 2, 5), SaleLine("1", 2, 10)]) == [
+        ("1", 3, 30),
+        ("2", 2, 10),
+    ]
     assert is_finished({"finished_at": "2026-10-26 14:05:20"}) is True
     assert is_finished({"finished_at": "0001-01-01T00:00:00Z"}) is False  # Go's zero time: a draft
     assert is_finished({"finished_at": ""}) is False and is_finished({}) is False
