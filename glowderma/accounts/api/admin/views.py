@@ -29,8 +29,12 @@ from glowderma.accounts.api.admin.serializers import (
     MeSerializer,
     OAuthCallbackSerializer,
     RefreshSerializer,
+    StaffCreateSerializer,
+    StaffCredentialsSerializer,
     StaffListItemSerializer,
     StaffListQuerySerializer,
+    StaffMemberSerializer,
+    StaffUpdateSerializer,
 )
 from glowderma.accounts.api.base import AdminAPIView, AdminGenericViewSet
 from glowderma.accounts.api.guard import LoginGuard, email_hash
@@ -41,14 +45,23 @@ from glowderma.accounts.api.throttles import (
     RefreshRateThrottle,
 )
 from glowderma.accounts.models import AuthSession, StaffUser
+from glowderma.accounts.permissions import IsManager
 from glowderma.core import audit, timeutils
 from glowderma.core.api.exceptions import AuthFailed, OAuthExchangeFailed, ProviderUnavailable
 from glowderma.core.api.parsers import JSONParser
-from glowderma.core.api.schema import ADMIN_ERRORS, PUBLIC_ERRORS, ErrorEnvelopeSerializer
+from glowderma.core.api.schema import (
+    ADMIN_ERRORS,
+    IDEMPOTENCY_KEY_HEADER,
+    OPTIONAL_IDEMPOTENCY_KEY_HEADER,
+    PUBLIC_ERRORS,
+    ErrorEnvelopeSerializer,
+)
+from glowderma.core.idempotency import idempotent
 from glowderma.integrations.oauth.ports import OAuthExchangeError, SocialClaims
 from glowderma.integrations.oauth.registry import PROVIDER_NAMES, get_oauth_provider
 
 ERRORS = {400: ErrorEnvelopeSerializer, 401: ErrorEnvelopeSerializer, 429: ErrorEnvelopeSerializer}
+TEMPORARY_PASSWORD = "temporary_password"  # noqa: S105 - the response key, not a password
 PROVIDER_PARAM = OpenApiParameter(
     name="provider", type=OpenApiTypes.STR, location=OpenApiParameter.PATH, enum=list(PROVIDER_NAMES)
 )
@@ -60,6 +73,7 @@ def _me(user: StaffUser, session: AuthSession) -> dict[str, Any]:
         "email": user.email,
         "display_name": user.full_name or user.email,
         "is_superuser": user.is_superuser,
+        "is_manager": user.is_manager,
         "linked_providers": list(
             user.social_identities.order_by("provider").values_list("provider", flat=True)
         ),
@@ -350,22 +364,169 @@ class OAuthLinkView(AdminAPIView):
         return Response(_me(user, session))
 
 
+# --- staff (contract §2.16) -------------------------------------------------------------------------------
+
+STAFF_ID_DESCRIPTION = "Manager only (403 `permission_denied` otherwise)."
+
+
+def _member(staff_id: int) -> dict[str, Any]:
+    """The ``StaffMember`` of a fresh read (every write answers with it)."""
+    user = selectors.staff_member(staff_id)
+    if user is None:  # pragma: no cover - the write just locked the row
+        raise NotFound
+    return dict(StaffMemberSerializer(user).data)
+
+
 class StaffViewSet(mixins.ListModelMixin, AdminGenericViewSet):
-    """``GET staff/`` (contract §2.16): the staff directory behind the audit-log actor filter."""
+    """``staff/`` (contract §2.16): the directory every staff member reads (the audit-log actor filter) and
+    the staff accounts managers manage (``StaffUser.is_manager``, decision GST-1)."""
 
     serializer_class = StaffListItemSerializer
+    queryset = StaffUser.objects.none()  # the schema's model; rows come from get_queryset
     page_size_options = (20, 50, 100)
     default_page_size = 50
+
+    def get_permissions(self) -> Sequence[BasePermission]:
+        if self.action == "list":
+            return cast(Sequence[BasePermission], super().get_permissions())
+        return [IsManager()]
+
+    def _is_manager(self) -> bool:
+        return bool(getattr(self.request.user, "is_manager", False))
 
     def get_queryset(self) -> QuerySet[StaffUser]:
         query = StaffListQuerySerializer(data=self.request.query_params.dict())
         query.is_valid(raise_exception=True)
-        return selectors.staff_list(cast(selectors.StaffFilters, dict(query.validated_data)))
+        filters = cast(selectors.StaffFilters, dict(query.validated_data))
+        return selectors.staff_list(filters, members=self._is_manager())
+
+    def get_serializer_context(self) -> dict[str, Any]:
+        return {**super().get_serializer_context(), "manager": self._is_manager()}
+
+    def _target(self, pk: int) -> StaffUser:
+        user = StaffUser.objects.filter(pk=pk).first()
+        if user is None:
+            raise NotFound
+        return user
 
     @extend_schema(
         operation_id="admin_staff_list",
+        description=(
+            "Every staff member: the directory behind the audit-log actor filter. A manager's rows also "
+            "carry `full_name`, `is_manager`, `last_login_at`, `linked_providers` and `created_at`; for "
+            "anyone else these keys are `null`."
+        ),
         parameters=[StaffListQuerySerializer],
         responses={200: StaffListItemSerializer(many=True), **ADMIN_ERRORS},
     )
     def list(self, request: Request, *args: Any, **kwargs: Any) -> Response:
         return super().list(request, *args, **kwargs)
+
+    @extend_schema(
+        operation_id="admin_staff_create",
+        description=(
+            f"{STAFF_ID_DESCRIPTION} Creates an active staff account with a generated temporary password, "
+            "shown once in the answer. `email` already used by any account → `unique`."
+        ),
+        parameters=[IDEMPOTENCY_KEY_HEADER],
+        request=StaffCreateSerializer,
+        responses={201: StaffCredentialsSerializer, **ADMIN_ERRORS},
+    )
+    @idempotent(sealed=(TEMPORARY_PASSWORD,))
+    def create(self, request: Request) -> Response:
+        body = StaffCreateSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        data = body.validated_data
+        user, password = services.create_staff(
+            email=data["email"],
+            full_name=data["full_name"],
+            is_manager=data["is_manager"],
+            actor=cast(StaffUser, request.user),
+            request=request,
+        )
+        return Response({"staff": _member(user.pk), TEMPORARY_PASSWORD: password}, status=201)
+
+    @extend_schema(
+        operation_id="admin_staff_retrieve",
+        description=STAFF_ID_DESCRIPTION,
+        responses={200: StaffMemberSerializer, **ADMIN_ERRORS},
+    )
+    def retrieve(self, request: Request, pk: int) -> Response:
+        user = selectors.staff_member(int(pk))
+        if user is None:
+            raise NotFound
+        return Response(StaffMemberSerializer(user).data)
+
+    @extend_schema(
+        operation_id="admin_staff_partial_update",
+        description=(
+            f"{STAFF_ID_DESCRIPTION} Changes `full_name` and/or `is_manager` (`email`, `is_active`, "
+            "`password` → `read_only`). Removing the manager role of the caller or of the last active "
+            "manager → 409 `conflict`."
+        ),
+        parameters=[OPTIONAL_IDEMPOTENCY_KEY_HEADER],
+        request=StaffUpdateSerializer,
+        responses={200: StaffMemberSerializer, **ADMIN_ERRORS},
+    )
+    @idempotent(required=False)
+    def partial_update(self, request: Request, pk: int) -> Response:
+        user = self._target(int(pk))
+        body = StaffUpdateSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        services.update_staff(
+            user, dict(body.validated_data), actor=cast(StaffUser, request.user), request=request
+        )
+        return Response(_member(user.pk))
+
+    @extend_schema(
+        operation_id="admin_staff_deactivate",
+        description=(
+            f"{STAFF_ID_DESCRIPTION} The account can no longer sign in: every open session is revoked "
+            "(`deactivated`), linked identities stay. The caller's own account or the last active manager → "
+            "409 `conflict`; an inactive account → 200 unchanged."
+        ),
+        parameters=[IDEMPOTENCY_KEY_HEADER],
+        request=None,
+        responses={200: StaffMemberSerializer, **ADMIN_ERRORS},
+    )
+    @idempotent()
+    def deactivate(self, request: Request, pk: int) -> Response:
+        user = self._target(int(pk))
+        services.deactivate_staff(user, actor=cast(StaffUser, request.user), request=request)
+        return Response(_member(user.pk))
+
+    @extend_schema(
+        operation_id="admin_staff_reactivate",
+        description=(
+            f"{STAFF_ID_DESCRIPTION} The account may sign in again (password, identities and manager role "
+            "kept); an active account → 200 unchanged."
+        ),
+        parameters=[OPTIONAL_IDEMPOTENCY_KEY_HEADER],
+        request=None,
+        responses={200: StaffMemberSerializer, **ADMIN_ERRORS},
+    )
+    @idempotent(required=False)
+    def reactivate(self, request: Request, pk: int) -> Response:
+        user = self._target(int(pk))
+        services.reactivate_staff(user, actor=cast(StaffUser, request.user), request=request)
+        return Response(_member(user.pk))
+
+    @extend_schema(
+        operation_id="admin_staff_reset_password",
+        description=(
+            f"{STAFF_ID_DESCRIPTION} Replaces the password with a generated temporary one (shown once) and "
+            "revokes every open session (`password_changed`); linked identities stay. The caller's own "
+            "account → 409 `conflict` (use `auth/change-password/`)."
+        ),
+        parameters=[IDEMPOTENCY_KEY_HEADER],
+        request=None,
+        responses={200: StaffCredentialsSerializer, **ADMIN_ERRORS},
+    )
+    @idempotent(sealed=(TEMPORARY_PASSWORD,))
+    def reset_password(self, request: Request, pk: int) -> Response:
+        user = self._target(int(pk))
+        password, _ = services.reset_staff_password(
+            user, actor=cast(StaffUser, request.user), request=request
+        )
+        LoginGuard().unlock("login", email_hash(user.email))  # a lockout from earlier guesses ends with it
+        return Response({"staff": _member(user.pk), TEMPORARY_PASSWORD: password})
