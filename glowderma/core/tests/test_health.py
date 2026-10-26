@@ -63,7 +63,15 @@ def test_health_ready_lists_every_provider_mode() -> None:
         "bts": "fake",
         "eskiz": "fake",
     }
-    assert set(body) == {"status", "checks", "version", "integrations", "sandbox", "providers"}
+    assert set(body) == {
+        "status",
+        "checks",
+        "version",
+        "integrations",
+        "sandbox",
+        "providers",
+        "cashback_policy_missing",
+    }
     assert body["sandbox"] == []
     # live Click without its merchant settings (the test settings leave them empty) is not configured, so
     # readiness fails for every caller
@@ -268,3 +276,56 @@ def test_readiness_without_a_probe_is_empty(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(readiness, "_probe", None)
     assert readiness.probe() is None
     assert readiness.live_configured() == {} and readiness.last_syncs() == {}
+
+
+@pytest.mark.django_db
+def test_ready_reports_a_missing_cashback_policy_inside_the_gate_only() -> None:
+    """Gap CB-9.2.4: no policy in force → ``cashback_policy_missing`` for operators; never a 503."""
+    from datetime import timedelta
+
+    from django.test import override_settings
+    from django.utils import timezone
+
+    from glowderma.loyalty.tests.factories import CashbackPolicyFactory
+
+    with override_settings(**ALL_FAKE, ADMIN_API_ALLOWED_NETS=[ip_network("10.0.0.0/8")]):
+        missing = Client(REMOTE_ADDR="10.1.2.3").get("/api/v1/health/?ready=1")
+        outside = Client(REMOTE_ADDR="203.0.113.7").get("/api/v1/health/?ready=1")
+        CashbackPolicyFactory.create(effective_from=timezone.now() + timedelta(days=3))  # scheduled only
+        scheduled = Client(REMOTE_ADDR="10.1.2.3").get("/api/v1/health/?ready=1")
+        CashbackPolicyFactory.create(
+            version=2,
+            effective_from=timezone.now() - timedelta(days=1),
+            created_at=timezone.now() - timedelta(days=2),
+        )
+        active = Client(REMOTE_ADDR="10.1.2.3").get("/api/v1/health/?ready=1")
+    assert missing.status_code == 200 and missing.json()["status"] == "ok"
+    assert missing.json()["cashback_policy_missing"] is True
+    assert "cashback_policy_missing" not in outside.json()
+    assert scheduled.json()["cashback_policy_missing"] is True
+    assert active.status_code == 200 and active.json()["cashback_policy_missing"] is False
+
+
+@pytest.mark.django_db
+def test_the_cashback_policy_check_is_null_while_unknown(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from django.test import override_settings
+
+    from glowderma.core import readiness
+
+    with override_settings(**ALL_FAKE):
+        with patch("glowderma.core.api.health.connection.cursor", side_effect=RuntimeError("db down")):
+            down = Client().get("/api/v1/health/?ready=1")
+
+        def broken() -> bool:
+            raise RuntimeError("check broke")
+
+        monkeypatch.setattr(readiness, "_cashback_policy_check", broken)
+        failing = Client().get("/api/v1/health/?ready=1")
+        monkeypatch.setattr(readiness, "_cashback_policy_check", None)
+        unregistered = Client().get("/api/v1/health/?ready=1")
+    assert down.status_code == 503 and down.json()["cashback_policy_missing"] is None
+    assert failing.status_code == 200 and failing.json()["cashback_policy_missing"] is None
+    assert "health check cashback policy failed" in caplog.text
+    assert unregistered.status_code == 200 and unregistered.json()["cashback_policy_missing"] is None

@@ -163,6 +163,22 @@ def test_stats_and_attention(staff_client: APIClient) -> None:
     assert attention["pending_appointments"] == 1 and attention["next_appointment_at"] is not None
 
 
+def test_attention_flags_a_missing_cashback_policy(
+    staff_client: APIClient, django_assert_num_queries: Any
+) -> None:
+    """Gap CB-9.2.4: true while no policy version is in force at ``now`` (none, or only a future one)."""
+    from glowderma.loyalty import selectors as loyalty_selectors
+    from glowderma.loyalty.tests.factories import CashbackPolicyFactory
+
+    assert _get(staff_client).json()["attention"]["cashback_policy_missing"] is True
+    CashbackPolicyFactory.create(created_at=NOW - timedelta(days=1), effective_from=NOW + timedelta(hours=1))
+    assert _get(staff_client).json()["attention"]["cashback_policy_missing"] is True  # scheduled only
+    with seeding.pinned_clock(NOW + timedelta(hours=1)):
+        assert staff_client.get(URL).json()["attention"]["cashback_policy_missing"] is False
+    with seeding.pinned_clock(NOW), django_assert_num_queries(1):  # one query for the flag
+        assert loyalty_selectors.cashback_policy_missing(NOW) is True
+
+
 def test_window_helpers() -> None:
     window = selectors.dashboard_window("custom", date(2026, 10, 24), date(2026, 10, 1), date(2026, 10, 2))
     assert (window.days, window.bucket) == (2, "hour")

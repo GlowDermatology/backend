@@ -19,6 +19,7 @@ from glowderma.core.models import AuditEntry
 from glowderma.core.timeutils import TASHKENT
 from glowderma.delivery import selectors as delivery_selectors
 from glowderma.integrations import selectors as integration_selectors
+from glowderma.loyalty import selectors as loyalty_selectors
 from glowderma.payments import selectors as payment_selectors
 
 
@@ -197,6 +198,7 @@ def dashboard(window: DashboardWindow, now: datetime | None = None) -> dict[str,
             "new_from_billz": products["new_from_billz"],
             "refunds_needing_action": payment_selectors.refunds_needing_action(),
             "bts_polling_failing": bts_polling_failing(),
+            "cashback_policy_missing": loyalty_selectors.cashback_policy_missing(instant),
         },
         "generated_at": instant,
     }

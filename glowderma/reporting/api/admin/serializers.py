@@ -120,6 +120,10 @@ class DashboardAttentionSerializer(serializers.Serializer[dict[str, Any]]):
     bts_polling_failing = serializers.BooleanField(
         help_text="The last BTS polling run tracked no parcel or stopped on transport failures (M2)."
     )
+    cashback_policy_missing = serializers.BooleanField(
+        help_text="No cashback policy version is in force now (none exists, or only a future one): purchases "
+        "earn no cashback until one starts."
+    )
 
 
 class DashboardSerializer(serializers.Serializer[dict[str, Any]]):

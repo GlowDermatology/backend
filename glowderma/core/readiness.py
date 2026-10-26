@@ -10,10 +10,15 @@ registers one :class:`ProviderProbe` at startup (``IntegrationsConfig.ready``) a
 * :meth:`ProviderProbe.last_syncs` — ``{provider: last successful sync}`` of the providers that sync (Billz
   catalog sync, BTS polling; ``IntegrationState.last_sync_at``). One query; shown only to callers past the
   admin network gate, with the configured flags.
+
+The loyalty app registers one more check the same way (``LoyaltyConfig.ready``):
+:func:`cashback_policy_missing` — no cashback policy version is in force, so purchases earn nothing (gap
+CB-9.2.4). Informational: shown to callers past the gate, it never fails readiness.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
 from typing import Protocol
 
@@ -25,6 +30,7 @@ class ProviderProbe(Protocol):
 
 
 _probe: ProviderProbe | None = None
+_cashback_policy_check: Callable[[], bool] | None = None
 
 
 def register(probe: ProviderProbe) -> None:
@@ -48,4 +54,23 @@ def last_syncs() -> dict[str, datetime | None]:
     return dict(_probe.last_syncs()) if _probe is not None else {}
 
 
-__all__ = ["ProviderProbe", "last_syncs", "live_configured", "probe", "register"]
+def register_cashback_policy_check(check: Callable[[], bool]) -> None:
+    """Install the "no cashback policy in force" check (one per process; the last registration wins)."""
+    global _cashback_policy_check
+    _cashback_policy_check = check
+
+
+def cashback_policy_missing() -> bool | None:
+    """Whether no cashback policy version is in force now; ``None`` without a registered check."""
+    return bool(_cashback_policy_check()) if _cashback_policy_check is not None else None
+
+
+__all__ = [
+    "ProviderProbe",
+    "cashback_policy_missing",
+    "last_syncs",
+    "live_configured",
+    "probe",
+    "register",
+    "register_cashback_policy_check",
+]

@@ -311,6 +311,7 @@ def test_seed_demo_reproduces_the_design_vectors(staff_client: APIClient) -> Non
         "new_from_billz": 4,
         "refunds_needing_action": 2,  # M3: the seeded failed Click refunds of №10100 and №10175
         "bts_polling_failing": False,
+        "cashback_policy_missing": False,  # v3 is active
     }
     assert sum(bucket["revenue"] for bucket in dashboard["buckets"]) == 768_000
     assert (

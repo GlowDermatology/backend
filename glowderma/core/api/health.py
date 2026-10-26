@@ -59,6 +59,12 @@ class HealthSerializer(serializers.Serializer[dict[str, Any]]):
         "per provider whose mode is `live`. A live provider that is not configured makes `status` `error` "
         "(503) for every caller.",
     )
+    cashback_policy_missing = serializers.BooleanField(
+        required=False,
+        allow_null=True,
+        help_text="With `integrations`: no cashback policy version is in force, so purchases earn nothing. "
+        "Informational, never fails readiness; `null` while the database check fails.",
+    )
 
 
 def _provider_configuration() -> dict[str, bool]:
@@ -68,6 +74,18 @@ def _provider_configuration() -> dict[str, bool]:
     except Exception:
         logger.warning("health check %s failed", "providers", exc_info=True)
         return {}
+
+
+def _cashback_policy_missing(database_ok: bool) -> bool | None:
+    """``core.readiness.cashback_policy_missing`` (registered by loyalty); ``None`` while the database is
+    down or when the check fails (logged, never raised)."""
+    if not database_ok:
+        return None
+    try:
+        return readiness.cashback_policy_missing()
+    except Exception:
+        logger.warning("health check %s failed", "cashback policy", exc_info=True)
+        return None
 
 
 def _provider_details(configured: dict[str, bool], database_ok: bool) -> dict[str, dict[str, Any]]:
@@ -144,4 +162,5 @@ class HealthView(APIView):
             body["integrations"] = integration_modes.provider_modes()
             body["sandbox"] = integration_modes.sandbox_providers()
             body["providers"] = _provider_details(configured, checks["database"] == "ok")
+            body["cashback_policy_missing"] = _cashback_policy_missing(checks["database"] == "ok")
         return Response(body, status=200 if ok else 503)
