@@ -10,6 +10,7 @@ from glowderma.core.seeding import (
     DEFAULT_ANCHOR,
     SeedContext,
     discover_seeders,
+    preflight_problems,
     reset_sequences,
     run_seeders,
 )
@@ -65,6 +66,9 @@ class Command(BaseCommand):
             names: list[str] = []
             if not options["sequences_only"]:
                 modules = discover_seeders()
+                problems = preflight_problems()
+                if problems:
+                    raise CommandError("\n".join(["seed_demo cannot seed this database:", *problems]))
                 names = run_seeders(SeedContext(anchor=anchor, keep_open=not options["no_keep_open"]))
                 self.stdout.write(
                     f"Imported {len(modules)} seed module(s); ran: {', '.join(names) or 'none'}"

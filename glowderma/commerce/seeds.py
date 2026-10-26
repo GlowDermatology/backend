@@ -68,7 +68,6 @@ from glowderma.integrations.payme import fake as fake_payme
 from glowderma.loyalty import seeds as loyalty_seeds
 from glowderma.loyalty import selectors as loyalty_selectors
 from glowderma.loyalty import services as loyalty_services
-from glowderma.loyalty.models import LedgerEntry, Purchase
 from glowderma.payments import selectors as payment_selectors
 
 SEED_ADMIN_EMAIL = "admin@glowderma.uz"
@@ -606,7 +605,7 @@ class Replay:
                 events_next = OrderEvent.objects.filter(order_id=step.events_of).count() + 1
             with (
                 pinned_clock(step.at),
-                pinned_sequence(LedgerEntry._meta.db_table, step.ledger_id),
+                pinned_sequence(loyalty_selectors.ledger_table(), step.ledger_id),
                 pinned_sequence(OrderEvent._meta.db_table, events_next),
             ):
                 step.action()
@@ -744,7 +743,7 @@ class Seeder:
     def schedule_malika(self) -> None:
         if not Customer.objects.filter(pk=MALIKA_ID).exists():
             return
-        present = set(Purchase.objects.filter(customer_id=MALIKA_ID).values_list("billz_sale_id", flat=True))
+        present = loyalty_selectors.store_sale_ids(MALIKA_ID)
         for sale_id, sold_at, amount, ledger_id in MALIKA_STORE_SALES:
             if sale_id in present:
                 continue
@@ -753,10 +752,7 @@ class Seeder:
                 functools.partial(_store_sale, MALIKA_ID, sale_id, amount, sold_at),
                 ledger_id=ledger_id,
             )
-        adjusted = LedgerEntry.objects.filter(
-            account__customer_id=MALIKA_ID, kind=enums.LedgerKind.ADJUSTMENT, reason=ADJUSTMENT_REASON
-        ).exists()
-        if not adjusted:
+        if not loyalty_selectors.has_adjustment(MALIKA_ID, ADJUSTMENT_REASON):
             self.replay.add(
                 MALIKA_ADJUSTMENT_AT,
                 lambda: loyalty_services.adjust(
@@ -784,7 +780,7 @@ class Seeder:
         self.schedule_store_sales()
         for plan in [*fixed_orders(), *malika_pre_policy_orders(), *generated_orders(products)]:
             self.schedule(plan)
-        park_sequence(LedgerEntry._meta.db_table, GENERATED_ID_FLOOR)
+        park_sequence(loyalty_selectors.ledger_table(), GENERATED_ID_FLOOR)
         park_sequence(OrderEvent._meta.db_table, GENERATED_ID_FLOOR)
         steps = self.replay.run()
         if self.context.keep_open:
@@ -810,7 +806,22 @@ def keep_open(now: datetime) -> int:
     return moved
 
 
-@register_seeder("commerce", order=70)
+MESSAGE_SEEDED_BEFORE_ORDERS = (
+    "the database holds loyalty ledger rows but none of the demo orders (it was seeded before the orders "
+    "slice existed); replaying the orders would reuse their ledger ids. Run `manage.py seed_demo --reset` "
+    "(it empties the database first)."
+)
+
+
+def preflight() -> str | None:
+    """Refuse a database seeded before this seeder existed: loyalty rows present, demo orders absent (the
+    replay pins ledger ids 100–121 that its earlier store sales already took — a duplicate-key failure)."""
+    if loyalty_selectors.has_ledger_entries() and not Order.objects.filter(pk__in=MALIKA_ORDER_IDS).exists():
+        return MESSAGE_SEEDED_BEFORE_ORDERS
+    return None
+
+
+@register_seeder("commerce", order=70, preflight=preflight)
 def seed_commerce(context: SeedContext) -> None:
     admin: StaffUser | None = get_user_model().objects.filter(email=SEED_ADMIN_EMAIL).first()
     if admin is None or not Product.objects.exists() or not Customer.objects.exists():

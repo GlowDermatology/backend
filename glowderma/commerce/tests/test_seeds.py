@@ -300,3 +300,23 @@ def test_seed_demo_reproduces_the_design_vectors(staff_client: APIClient) -> Non
     # --- idempotent: a second run adds nothing ---
     call_command("seed_demo", force=True, verbosity=0)
     assert _counts() == first
+
+
+def test_seed_demo_refuses_a_database_seeded_before_the_orders_slice() -> None:
+    """Loyalty demo rows without the commerce demo orders: the replay would reuse their ledger ids, so
+    ``seed_demo`` stops up front and points at ``--reset``; nothing is written."""
+    from django.core.management.base import CommandError
+
+    from glowderma.accounts.tests.factories import CustomerFactory, StaffUserFactory
+    from glowderma.commerce import seeds as commerce_seeds
+    from glowderma.loyalty import services as loyalty_services
+
+    customer = CustomerFactory.create()
+    with pinned_clock(ANCHOR):
+        loyalty_services.adjust(
+            customer.pk, "add", 1_000, "Oldingi demo yozuvi", StaffUserFactory.create().pk
+        )
+    assert commerce_seeds.preflight() == commerce_seeds.MESSAGE_SEEDED_BEFORE_ORDERS
+    with pytest.raises(CommandError, match=r"seed_demo --reset"):
+        call_command("seed_demo", force=True)
+    assert not Order.objects.exists() and LedgerEntry.objects.count() == 1

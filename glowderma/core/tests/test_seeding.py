@@ -223,3 +223,21 @@ def test_seed_demo_reset_flushes_then_seeds(
     settings.SETTINGS_MODULE = "config.settings.test"
     with pytest.raises(CommandError, match="--force"):
         call_command("seed_demo", reset=True)  # pytest-django runs with DEBUG=False: nothing is flushed
+
+
+def test_preflight_problems_collect_each_registered_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(seeding, "_registry", {})
+
+    @seeding.register_seeder("quiet", order=1, preflight=lambda: None)
+    def quiet(context: seeding.SeedContext) -> None:  # pragma: no cover - never run
+        pass
+
+    @seeding.register_seeder("plain", order=2)
+    def plain(context: seeding.SeedContext) -> None:  # pragma: no cover - never run
+        pass
+
+    @seeding.register_seeder("blocked", order=3, preflight=lambda: "run `seed_demo --reset`")
+    def blocked(context: seeding.SeedContext) -> None:  # pragma: no cover - never run
+        pass
+
+    assert seeding.preflight_problems() == ["blocked: run `seed_demo --reset`"]

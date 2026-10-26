@@ -139,20 +139,42 @@ class SeedContext:
 
 
 Seeder = Callable[[SeedContext], None]
+Preflight = Callable[[], str | None]
+"""A check run before any seeder: a message when the database is in a state the seeder cannot handle."""
 
 _registry: dict[str, tuple[int, Seeder]] = {}
 _TAG = "_glowderma_seeder"
+_PREFLIGHT = "_glowderma_seed_preflight"
 
 
-def register_seeder(name: str, *, order: int) -> Callable[[Seeder], Seeder]:
+def register_seeder(
+    name: str, *, order: int, preflight: Preflight | None = None
+) -> Callable[[Seeder], Seeder]:
+    """Register ``name`` at ``order``; ``preflight`` (optional) runs before every seeder of the run (see
+    :func:`preflight_problems`) and answers a message when the seeder would fail on this database."""
+
     def decorate(seeder: Seeder) -> Seeder:
         if name in _registry:
             raise ValueError(f"Seeder {name!r} is already registered")
         _registry[name] = (order, seeder)
         setattr(seeder, _TAG, (name, order))
+        if preflight is not None:
+            setattr(seeder, _PREFLIGHT, preflight)
         return seeder
 
     return decorate
+
+
+def preflight_problems() -> list[str]:
+    """The messages of every registered seeder's preflight check (``"<name>: <message>"``), in seeder order;
+    ``seed_demo`` refuses to run when the list is not empty."""
+    problems: list[str] = []
+    for name, _order, seeder in registered_seeders():
+        check: Preflight | None = getattr(seeder, _PREFLIGHT, None)
+        message = check() if check is not None else None
+        if message:
+            problems.append(f"{name}: {message}")
+    return problems
 
 
 def registered_seeders() -> list[tuple[str, int, Seeder]]:
