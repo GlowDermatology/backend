@@ -164,7 +164,10 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
   / `ctx.media_placeholder` for image bytes. Seeders look rows up by natural keys, read the demo staff through
   `get_user_model()` (`admin@glowderma.uz`, id 1; password from `SEED_ADMIN_PASSWORD`), and tolerate a missing
   lower-layer row (actor `NULL`) so a module seeder runs standalone. The root `conftest.py` `media_root` fixture
-  gives the whole test session a temporary `MEDIA_ROOT`. `settings.FAKE_NOW` (env `FAKE_NOW`, local/test only) pins
+  gives the whole test session a temporary `MEDIA_ROOT`. A migrated database already holds cashback policy v1
+  from `loyalty.0006` (GS-6): a plain `seed_demo` keeps it and adds the design v2/v3 (credits, №10248 and
+  Malika's ledger still reproduce), but the design's policy-history cards (v1 "20 mln gacha 1%") need
+  `seed_demo --reset`; the test settings disable the bootstrap (`LOYALTY_BOOTSTRAP_POLICY=False`). `settings.FAKE_NOW` (env `FAKE_NOW`, local/test only) pins
   `timeutils.now()` for demos and e2e runs.
 - Retention jobs delete from `core.db.PURGEABLE_TABLES` only inside `core.db.purge_window()`; the outbox offers
   `outbox.on_dead(topic)` hooks for the orchestrating module to record what a dead message means.

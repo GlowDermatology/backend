@@ -423,7 +423,7 @@ Body `{"verification_token": str (purpose register), "password": str, "name": st
 
 | Field / check | Code | Message (uz) · key |
 |---|---|---|
-| Terms published: `SiteSettings.terms_version` non-empty **and** the uz texts of `terms` and `privacy_policy` non-empty (`terms_version` versions both documents) | 503 `terms_not_published` | "Ro‘yxatdan o‘tish vaqtincha mavjud emas. Keyinroq urinib ko‘ring." · `error.terms_not_published` |
+| Terms published: `SiteSettings.terms_version` non-empty **and** the published uz texts of `terms` and `privacy_policy` hold a visible character (`terms_version` versions both documents; staff publish through admin §2.11 `POST settings/terms/publish/`) | 503 `terms_not_published` | "Ro‘yxatdan o‘tish vaqtincha mavjud emas. Keyinroq urinib ko‘ring." · `error.terms_not_published` |
 | `verification_token` | 400 `verification_invalid` | `error.verification_invalid` |
 | `name` trimmed 2..150 | `min_length` / `max_length` | "Ismingizni kiriting (kamida 2 belgi)." · `field.name_min` / generic |
 | `password` 8..128; Django validators with `CUSTOMER_PASSWORD_MIN_LENGTH` (8), common, numeric, similarity to the phone | `password_too_short` · `password_too_common` · `password_entirely_numeric` · `password_too_similar` · `max_length` | "Parol kamida 8 ta belgidan iborat bo‘lsin." · "Bu parol juda oddiy." · "Parol faqat raqamlardan iborat bo‘lmasin." · "Parol telefon raqamingizga juda o‘xshash." (`field.password_*`) |
@@ -945,9 +945,9 @@ the fake Billz serves stock normally.
  "store_phone": "+998712000001", "cosmetologist_phone": null,
  "telegram_url": "https://t.me/glowderma", "instagram_url": null, "website_url": "https://glowderma.uz",
  "pickup_address": "Toshkent, Yunusobod, …",          // resolved language
- "privacy_policy": "…", "terms": "…", "booking_policy": "…",   // resolved language; "" when not filled
- "terms_version": "2026-10-01",                       // | null while the terms are not published (registration answers 503 terms_not_published); versions terms AND privacy policy
- "terms_updated_at": "2026-10-01T00:00:00+05:00",     // | null
+ "privacy_policy": "…", "terms": "…", "booking_policy": "…",   // resolved language; "" when not filled; terms and privacy = the PUBLISHED copy
+ "terms_version": "20261001-1",                       // | null while the terms are not published (registration answers 503 terms_not_published); versions terms AND privacy policy
+ "terms_updated_at": "2026-10-01T10:15:00+05:00",     // | null; when that version was published (null whenever terms_version is null)
  "reservation_minutes": 15,
  "payment_providers": ["click", "payme"],             // providers that can take a payment now; [] = online payment unavailable (the app hides checkout)
  "online_sales_enabled": true,                        // false while Billz is fake in production: stock unknown, nothing can be added to the cart or checked out (§2.3)
@@ -955,6 +955,15 @@ the fake Billz serves stock normally.
  "min_app_version": {"ios": "1.0.0", "android": "1.0.0"},
  "store_urls": {"ios": "https://apps.apple.com/…", "android": "https://play.google.com/…"}}
 ```
+Staff set the phones, links and texts in admin §2.11 (`PATCH settings/`) and publish the terms there
+(`POST settings/terms/publish/`, gap closure 2026-10-27). `terms` and `privacy_policy` are the **published** copies:
+staff edit drafts, and the served texts change only together with `terms_version` (`YYYYMMDD-n`, the Tashkent day of
+the publication and its count that day), so the text shown under a version is exactly the text a customer accepts
+with it. `booking_policy` is not versioned and is served once saved (after the ≤60 s cache). A new version asks
+every customer to accept again (§2.2.4) and is the only one registration accepts (§2.1.3). The links are absolute
+`https` URLs on a public host (Telegram `t.me/<handle>`, Instagram `instagram.com/<handle>`) or `null`; they never
+contain quotes, angle brackets, backticks, backslashes, whitespace or invisible control characters.
+
 `payment_providers` lists Click and Payme in this order, each only when it can take a payment: a provider whose
 mode is `fake` is listed under the local/test settings and **omitted under the production settings**, where its
 callbacks are refused (§2.13.0, §6.14). Checkout and pay refuse a provider outside the list (400 `invalid_choice`,

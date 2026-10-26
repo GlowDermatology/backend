@@ -72,6 +72,12 @@ def active_policy(now: datetime | None = None) -> CashbackPolicy | None:
     return policy_at(now or timeutils.now())
 
 
+def cashback_policy_missing(now: datetime | None = None) -> bool:
+    """No policy version is in force now (none exists, or only a future one): purchases earn nothing until
+    one starts (admin §2.10 ``attention.cashback_policy_missing``, §2.15). One query."""
+    return CashbackPolicy.objects.active_at(now or timeutils.now()) is None
+
+
 def scheduled_policy(now: datetime | None = None) -> CashbackPolicy | None:
     """The one future, non-superseded version (``state == scheduled``), or ``None``."""
     instant = now or timeutils.now()

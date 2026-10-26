@@ -5,8 +5,9 @@ Every route name is prefixed ``admin-`` and unique across modules; the auth matr
 
 from django.urls import URLPattern, URLResolver, path
 
-from .views import SettingsView
+from .views import SettingsView, TermsPublishView
 
 urlpatterns: list[URLPattern | URLResolver] = [
     path("settings/", SettingsView.as_view(), name="admin-settings"),
+    path("settings/terms/publish/", TermsPublishView.as_view(), name="admin-settings-terms-publish"),
 ]

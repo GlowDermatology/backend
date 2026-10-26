@@ -132,7 +132,8 @@ def test_site_config_migrations_reverse_to_zero_and_forward_again() -> None:
     SiteSettings.objects.filter(pk=1).update(support_phone="+998712000000")
     call_command("migrate", "site_config", "0001", verbosity=0)
     # reverse of 0002 is a no-op (the row is configuration): pk 1 survives untouched; 0001's reverse drops it
-    assert SiteSettings.objects.get().pk == 1 and SiteSettings.load().support_phone == "+998712000000"
+    # (the columns of the current model that 0003 adds are absent at 0001: read the old ones only)
+    assert SiteSettings.objects.values_list("pk", "support_phone").get() == (1, "+998712000000")
     call_command("migrate", "site_config", "zero", verbosity=0)
     assert "site_config_sitesettings" not in connection.introspection.table_names()
     call_command("migrate", "site_config", verbosity=0)
@@ -148,3 +149,38 @@ def test_flush_keeps_the_singleton() -> None:
     call_command("flush", interactive=False, verbosity=0)
     assert SiteSettings.objects.count() == 1
     assert SiteSettings.load().pk == 1 and SiteSettings.load().reservation_minutes == 15
+
+
+@pytest.mark.django_db(transaction=True)
+def test_terms_drafts_migration_copies_the_saved_texts_once() -> None:
+    """``site_config.0003`` (review should_fix, GS-2): an empty draft takes its published text, a filled draft
+    is kept; rerunning the step changes nothing; the reverse drops the draft columns only."""
+    from importlib import import_module
+
+    from django.apps import apps as global_apps
+
+    SiteSettings.objects.filter(pk=1).update(
+        terms_uz="Shartlar", privacy_policy_ru="Политика", terms_draft_en="Draft", terms_en="Published"
+    )
+    step = import_module("glowderma.site_config.migrations.0003_terms_drafts")
+    step.copy_published_into_drafts(global_apps, None)
+    step.copy_published_into_drafts(global_apps, None)
+    row = SiteSettings.objects.get(pk=1)
+    assert (row.terms_draft_uz, row.privacy_policy_draft_ru, row.terms_draft_en) == (
+        "Shartlar",
+        "Политика",
+        "Draft",
+    )
+    assert (row.terms_draft_ru, row.privacy_policy_draft_uz) == ("", "")
+    call_command("migrate", "site_config", "0002", verbosity=0)
+    columns = {
+        c.name
+        for c in connection.introspection.get_table_description(
+            connection.cursor(), "site_config_sitesettings"
+        )
+    }
+    assert "terms_draft_uz" not in columns and "terms_uz" in columns
+    assert SiteSettings.objects.values_list("terms_uz", flat=True).get() == "Shartlar"
+    SiteSettings.objects.filter(pk=1).update(terms_uz="Yangi")
+    call_command("migrate", "site_config", verbosity=0)
+    assert SiteSettings.objects.get(pk=1).terms_draft_uz == "Yangi"

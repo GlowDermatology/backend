@@ -7,7 +7,8 @@ routes, the provider callbacks posted exactly as Click / Payme / BTS post them, 
 on commit (``django_capture_on_commit_callbacks(execute=True)``), so pushes, SMS, refunds and shipments happen
 as in production. State that has no customer route is arranged through the admin API with a staff token
 (cashback adjustments, appointment confirmation, order cancel/transition, campaigns); only the published terms
-and the catalogue rows are written directly (they have no API). Time moves through ``timeutils.now`` only
+(fixed versions; the admin publish path has its own journey, ``test_terms_publish_journey.py``) and the
+catalogue rows are written directly. Time moves through ``timeutils.now`` only
 (no freezegun), and never before a token is issued: PyJWT checks ``iat``/``exp`` against the real clock.
 
 The integration review found five seam defects with these journeys (M2J-1…5: one published-terms rule
@@ -263,7 +264,8 @@ def world(commit: Commit, fcm: FakeFcm, staff_client: APIClient, clock: Clock) -
 def publish_terms(
     version: str, *, terms_uz: str = "Foydalanish shartlari", privacy_uz: str = "Maxfiylik"
 ) -> None:
-    """Staff publish the terms (no API exists for it): the singleton row, and the 60 s ``settings/public/``
+    """Publish the terms at a fixed version (written directly; the admin publish path, which stamps dated
+    versions, has its own journey): the singleton row, and the 60 s ``settings/public/``
     cache dropped as ``site_config.services.update_settings`` does on commit."""
     SiteSettings.objects.filter(pk=1).update(
         terms_version=version,

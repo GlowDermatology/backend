@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Version | 1.0.2 (2026-10-26), M1 admin vertical; M2 cross-references from `docs/api/customer-api-v1.md` in §2.1 (staff OAuth under fake OAuth in production), §2.2 (manual Click refunds on cancel), §2.3 (Billz import and product create refused while Billz is fake in production), §2.10 (revenue, `attention.bts_polling_failing`), §2.11 (`integrations.providers`), §2.14 (`billz_fake_mode`), §2.15 (`providers`), §3.1 (`refresh_reused`), §3.2, §4 (`refund_requested.manual_reason`), §5.1/§5.7 (refund lines by provider, BTS polling attention), §6 (refund pending display, live-to-fake switch) and §7 items 3 and 18 (refund state line, refund resolve with a fresh Click status check) |
+| Version | 1.0.2 (2026-10-26), M1 admin vertical; M2 cross-references from `docs/api/customer-api-v1.md` in §2.1 (staff OAuth under fake OAuth in production), §2.2 (manual Click refunds on cancel), §2.3 (Billz import and product create refused while Billz is fake in production), §2.10 (revenue, `attention.bts_polling_failing`), §2.11 (`integrations.providers`), §2.14 (`billz_fake_mode`), §2.15 (`providers`), §3.1 (`refresh_reused`), §3.2, §4 (`refund_requested.manual_reason`), §5.1/§5.7 (refund lines by provider, BTS polling attention), §6 (refund pending display, live-to-fake switch) and §7 items 3 and 18 (refund state line, refund resolve with a fresh Click status check). Gap closure, settings package (2026-10-27): §1.7, §2.0, §2.10 (`attention.cashback_policy_missing`), §2.11 (contacts, legal texts, `POST settings/terms/publish/`), §2.15 (`cashback_policy_missing`), §3.2 (`settings.terms_published`, the bootstrap policy), §5.7 and §7 item 19 |
 | Implemented by | Django 6.1 / DRF 3.18 backend (Codex) and the Next.js admin data layer (`frontend/src/data/api/*`, Claude) |
 | Source of truth | `docs/specs/2026-10-24-backend-foundation-design.md`. Where this file and the spec disagree, the spec wins and this file is fixed. |
 | Enforced by | drf-spectacular schema (`openapi/schema.yaml`, `--validate --fail-on-warn`), backend contract tests, frontend mapper tests (order №10248, Malika's ledger) |
@@ -110,7 +110,7 @@ Collections embedded in a resource (customer ledger and purchases, order items, 
 | 409 | `invalid_transition` | A state machine refuses (order transition, appointment action, retry-shipment precondition) |
 | 409 | `click_not_reversed` | M3: `payments/{id}/refunds/{refund_id}/resolve/` of a failed Click refund without `manual_payout` while Click still shows the payment paid (§7 item 18); the UI then offers "Qo‘lda to‘landi" |
 | 409 | `not_cancellable` | Order cancel refused (§2.2) |
-| 409 | `conflict` | Other state conflicts (category has products, BTS message in flight, last image of an active product, …) |
+| 409 | `conflict` | Other state conflicts (category has products, BTS message in flight, last image of an active product, terms published without their uz texts (§2.11), …) |
 | 409 | `request_in_progress` | The same `Idempotency-Key` is still executing; `Retry-After: 1` |
 | 413 | `payload_too_large` | Body > 6 MiB |
 | 415 | `unsupported_media_type` | Wrong `Content-Type` |
@@ -146,7 +146,8 @@ Default top-level messages: `not_authenticated` "Avtorizatsiya talab qilinadi." 
   - `customers/{id}/cashback-adjustments/`;
   - `cashback/policy-versions/`;
   - `POST notifications/`;
-  - `appointments/{id}/{confirm|reject|attend}/`.
+  - `appointments/{id}/{confirm|reject|attend}/`;
+  - `settings/terms/publish/` (every publication asks every customer to accept the terms again).
 - **Optional:** honoured when sent on any other *authenticated* POST, PUT, PATCH or DELETE. `auth/*` endpoints ignore the header: their responses carry credentials or end sessions, so they are never stored.
 - **Scope:** (audience `staff`, actor staff id, method, resolved path including ids, key). The same key on two different orders is two separate records.
 - **Fingerprint:** SHA-256 over the canonical body. JSON is parsed, keys sorted and serialised compactly. Multipart uses the sorted non-file fields plus the SHA-256 of each file.
@@ -248,6 +249,7 @@ The FE creates one key per form/dialog instance (`crypto.randomUUID()`), reuses 
 | POST | `appointments/{id}/reschedule/`, `appointments/{id}/cancel/` (T10) | I optional | 200 |
 | GET | `dashboard/`, `nav-counts/` | | 200 |
 | GET / PATCH | `settings/` | | 200 |
+| POST | `settings/terms/publish/` (empty body) | I | 200 |
 | GET | `payments/`, `audit-log/` | P E | 200 |
 | POST | `payments/{id}/refunds/{refund_id}/retry/`, `…/resolve/` (§2.12) | I optional | 200 |
 | GET | `staff/` (§2.16) | P | 200 |
@@ -835,7 +837,8 @@ Templates are editable in the admin UI through `GET` / `PUT` below.
                "pending_appointments": 3, "next_appointment_at": "2026-10-26T09:00:00+05:00",  // = pending-summary
                "new_from_billz": 6,
                "refunds_needing_action": 0,               // refunds in failed|unknown|manual_required (a superseded failed one excluded, below)
-               "bts_polling_failing": false},             // M2: the last BTS polling run tracked no parcel or stopped on transport failures (IntegrationState(bts).consecutive_failures > 0)
+               "bts_polling_failing": false,              // M2: the last BTS polling run tracked no parcel or stopped on transport failures (IntegrationState(bts).consecutive_failures > 0)
+               "cashback_policy_missing": false},         // no cashback policy version is in force now: purchases earn nothing
  "generated_at": "2026-10-24T12:00:00+05:00"}
 ```
 - `revenue` = Σ `payment.amount` of payments confirmed in the bucket, minus the succeeded refunds of those payments. Refunds are attributed to the payment's bucket, so revenue is never negative. Late-captured payments (M2, customer contract §2.13.0: money taken for an order we did not honour, always refunded) are excluded.
@@ -843,21 +846,60 @@ Templates are editable in the admin UI through `GET` / `PUT` below.
 - `attention.refunds_needing_action` counts refunds in `unknown` or `manual_required`, and `failed` refunds that still need staff: a `failed` refund is **not** counted when a later refund of the same payment `succeeded` (a staff retry returned the money) or when its payment is `refunded`. `payments/?refund_state=failed` (§2.12) applies the same rule.
 - `attention.bts_polling_failing` (M2, customer contract §2.13.3) = `IntegrationState(bts).consecutive_failures > 0`: a polling run stopped after consecutive transport failures, or attempted parcels and tracked none (every parcel refused). It turns false at the next run that tracks a parcel; BTS webhooks never change it.
 
+- `attention.cashback_policy_missing` (gap CB-9.2.4) = no cashback policy version is in force at `generated_at`: none exists, or the only versions are scheduled for later (`state` `scheduled`). Purchases confirmed meanwhile earn no cashback (§2.7, the engine finds no tier). A fresh install is never in this state: migration `loyalty.0006` creates the first version (§3.2) when the policy table is empty; the flag catches a database where it was skipped. Staff fix it in "Cashback sozlamalari" (a new version starts at its `effective_from`, never in the past).
+
 **`GET nav-counts/`** → `{"orders_processing": 41, "appointments_pending": 3}`. These are all-time `processing` orders and the pending-summary count.
 
 ### 2.11 Settings (typed singleton)
 **`GET settings/`**
 ```jsonc
-{"reservation_minutes": 15, "support_phone": "+998712000000",   // str | null
+{"reservation_minutes": 15,
+ "support_phone": "+998712000000",                              // seller ("Sotuvchi bilan bog‘lanish") | null
+ "store_phone": "+998712000001",                                // the app's Settings section | null
+ "cosmetologist_phone": "+998712000002",                        // the AI section (Phase 2) | null
+ "telegram_url": "https://t.me/glowderma",                      // https | null
+ "instagram_url": "https://instagram.com/glowderma",            // https | null
+ "website_url": "https://glowderma.uz",                         // https | null
  "pickup_address": {"uz": "Toshkent, …", "ru": "", "en": ""},
+ "terms": {"uz": "…", "ru": "…", "en": ""},                     // Terms of Use, the DRAFT staff edit; "" = not filled
+ "privacy_policy": {"uz": "…", "ru": "", "en": ""},             // Privacy Policy, the DRAFT
+ "booking_policy": {"uz": "…", "ru": "", "en": ""},             // cancellation / reschedule terms of bookings (P3)
+ "terms_version": "20261027-1",                                 // read-only; the published version | null (never published)
+ "terms_updated_at": "2026-10-27T10:15:00+05:00",               // read-only; when it was published | null
+ "terms_unpublished_changes": false,                            // read-only; a terms / privacy draft differs from the published copy
  "integrations": {"mode": "fake",                               // read-only, from INTEGRATIONS_MODE (every provider's default)
                   "providers": {"oauth": "fake", "billz": "fake", "fcm": "fake",
                                 "click": "fake", "payme": "fake", "bts": "fake"}},   // read-only, each provider's *_MODE (M2 adds "eskiz")
- "updated_at": "…", "updated_by": null}                         // Actor | null
+ "updated_at": "…", "updated_by": null}                         // Actor | null (null = system)
 ```
-**`PATCH settings/`**: `reservation_minutes` int 5..60; `support_phone` E.164 or null; `pickup_address.*` ≤200 (each language optional: a leaf PATCH changes only the languages sent); `integrations` → `read_only`. → 200.
-- Audit `settings.updated`: `data` is a diff of **only the changed leaves**, each `{"from", "to"}`, nested like the resource. A PATCH of `pickup_address.ru` alone logs `{"pickup_address": {"ru": {"from": "", "to": "Ташкент, …"}}}`; `{"reservation_minutes": {"from": 15, "to": 20}, "support_phone": {"from": "+998712000000", "to": null}}`. A PATCH that changes nothing writes no audit row and keeps `updated_at` / `updated_by`.
+**Drafts and published copies (GS-2).** `terms` and `privacy_policy` exist twice: the **draft** that `GET` / `PATCH settings/` show and edit, and the **published copy** that only `POST settings/terms/publish/` writes (it copies every language of both drafts). `settings/public/` (customer contract §2.4), registration and the consent checks use the published copy only, so a `terms_version` always names exactly one text; `terms_unpublished_changes` is `true` while any draft language differs from its published copy. `booking_policy` is not versioned: it has one copy, served as soon as it is saved.
+
+**`PATCH settings/`** changes only the fields sent; an i18n object changes only the languages sent (each is optional). → 200 with the `GET` shape.
+
+| Field | Rule | Error (`field` · `code` · message) |
+|---|---|---|
+| `reservation_minutes` | int 5..60 | `min_value` / `max_value` / `invalid` (generic) |
+| `support_phone`, `store_phone`, `cosmetologist_phone` | E.164 `^\+998\d{9}$` or `null` (clears) | `invalid` "Telefon raqamini to‘g‘ri kiriting." |
+| `telegram_url` | absolute `https` URL, ≤200, trimmed, on a public host name; host `t.me`, `telegram.me` or `www.telegram.me` and the path one account handle (`/name`, `/name/` or an invite `/+code`: letters, digits, `_`, `.`, ≤64, not only dots); `null` or `""` clears; scheme and host stored lowercase | `invalid` "Havolani https:// bilan to‘liq kiriting." (not https, not a URL, credentials in it, a port other than 443, an IP or single-label host, or any of `"` `<` `>` `` ` `` `\`, whitespace or an invisible control/format character such as a bidi override) · `invalid` "Telegram havolasi https://t.me/… ko‘rinishida bo‘lsin." (another host, no handle, a deeper path, `/..`) · `max_length` |
+| `instagram_url` | as `telegram_url`; host `instagram.com` or `www.instagram.com` with an account handle (a query such as `?igsh=…` is kept) | … · `invalid` "Instagram havolasi https://instagram.com/… ko‘rinishida bo‘lsin." · `max_length` |
+| `website_url` | absolute `https` URL, ≤200, any public host name (not an IP literal, not a single label such as `localhost`), no credentials, port 443 only, same forbidden characters; `null` or `""` clears; scheme and host stored lowercase | `invalid` "Havolani https:// bilan to‘liq kiriting." · `max_length` |
+| `pickup_address.{uz,ru,en}` | ≤200 | `max_length` |
+| `terms.{uz,ru,en}`, `privacy_policy.{uz,ru,en}` (drafts) | text ≤50 000 characters; trimmed, line breaks stored as `\n`; a text with no visible character (only whitespace, zero-width spaces, BOM, bidi marks or other format characters) is stored `""`; `""` empties a language of the draft (the published copy is untouched) | `max_length` "50000 belgidan oshmasin." · `null` (an object sent as `null`) |
+| `booking_policy.{uz,ru,en}` | text ≤5 000 characters, same normalisation | `max_length` "5000 belgidan oshmasin." |
+| `pickup_address`, `terms`, `privacy_policy`, `booking_policy` (the object itself) | a JSON object whose keys are `uz`, `ru`, `en` only | `invalid` (generic) on the object's field when it is not an object · `invalid` "Faqat uz, ru va en kalitlarini yuboring." on `<field>.<key>` for any other key (`terms.UZ`), never a silent no-op |
+| `integrations`, `terms_version`, `terms_updated_at`, `terms_unpublished_changes` | read-only | `read_only` (generic) |
+
+- **Saving a text never publishes it.** A saved terms / privacy draft is invisible to customers until `POST settings/terms/publish/`, which is the only way `terms_version` changes: the version is the unit a customer consents to. Publish after any change customers must accept.
+- Audit `settings.updated`: `data` is a diff of **only the changed leaves**, each `{"from", "to"}`, nested like the resource. A PATCH of `pickup_address.ru` alone logs `{"pickup_address": {"ru": {"from": "", "to": "Ташкент, …"}}}`; `{"reservation_minutes": {"from": 15, "to": 20}, "support_phone": {"from": "+998712000000", "to": null}}`. A changed leaf of `terms`, `privacy_policy` or `booking_policy` is logged as a digest, **never the text**: `{"terms": {"uz": {"changed": true, "old_len": 1830, "new_len": 1912, "sha256": "9f2c4a1b7e3d5c60"}}}` (`old_len` / `new_len` in characters; `sha256` = the first 16 hex characters of the SHA-256 of the new text in UTF-8, `null` when the new text is `""`). A PATCH that changes nothing writes no audit row and keeps `updated_at` / `updated_by`.
 - `integrations` values are `IntegrationMode` literals. Fake providers are allowed in production (product owner decision 2026-10-26): the process logs one startup warning listing them, and never refuses to start.
+
+**`POST settings/terms/publish/`** (**I**; empty body) → 200 with the `GET settings/` shape (`terms_unpublished_changes: false`). Copies the `terms` and `privacy_policy` drafts (every language) into the published copies and publishes them as a new version:
+- `terms_version` = `YYYYMMDD-n`: the Tashkent calendar day of the publication and its count on that day from 1 (`20261027-1`, then `20261027-2`; the next day `20261028-1`). A version is never reused (should the stored version carry a later day — a clock set back — that day is kept and `n` grows). `terms_updated_at` = now; `updated_at` / `updated_by` follow.
+- From the moment it commits: registration (`auth/set-password/`, social completion) accepts only the new version (`terms_outdated` otherwise); every existing customer whose consent names another version gets `consent.update_required: true` in `me/` and **409 `terms_update_required`** at checkout and booking until the app sends `POST me/consent/` with the new version (customer contract §2.1.3, §2.2.4). `settings/public/` serves the new `terms_version` at once (its cache starts a new generation on commit).
+- Publishing again without a text change still issues a new version and asks every customer again: publish only for a change customers must accept.
+- Refusal: the uz `terms` or the uz `privacy_policy` draft has no visible character (empty, whitespace, or only invisible format characters) → **409 `conflict`** "Foydalanish shartlari va maxfiylik siyosatining o‘zbekcha matnini kiriting, so‘ng e’lon qiling." (nothing written). Without `Idempotency-Key` → 400 `idempotency_key_required`.
+- Concurrent publications are serialised on the settings row: each gets its own `n`.
+- Audit `settings.terms_published` `{"from": "20261027-1" | null, "to": "20261027-2", "sha256": {"terms": {"uz": "…", "ru": "…", "en": null}, "privacy_policy": {…}}}` — the digest (as above) of every published text. It matches the published copy served under that version until the next publication (drafts never touch it); only the current version's full text is kept (no archive of older versions, GS-2).
 
 ### 2.12 Payments
 **`GET payments/`** (P E)
@@ -927,6 +969,7 @@ Export `tolovlar` (§1.8): the `Qaytarish` column is the §5.1 refund-state line
 - `?ready=1` checks the database, cache and broker → 200 `{"status": "ok", "checks": {"database": "ok", "cache": "ok", "broker": "ok"}, "version": "<git sha>", "integrations": {"oauth": "fake", "billz": "fake", "fcm": "fake", "click": "fake", "payme": "fake", "bts": "fake"}}`, or 503 with `"status": "error"` and the failing check set to `"error"`. `integrations` = `{provider: IntegrationMode}` for every provider with a `*_MODE` setting (informational; a fake provider never fails readiness; M2 adds `eskiz`, customer contract §6.14). It is present **only when the caller would pass the admin network gate of §1** (peer in `ADMIN_API_ALLOWED_NETS` and, in production, a matching `X-GD-Internal-Secret`): which payment and shipping providers are fake is reconnaissance for an attacker. Other callers (load-balancer and container probes) get `status`, `checks` and `version` only.
 - **M3 — live providers.** Callers past the same gate also get `providers`: one entry per provider whose mode is `live` (none while every provider is fake), `{"configured": bool, "last_sync_at": datetime | null, "last_sync_age_seconds": int | null}`. `configured` = the live adapter can be built from the settings and its `is_configured()` says yes (settings only, nothing is sent — Billz: integration key, shop, cash box and payment type; Payme: merchant id and key; Click: the three numeric ids, not `00000`, and the secret key; BTS: login, password, sender city code and, for a branch pickup, the branch code; Eskiz: email, password and sender; FCM: project id and an existing key file). `last_sync_at` is the last successful Billz catalog sync or BTS polling run (`IntegrationState.last_sync_at`, `null` for the other providers and while the database check fails), `last_sync_age_seconds` the whole seconds since then (`null` with it). Example (inside the gate): `"providers": {"billz": {"configured": true, "last_sync_at": "2026-10-27T03:07:12+05:00", "last_sync_age_seconds": 1980}}`.
 - **M3 — sandboxes.** Callers past the same gate also get `sandbox`: the live providers configured against a sandbox — `bts` (BTS's test host as `BTS_BASE_URL`), `payme` (`PAYME_TEST_MODE=true` or Payme's sandbox checkout host), `eskiz` (Eskiz's test sender `4546`) — in that order, `[]` when none. Informational (a sandbox never fails readiness; each one also logs a startup WARNING); it must be empty in production, where money and parcels are real.
+- **Gap CB-9.2.4 — cashback policy.** Callers past the same gate also get `cashback_policy_missing`: `true` while no cashback policy version is in force (the rule of §2.10 `attention.cashback_policy_missing`), `null` while the database check fails or the check itself fails (logged WARNING "health check cashback policy failed"). Informational: it **never** fails readiness.
 - **The 503 rule.** `?ready=1` answers **503** (`"status": "error"`) when any of `database`, `cache`, `broker` is `error` **or** any live provider is not configured — for **every** caller. Outside the gate the body then carries no reason: `"status": "error"` with every check `ok` means a live provider is misconfigured (ask from inside the gate, or see docs/ops/monitoring.md §4). A fake provider never fails readiness. A failure of the provider probe itself is logged (WARNING) and does not fail readiness. Without `?ready=1` the answer is always 200 (liveness).
 
 ### 2.16 Staff directory
@@ -1004,10 +1047,10 @@ Export `tolovlar` (§1.8): the `Qaytarish` column is the §5.1 refund-state line
 | System | `outbox.dead` (`{topic, dedupe_key, attempts, last_error}`), `outbox.requeued` (M3, actor `system`, reason "manage.py requeue_outbox"; before `{status, attempts, last_error}`, after `{topic, dedupe_key, status: "pending"}`), `outbox.resolved` (M3, `requeue_outbox --resolved`: a dead message handled by hand is closed as `done` without running it — a `billz.push_sale` only once its sale is recorded with `billz_mark_recorded`; reason "manage.py requeue_outbox --resolved", before as above, after `{topic, dedupe_key, status: "done"}`); `billz.sale_recorded_by_hand` (M3, entity `order`, actor = the staff member named by `manage.py billz_mark_recorded --actor`, reason "manage.py billz_mark_recorded"; before `{purchase_id, billz_sale_id, billz_pushed_at: null, billz_payment_attempted_at, push_status}`, after `{purchase_id, billz_sale_id, billz_sale_ref, billz_pushed_at}`), `billz.payment_attempt_forgotten` (M3, entity `order`, actor = `requeue_outbox --forget-payment-attempt --actor`, reason "manage.py requeue_outbox --forget-payment-attempt"; before `{purchase_id, billz_sale_id, billz_payment_attempted_at}`, after `{purchase_id, billz_payment_attempted_at: null}`) |
 | Orders | `order.cancelled`, `order.status_changed`, `order.shipment_retry_requested`, `refund.requested`, `refund.state_changed` (system) |
 | Catalog | `product.created`, `product.updated`, `product.image_added`, `product.image_deleted`, `product.images_reordered`, `billz.import_started`, `billz.import_finished`, `category.created`, `category.updated`, `category.deleted`, `category.reordered`, `banner.created`, `banner.updated`, `banner.deleted`, `banner.reordered` |
-| Loyalty | `cashback.adjusted`, `cashback.policy_version_created`, `cashback.policy_version_superseded` |
+| Loyalty | `cashback.adjusted`, `cashback.policy_version_created`, `cashback.policy_version_superseded`. Gap CB-9.2.4: migration `loyalty.0006` writes one `cashback.policy_version_created` (actor `system`, reason "migration loyalty.0006: first cashback policy with the L1–L3 defaults", the service's data shape) when it creates the install's first policy. That v1's `created_at` (2026-05-20 10:00) and `effective_from` (2026-06-01 00:00, Tashkent) are fixed placeholder instants, not the deploy time (GS-6) |
 | Notifications | `notification.created`, `notification.cancelled` (M3; before `{state: "scheduled", scheduled_at}`, after `{state: "cancelled", cancelled_at}`), `notification_template.updated`, `segment.created`, `segment.updated`, `segment.deleted`, `segment.members_added`, `segment.member_removed`, `notification.push_dead` (system; a dead `push.order_status` / `push.appointment` / `campaign.send_batch` message: `{topic, dedupe_key, attempts, last_error, customer_id, campaign_id}`) |
 | Appointments | `appointment.confirmed`, `appointment.rejected`, `appointment.attended`, `appointment.created`, `appointment.rescheduled` (`{…, from_start, from_end, reschedule_no}`), `appointment.cancelled` (`{…, reason}`) |
-| Shell | `settings.updated` (changed leaves only, each `{from, to}`, §2.11), `export.downloaded` |
+| Shell | `settings.updated` (changed leaves only, each `{from, to}`; legal-text leaves as `{changed, old_len, new_len, sha256}`, §2.11), `settings.terms_published` (`{from, to, sha256}`, §2.11), `export.downloaded` |
 | M2 (customer API) | The customer, payment and POS actions listed in `docs/api/customer-api-v1.md` §3 ("Audit actions added in M2"): `customer.*`, `auth.device_mismatch`, `appointment.requested`, `appointment.cancelled` (`by: "customer"`), `payment.late_capture`, `pos.*`. The `audit-log/` filters accept them unchanged. |
 | Django admin (editable models) | `<model>.created`, `<model>.updated`, `<model>.deleted` for `location`, `professional`, `service`, `professional_service`, `working_hours`, `blocked_period`; `working_hours_override.created`, `working_hours_override.updated`, `working_hours_override.deleted` (the override is the seventh editable model, T13) |
 
@@ -1188,7 +1231,7 @@ Generic mapping applies throughout: snake_case → camelCase; integer ids → `S
 | `axisLabels` | the windowed series | `[s[0], s[floor((n−1)/2)], s[n−1]]`. Hour → the label; day → `DM(start)` ("18-okt", "21-okt", "24-okt"; month "25-sen", "9-okt", "24-okt") |
 | `stats.ordersNote` | `previous_period_orders`, `range` | today `` `Kecha: ${n} ta` ``; week `` `O‘tgan hafta: ${n} ta` ``; month `` `O‘tgan oy: ${n} ta` ``; custom `` `Oldingi davr: ${n} ta` `` |
 | `stats.*` | `stats.new_customers`, `total_customers`, `deleted_customers`, `out_of_stock` | Camel-case |
-| `attention.*` | `attention.*` | Camel-case; `refundsNeedingAction` is new; `btsPollingFailing` (M2) is new: when true the attention block shows "BTS kuzatuvi ishlamayapti · buyurtma holatlari yangilanmayapti"; "Eng yaqini: …" stays `formatWeekdayShortDateTime` |
+| `attention.*` | `attention.*` | Camel-case; `refundsNeedingAction` is new; `btsPollingFailing` (M2) is new: when true the attention block shows "BTS kuzatuvi ishlamayapti · buyurtma holatlari yangilanmayapti"; `cashbackPolicyMissing` (gap CB-9.2.4) is new: when true it shows "Cashback siyosati yo‘q · xaridlarga cashback yozilmayapti" linking to the cashback settings; "Eng yaqini: …" stays `formatWeekdayShortDateTime` |
 | Recent orders | `orders/?page_size=6` | `results` |
 | Sidebar badges | `nav-counts/` | orders = `orders_processing`; appointments = `appointments_pending` |
 | Sidebar user | `auth/me/` | name = `display_name`; secondary = `email`; initials = first letters of the first two words, else the first two letters, uppercased ("Administrator" → "AD") |
@@ -1218,7 +1261,7 @@ Provisional, configurable rules that shape payloads:
   - Click `unknown` is never auto-retried.
 - **Dashboard revenue.** Σ paid totals by payment confirmation time, net of refunds; orders = created in the bucket. Refunds are attributed to the payment's bucket.
 - **Rate basis / cashback-paid earning.** `before_purchase`; the cashback-paid part does not earn. Both are policy fields (`basis`, `earn_on_cashback_paid`).
-- **Seed tiers.** 0–20M 1%, 20–30M 2%, 30–50M 3%; open top.
+- **Seed tiers.** 0–20M 1%, 20–30M 2%, 30–50M 3%; open top. The install's first policy (migration `loyalty.0006`, gap CB-9.2.4) uses them as `[0, 20M)` 1%, `[20M, 30M)` 2%, `[30M, ∞)` 3% from 2026-06-01 (author system); open question L3.
 - **Spendable timing.** Credits are spendable immediately (`LOYALTY_PENDING_DAYS=0`).
 - **Refund larger than the balance.** The reversal is still posted; the balance may go negative and is flagged. `available` can be negative.
 - **Reservation length.** 15 min (`settings.reservation_minutes`). Pickup completion reuses `delivered`.
@@ -1299,3 +1342,8 @@ Provisional, configurable rules that shape payloads:
     - Refund operations for the Payments screen (M1c, consumed by F3): `POST payments/{id}/refunds/{refund_id}/retry/` (from `failed`) and `…/resolve/` `{state: succeeded|failed}` (from `unknown` / `manual_required`, audited `refund.state_changed` with the actor). M2 (customer contract §2.13.0): `…/resolve/ {state: succeeded, manual_payout?: bool}` also closes a `failed` **Click** refund (Click refuses reversals of a previous month, of offline/Humo cards, or when UZCARD declines). The server first asks Click for the payment's status (a fresh check through the port, never under a row lock): `reversed` → closed `succeeded` (Click returned the money; do not pay out); still `paid` → 409 **`click_not_reversed`** (M3; `invalid_transition` before) "Click to‘lovni qaytarmagan. Avval mijozga qo‘lda to‘lang, so‘ng «qo‘lda to‘landi» belgisi bilan yakunlang yoki qaytarishni qayta urinib ko‘ring." unless the body carries `manual_payout: true` (staff paid the customer outside Click; then closed `succeeded`, audited with `manual_payout: true`); Click unreachable → 503 `provider_unavailable`; Click fake under the production settings → 409 `invalid_transition` "Click sinov rejimida: to‘lov holatini tekshirib bo‘lmaydi. Click ulanganidan keyin yakunlang."; a payment without a Click payment id is **not checked** (Click cannot be asked about it) and needs `manual_payout: true` — without it 409 `conflict` "Bu to‘lovda Click to‘lov raqami yo‘q, shuning uchun Click’dan holatini tekshirib bo‘lmaydi. Mijozga qo‘lda to‘lang, so‘ng «qo‘lda to‘landi» belgisi bilan yakunlang." (M3: never the "Click to‘lovni qaytarmagan" answer, since Click was not asked). The UI therefore offers "Yakunlash" (no flag) first and, after the 409 `click_not_reversed` (or this `conflict`), "Qo‘lda to‘landi" (`manual_payout: true`) once the payout is done. The close is allowed only while it is the payment's newest refund, the payment is still `paid` and no other refund of the payment is open or succeeded (otherwise 409 `invalid_transition` "Bu qaytarishni yakunlab bo‘lmaydi.", so a refund retried with `…/retry/` cannot be paid out twice); M3: this guard runs **before** the Click status check (a refund that can no longer be closed is refused without asking Click) and again under the row locks. `manual_payout` is ignored for `unknown` / `manual_required` refunds, whose resolve is unchanged. While Click is fake under the production settings, `…/retry/` of a `failed` Click refund also answers 409 `invalid_transition` "Click sinov rejimida: to‘lov holatini tekshirib bo‘lmaydi. Click ulanganidan keyin yakunlang." (nothing written), so a retried refund can never skip the status check.
     - The logout action posts `{refresh: <gd_admin_refresh cookie>, scope: "current"}` and clears both cookies whatever the response (a 401 `SESSION_EXPIRED` counts as logged out). Settings (A1) can offer "others" and "all".
     - The login page, `auth.actions.ts`, cookies and `proxy.ts` follow the spec's "Auth" section.
+19. **Settings: contacts and legal texts (gap closure, settings package).**
+    - The Settings form gains `store_phone`, `cosmetologist_phone` (phone inputs, empty → `null`), `telegram_url`, `instagram_url`, `website_url` (https inputs, empty → `null`), with the §2.11 field errors mapped per field.
+    - A "Huquqiy matnlar" card edits `terms`, `privacy_policy` (drafts) and `booking_policy` per language (textareas; PATCH only the changed languages) and shows `terms_version` / `terms_updated_at` (`null` → "E’lon qilinmagan"); while `terms_unpublished_changes` is `true` it shows "E’lon qilinmagan o‘zgarishlar bor" next to the publish button.
+    - An "E’lon qilish" button calls `POST settings/terms/publish/` with a per-dialog `Idempotency-Key` after a confirmation ("Barcha mijozlardan shartlarni qayta qabul qilish so‘raladi."); 409 `conflict` shows the message. Saving texts never publishes.
+    - Dashboard attention: `cashbackPolicyMissing` (§5.7).

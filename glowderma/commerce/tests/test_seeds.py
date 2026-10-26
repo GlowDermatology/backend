@@ -194,6 +194,25 @@ COUNTED = (
 )
 
 
+MALIKA_LEDGER = [  # (id, kind, amount, balance_after) in posting order (03 §7.7)
+    (100, "credit", 3_610, 3_610),
+    (101, "credit", 12_450, 16_060),
+    (102, "credit", 9_870, 25_930),
+    (103, "credit", 15_300, 41_230),
+    (104, "credit", 6_210, 47_440),
+    (105, "credit", 8_640, 56_080),
+    (106, "credit", 1_560, 57_640),
+    (107, "reversal", -1_560, 56_080),
+    (108, "credit", 4_120, 60_200),
+    (109, "adjustment", 2_950, 63_150),
+    (110, "debit", -20_000, 43_150),
+    (111, "credit", 3_140, 46_290),
+    (112, "credit", 2_310, 48_600),
+    (120, "debit", -48_600, 0),
+    (121, "credit", 5_680, 5_680),
+]
+
+
 def _counts() -> dict[str, int]:
     return {model.__name__: model.objects.count() for model in COUNTED}
 
@@ -212,23 +231,7 @@ def test_seed_demo_reproduces_the_design_vectors(staff_client: APIClient) -> Non
 
     # --- Malika (5): the drawn chain 100–112 + 120/121, totals and balance (03 §7.7) ---
     ledger = loyalty_selectors.ledger_for_customer(5)
-    assert [(row.id, row.kind, row.amount, row.balance_after) for row in reversed(ledger)] == [
-        (100, "credit", 3_610, 3_610),
-        (101, "credit", 12_450, 16_060),
-        (102, "credit", 9_870, 25_930),
-        (103, "credit", 15_300, 41_230),
-        (104, "credit", 6_210, 47_440),
-        (105, "credit", 8_640, 56_080),
-        (106, "credit", 1_560, 57_640),
-        (107, "reversal", -1_560, 56_080),
-        (108, "credit", 4_120, 60_200),
-        (109, "adjustment", 2_950, 63_150),
-        (110, "debit", -20_000, 43_150),
-        (111, "credit", 3_140, 46_290),
-        (112, "credit", 2_310, 48_600),
-        (120, "debit", -48_600, 0),
-        (121, "credit", 5_680, 5_680),
-    ]
+    assert [(row.id, row.kind, row.amount, row.balance_after) for row in reversed(ledger)] == MALIKA_LEDGER
     assert loyalty_selectors.customer_totals(5) == Totals(9_940_000, 3_640_000, 13_580_000, 12)
     assert loyalty_selectors.account_summary(5) == AccountSummary(5_680, 0, 5_680)
     assert len(loyalty_selectors.purchases_for_customer(5)) == 25
@@ -308,6 +311,7 @@ def test_seed_demo_reproduces_the_design_vectors(staff_client: APIClient) -> Non
         "new_from_billz": 4,
         "refunds_needing_action": 2,  # M3: the seeded failed Click refunds of №10100 and №10175
         "bts_polling_failing": False,
+        "cashback_policy_missing": False,  # v3 is active
     }
     assert sum(bucket["revenue"] for bucket in dashboard["buckets"]) == 768_000
     assert (
@@ -379,3 +383,55 @@ def test_the_seeder_delivery_fee_never_calls_the_bts_port() -> None:
     plan = next(p for p in seeds.fixed_orders() if p.id == 10252)  # Samarqand (region 13)
     with override_settings(DEV_FEATURES_ALLOWED=False):  # the port would refuse every quote here
         assert seeds._delivery_fee(plan) == 28_000
+
+
+def test_seed_demo_over_the_install_policy_keeps_the_design_vectors(staff_client: APIClient) -> None:
+    """A migrated database already holds the install's first policy (loyalty.0006, gap CB-9.2.4): a plain
+    ``seed_demo`` keeps it as v1, adds the design v2/v3 and still reproduces №10248 and Malika's chain."""
+    from importlib import import_module
+    from types import SimpleNamespace
+
+    from django.apps import apps as global_apps
+    from django.db import connection
+
+    from glowderma.core.timeutils import TASHKENT
+    from glowderma.loyalty.models import CashbackPolicy
+
+    bootstrap = import_module("glowderma.loyalty.migrations.0006_bootstrap_cashback_policy")
+    with override_settings(LOYALTY_BOOTSTRAP_POLICY=True):
+        bootstrap.bootstrap_policy(global_apps, SimpleNamespace(connection=connection))
+    out = StringIO()
+    call_command("seed_demo", force=True, stdout=out)
+    assert "loyalty: policy v1 already exists with other tiers" in out.getvalue()
+    versions = {p.version: p for p in CashbackPolicy.objects.with_derived().prefetch_related("tiers")}
+    assert sorted(versions) == [1, 2, 3] and versions[1].author is None
+    assert [t.to_amount for t in versions[1].tiers.all()] == [20_000_000, 30_000_000, None]
+    assert [p.superseded_by for p in versions.values()] == [None, None, None]
+    # Review should_fix: the policy HISTORY as staff see it differs from the design here (documented in
+    # loyalty/seeds.py, AGENTS.md and GS-6: the design v1/v2 cards need `seed_demo --reset`). Pinned so the
+    # divergence stays a known, tested state: v1 is the install's three bands, v2 drops its open top band.
+    policy = staff_client.get("/api/v1/admin/cashback/policy/").json()
+    served = {
+        row["version"]: [(tier["from"], tier["to"], tier["percent"]) for tier in row["tiers"]]
+        for row in policy["versions"]
+    }
+    assert served == {
+        1: [(0, 20_000_000, "1.00"), (20_000_000, 30_000_000, "2.00"), (30_000_000, None, "3.00")],
+        2: [(0, 20_000_000, "1.00"), (20_000_000, 30_000_000, "2.00")],
+        3: [(0, 20_000_000, "1.00"), (20_000_000, 30_000_000, "2.00"), (30_000_000, 50_000_000, "3.00")],
+    }
+    authors = {row["version"]: row["author"] for row in policy["versions"]}
+    assert authors[1] is None and authors[2] is not None and authors[3] is not None
+    assert policy["active"]["version"] == 3
+    # the install policy changed no credit: nothing before 1 June earns, nothing under v1 reached 20 M
+    june = datetime(2026, 6, 1, tzinfo=TASHKENT)
+    assert not Purchase.objects.filter(at__lt=june, policy__isnull=False).exists()
+    assert not Purchase.objects.filter(policy__version=1, lifetime_before__gte=20_000_000).exists()
+    assert Purchase.objects.filter(policy__version=1).exists()
+    ledger = loyalty_selectors.ledger_for_customer(5)
+    assert [(row.id, row.kind, row.amount, row.balance_after) for row in reversed(ledger)] == MALIKA_LEDGER
+    detail = staff_client.get("/api/v1/admin/orders/10248/").json()
+    for item in detail["items"]:
+        item["image_url"] = "<media>"
+    assert detail == DETAIL_10248
+    assert list(LoyaltyAccount.objects.filter(balance__lt=0).values_list("customer_id", flat=True)) == [13]

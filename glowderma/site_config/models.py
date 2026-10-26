@@ -24,12 +24,21 @@ class SiteSettings(models.Model):
     telegram_url = models.URLField(max_length=200, blank=True)
     instagram_url = models.URLField(max_length=200, blank=True)
     website_url = models.URLField(max_length=200, blank=True)
+    # The PUBLISHED terms and privacy texts (GS-2): written only by ``services.publish_terms``, served by
+    # ``settings/public/`` under ``terms_version`` and the copy a customer's consent refers to.
     privacy_policy_uz = models.TextField(blank=True)
     privacy_policy_ru = models.TextField(blank=True)
     privacy_policy_en = models.TextField(blank=True)
     terms_uz = models.TextField(blank=True)
     terms_ru = models.TextField(blank=True)
     terms_en = models.TextField(blank=True)
+    # The working copies staff edit with ``PATCH settings/`` (served by the admin API only).
+    terms_draft_uz = models.TextField(blank=True)
+    terms_draft_ru = models.TextField(blank=True)
+    terms_draft_en = models.TextField(blank=True)
+    privacy_policy_draft_uz = models.TextField(blank=True)
+    privacy_policy_draft_ru = models.TextField(blank=True)
+    privacy_policy_draft_en = models.TextField(blank=True)
     terms_version = models.CharField(max_length=32, blank=True)  # C3: stamped on Customer.consent
     terms_updated_at = models.DateTimeField(null=True)
     booking_policy_uz = models.TextField(blank=True)  # P3 free-text cancellation/reschedule terms
