@@ -73,8 +73,9 @@ builds it (the contract cannot be edited into compliance after the fact):
 - Customer social login: Google, Facebook **and Apple** (product-owner decision 2026-10-26), with Apple token
   revocation on unlink and deletion.
 - Fake provider adapters are allowed under the production settings (product-owner decision 2026-10-26) with the
-  guarantees of C§6.14 (no callback accepted, no payment offered, no fixed code, no simulate, no home delivery with fake
-  BTS, no Billz sale recorded by a fake).
+  guarantees of C§6.14 (no transaction started and no capture honoured through a fake — a Click Complete of a
+  transaction attached while Click was live is accepted and reversed —, no payment offered, no fixed code, no simulate,
+  no home delivery with fake BTS, no Billz sale recorded by a fake).
 - Click: a Complete that cannot be honoured is accepted and reversed (Click SHOP API rule), never answered with an
   error.
 
@@ -356,7 +357,7 @@ C§2.0 rows 24–35 and 50–53: `cart/*`, `delivery/regions/`, `delivery/calcul
 | `poll_bts()` | `commerce.tasks` | replaces the P0 stub; C§2.13.3: single flight (`cache.add` lock), round robin after `IntegrationState(bts).data["poll_cursor"]`, the cursor written after **every attempted parcel** through `integrations.services.set_state_data`; per-parcel failures (`BtsUnavailable` and `BtsRejected` from `track()`) logged and skipped; the run stops only after `BTS_POLL_MAX_CONSECUTIVE_FAILURES` transport failures in a row (`record_failure`), else `record_sync_success`; ≤ `BTS_POLL_BATCH` parcels and ≤ `BTS_POLL_MAX_SECONDS` per run, stable payload fields only (webhook re-track too; a `BtsRejected` re-track answers 200 `ignored`) |
 | `set_state_data(provider, key, value)` | `integrations.services` | a single `UPDATE … SET data = data \|\| jsonb_build_object(key, value)` on the provider's `IntegrationState` row (no read-modify-write, so it cannot lose a concurrent `record_failure`) |
 | webhook inbox helper (`store_delivery`, `store_rejected` with the per-IP cap and 1 KiB truncation, `semantic_fingerprint`) | `commerce/api/webhooks/inbox.py` | C§2.13.0 |
-| fake-mode refusal: every webhook view first checks `core.providers.callbacks_refused(provider)` → Click `-1` / Payme `-32504` / BTS 401, bounded `rejected:` row with `error_code: "fake_mode"`, nothing else read or written | `commerce/api/webhooks/*` | C§2.13.0 (production may run fake adapters; fake mode never pays an order) |
+| fake-mode refusal: every webhook view first checks `core.providers.callbacks_refused(provider)` → Click Prepare `-1` / Payme `-32504` / BTS 401, bounded `rejected:` row with `error_code: "fake_mode"`, nothing else read or written; **exception:** a Click Complete is parsed and signature-checked, and when it names a payment attached while Click was live (`provider_state.prepare_at` set, `provider_txn_id = click_trans_id`) it runs the Complete steps with the honoured capture replaced by `record_late_capture(…, case="fake_mode")` (refund `manual_required` through the fake port, ERROR `payment.late_capture`); any other Complete → `-1` + `rejected:` row | `commerce/api/webhooks/*` | C§2.13.0 (production may run fake adapters; fake mode never pays an order and never strands a capture taken while Click was live) |
 | checkout and pay accept only `core.providers.payable_providers()` (400 `invalid_choice` otherwise) | `commerce/api/customer/*` | C§2.4, C§2.7 |
 | `attach_transaction(payment_id, provider_txn_id, provider_state)` (refuses a different existing txn id → `TransactionTaken`), `merge_provider_state(payment_id, patch)`, `mark_late_captured(payment_id, provider_txn_id, at, raw=None)` (pending or failed-by-us → `paid`, `error_code="late_capture"`, `failed_at=None`) | `payments.services` | under the Payment lock |
 | one display rule for late captures (C§2.8): `display_payment`, `pick_display` and `display_status_subquery` rank only non-late rows and fall back to the newest late capture when every row is one; `active_payment` ignores late captures; `revenue_buckets` excludes them (admin §2.10); `payme_statement(from_ms, to_ms)` by `provider_state.time`; `payment_by_txn(provider, txn_id)` | `payments.selectors` (B5, changed); `commerce.selectors` order list/detail and the customer `OrderSummary` keep using `pick_display` / `display_status_subquery` | C§2.8, C§2.13.0 |
@@ -471,9 +472,13 @@ create_refund}`, `payments.selectors.{active_payment, display_payment, refunds_f
 - Dev simulate: mounted only with `DEV_FEATURES_ALLOWED`, the flag and fake payment modes; runs the real views; absent
   under the production settings.
 - **Fake providers under the production settings** (`override_settings(DEV_FEATURES_ALLOWED=False)`, `CLICK_MODE =
-  PAYME_MODE = BTS_MODE = "fake"`): a correctly signed Click Prepare + Complete and a Basic-auth Payme
-  `CreateTransaction` + `PerformTransaction` made with the configured keys are refused (`-1` / `-32504`), the BTS webhook
-  answers 401, the order stays `awaiting_payment`, only bounded `rejected:` rows are written; checkout and pay refuse
+  PAYME_MODE = BTS_MODE = "fake"`): a correctly signed Click Prepare, a correctly signed Complete naming an unattached
+  or unknown payment and a Basic-auth Payme `CreateTransaction` + `PerformTransaction` made with the configured keys are
+  refused (`-1` / `-32504`), the BTS webhook answers 401, the order stays `awaiting_payment`, only bounded `rejected:`
+  rows are written; **switch while a Click transaction is open:** Prepare under the test settings (processed
+  there as a live Click's would be), then `override_settings(DEV_FEATURES_ALLOWED=False, CLICK_MODE="fake")` and the correctly signed Complete
+  → `0`, payment `paid` `late_capture`, refund `manual_required` (no port call), audit `payment.late_capture {case:
+  "fake_mode"}`, ERROR log, order not `processing`; the same Complete with a wrong signature → `-1`; checkout and pay refuse
   a fake provider with 400 `invalid_choice`; a Click refund created or submitted while the Click port is fake becomes
   `manual_required` with no port call. **Mixed posture** (`override_settings(DEV_FEATURES_ALLOWED=False, BTS_MODE=
   "fake", BILLZ_MODE="fake")`, `core.providers.payable_providers` patched to `["click"]` as with a live Click): `delivery/calculate/` and checkout with
@@ -602,7 +607,8 @@ Run with the real webhook views and a pinned clock; signatures built by `integra
 | 30 | complete | payment failed by Click earlier (`error_code "-5017"`) | -9 | nothing |
 | 31 | complete | payment already refunded after a capture | 0 (from state) | nothing new but a `dup:` row |
 | 32 | complete | refused capture of a payment whose reversal the fake refuses (`click.refund: failed`) | 0 | refund `failed`, counted in `attention.refunds_needing_action`; `…/resolve/ {state: succeeded}` closes it |
-| 33 | prepare / complete | any request, correctly signed, with `CLICK_MODE=fake` under `override_settings(DEV_FEATURES_ALLOWED=False)` | -1 | order and payments unchanged; bounded `rejected:` row `error_code: "fake_mode"` |
+| 33 | prepare / complete | with `CLICK_MODE=fake` under `override_settings(DEV_FEATURES_ALLOWED=False)`: any Prepare, correctly signed; a correctly signed Complete whose payment was never attached | -1 | order and payments unchanged; bounded `rejected:` row `error_code: "fake_mode"` |
+| 34 | complete | row 1 ran before the switch (301 attached while Click was live), then `CLICK_MODE=fake` under `override_settings(DEV_FEATURES_ALLOWED=False)`, correctly signed Complete with `error=0` | 0, `merchant_confirm_id` 301 | refused capture `{case: fake_mode}`: 301 `paid` `late_capture`, refund `manual_required` (no port call), ERROR `payment.late_capture`; the order is not paid and expires as usual |
 
 ### 5.2 Payme (mirrors the `test.paycom.uz` checklist; amounts in tiyin 78 440 000; codes marked † verify M3)
 
@@ -748,7 +754,9 @@ recorded; C§6.14).
 #PAYMENT_RETURN_URL=https://glowderma.uz/pay/return
 #PAYMENT_RETURN_FALLBACK_URL=glowderma://payment/return
 # ---- Click (SHOP API) ----------------------------------------------------------
-# fake under the production settings: callbacks are refused and Click is not offered to customers (no free orders).
+# fake under the production settings: Prepares are refused and Click is not offered to customers (no free orders); a
+# Complete of a transaction prepared while Click was live is accepted and reversed by hand (manual refund), so a
+# switch from live to fake never strands a customer's money.
 #CLICK_MODE=fake
 #CLICK_SERVICE_ID=00000
 #CLICK_MERCHANT_ID=00000
@@ -827,8 +835,9 @@ Validation (P0):
 - **Keys** (production; `local.py` ships valid development defaults, which are added to `KNOWN_PLACEHOLDER_SECRETS`):
   `SMS_CODE_HMAC_KEY`, `LOG_PII_KEY`, `PAYMENT_REF_KEY`, `QR_HMAC_KEY` and `BTS_WEBHOOK_SECRET` are required, ≥32
   characters (used as their UTF-8 bytes); `SECRETBOX_KEY` is required and must decode (base64url, padding optional) to
-  **exactly** 32 bytes (AES-256); `CLICK_SECRET_KEY` and `PAYME_KEY` are required in **every** mode (in fake mode their
-  callbacks are refused anyway; the check is a second layer), with no length floor because the provider issues them.
+  **exactly** 32 bytes (AES-256); `CLICK_SECRET_KEY` and `PAYME_KEY` are required in **every** mode (in fake mode Payme
+  callbacks are refused anyway and the check is a second layer; `CLICK_SECRET_KEY` still verifies the Completes of
+  transactions attached while Click was live, C§2.13.0), with no length floor because the provider issues them.
   Every one of these is refused when it contains `change-me` (case-insensitive) or equals a committed value (the
   existing `production.py` rule for `SECRET_KEY`/`INTERNAL_API_SECRET`, extended).
 - `OAUTH_MODE=live` with a non-empty `APPLE_BUNDLE_IDS` requires `APPLE_TEAM_ID`, `APPLE_KEY_ID` (no `change-me`) and a

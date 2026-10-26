@@ -29,7 +29,7 @@ Everything in admin §1 applies unless a row below says otherwise.
 | `/api/v1/auth/…` | app, before sign-in | none (refresh token in the body where needed) | device headers required (§1.2) |
 | `/api/v1/me/…`, `/api/v1/cart/…`, `/api/v1/orders/…`, `/api/v1/appointments/…`, `/api/v1/delivery/calculate/` | signed-in app | **C**: customer access JWT required | device headers required |
 | `/api/v1/catalog/…`, `/api/v1/settings/public/`, `/api/v1/delivery/regions/`, `/api/v1/specialists/…`, `/api/v1/services/` | anyone | **O**: optional; a present bearer must be valid | device headers optional (the app always sends them) |
-| `/api/v1/webhooks/{click,payme,bts}/…` | payment and delivery providers | provider signature / Basic auth / shared secret (§2.13); a provider whose mode is `fake` under the production settings accepts **no** callback (§2.13.0) | **not** the error envelope: provider-native bodies |
+| `/api/v1/webhooks/{click,payme,bts}/…` | payment and delivery providers | provider signature / Basic auth / shared secret (§2.13); a provider whose mode is `fake` under the production settings starts no transaction and honours no capture (§2.13.0) | **not** the error envelope: provider-native bodies |
 | `/api/v1/pos/…` | in-store cashier terminals | per-device API key (§2.10) | envelope; Uzbek messages only |
 | `/api/v1/dev/…` | developers, local/test settings only | **C** | mounted only when `DEV_FEATURES_ALLOWED` (local/test settings), `FAKE_PAYMENTS_ENABLED=true` **and** `CLICK_MODE` = `PAYME_MODE` = `fake` (§2.15); settings validation refuses the flag with any live payment mode and the production settings refuse it outright |
 
@@ -1470,13 +1470,30 @@ admin-only by DB constraint).
   `integrations/{click,payme,bts}/protocol.py` without DB access).
 - **Fake providers under the production settings** (product-owner decision 2026-10-26: production may run fake
   adapters, but fake mode can never hand out a free order). When `DEV_FEATURES_ALLOWED` is false (the production
-  settings, which staging also runs) and the provider's mode is `fake`, its callback view accepts **no** request,
-  whatever the signature: Click answers `-1` (`SIGN CHECK FAILED!`) to every Prepare and Complete, Payme answers
-  `-32504` to every method, BTS answers 401 `{"ok": false}`. Nothing is read or written except the bounded `rejected:`
-  inbox row below (`error_code: "fake_mode"`). The check runs first, before parameter parsing, so a request signed with
-  a leaked or placeholder key cannot move an order. Under the local/test settings fake callbacks are processed normally
-  (that is what the dev simulate endpoint and the sandbox suites drive). Production also requires real values for
-  `CLICK_SECRET_KEY`, `PAYME_KEY` and `BTS_WEBHOOK_SECRET` in every mode (plan §7), as a second layer.
+  settings, which staging also runs) and the provider's mode is `fake`, its callback view starts **no** transaction and
+  honours **no** capture, whatever the signature: Click answers `-1` (`SIGN CHECK FAILED!`) to every Prepare, Payme
+  answers `-32504` to every method, BTS answers 401 `{"ok": false}`. Nothing is read or written except the bounded
+  `rejected:` inbox row below (`error_code: "fake_mode"`). The check runs first, before parameter parsing, so a request
+  signed with a leaked key cannot start or move an order.
+  - **One exception: a Click Complete of a transaction attached while Click was live.** Switching `CLICK_MODE` from
+    `live` to `fake` is a normal operation under decision 4 (for example as a kill switch), and a transaction prepared
+    before the switch may complete after it with the customer's money already withdrawn — Click's protocol allows no
+    error answer then (refused capture, below), and a `-1` would leave the money at Click with no refund on our side.
+    So a Complete is parsed and its signature verified with `CLICK_SECRET_KEY` (a real key in every mode, plan §7);
+    when it names a payment we attached — `merchant_prepare_id` is a Click payment of the order whose
+    `provider_txn_id` equals `click_trans_id` and whose `provider_state.prepare_at` is set (under the production
+    settings only a live Prepare can have set it) — the Complete steps of §2.13.1 run, except that the capture is
+    **never honoured**: step 7 becomes a **refused capture** with `case: "fake_mode"` (unless an earlier case
+    applies), its refund becomes `manual_required` because the Click port is fake (below), and the ERROR
+    `payment.late_capture` alerts the on-call. Everything else — a bad signature, an unknown or unattached payment —
+    answers `-1` with a bounded `rejected:` row (`fake_mode`).
+  - Payme needs no such exception: Payme debits only on `PerformTransaction`, so refusing it takes no money (Payme
+    cancels the state-1 transaction by its timeout), and the `CancelTransaction` of a performed transaction that staff
+    refunded in the Payme cabinet leaves its `manual_required` refund for staff to resolve by hand (admin §7 item 18).
+
+  Under the local/test settings fake callbacks are processed normally (that is what the dev simulate endpoint and the
+  sandbox suites drive). Production also requires real values for `CLICK_SECRET_KEY`, `PAYME_KEY` and
+  `BTS_WEBHOOK_SECRET` in every mode (plan §7), as a second layer.
 - **HTTP status:** always 200 with the provider-native body for protocol outcomes (including auth failures for
   Click and Payme, as their protocols require). An unexpected exception rolls everything back; Click and BTS get
   HTTP 500 so they retry; Payme gets HTTP 200 with JSON-RPC error `-32400` (system error) — the choice per provider
@@ -1533,13 +1550,14 @@ admin-only by DB constraint).
   honour: (a) the payment was failed by **us** for a non-provider reason — `error_code` ∈ {`expired`, `abandoned`,
   `cancelled`} (a superseded Click attachment is `abandoned`, §2.7.2); (b) the order is `cancelled`, or
   `awaiting_payment` but not payable (`attaching=False`) because the grace is over; (c) the order is already paid by
-  **another** payment (double payment). **One rule for all of them: accept and reverse.** Click's SHOP API documentation
+  **another** payment (double payment); (d) the Click port is fake under the production settings and the transaction
+  was attached while Click was live (above). **One rule for all of them: accept and reverse.** Click's SHOP API documentation
   (docs.click.uz, SHOP API requests) settles it: after a successful Prepare and withdrawal of funds, the answer to
   Complete cannot be an error except `-4` (this payment was already confirmed) or `-9` (a repeated attempt to confirm a
   payment that was cancelled); if the goods cannot be provided, the merchant answers Complete **successfully** and
   cancels the payment through the Merchant API (`payment/reversal`); repeated error answers send the payment to manual
   investigation at Click. So: `commerce.services.record_late_capture(order_id, payment.id, "click", click_trans_id,
-  case=<"failed_by_us" | "not_payable" | "double_payment">)` under the Order → Payment locks:
+  case=<"failed_by_us" | "not_payable" | "double_payment" | "fake_mode">)` under the Order → Payment locks:
   `payments.services.mark_late_captured(payment_id, provider_txn_id, at)` — the **only** transition into `paid` from
   `failed` (or from `pending` in case (c)) and only for this case: status `paid`, `confirmed_at = at`, `failed_at =
   null`, `error_code = "late_capture"`, `provider_state` merged; the `payment_one_active_per_order` partial unique
@@ -1617,7 +1635,7 @@ Responses are `application/json`.
 | `error` | `error_note` | We answer it when |
 |---|---|---|
 | 0 | `Success` | accepted, including every refused capture (accepted and reversed, §2.13.0) |
-| -1 | `SIGN CHECK FAILED!` | signature mismatch; every request to a fake Click under the production settings (§2.13.0) |
+| -1 | `SIGN CHECK FAILED!` | signature mismatch; under the production settings with a fake Click: every Prepare, and every Complete that does not name a payment attached while Click was live (§2.13.0) |
 | -2 | `Incorrect parameter amount` | `amount` not a non-negative decimal with ≤2 dp, not integral so'm, or ≠ `payment.amount` (= `order.total`) |
 | -3 | `Action not found` | `action` ≠ 0 on prepare / ≠ 1 on complete |
 | -4 | `Already paid` | prepare only: the order is already paid (a Complete for a payment that is already captured answers `0` from state; a Complete for an order paid by another payment is a refused capture, `0`) |
@@ -1648,7 +1666,10 @@ Responses are `application/json`.
    sign_time})` → `0` with `merchant_prepare_id = payment.id`. `TransactionTaken` (a concurrent prepare bound the row) cannot happen under the Order lock and maps to
    `-8` defensively. No order event (a prepare is not a state change).
 
-**Complete (action 1).** Steps 1 of §2.13.0 (as prepare), advisory lock, then:
+**Complete (action 1).** Steps 1 of §2.13.0 (as prepare), advisory lock, then the steps below. Fake Click under the
+production settings: only a Complete that names a payment attached while Click was live gets past step 3 (otherwise
+`-1` and a `rejected:` row `fake_mode`), and step 7 never applies — such a capture goes to step 8 with `case:
+"fake_mode"` (§2.13.0).
 1. **duplicate / state replay:** an inbox row under `complete:{click_trans_id}` with a conflicting fingerprint → `-8`
    (`rejected:` row); `Payment(id = merchant_prepare_id, provider click, provider_txn_id = click_trans_id)` was already
    captured — `paid` (normally or as a late capture) or `refunded` afterwards — → `0` with `merchant_confirm_id =
@@ -1950,7 +1971,7 @@ gains `refresh_reused` (§2.1.6).
 |---|---|
 | Customer auth (`customer`) | `customer.registered` (`{reactivated, terms_version}`), `customer.login_succeeded` (`{method, new_device}`), `customer.login_failed` (`{method}`), `customer.logout`, `customer.password_reset`, `customer.password_changed` (`{first_password}`), `customer.history_reset` (`{reason: "dormant", last_activity_at}`), `customer.refresh_reused` (`{sid}`), `customer.social_linked` (`{provider, via?}`), `customer.social_unlinked` (`{provider, reason: "customer" \| "password_reset"}`), `customer.consent_accepted` (`{terms_version}`), `customer.deleted` (`{orders_cancelled, appointments_cancelled}`), `auth.device_mismatch` (`{sid}`, ≤1 per session per hour) |
 | Appointments (`customer`) | `appointment.requested`, `appointment.cancelled` (with `by: "customer"`) |
-| Payments (`system`) | `payment.late_capture` (`{order_id, payment_id, provider, case: "failed_by_us" \| "not_payable" \| "double_payment"}`) |
+| Payments (`system`) | `payment.late_capture` (`{order_id, payment_id, provider, case: "failed_by_us" \| "not_payable" \| "double_payment" \| "fake_mode"}`) |
 | POS (`integration` for resolves; `staff` for the commands) | `pos.qr_resolved` (`{pos_device_id, customer_id, sale_ref}`), `pos.qr_rejected` (`{pos_device_id, reason}`), `pos.device_created` (`{pos_device_id, name}`), `pos.device_revoked` (`{pos_device_id}`), `pos.device_rotated` (`{pos_device_id}`) — the three command actions carry the `--actor` staff user |
 
 ---
@@ -2293,8 +2314,9 @@ code a customer view can raise to an existing key.
     account value is an HMAC-protected reference, not a guessable id (§2.7.2). Click MD5 over raw form strings +
     `service_id` binding + amount equality + `merchant_prepare_id` binding; Payme Basic auth with `PAYME_KEY`, integer amount
     equality in tiyin, one active transaction per order (partial unique index + `-31051`), 12-hour timeout; IP
-    allow-lists are defence in depth only; a provider in fake mode under the production settings accepts no callback
-    (§2.13.0). Every handler takes the Order lock before reading state and names the payment it changes (§2.13.0).
+    allow-lists are defence in depth only; a provider in fake mode under the production settings starts no transaction
+    and honours no capture (§2.13.0; a Click Complete of a transaction attached while Click was live is accepted and
+    reversed with a manual refund). Every handler takes the Order lock before reading state and names the payment it changes (§2.13.0).
     Click callbacks are idempotent from state (a re-signed retry of an applied call succeeds again). Captures on
     non-payable orders, on payments we failed (including a Click attachment superseded by a newer Prepare) and double
     payments are **refused captures**: accepted, reversed through the Click Merchant API by `click_paydoc_id` and
@@ -2321,8 +2343,10 @@ code a customer view can raise to an existing key.
       reported by `GET /api/v1/health/?ready=1` (`providers`) and by admin `GET settings/` (`integrations.providers`,
       admin §2.11, §2.15). Fake and live providers may be **mixed** (live adapters arrive one at a time in M3), so the
       rule is per provider: in that posture a fake adapter never reports a real-money or real-world effect that did not
-      happen. Fake Click/Payme/BTS accept no callback (§2.13.0) and fake payment providers are not offered (§2.4), so
-      no order is ever paid through a fake provider; a Click refund through the fake port becomes `manual_required`,
+      happen. Fake Click/Payme/BTS start no transaction and honour no capture (§2.13.0: a Click Complete of a
+      transaction attached while Click was live is accepted and reversed, so a switch to fake never strands a
+      customer's money) and fake payment providers are not offered (§2.4), so no order is ever paid through a fake
+      provider; a Click refund through the fake port becomes `manual_required`,
       never `succeeded` (§2.13.0); fake BTS turns home delivery off (§2.6: pickup only, `fulfilment_methods`) and never
       makes up a tariff, a parcel, a tracking number or a cancellation (§2.14.3), so a customer paying through a live
       provider is never charged a fake tariff for a parcel nobody ships; fake Billz never records a sale it did not
