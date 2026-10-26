@@ -77,7 +77,7 @@ class SpecialistServiceSerializer(serializers.Serializer[ProfessionalService]):
 class SpecialistSerializer(serializers.Serializer[Professional]):
     id = serializers.IntegerField()
     name = serializers.CharField()
-    role = serializers.ChoiceField(choices=enums.SpecialistRole.choices)
+    role = serializers.ChoiceField(choices=enums.SpecialistRole.values)
     role_label = serializers.SerializerMethodField()
     photo_url = serializers.SerializerMethodField()
     bio = serializers.SerializerMethodField()
@@ -137,7 +137,7 @@ class SlotsQuerySerializer(serializers.Serializer[dict[str, Any]]):
     service_id = serializers.IntegerField(min_value=1, max_value=2_147_483_647)
 
 
-class WorkingHoursSerializer(serializers.Serializer[Any]):
+class SlotWorkingHoursSerializer(serializers.Serializer[Any]):
     start = serializers.CharField()
     end = serializers.CharField()
 
@@ -155,7 +155,7 @@ class FreeSlotsSerializer(serializers.Serializer[Any]):
     duration_min = serializers.IntegerField()
     price = serializers.IntegerField()
     slot_step_min = serializers.IntegerField()
-    working_hours = WorkingHoursSerializer(allow_null=True)
+    working_hours = SlotWorkingHoursSerializer(allow_null=True)
     slots = SlotSerializer(many=True)
 
 
@@ -181,7 +181,7 @@ class CancelSerializer(serializers.Serializer[dict[str, Any]]):
 class AppointmentSpecialistSerializer(serializers.Serializer[Professional]):
     id = serializers.IntegerField()
     name = serializers.CharField()
-    role = serializers.ChoiceField(choices=enums.SpecialistRole.choices)
+    role = serializers.ChoiceField(choices=enums.SpecialistRole.values)
     role_label = serializers.SerializerMethodField()
     photo_url = serializers.SerializerMethodField()
 
@@ -223,7 +223,7 @@ class CustomerAppointmentSerializer(serializers.Serializer[Appointment]):
     """C§2.11 ``Appointment`` of the customer audience (``note`` is the customer's own note)."""
 
     id = serializers.IntegerField()
-    status = serializers.ChoiceField(choices=enums.AppointmentStatus.choices)
+    status = serializers.ChoiceField(choices=enums.AppointmentStatus.values)
     status_label = serializers.SerializerMethodField()
     specialist = AppointmentSpecialistSerializer(source="professional")
     service = AppointmentServiceSerializer()
@@ -246,7 +246,7 @@ class CustomerAppointmentSerializer(serializers.Serializer[Appointment]):
         return obj.customer_note or None
 
     @extend_schema_field(
-        serializers.ChoiceField(choices=enums.AppointmentCancelledBy.choices, allow_null=True)
+        serializers.ChoiceField(choices=enums.AppointmentCancelledBy.values, allow_null=True)
     )
     def get_cancelled_by(self, obj: Appointment) -> str | None:
         return obj.cancelled_by or None

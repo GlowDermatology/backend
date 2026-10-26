@@ -21,6 +21,8 @@ from typing import TYPE_CHECKING, Any
 from django.conf import settings
 from django.core.cache import cache
 from django.db.models import Q
+from drf_spectacular.extensions import OpenApiAuthenticationExtension
+from drf_spectacular.openapi import AutoSchema
 from rest_framework.authentication import BaseAuthentication
 from rest_framework.exceptions import Throttled
 from rest_framework.permissions import BasePermission
@@ -116,6 +118,21 @@ class PosKeyAuthentication(BaseAuthentication):
 
     def authenticate_header(self, request: Request) -> str:
         return SCHEME
+
+
+class PosApiKeyScheme(OpenApiAuthenticationExtension):  # type: ignore[no-untyped-call]
+    """OpenAPI security scheme of :class:`PosKeyAuthentication`: ``Authorization: Api-Key <key>``."""
+
+    target_class = "glowderma.loyalty.authentication.PosKeyAuthentication"
+    name = "PosApiKey"
+
+    def get_security_definition(self, auto_schema: AutoSchema) -> dict[str, Any]:
+        return {
+            "type": "apiKey",
+            "in": "header",
+            "name": "Authorization",
+            "description": "`Api-Key gdpos_<prefix>_<secret>` (one key per cashier terminal).",
+        }
 
 
 class IsActivePosDevice(BasePermission):

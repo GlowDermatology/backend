@@ -67,14 +67,14 @@ class CashbackSummarySerializer(serializers.Serializer[Any]):
 class LedgerItemSerializer(serializers.Serializer[Any]):
     id = serializers.IntegerField()
     at = serializers.DateTimeField()
-    kind = serializers.ChoiceField(choices=enums.LedgerKind.choices)
+    kind = serializers.ChoiceField(choices=enums.LedgerKind.values)
     amount = serializers.IntegerField()
     balance_after = serializers.IntegerField()
     title = serializers.CharField()
     subtitle = serializers.CharField(allow_null=True)
     order_id = serializers.IntegerField(allow_null=True)
     # A field named like ``Field.source``; DRF reads declared fields, not the attribute.
-    source = serializers.ChoiceField(choices=enums.LedgerSource.choices)  # type: ignore[assignment]
+    source = serializers.ChoiceField(choices=enums.LedgerSource.values)  # type: ignore[assignment]
 
 
 class QrTokenSerializer(serializers.Serializer[Any]):

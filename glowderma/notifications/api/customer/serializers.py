@@ -16,7 +16,7 @@ LINK_IDS = ("product_id", "order_id", "appointment_id")
 
 
 class InboxLinkSerializer(serializers.Serializer[Any]):
-    kind = serializers.ChoiceField(choices=enums.InboxLinkKind.choices)
+    kind = serializers.ChoiceField(choices=enums.InboxLinkKind.values)
     product_id = serializers.IntegerField(allow_null=True)
     order_id = serializers.IntegerField(allow_null=True)
     appointment_id = serializers.IntegerField(allow_null=True)
@@ -35,7 +35,7 @@ class InboxItemSerializer(serializers.Serializer[InboxNotification]):
     """C§2.12 ``InboxItem``: texts as rendered at creation (never re-rendered after a language switch)."""
 
     id = serializers.IntegerField()
-    kind = serializers.ChoiceField(choices=enums.InboxKind.choices)
+    kind = serializers.ChoiceField(choices=enums.InboxKind.values)
     title = serializers.CharField()
     body = serializers.CharField()
     image_url = serializers.SerializerMethodField()
