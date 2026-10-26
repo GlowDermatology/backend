@@ -11081,13 +11081,27 @@ paths:
   /api/v1/webhooks/bts/:
     post:
       operationId: webhook_bts_status
-      description: BTS status notification; the status is re-tracked with our tracking
-        number (customer contract §2.13.3).
+      description: BTS status notification (JSON or form-data, customer contract §2.13.3),
+        authenticated by `?token=<BTS_WEBHOOK_SECRET>` or the `X-GD-Webhook-Token`
+        header; the status is re-tracked with our tracking number.
+      parameters:
+      - in: query
+        name: token
+        schema:
+          type: string
       tags:
       - webhooks
       requestBody:
         content:
           application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: {}
+          application/x-www-form-urlencoded:
             schema:
               type: object
               additionalProperties: {}
@@ -11100,6 +11114,13 @@ paths:
                 additionalProperties: {}
           description: ''
         '401':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '413':
           content:
             application/json:
               schema:
@@ -13677,6 +13698,13 @@ components:
           - $ref: '#/components/schemas/ProviderModes'
           description: '`?ready=1` only, and only for a caller that passes the admin
             network gate (§1): the mode of every provider with a `*_MODE` setting.'
+        sandbox:
+          type: array
+          items:
+            type: string
+          description: 'With `integrations`: the live providers configured against
+            a sandbox (BTS test host, Payme sandbox checkout / `PAYME_TEST_MODE`,
+            Eskiz test sender); empty in a real deployment.'
       required:
       - status
     HealthStatusEnum:
