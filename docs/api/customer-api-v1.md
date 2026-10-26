@@ -707,7 +707,10 @@ paid):
    written; the app asks the customer to finish or wait ≤2 minutes, `CLICK_INFLIGHT_SECONDS`);
 2. every `awaiting_payment` order → `commerce.services.cancel_by_customer` (P2; reason `customer_request`;
    processing/shipped orders continue: BTS uses the order's recipient snapshot);
-3. every open future appointment → `appointments.services.cancel_by_customer` (P3; `reason = "account_deleted"`);
+3. every open future appointment → `appointments.services.cancel_by_customer` (P3; `reason = "account_deleted"`,
+   `account_deleted=True`: the lead-time rule of §2.11 is skipped on this path only). An appointment that stopped being
+   cancellable between the selection and its row lock (staff cancelled, rejected or attended it, or it started) is
+   skipped and not counted; it never aborts the delete (integration, 2026-10-26);
 4. cart lines deleted (`commerce.services.delete_cart_lines`, P0);
 5. `accounts.services.delete_customer` (A1; P0 extends the built function): under the customer-level lock
    (`no_key=True`): `status=deleted`, `deleted_at`, name/image/address/password scrubbed, `language` reset to `uz`,
@@ -1493,7 +1496,9 @@ customer`; audit `appointment.requested` (actor_type `customer`). No push (the c
 `requested`/`confirmed`, ascending by start; `past` = the rest, descending; both limited to the history horizon
 (§2.2.3). **`GET me/appointments/{id}/`** → `Appointment` (404 for another customer's or beyond the horizon).
 
-**`POST appointments/{id}/cancel/`** (**C**, **I**). Body `{"reason": str ≤300 | null}`.
+**`POST appointments/{id}/cancel/`** (**C**, **I**). Body `{"reason": str ≤300 | null}`; the value reserved for the
+account-deletion path, `"account_deleted"` (after trimming), is refused with 400 `reason` `invalid`, so the event and
+the audit never show a false deletion.
 Allowed for `requested`/`confirmed` with `start − now ≥ BOOKING_CANCEL_MIN_LEAD_MINUTES` (default 0; P3 terms are
 not enforced beyond that) → 200 `Appointment` (`status: cancelled`). Else 409 `not_cancellable` "Bu qabulni bekor
 qilib bo‘lmaydi." (`error.appointment_not_cancellable`). Side effects (`appointments.services.cancel_by_customer`,
@@ -1993,7 +1998,7 @@ pushes are reported `sent` but reach no device (§6.14).
 | `data.type` | Other `data` keys | Notification block | Android channel / priority |
 |---|---|---|---|
 | `order_status` | `inbox_id`, `order_id`, `status` | title = customer label (§4.3) in the customer's language; body = template text (`{raqam}` only) | `orders` / high |
-| `appointment` | `inbox_id`, `appointment_id`, `action` | fixed texts (`notifications/texts.py`) | `appointments` / high |
+| `appointment` | `inbox_id`, `appointment_id`, `action` | fixed texts (`notifications/texts.py`); sent only while the action is still true when the outbox message is handled (`confirmed`/`rescheduled`: status `requested` or `confirmed`; `rejected`: `rejected`; `cancelled`: `cancelled`), otherwise no inbox row and no push (INFO log) | `appointments` / high |
 | `campaign` | `inbox_id`, `campaign_id`, `product_id` (or `""`) | as authored; `notification.image` = campaign image URL | `promo` or `general` / normal |
 | `account_security` | `inbox_id`, `event` (`social_linked`, `social_unlinked`, `password_reset`, `password_changed`), `provider` (or `""`) | catalog `push.account_security.<event>` (title + body; `{provider}` only) | `general` / high |
 | `session_replaced` | `sid` (the revoked session) | none (data-only; APNs `content-available: 1`, `apns-push-type: background`, priority 5) | – / high |
