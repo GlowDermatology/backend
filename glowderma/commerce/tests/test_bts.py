@@ -3,12 +3,14 @@ fallback (single flight, round robin, per-parcel failures, run outcome) and ``de
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Iterator
 from datetime import datetime, timedelta
 from typing import Any
 from unittest import mock
 
+import httpx
 import pytest
 from django.core.cache import cache
 from django.test import override_settings
@@ -22,15 +24,19 @@ from glowderma.core import timeutils
 from glowderma.core.timeutils import TASHKENT
 from glowderma.delivery.models import Shipment, ShipmentEvent
 from glowderma.delivery.tests.factories import ShipmentFactory
+from glowderma.integrations import httpclient
 from glowderma.integrations.bts.fake import FakeBts
 from glowderma.integrations.bts.ports import BtsRejected, BtsUnavailable, Parcel
 from glowderma.integrations.models import IntegrationState
+from glowderma.integrations.tests.live_fixtures import Script, reply
 from glowderma.reporting.selectors import bts_polling_failing
 
 SINCE = datetime(2026, 10, 25, 12, 0, tzinfo=TASHKENT)  # the shipment row's creation
 
 pytestmark = pytest.mark.django_db
 SECRET = "local-bts-webhook-secret-at-least-32-characters"  # noqa: S105 - the local default
+OK = {"ok": True}
+IGNORED = {"ok": True, "ignored": True}
 
 
 def parcel(*, status: str = "100", track: str | None = None, minutes_old: int = 60) -> Shipment:
@@ -139,7 +145,7 @@ def test_a_payload_number_of_another_parcel_is_ignored(
 ) -> None:
     shipment = parcel()
     with caplog.at_level(logging.WARNING):
-        response = hook({"clientId": shipment.order_id, "trackingNumber": "99999999", "status": "300"})
+        response = hook({"clientId": shipment.order_id, "orderId": 99999999, "status": "300"})
     assert response.status_code == 200 and tracked == [shipment.tracking_number]
     assert "bts.webhook_tracking_mismatch" in caplog.text
 
@@ -160,9 +166,9 @@ def test_unknown_parcel_rejected_and_down(caplog: pytest.LogCaptureFixture) -> N
 
 
 def test_a_body_nested_too_deep_is_unparsable() -> None:
-    """``json.loads`` raises RecursionError (not ValueError) on ``"[" * 200000``: without the token it is a
+    """``json.loads`` raises RecursionError (not ValueError) on ``"[" * 10000``: without the token it is a
     401 with a bounded row, never an HTTP 500 with nothing stored."""
-    deep = "[" * 200_000
+    deep = "[" * 10_000
     response = APIClient().generic("POST", BTS_URL, deep, content_type="application/json")
     assert response.status_code == 401 and response.json() == {"ok": False}
     (row,) = rows("bts")
@@ -186,6 +192,161 @@ def test_an_oversized_body_or_too_many_query_fields_is_a_client_error_not_a_500(
     crowded = APIClient().generic("POST", f"{BTS_URL}?{many}", "{}", content_type="application/json")
     assert crowded.status_code == 400
     assert "bts.webhook failed" not in caplog.text and rows("bts") == []
+
+
+# --- what BTS really sends (A-M2: docs.bts.uz /page/webhook and /page/test-update-status) ---------------
+
+
+def bts_document(shipment: Shipment, **changes: Any) -> dict[str, Any]:
+    document: dict[str, Any] = {
+        "clientId": str(shipment.order_id),
+        "orderId": int(shipment.tracking_number),
+        "barcode": "0199" + shipment.tracking_number,
+        "status": {"id": 6, "code": 1200, "name": "Доставлен"},
+        "date": "2026-10-26 15:00:00",
+    }
+    document.update(changes)
+    return document
+
+
+def post_raw(body: bytes | str, content_type: str, *, query: str = f"?token={SECRET}") -> Any:
+    return APIClient().generic("POST", f"{BTS_URL}{query}", body, content_type=content_type)
+
+
+def delivered(shipment: Shipment) -> None:
+    Order.objects.filter(pk=shipment.order_id).update(metadata={"fake": {"bts": {"track_status": "300"}}})
+
+
+def test_flat_form_fields_with_php_bracket_keys_and_the_query_token(tracked: list[str]) -> None:
+    shipment = parcel()
+    delivered(shipment)
+    form = {
+        "clientId": str(shipment.order_id),
+        "orderId": shipment.tracking_number,
+        "barcode": "019914293644",
+        "status[id]": "6",
+        "status[code]": "1200",
+        "status[name]": "Доставлен",
+        "date": "2026-10-26 15:00:00",
+    }
+    response = APIClient().post(f"{BTS_URL}?token={SECRET}", form, format="multipart")
+    assert response.status_code == 200 and response.json() == {"ok": True}
+    assert tracked == [shipment.tracking_number]
+    assert Order.objects.get(pk=shipment.order_id).status == "delivered"
+    (row,) = rows("bts")
+    assert row.event_key == f"{shipment.tracking_number}:1200:2026-10-26 15:00:00" and "?" not in row.path
+    assert SECRET not in str(row.headers) and SECRET not in row.raw_body
+
+
+@pytest.mark.parametrize("shape", ["named_field", "unnamed_field", "urlencoded_name", "json_string"])
+def test_a_form_or_body_holding_the_json_document(tracked: list[str], shape: str) -> None:
+    shipment = parcel()
+    document = json.dumps(bts_document(shipment, clientId=None))
+    if shape == "named_field":
+        response = APIClient().post(f"{BTS_URL}?token={SECRET}", {"data": document}, format="multipart")
+    elif shape == "unnamed_field":  # curl --form '"{…}"' (no name=): the document is the field's name
+        response = post_raw(document.encode(), "application/x-www-form-urlencoded")
+    elif shape == "urlencoded_name":
+        response = post_raw(json.dumps(document).encode(), "application/x-www-form-urlencoded")
+    else:  # a JSON string holding the document
+        response = post_raw(json.dumps(document), "application/json")
+    assert response.status_code == 200 and response.json() == {"ok": True}
+    assert tracked == [shipment.tracking_number]  # found by orderId == our tracking number
+
+
+def test_status_as_a_json_string_and_an_id_without_code(tracked: list[str]) -> None:
+    shipment = parcel()
+    form = {
+        "clientId": "",
+        "orderId": shipment.tracking_number,
+        "status": json.dumps({"id": 6, "name": "Доставлен"}),
+        "date": "2022-06-20 07:55:01",
+    }
+    response = post_raw(
+        "&".join(f"{key}={value}" for key, value in form.items()), "application/x-www-form-urlencoded"
+    )
+    assert response.json() == {"ok": True} and tracked == [shipment.tracking_number]
+    assert rows("bts")[0].event_key == f"{shipment.tracking_number}:6:2022-06-20 07:55:01"
+
+
+@pytest.mark.parametrize("client_id", [None, "", "stg-123", "abc"])
+def test_identity_falls_back_to_order_id_never_the_barcode(
+    tracked: list[str], client_id: object, caplog: pytest.LogCaptureFixture
+) -> None:
+    shipment = parcel()
+    with caplog.at_level(logging.WARNING):
+        assert hook(bts_document(shipment, clientId=client_id)).json() == {"ok": True}
+    assert tracked == [shipment.tracking_number] and "tracking_mismatch" not in caplog.text
+    other = parcel()
+    response = hook(bts_document(other, clientId=None, orderId=None, barcode=other.tracking_number))
+    assert response.json() == {"ok": True, "ignored": True}  # the barcode is never a lookup key
+
+
+def test_a_matching_client_id_and_order_id_log_no_mismatch(
+    tracked: list[str], caplog: pytest.LogCaptureFixture
+) -> None:
+    shipment = parcel()
+    with caplog.at_level(logging.WARNING):
+        assert hook(bts_document(shipment, clientId=shipment.order_id)).json() == {"ok": True}
+    assert "bts.webhook_tracking_mismatch" not in caplog.text
+
+
+def test_the_client_id_carries_the_environment_prefix(tracked: list[str]) -> None:
+    shipment = parcel()
+    with override_settings(BTS_CLIENT_ID_PREFIX="stg-"):
+        assert hook(bts_document(shipment, clientId=f"stg-{shipment.order_id}", orderId=None)).json() == OK
+        # another environment's (or the bare) clientId is not ours: nothing to look up without orderId
+        assert hook(bts_document(shipment, clientId=str(shipment.order_id), orderId=None)).json() == IGNORED
+    assert tracked == [shipment.tracking_number]
+
+
+def test_a_body_larger_than_the_bound_is_refused_unread() -> None:
+    response = post_raw(b"x" * (17 * 1024), "application/json")
+    assert response.status_code == 413 and response.json() == {"ok": False}
+    assert rows("bts") == []
+
+
+def test_a_real_notification_over_the_live_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The A-M2 probe: BTS's form-data notification re-tracks over the live adapter and delivers."""
+    scripted = Script().on("POST", "/auth/login", reply("bts", "login_ok"))
+    scripted.on(
+        "GET",
+        "/v1/order/track",
+        httpx.Response(200, json={"status": True, "data": {"orderId": 4293644, "status": {"code": 1200}}}),
+    )
+    real = httpclient.new_client
+    monkeypatch.setattr(httpclient, "new_client", lambda transport=None: real(scripted.transport))
+    order = OrderFactory.create(paid=True)
+    old = real_now() - timedelta(minutes=60)
+    shipment = ShipmentFactory.create(
+        order=order,
+        created=True,
+        tracking_number="4293644",
+        bts_order_id="4293644",
+        bts_status="100",
+        bts_created_at=old,
+        last_status_at=old,
+    )
+    form = {
+        "clientId": str(order.pk),
+        "orderId": "4293644",
+        "barcode": "019914293644",
+        "status[id]": "6",
+        "status[code]": "1200",
+        "status[name]": "Доставлен",
+        "date": "2026-10-26 15:00:00",
+    }
+    live = {
+        "BTS_MODE": "live",
+        "BTS_BASE_URL": "https://apitest.bts.uz:28345",
+        "BTS_LOGIN": "glowderma",
+        "BTS_PASSWORD": "bts-password-value",
+    }
+    with override_settings(**live):
+        response = APIClient().post(f"{BTS_URL}?token={SECRET}", form, format="multipart")
+    assert response.json() == {"ok": True}
+    assert [r.url.params["orderId"] for r in scripted.to("GET", "/v1/order/track")] == ["4293644"]
+    assert Order.objects.get(pk=shipment.order_id).status == "delivered"
 
 
 def test_fake_bts_in_production_answers_401() -> None:

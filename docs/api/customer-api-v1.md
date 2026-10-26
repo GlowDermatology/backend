@@ -1895,20 +1895,34 @@ Every method writes a `WebhookInbox` row (§2.13.0). The `transaction` value is 
 Payme id is `Payment.provider_txn_id`.
 
 #### 2.13.3 `POST webhooks/bts/` and the polling job
-- **Auth:** shared secret `BTS_WEBHOOK_SECRET` in header `X-GD-Webhook-Token` (preferred). Only if BTS cannot set
-  headers, query `?token=` **(verify M3)**: the view strips the parameter before anything is logged or stored
-  (`WebhookInbox.path` has no query string), and the edge proxy's log format redacts `token=` (ops runbook).
-  `compare_digest`; mismatch → 401 `{"ok": false}` + a bounded `rejected:` inbox row (§2.13.0). A fake BTS under the
-  production settings answers every call that way (§2.13.0).
-- **Body:** BTS's status notification (JSON). We read only the parcel identity and **never trust the status in the
-  payload**: our `Shipment` is found by `clientId` (= our order id) or by the tracking number **stored on our
-  Shipment**, and the view **re-tracks with the tracking number stored on our Shipment** through the BTS port
-  `track(tracking_number)` (P2 adds it). A payload tracking number that differs from ours is ignored with a WARNING
-  `bts.webhook_tracking_mismatch {order_id}`, so a payload pairing order X with another parcel's number cannot move
-  order X. The authoritative status is applied through `commerce.services.apply_bts_status(order_id, status,
-  via="webhook", payload=<stable fields of the tracked parcel, as polling below>)` (B5: shipment event; `200` → `handed_to_courier`, `300` → `delivered`,
-  others recorded only; events with source `bts`; `push.order_status`). A forged webhook can therefore only trigger a
-  re-track of a parcel we created.
+- **Auth (M3):** shared secret `BTS_WEBHOOK_SECRET`. BTS configures only a URL (`/v1/webhook/webhook-config`;
+  its own optional `has_token` sends a token of an unspecified name and place, not our header), so the webhook is
+  configured as `webhook_url = https://<api host>/api/v1/webhooks/bts/?token=<BTS_WEBHOOK_SECRET>` with BTS's
+  `has_token` off. The header `X-GD-Webhook-Token` is accepted too (either one). The view strips the parameter
+  before anything is logged or stored (`WebhookInbox.path` has no query string), and the edge proxy's log format
+  redacts `token=` (ops runbook). `compare_digest`; mismatch → 401 `{"ok": false}` + a bounded `rejected:` inbox
+  row (§2.13.0). A fake BTS under the production settings answers every call that way (§2.13.0).
+- **Body (M3, docs.bts.uz `/page/webhook`, `/page/test-update-status`):** BTS's notification document
+  `{"clientId": str|int|null|"", "orderId": int, "barcode": str, "status": {"id": int, "code"?: int, "name":
+  str}, "date": "YYYY-MM-DD[ HH:MM:SS]"}` — `status.id` is BTS's own scale (`6` = delivered = code `1200`). Every
+  delivery shape is read: a JSON body (also a JSON string holding the document); flat form fields (multipart or
+  urlencoded) including PHP bracket keys `status[id]` / `status[code]` / `status[name]` and `status` as a JSON
+  string; a form whose single field value — or name, when the field has none (BTS's curl example) — is the JSON
+  document. A body over 16 KiB → 413 `{"ok": false}`, nothing stored. Nothing else is assumed; BTS's retry policy
+  is undocumented, so polling (below) is the safety net for a delivery we answered 503.
+- **Identity, never the status:** we read only the parcel identity and **never trust the status in the
+  payload**: our `Shipment` is found by `clientId` (= `BTS_CLIENT_ID_PREFIX` + our order id; `null`, `""`, a
+  value of another environment's prefix are skipped) or else by `orderId` = the tracking number **stored on our
+  Shipment** (our tracking number **is** BTS's `orderId`, §2.14.3). The `barcode` is never read. The view
+  **re-tracks with the tracking number stored on our Shipment** through the BTS port `track(tracking_number)`.
+  An `orderId` that differs from the tracking number of the Shipment found by `clientId` is ignored with a
+  WARNING `bts.webhook_tracking_mismatch {order_id}`, so a payload pairing order X with another parcel's number
+  cannot move order X. The authoritative status is applied through `commerce.services.apply_bts_status(order_id,
+  status, via="webhook", payload=<stable fields of the tracked parcel, as polling below>)` (B5: shipment event;
+  port `200` → `handed_to_courier`, `300` → `delivered`, others recorded only — the live adapter translates BTS's
+  own codes, §2.14.3; events with source `bts`; `push.order_status`). A forged webhook can therefore only trigger
+  a re-track of a parcel we created. Inbox event key: `"{tracking number}:{status.code or status.id}:{date}"` (a
+  random key when either is missing, so nothing is deduplicated by mistake).
 - → 200 `{"ok": true}`; unknown parcel (no Shipment, or a Shipment without a tracking number yet) → 200 `{"ok": true,
   "ignored": true}` + WARNING log (BTS must not retry forever); a definitive refusal of the re-track (`BtsRejected`,
   e.g. BTS no longer knows our tracking number) → the same 200 `{"ok": true, "ignored": true}` + WARNING
@@ -2055,12 +2069,29 @@ pushes are reported `sent` but reach no device (§6.14).
 #### 2.14.3 BTS (`integrations/bts/`; B5 port + P2 additions; live adapter M3)
 | Port method | Use | Notes (verify M3 against `apitest`) |
 |---|---|---|
-| `regions()` | `delivery/regions/`, address validation | BTS region/city reference; cached 24 h |
-| `quote(region_code, city_code)` | `delivery/calculate/`, checkout | tariff calculation with `BTS_SENDER_CITY_CODE`, `BTS_DEFAULT_PARCEL_WEIGHT_G`, one parcel; `BtsRejected` → 409 `delivery_unavailable` |
-| `find_by_client_id(client_id)` | before every create (B5) | `clientId` = order id |
-| `create(request)` | outbox `bts.create_shipment` (B5) | recipient = the order's recipient snapshot |
+| `regions()` | `delivery/regions/`, address validation | BTS region/city reference; cached (served stale while a refresh fails), refreshed single-flight by the beat `delivery.refresh_bts_regions` |
+| `quote(region_code, city_code)` | `delivery/calculate/`, checkout | tariff calculation with `BTS_SENDER_CITY_CODE`, `BTS_DEFAULT_PARCEL_WEIGHT_G`, one parcel; live: bounded at 4 s (a customer request waits) and cached 5 min per (sender city, city, weight, pickup type); `BtsRejected` → 409 `delivery_unavailable`, `BtsUnavailable` → 503 |
+| `find_by_client_id(client_id, since)` | before every create (B5) | `clientId` = `BTS_CLIENT_ID_PREFIX` + order id (default prefix empty: the bare order id); live: BTS's order list from the day before the shipment row was created (`since`) to a week ahead; any doubt (a full page without pagination data, a failed page) → `BtsUnavailable`; two live parcels → ERROR `bts.duplicate_parcels` |
+| `create(request)` | outbox `bts.create_shipment` (B5) | recipient = the order's recipient snapshot; `ready_to_take` = `BTS_READY_TO_TAKE` (true); called **outside** the Order row lock (checks committed first, the order re-locked to record; a parcel of an order cancelled meanwhile is cancelled at BTS as an orphan) |
 | `cancel(parcel)` | admin cancel (B5) | succeeds only at status `100` (O1) |
 | `track(tracking_number)` | webhook re-track, polling (P2) | returns the parcel with its current status; always called with **our** stored tracking number; `BtsRejected` = a definitive per-parcel answer (unknown parcel), `BtsUnavailable` = transport error, 5xx or timeout (§2.13.3) |
+
+**Tracking number (M3 live).** BTS's `track` and `cancel` take only BTS's `orderId` (the waybill number), so the
+live adapter stores it as both `Shipment.tracking_number` and `bts_order_id`; BTS's `barcode` is not stored.
+
+**Status translation (M3 live).** BTS's own codes (`GET /v1/status/index`) differ from the port vocabulary above
+(`100` accepted / cancellable, `200` handed to the courier, `300` delivered); the live adapter translates:
+
+| BTS code | Port status | Order effect |
+|---|---|---|
+| `100`, or `null` (a new order) | `100` | none (cancellable) |
+| `200` courier took it, `300` in the sending office, `400`, `500`, `600`, `700`, `800`, `1100` courier delivering | `200` | `processing` → `handed_to_courier` |
+| `1200` delivered | `300` | → `delivered` |
+| `1300` deleted, `1400` expired | the code itself | recorded only; polling logs ERROR `bts.parcel_gone` once (staff act) |
+| any other code | the code itself (`unknown` when not a number) | recorded only |
+
+**Failures (M3 live).** No answer, HTTP 5xx and an answer that says the request was not processed (a redirect,
+408 / 425 / 429, 401 / 403) are `BtsUnavailable`; another 4xx is `BtsRejected`.
 
 Fake additions (P2): `regions()` returns the four regions of the fake tariff table (`10` Toshkent shahri, `11`
 Toshkent viloyati, `12` Sirdaryo, `13` Samarqand) with two cities each; `track()` returns `scenario["track_status"]`
