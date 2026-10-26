@@ -35,6 +35,12 @@ def test_test_settings_default_to_the_fake_with_documented_values() -> None:
     assert (settings.BILLZ_SHIFT_RETRY_MINUTES, settings.BILLZ_SHIFT_RETRY_MAX_HOURS) == (15, 36)
     assert settings.BILLZ_FULL_SYNC_MIN_RATIO == 0.8 and settings.BILLZ_VOLUME_FIELD == ""
     assert (settings.BILLZ_CONNECT_TIMEOUT_SECONDS, settings.BILLZ_READ_TIMEOUT_SECONDS) == (5.0, 30.0)
+    # gap X-STOCK-FRESHNESS (decision GC-5)
+    assert (
+        settings.BILLZ_DELTA_SYNC_SECONDS,
+        settings.BILLZ_STOCK_MAX_AGE_SECONDS,
+        settings.BILLZ_STOCK_STALE_REFUSE_SECONDS,
+    ) == (300, 900, 3600)
     assert settings.LOGGING["loggers"]["httpx"] == {"level": "WARNING"}  # request URLs can carry phones
 
 
@@ -134,6 +140,20 @@ def test_live_billz_in_production_refuses_bad_values(
         ("BILLZ_SHIFT_RETRY_MINUTES", "0", "BILLZ_SHIFT_RETRY_MINUTES must be between 1 and 1440"),
         ("BILLZ_SHIFT_RETRY_MAX_HOURS", "169", "BILLZ_SHIFT_RETRY_MAX_HOURS must be between 1 and 168"),
         ("BILLZ_SHIFT_RETRY_MAX_HOURS", "two", "BILLZ_SHIFT_RETRY_MAX_HOURS must be an integer"),
+        # gap X-STOCK-FRESHNESS (decision GC-5)
+        ("BILLZ_DELTA_SYNC_SECONDS", "59", "BILLZ_DELTA_SYNC_SECONDS must be between 60 and 3600"),
+        ("BILLZ_DELTA_SYNC_SECONDS", "3601", "BILLZ_DELTA_SYNC_SECONDS must be between 60 and 3600"),
+        ("BILLZ_STOCK_MAX_AGE_SECONDS", "30", "BILLZ_STOCK_MAX_AGE_SECONDS must be between 60 and 86400"),
+        (
+            "BILLZ_STOCK_STALE_REFUSE_SECONDS",
+            "700000",
+            "BILLZ_STOCK_STALE_REFUSE_SECONDS must be between 60 and 604800",
+        ),
+        (
+            "BILLZ_STOCK_STALE_REFUSE_SECONDS",
+            "600",
+            "BILLZ_STOCK_STALE_REFUSE_SECONDS must be at least BILLZ_STOCK_MAX_AGE_SECONDS",
+        ),
     ],
 )
 def test_billz_settings_are_validated_in_every_module(
@@ -180,3 +200,30 @@ def test_crlf_values_are_stripped_before_they_are_validated_and_used(
     product = fixture("products_page1")["products"][0]
     assert stock_of(product, production.BILLZ_SHOP_ID) == 12
     assert price_of(product, production.BILLZ_SHOP_ID) == 185_000
+
+
+def test_local_settings_accept_tuned_stock_freshness(
+    monkeypatch: pytest.MonkeyPatch, load_fresh_local: Callable[[], ModuleType]
+) -> None:
+    monkeypatch.setenv("BILLZ_DELTA_SYNC_SECONDS", "60")
+    monkeypatch.setenv("BILLZ_STOCK_MAX_AGE_SECONDS", "120")
+    monkeypatch.setenv("BILLZ_STOCK_STALE_REFUSE_SECONDS", "120")
+    local = load_fresh_local()
+    assert (
+        local.BILLZ_DELTA_SYNC_SECONDS,
+        local.BILLZ_STOCK_MAX_AGE_SECONDS,
+        local.BILLZ_STOCK_STALE_REFUSE_SECONDS,
+    ) == (60, 120, 120)
+
+
+def test_env_example_documents_the_stock_freshness_variables() -> None:
+    import re
+    from pathlib import Path
+
+    env_example = (Path(settings.BASE_DIR) / ".env.example").read_text()
+    for name, default in (
+        ("BILLZ_DELTA_SYNC_SECONDS", "300"),
+        ("BILLZ_STOCK_MAX_AGE_SECONDS", "900"),
+        ("BILLZ_STOCK_STALE_REFUSE_SECONDS", "3600"),
+    ):
+        assert re.search(rf"^#{name}={default}$", env_example, re.MULTILINE), name
