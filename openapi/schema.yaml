@@ -2652,8 +2652,9 @@ paths:
       operationId: admin_notifications_create
       description: Multipart with dotted keys (`link.kind`, `audience.type`, …) and
         an optional `image` (JPEG, PNG or WebP, ≤ 5 MiB). Without `scheduled_at` the
-        send starts at once (state queued); with it the campaign waits for its time
-        (state scheduled).
+        send starts at once; the 201 body is the campaign as stored after the commit
+        (`queued`, or `sent` when the send already ran inside the request). With it
+        the campaign waits for its time (state `scheduled`).
       parameters:
       - in: header
         name: Idempotency-Key
@@ -6124,17 +6125,10 @@ components:
         version:
           type: string
         integrations:
-          type: object
-          additionalProperties:
-            enum:
-            - fake
-            - live
-            type: string
-            description: |-
-              * `fake` - fake
-              * `live` - live
-          description: '`?ready=1` only: `{provider: mode}` for every provider with
-            a `*_MODE` setting.'
+          allOf:
+          - $ref: '#/components/schemas/ProviderModes'
+          description: '`?ready=1` only, and only for a caller that passes the admin
+            network gate (§1): the mode of every provider with a `*_MODE` setting.'
       required:
       - status
     HealthStatusEnum:
