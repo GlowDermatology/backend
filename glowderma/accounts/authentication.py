@@ -238,6 +238,8 @@ class CustomerJWTAuthentication(BaseAuthentication):
         return 'Bearer realm="api"'
 
 
-class OptionalCustomerAuthentication(CustomerJWTAuthentication):
-    """The optional-auth (O) variant: no ``Authorization`` header → anonymous; a present header must be a
-    valid customer access token (an invalid one is a 401, never silently anonymous)."""
+# The optional-auth (O) routes use the same class: no ``Authorization`` header → anonymous (``AllowAny`` lets
+# the request through); a present header must be a valid customer access token (an invalid one, or another
+# scheme, is a 401, never silently anonymous). One class keeps one OpenAPI security component
+# (``CustomerJWT``).
+OptionalCustomerAuthentication = CustomerJWTAuthentication

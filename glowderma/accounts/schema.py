@@ -13,11 +13,10 @@ class StaffJWTScheme(OpenApiAuthenticationExtension):  # type: ignore[no-untyped
 
 
 class CustomerJWTScheme(OpenApiAuthenticationExtension):  # type: ignore[no-untyped-call]
-    """Customer access JWT (``aud = customer``); also covers ``OptionalCustomerAuthentication`` (O routes,
-    where drf-spectacular adds the anonymous alternative because the permission is ``AllowAny``)."""
+    """Customer access JWT (``aud = customer``). ``OptionalCustomerAuthentication`` is the same class (O
+    routes, where drf-spectacular adds the anonymous alternative because the permission is ``AllowAny``)."""
 
     target_class = "glowderma.accounts.authentication.CustomerJWTAuthentication"
-    match_subclasses = True
     name = "CustomerJWT"
 
     def get_security_definition(self, auto_schema: AutoSchema) -> dict[str, Any]:
