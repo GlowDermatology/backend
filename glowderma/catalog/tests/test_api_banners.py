@@ -524,6 +524,22 @@ def test_patch_switches_to_and_from_a_url_link(staff_client: APIClient) -> None:
     assert Banner.objects.get(pk=banner.pk).link_url == ""
 
 
+@pytest.mark.parametrize("scheme", ["HTTPS", "Https"])
+def test_an_upper_case_scheme_is_stored_lower_case_not_a_500(staff_client: APIClient, scheme: str) -> None:
+    """Review fix: URLValidator accepts ``HTTPS://``; the DB check is case-sensitive → normalise, no 500."""
+    body = form(**{"link.kind": "url", "link.url": f"{scheme}://glowderma.uz/Aksiya"})
+    response = staff_client.post(BANNERS, body, format="multipart")
+    assert response.status_code == 201, response.json()
+    assert response.json()["link"]["url"] == "https://glowderma.uz/Aksiya"
+    banner = Banner.objects.get()
+    assert banner.link_url == "https://glowderma.uz/Aksiya"
+    response = staff_client.patch(
+        f"{BANNERS}{banner.pk}/", {"link": {"kind": "url", "url": f"{scheme}://t.me/x"}}, format="json"
+    )
+    assert response.status_code == 200, response.json()
+    assert Banner.objects.get().link_url == "https://t.me/x"
+
+
 def test_database_refuses_a_url_banner_without_https_or_with_a_target() -> None:
     from django.db import IntegrityError, transaction
 

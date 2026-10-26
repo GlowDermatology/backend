@@ -1,5 +1,6 @@
 """Shared DRF serializer fields implementing the value rules of admin API v1, section 1.4."""
 
+import unicodedata
 from datetime import datetime
 from decimal import Decimal
 from functools import cache
@@ -119,7 +120,11 @@ class HttpsUrlField(serializers.CharField):
             raise serializers.ValidationError(field_error("invalid", HTTPS_URL_INVALID)) from None
         if parts.username is not None or parts.password is not None or port not in (None, 443):
             raise serializers.ValidationError(field_error("invalid", HTTPS_URL_INVALID))
-        return value
+        if any(unicodedata.category(char) in ("Cc", "Cf") for char in value):
+            raise serializers.ValidationError(field_error("invalid", HTTPS_URL_INVALID))
+        # URLValidator compares the scheme case-insensitively, the DB checks (``LIKE 'https://%'``) do not:
+        # store the scheme lower-cased so ``HTTPS://…`` is accepted rather than ending in an IntegrityError.
+        return "https://" + value[len("https://") :]
 
 
 class BoundedListField(serializers.ListField):

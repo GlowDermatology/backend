@@ -170,12 +170,21 @@ class TestHttpsUrlField:
             "https://glowderma.uz:99999/",
             "https://glow derma.uz/",
             "ftp://glowderma.uz/",
+            "https://glowderma.uz/\u202eaksiya",
+            "https://glowderma.uz/a\u200bb",
         ],
     )
     def test_invalid(self, raw: str) -> None:
         assert errors(single(HttpsUrlField(), {"value": raw})) == [
             {"field": "value", "code": "invalid", "message": "Havolani https:// bilan to‘liq kiriting."}
         ]
+
+    @pytest.mark.parametrize("raw", ["HTTPS://glowderma.uz/Aksiya", "Https://glowderma.uz/Aksiya"])
+    def test_scheme_case_is_normalised(self, raw: str) -> None:
+        """The DB checks compare ``https://`` case-sensitively: the stored scheme is lower-cased."""
+        serializer = single(HttpsUrlField(), {"value": raw})
+        assert serializer.is_valid(), serializer.errors
+        assert serializer.validated_data["value"] == "https://glowderma.uz/Aksiya"
 
     def test_max_length(self) -> None:
         raw = "https://glowderma.uz/" + "a" * 480
