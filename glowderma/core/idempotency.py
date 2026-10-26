@@ -1,19 +1,24 @@
 import hashlib
 import json
+import logging
+import threading
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from functools import wraps
 from typing import Any
 
 from django.core.exceptions import ImproperlyConfigured
 from django.core.files.uploadedfile import UploadedFile
-from django.db import connection, transaction
+from django.db import DatabaseError, connection, transaction
 from rest_framework.request import Request
 from rest_framework.response import Response
 
 from glowderma.core import timeutils
 from glowderma.core.api.exceptions import IdempotencyKeyRequired, IdempotencyKeyReused, RequestInProgress
 from glowderma.core.models import IdempotencyRecord
+
+logger = logging.getLogger(__name__)
 
 
 def request_fingerprint(request: Request) -> str:
@@ -72,6 +77,48 @@ def _refresh(response: Response, record_id: int | None) -> Response:
     return response
 
 
+_held = threading.local()
+
+
+def _held_scopes() -> set[str]:
+    scopes: set[str] | None = getattr(_held, "scopes", None)
+    if scopes is None:
+        scopes = _held.scopes = set()
+    return scopes
+
+
+@contextmanager
+def _key_lock(lock_scope: str) -> Iterator[None]:
+    """Hold the key from the first query until the response body is final.
+
+    A session-level advisory lock, so it outlives the request's transaction: the on-commit callbacks (an eager
+    send) and the :func:`refresh_after_commit` UPDATE of the stored body run while a concurrent replay still
+    answers 409 ``request_in_progress`` instead of reading the pre-refresh body. Advisory locks are re-entrant
+    within one session, so the same connection (= thread) re-entering the key is refused in process.
+    """
+    held = _held_scopes()
+    if lock_scope in held:
+        raise RequestInProgress()
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT pg_try_advisory_lock(hashtextextended(%s, 0))", [lock_scope])
+        acquired = cursor.fetchone()
+    if not acquired or not acquired[0]:
+        raise RequestInProgress()
+    held.add(lock_scope)
+    try:
+        yield
+    finally:
+        held.discard(lock_scope)
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT pg_advisory_unlock(hashtextextended(%s, 0))", [lock_scope])
+        except DatabaseError:
+            # The session lock dies with the session: drop a connection we could not unlock on.
+            logger.warning("could not release the idempotency key lock", exc_info=True)
+            if not connection.in_atomic_block:
+                connection.close()
+
+
 def idempotent(required: bool = True) -> Callable[[Callable[..., Response]], Callable[..., Response]]:
     def decorate(view: Callable[..., Response]) -> Callable[..., Response]:
         @wraps(view)
@@ -98,36 +145,41 @@ def idempotent(required: bool = True) -> Callable[[Callable[..., Response]], Cal
             }
             lock_scope = f"{scope['audience']}|{scope['actor_id']}|{scope['method']}|{scope['path']}|{key}"
             record_id: int | None = None
-            with transaction.atomic():
-                with connection.cursor() as cursor:
-                    cursor.execute("SELECT pg_try_advisory_xact_lock(hashtextextended(%s, 0))", [lock_scope])
-                    acquired = cursor.fetchone()
-                if not acquired or not acquired[0]:
-                    raise RequestInProgress()
-                fingerprint = request_fingerprint(request)
-                record = IdempotencyRecord.objects.filter(**scope).first()
-                if record is not None and record.expires_at <= timeutils.now():
-                    record.delete()
-                    record = None
-                if record is not None:
-                    if record.request_hash != fingerprint:
-                        raise IdempotencyKeyReused()
-                    return Response(
-                        record.response_body,
-                        status=record.response_status,
-                        headers={"Idempotent-Replayed": "true"},
-                    )
-                response = view(self, request, *args, **kwargs)
-                if 200 <= response.status_code < 300:
-                    record_id = IdempotencyRecord.objects.create(
-                        **scope,
-                        request_hash=fingerprint,
-                        response_status=response.status_code,
-                        response_body=response.data,
-                    ).pk
-                else:
-                    transaction.set_rollback(True)
-            return _refresh(response, record_id)
+            with _key_lock(lock_scope):
+                with transaction.atomic():
+                    # The transaction-level lock (re-entrant for this session) keeps the key held until an
+                    # outer transaction commits, after the session lock above was released.
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            "SELECT pg_try_advisory_xact_lock(hashtextextended(%s, 0))", [lock_scope]
+                        )
+                        acquired = cursor.fetchone()
+                    if not acquired or not acquired[0]:  # pragma: no cover - the session lock is held
+                        raise RequestInProgress()
+                    fingerprint = request_fingerprint(request)
+                    record = IdempotencyRecord.objects.filter(**scope).first()
+                    if record is not None and record.expires_at <= timeutils.now():
+                        record.delete()
+                        record = None
+                    if record is not None:
+                        if record.request_hash != fingerprint:
+                            raise IdempotencyKeyReused()
+                        return Response(
+                            record.response_body,
+                            status=record.response_status,
+                            headers={"Idempotent-Replayed": "true"},
+                        )
+                    response = view(self, request, *args, **kwargs)
+                    if 200 <= response.status_code < 300:
+                        record_id = IdempotencyRecord.objects.create(
+                            **scope,
+                            request_hash=fingerprint,
+                            response_status=response.status_code,
+                            response_body=response.data,
+                        ).pk
+                    else:
+                        transaction.set_rollback(True)
+                return _refresh(response, record_id)
 
         return wrapped
 

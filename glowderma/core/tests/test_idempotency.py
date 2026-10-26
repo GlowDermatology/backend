@@ -326,3 +326,66 @@ def test_refresh_after_commit_keeps_the_body_inside_an_outer_transaction() -> No
     first = _after_commit_post(AfterCommitView, str(uuid4()))
     assert first.data == {"state": "queued"}  # nothing committed yet: the body is the stored state
     assert IdempotencyRecord.objects.get().response_body == {"state": "queued"}
+
+
+class RetryDuringSendView(APIView):
+    """An eager on-commit send during which the client retries the same key, from another connection and
+    from the same one (a nested call)."""
+
+    authentication_classes = [StubAuthentication]
+    permission_classes = [AllowAny]
+    seen: list[tuple[str, Any]] = []
+
+    @idempotent()
+    def post(self, request: Request) -> Response:
+        _STORE["state"] = "queued"
+        key = request.headers["Idempotency-Key"]
+
+        def finish() -> None:
+            _STORE["state"] = "sent"
+            other: list[Response] = []
+
+            def retry() -> None:
+                try:
+                    other.append(_retry_post(key))
+                finally:
+                    connection.close()
+
+            worker = Thread(target=retry, daemon=True)
+            worker.start()
+            worker.join(timeout=10)
+            self.seen.append(("other connection", other[0].data if other else "timeout"))
+            self.seen.append(("same connection", _retry_post(key).data))
+
+        transaction.on_commit(finish)
+
+        def body() -> dict[str, str]:
+            return {"state": _STORE["state"]}
+
+        return refresh_after_commit(Response(body(), status=201), body)
+
+
+def _retry_post(key: str) -> Response:
+    request = APIRequestFactory().post(
+        "/api/test/retry-during-send/", {}, format="json", HTTP_IDEMPOTENCY_KEY=key
+    )
+    response: Response = RetryDuringSendView.as_view()(request)
+    return response
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_retry_while_the_body_is_refreshed_is_in_progress_never_the_pre_send_body() -> None:
+    """The key stays held across the on-commit callbacks and the stored-body refresh: a retry racing the
+    first response answers 409 ``request_in_progress``; once the response is out, a replay is that body."""
+    RetryDuringSendView.seen = []
+    key = str(uuid4())
+    first = _retry_post(key)
+    assert first.status_code == 201 and first.data == {"state": "sent"}
+    assert [label for label, _ in RetryDuringSendView.seen] == ["other connection", "same connection"]
+    for _, data in RetryDuringSendView.seen:
+        assert data["code"] == "request_in_progress"
+    replay = _retry_post(key)
+    assert replay["Idempotent-Replayed"] == "true" and replay.data == {"state": "sent"}
+    with connection.cursor() as cursor:  # the session lock was released
+        cursor.execute("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND pid = pg_backend_pid()")
+        assert cursor.fetchone() == (0,)
