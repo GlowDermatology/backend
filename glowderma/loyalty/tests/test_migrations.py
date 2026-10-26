@@ -1,4 +1,4 @@
-"""loyalty.0001_initial / 0002_append_only (design 02 §0.2, 03 §9 row 12): dependencies, reversibility."""
+"""loyalty.0001_initial, 0002_append_only and 0003 (design 02 §0.2, 03 §9 row 12): dependencies, reversal."""
 
 from importlib import import_module
 
@@ -80,5 +80,29 @@ def test_migrate_zero_and_forward_again() -> None:
     assert set(MigrationRecorder.Migration.objects.filter(app="loyalty").values_list("name", flat=True)) == {
         "0001_initial",
         "0002_append_only",
+        "0003_posdevice_key_prefix_unique",
     }
     call_command("migrate", verbosity=0)  # re-apply whatever depends on loyalty for the rest of the phase
+
+
+@pytest.mark.django_db(transaction=True)
+def test_the_unique_prefix_step_names_devices_that_share_a_prefix() -> None:
+    call_command("migrate", verbosity=0)
+    call_command("migrate", "loyalty", "0002", verbosity=0)
+    try:
+        with connection.cursor() as cursor:
+            for name, digest in (("Kassa A", "a" * 64), ("Kassa B", "b" * 64)):
+                cursor.execute(
+                    "INSERT INTO loyalty_posdevice (name, location_label, key_prefix, key_hash, is_active,"
+                    " created_at, updated_at) VALUES (%s, '', 'twin0001', %s, true, now(), now())",
+                    [name, digest],
+                )
+        with pytest.raises(RuntimeError, match="share key prefixes"):
+            call_command("migrate", "loyalty", "0003", verbosity=0)
+        with connection.cursor() as cursor:
+            cursor.execute("DELETE FROM loyalty_posdevice WHERE key_hash = %s", ["b" * 64])
+        call_command("migrate", "loyalty", "0003", verbosity=0)
+        with connection.cursor() as cursor:
+            cursor.execute("DELETE FROM loyalty_posdevice")
+    finally:
+        call_command("migrate", verbosity=0)
