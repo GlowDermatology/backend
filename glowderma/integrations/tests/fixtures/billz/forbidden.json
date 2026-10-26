@@ -1,0 +1,2 @@
+{"_source": "components.responses.Forbidden (llms-full '403 и 404')",
+ "code": 403, "message": "forbidden", "error": "access denied", "data": null}

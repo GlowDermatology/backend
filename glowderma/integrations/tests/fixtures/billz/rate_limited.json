@@ -1,0 +1,2 @@
+{"_source": "components.responses.TooManyRequests (string code TOO_MANY_REQUESTS)",
+ "error": {"code": "TOO_MANY_REQUESTS", "message": "rate limit exceeded"}}

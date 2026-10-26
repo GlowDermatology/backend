@@ -1,0 +1,3 @@
+{"_source": "components.responses.RequestTimeout (llms-full 'Тело таймаута')",
+ "correlation_id": "6f1c1f1e-0000-4000-8000-000000000408",
+ "error": {"code": "TIMEOUT", "message": "Timeout waiting for response"}}

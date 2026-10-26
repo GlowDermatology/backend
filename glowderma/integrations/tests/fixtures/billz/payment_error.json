@@ -1,0 +1,4 @@
+{"_source": "post_v2_order_payment_order_id 400 (llms-full 'Коды ошибок оплаты'); the tests set data.error_code",
+ "status_code": 400,
+ "error": {"code": "", "message": "status: 400 - errors: Bad request - causes: ..."},
+ "data": {"error_code": 20084, "message": "payment is possible only for calculated order", "data": null}}

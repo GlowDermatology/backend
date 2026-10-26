@@ -187,6 +187,23 @@ def record_sync_success(provider: str, *, synced_at: Any = None) -> IntegrationS
     return state
 
 
+def update_provider_data(provider: str, changes: dict[str, Any]) -> IntegrationState:
+    """Merge ``changes`` into the provider's cursor document (``IntegrationState.data``) under the row lock.
+
+    The Billz adapter keeps its sync cursor here (``delta_since``, ``full_count``, ``full_synced_at``); it
+    calls this only after the caller applied a whole run, so a failed run never moves the cursor.
+    """
+    get_state(provider)
+    with transaction.atomic():
+        state = IntegrationState.objects.select_for_update().get(provider=provider)
+        data = dict(state.data) if isinstance(state.data, dict) else {}
+        data.update(changes)
+        state.data = data
+        state.updated_at = timeutils.now()
+        state.save(update_fields=["data", "updated_at"])
+        return state
+
+
 def record_failure(provider: str, message: str) -> IntegrationState:
     state = get_state(provider)
     instant = timeutils.now()

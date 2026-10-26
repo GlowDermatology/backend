@@ -1,0 +1,4 @@
+{"_source": "post_v1_auth_login 200 (llms-full '2. Первый запрос')",
+ "code": 200, "message": "ok", "error": null,
+ "data": {"access_token": "access-from-login", "refresh_token": "refresh-from-login",
+          "token_type": "Bearer", "expires_in": 1296000}}

@@ -17,15 +17,41 @@ The admin e2e scripts rely on these rules; change them only together with the fr
 
 So an import is idempotent: the only visible effect is those three hidden ``is_new_from_billz`` products
 appearing once (the second run leaves them unchanged), ``billz.last_sync_at`` moving to now and
-``ProductStock.synced_at`` being refreshed. ``synced_at`` of every yielded row is ``timeutils.now()``.
+``ProductStock.synced_at`` being refreshed. ``synced_at`` of every yielded row is ``timeutils.now()``. A
+``full`` run lists every known product, so the catalog's reconciliation never hides anything through the
+fake; ``sync_succeeded`` keeps no cursor.
+
+``push_sale(request, journal)`` (``commerce``'s ``billz.push_sale``; the order's ``metadata["fake"]["billz"]``
+is the scenario)
+    * no scenario → accepted; Billz "echoes" no sale (``billz_sale_id = ""``, the journal is never called) and
+      the receipt names ``request.order_uuid`` as the Billz order id;
+    * ``{"push": "down"}`` → :class:`BillzUnavailable` (transient: the outbox retries, ten failures make the
+      message dead);
+    * ``{"push": "rejected"}`` → :class:`BillzRejected` with Billz error 20036 (permanent: dead at once).
+
+The stubs (``refund_sale``, ``find_store_sale``, ``parse_webhook``) refuse exactly like the live adapter: a
+fake never invents what Billz cannot do.
 """
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from glowderma.core import timeutils
 
-from .ports import BillzProduct, ImportMode, KnownProducts
+from .ports import (
+    BillzProduct,
+    BillzRejected,
+    BillzUnavailable,
+    ImportMode,
+    KnownProducts,
+    SaleJournal,
+    SaleReceipt,
+    SaleRequest,
+    refuse_refund,
+    refuse_store_sale,
+    refuse_webhook,
+)
 
 NOT_FOUND_SUFFIX = "0000"
 
@@ -71,8 +97,9 @@ def synthetic_product(billz_id: str) -> BillzProduct:
 class FakeBillz:
     name = "billz"
 
-    def __init__(self, known: KnownProducts | None = None) -> None:
+    def __init__(self, known: KnownProducts | None = None, scenario: Mapping[str, Any] | None = None) -> None:
         self.known: KnownProducts = known if known is not None else _NoKnownProducts()
+        self.scenario: Mapping[str, Any] = scenario or {}
 
     def is_configured(self) -> bool:
         return True
@@ -107,3 +134,23 @@ class FakeBillz:
                 stock=product.stock,
                 synced_at=synced_at,
             )
+
+    def sync_succeeded(self, mode: ImportMode) -> None:
+        return None  # the fake keeps no cursor
+
+    def push_sale(self, request: SaleRequest, journal: SaleJournal) -> SaleReceipt:
+        outcome = self.scenario.get("push")
+        if outcome == "down":
+            raise BillzUnavailable("Billz did not answer (fake: down)")
+        if outcome == "rejected":
+            raise BillzRejected("product not found (fake: rejected)", error_code=20036, http_status=400)
+        return SaleReceipt(billz_order_id=str(request.order_uuid), billz_sale_id="", billz_sale_ref="")
+
+    def refund_sale(self, billz_order_id: str) -> None:
+        refuse_refund(billz_order_id)
+
+    def find_store_sale(self, receipt_ref: str) -> None:
+        refuse_store_sale(receipt_ref)
+
+    def parse_webhook(self, body: bytes) -> None:
+        refuse_webhook(body)

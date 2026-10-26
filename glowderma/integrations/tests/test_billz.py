@@ -3,6 +3,7 @@
 from collections.abc import Iterator
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 import pytest
 from django.db import IntegrityError
@@ -13,7 +14,15 @@ from glowderma.core.models import AuditEntry, OutboxMessage
 from glowderma.core.timeutils import TASHKENT
 from glowderma.integrations import selectors, services
 from glowderma.integrations.billz.fake import NEW_ITEM_IDS, NEW_ITEMS, FakeBillz, synthetic_product
-from glowderma.integrations.billz.ports import BillzProduct
+from glowderma.integrations.billz.live import LiveBillz
+from glowderma.integrations.billz.ports import (
+    BillzProduct,
+    BillzRejected,
+    BillzUnavailable,
+    SaleLine,
+    SaleReceipt,
+    SaleRequest,
+)
 from glowderma.integrations.billz.registry import billz_mode, get_billz
 from glowderma.integrations.models import IntegrationState, Job
 from glowderma.integrations.tests.factories import JobFactory, staff_actor
@@ -120,9 +129,42 @@ def test_registry_fake_is_the_test_default() -> None:
 
 
 @override_settings(BILLZ_MODE="live")
-def test_registry_live_is_m3() -> None:
-    with pytest.raises(NotImplementedError, match="M3"):
-        get_billz()
+def test_registry_live_is_the_live_adapter() -> None:
+    adapter = get_billz(Known([KNOWN]), {"push": "down"})  # the live adapter ignores both
+    assert isinstance(adapter, LiveBillz)
+    assert adapter.is_configured() is False  # the test settings carry no Billz credentials
+
+
+# --- fake sale push (commerce's billz.push_sale; rules moved from commerce.billz_sales) ---------------------
+
+
+class NoJournal:
+    def order_created(self, billz_order_id: str, billz_sale_ref: str) -> None:
+        raise AssertionError("the fake creates no Billz sale")
+
+
+SALE = SaleRequest(
+    order_id=10248,
+    order_uuid=UUID("0d6f6c1e-5a7b-4c1e-9a43-2f1d8e3b7a10"),
+    lines=[SaleLine("4607012301", 2, 185_000)],
+    customer_phone="+998901234567",
+)
+
+
+def test_fake_push_accepts_and_echoes_our_order_uuid() -> None:
+    receipt = FakeBillz().push_sale(SALE, NoJournal())
+    assert receipt == SaleReceipt(
+        billz_order_id="0d6f6c1e-5a7b-4c1e-9a43-2f1d8e3b7a10", billz_sale_id="", billz_sale_ref=""
+    )
+    FakeBillz().sync_succeeded("full")  # keeps no cursor
+
+
+def test_fake_push_scenarios() -> None:
+    with pytest.raises(BillzUnavailable, match="fake: down"):
+        FakeBillz(scenario={"push": "down"}).push_sale(SALE, NoJournal())
+    with pytest.raises(BillzRejected) as rejected:
+        get_billz(scenario={"push": "rejected"}).push_sale(SALE, NoJournal())
+    assert rejected.value.error_code == 20036
 
 
 @override_settings(BILLZ_MODE="", INTEGRATIONS_MODE="fake")

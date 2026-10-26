@@ -19,6 +19,12 @@ def provider_state(provider: str) -> IntegrationState | None:
     return IntegrationState.objects.filter(provider=provider).first()
 
 
+def provider_data(provider: str) -> dict[str, Any]:
+    """A copy of the provider's cursor document (``IntegrationState.data``); ``{}`` without a row."""
+    state = provider_state(provider)
+    return dict(state.data) if state is not None and isinstance(state.data, dict) else {}
+
+
 def billz_status(*, configured: bool) -> dict[str, Any]:
     """Contract §2.3 ``products/stats.billz``: ``connected`` = adapter configured ∧ last import not failed."""
     last = latest_job(enums.JobKind.BILLZ_IMPORT)

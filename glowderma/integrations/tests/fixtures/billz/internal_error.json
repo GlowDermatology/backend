@@ -1,0 +1,2 @@
+{"_source": "components.responses.InternalError",
+ "code": 500, "message": "internal error", "error": "server_error", "data": null}
