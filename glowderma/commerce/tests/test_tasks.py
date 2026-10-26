@@ -7,7 +7,7 @@ from unittest import mock
 import pytest
 
 from glowderma.commerce import services, tasks, topics
-from glowderma.commerce.models import OrderEvent
+from glowderma.commerce.models import Order, OrderEvent
 from glowderma.commerce.tests.support import AT, admin, deliver, pay, place
 from glowderma.core import outbox
 from glowderma.core.models import AuditEntry, OutboxMessage
@@ -16,6 +16,9 @@ from glowderma.core.tasks import dispatch_outbox
 from glowderma.delivery import services as delivery_services
 from glowderma.delivery.models import Shipment
 from glowderma.integrations.bts import fake as fake_bts
+from glowderma.integrations.bts.ports import BtsUnavailable
+from glowderma.integrations.click import fake as fake_click
+from glowderma.integrations.click.ports import ClickRefundRejected
 from glowderma.loyalty.models import Purchase
 from glowderma.payments import services as payment_services
 from glowderma.payments.models import Payment, Refund
@@ -136,6 +139,102 @@ def test_dead_letter_hook_for_a_manual_retry_names_the_admin() -> None:
     assert event.data["attempt"] == 2
 
 
+def test_a_second_dead_letter_after_a_manual_retry_is_recorded() -> None:
+    """The automatic create dies, the admin retries, the retry dies too: both are ``shipment_failed``."""
+    staff = admin()
+    order = pay(place(fake={"bts": {"down": True}}))
+    first = _dispatch_until_done(_message(topics.BTS_CREATE_SHIPMENT, order.pk))
+    assert first.status == "dead"
+    services.retry_shipment(order.pk, staff.pk)
+    retry = Shipment.objects.get(order=order).create_message
+    assert retry is not None and retry.pk != first.pk
+    assert _dispatch_until_done(retry).status == "dead"
+    events = OrderEvent.objects.filter(order=order, type="shipment_failed").order_by("id")
+    assert [e.data for e in events] == [
+        {"attempt": 1, "manual": False, "error_code": "dead_letter"},
+        {"attempt": 2, "manual": True, "error_code": "dead_letter"},
+    ]
+    assert events[1].actor_id == staff.pk
+    shipment = Shipment.objects.get(order=order)
+    assert (shipment.state, shipment.attempts, shipment.last_error_code) == ("failed", 2, "dead_letter")
+    tasks.on_bts_create_dead(retry)  # a second notice of the same message: nothing new
+    assert Shipment.objects.get(order=order).attempts == 2
+    assert OrderEvent.objects.filter(order=order, type="shipment_failed").count() == 2
+
+
+def test_redelivered_create_after_a_definitive_refusal_does_not_ask_bts_again() -> None:
+    """``mark_failed`` committed, then the worker died before the message was done: the redelivery skips."""
+    staff = admin()
+    order = pay(place(fake={"bts": {"fail_attempts": 1}}))
+    message = _message(topics.BTS_CREATE_SHIPMENT, order.pk)
+    tasks.handle_bts_create_shipment(message)
+    with mock.patch.object(fake_bts.FakeBts, "create", side_effect=AssertionError("asked twice")):
+        tasks.handle_bts_create_shipment(message)
+    shipment = Shipment.objects.get(order=order)
+    assert (shipment.state, shipment.attempts) == ("failed", 1)  # no parcel created without an admin retry
+    assert OrderEvent.objects.filter(order=order, type="shipment_failed").count() == 1
+    OutboxMessage.objects.filter(pk=message.pk).update(status="done")  # the redelivery's completion
+    services.retry_shipment(order.pk, staff.pk)
+    deliver(topics.BTS_CREATE_SHIPMENT, order.pk)
+    assert Shipment.objects.get(order=order).state == "created"
+    tasks.handle_bts_create_shipment(message)  # the superseded request 1 once more: still nothing
+    assert OrderEvent.objects.filter(order=order, type__startswith="shipment").count() == 2
+
+
+def test_crash_then_cancel_cancels_the_orphan_parcel_at_bts() -> None:
+    """P3: BTS created the parcel, the worker crashed before commit, the admin cancelled (no parcel seen):
+    the redelivered create finds the parcel by clientId and cancels it at BTS."""
+    staff = admin()
+    order = pay(place())
+    message = _message(topics.BTS_CREATE_SHIPMENT, order.pk)
+    with mock.patch.object(delivery_services, "mark_created", side_effect=RuntimeError("worker lost")):
+        with pytest.raises(RuntimeError):
+            tasks.handle_bts_create_shipment(message)
+    with pinned_clock(AT + timedelta(minutes=30)):
+        result = services.cancel_order(order.pk, "Mijoz so‘rovi bilan", staff.pk)
+    assert not result.bts_cancelled and str(order.pk) in fake_bts._parcels
+    with pinned_clock(AT + timedelta(minutes=31)):
+        tasks.handle_bts_create_shipment(message)
+    assert str(order.pk) not in fake_bts._parcels and str(order.pk) in fake_bts._cancelled
+    shipment = Shipment.objects.get(order=order)
+    assert (shipment.state, shipment.tracking_number, shipment.cancelled_at) == (
+        "cancelled",
+        fake_bts.tracking_number_for(order.pk),
+        AT + timedelta(minutes=31),
+    )
+    assert list(shipment.events.values_list("kind", flat=True)) == ["created", "cancelled"]
+    assert not OrderEvent.objects.filter(order=order, type__startswith="shipment").exists()
+    tasks.handle_bts_create_shipment(message)  # idempotent
+    assert shipment.events.count() == 2
+
+
+def test_an_orphan_parcel_bts_refuses_to_cancel_is_recorded_and_alerted(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    staff = admin()
+    order = pay(place())
+    message = _message(topics.BTS_CREATE_SHIPMENT, order.pk)
+    with mock.patch.object(delivery_services, "mark_created", side_effect=RuntimeError("worker lost")):
+        with pytest.raises(RuntimeError):
+            tasks.handle_bts_create_shipment(message)
+    services.cancel_order(order.pk, "Mijoz so‘rovi bilan", staff.pk)
+    Order.objects.filter(pk=order.pk).update(metadata={"fake": {"bts": {"cancel": "refused"}}})
+    tasks.handle_bts_create_shipment(message)
+    shipment = Shipment.objects.get(order=order)
+    assert shipment.state == "created" and shipment.tracking_number
+    assert list(shipment.events.values_list("kind", flat=True)) == ["created", "cancel_refused"]
+    assert "refused to cancel the orphan parcel" in caplog.text
+
+
+def test_orphan_lookup_transport_error_raises_for_a_retry() -> None:
+    staff = admin()
+    order = pay(place())
+    services.cancel_order(order.pk, "Mijoz so‘rovi bilan", staff.pk)
+    Order.objects.filter(pk=order.pk).update(metadata={"fake": {"bts": {"down": True}}})
+    with pytest.raises(BtsUnavailable):
+        tasks.handle_bts_create_shipment(_message(topics.BTS_CREATE_SHIPMENT, order.pk))
+
+
 # --- billz.push_sale ----------------------------------------------------------------------------------------
 
 
@@ -251,11 +350,88 @@ def test_refund_crash_after_the_reversal_is_adopted_by_the_status_check() -> Non
 
 
 def test_refund_redelivery_resubmits_when_click_did_not_reverse() -> None:
+    """The previous claim is older than the outbox lease: its worker cannot still be talking to Click."""
     order, refund = _cancelled_click_order()
-    payment_services.mark_submitting(refund.pk)
-    tasks.handle_refund_submit(_message(topics.REFUND_SUBMIT, order.pk))
+    with pinned_clock(AT + timedelta(minutes=61)):
+        payment_services.mark_submitting(refund.pk)
+    with pinned_clock(AT + timedelta(minutes=61) + tasks.RESUBMIT_AFTER):
+        tasks.handle_refund_submit(_message(topics.REFUND_SUBMIT, order.pk))
     refund.refresh_from_db()
     assert (refund.state, refund.attempts) == ("succeeded", 2)
+
+
+def test_refund_redelivery_never_doubles_a_fresh_claim() -> None:
+    """P2: a second worker re-claims the message while the first one is still waiting for Click — it must
+    neither submit a second reversal nor touch the refund; the first worker resolves it."""
+    order, refund = _cancelled_click_order()
+    with pinned_clock(AT + timedelta(minutes=61)):
+        payment_services.mark_submitting(refund.pk)  # worker 1 claimed and is calling Click
+    with (
+        pinned_clock(AT + timedelta(minutes=63)),
+        mock.patch(
+            "glowderma.integrations.click.fake.FakeClick.refund", side_effect=AssertionError("doubled")
+        ),
+    ):
+        tasks.handle_refund_submit(_message(topics.REFUND_SUBMIT, order.pk))
+    refund.refresh_from_db()
+    assert (refund.state, refund.attempts) == ("submitting", 1)
+    assert not OrderEvent.objects.filter(order=order, type__in=["refund_failed", "refund_succeeded"]).exists()
+
+
+def test_refund_claim_is_a_compare_and_set() -> None:
+    order, refund = _cancelled_click_order()
+    with pinned_clock(AT + timedelta(minutes=61)):
+        first = payment_services.mark_submitting(refund.pk)
+        with pytest.raises(payment_services.StaleRefundClaim):  # requested → already claimed
+            payment_services.mark_submitting(refund.pk)
+    later = AT + timedelta(minutes=61) + tasks.RESUBMIT_AFTER
+    with pinned_clock(later):
+        with pytest.raises(payment_services.StaleRefundClaim):  # wrong attempt number
+            payment_services.mark_submitting(
+                refund.pk,
+                expected_state="submitting",
+                expected_attempts=5,
+                resubmit_after=tasks.RESUBMIT_AFTER,
+            )
+        second = payment_services.mark_submitting(
+            refund.pk,
+            expected_state="submitting",
+            expected_attempts=first.attempts,
+            resubmit_after=tasks.RESUBMIT_AFTER,
+        )
+    assert second.attempts == 2
+    # the stale worker 1 now gets a refusal: it must not fail the refund attempt 2 owns
+    stale = payment_services.mark_failed(refund.pk, "refund_rejected", expected_attempts=first.attempts)
+    assert not stale.changed and Refund.objects.get(pk=refund.pk).state == "submitting"
+    assert not payment_services.mark_unknown(refund.pk, "timeout", expected_attempts=first.attempts).changed
+    with pytest.raises(ValueError):
+        payment_services.mark_submitting(refund.pk, expected_state="unknown")
+
+
+def test_refund_refusal_of_a_duplicate_is_checked_against_the_status() -> None:
+    """Click refuses a reversal it already performed: the follow-up status check makes it ``succeeded``."""
+    order, refund = _cancelled_click_order()
+    txn = refund.payment.provider_txn_id
+
+    def duplicate(provider_txn_id: str, amount: int) -> Any:
+        fake_click._reversed.add(txn)  # the reversal of the other worker went through meanwhile
+        raise ClickRefundRejected("duplicate", "already reversed")
+
+    with mock.patch("glowderma.integrations.click.fake.FakeClick.refund", side_effect=duplicate):
+        tasks.handle_refund_submit(_message(topics.REFUND_SUBMIT, order.pk))
+    refund.refresh_from_db()
+    assert refund.state == "succeeded" and Payment.objects.get(order=order).status == "refunded"
+    assert not OrderEvent.objects.filter(order=order, type="refund_failed").exists()
+
+
+def test_refund_dead_letter_hook_leaves_a_claimed_refund_to_its_worker() -> None:
+    order, refund = _cancelled_click_order()
+    message = _message(topics.REFUND_SUBMIT, order.pk)
+    payment_services.mark_submitting(refund.pk)  # a stale worker claimed it after the last failure
+    message.last_error = "timeout"
+    tasks.on_refund_submit_dead(message)
+    assert Refund.objects.get(pk=refund.pk).state == "submitting"
+    assert not OrderEvent.objects.filter(order=order, type="refund_failed").exists()
 
 
 def test_refund_transport_errors_dead_letter_as_failed_never_unknown() -> None:
