@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Version | 1.0.0 (2026-10-24), M1 admin vertical |
+| Version | 1.0.1 (2026-10-26), M1 admin vertical; M2 cross-references from `docs/api/customer-api-v1.md` in §2.10 (revenue), §2.11 (`integrations.providers`), §2.15 (`providers`), §3.1 (`refresh_reused`) and §3.2 |
 | Implemented by | Django 6.1 / DRF 3.18 backend (Codex) and the Next.js admin data layer (`frontend/src/data/api/*`, Claude) |
 | Source of truth | `docs/specs/2026-10-24-backend-foundation-design.md`. Where this file and the spec disagree, the spec wins and this file is fixed. |
 | Enforced by | drf-spectacular schema (`openapi/schema.yaml`, `--validate --fail-on-warn`), backend contract tests, frontend mapper tests (order №10248, Malika's ledger) |
@@ -832,7 +832,7 @@ Templates are editable in the admin UI through `GET` / `PUT` below.
  "pickup_address": {"uz": "Toshkent, …", "ru": "", "en": ""},
  "integrations": {"mode": "fake",                               // read-only, from INTEGRATIONS_MODE (every provider's default)
                   "providers": {"oauth": "fake", "billz": "fake", "fcm": "fake",
-                                "click": "fake", "payme": "fake", "bts": "fake"}},   // read-only, each provider's *_MODE
+                                "click": "fake", "payme": "fake", "bts": "fake"}},   // read-only, each provider's *_MODE (M2 adds "eskiz")
  "updated_at": "…", "updated_by": null}                         // Actor | null
 ```
 **`PATCH settings/`**: `reservation_minutes` int 5..60; `support_phone` E.164 or null; `pickup_address.*` ≤200 (each language optional: a leaf PATCH changes only the languages sent); `integrations` → `read_only`. → 200.
@@ -892,7 +892,7 @@ Templates are editable in the admin UI through `GET` / `PUT` below.
 ### 2.15 Health
 **`GET /api/v1/health/`**: no auth, no network gate, no throttle; not in the error envelope.
 - Without params → 200 `{"status": "ok"}`.
-- `?ready=1` checks the database, cache and broker → 200 `{"status": "ok", "checks": {"database": "ok", "cache": "ok", "broker": "ok"}, "version": "<git sha>", "integrations": {"oauth": "fake", "billz": "fake", "fcm": "fake", "click": "fake", "payme": "fake", "bts": "fake"}}`, or 503 with `"status": "error"` and the failing check set to `"error"`. `integrations` = `{provider: IntegrationMode}` for every provider with a `*_MODE` setting (informational; a fake provider never fails readiness). It is present **only when the caller would pass the admin network gate of §1** (peer in `ADMIN_API_ALLOWED_NETS` and, in production, a matching `X-GD-Internal-Secret`): which payment and shipping providers are fake is reconnaissance for an attacker. Other callers (load-balancer and container probes) get `status`, `checks` and `version` only.
+- `?ready=1` checks the database, cache and broker → 200 `{"status": "ok", "checks": {"database": "ok", "cache": "ok", "broker": "ok"}, "version": "<git sha>", "integrations": {"oauth": "fake", "billz": "fake", "fcm": "fake", "click": "fake", "payme": "fake", "bts": "fake"}}`, or 503 with `"status": "error"` and the failing check set to `"error"`. `integrations` = `{provider: IntegrationMode}` for every provider with a `*_MODE` setting (informational; a fake provider never fails readiness; M2 adds `eskiz`, customer contract §6.14). It is present **only when the caller would pass the admin network gate of §1** (peer in `ADMIN_API_ALLOWED_NETS` and, in production, a matching `X-GD-Internal-Secret`): which payment and shipping providers are fake is reconnaissance for an attacker. Other callers (load-balancer and container probes) get `status`, `checks` and `version` only.
 
 ### 2.16 Staff directory
 **`GET staff/`** (P; read-only) → `Page<StaffListItem>`, the options of the audit-log `actor` filter.

@@ -67,7 +67,11 @@ module because availability (`commerce.selectors.available_stock`) may not be im
 |---|---|
 | `glowderma/core/enums.py` | the new enums of C§3 (`OtpPurpose`, `NextStep`, `SocialProvider` incl. `apple`, `SocialTokenType`, `DevicePlatform`, `StockStatus`, `CustomerProductOrdering`, `CartLineStatus`, `OrderScope`, `CustomerRefundState`, `CashbackEarnedState`, `TimelineType`, `ProgressStep`, `ProgressState`, `LedgerSource`, `AppointmentScope`, `AppointmentCancelledBy`, `InboxKind`, `InboxLinkKind`, `PushDataType`, `AccountSecurityEvent`) |
 | `glowderma/core/i18n.py` (new) | `CATALOG` with every key of C§5 (incl. `push.*`), `t(key, lang, **params)`, `resolve_language(request, customer=None)` (Accept-Language q-parsing, fallback customer → `uz`), `format_number(n, lang)`, `format_percent(p, lang)` |
-| `glowderma/core/secretbox.py` (new) | `seal(plaintext: bytes, *, aad: bytes) -> str` / `open_(token: str, *, aad: bytes) -> bytes`: AES-256-GCM (`cryptography`, already pinned through PyJWT[crypto]) under `SMS_PAYLOAD_KEY`, random 96-bit nonce |
+| `glowderma/core/secretbox.py` (new) | `seal(plaintext: bytes, *, aad: bytes) -> str` / `open_(token: str, *, aad: bytes) -> bytes`: AES-256-GCM (`cryptography`, already pinned through PyJWT[crypto]) under `SECRETBOX_KEY` (base64url decoding to exactly 32 bytes, §7), random 96-bit nonce; used for the OTP payload (C§2.1.1) and the Apple refresh token (C§2.1.8) |
+| `glowderma/core/providers.py` (new) | `provider_modes() -> dict[str, str]` (`billz`, `click`, `payme`, `bts`, `eskiz`, `fcm`, `oauth` → `fake`/`live` from the `*_MODE` settings); `callbacks_refused(provider) -> bool` (mode `fake` ∧ ¬`DEV_FEATURES_ALLOWED`, C§2.13.0); `payable_providers() -> list[str]` (C§2.4: Click, Payme, minus those whose callbacks are refused); `warn_fake_providers()` (one WARNING `providers.fake_in_production {provider}` per fake provider when ¬`DEV_FEATURES_ALLOWED`) |
+| `glowderma/core/apps.py` | `CoreConfig.ready()` calls `providers.warn_fake_providers()` (every process start: gunicorn, worker, beat) |
+| `glowderma/core/api/health.py` | `?ready=1` adds `providers: provider_modes()` (admin §2.15); fake modes never fail the check |
+| `glowderma/site_config/api/admin/serializers.py` | admin `GET settings/` `integrations.providers` = `provider_modes()` next to the existing `mode` (admin §2.11; the admin contract is already updated) |
 | `glowderma/core/pii.py` (new) | `pii_ref(value: str) -> str` = first 16 hex of HMAC-SHA256(`LOG_PII_KEY`, value) |
 | `glowderma/core/qr_store.py` (new) | raw-Redis store for QR keys (C§2.9.3): `put(key_hash, customer_id, ttl, max_live)`, `take(key_hash) -> str \| None` (`GETDEL`), `revoke_all(customer_id)`; literal prefix `gd:loyalty:qr:`; LocMem fallback with a process lock for tests. Lives in core so `accounts` (revocation) and `loyalty` (issue/resolve) can both use it |
 | `glowderma/core/api/exceptions.py` | customer codes (C§1.6) as `CustomerError(code, status, *, details=None, params=None)` subclasses (incl. `terms_update_required`, `slot_taken`, `last_sign_in_method`, `sms_unavailable`, `terms_not_published`); `ENDPOINT_FIELD_CODES` += `otp_invalid`, `password_too_short`, `password_too_common`, `password_entirely_numeric`, `password_too_similar`, `password_unchanged`, `password_incorrect`, `terms_outdated`, `push_token_missing`, `latlng_pair`, `address_incomplete`; `AUTH_FAILURE_CODES` unchanged; the handler adds `details` (null by default) and renders `message`/field messages through `core.i18n` **only** when the resolved view is a customer/public/POS view (`view.audience` attribute); admin bodies stay byte-identical (regression test) |
@@ -83,14 +87,14 @@ module because availability (`commerce.selectors.available_stock`) may not be im
 | `glowderma/accounts/services.py` | `start_customer_session(customer_id, *, fid, platform, app_version, issue_device_key) -> SessionStart(session, raw_refresh, raw_device_key \| None)` (C§1.9 steps 1–6: deactivated devices lose their token, farewell payload carries `sid` + token, skipped when the token is held by another active row, `core.qr_store.revoke_all`), `revoke_customer_sessions(customer_id, reason, except_sid=None)` (also `qr_store.revoke_all`), `register_device(customer_id, fid, …)` (a token taken from another row clears it there), `device_is_known(customer_id, fid, raw_device_key) -> bool` (`compare_digest`), `invalidate_fcm_token(device_id)`, tombstone TTL = max(staff, customer access TTL) + 60 |
 | `glowderma/accounts/topics.py` (new) | `SMS_SEND = "sms.send"`, `PUSH_SESSION_REPLACED = "push.session_replaced"`, `PUSH_ACCOUNT_SECURITY = "push.account_security"` + dedupe-key builders (`sms.send:{sms_code_id}`, `push.session_replaced:{session_id}`, `push.account_security:{customer_id}:{event}:{uuid}`) |
 | `glowderma/accounts/tasks.py` (new) | handler `push.session_replaced` (data-only FCM message through the extended port; blanks the token in the payload after the send; `unregistered` → `invalidate_fcm_token`); beat task `accounts.cleanup_auth` (delete `SmsCode` older than 24 h, `done`/`dead` `sms.send` outbox rows older than 24 h, customer `AuthSession` rows revoked or expired for >90 days) |
-| `glowderma/integrations/fcm/{ports,fake}.py` | `PushMessage(token, title, body, data, *, data_only, android_channel, android_priority, apns_push_type, apns_priority, image_url, collapse_key)`; `PushResult.error` ∈ {`unregistered`, `payload_invalid`, …}; the fake records every field and maps tokens `…-bad` → `unregistered`, `…-payload` → `payload_invalid`, `…-down` → `FcmUnavailable` (moved here from P3 so P0's session-replaced push can be built) |
+| `glowderma/integrations/fcm/{ports,fake}.py` | `PushMessage(token, title, body, data, *, data_only, android_channel, android_priority, apns_push_type, apns_priority, image_url, collapse_key)`; `PushResult.error` ∈ {`unregistered`, `payload_invalid`, …}; the fake records every field **only when `DEV_FEATURES_ALLOWED`** (otherwise it keeps nothing and logs one INFO line with ids, C§2.14.2) and maps tokens `…-bad` → `unregistered`, `…-payload` → `payload_invalid`, `…-down` → `FcmUnavailable` (moved here from P3 so P0's session-replaced push can be built) |
 | `glowderma/catalog/selectors.py` | `customer_visible_products()` (C§2.3 visibility) |
 | `glowderma/commerce/services.py` | stub `cancel_by_customer(order_id: int, customer_id: int, *, at=None) -> int` raising `NotImplementedError("P2")` |
 | `glowderma/commerce/selectors.py` | stub `customer_inflight_order(customer_id: int) -> int \| None` returning `None` (P2 implements C§2.2.3 step 1) |
 | `glowderma/appointments/services.py` | stub `cancel_by_customer(appointment_id: int, customer_id: int, *, reason: str = "", at=None) -> Appointment` raising `NotImplementedError("P3")` |
 | URL stubs | `glowderma/{customers,site_config,delivery,commerce,loyalty,appointments,notifications}/api/customer/{__init__,urls}.py`, `glowderma/commerce/api/webhooks/{__init__,urls}.py`, `glowderma/commerce/api/dev/{__init__,urls}.py`, `glowderma/loyalty/api/pos/{__init__,urls}.py` — each `urlpatterns = []` |
-| `config/urls.py` | `CUSTOMER_API_MODULES = ("customers", "site_config", "delivery", "commerce", "loyalty", "appointments", "notifications")` mounted at `api/v1/`; `api/v1/webhooks/` → commerce webhooks; `api/v1/pos/` → loyalty pos; `api/v1/dev/` only when `FAKE_PAYMENTS_ENABLED` and `CLICK_MODE == PAYME_MODE == "fake"` |
-| `config/settings/base.py`, `local.py`, `test.py`, `production.py` | every setting of §7 with validation (§7 rules); `ESKIZ_FAKE_CODE` read only in `local.py`/`test.py` |
+| `config/urls.py` | `CUSTOMER_API_MODULES = ("customers", "site_config", "delivery", "commerce", "loyalty", "appointments", "notifications")` mounted at `api/v1/`; `api/v1/webhooks/` → commerce webhooks (always mounted; fake-mode refusal in the views, C§2.13.0); `api/v1/pos/` → loyalty pos; `api/v1/dev/` only when `DEV_FEATURES_ALLOWED`, `FAKE_PAYMENTS_ENABLED` and `CLICK_MODE == PAYME_MODE == "fake"` |
+| `config/settings/base.py`, `local.py`, `test.py`, `production.py` | every setting of §7 with validation (§7 rules); `DEV_FEATURES_ALLOWED` (a constant, not env: `False` in `base.py`, `True` in `local.py` and therefore `test.py`, forced `False` in `production.py`); `ESKIZ_FAKE_CODE` and `POS_API_KEYS` read only in `local.py`/`test.py` and refused by `production.py`; valid dev defaults for the new keys in `local.py` (added to the production placeholder list) |
 | `config/celery.py` | beat entries of §8 (`commerce.poll_bts` points at a P0 stub task `return []`, implemented by P2) |
 | `.env.example` | the lines of §7 |
 | `conftest.py`, `glowderma/accounts/tests/factories.py` | fixtures `customer`, `customer_session`, `customer_token`, `customer_client` (bearer + device headers `fid-test-0001`, `ios`, `1.0.0` + a known device key), `public_client`, `pos_device` + `pos_key`, `pos_client`; helpers `device_headers(fid=…, platform=…, version=…, key=…)`, `raw_device_key(device)` |
@@ -120,8 +124,18 @@ module because availability (`commerce.selectors.available_stock`) may not be im
   a 409 from an idempotent view leaves no row written (rollback).
 - `accounts.cleanup_auth` purges only the right rows (incl. done `sms.send` outbox rows); the throttle scope validation
   knows the new scopes.
-- Settings validation: `FAKE_PAYMENTS_ENABLED` with a live payment mode, `FAKE_SCENARIO_HEADER_ENABLED` with any live
-  provider mode, production with `ESKIZ_MODE=fake` → `ImproperlyConfigured`; `ESKIZ_FAKE_CODE` ignored by production.
+- Settings validation (boot tests import `config.settings.production` in a subprocess with a prepared env):
+  `FAKE_PAYMENTS_ENABLED` with a live payment mode and `FAKE_SCENARIO_HEADER_ENABLED` with any live provider mode →
+  `ImproperlyConfigured` in every module; production with `FAKE_PAYMENTS_ENABLED`, `FAKE_SCENARIO_HEADER_ENABLED`,
+  `ESKIZ_FAKE_CODE` or `POS_API_KEYS` set → `ImproperlyConfigured`; production with **every** provider fake
+  (`INTEGRATIONS_MODE=fake`) **boots**, logs one `providers.fake_in_production` WARNING per provider (caplog on
+  `CoreConfig.ready()`) and reports the modes in `health/?ready=1` and admin `GET settings/`; production refuses each
+  new key when missing, containing `change-me`, equal to a committed value (the `.env.example` lines and the `local.py`
+  defaults are in `KNOWN_PLACEHOLDER_SECRETS`) or too short, and refuses a `SECRETBOX_KEY` that does not decode to
+  exactly 32 bytes; `CLICK_SECRET_KEY`, `PAYME_KEY` and `BTS_WEBHOOK_SECRET` are refused as placeholders in **fake**
+  mode too; `CLICK_INFLIGHT_SECONDS` > `PAYMENT_IN_FLIGHT_GRACE_SECONDS` → `ImproperlyConfigured`.
+- `core.providers`: `callbacks_refused` / `payable_providers` matrix over (mode, `DEV_FEATURES_ALLOWED`); FCM fake
+  under `override_settings(DEV_FEATURES_ALLOWED=False)` keeps no message (bounded memory, no text).
 - Migration `accounts.0006` round trip (AGENTS.md rule: end with a plain `migrate`).
 - The automatic URL-walk auth matrix is extended: every route under `api/v1/` that is not admin/health/schema is
   classified **C**/**O**/**S**/**K** from its base class and probed accordingly.
@@ -160,7 +174,7 @@ C§2.0 rows 1–22: `auth/send-code/`, `auth/verify-code/`, `auth/set-password/`
 | `logout_customer(raw)` | `accounts.services` | revoke + device inactive, token cleared, QR tokens revoked |
 | `issue_social_nonce(fid)`, `consume_social_nonce(nonce, fid)`, `remember_id_token(provider, claims)` | `accounts.services` | Redis, single use, replay cache until `exp` |
 | `register(...)`, `login(...)`, `reset_password(...)` (unlinks identities, clears other device keys, `push.account_security`), `social_sign_in(...)`, `complete_social(...)` (fid + ticket binding, password for password accounts), `link_social(...)`, `unlink_social(...)`, `accept_consent(...)`, `update_profile(...)`, `set_image(...)`, `delete_account(customer_id, *, password=None, verification_token=None)` | `customers.services` | orchestrators (need `site_config` for the terms version and publication check and, for delete, `commerce`/`appointments`); `delete_account` locks the Customer row first, refuses on `commerce.selectors.customer_inflight_order` |
-| `public_settings()` | `site_config.selectors` | cached 60 s, invalidated on `update_settings` commit; `terms_version` null while unpublished |
+| `public_settings()` | `site_config.selectors` | cached 60 s, invalidated on `update_settings` commit; `terms_version` null while unpublished; `payment_providers = core.providers.payable_providers()` (C§2.4) |
 | `product_cards(qs, lang, customer_id=None)` | `customers.selectors` | one query for products + `available_stock` + main image + cart quantities |
 | `verify_app_token(token, token_type, nonce)` | `integrations.oauth` (Google, Facebook, Apple) | Apple: RS256 against Apple's JWKS, `aud` ∈ `APPLE_APP_BUNDLE_IDS`, nonce = SHA-256 of ours |
 
@@ -178,8 +192,9 @@ None (P0 owns `accounts.0006`). The link-social ticket binding and the OTP fid/I
 
 ### Fakes
 - **FakeEskiz** (C§2.14.1): phone ending `0000` → `EskizRejected`, `9999` → `EskizUnavailable`, else accepted
-  `fake-<sms_code_id>`; `FakeEskiz.sent` list (rendered texts, so tests can read the code without a DB lookup); the
-  code generator returns `ESKIZ_FAKE_CODE` only under local/test settings.
+  `fake-<sms_code_id>`; `FakeEskiz.sent` list (rendered texts, so tests can read the code without a DB lookup) **only
+  when `DEV_FEATURES_ALLOWED`** — under the production settings the fake keeps nothing and logs `sms.fake_accepted
+  {sms_code_id}`; the code generator returns `ESKIZ_FAKE_CODE` only under local/test settings.
 - **OAuth `verify_app_token` fakes**: `fake:<subject>:<email>` valid (nonce must equal the issued nonce or `*` in unit
   tests), `fake-unverified:…` valid without verified email, `fake-fail` → `exchange_failed`, `fake-down` →
   `unavailable`, `fake-expired` → `invalid_token`; Apple `fake-apple:<subject>:<email>` (relay addresses allowed).
@@ -227,6 +242,9 @@ None (P0 owns `accounts.0006`). The link-social ticket binding and the OTP fid/I
   `private, no-cache` with a bearer).
 - `sms.send` handler: claim before call, no resend after claim, connect-error un-claim, 4xx not retried, Android app
   hash line.
+- Fake posture under `override_settings(DEV_FEATURES_ALLOWED=False)`: FakeEskiz keeps no text and no digits of the
+  code (bounded memory); `ESKIZ_FAKE_CODE` is not used; `settings/public/` omits fake payment providers
+  (`payment_providers: []` with both fake), and lists them under the test settings.
 
 ### Depends on
 P0. For the delete orchestration at integration time: P2 (`commerce.services.cancel_by_customer`,
@@ -269,9 +287,12 @@ C§2.0 rows 23–34 and 49–52: `cart/*`, `delivery/regions/`, `delivery/calcul
 | `poll_bts()` | `commerce.tasks` | replaces the P0 stub; C§2.13.3 |
 | handler `payments.click_status_check` | `commerce.tasks` | C§2.13.0 `true` mode: Click `payment_status(click_paydoc_id)` → `record_late_capture` if still paid |
 | webhook inbox helper (`store_delivery`, `store_rejected` with the per-IP cap and 1 KiB truncation, `semantic_fingerprint`) | `commerce/api/webhooks/inbox.py` | C§2.13.0 |
+| fake-mode refusal: every webhook view first checks `core.providers.callbacks_refused(provider)` → Click `-1` / Payme `-32504` / BTS 401, bounded `rejected:` row with `error_code: "fake_mode"`, nothing else read or written | `commerce/api/webhooks/*` | C§2.13.0 (production may run fake adapters; fake mode never pays an order) |
+| checkout and pay accept only `core.providers.payable_providers()` (400 `invalid_choice` otherwise) | `commerce/api/customer/*` | C§2.4, C§2.7 |
 | `attach_transaction(payment_id, provider_txn_id, provider_state)` (refuses a different existing txn id → `TransactionTaken`), `merge_provider_state(payment_id, patch)`, `mark_late_captured(payment_id, provider_txn_id, at, raw=None)` (pending or failed-by-us → `paid`, `error_code="late_capture"`, `failed_at=None`) | `payments.services` | under the Payment lock |
 | `active_payment`, `display_payment` ignore `error_code = "late_capture"`; `payme_statement(from_ms, to_ms)` by `provider_state.time`; `payment_by_txn(provider, txn_id)` | `payments.selectors` (B5, changed) | |
 | `refund.submit` payload for Click carries `provider_state.click_paydoc_id` | `payments.services` (`_new_refund`) | C§2.13.0 |
+| a Click refund is `manual_required` (created with `manual=True`, and re-checked by `submit_refund` before any port call) while the Click port is fake under the production settings (`core.providers.callbacks_refused("click")`): the fake would report a reversal that moved no money | `commerce.services` (refund creation call sites), `commerce.tasks.submit_refund` | C§2.13.0, C§6.14 |
 | `region_catalog()` | `delivery.selectors` | BTS `regions()` cached 24 h (`gd:bts:regions`) |
 | Click protocol (`sign_ok`, `parse_amount`, `fingerprint`, `ERRORS`, `CLICK_ACCEPT_JSON`), Payme protocol (`auth_ok`, `rpc_error`, `MESSAGES`, `TIMEOUT_MS`, `ERR_ORDER_NOT_FOUND = -31050`, `ERR_ORDER_BUSY = -31051`, `INTERNAL_ERROR_RESPONSE`) | `integrations.{click,payme}.protocol` | pure functions and constants, no DB |
 | `ClickPort.pay_url(account_ref, amount, return_url)`, `PaymePort.checkout_url(account_ref, amount_tiyin, lang, return_url)` | `integrations.{click,payme}` ports + fakes | |
@@ -343,7 +364,14 @@ create_refund}`, `payments.selectors.{active_payment, display_payment, refunds_f
   (payload says `300`, track says `200` → `handed_to_courier`); a payload tracking number of another parcel is ignored
   (track called with ours, WARNING); unknown parcel ignored; transport failure 503 and nothing stored; polling picks
   stale shipments only; regions cache.
-- Dev simulate: mounted only with the flag and fake payment modes; runs the real views; refused in production settings.
+- Dev simulate: mounted only with `DEV_FEATURES_ALLOWED`, the flag and fake payment modes; runs the real views; absent
+  under the production settings.
+- **Fake providers under the production settings** (`override_settings(DEV_FEATURES_ALLOWED=False)`, `CLICK_MODE =
+  PAYME_MODE = BTS_MODE = "fake"`): a correctly signed Click Prepare + Complete and a Basic-auth Payme
+  `CreateTransaction` + `PerformTransaction` made with the configured keys are refused (`-1` / `-32504`), the BTS webhook
+  answers 401, the order stays `awaiting_payment`, only bounded `rejected:` rows are written; checkout and pay refuse
+  a fake provider with 400 `invalid_choice`; a Click refund created or submitted while the Click port is fake becomes
+  `manual_required` with no port call.
 - Migrations `commerce.0004` and `payments.0002` round trip.
 
 ### Depends on
@@ -356,7 +384,8 @@ P0; B5 merged (`feat/m2-base`).
 ### Owns
 `glowderma/loyalty/{qr.py (new), selectors.py, api/customer/*, api/pos/* (incl. base.py: PosAPIView), authentication.py
 (new: PosKeyAuthentication with the failed-auth counter, IsActivePosDevice), services.py (PosDevice key creation,
-revoke, rotate), management/commands/{createposkey,revokeposkey,rotateposkey}.py}`,
+revoke, rotate), management/commands/{createposkey,revokeposkey,rotateposkey}.py, seeds.py (the `POS_API_KEYS` seeding,
+local/test settings only)}`,
 `glowderma/appointments/{services.py, selectors.py, api/customer/*}`, `glowderma/notifications/{services.py,
 selectors.py, tasks.py (the `push.account_security` handler), texts.py, api/customer/*}`, tests in those modules.
 
@@ -370,7 +399,7 @@ C§2.0 rows 35–48: `me/cashback/`, `me/cashback/ledger/`, `me/qr/`, `pos/cashb
 | New / changed | Module | Notes |
 |---|---|---|
 | `issue_qr(customer_id) -> QrToken`, `resolve_qr(token) -> customer_id \| None` | `loyalty.qr` | 128-bit token, HMAC key, `core.qr_store.put(…, ttl=60, max_live=2)` / `take` (`GETDEL`) |
-| `create_pos_device(name, location_label, actor_email) -> (PosDevice, raw_key)`, `revoke_pos_device(prefix, actor_email)`, `rotate_pos_key(prefix, actor_email) -> raw_key`, `authenticate_pos_key(raw)` | `loyalty.services` / `loyalty.authentication` | SHA-256, `compare_digest`, `last_used_at` ≤ once per minute; failed-auth Redis counter per IP; audits `pos.device_created/revoked/rotated` with the staff actor; `POS_API_KEYS` seeding in fake mode (seeder) |
+| `create_pos_device(name, location_label, actor_email) -> (PosDevice, raw_key)`, `revoke_pos_device(prefix, actor_email)`, `rotate_pos_key(prefix, actor_email) -> raw_key`, `authenticate_pos_key(raw)` | `loyalty.services` / `loyalty.authentication` | SHA-256, `compare_digest`, `last_used_at` ≤ once per minute; failed-auth Redis counter per IP; audits `pos.device_created/revoked/rotated` with the staff actor; `POS_API_KEYS` seeding by the loyalty seeder only when `DEV_FEATURES_ALLOWED` (the production settings refuse the variable, C§2.10) |
 | `pos_customer_ref(device_id, customer_id)` | `loyalty.qr` | opaque `c_…` (C§2.10) |
 | `customer_ledger_page(customer_id)`, `ledger_item_view(row, lang, horizon)` | `loyalty.selectors` | over `ledger_for_customer` rows, paginated in SQL; before-horizon rows without order links |
 | `effective_holds(customer_id, now)` | `loyalty.selectors` | C§2.9.1: an **active** hold whose `expires_at` has passed exists only while the expiry job skips its order for an in-flight payment (otherwise expiry would have released it), so the selector shows `expires_at + PAYMENT_IN_FLIGHT_GRACE_SECONDS` for such holds and `expires_at` otherwise — no read of commerce or payments (layering) |
@@ -499,8 +528,10 @@ Run with the real webhook views and a pinned clock; signatures built by `integra
 ## 6. Fake provider behaviour (deterministic switches for e2e)
 
 Black-box e2e drives every branch with `X-GD-Fake-Scenario` (copied into `Order.metadata["fake"]` at checkout; read
-directly by `delivery/calculate/`, which has no order yet; honoured only with every provider mode fake and the flag on)
-or with the phone/token grammar below.
+directly by `delivery/calculate/`, which has no order yet; honoured only under the local/test settings with every
+provider mode fake and the flag on) or with the phone/token grammar below. Everything in this table is local/test
+behaviour: under the production settings the fakes run without scenarios, record nothing and refuse callbacks
+(C§6.14).
 
 | Provider | Switch | Effect |
 |---|---|---|
@@ -514,7 +545,7 @@ or with the phone/token grammar below.
 | Click | `click.transaction_id`, `click.paydoc_id` | fixed ids for `dev/…/simulate/` |
 | Payme | `payme.transaction_id` | fixed Payme id for `dev/…/simulate/` |
 | FCM | token `…-bad` / `…-payload` / `…-down` | `unregistered` (device pruned) / `payload_invalid` (message failed, device untouched) / `FcmUnavailable` (retry) |
-| POS | `POS_API_KEYS=name:key,…` | seeded `PosDevice` rows (fake mode) |
+| POS | `POS_API_KEYS=name:key,…` | seeded `PosDevice` rows (local/test settings only; refused by the production settings) |
 | Clock | `FAKE_NOW` (local/test) | pinned `timeutils.now()` for expiry/grace/slot tests |
 
 ---
@@ -540,11 +571,16 @@ or with the phone/token grammar below.
 #SMS_GLOBAL_HOURLY_LIMIT=500
 #CUSTOMER_VERIFICATION_TTL_SECONDS=600
 #CUSTOMER_PASSWORD_MIN_LENGTH=8
-# HMAC key for stored SMS codes and AES-256-GCM key for the code in transit to the SMS handler (32+ random bytes, base64url). Required in production.
-SMS_CODE_HMAC_KEY=change-me-sms-code-hmac-key-at-least-32-bytes
-SMS_PAYLOAD_KEY=change-me-sms-payload-aes-key-32-bytes-base64url
-# HMAC key for pseudonymous phone/device references in logs and throttle keys. Required in production.
-LOG_PII_KEY=change-me-log-pii-key-at-least-32-bytes
+# Keys of the customer API. Local/test settings ship valid development defaults, so these stay commented here;
+# production requires real values and refuses "change-me", committed values (these lines, the local defaults) and
+# short keys. Generate each with: python -c "import secrets; print(secrets.token_urlsafe(32))"
+# HMAC key for stored SMS codes (>= 32 characters).
+#SMS_CODE_HMAC_KEY=
+# AES-256-GCM key of core.secretbox (OTP payload in Redis, Apple refresh tokens): base64url of EXACTLY 32 bytes
+# (secrets.token_urlsafe(32) produces one).
+#SECRETBOX_KEY=
+# HMAC key for pseudonymous phone/device references in logs and throttle keys (>= 32 characters).
+#LOG_PII_KEY=
 # Android SMS Retriever app hash (11 chars) appended to the OTP text for Android; empty = no hash line.
 #ANDROID_SMS_APP_HASH=
 #SOCIAL_TICKET_TTL_SECONDS=600
@@ -560,14 +596,16 @@ LOG_PII_KEY=change-me-log-pii-key-at-least-32-bytes
 #PLAY_STORE_URL=https://play.google.com/store/apps/details?id=uz.glowderma.app
 #ADDRESS_MAX_PER_CUSTOMER=10
 # ---- Eskiz SMS ----------------------------------------------------------------
-# fake = in-process (phone ...0000 rejected, ...9999 down); live = notify.eskiz.uz (M3). Production refuses fake.
+# fake = in-process (phone ...0000 rejected, ...9999 down); live = notify.eskiz.uz (M3). Production accepts fake
+# (startup WARNING, reported in health/?ready=1): no SMS is delivered, so nobody can register, reset or sign in on a
+# new device. That is a demo/staging posture only.
 #ESKIZ_MODE=fake
 #ESKIZ_BASE_URL=https://notify.eskiz.uz/api
 #ESKIZ_EMAIL=change-me@example.uz
 #ESKIZ_PASSWORD=change-me-eskiz-password
 #ESKIZ_SENDER=4546
 #ESKIZ_CALLBACK_URL=
-# Fixed OTP for black-box e2e; read ONLY by config.settings.local / test (production ignores it).
+# Fixed OTP for black-box e2e; read ONLY by config.settings.local / test (production refuses the variable).
 #ESKIZ_FAKE_CODE=123456
 # ---- Cart and checkout ---------------------------------------------------------
 #CART_MAX_LINES=30
@@ -576,17 +614,19 @@ LOG_PII_KEY=change-me-log-pii-key-at-least-32-bytes
 #CHECKOUT_MIN_PAYABLE=1000
 # Seconds after reservation_expires_at during which a transaction started before it may still complete.
 #PAYMENT_IN_FLIGHT_GRACE_SECONDS=300
-# HMAC key of the provider account reference "<order_id>-<ref>" (32+ random bytes). Required in production.
-PAYMENT_REF_KEY=change-me-payment-ref-key-at-least-32-bytes
+# HMAC key of the provider account reference "<order_id>-<ref>" (>= 32 characters; local default, required in production).
+#PAYMENT_REF_KEY=
 # Where the provider page sends the customer back (https app/universal link; order_id is appended) and the custom-scheme fallback.
 #PAYMENT_RETURN_URL=https://glowderma.uz/pay/return
 #PAYMENT_RETURN_FALLBACK_URL=glowderma://payment/return
 # ---- Click (SHOP API) ----------------------------------------------------------
+# fake under the production settings: callbacks are refused and Click is not offered to customers (no free orders).
 #CLICK_MODE=fake
 #CLICK_SERVICE_ID=00000
 #CLICK_MERCHANT_ID=00000
 #CLICK_MERCHANT_USER_ID=00000
-CLICK_SECRET_KEY=change-me-click-secret-key
+# Issued by Click (merchant cabinet). Production requires a real value in every mode (a placeholder is refused).
+#CLICK_SECRET_KEY=
 #CLICK_PAY_URL=https://my.click.uz/services/pay
 #CLICK_ALLOWED_IPS=
 # A prepared Click payment counts as in flight (blocks switch/cancel/second prepare) for this many seconds.
@@ -596,9 +636,11 @@ CLICK_SECRET_KEY=change-me-click-secret-key
 #CLICK_REVERSES_ON_COMPLETE_ERROR=false
 #CLICK_STATUS_CHECK_DELAY_SECONDS=900
 # ---- Payme (Merchant API) ------------------------------------------------------
+# fake under the production settings: callbacks are refused and Payme is not offered to customers.
 #PAYME_MODE=fake
 #PAYME_MERCHANT_ID=change-me-payme-merchant-id
-PAYME_KEY=change-me-payme-key
+# Issued by Payme (merchant cabinet; the test key in the sandbox). Production requires a real value in every mode.
+#PAYME_KEY=
 #PAYME_CHECKOUT_URL=https://checkout.paycom.uz
 #PAYME_ACCOUNT_FIELD=order_id
 #PAYME_ALLOWED_IPS=
@@ -612,34 +654,50 @@ PAYME_KEY=change-me-payme-key
 #BTS_PASSWORD=change-me
 #BTS_SENDER_CITY_CODE=1001
 #BTS_DEFAULT_PARCEL_WEIGHT_G=1000
-BTS_WEBHOOK_SECRET=change-me-bts-webhook-secret
+# Shared secret of the BTS webhook (>= 32 characters; ours). Production requires a real value in every mode.
+#BTS_WEBHOOK_SECRET=
 #BTS_POLL_STALE_MINUTES=30
 # ---- FCM (live adapter M3: HTTP v1 over httpx with a service-account JWT) ------------
 #FCM_PROJECT_ID=change-me-firebase-project
 #FCM_CREDENTIALS_FILE=/run/secrets/fcm.json
 # ---- Loyalty QR and POS ----------------------------------------------------------
-QR_HMAC_KEY=change-me-qr-hmac-key-at-least-32-bytes
+# HMAC key of the QR token store and the POS customer_ref (>= 32 characters; local default, required in production).
+#QR_HMAC_KEY=
 #QR_TOKEN_TTL_SECONDS=60
 #QR_MAX_LIVE_TOKENS=2
 #POS_FAILED_AUTH_PER_IP_PER_MIN=20
-# Fake mode only: POS devices seeded as name:key pairs (production keys come from `manage.py createposkey`).
-#POS_API_KEYS=Kassa 1:gdpos_demo0001_change-me-32-characters-key
+# Local/test settings only (production refuses it): POS devices seeded as name:key pairs; production keys come from
+# `manage.py createposkey`. Key format gdpos_<8-char prefix>_<32 base64url chars>.
+#POS_API_KEYS=Kassa 1:gdpos_demo0001_local-dev-only-pos-key-000000000
 # ---- Appointments ------------------------------------------------------------------
 #BOOKING_MIN_LEAD_MINUTES=60
 #BOOKING_HORIZON_DAYS=30
 #BOOKING_MAX_OPEN_PER_CUSTOMER=3
 #BOOKING_CANCEL_MIN_LEAD_MINUTES=0
-# ---- Development switches (refused in production; require fake provider modes) ------
+# ---- Development switches (local/test settings only: production refuses them; they need fake provider modes) ----
 #FAKE_SCENARIO_HEADER_ENABLED=false
 #FAKE_PAYMENTS_ENABLED=false
 ```
-Validation (P0): positive integers where numeric; `ESKIZ_MODE`/`CLICK_MODE`/`PAYME_MODE`/`BTS_MODE` ∈ {fake, live}
-(default `INTEGRATIONS_MODE`); `FAKE_PAYMENTS_ENABLED` requires `CLICK_MODE == PAYME_MODE == "fake"`;
-`FAKE_SCENARIO_HEADER_ENABLED` requires every provider mode (`ESKIZ`, `CLICK`, `PAYME`, `BTS`, `FCM`) fake; production
-requires `SMS_CODE_HMAC_KEY`, `SMS_PAYLOAD_KEY`, `LOG_PII_KEY`, `PAYMENT_REF_KEY`, `QR_HMAC_KEY` (≥32 bytes) always and
-`CLICK_SECRET_KEY`, `PAYME_KEY`, `BTS_WEBHOOK_SECRET` when the matching mode is live, refuses `ESKIZ_MODE=fake`,
-`FAKE_SCENARIO_HEADER_ENABLED`, `FAKE_PAYMENTS_ENABLED`, and never reads `ESKIZ_FAKE_CODE`; `THROTTLE_RATES` knows the new
-scopes. Staging runs the production settings module.
+Validation (P0):
+- positive integers where numeric; `ESKIZ_MODE`/`CLICK_MODE`/`PAYME_MODE`/`BTS_MODE` ∈ {fake, live} (default
+  `INTEGRATIONS_MODE`); `FAKE_PAYMENTS_ENABLED` requires `CLICK_MODE == PAYME_MODE == "fake"`;
+  `FAKE_SCENARIO_HEADER_ENABLED` requires every provider mode (`ESKIZ`, `CLICK`, `PAYME`, `BTS`, `FCM`) fake;
+  `THROTTLE_RATES` knows the new scopes.
+- **Fake providers are allowed in production** (product-owner decision 2026-10-26): the production settings accept
+  `fake` for every `*_MODE`; `CoreConfig.ready()` logs one WARNING `providers.fake_in_production {provider}` per fake
+  provider and `health/?ready=1` / admin `GET settings/` report the modes (C§6.14). What fake means there is C§6.14:
+  callbacks refused, fake payment providers not offered, no SMS, no push, no social sign-in with fake OAuth.
+- `DEV_FEATURES_ALLOWED` is a settings-module constant (`True` only in `local.py`/`test.py`). The production settings
+  refuse at boot `FAKE_PAYMENTS_ENABLED`, `FAKE_SCENARIO_HEADER_ENABLED`, `ESKIZ_FAKE_CODE`, `POS_API_KEYS` and (as
+  today) `FAKE_NOW`, whatever the provider modes.
+- **Keys** (production; `local.py` ships valid development defaults, which are added to `KNOWN_PLACEHOLDER_SECRETS`):
+  `SMS_CODE_HMAC_KEY`, `LOG_PII_KEY`, `PAYMENT_REF_KEY`, `QR_HMAC_KEY` and `BTS_WEBHOOK_SECRET` are required, ≥32
+  characters (used as their UTF-8 bytes); `SECRETBOX_KEY` is required and must decode (base64url, padding optional) to
+  **exactly** 32 bytes (AES-256); `CLICK_SECRET_KEY` and `PAYME_KEY` are required in **every** mode (in fake mode their
+  callbacks are refused anyway; the check is a second layer), with no length floor because the provider issues them.
+  Every one of these is refused when it contains `change-me` (case-insensitive) or equals a committed value (the
+  existing `production.py` rule for `SECRET_KEY`/`INTERNAL_API_SECRET`, extended).
+- Staging runs the production settings module.
 
 ## 8. Beat entries (`config/celery.py`, P0)
 
@@ -682,7 +740,11 @@ The Click status check is an outbox message with a delay (`outbox.enqueue(…, d
 4. Ops: the website serves `apple-app-site-association` / `assetlinks.json` for `PAYMENT_RETURN_URL`; the edge proxy
    log format redacts `token=`; alerts on the ERROR events `otp.budget_tripped`, `payment.late_capture`,
    `payment.click_not_reversed`, `push.payload_invalid`; throttle rates reviewed after two weeks of production metrics.
-5. Mobile handover: contract link, `openapi/schema.yaml`, the fake-mode recipe (`ESKIZ_FAKE_CODE`, dev simulate), the
+   A deployment that runs fake adapters shows them in the startup WARNINGs `providers.fake_in_production` and in
+   `health/?ready=1` `providers`; the runbook lists what that posture cannot do (C§6.14: no online payment, no SMS, no
+   push, no social sign-in with fake OAuth).
+5. Mobile handover: contract link, `openapi/schema.yaml`, the local fake-mode recipe (`ESKIZ_FAKE_CODE`, dev simulate —
+   local/test settings only; a deployed staging needs live Eskiz and payment providers to sign up and pay), the
    device-key and refresh rules (C§1.9, C§2.1.6), the system-browser payment hand-off (C§2.7.2).
 
 ## 10. Dependencies at a glance

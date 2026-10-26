@@ -7,7 +7,7 @@
 | Source of truth | `docs/specs/2026-10-24-backend-foundation-design.md` (Auth and request security → Customer (M2); Financial integrity; Milestones → M2; Provisional business rules). If this file and the spec disagree, the spec wins and this file gets fixed. |
 | Shared rules | `docs/api/admin-api-v1.md` §1 (envelope, pagination, idempotency, values), §3 (enums), §4 (OrderEvent types), §5.8 (Uzbek labels). This file **references** them and lists only what is different for the customer audience. |
 | Open business rules | `docs/decisions/open-questions.md` (A1–A8, O1–O8, L1–L8, P1–P4, C1–C4, T1–T19) plus the new M2 points in §7 (`M2-*`) |
-| Out of scope (Phase 2) | The AI features of Backend PDF §12 (`POST /ai/analyze`, `POST /ai/chat`), their biometric consent and error codes are **not** part of v1; no route is mounted. Live Eskiz/Click/Payme/BTS/FCM adapters and reconciliation are M3. |
+| Out of scope (Phase 2) | The AI features of Backend PDF §12 (`POST /ai/analyze`, `POST /ai/chat`), their biometric consent and error codes are **not** part of v1; no route is mounted. Live Eskiz/Click/Payme/BTS/FCM adapters and reconciliation are M3; the Billz live adapter (M3) is built from docs.billz.io (`openapi.yaml` is the source of truth), and what it does not cover stays an explicit stub (§2.10). Fake adapters may run under the production settings (product-owner decision 2026-10-26); what that posture allows is §6.14. |
 | Enforced by | drf-spectacular (`openapi/schema.yaml`, `--validate --fail-on-warn`), the URL-walk auth matrix, contract tests per endpoint, the offline Click/Payme sandbox suites (plan §5) |
 
 Examples use `jsonc`: `//` comments give types and nullability and are not part of the payload. Example values are
@@ -29,9 +29,9 @@ Everything in admin §1 applies unless a row below says otherwise.
 | `/api/v1/auth/…` | app, before sign-in | none (refresh token in the body where needed) | device headers required (§1.2) |
 | `/api/v1/me/…`, `/api/v1/cart/…`, `/api/v1/orders/…`, `/api/v1/appointments/…`, `/api/v1/delivery/calculate/` | signed-in app | **C**: customer access JWT required | device headers required |
 | `/api/v1/catalog/…`, `/api/v1/settings/public/`, `/api/v1/delivery/regions/`, `/api/v1/specialists/…`, `/api/v1/services/` | anyone | **O**: optional; a present bearer must be valid | device headers optional (the app always sends them) |
-| `/api/v1/webhooks/{click,payme,bts}/…` | payment and delivery providers | provider signature / Basic auth / shared secret (§2.13) | **not** the error envelope: provider-native bodies |
+| `/api/v1/webhooks/{click,payme,bts}/…` | payment and delivery providers | provider signature / Basic auth / shared secret (§2.13); a provider whose mode is `fake` under the production settings accepts **no** callback (§2.13.0) | **not** the error envelope: provider-native bodies |
 | `/api/v1/pos/…` | in-store cashier terminals | per-device API key (§2.10) | envelope; Uzbek messages only |
-| `/api/v1/dev/…` | developers, fake mode only | **C** | mounted only when `FAKE_PAYMENTS_ENABLED=true` **and** `CLICK_MODE` = `PAYME_MODE` = `fake` (§2.15); settings validation refuses the flag with any live payment mode and production settings refuse it outright |
+| `/api/v1/dev/…` | developers, local/test settings only | **C** | mounted only when `DEV_FEATURES_ALLOWED` (local/test settings), `FAKE_PAYMENTS_ENABLED=true` **and** `CLICK_MODE` = `PAYME_MODE` = `fake` (§2.15); settings validation refuses the flag with any live payment mode and the production settings refuse it outright |
 
 - Every path ends with `/`. Paths in §2 are relative to `/api/v1/`.
 - The customer API is reachable from the internet through the edge proxy (TLS terminates there). `AdminNetworkMiddleware`
@@ -58,7 +58,7 @@ Everything in admin §1 applies unless a row below says otherwise.
 | `Idempotency-Key` | on the **I** routes (§1.7) | UUID, 36 chars, as admin §1.7. |
 | `Content-Type` | on bodies | `application/json`; `multipart/form-data` only on `PUT me/image/`; Click webhooks `application/x-www-form-urlencoded` only (§2.13.1). Anything else → 415 (Click: error `-8`). |
 | `X-Request-ID` | ignored from the app | Accepted only with the internal secret (admin §1.2), which the app never has. The server always generates one; the app shows it on error screens ("Xato kodi"). |
-| `X-GD-Fake-Scenario` | fake mode only | JSON object copied into `Order.metadata["fake"]` at checkout (BTS/Click/Payme switches of plan §6). Honoured only when `FAKE_SCENARIO_HEADER_ENABLED=true` **and** every provider mode (`ESKIZ_MODE`, `CLICK_MODE`, `PAYME_MODE`, `BTS_MODE`, `FCM_MODE`) is `fake`; settings validation refuses the flag otherwise and production settings refuse it outright. |
+| `X-GD-Fake-Scenario` | local/test settings only | JSON object copied into `Order.metadata["fake"]` at checkout (BTS/Click/Payme switches of plan §6). Honoured only when `DEV_FEATURES_ALLOWED` (local/test settings), `FAKE_SCENARIO_HEADER_ENABLED=true` **and** every provider mode (`ESKIZ_MODE`, `CLICK_MODE`, `PAYME_MODE`, `BTS_MODE`, `FCM_MODE`) is `fake`; settings validation refuses the flag otherwise and the production settings refuse it outright (fake providers in production never read a scenario, §6.14). |
 
 **401 codes and the app's reaction** (customer refresh tokens rotate, so a refresh failure always ends the session):
 
@@ -369,7 +369,7 @@ Body `{"phone": str, "purpose": "register" | "reset_password" | "link_social", "
 `expires_at=now`; new `SmsCode` row (`code_hmac = HMAC-SHA256(code, SMS_CODE_HMAC_KEY)` hex, 6 random digits from
 `secrets`, `expires_at = now + 120 s`, `max_attempts = 5`, `request_ip`); the global, fid and IP counters are
 incremented. The **plain code is never written to the database**: it is encrypted with AES-256-GCM under
-`SMS_PAYLOAD_KEY` (`core.secretbox.seal`, random 96-bit nonce, associated data = `sms_code_id`) and stored in Redis as
+`SECRETBOX_KEY` (`core.secretbox.seal`, random 96-bit nonce, associated data = `sms_code_id`) and stored in Redis as
 `gd:otp:payload:{sms_code_id}` with the code TTL (120 s). The outbox message is `sms.send {sms_code_id, lang,
 platform}` (dedupe `sms.send:{id}`) — no phone, no text, no code; the handler reads the phone from the row, opens the
 ciphertext, renders `sms.otp` (§2.14.1), sends, and deletes the Redis key. For `link_social` the ticket's `jti` is
@@ -736,10 +736,14 @@ is 404 here and `unavailable` in the cart. Availability (`available`) comes from
  "terms_version": "2026-10-01",                       // | null while the terms are not published (registration answers 503 terms_not_published); versions terms AND privacy policy
  "terms_updated_at": "2026-10-01T00:00:00+05:00",     // | null
  "reservation_minutes": 15,
- "payment_providers": ["click", "payme"],             // enabled providers (configured adapters)
+ "payment_providers": ["click", "payme"],             // providers that can take a payment now; [] = online payment unavailable (the app hides checkout)
  "min_app_version": {"ios": "1.0.0", "android": "1.0.0"},
  "store_urls": {"ios": "https://apps.apple.com/…", "android": "https://play.google.com/…"}}
 ```
+`payment_providers` lists Click and Payme in this order, each only when it can take a payment: a provider whose
+mode is `fake` is listed under the local/test settings and **omitted under the production settings**, where its
+callbacks are refused (§2.13.0, §6.14). Checkout and pay refuse a provider outside the list (400 `invalid_choice`,
+§2.7.1 row 1, §2.7.2). With an empty list the app shows the cart without the checkout button.
 
 ### 2.5 Cart (server cart, **C**)
 
@@ -838,7 +842,7 @@ Body:
 ```jsonc
 {"fulfilment": "delivery",            // FulfilmentMethod
  "address_id": 12,                    // delivery: required, own address; pickup: must be null
- "payment_provider": "click",         // PaymentProvider (enabled in settings/public)
+ "payment_provider": "click",         // PaymentProvider listed in settings/public payment_providers (§2.4)
  "cashback_to_use": 48600,            // int ≥ 0, default 0
  "expected_total": 784400,            // the total the app showed; required
  "customer_note": "Soat 18:00 dan keyin"}   // ≤300, default ""
@@ -857,7 +861,7 @@ Checks, in this order (the first failure answers):
 
 | # | Check | Result · message (uz) · key |
 |---|---|---|
-| 1 | Body fields | 400: `fulfilment`/`payment_provider` `invalid_choice`; `address_id` `required` (`field.address_required`) / `invalid` (pickup with an address); `cashback_to_use` `min_value`; `expected_total` `required`/`min_value`; `customer_note` `max_length` |
+| 1 | Body fields | 400: `fulfilment` `invalid_choice`; `payment_provider` `invalid_choice` (also when it is not in `payment_providers`, §2.4); `address_id` `required` (`field.address_required`) / `invalid` (pickup with an address); `cashback_to_use` `min_value`; `expected_total` `required`/`min_value`; `customer_note` `max_length` |
 | 2 | Consent current (§2.2.4) | 409 `terms_update_required` · `error.terms_update_required`, `details {current_version}` |
 | 3 | Delivery: address own (`does_not_exist` `field.address_not_found`), region/city known (`address_incomplete`) | 400 |
 | 4 | Delivery: BTS quote (`quote(region_code, city_code)`, no row lock held; passed to `create_order` as `delivery_fee`) | 409 `delivery_unavailable` / 503 `provider_unavailable` |
@@ -919,7 +923,7 @@ moves money, never creates order events and never expires an order.
 | Status `cancelled` | 409 `not_payable` "Bu buyurtmani to‘lab bo‘lmaydi." · `error.not_payable` |
 | Not payable with `attaching=True` (`now ≥ reservation_expires_at`; the job has not run yet) | 409 `order_expired` "To‘lov muddati tugadi. Mahsulotlarni savatga qaytarib, qaytadan rasmiylashtiring." · `error.order_expired` — **nothing is written** (§1.7); the expiry job cancels the order |
 | `provider` differs from the in-flight payment's provider (Click prepared < 10 min ago, or Payme state 1) | 409 `payment_in_progress` "To‘lov {provider} ilovasida jarayonda. Uni yakunlang yoki biroz kuting." · `error.payment_in_progress`, `details {provider, order_id}` |
-| `provider` not enabled | 400 `provider` `invalid_choice` |
+| `provider` not in `settings/public` `payment_providers` (§2.4) | 400 `provider` `invalid_choice` |
 
 **Side effects** (`commerce.services.ensure_payable_payment(order_id, provider)`, P2, under `lock_order` → Payment
 locks): the active `pending` payment of the same provider is **reused** while it is not attached, or while it is in
@@ -1123,8 +1127,10 @@ the presented key against `PosDevice.key_hash` (unique), compared with `compare_
 (DRF authenticates before it throttles, so the `pos` scope cannot see them): beyond `POS_FAILED_AUTH_PER_IP_PER_MIN`
 (20) the request is answered 429 `throttled` before any lookup. **Lifecycle:** `manage.py revokeposkey <prefix>
 --actor <email>` (`is_active=False`, audit `pos.device_revoked`) and `manage.py rotateposkey <prefix> --actor <email>`
-(new key shown once, old hash replaced, audit `pos.device_rotated`). In fake mode `POS_API_KEYS` (env, comma separated
-`name:key`) seeds rows. `PosAPIView` lives in `loyalty/api/pos/base.py` (§1.1).
+(new key shown once, old hash replaced, audit `pos.device_rotated`). Under the local/test settings only, `POS_API_KEYS`
+(env, comma separated `name:key`) seeds rows through the loyalty seeder; the production settings refuse the variable,
+whatever the provider modes, so a known demo key can never reach a deployed database. `PosAPIView` lives in
+`loyalty/api/pos/base.py` (§1.1).
 
 Body `{"token": str 1..64, "sale_ref": str ≤64 | null}` (`sale_ref` = the POS receipt number, audit only).
 
@@ -1153,7 +1159,10 @@ Body `{"token": str 1..64, "sale_ref": str ≤64 | null}` (`sale_ref` = the POS 
 - **Audit:** `pos.qr_resolved {pos_device_id, customer_id, sale_ref}` (actor_type `integration`, actor_id = device
   id); failures `pos.qr_rejected {pos_device_id, reason: "format" | "unknown"}` (one row per failure; throttled).
 - **Open (M3):** how the sale is then discovered and credited (L7) and whether cashiers redeem (L6). M2 stores nothing
-  else; `loyalty.services.record_store_purchase` (B4) is the M3 entry point.
+  else; `loyalty.services.record_store_purchase` (B4) is the M3 entry point. The M3 Billz live adapter follows
+  docs.billz.io (`openapi.yaml` is the source of truth); what those docs do not cover stays an explicit stub that
+  raises a typed "not supported" error: refunds of paid sales, per-receipt discovery of in-store sales after a QR scan
+  (L6/L7 stay open) and webhooks (Billz has none) (product-owner decision 2026-10-26).
 - Uzbek messages only on this route (cashier software); `Accept-Language` is honoured if sent.
 
 ### 2.11 Appointments
@@ -1280,6 +1289,15 @@ admin-only by DB constraint).
 - Views inherit `WebhookAPIView` and live in `commerce/api/webhooks/` (the order orchestrator; protocol-pure helpers
   — signature, amount parsing, error tables, the account-reference check — live in
   `integrations/{click,payme,bts}/protocol.py` without DB access).
+- **Fake providers under the production settings** (product-owner decision 2026-10-26: production may run fake
+  adapters, but fake mode can never hand out a free order). When `DEV_FEATURES_ALLOWED` is false (the production
+  settings, which staging also runs) and the provider's mode is `fake`, its callback view accepts **no** request,
+  whatever the signature: Click answers `-1` (`SIGN CHECK FAILED!`) to every Prepare and Complete, Payme answers
+  `-32504` to every method, BTS answers 401 `{"ok": false}`. Nothing is read or written except the bounded `rejected:`
+  inbox row below (`error_code: "fake_mode"`). The check runs first, before parameter parsing, so a request signed with
+  a leaked or placeholder key cannot move an order. Under the local/test settings fake callbacks are processed normally
+  (that is what the dev simulate endpoint and the sandbox suites drive). Production also requires real values for
+  `CLICK_SECRET_KEY`, `PAYME_KEY` and `BTS_WEBHOOK_SECRET` in every mode (plan §7), as a second layer.
 - **HTTP status:** always 200 with the provider-native body for protocol outcomes (including auth failures for
   Click and Payme, as their protocols require). An unexpected exception rolls everything back; Click and BTS get
   HTTP 500 so they retry; Payme gets HTTP 200 with JSON-RPC error `-32400` (system error) — the choice per provider
@@ -1392,7 +1410,7 @@ Responses are `application/json`.
 | `error` | `error_note` | We answer it when |
 |---|---|---|
 | 0 | `Success` | accepted (including a refused capture in `CLICK_REVERSES_ON_COMPLETE_ERROR=false` mode, §2.13.0) |
-| -1 | `SIGN CHECK FAILED!` | signature mismatch |
+| -1 | `SIGN CHECK FAILED!` | signature mismatch; every request to a fake Click under the production settings (§2.13.0) |
 | -2 | `Incorrect parameter amount` | `amount` not a non-negative decimal with ≤2 dp, not integral so'm, or ≠ `payment.amount` (= `order.total`) |
 | -3 | `Action not found` | `action` ≠ 0 on prepare / ≠ 1 on complete |
 | -4 | `Already paid` | the order is already paid by another payment (prepare; complete only in `true` mode) |
@@ -1402,7 +1420,7 @@ Responses are `application/json`.
 | -8 | `Error in request from click` | missing/malformed parameters (incl. `click_paydoc_id`); wrong content type; `service_id` ≠ ours; IP outside `CLICK_ALLOWED_IPS` (when set); a conflicting semantic fingerprint under the same key |
 | -9 | `Transaction cancelled` | prepare: the order is cancelled or not payable with `attaching=True`; another transaction of this order is in flight; complete: Click reported `error < 0`; the payment failed at Click earlier; a refused capture in `true` mode |
 
-**Prepare (action 0).** Steps 1 of §2.13.0 (params `-8` → content type `-8` → IP `-8` → signature `-1` → action `-3`
+**Prepare (action 0).** Fake Click under the production settings → `-1` before anything else (§2.13.0). Steps 1 of §2.13.0 (params `-8` → content type `-8` → IP `-8` → signature `-1` → action `-3`
 → `service_id` `-8` → account reference `-5`), advisory lock, then:
 1. **state replay:** a payment with `provider = click`, `provider_txn_id = click_trans_id` exists and is `pending` or
    `paid` → `0` with the same `merchant_prepare_id` (a re-signed retry); inbox fingerprint check (`-8` on conflict);
@@ -1447,7 +1465,7 @@ Endpoint `POST …/api/v1/webhooks/payme/`, `Content-Type: application/json`. Ev
 body; amounts are **tiyin** (so'm × 100) and exist only in this adapter; times are epoch **milliseconds**.
 
 **Auth:** `Authorization: Basic base64("Paycom:" + key)` where key = `PAYME_KEY` (the test key in the sandbox).
-Missing or wrong → error `-32504`. The optional `PAYME_ALLOWED_IPS` check runs after auth and answers `-32504` too
+Missing or wrong → error `-32504`; under the production settings a fake Payme answers `-32504` to every call (§2.13.0). The optional `PAYME_ALLOWED_IPS` check runs after auth and answers `-32504` too
 (defence in depth only).
 
 ```jsonc
@@ -1472,7 +1490,7 @@ Missing or wrong → error `-32504`. The optional `PAYME_ALLOWED_IPS` check runs
 | -32700 | "JSON xato." / "Ошибка парсинга JSON." / "Parse error." | body is not JSON |
 | -32600 | "So‘rov noto‘g‘ri." / "Неверный запрос." / "Invalid request." | missing `method`/`params`/`id`, wrong types |
 | -32601 | "Metod topilmadi." / "Метод не найден." / "Method not found." | unknown method; also `ChangePassword` (keys rotate through env, §7 `M2-P6`) |
-| -32504 | "Ruxsat yetarli emas." / "Недостаточно привилегий для выполнения метода." / "Insufficient privileges." | auth / IP |
+| -32504 | "Ruxsat yetarli emas." / "Недостаточно привилегий для выполнения метода." / "Insufficient privileges." | auth / IP; every call to a fake Payme under the production settings (§2.13.0) |
 | -32400 | "Tizim xatosi." / "Системная ошибка." / "System error." | unexpected exception (everything rolled back) |
 | -31001 | "Noto‘g‘ri summa." / "Неверная сумма." / "Wrong amount." | `amount` not a JSON integer, ≤ 0, or ≠ `order.total × 100` |
 | -31003 | "Tranzaksiya topilmadi." / "Транзакция не найдена." / "Transaction not found." | unknown `params.id` |
@@ -1506,7 +1524,8 @@ Payme id is `Payment.provider_txn_id`.
 - **Auth:** shared secret `BTS_WEBHOOK_SECRET` in header `X-GD-Webhook-Token` (preferred). Only if BTS cannot set
   headers, query `?token=` **(verify M3)**: the view strips the parameter before anything is logged or stored
   (`WebhookInbox.path` has no query string), and the edge proxy's log format redacts `token=` (ops runbook).
-  `compare_digest`; mismatch → 401 `{"ok": false}` + a bounded `rejected:` inbox row (§2.13.0).
+  `compare_digest`; mismatch → 401 `{"ok": false}` + a bounded `rejected:` inbox row (§2.13.0). A fake BTS under the
+  production settings answers every call that way (§2.13.0).
 - **Body:** BTS's status notification (JSON). We read only the parcel identity and **never trust the status in the
   payload**: our `Shipment` is found by `clientId` (= our order id) or by the tracking number **stored on our
   Shipment**, and the view **re-tracks with the tracking number stored on our Shipment** through the BTS port
@@ -1549,17 +1568,29 @@ Payme id is `Payment.provider_txn_id`.
 - **Delivery callback:** optional; M2 sets no `callback_url` and exposes no endpoint (M3 may add
   `webhooks/eskiz/` to record `DELIVRD`/`UNDELIV`).
 - **Fake (`ESKIZ_MODE=fake`):** phone ending `0000` → rejected (definitive); ending `9999` → transport down; otherwise
-  accepted with id `fake-<sms_code_id>`; every message is kept in `FakeEskiz.sent`. The fixed code `ESKIZ_FAKE_CODE`
-  (default `123456`, so black-box e2e can sign in) is honoured **only** by `config.settings.local` and
-  `config.settings.test`; `config.settings.production` — which staging also runs — refuses `ESKIZ_MODE=fake` and
-  ignores `ESKIZ_FAKE_CODE`, so no internet-facing deployment accepts a known code.
+  accepted with id `fake-<sms_code_id>`. Under the local/test settings every rendered message is kept in
+  `FakeEskiz.sent` (tests read the code there); under the production settings the fake keeps nothing and logs one INFO
+  line `sms.fake_accepted {sms_code_id}` per message (ids only, never the text or code), so no plain code stays in a
+  worker's memory (§6.4). The fixed code `ESKIZ_FAKE_CODE` (default `123456`, so black-box e2e can sign in) exists
+  **only** under `config.settings.local` and `config.settings.test` (`DEV_FEATURES_ALLOWED`);
+  `config.settings.production` — which staging also runs — refuses the variable at boot, so no internet-facing
+  deployment accepts a known code.
+- **Fake Eskiz in production (demo/staging posture, product-owner decision 2026-10-26).** The production settings
+  accept `ESKIZ_MODE=fake` (startup WARNING, mode reported by `health/?ready=1` and admin `settings/`, §6.14), but
+  **no SMS is delivered**: `send-code` and the `verify_device` step answer as usual and the code never arrives. Nobody
+  can register, sign in with a password on a device without a device key, reset a password, complete a social link,
+  set a first password on a social-only account or delete a social-only account; signed-in sessions, known-device
+  password sign-ins and linked social sign-ins (when OAuth is live) keep working. This posture is for demos and staging
+  only; a public launch needs `ESKIZ_MODE=live`.
 
 #### 2.14.2 FCM push (`integrations/fcm/`; live adapter M3, payload contract now)
 HTTP v1 `POST https://fcm.googleapis.com/v1/projects/{FCM_PROJECT_ID}/messages:send`, one request per message over
 `httpx` with an OAuth2 access token obtained from the service-account key (`FCM_CREDENTIALS_FILE`) by a PyJWT RS256
 JWT-bearer grant (both pinned already; firebase-admin is **not** added) **(verify M3)**. P0 extends the port:
 `PushMessage(token, title, body, data, *, data_only=False, android_channel="", android_priority="high",
-apns_push_type="alert", apns_priority=10, image_url="", collapse_key="")`; the fake records every field.
+apns_push_type="alert", apns_priority=10, image_url="", collapse_key="")`. The fake records every field under the
+local/test settings only; under the production settings it keeps nothing (one INFO line with ids per message), so
+pushes are reported `sent` but reach no device (§6.14).
 ```jsonc
 {"token": "<device fcm_token>",
  "notification": {"title": "Kuryerga topshirildi", "body": "Buyurtma №10248 kuryerga topshirildi."},  // omitted for data-only
@@ -1603,10 +1634,12 @@ Fake additions (P2): `regions()` returns the four regions of the fake tariff tab
 Toshkent viloyati, `12` Sirdaryo, `13` Samarqand) with two cities each; `track()` returns `scenario["track_status"]`
 or the parcel's last status; `scenario["quote"] == "rejected"` → `BtsRejected`, `"down"` → `BtsUnavailable`.
 
-### 2.15 `POST dev/payments/{order_id}/simulate/` (fake mode only)
-Mounted only when `FAKE_PAYMENTS_ENABLED=true` **and** `CLICK_MODE` = `PAYME_MODE` = `fake`; settings validation
-refuses `FAKE_PAYMENTS_ENABLED` together with any live payment mode, and production settings refuse it outright, so
-the endpoint can never sign callbacks with a real `CLICK_SECRET_KEY`/`PAYME_KEY`. **C**, own order. Body
+### 2.15 `POST dev/payments/{order_id}/simulate/` (local/test settings only)
+Mounted only when `DEV_FEATURES_ALLOWED` (local/test settings), `FAKE_PAYMENTS_ENABLED=true` **and** `CLICK_MODE` =
+`PAYME_MODE` = `fake`; settings validation refuses `FAKE_PAYMENTS_ENABLED` together with any live payment mode, and the
+production settings refuse it outright — whatever the provider modes — so the endpoint can never sign callbacks with a
+real `CLICK_SECRET_KEY`/`PAYME_KEY` and never exists on a deployed server (where fake callbacks are refused anyway,
+§2.13.0). **C**, own order. Body
 `{"outcome": "success" | "fail", "provider": PaymentProvider | null}`. It builds a correctly signed Click
 prepare + complete (or Payme `CheckPerformTransaction` + `CreateTransaction` + `PerformTransaction` / `CancelTransaction`)
 sequence and runs it through the **real webhook views** in-process, so the mobile team can finish a purchase without
@@ -1928,10 +1961,11 @@ handler renders through the catalog. Placeholders: `{n}`, `{m}`, `{limit}`, `{ma
    them; the global SMS budget is a circuit breaker with an alert (§2.1.1). Residual risk: a distributed attacker can
    still exhaust one victim's daily SMS cap (denial of reset/new-device sign-in for that day); M3 evaluates App Attest
    / Play Integrity attestation on `auth/send-code/` and `auth/login/`.
-4. **OTP storage.** Codes only as `HMAC-SHA256(code, SMS_CODE_HMAC_KEY)` (key ≥32 bytes, required in production),
-   compared with `compare_digest`; the plain code exists only in memory, in the AES-GCM ciphertext in Redis for its
-   120 s lifetime (`SMS_PAYLOAD_KEY`, §2.1.1) and in the SMS itself — never in the outbox payload, the database, a
-   backup or a log. 5 attempts per code, 10 wrong codes per phone per day (≈10⁻⁵ success odds per phone per day for a
+4. **OTP storage.** Codes only as `HMAC-SHA256(code, SMS_CODE_HMAC_KEY)` (key ≥32 characters, required in production
+   and refused when it is a placeholder or a committed value, plan §7), compared with `compare_digest`; the plain code
+   exists only in memory, in the AES-GCM ciphertext in Redis for its 120 s lifetime (`SECRETBOX_KEY`, exactly 32 bytes,
+   §2.1.1) and in the SMS itself — never in the outbox payload, the database, a backup, a log or a fake adapter's
+   message list outside the local/test settings (§2.14.1). 5 attempts per code, 10 wrong codes per phone per day (≈10⁻⁵ success odds per phone per day for a
    guesser); resend ≥60 s; verification tokens are 256-bit, stored as SHA-256, single use, bound to (phone, purpose)
    and, for `link_social`, to the ticket, 10 min. Logs and throttle keys carry `pii_ref(x)` = first 16 hex chars of
    `HMAC-SHA256(LOG_PII_KEY, x)` for phones and fids (a plain SHA-256 of a +998 number is brute-forced in seconds).
@@ -1960,7 +1994,7 @@ handler renders through the catalog. Placeholders: `{n}`, `{m}`, `{limit}`, `{ma
     the Phase-2 AI feature is separate and not part of M2.
 11. **Payments.** Card data never reaches the backend (provider pages, opened in the system browser). The provider
     account value is an HMAC-protected reference, not a guessable id (§2.7.2). Click MD5 over raw form strings +
-    `service_id` binding + amount equality + `merchant_prepare_id` binding; Payme Basic auth per mode, integer amount
+    `service_id` binding + amount equality + `merchant_prepare_id` binding; Payme Basic auth with `PAYME_KEY`, integer amount
     equality in tiyin, one active transaction per order (partial unique index + `-31051`), 12-hour timeout; IP
     allow-lists are defence in depth only. Every handler takes the Order lock before reading state and names the
     payment it changes (§2.13.0). Click callbacks are idempotent from state (a re-signed retry of an applied call
@@ -1979,10 +2013,23 @@ handler renders through the catalog. Placeholders: `{n}`, `{m}`, `{limit}`, `{ma
 13. **POS minimisation** (§2.10): hashed per-device keys with revoke/rotate commands, failed-auth throttling per IP,
     single-use QR via `GETDEL` with at most two live tokens per customer, one error for every failure, no name, history
     or internal id in the response, every resolve audited.
-14. **Fake/dev switches** (`ESKIZ_MODE=fake`, `ESKIZ_FAKE_CODE`, `FAKE_SCENARIO_HEADER_ENABLED`, `FAKE_PAYMENTS_ENABLED`,
-    `*_MODE=fake`) are refused by `config/settings/production.py`, which every internet-facing deployment (staging
-    included) runs; `FAKE_PAYMENTS_ENABLED` and the scenario header additionally require every relevant provider mode
-    to be `fake` in any settings module; the fixed OTP exists only in local/test settings.
+14. **Fake providers and dev switches** (product-owner decision 2026-10-26). Two different things:
+    - **Fake provider adapters** (`CLICK_MODE`, `PAYME_MODE`, `BTS_MODE`, `ESKIZ_MODE`, `FCM_MODE`, `BILLZ_MODE`,
+      `OAUTH_MODE` = `fake`) are **allowed** under `config.settings.production`, which every internet-facing deployment
+      (staging included) runs. Each fake provider logs one WARNING `providers.fake_in_production {provider}` at process
+      start, and the effective mode of every provider (`billz`, `click`, `payme`, `bts`, `eskiz`, `fcm`, `oauth`) is
+      reported by `GET /api/v1/health/?ready=1` (`providers`) and by admin `GET settings/` (`integrations.providers`,
+      admin §2.11, §2.15). In that posture a fake adapter can never hand out a free order or accept a known secret:
+      fake Click/Payme/BTS accept no callback (§2.13.0) and fake payment providers are not offered (§2.4), so no order
+      can be paid online; a Click refund through the fake port becomes `manual_required`, never `succeeded` (§2.13.0);
+      fake OAuth turns customer social sign-in off (404, §2.1.8); fake Eskiz delivers no SMS (demo/staging posture,
+      §2.14.1); fake FCM delivers no push; fakes keep no message history (§2.14.1, §2.14.2).
+    - **Dev switches** — `FAKE_PAYMENTS_ENABLED` (dev simulate, §2.15), `FAKE_SCENARIO_HEADER_ENABLED` (§1.2),
+      `ESKIZ_FAKE_CODE` (fixed OTP), `POS_API_KEYS` (seeded POS keys, §2.10), `FAKE_NOW` and the `*` nonce wildcard of
+      the OAuth fakes — work only under the local/test settings (`DEV_FEATURES_ALLOWED`, a settings-module constant,
+      not an env variable) and are **refused at boot** by the production settings whatever the provider modes;
+      `FAKE_PAYMENTS_ENABLED` and the scenario header additionally require every relevant provider mode to be `fake`.
+      Staging therefore cannot complete an online purchase or receive a code without live providers.
 15. **Enumeration.** Customer ids in URLs are sequential but always ownership-checked; phone existence is revealed only
     by the register/reset branches of `send-code` under SMS throttles (§7 `M2-A9`); a capped phone answers `auth/login/`
     the same way for any password; POS failures reveal nothing.
