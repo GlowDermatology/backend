@@ -14,7 +14,9 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from glowderma.core import enums, integration_modes
+from glowderma.core import integration_modes
+from glowderma.core.api.serializers import ProviderModesSerializer
+from glowderma.core.network import passes_admin_gate
 
 logger = logging.getLogger(__name__)
 
@@ -23,10 +25,10 @@ class HealthSerializer(serializers.Serializer[dict[str, Any]]):
     status = serializers.ChoiceField(choices=["ok", "error"])
     checks = serializers.DictField(child=serializers.ChoiceField(choices=["ok", "error"]), required=False)
     version = serializers.CharField(required=False)
-    integrations = serializers.DictField(
-        child=serializers.ChoiceField(choices=enums.IntegrationMode.values),
+    integrations = ProviderModesSerializer(
         required=False,
-        help_text="`?ready=1` only: `{provider: mode}` for every provider with a `*_MODE` setting.",
+        help_text="`?ready=1` only, and only for a caller that passes the admin network gate (§1): the mode "
+        "of every provider with a `*_MODE` setting.",
     )
 
 
@@ -71,12 +73,13 @@ class HealthView(APIView):
             checks["broker"] = "error"
             logger.warning("health check %s failed", "broker", exc_info=True)
         ok = all(value == "ok" for value in checks.values())
-        return Response(
-            {
-                "status": "ok" if ok else "error",
-                "checks": checks,
-                "version": settings.GIT_SHA,
-                "integrations": integration_modes.provider_modes(),
-            },
-            status=200 if ok else 503,
-        )
+        body: dict[str, Any] = {
+            "status": "ok" if ok else "error",
+            "checks": checks,
+            "version": settings.GIT_SHA,
+        }
+        # Which providers are fake is reconnaissance for an attacker (fake payments are allowed in
+        # production): only a caller that would pass the admin network gate sees it (contract §2.15).
+        if passes_admin_gate(request):
+            body["integrations"] = integration_modes.provider_modes()
+        return Response(body, status=200 if ok else 503)

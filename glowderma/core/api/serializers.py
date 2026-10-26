@@ -4,6 +4,9 @@ from typing import Any
 
 from rest_framework import serializers
 
+from glowderma.core import enums
+from glowderma.core.integration_modes import PROVIDER_MODE_SETTINGS
+
 
 class ActorSerializer(serializers.Serializer[Any]):
     """``Actor = {"id", "display_name"}``: the staff full name, else the email (``null`` = system).
@@ -27,3 +30,15 @@ class CustomerRefSerializer(serializers.Serializer[Any]):
     id = serializers.IntegerField(source="pk")
     name = serializers.CharField(allow_blank=True)
     phone = serializers.CharField()
+
+
+# One field per entry of ``core.integration_modes.PROVIDER_MODE_SETTINGS`` (health ``?ready=1`` and
+# ``GET settings/``), so a provider added there is rendered everywhere.
+class ProviderModesSerializer(serializers.Serializer[dict[str, str]]):
+    """Per-provider adapter modes (``*_MODE`` settings, each defaulting to ``INTEGRATIONS_MODE``)."""
+
+    def get_fields(self) -> dict[str, serializers.Field[Any, Any, Any, Any]]:
+        return {
+            provider: serializers.ChoiceField(choices=enums.IntegrationMode.values)
+            for provider in PROVIDER_MODE_SETTINGS
+        }

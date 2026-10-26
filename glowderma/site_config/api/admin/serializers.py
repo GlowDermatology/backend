@@ -11,7 +11,7 @@ from rest_framework import serializers
 from glowderma.core import enums, integration_modes
 from glowderma.core.api.exceptions import field_error
 from glowderma.core.api.fields import PhoneField
-from glowderma.core.api.serializers import ActorSerializer
+from glowderma.core.api.serializers import ActorSerializer, ProviderModesSerializer
 from glowderma.site_config.models import SiteSettings
 
 
@@ -19,17 +19,6 @@ class PickupAddressSerializer(serializers.Serializer[dict[str, str]]):
     uz = serializers.CharField(max_length=200, allow_blank=True, required=False)
     ru = serializers.CharField(max_length=200, allow_blank=True, required=False)
     en = serializers.CharField(max_length=200, allow_blank=True, required=False)
-
-
-class ProviderModesSerializer(serializers.Serializer[dict[str, str]]):
-    """Per-provider adapter modes (``*_MODE`` settings, each defaulting to ``INTEGRATIONS_MODE``)."""
-
-    oauth = serializers.ChoiceField(choices=enums.IntegrationMode.values)
-    billz = serializers.ChoiceField(choices=enums.IntegrationMode.values)
-    fcm = serializers.ChoiceField(choices=enums.IntegrationMode.values)
-    click = serializers.ChoiceField(choices=enums.IntegrationMode.values)
-    payme = serializers.ChoiceField(choices=enums.IntegrationMode.values)
-    bts = serializers.ChoiceField(choices=enums.IntegrationMode.values)
 
 
 class IntegrationsSerializer(serializers.Serializer[dict[str, Any]]):

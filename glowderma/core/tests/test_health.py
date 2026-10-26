@@ -1,3 +1,4 @@
+from ipaddress import ip_network
 from unittest.mock import patch
 
 import pytest
@@ -62,3 +63,44 @@ def test_health_ready_lists_every_provider_mode() -> None:
     }
     assert set(body) == {"status", "checks", "version", "integrations"}
     assert "integrations" not in Client().get("/api/v1/health/").json()
+
+
+@pytest.mark.django_db
+def test_health_ready_hides_the_provider_modes_outside_the_admin_gate() -> None:
+    """Contract §2.15: which providers are fake is reconnaissance; only a caller that passes the admin
+    network gate (§1) sees ``integrations``. Status, checks and version stay public."""
+    from django.test import override_settings
+
+    secret = settings.INTERNAL_API_SECRET
+    with override_settings(ADMIN_API_ALLOWED_NETS=[ip_network("10.0.0.0/8")]):
+        outside = Client(REMOTE_ADDR="203.0.113.7").get("/api/v1/health/?ready=1")
+        inside = Client(REMOTE_ADDR="10.1.2.3").get("/api/v1/health/?ready=1")
+    assert outside.status_code == 200 and set(outside.json()) == {"status", "checks", "version"}
+    assert "integrations" in inside.json()
+    with override_settings(
+        ADMIN_API_ALLOWED_NETS=[ip_network("10.0.0.0/8")], ADMIN_API_REQUIRE_INTERNAL_SECRET=True
+    ):
+        bare = Client(REMOTE_ADDR="10.1.2.3").get("/api/v1/health/?ready=1")
+        wrong = Client(REMOTE_ADDR="10.1.2.3").get(
+            "/api/v1/health/?ready=1",
+            HTTP_X_GD_INTERNAL_SECRET="nope",  # noqa: S106
+        )
+        signed = Client(REMOTE_ADDR="10.1.2.3").get(
+            "/api/v1/health/?ready=1", HTTP_X_GD_INTERNAL_SECRET=secret
+        )
+        outsider = Client(REMOTE_ADDR="203.0.113.7").get(
+            "/api/v1/health/?ready=1", HTTP_X_GD_INTERNAL_SECRET=secret
+        )
+    assert "integrations" not in bare.json() and "integrations" not in wrong.json()
+    assert "integrations" not in outsider.json()
+    assert signed.json()["integrations"]["click"] in ("fake", "live")
+
+
+def test_provider_modes_serializer_follows_the_settings_map(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One field per ``PROVIDER_MODE_SETTINGS`` entry: health and ``GET settings/`` cannot drift from it."""
+    from glowderma.core import integration_modes
+    from glowderma.core.api.serializers import ProviderModesSerializer
+
+    assert set(ProviderModesSerializer().fields) == set(integration_modes.PROVIDER_MODE_SETTINGS)
+    monkeypatch.setitem(integration_modes.PROVIDER_MODE_SETTINGS, "sms", "SMS_MODE")
+    assert list(ProviderModesSerializer().fields) == ["oauth", "billz", "fcm", "click", "payme", "bts", "sms"]
