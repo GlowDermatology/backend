@@ -158,6 +158,37 @@ def test_account_security_edge_cases(clock: Any, fcm: FakeFcm, caplog: pytest.Lo
     assert "push.payload_invalid" in caplog.text
 
 
+def test_a_dead_farewell_token_is_pruned_wherever_it_sits(clock: Any, fcm: FakeFcm) -> None:
+    customer = CustomerFactory.create()
+    DeviceFactory.create(customer=customer)
+    # the install that held the token was deactivated by the reset; another inactive row still holds it
+    stale = DeviceFactory.create(
+        customer=CustomerFactory.create(),
+        fcm_token="old-device-bad",  # noqa: S106
+        is_active=False,
+        push_enabled=True,
+    )
+    services.deliver_account_security(
+        security_payload(customer, "password_reset", farewell_tokens=["old-device-bad"])
+    )
+    stale.refresh_from_db()
+    assert (stale.fcm_token, stale.push_enabled, stale.fcm_invalidated_at) == ("", False, ANCHOR)
+
+
+def test_a_farewell_token_now_on_an_active_device_gets_no_notice(clock: Any, fcm: FakeFcm) -> None:
+    customer = CustomerFactory.create()
+    current = DeviceFactory.create(customer=customer)
+    # the install signed into another account after the reset: its token is now B's active device
+    other = DeviceFactory.create(customer=CustomerFactory.create(), fcm_token="moved-token")  # noqa: S106
+    inbox = services.deliver_account_security(
+        security_payload(customer, "password_reset", farewell_tokens=["moved-token", "gone-token"])
+    )
+    assert inbox is not None
+    assert [m.token for m in fcm.sent] == [current.fcm_token, "gone-token"]
+    other.refresh_from_db()
+    assert (other.fcm_token, other.push_enabled) == ("moved-token", True)
+
+
 def test_dead_account_security_message_is_audited_and_keeps_no_token(clock: Any) -> None:
     customer = CustomerFactory.create()
     payload = security_payload(customer, "password_reset", farewell_tokens=["old-token"])
@@ -193,6 +224,7 @@ def test_order_status_title_is_the_customer_label(
     DeviceFactory.create(customer=customer)
     inbox = services.deliver_order_status(order_push(customer, status, pickup=pickup))
     assert inbox is not None and inbox.title == title
+    assert inbox.language == language  # the row is in the customer's language, like its title
     [message] = fcm.sent
     assert message.title == title
     assert message.data == {
@@ -219,6 +251,40 @@ def test_no_push_for_an_order_before_the_history_horizon(clock: Any, fcm: FakeFc
         )
         is None
     )
+
+
+@pytest.mark.parametrize(
+    ("action", "status"),
+    [
+        ("confirmed", "cancelled"),
+        ("rescheduled", "rejected"),
+        ("rejected", "requested"),
+        ("cancelled", "confirmed"),
+    ],
+)
+def test_a_stale_appointment_action_is_skipped(
+    clock: Any, fcm: FakeFcm, caplog: pytest.LogCaptureFixture, action: str, status: str
+) -> None:
+    # e.g. staff confirm, then the customer cancels before the outbox delivers the confirm push
+    timestamps: dict[str, dict[str, Any]] = {
+        "requested": {},
+        "confirmed": {"confirmed_at": ANCHOR},
+        "rejected": {"rejected_at": ANCHOR},
+        "cancelled": {"cancelled_at": ANCHOR, "cancelled_by": "customer"},
+    }
+    appointment = AppointmentFactory.create(status=status, **timestamps[status])
+    DeviceFactory.create(customer=appointment.customer)
+    payload = {
+        "appointment_id": appointment.pk,
+        "action": action,
+        "event_id": 1,
+        "customer_id": appointment.customer_id,
+        "reschedule_no": None,
+    }
+    with caplog.at_level(logging.INFO, logger="glowderma.notifications.services"):
+        assert services.deliver_appointment(payload) is None
+    assert not InboxNotification.objects.exists() and fcm.sent == []
+    assert "push.appointment skipped" in caplog.text
 
 
 def test_appointment_push_channel(clock: Any, fcm: FakeFcm) -> None:

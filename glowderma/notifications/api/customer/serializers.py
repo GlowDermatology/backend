@@ -68,8 +68,10 @@ class ReadAllSerializer(serializers.Serializer[Any]):
 
 
 class AckRequestSerializer(serializers.Serializer[dict[str, Any]]):
+    # Only the bigint range (no min_value 1): ids ≤ 0 match no row and are ignored like any unknown id
+    # (C§2.12), so one bad id never blocks the batch's valid ones (the app retries a batch on its next start).
     inbox_ids = BoundedListField(
-        child=serializers.IntegerField(min_value=1, max_value=2**63 - 1), max_items=50
+        child=serializers.IntegerField(min_value=-(2**63), max_value=2**63 - 1), max_items=50
     )
 
     def validate_inbox_ids(self, value: list[int]) -> list[int]:

@@ -224,6 +224,34 @@ def test_ack_validation(customer_client: APIClient, body: dict[str, Any], code: 
     assert error["field"].startswith("inbox_ids") and (error["code"], error["message"]) == (code, message)
 
 
+def test_ack_ignores_ids_below_one_like_unknown_ids(customer: Customer, customer_client: APIClient) -> None:
+    row = order_row(customer)
+    response = customer_client.post(ACK, {"inbox_ids": [0, -5, row.pk]}, format="json")
+    assert response.status_code == 200 and response.json() == {"acknowledged": 1}
+    row.refresh_from_db()
+    assert row.delivered_at is not None
+    assert services.acknowledge(customer.pk, [0, -1]).acknowledged == 0
+
+
+def test_inbox_writes_document_the_optional_idempotency_key() -> None:
+    from drf_spectacular.generators import SchemaGenerator
+
+    schema = SchemaGenerator().get_schema(request=None, public=True)  # type: ignore[no-untyped-call]
+    operations = {
+        operation["operationId"]: operation
+        for path in schema["paths"].values()
+        for operation in path.values()
+        if isinstance(operation, dict) and "operationId" in operation
+    }
+    for operation_id in (
+        "customer_notifications_read",
+        "customer_notifications_read_all",
+        "customer_notifications_ack",
+    ):
+        [header] = [p for p in operations[operation_id]["parameters"] if p["name"] == "Idempotency-Key"]
+        assert header["in"] == "header" and header.get("required", False) is False
+
+
 @pytest.mark.django_db(transaction=True)
 def test_concurrent_acks_count_once() -> None:
     customer = CustomerFactory.create()

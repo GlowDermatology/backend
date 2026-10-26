@@ -7,7 +7,8 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import mixins
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -28,6 +29,17 @@ from glowderma.notifications.api.customer.serializers import (
 )
 
 HEADERS = [*DEVICE_HEADERS, ACCEPT_LANGUAGE_HEADER]
+# C§1.7: the inbox writes accept an optional key (they are idempotent by themselves).
+OPTIONAL_IDEMPOTENCY_KEY_HEADER = OpenApiParameter(
+    name="Idempotency-Key",
+    type=OpenApiTypes.UUID,
+    location=OpenApiParameter.HEADER,
+    required=False,
+    description=(
+        "Optional client-generated UUID; replays return the stored response with `Idempotent-Replayed: true`."
+    ),
+)
+WRITE_HEADERS = [*HEADERS, OPTIONAL_IDEMPOTENCY_KEY_HEADER]
 
 
 def _customer(request: Request) -> Customer:
@@ -95,7 +107,7 @@ class ReadView(CustomerAPIView):
     @extend_schema(
         operation_id="customer_notifications_read",
         description="Mark one row read (idempotent); reading implies delivery (counted like an ack).",
-        parameters=HEADERS,
+        parameters=WRITE_HEADERS,
         request=None,
         responses={200: ReadSerializer, **CUSTOMER_ERRORS},
     )
@@ -110,7 +122,7 @@ class ReadAllView(CustomerAPIView):
     @extend_schema(
         operation_id="customer_notifications_read_all",
         description="Mark every unread row read (each acknowledged first).",
-        parameters=HEADERS,
+        parameters=WRITE_HEADERS,
         request=None,
         responses={200: ReadAllSerializer, **CUSTOMER_ERRORS},
     )
@@ -128,7 +140,7 @@ class AckView(CustomerAPIView):
             "Delivery acknowledgement from the push handler (1..50 ids). Unknown ids and ids of other "
             "customers are ignored silently; a retry never counts twice."
         ),
-        parameters=HEADERS,
+        parameters=WRITE_HEADERS,
         request=AckRequestSerializer,
         responses={200: AckSerializer, **CUSTOMER_ERRORS},
     )

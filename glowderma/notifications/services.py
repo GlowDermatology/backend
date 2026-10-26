@@ -23,6 +23,7 @@ from glowderma.accounts import services as account_services
 from glowderma.accounts import topics as account_topics
 from glowderma.accounts.models import Customer, Device
 from glowderma.appointments import selectors as appointment_selectors
+from glowderma.appointments.models import OPEN_STATUSES
 from glowderma.catalog.models import Product
 from glowderma.core import audit, enums, i18n, outbox, timeutils
 from glowderma.core.api.exceptions import Conflict, field_error
@@ -574,12 +575,15 @@ def deliver_order_status(payload: dict[str, Any]) -> InboxNotification | None:
         logger.info("push.order_status skipped: order %s precedes the history horizon", order_id)
         return None
     template = StatusTemplate.objects.get(status=status)
-    body, language = render_template(template, customer.language, order_id)
+    language = i18n.normalize_language(customer.language)
+    # the row is the customer's, in the customer's language (C§2.12): the title is the label in that language;
+    # only the body falls back to the Uzbek template text when the template has none in it
+    body, _body_language = render_template(template, language, order_id)
     return _deliver(
         customer,
         dedupe_key=topics.order_status_inbox_key(order_id, status),
         kind=InboxNotification.Kind.ORDER_STATUS,
-        title=order_status_title(status, fulfilment, i18n.normalize_language(customer.language)),
+        title=order_status_title(status, fulfilment, language),
         body=body,
         link={"kind": "order", "order_id": order_id},
         source_type=InboxNotification.SourceType.ORDER,
@@ -591,14 +595,35 @@ def deliver_order_status(payload: dict[str, Any]) -> InboxNotification | None:
     )
 
 
+# The appointment statuses under which a ``push.appointment`` action still describes the row.
+STILL_TRUE: dict[str, frozenset[str]] = {
+    "confirmed": frozenset(OPEN_STATUSES),
+    "rescheduled": frozenset(OPEN_STATUSES),
+    "rejected": frozenset({enums.AppointmentStatus.REJECTED}),
+    "cancelled": frozenset({enums.AppointmentStatus.CANCELLED}),
+}
+
+
 def deliver_appointment(payload: dict[str, Any]) -> InboxNotification | None:
-    """``push.appointment {appointment_id, action, event_id, customer_id, reschedule_no}``."""
+    """``push.appointment {appointment_id, action, event_id, customer_id, reschedule_no}``; an action that no
+    longer matches the appointment's status (``STILL_TRUE``) is skipped."""
     action = str(payload["action"])
     if action not in texts.APPOINTMENT_TEXTS:
         raise ValueError(f"No push text for appointment action {action!r}")
     appointment = appointment_selectors.get_appointment(int(payload["appointment_id"]))
     if appointment is None:
         logger.warning("push.appointment for unknown appointment %s", payload["appointment_id"])
+        return None
+    still_true = STILL_TRUE.get(action)
+    if still_true is not None and appointment.status not in still_true:
+        # e.g. a staff confirm whose push is delivered after the customer cancelled: the stale notice would be
+        # the newest one the customer sees (a customer cancel sends none) — no inbox row, no push
+        logger.info(
+            "push.appointment skipped: action %s no longer matches appointment %s (%s)",
+            action,
+            appointment.pk,
+            appointment.status,
+        )
         return None
     customer = appointment.customer
     reschedule_no = payload.get("reschedule_no")
@@ -663,19 +688,34 @@ def deliver_account_security(payload: dict[str, Any]) -> InboxNotification | Non
         topic=account_topics.PUSH_ACCOUNT_SECURITY,
     )
     current = selectors.customer_push_device(customer_id)
-    farewell = [
-        str(token)
-        for token in payload.get("farewell_tokens") or []
-        if token and (current is None or str(token) != current.fcm_token)
-    ]
+    candidates = list(
+        dict.fromkeys(
+            str(token)
+            for token in payload.get("farewell_tokens") or []
+            if token and (current is None or str(token) != current.fcm_token)
+        )
+    )
+    # C§1.9 step 4 (the push.session_replaced rule): a token now held by an active Device row belongs to an
+    # install signed in again since the reset (possibly into another account) — it gets no notice and no
+    # inbox id that are not its own.
+    held = set(
+        Device.objects.filter(fcm_token__in=candidates, is_active=True).values_list("fcm_token", flat=True)
+    )
+    farewell = [token for token in candidates if token not in held]
     if farewell:
         messages = [
             _typed_message(token, title, body, {**data, "inbox_id": str(inbox.pk)}) for token in farewell
         ]
-        for result in get_fcm_port().send(messages):
-            if not result.ok and result.error == PAYLOAD_INVALID:
+        for token, result in zip(farewell, get_fcm_port().send(messages), strict=True):
+            if result.ok:
+                continue
+            if result.error == UNREGISTERED:
+                # a dead token is pruned wherever it still sits (C§2.14.2), as push.session_replaced does
+                for device_id in Device.objects.filter(fcm_token=token).values_list("pk", flat=True):
+                    account_services.invalidate_fcm_token(device_id, token=token)
+            elif result.error == PAYLOAD_INVALID:
                 _log_payload_invalid(account_topics.PUSH_ACCOUNT_SECURITY, inbox.pk)
-            elif not result.ok:
+            else:
                 logger.info("push.account_security farewell not delivered error=%s", result.error)
     return inbox
 
@@ -730,7 +770,7 @@ def acknowledge(
     """``POST me/notifications/ack/``: delivery acknowledgement from the app's push handler. Ids of other
     customers, unknown ids and rows before the history horizon are ignored silently (no enumeration)."""
     instant = timeutils.now() if at is None else at
-    wanted = sorted({int(pk) for pk in inbox_ids})
+    wanted = sorted({int(pk) for pk in inbox_ids if int(pk) > 0})  # ids ≤ 0 are unknown ids
     owned = list(
         selectors.inbox_queryset(customer_id, horizon).filter(pk__in=wanted).values_list("pk", flat=True)
     )
