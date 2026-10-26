@@ -96,7 +96,7 @@ urlpatterns = [
 pytestmark = [pytest.mark.django_db, pytest.mark.urls(__name__)]
 
 
-def bearer_client(token: str, **headers: str) -> APIClient:
+def bearer_client(token: str, **headers: Any) -> APIClient:
     client = APIClient()
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}", **headers)
     return client
@@ -141,7 +141,7 @@ def test_a_token_without_rot_is_refused(customer_session: tuple[AuthSession, str
     from django.conf import settings
 
     session = customer_session[0]
-    claims = {
+    claims: dict[str, Any] = {
         "iss": settings.JWT_ISSUER,
         "aud": "customer",
         "sub": str(session.customer_id),
@@ -280,7 +280,7 @@ def test_a_staff_session_id_in_a_customer_token_is_refused(staff_session: tuple[
         device_headers(version="1.0"),
     ],
 )
-def test_missing_or_malformed_device_headers_are_400(customer_token: str, headers: dict[str, str]) -> None:
+def test_missing_or_malformed_device_headers_are_400(customer_token: str, headers: dict[str, Any]) -> None:
     response = bearer_client(customer_token, **headers).get("/api/v1/test/echo/", HTTP_ACCEPT_LANGUAGE="ru")
     assert response.status_code == 400
     assert response.json() == {

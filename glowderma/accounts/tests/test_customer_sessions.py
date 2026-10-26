@@ -26,6 +26,12 @@ from glowderma.core.models import OutboxMessage
 pytestmark = pytest.mark.django_db
 
 
+def device_pk(session: AuthSession) -> int:
+    if session.device_id is None:  # pragma: no cover - customer sessions always have a device
+        raise AssertionError("customer session without a device")
+    return session.device_id
+
+
 def open_sessions(customer: Customer) -> list[AuthSession]:
     return list(AuthSession.objects.filter(customer=customer, revoked_at__isnull=True))
 
@@ -57,7 +63,7 @@ def test_first_sign_in_creates_device_session_and_key(django_capture_on_commit_c
 def test_second_device_replaces_the_first(django_capture_on_commit_callbacks: Any) -> None:
     customer = CustomerFactory.create()
     first = start_test_session(customer, fid="fid-first-001")
-    first_device = Device.objects.get(pk=first.session.device_id)
+    first_device = Device.objects.get(pk=device_pk(first.session))
     Device.objects.filter(pk=first_device.pk).update(fcm_token="tok-first", push_enabled=True)
     with django_capture_on_commit_callbacks(execute=False) as callbacks:
         second = services.start_customer_session(
@@ -91,7 +97,7 @@ def test_no_farewell_when_another_active_row_holds_the_token() -> None:
     first = start_test_session(customer, fid="fid-first-001")
     # A revocation still pending on an inactive row that kept its token while another account's active
     # install registered the same token (the partial unique index covers active rows only).
-    Device.objects.filter(pk=first.session.device_id).update(is_active=False, fcm_token="tok-moved")
+    Device.objects.filter(pk=device_pk(first.session)).update(is_active=False, fcm_token="tok-moved")
     DeviceFactory.create(fcm_token="tok-moved", push_enabled=True)
     started = services.start_customer_session(
         customer.pk, fid="fid-second-02", platform="ios", app_version="1.0.0", issue_device_key=True
@@ -105,13 +111,13 @@ def test_no_farewell_when_another_active_row_holds_the_token() -> None:
 def test_signing_in_again_on_the_same_install_replaces_without_a_push() -> None:
     customer = CustomerFactory.create()
     first = start_test_session(customer)
-    Device.objects.filter(pk=first.session.device_id).update(fcm_token="tok-same", push_enabled=True)
+    Device.objects.filter(pk=device_pk(first.session)).update(fcm_token="tok-same", push_enabled=True)
     again = start_test_session(customer, issue_device_key=False)
     assert again.session.device_id == first.session.device_id and again.farewell_tokens == []
     first.session.refresh_from_db()
     assert first.session.revoke_reason == "replaced"
     assert not OutboxMessage.objects.filter(topic=topics.PUSH_SESSION_REPLACED).exists()
-    device = Device.objects.get(pk=first.session.device_id)
+    device = Device.objects.get(pk=device_pk(first.session))
     assert device.fcm_token == "tok-same" and device.is_active
 
 
@@ -175,7 +181,7 @@ def test_register_device_moves_a_token_and_requires_one_for_push() -> None:
     customer = CustomerFactory.create()
     started = start_test_session(customer, fid="fid-mine-0001")
     other = DeviceFactory.create(fcm_token="tok-moving", push_enabled=True)
-    Device.objects.filter(pk=started.session.device_id).update(fcm_invalidated_at=timeutils.now())
+    Device.objects.filter(pk=device_pk(started.session)).update(fcm_invalidated_at=timeutils.now())
     device = services.register_device(
         customer.pk,
         "fid-mine-0001",
@@ -230,7 +236,7 @@ def test_delete_customer_clears_keys_consent_and_queues_apple_revokes(
         consent_at=timeutils.now(), consent_ip="10.0.0.1", last_login_at=timeutils.now()
     )
     started = start_test_session(customer)
-    Device.objects.filter(pk=started.session.device_id).update(fcm_token="tok-del", push_enabled=True)
+    Device.objects.filter(pk=device_pk(started.session)).update(fcm_token="tok-del", push_enabled=True)
     apple = CustomerSocialIdentityFactory.create(
         customer=customer, provider="apple", provider_refresh_token="sealed"
     )
@@ -249,7 +255,7 @@ def test_delete_customer_clears_keys_consent_and_queues_apple_revokes(
     )
     assert (customer.status, customer.language, customer.terms_version) == ("deleted", "uz", "")
     assert customer.consent_at is None and customer.consent_ip is None and customer.last_login_at is None
-    device = Device.objects.get(pk=started.session.device_id)
+    device = Device.objects.get(pk=device_pk(started.session))
     assert (device.is_active, device.push_enabled, device.fcm_token, device.key_hash) == (
         False,
         False,
@@ -317,4 +323,4 @@ def test_the_customer_lock_does_not_block_foreign_key_inserts() -> None:
 def test_tombstone_ttl_covers_both_audiences(settings: Any) -> None:
     settings.STAFF_ACCESS_TTL, settings.CUSTOMER_ACCESS_TTL = 900, 1800
     assert services.tombstone_ttl() == 1860
-    assert enums.SessionRevokeReason.REFRESH_REUSED == "refresh_reused"
+    assert enums.SessionRevokeReason.REFRESH_REUSED.value == "refresh_reused"

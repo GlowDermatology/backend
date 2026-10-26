@@ -118,7 +118,7 @@ def customer_token(customer_session: tuple[AuthSession, str]) -> str:
 
 @pytest.fixture
 def customer_client(customer_session: tuple[AuthSession, str], customer_token: str) -> APIClient:
-    """A JSON ``APIClient`` with the customer bearer, the session's device headers and its known device key."""
+    """A JSON ``APIClient`` with the customer bearer, the session's device headers and its device key."""
     session = customer_session[0]
     if session.device is None:  # pragma: no cover - start_customer_session always binds a device
         raise RuntimeError("customer session without a device")

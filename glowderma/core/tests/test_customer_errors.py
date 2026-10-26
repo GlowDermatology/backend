@@ -3,7 +3,7 @@
 import json
 import re
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any
 
 import pytest
 from django.conf import settings
@@ -49,7 +49,7 @@ class NameSerializer(serializers.Serializer[dict[str, Any]]):
 class RaisingView(APIView):
     """``audience`` decides the envelope; ``exc`` is raised by every request."""
 
-    authentication_classes: ClassVar[list[Any]] = []
+    authentication_classes = []
     permission_classes = [AllowAny]
     parser_classes = [JSONParser]
     exc: Exception | None = None

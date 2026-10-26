@@ -23,7 +23,8 @@ def request(user: Any = None, data: Any = None, **headers: str) -> Request:
     raw = APIRequestFactory().post("/", data or {}, format="json", **headers)
     raw.client_ip = "203.0.113.9"  # type: ignore[attr-defined]
     drf = Request(raw, parsers=[JSONParser()])
-    drf.user = user if user is not None else SimpleNamespace(pk=None, is_authenticated=False)
+    loose: Any = drf
+    loose.user = user if user is not None else SimpleNamespace(pk=None, is_authenticated=False)
     return drf
 
 
@@ -89,7 +90,9 @@ def test_auth_throttles_key_on_the_hashed_fid_phone_and_ip() -> None:
         == f"throttle_sms_device_{pii_ref('fid-auth-00001')}"
     )
     assert throttles.SmsIPThrottle().get_cache_key(req, VIEW) == "throttle_sms_ip_203.0.113.9"
-    assert throttles.CustomerAuthDeviceThrottle().get_cache_key(req, VIEW).endswith(pii_ref("fid-auth-00001"))
+    assert str(throttles.CustomerAuthDeviceThrottle().get_cache_key(req, VIEW)).endswith(
+        pii_ref("fid-auth-00001")
+    )
     assert (
         throttles.CustomerAuthIPThrottle().get_cache_key(req, VIEW) == "throttle_customer_auth_ip_203.0.113.9"
     )
@@ -113,7 +116,7 @@ def test_refresh_unknown_counts_only_misses() -> None:
     throttle.record_miss(req)
     blocked = throttles.RefreshUnknownThrottle()
     assert not blocked.allow_request(req, VIEW)
-    assert blocked.wait() is not None and blocked.wait() > 0
+    assert (blocked.wait() or 0) > 0
 
 
 @pytest.mark.django_db

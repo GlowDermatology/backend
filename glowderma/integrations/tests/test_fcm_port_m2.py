@@ -22,7 +22,7 @@ def test_push_message_defaults_and_data_only_variant() -> None:
     assert data.data_only and data.title == data.body == ""
     assert (data.apns_push_type, data.apns_priority, data.android_priority) == ("background", 5, "high")
     with pytest.raises(TypeError):
-        PushMessage("tok", "t", "b", {}, True)  # type: ignore[misc]  # the extras are keyword-only
+        PushMessage("tok", "t", "b", {}, True)  # type: ignore[call-arg]  # the extras are keyword-only
 
 
 def test_fake_records_every_field_under_the_local_test_settings() -> None:

@@ -191,9 +191,9 @@ def device_headers(
     platform: str = TEST_PLATFORM,
     version: str = TEST_APP_VERSION,
     key: str | None = None,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     """``APIClient`` keyword arguments for the customer device headers (customer contract §1.2)."""
-    headers = {
+    headers: dict[str, Any] = {
         "HTTP_X_GD_DEVICE_ID": fid,
         "HTTP_X_GD_PLATFORM": platform,
         "HTTP_X_GD_APP_VERSION": version,

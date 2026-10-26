@@ -46,8 +46,10 @@ def test_0006_round_trip_and_history_from_backfill() -> None:
 
 @pytest.mark.django_db
 def test_new_fields_and_choices() -> None:
-    assert ("refresh_reused", "refresh_reused") in AuthSession._meta.get_field("revoke_reason").choices
-    assert ("apple", "apple") in CustomerSocialIdentity._meta.get_field("provider").choices
+    assert ("refresh_reused", "refresh_reused") in list(
+        AuthSession._meta.get_field("revoke_reason").choices or []
+    )
+    assert ("apple", "apple") in list(CustomerSocialIdentity._meta.get_field("provider").choices or [])
     assert Device._meta.get_field("key_hash").max_length == 64
     customer = Customer(phone="+998900000000")
     assert customer.is_authenticated is True and customer.is_anonymous is False

@@ -25,6 +25,12 @@ from glowderma.integrations.fcm.registry import get_fcm_port
 pytestmark = pytest.mark.django_db
 
 
+def device_pk(session: AuthSession) -> int:
+    if session.device_id is None:  # pragma: no cover - customer sessions always have a device
+        raise AssertionError("customer session without a device")
+    return session.device_id
+
+
 @pytest.fixture
 def fcm() -> Any:
     port: Any = get_fcm_port()
@@ -88,7 +94,7 @@ def test_sign_in_on_a_new_device_delivers_the_farewell_push(
 ) -> None:
     customer = CustomerFactory.create()
     first = start_test_session(customer, fid="fid-first-001")
-    Device.objects.filter(pk=first.session.device_id).update(fcm_token="tok-first", push_enabled=True)
+    Device.objects.filter(pk=device_pk(first.session)).update(fcm_token="tok-first", push_enabled=True)
     with django_capture_on_commit_callbacks(execute=True):
         services.start_customer_session(
             customer.pk, fid="fid-second-02", platform="ios", app_version="1.0.0", issue_device_key=True

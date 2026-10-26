@@ -51,7 +51,7 @@ def test_customer_fixtures(
     assert session.customer_id == customer.pk and raw_refresh(session) == refresh
     assert session.device is not None and session.device.fid == "fid-test-0001"
     assert services.device_is_known(customer.pk, "fid-test-0001", raw_device_key(session.device))
-    credentials: Any = customer_client._credentials  # noqa: SLF001
+    credentials: Any = vars(customer_client)["_credentials"]
     assert (
         credentials["HTTP_X_GD_DEVICE_ID"] == "fid-test-0001" and credentials["HTTP_X_GD_PLATFORM"] == "ios"
     )
@@ -65,11 +65,11 @@ def test_public_and_pos_fixtures(
 ) -> None:
     import hashlib
 
-    assert public_client._credentials["HTTP_X_GD_DEVICE_ID"] == "fid-public-0001"  # noqa: SLF001
-    assert "HTTP_AUTHORIZATION" not in public_client._credentials  # noqa: SLF001
+    assert vars(public_client)["_credentials"]["HTTP_X_GD_DEVICE_ID"] == "fid-public-0001"
+    assert "HTTP_AUTHORIZATION" not in vars(public_client)["_credentials"]
     assert re.fullmatch(r"gdpos_[A-Za-z0-9]{8}_[A-Za-z0-9_-]{32}", pos_key)
     assert pos_device.key_hash == hashlib.sha256(pos_key.encode()).hexdigest() and pos_device.is_active
-    assert pos_client._credentials["HTTP_AUTHORIZATION"] == f"Api-Key {pos_key}"  # noqa: SLF001
+    assert vars(pos_client)["_credentials"]["HTTP_AUTHORIZATION"] == f"Api-Key {pos_key}"
 
 
 def test_device_headers_helper() -> None:
