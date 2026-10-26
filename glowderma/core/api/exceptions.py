@@ -132,7 +132,9 @@ def field_error(
     codes require an explicit ``message``. Any other code is a typo: the frontend maps codes to UI, so an
     invented one would ship silently. Customer views pass ``message_key`` (a ``field.*`` catalog key,
     customer contract §5.0) instead of a message: the detail carries the Uzbek text and the customer handler
-    renders the key in the request language (``params`` and ``limit`` fill its placeholders).
+    renders the key in the request language (``params`` and ``limit`` fill its placeholders). Pass amounts
+    as ``int``: they are grouped with ``i18n.format_number`` per language (``12 000`` in uz/ru, ``12,000`` in
+    en); a ``str`` param is copied unchanged into every language.
     """
     if code not in FIELD_MESSAGES and code not in ENDPOINT_FIELD_CODES:
         raise ValueError(f"Unknown field code {code!r}")
@@ -141,7 +143,12 @@ def field_error(
             raise ValueError("Pass either message or message_key")
         if not message_key.startswith("field.") or message_key not in i18n.CATALOG:
             raise ValueError(f"Unknown field catalog key {message_key!r}")
-        values = dict(params or {})
+        values = {
+            name: i18n.format_number(value, "uz")
+            if isinstance(value, int) and not isinstance(value, bool)
+            else value
+            for name, value in (params or {}).items()
+        }
         if limit is not None:
             values.setdefault("limit", limit)
         return exceptions.ErrorDetail(i18n.t(message_key, "uz", **values), code=code)
@@ -740,21 +747,35 @@ def _field_patterns() -> tuple[tuple[str, re.Pattern[str]], ...]:
     )
 
 
+# An integer as ``i18n.format_number(n, "uz")`` renders it: optional U+2212 minus, NBSP-grouped ASCII digits.
+_UZ_NUMBER = re.compile("(\u2212?)([0-9]{1,3}(?:\u00a0[0-9]{3})*)")
+
+
+def _localized_value(value: str, lang: str) -> str:
+    match = _UZ_NUMBER.fullmatch(value)
+    if match is None:
+        return value
+    number = int(match.group(2).replace("\u00a0", ""))
+    return i18n.format_number(-number if match.group(1) else number, lang)
+
+
 def localize_field_message(code: str, message: str, lang: str) -> str:
     """Render a field error's Uzbek ``message`` in ``lang`` through the catalog.
 
     The detail of a field error is its Uzbek text (``field_error`` renders the catalog key in Uzbek, DRF's own
     texts are swapped for ``FIELD_MESSAGES`` first), so the key is found by matching the Uzbek templates:
     ``field.<code>`` first, then every other ``field.*`` key; the placeholders read back from the text fill
-    the target language. A text that matches no template (a serializer-specific message) is returned
-    unchanged.
+    the target language, and a value written as an Uzbek-formatted integer is re-grouped for ``lang``
+    (``field_error`` formats ``int`` params that way). A text that matches no template (a serializer-specific
+    message) is returned unchanged.
     """
     preferred = f"field.{code}"
     patterns = sorted(_field_patterns(), key=lambda item: item[0] != preferred)
     for key, pattern in patterns:
         match = pattern.fullmatch(message)
         if match is not None:
-            return i18n.t(key, lang, **match.groupdict())
+            values = {name: _localized_value(value, lang) for name, value in match.groupdict().items()}
+            return i18n.t(key, lang, **values)
     return message
 
 

@@ -318,3 +318,28 @@ def test_unknown_customer_code_falls_back_to_the_status_key(caplog: pytest.LogCa
     body = api_exceptions.customer_error_body("odd_code", None, lang="en", status=409)
     assert body["message"] == i18n.t("error.conflict", "en")
     assert "No catalog key" in caplog.text
+
+
+def test_integer_field_params_are_grouped_per_language() -> None:
+    """Review nit: an ``int`` param of a ``message_key`` field error is formatted with ``format_number`` in
+    the target language, not copied from the Uzbek text."""
+    detail = field_error(
+        "insufficient_balance", message_key="field.cashback_insufficient", params={"available": 12000}
+    )
+    assert str(detail) == "Cashback balansi yetarli emas (mavjud: 12\u00a0000 so‘m)."
+    assert (
+        localize_field_message(detail.code, str(detail), "en")
+        == "Not enough cashback (available: 12,000 so'm)."
+    )
+    assert (
+        localize_field_message(detail.code, str(detail), "ru")
+        == "Недостаточно кешбэка (доступно: 12\u00a0000 сум)."
+    )
+    big = field_error("insufficient_balance", message_key="field.cashback_max", params={"max": 1_250_000})
+    assert (
+        localize_field_message(big.code, str(big), "en") == "You can use at most 1,250,000 so'm of cashback."
+    )
+    text = field_error(
+        "insufficient_balance", message_key="field.cashback_insufficient", params={"available": "abc"}
+    )
+    assert localize_field_message(text.code, str(text), "en") == "Not enough cashback (available: abc so'm)."
