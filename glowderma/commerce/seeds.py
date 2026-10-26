@@ -42,6 +42,7 @@ from __future__ import annotations
 import functools
 import heapq
 import itertools
+import logging
 import math
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -59,17 +60,19 @@ from glowderma.accounts.seeds import MALIKA_ID, CustomerFacts
 from glowderma.catalog.models import Product
 from glowderma.commerce import services, tasks, topics
 from glowderma.commerce.models import Order, OrderEvent, StockReservation
-from glowderma.core import enums, timeutils
+from glowderma.core import enums, integration_modes, timeutils
 from glowderma.core.models import OutboxMessage
 from glowderma.core.seeding import MockRandom, SeedContext, pinned_clock, register_seeder
 from glowderma.core.timeutils import TASHKENT
-from glowderma.integrations.bts.registry import get_bts
+from glowderma.integrations.bts import fake as fake_bts
 from glowderma.integrations.click import fake as fake_click
 from glowderma.integrations.payme import fake as fake_payme
 from glowderma.loyalty import seeds as loyalty_seeds
 from glowderma.loyalty import selectors as loyalty_selectors
 from glowderma.loyalty import services as loyalty_services
 from glowderma.payments import selectors as payment_selectors
+
+logger = logging.getLogger(__name__)
 
 SEED_ADMIN_EMAIL = "admin@glowderma.uz"
 GENERATED_SEED = 1284
@@ -176,11 +179,16 @@ def _pay(plan: OrderPlan) -> None:
 
 
 def _delivery_fee(plan: OrderPlan) -> int:
-    """The fee the seeder passes to ``create_order`` (the fake BTS tariff of the address region)."""
+    """The fee the seeder passes to ``create_order``: the design's fake BTS tariff of the address region
+    (``scenario["tariff"]`` wins), read from the data — never through the port, which refuses every quote
+    while BTS is fake under the production settings (``seed_demo --force`` on staging)."""
     if plan.fulfilment != DELIVERY or plan.address is None:
         return 0
-    scenario = plan.fake.get("bts") if isinstance(plan.fake.get("bts"), dict) else None
-    return get_bts(scenario).quote(plan.address.region_code, plan.address.city_code)
+    scenario = plan.fake.get("bts") if isinstance(plan.fake.get("bts"), dict) else {}
+    tariff = scenario.get("tariff")
+    if isinstance(tariff, int):
+        return tariff
+    return fake_bts.TARIFFS.get(plan.address.region_code, fake_bts.DEFAULT_TARIFF)
 
 
 # --- the fixed design orders (03 §7.8) ----------------------------------------------------------------------
@@ -850,6 +858,14 @@ def preflight() -> str | None:
 @register_seeder("commerce", order=70, preflight=preflight)
 def seed_commerce(context: SeedContext) -> None:
     admin: StaffUser | None = get_user_model().objects.filter(email=SEED_ADMIN_EMAIL).first()
+    if not integration_modes.dev_features_allowed():
+        # Under the production settings (staging, ``seed_demo --force``) the demo orders cannot be replayed:
+        # their effects run through the provider ports inline, which are either live (real parcels, real
+        # reversals) or fakes that report no effect (no parcel, no Billz sale, customer contract §2.14.3,
+        # §6.14). The other modules' demo data and loyalty's store sales are still seeded.
+        logger.warning("seed.commerce_orders_skipped %s", {"reason": "production settings"})
+        loyalty_seeds.seed_store_sales()
+        return
     if admin is None or not Product.objects.exists() or not Customer.objects.exists():
         # standalone run without the lower layers: still record the store sales loyalty hands to us
         loyalty_seeds.seed_store_sales()
