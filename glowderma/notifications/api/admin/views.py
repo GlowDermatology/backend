@@ -106,6 +106,20 @@ NotificationFormSerializer = inline_serializer(
 # --- notifications ------------------------------------------------------------------------------------------
 
 
+def _link_label(campaign: Campaign) -> str:
+    """Export column ``Havola`` (gap ADM-10.1): ``mahsulot #<id>`` (else the product name kept at creation),
+    the URL itself for kind ``url``, else empty — like the banners export."""
+    if campaign.link_kind == enums.LinkKind.URL:
+        return campaign.link_url
+    if campaign.link_kind == enums.LinkKind.PRODUCT:
+        return (
+            f"mahsulot #{campaign.link_product_id}"
+            if campaign.link_product_id
+            else campaign.link_product_label
+        )
+    return ""
+
+
 class NotificationViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
     serializer_class = NotificationRecordSerializer
     export_name = "bildirishnomalar"
@@ -138,6 +152,7 @@ class NotificationViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSe
                 labels.NOTIFICATION_STATE[record_state(campaign)],
                 "" if campaign.sent is None else campaign.sent,
                 "" if campaign.delivered is None else campaign.delivered,
+                _link_label(campaign),
             )
 
     @extend_schema(

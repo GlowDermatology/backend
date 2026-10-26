@@ -15,7 +15,7 @@ from rest_framework import serializers
 from glowderma.catalog import billz, selectors, services
 from glowderma.catalog.models import Banner, Category, Product, ProductImage
 from glowderma.core import enums
-from glowderma.core.api.exceptions import ProviderUnavailable, field_error
+from glowderma.core.api.exceptions import FIELD_MESSAGES, ProviderUnavailable, field_error
 from glowderma.core.api.fields import (
     AwareDateTimeField,
     HttpsUrlField,
@@ -380,11 +380,27 @@ class CategoryWriteSerializer(serializers.Serializer[Any]):
         return value
 
 
+class StrictBooleanField(serializers.BooleanField):
+    """A JSON boolean, or ``true`` / ``false`` (also ``1`` / ``0``) in multipart; anything else — ``"yes"``,
+    ``"on"``, a number — is ``invalid`` (contract §2.4 ``remove_image``; review nit: not DRF's truthy set)."""
+
+    default_error_messages = {"invalid": FIELD_MESSAGES["invalid"]}
+
+    def to_internal_value(self, data: Any) -> bool:
+        if isinstance(data, bool):
+            return data
+        if isinstance(data, str) and data in ("true", "1"):
+            return True
+        if isinstance(data, str) and data in ("false", "0"):
+            return False
+        self.fail("invalid")
+
+
 class CategoryPatchSerializer(CategoryWriteSerializer):
     """``PATCH categories/{slug}/``: every field optional; ``remove_image: true`` drops the stored image
     (gap ADM-5.1; refused together with a new ``image`` part: ``remove_image`` ``invalid``)."""
 
-    remove_image = serializers.BooleanField(required=False, default=False)
+    remove_image = StrictBooleanField(required=False, default=False)
 
 
 class SlugOrderSerializer(serializers.Serializer[dict[str, Any]]):

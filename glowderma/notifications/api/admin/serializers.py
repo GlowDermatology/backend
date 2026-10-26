@@ -189,6 +189,12 @@ class NotificationLinkInputSerializer(serializers.Serializer[dict[str, Any]]):
     # gap ADM-10.1 (decision GC-3): required for kind "url"; "" counts as missing; ignored for other kinds
     url = HttpsUrlField(required=False, allow_null=True, allow_blank=True)
 
+    def to_internal_value(self, data: Any) -> dict[str, Any]:
+        # a stray link.url next to another kind is ignored, so it is not validated either (review nit)
+        if isinstance(data, Mapping) and data.get("kind") != enums.LinkKind.URL and "url" in data:
+            data = {key: value for key, value in data.items() if key != "url"}
+        return cast(dict[str, Any], super().to_internal_value(data))
+
 
 class NotificationAudienceInputSerializer(serializers.Serializer[dict[str, Any]]):
     type = serializers.ChoiceField(choices=enums.AudienceType.values)

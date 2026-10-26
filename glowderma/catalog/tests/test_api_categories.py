@@ -70,9 +70,9 @@ def test_export(staff_client: APIClient) -> None:
     assert response["Content-Disposition"].startswith('attachment; filename="kategoriyalar-')
     rows = list(csv.reader(StringIO(response.content.decode("utf-8-sig")), delimiter=";"))
     assert rows == [
-        ["Slug", "Nomi", "Tartib", "Faol", "Mahsulotlar"],
-        ["serums", "'=Serumlar", "0", "Ha", "1"],
-        ["toners", "Tonerlar", "1", "Yo‘q", "0"],
+        ["Slug", "Nomi", "Tartib", "Faol", "Mahsulotlar", "Rasm"],
+        ["serums", "'=Serumlar", "0", "Ha", "1", ""],
+        ["toners", "Tonerlar", "1", "Yo‘q", "0", ""],
     ]
     assert (AuditEntry.objects.get(action="export.downloaded").after or {})["resource"] == "categories"
     assert staff_client.get(CATEGORIES, {"export": "xlsx"}).status_code == 200
@@ -359,6 +359,10 @@ def test_create_multipart_with_an_image(staff_client: APIClient, staff: StaffUse
         assert stored.size == (2400, 1200)
     after = AuditEntry.objects.get(action="category.created").after or {}
     assert after["image"] == name
+    # the export carries the image URL (review nit: column Rasm)
+    export = staff_client.get(CATEGORIES, {"export": "csv"}).content.decode("utf-8-sig")
+    rows = list(csv.reader(StringIO(export), delimiter=";"))
+    assert rows[0][-1] == "Rasm" and rows[1][-1] == media_url(name)
     # the customer catalogue shows it (customer contract §2.3 catalog/categories/ image_url)
     ProductFactory.create(category=category, status="active", price=50_000)
     category.is_active = True
@@ -391,6 +395,30 @@ def test_create_refuses_a_bad_image_and_writes_nothing(
     assert response.status_code == 400
     assert errors_of(response)["image"] == (code, message)
     assert not Category.objects.exists() and not AuditEntry.objects.filter(action="category.created").exists()
+
+
+def test_a_failed_write_removes_the_image_it_stored(staff: StaffUser) -> None:
+    """Review nit: the audit write failing rolls the row back and removes the file written for it."""
+    from glowderma.catalog import services
+
+    category = CategoryFactory.create(slug="serums", name_uz="Serumlar")
+    media = Path(settings.MEDIA_ROOT) / "categories" / str(category.pk)
+    before = set(media.glob("*")) if media.exists() else set()
+    with (
+        patch("glowderma.catalog.services.audit.record", side_effect=RuntimeError("audit down")),
+        pytest.raises(RuntimeError),
+    ):
+        services.update_category(category, image=upload("PNG"), actor=staff)
+    assert Category.objects.get(pk=category.pk).image.name == ""
+    assert (set(media.glob("*")) if media.exists() else set()) == before
+    with (
+        patch("glowderma.catalog.services.audit.record", side_effect=RuntimeError("audit down")),
+        pytest.raises(RuntimeError),
+    ):
+        services.create_category("masks", {"uz": "Niqoblar"}, image=upload("PNG"), actor=staff)
+    assert not Category.objects.filter(slug="masks").exists()
+    leftovers = [p for p in (Path(settings.MEDIA_ROOT) / "categories").rglob("*") if p.is_file()]
+    assert leftovers == []
 
 
 def test_patch_replaces_and_removes_the_image(
@@ -435,6 +463,11 @@ def test_patch_replaces_and_removes_the_image(
     assert staff_client.patch(url, {"remove_image": True}).json()["image_url"] is None
     response = staff_client.patch(url, {"remove_image": "maybe"})
     assert errors_of(response)["remove_image"] == ("invalid", "Noto‘g‘ri qiymat.")
+    # review nit: only a JSON boolean (or true/false/1/0 in multipart), not DRF's truthy set
+    for loose in ("yes", "on", 1):
+        response = staff_client.patch(url, {"remove_image": loose}, format="json")
+        assert errors_of(response)["remove_image"] == ("invalid", "Noto‘g‘ri qiymat."), loose
+    assert staff_client.patch(url, {"remove_image": "false"}, format="multipart").status_code == 200
 
 
 def test_category_bodies_are_json_or_multipart_only(staff_client: APIClient) -> None:

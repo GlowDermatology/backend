@@ -47,6 +47,7 @@ from glowderma.core.api.parsers import JSONParser
 from glowderma.core.api.schema import ADMIN_ERRORS, EXPORT_PARAM, ErrorEnvelopeSerializer
 from glowderma.core.exports import ExportMixin, format_export_datetime
 from glowderma.core.idempotency import idempotent
+from glowderma.core.media import absolute_media_url
 from glowderma.integrations import selectors as integration_selectors
 from glowderma.integrations import services as job_services
 from glowderma.integrations.api.admin.serializers import BillzImportSerializer, JobSerializer
@@ -288,6 +289,7 @@ class CategoryViewSet(ExportMixin, mixins.ListModelMixin, ActionParsersViewSet):
                 category.position,
                 labels.yes_no(category.is_active),
                 int(getattr(category, "product_count", 0)),
+                absolute_media_url(category.image.name) if category.image.name else "",  # gap ADM-5.1
             )
 
     def _category(self, slug: str) -> Category:

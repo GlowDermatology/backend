@@ -181,8 +181,8 @@ def test_export_csv_and_xlsx(staff_client: APIClient, clock: Any) -> None:
     assert response.status_code == 200
     assert response["Content-Disposition"] == 'attachment; filename="bildirishnomalar-20261024-1205.csv"'
     lines = response.content.decode("utf-8-sig").split("\r\n")
-    assert lines[0] == '"ID";"Sana";"Turi";"Sarlavha";"Auditoriya";"Holat";"Yuborildi";"Yetkazildi"'
-    assert '"2026-10-20 09:00";"Umumiy";"Hammaga";"Barcha · 4 751";"Navbatda";"";""' in lines[1]
+    assert lines[0] == '"ID";"Sana";"Turi";"Sarlavha";"Auditoriya";"Holat";"Yuborildi";"Yetkazildi";"Havola"'
+    assert '"2026-10-20 09:00";"Umumiy";"Hammaga";"Barcha · 4 751";"Navbatda";"";"";""' in lines[1]
     assert '"\'=Bitta";"Bitta mijoz · +998 90 123 45 67";"Navbatda"' in lines[2]
     full = staff_client.get(URL, {"export": "xlsx"})
     assert full.status_code == 200 and full["Content-Type"].startswith("application/vnd.openxmlformats")
@@ -626,6 +626,9 @@ def test_create_with_a_url_link_reaches_the_inbox_and_the_push(
         "url": link,
     }
     assert inbox_link({"kind": "url"})["kind"] == "none"  # a url row without its url is rendered linkless
+    # the export names the destination (review nit: column Havola)
+    export = staff_client.get(URL, {"export": "csv"}).content.decode("utf-8-sig").split("\r\n")
+    assert export[0].endswith(';"Havola"') and export[1].endswith(f';"{link}"')
 
 
 def test_a_product_link_ignores_a_stray_url(staff_client: APIClient, clock: Any) -> None:
@@ -635,6 +638,20 @@ def test_a_product_link_ignores_a_stray_url(staff_client: APIClient, clock: Any)
     assert response.status_code == 201, response.data
     assert response.data["link"]["url"] is None
     assert Campaign.objects.get(pk=response.data["id"]).link_url == ""
+    # review nit: an ignored stray URL is not validated either
+    data = form(**{"link.kind": "product", "link.product_id": str(product.pk), "link.url": "http://x"})
+    assert post(staff_client, data, key="8d0f5a43-3c8e-4d43-9a8a-3b7c6f1e2a90").status_code == 201
+
+
+@pytest.mark.parametrize("scheme", ["HTTPS", "Https"])
+def test_an_upper_case_scheme_is_stored_lower_case_not_a_500(
+    staff_client: APIClient, clock: Any, scheme: str
+) -> None:
+    """Review fix: URLValidator accepts ``HTTPS://``; the DB check is case-sensitive → normalise, no 500."""
+    response = post(staff_client, form(**{"link.kind": "url", "link.url": f"{scheme}://glowderma.uz/Aksiya"}))
+    assert response.status_code == 201, response.data
+    assert response.data["link"]["url"] == "https://glowderma.uz/Aksiya"
+    assert Campaign.objects.get(pk=response.data["id"]).link_url == "https://glowderma.uz/Aksiya"
 
 
 def test_database_refuses_inconsistent_url_links() -> None:

@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Collection, Iterable, Sequence
+from collections.abc import Collection, Iterable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
@@ -419,18 +420,36 @@ def _category_snapshot(category: Category) -> dict[str, Any]:
     }
 
 
-def _store_category_image(category: Category, processed: ProcessedImage) -> None:
+def _store_category_image(category: Category, processed: ProcessedImage, stored: list[str]) -> None:
     """Store the re-encoded image under ``categories/<id>/<sha256[:16]>.<ext>`` (gap ADM-5.1); the previous
-    file is removed after commit. The same bytes again change nothing (the name is content-addressed)."""
+    file is removed after commit. The same bytes again change nothing (the name is content-addressed). The
+    new name is appended to ``stored``: the caller removes it if its block raises (``_discard_on_error``)."""
     previous = category.image.name or ""
     name = media_name("categories", category.pk, processed.content, processed.extension)
     if previous == name:
         return
     category.image.save(_basename(name), ContentFile(processed.content, name=_basename(name)), save=False)
+    stored.append(str(category.image.name))
     category.save(update_fields=["image"])
     if previous:
         storage = category.image.storage
         transaction.on_commit(lambda: storage.delete(previous))
+
+
+@contextmanager
+def _discard_on_error(storage: Any) -> Iterator[list[str]]:
+    """Yield a list the block appends the files it wrote to; if the block raises (its transaction rolls back,
+    e.g. the audit write failed), those files are removed so no orphan stays in storage (review nit)."""
+    stored: list[str] = []
+    try:
+        yield stored
+    except BaseException:
+        for name in stored:
+            try:
+                storage.delete(name)
+            except Exception:  # best effort: the original error matters more
+                logger.warning("category image cleanup failed for %s", name, exc_info=True)
+        raise
 
 
 def _remove_category_image(category: Category) -> None:
@@ -459,7 +478,7 @@ def create_category(
     """``POST categories/``; ``image`` (optional upload, gap ADM-5.1) goes through ``core.images`` (the
     product-image limits) and is stored once the row has its id, in the same transaction."""
     processed = _process(image, "image") if image is not None else None
-    with transaction.atomic():
+    with _discard_on_error(Category._meta.get_field("image").storage) as stored, transaction.atomic():
         _advisory_lock(CATEGORY_LOCK)
         category = Category(
             slug=slug,
@@ -471,7 +490,7 @@ def create_category(
         )
         _save_unique(category.save, CATEGORY_SLUG_CONSTRAINT, "slug")
         if processed is not None:
-            _store_category_image(category, processed)
+            _store_category_image(category, processed, stored)
         audit.record(
             action="category.created",
             entity_type="category",
@@ -498,7 +517,7 @@ def update_category(
     if image is not None and remove_image:
         raise ValueError("Either a new image or remove_image, not both")
     processed = _process(image, "image") if image is not None else None
-    with transaction.atomic():
+    with _discard_on_error(Category._meta.get_field("image").storage) as stored, transaction.atomic():
         locked = Category.objects.select_for_update().get(pk=category.pk)
         before = _category_snapshot(locked)
         for language, value in (name or {}).items():
@@ -507,7 +526,7 @@ def update_category(
             locked.is_active = is_active
         locked.save()
         if processed is not None:
-            _store_category_image(locked, processed)
+            _store_category_image(locked, processed, stored)
         elif remove_image:
             _remove_category_image(locked)
         diff_before, diff_after = _diff(before, _category_snapshot(locked))
