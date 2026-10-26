@@ -39,7 +39,7 @@ def bookable() -> ProfessionalService:
     return link
 
 
-def committed_before_the_lock(monkeypatch: pytest.MonkeyPatch, change: Callable[[], None]) -> None:
+def committed_before_the_lock(monkeypatch: pytest.MonkeyPatch, change: Callable[[], object]) -> None:
     """Run ``change`` right before the booking locks the specialist: what a concurrent admin write that
     committed between the booking's first reads and its lock looks like to the booking."""
     hold = services._hold_active_specialist
