@@ -17,7 +17,7 @@ from PIL import Image
 from rest_framework.test import APIClient
 
 from glowderma.accounts import services as account_services
-from glowderma.accounts import tokens
+from glowderma.accounts import tokens, topics
 from glowderma.accounts.models import Address, AuthSession, Customer, CustomerSocialIdentity, Device
 from glowderma.accounts.tests.factories import (
     AddressFactory,
@@ -461,3 +461,21 @@ def test_phone_lockout_does_not_block_the_signed_in_owner(signed: Signed) -> Non
 def test_me_requires_customer_auth() -> None:
     response = APIClient().get(ME, format="json")
     assert response.status_code in (400, 401)
+
+
+def test_account_security_payloads_and_localized_errors(signed: Signed) -> None:
+    link = {"provider": "facebook", "token": "fake:fb-5:a@x.uz", "password": PASSWORD}
+    assert signed.client.post(ME + "social/", link, **signed.idem()).status_code == 200
+    assert signed.client.delete(ME + "social/facebook/", {"password": PASSWORD}).status_code == 200
+    payloads = [message.payload for message in OutboxMessage.objects.filter(topic="push.account_security")]
+    assert [payload["event"] for payload in payloads] == ["social_linked", "social_unlinked"]
+    for payload in payloads:
+        assert set(payload) == set(topics.ACCOUNT_SECURITY_PAYLOAD_KEYS) and len(payload["event_id"]) == 32
+        assert payload["provider"] == "facebook" and payload["farewell_tokens"] == []
+    wrong = {"current_password": "Nope-nope-1", "password": NEW_PASSWORD}
+    ru = signed.client.post(ME + "password/", wrong, HTTP_ACCEPT_LANGUAGE="ru", **signed.idem())
+    assert ru.data["errors"][0]["message"] == "Неверный пароль." and ru.data["message"] == "Проверьте поля."
+    en = signed.client.post(
+        ME + "social/", {**link, "password": "Nope-nope-2"}, HTTP_ACCEPT_LANGUAGE="en", **signed.idem()
+    )
+    assert en.data["errors"][0]["message"] == "Wrong password."
