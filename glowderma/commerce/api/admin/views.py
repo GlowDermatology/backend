@@ -220,7 +220,8 @@ class RefundResolveView(AdminAPIView):
     @extend_schema(
         operation_id="admin_payments_refund_resolve",
         description="Close an `unknown` / `manual_required` refund after a manual check, or a `failed` Click "
-        "refund as `succeeded` after a fresh Click status check (`manual_payout: true` when Click still reports "
+        "refund as `succeeded` after a fresh Click status check (`manual_payout: true` when Click still "
+        "reports "
         "the payment paid and staff paid the customer by hand; 503 when Click does not answer). Audited "
         "`refund.state_changed` with the actor; order event `refund_succeeded` / `refund_failed`.",
         request=ResolveRefundSerializer,

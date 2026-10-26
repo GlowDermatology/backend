@@ -1,7 +1,8 @@
 """Payme Merchant API (JSON-RPC 2.0) protocol helpers (customer contract §2.13.2) — pure, no database.
 
 Amounts are tiyin (so'm × 100) and exist only here and in the Payme views; times are epoch milliseconds. The
-account-error codes and ``-32400`` are protocol constants (verify M3 against the ``test.paycom.uz`` checklist).
+account-error codes and ``-32400`` are protocol constants (verify M3 against the ``test.paycom.uz``
+checklist).
 """
 
 from __future__ import annotations

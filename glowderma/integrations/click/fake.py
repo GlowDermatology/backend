@@ -10,13 +10,15 @@ switches (``Order.metadata["fake"]["click"]``, design 03 §1.3, plan §6; the ol
   ``"unknown"`` → ``refund`` raises :class:`ClickUnavailable` after "sending" the request, and every later
   ``payment_status`` of that payment raises too; ``"down"`` → every call raises :class:`ClickUnavailable`
   before anything is sent;
-* ``status``: ``"paid"`` / ``"reversed"`` / ``"down"`` → what ``payment_status`` answers regardless of the refund
+* ``status``: ``"paid"`` / ``"reversed"`` / ``"down"`` → what ``payment_status`` answers regardless of the
+refund
   outcome (the fresh status check of a staff resolve, §2.13.0);
 * ``transaction_id`` / ``paydoc_id``: fixed ids for ``dev/…/simulate/``.
 
 Reversed and "lost" payments are remembered per process (the fake's "Click database"). Under the local/test
 settings (``DEV_FEATURES_ALLOWED``) every refund/status call is recorded in :data:`calls` (``(method,
-payment_ref)``) so tests assert the ``click_paydoc_id`` the handlers used; under the production settings the fake
+payment_ref)``) so tests assert the ``click_paydoc_id`` the handlers used; under the production settings the
+fake
 records nothing (customer contract §6.14).
 
 Transaction ids (design 03 §7.8): ``CLK-`` + ``str(7_741_000_000 + order_id × 37)[:10]`` unless

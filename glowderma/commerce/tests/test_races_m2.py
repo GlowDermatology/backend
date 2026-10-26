@@ -1,4 +1,5 @@
-"""Races of the customer API under real transactions (plan §3 P2 tests): checkouts for the last unit and of one
+"""Races of the customer API under real transactions (plan §3 P2 tests): checkouts for the last unit and of
+one
 customer, checkout vs a delete and vs a capture, pay switch vs Complete, duplicate and superseding Click
 callbacks, concurrent Payme creates, expiry vs a late Complete."""
 
@@ -7,7 +8,7 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any
 from unittest import mock
 
@@ -262,5 +263,3 @@ def test_expiry_job_vs_a_complete_holding_the_order_lock() -> None:
     assert results[0]["error"] == 0 and results[1] == []
     order.refresh_from_db()
     assert order.status == "processing"
-
-

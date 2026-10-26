@@ -393,12 +393,17 @@ def create_order(
     cashback → ``awaiting_payment``.
 
     ``items`` are ``(product_id, quantity)`` in cart order (one line per product). ``delivery_fee`` is the BTS
-    quote the **caller** asked before any row lock (``0`` for pickup; the seeder passes its fee), so no HTTP call
+    quote the **caller** asked before any row lock (``0`` for pickup; the seeder passes its fee), so no HTTP
+    call
     runs under the ``ProductStock`` locks. Evaluation order (the first failure raises a typed error): the
-    address (:class:`AddressNotFound` / :class:`AddressIncomplete`); under the ``ProductStock`` row locks every
-    line visible (``catalog.selectors.customer_visible_products()`` when ``visible_only``, else ``active``) and
-    available (:class:`OutOfStock` with every problem line); ``cashback_used ≤ cashback_max(subtotal, fee, ∞)``
-    with ``min_payable`` (:class:`CashbackAboveMax`); ``expected_total`` (:class:`PriceChanged`); then the rows
+    address (:class:`AddressNotFound` / :class:`AddressIncomplete`); under the ``ProductStock`` row locks
+    every
+    line visible (``catalog.selectors.customer_visible_products()`` when ``visible_only``, else ``active``)
+    and
+    available (:class:`OutOfStock` with every problem line); ``cashback_used ≤ cashback_max(subtotal, fee,
+    ∞)``
+    with ``min_payable`` (:class:`CashbackAboveMax`); ``expected_total`` (:class:`PriceChanged`); then the
+    rows
     and the hold (:class:`InsufficientCashback` from ``create_hold``; everything rolls back).
     ``enforce_stock=False`` is for the demo seeder only, whose orders are replayed at historical instants
     against today's Billz stock. ``order_id``/``billz_order_uuid`` pin design ids (seed only). Writes the
@@ -764,9 +769,11 @@ def expire_reservation(order_id: int, at: datetime | None = None, *, skip_locked
 
     Re-checked under the Order lock (a capture may have won): ``awaiting_payment`` and
     ``reservation_expires_at ≤ now``. An order whose pending payment has an **open transaction** (never "in
-    flight": Click is in flight 120 s but open until its Complete) attached before ``reservation_expires_at`` is
+    flight": Click is in flight 120 s but open until its Complete) attached before ``reservation_expires_at``
+    is
     skipped until ``reservation_expires_at + PAYMENT_IN_FLIGHT_GRACE_SECONDS`` (customer contract §2.7.2). The
-    pending payment fails silently (unless it is a Payme state-1 transaction, P-2), reservations are released, the hold is released (``reservation_expired``); event
+    pending payment fails silently (unless it is a Payme state-1 transaction, P-2), reservations are
+    released, the hold is released (``reservation_expired``); event
     ``reservation_expired {released_item_count, payment_failed}``; no push, no audit. Returns whether the
     order was expired (``False`` = nothing to do, or locked by another transaction with ``skip_locked``).
     """
@@ -1066,8 +1073,8 @@ def retry_shipment(order_id: int, actor_id: int, *, request: Any = None) -> None
 # --- refunds (handlers, Payme confirmation, staff resolve/retry) --------------------------------------------
 
 MESSAGE_REFUND_STILL_PAID = (
-    "Click to‘lovni qaytarmagan. Avval mijozga qo‘lda to‘lang, so‘ng «qo‘lda to‘landi» belgisi bilan yakunlang "
-    "yoki qaytarishni qayta urinib ko‘ring."
+    "Click to‘lovni qaytarmagan. Avval mijozga qo‘lda to‘lang, so‘ng «qo‘lda to‘landi» belgisi bilan "
+    "yakunlang yoki qaytarishni qayta urinib ko‘ring."
 )
 MESSAGE_REFUND_CLICK_FAKE = (
     "Click sinov rejimida: to‘lov holatini tekshirib bo‘lmaydi. Click ulanganidan keyin yakunlang."
@@ -1247,7 +1254,8 @@ def retry_refund(
     refund_id: int, actor_id: int, *, at: datetime | None = None, request: Any = None
 ) -> payment_services.RefundResult:
     """Retry a ``failed`` refund (admin §7 item 18 ``…/retry/``): a new refund of the payment (Click →
-    ``requested`` + outbox, or ``manual_required`` without ``click_paydoc_id``; Payme → ``manual_required``) and
+    ``requested`` + outbox, or ``manual_required`` without ``click_paydoc_id``; Payme → ``manual_required``)
+    and
     its ``refund_requested`` event. Refused with the Uzbek messages under the Order lock: the refund is no
     longer ``failed``, its payment is no longer ``paid`` (a later retry already returned the money), another
     refund of the order is open, or — for Click — the Click port is fake under the production settings
@@ -1336,7 +1344,8 @@ __all__ = [
 ]
 
 
-# === M2 customer API (customer contract §2.5–§2.7, §2.13; plan §3 P2) ========================================
+# === M2 customer API (customer contract §2.5–§2.7, §2.13; plan §3 P2)
+# ========================================
 
 logger = logging.getLogger(__name__)
 
@@ -1349,7 +1358,8 @@ AUDIT_PAYMENT_LATE_CAPTURE = "payment.late_capture"
 FAILED_BY_US = ("expired", "abandoned", "cancelled")
 
 
-# --- cart (customer contract §2.5, §2.7.4) ---------------------------------------------------------------------
+# --- cart (customer contract §2.5, §2.7.4)
+# ---------------------------------------------------------------------
 
 
 def lock_cart(customer_id: int) -> Cart:
@@ -1474,9 +1484,11 @@ def clear_cart(customer_id: int) -> int:
 
 
 def reorder_into_cart(order_id: int, customer_id: int) -> None:
-    """``POST orders/{id}/reorder/``: the order's lines back into the cart (the caller checked ownership and the
+    """``POST orders/{id}/reorder/``: the order's lines back into the cart (the caller checked ownership and
+    the
     history horizon). An existing line keeps the larger of both quantities, clamped to ``max_quantity``;
-    unavailable or out-of-stock products are added anyway (shown with their status), except when the cart would
+    unavailable or out-of-stock products are added anyway (shown with their status), except when the cart
+    would
     exceed ``CART_MAX_LINES``: they are skipped first, and if it is still too full → ``cart_full``, nothing
     written."""
     with transaction.atomic():
@@ -1536,7 +1548,8 @@ def delete_cart_lines(customer_id: int) -> int:
     return deleted
 
 
-# --- checkout (customer contract §2.7.1) -------------------------------------------------------------------------
+# --- checkout (customer contract §2.7.1)
+# -------------------------------------------------------------------------
 
 
 def quote_delivery(region_code: str, city_code: str, scenario: Mapping[str, Any] | None = None) -> int:
@@ -1566,7 +1579,8 @@ class CheckoutInput:
 
 
 def lock_customer(customer_id: int) -> Customer | None:
-    """The customer-level lock of the customer API: ``SELECT … FOR NO KEY UPDATE`` (never ``FOR UPDATE``, which
+    """The customer-level lock of the customer API: ``SELECT … FOR NO KEY UPDATE`` (never ``FOR UPDATE``,
+    which
     would deadlock with a capture's ``Purchase`` insert; customer contract §2.7.1)."""
     return Customer.objects.select_for_update(no_key=True, of=("self",)).filter(pk=customer_id).first()
 
@@ -1635,7 +1649,8 @@ def checkout(customer_id: int, data: CheckoutInput) -> int:
         return order_id
 
 
-# --- pay (customer contract §2.7.2) --------------------------------------------------------------------------------
+# --- pay (customer contract §2.7.2)
+# --------------------------------------------------------------------------------
 
 
 def ensure_payable_payment(
@@ -1644,11 +1659,15 @@ def ensure_payable_payment(
     """The payment a provider page / callback works on, under ``lock_order`` → Payment locks.
 
     Same provider → the active ``pending`` payment is reused as it is (nothing written); with
-    ``superseding=<click_trans_id>`` (Click Prepare only) a Click payment attached to **another** transaction is
-    failed ``abandoned`` (no event) and a new ``pending`` row is created; a Payme row is reused only while it has
-    no transaction (``attach_transaction`` refuses another id with ``TransactionTaken``). Other provider: in flight →
+    ``superseding=<click_trans_id>`` (Click Prepare only) a Click payment attached to **another** transaction
+    is
+    failed ``abandoned`` (no event) and a new ``pending`` row is created; a Payme row is reused only while it
+    has
+    no transaction (``attach_transaction`` refuses another id with ``TransactionTaken``). Other provider: in
+    flight →
     :class:`PaymentInProgress`; else the pending row is failed ``abandoned`` and a new one created
-    (``Order.payment_provider`` updated). A failed previous attempt gets a new ``pending`` row. An order with a
+    (``Order.payment_provider`` updated). A failed previous attempt gets a new ``pending`` row. An order with
+    a
     non-late ``paid`` payment raises ``AlreadyPaid``."""
     with transaction.atomic():
         order = lock_order(order_id)
@@ -1694,7 +1713,8 @@ def cancel_by_customer(order_id: int, customer_id: int, *, at: datetime | None =
     """Cancel an ``awaiting_payment`` order of the customer (C-6); returns the order id.
 
     Another customer's order → :class:`OrderNotFound`; any other status → 409 ``not_cancellable``
-    (``error.order_not_cancellable``); a **Click** payment in flight → 409 ``payment_in_progress``. The pending
+    (``error.order_not_cancellable``); a **Click** payment in flight → 409 ``payment_in_progress``. The
+    pending
     payment fails unilaterally (``cancelled``; a Payme state-1 transaction stays ``pending`` until Payme's
     ``CancelTransaction``), reservations and the hold are released, ``cancelled`` / ``customer_request`` with
     ``cancelled_by`` null, event ``cancelled`` (source system), push ``cancelled``. No audit."""
@@ -1749,13 +1769,15 @@ def cancel_by_customer(order_id: int, customer_id: int, *, at: datetime | None =
         return order.pk
 
 
-# --- refused captures (customer contract §2.13.0) ----------------------------------------------------------------
+# --- refused captures (customer contract §2.13.0)
+# ----------------------------------------------------------------
 
 
 def late_capture_case(order: Order, payment: payment_selectors.PaymentRow, now: datetime) -> str | None:
     """The refused-capture case of a capture the provider reports for ``payment`` (``None`` = honour it),
     customer contract §2.13.0: ``double_payment`` (the order is paid by another payment), ``failed_by_us``
-    (failed by us for a non-provider reason, incl. a superseded attachment), ``not_payable`` (cancelled, or past
+    (failed by us for a non-provider reason, incl. a superseded attachment), ``not_payable`` (cancelled, or
+    past
     the grace); a payment that is not the order's pending one is never honoured."""
     if selectors.paid_by_other(order.pk, payment.id) or order.status in state.PAID_STATUSES:
         return "double_payment"
@@ -1782,7 +1804,8 @@ def record_late_capture(
     ``payments.mark_late_captured`` (``paid`` + ``late_capture``), ``Refund(origin=late_capture)`` (Click
     ``requested`` + outbox ``refund.submit``, or ``manual_required`` without ``click_paydoc_id`` / with fake
     Click), event ``refund_requested`` (source system, with ``manual_reason``), audit ``payment.late_capture
-    {order_id, payment_id, provider, case}`` and ERROR ``payment.late_capture``. The order never changes status.
+    {order_id, payment_id, provider, case}`` and ERROR ``payment.late_capture``. The order never changes
+    status.
     ``None`` when the payment was already recorded as a late capture (a replay)."""
     if case not in LATE_CAPTURE_CASES:
         raise ValueError(f"Unknown late-capture case {case!r}")

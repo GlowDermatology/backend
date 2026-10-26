@@ -1,4 +1,5 @@
-"""Customer routes of `delivery` (customer contract §2.6): ``delivery/regions/`` only — ``delivery/calculate/``
+"""Customer routes of `delivery` (customer contract §2.6): ``delivery/regions/`` only —
+``delivery/calculate/``
 reads the cart and loyalty, so ``commerce`` serves it."""
 
 from django.urls import URLPattern, URLResolver, path

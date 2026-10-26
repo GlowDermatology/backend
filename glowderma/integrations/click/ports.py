@@ -1,13 +1,15 @@
 """The Click port (design 02 §2.2, 03 §5 ``refund.submit``; customer contract §2.7.2, §2.13).
 
-Protocol callbacks (Prepare/Complete) are the M2 webhook views in ``commerce/api/webhooks/``; their pure helpers
+Protocol callbacks (Prepare/Complete) are the M2 webhook views in ``commerce/api/webhooks/``; their pure
+helpers
 (signature, amounts, error table) live in :mod:`.protocol`. ``registry.get_click(scenario)`` picks the adapter
 from ``settings.CLICK_MODE`` (default ``INTEGRATIONS_MODE``); ``scenario`` is the order's
 ``metadata["fake"]["click"]`` (the fake reads it, a live adapter ignores it).
 
 Refund and status calls are keyed by **Click's payment id of the Merchant API** — our
 ``Payment.provider_state["click_paydoc_id"]`` (``DELETE …/payment/reversal/{service_id}/{payment_id}``, ``GET
-…/payment/status/{service_id}/{payment_id}``), never ``click_trans_id`` (customer contract §2.13.0, verify M3).
+…/payment/status/{service_id}/{payment_id}``), never ``click_trans_id`` (customer contract §2.13.0, verify
+M3).
 The refund handler always asks :meth:`ClickPort.payment_status` before reversing (a redelivery after a crash
 must find an already reversed payment instead of reversing twice). :class:`ClickUnavailable` is a transport
 error; :class:`ClickRefundRejected` a definitive refusal.

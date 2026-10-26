@@ -1,7 +1,8 @@
 """Deterministic BTS for tests, the demo seed and local end-to-end runs (``BTS_MODE=fake``).
 
 The admin e2e scripts and ``commerce.seeds`` rely on these rules; change them only together with them. Every
-rule may be overridden per order through ``Order.metadata["fake"]["bts"]`` (design 03 §1.3, plan §6), handed in
+rule may be overridden per order through ``Order.metadata["fake"]["bts"]`` (design 03 §1.3, plan §6), handed
+in
 as ``scenario``:
 
 ``regions()``
@@ -42,7 +43,8 @@ as ``scenario``:
 **Under the production settings** (``core.integration_modes.fake_in_production("bts")``, customer contract
 §2.14.3) the fake never reports a remote effect that did not happen and keeps nothing in :data:`_parcels`:
 ``regions()`` → ``[]``; ``quote()`` / ``create()`` → :class:`BtsRejected` ``fake_mode``;
-``find_by_client_id()`` → ``None``; ``cancel()`` / ``track()`` → :class:`BtsUnavailable`; scenarios are ignored.
+``find_by_client_id()`` → ``None``; ``cancel()`` / ``track()`` → :class:`BtsUnavailable`; scenarios are
+ignored.
 """
 
 from collections.abc import Mapping

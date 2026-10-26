@@ -27,7 +27,7 @@ from glowderma.integrations.models import IntegrationState
 from glowderma.reporting.selectors import bts_polling_failing
 
 pytestmark = pytest.mark.django_db
-SECRET = "local-bts-webhook-secret-at-least-32-characters"
+SECRET = "local-bts-webhook-secret-at-least-32-characters"  # noqa: S105 - the local default
 
 
 def parcel(*, status: str = "100", track: str | None = None, minutes_old: int = 60) -> Shipment:
@@ -52,7 +52,7 @@ def parcel(*, status: str = "100", track: str | None = None, minutes_old: int = 
 
 
 def hook(body: dict[str, Any], *, token: str | None = SECRET, query: str = "") -> Any:
-    headers = {"HTTP_X_GD_WEBHOOK_TOKEN": token} if token is not None else {}
+    headers: dict[str, Any] = {"HTTP_X_GD_WEBHOOK_TOKEN": token} if token is not None else {}
     return APIClient().post(f"{BTS_URL}{query}", body, format="json", **headers)
 
 
@@ -73,12 +73,13 @@ def tracked() -> Iterator[list[str]]:
         yield calls
 
 
-# --- webhook ----------------------------------------------------------------------------------------------------
+# --- webhook
+# ----------------------------------------------------------------------------------------------------
 
 
 def test_bad_token_answers_401_with_a_bounded_row() -> None:
     shipment = parcel()
-    assert hook({"clientId": shipment.order_id}, token="wrong").status_code == 401
+    assert hook({"clientId": shipment.order_id}, token="wrong").status_code == 401  # noqa: S106
     response = hook({"clientId": shipment.order_id}, token=None, query="?token=wrong-token-value")
     assert response.status_code == 401 and response.json() == {"ok": False}
     for row in rows("bts"):
@@ -91,7 +92,11 @@ def test_query_token_is_stripped_from_the_stored_path(tracked: list[str]) -> Non
     response = hook({"clientId": shipment.order_id}, token=None, query=f"?token={SECRET}")
     assert response.status_code == 200
     (row,) = rows("bts")
-    assert row.path == BTS_URL and SECRET not in str(row.headers) and row.entity_ref == f"order:{shipment.order_id}"
+    assert (
+        row.path == BTS_URL
+        and SECRET not in str(row.headers)
+        and row.entity_ref == f"order:{shipment.order_id}"
+    )
 
 
 def test_the_retrack_is_authoritative() -> None:
@@ -105,14 +110,19 @@ def test_the_retrack_is_authoritative() -> None:
     event = OrderEvent.objects.get(order=order, type="handed_to_courier")
     assert event.data["via"] == "webhook" and event.data["bts_status"] == "200"
     after = state()
-    assert (after.last_sync_at, after.consecutive_failures) == (before.last_sync_at, before.consecutive_failures)
+    assert (after.last_sync_at, after.consecutive_failures) == (
+        before.last_sync_at,
+        before.consecutive_failures,
+    )
     key = rows("bts")[0].event_key
     assert key == f"{shipment.tracking_number}:300:2026-10-23T16:40:00"
     hook({"clientId": shipment.order_id, "status": "300", "eventTime": "2026-10-23T16:40:00"})
     assert rows("bts")[1].event_key.startswith(f"dup:{key}:")
 
 
-def test_a_payload_number_of_another_parcel_is_ignored(tracked: list[str], caplog: pytest.LogCaptureFixture) -> None:
+def test_a_payload_number_of_another_parcel_is_ignored(
+    tracked: list[str], caplog: pytest.LogCaptureFixture
+) -> None:
     shipment = parcel()
     with caplog.at_level(logging.WARNING):
         response = hook({"clientId": shipment.order_id, "trackingNumber": "99999999", "status": "300"})
@@ -142,7 +152,8 @@ def test_fake_bts_in_production_answers_401() -> None:
     assert rows("bts")[0].result["error_code"] == "fake_mode"
 
 
-# --- polling ------------------------------------------------------------------------------------------------------
+# --- polling
+# ------------------------------------------------------------------------------------------------------
 
 
 def test_polling_picks_only_stale_parcels(tracked: list[str]) -> None:
@@ -158,7 +169,9 @@ def test_round_robin_over_250_parcels(tracked: list[str]) -> None:
     for _ in range(3):
         tasks.run_bts_poll()
     assert sorted(tracked) == sorted(s.tracking_number for s in shipments)  # all 250, none twice
-    assert ShipmentEvent.objects.filter(kind="status_received").count() == 250  # unchanged statuses: nothing new
+    assert (
+        ShipmentEvent.objects.filter(kind="status_received").count() == 250
+    )  # unchanged statuses: nothing new
     tasks.run_bts_poll()  # wraps to the lowest id
     assert tracked[250] == shipments[0].tracking_number
 
@@ -167,7 +180,9 @@ def test_a_volatile_field_appends_no_event() -> None:
     shipment = parcel()
 
     def volatile(self: FakeBts, tracking_number: str) -> Parcel:
-        return Parcel(client_id="x", tracking_number=tracking_number, bts_order_id="new", tariff=99, status="100")
+        return Parcel(
+            client_id="x", tracking_number=tracking_number, bts_order_id="new", tariff=99, status="100"
+        )
 
     with mock.patch.object(FakeBts, "track", volatile):
         tasks.run_bts_poll()
@@ -199,7 +214,10 @@ def test_per_parcel_failures_are_skipped(tracked: list[str], caplog: pytest.LogC
     last = parcel()
     with caplog.at_level(logging.WARNING):
         result = tasks.run_bts_poll()
-    assert result.tracked == [first.order_id, last.order_id] and (result.rejected, result.unavailable) == (1, 1)
+    assert result.tracked == [first.order_id, last.order_id] and (result.rejected, result.unavailable) == (
+        1,
+        1,
+    )
     assert caplog.text.count("bts.poll_parcel_failed") == 2
     assert state().data["poll_cursor"] == last.pk and state().last_sync_at is not None
     assert state().consecutive_failures == 0 and down.pk < rejected.pk
@@ -262,7 +280,8 @@ def test_fake_bts_in_production_polls_nothing(tracked: list[str]) -> None:
     assert tracked == []
 
 
-# --- regions ---------------------------------------------------------------------------------------------------
+# --- regions
+# ---------------------------------------------------------------------------------------------------
 
 
 def test_regions_are_cached(public_client: APIClient) -> None:
@@ -298,5 +317,3 @@ def test_fake_bts_in_production_makes_nothing_up() -> None:
         assert bts.find_by_client_id("1") is None
         with pytest.raises(BtsUnavailable):
             bts.track("1")
-
-

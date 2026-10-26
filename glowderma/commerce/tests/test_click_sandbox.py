@@ -1,6 +1,7 @@
 """The offline Click SHOP API sandbox suite (plan §5.1; customer contract §2.13.0–§2.13.1), row by row.
 
-Real webhook views, signatures built by ``integrations.click.sandbox``, a clock pinned relative to the real now.
+Real webhook views, signatures built by ``integrations.click.sandbox``, a clock pinned relative to the real
+now.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ import pytest
 from django.test import override_settings
 from rest_framework.test import APIClient
 
-from glowderma.commerce import payment_ref, services, tasks
+from glowderma.commerce import payment_ref, selectors, services
 from glowderma.commerce.models import Order, OrderEvent
 from glowderma.commerce.tests.support import deliver, place, seed_policies, shopper
 from glowderma.commerce.tests.webhook_support import (
@@ -26,8 +27,8 @@ from glowderma.commerce.tests.webhook_support import (
     complete,
     complete_params,
     keys,
-    payments,
     payme,
+    payments,
     prepare,
     prepare_params,
     real_now,
@@ -35,7 +36,6 @@ from glowderma.commerce.tests.webhook_support import (
     rows,
     tiyin,
 )
-from glowderma.core import enums
 from glowderma.core.models import AuditEntry, OutboxMessage
 from glowderma.integrations.click import fake as fake_click
 from glowderma.integrations.payme import sandbox as payme_sandbox
@@ -58,6 +58,16 @@ def order(now: datetime) -> Order:
     return place(shopper(), fulfilment="pickup", when=now)
 
 
+def late_audit() -> dict[str, Any]:
+    after = AuditEntry.objects.get(action="payment.late_capture").after
+    assert isinstance(after, dict)
+    return after
+
+
+def late_case() -> str:
+    return str(late_audit()["case"])
+
+
 def _prepared(order: Order, now: datetime, txn: int = TXN, seconds: int = 60) -> int:
     with at(now + timedelta(seconds=seconds)):
         answer = prepare(order, txn)
@@ -65,7 +75,8 @@ def _prepared(order: Order, now: datetime, txn: int = TXN, seconds: int = 60) ->
     return int(answer["merchant_prepare_id"])
 
 
-# --- Prepare ---------------------------------------------------------------------------------------------------
+# --- Prepare
+# ---------------------------------------------------------------------------------------------------
 
 
 def test_row_1_prepare_attaches_the_transaction(order: Order, now: datetime) -> None:
@@ -82,7 +93,9 @@ def test_row_1_prepare_attaches_the_transaction(order: Order, now: datetime) -> 
     payment.refresh_from_db()
     assert payment.status == "pending" and payment.provider_txn_id == str(TXN)
     assert payment.provider_state["click_paydoc_id"] == str(TXN + 1_000_000)
-    assert payment.provider_state["prepare_at"] and payment.provider_state["merchant_prepare_id"] == payment.pk
+    assert (
+        payment.provider_state["prepare_at"] and payment.provider_state["merchant_prepare_id"] == payment.pk
+    )
     assert keys("click") == [f"prepare:{TXN}"]
     row = rows("click")[0]
     assert row.result["outcome"] == "accepted" and row.entity_ref == f"payment:{payment.pk}"
@@ -198,8 +211,7 @@ def test_rows_11_12_a_new_prepare_supersedes_and_the_old_complete_is_reversed(
     assert (old.status, old.error_code) == ("paid", "late_capture")
     refund = Refund.objects.get(payment=old)
     assert refund.origin == "late_capture"
-    audit = AuditEntry.objects.get(action="payment.late_capture")
-    assert audit.after["case"] == "failed_by_us"
+    assert late_case() == "failed_by_us"
     new.refresh_from_db()
     assert new.status == "pending"
     order.refresh_from_db()
@@ -222,7 +234,8 @@ def ms_(instant: datetime) -> int:
     return int(instant.timestamp() * 1000)
 
 
-# --- Complete ----------------------------------------------------------------------------------------------------
+# --- Complete
+# ----------------------------------------------------------------------------------------------------
 
 
 def test_row_14_complete_pays_the_order(order: Order, now: datetime) -> None:
@@ -244,7 +257,9 @@ def test_rows_15_16_complete_replays_have_one_effect(order: Order, now: datetime
     with at(now + timedelta(minutes=2)):
         assert complete(order, payment_id)["error"] == 0
         assert click(CLICK_COMPLETE, complete_params(order, payment_id))["error"] == 0
-        assert complete(order, payment_id, sign_time="2026-10-23 14:30:00")["merchant_confirm_id"] == payment_id
+        assert (
+            complete(order, payment_id, sign_time="2026-10-23 14:30:00")["merchant_confirm_id"] == payment_id
+        )
     assert Purchase.objects.filter(order_id=order.pk).count() == 1
     assert OrderEvent.objects.filter(order=order, type="payment_confirmed").count() == 1
     completes = [key for key in keys("click") if "complete" in key]
@@ -304,7 +319,7 @@ def test_row_21_complete_after_the_grace_is_a_refused_capture(order: Order, now:
     assert (refund.origin, refund.state) == ("late_capture", "requested")
     event = OrderEvent.objects.get(order=order, type="refund_requested")
     assert event.data["manual"] is False and event.data["manual_reason"] is None and event.source == "system"
-    assert AuditEntry.objects.get(action="payment.late_capture").after == {
+    assert late_audit() == {
         "order_id": order.pk,
         "payment_id": payment_id,
         "provider": "click",
@@ -324,7 +339,7 @@ def test_row_25_complete_after_a_switch_to_payme(order: Order, now: datetime) ->
     with at(now + timedelta(minutes=4)):  # Click left the in-flight window: the switch abandons it
         payme_payment = services.ensure_payable_payment(order.pk, "payme")
         assert complete(order, payment_id)["error"] == 0
-    assert AuditEntry.objects.get(action="payment.late_capture").after["case"] == "failed_by_us"
+    assert late_case() == "failed_by_us"
     assert Payment.objects.get(pk=payme_payment.id).status == "pending"
 
 
@@ -337,10 +352,10 @@ def test_row_26_double_payment(order: Order, now: datetime) -> None:
     click_payment = Payment.objects.get(pk=payment_id)
     assert (click_payment.status, click_payment.error_code) == ("paid", "late_capture")
     assert Payment.objects.get(pk=payme_payment.id).status == "paid"
-    assert AuditEntry.objects.get(action="payment.late_capture").after["case"] == "double_payment"
+    assert late_case() == "double_payment"
     order.refresh_from_db()
     assert order.status == "processing"
-    detail = services.selectors.order_detail(order.pk)
+    detail = selectors.order_detail(order.pk)
     assert detail is not None and detail.payment["provider"] == "payme"
 
 
@@ -349,7 +364,7 @@ def test_row_28_complete_after_a_customer_cancel(order: Order, now: datetime) ->
     with at(now + timedelta(minutes=4)):
         services.cancel_by_customer(order.pk, order.customer_id)
         assert complete(order, payment_id)["error"] == 0
-    assert AuditEntry.objects.get(action="payment.late_capture").after["case"] == "failed_by_us"
+    assert late_case() == "failed_by_us"
 
 
 def test_row_29_bad_signature_or_tampered_prepare_id(order: Order, now: datetime) -> None:
@@ -403,28 +418,35 @@ def test_row_32_a_refused_reversal_needs_a_staff_payout(now: datetime, staff_cli
     refund.refresh_from_db()
     assert refund.state == "succeeded"
     audit = AuditEntry.objects.filter(action="refund.state_changed", entity_id=str(refund.pk)).last()
-    assert audit is not None and audit.after["manual_payout"] is True and audit.after["from"] == "failed"
+    assert audit is not None and isinstance(audit.after, dict)
+    assert audit.after["manual_payout"] is True and audit.after["from"] == "failed"
     assert refunds_needing_action() == 0
 
 
-def test_row_32_click_reversed_after_all_closes_without_a_payout(now: datetime, staff_client: APIClient) -> None:
+def test_row_32_click_reversed_after_all_closes_without_a_payout(
+    now: datetime, staff_client: APIClient
+) -> None:
     _order, refund = _refused_reversal(now, status="reversed")
     url = f"/api/v1/admin/payments/{refund.payment_id}/refunds/{refund.pk}/resolve/"
     assert staff_client.post(url, {"state": "succeeded"}, format="json").status_code == 200
     refund.refresh_from_db()
     assert refund.state == "succeeded"
     audit = AuditEntry.objects.filter(action="refund.state_changed", entity_id=str(refund.pk)).last()
-    assert audit is not None and audit.after["manual_payout"] is False
+    assert audit is not None and isinstance(audit.after, dict) and audit.after["manual_payout"] is False
 
 
-# --- fake Click under the production settings (rows 33, 34) --------------------------------------------------------
+# --- fake Click under the production settings (rows 33, 34)
+# --------------------------------------------------------
 
 
 def test_row_33_fake_click_in_production_refuses_everything(order: Order, now: datetime) -> None:
     with override_settings(**PROD_FAKE_CLICK), at(now + timedelta(minutes=1)):
         assert prepare(order)["error"] == -1
         assert complete(order, payments(order)[0].pk)["error"] == -1  # never attached
-    assert payments(order)[0].provider_txn_id == "" and Order.objects.get(pk=order.pk).status == "awaiting_payment"
+    assert (
+        payments(order)[0].provider_txn_id == ""
+        and Order.objects.get(pk=order.pk).status == "awaiting_payment"
+    )
     assert [row.result["error_code"] for row in rows("click")] == ["fake_mode", "fake_mode"]
     assert all(row.event_key.startswith("rejected:") for row in rows("click"))
 
@@ -450,7 +472,7 @@ def test_row_34_complete_of_a_transaction_attached_while_live(
     assert not OutboxMessage.objects.filter(topic="refund.submit").exists()
     event = OrderEvent.objects.get(order=order, type="refund_requested")
     assert event.data["manual"] is True and event.data["manual_reason"] == "fake_mode"
-    assert AuditEntry.objects.get(action="payment.late_capture").after["case"] == "fake_mode"
+    assert late_case() == "fake_mode"
     assert "payment.late_capture" in caplog.text
     order.refresh_from_db()
     assert order.status == "awaiting_payment"
@@ -466,17 +488,22 @@ def test_row_34_variant_the_order_expired_first(order: Order, now: datetime) -> 
     assert Payment.objects.get(pk=payment_id).error_code == "expired"
     with override_settings(**PROD_FAKE_CLICK), at(expires + timedelta(seconds=401)):
         assert complete(order, payment_id)["error"] == 0
-    assert AuditEntry.objects.get(action="payment.late_capture").after["case"] == "failed_by_us"
+    assert late_case() == "failed_by_us"
     assert Refund.objects.get(payment_id=payment_id).state == "manual_required"
 
 
-def test_an_unexpected_exception_answers_500_and_rolls_back(order: Order, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_an_unexpected_exception_answers_500_and_rolls_back(
+    order: Order, monkeypatch: pytest.MonkeyPatch
+) -> None:
     def boom(*args: Any, **kwargs: Any) -> Any:
         raise RuntimeError("database down")
 
     monkeypatch.setattr(services, "ensure_payable_payment", boom)
     response = APIClient().generic(
-        "POST", CLICK_PREPARE, urlencode(prepare_params(order)), content_type="application/x-www-form-urlencoded"
+        "POST",
+        CLICK_PREPARE,
+        urlencode(prepare_params(order)),
+        content_type="application/x-www-form-urlencoded",
     )
     assert response.status_code == 500
     assert rows("click") == [] and payments(order)[0].provider_txn_id == ""
@@ -493,7 +520,8 @@ def test_expiry_c_prime_and_e(order: Order, now: datetime) -> None:
         assert complete(order, payment_id)["error"] == 0
     assert Order.objects.get(pk=order.pk).status == "processing"
     late = place(shopper(), fulfilment="pickup", when=now)
-    with at(late.reservation_expires_at + timedelta(seconds=10)):  # type: ignore[operator]
+    assert late.reservation_expires_at is not None
+    with at(late.reservation_expires_at + timedelta(seconds=10)):
         assert prepare(late, txn=TXN + 50)["error"] == -9
 
 

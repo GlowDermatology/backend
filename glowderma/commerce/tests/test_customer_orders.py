@@ -1,4 +1,5 @@
-"""``me/orders/`` and ``me/orders/{id}/`` (customer contract §2.8, §4): scopes, ownership, the history horizon,
+"""``me/orders/`` and ``me/orders/{id}/`` (customer contract §2.8, §4): scopes, ownership, the history
+horizon,
 the №10248 timeline vector in uz/ru/en, progress, refunds, the display rule."""
 
 from __future__ import annotations
@@ -44,12 +45,22 @@ def _vector_order(customer: Customer) -> Order:
     ShipmentFactory.create(order=order, created=True, tracking_number="48213907")
     rec = services.record_event
     rec(order, "order_created", {"channel": "ios", "item_count": 3, "total": 784_400}, at=T)
-    rec(order, "reservation_created", {"item_count": 3, "minutes": 15, "expires_at": "2026-10-23T14:17:00+05:00"}, at=T)
+    rec(
+        order,
+        "reservation_created",
+        {"item_count": 3, "minutes": 15, "expires_at": "2026-10-23T14:17:00+05:00"},
+        at=T,
+    )
     paid_at = T + timedelta(minutes=3)
     rec(
         order,
         "payment_confirmed",
-        {"provider": "click", "transaction_id": "CLK-7741920385", "amount": 784_400, "reservation_converted": True},
+        {
+            "provider": "click",
+            "transaction_id": "CLK-7741920385",
+            "amount": 784_400,
+            "reservation_converted": True,
+        },
         at=paid_at,
     )
     rec(
@@ -59,7 +70,12 @@ def _vector_order(customer: Customer) -> Order:
         at=paid_at,
     )
     rec(order, "billz_sale_recorded", {"billz_order_id": "0d6f6c1e-5a7b-4c1e-9a43-2f1d8e3b7a10"}, at=paid_at)
-    rec(order, "shipment_created", {"tracking_number": "48213907", "tariff": 25_000, "manual": False}, at=T + timedelta(minutes=4))
+    rec(
+        order,
+        "shipment_created",
+        {"tracking_number": "48213907", "tariff": 25_000, "manual": False},
+        at=T + timedelta(minutes=4),
+    )
     rec(
         order,
         "handed_to_courier",
@@ -86,7 +102,9 @@ def test_the_10248_timeline_vector(customer_client: APIClient, customer: Custome
     en = customer_client.get(url, HTTP_ACCEPT_LANGUAGE="en").json()["timeline"]
     assert en[3]["subtitle"] == "3 item(s) · 784,400 so'm"
     detail = customer_client.get(url).json()
-    assert detail["status_label"] == "Kuryerga topshirildi" and detail["fulfilment_label"] == "Yetkazib berish"
+    assert (
+        detail["status_label"] == "Kuryerga topshirildi" and detail["fulfilment_label"] == "Yetkazib berish"
+    )
     assert detail["shipment"] == {"carrier": "BTS", "tracking_number": "48213907", "tracking_url": None}
     assert [(p["step"], p["state"]) for p in detail["progress"]] == [
         ("placed", "done"),
@@ -97,7 +115,9 @@ def test_the_10248_timeline_vector(customer_client: APIClient, customer: Custome
     assert detail["actions"] == {"pay": False, "cancel": False, "reorder": True}
 
 
-def test_list_scopes_ownership_and_horizon(customer_client: APIClient, customer: Customer, now: datetime) -> None:
+def test_list_scopes_ownership_and_horizon(
+    customer_client: APIClient, customer: Customer, now: datetime
+) -> None:
     awaiting = place(customer, fulfilment="pickup", when=now - timedelta(minutes=5))
     delivered = OrderFactory.create(customer=customer, delivered=True, created_at=now - timedelta(days=1))
     cancelled = OrderFactory.create(customer=customer, cancelled=True, created_at=now - timedelta(days=2))
@@ -110,7 +130,11 @@ def test_list_scopes_ownership_and_horizon(customer_client: APIClient, customer:
         return [row["id"] for row in customer_client.get(LIST, params).json()["results"]]
 
     assert ids() == [awaiting.pk, delivered.pk, cancelled.pk]
-    assert ids("active") == [awaiting.pk] and ids("completed") == [delivered.pk] and ids("cancelled") == [cancelled.pk]
+    assert (
+        ids("active") == [awaiting.pk]
+        and ids("completed") == [delivered.pk]
+        and ids("cancelled") == [cancelled.pk]
+    )
     assert customer_client.get(LIST, {"scope": "nope"}).status_code == 400
     assert customer_client.get(LIST, {"page_size": 50}).status_code == 400
     assert customer_client.get(f"{LIST}{old.pk}/").status_code == 404
@@ -158,7 +182,9 @@ def test_pickup_delivered_and_cancelled_progress(customer_client: APIClient, cus
 def test_refund_mapping_and_names(customer_client: APIClient, customer: Customer, now: datetime) -> None:
     item = product(name_uz="Krem", name_ru="Крем", name_en="Cream")
     order = place(customer, [(item, 1)], fulfilment="pickup", when=now)
-    services.mark_paid(order.pk, Payment.objects.get(order=order).pk, "click", "CLK-9", raw={"click_paydoc_id": "9"})
+    services.mark_paid(
+        order.pk, Payment.objects.get(order=order).pk, "click", "CLK-9", raw={"click_paydoc_id": "9"}
+    )
     services.cancel_order(order.pk, "Mijoz so‘rovi", admin().pk)
     body = customer_client.get(f"{LIST}{order.pk}/", HTTP_ACCEPT_LANGUAGE="en").json()
     assert body["items"][0]["name"] == "Cream"
@@ -186,7 +212,8 @@ def test_customer_inflight_order(customer: Customer, now: datetime) -> None:
         assert selectors.customer_inflight_order(customer.pk) is None
 
 
-# --- the display rule (customer contract §2.8) ----------------------------------------------------------------
+# --- the display rule (customer contract §2.8)
+# ----------------------------------------------------------------
 
 
 def _views(client: APIClient, staff_client: APIClient, order: Order) -> dict[str, Any]:

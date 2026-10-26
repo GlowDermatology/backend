@@ -1,12 +1,15 @@
 """Click SHOP API callbacks (customer contract §2.13.1): ``webhooks/click/prepare/`` and ``…/complete/``.
 
-Order of work (§2.13.0): the protocol checks that need no database (parameters → content type → IP → signature →
-action → service id → account reference), the advisory lock of the Click transaction, the inbox duplicate check,
+Order of work (§2.13.0): the protocol checks that need no database (parameters → content type → IP →
+signature →
+action → service id → account reference), the advisory lock of the Click transaction, the inbox duplicate
+check,
 ``commerce.services.lock_order`` before any state read, the state transition through a commerce service that
 names the payment, and the ``WebhookInbox`` row last, all in one transaction. An unexpected exception rolls
 everything back and answers HTTP 500 (Click retries). A Click port that is fake under the production settings
 starts no transaction and honours no capture: every Prepare answers ``-1``; a Complete is parsed and
-signature-checked, and only one naming a payment attached while Click was live runs the Complete steps, with the
+signature-checked, and only one naming a payment attached while Click was live runs the Complete steps, with
+the
 capture always refused (``record_late_capture(case="fake_mode")``, a manual refund).
 """
 
@@ -156,7 +159,7 @@ class _ClickCallback(WebhookAPIView):
         row = inbox.exists(PROVIDER, f"{self._event_prefix}:{params['click_trans_id']}")
         if row is None or not isinstance(row.payload, dict):
             return False
-        return protocol.fingerprint(row.payload) != protocol.fingerprint(params)
+        return inbox.semantic_fingerprint(row.payload) != inbox.semantic_fingerprint(params)
 
     def _conflict(self, request: Request, params: dict[str, str], started: float) -> Response:
         body = self._answer(params, protocol.BAD_REQUEST)

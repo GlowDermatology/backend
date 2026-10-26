@@ -1,7 +1,9 @@
 """Click SHOP API protocol helpers (customer contract §2.13.1) — pure functions and constants, no database.
 
-The webhook views of ``commerce/api/webhooks/click.py`` call these before taking any lock: required parameters,
-the MD5 signature over the **raw received strings**, the amount format and the semantic fingerprint used for the
+The webhook views of ``commerce/api/webhooks/click.py`` call these before taking any lock: required
+parameters,
+the MD5 signature over the **raw received strings**, the amount format and the semantic fingerprint used for
+the
 duplicate check. Every choice marked *verify M3* in the contract sits behind a constant here.
 """
 
@@ -41,7 +43,8 @@ ERRORS: Final[dict[int, str]] = {
     BAD_REQUEST: "Error in request from click",
     TRANSACTION_CANCELLED: "Transaction cancelled",
 }
-# Content type switch (verify M3): when the sandbox posts JSON, it is parsed with parse_int=str/parse_float=str and
+# Content type switch (verify M3): when the sandbox posts JSON, it is parsed with
+# parse_int=str/parse_float=str and
 # string values are required, so the signed strings are never re-serialised.
 CLICK_ACCEPT_JSON: Final = False
 # What an unexpected exception answers: HTTP 500 (everything rolled back; Click retries).
@@ -116,7 +119,8 @@ def parse_amount(value: str) -> int | None:
 
 def fingerprint(params: Mapping[str, str]) -> str:
     """SHA-256 over the semantic fields (never ``sign_time``, ``sign_string``, ``error_note``,
-    ``click_paydoc_id``): a plain or re-signed retry has the same fingerprint, a conflicting replay does not."""
+    ``click_paydoc_id``): a plain or re-signed retry has the same fingerprint, a conflicting replay does
+    not."""
     canonical = "\x1f".join(f"{name}={params.get(name, '')}" for name in FINGERPRINT_FIELDS)
     return hashlib.sha256(canonical.encode()).hexdigest()
 

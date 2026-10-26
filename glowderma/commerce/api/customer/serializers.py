@@ -1,4 +1,5 @@
-"""Serializers of the commerce customer routes (customer contract §2.5–§2.8): request bodies with the contract's
+"""Serializers of the commerce customer routes (customer contract §2.5–§2.8): request bodies with the
+contract's
 field codes, and the response shapes (``Cart``, ``DeliveryQuote``, ``PayLink``, ``OrderSummary``,
 ``OrderDetail``) rendered from the dictionaries ``commerce.selectors`` builds."""
 
@@ -14,7 +15,8 @@ QUANTITY_MAX = 99
 NOTE_MAX = 300
 
 
-# --- requests --------------------------------------------------------------------------------------------------
+# --- requests
+# --------------------------------------------------------------------------------------------------
 
 
 class CustomerCartAddSerializer(serializers.Serializer[dict[str, Any]]):
@@ -59,7 +61,8 @@ class CustomerOrderScopeQuerySerializer(serializers.Serializer[dict[str, Any]]):
     )
 
 
-# --- responses ------------------------------------------------------------------------------------------------
+# --- responses
+# ------------------------------------------------------------------------------------------------
 
 
 class CustomerCartLineSerializer(serializers.Serializer[dict[str, Any]]):

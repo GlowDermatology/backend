@@ -1,9 +1,12 @@
 """``POST webhooks/bts/`` (customer contract §2.13.3): BTS status notifications.
 
-Authenticated by the shared secret ``BTS_WEBHOOK_SECRET`` (header ``X-GD-Webhook-Token``, or ``?token=`` when BTS
+Authenticated by the shared secret ``BTS_WEBHOOK_SECRET`` (header ``X-GD-Webhook-Token``, or ``?token=`` when
+BTS
 cannot set headers — never stored: ``WebhookInbox.path`` has no query string); a mismatch answers 401 with a
-bounded ``rejected:`` row. The payload's status is **never trusted**: our ``Shipment`` is found by ``clientId``
-(our order id) or by the tracking number stored on it, and the view re-tracks with **our** stored tracking number;
+bounded ``rejected:`` row. The payload's status is **never trusted**: our ``Shipment`` is found by
+``clientId``
+(our order id) or by the tracking number stored on it, and the view re-tracks with **our** stored tracking
+number;
 the authoritative status goes through ``commerce.services.apply_bts_status(via="webhook")``. The webhook never
 writes ``IntegrationState(bts)`` (polling alone reports the link's health).
 """
@@ -37,7 +40,7 @@ from glowderma.integrations.bts.registry import get_bts
 
 logger = logging.getLogger(__name__)
 PROVIDER = "bts"
-TOKEN_HEADER = "X-GD-Webhook-Token"
+TOKEN_HEADER = "X-GD-Webhook-Token"  # noqa: S105 - a header name
 OK: dict[str, Any] = {"ok": True}
 IGNORED: dict[str, Any] = {"ok": True, "ignored": True}
 REFUSED: dict[str, Any] = {"ok": False}

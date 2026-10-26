@@ -131,7 +131,8 @@ def refund_row(refund: Refund, payment: Payment | None = None) -> RefundRow:
 
 # --- display payment (customer contract §2.8): one ranking, newest id first within a rank -------------------
 # (3) not a late capture and paid/refunded · (2) not a late capture and pending · (1) a late capture (its own
-# status: paid until its refund succeeds, then refunded) · (0) failed. A double payment shows the payment that paid
+# status: paid until its refund succeeds, then refunded) · (0) failed. A double payment shows the payment
+# that paid
 # the order; an order whose only money-taking payment was captured too late shows that late capture.
 
 
@@ -254,7 +255,8 @@ def refunds_by_payment(payment_ids: Iterable[int]) -> dict[int, list[RefundRow]]
 
 
 def _superseded_failure() -> Q:
-    """A ``failed`` refund that needs no action any more (admin contract §2.10, §2.12): a **later** refund of the
+    """A ``failed`` refund that needs no action any more (admin contract §2.10, §2.12): a **later** refund of
+    the
     same payment succeeded (a staff retry returned the money), or the payment is ``refunded``."""
     later_succeeded = Refund.objects.filter(
         payment_id=OuterRef("payment_id"), state=enums.RefundState.SUCCEEDED, pk__gt=OuterRef("pk")

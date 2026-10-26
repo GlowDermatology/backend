@@ -13,7 +13,6 @@ from glowderma.core.seeding import pinned_clock
 from glowderma.delivery.models import Shipment
 from glowderma.loyalty import selectors as loyalty_selectors
 from glowderma.loyalty.models import CashbackHold
-from glowderma.loyalty.services import InsufficientBalance
 from glowderma.payments.models import Payment
 from glowderma.site_config.models import SiteSettings
 

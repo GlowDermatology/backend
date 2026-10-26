@@ -35,7 +35,9 @@ def dev_routes() -> Iterator[None]:
 
 def test_absent_without_the_flag(customer_client: APIClient, customer: Customer) -> None:
     order = place(customer, fulfilment="pickup")
-    response = customer_client.post(f"/api/v1/dev/payments/{order.pk}/simulate/", {"outcome": "success"}, format="json")
+    response = customer_client.post(
+        f"/api/v1/dev/payments/{order.pk}/simulate/", {"outcome": "success"}, format="json"
+    )
     assert response.status_code == 404
 
 
@@ -49,12 +51,16 @@ def test_absent_under_the_production_posture() -> None:
 
 
 @pytest.mark.parametrize("provider", ["click", "payme"])
-def test_simulate_success(dev_routes: None, customer_client: APIClient, customer: Customer, provider: str) -> None:
+def test_simulate_success(
+    dev_routes: None, customer_client: APIClient, customer: Customer, provider: str
+) -> None:
     seed_policies()
     order = place(customer, fulfilment="pickup", provider=provider)
     _fresh(order)
     response = customer_client.post(
-        f"/api/v1/dev/payments/{order.pk}/simulate/", {"outcome": "success", "provider": provider}, format="json"
+        f"/api/v1/dev/payments/{order.pk}/simulate/",
+        {"outcome": "success", "provider": provider},
+        format="json",
     )
     assert response.status_code == 200, response.json()
     body = response.json()
@@ -66,14 +72,23 @@ def test_simulate_success(dev_routes: None, customer_client: APIClient, customer
     assert order.status == "processing"
 
 
-def test_simulate_failure_and_ownership(dev_routes: None, customer_client: APIClient, customer: Customer) -> None:
+def test_simulate_failure_and_ownership(
+    dev_routes: None, customer_client: APIClient, customer: Customer
+) -> None:
     order = place(customer, fulfilment="pickup")
     _fresh(order)
-    body = customer_client.post(f"/api/v1/dev/payments/{order.pk}/simulate/", {"outcome": "fail"}, format="json").json()
+    body = customer_client.post(
+        f"/api/v1/dev/payments/{order.pk}/simulate/", {"outcome": "fail"}, format="json"
+    ).json()
     assert body["steps"][-1]["response"]["error"] == -9
     assert Payment.objects.get(order=order).status == "failed"
     other = place(shopper(), fulfilment="pickup")
-    assert customer_client.post(f"/api/v1/dev/payments/{other.pk}/simulate/", {"outcome": "fail"}, format="json").status_code == 404
+    assert (
+        customer_client.post(
+            f"/api/v1/dev/payments/{other.pk}/simulate/", {"outcome": "fail"}, format="json"
+        ).status_code
+        == 404
+    )
 
 
 def _fresh(order: Order) -> None:

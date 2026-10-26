@@ -12,7 +12,7 @@ import pytest
 from rest_framework.test import APIClient
 
 from glowderma.accounts.models import Customer
-from glowderma.commerce import services
+from glowderma.commerce import selectors, services
 from glowderma.commerce.models import Order, OrderEvent
 from glowderma.commerce.tests.support import admin, place, seed_policies, shopper
 from glowderma.commerce.tests.webhook_support import at, ms, payme, prepare, real_now, ref, tiyin
@@ -23,12 +23,14 @@ from glowderma.payments.models import Payment
 pytestmark = pytest.mark.django_db
 
 
-def key() -> dict[str, str]:
+def key() -> dict[str, Any]:
     return {"HTTP_IDEMPOTENCY_KEY": str(uuid.uuid4())}
 
 
 def pay(client: APIClient, order: Order, provider: str | None = None, **extra: Any) -> Any:
-    return client.post(f"/api/v1/orders/{order.pk}/pay/", {"provider": provider}, format="json", **{**key(), **extra})
+    return client.post(
+        f"/api/v1/orders/{order.pk}/pay/", {"provider": provider}, format="json", **{**key(), **extra}
+    )
 
 
 def cancel(client: APIClient, order: Order) -> Any:
@@ -70,14 +72,18 @@ def test_pay_payme_url_and_switch(customer_client: APIClient, customer: Customer
     assert body["provider"] == "payme" and body["payment_id"] != old.pk
     encoded = body["web_url"].removeprefix("https://checkout.paycom.uz/")
     decoded = base64.b64decode(encoded).decode()
-    assert f"ac.order_id={ref(order)}" in decoded and f"a={order.total * 100}" in decoded and "l=ru" in decoded
+    assert (
+        f"ac.order_id={ref(order)}" in decoded and f"a={order.total * 100}" in decoded and "l=ru" in decoded
+    )
     assert "c=https%3A%2F%2Fglowderma.uz%2Fpay%2Freturn%3Forder_id%3D" in decoded
     order.refresh_from_db()
     assert order.payment_provider == "payme"
     assert not OrderEvent.objects.filter(order=order, type="payment_failed").exists()
 
 
-def test_same_provider_reuses_the_row_while_click_is_open(customer_client: APIClient, customer: Customer, now: datetime) -> None:
+def test_same_provider_reuses_the_row_while_click_is_open(
+    customer_client: APIClient, customer: Customer, now: datetime
+) -> None:
     order = place(customer, fulfilment="pickup", when=now)
     with at(now + timedelta(seconds=10)):
         assert prepare(order)["error"] == 0
@@ -87,14 +93,19 @@ def test_same_provider_reuses_the_row_while_click_is_open(customer_client: APICl
         assert pay(customer_client, order, "click").json()["payment_id"] == payment.pk
         detail = customer_client.get(f"/api/v1/me/orders/{order.pk}/").json()
     assert detail["actions"]["pay"] is True and detail["payment"]["in_progress"] is True
-    assert detail["payment"]["in_progress_label"] == "To‘lov tekshirilmoqda" and detail["actions"]["cancel"] is False
+    assert (
+        detail["payment"]["in_progress_label"] == "To‘lov tekshirilmoqda"
+        and detail["actions"]["cancel"] is False
+    )
     with at(now + timedelta(seconds=300)):  # open but no longer in flight
         assert pay(customer_client, order, "click").json()["payment_id"] == payment.pk
     payment.refresh_from_db()
     assert payment.updated_at == stamp
 
 
-def test_switch_while_click_is_in_flight(customer_client: APIClient, customer: Customer, now: datetime) -> None:
+def test_switch_while_click_is_in_flight(
+    customer_client: APIClient, customer: Customer, now: datetime
+) -> None:
     order = place(customer, fulfilment="pickup", when=now)
     with at(now + timedelta(seconds=10)):
         assert prepare(order)["error"] == 0
@@ -108,7 +119,9 @@ def test_switch_while_click_is_in_flight(customer_client: APIClient, customer: C
         assert pay(customer_client, order, "payme").status_code == 200
 
 
-def test_payme_state_1_blocks_a_switch_and_the_pay_action(customer_client: APIClient, customer: Customer, now: datetime) -> None:
+def test_payme_state_1_blocks_a_switch_and_the_pay_action(
+    customer_client: APIClient, customer: Customer, now: datetime
+) -> None:
     order = place(customer, fulfilment="pickup", provider="payme", when=now)
     with at(now + timedelta(seconds=10)):
         assert payme(sandbox.create("payme-1", ref(order), tiyin(order), ms(now)))["result"]["state"] == 1
@@ -118,7 +131,9 @@ def test_payme_state_1_blocks_a_switch_and_the_pay_action(customer_client: APICl
     assert detail["actions"]["pay"] is False and detail["actions"]["cancel"] is True
 
 
-def test_not_payable_answers_order_expired_without_a_write(customer_client: APIClient, customer: Customer, now: datetime) -> None:
+def test_not_payable_answers_order_expired_without_a_write(
+    customer_client: APIClient, customer: Customer, now: datetime
+) -> None:
     order = place(customer, fulfilment="pickup", when=now)
     expires = order.reservation_expires_at
     assert expires is not None
@@ -131,7 +146,9 @@ def test_not_payable_answers_order_expired_without_a_write(customer_client: APIC
 
 def test_already_paid_and_not_payable(customer_client: APIClient, customer: Customer, now: datetime) -> None:
     order = place(customer, fulfilment="pickup", when=now)
-    services.mark_paid(order.pk, Payment.objects.get(order=order).pk, "click", "CLK-1", raw={"click_paydoc_id": "77"})
+    services.mark_paid(
+        order.pk, Payment.objects.get(order=order).pk, "click", "CLK-1", raw={"click_paydoc_id": "77"}
+    )
     assert pay(customer_client, order).json()["code"] == "already_paid"
     services.cancel_order(order.pk, "Mijoz so‘rovi", admin().pk)  # the refund is being made
     response = pay(customer_client, order)
@@ -140,7 +157,9 @@ def test_already_paid_and_not_payable(customer_client: APIClient, customer: Cust
     assert pay(customer_client, other).status_code == 404
 
 
-def test_pay_refuses_a_provider_that_cannot_take_payments(customer_client: APIClient, customer: Customer, now: datetime) -> None:
+def test_pay_refuses_a_provider_that_cannot_take_payments(
+    customer_client: APIClient, customer: Customer, now: datetime
+) -> None:
     from django.test import override_settings
 
     order = place(customer, fulfilment="pickup", when=now)
@@ -153,10 +172,13 @@ def test_pay_refuses_a_provider_that_cannot_take_payments(customer_client: APICl
     }
 
 
-# --- customer cancel -----------------------------------------------------------------------------------------
+# --- customer cancel
+# -----------------------------------------------------------------------------------------
 
 
-def test_cancel_an_awaiting_click_order(customer_client: APIClient, customer: Customer, now: datetime) -> None:
+def test_cancel_an_awaiting_click_order(
+    customer_client: APIClient, customer: Customer, now: datetime
+) -> None:
     order = place(customer, fulfilment="pickup", when=now)
     response = cancel(customer_client, order)
     assert response.status_code == 200
@@ -177,10 +199,15 @@ def test_cancel_an_awaiting_click_order(customer_client: APIClient, customer: Cu
     assert detail["timeline"][0]["subtitle"] == "Siz bekor qildingiz"
     refused = cancel(customer_client, order)
     assert refused.status_code == 409 and refused.json()["code"] == "not_cancellable"
-    assert refused.json()["message"] == "Bu buyurtmani ilovadan bekor qilib bo‘lmaydi. Sotuvchi bilan bog‘laning."
+    assert (
+        refused.json()["message"]
+        == "Bu buyurtmani ilovadan bekor qilib bo‘lmaydi. Sotuvchi bilan bog‘laning."
+    )
 
 
-def test_cancel_leaves_a_payme_state_1_transaction_pending(customer_client: APIClient, customer: Customer, now: datetime) -> None:
+def test_cancel_leaves_a_payme_state_1_transaction_pending(
+    customer_client: APIClient, customer: Customer, now: datetime
+) -> None:
     order = place(customer, fulfilment="pickup", provider="payme", when=now)
     with at(now + timedelta(seconds=10)):
         payme(sandbox.create("payme-1", ref(order), tiyin(order), ms(now)))
@@ -188,7 +215,9 @@ def test_cancel_leaves_a_payme_state_1_transaction_pending(customer_client: APIC
     assert Payment.objects.get(order=order).status == "pending"
 
 
-def test_cancel_while_click_is_in_flight(customer_client: APIClient, customer: Customer, now: datetime) -> None:
+def test_cancel_while_click_is_in_flight(
+    customer_client: APIClient, customer: Customer, now: datetime
+) -> None:
     order = place(customer, fulfilment="pickup", when=now)
     with at(now + timedelta(seconds=10)):
         prepare(order)
@@ -203,4 +232,4 @@ def test_cancel_while_click_is_in_flight(customer_client: APIClient, customer: C
 def test_cancel_of_another_customers_order(customer_client: APIClient, now: datetime) -> None:
     other = place(shopper(), fulfilment="pickup", when=now)
     assert cancel(customer_client, other).status_code == 404
-    assert services.selectors.customer_inflight_order(other.customer_id) is None
+    assert selectors.customer_inflight_order(other.customer_id) is None

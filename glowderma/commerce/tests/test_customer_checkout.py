@@ -1,4 +1,5 @@
-"""``delivery/calculate/`` and ``orders/checkout/`` (customer contract §2.6, §2.7.1): every check row in order,
+"""``delivery/calculate/`` and ``orders/checkout/`` (customer contract §2.6, §2.7.1): every check row in
+order,
 the snapshots, the replay, and the rule that no BTS call runs while a row lock is held."""
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ CALCULATE = "/api/v1/delivery/calculate/"
 SCENARIO = {"FAKE_SCENARIO_HEADER_ENABLED": True}
 
 
-def key() -> dict[str, str]:
+def key() -> dict[str, Any]:
     return {"HTTP_IDEMPOTENCY_KEY": str(uuid.uuid4())}
 
 
@@ -49,10 +50,17 @@ def checkout(client: APIClient, body: dict[str, Any], **extra: Any) -> Any:
 
 
 def pickup_body(total: int, **over: Any) -> dict[str, Any]:
-    return {"fulfilment": "pickup", "address_id": None, "payment_provider": "click", "expected_total": total, **over}
+    return {
+        "fulfilment": "pickup",
+        "address_id": None,
+        "payment_provider": "click",
+        "expected_total": total,
+        **over,
+    }
 
 
-# --- delivery/calculate/ ----------------------------------------------------------------------------------------
+# --- delivery/calculate/
+# ----------------------------------------------------------------------------------------
 
 
 def test_calculate_delivery_and_pickup(customer_client: APIClient, customer: Customer) -> None:
@@ -71,7 +79,9 @@ def test_calculate_delivery_and_pickup(customer_client: APIClient, customer: Cus
     SiteSettings.objects.filter(pk=SiteSettings.load().pk).update(pickup_address_uz="Toshkent, Yunusobod")
     pickup = customer_client.post(CALCULATE, {"fulfilment": "pickup"}, format="json").json()
     assert pickup["delivery_fee"] == 0 and pickup["pickup_address"] == "Toshkent, Yunusobod"
-    assert pickup["cashback_to_use"] == 0 and pickup["expected_total"] == 600_000 and pickup["weight_g"] is None
+    assert (
+        pickup["cashback_to_use"] == 0 and pickup["expected_total"] == 600_000 and pickup["weight_g"] is None
+    )
     pair = customer_client.post(
         CALCULATE, {"fulfilment": "delivery", "region_code": "13", "city_code": "1301"}, format="json"
     ).json()
@@ -87,15 +97,17 @@ def test_calculate_address_errors(customer_client: APIClient, customer: Customer
         "message": "Yetkazib berish manzilini tanlang.",
     }
     foreign = address(shopper())
-    other = customer_client.post(CALCULATE, {"fulfilment": "delivery", "address_id": foreign.pk}, format="json")
+    other = customer_client.post(
+        CALCULATE, {"fulfilment": "delivery", "address_id": foreign.pk}, format="json"
+    )
     assert other.json()["errors"][0]["code"] == "does_not_exist"
     assert other.json()["errors"][0]["message"] == "Manzil topilmadi."
     unknown = address(customer, "77", "7701")
     bad = customer_client.post(CALCULATE, {"fulfilment": "delivery", "address_id": unknown.pk}, format="json")
     assert bad.json()["errors"][0]["code"] == "address_incomplete"
-    assert customer_client.post(CALCULATE, {"fulfilment": "drone"}, format="json").json()["errors"][0]["code"] == (
-        "invalid_choice"
-    )
+    assert customer_client.post(CALCULATE, {"fulfilment": "drone"}, format="json").json()["errors"][0][
+        "code"
+    ] == ("invalid_choice")
 
 
 def test_calculate_bts_refusals_and_empty_cart(customer_client: APIClient, customer: Customer) -> None:
@@ -152,10 +164,13 @@ def test_calculate_numbers_equal_checkout(customer_client: APIClient, customer: 
     assert order.total == order.delivery_fee  # cashback covers the items, never the delivery (C-4)
 
 
-# --- checkout ---------------------------------------------------------------------------------------------------
+# --- checkout
+# ---------------------------------------------------------------------------------------------------
 
 
-def test_checkout_creates_the_order_and_empties_the_cart(customer_client: APIClient, customer: Customer) -> None:
+def test_checkout_creates_the_order_and_empties_the_cart(
+    customer_client: APIClient, customer: Customer
+) -> None:
     cream = product(price=312_000, stock=5, image=True)
     spf = product(price=240_000, stock=5, promo=True)
     fill(customer, (cream, 1), (spf, 2))
@@ -172,7 +187,11 @@ def test_checkout_creates_the_order_and_empties_the_cart(customer_client: APICli
     response = customer_client.post(CHECKOUT, body, format="json", **headers)
     assert response.status_code == 201, response.json()
     detail = response.json()
-    assert detail["status"] == "awaiting_payment" and detail["actions"] == {"pay": True, "cancel": True, "reorder": False}
+    assert detail["status"] == "awaiting_payment" and detail["actions"] == {
+        "pay": True,
+        "cancel": True,
+        "reorder": False,
+    }
     assert detail["pay_by"] is not None and detail["customer_note"] == "Soat 18:00 dan keyin"
     assert detail["items"][0]["image_url"].startswith("http://127.0.0.1:8000/media/products/")
     order = Order.objects.get(pk=detail["id"])
@@ -223,7 +242,10 @@ def test_checkout_rows_3_4_delivery(customer_client: APIClient, customer: Custom
     fill(customer, (product(), 1))
     foreign = address(shopper())
     body = {"fulfilment": "delivery", "payment_provider": "click", "expected_total": 125_000}
-    assert checkout(customer_client, {**body, "address_id": foreign.pk}).json()["errors"][0]["code"] == "does_not_exist"
+    assert (
+        checkout(customer_client, {**body, "address_id": foreign.pk}).json()["errors"][0]["code"]
+        == "does_not_exist"
+    )
     unknown = address(customer, "77", "7701")
     assert checkout(customer_client, {**body, "address_id": unknown.pk}).json()["errors"][0]["code"] == (
         "address_incomplete"
@@ -236,7 +258,9 @@ def test_checkout_rows_3_4_delivery(customer_client: APIClient, customer: Custom
             HTTP_X_GD_FAKE_SCENARIO=json.dumps({"bts": {"quote": "rejected"}}),
         )
         down = checkout(
-            customer_client, {**body, "address_id": own.pk}, HTTP_X_GD_FAKE_SCENARIO=json.dumps({"bts": {"quote": "down"}})
+            customer_client,
+            {**body, "address_id": own.pk},
+            HTTP_X_GD_FAKE_SCENARIO=json.dumps({"bts": {"quote": "down"}}),
         )
     assert rejected.status_code == 409 and rejected.json()["code"] == "delivery_unavailable"
     assert down.status_code == 503
@@ -262,7 +286,7 @@ def test_checkout_row_7_out_of_stock_lines(customer_client: APIClient, customer:
     gone = product(stock=0)
     fine = product(stock=9)
     fill(customer, (hidden, 1), (scarce, 3), (gone, 1), (fine, 1))
-    Category.objects.filter(pk=hidden.category_id).update(is_active=False)
+    Category.objects.filter(products=hidden).update(is_active=False)
     response = checkout(customer_client, pickup_body(1), HTTP_ACCEPT_LANGUAGE="ru")
     assert response.status_code == 409 and response.json()["code"] == "OUT_OF_STOCK"
     assert response.json()["message"] == "Некоторых товаров недостаточно."
@@ -290,7 +314,12 @@ def test_checkout_rows_8_9_10_cashback_and_price(customer_client: APIClient, cus
     changed = checkout(customer_client, pickup_body(9_999))
     assert changed.status_code == 409 and changed.json()["code"] == "price_changed"
     details = changed.json()["details"]
-    assert (details["total"], details["items_subtotal"], details["delivery_fee"], details["cashback_used"]) == (
+    assert (
+        details["total"],
+        details["items_subtotal"],
+        details["delivery_fee"],
+        details["cashback_used"],
+    ) == (
         10_000,
         10_000,
         0,
@@ -308,7 +337,10 @@ def test_checkout_rows_8_9_10_cashback_and_price(customer_client: APIClient, cus
 
 def test_checkout_row_0_online_sales_off(customer_client: APIClient, customer: Customer) -> None:
     fill(customer, (product(), 1))
-    with override_settings(DEV_FEATURES_ALLOWED=False, BILLZ_MODE="fake"), mock.patch.object(FakeBts, "quote") as quote:
+    with (
+        override_settings(DEV_FEATURES_ALLOWED=False, BILLZ_MODE="fake"),
+        mock.patch.object(FakeBts, "quote") as quote,
+    ):
         response = checkout(customer_client, {"fulfilment": "drone"}, HTTP_ACCEPT_LANGUAGE="en")
     assert response.status_code == 409 and response.json()["code"] == "online_sales_unavailable"
     assert response.json()["message"].startswith("Online ordering is temporarily unavailable")
@@ -333,13 +365,20 @@ def test_no_bts_call_while_a_row_lock_is_held(customer_client: APIClient, custom
     with mock.patch.object(services, "lock_customer", lock), mock.patch.object(FakeBts, "quote", quote):
         response = checkout(
             customer_client,
-            {"fulfilment": "delivery", "address_id": own.pk, "payment_provider": "payme", "expected_total": 125_000},
+            {
+                "fulfilment": "delivery",
+                "address_id": own.pk,
+                "payment_provider": "payme",
+                "expected_total": 125_000,
+            },
         )
     assert response.status_code == 201, response.json()
     assert calls == ["quote", "lock"]
 
 
-def test_checkout_refuses_a_deleted_customer_under_the_lock(customer_client: APIClient, customer: Customer) -> None:
+def test_checkout_refuses_a_deleted_customer_under_the_lock(
+    customer_client: APIClient, customer: Customer
+) -> None:
     fill(customer, (product(), 1))
     real_lock = services.lock_customer
 

@@ -1,11 +1,14 @@
 """The ``WebhookInbox`` writer of the provider callbacks (customer contract §2.13.0, T5).
 
 Every delivery is stored with how it was answered, in the transaction of its effect, **last**: a first
-delivery under its own ``event_key``, a replay of a key that already has a row under ``dup:{event_key}:{uuid4}``,
+delivery under its own ``event_key``, a replay of a key that already has a row under
+``dup:{event_key}:{uuid4}``,
 an authentication/signature failure under ``rejected:{uuid4}`` as a bounded row (allow-listed headers, the
-payload cut to 1 KiB of its JSON text, no raw body) and at most ``WEBHOOK_REJECTED_PER_IP_PER_MIN`` such rows per
+payload cut to 1 KiB of its JSON text, no raw body) and at most ``WEBHOOK_REJECTED_PER_IP_PER_MIN`` such rows
+per
 IP per minute (beyond that nothing is stored and one sampled WARNING per IP per minute carries the count).
-Credentials (``Authorization``, tokens, the BTS secret) never reach a stored row; ``path`` has no query string.
+Credentials (``Authorization``, tokens, the BTS secret) never reach a stored row; ``path`` has no query
+string.
 """
 
 from __future__ import annotations
@@ -23,6 +26,7 @@ from django.core.cache import cache
 from django.core.serializers.json import DjangoJSONEncoder
 
 from glowderma.core import timeutils
+from glowderma.integrations.click import protocol as click_protocol
 from glowderma.integrations.models import WebhookInbox
 
 logger = logging.getLogger(__name__)
@@ -34,6 +38,12 @@ OUTCOME_ACCEPTED = "accepted"
 OUTCOME_DUPLICATE = "duplicate"
 OUTCOME_REJECTED = "rejected"
 OUTCOME_ERROR = "error"
+
+
+def semantic_fingerprint(params: Any) -> str:
+    """The Click duplicate check (§2.13.0): SHA-256 over the semantic fields, never ``sign_time``,
+    ``sign_string``, ``error_note`` or ``click_paydoc_id``."""
+    return click_protocol.fingerprint(params if isinstance(params, dict) else {})
 
 
 def client_ip(request: Any) -> str | None:
@@ -93,7 +103,8 @@ def store_delivery(
     raw_body: str = "",
     started: float,
 ) -> WebhookInbox:
-    """An authenticated delivery: under ``event_key``, or ``dup:{event_key}:{uuid4}`` when the key already has a
+    """An authenticated delivery: under ``event_key``, or ``dup:{event_key}:{uuid4}`` when the key already
+    has a
     row (never a second row under one key); a duplicate keeps no raw body."""
     key = event_key
     if exists(provider, event_key) is not None:
@@ -113,7 +124,8 @@ def store_delivery(
 def store_conflict(
     provider: str, request: Any, payload: Any, *, status: int, body: Any, error_code: str, started: float
 ) -> WebhookInbox:
-    """An authenticated delivery refused for a conflicting fingerprint: a ``rejected:{uuid4}`` row (uncapped)."""
+    """An authenticated delivery refused for a conflicting fingerprint: a ``rejected:{uuid4}`` row
+    (uncapped)."""
     return WebhookInbox.objects.create(
         **_base(provider, request, started),
         event_key=f"rejected:{uuid.uuid4().hex}",
@@ -135,7 +147,8 @@ def store_rejected(
     provider: str, request: Any, payload: Any, *, status: int, body: Any, error_code: str, started: float
 ) -> WebhookInbox | None:
     """An authentication/signature failure (or a fake provider under the production settings): a bounded
-    ``rejected:{uuid4}`` row, at most ``WEBHOOK_REJECTED_PER_IP_PER_MIN`` per IP per minute (``None`` when the cap
+    ``rejected:{uuid4}`` row, at most ``WEBHOOK_REJECTED_PER_IP_PER_MIN`` per IP per minute (``None`` when
+    the cap
     is reached: nothing stored, one sampled WARNING per IP per minute)."""
     ip = client_ip(request) or "-"
     minute = int(timeutils.now().timestamp() // 60)

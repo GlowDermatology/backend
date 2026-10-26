@@ -6,6 +6,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import timedelta
+from typing import Any
 from unittest import mock
 
 import pytest
@@ -30,7 +31,7 @@ pytestmark = pytest.mark.django_db
 MIXED = {"DEV_FEATURES_ALLOWED": False, "BTS_MODE": "fake", "BILLZ_MODE": "fake"}
 
 
-def key() -> dict[str, str]:
+def key() -> dict[str, Any]:
     return {"HTTP_IDEMPOTENCY_KEY": str(uuid.uuid4())}
 
 
@@ -42,7 +43,9 @@ def fill(customer: Customer) -> None:
 def test_checkout_and_pay_refuse_a_fake_provider(customer_client: APIClient, customer: Customer) -> None:
     fill(customer)
     body = {"fulfilment": "pickup", "payment_provider": "click", "expected_total": 100_000}
-    with override_settings(DEV_FEATURES_ALLOWED=False, CLICK_MODE="fake", PAYME_MODE="fake", BILLZ_MODE="live"):
+    with override_settings(
+        DEV_FEATURES_ALLOWED=False, CLICK_MODE="fake", PAYME_MODE="fake", BILLZ_MODE="live"
+    ):
         response = customer_client.post("/api/v1/orders/checkout/", body, format="json", **key())
     assert response.status_code == 400 and response.json()["errors"][0]["field"] == "payment_provider"
 
@@ -60,7 +63,12 @@ def test_mixed_posture_delivery_is_not_offered(customer_client: APIClient, custo
         )
         refused = customer_client.post(
             "/api/v1/orders/checkout/",
-            {"fulfilment": "delivery", "address_id": own.pk, "payment_provider": "click", "expected_total": 125_000},
+            {
+                "fulfilment": "delivery",
+                "address_id": own.pk,
+                "payment_provider": "click",
+                "expected_total": 125_000,
+            },
             format="json",
             **key(),
         )
@@ -111,11 +119,17 @@ def test_online_selling_off(customer_client: APIClient, customer: Customer) -> N
     with override_settings(**MIXED), mock.patch.object(FakeBts, "quote") as quote:
         for lang, text in (("uz", "Onlayn buyurtma"), ("ru", "Онлайн-заказ"), ("en", "Online ordering")):
             response = customer_client.post(
-                "/api/v1/cart/items/", {"product_id": item.pk}, format="json", HTTP_ACCEPT_LANGUAGE=lang, **key()
+                "/api/v1/cart/items/",
+                {"product_id": item.pk},
+                format="json",
+                HTTP_ACCEPT_LANGUAGE=lang,
+                **key(),
             )
             assert response.status_code == 409 and response.json()["code"] == "online_sales_unavailable"
             assert response.json()["message"].startswith(text)
-        patched = customer_client.patch(f"/api/v1/cart/items/{line.product_id}/", {"quantity": 2}, format="json")
+        patched = customer_client.patch(
+            f"/api/v1/cart/items/{line.product_id}/", {"quantity": 2}, format="json"
+        )
         cart = customer_client.get("/api/v1/cart/").json()
         checkout = customer_client.post(
             "/api/v1/orders/checkout/",

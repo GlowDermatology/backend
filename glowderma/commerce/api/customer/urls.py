@@ -1,6 +1,8 @@
-"""Customer routes of `commerce` (customer contract §2.0 rows 24–35); mounted by ``config.urls`` at ``api/v1/``.
+"""Customer routes of `commerce` (customer contract §2.0 rows 24–35); mounted by ``config.urls`` at
+``api/v1/``.
 
-``delivery/calculate/`` is served here (it reads the cart, loyalty and ``cashback_max``); ``delivery/regions/``
+``delivery/calculate/`` is served here (it reads the cart, loyalty and ``cashback_max``);
+``delivery/regions/``
 is ``delivery``'s."""
 
 from django.urls import URLPattern, URLResolver, path

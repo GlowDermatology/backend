@@ -15,10 +15,10 @@ from glowderma.commerce.models import Order, OrderEvent
 from glowderma.commerce.tests.conftest import _REAL_NOW
 from glowderma.commerce.tests.support import (
     AT,
-    pending_payment_id,
     admin,
     credit,
     pay,
+    pending_payment_id,
     place,
     product,
     seed_policies,

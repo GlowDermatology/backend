@@ -1,4 +1,5 @@
-"""commerce.0004 / 0005 and the OrderItem image path data step (plan §3 P2 models; the frontend's image bug)."""
+"""commerce.0004 / 0005 and the OrderItem image path data step (plan §3 P2 models; the frontend's image
+bug)."""
 
 from __future__ import annotations
 

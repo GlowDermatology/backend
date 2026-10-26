@@ -51,7 +51,8 @@ def _create(order: Order, now: datetime, txn: str = TXN, *, offset: int = 60) ->
         return payme(sandbox.create(txn, ref(order), tiyin(order), ms(now)))
 
 
-# --- rows 1-2: auth and envelope -------------------------------------------------------------------------------
+# --- rows 1-2: auth and envelope
+# -------------------------------------------------------------------------------
 
 
 def test_row_1_auth(order: Order) -> None:
@@ -71,7 +72,8 @@ def test_row_2_envelope_errors(order: Order) -> None:
     assert response.status_code == 200 and response.json()["error"]["code"] == -32300
 
 
-# --- rows 3-7: CheckPerformTransaction --------------------------------------------------------------------------
+# --- rows 3-7: CheckPerformTransaction
+# --------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize("variant", ["unknown", "wrong_hmac", "missing"])
@@ -87,7 +89,11 @@ def test_row_3_account_errors(order: Order, variant: str) -> None:
 
 def test_row_3_account_field_setting(order: Order) -> None:
     with override_settings(PAYME_ACCOUNT_FIELD="invoice"):
-        ok = payme(sandbox.request("CheckPerformTransaction", {"amount": tiyin(order), "account": {"invoice": ref(order)}}))
+        ok = payme(
+            sandbox.request(
+                "CheckPerformTransaction", {"amount": tiyin(order), "account": {"invoice": ref(order)}}
+            )
+        )
         assert ok["result"] == {"allow": True}
         bad = payme(sandbox.request("CheckPerformTransaction", {"amount": tiyin(order), "account": {}}))
         assert bad["error"]["data"] == "invoice"
@@ -128,7 +134,8 @@ def test_row_7_valid(order: Order) -> None:
     assert rows("payme")[0].raw_body == ""  # read-only methods keep no raw body
 
 
-# --- rows 8-12: CreateTransaction --------------------------------------------------------------------------------
+# --- rows 8-12: CreateTransaction
+# --------------------------------------------------------------------------------
 
 
 def test_rows_8_9_create_and_replay(order: Order, now: datetime) -> None:
@@ -163,7 +170,8 @@ def test_row_12_new_id_after_expiry_within_the_grace(order: Order) -> None:
         assert _code(payme(sandbox.create(TXN, ref(order), tiyin(order), ms(expires)))) == -31008
 
 
-# --- rows 13-16: PerformTransaction ------------------------------------------------------------------------------
+# --- rows 13-16: PerformTransaction
+# ------------------------------------------------------------------------------
 
 
 def test_row_13_unknown_id(order: Order) -> None:
@@ -192,7 +200,8 @@ def test_row_16_perform_within_the_grace(order: Order, now: datetime) -> None:
         assert payme(sandbox.perform(TXN))["result"]["state"] == 2
 
 
-# --- rows 17-21: CancelTransaction --------------------------------------------------------------------------------
+# --- rows 17-21: CancelTransaction
+# --------------------------------------------------------------------------------
 
 
 def _performed(order: Order, now: datetime) -> None:
@@ -233,7 +242,8 @@ def test_rows_19_20_21_cancel_in_state_1(order: Order, now: datetime) -> None:
     assert OrderEvent.objects.filter(order=order, type="payment_failed").count() == 1
 
 
-# --- rows 22-26 ---------------------------------------------------------------------------------------------------
+# --- rows 22-26
+# ---------------------------------------------------------------------------------------------------
 
 
 def test_row_22_timeout_cancels_on_the_next_touch(order: Order, now: datetime) -> None:

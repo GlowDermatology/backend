@@ -15,7 +15,6 @@ from datetime import date, datetime, timedelta
 from typing import Any, Protocol, TypedDict
 
 from django.conf import settings
-
 from django.db.models import Count, IntegerField, OuterRef, Q, QuerySet, Subquery, Sum, TextField, Value
 from django.db.models.functions import Cast, Coalesce, TruncDay, TruncHour
 
@@ -390,7 +389,8 @@ __all__ = [
 ]
 
 
-# === M2 customer API (customer contract §2.5–§2.8, §4; plan §3 P2) ===========================================
+# === M2 customer API (customer contract §2.5–§2.8, §4; plan §3 P2)
+# ===========================================
 
 _S = enums.OrderStatus
 _E = enums.OrderEventType
@@ -432,7 +432,8 @@ class OrderLike(Protocol):
     def reservation_expires_at(self) -> datetime | None: ...
 
 
-# --- payment definitions (customer contract §2.7.2: one definition for the app, the jobs and every callback) --
+# --- payment definitions (customer contract §2.7.2: one definition for the app, the jobs and every callback)
+# --
 
 
 def attached_at(payment: PaymentLike) -> datetime | None:
@@ -454,7 +455,8 @@ def attached_at(payment: PaymentLike) -> datetime | None:
 
 
 def is_open(payment: PaymentLike) -> bool:
-    """A ``pending`` payment with an attached, uncompleted transaction (Click: no Complete yet; Payme: state 1)."""
+    """A ``pending`` payment with an attached, uncompleted transaction (Click: no Complete yet; Payme: state
+    1)."""
     if payment.status != enums.PaymentStatus.PENDING or attached_at(payment) is None:
         return False
     state = payment.provider_state if isinstance(payment.provider_state, dict) else {}
@@ -475,8 +477,10 @@ def in_flight(payment: PaymentLike, now: datetime) -> bool:
 
 
 def is_payable(order: OrderLike, payment: PaymentLike | None, now: datetime, *, attaching: bool) -> bool:
-    """``awaiting_payment`` ∧ (``now < reservation_expires_at`` ∨ (completing a transaction attached before it,
-    within ``PAYMENT_IN_FLIGHT_GRACE_SECONDS``)). Starting a transaction (``attaching``) never gets the grace."""
+    """``awaiting_payment`` ∧ (``now < reservation_expires_at`` ∨ (completing a transaction attached before
+    it,
+    within ``PAYMENT_IN_FLIGHT_GRACE_SECONDS``)). Starting a transaction (``attaching``) never gets the
+    grace."""
     expires = order.reservation_expires_at
     if order.status != _S.AWAITING_PAYMENT or expires is None:
         return False
@@ -504,7 +508,8 @@ def inflight_payment(order_id: int, now: datetime | None = None) -> payment_sele
 
 
 def customer_inflight_order(customer_id: int) -> int | None:
-    """The customer's ``awaiting_payment`` order whose **Click** payment is in flight (customer contract §2.2.3
+    """The customer's ``awaiting_payment`` order whose **Click** payment is in flight (customer contract
+    §2.2.3
     step 1: ``DELETE me/`` answers 409 ``payment_in_progress``), else ``None``."""
     now = timeutils.now()
     for order_id in Order.objects.filter(customer_id=customer_id, status=_S.AWAITING_PAYMENT).values_list(
@@ -547,7 +552,8 @@ def cashback_max(items_subtotal: int, delivery_fee: int, available: int | None) 
     return max(0, cap)
 
 
-# --- texts ----------------------------------------------------------------------------------------------------
+# --- texts
+# ----------------------------------------------------------------------------------------------------
 
 
 def product_name(product: Product, lang: str) -> str:
@@ -575,7 +581,8 @@ def pickup_address(lang: str) -> str:
     return str(getattr(site, f"pickup_address_{lang}", "") or site.pickup_address_uz or "")
 
 
-# --- cart (customer contract §2.5) ------------------------------------------------------------------------------
+# --- cart (customer contract §2.5)
+# ------------------------------------------------------------------------------
 
 
 def max_quantity(available: int) -> int:
@@ -666,7 +673,8 @@ def cart_view(customer_id: int, lang: str, *, last_change: dict[str, Any] | None
     }
 
 
-# --- customer orders (customer contract §2.8) ------------------------------------------------------------------
+# --- customer orders (customer contract §2.8)
+# ------------------------------------------------------------------
 
 
 def history_from(customer_id: int) -> datetime | None:
@@ -852,7 +860,8 @@ def _entry(event_type: str, at: datetime, title: str, subtitle: str | None) -> d
 
 def customer_timeline(order: Order, lang: str) -> list[dict[str, Any]]:
     """The customer entries of the order's events, newest first (``at`` desc, ``id`` desc). Hidden and folded
-    types never appear; staff names, notes, Billz ids, BTS failures and refund failures never reach the app."""
+    types never appear; staff names, notes, Billz ids, BTS failures and refund failures never reach the
+    app."""
     events = list(OrderEvent.objects.filter(order=order).order_by("-at", "-id"))
     folded_refunds = {
         event.data.get("refund_id")
@@ -1045,7 +1054,8 @@ def progress(order: Order, lang: str) -> list[dict[str, Any]]:
     return result
 
 
-# --- fake providers holding open money (customer contract §6.14) ------------------------------------------------
+# --- fake providers holding open money (customer contract §6.14)
+# ------------------------------------------------
 
 
 @dataclass(frozen=True, slots=True)

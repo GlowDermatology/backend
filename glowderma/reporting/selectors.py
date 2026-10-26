@@ -159,7 +159,8 @@ def customer_stats(start: datetime, end: datetime) -> dict[str, int]:
 
 def bts_polling_failing() -> bool:
     """``attention.bts_polling_failing`` (admin §2.10, customer contract §2.13.3): the last BTS polling run
-    stopped on transport failures or tracked no parcel (``IntegrationState(bts).consecutive_failures > 0``)."""
+    stopped on transport failures or tracked no parcel (``IntegrationState(bts).consecutive_failures >
+    0``)."""
     state = integration_selectors.provider_state("bts")
     return state is not None and state.consecutive_failures > 0
 

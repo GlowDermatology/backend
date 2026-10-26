@@ -16,8 +16,10 @@ from glowderma.core.models import TimeStampedModel, timestamp_default
 
 # Payment statuses that make a payment "active" for the one-active-per-order partial unique.
 ACTIVE_PAYMENT_STATUSES: tuple[str, ...] = (enums.PaymentStatus.PENDING, enums.PaymentStatus.PAID)
-# ``Payment.error_code`` of a refused capture (customer contract §2.13.0): money a provider took for a payment we
-# did not honour; the row is ``paid`` until its refund succeeds and never counts as the order's active payment.
+# ``Payment.error_code`` of a refused capture (customer contract §2.13.0): money a provider took for a
+# payment we
+# did not honour; the row is ``paid`` until its refund succeeds and never counts as the order's active
+# payment.
 LATE_CAPTURE = "late_capture"
 # Payment statuses that require a provider transaction id (the money moved under that id).
 SETTLED_PAYMENT_STATUSES: tuple[str, ...] = (enums.PaymentStatus.PAID, enums.PaymentStatus.REFUNDED)

@@ -84,7 +84,9 @@ def complete(order: Order, payment_id: int, txn: int = TXN, **overrides: Any) ->
 def payme(body: dict[str, Any] | str, *, key: str | None = None, auth: str | None = None) -> dict[str, Any]:
     raw = body if isinstance(body, str) else json.dumps(body)
     header = auth if auth is not None else payme_sandbox.auth_header(key)
-    response = APIClient().generic("POST", PAYME_URL, raw, content_type="application/json", HTTP_AUTHORIZATION=header)
+    response = APIClient().generic(
+        "POST", PAYME_URL, raw, content_type="application/json", HTTP_AUTHORIZATION=header
+    )
     assert response.status_code == 200, response.content
     return dict(response.json())
 

@@ -21,12 +21,14 @@ CART = "/api/v1/cart/"
 ITEMS = "/api/v1/cart/items/"
 
 
-def key() -> dict[str, str]:
+def key() -> dict[str, Any]:
     return {"HTTP_IDEMPOTENCY_KEY": str(uuid.uuid4())}
 
 
 def add(client: APIClient, product_id: int, quantity: int = 1, **extra: Any) -> Any:
-    return client.post(ITEMS, {"product_id": product_id, "quantity": quantity}, format="json", **{**key(), **extra})
+    return client.post(
+        ITEMS, {"product_id": product_id, "quantity": quantity}, format="json", **{**key(), **extra}
+    )
 
 
 def test_empty_cart(customer_client: APIClient) -> None:
@@ -78,7 +80,7 @@ def test_add_clamps_to_max_quantity(customer_client: APIClient) -> None:
 
 def test_add_refusals(customer_client: APIClient) -> None:
     hidden = product(stock=5)
-    Category.objects.filter(pk=hidden.category_id).update(is_active=False)
+    Category.objects.filter(products=hidden).update(is_active=False)
     response = add(customer_client, hidden.pk)
     assert response.status_code == 409 and response.json()["code"] == "product_unavailable"
     assert response.json()["message"] == "Mahsulot hozir sotuvda yo‘q."
@@ -118,7 +120,7 @@ def test_patch_and_delete(customer_client: APIClient) -> None:
     refused = customer_client.patch(f"{ITEMS}{item.pk}/", {"quantity": 1}, format="json")
     assert refused.status_code == 409 and refused.json()["code"] == "OUT_OF_STOCK"
     assert CartItem.objects.get().quantity == 8
-    Category.objects.filter(pk=item.category_id).update(is_active=False)
+    Category.objects.filter(products=item).update(is_active=False)
     hidden = customer_client.patch(f"{ITEMS}{item.pk}/", {"quantity": 1}, format="json")
     assert hidden.json()["code"] == "product_unavailable"
     assert customer_client.delete(f"{ITEMS}{item.pk}/").status_code == 200
@@ -130,7 +132,9 @@ def test_bulk_delete_and_clear(customer_client: APIClient) -> None:
     items = [product() for _ in range(3)]
     for item in items:
         add(customer_client, item.pk)
-    body = customer_client.delete(f"{ITEMS}?product_id={items[0].pk}&product_id={items[1].pk}&product_id=999999").json()
+    body = customer_client.delete(
+        f"{ITEMS}?product_id={items[0].pk}&product_id={items[1].pk}&product_id=999999"
+    ).json()
     assert [line["product_id"] for line in body["items"]] == [items[2].pk]
     none = customer_client.delete(ITEMS)
     assert none.status_code == 400 and none.json()["errors"][0]["code"] == "required"
@@ -156,7 +160,7 @@ def test_price_changed_statuses_and_totals(customer_client: APIClient, customer:
     scarce.stock.save()
     gone.stock.quantity = 0
     gone.stock.save()
-    Category.objects.filter(pk=hidden.category_id).update(is_active=False)
+    Category.objects.filter(products=hidden).update(is_active=False)
     body = customer_client.get(CART).json()
     lines = {line["product_id"]: line for line in body["items"]}
     assert lines[cheap.pk]["price_changed"] is True and lines[cheap.pk]["previous_price"] == 100_000
@@ -181,7 +185,7 @@ def test_reorder_refills_the_cart(customer_client: APIClient, customer: Customer
     kept = product(stock=3)
     hidden = product(stock=3)
     order = place(customer, [(kept, 2), (hidden, 1)], fulfilment="pickup")
-    Category.objects.filter(pk=hidden.category_id).update(is_active=False)  # kept: 3 − 2 reserved = 1 left
+    Category.objects.filter(products=hidden).update(is_active=False)  # kept: 3 − 2 reserved = 1 left
     url = f"/api/v1/orders/{order.pk}/reorder/"
     assert customer_client.post(url, format="json").json()["code"] == "idempotency_key_required"
     body = customer_client.post(url, format="json", **key()).json()
@@ -190,11 +194,13 @@ def test_reorder_refills_the_cart(customer_client: APIClient, customer: Customer
     assert lines[kept.pk]["quantity"] == 1  # clamped to max_quantity
     assert lines[hidden.pk]["status"] == "unavailable" and lines[hidden.pk]["quantity"] == 1
     other = place(shopper(), fulfilment="pickup")
-    assert customer_client.post(f"/api/v1/orders/{other.pk}/reorder/", format="json", **key()).status_code == 404
+    assert (
+        customer_client.post(f"/api/v1/orders/{other.pk}/reorder/", format="json", **key()).status_code == 404
+    )
 
 
 def test_reorder_cart_full(customer_client: APIClient, customer: Customer) -> None:
-    a, b, c = product(), product(), product(stock=0)
+    a, b = product(), product()
     order = place(customer, [(a, 1), (b, 1)], fulfilment="pickup")
     with override_settings(CART_MAX_LINES=1):
         response = customer_client.post(f"/api/v1/orders/{order.pk}/reorder/", format="json", **key())
@@ -205,4 +211,6 @@ def test_reorder_cart_full(customer_client: APIClient, customer: Customer) -> No
 def test_reorder_respects_the_history_horizon(customer_client: APIClient, customer: Customer) -> None:
     order = place(customer, fulfilment="pickup")
     Customer.objects.filter(pk=customer.pk).update(history_from=order.created_at + timedelta(seconds=1))
-    assert customer_client.post(f"/api/v1/orders/{order.pk}/reorder/", format="json", **key()).status_code == 404
+    assert (
+        customer_client.post(f"/api/v1/orders/{order.pk}/reorder/", format="json", **key()).status_code == 404
+    )

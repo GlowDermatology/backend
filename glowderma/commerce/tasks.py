@@ -523,10 +523,13 @@ def stable_payload(parcel: Parcel) -> dict[str, Any]:
 def run_bts_poll() -> PollResult:
     """One polling run: single flight (``cache.add`` lock), round robin after
     ``IntegrationState(bts).data["poll_cursor"]`` (written after every attempted parcel), at most
-    ``BTS_POLL_BATCH`` parcels and ``BTS_POLL_MAX_SECONDS``; per-parcel failures are skipped, the run stops only
+    ``BTS_POLL_BATCH`` parcels and ``BTS_POLL_MAX_SECONDS``; per-parcel failures are skipped, the run stops
+    only
     after ``BTS_POLL_MAX_CONSECUTIVE_FAILURES`` transport failures in a row. Outcome: stopped →
-    ``record_failure``; ≥ 1 tracked → ``record_sync_success``; attempted but none tracked → ``record_failure`` +
-    ERROR ``bts.poll_nothing_tracked``; no candidate → nothing written. Returns at once while BTS is fake under
+    ``record_failure``; ≥ 1 tracked → ``record_sync_success``; attempted but none tracked →
+    ``record_failure`` +
+    ERROR ``bts.poll_nothing_tracked``; no candidate → nothing written. Returns at once while BTS is fake
+    under
     the production settings."""
     empty = PollResult(tracked=[], rejected=0, unavailable=0, stopped=False)
     if integration_modes.fake_in_production("bts"):
@@ -596,11 +599,13 @@ def _poll() -> PollResult:
 
 @shared_task(name="commerce.poll_bts")  # type: ignore[untyped-decorator]
 def poll_bts() -> list[int]:
-    """BTS polling fallback (beat ``commerce-poll-bts`` every 600 s): the order ids whose parcel was tracked."""
+    """BTS polling fallback (beat ``commerce-poll-bts`` every 600 s): the order ids whose parcel was
+    tracked."""
     return run_bts_poll().tracked
 
 
-# --- fake payment providers holding open money (customer contract §6.14) -------------------------------------
+# --- fake payment providers holding open money (customer contract §6.14)
+# -------------------------------------
 
 
 def report_fake_provider_open_money() -> list[str]:

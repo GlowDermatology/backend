@@ -1,6 +1,8 @@
 """Customer routes of `commerce` (customer contract §2.5–§2.8): the server cart, ``delivery/calculate/``,
-checkout, pay, customer cancel, reorder and the customer's orders. ``delivery/calculate/`` lives here (it reads
-the cart, ``loyalty`` and ``commerce.selectors.cashback_max``, which ``delivery`` may not import); ``delivery``
+checkout, pay, customer cancel, reorder and the customer's orders. ``delivery/calculate/`` lives here (it
+reads
+the cart, ``loyalty`` and ``commerce.selectors.cashback_max``, which ``delivery`` may not import);
+``delivery``
 serves ``delivery/regions/``."""
 
 from __future__ import annotations
@@ -73,7 +75,8 @@ PRODUCT_ID_PARAM = OpenApiParameter(
 
 def fake_scenario_header(request: Request) -> dict[str, Any] | None:
     """``X-GD-Fake-Scenario`` (customer contract §1.2): honoured only under the local/test settings with
-    ``FAKE_SCENARIO_HEADER_ENABLED`` and every provider mode fake; anything else (or malformed JSON) → ``None``."""
+    ``FAKE_SCENARIO_HEADER_ENABLED`` and every provider mode fake; anything else (or malformed JSON) →
+    ``None``."""
     raw = request.headers.get(FAKE_SCENARIO_HEADER)
     if not raw or not integration_modes.dev_features_allowed():
         return None
@@ -123,7 +126,8 @@ def _consent_current(customer: Customer) -> None:
 def _delivery_address(
     customer: Customer, address_id: int | None, region_code: str | None, city_code: str | None
 ) -> tuple[int | None, str, str]:
-    """Rows 3 of checkout / the address checks of ``delivery/calculate/``: delivery offered, an own address or a
+    """Rows 3 of checkout / the address checks of ``delivery/calculate/``: delivery offered, an own address
+    or a
     region/city pair, known to BTS's reference list. Returns ``(address_id, region_code, city_code)``."""
     if not integration_modes.delivery_available():
         raise DeliveryUnavailable(key="error.delivery_not_offered")
@@ -164,7 +168,8 @@ def _return_url(order_id: int) -> str:
     return f"{base}{separator}{urlencode({'order_id': order_id})}"
 
 
-# --- cart (customer contract §2.5) -----------------------------------------------------------------------------
+# --- cart (customer contract §2.5)
+# -----------------------------------------------------------------------------
 
 
 class CartView(CustomerAPIView):
@@ -258,7 +263,8 @@ class CartItemView(CustomerAPIView):
         return _cart_response(self)
 
 
-# --- delivery/calculate/ (customer contract §2.6) ----------------------------------------------------------------
+# --- delivery/calculate/ (customer contract §2.6)
+# ----------------------------------------------------------------
 
 
 class DeliveryCalculateView(CustomerAPIView):
@@ -307,7 +313,8 @@ class DeliveryCalculateView(CustomerAPIView):
         return Response(CustomerDeliveryQuoteSerializer(quote).data)
 
 
-# --- checkout, pay, cancel, reorder (customer contract §2.7) -----------------------------------------------------
+# --- checkout, pay, cancel, reorder (customer contract §2.7)
+# -----------------------------------------------------
 
 
 class CheckoutView(CustomerAPIView):
@@ -475,7 +482,8 @@ class ReorderView(CustomerAPIView):
         return _cart_response(self)
 
 
-# --- the customer's orders (customer contract §2.8) ----------------------------------------------------------
+# --- the customer's orders (customer contract §2.8)
+# ----------------------------------------------------------
 
 
 class MyOrdersViewSet(CustomerGenericViewSet):

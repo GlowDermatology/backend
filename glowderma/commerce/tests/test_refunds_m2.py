@@ -14,6 +14,7 @@ from rest_framework.test import APIClient
 from glowderma.commerce import services, tasks
 from glowderma.commerce.models import Order, OrderEvent
 from glowderma.commerce.tests.support import AT, admin, deliver, pay, place
+from glowderma.core.api.exceptions import InvalidTransition
 from glowderma.core.models import AuditEntry, OutboxMessage
 from glowderma.core.seeding import pinned_clock
 from glowderma.integrations.click import fake as fake_click
@@ -94,7 +95,9 @@ def test_submit_rechecks_before_any_port_call() -> None:
         deliver("refund.submit", order.pk)
     refund.refresh_from_db()
     assert refund.state == "manual_required" and fake_click.calls == []
-    assert OrderEvent.objects.get(order=order, type="refund_requested").data["manual_reason"] is None  # as written
+    assert (
+        OrderEvent.objects.get(order=order, type="refund_requested").data["manual_reason"] is None
+    )  # as written
 
 
 def test_submit_of_a_payment_that_is_no_longer_paid() -> None:
@@ -124,13 +127,15 @@ def test_fresh_status_check_paid_needs_the_flag(staff_client: APIClient) -> None
     ok = staff_client.post(_resolve_url(refund), {"state": "succeeded", "manual_payout": True}, format="json")
     assert ok.status_code == 200
     audit = AuditEntry.objects.filter(action="refund.state_changed", entity_id=str(refund.pk)).last()
-    assert audit is not None and audit.after["manual_payout"] is True
+    assert audit is not None and isinstance(audit.after, dict) and audit.after["manual_payout"] is True
 
 
 def test_status_call_down_answers_503_and_writes_nothing(staff_client: APIClient) -> None:
     order, refund = _failed()
     _set_status(order, "down")
-    response = staff_client.post(_resolve_url(refund), {"state": "succeeded", "manual_payout": True}, format="json")
+    response = staff_client.post(
+        _resolve_url(refund), {"state": "succeeded", "manual_payout": True}, format="json"
+    )
     assert response.status_code == 503 and response.json()["code"] == "provider_unavailable"
     refund.refresh_from_db()
     assert refund.state == "failed"
@@ -140,7 +145,9 @@ def test_fake_click_in_production_refuses_resolve_and_retry(staff_client: APICli
     order, refund = _failed()
     calls = len(fake_click.calls)
     with override_settings(**PROD_FAKE_CLICK):
-        resolve = staff_client.post(_resolve_url(refund), {"state": "succeeded", "manual_payout": True}, format="json")
+        resolve = staff_client.post(
+            _resolve_url(refund), {"state": "succeeded", "manual_payout": True}, format="json"
+        )
         retry = staff_client.post(
             f"/api/v1/admin/payments/{refund.payment_id}/refunds/{refund.pk}/retry/", format="json"
         )
@@ -163,7 +170,10 @@ def test_the_status_call_runs_before_any_row_lock() -> None:
         sequence.append("status")
         return real_status(self, ref)
 
-    with mock.patch.object(services, "lock_order", lock), mock.patch.object(FakeClick, "payment_status", status):
+    with (
+        mock.patch.object(services, "lock_order", lock),
+        mock.patch.object(FakeClick, "payment_status", status),
+    ):
         services.resolve_refund(refund.pk, "succeeded", admin().pk, manual_payout=True)
     assert sequence[0] == "status" and "lock" in sequence
 
@@ -174,7 +184,7 @@ def test_without_a_paydoc_no_check_and_the_flag_is_required() -> None:
     payment.provider_state = {}
     payment.save(update_fields=["provider_state"])
     calls = len(fake_click.calls)
-    with pytest.raises(services.InvalidTransition):
+    with pytest.raises(InvalidTransition):
         services.resolve_refund(refund.pk, "succeeded", admin().pk)
     services.resolve_refund(refund.pk, "succeeded", admin().pk, manual_payout=True)
     assert len(fake_click.calls) == calls
@@ -186,7 +196,9 @@ def test_the_resolve_guard_after_a_retry(staff_client: APIClient) -> None:
     assert staff_client.post(retry_url, format="json").status_code == 200
     newer = Refund.objects.filter(payment__order=order).order_by("-id").first()
     assert newer is not None and newer.state == "requested"
-    response = staff_client.post(_resolve_url(refund), {"state": "succeeded", "manual_payout": True}, format="json")
+    response = staff_client.post(
+        _resolve_url(refund), {"state": "succeeded", "manual_payout": True}, format="json"
+    )
     assert response.status_code == 409 and response.json()["code"] == "invalid_transition"
     assert response.json()["message"] == services.MESSAGE_REFUND_NOT_RESOLVABLE
     assert Payment.objects.get(order=order).status == "paid"
@@ -195,12 +207,15 @@ def test_the_resolve_guard_after_a_retry(staff_client: APIClient) -> None:
     deliver("refund.submit", order.pk)
     newer.refresh_from_db()
     assert newer.state == "succeeded"
-    again = staff_client.post(_resolve_url(refund), {"state": "succeeded", "manual_payout": True}, format="json")
+    again = staff_client.post(
+        _resolve_url(refund), {"state": "succeeded", "manual_payout": True}, format="json"
+    )
     assert again.status_code == 409
     assert Refund.objects.filter(payment__order=order, state="succeeded").count() == 1
 
 
-# --- attention.refunds_needing_action and payments/?refund_state=failed (admin §2.10, §2.12) -------------------
+# --- attention.refunds_needing_action and payments/?refund_state=failed (admin §2.10, §2.12)
+# -------------------
 
 
 def test_a_superseded_failure_needs_no_action(staff_client: APIClient) -> None:
@@ -212,7 +227,10 @@ def test_a_superseded_failure_needs_no_action(staff_client: APIClient) -> None:
     on_refunded = RefundFactory.create(payment=refunded_payment, failed=True)
     RefundFactory.create(manual_required=True)
     assert payment_selectors.refunds_needing_action() == 2  # open_failure + manual_required
-    ids = [row["id"] for row in staff_client.get("/api/v1/admin/payments/", {"refund_state": "failed"}).json()["results"]]
+    ids = [
+        row["id"]
+        for row in staff_client.get("/api/v1/admin/payments/", {"refund_state": "failed"}).json()["results"]
+    ]
     assert ids == [open_failure.payment_id]
     assert superseded.pk and on_refunded.pk
     dashboard = staff_client.get("/api/v1/admin/dashboard/").json()
