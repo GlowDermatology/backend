@@ -113,7 +113,9 @@ class SpecialistViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet)
         for professional in rows:
             links: list[ProfessionalService] = getattr(professional, "offered_links", [])
             week: list[WorkingHours] = getattr(professional, "week_rows", [])
-            offered = [link.service.short_name_uz for link in links if link.is_active]
+            offered = [
+                link.service.short_name_uz for link in links if link.is_active and link.service.is_active
+            ]
             yield (
                 professional.pk,
                 professional.name,

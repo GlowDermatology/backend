@@ -51,6 +51,7 @@ SLOT_STEPS = (10, 15, 20, 30, 60)  # the CHECK ``professional_slot_step_allowed`
 MAX_POSITION = 100_000
 MAX_OFFERED_SERVICES = 50
 DB_INT_MAX = 2_147_483_647
+RANGE_LIMIT_DAYS = 3660  # schedule list filters: today ± ~10 years (keeps day_bounds away from date.max)
 CLOCK = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 MESSAGES = {
     "clock": "Vaqtni SS:DD ko‘rinishida kiriting.",
@@ -73,6 +74,7 @@ MESSAGES = {
     "block_past": "Tugagan vaqtni band qilib bo‘lmaydi.",
     "block_long": "Ko‘pi bilan 366 kunlik davr.",
     "range": "Oxirgi sana boshlang‘ich sanadan oldin bo‘lmasin.",
+    "range_far": "Sana bugundan ko‘pi bilan 10 yil uzoqlikda bo‘lsin.",
     "decimals": "Ko‘pi bilan 6 ta kasr raqam.",
 }
 
@@ -279,11 +281,21 @@ class ClinicSpecialistWriteSerializer(serializers.Serializer[dict[str, Any]]):
     def validate_staff_user_id(self, value: int | None) -> StaffUser | None:
         if value is None:
             return None
+        editing = self.context.get("professional_id")
+        if editing is not None:
+            # The link already stored on this specialist is accepted back unchanged, even once that account
+            # is deactivated: a client resending the whole form must not be refused for a field it kept.
+            current = (
+                Professional.objects.select_related("staff_user")
+                .filter(pk=editing, staff_user_id=value)
+                .first()
+            )
+            if current is not None and current.staff_user is not None:
+                return current.staff_user
         staff = StaffUser.objects.filter(pk=value, is_active=True).first()
         if staff is None:
             raise serializers.ValidationError(field_error("does_not_exist", MESSAGES["staff_not_found"]))
         taken = Professional.objects.filter(staff_user=staff)
-        editing = self.context.get("professional_id")
         if editing is not None:
             taken = taken.exclude(pk=editing)
         if taken.exists():
@@ -457,6 +469,12 @@ class BlockedPeriodCreateSerializer(serializers.Serializer[dict[str, Any]]):
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         start: dt.datetime = attrs["start"]
         end: dt.datetime = attrs["end"]
+        for name, value in (("start", start), ("end", end)):
+            # The slot engine reads blocks as Tashkent "HH:MM"; an off-grid edge would leave a bookable
+            # slot overlapping the block, so both edges sit on the 5-minute grid like the weekly hours.
+            local = value.astimezone(timeutils.TASHKENT)
+            if local.second or local.microsecond or local.minute % DURATION_STEP_MIN:
+                raise _error(name, "invalid", MESSAGES["grid"])
         if end <= start:
             raise _error("end", "invalid", MESSAGES["end_before_start"])
         if end <= timeutils.now():
@@ -473,7 +491,13 @@ class ScheduleRangeQuerySerializer(serializers.Serializer[dict[str, Any]]):
     date_to = serializers.DateField(required=False)
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
-        date_from = attrs.get("date_from") or timeutils.local_date(timeutils.now())
+        today = timeutils.local_date(timeutils.now())
+        limit = dt.timedelta(days=RANGE_LIMIT_DAYS)
+        for name in ("date_from", "date_to"):
+            value = attrs.get(name)
+            if value is not None and not today - limit <= value <= today + limit:
+                raise _error(name, "out_of_range", MESSAGES["range_far"])
+        date_from = attrs.get("date_from") or today
         date_to = attrs.get("date_to")
         if date_to is not None and date_to < date_from:
             raise _error("date_to", "invalid", MESSAGES["range"])
