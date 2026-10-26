@@ -405,6 +405,7 @@ C§2.0 rows 24–35 and 50–53: `cart/*`, `delivery/regions/`, `delivery/calcul
 | Payme protocol reads `account[PAYME_ACCOUNT_FIELD]` and answers `data = PAYME_ACCOUNT_FIELD` (the same setting builds the checkout URL's `ac.` key) | `integrations.payme.protocol`, `commerce/api/webhooks/payme.py` | C§2.13.2 |
 | Click refunds keyed by `click_paydoc_id`: `RefundRow.provider_payment_ref` (= `Payment.provider_state["click_paydoc_id"]`, `""` when absent) in `payments.selectors.refund_row`; B5's `commerce.tasks.submit_refund`, `_resolve_after_failure` and `_reversed` pass it (never `provider_txn_id` = `click_trans_id`) to `ClickPort.refund` / `payment_status`; a Click refund whose payment has no `click_paydoc_id` is created `manual_required` and re-checked by `submit_refund` before any port call; the seeded Click payments of `commerce/seeds.py` get a `click_paydoc_id`. `resolve_refund` also accepts a `failed` Click refund → `succeeded` (staff payout after a refused reversal, admin §7 item 18), **guarded** under the Order → Payment locks: only the payment's newest refund, the payment still `paid`, no other open or `succeeded` refund of the payment — else `InvalidTransition(MESSAGE_REFUND_NOT_RESOLVABLE)` (409); `payments.services.mark_succeeded` accepts `failed` only through that path; `submit_refund` re-reads the payment before any port call and ends the refund `failed` (`payment_not_paid`, `refund_failed` event, no Click call) when it is no longer `paid` | `payments.selectors`, `payments.services`, `commerce.tasks`, `commerce.services` | C§2.13.0 (Click Merchant API reversal/status are keyed by the payment id; the resolve guard) |
 | a Click refund is `manual_required` (created with `manual=True`, and re-checked by `submit_refund` before any port call) while the Click port is fake under the production settings (`core.providers.callbacks_refused("click")`): the fake would report a reversal that moved no money | `commerce.services` (refund creation call sites), `commerce.tasks.submit_refund` | C§2.13.0, C§6.14 |
+| `provider_open_money(provider) -> OpenMoney(open_transactions, open_refunds, order_ids)` and `report_fake_provider_open_money()` connected to Celery's `worker_ready` signal in `commerce/tasks.py` (imported by the worker's task autodiscovery before the signal fires) | `commerce.selectors`, `commerce.tasks` | C§6.14 operator procedure: for each payment provider with `core.providers.fake_in_production(provider)` and open money (`pending` payments with an open transaction — Click prepared without Complete, Payme state 1 — and refunds not `succeeded` whose payment is still `paid`), one ERROR `providers.fake_with_open_money {provider, open_transactions, open_refunds, order_ids}` (≤ 20 ids); nothing else changes (no new state, no blocking); never from `CoreConfig.ready()` (no database access at app loading) |
 | `region_catalog()` | `delivery.selectors` | BTS `regions()` cached 24 h (`gd:bts:regions`); `[]` (nothing cached) while `core.providers.delivery_available()` is false |
 | delivery offered only while `core.providers.delivery_available()`: `delivery/calculate/` and checkout answer 409 `delivery_unavailable` (`key="error.delivery_not_offered"`) for `fulfilment = delivery` before any BTS call; `delivery/regions/` answers `{"regions": [], "updated_at": null}` | `commerce/api/customer/*`, `delivery/api/customer/*` | C§2.6, C§2.7.1 row 3 |
 | `FakeBts` under the production settings (`core.providers.fake_in_production("bts")`): `regions()` `[]`, `quote()`/`create()` → `BtsRejected("fake_mode")` (shipment `failed`, `shipment_failed {error_code: "fake_mode"}`), `find_by_client_id()` → `None`, `cancel()`/`track()` → `BtsUnavailable`; `_parcels` stays empty; `poll_bts` returns at once | `integrations/bts/fake.py`, `commerce.tasks` | C§2.14.3 |
@@ -523,7 +524,12 @@ create_refund}`, `payments.selectors.{active_payment, display_payment, refunds_f
   correctly signed Complete → `0`, payment `paid` `late_capture`, refund `manual_required` (no port call), audit
   `payment.late_capture {case: "fake_mode"}`, ERROR log, order not `processing`; the same Complete with a wrong
   signature → `-1`; checkout and pay refuse a fake provider with 400 `invalid_choice`; a Click refund created or
-  submitted while the Click port is fake becomes `manual_required` with no port call. **Mixed posture**
+  submitted while the Click port is fake becomes `manual_required` with no port call; **open money at worker start:**
+  with an open Click transaction and a `manual_required` Payme refund of a paid payment, `report_fake_provider_open_money()`
+  under `CLICK_MODE = PAYME_MODE = "fake"` logs one ERROR `providers.fake_with_open_money` per provider with the counts
+  and order ids (caplog), none when nothing is open or under the test settings, and writes nothing; a Payme
+  `CancelTransaction` of that performed transaction answers `-32504` and leaves the refund `manual_required`.
+  **Mixed posture**
   (`override_settings(DEV_FEATURES_ALLOWED=False, BTS_MODE="fake", BILLZ_MODE="fake")`,
   `core.providers.payable_providers` patched to `["click"]` as with a live Click): `delivery/calculate/` and checkout
   with `fulfilment = delivery` → 409 `delivery_unavailable` with the `error.delivery_not_offered` message and no BTS
@@ -808,8 +814,9 @@ nothing is sold online, and no sale recorded; C§2.3, C§6.14).
 #PAYMENT_RETURN_FALLBACK_URL=glowderma://payment/return
 # ---- Click (SHOP API) ----------------------------------------------------------
 # fake under the production settings: Prepares are refused and Click is not offered to customers (no free orders); a
-# Complete of a transaction prepared while Click was live is accepted and reversed by hand (manual refund), so a
-# switch from live to fake never strands a customer's money.
+# Complete of a transaction prepared while Click was live is accepted and reversed by hand (manual refund). Still, do
+# not switch from live to fake while Click holds open money (open transactions, open refunds): the worker logs an ERROR
+# at start listing what is open, and money left at Click is reconciled by hand in the Click cabinet (C§6.14).
 #CLICK_MODE=fake
 #CLICK_SERVICE_ID=00000
 #CLICK_MERCHANT_ID=00000
@@ -824,7 +831,10 @@ nothing is sold online, and no sale recorded; C§2.3, C§6.14).
 # SHOP API rule), so there is no switch for it.
 #CLICK_INFLIGHT_SECONDS=120
 # ---- Payme (Merchant API) ------------------------------------------------------
-# fake under the production settings: callbacks are refused and Payme is not offered to customers.
+# fake under the production settings: callbacks are refused and Payme is not offered to customers. Do not switch from
+# live to fake while Payme holds open money (state-1 transactions, open refunds): a cabinet refund then cannot complete
+# (CancelTransaction is refused) and the money is reconciled by hand in the Payme cabinet; the worker logs an ERROR at
+# start listing what is open (C§6.14).
 #PAYME_MODE=fake
 #PAYME_MERCHANT_ID=change-me-payme-merchant-id
 # Issued by Payme (merchant cabinet; the test key in the sandbox). Production requires a real value in every mode.
@@ -947,7 +957,11 @@ No beat entry for `loyalty.services.expire_holds`: it must stay unscheduled whil
    already carries the M2 cross-references (§2.10, §2.11, §2.15, §3.1, §3.2, §7 item 18).
 4. Ops: the website serves `apple-app-site-association` / `assetlinks.json` for `PAYMENT_RETURN_URL`; the edge proxy
    log format redacts `token=`; alerts on the ERROR events `otp.budget_tripped`, `payment.late_capture`,
-   `push.payload_invalid`, `apple.revoke_dead`, and on refunds `failed` after a refused Click reversal (staff payout); throttle rates reviewed after two weeks of production metrics.
+   `push.payload_invalid`, `apple.revoke_dead`, `providers.fake_with_open_money`, and on refunds `failed` after a refused Click reversal (staff payout); throttle rates reviewed after two weeks of production metrics.
+   **Switching a payment provider from live to fake** (C§6.14) is a runbook step: first drain its open money (open
+   transactions completed or expired, its refunds settled in the admin Payments screen); the ERROR
+   `providers.fake_with_open_money` at worker start is the alarm when that was skipped; money left at a provider
+   switched to fake is reconciled by hand in that provider's cabinet (or by switching it back to live).
    A deployment that runs fake adapters shows them in the startup WARNINGs `providers.fake_in_production` and in
    `health/?ready=1` `providers`; the runbook lists what that posture cannot do (C§6.14: no online payment through a
    fake provider, no home delivery with fake BTS — shipments of orders placed before a switch to fake are shipped by

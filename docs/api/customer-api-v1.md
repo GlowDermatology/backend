@@ -1549,9 +1549,14 @@ admin-only by DB constraint).
     applies), its refund becomes `manual_required` because the Click port is fake (below), and the ERROR
     `payment.late_capture` alerts the on-call. Everything else — a bad signature, an unknown or unattached payment —
     answers `-1` with a bounded `rejected:` row (`fake_mode`).
-  - Payme needs no such exception: Payme debits only on `PerformTransaction`, so refusing it takes no money (Payme
-    cancels the state-1 transaction by its timeout), and the `CancelTransaction` of a performed transaction that staff
-    refunded in the Payme cabinet leaves its `manual_required` refund for staff to resolve by hand (admin §7 item 18).
+  - Payme gets no exception, and fake Payme keeps answering `-32504` to every method. A state-1 transaction is safe:
+    Payme debits only on `PerformTransaction`, so refusing it takes no money (Payme cancels it by its timeout; our
+    payment stays `pending` and the order expires as usual). A **refund** is not: Payme returns money to the payer
+    only through a successful `CancelTransaction` of the performed transaction, so while Payme is fake under the
+    production settings a refund staff start in the Payme cabinet cannot complete — the money stays with Payme. That
+    is why switching a payment provider from `live` to `fake` is an **operator procedure** (§6.14: not while the
+    provider holds open money; the worker's startup ERROR lists what is open), and money held by a provider switched
+    to fake is reconciled by hand in that provider's cabinet.
 
   Under the local/test settings fake callbacks are processed normally (that is what the dev simulate endpoint and the
   sandbox suites drive). Production also requires real values for `CLICK_SECRET_KEY`, `PAYME_KEY` and
@@ -1810,7 +1815,7 @@ the checkout URL's `ac.` key, §2.7.2) or from the payment found by
 | `CheckPerformTransaction` | `amount`, `account` | account reference (-31050) → order exists (-31050) → paid / cancelled / not payable with `attaching=True` (-31008) → another transaction in flight (-31051) → amount (-31001) | `{"allow": true}` (fiscal `detail` only when `PAYME_FISCAL_DETAIL_ENABLED`, §7 `M2-P5`) |
 | `CreateTransaction` | `id`, `time`, `amount`, `account` | **existing** `id`: state ≠ 1 → -31008; timed out → cancel (reason 4) and -31008; else the stored answer. **new** `id`: account (-31050) → paid / cancelled / not payable with `attaching=True` (-31008) → another Payme state-1 transaction or a Click transaction in flight (-31051) → amount (-31001) → `time` older than 12 h (-31008) → `ensure_payable_payment(order, "payme")` (reuses the pending Payme row only when it has no `provider_txn_id`) → `attach_transaction(provider_txn_id = id, provider_state = {transaction: id, time, create_time: now_ms, state: 1, account})`; `TransactionTaken` → -31051 | `{"create_time", "transaction": "<payment id>", "state": 1}` |
 | `PerformTransaction` | `id` | unknown (-31003) → state 2: the stored answer → state ≠ 1: -31008 → timed out: cancel (reason 4), -31008 → not payable with `attaching=False` (cancelled, paid by another payment, or expired beyond the grace): -31008, the transaction stays in state 1 and Payme cancels it **(verify M3)**; no money is taken, so this is not a refused capture → `mark_paid(order_id, payment.id, "payme", id)`; `provider_state += {state: 2, perform_time: now_ms}` | `{"transaction", "perform_time", "state": 2}` |
-| `CancelTransaction` | `id`, `reason` | unknown (-31003) → state 1: state −1, `cancel_time`, `reason`; `fail_payment_effects(order_id, payment.id, str(reason), provider_txn_id=id)` (payment failed, `payment_failed` event; also on an already cancelled/expired order) → state 2 **with an open `manual_required` refund** (staff refunded in the Payme cabinet after an admin cancel, O5): state −2, `cancel_time`, `reason`; `commerce.services.resolve_refund(refund_id, "succeeded", actor_id=None)` (refund succeeded, payment `refunded`, event `refund_succeeded`) → state 2 without an open refund: -31007 → state −1/−2: the stored answer | `{"transaction", "cancel_time", "state"}` |
+| `CancelTransaction` | `id`, `reason` | (fake Payme under the production settings: `-32504` like every method, so a cabinet refund cannot complete, §2.13.0, §6.14) unknown (-31003) → state 1: state −1, `cancel_time`, `reason`; `fail_payment_effects(order_id, payment.id, str(reason), provider_txn_id=id)` (payment failed, `payment_failed` event; also on an already cancelled/expired order) → state 2 **with an open `manual_required` refund** (staff refunded in the Payme cabinet after an admin cancel, O5): state −2, `cancel_time`, `reason`; `commerce.services.resolve_refund(refund_id, "succeeded", actor_id=None)` (refund succeeded, payment `refunded`, event `refund_succeeded`) → state 2 without an open refund: -31007 → state −1/−2: the stored answer | `{"transaction", "cancel_time", "state"}` |
 | `CheckTransaction` | `id` | unknown (-31003) | `{"create_time", "perform_time" (0 if none), "cancel_time" (0 if none), "transaction", "state", "reason" (null if none)}` |
 | `GetStatement` | `from`, `to` (ms) | Payme payments whose **Payme** transaction time `provider_state.time` (the `params.time` of `CreateTransaction`) ∈ [`from`, `to`], ascending by that time **(verify M3)**. M2 filters on the JSON key (volumes are small); M3 adds an expression index on `(provider_state->>'time')::bigint` for Payme rows if the statement is slow | `{"transactions": [{"id", "time", "amount", "account": {<PAYME_ACCOUNT_FIELD>: account_ref}, "create_time", "perform_time", "cancel_time", "transaction", "state", "reason", "receivers": null}]}` |
 
@@ -2449,6 +2454,22 @@ code a customer view can raise to an existing key.
       caller-chosen nonce and would sign anyone in as any linked identity, and with `STAFF_GOOGLE_AUTOLINK` even as any
       staff email; fake Eskiz delivers no SMS (demo/staging posture, §2.14.1); fake FCM delivers no push; fakes keep no
       message history (§2.14.1, §2.14.2).
+    - **Switching a payment provider from `live` to `fake`** is an operator procedure, not something the backend makes
+      safe. A provider holds **open money** while it has a `pending` payment with an open transaction (Click: prepared,
+      no Complete; Payme: state 1) or a refund that is not `succeeded` while its payment is still `paid` (`requested`,
+      `submitting`, `unknown`, `manual_required`, `failed`). The runbook: do not switch while the provider holds open
+      money — drain it first (let open transactions complete or expire and every refund of that provider settle — admin
+      `GET payments/?provider=…&refund_state=…`). If a switch happens anyway (a kill switch), the backend keeps
+      only what is already written: a Click Complete of a transaction attached while Click was live is accepted and
+      reversed by hand (§2.13.0); a Click refund becomes `manual_required` (staff pay out and resolve); a `failed` Click
+      refund cannot be status-checked and so cannot be resolved as `succeeded` until Click is live again (admin §7 item
+      18); fake Payme answers `-32504` to everything, so a Payme refund cannot complete through Payme. **Money held by a
+      provider that was switched to fake is reconciled by hand in that provider's cabinet** (or by switching it back to
+      live); there is no automation for it. The only machinery is a check at worker start (Celery `worker_ready`,
+      `commerce.tasks.report_fake_provider_open_money`; `CoreConfig.ready()` must not query the database): for each
+      payment provider that is fake under the production settings and holds open money it logs one ERROR
+      `providers.fake_with_open_money {provider, open_transactions, open_refunds, order_ids}` (at most 20 order ids),
+      which pages the on-call.
     - **Dev switches** — `FAKE_PAYMENTS_ENABLED` (dev simulate, §2.15), `FAKE_SCENARIO_HEADER_ENABLED` (§1.2),
       `ESKIZ_FAKE_CODE` (fixed OTP), `POS_API_KEYS` (seeded POS keys, §2.10), `FAKE_NOW` and the `*` nonce wildcard of
       the OAuth fakes — work only under the local/test settings (`DEV_FEATURES_ALLOWED`, a settings-module constant,

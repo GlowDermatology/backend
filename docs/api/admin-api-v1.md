@@ -1180,7 +1180,8 @@ Provisional, configurable rules that shape payloads:
 - **Admin cancel rule.** Allowed from `awaiting_payment` and `processing`. From `handed_to_courier` only if the BTS cancel succeeds (status 100); otherwise 409 `not_cancellable`.
   - This contract applies the same synchronous BTS-cancel check to `processing` orders whose BTS shipment exists.
 - **Refund pending display.** Cancel never sets `payment.status=refunded`. The payment stays `paid` with a Refund in `requested`/`submitting`/`manual_required`/`unknown` until the provider confirms.
-  - Payme is `manual_required`, done in the Payme cabinet and confirmed by inbound CancelTransaction.
+  - Payme is `manual_required`, done in the Payme cabinet and confirmed by inbound CancelTransaction. M2: Payme returns the money to the payer only through that successful CancelTransaction; while Payme is fake under the production settings every callback is refused, so a cabinet refund cannot complete and the money stays with Payme — switching a payment provider from live to fake is therefore a runbook step taken only without open money, and what a provider switched to fake still holds is reconciled by hand in its cabinet (customer contract §2.13.0, §6.14).
+  - A Click refund is `manual_required` too when its payment has no `click_paydoc_id` or the Click port is fake under the production settings (M2, customer contract §2.13.0): staff pay the customer outside Click and close it with `…/resolve/` (§7 item 18).
   - Click `unknown` is never auto-retried.
 - **Dashboard revenue.** Σ paid totals by payment confirmation time, net of refunds; orders = created in the bucket. Refunds are attributed to the payment's bucket.
 - **Rate basis / cashback-paid earning.** `before_purchase`; the cashback-paid part does not earn. Both are policy fields (`basis`, `earn_on_cashback_paid`).
