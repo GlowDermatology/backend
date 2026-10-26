@@ -10,8 +10,9 @@ Endpoints used by the live adapter (the documented test host is ``https://apites
 * ``regions()``: ``GET /v1/directory/regions``, then ``GET /v1/directory/cities?regionCode=`` per region;
 * ``quote(region, city)``: ``POST /v1/order-calculate/index`` with ``is_multiple_cost: 0``;
 * ``create(request)``: ``POST /v1/order/add`` with ``clientId`` = our order id;
-* ``find_by_client_id(client_id)``: ``GET /v1/order/list?beginDate=&endDate=`` — no ``clientId`` filter is
-  documented, so a date window is scanned page by page (verify M3);
+* ``find_by_client_id(client_id, since)``: ``GET /v1/order/list?beginDate=&endDate=`` — no ``clientId``
+  filter is documented, so a date window is scanned page by page (verify M3): from the day before the shipment
+  row was created (``since``, before its first create request) to :data:`LOOKUP_END_DAYS` days ahead;
 * ``track(tracking_number)``: ``GET /v1/order/track?orderId=`` — our tracking number is BTS's ``orderId``
   (the waybill number), the only key ``track`` and ``cancel`` accept;
 * ``cancel(parcel)``: ``GET /v1/order-cancel/index?orderId=`` — BTS cancels only at status ``100``.
@@ -28,9 +29,12 @@ gets recorded.
 
 from __future__ import annotations
 
+import math
+import re
 from dataclasses import dataclass
 from typing import Any, Final
 
+from ..httpclient import int_code
 from .ports import STATUS_ACCEPTED, CreateRequest, Parcel
 
 LANGUAGE: Final = "uz"
@@ -45,6 +49,14 @@ PATH_CANCEL: Final = "/v1/order-cancel/index"
 # Yii pagination: documented on the city list; assumed on the order list (verify M3).
 PER_PAGE: Final = 50
 MAX_PAGES: Final = 40
+# The clientId lookup window ends this many days after today: the list's date filter is not documented (a
+# pickup scheduled days ahead may carry a later date), so the end is generous until verified (verify M3).
+LOOKUP_END_DAYS: Final = 7
+# The largest delivery price we accept from a quote (so'm); anything above is not a price.
+MAX_PRICE: Final = 100_000_000
+# ``clientId`` prefix of an environment (``BTS_CLIENT_ID_PREFIX``): letters, digits, ``_`` and ``-``, at most
+# 16, never ending in a digit (so "<prefix><order id>" parses back unambiguously).
+CLIENT_ID_PREFIX_PATTERN: Final = re.compile(r"(?:[A-Za-z0-9_-]{0,15}[A-Za-z_-])?")
 TOKEN_TTL_SECONDS: Final = 23 * 3600  # the access token is valid one day
 DROPOFF_TYPE: Final = "courier"  # home delivery: the courier brings the parcel to the recipient
 PICKUP_TYPES: Final = frozenset({"courier", "branch"})
@@ -77,14 +89,26 @@ class Sender:
 
 
 def bts_code(value: object) -> int | None:
-    """BTS's status code as an integer (``None`` for a missing or non-numeric code)."""
-    if isinstance(value, bool):
+    """BTS's numeric code or id as an integer (``None`` for a missing or non-numeric one; strict:
+    :func:`~glowderma.integrations.httpclient.int_code`)."""
+    return int_code(value)
+
+
+def client_id_for(order_ref: str, prefix: str) -> str:
+    """The ``clientId`` we send for our order id: ``<BTS_CLIENT_ID_PREFIX><order id>``."""
+    return f"{prefix}{order_ref}"
+
+
+def order_ref_of(client_id: object, prefix: str) -> str | None:
+    """Our order id (digits) in a ``clientId`` BTS sends back (string or number), or ``None`` when it is
+    empty, not ours (another environment's prefix) or not an order id."""
+    if isinstance(client_id, bool) or not isinstance(client_id, int | str):
         return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str) and value.strip().lstrip("-").isdigit():
-        return int(value.strip())
-    return None
+    text = str(client_id)
+    if not text.startswith(prefix):
+        return None
+    rest = text[len(prefix) :]
+    return rest if rest.isascii() and rest.isdigit() and int(rest) > 0 else None
 
 
 def port_status(status: object) -> str:
@@ -136,22 +160,35 @@ def quote_option(data: object, pickup_type: str) -> dict[str, Any] | None:
 
 
 def price_of(option: dict[str, Any]) -> int | None:
+    """The quote's price in so'm: a finite number between 0 and :data:`MAX_PRICE` (an int, a float or a
+    decimal string), else ``None``."""
     price = option.get("price")
     if isinstance(price, bool) or not isinstance(price, int | float | str):
         return None
+    if isinstance(price, str) and not re.fullmatch(r"[0-9]{1,12}(?:\.[0-9]{1,6})?", price.strip()):
+        return None
     try:
         value = float(price)
-    except ValueError:
+    except ValueError, OverflowError:
         return None
-    return int(round(value)) if value >= 0 else None
+    if not math.isfinite(value) or not 0 <= value <= MAX_PRICE:
+        return None
+    return int(round(value))
 
 
 def create_payload(
-    request: CreateRequest, *, sender: Sender, pickup_type: str, weight_g: int
+    request: CreateRequest,
+    *,
+    sender: Sender,
+    pickup_type: str,
+    weight_g: int,
+    client_id: str,
+    ready_to_take: bool = True,
 ) -> dict[str, Any]:
-    """``POST /v1/order/add`` for one home-delivery parcel. The recipient comment has no field of its own, so
-    it is appended to the address in brackets (verify M3); no cash on delivery, no goods list (paid
-    online)."""
+    """``POST /v1/order/add`` for one home-delivery parcel. ``clientId`` is ``client_id`` (our order id with
+    the environment prefix); ``ready_to_take`` is ``BTS_READY_TO_TAKE`` (every documented example sends
+    ``true``; we create only after payment). The recipient comment has no field of its own, so it is appended
+    to the address in brackets (verify M3); no cash on delivery, no goods list (paid online)."""
     address = request.address.strip()
     if request.comment.strip():
         address = f"{address} ({request.comment.strip()})"
@@ -164,7 +201,8 @@ def create_payload(
     if pickup_type == "branch" and sender.branch_code:
         sender_block["branch_code"] = sender.branch_code
     return {
-        "clientId": request.client_id,
+        "clientId": client_id,
+        "ready_to_take": ready_to_take,
         "pickup_type": pickup_type,
         "dropoff_type": DROPOFF_TYPE,
         "is_sender_location": False,
@@ -180,8 +218,9 @@ def create_payload(
     }
 
 
-def parcel_from_order(item: object) -> Parcel | None:
+def parcel_from_order(item: object, prefix: str = "") -> Parcel | None:
     """A parcel from an order document (create answer, list item); ``None`` without a numeric ``orderId``.
+    ``client_id`` is our order id when the document's ``clientId`` carries our ``prefix``, else ``""``.
 
     Our tracking number is BTS's ``orderId`` (the waybill number ``track`` and ``cancel`` take); the tariff
     is not read from ``cost`` (its meaning is not documented, verify M3), so the order's quoted fee is
@@ -191,9 +230,8 @@ def parcel_from_order(item: object) -> Parcel | None:
     order_id = bts_code(item.get("orderId"))
     if order_id is None or order_id <= 0:
         return None
-    client_id = item.get("clientId")
     return Parcel(
-        client_id="" if client_id is None else str(client_id),
+        client_id=order_ref_of(item.get("clientId"), prefix) or "",
         tracking_number=str(order_id),
         bts_order_id=str(order_id),
         tariff=None,

@@ -13,10 +13,10 @@ in as ``scenario``:
     :class:`BtsUnavailable`; else ``scenario["tariff"]`` if set, else :data:`TARIFFS` by BTS region code
     (``"10"`` 25 000, ``"11"`` 26 000, ``"12"`` 27 000, ``"13"`` 28 000), else 25 000.
 
-``find_by_client_id(client_id)``
-    the parcel this process created for ``clientId`` (the fake's in-memory "BTS database", so a redelivery
-    after "BTS created the parcel, then the worker crashed" adopts it), or — with ``scenario["existing"]``
-    true — the parcel BTS would have created; else ``None``.
+``find_by_client_id(client_id, since)``
+    (``since`` is ignored) the parcel this process created for ``clientId`` (the fake's in-memory "BTS
+    database", so a redelivery after "BTS created the parcel, then the worker crashed" adopts it), or — with
+    ``scenario["existing"]`` true — the parcel BTS would have created; else ``None``.
 
 ``create(request)``
     * ``scenario["down"]`` true → :class:`BtsUnavailable` (transport error; the outbox retries);
@@ -47,6 +47,7 @@ ignored.
 """
 
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Any
 
 from glowderma.core import integration_modes
@@ -133,7 +134,7 @@ class FakeBts:
             raise BtsUnavailable("BTS did not answer (fake: quote down)")
         return self._tariff(region_code)
 
-    def find_by_client_id(self, client_id: str) -> Parcel | None:
+    def find_by_client_id(self, client_id: str, *, since: datetime) -> Parcel | None:
         if _production():
             return None
         if self.scenario.get("down"):

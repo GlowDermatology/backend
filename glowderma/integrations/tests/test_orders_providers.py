@@ -1,10 +1,12 @@
 """The fake BTS / Click / Payme adapters (rules documented in their modules) and the *_MODE registries."""
 
 from collections.abc import Iterator
+from datetime import datetime
 
 import pytest
 from django.test import override_settings
 
+from glowderma.core.timeutils import TASHKENT
 from glowderma.integrations.bts import fake as fake_bts
 from glowderma.integrations.bts.live import LiveBts
 from glowderma.integrations.bts.ports import BtsRejected, BtsUnavailable, CreateRequest, Parcel
@@ -16,6 +18,8 @@ from glowderma.integrations.click.registry import get_click
 from glowderma.integrations.payme import fake as fake_payme
 from glowderma.integrations.payme.live import LivePayme
 from glowderma.integrations.payme.registry import get_payme
+
+SINCE = datetime(2026, 10, 25, 12, 0, tzinfo=TASHKENT)  # the shipment row's creation
 
 
 @pytest.fixture(autouse=True)
@@ -45,10 +49,10 @@ def test_bts_quote_by_region_and_override() -> None:
 
 def test_bts_create_lookup_and_failures() -> None:
     bts = get_bts()
-    assert bts.find_by_client_id("10248") is None
+    assert bts.find_by_client_id("10248", since=SINCE) is None
     parcel = bts.create(_request())
     assert parcel == Parcel("10248", "48210248", "BTS-10248", 25_000, "100")
-    assert bts.find_by_client_id("10248") == parcel  # the redelivery adopts it
+    assert bts.find_by_client_id("10248", since=SINCE) == parcel  # the redelivery adopts it
     custom = get_bts({"tracking_number": "48213907", "status": "200", "tariff": 27_000}).create(_request("5"))
     assert (custom.tracking_number, custom.status, custom.tariff) == ("48213907", "200", 27_000)
     failing = get_bts({"fail_attempts": 1})
@@ -59,8 +63,8 @@ def test_bts_create_lookup_and_failures() -> None:
     with pytest.raises(BtsUnavailable):
         get_bts({"down": True}).create(_request("8"))
     with pytest.raises(BtsUnavailable):
-        get_bts({"down": True}).find_by_client_id("8")
-    assert get_bts({"existing": True}).find_by_client_id("9") is not None
+        get_bts({"down": True}).find_by_client_id("8", since=SINCE)
+    assert get_bts({"existing": True}).find_by_client_id("9", since=SINCE) is not None
 
 
 def test_bts_cancel_rules() -> None:

@@ -475,8 +475,7 @@ BTS_PASSWORD = env_str("BTS_PASSWORD", "")
 BTS_SENDER_CITY_CODE = env_str("BTS_SENDER_CITY_CODE", "1001")
 BTS_DEFAULT_PARCEL_WEIGHT_G = env_positive_int("BTS_DEFAULT_PARCEL_WEIGHT_G", 1000)
 # Live adapter (M3, C§2.14.3): our side of every parcel, how BTS collects it (courier = a BTS courier picks it
-# up at the sender address, branch = staff bring it to BTS_SENDER_BRANCH_CODE) and how many days back the
-# clientId lookup before a create scans BTS's order list.
+# up at the sender address, branch = staff bring it to BTS_SENDER_BRANCH_CODE).
 BTS_SENDER_NAME = env_str("BTS_SENDER_NAME", "")
 BTS_SENDER_PHONE = env_str("BTS_SENDER_PHONE", "")
 BTS_SENDER_ADDRESS = env_str("BTS_SENDER_ADDRESS", "")
@@ -484,7 +483,17 @@ BTS_SENDER_BRANCH_CODE = env_str("BTS_SENDER_BRANCH_CODE", "")
 BTS_PICKUP_TYPE = env_str("BTS_PICKUP_TYPE", "courier")
 if BTS_PICKUP_TYPE not in {"courier", "branch"}:
     raise ImproperlyConfigured("BTS_PICKUP_TYPE must be 'courier' or 'branch'")
-BTS_CLIENT_LOOKUP_DAYS = env_positive_int("BTS_CLIENT_LOOKUP_DAYS", 30)
+# clientId = BTS_CLIENT_ID_PREFIX + our order id. Empty (default) = the bare order id, as every parcel created
+# so far; set a short tag per environment sharing one BTS account ("stg-") so an order id reused after a
+# reset never adopts another environment's parcel. Letters, digits, "_" and "-", at most 16, never ending in a
+# digit.
+BTS_CLIENT_ID_PREFIX = env_str("BTS_CLIENT_ID_PREFIX", "").strip()
+if not re.fullmatch(r"(?:[A-Za-z0-9_-]{0,15}[A-Za-z_-])?", BTS_CLIENT_ID_PREFIX):
+    raise ImproperlyConfigured(
+        "BTS_CLIENT_ID_PREFIX must be at most 16 letters, digits, '_' or '-' and not end in a digit"
+    )
+# ready_to_take of every created parcel: true = BTS may collect it at once (we create only after payment).
+BTS_READY_TO_TAKE = env_bool("BTS_READY_TO_TAKE", True)
 BTS_POLL_STALE_MINUTES = env_positive_int("BTS_POLL_STALE_MINUTES", 30)
 BTS_POLL_BATCH = env_positive_int("BTS_POLL_BATCH", 100)
 BTS_POLL_MAX_SECONDS = env_positive_int("BTS_POLL_MAX_SECONDS", 300)

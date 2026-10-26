@@ -5,10 +5,12 @@ from __future__ import annotations
 
 import base64
 from collections.abc import Iterator
+from datetime import datetime
 
 import pytest
 from django.test import override_settings
 
+from glowderma.core.timeutils import TASHKENT
 from glowderma.integrations import services
 from glowderma.integrations.bts import fake as fake_bts
 from glowderma.integrations.bts.ports import BtsRejected, BtsUnavailable, CreateRequest, Parcel
@@ -21,6 +23,8 @@ from glowderma.integrations.click.registry import get_click
 from glowderma.integrations.models import IntegrationState
 from glowderma.integrations.payme import protocol as payme
 from glowderma.integrations.payme.registry import get_payme
+
+SINCE = datetime(2026, 10, 25, 12, 0, tzinfo=TASHKENT)  # the shipment row's creation
 
 
 @pytest.fixture(autouse=True)
@@ -137,7 +141,7 @@ def test_bts_fake_regions_quote_and_track() -> None:
 def test_bts_fake_in_production() -> None:
     with override_settings(DEV_FEATURES_ALLOWED=False, BTS_MODE="fake"):
         bts = get_bts({"tariff": 5})
-        assert bts.regions() == [] and bts.find_by_client_id("1") is None
+        assert bts.regions() == [] and bts.find_by_client_id("1", since=SINCE) is None
         with pytest.raises(BtsRejected):
             bts.create(CreateRequest("1", 1, "n", "+998900000000", "a", "10", "1001"))
         with pytest.raises(BtsUnavailable):
