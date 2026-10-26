@@ -232,7 +232,8 @@ def test_appointment_indexes_and_constraints_in_pg_catalog() -> None:
 
 
 def test_pending_summary_query_uses_the_partial_index_shape() -> None:
-    """The contract's pending summary: requested rows with start >= now, count and earliest start."""
+    """The shape of the pending summary's query: requested rows from a start instant on, count and earliest
+    start (the selector passes the start of today, contract §2.9)."""
     AppointmentFactory.create(start=T0)
     AppointmentFactory.create(start=T0 + timedelta(hours=1), status="confirmed", confirmed_at=NOW)
     AppointmentFactory.create(start=T0 - timedelta(days=5))  # requested but in the past

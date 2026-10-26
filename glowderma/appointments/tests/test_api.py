@@ -97,9 +97,39 @@ def test_pending_summary_at_the_anchor(staff_client: APIClient, seeded: None, cl
     response = staff_client.get(BASE + "pending-summary/")
     assert response.status_code == 200
     assert response.data == {"count": 3, "next_at": "2026-10-26T09:00:00+05:00"}
-    # past requests no longer count (the selector takes the instant; the session would outlive no 12 h jump)
+    # requests of an earlier day no longer count (the selector takes the instant; the session would outlive
+    # no 12 h jump)
     assert selectors.pending_summary(datetime(2026, 10, 27, tzinfo=TASHKENT)) == {"count": 0, "next_at": None}
     assert selectors.upcoming_count(5) == 1  # Malika's card (design 03 §7.11)
+
+
+def test_pending_summary_counts_todays_unanswered_requests_whose_time_passed(
+    staff_client: APIClient, clock: Any
+) -> None:
+    """M3 (contract §2.9): a request of today whose time has passed still awaits an answer, so it counts
+    (the header must not say "all reviewed"); a request of an earlier day does not; ``next_at`` is the
+    earliest counted start."""
+    now = datetime(2026, 10, 26, 15, 0, tzinfo=TASHKENT)
+    this_morning = AppointmentFactory.create(start=datetime(2026, 10, 26, 9, 0, tzinfo=TASHKENT))
+    AppointmentFactory.create(start=datetime(2026, 10, 25, 17, 0, tzinfo=TASHKENT))  # yesterday: not counted
+    later = AppointmentFactory.create(start=datetime(2026, 10, 27, 11, 0, tzinfo=TASHKENT))
+    AppointmentFactory.create(
+        start=datetime(2026, 10, 26, 10, 0, tzinfo=TASHKENT), status="confirmed", confirmed_at=now
+    )  # answered
+    assert selectors.pending_summary(now) == {"count": 2, "next_at": this_morning.start}
+    # the day boundary is Tashkent midnight: at 00:00 the next day this morning's request drops out
+    assert selectors.pending_summary(datetime(2026, 10, 27, 0, 0, tzinfo=TASHKENT)) == {
+        "count": 1,
+        "next_at": later.start,
+    }
+    # just before midnight it still counts
+    assert selectors.pending_summary(datetime(2026, 10, 26, 23, 59, tzinfo=TASHKENT))["count"] == 2
+    clock(now)
+    assert staff_client.get(BASE + "pending-summary/").data == {
+        "count": 2,
+        "next_at": "2026-10-26T09:00:00+05:00",
+    }
+    assert staff_client.get("/api/v1/admin/nav-counts/").data["appointments_pending"] == 2
 
 
 def test_actions_require_an_idempotency_key(staff_client: APIClient, clock: Any) -> None:

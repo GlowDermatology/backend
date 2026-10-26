@@ -42,10 +42,14 @@ def day_view(day: date) -> DayView:
 
 
 def pending_summary(now: datetime | None = None) -> dict[str, Any]:
-    """``{"count", "next_at"}`` of ``requested`` appointments with ``start ≥ now`` (contract §2.9)."""
+    """``{"count", "next_at"}`` of the ``requested`` appointments that still await an answer (contract §2.9):
+    those starting today (Tashkent) or later — today's requests whose time has already passed included, so
+    the header never says "all reviewed" while one of them is unanswered; requests of earlier days are not
+    counted. ``next_at`` is the earliest of them (it may lie earlier today)."""
     instant = timeutils.now() if now is None else now
+    today_start, _ = timeutils.day_bounds(timeutils.local_date(instant))
     summary = Appointment.objects.filter(
-        status=enums.AppointmentStatus.REQUESTED, start__gte=instant
+        status=enums.AppointmentStatus.REQUESTED, start__gte=today_start
     ).aggregate(count=Count("id"), next_at=Min("start"))
     return {"count": int(summary["count"] or 0), "next_at": summary["next_at"]}
 

@@ -767,7 +767,7 @@ Templates are editable in the admin UI through `GET` / `PUT` below.
     "price": 150000,                                        // snapshot at booking
     "status": "requested", "requested_at": "2026-10-24T08:41:00+05:00", "requested_via": "app"}]}
 ```
-**`GET appointments/pending-summary/`** → `{"count": 3, "next_at": "2026-10-26T09:00:00+05:00"}`. Counts `requested` appointments with `start ≥ now`; `next_at` is the earliest of them, or null.
+**`GET appointments/pending-summary/`** → `{"count": 3, "next_at": "2026-10-26T09:00:00+05:00"}`. Counts the `requested` appointments that still await an answer: `start ≥` the start of **today** (Tashkent midnight) — M3: today's requests whose time has already passed count too, so the header never says every request was reviewed while one of today's is unanswered; requests of earlier days do not count. `next_at` is the earliest of them (it may lie earlier today), or null. The dashboard's `pending_appointments` / `next_appointment_at` and `nav-counts/` `appointments_pending` are the same figures.
 
 **`POST appointments/{id}/confirm/` · `…/reject/` · `…/attend/`** (I). Empty body.
 - Allowed: `requested` → confirm or reject; `confirmed` → attend. Otherwise 409 `invalid_transition` "Bu amal ushbu holatda mumkin emas.".
