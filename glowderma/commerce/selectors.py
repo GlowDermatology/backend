@@ -41,11 +41,16 @@ STATUS_COUNT_KEYS: tuple[str, ...] = ("all", *enums.OrderStatus.values)
 
 
 def available_stock(product_ids: Iterable[int]) -> dict[int, int]:
-    """``{product_id: Billz quantity − active reservations − converted since the last Billz sync}``.
+    """``{product_id: Billz quantity − active reservations − converted units Billz has not seen sold}``.
 
-    Billz owns ``ProductStock.quantity``; units of a converted reservation stay unavailable until a Billz
-    sync after the conversion reflects the pushed sale (``synced_at`` null → that term is ignored). A product
-    without a stock row has 0 available.
+    Billz owns ``ProductStock.quantity`` (read at ``synced_at``). A converted reservation (a paid order) keeps
+    counting until its sale is in Billz **and** the stock was read after that (review A M3): while the
+    purchase is unpushed (``billz_pushed_at`` null — a push still running, deferred for a closed shift or
+    dead-lettered for staff) Billz still counts the unit as in stock, so every sync would otherwise offer it
+    again. It also counts while converted after the last read (``converted_at > synced_at``). It stops
+    counting once a read after the push reflects the sale, and for a cancelled order whose sale never reached
+    Billz (the unit never left Billz's stock). ``synced_at`` null (never read from Billz) → converted units
+    are ignored. A product without a stock row has 0 available.
     """
     ids = list(product_ids)
     result = dict.fromkeys(ids, 0)
@@ -58,11 +63,18 @@ def available_stock(product_ids: Iterable[int]) -> dict[int, int]:
         .annotate(total=Sum("quantity"))
         .values("total")[:1]
     )
+    unseen_by_billz = (
+        Q(converted_at__gt=OuterRef("synced_at"))
+        | Q(order__purchase__billz_pushed_at__gte=OuterRef("synced_at"))
+        | (
+            Q(order__purchase__billz_pushed_at__isnull=True)
+            & ~Q(order__status=enums.OrderStatus.CANCELLED)
+            & Q(converted_at__lte=OuterRef("synced_at"))  # null synced_at → never true: ignored
+        )
+    )
     converted = (
         StockReservation.objects.filter(
-            product_id=OuterRef("product_id"),
-            state=StockReservation.State.CONVERTED,
-            converted_at__gt=OuterRef("synced_at"),
+            unseen_by_billz, product_id=OuterRef("product_id"), state=StockReservation.State.CONVERTED
         )
         .order_by()
         .values("product_id")
