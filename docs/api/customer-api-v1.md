@@ -605,7 +605,11 @@ The fakes' `*` nonce wildcard exists only under the local/test settings. `author
   does not exchange again. An exchange refused by Apple → 400 `social_token_invalid`; Apple unreachable → 503
   `provider_unavailable`; nothing is linked in either case. When an Apple identity is unlinked (`DELETE
   me/social/apple/`, the reset of §2.1.5, `DELETE me/` §2.2.3), the same transaction enqueues `apple.revoke
-  {identity_id, client_id, sealed_token}` (dedupe `apple.revoke:{identity_id}`); its handler (`accounts/tasks.py`)
+  {identity_id, customer_id, subject, subject_ref, client_id, sealed_token}` (dedupe `apple.revoke:{identity_id}`;
+  `subject` is blanked once the message reaches a final outcome). Tokens exchanged for a refused `POST me/social/`, or
+  for a completion refused with `social_provider_linked` / `social_identity_linked`, are revoked the same way unless
+  their `sub` is linked to a customer (one revocation ends Apple's whole authorization of the app); a ticket that is
+  never completed keeps its token until the ticket expires. Its handler (`accounts/tasks.py`)
   posts the token to `https://appleid.apple.com/auth/revoke` (`token_type_hint = refresh_token`); transport errors
   retry through the outbox, an Apple 400 (token already invalid) is final with a WARNING, a dead message logs ERROR
   `apple.revoke_dead` (alert; staff revoke in the Apple developer account). The fake records the revoke (local/test).
@@ -718,8 +722,8 @@ paid):
    addresses deleted, social identities deleted (an `apple.revoke` outbox message for each Apple identity holding a
    token, §2.1.8), devices `is_active=False, push_enabled=False, fcm_token="", key_hash=""`, every session revoked
    `deactivated` through `revoke_customer_sessions` (customer tombstone TTL), outstanding QR tokens deleted
-   (`core.qr_store.revoke_all`); key hashes and QR tokens are cleared in the same transaction, the Redis deletions on
-   commit;
+   (`core.qr_store.revoke_all`), the customer's `IdempotencyRecord` rows deleted; key hashes and QR tokens are cleared
+   in the same transaction, the Redis deletions on commit;
 6. audit `customer.deleted {orders_cancelled, appointments_cancelled}`.
 
 **Kept:** the row and phone (unique), `LoyaltyAccount` balance and ledger, `Purchase` rows, orders, appointments,
@@ -790,8 +794,12 @@ Body `{"fcm_token": str 0..512 | null, "push_enabled": bool, "model": str ≤80,
   (`fcm_token=""`, `push_enabled=False`, and `is_active=False` if it was active) first
   (`device_active_fcm_token_unique` backstop).
 - `fcm_invalidated_at` is cleared when a new token arrives.
+- **Locks:** the caller's customer row and the customer row of every device holding the token, in ascending pk
+  order, before any Device or AuthSession row; the holders are read without a lock first, and if the token moved in
+  the meantime the attempt rolls back and starts again (up to `REGISTER_DEVICE_ATTEMPTS = 3`). Two customers
+  registering the same fresh token at once never answer 500: one keeps it, the other's device loses it.
 → 200 `{"fid", "platform", "model", "os", "app_version", "push_enabled", "last_active_at"}`.
-Service: `accounts.services.register_device` (P0).
+Service: `accounts.services.register_device` (P0, lock order P1).
 
 #### 2.2.7 Addresses
 ```jsonc
