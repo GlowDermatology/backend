@@ -9,6 +9,7 @@ and the app versions come from settings on every call. Reads never create the si
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,6 +18,8 @@ from django.core.cache import cache
 
 from glowderma.core import enums, integration_modes, timeutils
 from glowderma.site_config.models import SiteSettings
+
+logger = logging.getLogger(__name__)
 
 PUBLIC_SETTINGS_CACHE_KEY = "site_config:public_settings:v1"
 PUBLIC_SETTINGS_TTL = 60
@@ -76,12 +79,27 @@ def localized(texts: dict[str, str], lang: str) -> str:
     return texts.get(lang) or texts.get(enums.ContentLanguage.UZ) or ""
 
 
+def _cached_snapshot() -> dict[str, Any]:
+    """The 60 s cached snapshot; a Redis error falls back to the database (settings/public/ is read at every
+    app start and must not answer 500 while the cache is down)."""
+    try:
+        snapshot = cache.get(PUBLIC_SETTINGS_CACHE_KEY)
+    except Exception:
+        logger.warning("public_settings cache read failed", exc_info=True)
+        return _snapshot()
+    if isinstance(snapshot, dict):
+        return snapshot
+    snapshot = _snapshot()
+    try:
+        cache.set(PUBLIC_SETTINGS_CACHE_KEY, snapshot, PUBLIC_SETTINGS_TTL)
+    except Exception:
+        logger.warning("public_settings cache write failed", exc_info=True)
+    return snapshot
+
+
 def public_settings(lang: str) -> dict[str, Any]:
     """The ``GET settings/public/`` body in ``lang`` (customer contract §2.4)."""
-    snapshot = cache.get(PUBLIC_SETTINGS_CACHE_KEY)
-    if not isinstance(snapshot, dict):
-        snapshot = _snapshot()
-        cache.set(PUBLIC_SETTINGS_CACHE_KEY, snapshot, PUBLIC_SETTINGS_TTL)
+    snapshot = _cached_snapshot()
     return {
         "support_phone": snapshot["support_phone"],
         "store_phone": snapshot["store_phone"],
