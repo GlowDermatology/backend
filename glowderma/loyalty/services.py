@@ -354,6 +354,20 @@ def get_or_create_account(customer_id: int) -> int:
     return account.pk
 
 
+def lock_account(customer_id: int) -> datetime | None:
+    """Lock the customer's account row ``FOR UPDATE OF`` (created lazily) without writing; return the newest
+    ledger entry's ``at`` (``None`` for an empty ledger).
+
+    For an orchestrating flow that must pick its posting instant under the lock (``post_entry`` refuses an
+    ``at`` older than the newest entry, T19). The caller owns the transaction, which keeps the lock until it
+    commits; lock order Order → Payment → LoyaltyAccount still applies.
+    """
+    account = _lock_account(customer_id)
+    return (
+        LedgerEntry.objects.filter(account_id=account.pk).order_by("-at").values_list("at", flat=True).first()
+    )
+
+
 def post_entry(
     account_id: int,
     *,

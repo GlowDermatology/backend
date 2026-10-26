@@ -275,3 +275,56 @@ def test_account_summary_is_one_statement(django_assert_num_queries: Any) -> Non
     no_account = CustomerFactory.create()
     with django_assert_num_queries(1):
         assert selectors.account_summary(no_account.pk) == AccountSummary(0, 0, 0)
+
+
+# --- per-order hold and the demo-seeder reads ------------------------------------------------------------
+
+
+def test_hold_for_order_prefers_the_active_hold_else_the_newest() -> None:
+    from glowderma.loyalty.selectors import HoldView
+    from glowderma.loyalty.tests.factories import CashbackHoldFactory
+
+    released = CashbackHoldFactory.create(released=True)
+    order_id = released.order_id
+    assert selectors.hold_for_order(order_id) == HoldView(
+        id=released.pk, amount=released.amount, state="released", expires_at=released.expires_at
+    )
+    active = CashbackHoldFactory.create(order=released.order, account=released.account)
+    view = selectors.hold_for_order(order_id)
+    assert view is not None and (view.id, view.state) == (active.pk, "active")
+    later = CashbackHoldFactory.create(order=released.order, account=released.account, released=True)
+    assert later.pk > active.pk
+    view = selectors.hold_for_order(order_id)
+    assert view is not None and view.id == active.pk  # the active hold wins over a newer released one
+    assert selectors.hold_for_order(order_id + 1_000_000) is None
+
+
+def test_seeder_reads_store_sales_adjustments_and_the_ledger() -> None:
+    seed_policies()
+    staff = StaffUserFactory.create()
+    customer = CustomerFactory.create()
+    assert not selectors.has_ledger_entries()
+    assert selectors.store_sale_ids(customer.pk) == set()
+    with pinned_clock(at(9, 5)):
+        services.record_store_purchase(customer.pk, "S-1", "S-1", 231_000, at(9, 5))
+        services.adjust(customer.pk, "add", 2_950, "Kassada QR o‘qilmadi", staff.pk)
+    assert selectors.store_sale_ids(customer.pk) == {"S-1"}
+    assert selectors.has_adjustment(customer.pk, "Kassada QR o‘qilmadi")
+    assert not selectors.has_adjustment(customer.pk, "boshqa sabab")
+    assert selectors.has_ledger_entries()
+    assert selectors.ledger_table() == LedgerEntry._meta.db_table
+
+
+@pytest.mark.django_db(transaction=True)
+def test_lock_account_creates_the_account_and_returns_the_newest_instant() -> None:
+    from django.db import transaction
+
+    staff = StaffUserFactory.create()
+    customer = CustomerFactory.create()
+    with transaction.atomic():
+        assert services.lock_account(customer.pk) is None
+    assert LoyaltyAccount.objects.filter(customer=customer).exists()
+    with pinned_clock(at(9, 5)):
+        services.adjust(customer.pk, "add", 1_000, "Tuzatish sababi", staff.pk)
+    with transaction.atomic():
+        assert services.lock_account(customer.pk) == at(9, 5)

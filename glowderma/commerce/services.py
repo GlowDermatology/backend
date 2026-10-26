@@ -49,7 +49,6 @@ from glowderma.integrations.bts.ports import BtsUnavailable
 from glowderma.integrations.bts.registry import get_bts
 from glowderma.loyalty import selectors as loyalty_selectors
 from glowderma.loyalty import services as loyalty_services
-from glowderma.loyalty.models import LedgerEntry, LoyaltyAccount
 from glowderma.payments import selectors as payment_selectors
 from glowderma.payments import services as payment_services
 from glowderma.payments.models import OPEN_REFUND_STATES
@@ -146,15 +145,10 @@ def ledger_instant(customer_id: int, floor: datetime) -> datetime:
     ``record_online_purchase`` / ``reverse_purchase`` require an explicit ``at``. A ``now()`` read before
     that lock (before a BTS call or an Order-lock wait) is older than any entry another transaction posts
     meanwhile (a POS sale, an adjustment, another order's capture), so the live flows take their instant
-    here instead. Thin adapter: ``loyalty`` has no service that locks the account without writing, so
-    ``commerce`` takes the same ``FOR UPDATE OF`` lock itself (lock order Order → Payment → LoyaltyAccount
-    is kept: callers take it after the Payment lock).
+    here instead, through ``loyalty.services.lock_account`` (callers take it after the Payment lock, so the
+    lock order Order → Payment → LoyaltyAccount is kept).
     """
-    account_id = loyalty_services.get_or_create_account(customer_id)
-    LoyaltyAccount.objects.select_for_update(of=("self",)).filter(pk=account_id).only("id").first()
-    newest = (
-        LedgerEntry.objects.filter(account_id=account_id).order_by("-at").values_list("at", flat=True).first()
-    )
+    newest = loyalty_services.lock_account(customer_id)
     return floor if newest is None or newest <= floor else newest
 
 

@@ -17,6 +17,7 @@ from uuid import UUID
 
 from django.db.models import (
     BigIntegerField,
+    Case,
     Count,
     DecimalField,
     OuterRef,
@@ -25,6 +26,7 @@ from django.db.models import (
     Subquery,
     Sum,
     Value,
+    When,
 )
 from django.db.models.functions import Coalesce
 
@@ -314,6 +316,54 @@ def purchase_for_order(order_id: int) -> PurchaseRow | None:
     """The purchase of a paid order (``Purchase.order`` is 1:1): the id ``reverse_purchase`` needs."""
     purchase = Purchase.objects.select_related("policy").filter(order_id=order_id).first()
     return None if purchase is None else purchase_row(purchase)
+
+
+@dataclass(frozen=True, slots=True)
+class HoldView:
+    """One order's cashback hold (contract §2.2 ``cashback_hold`` keys plus the id)."""
+
+    id: int
+    amount: int
+    state: str
+    expires_at: datetime
+
+
+def hold_for_order(order_id: int) -> HoldView | None:
+    """The order's hold: the ``active`` one (at most one, a DB constraint), else the newest; ``None``
+    without. ``Order.cashback_hold`` renders only an ``active`` hold (contract §7 item 18): the caller checks
+    ``state``.
+    """
+    active_first = Case(When(state=enums.CashbackHoldState.ACTIVE, then=Value(0)), default=Value(1))
+    hold = CashbackHold.objects.filter(order_id=order_id).order_by(active_first, "-id").first()  # one query
+    if hold is None:
+        return None
+    return HoldView(id=hold.pk, amount=hold.amount, state=hold.state, expires_at=hold.expires_at)
+
+
+def store_sale_ids(customer_id: int) -> set[str]:
+    """The Billz sale ids of the customer's recorded store purchases (the demo seeder skips those)."""
+    return set(
+        Purchase.objects.filter(customer_id=customer_id, source=enums.PurchaseSource.STORE_QR).values_list(
+            "billz_sale_id", flat=True
+        )
+    )
+
+
+def has_adjustment(customer_id: int, reason: str) -> bool:
+    """Whether the customer's ledger holds an ``adjustment`` with exactly this reason (demo seeder check)."""
+    return LedgerEntry.objects.filter(
+        account__customer_id=customer_id, kind=enums.LedgerKind.ADJUSTMENT, reason=reason
+    ).exists()
+
+
+def has_ledger_entries() -> bool:
+    """Whether any ledger entry exists (the commerce demo seeder's preflight)."""
+    return LedgerEntry.objects.exists()
+
+
+def ledger_table() -> str:
+    """The ledger's table name: the demo seeders pin and park its id sequence (``core.seeding``)."""
+    return LedgerEntry._meta.db_table
 
 
 @dataclass(frozen=True, slots=True)

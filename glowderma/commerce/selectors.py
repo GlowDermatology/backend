@@ -25,7 +25,6 @@ from glowderma.core.timeutils import TASHKENT
 from glowderma.delivery import selectors as delivery_selectors
 from glowderma.delivery.models import Shipment
 from glowderma.loyalty import selectors as loyalty_selectors
-from glowderma.loyalty.models import CashbackHold
 from glowderma.payments import selectors as payment_selectors
 from glowderma.payments.models import Payment
 
@@ -237,17 +236,9 @@ class OrderDetail:
 
 
 def _cashback_hold(order_id: int) -> dict[str, Any] | None:
-    """``Order.cashback_hold``: the order's ``active`` hold only, else ``null`` (contract §7 item 18).
-
-    Adapter: ``loyalty.selectors`` has no per-order hold read yet (reported to the lead), so this reads the
-    ``CashbackHold`` row of the order directly (``loyalty`` is a lower layer).
-    """
-    hold = (
-        CashbackHold.objects.filter(order_id=order_id, state=enums.CashbackHoldState.ACTIVE)
-        .order_by("-id")
-        .first()
-    )
-    if hold is None:
+    """``Order.cashback_hold``: the order's ``active`` hold only, else ``null`` (contract §7 item 18)."""
+    hold = loyalty_selectors.hold_for_order(order_id)
+    if hold is None or hold.state != enums.CashbackHoldState.ACTIVE:
         return None
     return {"amount": hold.amount, "state": hold.state, "expires_at": hold.expires_at}
 
