@@ -78,4 +78,4 @@ def test_the_purge_is_scheduled_nightly_and_the_default_is_90_days() -> None:
     entry = app.conf.beat_schedule["integrations-purge-webhook-inbox"]
     assert entry["task"] == "integrations.purge_webhook_inbox" == purge_webhook_inbox.name
     assert (entry["schedule"].hour, entry["schedule"].minute) == ({3}, {25})
-    assert settings.WEBHOOK_INBOX_RETENTION_DAYS == 90 and settings.OUTBOX_RETENTION_DAYS == 30
+    assert settings.WEBHOOK_INBOX_RETENTION_DAYS == 180 and settings.OUTBOX_RETENTION_DAYS == 30

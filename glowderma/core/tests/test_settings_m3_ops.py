@@ -46,7 +46,7 @@ SECRET = "alert-webhook-secret-at-least-32-characters"  # noqa: S105
 def test_defaults() -> None:
     assert settings.ALERT_WEBHOOK_URL == "" and settings.ALERT_WEBHOOK_SECRET == ""
     assert settings.ALERT_DEDUPE_MINUTES == 30 and settings.ALERT_ENV == "local"
-    assert (settings.WEBHOOK_INBOX_RETENTION_DAYS, settings.OUTBOX_RETENTION_DAYS) == (90, 30)
+    assert (settings.WEBHOOK_INBOX_RETENTION_DAYS, settings.OUTBOX_RETENTION_DAYS) == (180, 30)
     assert (settings.RETENTION_BATCH_SIZE, settings.OUTBOX_DEFERRAL_WINDOW_HOURS) == (1000, 24)
     thresholds = [
         settings.CONSISTENCY_SAMPLE_SIZE,

@@ -31,7 +31,7 @@ from the product owner (and, where marked, from legal counsel) before go-live.
 | Loyalty | balance, ledger entries, holds, purchases (incl. in-store Billz sale ids) | Postgres `loyalty_*` | Kept after deletion (decision A1) |
 | Appointments | customer, specialist, service, time, customer note, staff note | Postgres `appointments_*` | |
 | Notifications | inbox rows (title, body), campaign texts, a campaign's single-phone audience snapshot | Postgres `notifications_*` | Retention not implemented (Q5) |
-| Raw provider callbacks | Click/Payme/BTS/Billz request bodies (`payload`, `raw_body` ≤ 64 KiB), allow-listed headers, remote IP | Postgres `integrations_webhookinbox` (append-only) | Purged after `WEBHOOK_INBOX_RETENTION_DAYS` (90) |
+| Raw provider callbacks | Click/Payme/BTS/Billz request bodies (`payload`, `raw_body` ≤ 64 KiB), allow-listed headers, remote IP | Postgres `integrations_webhookinbox` (append-only) | Purged after `WEBHOOK_INBOX_RETENTION_DAYS` (180) |
 | Outbox messages | ids; `apple.revoke` carries a sealed Apple token; `push.account_security` may carry FCM tokens until sent | Postgres `core_outboxmessage` | Done rows purged after `OUTBOX_RETENTION_DAYS` (30); dead rows kept until requeued or resolved (§4); done/dead `sms.send` after 24 h |
 | Idempotency records | stored responses of customer and staff writes (may contain profile or address data) | Postgres `core_idempotencyrecord` | Deleted after 24 h; a deleted customer's are deleted at once |
 | Audit log | actor (staff name/email; customers as a masked phone `+998 90 *** ** 67`), action, before/after documents, IP, user agent, request id | Postgres `core_auditentry` (append-only) | Never purged (Q1) |
@@ -107,14 +107,14 @@ loyalty account, ledger and purchases, orders (with their recipient snapshot), p
 and the audit log. A re-registration shows nothing created before it (history horizon, §2.2.3).
 
 Not covered by the app flow (operator steps on request): copies in backups (they age out with the backup
-retention), raw provider callbacks (purged after 90 days), Billz's own client record created from the phone
+retention), raw provider callbacks (purged after 180 days), Billz's own client record created from the phone
 (delete it in Billz), BTS and Eskiz records (provider-side retention).
 
 ## 4. Retention
 
 | Data | Retention | Mechanism |
 |---|---|---|
-| Raw provider callbacks (`WebhookInbox`) | `WEBHOOK_INBOX_RETENTION_DAYS`, default 90 days | beat `integrations-purge-webhook-inbox` 03:25 Tashkent: batches inside `core.db.purge_window()` (the append-only trigger lets only that transaction delete), audit `integrations.inbox_purged {provider, rows, before}` |
+| Raw provider callbacks (`WebhookInbox`) | `WEBHOOK_INBOX_RETENTION_DAYS`, default 180 days (customer contract §6 item 11, decision T13) | beat `integrations-purge-webhook-inbox` 03:25 Tashkent: batches inside `core.db.purge_window()` (the append-only trigger lets only that transaction delete), audit `integrations.inbox_purged {provider, rows, before}` |
 | Done outbox messages | `OUTBOX_RETENTION_DAYS`, default 30 days | beat `core-purge-outbox` 03:20: ORM batches (shipments drop their link), audit `outbox.purged {rows, before}` |
 | Dead outbox messages | kept until resolved | never purged by retention: a dead message is an action item (`requeue_outbox --dead` replays it from the row; the consistency report lists dead `billz.push_sale` rows of any age and K6 the recent ones). They hold ids; a dead `push.*` or `campaign.send_batch` row may hold FCM tokens. Once the cause is fixed, replay them; dead `sms.send` rows are the exception (deleted after 24 h, phone and code) |
 | Done/dead `sms.send` messages, SMS codes | 24 h | `accounts.cleanup_auth`, hourly |
@@ -157,5 +157,5 @@ Glow Derma), not something the software does:
 | Q4 | Whether the order recipient snapshot (name, phone, address) is scrubbed after delivery or after deletion | kept |
 | Q5 | Retention of inbox notifications and campaign recipients (designed 365 / 180 days) | kept |
 | Q6 | Backup retention off the host, and its location | not defined in code |
-| Q7 | Raw callback retention: the brief sets 90 days; customer contract §2.13.0/§6 item 11 and decision T13 still say 180 days | 90 days implemented; the lead aligns the contract |
+| Q7 | Raw callback retention: settled at 180 days by customer contract §6 item 11 ("180-day retention, C4") and decision T13 | 180 days implemented (`WEBHOOK_INBOX_RETENTION_DAYS`); a shorter period needs a contract change first |
 | Q8 | Which alert receiver is used (§1.2) | none configured |

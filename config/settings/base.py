@@ -522,7 +522,8 @@ ALERT_ENV = env_str("ALERT_ENV", "local").strip()
 # Retention (docs/ops/compliance.md): raw provider callbacks hold personal data; done outbox rows are
 # delivery bookkeeping (dead ones are kept: they are action items until requeued or resolved by hand).
 # Purged nightly in batches (core.purge_outbox, integrations.purge_webhook_inbox).
-WEBHOOK_INBOX_RETENTION_DAYS = env_bounded_int("WEBHOOK_INBOX_RETENTION_DAYS", 90, minimum=1, maximum=3650)
+# 180 days: customer contract §6 item 11 ("180-day retention, C4") and decision T13.
+WEBHOOK_INBOX_RETENTION_DAYS = env_bounded_int("WEBHOOK_INBOX_RETENTION_DAYS", 180, minimum=1, maximum=3650)
 OUTBOX_RETENTION_DAYS = env_bounded_int("OUTBOX_RETENTION_DAYS", 30, minimum=1, maximum=3650)
 RETENTION_BATCH_SIZE = env_bounded_int("RETENTION_BATCH_SIZE", 1000, minimum=100, maximum=10000)
 # A deferred outbox message (outbox.RetryLater) of a topic that declares no window of its own counts as stuck
