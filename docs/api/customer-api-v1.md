@@ -1638,14 +1638,32 @@ admin-only by DB constraint).
   keeps the capture; we return it). The order itself never changes status because of a refused capture.
   - **A reversal Click refuses** — Click reverses only payments of the current reporting month made with an online card,
     and UZCARD may refuse — ends as refund `failed` (B5 `submit_refund` → `mark_failed`, event `refund_failed`), which
-    shows in admin `attention.refunds_needing_action`. Staff either `retry` it (a transient refusal) or pay the customer
-    outside Click and close it with `…/resolve/ {state: "succeeded"}`, which P2 extends from `unknown` /
-    `manual_required` to a `failed` Click refund (admin §7 item 18). The customer keeps seeing "To‘lov qaytarilmoqda"
-    until then (§2.8).
+    shows in admin `attention.refunds_needing_action`. Staff either `retry` it (a transient refusal) or close it with
+    `…/resolve/ {state: "succeeded"}`, which P2 extends from `unknown` / `manual_required` to a `failed` Click refund
+    (admin §7 item 18) after a fresh Click status check (below). The customer keeps seeing "To‘lov qaytarilmoqda" until
+    then (§2.8).
+  - **Fresh Click status check on that resolve.** `failed` does not prove that Click kept the money: B5's `_reversed()`
+    answers "not reversed" when its own status call fails, so a reversal Click performed can be recorded `failed`, and
+    a staff payout on top would pay the customer twice. `commerce.services.resolve_refund(…, "succeeded", …,
+    manual_payout=…)` of a `failed` Click refund therefore first asks Click, **outside any row lock** (no HTTP under a
+    lock), `ClickPort.payment_status(click_paydoc_id)`:
+    - `reversed` → Click returned the money: the refund is closed `succeeded` (a Click reversal, whatever
+      `manual_payout` says; staff must not pay out);
+    - `paid` and no `manual_payout: true` → 409 `invalid_transition` "Click to‘lovni qaytarmagan. Avval mijozga
+      qo‘lda to‘lang, so‘ng «qo‘lda to‘landi» belgisi bilan yakunlang yoki qaytarishni qayta urinib ko‘ring."
+      (`MESSAGE_REFUND_STILL_PAID`), nothing written;
+    - `paid` and `manual_payout: true` (staff paid the customer outside Click) → closed `succeeded`, audit
+      `refund.state_changed` with `manual_payout: true`;
+    - Click transport error → 503 `provider_unavailable`, nothing written (retry later);
+    - the Click port is fake under the production settings → 409 `invalid_transition` "Click sinov rejimida: to‘lov
+      holatini tekshirib bo‘lmaydi. Click ulanganidan keyin yakunlang." (`MESSAGE_REFUND_CLICK_FAKE`): an unverified
+      payout could double the refund (§6.14 operator procedure);
+    - a payment without `click_paydoc_id` was never sent to Click, so there is nothing Click could have reversed: no
+      check, `manual_payout: true` required (else the 409 `MESSAGE_REFUND_STILL_PAID`).
   - **Guard on that resolve.** A `failed` refund is closed, so a `retry` (a **new** refund of the same payment) may
     already exist, open or succeeded; resolving the old failed one as well would pay the customer twice and push
     revenue below zero. `commerce.services.resolve_refund` therefore closes a `failed` Click refund as `succeeded` only
-    when, under the Order → Payment locks, (1) it is the payment's **newest** refund, (2) the payment is still `paid`
+    when, after the status check and under the Order → Payment locks, (1) it is the payment's **newest** refund, (2) the payment is still `paid`
     and (3) the payment has no other refund that is open (`requested`, `submitting`, `manual_required`, `unknown`) or
     `succeeded`; otherwise 409 `invalid_transition` with the built Uzbek message "Bu qaytarishni yakunlab bo‘lmaydi."
     (`MESSAGE_REFUND_NOT_RESOLVABLE`). `resolve` from `unknown` / `manual_required` is unchanged (such a refund is the
