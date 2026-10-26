@@ -81,12 +81,15 @@ class FakeFacebook:
 # → ``exchange_failed``, ``fake-down`` → ``unavailable``, ``fake-expired`` → ``invalid_token``; anything else
 # is ``invalid_token``. The nonce is not part of a fake token: the customer service checks that it was issued
 # (and the ``*`` wildcard only under the local/test settings). Apple's authorization code ``fake-code:<any>``
-# yields the refresh token ``fake-apple-refresh-<subject>``, ``fake-code-fail`` is refused, ``fake-code-down``
-# unavailable. The fakes never run under the production settings: the registry answers 404 first.
+# yields the refresh token ``fake-apple-refresh-<subject>``, ``fake-code-sub:<subject>`` the same but only for
+# that subject (another identity → refused, as the live adapter's id_token ``sub`` check), ``fake-code-fail``
+# is refused, ``fake-code-down`` unavailable. The fakes never run under the production settings: the registry
+# answers 404 first.
 
 FAKE_TOKEN_LIFETIME_SECONDS = 600
 FAKE_GOOGLE_CLIENT_ID = "fake-google-client"
 FAKE_APPLE_BUNDLE_ID = "uz.glowderma.app"
+FAKE_CODE_SUBJECT_PREFIX = "fake-code-sub:"
 
 
 def _now() -> int:
@@ -156,7 +159,12 @@ class FakeApple:
             raise OAuthExchangeError("exchange_failed", "fake code refused")
         if code == "fake-code-down":
             raise OAuthExchangeError("unavailable", "fake Apple down")
-        if not code.startswith("fake-code:"):
+        if code.startswith(FAKE_CODE_SUBJECT_PREFIX):
+            # A code bound to an Apple account: refused for any other identity, like the live adapter's
+            # id_token ``sub`` check.
+            if code.removeprefix(FAKE_CODE_SUBJECT_PREFIX) != subject:
+                raise OAuthExchangeError("exchange_failed", "authorization code of another Apple account")
+        elif not code.startswith("fake-code:"):
             raise OAuthExchangeError("exchange_failed", "unknown fake code")
         if _records():
             self.exchanged.append((code, client_id))

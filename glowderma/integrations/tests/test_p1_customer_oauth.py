@@ -231,9 +231,14 @@ def test_apple_id_token_with_hashed_nonce(
         )
 
 
-def test_apple_code_exchange_and_revoke(recorder: Recorder, ec_pem: bytes) -> None:
-    provider = apple(recorder, ec_pem)
-    recorder.route("/auth/token", httpx.Response(200, json={"refresh_token": "r-apple", "id_token": "x"}))
+def test_apple_code_exchange_and_revoke(
+    recorder: Recorder, ec_pem: bytes, jwk_client: StaticJWKClient, sign: Callable[..., str]
+) -> None:
+    provider = apple(recorder, ec_pem, jwk_client)
+    id_token = sign(iss="https://appleid.apple.com", aud="uz.glowderma.beta", sub="s")
+    recorder.route(
+        "/auth/token", httpx.Response(200, json={"refresh_token": "r-apple", "id_token": id_token})
+    )
     recorder.route("/auth/revoke", httpx.Response(200))
     assert provider.exchange_code("code-1", client_id="uz.glowderma.beta", subject="s") == "r-apple"
     provider.revoke("r-apple", client_id="uz.glowderma.beta")
@@ -271,3 +276,78 @@ def test_apple_failures(recorder: Recorder, ec_pem: bytes, response: Any, kind: 
         with pytest.raises(OAuthExchangeError) as revoke_error:
             provider.revoke("r", client_id=BUNDLE)
         assert revoke_error.value.kind == "unavailable"
+
+
+# --- fix pass 1: the code is bound to the identity's subject; only "token already invalid" is final
+
+
+@pytest.mark.parametrize(
+    "claims",
+    [
+        {"sub": "another-apple-user", "aud": BUNDLE},  # a code of another Apple account
+        {"sub": "s", "aud": "uz.glowderma.beta"},  # issued to another client_id
+        {"sub": "s", "aud": BUNDLE, "iss": "https://evil.example"},
+    ],
+)
+def test_apple_exchange_refuses_an_id_token_of_another_subject_or_client(
+    recorder: Recorder,
+    ec_pem: bytes,
+    jwk_client: StaticJWKClient,
+    sign: Callable[..., str],
+    claims: dict[str, str],
+) -> None:
+    provider = apple(recorder, ec_pem, jwk_client)
+    id_token = sign(**{"iss": "https://appleid.apple.com", **claims})
+    recorder.route("/auth/token", httpx.Response(200, json={"refresh_token": "r", "id_token": id_token}))
+    with pytest.raises(OAuthExchangeError) as error:
+        provider.exchange_code("c", client_id=BUNDLE, subject="s")
+    assert error.value.kind == "exchange_failed"
+
+
+def test_apple_exchange_without_id_token_is_refused(recorder: Recorder, ec_pem: bytes) -> None:
+    provider = apple(recorder, ec_pem)
+    recorder.route("/auth/token", httpx.Response(200, json={"refresh_token": "r"}))
+    with pytest.raises(OAuthExchangeError) as error:
+        provider.exchange_code("c", client_id=BUNDLE, subject="s")
+    assert error.value.kind == "exchange_failed"
+
+
+def test_apple_exchange_with_jwks_down_is_unavailable(
+    recorder: Recorder, ec_pem: bytes, sign: Callable[..., str]
+) -> None:
+    provider = apple(recorder, ec_pem, StaticJWKClient(None))
+    id_token = sign(iss="https://appleid.apple.com", aud=BUNDLE, sub="s")
+    recorder.route("/auth/token", httpx.Response(200, json={"refresh_token": "r", "id_token": id_token}))
+    with pytest.raises(OAuthExchangeError) as error:
+        provider.exchange_code("c", client_id=BUNDLE, subject="s")
+    assert error.value.kind == "unavailable"
+
+
+@pytest.mark.parametrize(
+    ("response", "kind"),
+    [
+        (httpx.Response(400, json={"error": "invalid_grant"}), "exchange_failed"),
+        (httpx.Response(400, json={"error": "invalid_request"}), "exchange_failed"),
+        (httpx.Response(400, json={"error": "invalid_client"}), "unavailable"),
+        (httpx.Response(401, json={"error": "invalid_client"}), "unavailable"),
+        (httpx.Response(403), "unavailable"),
+    ],
+)
+def test_apple_revoke_treats_only_an_invalid_token_as_final(
+    recorder: Recorder, ec_pem: bytes, response: httpx.Response, kind: str
+) -> None:
+    provider = apple(recorder, ec_pem)
+    recorder.route("/auth/revoke", response)
+    with pytest.raises(OAuthExchangeError) as error:
+        provider.revoke("r", client_id=BUNDLE)
+    assert error.value.kind == kind
+
+
+def test_fake_apple_code_bound_to_another_subject_is_refused() -> None:
+    fake = FakeApple()
+    assert (
+        fake.exchange_code("fake-code-sub:a-1", client_id=BUNDLE, subject="a-1") == "fake-apple-refresh-a-1"
+    )
+    with pytest.raises(OAuthExchangeError) as error:
+        fake.exchange_code("fake-code-sub:someone-else", client_id=BUNDLE, subject="a-1")
+    assert error.value.kind == "exchange_failed"
