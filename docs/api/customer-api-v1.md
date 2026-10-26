@@ -194,7 +194,8 @@ high pure-IP ceiling as a backstop; the per-phone rules are the main protection 
 | OTP rules (not a DRF throttle; §2.1.1) | phone (DB-derived, survive a cache flush); fid and IP daily counters in Redis | resend ≥ 60 s per (phone, purpose); ≤ 10 codes per phone per Tashkent day; ≤ 10 wrong codes per phone per day; 15 min lockout after 5 wrong codes on one code; ≤ 10 codes per fid and ≤ 1000 per IP per day (`otp_network_limit`); global ≤ `SMS_GLOBAL_HOURLY_LIMIT` per hour | `auth/send-code/`, `auth/verify-code/`, `auth/login/` |
 | **`customer_auth_device`** (new) | fid | 30/min | `auth/verify-code/`, `auth/set-password/`, `auth/login/`, `auth/reset-password/`, `auth/social/`, `auth/social/nonce/`, `auth/social/complete/` |
 | **`customer_auth_ip`** (new) | client IP (backstop) | 1200/min | the same routes |
-| customer login guard (`LoginGuard`, scope `customer_login`) | `pii_ref(phone)` | 5 failures/min, then lockout 1 → 15 min exponential | `auth/login/` on a device without a valid device key; every other password check of the customer — `auth/social/complete/`, `me/social/` (POST and DELETE), `me/password/`, `DELETE me/` — so a stolen access token gets no second guessing budget |
+| customer login guard (`LoginGuard`, scope `customer_login`) | `pii_ref(phone)` | 5 failures/min, then lockout 1 → 15 min exponential | checked and counted by `auth/login/` on a device without a valid device key and by the password step of `auth/social/complete/` (both unauthenticated); it also **receives** (counts, never checks) every failure of the signed-in re-authentication below, so a stolen access token adds no unchecked guessing path |
+| **signed-in re-authentication guard** (new; `LoginGuard`, scope `customer_reauth`) | customer id | 5 failures/min, then lockout 1 → 15 min exponential | the password checks of a signed-in customer — `me/social/` (POST and DELETE), `me/password/`, `DELETE me/`: they check **only** this lock, which only a holder of the customer's session can fill, so someone who merely knows the phone (and fills `customer_login` with `auth/login/` calls) can never block the owner's password change, account deletion or social link/unlink; a success resets only this scope |
 | **known-device login guard** (new; `LoginGuard`, scope `customer_login_device`) | device row id | 5 failures/min, then lockout 1 → 15 min exponential | `auth/login/` with a valid `X-GD-Device-Key` (§2.1.4): someone who only knows the phone cannot lock the owner out of their own known device |
 | `refresh` | SHA-256 of the presented refresh token | 120/min | `auth/refresh/` |
 | **`refresh_unknown`** (new) | client IP, counted only when the presented token matches no session | 60/min | `auth/refresh/` (junk-token rotation cannot bypass the per-token key) |
@@ -444,7 +445,8 @@ holds one.
    evaluated first and reveals nothing by itself (the answer does not differ until the password is checked).
 2. Login guard → 429 `throttled`: a **known** device counts its failures in scope `customer_login_device` keyed by the
    device row; an unknown device in scope `customer_login` keyed by `pii_ref(phone)` (§1.8). Someone who only knows the
-   phone can lock the unknown-device path for that phone (residual risk, §6.3) but never the owner's known device.
+   phone can lock the unknown-device path for that phone (residual risk, §6.3) but never the owner's known device, nor
+   the password checks of the owner's signed-in session (scope `customer_reauth`, §1.8).
 3. **Unknown device without `verification_token`:** if a code cannot be sent right now for **any** reason step 6 could
    meet — the phone's lockout, daily code cap or daily wrong-code cap, the fid day cap, the IP day cap or the global
    hourly budget (§2.1.1) — → 429 `otp_locked` / `otp_daily_limit` / `otp_network_limit` or 503 `sms_unavailable`
@@ -674,9 +676,10 @@ created keep the language they were rendered in (§2.12).
 #### 2.2.3 `DELETE me/`
 Body `{"password": str | null, "verification_token": str | null}`.
 - `has_password` → `password` required (`required`; wrong → `password_incorrect` "Parol noto‘g‘ri." ·
-  `field.password_incorrect`), guarded by `LoginGuard` scope `customer_login` keyed by the customer's `pii_ref(phone)`
-  — the same budget as `auth/login/` (429 `throttled` after 5 failures), so a stolen access token gets no separate
-  guessing budget (§1.8).
+  `field.password_incorrect`), guarded by `LoginGuard` scope `customer_reauth` keyed by the customer id (429
+  `throttled` after 5 failures); every failure is also counted in the `customer_login` budget of `auth/login/`, so a
+  stolen access token gets no unchecked guessing path, while someone who only knows the phone cannot lock the owner's
+  deletion (§1.8; Apple guideline 5.1.1(v) requires deletion to work).
 - No password (social-only) → `verification_token` of purpose `reset_password` for the customer's own phone required
   (`required` / 400 `verification_invalid`); the app asks for an SMS code first, so a stolen 15-minute access token
   alone cannot delete the account.
@@ -781,7 +784,8 @@ Service: `accounts.services.register_device` (P0).
 #### 2.2.8 Social identities of a signed-in customer
 **Re-authentication** (`POST` and `DELETE` alike): a bearer token alone never changes how the account signs in.
 `has_password` → `password` required and checked (`required` / `password_incorrect` "Parol noto‘g‘ri." ·
-`field.password_incorrect`; LoginGuard scope `customer_login`, §1.8); no password (social-only) → `verification_token`
+`field.password_incorrect`; LoginGuard scope `customer_reauth`, each failure also counted in `customer_login`, §1.8); no
+password (social-only) → `verification_token`
 of purpose `reset_password` for the customer's **own** phone required (`required` / 400 `verification_invalid`),
 consumed under the customer-level lock — the app asks for an SMS code first (`send-code` `reset_password` →
 `verify-code`). Otherwise a stolen session (even a 15-minute access token) could attach the thief's own Google,
@@ -808,7 +812,7 @@ Body `{"current_password": str | null, "verification_token": str | null, "passwo
 
 | Field / check | Code · message (uz) · key |
 |---|---|
-| `has_password` → `current_password` required and correct (LoginGuard scope `customer_login`, §1.8) | `required`; `password_incorrect` "Parol noto‘g‘ri." · `field.password_incorrect`; 429 `throttled` |
+| `has_password` → `current_password` required and correct (LoginGuard scope `customer_reauth`, each failure also counted in `customer_login`, §1.8) | `required`; `password_incorrect` "Parol noto‘g‘ri." · `field.password_incorrect`; 429 `throttled` |
 | no password (social-only) → `verification_token` of purpose `reset_password` for the customer's own phone, consumed under the customer-level lock | `required`; 400 `verification_invalid` · `error.verification_invalid` |
 | `password` rules as §2.1.3, plus not equal to the current password | `password_too_short` · `password_too_common` · `password_entirely_numeric` · `password_too_similar` · `max_length` · `password_unchanged` "Yangi parol eskisidan farq qilsin." · `field.password_unchanged` |
 
@@ -2296,9 +2300,12 @@ code a customer view can raise to an existing key.
    traffic is real, raise the limit; M3 considers a per-/24 (IPv4) or per-/48 (IPv6) hourly counter in front of the
    breaker. A distributed attacker can
    still exhaust one victim's daily SMS cap (denial of reset/new-device sign-in for that day), and anyone who knows a
-   phone can keep its **unknown-device** password sign-in locked by sending 5 wrong passwords per lock cycle (1 to 15
-   minutes) — the owner's known device has its own guard and stays usable (§2.1.4); M3 evaluates App Attest / Play
-   Integrity attestation on `auth/send-code/` and `auth/login/`.
+   phone can keep its **unknown-device** password sign-in (and the password step of a social completion) locked by
+   sending 5 wrong passwords per lock cycle (1 to 15 minutes) — the owner's known device has its own guard and stays
+   usable (§2.1.4), and the password checks of a signed-in session (password change, deletion, social link/unlink) use
+   the customer-id lock `customer_reauth`, which only a session holder can fill (§1.8). The price of that split: a thief
+   holding a stolen session can guess on both paths, at most 5 + 5 passwords per lock cycle, both locks escalating to
+   15 minutes; M3 evaluates App Attest / Play Integrity attestation on `auth/send-code/` and `auth/login/`.
 4. **OTP storage.** Codes only as `HMAC-SHA256(code, SMS_CODE_HMAC_KEY)` (key ≥32 characters, required in production
    and refused when it is a placeholder or a committed value, plan §7), compared with `compare_digest`; the plain code
    exists only in memory, in the AES-GCM ciphertext in Redis for its 120 s lifetime (`SECRETBOX_KEY`, exactly 32 bytes,
@@ -2310,8 +2317,8 @@ code a customer view can raise to an existing key.
    `SmsCode` rows and done `sms.send` outbox rows are deleted after 24 h (`accounts.cleanup_auth`).
 5. **Passwords:** Argon2 (`PASSWORD_HASHERS`); a dummy hash check runs whenever no stored hash is compared (unknown
    phone, deleted customer, empty password), so `auth/login/` costs the same for every phone state (§2.1.4); min 8 +
-   Django validators, never returned or logged. Every password check of a signed-in customer shares the
-   `customer_login` guard. `auth/reset-password/` (recovery) revokes all sessions, unlinks social identities and rotates
+   Django validators, never returned or logged. The password checks of a signed-in customer are locked by their own
+   customer-id guard (`customer_reauth`) and also counted in the phone's `customer_login` guard (§1.8). `auth/reset-password/` (recovery) revokes all sessions, unlinks social identities and rotates
    the device key; `me/password/` (signed in, current password or SMS code) keeps the session and identities.
 6. **Secrets on the device.** Refresh token and device key: iOS Keychain (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`,
    no iCloud sync) / Android Keystore-backed EncryptedSharedPreferences; access token in memory; the refresh and
@@ -2435,7 +2442,7 @@ the client may still revise it later through a setting or a data field:
 | M2-A9 | May the app reveal whether a phone is registered (register / reset flows)? | Yes, throttled (`phone_registered` / `phone_not_registered`) |
 | M2-A10 | Does a social sign-in on a new phone also need the SMS code? | No: linking requires the account's strongest factor — the SMS code plus the password if set (completion), or from a signed-in session the password, or an SMS code for accounts without one (never the bearer alone) — so the provider sign-in is a factor of equal strength; only password sign-in on a device without a device key needs the code |
 | M2-A11 | Customer password rule | ≥8 characters, not only digits, not common, not similar to the phone |
-| M2-A12 | Deleting an account: confirmation and open items | Password (or an SMS code for social-only accounts) required, guarded like sign-in; unpaid orders and open appointments are cancelled; paid orders continue; refused while a Click payment is in flight (≤ 2 minutes) |
+| M2-A12 | Deleting an account: confirmation and open items | Password (or an SMS code for social-only accounts) required, guarded by its own re-authentication lock (failures also count against sign-in; a phone-only attacker cannot block it); unpaid orders and open appointments are cancelled; paid orders continue; refused while a Click payment is in flight (≤ 2 minutes) |
 | M2-A13 | Minimum app version enforcement | Off (`MIN_APP_VERSION_*=0.0.0`) until the first store release |
 | M2-A14 | Apple App Store guideline 4.8: Google/Facebook sign-in on iOS requires an equivalent privacy-focused option (Sign in with Apple) | **Decided by the product owner (2026-10-26):** offer Sign in with Apple on iOS (`apple` provider, ID token with nonce, token revocation on unlink and deletion per guideline 5.1.1(v)); `APPLE_BUNDLE_IDS` empty keeps it disabled (live) or fake (local/test) until the client provides the bundle id (A7) |
 | M2-A15 | Recycled phone numbers: what does the person who reactivates a deleted account see? | Balance and purchases kept (A1); orders, appointments, inbox and ledger order links only from the reactivation (`Customer.history_from`) |

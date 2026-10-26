@@ -218,8 +218,11 @@ C§2.0 rows 1–23: `auth/send-code/`, `auth/verify-code/`, `auth/set-password/`
 **Reused (do not redefine):** `accounts.services.{add_address, update_address, set_default_address, remove_address,
 set_customer_password, check_customer_password, delete_customer (changed by P0), reactivate_customer,
 start_customer_session (P0), register_device (P0), revoke_customer_sessions (P0), device_is_known (P0),
-move_history_horizon (P0)}`, `accounts.api.guard.LoginGuard` (scope `customer_login` per phone for every password
-check of the customer, `customer_login_device` per device row for a login with a valid device key), `catalog.selectors.{filter_products_search, customer_visible_products,
+move_history_horizon (P0)}`, `accounts.api.guard.LoginGuard` (scope `customer_login` per phone for the unauthenticated
+password checks — `auth/login/` on an unknown device, `auth/social/complete/`; `customer_login_device` per device row for
+a login with a valid device key; `customer_reauth` per customer id for the signed-in checks of `me/social/`,
+`me/password/` and `DELETE me/`, which call `check`/`reset` on `customer_reauth` only and `record_failure` on both
+`customer_reauth` and `customer_login` — counting and blocking split, C§1.8), `catalog.selectors.{filter_products_search, customer_visible_products,
 category_queryset, banner_queryset}`, `commerce.selectors.available_stock` (B5), `site_config.models.SiteSettings.load`,
 `core.images.process_image`, `core.secretbox`, `core.pii`, `commerce.services.cancel_by_customer` (P2) and
 `appointments.services.cancel_by_customer` (P3) from `delete_account` (called only when the customer has open items;
@@ -287,7 +290,8 @@ None (P0 owns `accounts.0006`). The link-social ticket binding and the OTP fid/I
   errors, treats Apple 400 as final, and the dead hook logs ERROR `apple.revoke_dead`. Fake OAuth under
   `override_settings(DEV_FEATURES_ALLOWED=False)` → 404 on the four routes and the `*` nonce refused. Facebook: the live
   adapter (recorded fixtures) sends `input_token` only in the POST body, never in a URL (staff path too).
-- `me/social/`: link with password (wrong → `password_incorrect`, shares the `customer_login` budget); a social-only
+- `me/social/`: link with password (wrong → `password_incorrect`; locked by `customer_reauth`, each failure also counted
+  in `customer_login`); a social-only
   account linking without `verification_token` → 400 `verification_token` `required`, with a used or foreign token →
   400 `verification_invalid`, with a fresh `reset_password` token of its own phone → 200; unlink needs the same
   re-authentication (checked before the idempotent no-op); `last_sign_in_method`.
@@ -301,8 +305,11 @@ None (P0 owns `accounts.0006`). The link-social ticket binding and the OTP fid/I
   image and addresses scrubbed, balance and purchases kept, audit `customer.history_reset`; 179 days ago, or a purchase
   last week → untouched. Social completion on a social-only dormant account applies the same rule; completion on a new
   device puts the replaced device's token in `farewell_tokens`.
-- `DELETE me/`: password check sharing the `customer_login` guard (5 failures on `DELETE me/` also lock `auth/login/` on
-  an unknown device); social-only needs a `reset_password` verification token;
+- `DELETE me/`: password check under `customer_reauth` (5 failures → 429 on the 6th, and those failures also lock
+  `auth/login/` on an unknown device through `customer_login`); **lockout DoS test:** lock `customer_login` with 6
+  unknown-device `auth/login/` calls with wrong passwords → the owner's `DELETE me/` and `me/password/` with the
+  correct password from the signed-in session still answer 204 / 200 (and `me/social/` POST 200); social-only needs a
+  `reset_password` verification token;
   in-flight order (stub returning an id) → 409 `payment_in_progress` and nothing written; scrub (name, image file,
   addresses, identities, device tokens and keys), sessions revoked with tombstones, QR tokens revoked, audit;
   re-registration afterwards.
