@@ -18,6 +18,7 @@ import time
 from typing import Any
 
 from django.conf import settings
+from django.core.exceptions import TooManyFieldsSent
 from django.db import connection, transaction
 from django.http import QueryDict
 from drf_spectacular.types import OpenApiTypes
@@ -49,16 +50,21 @@ def advisory_lock(key: str) -> None:
 
 def _parse(request: Request) -> tuple[dict[str, str] | None, str]:
     """``(params, raw_body)``: form fields as raw strings; JSON only with ``CLICK_ACCEPT_JSON`` (strings
-    required). ``None`` for any other content type or an unparsable body."""
+    required). ``None`` for any other content type or an unparsable body — including more form fields than
+    ``DATA_UPLOAD_MAX_NUMBER_FIELDS`` and JSON nested deeper than the decoder allows, which would otherwise
+    escape as HTTP 500."""
     raw = request.body.decode("utf-8", errors="replace")
     content_type = (request.content_type or "").split(";")[0].strip().lower()
     if content_type == FORM_CONTENT_TYPE:
-        query = QueryDict(raw, encoding="utf-8")
+        try:
+            query = QueryDict(raw, encoding="utf-8")
+        except TooManyFieldsSent:
+            return None, raw
         return {key: query.get(key, "") for key in query}, raw
     if protocol.CLICK_ACCEPT_JSON and content_type == "application/json":
         try:
             data = json.loads(raw, parse_int=str, parse_float=str)
-        except ValueError:
+        except ValueError, RecursionError:
             return None, raw
         if isinstance(data, dict) and all(isinstance(v, str) for v in data.values()):
             return dict(data), raw

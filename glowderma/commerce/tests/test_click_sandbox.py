@@ -653,3 +653,31 @@ def test_fake_click_in_production_refuses_a_misaddressed_complete_with_minus_1(
     row = rows("click")[-1]
     assert row.event_key.startswith("rejected:") and row.result["error_code"] == "fake_mode"
     assert Payment.objects.get(pk=payment_id).status == "pending"
+
+
+# --- fix pass 2: an unparsable body is a -8 with a bounded row, never HTTP 500
+# -------------------------------------------
+
+
+def _post_raw(url: str, raw: str, content_type: str) -> Any:
+    return APIClient().generic("POST", url, raw, content_type=content_type)
+
+
+def test_a_form_body_with_too_many_fields_answers_minus_8(order: Order) -> None:
+    raw = urlencode(prepare_params(order)) + "&x=1" * 1000  # beyond DATA_UPLOAD_MAX_NUMBER_FIELDS
+    response = _post_raw(CLICK_PREPARE, raw, "application/x-www-form-urlencoded")
+    assert response.status_code == 200 and response.json()["error"] == -8
+    (row,) = rows("click")
+    assert row.event_key.startswith("rejected:") and row.raw_body == ""
+    assert row.result["error_code"] == "bad_request" and len(str(row.payload)) <= 1024
+    assert payments(order)[0].provider_txn_id == ""
+
+
+def test_a_json_body_nested_too_deep_answers_minus_8(order: Order, monkeypatch: pytest.MonkeyPatch) -> None:
+    from glowderma.integrations.click import protocol
+
+    monkeypatch.setattr(protocol, "CLICK_ACCEPT_JSON", True)  # the verify-M3 switch of §2.13.1
+    response = _post_raw(CLICK_PREPARE, "[" * 200_000, "application/json")
+    assert response.status_code == 200 and response.json()["error"] == -8
+    (row,) = rows("click")
+    assert row.event_key.startswith("rejected:") and row.result["error_code"] == "bad_request"
