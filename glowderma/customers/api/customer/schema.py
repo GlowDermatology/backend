@@ -16,10 +16,10 @@ from drf_spectacular.openapi import AutoSchema
 class DeleteBodyAutoSchema(AutoSchema):
     def _get_request_body(self, direction: str = "request") -> Any:
         if self.method != "DELETE":
-            return super()._get_request_body(direction)
+            return super()._get_request_body(direction)  # type: ignore[no-untyped-call]
         self.method = "POST"  # the base class answers None for any other method
         try:
-            body = super()._get_request_body(direction)
+            body = super()._get_request_body(direction)  # type: ignore[no-untyped-call]
         finally:
             self.method = "DELETE"
         if body:

@@ -287,18 +287,13 @@ def _account_security(
 
 
 def _unlink(identity: CustomerSocialIdentity, *, reason: str, customer: Customer, request: Any) -> None:
-    account_services.enqueue_apple_revoke(identity)
     _audit("customer.social_unlinked", customer, request, {"provider": identity.provider, "reason": reason})
-    identity.delete()
+    account_services.unlink_customer_identity(identity)
 
 
-def _stamp_consent(customer: Customer, terms_version: str, ip: str) -> None:
-    Customer.objects.filter(pk=customer.pk).update(
-        terms_version=terms_version,
-        consent_at=timeutils.now(),
-        consent_ip=ip or None,
-        updated_at=timeutils.now(),
-    )
+def _unlink_all(customer: Customer, *, reason: str, request: Any) -> None:
+    for identity in list(CustomerSocialIdentity.objects.filter(customer_id=customer.pk).order_by("pk")):
+        _unlink(identity, reason=reason, customer=customer, request=request)
 
 
 def _require_published_terms() -> site_config_selectors.Terms:
@@ -318,25 +313,11 @@ def dormant_reset(customer_id: int, *, lang: str, last_activity: datetime | None
     its customer-level lock: the history horizon moves to now; name, image, addresses and cart are scrubbed;
     language becomes the request language; consent is cleared; every identity is unlinked (Apple revoked) and
     every device key cleared. Balance, ledger and purchases stay. Audit ``customer.history_reset``."""
-    now = timeutils.now()
     customer = Customer.objects.get(pk=customer_id)
-    account_services.move_history_horizon(customer_id, at=now)
-    if customer.image:
-        customer.image.delete(save=False)
-    Customer.objects.filter(pk=customer_id).update(
-        name="",
-        image="",
-        address_text="",
-        language=lang,
-        terms_version="",
-        consent_at=None,
-        consent_ip=None,
-        updated_at=now,
-    )
-    Address.objects.filter(customer_id=customer_id).delete()
-    for identity in list(CustomerSocialIdentity.objects.filter(customer_id=customer_id)):
-        _unlink(identity, reason="dormant", customer=customer, request=request)
-    Device.objects.filter(customer_id=customer_id).update(key_hash="", updated_at=now)
+    account_services.move_history_horizon(customer_id, at=timeutils.now())
+    account_services.scrub_profile_for_dormant(customer_id, language=lang)  # image file deleted on commit
+    _unlink_all(customer, reason="dormant", request=request)
+    account_services.clear_device_keys(customer_id)
     commerce_services.delete_cart_lines(customer_id)
     _audit(
         "customer.history_reset",
@@ -350,6 +331,16 @@ def dormant_reset(customer_id: int, *, lang: str, last_activity: datetime | None
 
 
 # --- registration, login, reset (customer contract §2.1.3–§2.1.5)
+
+
+def _reactivate(customer: Customer, *, name: str, language: str) -> Customer:
+    """Reactivate a deleted row (same id, history horizon at ``reactivated_at``) after scrubbing anything a
+    write racing its deletion left on it."""
+    account_services.scrub_deleted_for_reactivation(customer.pk)
+    customer = account_services.reactivate_customer(customer, name=name)
+    account_services.move_history_horizon(customer.pk, at=customer.reactivated_at or timeutils.now())
+    account_services.set_customer_language(customer.pk, language)
+    return customer
 
 
 def register(
@@ -370,26 +361,24 @@ def register(
     validate_customer_password(password, row.phone)
     _check_terms_version(terms_version, terms)
     with transaction.atomic():
+        # Lock order Customer → SmsCode (C§2.7.1), as every flow that consumes a verification token.
+        customer = account_services.lock_customer_by_phone(row.phone)
         phone, _ = account_services.consume_verification(
-            verification_token, purpose=enums.OtpPurpose.REGISTER
+            verification_token, purpose=enums.OtpPurpose.REGISTER, phone=row.phone
         )
-        customer = Customer.objects.select_for_update(no_key=True).filter(phone=phone).first()
         reactivated = False
         if customer is not None and customer.status == enums.CustomerStatus.ACTIVE:
             raise PhoneRegistered()
         if customer is None:
             try:
-                with transaction.atomic():
-                    customer = Customer.objects.create(phone=phone, name=name, language=language)
+                customer = account_services.create_customer(phone, name=name, language=language)
             except IntegrityError as exc:  # a concurrent registration won
                 raise PhoneRegistered() from exc
         else:
-            customer = account_services.reactivate_customer(customer, name=name)
-            account_services.move_history_horizon(customer.pk, at=customer.reactivated_at or timeutils.now())
-            Customer.objects.filter(pk=customer.pk).update(language=language)
+            customer = _reactivate(customer, name=name, language=language)
             reactivated = True
         account_services.set_customer_password(customer, password)
-        _stamp_consent(customer, terms_version, device.ip)
+        account_services.stamp_consent(customer.pk, terms_version=terms_version, ip=device.ip)
         started = account_services.start_customer_session(
             customer.pk, device.fid, device.platform, device.app_version, issue_device_key=True
         )
@@ -430,6 +419,8 @@ def login(
                 raise block
         ok = check_login_password(customer, password)
         if ok and customer is not None:
+            ok = _login_still_valid(customer, device=device, device_key=device_key, known=known)
+        if ok and customer is not None:
             guard.reset(scope, key)
             if known:
                 started = account_services.start_customer_session(
@@ -453,8 +444,22 @@ def login(
             _audit("customer.login_succeeded", customer, request, {"method": "password", "new_device": True})
             return SignIn(started, customer.pk)
     guard.record_failure(scope, key)
-    _audit("customer.login_failed", customer, request, {"method": "password"})
+    # actor_id whenever the customer row exists, deleted included (C§2.1.4 step 4)
+    actor = customer or Customer.objects.filter(phone=phone).first()
+    _audit("customer.login_failed", actor, request, {"method": "password"})
     raise AuthFailed("invalid_credentials")
+
+
+def _login_still_valid(
+    customer: Customer, *, device: DeviceContext, device_key: str | None, known: bool
+) -> bool:
+    """Re-check the unlocked snapshot under the customer-level lock (C§2.7.1): still active, the hash just
+    checked is still the stored one (a reset committing meanwhile wins), and for a known device its key
+    still holds (a reset clears the other devices' keys)."""
+    locked = account_services.lock_customer(customer.pk)
+    if locked.status != enums.CustomerStatus.ACTIVE or locked.password != customer.password:
+        return False
+    return not known or account_services.device_is_known(customer.pk, device.fid, device_key)
 
 
 def reset_password(
@@ -467,20 +472,19 @@ def reset_password(
         raise PhoneNotRegistered()
     validate_customer_password(password, row.phone, current_hash=customer.password)
     with transaction.atomic():
+        # Lock order Customer → SmsCode (C§2.7.1): the same order as DELETE me/ and me/password/, which
+        # consume a reset_password token too.
+        customer = account_services.lock_customer(customer.pk)
         account_services.consume_verification(
             verification_token, purpose=enums.OtpPurpose.RESET_PASSWORD, phone=row.phone
         )
-        customer = account_services.lock_customer(customer.pk)
         if customer.status != enums.CustomerStatus.ACTIVE:
             raise PhoneNotRegistered()
         dormant, last_activity = selectors.is_dormant(customer.pk, now=timeutils.now())
         account_services.set_customer_password(customer, password)
         account_services.revoke_customer_sessions(customer.pk, enums.SessionRevokeReason.PASSWORD_CHANGED)
-        for identity in list(CustomerSocialIdentity.objects.filter(customer_id=customer.pk)):
-            _unlink(identity, reason="password_reset", customer=customer, request=request)
-        Device.objects.filter(customer_id=customer.pk).exclude(fid=device.fid).update(
-            key_hash="", updated_at=timeutils.now()
-        )
+        _unlink_all(customer, reason="password_reset", request=request)
+        account_services.clear_device_keys(customer.pk, except_fid=device.fid)
         if dormant:
             dormant_reset(customer.pk, lang=device.lang, last_activity=last_activity, request=request)
         started = account_services.start_customer_session(
@@ -561,29 +565,20 @@ def social_sign_in(
         .filter(provider=provider, subject=claims.subject)
         .first()
     )
+    sealed = client_id = ""
     if identity is not None and identity.customer.status == enums.CustomerStatus.ACTIVE:
-        sealed = client_id = ""
         if provider == enums.CustomerSocialProvider.APPLE and not identity.provider_refresh_token:
             sealed, client_id = _exchange_apple(authorization_code, claims)
-        with transaction.atomic():
-            fields: dict[str, Any] = {"last_login_at": timeutils.now()}
-            if sealed:
-                fields.update(provider_refresh_token=sealed, provider_client_id=client_id)
-            CustomerSocialIdentity.objects.filter(pk=identity.pk).update(**fields)
-            started = account_services.start_customer_session(
-                identity.customer_id,
-                device.fid,
-                device.platform,
-                device.app_version,
-                issue_device_key=True,
-                auth_method=provider,
-            )
-            _audit("customer.login_succeeded", identity.customer, request, {"method": provider})
-            return SignIn(started, identity.customer_id)
+        signed = _sign_in_linked(identity, provider, sealed, client_id, device=device, request=request)
+        if signed is not None:
+            return signed
+        # The identity was unlinked (reset, dormant rule, unlink) or the account deleted meanwhile: it is an
+        # unknown identity now and gets the verify_phone ticket (an Apple code already exchanged is reused).
     jti = secrets.token_hex(16)
     ttl = int(settings.SOCIAL_TICKET_TTL_SECONDS)
     if provider == enums.CustomerSocialProvider.APPLE:
-        sealed, client_id = _exchange_apple(authorization_code, claims)
+        if not sealed:
+            sealed, client_id = _exchange_apple(authorization_code, claims)
         cache.set(SOCIAL_APPLE_KEY.format(jti=jti), {"sealed": sealed, "client_id": client_id}, ttl)
     ticket = signing.TimestampSigner(salt=SOCIAL_TICKET_SALT).sign_object(
         {
@@ -595,6 +590,38 @@ def social_sign_in(
         }
     )
     return PhoneStep(ticket, provider, claims.email, ttl)
+
+
+def _sign_in_linked(
+    identity: CustomerSocialIdentity,
+    provider: str,
+    sealed: str,
+    client_id: str,
+    *,
+    device: DeviceContext,
+    request: Any,
+) -> SignIn | None:
+    """The linked-identity sign-in under the customer-level lock first (C§2.7.1: Customer → identity →
+    devices → sessions, the order of unlink, reset, the dormant rule and ``DELETE me/``), with the identity
+    and the customer re-read under it; ``None`` when either changed meanwhile (nothing written)."""
+    with transaction.atomic():
+        customer = account_services.lock_customer(identity.customer_id)
+        if customer.status != enums.CustomerStatus.ACTIVE:
+            return None
+        if not account_services.touch_identity_sign_in(
+            identity.pk, customer.pk, sealed_token=sealed, client_id=client_id
+        ):
+            return None
+        started = account_services.start_customer_session(
+            customer.pk,
+            device.fid,
+            device.platform,
+            device.app_version,
+            issue_device_key=True,
+            auth_method=provider,
+        )
+        _audit("customer.login_succeeded", customer, request, {"method": provider})
+        return SignIn(started, customer.pk)
 
 
 @dataclass(frozen=True, slots=True)
@@ -660,7 +687,8 @@ def complete_social(
             raise _field("terms_version", "required")
         terms = _require_published_terms()
         _check_terms_version(terms_version, terms)
-    elif customer is not None and customer.password:
+    checked_hash = ""  # the stored hash the password was checked against ("" = none checked)
+    if active and customer is not None and customer.password:
         if not password:
             raise _field("password", "required")
         guard = LoginGuard()
@@ -670,18 +698,37 @@ def complete_social(
             guard.record_failure(LOGIN_SCOPE, key)
             raise _field("password", "password_incorrect", "field.password_incorrect")
         guard.reset(LOGIN_SCOPE, key)
+        checked_hash = customer.password
     used_key = SOCIAL_TICKET_USED_KEY.format(jti=social.jti)
     if not cache.add(used_key, 1, int(settings.SOCIAL_TICKET_TTL_SECONDS)):
         raise SocialTicketInvalid()
     try:
         result = _complete_social(
-            social, verification_token, phone, active, apple, name, terms_version, language, device, request
+            social,
+            verification_token,
+            phone,
+            active,
+            apple,
+            name,
+            terms_version,
+            language,
+            device,
+            request,
+            checked_hash=checked_hash,
         )
     except Exception:
-        cache.delete(used_key)
+        _best_effort(cache.delete, used_key)  # never replaces the original error
         raise
-    cache.delete(SOCIAL_APPLE_KEY.format(jti=social.jti))
+    # Everything committed: a Redis error here must not lose the tokens the client is about to receive.
+    _best_effort(cache.delete, SOCIAL_APPLE_KEY.format(jti=social.jti))
     return result
+
+
+def _best_effort(operation: Any, *args: Any) -> None:
+    try:
+        operation(*args)
+    except Exception:
+        logger.warning("cache cleanup failed: %s", getattr(operation, "__name__", operation), exc_info=True)
 
 
 def _complete_social(
@@ -695,16 +742,25 @@ def _complete_social(
     language: str | None,
     device: DeviceContext,
     request: Any,
+    *,
+    checked_hash: str,
 ) -> SignIn:
     with transaction.atomic():
+        # Lock order Customer → SmsCode (C§2.7.1).
+        customer = account_services.lock_customer_by_phone(phone)
         account_services.consume_verification(
             verification_token, purpose=enums.OtpPurpose.LINK_SOCIAL, phone=phone
         )
-        customer = Customer.objects.select_for_update(no_key=True).filter(phone=phone).first()
         created = reactivated = False
         if customer is not None and customer.status == enums.CustomerStatus.ACTIVE:
             if not active:  # registered meanwhile: the name/terms branch no longer applies
                 raise PhoneRegistered()
+            if customer.password != checked_hash:
+                # A password was set or changed after the unlocked check (C§2.1.9, §6.16: the SMS code plus
+                # the password when one is set): the client retries with the current password.
+                if not checked_hash:
+                    raise _field("password", "required")
+                raise _field("password", "password_incorrect", "field.password_incorrect")
             if not customer.password:
                 dormant, last_activity = selectors.is_dormant(customer.pk, now=timeutils.now())
                 if dormant:
@@ -714,37 +770,31 @@ def _complete_social(
                 raise VerificationInvalid()
             if customer is None:
                 try:
-                    with transaction.atomic():
-                        customer = Customer.objects.create(
-                            phone=phone, name=(name or "").strip(), language=language or device.lang
-                        )
+                    customer = account_services.create_customer(
+                        phone, name=(name or "").strip(), language=language or device.lang
+                    )
                 except IntegrityError as exc:
                     raise PhoneRegistered() from exc
                 created = True
             else:
-                customer = account_services.reactivate_customer(customer, name=(name or "").strip())
-                account_services.move_history_horizon(
-                    customer.pk, at=customer.reactivated_at or timeutils.now()
-                )
-                Customer.objects.filter(pk=customer.pk).update(language=language or device.lang)
+                customer = _reactivate(customer, name=(name or "").strip(), language=language or device.lang)
                 reactivated = True
-            _stamp_consent(customer, str(terms_version), device.ip)
+            account_services.stamp_consent(customer.pk, terms_version=str(terms_version), ip=device.ip)
         label = PROVIDER_LABELS[social.provider]
         if CustomerSocialIdentity.objects.filter(customer_id=customer.pk, provider=social.provider).exists():
             raise SocialProviderLinked(details={"provider": social.provider}, params={"provider": label})
         if CustomerSocialIdentity.objects.filter(provider=social.provider, subject=social.subject).exists():
             raise SocialIdentityLinked(details={"provider": social.provider}, params={"provider": label})
         try:
-            with transaction.atomic():
-                CustomerSocialIdentity.objects.create(
-                    customer_id=customer.pk,
-                    provider=social.provider,
-                    subject=social.subject,
-                    email_at_link=social.email[:254] if "@" in social.email else "",
-                    last_login_at=timeutils.now(),
-                    provider_refresh_token=apple["sealed"] if apple else "",
-                    provider_client_id=apple["client_id"] if apple else "",
-                )
+            account_services.link_customer_identity(
+                customer.pk,
+                provider=social.provider,
+                subject=social.subject,
+                email=social.email,
+                sealed_token=apple["sealed"] if apple else "",
+                client_id=apple["client_id"] if apple else "",
+                signed_in=True,
+            )
         except IntegrityError as exc:
             raise SocialIdentityLinked(
                 details={"provider": social.provider}, params={"provider": label}
@@ -816,6 +866,28 @@ def _consume_reauth(customer: Customer, verification_token: str | None, needed: 
         )
 
 
+def _lock_reauthenticated(
+    customer_id: int,
+    sid: str | None,
+    snapshot: Customer,
+    verification_token: str | None,
+    needed: bool,
+    *,
+    secret_field: str = "password",  # noqa: S107 - a field name, not a secret
+) -> Customer:
+    """Take the signed-in lock (:func:`accounts.services.lock_signed_in_customer`: active customer, open
+    session) and re-check the re-authentication against the locked row: the hash the password was checked
+    against (or its absence, for a verification token) is still the stored one — a reset or another password
+    change committing meanwhile wins. Then consume the verification token (Customer → SmsCode, C§2.7.1)."""
+    customer = account_services.lock_signed_in_customer(customer_id, sid)
+    if customer.password != snapshot.password:
+        if not snapshot.password:
+            raise _field(secret_field, "required")
+        raise _field(secret_field, "password_incorrect", "field.password_incorrect")
+    _consume_reauth(customer, verification_token, needed)
+    return customer
+
+
 def link_social(
     customer_id: int,
     provider: str,
@@ -827,38 +899,48 @@ def link_social(
     password: str | None,
     verification_token: str | None,
     fid: str,
+    sid: str | None = None,
     request: Any = None,
 ) -> None:
-    """``POST me/social/`` (customer contract §2.2.8)."""
+    """``POST me/social/`` (customer contract §2.2.8). The slow provider checks run before any lock; under
+    the lock the account must still be active, the session open and the re-authentication current, so an
+    identity never lands on an account deleted, reset or taken over meanwhile (C§6.17). An Apple token
+    exchanged for a refused link is revoked."""
     oauth_registry.get_app_verifier(provider)  # 404 first
-    customer = Customer.objects.get(pk=customer_id)
-    needed = reauthenticate(customer, password=password, verification_token=verification_token)
+    snapshot = Customer.objects.get(pk=customer_id)
+    needed = reauthenticate(snapshot, password=password, verification_token=verification_token)
     claims = verify_social_token(provider, token, token_type, nonce, fid=fid)
     sealed = client_id = ""
     if provider == enums.CustomerSocialProvider.APPLE:
         sealed, client_id = _exchange_apple(authorization_code, claims)
     label = PROVIDER_LABELS[provider]
-    with transaction.atomic():
-        customer = account_services.lock_customer(customer_id)
-        _consume_reauth(customer, verification_token, needed)
-        if CustomerSocialIdentity.objects.filter(customer_id=customer_id, provider=provider).exists():
-            raise SocialProviderLinked(details={"provider": provider}, params={"provider": label})
-        if CustomerSocialIdentity.objects.filter(provider=provider, subject=claims.subject).exists():
-            raise SocialIdentityLinked(details={"provider": provider}, params={"provider": label})
-        try:
-            with transaction.atomic():
-                CustomerSocialIdentity.objects.create(
-                    customer_id=customer_id,
+    try:
+        with transaction.atomic():
+            customer = _lock_reauthenticated(customer_id, sid, snapshot, verification_token, needed)
+            if CustomerSocialIdentity.objects.filter(customer_id=customer_id, provider=provider).exists():
+                raise SocialProviderLinked(details={"provider": provider}, params={"provider": label})
+            if CustomerSocialIdentity.objects.filter(provider=provider, subject=claims.subject).exists():
+                raise SocialIdentityLinked(details={"provider": provider}, params={"provider": label})
+            try:
+                account_services.link_customer_identity(
+                    customer_id,
                     provider=provider,
                     subject=claims.subject,
-                    email_at_link=claims.email[:254] if "@" in claims.email else "",
-                    provider_refresh_token=sealed,
-                    provider_client_id=client_id,
+                    email=claims.email,
+                    sealed_token=sealed,
+                    client_id=client_id,
                 )
-        except IntegrityError as exc:
-            raise SocialIdentityLinked(details={"provider": provider}, params={"provider": label}) from exc
-        _account_security(customer_id, enums.AccountSecurityEvent.SOCIAL_LINKED, provider=provider)
-        _audit("customer.social_linked", customer, request, {"provider": provider, "via": "settings"})
+            except IntegrityError as exc:
+                raise SocialIdentityLinked(
+                    details={"provider": provider}, params={"provider": label}
+                ) from exc
+            _account_security(customer_id, enums.AccountSecurityEvent.SOCIAL_LINKED, provider=provider)
+            _audit("customer.social_linked", customer, request, {"provider": provider, "via": "settings"})
+    except Exception:
+        if sealed:
+            with transaction.atomic():
+                account_services.enqueue_apple_token_revoke(sealed, client_id=client_id)
+        raise
 
 
 def unlink_social(
@@ -867,15 +949,15 @@ def unlink_social(
     *,
     password: str | None,
     verification_token: str | None,
+    sid: str | None = None,
     request: Any = None,
 ) -> None:
     """``DELETE me/social/{provider}/`` (customer contract §2.2.8): re-authentication first, then the
     idempotent no-op, ``last_sign_in_method``, the unlink (Apple revoked) and the notice."""
-    customer = Customer.objects.get(pk=customer_id)
-    needed = reauthenticate(customer, password=password, verification_token=verification_token)
+    snapshot = Customer.objects.get(pk=customer_id)
+    needed = reauthenticate(snapshot, password=password, verification_token=verification_token)
     with transaction.atomic():
-        customer = account_services.lock_customer(customer_id)
-        _consume_reauth(customer, verification_token, needed)
+        customer = _lock_reauthenticated(customer_id, sid, snapshot, verification_token, needed)
         identity = CustomerSocialIdentity.objects.filter(customer_id=customer_id, provider=provider).first()
         if identity is None:
             return
@@ -898,19 +980,27 @@ def change_password(
     request: Any = None,
 ) -> None:
     """``POST me/password/`` (customer contract §2.2.9): set or change the password while signed in; the
-    current session, its device key and every identity are kept; other sessions → ``password_changed``."""
-    customer = Customer.objects.get(pk=customer_id)
+    current session, its device key and every identity are kept; other sessions → ``password_changed``.
+    Under the lock the caller's session must still be open (a reset revokes it) and the checked hash
+    current, so a racing reset's new password is never overwritten."""
+    snapshot = Customer.objects.get(pk=customer_id)
     needed = reauthenticate(
-        customer,
+        snapshot,
         password=current_password,
         verification_token=verification_token,
         secret_field="current_password",  # noqa: S106 - a field name
     )
-    validate_customer_password(password, customer.phone, current_hash=customer.password)
-    first = not customer.password
+    validate_customer_password(password, snapshot.phone, current_hash=snapshot.password)
+    first = not snapshot.password
     with transaction.atomic():
-        customer = account_services.lock_customer(customer_id)
-        _consume_reauth(customer, verification_token, needed)
+        customer = _lock_reauthenticated(
+            customer_id,
+            sid,
+            snapshot,
+            verification_token,
+            needed,
+            secret_field="current_password",  # noqa: S106 - a field name
+        )
         account_services.set_customer_password(customer, password)
         account_services.revoke_customer_sessions(
             customer_id, enums.SessionRevokeReason.PASSWORD_CHANGED, except_sid=sid
@@ -920,44 +1010,43 @@ def change_password(
 
 
 # --- profile, consent, image, addresses (customer contract §2.2.2–§2.2.7)
+#
+# Every signed-in write takes ``accounts.services.lock_signed_in_customer`` (customer active, the request's
+# session still open) before writing, so a request authenticated before a concurrent ``DELETE me/`` or reset
+# committed writes nothing to the deleted or taken-over account (C§6.17).
 
 
-def accept_consent(customer_id: int, *, terms_version: str, ip: str, request: Any = None) -> None:
+def accept_consent(
+    customer_id: int, *, terms_version: str, ip: str, sid: str | None = None, request: Any = None
+) -> None:
     terms = site_config_selectors.current_terms()
     if not terms.published:
         raise _field("terms_version", "terms_outdated", "field.terms_outdated")
     _check_terms_version(terms_version, terms)
     with transaction.atomic():
-        customer = account_services.lock_customer(customer_id)
-        _stamp_consent(customer, terms_version, ip)
+        customer = account_services.lock_signed_in_customer(customer_id, sid)
+        account_services.stamp_consent(customer_id, terms_version=terms_version, ip=ip)
         _audit("customer.consent_accepted", customer, request, {"terms_version": terms_version})
 
 
-def update_profile(customer_id: int, changes: dict[str, Any], *, fid: str) -> None:
+def update_profile(customer_id: int, changes: dict[str, Any], *, fid: str, sid: str | None = None) -> None:
     """``PATCH me/``: name and language on the customer, ``push_enabled`` on the current device (requires a
     stored FCM token: ``push_token_missing``). No audit (own profile)."""
+    fields = {name: changes[name] for name in ("name", "language", "push_enabled") if name in changes}
     with transaction.atomic():
-        account_services.lock_customer(customer_id)
-        if "push_enabled" in changes:
-            device = Device.objects.select_for_update().get(customer_id=customer_id, fid=fid)
-            if changes["push_enabled"] and not device.fcm_token:
-                raise _field("push_enabled", "push_token_missing", "field.push_token_missing")
-            device.push_enabled = bool(changes["push_enabled"])
-            device.save(update_fields=["push_enabled", "updated_at"])
-        fields = {name: changes[name] for name in ("name", "language") if name in changes}
-        if fields:
-            Customer.objects.filter(pk=customer_id).update(**fields, updated_at=timeutils.now())
+        account_services.lock_signed_in_customer(customer_id, sid)
+        account_services.update_customer_profile(customer_id, fid=fid, **fields)
     logger.info("customer.profile_updated customer_id=%s fields=%s", customer_id, sorted(changes))
 
 
-def set_image(customer_id: int, upload: Any) -> str:
+def set_image(customer_id: int, upload: Any, *, sid: str | None = None) -> str:
     """``PUT me/image/``: re-encoded and EXIF-stripped (``core.images``), the previous file deleted."""
     try:
         processed = process_image(upload)
     except ImageError as exc:
         raise _field("file", exc.code) from exc
     with transaction.atomic():
-        customer = account_services.lock_customer(customer_id)
+        customer = account_services.lock_signed_in_customer(customer_id, sid)
         previous = customer.image.name if customer.image else ""
         name = media_name("customers", customer_id, processed.content, processed.extension)
         customer.image.save(PurePosixPath(name).name, ContentFile(processed.content), save=True)
@@ -967,23 +1056,42 @@ def set_image(customer_id: int, upload: Any) -> str:
     return absolute_media_url(new_name)
 
 
-def delete_image(customer_id: int) -> None:
+def delete_image(customer_id: int, *, sid: str | None = None) -> None:
     with transaction.atomic():
-        customer = account_services.lock_customer(customer_id)
+        customer = account_services.lock_signed_in_customer(customer_id, sid)
         if customer.image:
             previous = str(customer.image.name)
             Customer.objects.filter(pk=customer_id).update(image="", updated_at=timeutils.now())
             transaction.on_commit(lambda: default_storage.delete(previous), robust=True)
 
 
-def add_address(customer_id: int, **fields: Any) -> Address:
+def add_address(customer_id: int, *, sid: str | None = None, **fields: Any) -> Address:
     """``POST me/addresses/``: at most ``ADDRESS_MAX_PER_CUSTOMER`` (409 ``address_limit``)."""
     limit = int(settings.ADDRESS_MAX_PER_CUSTOMER)
     with transaction.atomic():
-        account_services.lock_customer(customer_id)
+        account_services.lock_signed_in_customer(customer_id, sid)
         if Address.objects.filter(customer_id=customer_id).count() >= limit:
             raise AddressLimit(details={"limit": limit}, params={"limit": limit})
         return account_services.add_address(customer_id, **fields)
+
+
+def update_address(customer_id: int, address_id: int, *, sid: str | None = None, **fields: Any) -> Address:
+    """``PATCH me/addresses/{id}/``: the row re-read under the lock (404 when it was removed meanwhile)."""
+    with transaction.atomic():
+        account_services.lock_signed_in_customer(customer_id, sid)
+        return account_services.update_customer_address(address_id, customer_id, **fields)
+
+
+def set_default_address(customer_id: int, address_id: int, *, sid: str | None = None) -> Address:
+    with transaction.atomic():
+        account_services.lock_signed_in_customer(customer_id, sid)
+        return account_services.set_customer_default_address(address_id, customer_id)
+
+
+def remove_address(customer_id: int, address_id: int, *, sid: str | None = None) -> None:
+    with transaction.atomic():
+        account_services.lock_signed_in_customer(customer_id, sid)
+        account_services.remove_customer_address(address_id, customer_id)
 
 
 # --- account deletion (customer contract §2.2.3)
@@ -1003,23 +1111,24 @@ def delete_account(
     *,
     password: str | None = None,
     verification_token: str | None = None,
+    sid: str | None = None,
     request: Any = None,
 ) -> DeletionResult:
     """``DELETE me/`` steps 1–6: re-authentication (``customer_reauth``), then in one transaction under the
     customer-level lock (``FOR NO KEY UPDATE``, before any order lock): 409 ``payment_in_progress`` while a
     Click payment is in flight (nothing written), cancel unpaid orders and open future appointments, delete
     the cart lines, ``accounts.services.delete_customer`` and audit ``customer.deleted``."""
-    customer = Customer.objects.get(pk=customer_id)
-    needed = reauthenticate(customer, password=password, verification_token=verification_token)
+    snapshot = Customer.objects.get(pk=customer_id)
+    needed = reauthenticate(snapshot, password=password, verification_token=verification_token)
     with transaction.atomic():
-        customer = account_services.lock_customer(customer_id)
+        customer = account_services.lock_signed_in_customer(customer_id, sid)
         inflight = commerce_selectors.customer_inflight_order(customer_id)
         if inflight is not None:
             raise PaymentInProgress(
                 details={"provider": enums.PaymentProvider.CLICK.value, "order_id": inflight},
                 params={"provider": "Click"},
             )
-        _consume_reauth(customer, verification_token, needed)
+        customer = _lock_reauthenticated(customer_id, sid, snapshot, verification_token, needed)
         now = timeutils.now()
         order_ids = list(
             Order.objects.filter(customer_id=customer_id, status=enums.OrderStatus.AWAITING_PAYMENT)

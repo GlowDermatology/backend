@@ -49,6 +49,11 @@ class MeBase(CustomerAPIView):
     def fid(self) -> str:
         return cast(DeviceHeaders, self.device).fid
 
+    @property
+    def sid(self) -> str:
+        """The request's session id: every write re-checks it under the customer-level lock."""
+        return str(cast(dict[str, Any], self.request.auth)["sid"])
+
     def me(self) -> dict[str, Any]:
         return selectors.me_payload(Customer.objects.get(pk=self.customer.pk), fid=self.fid)
 
@@ -73,7 +78,7 @@ class MeView(MeBase):
     def patch(self, request: Request) -> Response:
         serializer = s.MePatchSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        services.update_profile(self.customer.pk, dict(serializer.validated_data), fid=self.fid)
+        services.update_profile(self.customer.pk, dict(serializer.validated_data), fid=self.fid, sid=self.sid)
         return Response(self.me())
 
     @extend_schema(
@@ -90,6 +95,7 @@ class MeView(MeBase):
             self.customer.pk,
             password=data.get("password"),
             verification_token=data.get("verification_token"),
+            sid=self.sid,
             request=request,
         )
         return Response(status=204)
@@ -109,6 +115,7 @@ class ConsentView(MeBase):
             self.customer.pk,
             terms_version=serializer.validated_data["terms_version"],
             ip=client_ip(request),
+            sid=self.sid,
             request=request,
         )
         return Response(self.me())
@@ -137,7 +144,7 @@ class ImageView(MeBase):
         upload = request.FILES.get("file")
         if upload is None:
             raise ValidationError({"file": [field_error("required")]})
-        return Response({"image_url": services.set_image(self.customer.pk, upload)})
+        return Response({"image_url": services.set_image(self.customer.pk, upload, sid=self.sid)})
 
     @extend_schema(
         operation_id="customer_me_image_destroy",
@@ -145,7 +152,7 @@ class ImageView(MeBase):
         responses={204: None, **CUSTOMER_ERRORS},
     )
     def delete(self, request: Request) -> Response:
-        services.delete_image(self.customer.pk)
+        services.delete_image(self.customer.pk, sid=self.sid)
         return Response(status=204)
 
 
@@ -202,7 +209,7 @@ class PasswordView(MeBase):
             current_password=data.get("current_password"),
             verification_token=data.get("verification_token"),
             password=data["password"],
-            sid=str(cast(dict[str, Any], request.auth)["sid"]),
+            sid=self.sid,
             request=request,
         )
         return Response(self.me())
@@ -231,6 +238,7 @@ class SocialLinkView(MeBase):
             password=data.get("password"),
             verification_token=data.get("verification_token"),
             fid=self.fid,
+            sid=self.sid,
             request=request,
         )
         return Response(self.me())
@@ -256,6 +264,7 @@ class SocialUnlinkView(MeBase):
             provider,
             password=data.get("password"),
             verification_token=data.get("verification_token"),
+            sid=self.sid,
             request=request,
         )
         return Response(self.me())
@@ -281,20 +290,15 @@ class AddressListView(MeBase):
     def post(self, request: Request) -> Response:
         serializer = s.AddressWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        address = services.add_address(self.customer.pk, **serializer.validated_data)
+        address = services.add_address(self.customer.pk, sid=self.sid, **serializer.validated_data)
         address.refresh_from_db()
         return Response(selectors.address_payload(address), status=201)
 
 
-class AddressLookup(MeBase):
-    def address(self, pk: int) -> Address:
-        address = Address.objects.filter(pk=pk, customer_id=self.customer.pk).first()
-        if address is None:
-            raise NotFound
-        return address
+class AddressDetailView(MeBase):
+    """The address row is re-read under the customer-level lock by the service (404 when it is not the
+    caller's, or another request removed it meanwhile)."""
 
-
-class AddressDetailView(AddressLookup):
     @extend_schema(
         operation_id="customer_me_addresses_partial_update",
         parameters=[*PARAMETERS, ADDRESS_ID_PARAM],
@@ -302,10 +306,11 @@ class AddressDetailView(AddressLookup):
         responses={200: s.CustomerAddressSerializer, **CUSTOMER_ERRORS},
     )
     def patch(self, request: Request, pk: int) -> Response:
-        address = self.address(pk)
+        if not Address.objects.filter(pk=pk, customer_id=self.customer.pk).exists():
+            raise NotFound  # 404 before validation for a foreign or unknown id
         serializer = s.AddressWriteSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        updated = account_services.update_address(address, **serializer.validated_data)
+        updated = services.update_address(self.customer.pk, pk, sid=self.sid, **serializer.validated_data)
         updated.refresh_from_db()
         return Response(selectors.address_payload(updated))
 
@@ -315,11 +320,11 @@ class AddressDetailView(AddressLookup):
         responses={204: None, **CUSTOMER_ERRORS},
     )
     def delete(self, request: Request, pk: int) -> Response:
-        account_services.remove_address(self.address(pk))
+        services.remove_address(self.customer.pk, pk, sid=self.sid)
         return Response(status=204)
 
 
-class AddressDefaultView(AddressLookup):
+class AddressDefaultView(MeBase):
     @extend_schema(
         operation_id="customer_me_addresses_default",
         parameters=[*PARAMETERS, ADDRESS_ID_PARAM],
@@ -327,6 +332,6 @@ class AddressDefaultView(AddressLookup):
         responses={200: s.CustomerAddressSerializer, **CUSTOMER_ERRORS},
     )
     def post(self, request: Request, pk: int) -> Response:
-        address = account_services.set_default_address(self.address(pk))
+        address = services.set_default_address(self.customer.pk, pk, sid=self.sid)
         address.refresh_from_db()
         return Response(selectors.address_payload(address))
