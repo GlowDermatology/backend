@@ -14,6 +14,8 @@ from __future__ import annotations
 import os
 from datetime import datetime
 
+from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.db import transaction
 
 from glowderma.accounts import services
@@ -25,6 +27,7 @@ from glowderma.core.timeutils import TASHKENT
 ADMIN_EMAIL = "admin@glowderma.uz"
 ADMIN_FULL_NAME = "Administrator"
 DEFAULT_ADMIN_PASSWORD = "glowderma-demo-2026"  # noqa: S105 - demo default, overridable by SEED_ADMIN_PASSWORD
+SEED_ADMIN_PASSWORD_MIN_LENGTH = 12
 
 NAMED_CUSTOMERS: tuple[tuple[int, str, str], ...] = (
     (1, "Sherzod Qodirov", "+998973014418"),
@@ -109,9 +112,34 @@ class CustomerFacts:
         self.push_enabled = random.chance(0.8)
 
 
+def preflight() -> str | None:
+    """Under the production settings (``seed_demo --force`` on an internet-facing staging stack) the demo
+    admin is never created with a known password: SEED_ADMIN_PASSWORD must be set, at least 12 characters, not
+    a placeholder and not the committed demo default. An existing admin keeps its password."""
+    if settings.SETTINGS_MODULE != "config.settings.production":
+        return None
+    if StaffUser.objects.filter(email=ADMIN_EMAIL).exists():
+        return None
+    password = os.environ.get("SEED_ADMIN_PASSWORD", "")
+    if (
+        len(password) < SEED_ADMIN_PASSWORD_MIN_LENGTH
+        or "change-me" in password.lower()
+        or password == DEFAULT_ADMIN_PASSWORD
+    ):
+        return (
+            f"set SEED_ADMIN_PASSWORD (at least {SEED_ADMIN_PASSWORD_MIN_LENGTH} characters, not a "
+            f"placeholder, not the committed demo password) to create {ADMIN_EMAIL} under the production "
+            "settings"
+        )
+    return None
+
+
 def ensure_admin() -> StaffUser:
     admin = StaffUser.objects.filter(email=ADMIN_EMAIL).first()
     if admin is None:
+        problem = preflight()
+        if problem is not None:
+            raise ImproperlyConfigured(problem)
         password = os.environ.get("SEED_ADMIN_PASSWORD", DEFAULT_ADMIN_PASSWORD)
         # The demo administrator manages staff (admin contract §2.16, decision GST-1).
         extra: dict[str, object] = {"full_name": ADMIN_FULL_NAME, "is_staff": True, "is_manager": True}
@@ -164,7 +192,7 @@ def _ensure_device(customer: Customer) -> Device:
         )
 
 
-@register_seeder("accounts", order=10)
+@register_seeder("accounts", order=10, preflight=preflight)
 @transaction.atomic
 def seed_accounts(context: SeedContext) -> None:
     ensure_admin()

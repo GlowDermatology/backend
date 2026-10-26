@@ -2,8 +2,10 @@
 
 import importlib
 from datetime import datetime
+from typing import Any
 
 import pytest
+from django.core.exceptions import ImproperlyConfigured
 from django.db import models
 
 from glowderma.accounts import seeds
@@ -138,6 +140,51 @@ def test_seed_admin_password_comes_from_the_environment_when_set(monkeypatch: py
     assert not admin.check_password("glowderma-demo-2026")
     monkeypatch.delenv("SEED_ADMIN_PASSWORD")
     assert seeds.ensure_admin() == admin  # an existing admin keeps its password
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "password",
+    [None, "", "short-pw-11", "glowderma-demo-2026", "change-me-demo-admin-password", "Change-Me-0123456789"],
+)
+def test_production_settings_refuse_a_known_or_missing_seed_admin_password(
+    settings: Any, monkeypatch: pytest.MonkeyPatch, password: str | None
+) -> None:
+    """A staging stack runs the production settings and faces the internet: no demo admin with a known
+    password."""
+    settings.SETTINGS_MODULE = "config.settings.production"
+    if password is None:
+        monkeypatch.delenv("SEED_ADMIN_PASSWORD", raising=False)
+    else:
+        monkeypatch.setenv("SEED_ADMIN_PASSWORD", password)
+    message = seeds.preflight()
+    assert message is not None and "SEED_ADMIN_PASSWORD" in message
+    assert password is None or password == "" or password not in message
+    assert f"accounts: {message}" in seeding.preflight_problems()
+    with pytest.raises(ImproperlyConfigured, match="SEED_ADMIN_PASSWORD"):
+        seeds.ensure_admin()
+    assert not StaffUser.objects.filter(email="admin@glowderma.uz").exists()
+
+
+@pytest.mark.django_db
+def test_production_settings_accept_a_strong_seed_admin_password_and_an_existing_admin(
+    settings: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings.SETTINGS_MODULE = "config.settings.production"
+    monkeypatch.setenv("SEED_ADMIN_PASSWORD", "Staging!Harbor-Long72")
+    assert seeds.preflight() is None
+    admin = seeds.ensure_admin()
+    assert admin.check_password("Staging!Harbor-Long72")
+    monkeypatch.delenv("SEED_ADMIN_PASSWORD")
+    assert seeds.preflight() is None  # an existing admin keeps its password
+    assert seeds.ensure_admin() == admin
+
+
+@pytest.mark.django_db
+def test_other_settings_keep_the_demo_default(settings: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    settings.SETTINGS_MODULE = "config.settings.local"
+    monkeypatch.delenv("SEED_ADMIN_PASSWORD", raising=False)
+    assert seeds.preflight() is None
 
 
 @pytest.mark.django_db
