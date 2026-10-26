@@ -130,7 +130,7 @@ class PaymeView(WebhookAPIView):
     put = patch = delete = head = get
 
     @extend_schema(exclude=True)
-    def options(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+    def options(self, request: Request, *args: Any, **kwargs: Any) -> Response:  # type: ignore[override]
         return self.get(request)
 
     # --- inbox

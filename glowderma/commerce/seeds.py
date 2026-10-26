@@ -184,8 +184,8 @@ def _delivery_fee(plan: OrderPlan) -> int:
     while BTS is fake under the production settings (``seed_demo --force`` on staging)."""
     if plan.fulfilment != DELIVERY or plan.address is None:
         return 0
-    scenario = plan.fake.get("bts") if isinstance(plan.fake.get("bts"), dict) else {}
-    tariff = scenario.get("tariff")
+    scenario = plan.fake.get("bts")
+    tariff = scenario.get("tariff") if isinstance(scenario, dict) else None
     if isinstance(tariff, int):
         return tariff
     return fake_bts.TARIFFS.get(plan.address.region_code, fake_bts.DEFAULT_TARIFF)
