@@ -52,7 +52,7 @@ from glowderma.catalog import topics as catalog_topics
 from glowderma.commerce import selectors, services, topics
 from glowderma.commerce.billz_sales import PurchaseJournal, get_sale_port, sale_request
 from glowderma.commerce.models import Order, StockReservation
-from glowderma.core import enums, integration_modes, outbox, timeutils
+from glowderma.core import audit, enums, integration_modes, outbox, timeutils
 from glowderma.core.api.exceptions import InvalidTransition
 from glowderma.core.models import OutboxMessage
 from glowderma.delivery import selectors as delivery_selectors
@@ -386,6 +386,89 @@ def on_billz_push_dead(message: OutboxMessage) -> None:
     )
 
 
+# --- manage.py requeue_outbox of billz.push_sale (review NEW-4) ---------------------------------------------
+
+AUDIT_PAYMENT_ATTEMPT_FORGOTTEN = "billz.payment_attempt_forgotten"
+REQUEUE_WARNING = (
+    "confirm the sale was not entered by hand; use billz_mark_recorded for those "
+    "(a requeue would record it in Billz a second time)"
+)
+
+
+def _push_info(message: OutboxMessage) -> tuple[Any, Any]:
+    payload = _payload(message)
+    purchase_id = payload.get("purchase_id")
+    info = loyalty_selectors.billz_push_info(int(purchase_id)) if isinstance(purchase_id, int) else None
+    return payload.get("order_id"), info
+
+
+def describe_push(message: OutboxMessage) -> str:
+    """The order and the Billz draft staff look up before a replay."""
+    order_id, info = _push_info(message)
+    text = f"order {order_id if order_id is not None else '-'}, Billz draft "
+    text += (info.billz_sale_id if info is not None else "") or "-"
+    if info is not None and info.billz_payment_attempted_at is not None:
+        text += f", payment attempted at {info.billz_payment_attempted_at.isoformat()}"
+    return text
+
+
+def push_already_recorded(message: OutboxMessage) -> str:
+    """A purchase recorded in Billz meanwhile (by hand with billz_mark_recorded, or by another push)."""
+    _, info = _push_info(message)
+    if info is None or info.billz_pushed_at is None:
+        return ""
+    return f"already recorded in Billz at {info.billz_pushed_at.isoformat()} (by hand or by an earlier push)"
+
+
+def forget_payment_attempt(message: OutboxMessage, actor: Any) -> str:
+    """``requeue_outbox --forget-payment-attempt``: staff confirmed in Billz that the payment never arrived;
+    clear the stamp that stops a second payment (under the Order lock, audited with the staff actor)."""
+    order_id, info = _push_info(message)
+    if info is None or not isinstance(order_id, int):
+        raise outbox.RequeueRefused(f"message #{message.pk} names no purchase")
+    with transaction.atomic():
+        services.lock_order(order_id, wait=services.ADMIN_LOCK_WAIT)
+        _, info = _push_info(message)  # re-read under the lock
+        if info is None:
+            raise outbox.RequeueRefused(f"message #{message.pk} names no purchase")
+        if info.billz_pushed_at is not None:
+            raise outbox.RequeueRefused(f"order {order_id} is already recorded in Billz: nothing to forget")
+        if info.billz_payment_attempted_at is None:
+            raise outbox.RequeueRefused(f"order {order_id} has no payment attempt to forget")
+        loyalty_services.clear_billz_payment_attempt(info.purchase_id, billz_sale_id=info.billz_sale_id)
+        audit.record(
+            action=AUDIT_PAYMENT_ATTEMPT_FORGOTTEN,
+            entity_type="order",
+            entity_id=str(order_id),
+            actor=actor,
+            before={
+                "purchase_id": info.purchase_id,
+                "billz_sale_id": info.billz_sale_id,
+                "billz_payment_attempted_at": info.billz_payment_attempted_at.isoformat(),
+            },
+            after={"purchase_id": info.purchase_id, "billz_payment_attempted_at": None},
+            reason="manage.py requeue_outbox --forget-payment-attempt",
+        )
+    logger.warning(
+        "billz.payment_attempt_forgotten order_id=%s billz_order_id=%s", order_id, info.billz_sale_id or "-"
+    )
+    return (
+        f"forgot the payment attempt of order {order_id} (Billz draft {info.billz_sale_id or '-'}): "
+        "the next attempt pays the draft"
+    )
+
+
+outbox.on_requeue(
+    topics.BILLZ_PUSH_SALE,
+    outbox.RequeueHooks(
+        describe=describe_push,
+        skip_reason=push_already_recorded,
+        warning=REQUEUE_WARNING,
+        forget_payment_attempt=forget_payment_attempt,
+    ),
+)
+
+
 # --- refund.submit ------------------------------------------------------------------------------------------
 
 # The outbox lease of ``core.tasks`` (a message whose worker has not finished after it is handed to another
@@ -607,6 +690,9 @@ __all__ = [
     "expire_reservations",
     "handle_billz_push_sale",
     "handle_stock_synced",
+    "describe_push",
+    "forget_payment_attempt",
+    "push_already_recorded",
     "handle_bts_create_shipment",
     "handle_refund_submit",
     "on_billz_push_dead",

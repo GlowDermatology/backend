@@ -11,7 +11,7 @@ from unittest.mock import patch
 import httpx
 import pytest
 from django.core.cache import cache
-from django.core.management import call_command
+from django.core.management import CommandError, call_command
 from django.test import override_settings
 from redis.exceptions import ConnectionError as RedisConnectionError
 
@@ -523,3 +523,100 @@ def test_the_payment_attempt_is_a_compare_and_set_under_the_order_lock() -> None
         journal.before_payment()  # a second attempt that read the purchase before the stamp
     assert caught.value.retry_after == billz_sales.PAYMENT_RACE_RETRY
     assert Purchase.objects.get(pk=purchase.pk).billz_payment_attempted_at == stamped  # unchanged
+
+
+# --- NEW-4: requeue_outbox of billz.push_sale ---------------------------------------------------------------
+
+
+def refusing_payment() -> BillzServer:
+    """A Billz that refuses the payment for good (an undocumented business code): dead at once, draft kept."""
+    server = BillzServer()
+
+    def refused(request: httpx.Request) -> httpx.Response:
+        error = fixture("payment_error")
+        error["data"].update(error_code=20999, message="payment refused")
+        return httpx.Response(400, json=error)
+
+    server.overrides["POST /v2/order-payment/{order_id}"] = refused
+    return server
+
+
+def requeue(*args: str) -> str:
+    out = StringIO()
+    call_command("requeue_outbox", "--topic", topics.BILLZ_PUSH_SALE, "--dead", *args, stdout=out)
+    return out.getvalue()
+
+
+@override_settings(BILLZ_MODE="live")
+def test_the_requeue_listing_names_the_order_and_the_draft_and_warns() -> None:
+    """NEW-4 (probe test_requeue_listing_of_a_configuration_death_does_not_name_the_order): staff must see
+    which order (and which Billz draft) a replay would push, and be told to check for a hand entry."""
+    order = paid_order()
+    server = refusing_payment()
+    with patch("glowderma.commerce.billz_sales.get_billz", side_effect=lambda **kwargs: live(server)):
+        dead = dispatch(message_of(order.pk))
+    assert dead.status == "dead"
+    text = requeue("--dry-run")
+    assert text.startswith("WARNING: confirm the sale was not entered by hand; use billz_mark_recorded")
+    assert f"would requeue #{dead.pk} {dead.dedupe_key} [order {order.pk}, Billz draft {SALE_ID}]" in text
+
+
+@override_settings(BILLZ_MODE="live")
+def test_a_requeue_skips_a_sale_recorded_by_hand() -> None:
+    """NEW-4 + NEW-2: a dead sale staff recorded with billz_mark_recorded is listed but never replayed."""
+    order = paid_order()
+    server = refusing_payment()
+    with patch("glowderma.commerce.billz_sales.get_billz", side_effect=lambda **kwargs: live(server)):
+        dead = dispatch(message_of(order.pk))
+    assert dead.status == "dead"
+    call_command("billz_mark_recorded", "--order", str(order.pk), "--actor", admin().email, stdout=StringIO())
+    text = requeue()
+    assert f"skip #{dead.pk}" in text and "already recorded in Billz" in text
+    assert "1 dead message(s) matched, 0 requeued, 1 skipped." in text
+    dead.refresh_from_db()
+    assert dead.status == "dead"
+
+
+@override_settings(BILLZ_MODE="live")
+def test_a_lost_payment_is_replayed_only_with_forget_payment_attempt(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """NEW-4 (probe test_lost_payment_dead_then_requeue_dies_again_at_once): after the quiet period the sale
+    is dead "check by hand" and a plain requeue dies again at once (the stamp stays). Once staff confirmed in
+    Billz that the payment never arrived, ``--forget-payment-attempt`` clears the stamp (audited) and the
+    replay pays the draft once."""
+    order = paid_order()
+    server = BillzServer()
+    lost = [True]
+    original = server._default
+
+    def payment(request: httpx.Request) -> httpx.Response:
+        if lost:
+            lost.pop()
+            raise httpx.ReadTimeout("timed out", request=request)  # Billz never got it
+        return original("POST /v2/order-payment/{order_id}", request)
+
+    server.overrides["POST /v2/order-payment/{order_id}"] = payment
+    staff = admin()
+    start = timeutils.now()
+    with patch("glowderma.commerce.billz_sales.get_billz", side_effect=lambda **kwargs: live(server)):
+        with pinned_clock(start):
+            first = dispatch(message_of(order.pk))
+        with pinned_clock(start + timedelta(minutes=11)):
+            dead = dispatch(first)
+        assert dead.status == "dead" and "not paying again" in dead.last_error
+        requeue()
+        with pinned_clock(start + timedelta(minutes=12)):
+            assert dispatch(dead).status == "dead"  # the stamp still guards: dies again at once
+        with pytest.raises(CommandError, match="needs --order"):
+            requeue("--forget-payment-attempt", "--actor", staff.email)
+        text = requeue("--forget-payment-attempt", "--order", str(order.pk), "--actor", staff.email)
+        assert f"forgot the payment attempt of order {order.pk} (Billz draft {SALE_ID})" in text
+        assert Purchase.objects.get(order=order).billz_payment_attempted_at is None
+        with pinned_clock(start + timedelta(minutes=13)):
+            replayed = dispatch(dead)
+    assert replayed.status == "done", replayed.last_error
+    assert len(server.sales[SALE_ID].payments) == 1
+    entry = AuditEntry.objects.get(action="billz.payment_attempt_forgotten", entity_id=str(order.pk))
+    assert entry.actor_id == staff.pk and entry.before is not None
+    assert entry.before["billz_sale_id"] == SALE_ID
