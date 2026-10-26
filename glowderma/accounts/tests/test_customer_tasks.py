@@ -20,6 +20,7 @@ from glowderma.accounts.tests.factories import (
 )
 from glowderma.core import outbox, timeutils
 from glowderma.core.models import OutboxMessage
+from glowderma.core.tasks import dispatch_outbox
 from glowderma.integrations.fcm.registry import get_fcm_port
 
 pytestmark = pytest.mark.django_db
@@ -87,6 +88,16 @@ def test_a_transport_failure_propagates_for_the_outbox_retry(fcm: Any) -> None:
         tasks.push_session_replaced(message)
     message.refresh_from_db()
     assert message.payload["fcm_token"] == "tok-x-down"  # kept for the retry
+
+
+def test_a_dead_session_replaced_message_keeps_no_token(fcm: Any) -> None:
+    """Review nit: FCM stays down until the message dies; the dead row must not keep the raw token."""
+    message = replaced_message("tok-y-down")
+    OutboxMessage.objects.filter(pk=message.pk).update(attempts=99, status="failed")
+    dispatch_outbox(batch=10)
+    message.refresh_from_db()
+    assert message.status == "dead"
+    assert message.payload["fcm_token"] == "" and message.payload["sid"]
 
 
 def test_sign_in_on_a_new_device_delivers_the_farewell_push(

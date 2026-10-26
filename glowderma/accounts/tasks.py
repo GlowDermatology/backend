@@ -1,5 +1,5 @@
-"""Background work of ``accounts``: the ``push.session_replaced`` handler and the ``accounts.cleanup_auth``
-job.
+"""Background work of ``accounts``: the ``push.session_replaced`` handler (and its dead-letter hook) and the
+``accounts.cleanup_auth`` job.
 
 P1 appends the ``sms.send`` and ``apple.revoke`` handlers (and the ``apple.revoke`` dead-letter hook) below.
 """
@@ -53,6 +53,17 @@ def push_session_replaced(message: OutboxMessage) -> None:
     OutboxMessage.objects.filter(pk=message.pk).update(
         payload={**payload, "fcm_token": ""}, updated_at=timeutils.now()
     )
+
+
+@outbox.on_dead(topics.PUSH_SESSION_REPLACED)
+def blank_dead_session_replaced_token(message: OutboxMessage) -> None:
+    """A ``push.session_replaced`` that died (FCM unavailable until the last attempt) keeps no token either
+    (customer contract §1.9 step 4: the token does not stay behind in the outbox row)."""
+    payload: dict[str, Any] = dict(message.payload) if isinstance(message.payload, dict) else {}
+    if payload.get("fcm_token"):
+        OutboxMessage.objects.filter(pk=message.pk).update(
+            payload={**payload, "fcm_token": ""}, updated_at=timeutils.now()
+        )
 
 
 @shared_task(name="accounts.cleanup_auth")  # type: ignore[untyped-decorator]
