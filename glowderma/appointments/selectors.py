@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
-from django.db.models import Count, Min, QuerySet
+from django.db.models import Count, Max, Min, QuerySet
 
 from glowderma.appointments.models import OPEN_STATUSES, Appointment
 from glowderma.core import enums, timeutils
@@ -54,3 +54,27 @@ def upcoming_count(customer_id: int, now: datetime | None = None) -> int:
     return Appointment.objects.filter(
         customer_id=customer_id, status__in=OPEN_STATUSES, start__gte=instant
     ).count()
+
+
+# --- M2 (plan §1 P0): the appointment part of the dormant-account rule (customer contract §2.2.3) ---
+
+
+def last_activity_at(customer_id: int) -> datetime | None:
+    """The customer's newest appointment activity, else ``None``.
+
+    The newest of every appointment's ``created_at`` (booked in the app **or by staff**, any status) and the
+    ``start`` of ``requested`` / ``confirmed`` / ``attended`` appointments (a future open appointment counts
+    with its future start, so an account with one is never dormant). ``customers.selectors.last_activity_at``
+    (P1) combines it with sign-ins, purchases and orders.
+    """
+    rows = Appointment.objects.filter(customer_id=customer_id)
+    created = rows.aggregate(newest=Max("created_at"))["newest"]
+    started = rows.filter(
+        status__in=(
+            enums.AppointmentStatus.REQUESTED,
+            enums.AppointmentStatus.CONFIRMED,
+            enums.AppointmentStatus.ATTENDED,
+        )
+    ).aggregate(newest=Max("start"))["newest"]
+    candidates = [value for value in (created, started) if value is not None]
+    return max(candidates) if candidates else None

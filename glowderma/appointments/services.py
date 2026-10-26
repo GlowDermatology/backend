@@ -364,3 +364,15 @@ def cancel(appointment_id: int, *, reason: str = "", actor: Any, request: Any = 
     _enqueue_push(appointment, "cancelled", event)
     _audit(appointment, "cancelled", actor=actor, request=request, reason=reason or None)
     return appointment
+
+
+# --- M2 seam (plan §1 P0): the customer cancel, implemented by P3
+# --------------------------------------------
+
+
+def cancel_by_customer(
+    appointment_id: int, customer_id: int, *, reason: str = "", at: datetime | None = None
+) -> Appointment:
+    """Customer cancel of an own open appointment (customer contract §2.11; ``DELETE me/`` passes
+    ``reason="account_deleted"``). P0 stub with the final signature; P3 implements it."""
+    raise NotImplementedError("P3")
