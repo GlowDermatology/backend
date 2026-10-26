@@ -89,11 +89,13 @@ class Cart(TimeStampedModel):
 
 
 class CartItem(models.Model):
-    """One product line of a cart (no price snapshot: prices are read live at checkout)."""
+    """One product line of a cart; prices are read live at checkout, ``price_at_add`` only feeds the cart's
+    "price changed since you added it" hint (customer contract §2.5, M2-C12)."""
 
     cart = models.ForeignKey("commerce.Cart", on_delete=models.CASCADE, related_name="items")
     product = models.ForeignKey("catalog.Product", on_delete=models.CASCADE, related_name="cart_items")
     quantity = models.PositiveSmallIntegerField()
+    price_at_add = models.BigIntegerField(null=True)  # Product.price at the last write; null before 0004
     added_at = models.DateTimeField(default=timestamp_default, editable=False)
     updated_at = models.DateTimeField(default=timestamp_default)
 
@@ -280,7 +282,8 @@ class OrderItem(models.Model):
     billz_id = models.CharField(max_length=14)
     image_url = models.CharField(
         max_length=500, blank=True
-    )  # absolute URL of images[0] at checkout; "" → null
+    )  # media storage path of images[0] at checkout ("products/1/9f2c.webp"); rendered absolute by
+    # core.media.absolute_media_url at serialization time; "" → null
     quantity = models.PositiveIntegerField()
     unit_price = models.BigIntegerField()  # Product.price at checkout
     promo = models.BooleanField(default=False)

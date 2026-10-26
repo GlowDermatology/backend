@@ -19,40 +19,61 @@ Errors: request-level refusals raise the contract exceptions of ``core.api.excep
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from django.db import OperationalError, connection, transaction
+from django.conf import settings
+from django.db import IntegrityError, OperationalError, connection, transaction
 from django.utils import timezone
 
 from glowderma.accounts.models import Address, Customer, Device, StaffUser
+from glowderma.catalog import selectors as catalog_selectors
 from glowderma.catalog.models import Product, ProductStock
 from glowderma.commerce import events, selectors, state, topics
 from glowderma.commerce.models import (
     EVENT_SOURCES,
     EVENT_STATUS_AFTER,
+    Cart,
     CartItem,
     Order,
     OrderEvent,
     OrderItem,
     StockReservation,
 )
-from glowderma.core import audit, enums, outbox, timeutils
-from glowderma.core.api.exceptions import Conflict, InvalidTransition, NotCancellable, ProviderUnavailable
-from glowderma.core.media import absolute_media_url
+from glowderma.core import audit, enums, integration_modes, outbox, timeutils
+from glowderma.core.api.exceptions import (
+    AlreadyPaid,
+    AuthFailed,
+    CartEmpty,
+    CartFull,
+    Conflict,
+    DeliveryUnavailable,
+    InvalidTransition,
+    NotCancellable,
+    OnlineSalesUnavailable,
+    OpenOrderExists,
+    PaymentInProgress,
+    ProductUnavailable,
+    ProviderUnavailable,
+    not_cancellable,
+)
+from glowderma.core.api.exceptions import OutOfStock as OutOfStockError
 from glowderma.delivery import selectors as delivery_selectors
 from glowderma.delivery import services as delivery_services
 from glowderma.delivery.models import Shipment
-from glowderma.integrations.bts.ports import BtsUnavailable
+from glowderma.integrations.bts.ports import BtsRejected, BtsUnavailable
 from glowderma.integrations.bts.registry import get_bts
+from glowderma.integrations.click.ports import ClickUnavailable
+from glowderma.integrations.click.registry import get_click
 from glowderma.loyalty import selectors as loyalty_selectors
 from glowderma.loyalty import services as loyalty_services
 from glowderma.payments import selectors as payment_selectors
 from glowderma.payments import services as payment_services
-from glowderma.payments.models import OPEN_REFUND_STATES
+from glowderma.payments.models import OPEN_REFUND_STATES, Refund
 from glowderma.site_config.models import SiteSettings
 
 MESSAGE_NOT_CANCELLABLE = "Bu buyurtmani bekor qilib bo‘lmaydi."
@@ -89,11 +110,55 @@ class CheckoutError(CommerceError, ValueError):
 
 
 class OutOfStock(CommerceError):
-    """``available_stock < quantity`` for these products (M2 ``OUT_OF_STOCK``)."""
+    """Problem lines of a checkout (customer contract §2.7.1 row 7, ``OUT_OF_STOCK``): every line that is not
+    customer-visible (``unavailable``), has nothing available (``out_of_stock``) or less than requested
+    (``insufficient``), as ``{product_id, name, requested, available, status}`` in cart order."""
 
-    def __init__(self, product_ids: Sequence[int]) -> None:
-        super().__init__(f"Out of stock: {sorted(product_ids)}")
-        self.product_ids = tuple(sorted(product_ids))
+    def __init__(self, lines: Sequence[Mapping[str, Any]]) -> None:
+        self.lines = [dict(line) for line in lines]
+        self.product_ids = tuple(sorted(int(line["product_id"]) for line in self.lines))
+        super().__init__(f"Out of stock: {list(self.product_ids)}")
+
+
+class CashbackAboveMax(CommerceError):
+    """Row 8: ``cashback_used > cashback_max(items_subtotal, delivery_fee, ∞)``."""
+
+    def __init__(self, maximum: int) -> None:
+        super().__init__(f"At most {maximum} so'm of cashback")
+        self.max = maximum
+
+
+class PriceChanged(CommerceError):
+    """Row 9: ``expected_total`` differs from the live total (``totals``: total, items_subtotal, delivery_fee,
+    cashback_used)."""
+
+    def __init__(self, totals: Mapping[str, int]) -> None:
+        super().__init__(f"Expected total differs: {dict(totals)}")
+        self.totals = dict(totals)
+
+
+class InsufficientCashback(CommerceError):
+    """Row 10: ``cashback_used > available`` under the LoyaltyAccount lock (``loyalty.create_hold``)."""
+
+    def __init__(self, available: int) -> None:
+        super().__init__(f"Only {available} so'm of cashback available")
+        self.available = available
+
+
+class AddressNotFound(CommerceError):
+    """The delivery ``address_id`` is not the customer's (row 3)."""
+
+
+class AddressIncomplete(CommerceError):
+    """The delivery address has no BTS region/city (row 3)."""
+
+
+class ProductNotFound(CommerceError):
+    """``POST cart/items/``: unknown product id (``product_id`` ``does_not_exist``)."""
+
+
+class CartLineNotFound(CommerceError):
+    """``PATCH cart/items/{product_id}/`` of a line the cart does not have (404)."""
 
 
 # --- helpers ------------------------------------------------------------------------------------------------
@@ -263,9 +328,41 @@ class _Line:
     quantity: int
 
 
-def _first_image_url(product: Product) -> str:
+def _first_image_path(product: Product) -> str:
+    """The media storage path of the product's first image (the snapshot; rendered absolute by the API)."""
     image = product.images.order_by("position", "id").first()
-    return absolute_media_url(image.file.name or "") if image is not None and image.file else ""
+    return (image.file.name or "") if image is not None and image.file else ""
+
+
+def _problem_lines(
+    lines: Sequence[_Line], available: Mapping[int, int], visible: set[int] | None
+) -> list[dict[str, Any]]:
+    problems = []
+    for line in lines:
+        product = line.product
+        stock = max(0, available.get(product.pk, 0))
+        if visible is not None:
+            shown = product.pk in visible
+        else:
+            shown = product.status == enums.ProductStatus.ACTIVE
+        if not shown:
+            status = enums.CartLineStatus.UNAVAILABLE
+        elif stock <= 0:
+            status = enums.CartLineStatus.OUT_OF_STOCK
+        elif stock < line.quantity:
+            status = enums.CartLineStatus.INSUFFICIENT
+        else:
+            continue
+        problems.append(
+            {
+                "product_id": product.pk,
+                "name": product.name_uz or product.billz_name or product.billz_id,
+                "requested": line.quantity,
+                "available": stock,
+                "status": status,
+            }
+        )
+    return problems
 
 
 def create_order(
@@ -275,28 +372,38 @@ def create_order(
     *,
     payment_provider: str,
     channel: str,
+    delivery_fee: int,
     address_id: int | None = None,
     address_text: str = "",
     region_code: str = "",
     city_code: str = "",
     address_comment: str = "",
     cashback_used: int = 0,
+    expected_total: int | None = None,
+    min_payable: int = 0,
+    visible_only: bool = False,
+    customer_note: str = "",
     at: datetime | None = None,
     metadata: Mapping[str, Any] | None = None,
     order_id: int | None = None,
     billz_order_uuid: UUID | None = None,
     enforce_stock: bool = True,
 ) -> int:
-    """Checkout (03 §4.1 row 1): snapshot the lines, reserve stock, hold cashback → ``awaiting_payment``.
+    """Checkout (03 §4.1 row 1; customer contract §2.7.1 rows 7–10): snapshot the lines, reserve stock, hold
+    cashback → ``awaiting_payment``.
 
-    ``items`` are ``(product_id, quantity)`` in cart order (one line per product). The delivery fee is the BTS
-    tariff quote for the address (``0`` for pickup), asked **before** any row lock is taken; ``cashback_used``
-    (≤ ``items_subtotal``) becomes a ``loyalty`` hold until the reservation expires. Stock is checked under
-    the ``ProductStock`` row locks (:class:`OutOfStock`); ``enforce_stock=False`` is for the demo seeder only,
-    whose orders are replayed at historical instants against today's Billz stock.
-    ``order_id``/``billz_order_uuid`` pin design ids (seed only). Writes the ``Order``, items, reservations,
-    the hold, the ``pending`` payment, the delivery shipment and the events ``order_created`` +
-    ``reservation_created``; no outbox, no audit. Returns the id.
+    ``items`` are ``(product_id, quantity)`` in cart order (one line per product). ``delivery_fee`` is the BTS
+    quote the **caller** asked before any row lock (``0`` for pickup; the seeder passes its fee), so no HTTP call
+    runs under the ``ProductStock`` locks. Evaluation order (the first failure raises a typed error): the
+    address (:class:`AddressNotFound` / :class:`AddressIncomplete`); under the ``ProductStock`` row locks every
+    line visible (``catalog.selectors.customer_visible_products()`` when ``visible_only``, else ``active``) and
+    available (:class:`OutOfStock` with every problem line); ``cashback_used ≤ cashback_max(subtotal, fee, ∞)``
+    with ``min_payable`` (:class:`CashbackAboveMax`); ``expected_total`` (:class:`PriceChanged`); then the rows
+    and the hold (:class:`InsufficientCashback` from ``create_hold``; everything rolls back).
+    ``enforce_stock=False`` is for the demo seeder only, whose orders are replayed at historical instants
+    against today's Billz stock. ``order_id``/``billz_order_uuid`` pin design ids (seed only). Writes the
+    ``Order`` (with ``customer_note``), items, reservations, the hold, the ``pending`` payment, the delivery
+    shipment and the events ``order_created`` + ``reservation_created``; no outbox, no audit. Returns the id.
     """
     _aware(at, "at")
     instant = at or timeutils.now()
@@ -313,6 +420,11 @@ def create_order(
         raise CheckoutError("One line per product")
     if any(quantity < 1 for _, quantity in items):
         raise CheckoutError("Quantities are positive")
+    if cashback_used < 0:
+        raise CheckoutError("cashback_used must not be negative")
+    delivery = fulfilment == enums.FulfilmentMethod.DELIVERY
+    if delivery_fee < 0 or (not delivery and delivery_fee != 0):
+        raise CheckoutError("The delivery fee is a non-negative quote, 0 for pickup")
     meta = dict(metadata or {})
     with transaction.atomic():
         customer = Customer.objects.filter(pk=customer_id).first()
@@ -323,17 +435,12 @@ def create_order(
         if missing:
             raise CheckoutError(f"Unknown products {sorted(missing)}")
         lines = [_Line(products[product_id], quantity) for product_id, quantity in items]
-        items_subtotal = sum(line.product.price * line.quantity for line in lines)
-        promo_subtotal = sum(line.product.price * line.quantity for line in lines if line.product.promo)
-        if not 0 <= cashback_used <= items_subtotal:
-            raise CheckoutError("cashback_used must be between 0 and the items subtotal")
         address = {"text": "", "region_code": "", "city_code": "", "comment": ""}
-        delivery_fee = 0
-        if fulfilment == enums.FulfilmentMethod.DELIVERY:
+        if delivery:
             if address_id is not None:
                 saved = Address.objects.filter(pk=address_id, customer_id=customer_id).first()
                 if saved is None:
-                    raise CheckoutError(f"Unknown address {address_id}")
+                    raise AddressNotFound(f"Unknown address {address_id}")
                 address = {
                     "text": saved.text,
                     "region_code": saved.region_code,
@@ -348,31 +455,46 @@ def create_order(
                     "comment": address_comment,
                 }
             if not address["text"]:
-                raise CheckoutError("A delivery order needs an address")
-            fake = meta.get("fake") if isinstance(meta.get("fake"), dict) else {}
-            scenario = fake.get("bts") if isinstance(fake, dict) else None
-            delivery_fee = get_bts(scenario if isinstance(scenario, dict) else None).quote(
-                address["region_code"], address["city_code"]
-            )
-        total = items_subtotal + delivery_fee - cashback_used
-        if total <= 0:
-            raise CheckoutError("The order total must be positive")
-        # the BTS quote above runs before any row lock; the stock rows are locked only from here to commit
+                raise AddressNotFound("A delivery order needs an address")
+            if not address["region_code"] or not address["city_code"]:
+                raise AddressIncomplete("A delivery address needs the BTS region and city")
+        # the caller's BTS quote ran before any row lock; the stock rows are locked only from here to commit
         if enforce_stock:
             list(
                 ProductStock.objects.select_for_update(of=("self",))
                 .filter(product_id__in=product_ids)
                 .order_by("product_id")
             )
-            available = selectors.available_stock(product_ids)
-            short = [
-                line.product.pk
-                for line in lines
-                if line.product.status != enums.ProductStatus.ACTIVE
-                or available.get(line.product.pk, 0) < line.quantity
-            ]
-            if short:
-                raise OutOfStock(short)
+            visible = (
+                set(
+                    catalog_selectors.customer_visible_products()
+                    .filter(pk__in=product_ids)
+                    .values_list("pk", flat=True)
+                )
+                if visible_only
+                else None
+            )
+            problems = _problem_lines(lines, selectors.available_stock(product_ids), visible)
+            if problems:
+                raise OutOfStock(problems)
+        # prices are read after the locks: the live subtotal of rows 8 and 9
+        items_subtotal = sum(line.product.price * line.quantity for line in lines)
+        promo_subtotal = sum(line.product.price * line.quantity for line in lines if line.product.promo)
+        maximum = max(0, min(items_subtotal, items_subtotal + delivery_fee - min_payable))
+        if cashback_used > maximum:
+            raise CashbackAboveMax(maximum)
+        total = items_subtotal + delivery_fee - cashback_used
+        if expected_total is not None and expected_total != total:
+            raise PriceChanged(
+                {
+                    "total": total,
+                    "items_subtotal": items_subtotal,
+                    "delivery_fee": delivery_fee,
+                    "cashback_used": cashback_used,
+                }
+            )
+        if total <= 0:
+            raise CheckoutError("The order total must be positive")
         minutes = SiteSettings.load().reservation_minutes
         expires_at = instant + timedelta(minutes=minutes)
         if billz_order_uuid is not None:
@@ -389,6 +511,7 @@ def create_order(
             address_comment=address["comment"],
             recipient_name=customer.name,
             recipient_phone=customer.phone,
+            customer_note=customer_note,
             items_subtotal=items_subtotal,
             promo_subtotal=promo_subtotal,
             delivery_fee=delivery_fee,
@@ -408,7 +531,7 @@ def create_order(
                 product=line.product,
                 name=line.product.name_uz or line.product.billz_name or line.product.billz_id,
                 billz_id=line.product.billz_id,
-                image_url=_first_image_url(line.product),
+                image_url=_first_image_path(line.product),
                 quantity=line.quantity,
                 unit_price=line.product.price,
                 promo=line.product.promo,
@@ -428,9 +551,12 @@ def create_order(
             for line in lines
         )
         if cashback_used > 0:
-            loyalty_services.create_hold(customer.pk, order.pk, cashback_used, expires_at)
+            try:
+                loyalty_services.create_hold(customer.pk, order.pk, cashback_used, expires_at)
+            except loyalty_services.InsufficientBalance as exc:
+                raise InsufficientCashback(exc.available) from exc
         payment_services.create_payment(order.pk, payment_provider, total)
-        if fulfilment == enums.FulfilmentMethod.DELIVERY:
+        if delivery:
             delivery_services.ensure_shipment(order.pk)
         record_event(
             order,
@@ -450,28 +576,41 @@ def create_order(
 # --- payment (row 2) ----------------------------------------------------------------------------------------
 
 
-def mark_paid(order_id: int, provider_txn_id: str, at: datetime | None = None) -> None:
-    """A provider capture (Click ``complete`` / Payme ``PerformTransaction``, M2 webhooks; the seed).
+def mark_paid(
+    order_id: int,
+    payment_id: int,
+    provider: str,
+    provider_txn_id: str,
+    at: datetime | None = None,
+    *,
+    raw: dict[str, Any] | None = None,
+) -> None:
+    """An honoured provider capture (Click Complete / Payme ``PerformTransaction``; the seed).
 
-    Under Order → Payment → Account: the order's ``pending`` payment becomes ``paid``
-    (``payments.services.confirm_payment``) and :func:`confirm_payment_effects` runs in the same transaction.
-    A capture for an order that is no longer ``awaiting_payment`` is refused (``InvalidTransition``; M2 turns
-    it into a late-capture refund). Idempotent for the same transaction on a paid order.
+    Names the payment explicitly (customer contract §2.13.0 step 4): under Order → Payment → Account,
+    ``payment_id`` must be the order's active ``pending`` payment of ``provider``; it becomes ``paid``
+    (``payments.services.confirm_payment``, ``raw`` merged into ``provider_state``) and
+    :func:`confirm_payment_effects` runs in the same transaction. Anything else raises ``InvalidTransition``
+    (the callers turn a capture they cannot honour into :func:`record_late_capture`). Idempotent for the same
+    transaction of an already paid order.
     """
     _aware(at, "at")
     with transaction.atomic():
         order = lock_order(order_id)
         instant = at or timeutils.now()  # after the Order lock
-        paid = payment_selectors.active_payment(order_id, enums.PaymentStatus.PAID)
-        if order.status != _S.AWAITING_PAYMENT:
-            if paid is not None and paid.transaction_id == provider_txn_id:
+        payment = payment_selectors.get_payment(payment_id)
+        if payment is None or payment.order_id != order_id or payment.provider != provider:
+            raise InvalidTransition(f"Payment {payment_id} is not a {provider} payment of order {order_id}")
+        if payment.status == enums.PaymentStatus.PAID and not payment.late_capture:
+            if payment.transaction_id == provider_txn_id and order.status != _S.AWAITING_PAYMENT:
                 return
+        if order.status != _S.AWAITING_PAYMENT:
             raise InvalidTransition(f"Order {order_id} is {order.status}, not awaiting payment")
         pending = payment_selectors.active_payment(order_id, enums.PaymentStatus.PENDING)
-        if pending is None:
-            raise InvalidTransition(f"Order {order_id} has no pending payment")
-        payment_services.confirm_payment(pending.id, provider_txn_id, instant)
-        confirm_payment_effects(order_id, pending.id, at, floor=instant)
+        if pending is None or pending.id != payment_id:
+            raise InvalidTransition(f"Payment {payment_id} is not the pending payment of order {order_id}")
+        payment_services.confirm_payment(payment_id, provider_txn_id, instant, raw)
+        confirm_payment_effects(order_id, payment_id, at, floor=instant)
 
 
 def confirm_payment_effects(
@@ -573,25 +712,35 @@ def confirm_payment_effects(
 
 
 def fail_payment_effects(
-    order_id: int, error_code: str | None, at: datetime | None = None, *, provider_txn_id: str | None = None
+    order_id: int,
+    payment_id: int,
+    error_code: str | None,
+    at: datetime | None = None,
+    *,
+    provider_txn_id: str | None = None,
 ) -> bool:
-    """A provider failure callback (03 §4.1 row 16; Click ``complete`` error < 0, Payme ``CancelTransaction``
-    on state 1): the pending payment fails and ``payment_failed`` is recorded; the order stays payable until
-    expiry. Returns ``False`` when there is no pending payment (nothing written)."""
+    """A provider failure callback (03 §4.1 row 16; Click Complete with ``error < 0``, Payme
+    ``CancelTransaction`` of a state-1 transaction) for **that** payment: it fails and ``payment_failed`` is
+    recorded; the order stays payable until expiry. ``False`` when the payment is failed already (nothing
+    written); a payment of another order, or one that is not ``pending``, raises ``InvalidTransition``."""
     _aware(at, "at")
     instant = at or timeutils.now()
     with transaction.atomic():
         order = lock_order(order_id)
-        pending = payment_selectors.active_payment(order_id, enums.PaymentStatus.PENDING)
-        if pending is None:
+        payment = payment_selectors.get_payment(payment_id)
+        if payment is None or payment.order_id != order_id:
+            raise InvalidTransition(f"Payment {payment_id} does not belong to order {order_id}")
+        if payment.status == enums.PaymentStatus.FAILED:
             return False
-        payment_services.fail_payment(pending.id, error_code or "failed", instant)
+        if payment.status != enums.PaymentStatus.PENDING:
+            raise InvalidTransition(f"Payment {payment_id} is {payment.status}, not pending")
+        payment_services.fail_payment(payment_id, error_code or "failed", instant)
         record_event(
             order,
             _E.PAYMENT_FAILED,
             {
-                "provider": pending.provider,
-                "transaction_id": provider_txn_id or pending.transaction_id,
+                "provider": payment.provider,
+                "transaction_id": provider_txn_id or payment.transaction_id,
                 "error_code": error_code,
             },
             at=instant,
@@ -602,12 +751,22 @@ def fail_payment_effects(
 # --- reservation expiry (row 3) -----------------------------------------------------------------------------
 
 
+def _in_grace(order: Order, payment: payment_selectors.PaymentRow, now: datetime) -> bool:
+    expires = order.reservation_expires_at
+    attached = selectors.attached_at(payment)
+    if expires is None or attached is None or attached >= expires or not selectors.is_open(payment):
+        return False
+    return now < expires + timedelta(seconds=settings.PAYMENT_IN_FLIGHT_GRACE_SECONDS)
+
+
 def expire_reservation(order_id: int, at: datetime | None = None, *, skip_locked: bool = False) -> bool:
     """The reservation of an unpaid order ran out (03 §4.1 row 3): ``cancelled`` / ``reservation_expired``.
 
     Re-checked under the Order lock (a capture may have won): ``awaiting_payment`` and
-    ``reservation_expires_at ≤ now``. The pending payment fails silently (unless it is a Payme state-1
-    transaction, P-2), reservations are released, the hold is released (``reservation_expired``); event
+    ``reservation_expires_at ≤ now``. An order whose pending payment has an **open transaction** (never "in
+    flight": Click is in flight 120 s but open until its Complete) attached before ``reservation_expires_at`` is
+    skipped until ``reservation_expires_at + PAYMENT_IN_FLIGHT_GRACE_SECONDS`` (customer contract §2.7.2). The
+    pending payment fails silently (unless it is a Payme state-1 transaction, P-2), reservations are released, the hold is released (``reservation_expired``); event
     ``reservation_expired {released_item_count, payment_failed}``; no push, no audit. Returns whether the
     order was expired (``False`` = nothing to do, or locked by another transaction with ``skip_locked``).
     """
@@ -624,8 +783,10 @@ def expire_reservation(order_id: int, at: datetime | None = None, *, skip_locked
             order.reservation_expires_at is not None and order.reservation_expires_at > instant
         ):
             return False
-        payment_failed = False
         pending = payment_selectors.active_payment(order_id, enums.PaymentStatus.PENDING)
+        if pending is not None and _in_grace(order, pending, instant):
+            return False  # an open transaction attached in time may still complete (customer contract §2.7.2)
+        payment_failed = False
         if pending is not None:
             result = payment_services.fail_payment(pending.id, "expired", instant, unilateral=True)
             payment_failed = result.changed
@@ -750,7 +911,12 @@ def cancel_order(
         else:
             if paid is not None:
                 refund = payment_services.create_refund(
-                    paid.id, paid.amount, actor_id, at=instant, request=request
+                    paid.id,
+                    paid.amount,
+                    actor_id,
+                    at=instant,
+                    request=request,
+                    manual=refund_manual_reason(paid) is not None,
                 )
             if purchase is not None:
                 # read under the LoyaltyAccount lock, after the BTS call (T19: never an older instant)
@@ -781,18 +947,9 @@ def cancel_order(
             actor_id=actor_id,
             at=instant,
         )
-        if refund is not None:
+        if refund is not None and paid is not None:
             record_event_once(
-                order,
-                _E.REFUND_REQUESTED,
-                {
-                    "refund_id": refund.refund_id,
-                    "amount": refund.amount,
-                    "provider": refund.provider,
-                    "manual": refund.state == enums.RefundState.MANUAL_REQUIRED,
-                },
-                actor_id=actor_id,
-                at=instant,
+                order, _E.REFUND_REQUESTED, refund_requested_data(refund, paid), actor_id=actor_id, at=instant
             )
         _enqueue_push(order, _S.CANCELLED, cancelled)
         audit.record(
@@ -908,6 +1065,45 @@ def retry_shipment(order_id: int, actor_id: int, *, request: Any = None) -> None
 
 # --- refunds (handlers, Payme confirmation, staff resolve/retry) --------------------------------------------
 
+MESSAGE_REFUND_STILL_PAID = (
+    "Click to‘lovni qaytarmagan. Avval mijozga qo‘lda to‘lang, so‘ng «qo‘lda to‘landi» belgisi bilan yakunlang "
+    "yoki qaytarishni qayta urinib ko‘ring."
+)
+MESSAGE_REFUND_CLICK_FAKE = (
+    "Click sinov rejimida: to‘lov holatini tekshirib bo‘lmaydi. Click ulanganidan keyin yakunlang."
+)
+MANUAL_REASON_PAYME = "payme"
+MANUAL_REASON_NO_PAYDOC = "no_paydoc"
+MANUAL_REASON_FAKE_MODE = "fake_mode"
+
+
+def refund_manual_reason(payment: payment_selectors.PaymentRow) -> str | None:
+    """Why a new refund of ``payment`` is ``manual_required`` (admin §4 ``refund_requested.manual_reason``):
+    ``payme`` (Payme refunds are cabinet refunds), ``no_paydoc`` (a Click payment without ``click_paydoc_id``
+    was never sent to Click with another id), ``fake_mode`` (the Click port is fake under the production
+    settings: the fake would report a reversal that moved no money); ``None`` = submitted to Click."""
+    if payment.provider == enums.PaymentProvider.PAYME:
+        return MANUAL_REASON_PAYME
+    if not payment_selectors.click_paydoc_id(payment.provider_state):
+        return MANUAL_REASON_NO_PAYDOC
+    if integration_modes.callbacks_refused("click"):
+        return MANUAL_REASON_FAKE_MODE
+    return None
+
+
+def refund_requested_data(
+    refund: payment_services.RefundResult, payment: payment_selectors.PaymentRow
+) -> dict[str, Any]:
+    """``refund_requested`` data with ``manual_reason`` (null unless the refund is ``manual_required``)."""
+    manual = refund.state == enums.RefundState.MANUAL_REQUIRED
+    return {
+        "refund_id": refund.refund_id,
+        "amount": refund.amount,
+        "provider": refund.provider,
+        "manual": manual,
+        "manual_reason": (refund_manual_reason(payment) or MANUAL_REASON_PAYME) if manual else None,
+    }
+
 
 def _refund_event_data(refund: payment_services.RefundResult) -> dict[str, Any]:
     return {"refund_id": refund.refund_id, "amount": refund.amount, "provider": refund.provider}
@@ -942,21 +1138,96 @@ def _locked_refund_row(refund_id: int) -> tuple[Order, payment_selectors.RefundR
     return order, locked
 
 
+def _click_status_for_resolve(row: payment_selectors.RefundRow, manual_payout: bool) -> bool:
+    """The fresh Click status check of a ``failed`` Click refund's resolve (customer contract §2.13.0), run
+    **outside any row lock**: ``True`` when Click reversed the payment (closed without a payout); a payout
+    without ``manual_payout`` → 409 ``MESSAGE_REFUND_STILL_PAID``; Click down → 503; fake Click under the
+    production settings → 409 ``MESSAGE_REFUND_CLICK_FAKE``."""
+    if integration_modes.callbacks_refused("click"):
+        raise InvalidTransition(MESSAGE_REFUND_CLICK_FAKE)
+    if not row.provider_payment_ref:
+        if not manual_payout:
+            raise InvalidTransition(MESSAGE_REFUND_STILL_PAID)
+        return False
+    order = Order.objects.get(pk=row.order_id)
+    try:
+        status = get_click(fake_scenario(order, "click")).payment_status(row.provider_payment_ref)
+    except ClickUnavailable as exc:
+        raise ProviderUnavailable() from exc
+    if status == "reversed":
+        return True
+    if not manual_payout:
+        raise InvalidTransition(MESSAGE_REFUND_STILL_PAID)
+    return False
+
+
+def _resolvable_failed(row: payment_selectors.RefundRow) -> bool:
+    """The guard of a failed Click refund's resolve (under the Order → Payment locks): the payment's newest
+    refund, the payment still ``paid``, no other refund of the payment open or ``succeeded``."""
+    payment = payment_selectors.get_payment(row.payment_id)
+    if payment is None or payment.status != enums.PaymentStatus.PAID:
+        return False
+    siblings = [
+        r for r in payment_selectors.refunds_for_order(row.order_id) if r.payment_id == row.payment_id
+    ]
+    if max(r.id for r in siblings) != row.id:
+        return False
+    return not any(
+        r.id != row.id and (r.state in OPEN_REFUND_STATES or r.state == enums.RefundState.SUCCEEDED)
+        for r in siblings
+    )
+
+
 def resolve_refund(
-    refund_id: int, outcome: str, actor_id: int | None, *, at: datetime | None = None, request: Any = None
+    refund_id: int,
+    outcome: str,
+    actor_id: int | None,
+    *,
+    manual_payout: bool = False,
+    at: datetime | None = None,
+    request: Any = None,
 ) -> payment_services.RefundResult:
-    """Close a ``manual_required`` / ``unknown`` refund as ``succeeded`` or ``failed`` (contract §7 item 18
-    ``…/resolve/``; with ``actor_id=None`` it stands for Payme's ``CancelTransaction``). The state is checked
-    under the Order lock (two concurrent resolves: the second gets 409 ``invalid_transition`` with the
-    Uzbek message); writes the ``refund_succeeded`` / ``refund_failed`` event."""
+    """Close a ``manual_required`` / ``unknown`` refund as ``succeeded`` or ``failed`` (admin §7 item 18
+    ``…/resolve/``; with ``actor_id=None`` it stands for Payme's ``CancelTransaction``), or a ``failed``
+    **Click** refund as ``succeeded`` (customer contract §2.13.0): a fresh Click status check outside any lock
+    (``reversed`` → closed; still ``paid`` → only with ``manual_payout``; Click down → 503; fake Click under
+    the production settings → 409), then the guard under the Order → Payment locks (newest refund, payment
+    still ``paid``, no other open or succeeded refund; else 409 ``MESSAGE_REFUND_NOT_RESOLVABLE``). The state
+    is checked under the Order lock (two concurrent resolves: the second gets 409 ``invalid_transition``);
+    writes the ``refund_succeeded`` / ``refund_failed`` event; ``manual_payout`` is audited."""
     _aware(at, "at")
     if outcome not in (enums.RefundState.SUCCEEDED, enums.RefundState.FAILED):
         raise ValueError(f"A refund resolves to succeeded or failed, not {outcome!r}")
+    first = payment_selectors.get_refund(refund_id)
+    if first is None:
+        raise payment_services.RefundNotFound(f"Refund {refund_id} does not exist")
+    failed_click = (
+        first.state == enums.RefundState.FAILED
+        and first.provider == enums.PaymentProvider.CLICK
+        and outcome == enums.RefundState.SUCCEEDED
+    )
+    payout = False
+    if failed_click:
+        reversed_at_click = _click_status_for_resolve(first, manual_payout)  # no lock held (HTTP)
+        payout = manual_payout and not reversed_at_click
     with transaction.atomic():
         order, row = _locked_refund_row(refund_id)
+        instant = at or timeutils.now()
+        if failed_click:
+            if row.state != enums.RefundState.FAILED or not _resolvable_failed(row):
+                raise InvalidTransition(MESSAGE_REFUND_NOT_RESOLVABLE)
+            result = payment_services.mark_succeeded(
+                refund_id,
+                instant,
+                actor_id=actor_id,
+                request=request,
+                from_failed=True,
+                audit_extra={"manual_payout": payout},
+            )
+            record_refund_outcome(order, result, at=instant)
+            return result
         if row.state not in (enums.RefundState.MANUAL_REQUIRED, enums.RefundState.UNKNOWN):
             raise InvalidTransition(MESSAGE_REFUND_NOT_RESOLVABLE)
-        instant = at or timeutils.now()
         try:
             if outcome == enums.RefundState.SUCCEEDED:
                 result = payment_services.mark_succeeded(
@@ -975,15 +1246,19 @@ def resolve_refund(
 def retry_refund(
     refund_id: int, actor_id: int, *, at: datetime | None = None, request: Any = None
 ) -> payment_services.RefundResult:
-    """Retry a ``failed`` refund (contract §7 item 18 ``…/retry/``): a new refund of the payment (Click →
-    ``requested`` + outbox, Payme → ``manual_required``) and its ``refund_requested`` event. Refused with
-    the Uzbek messages under the Order lock: the refund is no longer ``failed``, its payment is no longer
-    ``paid`` (a later retry already returned the money), or another refund of the order is open."""
+    """Retry a ``failed`` refund (admin §7 item 18 ``…/retry/``): a new refund of the payment (Click →
+    ``requested`` + outbox, or ``manual_required`` without ``click_paydoc_id``; Payme → ``manual_required``) and
+    its ``refund_requested`` event. Refused with the Uzbek messages under the Order lock: the refund is no
+    longer ``failed``, its payment is no longer ``paid`` (a later retry already returned the money), another
+    refund of the order is open, or — for Click — the Click port is fake under the production settings
+    (``MESSAGE_REFUND_CLICK_FAKE``: the retry would skip the status check of a later resolve)."""
     _aware(at, "at")
     with transaction.atomic():
         order, row = _locked_refund_row(refund_id)
         if row.state != enums.RefundState.FAILED:
             raise InvalidTransition(MESSAGE_REFUND_NOT_RETRYABLE)
+        if row.provider == enums.PaymentProvider.CLICK and integration_modes.callbacks_refused("click"):
+            raise InvalidTransition(MESSAGE_REFUND_CLICK_FAKE)
         payment = payment_selectors.get_payment(row.payment_id)
         if payment is None or payment.status != enums.PaymentStatus.PAID:
             raise InvalidTransition(MESSAGE_REFUND_NOT_RETRYABLE)
@@ -991,20 +1266,19 @@ def retry_refund(
             raise Conflict(MESSAGE_REFUND_OPEN)
         instant = at or timeutils.now()
         try:
-            result = payment_services.retry_refund(refund_id, actor_id, at=instant, request=request)
+            result = payment_services.retry_refund(
+                refund_id,
+                actor_id,
+                at=instant,
+                request=request,
+                manual=refund_manual_reason(payment) is not None,
+            )
         except InvalidTransition as exc:  # pragma: no cover - the states were checked under the lock
             raise InvalidTransition(MESSAGE_REFUND_NOT_RETRYABLE) from exc
         except Conflict as exc:  # pragma: no cover - idem
             raise Conflict(MESSAGE_REFUND_OPEN) from exc
         record_event(
-            order,
-            _E.REFUND_REQUESTED,
-            {
-                **_refund_event_data(result),
-                "manual": result.state == enums.RefundState.MANUAL_REQUIRED,
-            },
-            actor_id=actor_id,
-            at=instant,
+            order, _E.REFUND_REQUESTED, refund_requested_data(result, payment), actor_id=actor_id, at=instant
         )
         return result
 
@@ -1016,8 +1290,30 @@ __all__ = [
     "OrderNotFound",
     "OutOfStock",
     "apply_bts_status",
+    "AddressIncomplete",
+    "AddressNotFound",
+    "CartLineNotFound",
+    "CashbackAboveMax",
+    "CheckoutInput",
+    "InsufficientCashback",
+    "PriceChanged",
+    "ProductNotFound",
+    "add_to_cart",
     "cancel_by_customer",
     "cancel_order",
+    "checkout",
+    "clear_cart",
+    "ensure_payable_payment",
+    "late_capture_case",
+    "lock_cart",
+    "lock_customer",
+    "quote_delivery",
+    "record_late_capture",
+    "refund_manual_reason",
+    "refund_requested_data",
+    "remove_from_cart",
+    "reorder_into_cart",
+    "set_cart_quantity",
     "clean_reason",
     "confirm_payment_effects",
     "create_order",
@@ -1040,20 +1336,484 @@ __all__ = [
 ]
 
 
-# --- M2 seams (plan §1 P0): stubs P2 replaces, and the cart helper P1 needs now
+# === M2 customer API (customer contract §2.5–§2.7, §2.13; plan §3 P2) ========================================
+
+logger = logging.getLogger(__name__)
+
+# The definitions of customer contract §2.7.2 live in ``selectors`` (read-only predicates); re-exported here.
+is_payable = selectors.is_payable
+is_open = selectors.is_open
+in_flight = selectors.in_flight
+LATE_CAPTURE_CASES = ("failed_by_us", "not_payable", "double_payment", "fake_mode")
+AUDIT_PAYMENT_LATE_CAPTURE = "payment.late_capture"
+FAILED_BY_US = ("expired", "abandoned", "cancelled")
 
 
-def cancel_by_customer(order_id: int, customer_id: int, *, at: datetime | None = None) -> int:
-    """Customer cancel of an ``awaiting_payment`` order (customer contract §2.7.3); returns the order id.
+# --- cart (customer contract §2.5, §2.7.4) ---------------------------------------------------------------------
 
-    P0 stub with the final signature: P2 implements it (state.py row 5; a Click payment in flight →
-    ``PaymentInProgress``). ``DELETE me/`` (P1) calls it only for customers with open orders.
-    """
-    raise NotImplementedError("P2")
+
+def lock_cart(customer_id: int) -> Cart:
+    """The customer's ``Cart`` row ``FOR UPDATE`` (created lazily); every cart write takes it first."""
+    cart = Cart.objects.select_for_update(of=("self",)).filter(customer_id=customer_id).first()
+    if cart is None:
+        try:
+            with transaction.atomic():
+                Cart.objects.create(customer_id=customer_id)
+        except IntegrityError:  # a concurrent first write created it
+            pass
+        cart = Cart.objects.select_for_update(of=("self",)).get(customer_id=customer_id)
+    return cart
+
+
+def _touch(cart: Cart) -> None:
+    cart.save()  # TimeStampedModel bumps ``updated_at``
+
+
+def _sales_on() -> None:
+    if not integration_modes.online_sales_enabled():
+        raise OnlineSalesUnavailable()
+
+
+def _product_state(product_id: int) -> tuple[Product, bool, int]:
+    product = Product.objects.filter(pk=product_id).first()
+    if product is None:
+        raise ProductNotFound(f"Product {product_id} does not exist")
+    visible = catalog_selectors.customer_visible_products().filter(pk=product_id).exists()
+    available = selectors.customer_available_stock([product_id]).get(product_id, 0)
+    return product, visible, selectors.max_quantity(available)
+
+
+def add_to_cart(customer_id: int, product_id: int, quantity: int) -> dict[str, Any]:
+    """``POST cart/items/``: add ``quantity`` to the line, clamped to ``max_quantity`` (``max_reached``);
+    returns ``last_change``. Refusals: online selling off (first), unknown product, not visible
+    (``product_unavailable``), ``max_quantity = 0`` (``OUT_OF_STOCK`` one), a new line in a full cart."""
+    _sales_on()
+    with transaction.atomic():
+        cart = lock_cart(customer_id)
+        product, visible, limit = _product_state(product_id)
+        if not visible:
+            raise ProductUnavailable()
+        if limit == 0:
+            raise OutOfStockError(one=True, details={"product_id": product_id, "available": 0})
+        line = CartItem.objects.filter(cart=cart, product_id=product_id).first()
+        if line is None and CartItem.objects.filter(cart=cart).count() >= settings.CART_MAX_LINES:
+            raise CartFull(
+                details={"max_lines": settings.CART_MAX_LINES}, params={"limit": settings.CART_MAX_LINES}
+            )
+        requested = (line.quantity if line is not None else 0) + quantity
+        new = min(requested, limit)
+        now = timeutils.now()
+        if line is None:
+            CartItem.objects.create(
+                cart=cart,
+                product=product,
+                quantity=new,
+                price_at_add=product.price,
+                added_at=now,
+                updated_at=now,
+            )
+        else:
+            line.quantity = new
+            line.price_at_add = product.price
+            line.updated_at = now
+            line.save(update_fields=["quantity", "price_at_add", "updated_at"])
+        _touch(cart)
+        return {
+            "product_id": product_id,
+            "requested_quantity": requested,
+            "quantity": new,
+            "max_reached": new < requested,
+        }
+
+
+def set_cart_quantity(customer_id: int, product_id: int, quantity: int) -> dict[str, Any]:
+    """``PATCH cart/items/{product_id}/``: absolute quantity, clamped to ``max_quantity``; returns
+    ``last_change``. Online selling off (first) → 409; line absent → :class:`CartLineNotFound`; not visible →
+    ``product_unavailable``; ``max_quantity = 0`` → ``OUT_OF_STOCK`` (line unchanged)."""
+    _sales_on()
+    with transaction.atomic():
+        cart = lock_cart(customer_id)
+        line = CartItem.objects.filter(cart=cart, product_id=product_id).select_related("product").first()
+        if line is None:
+            raise CartLineNotFound(f"No cart line for product {product_id}")
+        product, visible, limit = _product_state(product_id)
+        if not visible:
+            raise ProductUnavailable()
+        if limit == 0:
+            raise OutOfStockError(one=True, details={"product_id": product_id, "available": 0})
+        new = min(quantity, limit)
+        line.quantity = new
+        line.price_at_add = product.price
+        line.updated_at = timeutils.now()
+        line.save(update_fields=["quantity", "price_at_add", "updated_at"])
+        _touch(cart)
+        return {
+            "product_id": product_id,
+            "requested_quantity": quantity,
+            "quantity": new,
+            "max_reached": new < quantity,
+        }
+
+
+def remove_from_cart(customer_id: int, product_ids: Sequence[int]) -> int:
+    """``DELETE cart/items/{product_id}/`` and the bulk form: remove those lines (absent ids ignored)."""
+    with transaction.atomic():
+        cart = lock_cart(customer_id)
+        deleted, _ = CartItem.objects.filter(cart=cart, product_id__in=list(product_ids)).delete()
+        _touch(cart)
+        return deleted
+
+
+def clear_cart(customer_id: int) -> int:
+    """``DELETE cart/``: empty the cart (``delete_cart_lines`` under the Cart lock)."""
+    with transaction.atomic():
+        cart = lock_cart(customer_id)
+        deleted = delete_cart_lines(customer_id)
+        _touch(cart)
+        return deleted
+
+
+def reorder_into_cart(order_id: int, customer_id: int) -> None:
+    """``POST orders/{id}/reorder/``: the order's lines back into the cart (the caller checked ownership and the
+    history horizon). An existing line keeps the larger of both quantities, clamped to ``max_quantity``;
+    unavailable or out-of-stock products are added anyway (shown with their status), except when the cart would
+    exceed ``CART_MAX_LINES``: they are skipped first, and if it is still too full → ``cart_full``, nothing
+    written."""
+    with transaction.atomic():
+        cart = lock_cart(customer_id)
+        lines = list(
+            OrderItem.objects.filter(order_id=order_id).select_related("product").order_by("position")
+        )
+        existing = {item.product_id: item for item in CartItem.objects.filter(cart=cart)}
+        ids = [line.product_id for line in lines]
+        available = selectors.customer_available_stock(ids)
+        visible = selectors.visible_ids(ids)
+        plan: list[tuple[OrderItem, int, bool]] = []
+        for line in lines:
+            limit = selectors.max_quantity(available.get(line.product_id, 0))
+            sellable = line.product_id in visible and limit > 0
+            current = existing[line.product_id].quantity if line.product_id in existing else 0
+            wanted = max(current, line.quantity)
+            if sellable:
+                quantity = min(wanted, limit)
+            else:
+                quantity = min(max(wanted, 1), int(settings.CART_MAX_QTY_PER_LINE), 99)
+            plan.append((line, quantity, sellable))
+        new_lines = [entry for entry in plan if entry[0].product_id not in existing]
+        if len(existing) + len(new_lines) > settings.CART_MAX_LINES:
+            plan = [entry for entry in plan if entry[2] or entry[0].product_id in existing]
+            if (
+                len(existing) + sum(1 for e in plan if e[0].product_id not in existing)
+                > settings.CART_MAX_LINES
+            ):
+                raise CartFull(
+                    details={"max_lines": settings.CART_MAX_LINES}, params={"limit": settings.CART_MAX_LINES}
+                )
+        now = timeutils.now()
+        for line, quantity, _sellable in plan:
+            item = existing.get(line.product_id)
+            if item is None:
+                CartItem.objects.create(
+                    cart=cart,
+                    product_id=line.product_id,
+                    quantity=quantity,
+                    price_at_add=line.product.price,
+                    added_at=now,
+                    updated_at=now,
+                )
+            else:
+                item.quantity = quantity
+                item.price_at_add = line.product.price
+                item.updated_at = now
+                item.save(update_fields=["quantity", "price_at_add", "updated_at"])
+        _touch(cart)
 
 
 def delete_cart_lines(customer_id: int) -> int:
     """Delete every cart line of the customer (``DELETE me/`` step 4, the dormant reset of customer contract
-    §2.2.3); returns the number of lines deleted. P2's ``clear_cart`` reuses it."""
+    §2.2.3, :func:`clear_cart`); returns the number of lines deleted."""
     deleted, _ = CartItem.objects.filter(cart__customer_id=customer_id).delete()
     return deleted
+
+
+# --- checkout (customer contract §2.7.1) -------------------------------------------------------------------------
+
+
+def quote_delivery(region_code: str, city_code: str, scenario: Mapping[str, Any] | None = None) -> int:
+    """The BTS tariff (no row lock may be held): a route BTS does not serve → 409 ``delivery_unavailable``
+    (``error.delivery_unavailable``); a transport failure → 503 ``provider_unavailable``."""
+    try:
+        return get_bts(scenario).quote(region_code, city_code)
+    except BtsRejected as exc:
+        raise DeliveryUnavailable(key="error.delivery_unavailable") from exc
+    except BtsUnavailable as exc:
+        raise ProviderUnavailable() from exc
+
+
+@dataclass(frozen=True, slots=True)
+class CheckoutInput:
+    fulfilment: str
+    payment_provider: str
+    channel: str
+    expected_total: int
+    cashback_to_use: int = 0
+    address_id: int | None = None
+    region_code: str = ""
+    city_code: str = ""
+    customer_note: str = ""
+    scenario: Mapping[str, Any] | None = None  # X-GD-Fake-Scenario (local/test only), copied to metadata.fake
+    checkout_meta: Mapping[str, Any] | None = None  # metadata.checkout: app_version, device_id
+
+
+def lock_customer(customer_id: int) -> Customer | None:
+    """The customer-level lock of the customer API: ``SELECT … FOR NO KEY UPDATE`` (never ``FOR UPDATE``, which
+    would deadlock with a capture's ``Purchase`` insert; customer contract §2.7.1)."""
+    return Customer.objects.select_for_update(no_key=True, of=("self",)).filter(pk=customer_id).first()
+
+
+def checkout(customer_id: int, data: CheckoutInput) -> int:
+    """``POST orders/checkout/`` after the view's body, consent and address checks (rows 1–3): row 0 (online
+    selling), row 4 (the BTS quote, no row lock held), then the customer-level lock (``FOR NO KEY UPDATE``; an
+    inactive customer → 401 ``SESSION_EXPIRED``), row 5 (open orders), row 6 (cart read under the lock and the
+    Cart lock) and :func:`create_order` (rows 7–10); the cart is emptied and ``Cart.last_checkout_order`` set
+    in the same transaction. Returns the order id."""
+    _sales_on()
+    delivery = data.fulfilment == enums.FulfilmentMethod.DELIVERY
+    scenario = dict(data.scenario or {})
+    bts_scenario = scenario.get("bts") if isinstance(scenario.get("bts"), dict) else None
+    fee = quote_delivery(data.region_code, data.city_code, bts_scenario) if delivery else 0
+    with transaction.atomic():
+        customer = lock_customer(customer_id)
+        if customer is None or customer.status != enums.CustomerStatus.ACTIVE:
+            raise AuthFailed("SESSION_EXPIRED")
+        open_orders = Order.objects.filter(customer_id=customer_id, status=_S.AWAITING_PAYMENT).order_by(
+            "-created_at", "-id"
+        )
+        if open_orders.count() >= settings.CHECKOUT_MAX_OPEN_ORDERS:
+            newest = open_orders.first()
+            assert newest is not None  # noqa: S101 - count ≥ 1
+            raise OpenOrderExists(
+                details={
+                    "order_id": newest.pk,
+                    "pay_by": (
+                        timeutils.isoformat(newest.reservation_expires_at)
+                        if newest.reservation_expires_at is not None
+                        else None
+                    ),
+                },
+                params={"order_id": newest.pk},
+            )
+        cart = lock_cart(customer_id)
+        items = list(
+            CartItem.objects.filter(cart=cart)
+            .order_by("added_at", "id")
+            .values_list("product_id", "quantity")
+        )
+        if not items:
+            raise CartEmpty()
+        metadata: dict[str, Any] = {"checkout": dict(data.checkout_meta or {})}
+        if scenario:
+            metadata["fake"] = scenario
+        order_id = create_order(
+            customer_id,
+            [(int(product_id), int(quantity)) for product_id, quantity in items],
+            data.fulfilment,
+            payment_provider=data.payment_provider,
+            channel=data.channel,
+            delivery_fee=fee,
+            address_id=data.address_id if delivery else None,
+            cashback_used=data.cashback_to_use,
+            expected_total=data.expected_total,
+            min_payable=int(settings.CHECKOUT_MIN_PAYABLE),
+            visible_only=True,
+            customer_note=data.customer_note,
+            metadata=metadata,
+        )
+        CartItem.objects.filter(cart=cart).delete()
+        cart.last_checkout_order_id = order_id
+        cart.save()
+        return order_id
+
+
+# --- pay (customer contract §2.7.2) --------------------------------------------------------------------------------
+
+
+def ensure_payable_payment(
+    order_id: int, provider: str, *, superseding: str | None = None, at: datetime | None = None
+) -> payment_selectors.PaymentRow:
+    """The payment a provider page / callback works on, under ``lock_order`` → Payment locks.
+
+    Same provider → the active ``pending`` payment is reused as it is (nothing written); with
+    ``superseding=<click_trans_id>`` (Click Prepare only) a Click payment attached to **another** transaction is
+    failed ``abandoned`` (no event) and a new ``pending`` row is created; a Payme row is reused only while it has
+    no transaction (``attach_transaction`` refuses another id with ``TransactionTaken``). Other provider: in flight →
+    :class:`PaymentInProgress`; else the pending row is failed ``abandoned`` and a new one created
+    (``Order.payment_provider`` updated). A failed previous attempt gets a new ``pending`` row. An order with a
+    non-late ``paid`` payment raises ``AlreadyPaid``."""
+    with transaction.atomic():
+        order = lock_order(order_id)
+        now = at or timeutils.now()
+        if selectors.honoured_paid(order_id):
+            raise AlreadyPaid()
+        pending = payment_selectors.active_payment(order_id, enums.PaymentStatus.PENDING)
+        if pending is not None and pending.provider == provider:
+            superseded = (
+                superseding is not None
+                and provider == enums.PaymentProvider.CLICK
+                and bool(pending.transaction_id)
+                and pending.transaction_id != superseding
+            )
+            if not superseded:
+                return pending
+            payment_services.fail_payment(pending.id, "abandoned", now, unilateral=True)
+        elif pending is not None:
+            if selectors.in_flight(pending, now):
+                raise PaymentInProgress(
+                    details={"provider": pending.provider, "order_id": order_id},
+                    params={"provider": selectors.provider_brand(pending.provider)},
+                )
+            result = payment_services.fail_payment(pending.id, "abandoned", now, unilateral=True)
+            if not result.changed:  # a Payme state-1 transaction is never failed unilaterally (P-2)
+                raise PaymentInProgress(
+                    details={"provider": pending.provider, "order_id": order_id},
+                    params={"provider": selectors.provider_brand(pending.provider)},
+                )
+        created = payment_services.create_payment(order_id, provider, order.total)
+        if order.payment_provider != provider:
+            order.payment_provider = provider
+            order.save(update_fields=["payment_provider", "updated_at"])
+        row = payment_selectors.get_payment(created.payment_id)
+        assert row is not None  # noqa: S101 - just created
+        return row
+
+
+# --- customer cancel (customer contract §2.7.3; state.py row 5) ---------------------------------------------
+
+
+def cancel_by_customer(order_id: int, customer_id: int, *, at: datetime | None = None) -> int:
+    """Cancel an ``awaiting_payment`` order of the customer (C-6); returns the order id.
+
+    Another customer's order → :class:`OrderNotFound`; any other status → 409 ``not_cancellable``
+    (``error.order_not_cancellable``); a **Click** payment in flight → 409 ``payment_in_progress``. The pending
+    payment fails unilaterally (``cancelled``; a Payme state-1 transaction stays ``pending`` until Payme's
+    ``CancelTransaction``), reservations and the hold are released, ``cancelled`` / ``customer_request`` with
+    ``cancelled_by`` null, event ``cancelled`` (source system), push ``cancelled``. No audit."""
+    _aware(at, "at")
+    with transaction.atomic():
+        order = lock_order(order_id)
+        if order.customer_id != customer_id:
+            raise OrderNotFound(f"Order {order_id} does not exist")
+        if order.status != _S.AWAITING_PAYMENT:
+            raise not_cancellable("order")
+        instant = at or timeutils.now()
+        pending = payment_selectors.active_payment(order.pk, enums.PaymentStatus.PENDING)
+        if (
+            pending is not None
+            and pending.provider == enums.PaymentProvider.CLICK
+            and in_flight(pending, instant)
+        ):
+            raise PaymentInProgress(
+                details={"provider": pending.provider, "order_id": order.pk}, params={"provider": "Click"}
+            )
+        if pending is not None:
+            payment_services.fail_payment(pending.id, "cancelled", instant, unilateral=True)
+        stock_released = (
+            StockReservation.objects.filter(order=order, state=StockReservation.State.ACTIVE).update(
+                state=StockReservation.State.RELEASED,
+                released_at=instant,
+                release_reason=StockReservation.ReleaseReason.CANCELLED,
+                updated_at=instant,
+            )
+            > 0
+        )
+        loyalty_services.release_hold(order.pk, "order_cancelled", at=instant)
+        _set_status(
+            order, _S.CANCELLED, instant, cancellation_reason=enums.CancellationReason.CUSTOMER_REQUEST
+        )
+        cancelled = record_event(
+            order,
+            _E.CANCELLED,
+            {
+                "reason": enums.CancellationReason.CUSTOMER_REQUEST,
+                "note": None,
+                "refund_id": None,
+                "cashback_reversed": False,
+                "stock_released": stock_released,
+                "bts_cancelled": False,
+                "push_sent": push_sent(order.customer_id),
+            },
+            source=_SRC.SYSTEM,
+            at=instant,
+        )
+        _enqueue_push(order, _S.CANCELLED, cancelled)
+        return order.pk
+
+
+# --- refused captures (customer contract §2.13.0) ----------------------------------------------------------------
+
+
+def late_capture_case(order: Order, payment: payment_selectors.PaymentRow, now: datetime) -> str | None:
+    """The refused-capture case of a capture the provider reports for ``payment`` (``None`` = honour it):
+    ``failed_by_us`` (failed by us for a non-provider reason, incl. a superseded attachment), ``not_payable``
+    (cancelled, or past the grace), ``double_payment`` (paid by another payment); a payment that is not the
+    order's active pending one is never honoured."""
+    if payment.status == enums.PaymentStatus.FAILED and payment.error_code in FAILED_BY_US:
+        return "failed_by_us"
+    if selectors.paid_by_other(order.pk, payment.id) or order.status in state.PAID_STATUSES:
+        return "double_payment"
+    if not is_payable(order, payment, now, attaching=False):
+        return "not_payable"
+    if payment.status != enums.PaymentStatus.PENDING:
+        return "failed_by_us"
+    return None
+
+
+def record_late_capture(
+    order_id: int,
+    payment_id: int,
+    provider: str,
+    provider_txn_id: str,
+    *,
+    case: str,
+    at: datetime | None = None,
+    raw: dict[str, Any] | None = None,
+) -> payment_services.RefundResult | None:
+    """Accept and reverse a capture we do not honour (customer contract §2.13.0) under Order → Payment:
+    ``payments.mark_late_captured`` (``paid`` + ``late_capture``), ``Refund(origin=late_capture)`` (Click
+    ``requested`` + outbox ``refund.submit``, or ``manual_required`` without ``click_paydoc_id`` / with fake
+    Click), event ``refund_requested`` (source system, with ``manual_reason``), audit ``payment.late_capture
+    {order_id, payment_id, provider, case}`` and ERROR ``payment.late_capture``. The order never changes status.
+    ``None`` when the payment was already recorded as a late capture (a replay)."""
+    if case not in LATE_CAPTURE_CASES:
+        raise ValueError(f"Unknown late-capture case {case!r}")
+    _aware(at, "at")
+    with transaction.atomic():
+        order = lock_order(order_id)
+        instant = at or timeutils.now()
+        payment = payment_selectors.get_payment(payment_id)
+        if payment is None or payment.order_id != order_id or payment.provider != provider:
+            raise InvalidTransition(f"Payment {payment_id} is not a {provider} payment of order {order_id}")
+        captured = payment_services.mark_late_captured(payment_id, provider_txn_id, instant, raw)
+        if not captured.changed:
+            return None
+        row = payment_selectors.get_payment(payment_id)
+        assert row is not None  # noqa: S101
+        refund = payment_services.create_refund(
+            payment_id,
+            row.amount,
+            None,
+            Refund.Origin.LATE_CAPTURE,
+            at=instant,
+            manual=refund_manual_reason(row) is not None,
+        )
+        record_event_once(order, _E.REFUND_REQUESTED, refund_requested_data(refund, row), at=instant)
+        details = {"order_id": order_id, "payment_id": payment_id, "provider": provider, "case": case}
+        audit.record(
+            action=AUDIT_PAYMENT_LATE_CAPTURE,
+            entity_type="payment",
+            entity_id=str(payment_id),
+            actor_type="system",
+            after=details,
+        )
+        logger.error("payment.late_capture %s", details)
+        return refund

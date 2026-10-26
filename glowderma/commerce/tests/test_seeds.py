@@ -287,6 +287,7 @@ def test_seed_demo_reproduces_the_design_vectors(staff_client: APIClient) -> Non
         "next_appointment_at": "2026-10-26T09:00:00+05:00",
         "new_from_billz": 4,
         "refunds_needing_action": 0,
+        "bts_polling_failing": False,
     }
     assert sum(bucket["revenue"] for bucket in dashboard["buckets"]) == 768_000
     assert (

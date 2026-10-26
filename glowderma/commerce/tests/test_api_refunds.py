@@ -70,7 +70,13 @@ def test_resolve_unknown_as_failed_then_retry(staff_client: APIClient) -> None:
         new.origin == "manual" and OutboxMessage.objects.filter(dedupe_key=f"refund.submit:{new.pk}").exists()
     )
     event = OrderEvent.objects.filter(order=order, type="refund_requested").latest("id")
-    assert event.data == {"refund_id": new.pk, "amount": new.amount, "provider": "click", "manual": False}
+    assert event.data == {
+        "refund_id": new.pk,
+        "amount": new.amount,
+        "provider": "click",
+        "manual": False,
+        "manual_reason": None,
+    }
     assert event.source == "admin"
     busy = staff_client.post(_url(new, "resolve"), {"state": "failed"}, format="json")
     assert busy.status_code == 409

@@ -9,7 +9,6 @@ from glowderma.commerce import selectors, services
 from glowderma.commerce.models import Order, OrderEvent, StockReservation
 from glowderma.commerce.tests.support import AT, credit, pay, place, product, seed_policies, shopper
 from glowderma.core import enums
-from glowderma.core.media import absolute_media_url
 from glowderma.core.seeding import pinned_clock
 from glowderma.delivery.models import Shipment
 from glowderma.loyalty import selectors as loyalty_selectors
@@ -39,7 +38,9 @@ def test_checkout_snapshots_lines_amounts_and_writes_the_two_events() -> None:
         (spf.pk, 1, 240_000, True, 240_000),
         (foam.pk, 2, 128_000, False, 256_000),
     ]
-    assert items[0].image_url == absolute_media_url(cream.images.get().file.name or "")
+    assert (
+        items[0].image_url == cream.images.get().file.name
+    )  # the storage path; rendered absolute by the API
     assert items[1].image_url == "" and items[0].name == cream.name_uz and items[0].billz_id == cream.billz_id
     assert order.reservation_minutes == 15 and order.reservation_expires_at == AT + timedelta(minutes=15)
     assert order.recipient_phone == order.customer.phone
@@ -112,6 +113,7 @@ def test_hidden_products_and_converted_sales_after_the_sync_are_unavailable() ->
             enums.FulfilmentMethod.PICKUP,
             payment_provider="click",
             channel="android",
+            delivery_fee=0,
             enforce_stock=False,
         )
     assert StockReservation.objects.get(order_id=order_id).quantity == 5
@@ -126,8 +128,9 @@ def test_cashback_becomes_a_hold_until_the_reservation_expires() -> None:
     assert (hold.amount, hold.state, hold.expires_at) == (20_000, "active", order.reservation_expires_at)
     assert order.total == order.items_subtotal + 25_000 - 20_000
     assert loyalty_selectors.account_summary(customer.pk).available == 10_000
-    with pytest.raises(InsufficientBalance):
+    with pytest.raises(services.InsufficientCashback) as caught:
         place(customer, cashback=10_001)
+    assert caught.value.available == 10_000
 
 
 @pytest.mark.parametrize(
@@ -149,28 +152,42 @@ def test_checkout_input_errors(kwargs: dict[str, object]) -> None:
         "fulfilment": "delivery",
         "payment_provider": "click",
         "channel": "ios",
+        "delivery_fee": 25_000,
         "address_text": "Toshkent",
+        "region_code": "10",
+        "city_code": "1001",
     }
     params.update(kwargs)
     items = params.pop("items")
     fulfilment = params.pop("fulfilment")
-    with pytest.raises(services.CheckoutError):
+    with pytest.raises((services.CheckoutError, services.AddressNotFound, services.CashbackAboveMax)):
         services.create_order(shopper().pk, items, fulfilment, **params)  # type: ignore[arg-type]
 
 
 def test_checkout_refuses_unknown_products_duplicates_and_deleted_customers() -> None:
     item = product()
     with pytest.raises(services.CheckoutError):
-        services.create_order(shopper().pk, [(10**9, 1)], "pickup", payment_provider="click", channel="ios")
-    with pytest.raises(services.CheckoutError):
         services.create_order(
-            shopper().pk, [(item.pk, 1), (item.pk, 2)], "pickup", payment_provider="click", channel="ios"
+            shopper().pk, [(10**9, 1)], "pickup", payment_provider="click", channel="ios", delivery_fee=0
         )
     with pytest.raises(services.CheckoutError):
-        services.create_order(shopper().pk, [(item.pk, 0)], "pickup", payment_provider="click", channel="ios")
+        services.create_order(
+            shopper().pk,
+            [(item.pk, 1), (item.pk, 2)],
+            "pickup",
+            payment_provider="click",
+            channel="ios",
+            delivery_fee=0,
+        )
+    with pytest.raises(services.CheckoutError):
+        services.create_order(
+            shopper().pk, [(item.pk, 0)], "pickup", payment_provider="click", channel="ios", delivery_fee=0
+        )
     gone = account_services.delete_customer(shopper())
     with pytest.raises(services.CheckoutError):
-        services.create_order(gone.pk, [(item.pk, 1)], "pickup", payment_provider="click", channel="ios")
+        services.create_order(
+            gone.pk, [(item.pk, 1)], "pickup", payment_provider="click", channel="ios", delivery_fee=0
+        )
 
 
 def test_saved_address_is_snapshotted() -> None:
@@ -185,6 +202,7 @@ def test_saved_address_is_snapshotted() -> None:
             "delivery",
             payment_provider="payme",
             channel="android",
+            delivery_fee=28_000,
             address_id=address.pk,
         )
     saved = Order.objects.get(pk=order_id)

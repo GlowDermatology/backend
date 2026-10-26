@@ -63,6 +63,7 @@ from glowderma.core import enums, timeutils
 from glowderma.core.models import OutboxMessage
 from glowderma.core.seeding import MockRandom, SeedContext, pinned_clock, register_seeder
 from glowderma.core.timeutils import TASHKENT
+from glowderma.integrations.bts.registry import get_bts
 from glowderma.integrations.click import fake as fake_click
 from glowderma.integrations.payme import fake as fake_payme
 from glowderma.loyalty import seeds as loyalty_seeds
@@ -157,6 +158,29 @@ def _txn_id(plan: OrderPlan) -> str:
     if plan.provider == CLICK:
         return fake_click.transaction_id(plan.id, plan.fake.get("click"))
     return fake_payme.transaction_id(plan.id, plan.fake.get("payme"))
+
+
+def _pay(plan: OrderPlan) -> None:
+    """``mark_paid`` of the order's pending payment (M2 signature); a Click payment gets its
+    ``click_paydoc_id`` first, as a Prepare would store it (refunds are keyed by it, customer contract
+    §2.13.0)."""
+    pending = payment_selectors.active_payment(plan.id, enums.PaymentStatus.PENDING)
+    if pending is None:
+        return
+    raw = (
+        {"click_paydoc_id": fake_click.paydoc_id(plan.id, plan.fake.get("click"))}
+        if plan.provider == CLICK
+        else None
+    )
+    services.mark_paid(plan.id, pending.id, plan.provider, _txn_id(plan), raw=raw)
+
+
+def _delivery_fee(plan: OrderPlan) -> int:
+    """The fee the seeder passes to ``create_order`` (the fake BTS tariff of the address region)."""
+    if plan.fulfilment != DELIVERY or plan.address is None:
+        return 0
+    scenario = plan.fake.get("bts") if isinstance(plan.fake.get("bts"), dict) else None
+    return get_bts(scenario).quote(plan.address.region_code, plan.address.city_code)
 
 
 # --- the fixed design orders (03 §7.8) ----------------------------------------------------------------------
@@ -654,7 +678,7 @@ class Seeder:
             return
         add(
             plan.paid_at,
-            lambda: services.mark_paid(plan.id, _txn_id(plan)),
+            lambda: _pay(plan),
             ledger_id=plan.ledger_ids.get("pay"),
             events_of=events_of,
         )
@@ -719,6 +743,7 @@ class Seeder:
             plan.fulfilment,
             payment_provider=plan.provider,
             channel=plan.channel,
+            delivery_fee=_delivery_fee(plan),
             address_text=address.text if address else "",
             region_code=address.region_code if address else "",
             city_code=address.city_code if address else "",

@@ -15,6 +15,7 @@ from glowderma.commerce.models import Order, OrderEvent
 from glowderma.commerce.tests.conftest import _REAL_NOW
 from glowderma.commerce.tests.support import (
     AT,
+    pending_payment_id,
     admin,
     credit,
     pay,
@@ -85,8 +86,12 @@ def test_cancel_racing_a_late_capture_ends_consistent() -> None:
     def cancel() -> Any:
         return services.cancel_order(order.pk, "Mijoz so‘rovi bilan", staff.pk)
 
+    payment_id = pending_payment_id(order)
+
     def capture() -> Any:
-        return services.mark_paid(order.pk, txn(order))
+        return services.mark_paid(
+            order.pk, payment_id, "click", txn(order), raw={"click_paydoc_id": "5500000001"}
+        )
 
     with pinned_clock(AT + timedelta(minutes=5)):
         results = _race(cancel, capture)

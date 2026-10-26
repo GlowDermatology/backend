@@ -117,6 +117,8 @@ def test_migrate_zero_and_forward_again() -> None:
         "0001_initial",
         "0002_order_sequence",
         "0003_orderevent_append_only",
+        "0004_cartitem_price_at_add",
+        "0005_orderitem_image_path",
     }
     assert OrderFactory.create().pk == 10001
     call_command("migrate", verbosity=0)  # re-apply any app that depends on commerce (loyalty, payments, …)

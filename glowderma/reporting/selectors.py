@@ -18,6 +18,7 @@ from glowderma.core import enums, timeutils
 from glowderma.core.models import AuditEntry
 from glowderma.core.timeutils import TASHKENT
 from glowderma.delivery import selectors as delivery_selectors
+from glowderma.integrations import selectors as integration_selectors
 from glowderma.payments import selectors as payment_selectors
 
 
@@ -156,6 +157,13 @@ def customer_stats(start: datetime, end: datetime) -> dict[str, int]:
     }
 
 
+def bts_polling_failing() -> bool:
+    """``attention.bts_polling_failing`` (admin §2.10, customer contract §2.13.3): the last BTS polling run
+    stopped on transport failures or tracked no parcel (``IntegrationState(bts).consecutive_failures > 0``)."""
+    state = integration_selectors.provider_state("bts")
+    return state is not None and state.consecutive_failures > 0
+
+
 def dashboard(window: DashboardWindow, now: datetime | None = None) -> dict[str, Any]:
     """``GET dashboard/``: buckets (``revenue`` = payments confirmed in the bucket net of their succeeded
     refunds; ``orders`` = orders created in the bucket), the previous period's orders, stats, attention."""
@@ -187,6 +195,7 @@ def dashboard(window: DashboardWindow, now: datetime | None = None) -> dict[str,
             "next_appointment_at": pending["next_at"],
             "new_from_billz": products["new_from_billz"],
             "refunds_needing_action": payment_selectors.refunds_needing_action(),
+            "bts_polling_failing": bts_polling_failing(),
         },
         "generated_at": instant,
     }

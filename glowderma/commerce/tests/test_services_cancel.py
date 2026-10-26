@@ -109,6 +109,7 @@ def test_cancel_processing_click_requests_a_refund_and_reverses_the_entries() ->
         "amount": order.total,
         "provider": "click",
         "manual": False,
+        "manual_reason": None,
     }
     assert events["refund_requested"].source == "admin"
     assert AuditEntry.objects.filter(action="refund.requested", entity_id=str(refund.pk)).exists()

@@ -25,23 +25,29 @@ Dead letters (``outbox.on_dead``): ``bts.create_shipment`` → shipment ``failed
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
 from celery import shared_task  # type: ignore[import-untyped]
+from celery.signals import worker_ready  # type: ignore[import-untyped]
+from django.conf import settings
+from django.core.cache import cache
 from django.db import transaction
 
-from glowderma.commerce import services, topics
+from glowderma.commerce import selectors, services, topics
 from glowderma.commerce.billz_sales import SaleLine, get_sale_port
 from glowderma.commerce.models import Order
-from glowderma.core import enums, outbox, timeutils
+from glowderma.core import enums, integration_modes, outbox, timeutils
 from glowderma.core.api.exceptions import InvalidTransition
 from glowderma.core.models import OutboxMessage
 from glowderma.delivery import selectors as delivery_selectors
 from glowderma.delivery import services as delivery_services
 from glowderma.delivery.models import Shipment
-from glowderma.integrations.bts.ports import BtsRejected, CreateRequest
+from glowderma.integrations import selectors as integration_selectors
+from glowderma.integrations import services as integration_services
+from glowderma.integrations.bts.ports import BtsRejected, BtsUnavailable, CreateRequest, Parcel
 from glowderma.integrations.bts.registry import get_bts
 from glowderma.integrations.click.ports import ClickRefundRejected, ClickUnavailable
 from glowderma.integrations.click.registry import get_click
@@ -237,6 +243,10 @@ def push_sale(payload: dict[str, Any]) -> None:
         raise LookupError(f"Purchase {purchase_id} does not exist")
     if info.billz_pushed_at is not None:
         return
+    if integration_modes.fake_in_production("billz"):
+        # customer contract §6.14: never record a Billz sale the fake did not send; staff enter it by hand
+        logger.warning("billz.sale_not_pushed %s", {"order_id": order_id, "purchase_id": purchase_id})
+        return
     order = Order.objects.get(pk=order_id)
     lines = [
         SaleLine(billz_id=item.billz_id, quantity=item.quantity, unit_price=item.unit_price)
@@ -306,11 +316,11 @@ def _succeed(refund_id: int, order_id: int, provider_refund_id: str) -> None:
 
 
 def _resolve_after_failure(
-    refund_id: int, order_id: int, provider_txn_id: str, port: Any, error: str, attempt: int
+    refund_id: int, order_id: int, payment_ref: str, port: Any, error: str, attempt: int
 ) -> None:
     """A transport failure after the reversal was sent: ask once more; inconclusive → ``unknown``."""
     try:
-        status = port.payment_status(provider_txn_id)
+        status = port.payment_status(payment_ref)
     except ClickUnavailable as exc:
         _unknown(refund_id, order_id, f"{error}; status check: {exc}", attempt)
         return
@@ -320,15 +330,42 @@ def _resolve_after_failure(
     _unknown(refund_id, order_id, f"{error}; payment still {status}", attempt)
 
 
-def _reversed(port: Any, provider_txn_id: str) -> bool:
+def _reversed(port: Any, payment_ref: str) -> bool:
     try:
-        return bool(port.payment_status(provider_txn_id) == "reversed")
+        return bool(port.payment_status(payment_ref) == "reversed")
     except ClickUnavailable:
         return False
 
 
+PAYMENT_NOT_PAID = "payment_not_paid"
+
+
+def _fail_unpaid(refund: payment_selectors.RefundRow) -> None:
+    """The payment is no longer ``paid`` (a later refund returned the money): end the refund ``failed``
+    ``payment_not_paid`` with its ``refund_failed`` event and never call Click (customer contract §2.13.0)."""
+    with transaction.atomic():
+        order = services.lock_order(refund.order_id)
+        current = payment_selectors.get_refund(refund.id)
+        if current is None or current.state not in (
+            enums.RefundState.REQUESTED,
+            enums.RefundState.SUBMITTING,
+        ):
+            return
+        result = payment_services.mark_failed(
+            refund.id, PAYMENT_NOT_PAID, "the payment is no longer paid", timeutils.now()
+        )
+        if result.changed:
+            services.record_refund_outcome(order, result, at=timeutils.now())
+
+
 def submit_refund(payload: dict[str, Any]) -> None:
     """The ``refund.submit`` effect (02 §2.2 handler; callable inline by the seeder).
+
+    Re-checks before any port call (customer contract §2.13.0): the payment must still be ``paid`` (else the
+    refund ends ``failed`` ``payment_not_paid``), and a refund whose payment has no ``click_paydoc_id`` — or
+    while the Click port is fake under the production settings — becomes ``manual_required`` (its
+    ``refund_requested`` event stays as written). Every Click call is keyed by the payment's
+    ``click_paydoc_id`` (``RefundRow.provider_payment_ref``), never ``click_trans_id``.
 
     ``requested``: status check (a transport error raises, the refund stays ``requested``), claim
     (compare-and-set), reverse. ``submitting`` (a redelivery): status check first — reversed → ``succeeded``,
@@ -345,12 +382,20 @@ def submit_refund(payload: dict[str, Any]) -> None:
         return  # succeeded / failed / manual_required / unknown: nothing to do (unknown is never retried)
     if refund.provider != enums.PaymentProvider.CLICK:
         return
+    payment = payment_selectors.get_payment(refund.payment_id)
+    if payment is None or payment.status != enums.PaymentStatus.PAID:
+        _fail_unpaid(refund)
+        return
+    ref = refund.provider_payment_ref
+    if not ref or integration_modes.callbacks_refused("click"):
+        if refund.state == enums.RefundState.REQUESTED:
+            payment_services.mark_manual_required(refund_id, timeutils.now())
+        return
     order = Order.objects.get(pk=refund.order_id)
     port = get_click(services.fake_scenario(order, "click"))
-    txn = refund.provider_txn_id
     if refund.state == enums.RefundState.REQUESTED:
         # status check before anything is sent: a transport error here raises (the refund stays requested)
-        already = port.payment_status(txn) == "reversed"
+        already = port.payment_status(ref) == "reversed"
         claim = _claim(refund_id, expected_state=enums.RefundState.REQUESTED)
         if claim is None:
             return
@@ -360,7 +405,7 @@ def submit_refund(payload: dict[str, Any]) -> None:
     else:
         # a redelivery: the reversal may have gone through already
         try:
-            status = port.payment_status(txn)
+            status = port.payment_status(ref)
         except ClickUnavailable as exc:
             _unknown(refund_id, order.pk, f"status check: {exc}", refund.attempts)
             return
@@ -376,9 +421,9 @@ def submit_refund(payload: dict[str, Any]) -> None:
         if claim is None:
             return
     try:
-        receipt = port.refund(txn, refund.amount)
+        receipt = port.refund(ref, refund.amount)
     except ClickRefundRejected as exc:
-        if _reversed(port, txn):
+        if _reversed(port, ref):
             _succeed(refund_id, order.pk, "")
             return
         with transaction.atomic():
@@ -390,7 +435,7 @@ def submit_refund(payload: dict[str, Any]) -> None:
                 services.record_refund_outcome(locked, result, at=timeutils.now())
         return
     except ClickUnavailable as exc:
-        _resolve_after_failure(refund_id, order.pk, txn, port, str(exc), claim.attempts)
+        _resolve_after_failure(refund_id, order.pk, ref, port, str(exc), claim.attempts)
         return
     _succeed(refund_id, order.pk, receipt.provider_refund_id)
 
@@ -445,14 +490,146 @@ __all__ = [
     "on_refund_submit_dead",
     "poll_bts",
     "push_sale",
+    "report_fake_provider_open_money",
+    "run_bts_poll",
     "submit_refund",
 ]
 
 
+# --- BTS polling (customer contract §2.13.3) ---------------------------------------------------------------
+
+POLL_LOCK_KEY = "gd:lock:poll_bts"
+POLL_LOCK_SECONDS = 600
+POLL_CURSOR_KEY = "poll_cursor"
+
+
+@dataclass(frozen=True, slots=True)
+class PollResult:
+    tracked: list[int]  # order ids whose parcel was tracked
+    rejected: int
+    unavailable: int
+    stopped: bool
+
+
+def stable_payload(parcel: Parcel) -> dict[str, Any]:
+    """The stable fields of a tracked parcel (never the whole document, whose volatile fields would make every
+    poll a new status): tracking number, status code and BTS's status time when it sends one."""
+    payload: dict[str, Any] = {"tracking_number": parcel.tracking_number, "status": parcel.status}
+    if parcel.status_at:
+        payload["status_at"] = parcel.status_at
+    return payload
+
+
+def run_bts_poll() -> PollResult:
+    """One polling run: single flight (``cache.add`` lock), round robin after
+    ``IntegrationState(bts).data["poll_cursor"]`` (written after every attempted parcel), at most
+    ``BTS_POLL_BATCH`` parcels and ``BTS_POLL_MAX_SECONDS``; per-parcel failures are skipped, the run stops only
+    after ``BTS_POLL_MAX_CONSECUTIVE_FAILURES`` transport failures in a row. Outcome: stopped →
+    ``record_failure``; ≥ 1 tracked → ``record_sync_success``; attempted but none tracked → ``record_failure`` +
+    ERROR ``bts.poll_nothing_tracked``; no candidate → nothing written. Returns at once while BTS is fake under
+    the production settings."""
+    empty = PollResult(tracked=[], rejected=0, unavailable=0, stopped=False)
+    if integration_modes.fake_in_production("bts"):
+        return empty
+    if not cache.add(POLL_LOCK_KEY, 1, timeout=POLL_LOCK_SECONDS):
+        return empty
+    try:
+        return _poll()
+    finally:
+        cache.delete(POLL_LOCK_KEY)
+
+
+def _poll() -> PollResult:
+    started = timeutils.now()
+    stale_before = started - timedelta(minutes=settings.BTS_POLL_STALE_MINUTES)
+    candidates = delivery_selectors.stale_shipments(stale_before)
+    if not candidates:
+        return PollResult(tracked=[], rejected=0, unavailable=0, stopped=False)
+    state = integration_selectors.provider_state("bts")
+    raw_cursor = (
+        state.data.get(POLL_CURSOR_KEY) if state is not None and isinstance(state.data, dict) else None
+    )
+    cursor = int(raw_cursor) if isinstance(raw_cursor, int) else 0
+    after = [row for row in candidates if row[0] > cursor]
+    batch = (after or candidates)[: settings.BTS_POLL_BATCH]
+    tracked: list[int] = []
+    rejected = unavailable = streak = 0
+    stopped = False
+    for shipment_id, order_id, tracking_number in batch:
+        if (timeutils.now() - started).total_seconds() >= settings.BTS_POLL_MAX_SECONDS:
+            break
+        order = Order.objects.get(pk=order_id)
+        try:
+            parcel = get_bts(services.fake_scenario(order, "bts")).track(tracking_number)
+        except BtsUnavailable:
+            unavailable += 1
+            streak += 1
+            logger.warning("bts.poll_parcel_failed %s", {"shipment_id": shipment_id, "kind": "unavailable"})
+            integration_services.set_state_data("bts", POLL_CURSOR_KEY, shipment_id)
+            if streak >= settings.BTS_POLL_MAX_CONSECUTIVE_FAILURES:
+                stopped = True
+                break
+            continue
+        except BtsRejected:
+            rejected += 1
+            streak = 0
+            logger.warning("bts.poll_parcel_failed %s", {"shipment_id": shipment_id, "kind": "rejected"})
+            integration_services.set_state_data("bts", POLL_CURSOR_KEY, shipment_id)
+            continue
+        streak = 0
+        tracked.append(order_id)
+        services.apply_bts_status(
+            order_id, parcel.status, enums.ShipmentVia.POLLING, payload=stable_payload(parcel)
+        )
+        integration_services.set_state_data("bts", POLL_CURSOR_KEY, shipment_id)
+    if stopped:
+        integration_services.record_failure("bts", f"poll stopped: {streak} transport failures in a row")
+    elif tracked:
+        integration_services.record_sync_success("bts")
+    elif rejected or unavailable:
+        integration_services.record_failure(
+            "bts", f"poll: no parcel tracked (rejected {rejected}, unavailable {unavailable})"
+        )
+        logger.error("bts.poll_nothing_tracked %s", {"rejected": rejected, "unavailable": unavailable})
+    return PollResult(tracked=tracked, rejected=rejected, unavailable=unavailable, stopped=stopped)
+
+
 @shared_task(name="commerce.poll_bts")  # type: ignore[untyped-decorator]
 def poll_bts() -> list[int]:
-    """BTS polling fallback (customer contract §2.13.3; beat ``commerce-poll-bts`` every 600 s).
+    """BTS polling fallback (beat ``commerce-poll-bts`` every 600 s): the order ids whose parcel was tracked."""
+    return run_bts_poll().tracked
 
-    P0 stub returning ``[]`` (no parcel polled); P2 implements the single-flight round-robin run.
-    """
-    return []
+
+# --- fake payment providers holding open money (customer contract §6.14) -------------------------------------
+
+
+def report_fake_provider_open_money() -> list[str]:
+    """At worker start: one ERROR ``providers.fake_with_open_money {provider, open_transactions, open_refunds,
+    order_ids}`` per payment provider that is fake under the production settings and still holds open money
+    (the operator procedure of §6.14 was skipped). Writes nothing; returns the providers reported."""
+    reported = []
+    for provider in (enums.PaymentProvider.CLICK, enums.PaymentProvider.PAYME):
+        if not integration_modes.fake_in_production(provider):
+            continue
+        money = selectors.provider_open_money(provider)
+        if money.open_transactions == 0 and money.open_refunds == 0:
+            continue
+        logger.error(
+            "providers.fake_with_open_money %s",
+            {
+                "provider": str(provider),
+                "open_transactions": money.open_transactions,
+                "open_refunds": money.open_refunds,
+                "order_ids": money.order_ids,
+            },
+        )
+        reported.append(str(provider))
+    return reported
+
+
+@worker_ready.connect  # type: ignore[untyped-decorator]
+def _report_open_money_at_worker_start(**_kwargs: Any) -> None:
+    try:
+        report_fake_provider_open_money()
+    except Exception:  # the check must never keep a worker from starting
+        logger.exception("providers.fake_with_open_money check failed")
