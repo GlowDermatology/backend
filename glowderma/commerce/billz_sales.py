@@ -9,7 +9,8 @@ cashback — is ``integrations.billz``'s :meth:`BillzPort.push_sale` (``LiveBill
 * :class:`PurchaseJournal` — the push's ``SaleJournal`` over the online purchase: it re-reads the purchase
   under the adapter's sale lock (``progress``), persists the Billz sale id the moment Billz created it
   (``loyalty.services.record_billz_order``), and right before the payment re-checks the order under its
-  lock (cancelled → ``SaleCancelled``) and commits the payment attempt
+  lock (cancelled → ``SaleCancelled``; an attempt stamped meanwhile by another attempt →
+  ``BillzPaymentPending``, a compare-and-set) and commits the payment attempt
   (``loyalty.services.record_billz_payment_attempt``), forgetting it when Billz certainly did not take it;
 * :func:`sale_request` — the port's request built from the order and its customer (each line at the
   ``unit_price`` the customer was charged: the Billz sale records what the customer paid, decision D1).
@@ -35,6 +36,7 @@ from glowderma.commerce import services
 from glowderma.commerce.models import Order
 from glowderma.core import enums, timeutils
 from glowderma.integrations.billz.ports import (
+    BillzPaymentPending,
     BillzPort,
     BillzUnavailable,
     SaleCancelled,
@@ -50,6 +52,8 @@ from glowderma.loyalty import services as loyalty_services
 BillzPushUnavailable = BillzUnavailable
 # How long the payment re-check waits for the Order row (409 Conflict after it: the outbox retries).
 ORDER_LOCK_WAIT = timedelta(seconds=20)
+# A payment attempt stamped by another attempt meanwhile: look at the sale again this much later.
+PAYMENT_RACE_RETRY = timedelta(minutes=1)
 
 
 class PurchaseJournal:
@@ -89,6 +93,14 @@ class PurchaseJournal:
             if order.status == enums.OrderStatus.CANCELLED:
                 raise SaleCancelled(f"order {self.order_id} was cancelled before its Billz sale was paid")
             info = loyalty_selectors.billz_push_info(self.purchase_id)
+            if info is not None and info.billz_payment_attempted_at is not None:
+                # compare-and-set (review NEW-5): another attempt stamped (and may have sent) a payment since
+                # this one read the purchase — never a second payment; the next attempt reads the sale first
+                raise BillzPaymentPending(
+                    f"a payment of the Billz sale of order {self.order_id} was already attempted at "
+                    f"{info.billz_payment_attempted_at.isoformat()}; not paying again",
+                    retry_after=PAYMENT_RACE_RETRY,
+                )
             sale_id = info.billz_sale_id if info is not None else ""
             loyalty_services.record_billz_payment_attempt(
                 self.purchase_id, billz_sale_id=sale_id, at=timeutils.now()

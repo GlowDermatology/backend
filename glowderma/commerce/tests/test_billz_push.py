@@ -26,6 +26,7 @@ from glowderma.core.seeding import pinned_clock
 from glowderma.core.tasks import dispatch_outbox
 from glowderma.integrations.billz.client import BillzClient
 from glowderma.integrations.billz.live import SALE_BUSY_RETRY, SALE_LOCK_KEY, LiveBillz
+from glowderma.integrations.billz.ports import BillzPaymentPending
 from glowderma.integrations.tests.billz_support import (
     CLIENT_ID,
     FOAM_ID,
@@ -499,3 +500,25 @@ def test_the_payment_recheck_waits_for_the_order_row_only_briefly() -> None:
             journal.before_payment()
     assert lock.call_args.kwargs == {"wait": billz_sales.ORDER_LOCK_WAIT}
     assert Purchase.objects.get(pk=purchase.pk).billz_payment_attempted_at is None
+
+
+def test_the_payment_attempt_is_a_compare_and_set_under_the_order_lock() -> None:
+    """NEW-5: an attempt that read the purchase before another attempt stamped (and maybe sent) the payment
+    never stamps it again: it is deferred (no attempt spent) and the next one reads the sale first."""
+    from glowderma.commerce import billz_sales
+    from glowderma.loyalty import services as loyalty_services
+
+    order = paid_order()
+    purchase = Purchase.objects.get(order=order)
+    assert purchase.billz_order_uuid is not None
+    loyalty_services.record_billz_order(
+        purchase.pk, billz_order_uuid=purchase.billz_order_uuid, billz_sale_id=SALE_ID, billz_sale_ref="1"
+    )
+    journal = billz_sales.PurchaseJournal(purchase.pk, purchase.billz_order_uuid, order.pk)
+    journal.before_payment()  # the first attempt stamps it
+    stamped = Purchase.objects.get(pk=purchase.pk).billz_payment_attempted_at
+    assert stamped is not None
+    with pinned_clock(timeutils.now() + timedelta(seconds=30)), pytest.raises(BillzPaymentPending) as caught:
+        journal.before_payment()  # a second attempt that read the purchase before the stamp
+    assert caught.value.retry_after == billz_sales.PAYMENT_RACE_RETRY
+    assert Purchase.objects.get(pk=purchase.pk).billz_payment_attempted_at == stamped  # unchanged
