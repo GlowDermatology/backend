@@ -18,20 +18,28 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
+from typing import Any
 
-from django.db.models import Exists, F, OrderBy, OuterRef, Q, QuerySet
-from django.db.models.functions import Collate, Lower
+from django.conf import settings
+from django.db.models import Count, Exists, F, Max, OrderBy, OuterRef, Q, QuerySet, Value
+from django.db.models.functions import Coalesce, Collate, Lower, NullIf
 from django.db.models.lookups import Contains
 
-from glowderma.accounts.models import Customer, Device
+from glowderma.accounts.models import Address, AuthSession, Customer, CustomerSocialIdentity, Device
 from glowderma.appointments import selectors as appointments_selectors
-from glowderma.commerce.models import Order
-from glowderma.core import enums
+from glowderma.catalog import selectors as catalog_selectors
+from glowderma.catalog.models import Banner, Category, Product, ProductImage
+from glowderma.commerce import selectors as commerce_selectors
+from glowderma.commerce.models import CartItem, Order
+from glowderma.core import enums, timeutils
+from glowderma.core.media import absolute_media_url
 from glowderma.loyalty import selectors as loyalty_selectors
+from glowderma.loyalty.models import Purchase
 from glowderma.loyalty.selectors import AccountSummary, LedgerRow, PurchaseRow, TierInfo, Totals
 from glowderma.notifications import selectors as notifications_selectors
 from glowderma.notifications.models import CustomerSegment, SegmentMember
+from glowderma.site_config import selectors as site_config_selectors
 
 NAME_COLLATION = "glowderma_ci"  # ICU case-insensitive collation (core.0007), used in ORDER BY only
 SEARCH_MAX_LENGTH = 64
@@ -274,3 +282,262 @@ __all__ = [
     "newest_order",
     "search_q",
 ]
+
+
+# --- M2 customer API reads (customer contract §2.2, §2.3; plan §2 P1) --------------------------------------
+
+
+def last_activity_at(customer_id: int) -> datetime | None:
+    """The dormant-account rule's last activity (customer contract §2.2.3): the newest of
+    ``Customer.last_login_at``, the newest customer session ``last_used_at``, the newest ``Purchase``, the
+    newest order and the appointment activity of ``appointments.selectors.last_activity_at`` (every
+    appointment's ``created_at``, staff bookings included, and the ``start`` of open or attended ones)."""
+    candidates: list[datetime | None] = [
+        Customer.objects.filter(pk=customer_id).values_list("last_login_at", flat=True).first(),
+        AuthSession.objects.filter(customer_id=customer_id, audience="customer").aggregate(
+            newest=Max("last_used_at")
+        )["newest"],
+        Purchase.objects.filter(customer_id=customer_id).aggregate(newest=Max("at"))["newest"],
+        Order.objects.filter(customer_id=customer_id).aggregate(newest=Max("created_at"))["newest"],
+        appointments_selectors.last_activity_at(customer_id),
+    ]
+    values = [value for value in candidates if value is not None]
+    return max(values) if values else None
+
+
+def is_dormant(customer_id: int, *, now: datetime) -> tuple[bool, datetime | None]:
+    """``(dormant, last_activity_at)``: inactive for longer than ``CUSTOMER_DORMANT_DAYS`` (no activity at all
+    counts as dormant)."""
+    last = last_activity_at(customer_id)
+    threshold = now - timedelta(days=int(settings.CUSTOMER_DORMANT_DAYS))
+    return (last is None or last < threshold), last
+
+
+def media_url(file: Any) -> str | None:
+    """The absolute URL of a stored file (``PUBLIC_MEDIA_BASE_URL``), ``None`` when empty."""
+    name = getattr(file, "name", None)
+    return absolute_media_url(str(name)) if name else None
+
+
+def localized_field(obj: object, field: str, lang: str) -> str:
+    """``<field>_<lang>`` → ``<field>_uz`` → ``""`` (customer contract §1.4)."""
+    return str(getattr(obj, f"{field}_{lang}", "") or getattr(obj, f"{field}_uz", "") or "")
+
+
+def product_name(product: Product, lang: str) -> str:
+    """The resolved-language name, then uz, then ``billz_name``."""
+    return localized_field(product, "name", lang) or product.billz_name
+
+
+def address_payload(address: Address) -> dict[str, Any]:
+    return {
+        "id": address.pk,
+        "label": address.label,
+        "text": address.text,
+        "region_code": address.region_code,
+        "city_code": address.city_code,
+        "comment": address.comment,
+        "latitude": float(address.latitude) if address.latitude is not None else None,
+        "longitude": float(address.longitude) if address.longitude is not None else None,
+        "is_default": address.is_default,
+        "created_at": timeutils.isoformat(address.created_at),
+        "updated_at": timeutils.isoformat(address.updated_at),
+    }
+
+
+def customer_addresses(customer_id: int) -> list[Address]:
+    """Default first, then ``updated_at`` desc (customer contract §2.2.7)."""
+    return list(Address.objects.filter(customer_id=customer_id).order_by("-is_default", "-updated_at", "-id"))
+
+
+def me_payload(customer: Customer, *, fid: str | None) -> dict[str, Any]:
+    """``Me`` (customer contract §2.2.1); ``push_enabled`` of the current device (``fid``)."""
+    terms = site_config_selectors.current_terms()
+    current = terms.version if terms.published else ""
+    providers = sorted(
+        CustomerSocialIdentity.objects.filter(customer_id=customer.pk).values_list("provider", flat=True)
+    )
+    device = Device.objects.filter(customer_id=customer.pk, fid=fid).first() if fid else None
+    default = Address.objects.filter(customer_id=customer.pk, is_default=True).first()
+    return {
+        "id": customer.pk,
+        "phone": customer.phone,
+        "name": customer.name,
+        "language": customer.language,
+        "image_url": media_url(customer.image),
+        "registered_at": timeutils.isoformat(customer.history_from or customer.registered_at),
+        "has_password": bool(customer.password),
+        "linked_providers": providers,
+        "push_enabled": bool(device and device.push_enabled),
+        "consent": {
+            "terms_version": customer.terms_version or None,
+            "accepted_at": timeutils.isoformat(customer.consent_at) if customer.consent_at else None,
+            "current_version": current or None,
+            "update_required": bool(current) and customer.terms_version != current,
+        },
+        "default_address": address_payload(default) if default is not None else None,
+    }
+
+
+# --- public catalog (customer contract §2.3) ---
+
+
+def customer_categories() -> QuerySet[Category]:
+    """Active categories by position; ``product_count`` = visible products."""
+    visible = catalog_selectors.customer_visible_products()
+    return (
+        Category.objects.filter(is_active=True)
+        .annotate(product_count=Count("products", filter=Q(products__in=visible), distinct=True))
+        .order_by("position", "id")
+    )
+
+
+def active_category(slug: str) -> Category | None:
+    return Category.objects.filter(slug=slug, is_active=True).first()
+
+
+def customer_banners(now: datetime) -> list[Banner]:
+    """``is_active`` ∧ started ∧ not ended, by position and id, at most 20."""
+    return list(
+        Banner.objects.select_related("link_product", "link_category")
+        .filter(is_active=True)
+        .filter(Q(starts_at__isnull=True) | Q(starts_at__lte=now))
+        .filter(Q(ends_at__isnull=True) | Q(ends_at__gt=now))
+        .order_by("position", "id")[:BANNER_LIMIT]
+    )
+
+
+BANNER_LIMIT = 20
+
+
+def banner_payload(banner: Banner, lang: str, visible_ids: set[int]) -> dict[str, Any]:
+    """A link to an invisible product or an inactive category renders ``kind: "none"``."""
+    link: dict[str, Any] = {"kind": enums.BannerLinkKind.NONE.value, "product_id": None, "category": None}
+    if banner.link_kind == enums.BannerLinkKind.PRODUCT and banner.link_product_id in visible_ids:
+        link = {"kind": banner.link_kind, "product_id": banner.link_product_id, "category": None}
+    elif (
+        banner.link_kind == enums.BannerLinkKind.CATEGORY
+        and banner.link_category is not None
+        and banner.link_category.is_active
+    ):
+        link = {"kind": banner.link_kind, "product_id": None, "category": banner.link_category.slug}
+    return {
+        "id": banner.pk,
+        "title": localized_field(banner, "title", lang),
+        "image_url": media_url(banner.image),
+        "image_width": banner.image_width,
+        "image_height": banner.image_height,
+        "link": link,
+    }
+
+
+def visible_product_ids(ids: list[int]) -> set[int]:
+    return set(catalog_selectors.customer_visible_products().filter(pk__in=ids).values_list("pk", flat=True))
+
+
+def customer_products() -> QuerySet[Product]:
+    return catalog_selectors.customer_visible_products().select_related("category")
+
+
+def resolved_name_expression(lang: str) -> Coalesce:
+    columns = [f"name_{lang}"] if lang != enums.ContentLanguage.UZ else []
+    parts = [NullIf(F(column), Value("")) for column in (*columns, "name_uz")]
+    return Coalesce(*parts, F("billz_name"))
+
+
+def order_customer_products(qs: QuerySet[Product], ordering: str, lang: str) -> QuerySet[Product]:
+    """``default`` (newest ``created_at``), ``price``, ``-price``, ``name`` (resolved language under
+    ``glowderma_ci``); ties by ``id`` desc."""
+    if ordering == enums.CustomerProductOrdering.PRICE:
+        return qs.order_by("price", "-id")
+    if ordering == enums.CustomerProductOrdering.PRICE_DESC:
+        return qs.order_by("-price", "-id")
+    if ordering == enums.CustomerProductOrdering.NAME:
+        return qs.annotate(_name_ci=Collate(resolved_name_expression(lang), NAME_COLLATION)).order_by(
+            "_name_ci", "-id"
+        )
+    return qs.order_by("-created_at", "-id")
+
+
+def filter_in_stock(qs: QuerySet[Product], in_stock: bool) -> QuerySet[Product]:
+    """``available > 0`` (``customer_available_stock``: nothing while online selling is off)."""
+    ids = list(qs.values_list("pk", flat=True))
+    available = commerce_selectors.customer_available_stock(ids)
+    positive = [pk for pk, quantity in available.items() if quantity > 0]
+    return qs.filter(pk__in=positive) if in_stock else qs.exclude(pk__in=positive)
+
+
+def _main_images(product_ids: list[int]) -> dict[int, ProductImage]:
+    images: dict[int, ProductImage] = {}
+    for image in ProductImage.objects.filter(product_id__in=product_ids).order_by(
+        "product_id", "position", "id"
+    ):
+        images.setdefault(image.product_id, image)
+    return images
+
+
+def _cart_quantities(customer_id: int | None, product_ids: list[int]) -> dict[int, int]:
+    if customer_id is None:
+        return {}
+    return dict(
+        CartItem.objects.filter(cart__customer_id=customer_id, product_id__in=product_ids).values_list(
+            "product_id", "quantity"
+        )
+    )
+
+
+def product_cards(products: list[Product], lang: str, customer_id: int | None = None) -> list[dict[str, Any]]:
+    """``ProductCard`` rows: one stock read (``customer_available_stock``), one image query, one cart
+    query."""
+    ids = [product.pk for product in products]
+    available = commerce_selectors.customer_available_stock(ids)
+    images = _main_images(ids)
+    in_cart = _cart_quantities(customer_id, ids)
+    cards = []
+    for product in products:
+        quantity = int(available.get(product.pk, 0))
+        image = images.get(product.pk)
+        category = product.category
+        cards.append(
+            {
+                "id": product.pk,
+                "name": product_name(product, lang),
+                "volume": product.volume,
+                "price": product.price,
+                "promo": product.promo,
+                "category": {"slug": category.slug, "name": localized_field(category, "name", lang)}
+                if category is not None
+                else None,
+                "main_image_url": media_url(image.file) if image is not None else None,
+                "available": quantity,
+                "stock_status": (
+                    enums.StockStatus.IN_STOCK if quantity > 0 else enums.StockStatus.OUT_OF_STOCK
+                ).value,
+                "in_cart_quantity": int(in_cart.get(product.pk, 0)),
+            }
+        )
+    return cards
+
+
+def product_detail(product: Product, lang: str, customer_id: int | None = None) -> dict[str, Any]:
+    [card] = product_cards([product], lang, customer_id)
+    images = ProductImage.objects.filter(product_id=product.pk).order_by("position", "id")
+    return {
+        **card,
+        "description": localized_field(product, "description", lang),
+        "ingredients": localized_field(product, "ingredients", lang),
+        "usage": localized_field(product, "usage", lang),
+        "images": [
+            {"id": image.pk, "url": media_url(image.file), "position": image.position} for image in images
+        ],
+        "max_quantity": min(card["available"], int(settings.CART_MAX_QTY_PER_LINE)),
+    }
+
+
+def category_payload(category: Category, lang: str) -> dict[str, Any]:
+    return {
+        "slug": category.slug,
+        "name": localized_field(category, "name", lang),
+        "image_url": media_url(category.image),
+        "product_count": int(getattr(category, "product_count", 0)),
+    }

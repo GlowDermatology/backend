@@ -15,7 +15,7 @@ import jwt
 from jwt.exceptions import PyJWKClientConnectionError, PyJWKClientError
 
 from . import http
-from .ports import OAuthExchangeError, SocialClaims
+from .ports import ID_TOKEN, AppTokenClaims, OAuthExchangeError, SocialClaims
 
 logger = logging.getLogger(__name__)
 TOKEN_URL = "https://oauth2.googleapis.com/token"  # noqa: S105 - an endpoint URL, not a secret
@@ -123,4 +123,74 @@ class GoogleOAuthProvider:
             email=str(claims["email"]),
             email_verified=True,
             hd=hd,
+        )
+
+
+# --- customer app ID tokens (customer contract §2.1.8) ------------------------------------------------------
+
+APP_REQUIRED_CLAIMS = ("iss", "aud", "exp", "iat", "sub", "nonce")
+
+
+def verify_rs256(
+    token: str,
+    *,
+    client: jwt.PyJWKClient,
+    audience: list[str] | str,
+    issuer: tuple[str, ...] | str,
+    required: tuple[str, ...],
+) -> dict[str, Any]:
+    """Decode an RS256 ID token against ``client``'s key set; failures map to ``OAuthExchangeError``."""
+    try:
+        signing_key = client.get_signing_key_from_jwt(token)
+    except PyJWKClientConnectionError as exc:
+        raise OAuthExchangeError("unavailable", "jwks unreachable") from exc
+    except (PyJWKClientError, jwt.PyJWTError) as exc:
+        raise OAuthExchangeError("invalid_token", "unknown signing key") from exc
+    try:
+        claims: dict[str, Any] = jwt.decode(
+            token,
+            signing_key.key,
+            algorithms=list(ALGORITHMS),
+            audience=audience,
+            issuer=issuer,
+            leeway=LEEWAY_SECONDS,
+            options={"require": list(required)},
+        )
+    except jwt.PyJWTError as exc:
+        raise OAuthExchangeError("invalid_token", type(exc).__name__) from exc
+    return claims
+
+
+def optional_email(claims: dict[str, Any]) -> str:
+    email = claims.get("email")
+    return email if isinstance(email, str) else ""
+
+
+class GoogleAppTokenVerifier:
+    """Google ID tokens of the customer app: ``aud`` ∈ ``GOOGLE_APP_CLIENT_IDS`` (the iOS client id and the
+    web/server client id the Android SDK asks for), ``nonce`` equal to the raw server nonce; ``email`` is
+    optional and ``email_verified`` ignored (the phone is the customer's identity, unlike the staff path)."""
+
+    name = "google"
+
+    def __init__(self, *, client_ids: list[str], jwk_client: jwt.PyJWKClient | None = None) -> None:
+        self.client_ids = list(client_ids)
+        self.jwk_client = jwk_client
+
+    def verify_app_token(self, token: str, token_type: str, nonce: str | None) -> AppTokenClaims:
+        if token_type != ID_TOKEN or not self.client_ids:
+            raise OAuthExchangeError("invalid_token", "unsupported token")
+        claims = verify_rs256(
+            token,
+            client=self.jwk_client or jwks_client(),
+            audience=self.client_ids,
+            issuer=ISSUERS,
+            required=APP_REQUIRED_CLAIMS,
+        )
+        token_nonce = claims.get("nonce")
+        if not isinstance(token_nonce, str) or nonce is None or not nonces_match(token_nonce, nonce):
+            raise OAuthExchangeError("invalid_token", "nonce mismatch")
+        audience = claims["aud"] if isinstance(claims["aud"], str) else str(claims["aud"][0])
+        return AppTokenClaims(
+            self.name, str(claims["sub"]), optional_email(claims), audience, int(claims["exp"])
         )

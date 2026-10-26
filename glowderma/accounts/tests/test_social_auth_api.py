@@ -1,5 +1,6 @@
 """API tests for ``auth/oauth/{provider}/`` (login, link, unlink) with the fake providers (contract 2.1)."""
 
+import secrets
 from typing import Any
 
 import pytest
@@ -13,13 +14,18 @@ from glowderma.integrations.oauth.ports import OAuthExchangeError
 
 pytestmark = pytest.mark.django_db
 BASE = "/api/v1/admin/auth/oauth/"
-VERIFIER = "v" * 43
+VERIFIER = "v" * 43  # a fixed verifier where the body is only validated; body() makes a fresh one per call
 REDIRECT = "http://localhost:3000/admin/auth/callback"
 LOGIN_KEYS = {"access", "access_expires_at", "refresh", "refresh_expires_at", "user"}
 
 
 def body(code: str, *, nonce: str | None = "*", **overrides: Any) -> dict[str, Any]:
-    data: dict[str, Any] = {"code": code, "code_verifier": VERIFIER, "redirect_uri": REDIRECT}
+    # A PKCE verifier is single use across instances (admin §2.1): every call gets its own.
+    data: dict[str, Any] = {
+        "code": code,
+        "code_verifier": secrets.token_urlsafe(48),
+        "redirect_uri": REDIRECT,
+    }
     if nonce is not None:
         data["nonce"] = nonce
     data.update(overrides)

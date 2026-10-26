@@ -1,5 +1,7 @@
-"""Customer routes of `site_config` (customer contract §2.0); mounted by ``config.urls`` at ``api/v1/``."""
+"""Customer routes of `site_config` (customer contract §2.4); mounted by ``config.urls`` at ``api/v1/``."""
 
-from django.urls import URLPattern, URLResolver
+from django.urls import URLPattern, URLResolver, path
 
-urlpatterns: list[URLPattern | URLResolver] = []
+from glowderma.site_config.api.customer.views import PublicSettingsView
+
+urlpatterns: list[URLPattern | URLResolver] = [path("settings/public/", PublicSettingsView.as_view())]

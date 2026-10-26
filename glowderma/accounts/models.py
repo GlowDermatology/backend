@@ -251,6 +251,9 @@ class CustomerSocialIdentity(models.Model):
     last_login_at = models.DateTimeField(null=True)
     # Apple's refresh token sealed with core.secretbox (customer contract §2.1.8), revoked on unlink/deletion.
     provider_refresh_token = models.TextField(blank=True)
+    # The OAuth client the refresh token was issued to (Apple: the ID token's ``aud`` bundle id, which is the
+    # ``client_id`` of the code exchange and therefore of the revocation); "" = none or before 0007.
+    provider_client_id = models.CharField(max_length=255, blank=True)
 
     class Meta:
         constraints = [
@@ -267,6 +270,12 @@ class CustomerSocialIdentity(models.Model):
 
 
 class AuthSession(models.Model):
+    class AuthMethod(models.TextChoices):  # internal: how the session's sign-in was proven
+        PASSWORD = "password"  # noqa: S105 - staff email + password, customer password (or SMS-verified)
+        GOOGLE = "google"
+        FACEBOOK = "facebook"
+        APPLE = "apple"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     audience = models.CharField(max_length=16, choices=[("staff", "staff"), ("customer", "customer")])
     staff = models.ForeignKey(
@@ -307,6 +316,9 @@ class AuthSession(models.Model):
     # request carrying the current ``rot`` sets ``rotation_confirmed`` (CustomerJWTAuthentication).
     rotation = models.PositiveIntegerField(default=0)
     rotation_confirmed = models.BooleanField(default=False)
+    # How the sign-in that opened this session was proven (admin contract §2.1: linking a staff identity
+    # needs a password session). Kept on the row, so a customer refresh rotation carries it; "" = before 0007.
+    auth_method = models.CharField(max_length=16, choices=AuthMethod.choices, blank=True)
 
     class Meta:
         indexes = [

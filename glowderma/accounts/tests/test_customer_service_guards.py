@@ -172,18 +172,25 @@ def test_register_device_refuses_a_replaced_or_logged_out_device() -> None:
     assert not Device.objects.filter(fcm_token__in=("tok-old", "tok-new")).exists()
 
 
-def test_register_device_takes_the_customer_lock_first() -> None:
+def test_register_device_takes_the_customer_locks_first() -> None:
     customer = CustomerFactory.create()
     start_test_session(customer, fid="fid-lockorder-1")
-    DeviceFactory.create(fcm_token="tok-held")
+    held = DeviceFactory.create(fcm_token="tok-held")
     with CaptureQueriesContext(connection) as queries:
         services.register_device(customer.pk, "fid-lockorder-1", fcm_token="tok-held", push_enabled=True)
-    locking = [q["sql"] for q in queries.captured_queries if q["sql"].rstrip().endswith("UPDATE")]
-    assert 'FROM "accounts_customer"' in locking[0] and "FOR NO KEY UPDATE" in locking[0]
-    # Then the device rows, then (the active holder is deactivated) its open sessions: the order of
-    # start_customer_session and delete_customer (customer, devices, sessions), so they cannot deadlock.
-    assert 'FROM "accounts_device"' in locking[1] and 'FROM "accounts_authsession"' in locking[2]
-    assert len(locking) == 3
+    locking = [q for q in queries.captured_queries if q["sql"].rstrip().endswith("UPDATE")]
+    # Both customers (the caller and the token's holder) in ascending primary key order, ...
+    customer_locks = [q["sql"] for q in locking[:2]]
+    assert all('FROM "accounts_customer"' in sql and "FOR NO KEY UPDATE" in sql for sql in customer_locks)
+    ordered = sorted([customer.pk, held.customer_id])
+    assert all(
+        f'"accounts_customer"."id" = {pk}' in sql for pk, sql in zip(ordered, customer_locks, strict=True)
+    )
+    # ... then the device rows, then (the active holder is deactivated) its open sessions: every flow of
+    # either customer takes its own customer lock before its sessions and devices, so none can deadlock.
+    assert 'FROM "accounts_device"' in locking[2]["sql"]
+    assert 'FROM "accounts_authsession"' in locking[3]["sql"]
+    assert len(locking) == 4
 
 
 @pytest.mark.django_db(transaction=True)
