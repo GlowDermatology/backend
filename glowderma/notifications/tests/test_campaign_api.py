@@ -345,6 +345,29 @@ def test_create_body_is_the_campaign_after_the_eager_send(
     assert Campaign.objects.count() == 1
 
 
+@pytest.mark.django_db(transaction=True)
+def test_create_body_still_says_queued_with_a_real_worker(
+    staff_client: APIClient, clock: Any, fcm: FakeFcm, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Contract §2.8, the other branch: with a real worker the on-commit dispatch only enqueues, so the
+    rebuilt 201 body (and the stored replay body) still says ``queued``; the rebuild never dispatches."""
+    from glowderma.core import tasks as core_tasks
+
+    enqueued: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(core_tasks.dispatch_outbox, "delay", lambda *args, **kwargs: enqueued.append(args))
+    for _ in range(2):
+        DeviceFactory.create(customer=CustomerFactory.create())
+    response = post(staff_client, form())
+    assert response.status_code == 201, response.data
+    body = response.data
+    assert (body["state"], body["sent"], body["sent_at"]) == ("queued", None, None)
+    assert len(enqueued) == 1 and fcm.sent == []
+    replay = post(staff_client, form())
+    assert replay.status_code == 201 and replay["Idempotent-Replayed"] == "true"
+    assert replay.data == body
+    assert len(enqueued) == 1 and Campaign.objects.get().state == "queued"
+
+
 def test_create_scheduled_waits_for_beat(staff_client: APIClient, clock: Any) -> None:
     segment = CustomerSegmentFactory.create(name="Doimiy mijozlar", min_online_orders=None)
     member = CustomerFactory.create()

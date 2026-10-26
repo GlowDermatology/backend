@@ -151,8 +151,9 @@ class NotificationViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSe
         operation_id="admin_notifications_create",
         description=(
             "Multipart with dotted keys (`link.kind`, `audience.type`, …) and an optional `image` (JPEG, PNG "
-            "or WebP, ≤ 5 MiB). Without `scheduled_at` the send starts at once (state queued); with it the "
-            "campaign waits for its time (state scheduled)."
+            "or WebP, ≤ 5 MiB). Without `scheduled_at` the send starts at once; the 201 body is the campaign "
+            "as stored after the commit (`queued`, or `sent` when the send already ran inside the request). "
+            "With it the campaign waits for its time (state `scheduled`)."
         ),
         parameters=[IDEMPOTENCY_KEY_HEADER],
         request={"multipart/form-data": NotificationFormSerializer},
