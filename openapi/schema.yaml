@@ -13677,6 +13677,14 @@ components:
           - $ref: '#/components/schemas/ProviderModes'
           description: '`?ready=1` only, and only for a caller that passes the admin
             network gate (§1): the mode of every provider with a `*_MODE` setting.'
+        providers:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ProviderReadiness'
+          description: '`?ready=1` only, and only for a caller that passes the admin
+            network gate (§1): one entry per provider whose mode is `live`. A live
+            provider that is not configured makes `status` `error` (503) for every
+            caller.'
       required:
       - status
     HealthStatusEnum:
@@ -16109,6 +16117,28 @@ components:
       - fcm
       - oauth
       - payme
+    ProviderReadiness:
+      type: object
+      properties:
+        configured:
+          type: boolean
+          description: The live adapter can be built and its `is_configured()` (where
+            the port has one) says yes; `false` makes readiness answer 503.
+        last_sync_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: 'Billz and BTS only: the last successful catalog sync / polling
+            run; `null` otherwise.'
+        last_sync_age_seconds:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: Seconds since `last_sync_at`; `null` with it.
+      required:
+      - configured
+      - last_sync_age_seconds
+      - last_sync_at
     PublicSettings:
       type: object
       properties:
