@@ -113,6 +113,7 @@ def test_migrate_zero_and_forward_again() -> None:
         "0001_initial",
         "0002_seed_status_templates",
         "0003_inbox_account_source",
+        "0004_campaign_cancelled",
     }
     with connection.cursor() as cursor:
         cursor.execute("SELECT indexdef FROM pg_indexes WHERE indexname = 'segment_name_ci_unique'")

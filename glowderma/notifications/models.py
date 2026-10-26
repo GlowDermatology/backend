@@ -106,6 +106,7 @@ class Campaign(TimeStampedModel):
         QUEUED = "queued"
         SENDING = "sending"
         SENT = "sent"
+        CANCELLED = "cancelled"  # M3: a scheduled campaign staff cancelled before its send started
 
     kind = models.CharField(max_length=8, choices=enums.NotificationKind.choices)  # promo|general
     title = models.CharField(max_length=60)
@@ -136,6 +137,7 @@ class Campaign(TimeStampedModel):
     scheduled_at = models.DateTimeField(null=True)
     started_at = models.DateTimeField(null=True)
     sent_at = models.DateTimeField(null=True)
+    cancelled_at = models.DateTimeField(null=True)  # M3: set with state cancelled only
     sent = models.PositiveIntegerField(null=True)  # FCM accepted
     failed = models.PositiveIntegerField(null=True)  # FCM rejected / no token
     delivered = models.PositiveIntegerField(null=True)  # M2 acknowledgements; null in M1
@@ -212,8 +214,21 @@ class Campaign(TimeStampedModel):
                         sent__isnull=False,
                         failed__isnull=False,
                     )
+                    | Q(
+                        state="cancelled",
+                        scheduled_at__isnull=False,
+                        started_at__isnull=True,
+                        sent_at__isnull=True,
+                        sent__isnull=True,
+                        failed__isnull=True,
+                    )
                 ),
                 name="campaign_state_fields",
+            ),
+            models.CheckConstraint(
+                condition=Q(state="cancelled", cancelled_at__isnull=False)
+                | ~Q(state="cancelled") & Q(cancelled_at__isnull=True),
+                name="campaign_cancelled_at",
             ),
         ]
         indexes = [

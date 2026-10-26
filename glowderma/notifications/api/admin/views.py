@@ -175,6 +175,21 @@ class NotificationViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSe
         return refresh_after_commit(Response(body(), status=201), body)
 
 
+class NotificationCancelView(AdminAPIView):
+    @extend_schema(
+        operation_id="admin_notifications_cancel",
+        description="Cancel a `scheduled` campaign before its send starts (state `cancelled`, audited "
+        "`notification.cancelled`). Idempotent: an already cancelled campaign answers 200 unchanged. 409 "
+        "`conflict` once the send started (`queued` / `sent`); 404 for an unknown id.",
+        request=None,
+        responses={200: NotificationRecordSerializer, **ADMIN_ERRORS},
+    )
+    @idempotent(required=False)
+    def post(self, request: Request, pk: int) -> Response:
+        campaign = services.cancel_campaign(pk, actor=request.user, request=request)
+        return Response(NotificationRecordSerializer(selectors.get_campaign(campaign.pk)).data)
+
+
 class NotificationMetaView(AdminAPIView):
     @extend_schema(
         operation_id="admin_notifications_meta", responses={200: NotificationMetaSerializer, **ADMIN_ERRORS}

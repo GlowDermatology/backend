@@ -49,6 +49,7 @@ NOTIFICATION_STATE: dict[str, str] = {
     enums.NotificationState.SCHEDULED: "Rejalashtirilgan",
     enums.NotificationState.QUEUED: "Navbatda",
     enums.NotificationState.SENT: "Yuborildi",
+    enums.NotificationState.CANCELLED: "Bekor qilindi",
 }
 NOTIFICATION_KIND: dict[str, str] = {
     enums.NotificationKind.PROMO: "Aksiya",

@@ -23,6 +23,10 @@ Scenarios (03 §7.8):
 * customer 13's deliberate negative balance: №10210 (pickup, paid 10 Oct, credited) is cancelled by the admin
   on 16 Oct after №10215 (14 Oct) spent the whole balance → the reversal of №10210's credit drives the
   balance below zero (L5);
+* two of the generated admin cancels, №10100 and №10175, keep a **failed** Click refund (Click refused the
+  reversal; on resolve the fake Click reports the payment ``paid`` / is ``down``:
+  ``FAILED_CLICK_REFUNDS``) for the Payments screen's resolve flow — so ``attention.refunds_needing_action``
+  is 2;
 * the 230 generated orders (ids 10001–10242 minus 10198, 10231 and Malika's ten), facts from ``MockRandom
   (1284)`` with the mock's distributions, ``created_at`` interpolated between the anchors in business time
   (09:00–22:00 Tashkent, monotonic with the ids). Status allocation: 10238–10242 ``awaiting_payment``,
@@ -147,6 +151,7 @@ class OrderPlan:
     pinned_events: bool = False  # №10248: events 1–7
     ledger_ids: dict[str, int] = field(default_factory=dict)  # step → first pinned ledger id (Malika)
     dynamic_cashback: Callable[[], int] | None = None  # customer 13's №10215: the whole balance
+    click_status_after_refund: str = ""  # FAILED_CLICK_REFUNDS: the fake Click status once the refund failed
 
     @property
     def paid_at(self) -> datetime:
@@ -525,8 +530,29 @@ def generated_orders(products: list[str]) -> list[OrderPlan]:
             plan.refund_at = created + timedelta(minutes=62 if provider == CLICK else 120)
         plans.append(plan)
     _customer_13(plans)
+    _failed_click_refunds(plans)
     _assign_tracking(plans)
     return plans
+
+
+# Failed Click refunds for the Payments screen's resolve flow (M3 e2e: "Yakunlash" → 409 → "Qo‘lda to‘landi"):
+# two generated admin cancels that no design figure names (old, not on the anchor day, no named customer).
+# Click refuses the reversal (fake ``refund: failed``), so the refund ends ``failed`` and the payment stays
+# ``paid``; the fake status Click then reports on resolve is ``paid`` (№10100: "Click to‘lovni
+# qaytarmagan", 409 ``click_not_reversed``) or ``down`` (№10175: 503 ``provider_unavailable``) — set after
+# the refund failed, since the submission's own status check must answer.
+FAILED_CLICK_REFUNDS: dict[int, str] = {10100: "paid", 10175: "down"}
+
+
+def _failed_click_refunds(plans: list[OrderPlan]) -> None:
+    for plan in plans:
+        status = FAILED_CLICK_REFUNDS.get(plan.id)
+        if status is None:
+            continue
+        if plan.provider != CLICK or plan.outcome != ADMIN_CANCEL:  # pragma: no cover - fixed by the draw
+            raise RuntimeError(f"seed order {plan.id} is no longer an admin-cancelled Click order")
+        plan.fake["click"] = {"refund": "failed", "status": "paid"}
+        plan.click_status_after_refund = status
 
 
 def _customer_13(plans: list[OrderPlan]) -> None:
@@ -765,6 +791,11 @@ class Seeder:
     def _refund(self, plan: OrderPlan) -> None:
         if plan.provider == CLICK:
             _deliver(topics.REFUND_SUBMIT, plan.id, tasks.submit_refund)
+            if plan.click_status_after_refund:
+                scenario = {**plan.fake.get("click", {}), "status": plan.click_status_after_refund}
+                order = Order.objects.get(pk=plan.id)
+                order.metadata = {**order.metadata, "fake": {**plan.fake, "click": scenario}}
+                order.save(update_fields=["metadata"])
             return
         for refund in payment_selectors.refunds_for_order(plan.id):
             if refund.state == enums.RefundState.MANUAL_REQUIRED:

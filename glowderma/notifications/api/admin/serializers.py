@@ -84,6 +84,9 @@ class NotificationRecordSerializer(serializers.Serializer[Campaign]):
     scheduled_at = serializers.DateTimeField(allow_null=True)
     created_at = serializers.DateTimeField()
     sent_at = serializers.DateTimeField(allow_null=True)
+    cancelled_at = serializers.DateTimeField(
+        allow_null=True, help_text="M3: when staff cancelled the scheduled campaign (state `cancelled`)."
+    )
     sent = serializers.IntegerField(allow_null=True)
     failed = serializers.IntegerField(allow_null=True)
     delivered = serializers.IntegerField(allow_null=True)

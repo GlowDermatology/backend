@@ -30,7 +30,12 @@ CONTRACT_LABELS: dict[str, dict[str, str]] = {
         "adjustment": "Tuzatish",
         "reversal": "Qaytarildi",
     },
-    "NOTIFICATION_STATE": {"scheduled": "Rejalashtirilgan", "queued": "Navbatda", "sent": "Yuborildi"},
+    "NOTIFICATION_STATE": {
+        "scheduled": "Rejalashtirilgan",
+        "queued": "Navbatda",
+        "sent": "Yuborildi",
+        "cancelled": "Bekor qilindi",
+    },
     "NOTIFICATION_KIND": {"promo": "Aksiya", "general": "Umumiy"},
 }
 ENUM_FOR_LABELS = {

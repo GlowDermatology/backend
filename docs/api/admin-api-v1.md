@@ -236,6 +236,7 @@ The FE creates one key per form/dialog instance (`crypto.randomUUID()`), reuses 
 | GET | `notifications/` | P E | 200 |
 | GET | `notifications/meta/` | | 200 |
 | POST | `notifications/` | I, multipart | 201 |
+| POST | `notifications/{id}/cancel/` (M3) | | 200 |
 | GET / PUT | `notification-templates/{status}/` | | 200 |
 | GET / POST | `segments/` | P E / – | 200 / 201 |
 | GET / PATCH / DELETE | `segments/{id}/` | | 200 / 200 / 204 |
@@ -681,6 +682,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
  "recipient_count": 612,          // devices with push on, snapshot at creation; recomputed when the send starts
  "state": "scheduled",            // scheduled|queued|sent
  "scheduled_at": "2026-10-26T10:00:00+05:00", "created_at": "2026-10-24T11:30:00+05:00", "sent_at": null,
+ "cancelled_at": null,            // M3: set when a scheduled campaign was cancelled (state "cancelled")
  "sent": null, "failed": null,    // FCM accepted / failed counts, null until sent
  "delivered": null,               // null until M2 app acknowledgements
  "author": {"id": 1, "display_name": "Administrator"}}
@@ -716,6 +718,8 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 - With `scheduled_at` → state `scheduled`; beat starts the send when due.
 - Audit `notification.created`.
 - 201 `NotificationRecord`. **The 201 body is the campaign as stored when the response is built**: it is read after the request's transaction committed and its on-commit dispatch ran. With an eager Celery (local settings) the send already finished inside the request, so the body says `state: "sent"` with `sent`, `failed` and `sent_at`; with a real worker it normally still says `queued` (a fast worker may already have advanced it). The key stays held until that body is stored: a retry racing the first response gets 409 `request_in_progress` (§1.7), and a replay afterwards returns that same body.
+
+**`POST notifications/{id}/cancel/`** (M3; empty body; `Idempotency-Key` optional, §1.7) → 200 `NotificationRecord`. Cancels a **`scheduled`** campaign before its send starts: state `cancelled`, `cancelled_at` = now, nothing is materialised or sent (no recipients, no inbox items) and the beat never starts it; audit `notification.cancelled`. Idempotent: an already `cancelled` campaign answers 200 with the same record and no new audit row. Once the send started (`queued`, including the internal sending phase, or `sent`) → 409 `conflict` "Yuborish boshlangan: xabarni bekor qilib bo‘lmaydi."; an unknown id → 404. The row lock orders it against the beat: a campaign the beat is starting at that moment is answered after it, with the 409. `GET notifications/?state=cancelled` lists cancelled campaigns; a cancelled campaign no longer holds its segment (`DELETE segments/{id}/` checks `scheduled` ones only). The UI offers "Bekor qilish" on `scheduled` rows only.
 
 Templates are editable in the admin UI through `GET` / `PUT` below.
 
@@ -968,7 +972,7 @@ Export `tolovlar` (§1.8): the `Qaytarish` column is the §5.1 refund-state line
 | RequestedVia | `app`, `admin` | |
 | BlockKind | `busy`, `off` | |
 | NotificationKind | `promo`, `general` | |
-| NotificationState | `scheduled`, `queued`, `sent` | |
+| NotificationState | `scheduled`, `queued`, `sent`, `cancelled` (M3) | |
 | AudienceType | `all`, `segment`, `customer` | |
 | LinkKind | `none`, `product` | notifications |
 | BannerLinkKind | `none`, `product`, `category` | banners |
@@ -990,7 +994,7 @@ Export `tolovlar` (§1.8): the `Qaytarish` column is the §5.1 refund-state line
 | Orders | `order.cancelled`, `order.status_changed`, `order.shipment_retry_requested`, `refund.requested`, `refund.state_changed` (system) |
 | Catalog | `product.created`, `product.updated`, `product.image_added`, `product.image_deleted`, `product.images_reordered`, `billz.import_started`, `billz.import_finished`, `category.created`, `category.updated`, `category.deleted`, `category.reordered`, `banner.created`, `banner.updated`, `banner.deleted`, `banner.reordered` |
 | Loyalty | `cashback.adjusted`, `cashback.policy_version_created`, `cashback.policy_version_superseded` |
-| Notifications | `notification.created`, `notification_template.updated`, `segment.created`, `segment.updated`, `segment.deleted`, `segment.members_added`, `segment.member_removed`, `notification.push_dead` (system; a dead `push.order_status` / `push.appointment` / `campaign.send_batch` message: `{topic, dedupe_key, attempts, last_error, customer_id, campaign_id}`) |
+| Notifications | `notification.created`, `notification.cancelled` (M3; before `{state: "scheduled", scheduled_at}`, after `{state: "cancelled", cancelled_at}`), `notification_template.updated`, `segment.created`, `segment.updated`, `segment.deleted`, `segment.members_added`, `segment.member_removed`, `notification.push_dead` (system; a dead `push.order_status` / `push.appointment` / `campaign.send_batch` message: `{topic, dedupe_key, attempts, last_error, customer_id, campaign_id}`) |
 | Appointments | `appointment.confirmed`, `appointment.rejected`, `appointment.attended`, `appointment.created`, `appointment.rescheduled` (`{…, from_start, from_end, reschedule_no}`), `appointment.cancelled` (`{…, reason}`) |
 | Shell | `settings.updated` (changed leaves only, each `{from, to}`, §2.11), `export.downloaded` |
 | M2 (customer API) | The customer, payment and POS actions listed in `docs/api/customer-api-v1.md` §3 ("Audit actions added in M2"): `customer.*`, `auth.device_mismatch`, `appointment.requested`, `appointment.cancelled` (`by: "customer"`), `payment.late_capture`, `pos.*`. The `audit-log/` filters accept them unchanged. |
@@ -1188,7 +1192,7 @@ Generic mapping applies throughout: snake_case → camelCase; integer ids → `S
 | CancellationReason | reservation_expired "Band muddati tugadi" · admin "Admin bekor qildi" · customer_request "Mijoz bekor qildi" |
 | ProductStatus / CustomerStatus | active "Faol" · hidden "Yashirin" / active "Faol" · deleted "O‘chirilgan" |
 | LedgerKind | credit "Hisoblandi" · debit "Ishlatildi" · adjustment "Tuzatish" · reversal "Qaytarildi" |
-| NotificationState / Kind | scheduled "Rejalashtirilgan" · queued "Navbatda" · sent "Yuborildi" / promo "Aksiya" · general "Umumiy" |
+| NotificationState / Kind | scheduled "Rejalashtirilgan" · queued "Navbatda" · sent "Yuborildi" · cancelled "Bekor qilindi" (M3) / promo "Aksiya" · general "Umumiy" |
 | Booleans in exports | "Ha" / "Yo‘q" |
 
 ---

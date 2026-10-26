@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 from django.conf import settings
 from django.core.management import call_command
+from django.db import transaction
 from django.test import override_settings
 from rest_framework.test import APIClient
 
@@ -249,6 +250,21 @@ def test_seed_demo_reproduces_the_design_vectors(staff_client: APIClient) -> Non
         order_10244["payment"]["status"] == "refunded" and order_10244["refunds"][0]["state"] == "succeeded"
     )
     assert order_10244["cancellation"] == {"reason": "admin", "note": "Mijoz so‘rovi bilan"}
+    # --- M3: two failed Click refunds for the resolve flow (FAILED_CLICK_REFUNDS) ---
+    failed = staff_client.get("/api/v1/admin/payments/", {"refund_state": "failed"}).json()["results"]
+    assert sorted(row["order_id"] for row in failed) == [10100, 10175]
+    for row in failed:
+        assert (row["provider"], row["status"]) == ("click", "paid")
+        assert row["refunds"][0]["state"] == "failed" and row["refunds"][0]["manual_reason"] is None
+    assert Order.objects.get(pk=10100).metadata["fake"]["click"] == {"refund": "failed", "status": "paid"}
+    assert Order.objects.get(pk=10175).metadata["fake"]["click"] == {"refund": "failed", "status": "down"}
+    for order_id, status, code in ((10100, 409, "click_not_reversed"), (10175, 503, "provider_unavailable")):
+        (row,) = [row for row in failed if row["order_id"] == order_id]
+        url = f"/api/v1/admin/payments/{row['id']}/refunds/{row['refunds'][0]['id']}/resolve/"
+        with transaction.atomic():  # probe the answer only; the seeded refund stays failed
+            answer = staff_client.post(url, {"state": "succeeded"}, format="json")
+            transaction.set_rollback(True)
+        assert (answer.status_code, answer.json()["code"]) == (status, code)
     order_10249 = staff_client.get("/api/v1/admin/orders/10249/").json()
     assert order_10249["history"][0]["data"] == {"released_item_count": 1, "payment_failed": True}
     assert order_10249["payment"]["status"] == "failed"
@@ -290,7 +306,7 @@ def test_seed_demo_reproduces_the_design_vectors(staff_client: APIClient) -> Non
         "pending_appointments": 3,
         "next_appointment_at": "2026-10-26T09:00:00+05:00",
         "new_from_billz": 4,
-        "refunds_needing_action": 0,
+        "refunds_needing_action": 2,  # M3: the seeded failed Click refunds of №10100 and №10175
         "bts_polling_failing": False,
     }
     assert sum(bucket["revenue"] for bucket in dashboard["buckets"]) == 768_000

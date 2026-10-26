@@ -120,6 +120,7 @@ def test_list_shape_ordering_and_filters(staff_client: APIClient, staff: StaffUs
         "scheduled_at": "2026-10-26T10:00:00+05:00",
         "created_at": "2026-10-24T11:30:00+05:00",
         "sent_at": None,
+        "cancelled_at": None,
         "sent": None,
         "failed": None,
         "delivered": None,

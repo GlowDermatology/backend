@@ -8,6 +8,7 @@ readability.
 from django.urls import URLPattern, URLResolver, path
 
 from .views import (
+    NotificationCancelView,
     NotificationMetaView,
     NotificationViewSet,
     SegmentMemberDetailView,
@@ -24,6 +25,9 @@ members = SegmentMembersViewSet.as_view({"get": "list", "post": "add"})
 urlpatterns: list[URLPattern | URLResolver] = [
     path("notifications/", notifications, name="admin-notifications-list"),
     path("notifications/meta/", NotificationMetaView.as_view(), name="admin-notifications-meta"),
+    path(
+        "notifications/<int:pk>/cancel/", NotificationCancelView.as_view(), name="admin-notifications-cancel"
+    ),
     path("notification-templates/<str:status>/", TemplateView.as_view(), name="admin-notification-templates"),
     path("segments/", segments, name="admin-segments-list"),
     path("segments/<int:pk>/", segment, name="admin-segments-detail"),

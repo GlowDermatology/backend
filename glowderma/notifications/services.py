@@ -242,6 +242,45 @@ def create_campaign(data: CampaignInput, image: Any = None, *, actor: Any, reque
     return campaign
 
 
+MESSAGE_CANCEL_STARTED = "Yuborish boshlangan: xabarni bekor qilib bo‘lmaydi."
+
+
+def cancel_campaign(campaign_id: int, *, actor: Any, request: Any = None) -> Campaign:
+    """``POST notifications/{id}/cancel/`` (admin contract §2.8, M3): a ``scheduled`` campaign becomes
+    ``cancelled`` (``cancelled_at`` = now; nothing was materialised or sent), audited
+    ``notification.cancelled``.
+    Idempotent: an already cancelled campaign is returned unchanged (no second audit row). Once the send
+    started (``queued`` / ``sending`` / ``sent``) → 409 ``conflict`` :data:`MESSAGE_CANCEL_STARTED`. The row
+    lock orders it against ``start_due_campaigns`` (which skips a locked row and re-reads the state)."""
+    with transaction.atomic():
+        campaign = Campaign.objects.select_for_update().filter(pk=campaign_id).first()
+        if campaign is None:
+            raise NotFound
+        if campaign.state == Campaign.State.CANCELLED:
+            return campaign
+        if campaign.state != Campaign.State.SCHEDULED:
+            raise Conflict(MESSAGE_CANCEL_STARTED)
+        scheduled_at = campaign.scheduled_at
+        before = {
+            "state": campaign.state,
+            "scheduled_at": timeutils.isoformat(scheduled_at) if scheduled_at else None,
+        }
+        cancelled_at = timeutils.now()
+        campaign.state = Campaign.State.CANCELLED
+        campaign.cancelled_at = cancelled_at
+        campaign.save(update_fields=["state", "cancelled_at", "updated_at"])
+        audit.record(
+            action="notification.cancelled",
+            entity_type="campaign",
+            entity_id=str(campaign.pk),
+            actor=actor,
+            request=request,
+            before=before,
+            after={"state": campaign.state, "cancelled_at": timeutils.isoformat(cancelled_at)},
+        )
+        return campaign
+
+
 def start_due_campaigns(now: Any = None) -> list[int]:
     """Beat ``notifications.start_due_campaigns`` (1 min): queue every ``scheduled`` campaign that is due,
     one transaction each (``select_for_update(skip_locked=True)`` keeps two beats apart)."""

@@ -229,6 +229,7 @@ class NotificationState(TextChoices):
     SCHEDULED = "scheduled"
     QUEUED = "queued"
     SENT = "sent"
+    CANCELLED = "cancelled"  # M3: POST notifications/{id}/cancel/ of a scheduled campaign
 
 
 class AudienceType(TextChoices):
