@@ -343,7 +343,9 @@ def push_sale(payload: dict[str, Any]) -> None:
 def _alert_cancelled_sale(order_id: int, purchase_id: int, case: str) -> None:
     """The ``billz.sale_of_cancelled_order`` alert (ids only; the ERROR line names the Billz sale)."""
     alerts.alert(
-        "billz.sale_of_cancelled_order", {"order_id": order_id, "purchase_id": purchase_id, "case": case}
+        "billz.sale_of_cancelled_order",
+        {"order_id": order_id, "purchase_id": purchase_id, "case": case},
+        scope=str(order_id),  # one alert per order: another order's sale is another action for staff
     )
 
 
@@ -378,6 +380,7 @@ def on_billz_push_dead(message: OutboxMessage) -> None:
     alerts.alert(
         "billz.sale_dead",
         {"order_id": payload.get("order_id"), "purchase_id": purchase_id, "message_id": message.pk},
+        scope=str(payload.get("order_id")),  # one alert per order (a sale each staff enters by hand)
     )
 
 

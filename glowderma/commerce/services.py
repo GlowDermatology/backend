@@ -863,7 +863,9 @@ def _announce_billz_refund(order_id: int, purchase_id: int) -> None:
             pushed,
         )
         alerts.alert(
-            "billz.refund_by_hand", {"order_id": order_id, "purchase_id": purchase_id, "pushed": pushed}
+            "billz.refund_by_hand",
+            {"order_id": order_id, "purchase_id": purchase_id, "pushed": pushed},
+            scope=str(order_id),  # one alert per order: each is a refund staff make by hand
         )
 
     transaction.on_commit(announce)

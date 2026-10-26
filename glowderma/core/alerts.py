@@ -5,8 +5,10 @@
 body bytes (header ``X-GD-Signature: sha256=<hex>``, key ``ALERT_WEBHOOK_SECRET``).
 
 * **Disabled** while ``ALERT_WEBHOOK_URL`` is empty: nothing is queued.
-* **Deduplicated**: at most one message per ``event`` and ``scope`` (the outbox topic of ``outbox.dead``, else
-  empty) per fixed window of ``ALERT_DEDUPE_MINUTES``: the window number is part of the outbox dedupe key.
+* **Deduplicated**: at most one message per ``event`` and ``scope`` per fixed window of
+  ``ALERT_DEDUPE_MINUTES``: the window number is part of the outbox dedupe key. The scope is what makes two
+  alerts different actions: the outbox topic for ``outbox.dead``, the order id for the per-order Billz events
+  (``billz.sale_dead``, ``billz.refund_by_hand``, ``billz.sale_of_cancelled_order``), else empty.
 * **Never breaks the caller**: the insert runs in a savepoint and any failure is logged at WARNING and
   swallowed. An alert raised inside a transaction that later rolls back is rolled back with it; the ERROR log
   line every call site also writes stays the primary signal.
