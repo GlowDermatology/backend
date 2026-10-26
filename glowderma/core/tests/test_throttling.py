@@ -31,6 +31,14 @@ def test_defaults_match_contract_1_9() -> None:
         "checkout",
         "pay",
         "pos",
+        # M2 (customer contract §1.8)
+        "sms_device",
+        "customer_auth_device",
+        "customer_auth_ip",
+        "refresh_unknown",
+        "qr",
+        "public",
+        "public_ip",
     }
     for rate in DEFAULT_THROTTLE_RATES.values():
         validate_throttle_rates({"login": rate})

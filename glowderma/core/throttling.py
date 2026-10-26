@@ -20,10 +20,20 @@ DEFAULT_THROTTLE_RATES: Final[dict[str, str]] = {
     "oauth": "30/min",
     "customer": "600/min",
     "sms_phone": "5/min",
-    "sms_ip": "20/min",
+    # Customer contract §1.8: a CGNAT backstop; the scope is used only by auth/send-code/.
+    "sms_ip": "600/min",
     "checkout": "30/min",
     "pay": "30/min",
     "pos": "120/min",
+    # M2 (customer contract §1.8): device-first keys because of carrier-grade NAT, pure-IP ceilings as
+    # backstops.
+    "sms_device": "10/min",
+    "customer_auth_device": "30/min",
+    "customer_auth_ip": "1200/min",
+    "refresh_unknown": "60/min",
+    "qr": "6/min",
+    "public": "300/min",
+    "public_ip": "3000/min",
 }
 
 # DRF ``SimpleRateThrottle.parse_rate``: "<requests>/<period>" where the period's first letter is one of
