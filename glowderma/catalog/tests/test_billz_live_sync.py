@@ -5,13 +5,15 @@ is complete and plausible; the delta watermark moves only after a run was applie
 single-flight ``billz_import`` job and does nothing while Billz is fake.
 """
 
+from datetime import timedelta
 from typing import Any
 from unittest.mock import patch
 
 import httpx
 import pytest
-from celery.exceptions import Retry  # type: ignore[import-untyped]
+from celery.exceptions import Retry, SoftTimeLimitExceeded  # type: ignore[import-untyped]
 from django.test import override_settings
+from redis.exceptions import ConnectionError as RedisConnectionError
 from rest_framework.test import APIClient
 
 from glowderma.catalog import services, tasks
@@ -265,3 +267,149 @@ def test_product_create_answers_503_when_billz_does_not_answer(staff_client: API
     assert response.status_code == 503, response.json()
     assert response.json()["code"] == "provider_unavailable"
     assert not Product.objects.exists()
+
+
+# --- review fixes -------------------------------------------------------------------------------------------
+
+
+class BrokenCache:
+    """Redis is down: every cache operation raises like Django's RedisCache does."""
+
+    def __getattr__(self, name: str) -> Any:
+        def fail(*args: Any, **kwargs: Any) -> Any:
+            raise RedisConnectionError("Error 111 connecting to localhost:6380. Connection refused.")
+
+        return fail
+
+
+@override_settings(**LIVE)
+@pytest.mark.parametrize("method", ["post", "patch"])
+def test_product_create_and_billz_id_change_answer_503_when_redis_is_down(
+    staff_client: APIClient, method: str
+) -> None:
+    """Review B1 (probe test_redis_down_admin_product_create_answers_500_not_503)."""
+    existing = ProductFactory.create(billz_id="4607012399")
+    body: dict[str, Any] = {"billz_id": "4607012301"}
+    if method == "post":
+        body.update(price=185_000, texts={"uz": {"name": "Serum"}})
+    staff_client.raise_request_exception = False
+    with patch("glowderma.catalog.billz.get_port", return_value=live(BillzServer(), cache=BrokenCache())):
+        if method == "post":
+            response = staff_client.post("/api/v1/admin/products/", body)
+        else:
+            response = staff_client.patch(f"/api/v1/admin/products/{existing.pk}/", body)
+    assert response.status_code == 503, response.content
+    assert response.json()["code"] == "provider_unavailable"
+    existing.refresh_from_db()
+    assert existing.billz_id == "4607012399" and Product.objects.count() == 1
+
+
+@override_settings(**LIVE)
+def test_a_corrupt_billz_answer_on_product_create_is_503(staff_client: APIClient) -> None:
+    """Review B7 (probe test_corrupt_gzip_on_admin_create_is_500)."""
+    server = BillzServer()
+    server.overrides["GET /v2/products"] = lambda request: httpx.Response(
+        200, headers={"Content-Encoding": "gzip"}, content=b"garbage"
+    )
+    staff_client.raise_request_exception = False
+    body = {"billz_id": "4607012301", "price": 185_000, "texts": {"uz": {"name": "Serum"}}}
+    with patch("glowderma.catalog.billz.get_port", return_value=live(server)):
+        response = staff_client.post("/api/v1/admin/products/", body)
+    assert response.status_code == 503 and response.json()["code"] == "provider_unavailable"
+    assert not Product.objects.exists()
+
+
+@override_settings(**LIVE)
+def test_a_full_sync_with_overlapping_pages_hides_nothing() -> None:
+    """Review A M4 (probe test_full_sync_hides_a_product_skipped_by_overlapping_pages): Billz still sells the
+    product the shifted pages skipped, so the run is refused instead of hiding it."""
+    first, second = fixture("products_page1"), fixture("products_page2")
+    second["products"][1] = first["products"][1]  # page 2 repeats page 1's last product; 4607012303 is lost
+    server = BillzServer()
+    server.product_pages = [first, second]
+    skipped = ProductFactory.create(billz_id="4607012303", status="active")
+    ProductImageFactory.create(product=skipped)
+    job = run(live(server))
+    assert job.state == "failed" and (job.error or {})["code"] == "billz_listing_incomplete"
+    skipped.refresh_from_db()
+    assert skipped.status == "active"
+
+
+@override_settings(**LIVE)
+def test_a_product_created_while_the_full_listing_was_read_is_not_hidden() -> None:
+    """Review B12 (probe test_product_activated_during_the_upserts_is_hidden_by_the_full_sync): staff
+    created and activated a product Billz added after the listing was read; it is judged by the next run."""
+    created: list[int] = []
+    original = services.upsert_from_billz
+
+    def upsert(row: Any) -> Any:
+        outcome = original(row)
+        if not created:
+            created.append(ProductFactory.create(billz_id="4607012377", status="active").pk)
+        return outcome
+
+    with patch.object(services, "upsert_from_billz", upsert):
+        job = run(live(BillzServer()))
+    assert job.state == "succeeded", job.error
+    assert Product.objects.get(pk=created[0]).status == "active"
+    assert job.result is not None and job.result["hidden"] == 0
+
+
+def test_hide_service_skips_products_changed_after_the_listing_started() -> None:
+    old = ProductFactory.create(billz_id="4607012301", status="active")
+    edited = ProductFactory.create(billz_id="4607012302", status="active")
+    looked_up = ProductFactory.create(billz_id="4607012303", status="active")
+    listed_at = timeutils.now()
+    Product.objects.filter(pk__in=[old.pk, edited.pk, looked_up.pk]).update(
+        created_at=listed_at - timedelta(days=1), updated_at=listed_at - timedelta(days=1)
+    )
+    Product.objects.filter(pk=edited.pk).update(updated_at=listed_at + timedelta(seconds=1))
+    Product.objects.filter(pk=looked_up.pk).update(billz_synced_at=listed_at + timedelta(seconds=1))
+    assert services.hide_missing_from_billz(set(), listed_at=listed_at) == [old.pk]
+
+
+@override_settings(**LIVE)
+def test_the_live_sync_never_blanks_the_volume_without_a_volume_field() -> None:
+    """Review A S6 (probe test_live_sync_blanks_the_volume_when_billz_volume_field_is_unset): "empty =
+    volume not synced" means the stored volume stays, not that it is erased."""
+    serum = ProductFactory.create(billz_id="4607012301", volume="30 ml", billz_name="OLD")
+    job = run(live(BillzServer(), volume_field=""), mode="delta")
+    assert job.state == "succeeded", job.error
+    serum.refresh_from_db()
+    assert (serum.volume, serum.billz_name) == ("30 ml", "HYALURONIC SERUM 30ML")
+    created = Product.objects.get(billz_id="4607012302")
+    assert created.volume == ""  # a new product simply starts without one
+
+
+@override_settings(**LIVE)
+def test_a_refused_integration_key_fails_the_job_with_its_own_code() -> None:
+    """Review B nit: a revoked key is not "Billz down"; staff must fix BILLZ_SECRET_KEY."""
+    server = BillzServer()
+    server.overrides["POST /v1/auth/login"] = lambda request: httpx.Response(
+        403, json=fixture("login_forbidden")
+    )
+    job = run(live(server))
+    assert job.state == "failed" and (job.error or {})["code"] == "billz_auth_failed"
+    assert (job.error or {})["message"] == "Tashqi xizmat javob bermadi. Qayta urinib ko‘ring."
+
+
+@override_settings(**LIVE)
+def test_an_import_out_of_time_fails_its_job() -> None:
+    class Slow:
+        def iter_products(self, mode: str) -> Any:
+            raise SoftTimeLimitExceeded()
+
+    job = run(Slow())  # type: ignore[arg-type]
+    assert job.state == "failed" and (job.error or {})["code"] == "provider_unavailable"
+    assert tasks.run_billz_import.soft_time_limit == tasks.IMPORT_SOFT_TIME_LIMIT < 15 * 60
+    assert tasks.run_billz_import.time_limit == tasks.IMPORT_TIME_LIMIT < 15 * 60
+
+
+@override_settings(**LIVE)
+def test_the_beat_warns_when_it_joins_an_old_job(caplog: pytest.LogCaptureFixture) -> None:
+    """Review B14: an import job older than the reaper's threshold is not joined silently."""
+    old = JobFactory.create(params={"mode": "delta"})
+    Job.objects.filter(pk=old.pk).update(created_at=timeutils.now() - timedelta(minutes=20))
+    with patch("glowderma.catalog.billz.get_port", return_value=live(BillzServer())):
+        assert tasks.billz_sync_delta() == old.pk
+    assert f"joined import job {old.pk}, queued since" in caplog.text

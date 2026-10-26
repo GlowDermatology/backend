@@ -12,12 +12,14 @@ import logging
 import math
 from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from hashlib import sha256
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
 from django.core.files.base import ContentFile
 from django.db import IntegrityError, connection, transaction
+from django.db.models import Q
 from rest_framework.exceptions import NotFound, ValidationError
 
 from glowderma.catalog import selectors
@@ -750,7 +752,14 @@ class TooManyMissing(BillzListingIncomplete):
     """Billz no longer lists an implausibly large share of the active catalog: nothing is hidden."""
 
 
-def hide_missing_from_billz(listed: Collection[str], *, min_ratio: float = 1.0) -> list[int]:
+def _changed_since(product: Product, instant: datetime) -> bool:
+    stamps = (product.created_at, product.updated_at, product.billz_synced_at)
+    return any(stamp is not None and stamp >= instant for stamp in stamps)
+
+
+def hide_missing_from_billz(
+    listed: Collection[str], *, min_ratio: float = 1.0, listed_at: datetime | None = None
+) -> list[int]:
     """The full sync's reconciliation: every **active** product whose ``billz_id`` is not in ``listed`` (the
     complete Billz listing) becomes ``hidden``; returns their ids. Products are never deleted, so a product
     Billz lists again keeps its texts, images and history and staff re-activate it.
@@ -764,12 +773,21 @@ def hide_missing_from_billz(listed: Collection[str], *, min_ratio: float = 1.0) 
     ``product.updated`` audit row (``status`` diff, actor ``system``) with :data:`BILLZ_MISSING_REASON`. Each
     product is hidden in its own transaction under its row lock (an admin edit in between wins: the row is
     re-read). The caller guarantees ``listed`` is complete (``BillzPort.iter_products("full")``).
+
+    ``listed_at`` (when the listing started being read): a product created, edited or looked up in Billz at
+    or after that instant is never hidden — the listing could not contain it (staff created and activated it
+    while the run was paging, review B12); the next daily full sync judges it.
     """
     require_live_billz()
     wanted = frozenset(listed)
     hidden: list[int] = []
     active = Product.objects.filter(status=enums.ProductStatus.ACTIVE)
-    candidates = list(active.exclude(billz_id__in=wanted).order_by("id").values_list("pk", flat=True))
+    missing = active.exclude(billz_id__in=wanted)
+    if listed_at is not None:
+        missing = missing.exclude(
+            Q(created_at__gte=listed_at) | Q(updated_at__gte=listed_at) | Q(billz_synced_at__gte=listed_at)
+        )
+    candidates = list(missing.order_by("id").values_list("pk", flat=True))
     total = active.count()
     allowed = max(HIDE_ALWAYS_ALLOWED, total - math.ceil(round(total * min_ratio, 6)))
     if len(candidates) > allowed:
@@ -787,6 +805,8 @@ def hide_missing_from_billz(listed: Collection[str], *, min_ratio: float = 1.0) 
             )
             if product is None or product.billz_id in wanted:
                 continue
+            if listed_at is not None and _changed_since(product, listed_at):
+                continue  # created, edited or looked up after the listing started: not this run's to judge
             before = product_snapshot(product)
             product.status = enums.ProductStatus.HIDDEN
             _set_last_change(product, enums.ProductChangeKind.HIDDEN, None, before)

@@ -22,6 +22,7 @@ import logging
 from typing import Any
 
 from celery import shared_task  # type: ignore[import-untyped]
+from celery.exceptions import SoftTimeLimitExceeded  # type: ignore[import-untyped]
 from django.conf import settings
 
 from glowderma.catalog import billz, services
@@ -66,7 +67,15 @@ def _fail(job: Job, code: str, message: str) -> None:
     _finished(failed, error=failed.error)
 
 
-@shared_task(name="catalog.run_billz_import")  # type: ignore[untyped-decorator]
+# A full sync of a large catalog may outlast the global task limits (540 s / 600 s); its own limits stay
+# below the stale-job reaper's 15 minutes, so a run that is still alive is never reaped as "worker lost".
+IMPORT_SOFT_TIME_LIMIT = 840
+IMPORT_TIME_LIMIT = 870
+
+
+@shared_task(  # type: ignore[untyped-decorator]
+    name="catalog.run_billz_import", soft_time_limit=IMPORT_SOFT_TIME_LIMIT, time_limit=IMPORT_TIME_LIMIT
+)
 def run_billz_import(job_id: int) -> None:
     """Claim the queued job, upsert every Billz row, record the sync and finish the job (never raises)."""
     job = job_services.claim_job(job_id)
@@ -89,6 +98,7 @@ def run_billz_import(job_id: int) -> None:
     port_mode: ImportMode = "full" if mode == enums.BillzImportMode.FULL else "delta"
     try:
         port = billz.get_port()
+        listed_at = timeutils.now()  # before the first page: nothing created after it can be in the listing
         rows = list(port.iter_products(port_mode))
         total = len(rows)
         job_services.report_progress(job, 0, total)
@@ -102,15 +112,22 @@ def run_billz_import(job_id: int) -> None:
         if port_mode == "full":
             listed = {row.billz_id for row in rows}
             counters["hidden"] = len(
-                services.hide_missing_from_billz(listed, min_ratio=settings.BILLZ_FULL_SYNC_MIN_RATIO)
+                services.hide_missing_from_billz(
+                    listed, min_ratio=settings.BILLZ_FULL_SYNC_MIN_RATIO, listed_at=listed_at
+                )
             )
         port.sync_succeeded(port_mode)
         job_services.record_sync_success(IntegrationState.Provider.BILLZ, synced_at=timeutils.now())
         finished = job_services.finish_job(job, counters)
     except BillzError as exc:
         logger.warning("Billz import job %s failed: %s", job_id, exc)
-        # the message is the generic catalog one; the code tells "Billz down" from "listing incomplete"
+        # the message is the generic catalog one; the code tells "Billz down" from "listing incomplete" or a
+        # refused integration key ("billz_auth_failed")
         _fail(job, exc.code, MESSAGES["provider_unavailable"])
+        return
+    except SoftTimeLimitExceeded:
+        logger.error("Billz import job %s ran out of time (%s s)", job_id, IMPORT_SOFT_TIME_LIMIT)
+        _fail(job, "provider_unavailable", MESSAGES["provider_unavailable"])
         return
     except job_services.JobNotActive:
         return
@@ -138,7 +155,14 @@ def _scheduled_import(mode: str) -> Job | None:
         return None
     job, created = job_services.start_job(enums.JobKind.BILLZ_IMPORT, {"mode": mode}, actor=None)
     if not created:
-        logger.info("Billz %s sync: import job %s is already %s", mode, job.pk, job.state)
+        age = timeutils.now() - job.created_at
+        if age >= job_services.STALE_JOB_AFTER:
+            # a job this old should have been reaped (review B14): the beat must not silently join it for ever
+            logger.warning(
+                "Billz %s sync joined import job %s, %s since %s", mode, job.pk, job.state, job.created_at
+            )
+        else:
+            logger.info("Billz %s sync: import job %s is already %s", mode, job.pk, job.state)
     return job
 
 
