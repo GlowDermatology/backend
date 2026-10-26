@@ -34,6 +34,16 @@ def clear_cache() -> Iterator[None]:
 
 
 @pytest.fixture(scope="session", autouse=True)
+def urlconf_loaded_under_test_settings() -> None:
+    """``config.urls`` decides its routes at import time (``DJANGO_ADMIN_ENABLED``, the dev routes, DEBUG
+    media). Import it once under the test settings, before any test: a test that runs the deploy checks
+    inside ``override_settings(<production values>)`` would otherwise import it first and leave a URLconf
+    without the Django admin cached for the rest of the session ("'admin' is not a registered namespace" in
+    whichever test happens to run later, review B15)."""
+    import config.urls  # noqa: F401
+
+
+@pytest.fixture(scope="session", autouse=True)
 def static_directory() -> None:
     settings.STATIC_ROOT.mkdir(parents=True, exist_ok=True)
 

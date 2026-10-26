@@ -1,0 +1,4 @@
+{"_source": "components.schemas.AsyncEnvelope 200 (order-product / order-customer-new with Billz-Response-Channel: HTTP)",
+ "session_id": "fd8d352a-6299-4489-8a6e-a5c037f3f65b", "status_code": 200,
+ "id": "38c3920a-ffdd-4233-a823-8af3266f5f4f", "error": {"code": "", "message": ""},
+ "correlation_id": "4f1c2b3a-0000-4000-8000-000000000001", "topic": "order.add_item.success", "data": null}

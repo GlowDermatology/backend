@@ -116,7 +116,7 @@ Collections embedded in a resource (customer ledger and purchases, order items, 
 | 422 | `idempotency_key_reused` | Same key, different request fingerprint |
 | 429 | `throttled` | `Retry-After` in seconds |
 | 500 | `server_error` | Unexpected; quote `request_id` |
-| 503 | `provider_unavailable` | A synchronous provider call failed transiently (BTS cancel). Safe to retry with the same key. |
+| 503 | `provider_unavailable` | A synchronous provider call failed transiently (BTS cancel; the Billz lookup of `POST products/` and of a `PATCH products/{id}/` that changes `billz_id`, §2.3). Safe to retry with the same key. |
 
 Default top-level messages: `not_authenticated` "Avtorizatsiya talab qilinadi." · `SESSION_EXPIRED` "Sessiya tugadi. Qayta kiring." · `SESSION_REPLACED` "Boshqa qurilmadan kirildi." · `invalid_credentials` "Login yoki parol noto‘g‘ri." · `permission_denied` "Ruxsat yo‘q." · `not_found` "Topilmadi." · `request_in_progress` "So‘rov bajarilmoqda. Birozdan so‘ng qayta urinib ko‘ring." · `idempotency_key_reused` "Bu kalit boshqa so‘rov uchun ishlatilgan." · `idempotency_key_required` "Idempotency-Key sarlavhasi kerak." · `throttled` "Juda ko‘p urinish. {n} soniyadan so‘ng qayta urinib ko‘ring." · `payload_too_large` "Fayl juda katta." · `provider_unavailable` "Tashqi xizmat javob bermadi. Qayta urinib ko‘ring." · `server_error` "Kutilmagan xato."
 
@@ -476,7 +476,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 
 | Field | Rule and message |
 |---|---|
-| `billz_id` | Required on create. `^\d{6,14}$` (`invalid` "Billz ID yoki shtrix-kod 6–14 ta raqamdan iborat bo‘lsin."); `unique` "Bu Billz ID bilan mahsulot allaqachon bor."; must exist in Billz (`billz_not_found` "Billz’da bunday mahsulot topilmadi."). Setting or changing it refreshes `billz_name`, `volume`, `stock` and `billz_price`. M2: while the Billz port is fake under the production settings (customer contract §2.3, §6.14) a create, or a PATCH that sets or changes `billz_id`, answers 409 `conflict` "Billz sinov rejimida: Billz ma’lumotlarini olib bo‘lmaydi. Billz ulanganidan keyin qayta urinib ko‘ring." (nothing written; a fake must never invent Billz fields or stock); every other PATCH works as usual. |
+| `billz_id` | Required on create. `^\d{6,14}$` (`invalid` "Billz ID yoki shtrix-kod 6–14 ta raqamdan iborat bo‘lsin."); `unique` "Bu Billz ID bilan mahsulot allaqachon bor."; must exist in Billz (`billz_not_found` "Billz’da bunday mahsulot topilmadi."). Setting or changing it refreshes `billz_name`, `volume` (only when Billz provides one: with live Billz and no `BILLZ_VOLUME_FIELD` the stored volume is kept), `stock` and `billz_price`. M3: the create, and a PATCH that sets or changes `billz_id`, ask live Billz for the product (bounded to about 25 s); when Billz, its shared cache or the answer fails → 503 `provider_unavailable` "Tashqi xizmat javob bermadi. Qayta urinib ko‘ring." and nothing is written (safe to retry with the same `Idempotency-Key`); every other PATCH never calls Billz. M2: while the Billz port is fake under the production settings (customer contract §2.3, §6.14) a create, or a PATCH that sets or changes `billz_id`, answers 409 `conflict` "Billz sinov rejimida: Billz ma’lumotlarini olib bo‘lmaydi. Billz ulanganidan keyin qayta urinib ko‘ring." (nothing written; a fake must never invent Billz fields or stock); every other PATCH works as usual. |
 | `texts.uz.name` | Trimmed 2..120 (`min_length` "O‘zbekcha nomni kiriting (kamida 2 belgi).", `max_length` "120 belgidan oshmasin.") |
 | `texts.*.description`, `texts.*.ingredients` / `texts.*.usage` / `texts.ru.name`, `texts.en.name` | ≤2000 / ≤1000 / ≤120 ("{n} belgidan oshmasin."). Missing on create → `""`. |
 | `price` | int 1000..100000000 (`min_value` "Narx kamida 1 000 so‘m bo‘lsin.", `max_value` "Narx juda katta.") |
@@ -486,6 +486,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 | Active rule | Whenever the resulting status is `active`: `category` must be set (`required_for_active` "Faol mahsulot uchun kategoriyani tanlang."), the product needs ≥1 image (field `images`, `required_for_active` "Faol mahsulotda kamida bitta rasm bo‘lsin.") and `price ≥ 1000` (field `price`, `min_value` "Narx kamida 1 000 so‘m bo‘lsin." — imported products may carry `price = 0` while hidden). A create with `active` therefore always fails; the FE creates `hidden`. |
 
 - Every successful create or PATCH sets `is_new_from_billz=false`.
+- Responses of `POST products/` and `PATCH products/{id}/`: 201/200 `Product`, 400 `validation_error`, 404 (PATCH), 409 `conflict` (fake Billz in production), 503 `provider_unavailable` (the Billz lookup above).
 - `last_change.kind` is chosen by priority: `created` > `price_changed` > `activated`/`hidden` > `promo_added`/`promo_removed` > `updated`. Image calls do not change `last_change`.
 - Audit `product.created` / `product.updated` (field diff).
 
@@ -507,9 +508,11 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 - M2: while the Billz port is fake under the production settings (`DEV_FEATURES_ALLOWED` false; customer contract §2.3, §6.14) the import is **refused**: 409 `conflict` "Billz sinov rejimida: Billz ma’lumotlarini olib bo‘lmaydi. Billz ulanganidan keyin qayta urinib ko‘ring." and no job is created, because a fake would invent products and stock that customers then pay against (online selling needs live Billz; the customer catalog shows every product unavailable in that posture). A job queued before such a switch fails when the worker claims it (`error.code = "billz_fake_mode"`, same message) without calling the port; `billz.last_sync_at` does not move. Under the local/test settings the fake import works as below.
 - Fake adapter in M1 (`BILLZ_MODE`, default `INTEGRATIONS_MODE`). Products are upserted by `billz_id`:
   - new → `hidden` with `is_new_from_billz=true`;
-  - existing → only the Billz-owned fields change (`billz_name`, `volume`, `billz_price`, stock); admin-owned fields and `last_change` never move.
-- `Job.result` counts: `created` (new rows), `updated` (an existing product whose Billz-owned field or stock changed), `unchanged` (a `synced_at` refresh alone), `new_from_billz` (= `created`). `Job.progress` is `{"done", "total"}`.
+  - existing → only the Billz-owned fields change (`billz_name`, `volume`, `billz_price`, stock); the upsert never moves an admin-owned field or `last_change`.
+- M3, live Billz, `mode = "full"` (the reconciliation; the daily beat runs one): the listing is used only when it is complete and plausible (every page, the count stable while paging, as many distinct products as Billz counts, at least one product of the configured shop, not fewer than `BILLZ_FULL_SYNC_MIN_RATIO` of the previous full count); otherwise the job fails with `error.code = "billz_listing_incomplete"` and nothing is applied or hidden. After the upserts, **the system hides** every `active` product Billz no longer lists: `status = hidden`, `last_change = {"kind": "hidden", "actor": null, …}` (the system), audit `product.updated` (`status` diff, actor `system`, reason `billz_missing: …`). Never more than `max(3, active − ceil(ratio × active))` products in one run (else the job fails `billz_listing_incomplete` and nothing is hidden), never a product created, edited or looked up in Billz after the listing started, and never deleted (texts, images and history stay; staff re-activate it). A delta never hides.
+- `Job.result` counts: `created` (new rows), `updated` (an existing product whose Billz-owned field or stock changed), `unchanged` (a `synced_at` refresh alone), `new_from_billz` (= `created`); a `full` run adds `hidden` (products the reconciliation hid). `Job.progress` is `{"done", "total"}`.
 - Sets `billz.last_sync_at`. Audit `billz.import_started` (actor = the staff who started it) / `billz.import_finished` (written by the worker, or by the stale-job reaper with `error.code = "worker_lost"`).
+- Error codes of a failed import job (§2.14; the message is always the generic `provider_unavailable` one): `provider_unavailable` (Billz did not answer or the run ran out of time), `billz_listing_incomplete` (the full listing above), `billz_auth_failed` (Billz refused the integration key: `BILLZ_SECRET_KEY` must be checked), `billz_fake_mode` (M2), `worker_lost`, `server_error`.
 - Routes: the views live in `catalog` (an admin view sits above `integrations` in the layering); the paths are unchanged.
 
 ### 2.4 Categories (addressed by slug)
@@ -591,10 +594,12 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
  "reverses_id": null,                                     // reversals only
  "reason": null, "actor": null}                           // adjustments only: reason str, actor Actor
 // Purchase
-{"id": 41, "at": "2026-10-23T14:05:00+05:00", "source": "online", "order_id": 10248, "billz_sale_ref": null,
+{"id": 41, "at": "2026-10-23T14:05:00+05:00", "source": "online", "order_id": 10248, "billz_sale_ref": "5632631379",   // see below
  "amount": 808000, "promo_amount": 240000, "cashback": 5680, "policy_version": 3,
  "reversed": false}                                       // true once the order was cancelled/refunded
 ```
+
+- `billz_sale_ref` (Purchase): the Billz document number (≤ 32), `null` when none. A `store_qr` purchase always has one. An `online` purchase gets one the moment Billz created its sale (M3 live push), **while that sale may still be a draft**: it is the number staff look up in Billz when the push is deferred (closed shift) or dead (the sale is then completed, or deleted, by hand). The order history's `billz_sale_recorded` event marks the sale as paid in Billz; while Billz is fake (or before the push ran) it is `null`.
 
 | `kind` | `source_type` | Populated |
 |---|---|---|
@@ -887,12 +892,12 @@ Templates are editable in the admin UI through `GET` / `PUT` below.
  "params": {"mode": "delta"},
  "created_at": "…", "started_at": "…", "finished_at": null,
  "progress": {"done": 120, "total": 248},                  // null if unknown
- "result": null,                                           // succeeded: {"created": 3, "updated": 245, "unchanged": 0, "new_from_billz": 3}
- "error": null,                                            // failed: {"code": "provider_unavailable" | "worker_lost" | "billz_fake_mode" (M2) | …, "message": "…"}
+ "result": null,                                           // succeeded: {"created": 3, "updated": 245, "unchanged": 0, "new_from_billz": 3} (+ "hidden": 2 for a full import, M3)
+ "error": null,                                            // failed: {"code": "provider_unavailable" | "billz_listing_incomplete" | "billz_auth_failed" (M3) | "worker_lost" | "billz_fake_mode" (M2) | "server_error", "message": "…"}
  "created_by": {"id": 1, "display_name": "Administrator"}}
 ```
 - `progress` is always `{"done", "total"}` (or `null` before the first batch); `result` is the kind-specific summary (Billz import: §2.3).
-- A `running` job whose worker died is re-claimed by a redelivery or, after 15 minutes without a heartbeat, failed by the beat task `integrations.reap_stale_jobs` with `error.code = "worker_lost"` ("Jarayon uzilib qoldi. Qayta urinib ko‘ring."). A failed job never blocks a new one of the same kind.
+- A `running` job whose worker died is re-claimed by a redelivery or, after 15 minutes without a heartbeat, failed by the beat task `integrations.reap_stale_jobs` with `error.code = "worker_lost"` ("Jarayon uzilib qoldi. Qayta urinib ko‘ring."); M3: so is a job still `queued` 15 minutes after it was created (no worker ever claimed it). A failed job never blocks a new one of the same kind.
 - 404 `not_found` for an unknown id.
 
 ### 2.15 Health
@@ -972,7 +977,7 @@ Templates are editable in the admin UI through `GET` / `PUT` below.
 | Area | `action` values |
 |---|---|
 | Auth | `auth.login_succeeded`, `auth.login_failed`, `auth.logout` (`{scope, revoked_count}`), `auth.password_changed`, `auth.session_revoked` (`{sid, reason}`), `auth.staff_deactivated` (`{revoked_count}`), `auth.staff_reactivated`, `auth.social_linked`, `auth.social_unlinked` |
-| System | `outbox.dead` (`{topic, dedupe_key, attempts, last_error}`) |
+| System | `outbox.dead` (`{topic, dedupe_key, attempts, last_error}`), `outbox.requeued` (M3, actor `system`, reason "manage.py requeue_outbox"; before `{status, attempts, last_error}`, after `{topic, dedupe_key, status: "pending"}`) |
 | Orders | `order.cancelled`, `order.status_changed`, `order.shipment_retry_requested`, `refund.requested`, `refund.state_changed` (system) |
 | Catalog | `product.created`, `product.updated`, `product.image_added`, `product.image_deleted`, `product.images_reordered`, `billz.import_started`, `billz.import_finished`, `category.created`, `category.updated`, `category.deleted`, `category.reordered`, `banner.created`, `banner.updated`, `banner.deleted`, `banner.reordered` |
 | Loyalty | `cashback.adjusted`, `cashback.policy_version_created`, `cashback.policy_version_superseded` |
@@ -1001,7 +1006,7 @@ Events are append-only. The API returns all of them; the FE mapper **folds** the
 | `order_created` | system | `awaiting_payment` | `channel`, `item_count` (lines), `total` | row |
 | `reservation_created` | system | null | `item_count`, `minutes`, `expires_at` | folded into `order_created` |
 | `payment_confirmed` | system | `processing` | `provider`, `transaction_id`, `amount`, `reservation_converted` (bool) | row |
-| `billz_sale_recorded` | system | null | `billz_order_id` (str) | folded into `payment_confirmed` |
+| `billz_sale_recorded` | system | null | `billz_order_id` (str) | folded into `payment_confirmed`. M3: written once the sale is **paid** in Billz; never for an order cancelled meanwhile (staff refund such a sale in Billz by hand) |
 | `cashback_credited` | system | null | `ledger_entry_id`, `amount`, `base`, `percent`, `policy_version` | folded into `payment_confirmed` |
 | `payment_failed` | system | null | `provider`, `transaction_id` (str\|null), `error_code` (str\|null) | row |
 | `shipment_created` | system or admin | null | `tracking_number`, `tariff`, `manual` (bool) | row |
@@ -1193,7 +1198,7 @@ Provisional, configurable rules that shape payloads:
 - **Spendable timing.** Credits are spendable immediately (`LOYALTY_PENDING_DAYS=0`).
 - **Refund larger than the balance.** The reversal is still posted; the balance may go negative and is flagged. `available` can be negative.
 - **Reservation length.** 15 min (`settings.reservation_minutes`). Pickup completion reuses `delivered`.
-- **Price authority.** Admin `price`; `billz_price` is stored for reference (`PRICE_SOURCE`).
+- **Price authority.** Admin `price`; `billz_price` is stored for reference (`PRICE_SOURCE`). M3 (decision D1, provisional): the Billz sale of an online order records each line at the `unit_price` the customer was charged and is paid only when Billz's bill equals Σ `unit_price` × `quantity` exactly; otherwise the push stops for staff (dead-lettered with the reason).
 - **Customer delete and re-register.** Phone is unique. Delete scrubs the name, image and address (`name: ""`). Re-registration reactivates the same id, so ledger and purchases persist.
 - **Production media storage.** Open; URLs are always absolute from `PUBLIC_MEDIA_BASE_URL`.
 

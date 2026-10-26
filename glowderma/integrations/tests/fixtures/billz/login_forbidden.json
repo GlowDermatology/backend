@@ -1,0 +1,2 @@
+{"_source": "post_v1_auth_login 403 (components.responses.Forbidden, llms-full '403 и 404')",
+ "code": 403, "message": "blocked", "error": "user hasn't been activated", "data": null}

@@ -14,7 +14,7 @@ from typing import Any
 
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import IntegrityError, connection, transaction
-from django.db.models import F
+from django.db.models import F, Q
 
 from glowderma.core import audit, enums, outbox, timeutils
 from glowderma.integrations.models import IntegrationState, Job
@@ -78,6 +78,12 @@ def is_stale(job: Job, *, now: Any = None) -> bool:
     return bool(reference < (now or timeutils.now()) - STALE_JOB_AFTER)
 
 
+def is_lost_in_queue(job: Job, *, now: Any = None) -> bool:
+    """A ``queued`` job no worker claimed within :data:`STALE_JOB_AFTER` (its ``job.queued`` message died or
+    its Celery task was lost): it would hold the single-flight slot for ever (review B14)."""
+    return job.state == enums.JobState.QUEUED and job.created_at < (now or timeutils.now()) - STALE_JOB_AFTER
+
+
 def claim_job(job_id: int) -> Job | None:
     """Move a queued job to ``running`` (``attempts += 1``); ``None`` when it cannot be claimed.
 
@@ -102,22 +108,30 @@ def claim_job(job_id: int) -> Job | None:
 
 
 def reap_stale_jobs(*, now: Any = None) -> list[Job]:
-    """Fail every stale running job with ``{"code": "worker_lost"}`` (design 01 §2.2); returns them.
+    """Fail every stale running job — and every job still queued after :data:`STALE_JOB_AFTER` — with
+    ``{"code": "worker_lost"}`` (design 01 §2.2); returns them.
 
     Each job is finished in its own transaction under the row lock, so a worker that is still alive and
-    heartbeats concurrently wins (the row is re-checked after the lock). A ``billz_import`` job also records
-    the provider failure and the ``billz.import_finished`` audit row, like the worker would.
+    heartbeats (or claims the queued job) concurrently wins (the row is re-checked after the lock). A
+    ``billz_import`` job also records the provider failure and the ``billz.import_finished`` audit row, like
+    the worker would. A late task of a reaped queued job finds it failed and does nothing.
     """
     instant = now or timeutils.now()
     reaped: list[Job] = []
     candidates = Job.objects.filter(
-        state=enums.JobState.RUNNING, heartbeat_at__lt=instant - STALE_JOB_AFTER
+        Q(state=enums.JobState.RUNNING, heartbeat_at__lt=instant - STALE_JOB_AFTER)
+        | Q(state=enums.JobState.QUEUED, created_at__lt=instant - STALE_JOB_AFTER)
     ).values_list("pk", flat=True)
     for job_id in list(candidates):
         with transaction.atomic():
             job = Job.objects.select_for_update().filter(pk=job_id).first()
-            if job is None or not is_stale(job, now=instant):
+            if job is None or not (is_stale(job, now=instant) or is_lost_in_queue(job, now=instant)):
                 continue
+            if job.state == enums.JobState.QUEUED:
+                # _finish moves running jobs only, and a finished job needs a start (never started: the reap)
+                job.state = enums.JobState.RUNNING
+                job.started_at = instant
+                job.save(update_fields=["state", "started_at"])
             job = _finish(
                 job, enums.JobState.FAILED, error={"code": WORKER_LOST_CODE, "message": WORKER_LOST_MESSAGE}
             )
@@ -129,7 +143,13 @@ def reap_stale_jobs(*, now: Any = None) -> list[Job]:
                     entity_id=str(job.pk),
                     after={"job_id": job.pk, "state": job.state, "result": None, "error": job.error},
                 )
-        logger.warning("Reaped stale %s job %s (no heartbeat since %s)", job.kind, job.pk, job.heartbeat_at)
+        logger.warning(
+            "Reaped stale %s job %s (no heartbeat since %s, queued at %s)",
+            job.kind,
+            job.pk,
+            job.heartbeat_at,
+            job.created_at,
+        )
         reaped.append(job)
     return reaped
 
@@ -187,6 +207,23 @@ def record_sync_success(provider: str, *, synced_at: Any = None) -> IntegrationS
     )
     state.refresh_from_db()
     return state
+
+
+def update_provider_data(provider: str, changes: dict[str, Any]) -> IntegrationState:
+    """Merge ``changes`` into the provider's cursor document (``IntegrationState.data``) under the row lock.
+
+    The Billz adapter keeps its sync cursor here (``delta_since``, ``full_count``, ``full_synced_at``); it
+    calls this only after the caller applied a whole run, so a failed run never moves the cursor.
+    """
+    get_state(provider)
+    with transaction.atomic():
+        state = IntegrationState.objects.select_for_update().get(provider=provider)
+        data = dict(state.data) if isinstance(state.data, dict) else {}
+        data.update(changes)
+        state.data = data
+        state.updated_at = timeutils.now()
+        state.save(update_fields=["data", "updated_at"])
+        return state
 
 
 def record_failure(provider: str, message: str) -> IntegrationState:

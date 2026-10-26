@@ -26,9 +26,20 @@ accepted the default for M2; the client may still revise it, which changes a set
 | O3 | Reservation length | 15 minutes | `SiteSettings.reservation_minutes` | open |
 | O4 | Pickup: reuse "Delivered" or add "Picked up"? | Reuse `delivered` | order statuses | open |
 | O5 | Refund display | Payment stays `paid` with a Refund in progress; becomes `refunded` only when the provider confirms. Payme refunds are manual (`manual_required`) and confirmed by Payme's CancelTransaction | Refund state machine | decided (tech) |
-| O6 | Price authority: Glow Derma admin or Billz? | Admin price; Billz price stored for comparison | `PRICE_SOURCE=admin` | open |
+| O6 | Price authority: Glow Derma admin or Billz? | Admin price; Billz price stored for comparison; the Billz sale of an online order records the price the customer was charged (BZ-D1) | `PRICE_SOURCE=admin` | open |
 | O7 | Cash payments | Not supported; payment providers are pluggable | provider registry | open |
 | O8 | Dashboard "revenue" definition | Σ paid order totals by payment confirmation time, net of refunds; "orders" = created in the bucket | `reporting` selectors | open |
+
+## Billz live adapter (M3) — provisional defaults decided by the lead, 2026-10-26
+Taken while fixing the two reviews of the live Billz adapter (`docs/integrations/billz.md` §6, §7, §12). Each is
+implemented and configurable where a setting is named; the client or the product owner may still revise it.
+
+| # | Question | Provisional default | Where | Status |
+|---|---|---|---|---|
+| BZ-D1 | At which price is an online order recorded as a Billz sale (O6; Billz open question 3)? | At what the customer was charged: per line `use_free_price: true`, `free_price` = `OrderItem.unit_price`, so the expected bill is Σ `unit_price` × `quantity`. The cashback spent and the delivery fee stay outside Billz (sales are `without_cashback`; cashback lives in Glow Derma's ledger). The sale is paid **only** when Billz's recalculated total equals that amount exactly; otherwise nothing is paid and the message is dead-lettered with the reason (staff check the draft). Never another amount, never rounded. | `integrations.billz.live` (`_resolve`, `_push`) | provisional default (lead, 2026-10-26) |
+| BZ-D2 | What happens to a sale while the Billz shift or cash box is closed (20010, 20082, 20033; Billz open question 1)? | Not permanent: the push is deferred every `BILLZ_SHIFT_RETRY_MINUTES` (15) without spending the outbox attempts (`outbox.RetryLater`), for at most `BILLZ_SHIFT_RETRY_MAX_HOURS` (36) after the first refusal, then dead-lettered "shift closed". The bought units stay unavailable online meanwhile. | `core.outbox.RetryLater`, `commerce.tasks.push_sale`, settings | provisional default (lead, 2026-10-26) |
+| BZ-D3 | Configuration-type failures (3xx, 403, a 404 of a route, 20009, 20085, a refused key) | Retryable (`BillzMisconfigured`) with an ERROR `billz.configuration_error` so monitoring alerts; a circuit breaker fails calls fast for 90 s after 5 consecutive transport/5xx failures. After the fix, `manage.py requeue_outbox --topic billz.push_sale --dead [--since ISO] [--dry-run]` replays the dead sales (audited `outbox.requeued`); check first that none was entered in Billz by hand. | `integrations.billz.client`, `core` management command | provisional default (lead, 2026-10-26) |
+| BZ-D4 | Should online sales be sent with `skip_ofd: true` (20063; Billz open question 2)? | Not sent (`false`): online payments are fiscalised by the payment provider; if Billz requires the OFD for the sale it refuses (permanent, recorded by hand). | `integrations.billz.live._pay` | open — product owner to decide |
 
 ## Accounts
 | # | Question | Provisional default | Where | Status |
@@ -136,4 +147,5 @@ _(move rows here with date and who decided)_
 | 2026-10-26 | M2-* | Every M2 open question uses the customer contract's documented default, recorded above as a provisional default | product owner |
 | 2026-10-26 | A6, M2-A14 | Sign in with Apple is in scope (provider `apple`, ID token with nonce; `APPLE_BUNDLE_IDS` empty = disabled/fake until the client provides the bundle id); offer it on iOS | product owner |
 | 2026-10-26 | L6, L7 | The M3 Billz live adapter is built from docs.billz.io (`openapi.yaml` is the source of truth); refunds of paid sales, per-receipt discovery of in-store sales after a QR scan and webhooks (none exist) stay explicit stubs; L6/L7 stay open | product owner |
+| 2026-10-26 | BZ-D1–BZ-D4 | Billz sale at the charged price, paid only on an exact bill; closed shift deferred 15 min × 36 h; configuration failures retryable + `requeue_outbox`; `skip_ofd` stays false pending the product owner | lead (provisional) |
 | 2026-10-26 | M2-F1 | Fake provider adapters are allowed in production (warned and reported); the dev simulate endpoint and the fixed fake OTP exist only under local/test settings, so fake mode never hands out free orders or accepts a fixed code | product owner |

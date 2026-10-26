@@ -386,8 +386,13 @@ class Purchase(TimeStampedModel):
     # Billz identifiers
     billz_sale_id = models.CharField(max_length=64, blank=True)  # Billz's own sale id (store, or online echo)
     billz_sale_ref = models.CharField(max_length=32, blank=True)  # human document number ("S-88213")
-    billz_order_uuid = models.UUIDField(null=True)  # online: generated BEFORE the push, the Billz order id
+    # online: our correlation id, generated BEFORE the push (the outbox dedupe key, logs); Billz's own sale id
+    # is billz_sale_id, stored the moment Billz created the sale (still a draft until billz_pushed_at is set)
+    billz_order_uuid = models.UUIDField(null=True)
     billz_pushed_at = models.DateTimeField(null=True)  # online: set when billz.push_sale succeeded
+    # online: a Billz payment request was sent at this instant and its outcome is not known yet (never paid
+    # twice: the next attempt waits and re-reads the sale; cleared when Billz certainly did not take it)
+    billz_payment_attempted_at = models.DateTimeField(null=True)
     # engine inputs (snapshots)
     amount = models.BigIntegerField()  # gross total before cashback redemption (items_subtotal online)
     promo_amount = models.BigIntegerField(default=0)  # part of amount that is promotional

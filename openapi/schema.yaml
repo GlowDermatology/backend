@@ -3866,6 +3866,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
+        '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/admin/products/{id}/:
     get:
       operationId: admin_products_retrieve
@@ -3989,6 +3995,12 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
         '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '503':
           content:
             application/json:
               schema:

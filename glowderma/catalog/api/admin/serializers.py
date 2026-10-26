@@ -15,11 +15,11 @@ from rest_framework import serializers
 from glowderma.catalog import billz, selectors, services
 from glowderma.catalog.models import Banner, Category, Product, ProductImage
 from glowderma.core import enums
-from glowderma.core.api.exceptions import field_error
+from glowderma.core.api.exceptions import ProviderUnavailable, field_error
 from glowderma.core.api.fields import AwareDateTimeField, QueryBooleanField, SlugField, i18n_dict, i18n_text
 from glowderma.core.api.serializers import ActorSerializer
 from glowderma.core.media import absolute_media_url
-from glowderma.integrations.billz.ports import BillzPort, BillzProduct
+from glowderma.integrations.billz.ports import BillzError, BillzPort, BillzProduct
 
 BILLZ_ID_PATTERN = r"^\d{6,14}$"
 UZ_NAME_MIN_LENGTH = 2
@@ -266,7 +266,10 @@ class ProductWriteSerializer(serializers.Serializer[Any]):
             others = others.exclude(pk=current.pk)
         if others.exists():
             raise serializers.ValidationError([field_error("unique", services.BILLZ_ID_TAKEN)])
-        found = self._port().get_product(value)
+        try:
+            found = self._port().get_product(value)
+        except BillzError as exc:  # live Billz unreachable or refusing: 503, nothing written
+            raise ProviderUnavailable() from exc
         if found is None:
             raise serializers.ValidationError(
                 [field_error("billz_not_found", "Billz’da bunday mahsulot topilmadi.")]

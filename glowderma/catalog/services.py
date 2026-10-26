@@ -9,14 +9,17 @@ rules that need the resulting state — the product **active rule** and the exac
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable, Sequence
+import math
+from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from hashlib import sha256
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
 from django.core.files.base import ContentFile
 from django.db import IntegrityError, connection, transaction
+from django.db.models import Q
 from rest_framework.exceptions import NotFound, ValidationError
 
 from glowderma.catalog import selectors
@@ -25,7 +28,7 @@ from glowderma.core import audit, enums, integration_modes, timeutils
 from glowderma.core.api.exceptions import Conflict, field_error
 from glowderma.core.images import ImageError, ProcessedImage, process_image
 from glowderma.core.media import media_name
-from glowderma.integrations.billz.ports import BillzProduct
+from glowderma.integrations.billz.ports import BillzListingIncomplete, BillzProduct
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +145,8 @@ def product_snapshot(product: Product) -> dict[str, Any]:
 def _apply_billz(product: Product, row: BillzProduct) -> None:
     product.billz_id = row.billz_id
     product.billz_name = row.billz_name
-    product.volume = row.volume
+    if row.volume is not None:  # None: Billz asserted no volume (no BILLZ_VOLUME_FIELD); keep the stored one
+        product.volume = row.volume
     product.billz_price = row.price
     product.billz_synced_at = row.synced_at
 
@@ -706,8 +710,9 @@ def upsert_from_billz(row: BillzProduct) -> UpsertOutcome:
     """The import's upsert by ``billz_id`` (contract §2.3).
 
     New → ``hidden`` with ``is_new_from_billz=True``, ``price = billz price or 0``, empty texts, no images.
-    Existing → only ``billz_name``, ``volume``, ``billz_price``, ``billz_synced_at`` and the stock row change;
-    texts, images, price, status, promo, ``last_change`` and ``updated_at`` are never touched.
+    Existing → only ``billz_name``, ``volume``, ``billz_price``, ``billz_synced_at`` and the stock row change
+    (``volume`` only when Billz asserts one: ``row.volume is None`` leaves it alone); texts, images, price,
+    status, promo, ``last_change`` and ``updated_at`` are never touched.
     """
     require_live_billz()
     with transaction.atomic():
@@ -720,14 +725,105 @@ def upsert_from_billz(row: BillzProduct) -> UpsertOutcome:
             return "created"
         changed = (
             product.billz_name != row.billz_name
-            or product.volume != row.volume
+            or (row.volume is not None and product.volume != row.volume)
             or product.billz_price != row.price
         )
-        Product.objects.filter(pk=product.pk).update(
-            billz_name=row.billz_name, volume=row.volume, billz_price=row.price, billz_synced_at=row.synced_at
-        )
+        fields: dict[str, Any] = {
+            "billz_name": row.billz_name,
+            "billz_price": row.price,
+            "billz_synced_at": row.synced_at,
+        }
+        if row.volume is not None:  # None = not asserted (no BILLZ_VOLUME_FIELD): never blank a stored volume
+            fields["volume"] = row.volume
+        Product.objects.filter(pk=product.pk).update(**fields)
         stock_changed = sync_stock(product, row.stock, row.synced_at)
         return "updated" if changed or stock_changed else "unchanged"
+
+
+# Audit reason of a product hidden by the reconciliation (docs/integrations/billz.md "Full sync").
+BILLZ_MISSING_REASON = "billz_missing: Billz no longer lists this product (daily full sync)"
+
+
+# A full sync may always hide this many products, whatever the share (a few discontinued items a day).
+HIDE_ALWAYS_ALLOWED = 3
+
+
+class TooManyMissing(BillzListingIncomplete):
+    """Billz no longer lists an implausibly large share of the active catalog: nothing is hidden."""
+
+
+def _changed_since(product: Product, instant: datetime) -> bool:
+    stamps = (product.created_at, product.updated_at, product.billz_synced_at)
+    return any(stamp is not None and stamp >= instant for stamp in stamps)
+
+
+def hide_missing_from_billz(
+    listed: Collection[str], *, min_ratio: float = 1.0, listed_at: datetime | None = None
+) -> list[int]:
+    """The full sync's reconciliation: every **active** product whose ``billz_id`` is not in ``listed`` (the
+    complete Billz listing) becomes ``hidden``; returns their ids. Products are never deleted, so a product
+    Billz lists again keeps its texts, images and history and staff re-activate it.
+
+    Second plausibility guard (the first is the adapter's, on Billz's own count): when more than
+    ``max(HIDE_ALWAYS_ALLOWED, (1 − min_ratio) × active products)`` would be hidden — e.g. the catalog's
+    Billz ids are not the barcodes Billz lists, or the wrong shop is configured — :class:`TooManyMissing` is
+    raised and nothing is hidden.
+
+    Hiding is an admin-owned change made by the system: ``last_change`` = ``hidden`` without an actor and the
+    ``product.updated`` audit row (``status`` diff, actor ``system``) with :data:`BILLZ_MISSING_REASON`. Each
+    product is hidden in its own transaction under its row lock (an admin edit in between wins: the row is
+    re-read). The caller guarantees ``listed`` is complete (``BillzPort.iter_products("full")``).
+
+    ``listed_at`` (when the listing started being read): a product created, edited or looked up in Billz at
+    or after that instant is never hidden — the listing could not contain it (staff created and activated it
+    while the run was paging, review B12); the next daily full sync judges it.
+    """
+    require_live_billz()
+    wanted = frozenset(listed)
+    hidden: list[int] = []
+    active = Product.objects.filter(status=enums.ProductStatus.ACTIVE)
+    missing = active.exclude(billz_id__in=wanted)
+    if listed_at is not None:
+        missing = missing.exclude(
+            Q(created_at__gte=listed_at) | Q(updated_at__gte=listed_at) | Q(billz_synced_at__gte=listed_at)
+        )
+    candidates = list(missing.order_by("id").values_list("pk", flat=True))
+    total = active.count()
+    allowed = max(HIDE_ALWAYS_ALLOWED, total - math.ceil(round(total * min_ratio, 6)))
+    if len(candidates) > allowed:
+        raise TooManyMissing(
+            f"Billz no longer lists {len(candidates)} active products; refusing to hide more than {allowed} "
+            "in one run"
+        )
+    for product_id in candidates:
+        with transaction.atomic():
+            product = (
+                Product.objects.select_for_update(of=("self",))
+                .select_related("category")
+                .filter(pk=product_id, status=enums.ProductStatus.ACTIVE)
+                .first()
+            )
+            if product is None or product.billz_id in wanted:
+                continue
+            if listed_at is not None and _changed_since(product, listed_at):
+                continue  # created, edited or looked up after the listing started: not this run's to judge
+            before = product_snapshot(product)
+            product.status = enums.ProductStatus.HIDDEN
+            _set_last_change(product, enums.ProductChangeKind.HIDDEN, None, before)
+            product.save()
+            diff_before, diff_after = _diff(before, product_snapshot(product))
+            audit.record(
+                action="product.updated",
+                entity_type="product",
+                entity_id=str(product.pk),
+                before=diff_before,
+                after=diff_after,
+                reason=BILLZ_MISSING_REASON,
+            )
+            hidden.append(product.pk)
+    if hidden:
+        logger.warning("Billz full sync hid %d products Billz no longer lists: %s", len(hidden), hidden)
+    return hidden
 
 
 def import_products(rows: Iterable[BillzProduct]) -> dict[str, int]:

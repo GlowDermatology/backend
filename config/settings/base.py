@@ -197,6 +197,10 @@ def logging_config(app_level: str) -> dict[str, Any]:
             "django.security": {"level": "WARNING"},
             "glowderma": {"level": app_level},
             "celery": {"level": "INFO"},
+            # httpx logs every request URL at INFO; provider query strings can carry a phone number (Billz
+            # GET /v1/client?phone_number=…), so its request lines never reach the logs.
+            "httpx": {"level": "WARNING"},
+            "httpcore": {"level": "WARNING"},
         },
     }
 
@@ -249,12 +253,73 @@ SPECTACULAR_SETTINGS["ENUM_NAME_OVERRIDES"] = {
     "HealthStatusEnum": ["ok", "error"],
     "SocialProviderEnum": ["google", "facebook"],
 }
-# --- Billz adapter (contract 2.3, M1a) ---
-# BILLZ_MODE: "fake" (deterministic in-process catalog, see integrations.billz.fake) or "live" (M3); defaults
-# to INTEGRATIONS_MODE.
-BILLZ_MODE = env_str("BILLZ_MODE", INTEGRATIONS_MODE)
+# --- Billz adapter (contract 2.3, M1a; live client M3, docs/integrations/billz.md) ---
+# BILLZ_MODE: "fake" (deterministic in-process catalog, see integrations.billz.fake) or "live"
+# (integrations.billz.live, the BILLZ 2.0 public API); defaults to INTEGRATIONS_MODE.
+BILLZ_MODE = env_str("BILLZ_MODE", INTEGRATIONS_MODE).strip()
 if BILLZ_MODE not in {"fake", "live"}:
     raise ImproperlyConfigured("BILLZ_MODE must be 'fake' or 'live'")
+
+
+def env_positive_float(name: str, default: float, *, maximum: float | None = None) -> float:
+    try:
+        value = float(env_str(name, default))
+    except ValueError as exc:
+        raise ImproperlyConfigured(f"{name} must be a number") from exc
+    if not value > 0 or value == float("inf"):
+        raise ImproperlyConfigured(f"{name} must be a positive number")
+    if maximum is not None and value > maximum:
+        raise ImproperlyConfigured(f"{name} must be at most {maximum:g}")
+    return value
+
+
+def env_bounded_int(name: str, default: int, *, minimum: int, maximum: int) -> int:
+    value = env_int(name, default)
+    if not minimum <= value <= maximum:
+        raise ImproperlyConfigured(f"{name} must be between {minimum} and {maximum}")
+    return value
+
+
+def env_billz_value(name: str, default: str = "") -> str:
+    """A Billz key or id with surrounding whitespace removed: a ``.env`` saved with CRLF line endings leaves
+    a ``\\r`` on every value, and a shop id that never equals Billz's own would zero every stock."""
+    return env_str(name, default).strip()
+
+
+# Live client only; the fake needs none of these (config.settings.production requires the ids and the key when
+# BILLZ_MODE=live). The base URL and the platform id are the documented public values of openapi.yaml.
+BILLZ_BASE_URL = env_str("BILLZ_BASE_URL", "https://api-admin.billz.ai").strip().rstrip("/")
+if urlsplit(BILLZ_BASE_URL).scheme not in {"http", "https"} or not urlsplit(BILLZ_BASE_URL).netloc:
+    raise ImproperlyConfigured("BILLZ_BASE_URL must be an absolute http(s) URL")
+# The integration key (Settings → Company → Integration keys); the shop whose stock and price the catalog
+# shows (GET /v1/shop); the cash box online sales are created on (GET /v1/cash-box); the online payment type
+# (GET /v1/company-payment-type).
+BILLZ_SECRET_KEY = env_billz_value("BILLZ_SECRET_KEY")
+BILLZ_PLATFORM_ID = env_billz_value("BILLZ_PLATFORM_ID", "7d4a4c38-dd84-4902-b744-0488b80a4c01")
+BILLZ_SHOP_ID = env_billz_value("BILLZ_SHOP_ID")
+BILLZ_CASHBOX_ID = env_billz_value("BILLZ_CASHBOX_ID")
+BILLZ_PAYMENT_TYPE_ID = env_billz_value("BILLZ_PAYMENT_TYPE_ID")
+# Requests per second shared by every worker (Redis cache). Billz answers 429 above ~2/s per IP, so the
+# default stays below that limit and nothing above it is accepted.
+BILLZ_RATE_LIMIT_PER_SECOND = env_positive_float("BILLZ_RATE_LIMIT_PER_SECOND", 1.5, maximum=2.0)
+# Bounded so that one call can never outlive the sale push deadline (240 s) or the renewal lock (90 s).
+BILLZ_CONNECT_TIMEOUT_SECONDS = env_positive_float("BILLZ_CONNECT_TIMEOUT_SECONDS", 5.0, maximum=30.0)
+BILLZ_READ_TIMEOUT_SECONDS = env_positive_float("BILLZ_READ_TIMEOUT_SECONDS", 30.0, maximum=60.0)
+# GET /v2/products page size (Billz refuses limit > 300).
+BILLZ_PAGE_SIZE = env_int("BILLZ_PAGE_SIZE", 300)
+if not 1 <= BILLZ_PAGE_SIZE <= 300:
+    raise ImproperlyConfigured("BILLZ_PAGE_SIZE must be between 1 and 300")
+# A full sync hides missing products only when Billz listed at least this share of the previous full count.
+BILLZ_FULL_SYNC_MIN_RATIO = env_positive_float("BILLZ_FULL_SYNC_MIN_RATIO", 0.8)
+if BILLZ_FULL_SYNC_MIN_RATIO > 1:
+    raise ImproperlyConfigured("BILLZ_FULL_SYNC_MIN_RATIO must be in (0, 1]")
+# Name of the Billz product attribute or custom field holding the volume ("30 ml"); empty = volume not synced.
+BILLZ_VOLUME_FIELD = env_str("BILLZ_VOLUME_FIELD", "").strip()
+# A sale Billz refuses because the shift or the cash box is closed (20010, 20082, 20033) is retried this
+# often, without spending the outbox attempts, for at most this long after the first refusal; then it is
+# dead-lettered with the reason "shift closed" (decision D2, docs/integrations/billz.md §7).
+BILLZ_SHIFT_RETRY_MINUTES = env_bounded_int("BILLZ_SHIFT_RETRY_MINUTES", 15, minimum=1, maximum=24 * 60)
+BILLZ_SHIFT_RETRY_MAX_HOURS = env_bounded_int("BILLZ_SHIFT_RETRY_MAX_HOURS", 36, minimum=1, maximum=7 * 24)
 # --- Notifications: FCM adapter and campaign batching (contract 2.8, M1d) ---
 # FCM_MODE: "fake" (deterministic in-process push adapter, see integrations.fcm.fake; tokens ending in "-bad"
 # fail) or "live" (M3); defaults to INTEGRATIONS_MODE. CAMPAIGN_BATCH_SIZE is the number of recipients one

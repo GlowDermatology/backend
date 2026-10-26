@@ -972,6 +972,30 @@ def reverse_purchase(purchase_id: int, at: datetime, actor_id: int | None = None
         )
 
 
+def record_billz_order(
+    purchase_id: int, *, billz_order_uuid: UUID, billz_sale_id: str, billz_sale_ref: str
+) -> LinkResult:
+    """Persist the sale Billz just created for an online purchase (design "Billz sale"), nothing more.
+
+    The live push (``integrations.billz``) calls this through the ``billz.push_sale`` handler the moment
+    Billz answered the create, **before** any item is sent, so a retry after a crash at any later step resumes
+    on that sale instead of creating another one. ``billz_pushed_at`` stays null until the sale is paid in
+    Billz (:func:`link_billz_sale`). Same checks and idempotency as :func:`link_billz_sale`: the same id again
+    is a no-op; another id on the purchase, an id of another purchase or a wrong ``billz_order_uuid`` raise
+    :class:`BillzSaleConflict`.
+    """
+    if not billz_sale_id:
+        raise ValueError("record_billz_order needs the Billz sale id")
+    return _link_billz(
+        purchase_id,
+        billz_order_uuid=billz_order_uuid,
+        billz_sale_id=billz_sale_id,
+        billz_sale_ref=billz_sale_ref,
+        pushed_at=None,
+        mark_pushed=False,
+    )
+
+
 def link_billz_sale(
     purchase_id: int,
     *,
@@ -992,6 +1016,64 @@ def link_billz_sale(
     an already linked purchase, or a sale id that already belongs to another purchase, raises
     :class:`BillzSaleConflict`.
     """
+    return _link_billz(
+        purchase_id,
+        billz_order_uuid=billz_order_uuid,
+        billz_sale_id=billz_sale_id,
+        billz_sale_ref=billz_sale_ref,
+        pushed_at=pushed_at,
+        mark_pushed=True,
+    )
+
+
+def record_billz_payment_attempt(purchase_id: int, *, billz_sale_id: str, at: datetime) -> None:
+    """Persist that the payment of the online purchase's Billz sale is about to be sent (review B2).
+
+    Called by the ``billz.push_sale`` journal right before ``POST /v2/order-payment`` and committed before
+    it, so an answer lost in transit is never followed by a second payment: the next attempt finds the stamp
+    and re-reads the sale instead. Refuses (:class:`BillzSaleConflict`) a purchase that is not online, holds
+    another sale or was pushed already.
+    """
+    _aware(at, "at")
+    with transaction.atomic():
+        purchase = _locked_online_purchase(purchase_id, billz_sale_id)
+        if purchase.billz_pushed_at is not None:
+            raise BillzSaleConflict(f"Purchase {purchase_id} was pushed to Billz already")
+        Purchase.objects.filter(pk=purchase.pk).update(
+            billz_payment_attempted_at=at, updated_at=timeutils.now()
+        )
+
+
+def clear_billz_payment_attempt(purchase_id: int, *, billz_sale_id: str) -> None:
+    """Billz certainly did not take the payment (refused it, or it was never sent): forget the attempt."""
+    with transaction.atomic():
+        purchase = _locked_online_purchase(purchase_id, billz_sale_id)
+        if purchase.billz_payment_attempted_at is not None and purchase.billz_pushed_at is None:
+            Purchase.objects.filter(pk=purchase.pk).update(
+                billz_payment_attempted_at=None, updated_at=timeutils.now()
+            )
+
+
+def _locked_online_purchase(purchase_id: int, billz_sale_id: str) -> Purchase:
+    purchase = Purchase.objects.select_for_update(of=("self",)).filter(pk=purchase_id).first()
+    if purchase is None:
+        raise PurchaseNotFound(f"Purchase {purchase_id} does not exist")
+    if purchase.source != enums.PurchaseSource.ONLINE:
+        raise BillzSaleConflict(f"Purchase {purchase_id} is a store sale, not an online order")
+    if not billz_sale_id or purchase.billz_sale_id != billz_sale_id:
+        raise BillzSaleConflict(f"Purchase {purchase_id} is not linked to Billz sale {billz_sale_id!r}")
+    return purchase
+
+
+def _link_billz(
+    purchase_id: int,
+    *,
+    billz_order_uuid: UUID | None,
+    billz_sale_id: str,
+    billz_sale_ref: str,
+    pushed_at: datetime | None,
+    mark_pushed: bool,
+) -> LinkResult:
     _check_billz_refs(billz_sale_id, billz_sale_ref)
     _aware(pushed_at, "pushed_at")
     with transaction.atomic():
@@ -1012,7 +1094,7 @@ def link_billz_sale(
         sale_id = billz_sale_id or purchase.billz_sale_id
         ref = billz_sale_ref or purchase.billz_sale_ref or sale_id
         _check_billz_refs(sale_id, ref)  # a defaulted ref (the sale id) must fit too
-        pushed = purchase.billz_pushed_at or pushed_at or timeutils.now()
+        pushed = purchase.billz_pushed_at or ((pushed_at or timeutils.now()) if mark_pushed else None)
         changed = (sale_id, ref, pushed) != (
             purchase.billz_sale_id,
             purchase.billz_sale_ref,
@@ -1451,6 +1533,7 @@ __all__ = [
     "active_policy",
     "adjust",
     "capture_hold",
+    "clear_billz_payment_attempt",
     "create_hold",
     "create_policy_version",
     "create_pos_device",
@@ -1462,6 +1545,8 @@ __all__ = [
     "policy_at",
     "pos_key_hash",
     "post_entry",
+    "record_billz_order",
+    "record_billz_payment_attempt",
     "record_online_purchase",
     "record_store_purchase",
     "release_hold",

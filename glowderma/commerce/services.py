@@ -844,6 +844,26 @@ def clean_reason(reason: str) -> str:
     return text
 
 
+def _announce_billz_refund(order_id: int, purchase_id: int) -> None:
+    """A cancelled order whose Billz sale exists (paid, or a draft a push may still pay): Billz has no refund
+    API (stub ``refund_sale``), so once the cancel commits an ERROR line names the sale staff refund — or the
+    draft they delete — in Billz by hand (review A S5). A push still running stops before paying
+    (``PurchaseJournal.before_payment``) or logs ``billz.sale_of_cancelled_order`` after it."""
+    info = loyalty_selectors.billz_push_info(purchase_id)
+    if info is None or not info.billz_sale_id:
+        return
+    sale_id, pushed = info.billz_sale_id, info.billz_pushed_at is not None
+    transaction.on_commit(
+        lambda: logger.error(
+            "billz.refund_by_hand order_id=%s billz_order_id=%s pushed=%s: the order was cancelled; "
+            "refund the Billz sale (or delete its draft) in Billz by hand",
+            order_id,
+            sale_id,
+            pushed,
+        )
+    )
+
+
 def cancel_order(
     order_id: int, reason: str, actor_id: int, *, at: datetime | None = None, request: Any = None
 ) -> CancelResult:
@@ -926,6 +946,7 @@ def cancel_order(
                 instant = at or ledger_instant(order.customer_id, instant)
                 reversal = loyalty_services.reverse_purchase(purchase.id, instant, actor_id)
                 cashback_reversed = len(reversal.reversal_entry_ids) > 0
+                _announce_billz_refund(order.pk, purchase.id)
         _set_status(
             order,
             _S.CANCELLED,

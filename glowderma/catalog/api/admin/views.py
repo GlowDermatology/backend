@@ -43,7 +43,7 @@ from glowderma.core import enums, labels
 from glowderma.core.api.exceptions import field_error
 from glowderma.core.api.fields import RESERVED_SLUGS
 from glowderma.core.api.parsers import JSONParser
-from glowderma.core.api.schema import ADMIN_ERRORS, EXPORT_PARAM
+from glowderma.core.api.schema import ADMIN_ERRORS, EXPORT_PARAM, ErrorEnvelopeSerializer
 from glowderma.core.exports import ExportMixin, format_export_datetime
 from glowderma.core.idempotency import idempotent
 from glowderma.integrations import selectors as integration_selectors
@@ -51,6 +51,9 @@ from glowderma.integrations import services as job_services
 from glowderma.integrations.api.admin.serializers import BillzImportSerializer, JobSerializer
 
 # --- products -----------------------------------------------------------------------------------------------
+
+# A create or a billz_id change asks Billz for the product: a live Billz that does not answer is 503.
+BILLZ_LOOKUP_ERRORS = {**ADMIN_ERRORS, 503: ErrorEnvelopeSerializer}
 
 
 class ProductViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
@@ -94,7 +97,7 @@ class ProductViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
     @extend_schema(
         operation_id="admin_products_create",
         request=ProductWriteSerializer,
-        responses={201: ProductSerializer, **ADMIN_ERRORS},
+        responses={201: ProductSerializer, **BILLZ_LOOKUP_ERRORS},
     )
     @idempotent(required=False)
     def create(self, request: Request) -> Response:
@@ -114,7 +117,7 @@ class ProductViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
     @extend_schema(
         operation_id="admin_products_partial_update",
         request=ProductPatchSerializer,
-        responses={200: ProductSerializer, **ADMIN_ERRORS},
+        responses={200: ProductSerializer, **BILLZ_LOOKUP_ERRORS},
     )
     @idempotent(required=False)
     def partial_update(self, request: Request, pk: int) -> Response:

@@ -131,3 +131,22 @@ def test_reaper_is_registered_and_scheduled_every_five_minutes() -> None:
     assert "integrations.reap_stale_jobs" in app.tasks
     schedule = app.conf.beat_schedule["reap-stale-jobs"]
     assert schedule == {"task": "integrations.reap_stale_jobs", "schedule": 300.0}
+
+
+def test_reap_stale_jobs_fails_a_job_no_worker_claimed_in_time(
+    django_capture_on_commit_callbacks: Any,
+) -> None:
+    """Review B14: a queued job whose ``job.queued`` message died (or whose task was lost) would hold the
+    single-flight slot for ever, and the beat would join it silently every hour."""
+    lost = JobFactory.create()
+    Job.objects.filter(pk=lost.pk).update(created_at=timeutils.now() - timedelta(minutes=16))
+    young = timeutils.now()
+    with django_capture_on_commit_callbacks(execute=True):
+        reaped = services.reap_stale_jobs()
+    assert [job.pk for job in reaped] == [lost.pk]
+    lost.refresh_from_db()
+    assert (lost.state, lost.error) == ("failed", WORKER_LOST)
+    assert lost.started_at is not None and lost.started_at >= young and lost.finished_at is not None
+    assert AuditEntry.objects.filter(action="billz.import_finished", entity_id=str(lost.pk)).exists()
+    assert services.claim_job(lost.pk) is None  # a late task finds it finished
+    assert not services.is_lost_in_queue(lost)

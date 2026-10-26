@@ -290,8 +290,17 @@ def test_integrations_mode_validated_at_startup(
     ok: bool,
 ) -> None:
     monkeypatch.setenv("INTEGRATIONS_MODE", value)
-    # live adapters would also demand their credentials (covered in integrations/tests/test_live_settings.py)
-    for name in ("OAUTH_MODE", "CLICK_MODE", "PAYME_MODE", "BTS_MODE", "ESKIZ_MODE", "FCM_MODE"):
+    # live adapters would also demand their credentials (covered in integrations/tests/test_live_settings.py
+    # and test_billz_settings.py)
+    for name in (
+        "OAUTH_MODE",
+        "CLICK_MODE",
+        "PAYME_MODE",
+        "BTS_MODE",
+        "ESKIZ_MODE",
+        "FCM_MODE",
+        "BILLZ_MODE",
+    ):
         monkeypatch.setenv(name, "fake")
     if ok:
         assert load_fresh_production().INTEGRATIONS_MODE == value
@@ -492,7 +501,7 @@ def test_live_oauth_follows_integrations_mode_and_rejects_placeholders(
 ) -> None:
     monkeypatch.delenv("OAUTH_MODE", raising=False)
     monkeypatch.setenv("INTEGRATIONS_MODE", "live")
-    for name in ("CLICK_MODE", "PAYME_MODE", "BTS_MODE", "ESKIZ_MODE", "FCM_MODE"):
+    for name in ("CLICK_MODE", "PAYME_MODE", "BTS_MODE", "ESKIZ_MODE", "FCM_MODE", "BILLZ_MODE"):
         monkeypatch.setenv(name, "fake")  # their live settings are tested in integrations/tests
     for name, value in LIVE_OAUTH_ENV.items():
         monkeypatch.setenv(name, value)

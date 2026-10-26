@@ -1,0 +1,18 @@
+{"_source": "get_v2_products 200, page 2 of the same listing",
+ "count": 4,
+ "products": [
+  {"id": "e9a593b4-b67d-478e-b851-66e7f6d7e22c", "parent_id": "", "name": "GIFT BOX (NO BARCODE)",
+   "sku": "BOX-1", "barcode": "", "description": "", "is_variative": false, "categories": [],
+   "updated_at": "2026-10-26 09:30:00",
+   "shop_measurement_values": [{"shop_id": "c1056fcc-539b-47ea-8bc4-d9e337c433f0", "shop_name": "Glow Derma Yunusobod", "active_measurement_value": 3}],
+   "shop_prices": [{"shop_id": "c1056fcc-539b-47ea-8bc4-d9e337c433f0", "shop_name": "Glow Derma Yunusobod", "retail_price": 50000,
+                    "retail_currency": "UZS", "supply_price": 0, "supply_currency": "", "promo_price": 0, "promos": []}],
+   "product_attributes": [], "custom_fields": null},
+  {"id": "5f3e2d1c-0000-4000-8000-000000000004", "parent_id": "", "name": "WAREHOUSE ONLY CREAM",
+   "sku": "GD-CR-50", "barcode": "4607012303", "description": "", "is_variative": false, "categories": [],
+   "updated_at": "2026-10-26 09:45:00",
+   "shop_measurement_values": [{"shop_id": "6f244db4-75d6-4fac-9841-14867d45e36a", "shop_name": "Warehouse", "active_measurement_value": 7.5}],
+   "shop_prices": [{"shop_id": "6f244db4-75d6-4fac-9841-14867d45e36a", "shop_name": "Warehouse", "retail_price": 249000,
+                    "retail_currency": "UZS", "supply_price": 0, "supply_currency": "", "promo_price": 0, "promos": []}],
+   "product_attributes": [], "custom_fields": null}
+ ]}

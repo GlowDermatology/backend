@@ -1,0 +1,5 @@
+{"_source": "post_v2_order 200 with Billz-Response-Channel: HTTP (llms-full 'Интернет-заказ', step 2)",
+ "session_id": "fd8d352a-6299-4489-8a6e-a5c037f3f65b", "status_code": 200,
+ "id": "38c3920a-ffdd-4233-a823-8af3266f5f4f", "error": {"code": "", "message": ""},
+ "data": {"id": "38c3920a-ffdd-4233-a823-8af3266f5f4f", "order_number": "5632631379", "order_type": "SALE"},
+ "correlation_id": "3674f28e-7b96-4683-87c3-80892698f421"}

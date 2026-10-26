@@ -379,6 +379,7 @@ class BillzPushInfo:
     billz_sale_id: str
     billz_sale_ref: str
     billz_pushed_at: datetime | None  # set → the push already succeeded; the handler skips
+    billz_payment_attempted_at: datetime | None = None  # a Billz payment whose outcome is not known yet
 
 
 def billz_push_info(purchase_id: int) -> BillzPushInfo | None:
@@ -393,6 +394,7 @@ def billz_push_info(purchase_id: int) -> BillzPushInfo | None:
             "billz_sale_id",
             "billz_sale_ref",
             "billz_pushed_at",
+            "billz_payment_attempted_at",
         )
         .first()
     )
@@ -406,6 +408,7 @@ def billz_push_info(purchase_id: int) -> BillzPushInfo | None:
         billz_sale_id=purchase.billz_sale_id,
         billz_sale_ref=purchase.billz_sale_ref,
         billz_pushed_at=purchase.billz_pushed_at,
+        billz_payment_attempted_at=purchase.billz_payment_attempted_at,
     )
 
 
