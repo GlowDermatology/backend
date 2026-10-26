@@ -4,6 +4,7 @@ from datetime import date, datetime, time
 from typing import Any
 
 import pytest
+from drf_spectacular.generators import SchemaGenerator
 from rest_framework.test import APIClient
 
 from glowderma.accounts import seeds as accounts_seeds
@@ -378,3 +379,33 @@ def test_meta_runs_in_a_bounded_number_of_queries(
 ) -> None:
     with django_assert_max_num_queries(8):
         assert staff_client.get(f"{BASE}meta/").status_code == 200
+
+
+def test_optional_note_and_reason_are_optional_in_the_schema() -> None:
+    """``note`` (create) and ``reason`` (cancel) are optional: not required and without a schema ``default``
+    (a generator types a key with a default as always present)."""
+    schema_doc = SchemaGenerator().get_schema(request=None, public=True)  # type: ignore[no-untyped-call]
+    components = schema_doc["components"]["schemas"]
+    for component, field in (("AppointmentCreateRequest", "note"), ("AppointmentCancelRequest", "reason")):
+        schema = components[component]
+        assert field in schema["properties"]
+        assert field not in schema.get("required", [])
+        assert "default" not in schema["properties"][field]
+
+
+def test_create_without_note_and_cancel_without_reason_use_the_empty_default(
+    staff_client: APIClient, seeded: None
+) -> None:
+    created = staff_client.post(
+        BASE,
+        {"specialist_id": 2, "service_id": 1, "customer_id": 5, "start": at("2026-10-27", "11:00")},
+        format="json",
+    )
+    assert created.status_code == 201, created.data
+    row = Appointment.objects.get(pk=created.data["id"])
+    assert row.staff_note == ""
+    cancelled = staff_client.post(f"{BASE}{row.pk}/cancel/", {}, format="json")
+    assert cancelled.status_code == 200 and cancelled.data["status"] == "cancelled"
+    row.refresh_from_db()
+    assert row.staff_note == ""
+    assert row.events.get(type="cancelled").data["reason"] is None

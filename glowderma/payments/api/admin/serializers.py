@@ -1,31 +1,20 @@
-"""Admin serializers of `payments` (contract §2.12 ``GET payments/``). The ``Refund``, ``CustomerRef`` and the
-period query shapes are shared with the orders screens of ``commerce`` (above this module)."""
+"""Admin serializers of `payments` (contract §2.12 ``GET payments/``). The ``Refund`` and the period query
+shapes are shared with the orders screens of ``commerce`` (above this module); ``CustomerRef`` lives in
+``core.api.serializers``."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from drf_spectacular.utils import extend_schema_field, extend_schema_serializer
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from glowderma.core import enums
 from glowderma.core.api.exceptions import field_error
+from glowderma.core.api.serializers import CustomerRefSerializer
 from glowderma.payments.selectors import RefundRow
 
 SEARCH_MAX_LENGTH = 64
-
-
-@extend_schema_serializer(component_name="OrderCustomerRef")
-class CustomerRefSerializer(serializers.Serializer[Any]):
-    """``CustomerRef = {id, name, phone}``; ``name`` is ``""`` once the customer is deleted (§2.0).
-
-    Same shape as ``appointments``' ``CustomerRef`` (a sibling module this one cannot import); the component
-    is named ``OrderCustomerRef`` until the shape moves to ``core.api.serializers`` (proposed to the lead).
-    """
-
-    id = serializers.IntegerField(source="pk")
-    name = serializers.CharField(allow_blank=True)
-    phone = serializers.CharField()
 
 
 class RefundSerializer(serializers.Serializer[RefundRow]):

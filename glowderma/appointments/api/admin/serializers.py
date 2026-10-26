@@ -13,6 +13,7 @@ from glowderma.appointments.selectors import DayView
 from glowderma.core import enums
 from glowderma.core.api.exceptions import field_error
 from glowderma.core.api.fields import AwareDateTimeField, PhoneField
+from glowderma.core.api.serializers import CustomerRefSerializer
 from glowderma.professionals.models import Professional, Service
 from glowderma.professionals.selectors import DaySchedule
 
@@ -23,14 +24,6 @@ MESSAGES = {
     "customer_id_not_found": "Mijoz topilmadi.",
     "one_customer_ref": "customer_id yoki phone dan faqat bittasini yuboring.",
 }
-
-
-class CustomerRefSerializer(serializers.Serializer[Customer]):
-    """Contract §2.0 ``CustomerRef``; ``name`` is ``""`` once the customer is deleted (scrubbed)."""
-
-    id = serializers.IntegerField()
-    name = serializers.CharField(allow_blank=True)
-    phone = serializers.CharField()
 
 
 class AppointmentItemSerializer(serializers.Serializer[Appointment]):
@@ -103,7 +96,9 @@ class AppointmentCreateSerializer(serializers.Serializer[dict[str, Any]]):
     customer_id = serializers.IntegerField(required=False)
     phone = PhoneField(required=False)
     start = AwareDateTimeField()
-    note = serializers.CharField(max_length=300, allow_blank=True, required=False, default="")
+    # Optional in the contract: no schema ``default`` (a generator would type the key as always present);
+    # ``validate`` supplies the runtime default "".
+    note = serializers.CharField(max_length=300, allow_blank=True, required=False)
 
     def validate_specialist_id(self, value: int) -> Professional:
         professional = Professional.objects.filter(pk=value, is_active=True).first()
@@ -120,6 +115,7 @@ class AppointmentCreateSerializer(serializers.Serializer[dict[str, Any]]):
         return service
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        attrs.setdefault("note", "")
         has_id, has_phone = "customer_id" in attrs, "phone" in attrs
         if has_id == has_phone:
             code = "required" if not has_id else "invalid"
@@ -162,7 +158,11 @@ class AppointmentRescheduleSerializer(serializers.Serializer[dict[str, Any]]):
 class AppointmentCancelSerializer(serializers.Serializer[dict[str, Any]]):
     """``POST appointments/{id}/cancel/``: optional ``reason`` (≤ 300), kept as the staff note."""
 
-    reason = serializers.CharField(max_length=300, allow_blank=True, required=False, default="")
+    reason = serializers.CharField(max_length=300, allow_blank=True, required=False)  # no schema default
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        attrs.setdefault("reason", "")
+        return attrs
 
 
 class BookingServiceSerializer(serializers.Serializer[Any]):

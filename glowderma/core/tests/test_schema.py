@@ -19,6 +19,17 @@ def test_committed_schema_is_current() -> None:
     assert generated == committed
 
 
+def test_one_customer_ref_component_serves_every_module() -> None:
+    """Contract §2.0 ``CustomerRef``: one OpenAPI component (appointments, orders, payments)."""
+    generated = SchemaGenerator().get_schema(request=None, public=True)  # type: ignore[no-untyped-call]
+    components = generated["components"]["schemas"]
+    assert "OrderCustomerRef" not in components
+    assert set(components["CustomerRef"]["properties"]) == {"id", "name", "phone"}
+    assert components["CustomerRef"]["required"] == ["id", "name", "phone"]
+    for component in ("AppointmentItem", "OrderSummary", "OrderDetail", "Payment"):
+        assert components[component]["properties"]["customer"] == {"$ref": "#/components/schemas/CustomerRef"}
+
+
 @pytest.mark.django_db
 def test_docs_require_staff_outside_debug() -> None:
     user = get_user_model().objects.create_user("admin@x.uz", "Saffron!Harbor-Long72")

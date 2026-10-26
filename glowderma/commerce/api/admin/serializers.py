@@ -11,12 +11,8 @@ from glowderma.commerce import selectors
 from glowderma.commerce.models import Order, OrderEvent
 from glowderma.core import enums
 from glowderma.core.api.exceptions import field_error
-from glowderma.core.api.serializers import ActorSerializer
-from glowderma.payments.api.admin.serializers import (
-    CustomerRefSerializer,
-    PeriodQuerySerializer,
-    RefundSerializer,
-)
+from glowderma.core.api.serializers import ActorSerializer, CustomerRefSerializer
+from glowderma.payments.api.admin.serializers import PeriodQuerySerializer, RefundSerializer
 
 REASON_MIN_LENGTH = 3
 REASON_MAX_LENGTH = 500

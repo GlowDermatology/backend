@@ -16,3 +16,14 @@ class ActorSerializer(serializers.Serializer[Any]):
 
     def get_display_name(self, obj: Any) -> str:
         return str(getattr(obj, "full_name", "") or obj.get_username())
+
+
+# Takes any ``accounts.Customer`` instance; the one ``CustomerRef`` component every module renders.
+class CustomerRefSerializer(serializers.Serializer[Any]):
+    """``CustomerRef = {"id", "name", "phone"}`` (contract §2.0); ``name`` is ``""`` once the customer is
+    deleted (scrubbed).
+    """
+
+    id = serializers.IntegerField(source="pk")
+    name = serializers.CharField(allow_blank=True)
+    phone = serializers.CharField()
