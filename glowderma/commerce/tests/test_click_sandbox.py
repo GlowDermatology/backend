@@ -612,3 +612,44 @@ def test_a_refused_attach_rolls_back_the_supersede(
         assert prepare(order, txn=TXN + 1)["error"] == -8
     assert _state(order) == before  # the old attempt is still pending and attached, no new row
     assert rows("click")[-1].result["error_code"] == "-8"
+
+
+def test_a_non_ascii_sign_string_answers_minus_1_with_a_bounded_row(order: Order) -> None:
+    params = prepare_params(order)
+    params["sign_string"] = "é" * 32
+    answer = click(CLICK_PREPARE, params)  # asserts HTTP 200 (no TypeError → 500)
+    assert answer["error"] == -1
+    (row,) = rows("click")
+    assert row.event_key.startswith("rejected:") and row.result["error_code"] == "bad_signature"
+
+
+def test_authenticated_refusals_are_never_capped_and_keep_the_raw_body(order: Order) -> None:
+    for _ in range(12):  # correctly signed Prepares whose account reference does not verify
+        assert prepare(order, merchant_trans_id=f"{order.pk}-0000000000")["error"] == -5
+    found = rows("click")
+    assert len(found) == 12  # beyond WEBHOOK_REJECTED_PER_IP_PER_MIN: authenticated rows are uncapped
+    assert all(row.event_key.startswith("rejected:") and row.raw_body for row in found)
+    assert {row.result["error_code"] for row in found} == {"-5"}
+    assert isinstance(found[0].payload, dict) and found[0].payload["merchant_trans_id"].endswith("0000000000")
+    assert prepare(order, service_id="99999")["error"] == -8
+    assert prepare(order, action="1")["error"] == -3
+    assert rows("click")[-1].result["error_code"] == "-3"
+    assert prepare(order)["error"] == 0  # the correct delivery is not a fingerprint conflict
+    assert f"prepare:{TXN}" in keys("click")
+
+
+def test_an_out_of_range_merchant_prepare_id_answers_minus_8(order: Order, now: datetime) -> None:
+    _prepared(order, now)
+    params = complete_params(order, 9_999_999_999_999_999_999)
+    assert click(CLICK_COMPLETE, params)["error"] == -8
+
+
+def test_fake_click_in_production_refuses_a_misaddressed_complete_with_minus_1(
+    order: Order, now: datetime
+) -> None:
+    payment_id = _prepared(order, now)
+    with override_settings(**PROD_FAKE_CLICK):
+        assert complete(order, payment_id, service_id="99999")["error"] == -1
+    row = rows("click")[-1]
+    assert row.event_key.startswith("rejected:") and row.result["error_code"] == "fake_mode"
+    assert Payment.objects.get(pk=payment_id).status == "pending"

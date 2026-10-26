@@ -58,6 +58,31 @@ def test_click_signature_amount_and_fingerprint() -> None:
     assert click.ERRORS[click.SIGN_FAILED] == "SIGN CHECK FAILED!"
 
 
+def test_click_sign_ok_with_a_non_ascii_sign_string_is_false() -> None:
+    params = click_sandbox.prepare_params(click_trans_id=1, merchant_trans_id="10248-abc", amount="784400")
+    params["sign_string"] = "é" * 32
+    assert click.sign_ok(params, "local-click-secret-key", complete=False) is False
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("click_trans_id", "9999999999999999999"),
+        ("click_trans_id", "-5"),
+        ("click_paydoc_id", "9223372036854775808"),
+        ("error", "-9999999999999999999"),
+        ("merchant_prepare_id", "9999999999999999999"),
+    ],
+)
+def test_click_integers_beyond_bigint_or_negative_ids_are_malformed(name: str, value: str) -> None:
+    params = click_sandbox.complete_params(
+        click_trans_id=1, merchant_trans_id="10248-abc", merchant_prepare_id=301, amount="784400"
+    )
+    assert not click.missing_or_malformed(params, complete=True)
+    params[name] = value
+    assert click.missing_or_malformed(params, complete=True)
+
+
 def test_click_pay_url() -> None:
     url = get_click().pay_url("10248-abc", 784400, "https://glowderma.uz/pay/return?order_id=10248")
     assert url.startswith("https://my.click.uz/services/pay?service_id=00000&merchant_id=00000&amount=784400")

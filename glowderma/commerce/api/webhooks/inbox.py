@@ -122,15 +122,24 @@ def store_delivery(
 
 
 def store_conflict(
-    provider: str, request: Any, payload: Any, *, status: int, body: Any, error_code: str, started: float
+    provider: str,
+    request: Any,
+    payload: Any,
+    *,
+    status: int,
+    body: Any,
+    error_code: str,
+    started: float,
+    raw_body: str = "",
 ) -> WebhookInbox:
-    """An authenticated delivery refused for a conflicting fingerprint: a ``rejected:{uuid4}`` row
-    (uncapped)."""
+    """An authenticated delivery refused before its state is read (a conflicting fingerprint; a Click
+    action, service id or account reference that does not fit): a ``rejected:{uuid4}`` row, **uncapped**,
+    never under the delivery's own key."""
     return WebhookInbox.objects.create(
         **_base(provider, request, started),
         event_key=f"rejected:{uuid.uuid4().hex}",
         payload=payload,
-        raw_body="",
+        raw_body=raw_body[:RAW_BODY_MAX],
         result=result(status, body, OUTCOME_REJECTED, error_code),
     )
 

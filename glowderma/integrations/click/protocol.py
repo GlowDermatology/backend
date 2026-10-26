@@ -73,6 +73,7 @@ FINGERPRINT_FIELDS: Final = (
     "error",
 )
 _INT = re.compile(r"-?[0-9]{1,19}")
+BIGINT_MAX: Final = 9_223_372_036_854_775_807
 _AMOUNT = re.compile(r"(0|[1-9][0-9]{0,15})(?:\.([0-9]{1,2}))?")
 _SIGN_TIME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}")
 
@@ -82,10 +83,13 @@ def missing_or_malformed(params: Mapping[str, str], *, complete: bool) -> bool:
     names = COMPLETE_PARAMS if complete else PREPARE_PARAMS
     if any(name not in params for name in names if name != "error_note"):
         return True
-    integers = ["click_trans_id", "service_id", "click_paydoc_id", "action", "error"]
+    ids = ["click_trans_id", "service_id", "click_paydoc_id"]
     if complete:
-        integers.append("merchant_prepare_id")
-    if any(not _INT.fullmatch(params[name]) for name in integers):
+        ids.append("merchant_prepare_id")
+    integers = [*ids, "action", "error"]
+    if any(not _INT.fullmatch(params[name]) or abs(int(params[name])) > BIGINT_MAX for name in integers):
+        return True  # beyond bigint a lookup would raise DataError (HTTP 500, Click retrying forever)
+    if any(int(params[name]) < 0 for name in ids):
         return True
     return not params["merchant_trans_id"] or not params["sign_string"] or not params["sign_time"]
 
@@ -103,7 +107,9 @@ def signature(params: Mapping[str, str], secret: str, *, complete: bool) -> str:
 def sign_ok(params: Mapping[str, str], secret: str, *, complete: bool) -> bool:
     """``compare_digest`` of the received ``sign_string`` with :func:`signature`."""
     received = params.get("sign_string", "").lower()
-    return bool(secret) and hmac.compare_digest(received, signature(params, secret, complete=complete))
+    expected = signature(params, secret, complete=complete)
+    # bytes: ``compare_digest`` raises TypeError on a ``str`` with non-ASCII characters (HTTP 500)
+    return bool(secret) and hmac.compare_digest(received.encode(), expected.encode())
 
 
 def parse_amount(value: str) -> int | None:

@@ -110,14 +110,17 @@ class _ClickCallback(WebhookAPIView):
             return self._rejected(
                 request, params, protocol.SIGN_FAILED, FAKE_MODE if fake else BAD_SIGNATURE, started
             )
+        # Past the signature the request is authenticated: these refusals are stored uncapped, with the raw
+        # body, as their own ``rejected:{uuid4}`` rows — never under the delivery's key, where their foreign
+        # action / service id / reference would make the correct delivery a fingerprint conflict (-8).
         expected_action = protocol.ACTION_COMPLETE if self.complete else protocol.ACTION_PREPARE
         if params["action"] != expected_action:
-            return self._rejected(request, params, protocol.ACTION_NOT_FOUND, "action", started)
+            return self._refused(request, params, protocol.ACTION_NOT_FOUND, raw, started, fake=fake)
         if params["service_id"] != str(settings.CLICK_SERVICE_ID):
-            return self._rejected(request, params, protocol.BAD_REQUEST, "service_id", started)
+            return self._refused(request, params, protocol.BAD_REQUEST, raw, started, fake=fake)
         order_id = payment_ref.verify(params["merchant_trans_id"])
         if order_id is None:
-            return self._rejected(request, params, protocol.USER_NOT_FOUND, "account_ref", started)
+            return self._refused(request, params, protocol.USER_NOT_FOUND, raw, started, fake=fake)
         with transaction.atomic():
             advisory_lock(f"click:{params['click_trans_id']}")
             if self.complete:
@@ -153,6 +156,26 @@ class _ClickCallback(WebhookAPIView):
             entity_ref=entity,
             raw_body=raw,
             started=started,
+        )
+        return Response(body)
+
+    def _refused(
+        self, request: Request, params: dict[str, str], error: int, raw: str, started: float, *, fake: bool
+    ) -> Response:
+        """An authenticated protocol refusal (action, service id, account reference); with a fake Click under
+        the production settings it names no attached payment: ``-1`` and a bounded row (§2.13.0)."""
+        if fake:
+            return self._rejected(request, params, protocol.SIGN_FAILED, FAKE_MODE, started)
+        body = self._answer(params, error)
+        inbox.store_conflict(
+            PROVIDER,
+            request,
+            params,
+            status=200,
+            body=body,
+            error_code=str(error),
+            started=started,
+            raw_body=raw,
         )
         return Response(body)
 
