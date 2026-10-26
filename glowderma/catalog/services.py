@@ -691,7 +691,13 @@ def _reload_banner(banner_id: int) -> Banner:
 
 
 def sync_stock(product: Product, quantity: int, synced_at: Any) -> bool:
-    """Write the Billz stock of ``product``; returns whether the quantity changed (row always touched).
+    """Write the Billz stock of ``product`` read at ``synced_at``; returns whether the quantity changed.
+
+    ``ProductStock.synced_at`` never moves backwards: a read older than the stored one (an import whose
+    listing began before a newer single-product lookup wrote the row) changes nothing — neither the quantity
+    nor ``synced_at``, so availability and the settlement of sold units (``commerce``) keep the newer read.
+    A read at the same instant or later is written (the row is touched even when the quantity is unchanged).
+    The compare and the write run under the stock row's lock, so two concurrent writers cannot interleave.
 
     The last layer of the fake-Billz guard: refused while Billz is fake under the production settings.
     """
@@ -701,9 +707,25 @@ def sync_stock(product: Product, quantity: int, synced_at: Any) -> bool:
     )
     if created:
         return True
-    changed = stock.quantity != quantity
-    ProductStock.objects.filter(pk=stock.pk).update(quantity=quantity, synced_at=synced_at)
-    return changed
+    not_newer = Q(synced_at__isnull=True)
+    if synced_at is not None:
+        not_newer |= Q(synced_at__lte=synced_at)
+    with transaction.atomic():
+        previous = (
+            ProductStock.objects.select_for_update()
+            .filter(not_newer, pk=stock.pk)
+            .values_list("quantity", flat=True)
+            .first()
+        )
+        if previous is None:
+            logger.info(
+                "billz.stock_read_skipped product_id=%s: a newer read is stored (this read at %s)",
+                product.pk,
+                synced_at.isoformat() if synced_at is not None else "-",
+            )
+            return False
+        ProductStock.objects.filter(pk=stock.pk).update(quantity=quantity, synced_at=synced_at)
+    return previous != quantity
 
 
 def upsert_from_billz(row: BillzProduct) -> UpsertOutcome:

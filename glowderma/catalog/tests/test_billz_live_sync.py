@@ -413,3 +413,57 @@ def test_the_beat_warns_when_it_joins_an_old_job(caplog: pytest.LogCaptureFixtur
     with patch("glowderma.catalog.billz.get_port", return_value=live(BillzServer())):
         assert tasks.billz_sync_delta() == old.pk
     assert f"joined import job {old.pk}, queued since" in caplog.text
+
+
+# --- ProductStock.synced_at never moves backwards (M3 integration, NEW-2 edge) -----------------------------
+
+
+def _stock(quantity: int, synced_at: Any) -> ProductStock:
+    return ProductStockFactory.create(quantity=quantity, synced_at=synced_at)
+
+
+def test_sync_stock_ignores_a_read_older_than_the_stored_one(caplog: pytest.LogCaptureFixture) -> None:
+    newer = timeutils.now()
+    stock = _stock(4, newer)
+    assert services.sync_stock(stock.product, 9, newer - timedelta(minutes=5)) is False
+    stock.refresh_from_db()
+    assert (stock.quantity, stock.synced_at) == (4, newer)  # neither the quantity nor the instant moved back
+    assert any("billz.stock_read_skipped" in record.getMessage() for record in caplog.records)
+
+
+def test_sync_stock_writes_a_read_at_the_same_instant_or_later() -> None:
+    read_at = timeutils.now()
+    stock = _stock(4, read_at)
+    assert services.sync_stock(stock.product, 4, read_at) is False  # touched, quantity unchanged
+    assert services.sync_stock(stock.product, 7, read_at + timedelta(seconds=1)) is True
+    stock.refresh_from_db()
+    assert (stock.quantity, stock.synced_at) == (7, read_at + timedelta(seconds=1))
+
+
+def test_sync_stock_writes_over_a_stock_never_read_from_billz() -> None:
+    stock = _stock(4, None)
+    read_at = timeutils.now()
+    assert services.sync_stock(stock.product, 6, read_at) is True
+    stock.refresh_from_db()
+    assert (stock.quantity, stock.synced_at) == (6, read_at)
+
+
+def test_an_import_whose_listing_began_before_a_newer_lookup_keeps_the_lookup() -> None:
+    """The import's rows carry the instant its listing began; a product looked up in Billz after that (an
+    admin billz_id change) holds a newer stock read, which the import must not overwrite."""
+    from glowderma.integrations.billz.ports import BillzProduct
+
+    listing_began = timeutils.now()
+    stock = _stock(2, listing_began + timedelta(minutes=3))  # the newer lookup
+    product = stock.product
+    row = BillzProduct(
+        billz_id=product.billz_id,
+        billz_name=product.billz_name,
+        volume=None,
+        price=product.billz_price,
+        stock=5,
+        synced_at=listing_began,
+    )
+    assert services.upsert_from_billz(row) == "unchanged"
+    stock.refresh_from_db()
+    assert (stock.quantity, stock.synced_at) == (2, listing_began + timedelta(minutes=3))

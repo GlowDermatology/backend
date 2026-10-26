@@ -244,7 +244,10 @@ ProductStock.synced_at`) — a sale deferred for a closed shift or dead for staf
 sale at the next sync. A cancelled order whose sale never reached Billz stops counting at the next sync. A dead
 sale staff entered in Billz by hand is recorded with `manage.py billz_mark_recorded` (§7): it sets
 `billz_pushed_at`, so the unit stops counting after the next read — without it, Billz's own (hand-entered) sale
-and our reservation would both be subtracted for ever (review NEW-2).
+and our reservation would both be subtracted for ever (review NEW-2). `ProductStock.synced_at` never moves
+backwards (`catalog.services.sync_stock`): an import row carries the instant its listing **began**, so a read older
+than the stored one — a product looked up in Billz (an admin `billz_id` change) while the listing was running —
+writes neither its quantity nor its instant (log `billz.stock_read_skipped`).
 
 **Settled reservations** (review NEW-2): once a converted reservation stops counting for good, it is stamped
 `StockReservation.billz_settled_at` (`commerce.services.settle_billz_reservations`) and the availability read —
