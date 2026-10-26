@@ -90,7 +90,7 @@ Admin §1.4 applies (snake_case, integer ids, money as integer so'm, ISO 8601 `+
 | Labels | Every enum that the app shows comes with a server-rendered `<field>_label` in the resolved language (§5). The enum literal stays authoritative; the label is presentation. | `"status": "processing", "status_label": "Tayyorlanmoqda"` |
 | Phone mask | `+998 XX *** ** NN` | `"+998 90 *** ** 67"` |
 | Email mask | first character, `***`, domain | `"m***@gmail.com"` |
-| Stock | `available` = max(0, Billz quantity − active reservations − converted-since-sync), the B5 `commerce.selectors.available_stock` | `7` |
+| Stock | `available` = max(0, Billz quantity − active reservations − converted-since-sync), the B5 `commerce.selectors.available_stock`, read through `commerce.selectors.customer_available_stock`; **0 for every product while Billz is fake under the production settings** (online selling needs live Billz stock, §2.3) | `7` |
 | Coordinates | JSON numbers, ≤6 dp | `41.311081` |
 | Time of day | `"HH:MM"` Tashkent | `"09:30"` |
 | Payment account reference | `"<order_id>-<ref>"`, `ref` = first 10 lower-case hex chars of `HMAC-SHA256(PAYMENT_REF_KEY, str(order_id))` (§2.7.2) | `"10248-3f9a0c1b2d"` |
@@ -143,6 +143,7 @@ Codes added for this audience (admin §1.6 codes keep their meaning):
 | 409 | `price_changed` | `expected_total` differs (§2.7.1) | `{"total", "items_subtotal", "delivery_fee", "cashback_used", "cart": Cart}` |
 | 409 | `open_order_exists` | An unpaid order already exists (§2.7.1) | `{"order_id": int, "pay_by": datetime}` |
 | 409 | `delivery_unavailable` | BTS does not deliver to the address, or delivery is not offered at all (§2.6: fake BTS under the production settings) | null |
+| 409 | `online_sales_unavailable` | Online selling is off because the stock source is not live (§2.3: fake Billz under the production settings): cart add/patch and checkout | null |
 | 409 | `not_payable` · `order_expired` · `already_paid` | `orders/{id}/pay/` refusals (§2.7.2) | null |
 | 409 | `payment_in_progress` | A provider transaction of this order is in flight (§2.7.2): pay with the other provider, customer cancel, `DELETE me/` | `{"provider": str, "order_id": int}` |
 | 409 | `not_cancellable` | Order or appointment cancel refused (catalog key per resource, §5.0) | null |
@@ -852,8 +853,23 @@ unlinks everything (§2.1.5).
 
 **Visibility** (`catalog.selectors.customer_visible_products()`, P0): `Product.status = active` ∧ `price ≥ 1000` ∧
 category set and `Category.is_active` (a hidden category hides its products, design 01 open point 12). Anything else
-is 404 here and `unavailable` in the cart. Availability (`available`) comes from `commerce.selectors.available_stock`
-— which is why these views live in the top-layer `customers` module (catalog may not import commerce).
+is 404 here and `unavailable` in the cart. Availability (`available`) comes from
+`commerce.selectors.customer_available_stock` (P0: the B5 `available_stock`, or 0 for every product while online
+selling is off, below) — which is why these views live in the top-layer `customers` module (catalog may not import
+commerce).
+
+**Online selling requires live Billz** (`core.providers.online_sales_enabled()` = ¬`fake_in_production("billz")`, P0).
+Billz owns the stock every reservation is checked against (§1.4); a fake Billz under the production settings knows no
+real quantity, so the stock is **unknown** and nothing is sold online against it. In that posture: the catalog still
+lists every visible product, but `available` is 0, `stock_status` `out_of_stock` and `max_quantity` 0 for all of them
+(cart lines read `out_of_stock` too); `settings/public/` answers `online_sales_enabled: false` (§2.4) and the app
+shows the products without "Savatga" and the cart without checkout; `POST cart/items/`, `PATCH cart/items/{id}/`
+and `orders/checkout/` answer **409 `online_sales_unavailable`** "Onlayn buyurtma vaqtincha mavjud emas. Mahsulotlarni
+do‘konimizdan xarid qilishingiz mumkin." (`error.online_sales_unavailable`) before anything else; the fake never
+writes stock — the admin Billz import and every admin action that would read Billz answer 409 (admin §2.3) and
+`catalog.services.sync_stock` is never reached through a fake. Orders placed while Billz was live keep their
+reservations and can still be paid; their sales are entered in Billz by hand (§6.14). Under the local/test settings
+the fake Billz serves stock normally.
 
 ```jsonc
 // ProductCard (list item)
@@ -884,7 +900,7 @@ is 404 here and `unavailable` in the cart. Availability (`available`) comes from
 |---|---|---|
 | `search` | str ≤64 (trimmed; longer input cut to 64) | Case-insensitive partial match over the uz/ru/en names, `billz_name`, `billz_id` (`catalog.selectors.filter_products_search`, pg_trgm). Fewer than 2 characters is ignored. |
 | `category` | slug | unknown or inactive slug → 400 `invalid_choice` |
-| `in_stock` | bool | `available > 0` |
+| `in_stock` | bool | `available > 0` (no product while online selling is off) |
 | `promo` | bool | |
 | `ordering` | `default` (newest `created_at` first), `price`, `-price`, `name` | ties by `id` desc; `name` uses the resolved-language name under `glowderma_ci` |
 | `page`, `page_size` | §1.5 | |
@@ -903,6 +919,7 @@ is 404 here and `unavailable` in the cart. Availability (`available`) comes from
  "terms_updated_at": "2026-10-01T00:00:00+05:00",     // | null
  "reservation_minutes": 15,
  "payment_providers": ["click", "payme"],             // providers that can take a payment now; [] = online payment unavailable (the app hides checkout)
+ "online_sales_enabled": true,                        // false while Billz is fake in production: stock unknown, nothing can be added to the cart or checked out (§2.3)
  "fulfilment_methods": ["delivery", "pickup"],        // FulfilmentMethod[] offered at checkout; no "delivery" while BTS is fake in production (§2.6)
  "min_app_version": {"ios": "1.0.0", "android": "1.0.0"},
  "store_urls": {"ios": "https://apps.apple.com/…", "android": "https://play.google.com/…"}}
@@ -913,6 +930,10 @@ callbacks are refused (§2.13.0, §6.14). Checkout and pay refuse a provider out
 §2.7.1 row 1, §2.7.2). With an empty list the app shows the cart without the checkout button.
 `fulfilment_methods` lists `delivery` and `pickup` in this order; `delivery` is omitted while delivery is not offered
 (§2.6: the BTS port is fake under the production settings), and then the app offers pickup only.
+`online_sales_enabled` = `core.providers.online_sales_enabled()`: false while the Billz port is fake under the
+production settings (§2.3); the app then hides "Savatga" and checkout and shows the catalog for browsing only (the
+server refuses those writes with `online_sales_unavailable` anyway). It does not hide the "To‘lash" button of an order
+placed earlier.
 
 ### 2.5 Cart (server cart, **C**)
 
@@ -944,8 +965,8 @@ line (model change `commerce.0004_cartitem_price_at_add`, §7 `M2-C12`).
 | Endpoint | Body / params | Rules and errors |
 |---|---|---|
 | **`GET cart/`** | – | 200 `Cart` |
-| **`POST cart/items/`** (**I**: an increment, so a network retry must replay, not add again) | `{"product_id": int, "quantity": int 1..99 = 1}` | Adds to an existing line. New quantity = min(old + quantity, `max_quantity`); clamped → `last_change.max_reached = true` (200, not an error). Not visible → 409 `product_unavailable` "Mahsulot hozir sotuvda yo‘q." (`error.product_unavailable`); `max_quantity = 0` → 409 `OUT_OF_STOCK` "Bu mahsulot qolmagan." (`error.out_of_stock_one`, `details {"product_id", "available": 0}`); a new line when the cart has `CART_MAX_LINES` (30) lines → 409 `cart_full` "Savatga ko‘pi bilan {limit} xil mahsulot qo‘shish mumkin." (`error.cart_full`). Unknown id → `product_id` `does_not_exist`. |
-| **`PATCH cart/items/{product_id}/`** | `{"quantity": int 1..99}` | Absolute (retry-safe; the app's +/− steppers use it). Sets min(quantity, `max_quantity`). Line absent → 404. `max_quantity = 0` → 409 `OUT_OF_STOCK` (line unchanged). Not visible → 409 `product_unavailable`. |
+| **`POST cart/items/`** (**I**: an increment, so a network retry must replay, not add again) | `{"product_id": int, "quantity": int 1..99 = 1}` | Online selling off (§2.3) → 409 `online_sales_unavailable` (`error.online_sales_unavailable`), checked first. Adds to an existing line. New quantity = min(old + quantity, `max_quantity`); clamped → `last_change.max_reached = true` (200, not an error). Not visible → 409 `product_unavailable` "Mahsulot hozir sotuvda yo‘q." (`error.product_unavailable`); `max_quantity = 0` → 409 `OUT_OF_STOCK` "Bu mahsulot qolmagan." (`error.out_of_stock_one`, `details {"product_id", "available": 0}`); a new line when the cart has `CART_MAX_LINES` (30) lines → 409 `cart_full` "Savatga ko‘pi bilan {limit} xil mahsulot qo‘shish mumkin." (`error.cart_full`). Unknown id → `product_id` `does_not_exist`. |
+| **`PATCH cart/items/{product_id}/`** | `{"quantity": int 1..99}` | Online selling off → 409 `online_sales_unavailable`, checked first. Absolute (retry-safe; the app's +/− steppers use it). Sets min(quantity, `max_quantity`). Line absent → 404. `max_quantity = 0` → 409 `OUT_OF_STOCK` (line unchanged). Not visible → 409 `product_unavailable`. |
 | **`DELETE cart/items/{product_id}/`** | – | Removes the line; idempotent (absent line → 200). |
 | **`DELETE cart/items/?product_id=4&product_id=9`** | 1..50 ids | Removes those lines; unknown ids ignored. None or >50 → 400 `product_id` `required` / `max_items`. |
 | **`DELETE cart/`** | – | Empties the cart. |
@@ -1051,6 +1072,7 @@ Checks, in this order (the first failure answers):
 
 | # | Check | Result · message (uz) · key |
 |---|---|---|
+| 0 | Online selling on (§2.3: not while Billz is fake under the production settings); nothing is read or quoted | 409 `online_sales_unavailable` "Onlayn buyurtma vaqtincha mavjud emas. Mahsulotlarni do‘konimizdan xarid qilishingiz mumkin." · `error.online_sales_unavailable` |
 | 1 | Body fields | 400: `fulfilment` `invalid_choice`; `payment_provider` `invalid_choice` (also when it is not in `payment_providers`, §2.4); `address_id` `required` (`field.address_required`) / `invalid` (pickup with an address); `cashback_to_use` `min_value`; `expected_total` `required`/`min_value`; `customer_note` `max_length` |
 | 2 | Consent current (§2.2.4) | 409 `terms_update_required` · `error.terms_update_required`, `details {current_version}` |
 | 3 | Delivery: offered (§2.6; else 409 `delivery_unavailable` · `error.delivery_not_offered`, no BTS call), address own (`does_not_exist` `field.address_not_found`), region/city known (`address_incomplete`) | 409 / 400 |
@@ -2183,6 +2205,7 @@ code a customer view can raise to an existing key.
 | `error.cart_empty` | Savat bo‘sh. | Корзина пуста. | Your cart is empty. |
 | `error.delivery_unavailable` | Bu hududga yetkazib berish mavjud emas. | Доставка в этот регион недоступна. | Delivery to this area is not available. |
 | `error.delivery_not_offered` | Yetkazib berish hozircha mavjud emas. Olib ketishni tanlang. | Доставка пока недоступна. Выберите самовывоз. | Delivery is not available right now. Please choose pickup. |
+| `error.online_sales_unavailable` | Onlayn buyurtma vaqtincha mavjud emas. Mahsulotlarni do‘konimizdan xarid qilishingiz mumkin. | Онлайн-заказ временно недоступен. Товары можно купить в нашем магазине. | Online ordering is temporarily unavailable. You can buy the products in our store. |
 | `error.open_order_exists` | Sizda to‘lanmagan buyurtma bor (№{order_id}). Avval uni to‘lang yoki bekor qiling. | У вас есть неоплаченный заказ (№{order_id}). Оплатите или отмените его. | You have an unpaid order (№{order_id}). Please pay or cancel it first. |
 | `error.price_changed` | Narxlar yangilandi. Buyurtmani qayta tekshiring. | Цены обновились. Проверьте заказ ещё раз. | Prices have changed. Please review your order. |
 | `error.already_paid` | Buyurtma allaqachon to‘langan. | Заказ уже оплачен. | This order is already paid. |
@@ -2411,10 +2434,15 @@ code a customer view can raise to an existing key.
       through a fake provider; a Click refund through the fake port becomes `manual_required`, never `succeeded`
       (§2.13.0); fake BTS turns home delivery off (§2.6: pickup only, `fulfilment_methods`) and never makes up a tariff,
       a parcel, a tracking number or a cancellation (§2.14.3), so a customer paying through a live provider is never
-      charged a fake tariff for a parcel nobody ships; fake Billz never records a sale it did not send: the
-      `billz.push_sale` handler does not call it, leaves the purchase's `billz_pushed_at` null (no `billz_sale_id`, no
-      `billz_sale_recorded` event) and logs WARNING `billz.sale_not_pushed {order_id, purchase_id}`, so staff enter the
-      sale in Billz by hand and the M3 live adapter can find every unpushed online sale; fake OAuth turns social sign-in
+      charged a fake tariff for a parcel nobody ships; **online selling requires live Billz** (§2.3): with a fake Billz
+      the stock is unknown, so every product reads `available: 0`, `settings/public/` answers `online_sales_enabled:
+      false`, cart adds and checkout answer 409 `online_sales_unavailable`, and the fake never invents or refreshes
+      stock (the admin Billz import, `POST products/` and a `billz_id` change answer 409, admin §2.3; `sync_stock` is
+      never reached through it); an order placed while Billz was live and paid after the switch is never recorded as a
+      Billz sale it did not send: the `billz.push_sale` handler does not call the fake, leaves the purchase's
+      `billz_pushed_at` null (no `billz_sale_id`, no `billz_sale_recorded` event) and logs WARNING
+      `billz.sale_not_pushed {order_id, purchase_id}`, so staff enter the sale in Billz by hand and the M3 live adapter
+      can find every unpushed online sale; fake OAuth turns social sign-in
       off for customers **and staff** — 404 on the customer social routes (§2.1.8) and on the staff `POST
       auth/oauth/{provider}/` and `POST auth/oauth/{provider}/link/` (admin §2.1; unlinking keeps working, email +
       password sign-in is unaffected) — because a fake verifier accepts any `fake:<subject>:<email>` code with a
@@ -2503,5 +2531,5 @@ the client may still revise it later through a setting or a data field:
 | M2-N1 | Show the admin's adjustment reason to the customer? | No (generic "Bonus qo‘shildi" / "Balans tuzatildi") |
 | M2-N2 | Push for a customer's own order cancellation | Yes (state machine row 5 pushes `cancelled`) |
 | M2-N3 | Security notices (social link/unlink, password reset and change) | Push + inbox row (`account_security`), and for a reset or a social completion a visible push to the replaced device plus a 401 message there; no SMS (re-evaluated in revision 2: a reset needs the SMS code, so an SMS notice would reach whoever did it; an SMS template would also need Eskiz approval) |
-| M2-F1 | May production run fake provider adapters? | **Decided by the product owner (2026-10-26):** yes, warned at startup and reported per provider in `health/?ready=1` and admin settings; fake callbacks are refused (a Click Complete of a transaction attached while Click was live is accepted and reversed), fake payment providers are not offered, the dev simulate endpoint and the fixed OTP exist only under local/test settings, and fake Eskiz delivers no SMS (demo/staging posture, §6.14). Mixed with live providers, a fake never reports an effect that did not happen: fake BTS turns home delivery off (pickup only) and makes up no parcel; fake Billz records no sale (pushed by hand) (§2.6, §2.14.3, §6.14) |
+| M2-F1 | May production run fake provider adapters? | **Decided by the product owner (2026-10-26):** yes, warned at startup and reported per provider in `health/?ready=1` and admin settings; fake callbacks are refused (a Click Complete of a transaction attached while Click was live is accepted and reversed), fake payment providers are not offered, the dev simulate endpoint and the fixed OTP exist only under local/test settings, and fake Eskiz delivers no SMS (demo/staging posture, §6.14). Mixed with live providers, a fake never reports an effect that did not happen: fake BTS turns home delivery off (pickup only) and makes up no parcel; online selling requires live Billz — with fake Billz the stock is unknown, every product is unavailable online (`online_sales_enabled: false`), the admin import is refused and no sale is recorded (an earlier order's sale is entered by hand) (§2.3, §2.6, §2.14.3, §6.14) |
 | M2-T1 | Terms not yet versioned in settings | Registration answers 503 `terms_not_published` until staff publish `terms_version` with the uz terms and privacy texts |

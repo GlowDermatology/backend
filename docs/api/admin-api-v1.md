@@ -475,7 +475,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 
 | Field | Rule and message |
 |---|---|
-| `billz_id` | Required on create. `^\d{6,14}$` (`invalid` "Billz ID yoki shtrix-kod 6–14 ta raqamdan iborat bo‘lsin."); `unique` "Bu Billz ID bilan mahsulot allaqachon bor."; must exist in Billz (`billz_not_found` "Billz’da bunday mahsulot topilmadi."). Setting or changing it refreshes `billz_name`, `volume`, `stock` and `billz_price`. |
+| `billz_id` | Required on create. `^\d{6,14}$` (`invalid` "Billz ID yoki shtrix-kod 6–14 ta raqamdan iborat bo‘lsin."); `unique` "Bu Billz ID bilan mahsulot allaqachon bor."; must exist in Billz (`billz_not_found` "Billz’da bunday mahsulot topilmadi."). Setting or changing it refreshes `billz_name`, `volume`, `stock` and `billz_price`. M2: while the Billz port is fake under the production settings (customer contract §2.3, §6.14) a create, or a PATCH that sets or changes `billz_id`, answers 409 `conflict` "Billz sinov rejimida: Billz ma’lumotlarini olib bo‘lmaydi. Billz ulanganidan keyin qayta urinib ko‘ring." (nothing written; a fake must never invent Billz fields or stock); every other PATCH works as usual. |
 | `texts.uz.name` | Trimmed 2..120 (`min_length` "O‘zbekcha nomni kiriting (kamida 2 belgi).", `max_length` "120 belgidan oshmasin.") |
 | `texts.*.description`, `texts.*.ingredients` / `texts.*.usage` / `texts.ru.name`, `texts.en.name` | ≤2000 / ≤1000 / ≤120 ("{n} belgidan oshmasin."). Missing on create → `""`. |
 | `price` | int 1000..100000000 (`min_value` "Narx kamida 1 000 so‘m bo‘lsin.", `max_value` "Narx juda katta.") |
@@ -503,6 +503,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 
 **`POST integrations/billz/import/`**. Body `{}` or `{"mode": "delta"|"full"}` (default `delta`) → 202 `Job`.
 - Single-flight: if a `billz_import` job is queued or running, that job is returned. A `failed` job never blocks a new import.
+- M2: while the Billz port is fake under the production settings (`DEV_FEATURES_ALLOWED` false; customer contract §2.3, §6.14) the import is **refused**: 409 `conflict` "Billz sinov rejimida: Billz ma’lumotlarini olib bo‘lmaydi. Billz ulanganidan keyin qayta urinib ko‘ring." and no job is created, because a fake would invent products and stock that customers then pay against (online selling needs live Billz; the customer catalog shows every product unavailable in that posture). A job queued before such a switch fails when the worker claims it (`error.code = "billz_fake_mode"`, same message) without calling the port; `billz.last_sync_at` does not move. Under the local/test settings the fake import works as below.
 - Fake adapter in M1 (`BILLZ_MODE`, default `INTEGRATIONS_MODE`). Products are upserted by `billz_id`:
   - new → `hidden` with `is_new_from_billz=true`;
   - existing → only the Billz-owned fields change (`billz_name`, `volume`, `billz_price`, stock); admin-owned fields and `last_change` never move.
@@ -883,7 +884,7 @@ Templates are editable in the admin UI through `GET` / `PUT` below.
  "created_at": "…", "started_at": "…", "finished_at": null,
  "progress": {"done": 120, "total": 248},                  // null if unknown
  "result": null,                                           // succeeded: {"created": 3, "updated": 245, "unchanged": 0, "new_from_billz": 3}
- "error": null,                                            // failed: {"code": "provider_unavailable" | "worker_lost" | …, "message": "…"}
+ "error": null,                                            // failed: {"code": "provider_unavailable" | "worker_lost" | "billz_fake_mode" (M2) | …, "message": "…"}
  "created_by": {"id": 1, "display_name": "Administrator"}}
 ```
 - `progress` is always `{"done", "total"}` (or `null` before the first batch); `result` is the kind-specific summary (Billz import: §2.3).

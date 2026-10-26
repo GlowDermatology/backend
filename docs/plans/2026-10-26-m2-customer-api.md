@@ -76,7 +76,8 @@ builds it (the contract cannot be edited into compliance after the fact):
 - Fake provider adapters are allowed under the production settings (product-owner decision 2026-10-26) with the
   guarantees of C§6.14 (no transaction started and no capture honoured through a fake — a Click Complete of a
   transaction attached while Click was live is accepted and reversed —, no payment offered, no fixed code, no simulate,
-  no home delivery with fake BTS, no Billz sale recorded by a fake).
+  no home delivery with fake BTS, no online selling with fake Billz — the stock is unknown — and no Billz sale or stock
+  recorded by a fake).
 - Click: a Complete that cannot be honoured is accepted and reversed (Click SHOP API rule), never answered with an
   error.
 
@@ -90,13 +91,13 @@ builds it (the contract cannot be edited into compliance after the fact):
 | `glowderma/core/enums.py` | the new enums of C§3 (`OtpPurpose`, `NextStep`, `CustomerSocialProvider` (`google`, `facebook`, `apple`; component `CustomerSocialProviderEnum` — the staff override `"SocialProviderEnum": ["google", "facebook"]` in `config/settings/base.py` stays as it is), `SocialTokenType`, `StockStatus`, `CustomerProductOrdering`, `CartLineStatus`, `OrderScope`, `CustomerRefundState`, `CashbackEarnedState`, `TimelineType`, `ProgressStep`, `ProgressState`, `LedgerSource`, `AppointmentScope`, `AppointmentCancelledBy`, `InboxKind`, `InboxLinkKind`, `PushDataType`, `AccountSecurityEvent` incl. `password_changed`); **no `DevicePlatform`**: the platform reuses `OrderChannel` (a second enum with the same literals makes drf-spectacular 0.30 report `ENUM_NAME_OVERRIDES` duplication, which `--fail-on-warn` turns into a failure); `SessionRevokeReason` += `refresh_reused` (admin §3, already updated) |
 | `glowderma/core/i18n.py` (new) | `CATALOG` with every key of C§5 (incl. `push.*`), `t(key, lang, **params)`, `resolve_language(request, customer=None)` (Accept-Language q-parsing, fallback customer → `uz`), `format_number(n, lang)`, `format_percent(p, lang)` |
 | `glowderma/core/secretbox.py` (new) | `seal(plaintext: bytes, *, aad: bytes) -> str` / `open_(token: str, *, aad: bytes) -> bytes`: AES-256-GCM (`cryptography`, already pinned through PyJWT[crypto]) under `SECRETBOX_KEY` (base64url decoding to exactly 32 bytes, §7), random 96-bit nonce; used for the OTP payload (C§2.1.1) and the Apple refresh token (C§2.1.8) |
-| `glowderma/core/providers.py` (new) | `provider_modes() -> dict[str, str]` (`billz`, `click`, `payme`, `bts`, `eskiz`, `fcm`, `oauth` → `fake`/`live` from the `*_MODE` settings); `fake_in_production(provider) -> bool` (mode `fake` ∧ ¬`DEV_FEATURES_ALLOWED`, the one predicate of C§6.14); `callbacks_refused(provider) -> bool` (= `fake_in_production` for `click`/`payme`/`bts`, C§2.13.0); `payable_providers() -> list[str]` (C§2.4: Click, Payme, minus those whose callbacks are refused); `delivery_available() -> bool` (¬`fake_in_production("bts")`, C§2.6) and `fulfilment_methods() -> list[str]` (`delivery` only when available, then `pickup`); `warn_fake_providers()` (one WARNING `providers.fake_in_production {provider}` per fake provider when ¬`DEV_FEATURES_ALLOWED`) |
+| `glowderma/core/providers.py` (new) | `provider_modes() -> dict[str, str]` (`billz`, `click`, `payme`, `bts`, `eskiz`, `fcm`, `oauth` → `fake`/`live` from the `*_MODE` settings); `fake_in_production(provider) -> bool` (mode `fake` ∧ ¬`DEV_FEATURES_ALLOWED`, the one predicate of C§6.14); `callbacks_refused(provider) -> bool` (= `fake_in_production` for `click`/`payme`/`bts`, C§2.13.0); `payable_providers() -> list[str]` (C§2.4: Click, Payme, minus those whose callbacks are refused); `delivery_available() -> bool` (¬`fake_in_production("bts")`, C§2.6) and `fulfilment_methods() -> list[str]` (`delivery` only when available, then `pickup`); `online_sales_enabled() -> bool` (¬`fake_in_production("billz")`, C§2.3: online selling needs live Billz stock); `warn_fake_providers()` (one WARNING `providers.fake_in_production {provider}` per fake provider when ¬`DEV_FEATURES_ALLOWED`) |
 | `glowderma/core/apps.py` | `CoreConfig.ready()` calls `providers.warn_fake_providers()` (every process start: gunicorn, worker, beat) |
 | `glowderma/core/api/health.py` | `?ready=1` adds `providers: provider_modes()` (admin §2.15); fake modes never fail the check |
 | `glowderma/site_config/api/admin/serializers.py` | admin `GET settings/` `integrations.providers` = `provider_modes()` next to the existing `mode` (admin §2.11; the admin contract is already updated) |
 | `glowderma/core/pii.py` (new) | `pii_ref(value: str) -> str` = first 16 hex of HMAC-SHA256(`LOG_PII_KEY`, value) |
 | `glowderma/core/qr_store.py` (new) | raw-Redis store for QR keys (C§2.9.3): `put(key_hash, customer_id, ttl, max_live)`, `take(key_hash) -> str \| None` (`GETDEL`), `revoke_all(customer_id)`; literal prefix `gd:loyalty:qr:`; LocMem fallback with a process lock for tests. Lives in core so `accounts` (revocation) and `loyalty` (issue/resolve) can both use it |
-| `glowderma/core/api/exceptions.py` | customer codes (C§1.6) as `CustomerError(code, status, *, key=None, details=None, params=None)` subclasses — `key` is the catalog key, default `error.<code>`, explicit where C§5.0 says so (`not_cancellable` per resource, `OUT_OF_STOCK` one/lines) — (incl. `terms_update_required`, `slot_taken`, `last_sign_in_method`, `sms_unavailable`, `terms_not_published`, `otp_network_limit`, 401 `password_changed`); the customer handler maps core `NotCancellable` / `InvalidTransition` from reused B5/B6 services to `error.not_cancellable` / `error.invalid_transition`; `field_error(code, message_key=…)` for endpoint-specific field keys; `ENDPOINT_FIELD_CODES` += `otp_invalid`, `password_too_short`, `password_too_common`, `password_entirely_numeric`, `password_too_similar`, `password_unchanged`, `password_incorrect`, `terms_outdated`, `push_token_missing`, `latlng_pair`, `address_incomplete`; `AUTH_FAILURE_CODES` unchanged; the handler adds `details` (null by default) and renders `message`/field messages through `core.i18n` **only** when the resolved view is a customer/public/POS view (`view.audience` attribute); admin bodies stay byte-identical (regression test) |
+| `glowderma/core/api/exceptions.py` | customer codes (C§1.6) as `CustomerError(code, status, *, key=None, details=None, params=None)` subclasses — `key` is the catalog key, default `error.<code>`, explicit where C§5.0 says so (`not_cancellable` per resource, `OUT_OF_STOCK` one/lines) — (incl. `terms_update_required`, `slot_taken`, `last_sign_in_method`, `sms_unavailable`, `terms_not_published`, `otp_network_limit`, `online_sales_unavailable`, 401 `password_changed`); the customer handler maps core `NotCancellable` / `InvalidTransition` from reused B5/B6 services to `error.not_cancellable` / `error.invalid_transition`; `field_error(code, message_key=…)` for endpoint-specific field keys; `ENDPOINT_FIELD_CODES` += `otp_invalid`, `password_too_short`, `password_too_common`, `password_entirely_numeric`, `password_too_similar`, `password_unchanged`, `password_incorrect`, `terms_outdated`, `push_token_missing`, `latlng_pair`, `address_incomplete`; `AUTH_FAILURE_CODES` unchanged; the handler adds `details` (null by default) and renders `message`/field messages through `core.i18n` **only** when the resolved view is a customer/public/POS view (`view.audience` attribute); admin bodies stay byte-identical (regression test) |
 | `glowderma/core/api/schema.py` | `CUSTOMER_ERRORS`, `PUBLIC_CUSTOMER_ERRORS`, `DEVICE_HEADERS` (`X-GD-Device-Id`, `X-GD-Platform`, `X-GD-App-Version`), `DEVICE_KEY_HEADER`, `ACCEPT_LANGUAGE_HEADER` |
 | `glowderma/core/throttling.py` | new scopes `sms_device: 10/min`, `customer_auth_device: 30/min`, `customer_auth_ip: 1200/min`, `refresh_unknown: 60/min`, `qr: 6/min`, `public: 300/min`, `public_ip: 3000/min`; `sms_ip` default `600/min` (used only by `auth/send-code/`) |
 | `glowderma/core/audit.py` | `record()` accepts a `Customer` or `PosDevice` actor: `actor_type` `customer`/`integration`, `actor_label` = masked phone / device name (no `get_username` on non-staff) |
@@ -112,8 +113,9 @@ builds it (the contract cannot be edited into compliance after the fact):
 | `glowderma/accounts/tasks.py` (new) | handler `push.session_replaced` (data-only FCM message through the extended port; blanks the token in the payload after the send; `unregistered` → `invalidate_fcm_token`); beat task `accounts.cleanup_auth` (delete `SmsCode` older than 24 h, `done`/`dead` `sms.send` outbox rows older than 24 h, customer `AuthSession` rows revoked or expired for >90 days) |
 | `glowderma/integrations/fcm/{ports,fake}.py` | `PushMessage(token, title, body, data, *, data_only, android_channel, android_priority, apns_push_type, apns_priority, image_url, collapse_key)`; `PushResult.error` ∈ {`unregistered`, `payload_invalid`, …}; the fake records every field **only when `DEV_FEATURES_ALLOWED`** (otherwise it keeps nothing and logs one INFO line with ids, C§2.14.2) and maps tokens `…-bad` → `unregistered`, `…-payload` → `payload_invalid`, `…-down` → `FcmUnavailable` (moved here from P3 so P0's session-replaced push can be built) |
 | `glowderma/catalog/selectors.py` | `customer_visible_products()` (C§2.3 visibility) |
+| `glowderma/catalog/services.py` (the guard only), `glowderma/catalog/tasks.py`, `glowderma/catalog/api/admin/views.py` | **No stock from a fake Billz** (C§2.3, C§6.14, admin §2.3): `require_live_billz()` raises `BillzNotLive` while `core.providers.fake_in_production("billz")`; `create_product` and an `update_product` that sets or changes `billz_id` call it before any port call, `BillzImportView` before `start_job` (409 `conflict` with the admin §2.3 message, no job), `run_billz_import` after claiming the job (job failed `billz_fake_mode`, no port call, `last_sync_at` unchanged), and `sync_stock` itself as the last layer, so a fake never invents or refreshes stock under the production settings |
 | `glowderma/commerce/services.py` | stub `cancel_by_customer(order_id: int, customer_id: int, *, at=None) -> int` raising `NotImplementedError("P2")` |
-| `glowderma/commerce/selectors.py` | stub `customer_inflight_order(customer_id: int) -> int \| None` returning `None` (P2 implements C§2.2.3 step 1) |
+| `glowderma/commerce/selectors.py` | stub `customer_inflight_order(customer_id: int) -> int \| None` returning `None` (P2 implements C§2.2.3 step 1); `customer_available_stock(product_ids) -> dict[int, int]` (real, not a stub: the B5 `available_stock`, or 0 for every id while `not core.providers.online_sales_enabled()`, C§1.4/§2.3) — the one availability read of the catalog (P1) and the cart and checkout views (P2) |
 | `glowderma/appointments/services.py` | stub `cancel_by_customer(appointment_id: int, customer_id: int, *, reason: str = "", at=None) -> Appointment` raising `NotImplementedError("P3")` |
 | URL stubs | `glowderma/{customers,site_config,delivery,commerce,loyalty,appointments,notifications}/api/customer/{__init__,urls}.py`, `glowderma/commerce/api/webhooks/{__init__,urls}.py`, `glowderma/commerce/api/dev/{__init__,urls}.py`, `glowderma/loyalty/api/pos/{__init__,urls}.py` — each `urlpatterns = []` |
 | `config/urls.py` | `CUSTOMER_API_MODULES = ("customers", "site_config", "delivery", "commerce", "loyalty", "appointments", "notifications")` mounted at `api/v1/`; `api/v1/webhooks/` → commerce webhooks (always mounted; fake-mode refusal in the views, C§2.13.0); `api/v1/pos/` → loyalty pos; `api/v1/dev/` only when `DEV_FEATURES_ALLOWED`, `FAKE_PAYMENTS_ENABLED` and `CLICK_MODE == PAYME_MODE == "fake"` |
@@ -164,8 +166,14 @@ builds it (the contract cannot be edited into compliance after the fact):
   exactly 32 bytes; `CLICK_SECRET_KEY`, `PAYME_KEY` and `BTS_WEBHOOK_SECRET` are refused as placeholders in **fake**
   mode too; `CLICK_INFLIGHT_SECONDS` > `PAYMENT_IN_FLIGHT_GRACE_SECONDS` → `ImproperlyConfigured`.
 - `core.providers`: `fake_in_production` / `callbacks_refused` / `payable_providers` / `delivery_available` /
-  `fulfilment_methods` matrix over (mode, `DEV_FEATURES_ALLOWED`); FCM fake
+  `fulfilment_methods` / `online_sales_enabled` matrix over (mode, `DEV_FEATURES_ALLOWED`); FCM fake
   under `override_settings(DEV_FEATURES_ALLOWED=False)` keeps no message (bounded memory, no text).
+- **Fake Billz under the production settings** (`override_settings(DEV_FEATURES_ALLOWED=False, BILLZ_MODE="fake")`):
+  `POST integrations/billz/import/` → 409 `conflict` with the admin §2.3 message and no job; a job queued before the
+  switch → `run_billz_import` fails it `billz_fake_mode` without a port call (spy) and `last_sync_at` unchanged;
+  `POST products/` and a `PATCH` changing `billz_id` → 409, a texts/price PATCH → 200; `sync_stock` is never called
+  (spy over the whole test) and `ProductStock` rows are unchanged; `customer_available_stock` returns 0 for every id
+  (the B5 value under the test settings).
 - Migrations `accounts.0006` and `notifications.0003` round trip (AGENTS.md rule: end with a plain `migrate`); an
   `account`-source `general` inbox row inserts, a `general` row with `source_type = "order"` is refused by the CHECK.
 - Schema: `spectacular --validate --fail-on-warn` passes with every new enum registered in `CONTRACT_ENUMS` (no
@@ -216,8 +224,8 @@ C§2.0 rows 1–23: `auth/send-code/`, `auth/verify-code/`, `auth/set-password/`
 | `logout_customer(raw)` | `accounts.services` | revoke + device inactive, token cleared, QR tokens revoked |
 | `issue_social_nonce(fid)`, `consume_social_nonce(nonce, fid)`, `remember_id_token(provider, claims)` | `accounts.services` | Redis, single use, replay cache until `exp` |
 | `register(...)` (reactivation → `move_history_horizon`), `login(...)` (device key evaluated first, guard scope by device knowledge, dummy hash whenever no stored hash is compared), `reset_password(...)` (unlinks identities, clears other device keys, dormant rule, `push.account_security` with `farewell_tokens`), `social_sign_in(...)`, `complete_social(...)` (fid + ticket binding, password for password accounts, dormant rule for SMS-only links — run before the `social_provider_linked` check: unlinks every existing identity with `apple.revoke` for Apple, clears every device key, resets language and consent —, `farewell_tokens`), `link_social(...)` / `unlink_social(...)` (re-authentication: password, or a `reset_password` verification token when the account has none), `change_password(...)` (`me/password/`: current password or verification token; keeps session, device key and identities), `accept_consent(...)`, `update_profile(...)`, `set_image(...)`, `delete_account(customer_id, *, password=None, verification_token=None)`; `customers.selectors.last_activity_at(customer_id)` (newest of last login, session use, purchase, order) | `customers.services` | orchestrators (need `site_config` for the terms version and publication check and, for delete, `commerce`/`appointments`); `delete_account` takes the customer-level lock first (`select_for_update(no_key=True)`), refuses on `commerce.selectors.customer_inflight_order` |
-| `public_settings()` | `site_config.selectors` | cached 60 s, invalidated on `update_settings` commit; `terms_version` null while unpublished; `payment_providers = core.providers.payable_providers()`, `fulfilment_methods = core.providers.fulfilment_methods()` (C§2.4) |
-| `product_cards(qs, lang, customer_id=None)` | `customers.selectors` | one query for products + `available_stock` + main image + cart quantities |
+| `public_settings()` | `site_config.selectors` | cached 60 s, invalidated on `update_settings` commit; `terms_version` null while unpublished; `payment_providers = core.providers.payable_providers()`, `fulfilment_methods = core.providers.fulfilment_methods()`, `online_sales_enabled = core.providers.online_sales_enabled()` (C§2.4) |
+| `product_cards(qs, lang, customer_id=None)` | `customers.selectors` | one query for products + `commerce.selectors.customer_available_stock` (P0; 0 for every product while online selling is off, C§2.3) + main image + cart quantities |
 | `verify_app_token(token, token_type, nonce)`, `exchange_apple_code(code, client_id) -> refresh_token`, `revoke_apple_token(refresh_token, client_id)` | `integrations.oauth` (Google, Facebook, Apple) | C§2.1.8: only the four (provider, token type) pairs; per-provider required claims (`email` optional, `email_verified` ignored — the staff Google adapter keeps its own list); Apple: RS256 against Apple's JWKS, `aud` ∈ `APPLE_BUNDLE_IDS`, `nonce == sha256(raw).hexdigest()`, ES256 client secret from `APPLE_TEAM_ID`/`APPLE_KEY_ID`/`APPLE_PRIVATE_KEY_FILE` for the code exchange and the revoke; Facebook `debug_token` with `input_token` in a POST form body (the staff `_debug_token` changed the same way); replay key `sha256(provider + ":" + raw token)`; ticket `jti` server-generated; customer social routes 404 while OAuth is fake under the production settings |
 
 **Reused (do not redefine):** `accounts.services.{add_address, update_address, set_default_address, remove_address,
@@ -229,7 +237,7 @@ a login with a valid device key; `customer_reauth` per customer id for the signe
 `me/password/` and `DELETE me/`, which call `check`/`reset` on `customer_reauth` only and `record_failure` on both
 `customer_reauth` and `customer_login` — counting and blocking split, C§1.8),
 `catalog.selectors.{filter_products_search, customer_visible_products, category_queryset, banner_queryset}`,
-`commerce.selectors.available_stock` (B5), `site_config.models.SiteSettings.load`, `core.images.process_image`,
+`commerce.selectors.customer_available_stock` (P0, over B5's `available_stock`), `site_config.models.SiteSettings.load`, `core.images.process_image`,
 `core.secretbox`, `core.pii`, `commerce.services.cancel_by_customer` (P2) and `appointments.services.cancel_by_customer`
 (P3) from `delete_account` (called only when the customer has open items; P1 tests cover the no-open-items path with the
 P0 stubs, the lead's integration test the rest).
@@ -340,7 +348,10 @@ None (P0 owns `accounts.0006`). The link-social ticket binding and the OTP fid/I
 - Fake posture under `override_settings(DEV_FEATURES_ALLOWED=False)`: FakeEskiz keeps no text and no digits of the
   code (bounded memory); `ESKIZ_FAKE_CODE` is not used; `settings/public/` omits fake payment providers
   (`payment_providers: []` with both fake), and lists them under the test settings; with `BTS_MODE=fake` it publishes
-  `fulfilment_methods: ["pickup"]` (both methods under the test settings).
+  `fulfilment_methods: ["pickup"]` (both methods under the test settings); with `BILLZ_MODE=fake` it publishes
+  `online_sales_enabled: false` and the catalog still lists the visible products, each with `available: 0`,
+  `stock_status: "out_of_stock"`, `max_quantity: 0`, and `in_stock=true` matches none (`true` and the B5 numbers under
+  the test settings).
 
 ### Depends on
 P0. For the delete orchestration at integration time: P2 (`commerce.services.cancel_by_customer`,
@@ -369,10 +380,10 @@ C§2.0 rows 24–35 and 50–53: `cart/*`, `delivery/regions/`, `delivery/calcul
 ### Services
 | New / changed | Module | Notes |
 |---|---|---|
-| `cart_view(customer_id, lang)`, `add_to_cart`, `set_cart_quantity`, `remove_from_cart`, `clear_cart`, `reorder_into_cart(order_id, customer_id)` | `commerce.services` / `selectors` | Cart row lock; `price_at_add`; clamping to `max_quantity`; C§2.5/C§2.7.4 errors |
+| `cart_view(customer_id, lang)`, `add_to_cart`, `set_cart_quantity`, `remove_from_cart`, `clear_cart`, `reorder_into_cart(order_id, customer_id)` | `commerce.services` / `selectors` | Cart row lock; `price_at_add`; clamping to `max_quantity`; C§2.5/C§2.7.4 errors; availability through `commerce.selectors.customer_available_stock` (P0); `add_to_cart` / `set_cart_quantity` answer `OnlineSalesUnavailable` (409 `online_sales_unavailable`) first while `not core.providers.online_sales_enabled()` (C§2.3) |
 | `cashback_max(items_subtotal, delivery_fee, available)` | `commerce.selectors` | the one formula of C§2.7 (cart, calculate, checkout) |
 | `create_order(…, delivery_fee: int, expected_total: int \| None = None, min_payable: int = 0, visible_only: bool = False)` | `commerce.services` (B5, changed) | **B5 changes, all of them:** (1) the BTS quote leaves `create_order` — the caller passes `delivery_fee` (no HTTP call under `ProductStock` locks; the seeder passes its fee); (2) visibility through `catalog.selectors.customer_visible_products()` when `visible_only` (status, price ≥ 1000, active category) under the stock locks; (3) `OutOfStock(lines=[{product_id, name, requested, available, status}])` with every problem line; (4) `CashbackAboveMax(max)` from `min_payable` evaluated on the live subtotal (replaces the bare `cashback_used ≤ items_subtotal` check); (5) `PriceChanged(totals)` when `expected_total` differs; (6) typed `AddressNotFound` / `AddressIncomplete` instead of the generic `CheckoutError`; (7) evaluation order stock → cashback max → expected total → rows → `create_hold` (`InsufficientCashback`); (8) `customer_note: str = ""` stored on `Order.customer_note` (C§2.7.1 body) |
-| `checkout(customer_id, request) -> order_id` | `commerce.services` | quote first (no row lock), then `select_for_update(no_key=True)` on the Customer row, open-order rule and cart read under it, `create_order(…, customer_note=…)`, cart emptied, `Cart.last_checkout_order` |
+| `checkout(customer_id, request) -> order_id` | `commerce.services` | row 0 first: `OnlineSalesUnavailable` while `not core.providers.online_sales_enabled()` (no read, no quote, C§2.7.1); then the quote (no row lock), then `select_for_update(no_key=True)` on the Customer row, open-order rule and cart read under it, `create_order(…, customer_note=…)`, cart emptied, `Cart.last_checkout_order` |
 | `is_payable(order, payment, now, *, attaching)`, `is_open(payment)`, `in_flight(payment, now)`, `customer_inflight_order(customer_id)` | `commerce.services` / `selectors` | C§2.7.2 definitions (open transaction vs in flight; `CLICK_INFLIGHT_SECONDS` = 120); the selector replaces the P0 stub |
 | `ensure_payable_payment(order_id, provider, *, superseding: str \| None = None) -> PaymentRow` | `commerce.services` | same provider → reuse as is (the pay endpoint never writes for it); `superseding=<click_trans_id>` (Click Prepare only) → an active Click payment attached to another transaction is failed `abandoned` and a new row created (C§2.7.2 supersede rule); other provider in flight → `PaymentInProgress`; other provider not in flight → switch (`abandoned`); new row after a failure; updates `Order.payment_provider`; under `lock_order` |
 | `cancel_by_customer(order_id, customer_id, *, at=None)` | `commerce.services` | replaces the P0 stub; state.py row 5; Click in flight → `PaymentInProgress` |
@@ -397,7 +408,7 @@ C§2.0 rows 24–35 and 50–53: `cart/*`, `delivery/regions/`, `delivery/calcul
 | `region_catalog()` | `delivery.selectors` | BTS `regions()` cached 24 h (`gd:bts:regions`); `[]` (nothing cached) while `core.providers.delivery_available()` is false |
 | delivery offered only while `core.providers.delivery_available()`: `delivery/calculate/` and checkout answer 409 `delivery_unavailable` (`key="error.delivery_not_offered"`) for `fulfilment = delivery` before any BTS call; `delivery/regions/` answers `{"regions": [], "updated_at": null}` | `commerce/api/customer/*`, `delivery/api/customer/*` | C§2.6, C§2.7.1 row 3 |
 | `FakeBts` under the production settings (`core.providers.fake_in_production("bts")`): `regions()` `[]`, `quote()`/`create()` → `BtsRejected("fake_mode")` (shipment `failed`, `shipment_failed {error_code: "fake_mode"}`), `find_by_client_id()` → `None`, `cancel()`/`track()` → `BtsUnavailable`; `_parcels` stays empty; `poll_bts` returns at once | `integrations/bts/fake.py`, `commerce.tasks` | C§2.14.3 |
-| `push_sale` (B5 `billz.push_sale` handler) skips the port while `core.providers.fake_in_production("billz")`: no `link_billz_sale`, no `billz_sale_recorded` event, WARNING `billz.sale_not_pushed {order_id, purchase_id}`, the message ends `done` | `commerce.tasks` | C§6.14 |
+| `push_sale` (B5 `billz.push_sale` handler) skips the port while `core.providers.fake_in_production("billz")` (an order placed while Billz was live and paid after the switch — no new order can be placed then, C§2.3): no `link_billz_sale`, no `billz_sale_recorded` event, WARNING `billz.sale_not_pushed {order_id, purchase_id}`, the message ends `done` | `commerce.tasks` | C§6.14 |
 | Click protocol (`sign_ok`, `parse_amount`, `fingerprint`, `ERRORS`, `CLICK_ACCEPT_JSON`), Payme protocol (`auth_ok`, `rpc_error`, `MESSAGES`, `TIMEOUT_MS`, `ERR_ORDER_NOT_FOUND = -31050`, `ERR_ORDER_BUSY = -31051`, `INTERNAL_ERROR_RESPONSE`) | `integrations.{click,payme}.protocol` | pure functions and constants, no DB |
 | `ClickPort.pay_url(account_ref, amount, return_url)`, `PaymePort.checkout_url(account_ref, amount_tiyin, lang, return_url)` | `integrations.{click,payme}` ports + fakes | |
 | `BtsPort.track(tracking_number)`, `BtsPort.regions()`; `quote` may raise `BtsRejected` | `integrations.bts` | fakes per §6 |
@@ -518,8 +529,12 @@ create_refund}`, `payments.selectors.{active_payment, display_payment, refunds_f
   with `fulfilment = delivery` → 409 `delivery_unavailable` with the `error.delivery_not_offered` message and no BTS
   call, pickup checkout works, `delivery/regions/` empty; a `bts.create_shipment` of an order placed before the switch →
   shipment `failed` `fake_mode`, no tracking number, `FakeBts._parcels` empty; an admin cancel of a `created` shipment →
-  503, no `bts_cancelled: true`; `poll_bts` polls nothing; `billz.push_sale` → `billz_pushed_at` null, no
-  `billz_sale_recorded` event, WARNING logged.
+  503, no `bts_cancelled: true`; `poll_bts` polls nothing; **online selling off** (`BILLZ_MODE="fake"`): `POST
+  cart/items/` and `PATCH cart/items/{id}/` → 409 `online_sales_unavailable` (uz/ru/en messages), nothing written, `GET
+  cart/` shows every line `out_of_stock` with `available: 0`, checkout → 409 `online_sales_unavailable` before any BTS
+  call or lock (fake BTS asserts no call), `orders/{id}/pay/` of an order placed before the switch still answers 200;
+  `billz.push_sale` of that order once paid → `billz_pushed_at` null, no `billz_sale_recorded` event, WARNING
+  logged.
 - Migrations `commerce.0004` and `payments.0002` round trip.
 
 ### Depends on
@@ -687,8 +702,8 @@ directly by `delivery/calculate/`, which has no order yet; honoured only under t
 provider mode fake and the flag on) or with the phone/token grammar below. Everything in this table is local/test
 behaviour: under the production settings the fakes run without scenarios, record nothing, refuse callbacks (except a
 Click Complete of a transaction attached while Click was live, accepted and reversed) and report no effect that did not
-happen (fake BTS: no delivery offered, no parcel made up, C§2.14.3; fake Billz: no sale
-recorded; C§6.14).
+happen (fake BTS: no delivery offered, no parcel made up, C§2.14.3; fake Billz: no stock imported or refreshed, so
+nothing is sold online, and no sale recorded; C§2.3, C§6.14).
 
 | Provider | Switch | Effect |
 |---|---|---|
@@ -866,8 +881,9 @@ Validation (P0):
   `fake` for every `*_MODE`; `CoreConfig.ready()` logs one WARNING `providers.fake_in_production {provider}` per fake
   provider and `health/?ready=1` / admin `GET settings/` report the modes (C§6.14). What fake means there is C§6.14:
   callbacks refused (a Click Complete of a transaction attached while Click was live is accepted and reversed), fake
-  payment providers not offered, no home delivery with fake BTS (pickup only), no Billz sale
-  recorded by fake Billz, no SMS, no push, no social sign-in (customer or staff) with fake OAuth.
+  payment providers not offered, no home delivery with fake BTS (pickup only), no online selling with fake Billz (stock
+  unknown: import refused, every product unavailable online, no sale recorded), no SMS, no push, no social sign-in
+  (customer or staff) with fake OAuth.
 - `DEV_FEATURES_ALLOWED` is a settings-module constant (`True` only in `local.py`/`test.py`). The production settings
   refuse at boot `FAKE_PAYMENTS_ENABLED`, `FAKE_SCENARIO_HEADER_ENABLED`, `ESKIZ_FAKE_CODE`, `POS_API_KEYS` and (as
   today) `FAKE_NOW`, whatever the provider modes.
@@ -935,12 +951,14 @@ No beat entry for `loyalty.services.expire_holds`: it must stay unscheduled whil
    A deployment that runs fake adapters shows them in the startup WARNINGs `providers.fake_in_production` and in
    `health/?ready=1` `providers`; the runbook lists what that posture cannot do (C§6.14: no online payment through a
    fake provider, no home delivery with fake BTS — shipments of orders placed before a switch to fake are shipped by
-   hand from `attention.bts_failed` —, Billz sales entered by hand with fake Billz, no SMS, no push, no customer or
-   staff social sign-in with fake OAuth).
+   hand from `attention.bts_failed` —, no online selling with fake Billz — the catalog is browse-only, the admin import
+   is refused, and the sales of orders placed before the switch are entered in Billz by hand —, no SMS, no push, no
+   customer or staff social sign-in with fake OAuth).
 5. Mobile handover: contract link, `openapi/schema.yaml`, the local fake-mode recipe (`ESKIZ_FAKE_CODE`, dev simulate —
    local/test settings only; a deployed staging needs live Eskiz and payment providers to sign up and pay), the
    device-key and refresh rules (C§1.9, C§2.1.6; the single-flight refresh of C§1.2), the system-browser payment
-   hand-off (C§2.7.2), `fulfilment_methods` (pickup only while BTS is fake under the production settings, C§2.6).
+   hand-off (C§2.7.2), `fulfilment_methods` (pickup only while BTS is fake under the production settings, C§2.6),
+   `online_sales_enabled` (browse-only catalog while Billz is fake under the production settings, C§2.3).
 
 ## 10. Dependencies at a glance
 
