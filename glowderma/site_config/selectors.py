@@ -1,17 +1,19 @@
 """Read side of `site_config` for the customer API (customer contract §2.4, §2.1.3, §2.2.4).
 
 :func:`public_settings` serves ``GET settings/public/``: the database part (the singleton's texts and
-phones) is
-cached for ``PUBLIC_SETTINGS_TTL`` seconds under one key and invalidated when ``services.update_settings``
-commits; the provider-derived parts (``payment_providers``, ``fulfilment_methods``, ``online_sales_enabled``)
-and the app versions come from settings on every call. Reads never create the singleton row.
+phones) is cached for ``PUBLIC_SETTINGS_TTL`` seconds under one key, tagged with the cache generation it was
+built under; ``services.update_settings`` starts a new generation when it commits, so a snapshot a request
+read before that commit and writes back after it is never served (it carries the old generation). The
+provider-derived parts (``payment_providers``, ``fulfilment_methods``, ``online_sales_enabled``) and the app
+versions come from settings on every call. Reads never create the singleton row.
 """
 
 from __future__ import annotations
 
 import logging
+import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from django.conf import settings
 from django.core.cache import cache
@@ -21,7 +23,8 @@ from glowderma.site_config.models import SiteSettings
 
 logger = logging.getLogger(__name__)
 
-PUBLIC_SETTINGS_CACHE_KEY = "site_config:public_settings:v1"
+PUBLIC_SETTINGS_CACHE_KEY = "site_config:public_settings:v2"  # {"generation", "snapshot"}
+PUBLIC_SETTINGS_GENERATION_KEY = "site_config:public_settings:generation"
 PUBLIC_SETTINGS_TTL = 60
 LANGUAGES = tuple(enums.ContentLanguage.values)
 
@@ -71,7 +74,10 @@ def _snapshot() -> dict[str, Any]:
 
 
 def invalidate_public_settings() -> None:
-    cache.delete(PUBLIC_SETTINGS_CACHE_KEY)
+    """Start a new cache generation (on commit of a settings change): every snapshot built under an older
+    one is a miss from now on, including one a request that read the row before the change writes back
+    after this call."""
+    cache.set(PUBLIC_SETTINGS_GENERATION_KEY, uuid.uuid4().hex, timeout=None)
 
 
 def localized(texts: dict[str, str], lang: str) -> str:
@@ -79,19 +85,37 @@ def localized(texts: dict[str, str], lang: str) -> str:
     return texts.get(lang) or texts.get(enums.ContentLanguage.UZ) or ""
 
 
+def _generation(found: dict[str, Any]) -> str:
+    """The current cache generation (read with the snapshot), created when missing (first use, eviction).
+    It is taken before the database read, so a change committing after it is a newer generation."""
+    generation = found.get(PUBLIC_SETTINGS_GENERATION_KEY)
+    if isinstance(generation, str):
+        return generation
+    fresh = uuid.uuid4().hex
+    if cache.add(PUBLIC_SETTINGS_GENERATION_KEY, fresh, timeout=None):
+        return fresh
+    current = cache.get(PUBLIC_SETTINGS_GENERATION_KEY)
+    return current if isinstance(current, str) else fresh
+
+
 def _cached_snapshot() -> dict[str, Any]:
-    """The 60 s cached snapshot; a Redis error falls back to the database (settings/public/ is read at every
-    app start and must not answer 500 while the cache is down)."""
+    """The 60 s cached snapshot of the current generation (one round trip on a hit); a Redis error falls back
+    to the database (settings/public/ is read at every app start and must not answer 500 while the cache is
+    down)."""
     try:
-        snapshot = cache.get(PUBLIC_SETTINGS_CACHE_KEY)
+        found = cache.get_many([PUBLIC_SETTINGS_GENERATION_KEY, PUBLIC_SETTINGS_CACHE_KEY])
+        entry = found.get(PUBLIC_SETTINGS_CACHE_KEY)
+        generation = _generation(found)
     except Exception:
         logger.warning("public_settings cache read failed", exc_info=True)
         return _snapshot()
-    if isinstance(snapshot, dict):
-        return snapshot
+    if isinstance(entry, dict) and entry.get("generation") == generation:
+        return cast(dict[str, Any], entry["snapshot"])
     snapshot = _snapshot()
     try:
-        cache.set(PUBLIC_SETTINGS_CACHE_KEY, snapshot, PUBLIC_SETTINGS_TTL)
+        cache.set(
+            PUBLIC_SETTINGS_CACHE_KEY, {"generation": generation, "snapshot": snapshot}, PUBLIC_SETTINGS_TTL
+        )
     except Exception:
         logger.warning("public_settings cache write failed", exc_info=True)
     return snapshot
