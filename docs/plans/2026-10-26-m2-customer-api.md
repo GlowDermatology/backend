@@ -114,9 +114,10 @@ builds it (the contract cannot be edited into compliance after the fact):
 | `glowderma/integrations/fcm/{ports,fake}.py` | `PushMessage(token, title, body, data, *, data_only, android_channel, android_priority, apns_push_type, apns_priority, image_url, collapse_key)`; `PushResult.error` ∈ {`unregistered`, `payload_invalid`, …}; the fake records every field **only when `DEV_FEATURES_ALLOWED`** (otherwise it keeps nothing and logs one INFO line with ids, C§2.14.2) and maps tokens `…-bad` → `unregistered`, `…-payload` → `payload_invalid`, `…-down` → `FcmUnavailable` (moved here from P3 so P0's session-replaced push can be built) |
 | `glowderma/catalog/selectors.py` | `customer_visible_products()` (C§2.3 visibility) |
 | `glowderma/catalog/services.py` (the guard only), `glowderma/catalog/tasks.py`, `glowderma/catalog/api/admin/views.py` | **No stock from a fake Billz** (C§2.3, C§6.14, admin §2.3): `require_live_billz()` raises `BillzNotLive` while `core.providers.fake_in_production("billz")`; `create_product` and an `update_product` that sets or changes `billz_id` call it before any port call, `BillzImportView` before `start_job` (409 `conflict` with the admin §2.3 message, no job), `run_billz_import` after claiming the job (job failed `billz_fake_mode`, no port call, `last_sync_at` unchanged), and `sync_stock` itself as the last layer, so a fake never invents or refreshes stock under the production settings |
-| `glowderma/commerce/services.py` | stub `cancel_by_customer(order_id: int, customer_id: int, *, at=None) -> int` raising `NotImplementedError("P2")` |
+| `glowderma/commerce/services.py` | stub `cancel_by_customer(order_id: int, customer_id: int, *, at=None) -> int` raising `NotImplementedError("P2")`; `delete_cart_lines(customer_id) -> int` (real: deletes the customer's `CartItem` rows; used by `DELETE me/` step 4 and the dormant reset of C§2.2.3, both P1; P2's `clear_cart` reuses it) |
 | `glowderma/commerce/selectors.py` | stub `customer_inflight_order(customer_id: int) -> int \| None` returning `None` (P2 implements C§2.2.3 step 1); `customer_available_stock(product_ids) -> dict[int, int]` (real, not a stub: the B5 `available_stock`, or 0 for every id while `not core.providers.online_sales_enabled()`, C§1.4/§2.3) — the one availability read of the catalog (P1) and the cart and checkout views (P2) |
 | `glowderma/appointments/services.py` | stub `cancel_by_customer(appointment_id: int, customer_id: int, *, reason: str = "", at=None) -> Appointment` raising `NotImplementedError("P3")` |
+| `glowderma/appointments/selectors.py` | `last_activity_at(customer_id) -> datetime \| None` (real, not a stub: the newest of every appointment's `created_at` — app or staff booking, any status — and the `start` of `requested`/`confirmed`/`attended` appointments; C§2.2.3 dormant rule), so P1's `customers.selectors.last_activity_at` does not wait for P3 |
 | URL stubs | `glowderma/{customers,site_config,delivery,commerce,loyalty,appointments,notifications}/api/customer/{__init__,urls}.py`, `glowderma/commerce/api/webhooks/{__init__,urls}.py`, `glowderma/commerce/api/dev/{__init__,urls}.py`, `glowderma/loyalty/api/pos/{__init__,urls}.py` — each `urlpatterns = []` |
 | `config/urls.py` | `CUSTOMER_API_MODULES = ("customers", "site_config", "delivery", "commerce", "loyalty", "appointments", "notifications")` mounted at `api/v1/`; `api/v1/webhooks/` → commerce webhooks (always mounted; fake-mode refusal in the views, C§2.13.0); `api/v1/pos/` → loyalty pos; `api/v1/dev/` only when `DEV_FEATURES_ALLOWED`, `FAKE_PAYMENTS_ENABLED` and `CLICK_MODE == PAYME_MODE == "fake"` |
 | `config/settings/base.py`, `local.py`, `test.py`, `production.py` | every setting of §7 with validation (§7 rules); `DEV_FEATURES_ALLOWED` (a constant, not env: `False` in `base.py`, `True` in `local.py` and therefore `test.py`, forced `False` in `production.py`); `ESKIZ_FAKE_CODE` and `POS_API_KEYS` read only in `local.py`/`test.py` and refused by `production.py`; valid dev defaults for the new keys in `local.py` (added to the production placeholder list) |
@@ -132,6 +133,9 @@ builds it (the contract cannot be edited into compliance after the fact):
   customer tombstone TTL, language/consent/last login cleared, `apple.revoke` enqueued per Apple identity with a token;
   idempotent; it takes `FOR NO KEY UPDATE`, not `FOR UPDATE` (a concurrent `Purchase` insert for the customer does not
   wait). `start_customer_session` returns the deactivated devices' tokens in `farewell_tokens`; `move_history_horizon`.
+- `appointments.selectors.last_activity_at`: a staff booking's `created_at`, an attended visit's `start`, a future
+  `confirmed` appointment's `start` (later than now) win as expected; `rejected`/`cancelled` count only by `created_at`;
+  `None` without appointments. `commerce.services.delete_cart_lines` deletes only that customer's lines.
 - Device headers: missing → 400 `device_required`; fid mismatch → 401 + one audit row per hour; platform mismatch;
   `X-GD-App-Version` below the floor → 426 with `details`.
 - `start_customer_session`: second device revokes the first (`replaced`), deactivates its device **and clears its
@@ -223,7 +227,7 @@ C§2.0 rows 1–23: `auth/send-code/`, `auth/verify-code/`, `auth/set-password/`
 | `rotate_customer_refresh(raw, *, fid) -> RefreshResult` | `accounts.services` | C§2.1.6 steps 1–6: row lock on `refresh_hash OR previous_refresh_hash`, rotate / grace replay (whenever `auth:refresh_grace:{h}` exists, confirmed or not) / re-rotate (unconfirmed only, bounded by `CUSTOMER_REFRESH_UNCONFIRMED_SECONDS`, dead hash remembered in `auth:refresh_dead:{hash}`, grace cache rewritten) / reuse → revoke `refresh_reused` + audit; grace cache written before commit and deleted on rollback |
 | `logout_customer(raw)` | `accounts.services` | revoke + device inactive, token cleared, QR tokens revoked |
 | `issue_social_nonce(fid)`, `consume_social_nonce(nonce, fid)`, `remember_id_token(provider, claims)` | `accounts.services` | Redis, single use, replay cache until `exp` |
-| `register(...)` (reactivation → `move_history_horizon`), `login(...)` (device key evaluated first, guard scope by device knowledge, dummy hash whenever no stored hash is compared), `reset_password(...)` (unlinks identities, clears other device keys, dormant rule, `push.account_security` with `farewell_tokens`), `social_sign_in(...)`, `complete_social(...)` (fid + ticket binding, password for password accounts, dormant rule for SMS-only links — run before the `social_provider_linked` check: unlinks every existing identity with `apple.revoke` for Apple, clears every device key, resets language and consent —, `farewell_tokens`), `link_social(...)` / `unlink_social(...)` (re-authentication: password, or a `reset_password` verification token when the account has none), `change_password(...)` (`me/password/`: current password or verification token; keeps session, device key and identities), `accept_consent(...)`, `update_profile(...)`, `set_image(...)`, `delete_account(customer_id, *, password=None, verification_token=None)`; `customers.selectors.last_activity_at(customer_id)` (newest of last login, session use, purchase, order) | `customers.services` | orchestrators (need `site_config` for the terms version and publication check and, for delete, `commerce`/`appointments`); `delete_account` takes the customer-level lock first (`select_for_update(no_key=True)`), refuses on `commerce.selectors.customer_inflight_order` |
+| `register(...)` (reactivation → `move_history_horizon`), `login(...)` (device key evaluated first, guard scope by device knowledge, dummy hash whenever no stored hash is compared), `reset_password(...)` (unlinks identities, clears other device keys, dormant rule, `push.account_security` with `farewell_tokens`), `social_sign_in(...)`, `complete_social(...)` (fid + ticket binding, password for password accounts, dormant rule for SMS-only links — run before the `social_provider_linked` check: unlinks every existing identity with `apple.revoke` for Apple, clears every device key, resets language and consent —, `farewell_tokens`), `link_social(...)` / `unlink_social(...)` (re-authentication: password, or a `reset_password` verification token when the account has none), `change_password(...)` (`me/password/`: current password or verification token; keeps session, device key and identities), `accept_consent(...)`, `update_profile(...)`, `set_image(...)`, `delete_account(customer_id, *, password=None, verification_token=None)`; `customers.selectors.last_activity_at(customer_id)` (newest of last login, session use, purchase, order and `appointments.selectors.last_activity_at` — appointment creation incl. staff bookings, and the start of open or attended appointments); the dormant reset deletes the cart lines through `commerce.services.delete_cart_lines` (P0), as `delete_account` step 4 does | `customers.services` | orchestrators (need `site_config` for the terms version and publication check and, for delete, `commerce`/`appointments`); `delete_account` takes the customer-level lock first (`select_for_update(no_key=True)`), refuses on `commerce.selectors.customer_inflight_order` |
 | `public_settings()` | `site_config.selectors` | cached 60 s, invalidated on `update_settings` commit; `terms_version` null while unpublished; `payment_providers = core.providers.payable_providers()`, `fulfilment_methods = core.providers.fulfilment_methods()`, `online_sales_enabled = core.providers.online_sales_enabled()` (C§2.4) |
 | `product_cards(qs, lang, customer_id=None)` | `customers.selectors` | one query for products + `commerce.selectors.customer_available_stock` (P0; 0 for every product while online selling is off, C§2.3) + main image + cart quantities |
 | `verify_app_token(token, token_type, nonce)`, `exchange_apple_code(code, client_id) -> refresh_token`, `revoke_apple_token(refresh_token, client_id)` | `integrations.oauth` (Google, Facebook, Apple) | C§2.1.8: only the four (provider, token type) pairs; per-provider required claims (`email` optional, `email_verified` ignored — the staff Google adapter keeps its own list); Apple: RS256 against Apple's JWKS, `aud` ∈ `APPLE_BUNDLE_IDS`, `nonce == sha256(raw).hexdigest()`, ES256 client secret from `APPLE_TEAM_ID`/`APPLE_KEY_ID`/`APPLE_PRIVATE_KEY_FILE` for the code exchange and the revoke; Facebook `debug_token` with `input_token` in a POST form body (the staff `_debug_token` changed the same way); replay key `sha256(provider + ":" + raw token)`; ticket `jti` server-generated; customer social routes 404 while OAuth is fake under the production settings |
@@ -238,7 +242,8 @@ a login with a valid device key; `customer_reauth` per customer id for the signe
 `customer_reauth` and `customer_login` — counting and blocking split, C§1.8),
 `catalog.selectors.{filter_products_search, customer_visible_products, category_queryset, banner_queryset}`,
 `commerce.selectors.customer_available_stock` (P0, over B5's `available_stock`), `site_config.models.SiteSettings.load`, `core.images.process_image`,
-`core.secretbox`, `core.pii`, `commerce.services.cancel_by_customer` (P2) and `appointments.services.cancel_by_customer`
+`core.secretbox`, `core.pii`, `commerce.services.delete_cart_lines` (P0), `appointments.selectors.last_activity_at` (P0),
+`commerce.services.cancel_by_customer` (P2) and `appointments.services.cancel_by_customer`
 (P3) from `delete_account` (called only when the customer has open items; P1 tests cover the no-open-items path with the
 P0 stubs, the lead's integration test the rest).
 
@@ -320,8 +325,12 @@ None (P0 owns `accounts.0006`). The link-social ticket binding and the OTP fid/I
 - Reset: sessions revoked (the old device then gets 401 `password_changed`), identities unlinked with audit rows (Apple:
   `apple.revoke` enqueued), other device keys cleared, new device key returned, `push.account_security` enqueued with
   the old device's token in `farewell_tokens`; dormant rule: last activity 181 days ago → `history_from = now`, name,
-  image and addresses scrubbed, balance and purchases kept, audit `customer.history_reset`; 179 days ago, or a purchase
-  last week → untouched. Social completion on a social-only dormant account applies the same rule; completion on a new
+  image, addresses and cart lines scrubbed, balance and purchases kept, audit `customer.history_reset`; 179 days ago, or
+  a purchase last week → untouched. **Appointments are activity:** last sign-in 200 days ago but a staff-booked
+  appointment created 10 days ago (`requested_via = admin`) → untouched; an `attended` visit 30 days ago → untouched; a
+  `confirmed` appointment created 200 days ago with its `start` next week → untouched (an open appointment always keeps
+  the account active, so the rule never meets one to cancel); every appointment older than 180 days (created and
+  started) → dormant, and the old appointments are invisible in `me/appointments/` afterwards (horizon). Social completion on a social-only dormant account applies the same rule; completion on a new
   device puts the replaced device's token in `farewell_tokens`. **Previous holder locked out:** a dormant social-only
   account with a linked Google identity and a device key on the old install; complete an Apple link by SMS → Google
   unlinked (audit `customer.social_unlinked {reason: "dormant"}`), the old device's `key_hash` cleared, language and
@@ -568,7 +577,7 @@ P0; B5 merged (`feat/m2-base`).
 (new: PosKeyAuthentication with the failed-auth counter, IsActivePosDevice), services.py (PosDevice key creation,
 revoke, rotate), management/commands/{createposkey,revokeposkey,rotateposkey}.py, seeds.py (the `POS_API_KEYS` seeding,
 local/test settings only)}`,
-`glowderma/appointments/{services.py, selectors.py, api/customer/*}`, `glowderma/notifications/{services.py,
+`glowderma/appointments/{services.py, selectors.py (after P0's `last_activity_at`), api/customer/*}`, `glowderma/notifications/{services.py,
 selectors.py, tasks.py (the `push.account_security` handler), topics.py (`HANDLED_TOPICS` += `push.account_security`, so
 its dead letters are audited by the existing `on_push_dead` hook, and `PAYLOAD_KEYS[PUSH_ACCOUNT_SECURITY] =
 accounts.topics.ACCOUNT_SECURITY_PAYLOAD_KEYS`, imported), texts.py, api/customer/*}`, tests in those modules.
@@ -768,8 +777,9 @@ nothing is sold online, and no sale recorded; C§2.3, C§6.14).
 #SMS_GLOBAL_HOURLY_LIMIT=500
 #CUSTOMER_VERIFICATION_TTL_SECONDS=600
 #CUSTOMER_PASSWORD_MIN_LENGTH=8
-# Dormant-account rule (C§2.2.3, M2-A16): an SMS recovery of an account inactive for longer moves the history horizon
-# to now and scrubs name, image and addresses.
+# Dormant-account rule (C§2.2.3, M2-A16): an SMS recovery of an account inactive for longer (no sign-in, purchase,
+# order or appointment, staff bookings included) resets it as at deletion: history horizon now, profile, addresses,
+# cart, consent, social identities and device keys cleared.
 #CUSTOMER_DORMANT_DAYS=180
 # Keys of the customer API. Local/test settings ship valid development defaults, so these stay commented here;
 # production requires real values and refuses "change-me", committed values (these lines, the local defaults) and

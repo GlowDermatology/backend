@@ -708,7 +708,7 @@ paid):
 2. every `awaiting_payment` order → `commerce.services.cancel_by_customer` (P2; reason `customer_request`;
    processing/shipped orders continue: BTS uses the order's recipient snapshot);
 3. every open future appointment → `appointments.services.cancel_by_customer` (P3; `reason = "account_deleted"`);
-4. cart lines deleted;
+4. cart lines deleted (`commerce.services.delete_cart_lines`, P0);
 5. `accounts.services.delete_customer` (A1; P0 extends the built function): under the customer-level lock
    (`no_key=True`): `status=deleted`, `deleted_at`, name/image/address/password scrubbed, `language` reset to `uz`,
    `terms_version=""`, `consent_at`/`consent_ip`/`last_login_at` cleared (the audit log keeps the consent history),
@@ -746,11 +746,23 @@ to now (`move_history_horizon`) and resets the account as at deletion, so the pr
   On `auth/social/complete/` the rule runs **before** the `social_provider_linked` check, so a provider the previous
   holder had linked neither blocks nor outlives the new holder's identity. (The reset path unlinks identities and
   rotates device keys anyway, §2.1.5.)
+- the previous holder's **cart lines** are deleted (`commerce.services.delete_cart_lines`, as deletion step 4).
 
-Balance, ledger and purchases are kept (A1). Last activity = the newest of `Customer.last_login_at`, the newest
-customer session `last_used_at`, the newest `Purchase` and the newest order of the customer
-(`customers.selectors.last_activity_at`, top layer), so an in-store customer who activates the app after recent
-purchases is not affected. Audit `customer.history_reset {reason: "dormant", last_activity_at}`.
+**Last activity** = the newest of `Customer.last_login_at`, the newest customer session `last_used_at`, the newest
+`Purchase`, the newest order of the customer, the newest appointment's `created_at` (any status, booked in the app
+**or by staff** on the phone) and the newest `start` of a `requested`, `confirmed` or `attended` appointment
+(`customers.selectors.last_activity_at`, top layer, reading `appointments.selectors.last_activity_at`), so an in-store
+customer who activates the app after recent purchases or visits, or someone staff booked for recently, is not affected.
+
+**Why this is the deletion reset.** Deletion (above) also cancels open orders and open appointments, which the dormant
+rule never has to: an `awaiting_payment` order lives `reservation_minutes` (its creation is activity), and an open
+appointment — any `requested`/`confirmed` one, past or future — has its `start` counted, so an account with either is
+never dormant. Everything else matches deletion step by step: profile and consent scrubbed, addresses and cart lines
+deleted, social identities unlinked (Apple revoked), device keys cleared, every other session revoked and its device
+token cleared and QR tokens deleted by the sign-in (§1.9), and the earlier history hidden by the same horizon
+(`Customer.history_from`: orders, appointments, inbox, ledger order links, order pushes). Only the status stays
+`active`, because the new holder is signing in. Balance, ledger and purchases are kept (A1). Audit
+`customer.history_reset {reason: "dormant", last_activity_at}`.
 
 #### 2.2.4 `POST me/consent/`
 Body `{"terms_version": str}` equal to the current version (else `terms_outdated`) → 200 `Me`. Stamps
@@ -2519,9 +2531,11 @@ code a customer view can raise to an existing key.
     `SESSION_REPLACED` with a message (§1.2). `reset-password` revokes every session and unlinks every identity
     (§2.1.5).
 17. **Recycled numbers (PD law).** A reactivated account, and a dormant account recovered by SMS (`M2-A16`), sees only
-    history created after `Customer.history_from`, with the previous holder's name, image, addresses, language and
-    consent reset; the previous holder keeps no way in — deletion and the dormant rule both remove every social
-    identity and device key, and the sign-in revokes every other session (§2.2.3).
+    history created after `Customer.history_from`, with the previous holder's name, image, addresses, cart, language
+    and consent reset; the previous holder keeps no way in — deletion and the dormant rule both remove every social
+    identity and device key, and the sign-in revokes every other session (§2.2.3). An account counts as dormant only
+    when nothing happened on it for `CUSTOMER_DORMANT_DAYS` — sign-ins, purchases, orders and appointments, including
+    staff bookings and attended visits — so it never has an open order or appointment to cancel.
 18. **Uploads** (`me/image/`) go through `core.images.process_image` (re-encode, EXIF strip, 5 MiB, type sniffing).
 
 ---
@@ -2562,7 +2576,7 @@ the client may still revise it later through a setting or a data field:
 | M2-A13 | Minimum app version enforcement | Off (`MIN_APP_VERSION_*=0.0.0`) until the first store release |
 | M2-A14 | Apple App Store guideline 4.8: Google/Facebook sign-in on iOS requires an equivalent privacy-focused option (Sign in with Apple) | **Decided by the product owner (2026-10-26):** offer Sign in with Apple on iOS (`apple` provider, ID token with nonce, token revocation on unlink and deletion per guideline 5.1.1(v)); `APPLE_BUNDLE_IDS` empty keeps it disabled (live) or fake (local/test) until the client provides the bundle id (A7) |
 | M2-A15 | Recycled phone numbers: what does the person who reactivates a deleted account see? | Balance and purchases kept (A1); orders, appointments, inbox and ledger order links only from the reactivation (`Customer.history_from`) |
-| M2-A16 | Recycled numbers of accounts that were never deleted: what does a new holder who recovers the account by SMS see? | After a password reset or an SMS-only social link on an account inactive for more than 180 days (`CUSTOMER_DORMANT_DAYS`; last sign-in, refresh, purchase or order), the history horizon moves to now; name, image and addresses are scrubbed, language and consent reset, and every existing social identity and device key removed, so the previous holder cannot sign in; balance and purchases are kept (A1) |
+| M2-A16 | Recycled numbers of accounts that were never deleted: what does a new holder who recovers the account by SMS see? | After a password reset or an SMS-only social link on an account inactive for more than 180 days (`CUSTOMER_DORMANT_DAYS`; last sign-in, refresh, purchase, order or appointment — staff bookings and attended visits included, an open appointment always counts), the account is reset as at deletion: the history horizon moves to now; name, image, addresses and cart are scrubbed, language and consent reset, and every existing social identity and device key removed, so the previous holder cannot sign in; such an account has no open order or appointment to cancel; balance and purchases are kept (A1) |
 | M2-A17 | How does a signed-in customer change or add a password? | `POST me/password/` with the current password, or an SMS code when the account has none; the session and social identities are kept. `auth/reset-password/` stays the recovery path that unlinks every identity |
 | M2-C12 | Show "price changed since you added it" in the cart | Yes — needs `CartItem.price_at_add` (migration `commerce.0004`) |
 | M2-C13 | Several unpaid orders at once? | No: one `awaiting_payment` order per customer (`CHECKOUT_MAX_OPEN_ORDERS=1`, serialised by the Customer row lock) |
