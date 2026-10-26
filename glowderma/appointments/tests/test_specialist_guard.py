@@ -135,10 +135,13 @@ def test_an_admin_booking_of_a_specialist_deactivated_meanwhile_is_refused(
     link = bookable()
     customer = CustomerFactory.create()
 
-    def deactivate() -> None:
-        Professional.objects.filter(pk=link.professional_id).update(is_active=False)
+    hold = services._hold_active_specialist
 
-    monkeypatch.setattr(services, "_before_write", deactivate)
+    def deactivated_first(pk: int) -> bool:  # the deactivation committed before the booking took the lock
+        Professional.objects.filter(pk=link.professional_id).update(is_active=False)
+        return hold(pk)
+
+    monkeypatch.setattr(services, "_hold_active_specialist", deactivated_first)
     response = staff_client.post(
         "/api/v1/admin/appointments/",
         {
