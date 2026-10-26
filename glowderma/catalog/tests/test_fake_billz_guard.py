@@ -97,6 +97,28 @@ def test_create_and_a_billz_id_change_are_refused_other_patches_work(
     assert ProductStock.objects.get(product=product).quantity == 4
 
 
+def test_the_billz_id_guard_compares_the_normalised_value(
+    staff_client: APIClient, fake_billz_in_production: dict[str, Any]
+) -> None:
+    """Review nit: an unchanged id with surrounding whitespace (or sent as a number) is no change, and a null
+    or boolean id is the serializer's 400, never the fake-Billz 409."""
+    product = ProductFactory.create(billz_id="4607099901", price=100_000, status="hidden")
+    url = f"{PRODUCTS}{product.pk}/"
+    padded = staff_client.patch(url, {"billz_id": " 4607099901 ", "price": 110_000}, format="json")
+    assert padded.status_code == 200, padded.json()
+    as_number = staff_client.patch(url, {"billz_id": 4607099901}, format="json")
+    assert as_number.status_code == 200, as_number.json()
+    for invalid in (None, True):
+        response = staff_client.patch(url, {"billz_id": invalid}, format="json")
+        assert response.status_code == 400, response.json()
+        assert response.json()["errors"][0]["field"] == "billz_id"
+    changed = staff_client.patch(url, {"billz_id": 4607012399}, format="json")
+    assert changed.status_code == 409 and changed.json()["message"] == MESSAGE
+    assert fake_billz_in_production["get_port"].call_count == 0
+    product.refresh_from_db()
+    assert (product.billz_id, product.price) == ("4607099901", 110_000)
+
+
 def test_the_service_layers_refuse_on_their_own(fake_billz_in_production: dict[str, Any]) -> None:
     product = ProductFactory.create(billz_id="4607099902")
     with pytest.raises(services.BillzNotLive):

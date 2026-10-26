@@ -122,7 +122,14 @@ class ProductViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
         if product is None:
             raise NotFound
         data = request.data
-        if isinstance(data, dict) and "billz_id" in data and str(data["billz_id"]) != product.billz_id:
+        submitted = data.get("billz_id") if isinstance(data, dict) else None
+        # Compare what the serializer would store (a trimmed string); null, booleans and other types fall
+        # through to its 400 without a Billz lookup.
+        if (
+            isinstance(submitted, (str, int))
+            and not isinstance(submitted, bool)
+            and str(submitted).strip() != product.billz_id
+        ):
             services.require_live_billz()  # before the serializer's Billz lookup (customer contract §6.14)
         serializer = ProductPatchSerializer(instance=product, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
