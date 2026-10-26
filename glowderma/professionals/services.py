@@ -118,6 +118,21 @@ def _store_photo(professional: Professional, upload: Any) -> None:
     professional.save(update_fields=["photo"])
 
 
+ADMIN_UPCOMING_MESSAGE = (
+    "Mutaxassisda {n} ta kelgusi qabul bor (kutilayotgan yoki tasdiqlangan). Avval ularni boshqa vaqtga yoki "
+    "mutaxassisga ko‘chiring yoki bekor qiling."
+)
+
+
+def _refuse_deactivation_with_upcoming(professional: Professional) -> None:
+    """The PS-2 guard for the Django admin (and the named helpers): there is no ``force`` here, so a
+    specialist with ``requested`` / ``confirmed`` appointments ahead is never deactivated outside the admin
+    REST API (``PATCH specialists/{id}/`` with ``force: true``)."""
+    upcoming = bookings.upcoming_counts([professional.pk], timeutils.now())[professional.pk]
+    if upcoming:
+        raise ValidationError({"is_active": ADMIN_UPCOMING_MESSAGE.format(n=upcoming)})
+
+
 @transaction.atomic
 def save_row(obj: models.Model, *, actor: Any, request: Any = None) -> models.Model:
     """Validate and persist ``obj`` (insert or update), then audit ``<entity>.created|updated``.
@@ -128,8 +143,13 @@ def save_row(obj: models.Model, *, actor: Any, request: Any = None) -> models.Mo
     model = type(obj)
     before: dict[str, Any] | None = None
     if obj.pk is not None:
-        current = model._default_manager.filter(pk=obj.pk).first()
+        rows = model._default_manager.filter(pk=obj.pk)
+        if isinstance(obj, Professional):
+            rows = rows.select_for_update()  # serialises with bookings like ``update_specialist`` (PS-2)
+        current = rows.first()
         before = snapshot(current) if current is not None else None
+    if isinstance(obj, Professional) and before is not None and before["is_active"] and not obj.is_active:
+        _refuse_deactivation_with_upcoming(obj)
     pending_photo = None
     if isinstance(obj, Professional) and obj.photo and not getattr(obj.photo, "_committed", True):
         # The content-addressed name needs the row id: validate the bytes now, store them after the insert.
@@ -464,30 +484,42 @@ def set_specialist_photo(
 ) -> Professional:
     """``PUT specialists/{id}/photo/``: re-encoded by ``core.images`` (the product-image limits), stored under
     a content-addressed name; the previous file is removed after commit. Audit ``professional.photo_updated``
-    (the same bytes again change nothing)."""
+    (the same bytes again change nothing).
+
+    The new file is written under the row lock (local storage today). If this block fails after the write
+    (the audit insert, say), the new file is removed again so a rollback leaves no orphan; a rollback of an
+    enclosing transaction (the Idempotency-Key wrapper) after this block returned cannot be seen here. A
+    remote storage backend should move the upload before the lock (catalog banners share this shape)."""
     try:
         processed = process_image(upload)
     except ImageError as exc:
         raise ApiValidationError({"file": [field_error(exc.code)]}) from exc
-    with transaction.atomic():
-        professional = _locked_professional(professional_id)
-        previous = professional.photo.name or ""
-        name = media_name(PHOTO_KIND, professional.pk, processed.content, processed.extension)
-        if previous == name:
-            return professional
-        professional.photo.save(name.rsplit("/", 1)[-1], ContentFile(processed.content), save=False)
-        professional.save(update_fields=["photo"])
-        if previous:
-            _remove_file_on_commit(professional.photo.storage, previous)
-        audit.record(
-            action="professional.photo_updated",
-            entity_type="professional",
-            entity_id=str(professional.pk),
-            actor=actor,
-            request=request,
-            before={"photo": previous or None},
-            after={"photo": professional.photo.name, "sha256": sha256(processed.content).hexdigest()},
-        )
+    written, storage = "", None
+    try:
+        with transaction.atomic():
+            professional = _locked_professional(professional_id)
+            previous = professional.photo.name or ""
+            name = media_name(PHOTO_KIND, professional.pk, processed.content, processed.extension)
+            if previous == name:
+                return professional
+            professional.photo.save(name.rsplit("/", 1)[-1], ContentFile(processed.content), save=False)
+            written, storage = professional.photo.name or "", professional.photo.storage
+            professional.save(update_fields=["photo"])
+            if previous:
+                _remove_file_on_commit(professional.photo.storage, previous)
+            audit.record(
+                action="professional.photo_updated",
+                entity_type="professional",
+                entity_id=str(professional.pk),
+                actor=actor,
+                request=request,
+                before={"photo": previous or None},
+                after={"photo": professional.photo.name, "sha256": sha256(processed.content).hexdigest()},
+            )
+    except BaseException:
+        if written and storage is not None:
+            storage.delete(written)
+        raise
     return professional
 
 
