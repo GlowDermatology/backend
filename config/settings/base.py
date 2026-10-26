@@ -514,6 +514,9 @@ if QR_MAX_LIVE_TOKENS > 2:  # C§6.13: at most two live QR tokens per customer
     raise ImproperlyConfigured("QR_MAX_LIVE_TOKENS must be 1 or 2")
 POS_FAILED_AUTH_PER_IP_PER_MIN = env_positive_int("POS_FAILED_AUTH_PER_IP_PER_MIN", 20)
 POS_API_KEYS: list[tuple[str, str]] = []
+# loyalty.0006 inserts the first cashback policy (L1–L3 defaults) into an empty policy table (gap CB-9.2.4).
+# False only under config.settings.test, whose tests build their own policy versions from v1.
+LOYALTY_BOOTSTRAP_POLICY = True
 # Appointments (C§2.11).
 BOOKING_MIN_LEAD_MINUTES = env_non_negative_int("BOOKING_MIN_LEAD_MINUTES", 60)
 BOOKING_HORIZON_DAYS = env_positive_int("BOOKING_HORIZON_DAYS", 30)

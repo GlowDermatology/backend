@@ -19,9 +19,13 @@ commerce seeder calls :func:`seed_store_sales` when its replay reaches :data:`ST
 one (this slice, or a standalone run) :func:`seed_loyalty` seeds them itself.
 
 Idempotent: policies by ``version``, sales by ``billz_sale_id`` (the service itself is idempotent; the
-seeder also skips the sales already present). Every timestamp is a pinned design instant, so the run is
-anchor-independent and ``keep_open`` has nothing to move. A missing lower-layer row (no demo admin, no
-customers) is tolerated: the author is ``NULL`` and absent customers are skipped (standalone run).
+seeder also skips the sales already present). A migrated database already holds the install's first policy
+(``loyalty.0006``: v1 with the L3 bands from 2026-06-01, the design v1's period): the design v1 is then not
+seeded (versions are append-only) and the run notes it; v2 and v3 follow as designed, and every credit of the
+dataset stays the same (no seeded purchase of the v1 period reaches the 20 M band). Every timestamp is a
+pinned design instant, so the run is anchor-independent and ``keep_open`` has nothing to move. A missing
+lower-layer row (no demo admin, no customers) is tolerated: the author is ``NULL`` and absent customers are
+skipped (standalone run).
 """
 
 from __future__ import annotations
@@ -95,6 +99,14 @@ def _insert(spec: PolicySpec, admin: StaffUser | None) -> CashbackPolicy:
     return policy
 
 
+def _matches(spec: PolicySpec) -> bool:
+    """Whether the stored version ``spec.version`` has the tiers of ``spec``."""
+    stored = CashbackTier.objects.filter(policy__version=spec.version).order_by("from_amount")
+    return [(t.from_amount, t.to_amount, t.percent) for t in stored] == [
+        (low, high, Decimal(percent)) for low, high, percent in spec.tiers
+    ]
+
+
 def store_sale_id(customer_id: int) -> str:
     """The Billz document number of the seeded store sale of a customer (``S-{80000 + id × 7}``)."""
     return f"S-{80_000 + customer_id * 7}"
@@ -160,6 +172,11 @@ def seed_loyalty(context: SeedContext) -> None:
         existing = set(CashbackPolicy.objects.values_list("version", flat=True))
         for spec in POLICY_VERSIONS:
             if spec.version in existing:
+                if not _matches(spec):
+                    context.note(
+                        f"loyalty: policy v{spec.version} already exists with other tiers (the install's "
+                        "first policy, loyalty.0006); the design version was not seeded"
+                    )
                 continue
             _insert(spec, admin)
         if STORE_SALES_REPLAYED_BY not in {name for name, _order, _seeder in registered_seeders()}:

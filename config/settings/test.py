@@ -12,3 +12,6 @@ PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 JWT_SIGNING_KEYS = {"test": b"test-jwt-signing-key-at-least-32-bytes"}
 JWT_ACTIVE_KID = "test"
 INTERNAL_API_SECRET = "test-internal-secret-at-least-32-characters"  # noqa: S105
+# The suite starts from an empty cashback policy table (tests insert v1… themselves); loyalty.0006 is tested
+# with the switch on.
+LOYALTY_BOOTSTRAP_POLICY = False
