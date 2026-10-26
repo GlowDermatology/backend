@@ -476,8 +476,8 @@ session of the customer revoked with `password_changed` (tombstones on commit; t
 {provider, reason: "password_reset"}` each; Apple identities are revoked at Apple, §2.1.8), because a reset is what a
 victim does after an account takeover and a linked identity would otherwise keep the attacker in; every other
 device's key hash cleared; the **dormant-account rule** (§2.2.3, `M2-A16`) applies; then `start_customer_session(…,
-issue_device_key=True)` on this device; outbox `push.account_security {customer_id, event: "password_reset",
-farewell_tokens}` — inbox row + push to the new device **and** a visible push to every token captured from the devices
+issue_device_key=True)` on this device; outbox `push.account_security` (payload §2.14.2: `event: "password_reset"`,
+`provider: ""`, `farewell_tokens` = the captured tokens) — inbox row + push to the new device **and** a visible push to every token captured from the devices
 this reset deactivated (`SessionStart.farewell_tokens`, §1.9), so the previous device learns of the reset even when the
 reset came from a stolen SIM (§2.14.2); audit `customer.password_reset`. 400 `verification_invalid`; 409
 `phone_not_registered` if the customer was deleted in between.
@@ -632,8 +632,9 @@ Errors: 400 `social_ticket_invalid`, 400 `verification_invalid`; 409 `social_pro
 sealed refresh token moved from `gd:social:apple:{jti}` onto the row; missing — a cache flush — → 400
 `social_ticket_invalid`, the app restarts the sign-in, so no Apple identity is ever linked without a revocable token);
 consent when
-creating/reactivating; `start_customer_session(…, issue_device_key=True)`; outbox `push.account_security
-{customer_id, event: "social_linked", provider, farewell_tokens}` when an existing account was linked — the inbox row,
+creating/reactivating; `start_customer_session(…, issue_device_key=True)`; outbox `push.account_security` (payload
+§2.14.2: `event: "social_linked"`, `provider`, `farewell_tokens` = the captured tokens) when an existing account was
+linked — the inbox row,
 the push to the new device and a visible push to the device this sign-in replaced (`SessionStart.farewell_tokens`,
 §1.9), which besides gets `SESSION_REPLACED`; audit `customer.social_linked {provider}` (+ `customer.registered`).
 
@@ -785,15 +786,16 @@ Facebook or Apple identity, which then signs in on any device without SMS (`M2-A
   null}`. The token is verified exactly as in §2.1.8 (allowed pairs, nonce, replay cache; Apple: the authorization code
   is required and exchanged, the refresh token stored sealed) and the caller re-authenticated as above. → 200 `Me`. Errors: 400
   `social_token_invalid`, 400 `verification_invalid`; 409 `social_provider_linked` / `social_identity_linked`; 429
-  `throttled`; 503 `provider_unavailable`. Side effects: identity row; outbox `push.account_security {customer_id,
-  event: "social_linked", provider}`; audit `customer.social_linked {provider, via: "settings"}`.
+  `throttled`; 503 `provider_unavailable`. Side effects: identity row; outbox `push.account_security` (payload §2.14.2:
+  `event: "social_linked"`, `provider`, `farewell_tokens: []`); audit `customer.social_linked {provider, via:
+  "settings"}`.
 - **`DELETE me/social/{provider}/`** (**C**). Body `{"password": str | null, "verification_token": str | null}`,
   re-authenticated as above (checked first). → 200 `Me`; idempotent (not linked → 200). Refused with 409
   `last_sign_in_method` "Bu yagona kirish usuli. Avval parol o‘rnating." (`error.last_sign_in_method`, `details
   {provider}`) when the customer has no password and this is the only identity; the app then offers `POST me/password/`
   (§2.2.9), which keeps the identity. Side effects: identity deleted (Apple: `apple.revoke`, §2.1.8); audit
-  `customer.social_unlinked {provider, reason: "customer"}`; outbox `push.account_security {customer_id, event:
-  "social_unlinked", provider}`.
+  `customer.social_unlinked {provider, reason: "customer"}`; outbox `push.account_security` (payload §2.14.2: `event:
+  "social_unlinked"`, `provider`, `farewell_tokens: []`).
 
 #### 2.2.9 `POST me/password/` (**C**, **I**) — set or change the password while signed in
 Body `{"current_password": str | null, "verification_token": str | null, "password": str}`.
@@ -807,8 +809,8 @@ Body `{"current_password": str | null, "verification_token": str | null, "passwo
 → **200 `Me`** (`has_password: true`). Side effects (`customers.services.change_password`, P1):
 `set_customer_password` (`password_changed_at`); every **other** session of the customer revoked with
 `password_changed` (none under the single-device rule unless a revocation is pending); the **current session, its
-device key and every social identity are kept**; outbox `push.account_security {customer_id, event:
-"password_changed"}` (inbox + push to this device); audit `customer.password_changed {first_password: bool}`. This is
+device key and every social identity are kept**; outbox `push.account_security` (payload §2.14.2: `event:
+"password_changed"`, `provider: ""`, `farewell_tokens: []`; inbox + push to this device); audit `customer.password_changed {first_password: bool}`. This is
 the route the `last_sign_in_method` message points to, and the way a social-only customer adds a password; the
 unauthenticated `auth/reset-password/` stays the recovery path that unlinks everything (§2.1.5).
 
@@ -1447,8 +1449,8 @@ admin-only by DB constraint).
   they are stored with `source_type = "account"` and `source_id` = the customer id (migration
   `notifications.0003_inbox_account_source`: the `account` source and the CHECK `kind = 'general' AND source_type =
   'account' AND template_status = ''`; the built model admits `general` only for campaigns), `link = {"kind":
-  "none"}`, `dedupe_key = "account:{customer_id}:{event}:{event_id}"` where `event_id` is the uuid carried in the outbox
-  payload, so a redelivered message never adds a second row.
+  "none"}`, `dedupe_key = "account:{customer_id}:{event}:{event_id}"` with the payload's `event_id` (§2.14.2), so a
+  redelivered message never adds a second row.
 - **`GET me/notifications/unread-count/`** → `{"unread_count": 3}` (badge polling; `inbox_customer_unread_idx`).
 - **`POST me/notifications/{id}/read/`** → 200 `{"id", "read_at", "unread_count"}`; idempotent. 404 for another
   customer's row. Reading implies delivery: the row goes through the **same** `notifications.services.acknowledge`
@@ -1873,6 +1875,18 @@ pushes are reported `sent` but reach no device (§6.14).
 | `account_security` | `inbox_id`, `event` (`social_linked`, `social_unlinked`, `password_reset`, `password_changed`), `provider` (or `""`) | catalog `push.account_security.<event>` (title + body; `{provider}` only) | `general` / high |
 | `session_replaced` | `sid` (the revoked session) | none (data-only; APNs `content-available: 1`, `apns-push-type: background`, priority 5) | – / high |
 
+- **`push.account_security` payload — the one definition** every producer (P1: `auth/reset-password/`,
+  `auth/social/complete/`, `me/social/` POST and DELETE, `me/password/`) writes and the handler (P3) reads; P0 declares
+  it as `accounts.topics.ACCOUNT_SECURITY_PAYLOAD_KEYS` and P3 registers the same tuple (imported, not re-typed) in
+  `notifications.topics.PAYLOAD_KEYS`. Every key is always present:
+  ```jsonc
+  {"customer_id": 5,
+   "event": "password_reset",          // AccountSecurityEvent
+   "event_id": "3f2c9a…32 hex",        // uuid4 hex made by the producer; suffix of the outbox dedupe key
+                                       // push.account_security:{customer_id}:{event}:{event_id} and of the inbox dedupe_key
+   "provider": "",                     // CustomerSocialProvider for social_linked / social_unlinked, else ""
+   "farewell_tokens": []}              // FCM tokens of the devices a reset or social completion deactivated, else []
+  ```
 - **Farewell notices.** A `push.account_security` payload may carry `farewell_tokens`: the FCM tokens captured from the
   devices that a reset or a social completion deactivated (§1.9). The handler sends each the same visible notice as the
   current device (same `inbox_id`; an app without a session shows it and opens the sign-in screen), then blanks the
