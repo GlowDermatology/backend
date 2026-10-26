@@ -23,6 +23,8 @@ app.conf.beat_schedule = {
     "accounts-cleanup-auth": {"task": "accounts.cleanup_auth", "schedule": 3600.0},
     # M2 BTS polling fallback (customer contract §2.13.3); the P0 stub returns [] until P2 implements it.
     "commerce-poll-bts": {"task": "commerce.poll_bts", "schedule": 600.0},
+    # M3: BTS's region list is refreshed before it goes stale (24 h), so no customer request pays for it.
+    "delivery-refresh-bts-regions": {"task": "delivery.refresh_bts_regions", "schedule": 6 * 3600.0},
     "loyalty-reconcile-balances": {
         "task": "loyalty.reconcile_balances",
         "schedule": crontab(hour=3, minute=10),

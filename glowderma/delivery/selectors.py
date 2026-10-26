@@ -14,6 +14,7 @@ The contract's ``shipment`` union (``OrderSummary.shipment``):
 
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any
@@ -24,12 +25,19 @@ from django.db.models.functions import Coalesce
 
 from glowderma.core import enums, integration_modes, timeutils
 from glowderma.delivery.models import Shipment, ShipmentEvent
-from glowderma.integrations.bts.ports import City, Region
+from glowderma.integrations.bts.ports import BtsUnavailable, City, Region
 from glowderma.integrations.bts.registry import get_bts
 
-# BTS's region/city reference list (customer contract §2.6): cached 24 h under this key.
+logger = logging.getLogger(__name__)
+
+# BTS's region/city reference list (customer contract §2.6): fresh for 24 h, kept a week under this key so a
+# BTS outage serves the last list instead of 503; refreshed single-flight (REGIONS_LOCK_KEY) by the first
+# request that finds it stale and by the beat ``delivery.refresh_bts_regions``.
 REGIONS_CACHE_KEY = "gd:bts:regions"
-REGIONS_CACHE_SECONDS = 24 * 3600
+REGIONS_FRESH_SECONDS = 24 * 3600
+REGIONS_CACHE_SECONDS = 7 * 24 * 3600
+REGIONS_LOCK_KEY = "gd:bts:regions-refresh"
+REGIONS_LOCK_SECONDS = 60
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,20 +149,32 @@ class RegionCatalog:
     updated_at: datetime | None
 
 
-def region_catalog() -> RegionCatalog:
-    """``delivery/regions/``: BTS ``regions()`` cached 24 h (``gd:bts:regions``); empty with ``updated_at``
-    null (nothing cached, no BTS call) while delivery is not offered (customer contract §2.6). A transport
-    failure of the first fetch raises ``BtsUnavailable`` (the caller answers 503)."""
-    if not integration_modes.delivery_available():
-        return RegionCatalog(regions=[], updated_at=None)
+def cached_region_catalog() -> RegionCatalog | None:
+    """The cached list, fresh or stale (``None`` when nothing is cached)."""
     cached = cache.get(REGIONS_CACHE_KEY)
-    if isinstance(cached, dict):
-        regions = [
-            Region(code=r["code"], name=r["name"], cities=tuple(City(**c) for c in r["cities"]))
-            for r in cached["regions"]
-        ]
-        return RegionCatalog(regions=regions, updated_at=datetime.fromisoformat(cached["updated_at"]))
-    regions = get_bts().regions()
+    if not isinstance(cached, dict):
+        return None
+    regions = [
+        Region(code=r["code"], name=r["name"], cities=tuple(City(**c) for c in r["cities"]))
+        for r in cached["regions"]
+    ]
+    return RegionCatalog(regions=regions, updated_at=datetime.fromisoformat(cached["updated_at"]))
+
+
+def refresh_region_catalog(stale: RegionCatalog | None = None) -> RegionCatalog | None:
+    """Fetch BTS's list once (single flight across workers) and cache it; ``None`` when another worker is
+    fetching it right now. A failure raises ``BtsUnavailable`` unless ``stale`` can be served (WARNING)."""
+    if not cache.add(REGIONS_LOCK_KEY, 1, timeout=REGIONS_LOCK_SECONDS):
+        return None
+    try:
+        regions = get_bts().regions()
+    except BtsUnavailable:
+        if stale is None:
+            raise
+        logger.warning("bts.regions_refresh_failed; serving the list of %s", stale.updated_at)
+        return stale
+    finally:
+        cache.delete(REGIONS_LOCK_KEY)
     now = timeutils.now()
     cache.set(
         REGIONS_CACHE_KEY,
@@ -162,6 +182,26 @@ def region_catalog() -> RegionCatalog:
         REGIONS_CACHE_SECONDS,
     )
     return RegionCatalog(regions=list(regions), updated_at=now)
+
+
+def region_catalog() -> RegionCatalog:
+    """``delivery/regions/``: BTS ``regions()``, fresh for 24 h; empty with ``updated_at`` null (nothing
+    cached, no BTS call) while delivery is not offered (customer contract §2.6). A stale list is refreshed by
+    one request (single flight) while every other one — and that one, when BTS fails — is served the stale
+    list; only a first fetch that fails, or one that another worker is still running, raises
+    ``BtsUnavailable`` (the caller answers 503)."""
+    if not integration_modes.delivery_available():
+        return RegionCatalog(regions=[], updated_at=None)
+    cached = cached_region_catalog()
+    if cached is not None and cached.updated_at is not None:
+        if (timeutils.now() - cached.updated_at).total_seconds() < REGIONS_FRESH_SECONDS:
+            return cached
+    fetched = refresh_region_catalog(stale=cached)
+    if fetched is not None:
+        return fetched
+    if cached is not None:
+        return cached
+    raise BtsUnavailable("BTS's region list is being fetched by another request")
 
 
 def region_known(region_code: str, city_code: str) -> bool:
@@ -210,6 +250,8 @@ __all__ = [
     "bts_failed_count",
     "create_request_answered",
     "region_catalog",
+    "cached_region_catalog",
+    "refresh_region_catalog",
     "region_known",
     "shipment_by_tracking",
     "stale_shipments",

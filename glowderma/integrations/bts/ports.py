@@ -102,7 +102,8 @@ class BtsUnavailable(BtsError):
 
 class BtsPort(Protocol):
     def regions(self) -> list[Region]:
-        """BTS's region/city reference list (cached 24 h by ``delivery.selectors.region_catalog``)."""
+        """BTS's region/city reference list (cached by ``delivery.selectors.region_catalog``: fresh 24 h,
+        served stale while a refresh fails, refreshed by the beat ``delivery.refresh_bts_regions``)."""
         ...
 
     def quote(self, region_code: str, city_code: str) -> int:

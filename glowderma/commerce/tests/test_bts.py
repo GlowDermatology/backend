@@ -22,6 +22,8 @@ from glowderma.commerce.tests.factories import OrderFactory
 from glowderma.commerce.tests.webhook_support import BTS_URL, real_now, rows
 from glowderma.core import timeutils
 from glowderma.core.timeutils import TASHKENT
+from glowderma.delivery import selectors as delivery_selectors
+from glowderma.delivery import tasks as delivery_tasks
 from glowderma.delivery.models import Shipment, ShipmentEvent
 from glowderma.delivery.tests.factories import ShipmentFactory
 from glowderma.integrations import httpclient
@@ -543,6 +545,42 @@ def test_regions_are_cached(public_client: APIClient) -> None:
     assert body["regions"][0]["cities"][0] == {"code": "1001", "name": "Chilonzor tumani"}
     assert body["updated_at"] is not None
     assert first.headers["Cache-Control"] in ("public, max-age=60", "private, no-cache")
+
+
+def test_a_stale_region_list_is_refreshed_once_and_served_while_bts_fails(public_client: APIClient) -> None:
+    """R7: single flight, the stale list served while a refresh runs elsewhere or fails, 503 only with no
+    list at all; the beat refreshes it before any request has to."""
+    calls: list[int] = []
+    real = FakeBts.regions
+    fail = {"on": False}
+
+    def spy(self: FakeBts) -> Any:
+        calls.append(1)
+        if fail["on"]:
+            raise BtsUnavailable("down")
+        return real(self)
+
+    url = "/api/v1/delivery/regions/"
+    with mock.patch.object(FakeBts, "regions", spy):
+        fail["on"] = True
+        assert public_client.get(url).status_code == 503  # nothing cached and BTS down
+        fail["on"] = False
+        first = public_client.get(url).json()
+        later = timeutils.now() + timedelta(hours=25)
+        fail["on"] = True
+        with mock.patch.object(timeutils, "now", lambda: later):
+            stale = public_client.get(url)  # stale: one refresh attempt, BTS down → the stale list
+            assert stale.status_code == 200 and stale.json() == first
+            cache.add(delivery_selectors.REGIONS_LOCK_KEY, 1, 60)  # another worker is refreshing
+            assert public_client.get(url).json() == first
+            cache.delete(delivery_selectors.REGIONS_LOCK_KEY)
+            fail["on"] = False
+            assert delivery_tasks.refresh_bts_regions() == 4
+            assert public_client.get(url).json()["updated_at"] != first["updated_at"]
+    assert calls == [1, 1, 1, 1]
+    cache.clear()
+    cache.add(delivery_selectors.REGIONS_LOCK_KEY, 1, 60)
+    assert public_client.get(url).status_code == 503  # nothing cached and the fetch is running elsewhere
 
 
 def test_regions_empty_while_delivery_is_not_offered(public_client: APIClient) -> None:
