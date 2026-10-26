@@ -24,8 +24,13 @@ outbox. Delivery is at-least-once: each handler is idempotent at the provider bo
   retried; a conflict raises, never a silent success.
 * ``refund.submit`` — Click: status check by ``provider_txn_id`` before any reversal; ``mark_submitting``
   (a fenced compare-and-set) is committed before the reversal call; ``succeeded`` / ``failed`` / ``unknown``
-  (+ events); ``unknown`` is never retried automatically. Raises only on a transport error **before**
-  submission, so a message that dies always finds the refund ``requested``.
+  (+ events); ``unknown`` is never retried automatically. Click answering that it did **not** process the
+  reversal (``ClickNotProcessed``: a redirect, 408/425/429, an auth refusal, a request that never left)
+  releases the claim (``submitting → requested``) and raises, so the outbox retries with a fresh status check.
+  **Any other exception** after the claim (an untyped error, a Celery soft time limit) records ``unknown`` and
+  re-raises: never a second automatic reversal, never a silent ``submitting``. Raises only on a transport
+  error **before** submission (or after a release), so a message that dies always finds the refund
+  ``requested``.
 
 Dead letters (``outbox.on_dead``): ``bts.create_shipment`` → shipment ``failed`` (``dead_letter``) +
 ``shipment_failed``; ``refund.submit`` → refund ``failed`` (``dead_letter``, never ``unknown``) +
@@ -66,7 +71,12 @@ from glowderma.integrations.billz.ports import (
 )
 from glowderma.integrations.bts.ports import BtsRejected, BtsUnavailable, CreateRequest, Parcel
 from glowderma.integrations.bts.registry import get_bts
-from glowderma.integrations.click.ports import ClickRefundRejected, ClickUnavailable
+from glowderma.integrations.click.ports import (
+    ClickError,
+    ClickNotProcessed,
+    ClickRefundRejected,
+    ClickUnavailable,
+)
 from glowderma.integrations.click.registry import get_click
 from glowderma.loyalty import selectors as loyalty_selectors
 from glowderma.loyalty import services as loyalty_services
@@ -517,6 +527,10 @@ def submit_refund(payload: dict[str, Any]) -> None:
             return
     try:
         receipt = port.refund(ref, refund.amount)
+    except ClickNotProcessed as exc:
+        # Click said it did not process the reversal: nothing happened, give the claim back and retry
+        payment_services.release_claim(refund_id, str(exc), timeutils.now(), expected_attempts=claim.attempts)
+        raise
     except ClickRefundRejected as exc:
         if _reversed(port, ref):
             _succeed(refund_id, order.pk, "")
@@ -532,7 +546,23 @@ def submit_refund(payload: dict[str, Any]) -> None:
     except ClickUnavailable as exc:
         _resolve_after_failure(refund_id, order.pk, ref, port, str(exc), claim.attempts)
         return
+    except BaseException as exc:
+        if isinstance(exc, ClickError):  # pragma: no cover - every ClickError is handled above
+            raise
+        # the reversal may have left: the outcome is unknown and is never retried automatically
+        _unknown_after(refund_id, order.pk, exc, claim.attempts)
+        raise
     _succeed(refund_id, order.pk, receipt.provider_refund_id)
+
+
+def _unknown_after(refund_id: int, order_id: int, exc: BaseException, attempt: int) -> None:
+    """``unknown`` after an exception the Click port does not type (a soft time limit, a bug): the reversal
+    may have reached Click. A failure to record it is logged; the original exception is what propagates."""
+    logger.error("refund.submit: reversal of refund %s ended in %s", refund_id, type(exc).__name__)
+    try:
+        _unknown(refund_id, order_id, f"reversal outcome unknown: {type(exc).__name__}", attempt)
+    except Exception:
+        logger.exception("refund.submit: could not record refund %s as unknown", refund_id)
 
 
 @outbox.register(topics.REFUND_SUBMIT)

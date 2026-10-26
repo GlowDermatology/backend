@@ -54,6 +54,20 @@ def test_payme_state_one_is_left_pending_by_unilateral_fails() -> None:
     assert services.can_fail_unilaterally("payme", {"state": 2})
 
 
+def test_a_claim_click_did_not_process_is_released_by_its_owner_only() -> None:
+    """M3 Click reversal answered "not processed": ``submitting → requested`` (fenced by the attempt)."""
+    payment = PaymentFactory.create()
+    refund_id = services.create_refund(payment.pk, payment.amount, None, at=AT).refund_id
+    claim = services.mark_submitting(refund_id, AT)
+    assert not services.release_claim(refund_id, "stale", AT, expected_attempts=claim.attempts + 1).changed
+    released = services.release_claim(refund_id, "HTTP 429", AT, expected_attempts=claim.attempts)
+    assert (released.state, released.changed) == ("requested", True)
+    assert not services.release_claim(refund_id, "again", AT, expected_attempts=claim.attempts).changed
+    audit = AuditEntry.objects.filter(action="refund.state_changed").order_by("-id").first()
+    assert audit is not None and (audit.after["from"], audit.after["to"]) == ("submitting", "requested")
+    assert services.mark_submitting(refund_id, AT).attempts == claim.attempts + 1  # claimed again
+
+
 def test_click_refund_state_machine_and_audits() -> None:
     payment = PaymentFactory.create()
     staff = payment.order.cancelled_by

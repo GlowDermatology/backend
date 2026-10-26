@@ -9,18 +9,25 @@ Requests go to ``{CLICK_MERCHANT_API_URL}/payment/status/{service_id}/{payment_i
 that never left is retried (:mod:`glowderma.integrations.httpclient`).
 
 Failure mapping (the refund handler asks :meth:`LiveClick.payment_status` before any reversal and again after
-a refusal or an unknown outcome, so it only needs these to be truthful):
+a refusal or an unknown outcome, so it only needs these to be truthful). Any 2xx is an answer (Click documents
+200 and 201):
 
-* no answer (connect failure, timeout, broken body) or HTTP 5xx → ``ClickUnavailable`` for both calls (for a
-  reversal: outcome unknown);
-* HTTP 4xx (auth, unknown payment, bad request) → status: ``ClickStatusUnknown``; reversal:
-  ``ClickRefundRejected("http_<status>")``;
-* HTTP 200 that is not a JSON object with ``error_code`` → status: ``ClickStatusUnknown``; reversal:
+* the request provably never left, or Click answered that it did **not** process it (a redirect — never
+  followed —, 408 / 425 / 429, 401 / 403) → ``ClickNotProcessed`` for both calls (a reversal's claim is
+  released and the outbox retries);
+* no usable answer after the request may have left (timeout, broken or undecodable body) or HTTP 5xx →
+  ``ClickUnavailable`` (for a reversal: outcome unknown);
+* another HTTP 4xx (bad request, unknown payment) → status: ``ClickStatusUnknown``; reversal:
+  ``ClickRefundRejected`` with Click's ``error_code`` when the body carries one, else ``http_<status>``;
+* 2xx that is not a JSON object with an integer ``error_code`` → status: ``ClickStatusUnknown``; reversal:
   ``ClickUnavailable`` (outcome unknown);
-* HTTP 200 with ``error_code`` ≠ 0 → status: ``ClickStatusUnknown``; reversal:
+* 2xx with ``error_code`` ≠ 0 → status: ``ClickStatusUnknown``; reversal:
   ``ClickRefundRejected(str(code), error_note)``;
-* HTTP 200 with ``error_code`` 0 → status: ``paid`` / ``reversed`` (:func:`.protocol.merchant_payment_state`),
-  any other ``payment_status`` ``ClickStatusUnknown``; reversal: ``RefundReceipt(payment_id)``.
+* 2xx with ``error_code`` 0 → status: ``paid`` (``payment_status`` 2) / ``reversed`` (``-99``, verify M3)
+  (:func:`.protocol.merchant_payment_state`), any other ``payment_status`` ``ClickStatusUnknown``; reversal:
+  ``RefundReceipt(payment_id)``;
+* an answer of any other shape the adapter cannot read → ``ClickStatusUnknown`` / ``ClickUnavailable``, never
+  an untyped exception.
 
 A 401/403 (a wrong ``CLICK_MERCHANT_USER_ID`` / secret, or a clock far off) is logged at ERROR
 ``click.auth_failed``. Nothing secret is logged: not the ``Auth`` header, not the secret, not a body.
@@ -38,6 +45,7 @@ from django.conf import settings
 from .. import httpclient
 from . import protocol
 from .ports import (
+    ClickNotProcessed,
     ClickRefundRejected,
     ClickStatusUnknown,
     ClickUnavailable,
@@ -115,66 +123,71 @@ class LiveClick:
 
     @staticmethod
     def _error_code(body: dict[str, Any]) -> int | None:
-        code = body.get("error_code")
-        if isinstance(code, bool):
-            return None
-        if isinstance(code, int):
-            return code
-        if isinstance(code, str) and code.lstrip("-").isdigit():
-            return int(code)
-        return None
+        return httpclient.int_code(body.get("error_code"))
+
+    def _answer(self, method: str, template: str, payment_ref: str, what: str) -> httpclient.Answer:
+        """The HTTP answer; no answer → ``ClickNotProcessed`` (never sent) / ``ClickUnavailable`` (may have
+        left), an answer that says "not processed" → ``ClickNotProcessed``, 5xx → ``ClickUnavailable``."""
+        try:
+            answer = self._call(method, template, payment_ref, retry_unsent=True)
+        except httpclient.TransportFailure as exc:
+            if not exc.sent:
+                raise ClickNotProcessed(f"{what}: {exc}") from exc
+            raise ClickUnavailable(f"{what}: {exc}") from exc
+        if answer.not_processed:
+            raise ClickNotProcessed(f"{what}: HTTP {answer.status} (not processed)")
+        if answer.status >= 500:
+            raise ClickUnavailable(f"{what}: HTTP {answer.status}")
+        return answer
 
     # --- port -----------------------------------------------------------------------------------------------
 
     def payment_status(self, payment_ref: str) -> PaymentState:
-        if not payment_ref.isdigit():
+        if not payment_ref.isascii() or not payment_ref.isdigit():
             raise ClickStatusUnknown("not a Click payment id")
-        try:
-            answer = self._call("GET", protocol.MERCHANT_PATH_STATUS, payment_ref, retry_unsent=True)
-        except httpclient.TransportFailure as exc:
-            raise ClickUnavailable(f"Click status check: {exc}") from exc
-        if answer.status >= 500:
-            raise ClickUnavailable(f"Click status check: HTTP {answer.status}")
-        if answer.status != 200:
-            raise ClickStatusUnknown(f"Click status check: HTTP {answer.status}")
+        what = "Click status check"
+        answer = self._answer("GET", protocol.MERCHANT_PATH_STATUS, payment_ref, what)
+        if not answer.ok:
+            raise ClickStatusUnknown(f"{what}: HTTP {answer.status}")
         body = answer.json_object()
         code = self._error_code(body)
         if code is None:
-            raise ClickStatusUnknown("Click status check: answer without error_code")
+            raise ClickStatusUnknown(f"{what}: answer without error_code")
         if code != protocol.MERCHANT_API_OK:
-            note = httpclient.safe_text(body.get("error_note"))
-            raise ClickStatusUnknown(f"Click status check: error_code {code} {note}".strip())
-        state = protocol.merchant_payment_state(body.get("payment_status"))
+            note = httpclient.safe_text(body.get("error_note"), 120)
+            raise ClickStatusUnknown(f"{what}: error_code {code} {note}".strip())
+        raw = body.get("payment_status")
+        state = protocol.merchant_payment_state(raw)
         if state is None:
-            logger.warning("click.status_unknown payment_status=%r", body.get("payment_status"))
-            raise ClickStatusUnknown(f"Click status check: payment_status {body.get('payment_status')!r}")
+            shown = httpclient.safe_text(raw if isinstance(raw, int | str) else type(raw).__name__, 32)
+            logger.warning("click.status_unknown payment_status=%s", shown)
+            raise ClickStatusUnknown(f"{what}: payment_status {shown}")
         return state
 
     def refund(self, payment_ref: str, amount: int) -> RefundReceipt:
         """Reverse the whole payment (Click's ``payment/reversal`` has no amount; ``amount`` is the refund's,
         always the full payment amount)."""
-        if not payment_ref.isdigit():
+        if not payment_ref.isascii() or not payment_ref.isdigit():
             raise ClickRefundRejected(INVALID_PAYMENT_ID, "not a Click payment id")
-        try:
-            answer = self._call("DELETE", protocol.MERCHANT_PATH_REVERSAL, payment_ref, retry_unsent=True)
-        except httpclient.TransportFailure as exc:
-            raise ClickUnavailable(f"Click reversal: {exc}") from exc
-        if answer.status >= 500:
-            raise ClickUnavailable(f"Click reversal: HTTP {answer.status}")
-        if answer.status != 200:
-            raise ClickRefundRejected(
-                f"http_{answer.status}", f"Click refused the reversal: HTTP {answer.status}"
-            )
+        what = "Click reversal"
+        answer = self._answer("DELETE", protocol.MERCHANT_PATH_REVERSAL, payment_ref, what)
         body = answer.json_object()
         code = self._error_code(body)
+        if not answer.ok:
+            # a 4xx Click explains in its own body keeps Click's code (≤ 19 characters, fits error_code)
+            note = httpclient.safe_text(body.get("error_note"), 120)
+            error_code = str(code) if code is not None else f"http_{answer.status}"
+            detail = f"HTTP {answer.status} error_code {code} {note}" if code is not None else ""
+            detail = detail.rstrip() or f"HTTP {answer.status}"
+            raise ClickRefundRejected(error_code, f"Click refused the reversal: {detail}")
         if code is None:
-            raise ClickUnavailable("Click reversal: answer without error_code")
+            raise ClickUnavailable(f"{what}: answer without error_code")
         if code != protocol.MERCHANT_API_OK:
-            note = httpclient.safe_text(body.get("error_note")) or "refused"
+            note = httpclient.safe_text(body.get("error_note"), 120) or "refused"
             raise ClickRefundRejected(str(code), f"Click refused the reversal: {note}")
         payment_id = body.get("payment_id")
-        reference = str(payment_id) if isinstance(payment_id, int | str) and str(payment_id) else payment_ref
-        return RefundReceipt(provider_refund_id=reference[:64])
+        reference = httpclient.int_code(payment_id)
+        return RefundReceipt(provider_refund_id=str(reference) if reference is not None else payment_ref)
 
     def pay_url(self, account_ref: str, amount: int, return_url: str) -> str:
         return protocol.pay_url(

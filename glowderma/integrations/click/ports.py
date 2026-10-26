@@ -10,7 +10,8 @@ Refund and status calls are keyed by **Click's payment id of the Merchant API** 
 …/payment/status/{service_id}/{payment_id}``), never ``click_trans_id`` (customer contract §2.13.0, verify
 M3). The refund handler always asks :meth:`ClickPort.payment_status` before reversing (a redelivery after a
 crash must find an already reversed payment instead of reversing twice). :class:`ClickUnavailable` is a
-transport error; :class:`ClickRefundRejected` a definitive refusal.
+transport error (outcome unknown); its subclass :class:`ClickNotProcessed` an answer that proves nothing
+happened; :class:`ClickRefundRejected` a definitive refusal.
 
 The live adapter (:mod:`.live`, ``CLICK_MODE=live``) calls Click's Merchant API with the signed ``Auth``
 header; an answer it cannot map to ``paid`` / ``reversed`` raises :class:`ClickStatusUnknown` (a
@@ -43,6 +44,12 @@ class ClickError(Exception):
 
 class ClickUnavailable(ClickError):
     """Click did not answer (transport error); the outcome of a call in flight is unknown."""
+
+
+class ClickNotProcessed(ClickUnavailable):
+    """Click answered that it did **not** process the request (a redirect, 408 / 425 / 429, an authentication
+    refusal) or the request provably never left: nothing happened at Click, so it may be repeated later. For
+    a reversal the refund handler releases its claim (``submitting → requested``) and the outbox retries."""
 
 
 class ClickStatusUnknown(ClickUnavailable):

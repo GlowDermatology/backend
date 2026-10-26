@@ -171,16 +171,19 @@ def valid_sign_time(value: str) -> bool:
 # Source: docs.click.uz/en/merchant-api/requests (read 2026-10-26). Requests carry ``Accept`` /
 # ``Content-Type: application/json`` and ``Auth: merchant_user_id:sha1(timestamp + secret_key):timestamp``
 # (10-digit UNIX seconds). The secret is the one ``secret_key`` Click issues per service (the SHOP API's
-# ``CLICK_SECRET_KEY``; Click's own PHP library configures that one key for both). Transport-level errors come
-# as HTTP statuses (400, 401, 403, 404, 406, 410, 500, 503 — docs.click.uz/en/merchant-api/errors); a
-# processed request answers 200 with ``error_code`` (0 = success) and ``error_note``.
+# ``CLICK_SECRET_KEY``; Click's own PHP library configures that one key for both). HTTP statuses
+# (docs.click.uz/en/merchant-api/errors): 200 and 201 OK, 400, 401, 403, 404, 406, 410, 500, 502; a
+# processed request answers 2xx with ``error_code`` (0 = success) and ``error_note``.
 MERCHANT_API_OK: Final = 0
 MERCHANT_PATH_STATUS: Final = "payment/status/{service_id}/{payment_id}"
 MERCHANT_PATH_REVERSAL: Final = "payment/reversal/{service_id}/{payment_id}"
-# ``payment_status`` codes (verify M3): docs.click.uz shows the field but documents no values. Click's own PHP
-# library (github.com/click-llc/click-integration-php, ``BasePayments::on_invoice_checked``) reads a positive
-# status as confirmed and ``-99`` as rejected (cancelled). Only those two readings are trusted; every other
-# code is "unknown" (ClickStatusUnknown), so an unverified code can never close or skip a refund.
+# ``payment_status`` codes: docs.click.uz/en/merchant-api/click-pass ("Payment Status Codes") documents
+# ``< 0`` error, ``0`` created, ``1`` processing, ``2`` successful. Only ``2`` reads ``paid``. ``-99`` reads
+# ``reversed`` — a guess (verify M3): -99 is the invoice status "Deleted" in Click's docs and what Click's PHP
+# library (github.com/click-llc/click-integration-php, ``BasePayments::on_invoice_checked``) treats as
+# cancelled; a reversal's code must be confirmed on the sandbox. Every other code (``1`` processing included)
+# is "unknown" (ClickStatusUnknown), so an unverified code can never close or skip a refund.
+MERCHANT_STATUS_PAID: Final = 2
 MERCHANT_STATUS_REVERSED: Final = frozenset({-99})
 # Click reversal conditions (docs.click.uz): a completed payment of the current reporting month (the previous
 # month only on the 1st), made with an online card; UZCARD may refuse.
@@ -193,16 +196,18 @@ def merchant_auth_header(merchant_user_id: str, secret_key: str, timestamp: int)
 
 
 def merchant_payment_state(code: object) -> Literal["paid", "reversed"] | None:
-    """The port state of a Merchant API ``payment_status`` (see :data:`MERCHANT_STATUS_REVERSED`), else
-    ``None`` (unknown: never treated as paid or reversed)."""
-    if isinstance(code, bool) or not isinstance(code, int | str):
+    """The port state of a Merchant API ``payment_status``: ``2`` → ``paid``, ``-99`` → ``reversed`` (see
+    :data:`MERCHANT_STATUS_REVERSED`), anything else ``None`` (unknown: never treated as paid or reversed)."""
+    if isinstance(code, bool):
         return None
-    try:
+    if isinstance(code, int):
+        value = code
+    elif isinstance(code, str) and re.fullmatch(r"-?[0-9]{1,6}", code):
         value = int(code)
-    except ValueError:
+    else:
         return None
     if value in MERCHANT_STATUS_REVERSED:
         return "reversed"
-    if value > 0:
+    if value == MERCHANT_STATUS_PAID:
         return "paid"
     return None

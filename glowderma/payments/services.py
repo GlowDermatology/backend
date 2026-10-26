@@ -505,6 +505,28 @@ def mark_submitting(
         return _refund_result(refund, payment, changed=True)
 
 
+def release_claim(
+    refund_id: int, last_error: str = "", at: datetime | None = None, *, expected_attempts: int
+) -> RefundResult:
+    """``submitting → requested``: the provider answered that it did **not** process the claimed attempt (a
+    redirect, 408 / 425 / 429, an authentication refusal; M3 Click reversal), so nothing was sent and the
+    outbox may submit again after its status check. Fenced like :func:`mark_unknown`: only the worker whose
+    attempt is still the newest ``submitting`` one releases it (``changed=False`` otherwise)."""
+    _aware(at, "at")
+    instant = at or timeutils.now()
+    with transaction.atomic():
+        payment, refund = _locked_refund(refund_id)
+        if _stale(refund, enums.RefundState.SUBMITTING, expected_attempts):
+            return _refund_result(refund, payment, changed=False)
+        before = refund.state
+        refund.state = enums.RefundState.REQUESTED
+        refund.last_error = last_error
+        refund.last_attempt_at = instant
+        refund.save()
+        _audit_state(refund, before)
+        return _refund_result(refund, payment, changed=True)
+
+
 def _stale(refund: Refund, expected_state: str | None, expected_attempts: int | None) -> bool:
     """The caller's claim no longer owns the row (fencing of :func:`mark_failed` / :func:`mark_unknown`)."""
     if expected_state is not None and refund.state != expected_state:
@@ -678,5 +700,6 @@ __all__ = [
     "mark_succeeded",
     "mark_unknown",
     "merge_provider_state",
+    "release_claim",
     "retry_refund",
 ]
