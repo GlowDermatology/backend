@@ -227,11 +227,12 @@ move_history_horizon (P0)}`, `accounts.api.guard.LoginGuard` (scope `customer_lo
 password checks — `auth/login/` on an unknown device, `auth/social/complete/`; `customer_login_device` per device row for
 a login with a valid device key; `customer_reauth` per customer id for the signed-in checks of `me/social/`,
 `me/password/` and `DELETE me/`, which call `check`/`reset` on `customer_reauth` only and `record_failure` on both
-`customer_reauth` and `customer_login` — counting and blocking split, C§1.8), `catalog.selectors.{filter_products_search, customer_visible_products,
-category_queryset, banner_queryset}`, `commerce.selectors.available_stock` (B5), `site_config.models.SiteSettings.load`,
-`core.images.process_image`, `core.secretbox`, `core.pii`, `commerce.services.cancel_by_customer` (P2) and
-`appointments.services.cancel_by_customer` (P3) from `delete_account` (called only when the customer has open items;
-P1 tests cover the no-open-items path with the P0 stubs, the lead's integration test the rest).
+`customer_reauth` and `customer_login` — counting and blocking split, C§1.8),
+`catalog.selectors.{filter_products_search, customer_visible_products, category_queryset, banner_queryset}`,
+`commerce.selectors.available_stock` (B5), `site_config.models.SiteSettings.load`, `core.images.process_image`,
+`core.secretbox`, `core.pii`, `commerce.services.cancel_by_customer` (P2) and `appointments.services.cancel_by_customer`
+(P3) from `delete_account` (called only when the customer has open items; P1 tests cover the no-open-items path with the
+P0 stubs, the lead's integration test the rest).
 
 ### Models / migrations
 None (P0 owns `accounts.0006`). The link-social ticket binding and the OTP fid/IP day counters live in Redis (§11).
@@ -277,9 +278,9 @@ None (P0 owns `accounts.0006`). The link-social ticket binding and the OTP fid/I
   the same tokens; after 11 min still unconfirmed → reuse: 401 `SESSION_EXPIRED`, audit `customer.refresh_reused`; the
   token replaced by a re-rotation presented later → reuse (dead-hash entry); **parallel 401s:** rotate R1 → R2, use A2
   (rotation confirmed), then present R1 again within 120 s → 200 with the same tokens (R2/A2), session alive, no audit
-  row; old token after the first access token of the new `rot` **and** after the 120 s grace → 401 `SESSION_EXPIRED`
-  + audit, session dead for the new token too; a token two rotations old → 401
-  `not_authenticated`; sliding expiry; device mismatch; junk tokens hit `refresh_unknown`.
+  row; old token after the first access token of the new `rot` **and** after the 120 s grace → 401 `SESSION_EXPIRED` +
+  audit, session dead for the new token too; a token two rotations old → 401 `not_authenticated`; sliding expiry; device
+  mismatch; junk tokens hit `refresh_unknown`.
 - Social: nonce issue/consume single use and fid binding; replayed ID token refused; linked → tokens; unknown →
   ticket bound to the fid (another fid → `social_ticket_invalid`); send-code with ticket; complete for active
   (password required when set, wrong → `password_incorrect`), social-only, no and deleted customer; a verification token
@@ -301,10 +302,9 @@ None (P0 owns `accounts.0006`). The link-social ticket binding and the OTP fid/I
   password login → 200; the same staff sign-in under the test settings → 200. Facebook: the live
   adapter (recorded fixtures) sends `input_token` only in the POST body, never in a URL (staff path too).
 - `me/social/`: link with password (wrong → `password_incorrect`; locked by `customer_reauth`, each failure also counted
-  in `customer_login`); a social-only
-  account linking without `verification_token` → 400 `verification_token` `required`, with a used or foreign token →
-  400 `verification_invalid`, with a fresh `reset_password` token of its own phone → 200; unlink needs the same
-  re-authentication (checked before the idempotent no-op); `last_sign_in_method`.
+  in `customer_login`); a social-only account linking without `verification_token` → 400 `verification_token`
+  `required`, with a used or foreign token → 400 `verification_invalid`, with a fresh `reset_password` token of its own
+  phone → 200; unlink needs the same re-authentication (checked before the idempotent no-op); `last_sign_in_method`.
 - `me/password/`: change with the current password (wrong → `password_incorrect`, guard); a social-only account sets a
   first password with a `reset_password` verification token; `password_unchanged`; requires an Idempotency-Key and a
   retry replays the 200; the current session and device key keep working, social identities stay linked, other
@@ -496,8 +496,8 @@ create_refund}`, `payments.selectors.{active_payment, display_payment, refunds_f
   order expires) and [301 failed `-5017`, 302 `late_capture`] show the late capture as `paid` + `refund.in_progress` in
   the admin list, the admin `payment` filter (`paid` matches, `failed` does not), the admin detail, `me/orders/` and
   `me/orders/{id}/`; [301 `late_capture`, 302 `pending`] shows 302 `pending` with `refund: null` and the
-  `refund_in_progress` timeline entry; `revenue_buckets` excludes the late capture; pay on a cancelled order being refunded answers
-  `not_payable`, never `already_paid`.
+  `refund_in_progress` timeline entry; `revenue_buckets` excludes the late capture; pay on a cancelled order being
+  refunded answers `not_payable`, never `already_paid`.
 - **Race — checkout vs a capture of another open order** (`CHECKOUT_MAX_OPEN_ORDERS=2`, threads, `transaction=True`): a
   Click Complete holds Order → Payment → LoyaltyAccount and inserts its `Purchase` while a checkout of the same customer
   holds the customer-level lock and waits in `create_hold` → both finish, no `40P01` deadlock.
@@ -508,16 +508,17 @@ create_refund}`, `payments.selectors.{active_payment, display_payment, refunds_f
   or unknown payment and a Basic-auth Payme `CreateTransaction` + `PerformTransaction` made with the configured keys are
   refused (`-1` / `-32504`), the BTS webhook answers 401, the order stays `awaiting_payment`, only bounded `rejected:`
   rows are written; **switch while a Click transaction is open:** Prepare under the test settings (processed
-  there as a live Click's would be), then `override_settings(DEV_FEATURES_ALLOWED=False, CLICK_MODE="fake")` and the correctly signed Complete
-  → `0`, payment `paid` `late_capture`, refund `manual_required` (no port call), audit `payment.late_capture {case:
-  "fake_mode"}`, ERROR log, order not `processing`; the same Complete with a wrong signature → `-1`; checkout and pay refuse
-  a fake provider with 400 `invalid_choice`; a Click refund created or submitted while the Click port is fake becomes
-  `manual_required` with no port call. **Mixed posture** (`override_settings(DEV_FEATURES_ALLOWED=False, BTS_MODE=
-  "fake", BILLZ_MODE="fake")`, `core.providers.payable_providers` patched to `["click"]` as with a live Click): `delivery/calculate/` and checkout with
-  `fulfilment = delivery` → 409 `delivery_unavailable` with the `error.delivery_not_offered` message and no BTS call,
-  pickup checkout works, `delivery/regions/` empty; a `bts.create_shipment` of an order placed before the switch →
-  shipment `failed` `fake_mode`, no tracking number, `FakeBts._parcels` empty; an admin cancel of a `created`
-  shipment → 503, no `bts_cancelled: true`; `poll_bts` polls nothing; `billz.push_sale` → `billz_pushed_at` null, no
+  there as a live Click's would be), then `override_settings(DEV_FEATURES_ALLOWED=False, CLICK_MODE="fake")` and the
+  correctly signed Complete → `0`, payment `paid` `late_capture`, refund `manual_required` (no port call), audit
+  `payment.late_capture {case: "fake_mode"}`, ERROR log, order not `processing`; the same Complete with a wrong
+  signature → `-1`; checkout and pay refuse a fake provider with 400 `invalid_choice`; a Click refund created or
+  submitted while the Click port is fake becomes `manual_required` with no port call. **Mixed posture**
+  (`override_settings(DEV_FEATURES_ALLOWED=False, BTS_MODE="fake", BILLZ_MODE="fake")`,
+  `core.providers.payable_providers` patched to `["click"]` as with a live Click): `delivery/calculate/` and checkout
+  with `fulfilment = delivery` → 409 `delivery_unavailable` with the `error.delivery_not_offered` message and no BTS
+  call, pickup checkout works, `delivery/regions/` empty; a `bts.create_shipment` of an order placed before the switch →
+  shipment `failed` `fake_mode`, no tracking number, `FakeBts._parcels` empty; an admin cancel of a `created` shipment →
+  503, no `bts_cancelled: true`; `poll_bts` polls nothing; `billz.push_sale` → `billz_pushed_at` null, no
   `billz_sale_recorded` event, WARNING logged.
 - Migrations `commerce.0004` and `payments.0002` round trip.
 
@@ -593,10 +594,10 @@ P0's `notifications.0003`.
   `Campaign.delivered`); read before ack counts once; foreign ids ignored; horizon.
 - Pushes: `deliver_account_security` accepts the C§2.14.2 payload built by `accounts.topics.account_security_payload`
   for each of the four events (one inbox row per `event_id`, a redelivery adds none, `provider` `""` renders no
-  provider) and the payload keys match `PAYLOAD_KEYS`; `inbox_id` present for the senders; order-status title in ru and en and "Olib ketildi" for a pickup
-  delivery; no push for an order before the horizon; account-security push texts; channel/priority mapping; no PII
-  (assert title/body/data contain no customer name or phone for seeded customers); `unregistered` prunes the device;
-  `payload_invalid` leaves every device untouched and fails the message.
+  provider) and the payload keys match `PAYLOAD_KEYS`; `inbox_id` present for the senders; order-status title in ru and
+  en and "Olib ketildi" for a pickup delivery; no push for an order before the horizon; account-security push texts;
+  channel/priority mapping; no PII (assert title/body/data contain no customer name or phone for seeded customers);
+  `unregistered` prunes the device; `payload_invalid` leaves every device untouched and fails the message.
 
 ### Depends on
 P0.
@@ -684,8 +685,9 @@ Run with the real webhook views and a pinned clock; signatures built by `integra
 Black-box e2e drives every branch with `X-GD-Fake-Scenario` (copied into `Order.metadata["fake"]` at checkout; read
 directly by `delivery/calculate/`, which has no order yet; honoured only under the local/test settings with every
 provider mode fake and the flag on) or with the phone/token grammar below. Everything in this table is local/test
-behaviour: under the production settings the fakes run without scenarios, record nothing, refuse callbacks and report
-no effect that did not happen (fake BTS: no delivery offered, no parcel made up, C§2.14.3; fake Billz: no sale
+behaviour: under the production settings the fakes run without scenarios, record nothing, refuse callbacks (except a
+Click Complete of a transaction attached while Click was live, accepted and reversed) and report no effect that did not
+happen (fake BTS: no delivery offered, no parcel made up, C§2.14.3; fake Billz: no sale
 recorded; C§6.14).
 
 | Provider | Switch | Effect |
@@ -863,7 +865,8 @@ Validation (P0):
 - **Fake providers are allowed in production** (product-owner decision 2026-10-26): the production settings accept
   `fake` for every `*_MODE`; `CoreConfig.ready()` logs one WARNING `providers.fake_in_production {provider}` per fake
   provider and `health/?ready=1` / admin `GET settings/` report the modes (C§6.14). What fake means there is C§6.14:
-  callbacks refused, fake payment providers not offered, no home delivery with fake BTS (pickup only), no Billz sale
+  callbacks refused (a Click Complete of a transaction attached while Click was live is accepted and reversed), fake
+  payment providers not offered, no home delivery with fake BTS (pickup only), no Billz sale
   recorded by fake Billz, no SMS, no push, no social sign-in (customer or staff) with fake OAuth.
 - `DEV_FEATURES_ALLOWED` is a settings-module constant (`True` only in `local.py`/`test.py`). The production settings
   refuse at boot `FAKE_PAYMENTS_ENABLED`, `FAKE_SCENARIO_HEADER_ENABLED`, `ESKIZ_FAKE_CODE`, `POS_API_KEYS` and (as
@@ -936,8 +939,8 @@ No beat entry for `loyalty.services.expire_holds`: it must stay unscheduled whil
    staff social sign-in with fake OAuth).
 5. Mobile handover: contract link, `openapi/schema.yaml`, the local fake-mode recipe (`ESKIZ_FAKE_CODE`, dev simulate —
    local/test settings only; a deployed staging needs live Eskiz and payment providers to sign up and pay), the
-   device-key and refresh rules (C§1.9, C§2.1.6; the single-flight refresh of C§1.2), the system-browser payment hand-off
-   (C§2.7.2), `fulfilment_methods` (pickup only while BTS is fake under the production settings, C§2.6).
+   device-key and refresh rules (C§1.9, C§2.1.6; the single-flight refresh of C§1.2), the system-browser payment
+   hand-off (C§2.7.2), `fulfilment_methods` (pickup only while BTS is fake under the production settings, C§2.6).
 
 ## 10. Dependencies at a glance
 

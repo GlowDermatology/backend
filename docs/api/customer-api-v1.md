@@ -487,8 +487,8 @@ device's key hash cleared; the **dormant-account rule** (§2.2.3, `M2-A16`) appl
 issue_device_key=True)` on this device; outbox `push.account_security` (payload §2.14.2: `event: "password_reset"`,
 `provider: ""`, `farewell_tokens` = the captured tokens) — inbox row + push to the new device **and** a visible push to
 every token captured from the devices this reset deactivated (`SessionStart.farewell_tokens`, §1.9), so the previous
-device learns of the reset even when the reset came from a stolen SIM (§2.14.2); audit `customer.password_reset`. 400 `verification_invalid`; 409
-`phone_not_registered` if the customer was deleted in between.
+device learns of the reset even when the reset came from a stolen SIM (§2.14.2); audit `customer.password_reset`. 400
+`verification_invalid`; 409 `phone_not_registered` if the customer was deleted in between.
 
 #### 2.1.6 `POST auth/refresh/`
 Body `{"refresh": str}`. Device headers must match the session's device (else 401 `not_authenticated`).
@@ -526,8 +526,9 @@ Body `{"refresh": str}`. Device headers must match the session's device (else 40
    **or** the unconfirmed window is over (`now − rotated_at > CUSTOMER_REFRESH_UNCONFIRMED_SECONDS`), or a dead token
    came back (step 2) → **reuse**: one of the holders is not the app. Session revoked with reason `refresh_reused`
    (tombstone on commit); audit `customer.refresh_reused {sid}`; WARNING log → 401 `SESSION_EXPIRED` (not
-   `SESSION_REPLACED`: nobody signed in elsewhere). This is the spec's "reuse after a short grace window revokes the session": the grace window is the
-   120 s replay of 5a; the first use of the new tokens ends only the longer re-rotation window of 5b.
+   `SESSION_REPLACED`: nobody signed in elsewhere). This is the spec's "reuse after a short grace window revokes the
+   session": the grace window is the 120 s replay of 5a; the first use of the new tokens ends only the longer
+   re-rotation window of 5b.
 
 **Rotation counter and confirmation.** `rot` is the integer `AuthSession.rotation` (migration `accounts.0006`, `0`
 before the first rotation), compared exactly — never a timestamp, so clock precision and a pinned `FAKE_NOW` cannot
@@ -562,10 +563,10 @@ revoked or expired token → 401 `SESSION_EXPIRED` (the app treats it as logged 
 me/social/`) answers **404** when `OAUTH_MODE=fake` under the production settings (`DEV_FEATURES_ALLOWED` false): the
 fake verifier accepts made-up subjects, which would let anyone sign in to an account linked while it was on — the OAuth
 equivalent of a fixed OTP (§6.14). `DELETE me/social/{provider}/` keeps working. The staff OAuth routes get the same
-gate (`POST auth/oauth/{provider}/` and `…/link/` answer 404, admin §2.1), because the staff fake has the same exposure. Provider `apple` additionally needs
-`APPLE_BUNDLE_IDS` (product-owner decision 2026-10-26): empty + `OAUTH_MODE=live` → 404 for `apple`; empty +
-`OAUTH_MODE=fake` (local/test) → the fake Apple adapter (`fake-apple:…`, plan §6) answers, so the app can be built
-before the client provides the bundle id.
+gate (`POST auth/oauth/{provider}/` and `…/link/` answer 404, admin §2.1), because the staff fake has the same exposure.
+Provider `apple` additionally needs `APPLE_BUNDLE_IDS` (product-owner decision 2026-10-26): empty + `OAUTH_MODE=live` →
+404 for `apple`; empty + `OAUTH_MODE=fake` (local/test) → the fake Apple adapter (`fake-apple:…`, plan §6) answers, so
+the app can be built before the client provides the bundle id.
 
 **Nonce.** `GET auth/social/nonce/` → 200 `{"nonce": "<43 base64url chars>", "expires_in": 600}`: 256-bit random,
 stored as `gd:social:nonce:{sha256(nonce)}` = `pii_ref(fid)`, TTL `SOCIAL_NONCE_TTL_SECONDS` (600). The app passes it
@@ -841,9 +842,10 @@ Body `{"current_password": str | null, "verification_token": str | null, "passwo
 `set_customer_password` (`password_changed_at`); every **other** session of the customer revoked with
 `password_changed` (none under the single-device rule unless a revocation is pending); the **current session, its
 device key and every social identity are kept**; outbox `push.account_security` (payload §2.14.2: `event:
-"password_changed"`, `provider: ""`, `farewell_tokens: []`; inbox + push to this device); audit `customer.password_changed {first_password: bool}`. This is
-the route the `last_sign_in_method` message points to, and the way a social-only customer adds a password; the
-unauthenticated `auth/reset-password/` stays the recovery path that unlinks everything (§2.1.5).
+"password_changed"`, `provider: ""`, `farewell_tokens: []`; inbox + push to this device); audit
+`customer.password_changed {first_password: bool}`. This is the route the `last_sign_in_method` message points to, and
+the way a social-only customer adds a password; the unauthenticated `auth/reset-password/` stays the recovery path that
+unlinks everything (§2.1.5).
 
 ---
 ### 2.3 Catalog (public, **O**)
@@ -901,7 +903,7 @@ is 404 here and `unavailable` in the cart. Availability (`available`) comes from
  "terms_updated_at": "2026-10-01T00:00:00+05:00",     // | null
  "reservation_minutes": 15,
  "payment_providers": ["click", "payme"],             // providers that can take a payment now; [] = online payment unavailable (the app hides checkout)
- "fulfilment_methods": ["delivery", "pickup"],        // FulfilmentMethod[] the app may offer at checkout; "delivery" is absent while BTS is fake under the production settings (§2.6)
+ "fulfilment_methods": ["delivery", "pickup"],        // FulfilmentMethod[] offered at checkout; no "delivery" while BTS is fake in production (§2.6)
  "min_app_version": {"ios": "1.0.0", "android": "1.0.0"},
  "store_urls": {"ios": "https://apps.apple.com/…", "android": "https://play.google.com/…"}}
 ```
@@ -1589,23 +1591,24 @@ admin-only by DB constraint).
   `cancelled`} (a superseded Click attachment is `abandoned`, §2.7.2); (b) the order is `cancelled`, or
   `awaiting_payment` but not payable (`attaching=False`) because the grace is over; (c) the order is already paid by
   **another** payment (double payment); (d) the Click port is fake under the production settings and the transaction
-  was attached while Click was live (above). **One rule for all of them: accept and reverse.** Click's SHOP API documentation
-  (docs.click.uz, SHOP API requests) settles it: after a successful Prepare and withdrawal of funds, the answer to
-  Complete cannot be an error except `-4` (this payment was already confirmed) or `-9` (a repeated attempt to confirm a
-  payment that was cancelled); if the goods cannot be provided, the merchant answers Complete **successfully** and
-  cancels the payment through the Merchant API (`payment/reversal`); repeated error answers send the payment to manual
-  investigation at Click. So: `commerce.services.record_late_capture(order_id, payment.id, "click", click_trans_id,
-  case=<"failed_by_us" | "not_payable" | "double_payment" | "fake_mode">)` under the Order → Payment locks:
-  `payments.services.mark_late_captured(payment_id, provider_txn_id, at)` — the **only** transition into `paid` from
-  `failed` (or from `pending` in case (c)) and only for this case: status `paid`, `confirmed_at = at`, `failed_at =
+  was attached while Click was live (above). **One rule for all of them: accept and reverse.** Click's SHOP API
+  documentation (docs.click.uz, SHOP API requests) settles it: after a successful Prepare and withdrawal of funds, the
+  answer to Complete cannot be an error except `-4` (this payment was already confirmed) or `-9` (a repeated attempt to
+  confirm a payment that was cancelled); if the goods cannot be provided, the merchant answers Complete **successfully**
+  and cancels the payment through the Merchant API (`payment/reversal`); repeated error answers send the payment to
+  manual investigation at Click. So: `commerce.services.record_late_capture(order_id, payment.id, "click",
+  click_trans_id, case=<"failed_by_us" | "not_payable" | "double_payment" | "fake_mode">)` under the Order → Payment
+  locks: `payments.services.mark_late_captured(payment_id, provider_txn_id, at)` — the **only** transition into `paid`
+  from `failed` (or from `pending` in case (c)) and only for this case: status `paid`, `confirmed_at = at`, `failed_at =
   null`, `error_code = "late_capture"`, `provider_state` merged; the `payment_one_active_per_order` partial unique
   excludes `error_code = 'late_capture'` (migration `payments.0002_payment_active_excludes_late_capture`), so case (c)
-  can coexist with the order's real paid payment, and the payment selectors treat such rows by the display rule of
-  §2.8 — then `Refund(origin=late_capture, amount=payment.amount)` `requested` + outbox `refund.submit` (B5
+  can coexist with the order's real paid payment, and the payment selectors treat such rows by the display rule of §2.8
+  — then `Refund(origin=late_capture, amount=payment.amount)` `requested` + outbox `refund.submit` (B5
   `payments.services.create_refund`), event `refund_requested {refund_id, amount, provider, manual: false}` (source
-  system), audit `payment.late_capture {order_id, payment_id, provider, case}`, ERROR log `payment.late_capture`
-  (alert). Answer `0` with `merchant_confirm_id = payment.id` (Click keeps the capture; we return it). The order itself
-  never changes status because of a refused capture.
+  system; `manual_required` without the outbox message and `manual: true` when the payment has no `click_paydoc_id` or
+  the Click port is fake under the production settings, below), audit `payment.late_capture {order_id, payment_id,
+  provider, case}`, ERROR log `payment.late_capture` (alert). Answer `0` with `merchant_confirm_id = payment.id` (Click
+  keeps the capture; we return it). The order itself never changes status because of a refused capture.
   - **A reversal Click refuses** — Click reverses only payments of the current reporting month made with an online card,
     and UZCARD may refuse — ends as refund `failed` (B5 `submit_refund` → `mark_failed`, event `refund_failed`), which
     shows in admin `attention.refunds_needing_action`. Staff either `retry` it (a transient refusal) or pay the customer
@@ -1913,8 +1916,9 @@ pushes are reported `sent` but reach no device (§6.14).
   ```jsonc
   {"customer_id": 5,
    "event": "password_reset",          // AccountSecurityEvent
-   "event_id": "3f2c9a…32 hex",        // uuid4 hex made by the producer; suffix of the outbox dedupe key
-                                       // push.account_security:{customer_id}:{event}:{event_id} and of the inbox dedupe_key
+   "event_id": "3f2c9a…32 hex",        // uuid4 hex made by the producer; the suffix of the outbox dedupe key
+                                       // push.account_security:{customer_id}:{event}:{event_id} and of the
+                                       // inbox dedupe_key account:{customer_id}:{event}:{event_id} (§2.12)
    "provider": "",                     // CustomerSocialProvider for social_linked / social_unlinked, else ""
    "farewell_tokens": []}              // FCM tokens of the devices a reset or social completion deactivated, else []
   ```
@@ -2339,8 +2343,9 @@ code a customer view can raise to an existing key.
 5. **Passwords:** Argon2 (`PASSWORD_HASHERS`); a dummy hash check runs whenever no stored hash is compared (unknown
    phone, deleted customer, empty password), so `auth/login/` costs the same for every phone state (§2.1.4); min 8 +
    Django validators, never returned or logged. The password checks of a signed-in customer are locked by their own
-   customer-id guard (`customer_reauth`) and also counted in the phone's `customer_login` guard (§1.8). `auth/reset-password/` (recovery) revokes all sessions, unlinks social identities and rotates
-   the device key; `me/password/` (signed in, current password or SMS code) keeps the session and identities.
+   customer-id guard (`customer_reauth`) and also counted in the phone's `customer_login` guard (§1.8).
+   `auth/reset-password/` (recovery) revokes all sessions, unlinks social identities and rotates the device key;
+   `me/password/` (signed in, current password or SMS code) keeps the session and identities.
 6. **Secrets on the device.** Refresh token and device key: iOS Keychain (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`,
    no iCloud sync) / Android Keystore-backed EncryptedSharedPreferences; access token in memory; the refresh and
    access tokens are deleted on any `SESSION_*` or `password_changed`, on logout and on a 401 from `auth/refresh/` (the device key is kept so
@@ -2369,18 +2374,18 @@ code a customer view can raise to an existing key.
     the Phase-2 AI feature is separate and not part of M2.
 11. **Payments.** Card data never reaches the backend (provider pages, opened in the system browser). The provider
     account value is an HMAC-protected reference, not a guessable id (§2.7.2). Click MD5 over raw form strings +
-    `service_id` binding + amount equality + `merchant_prepare_id` binding; Payme Basic auth with `PAYME_KEY`, integer amount
-    equality in tiyin, one active transaction per order (partial unique index + `-31051`), 12-hour timeout; IP
+    `service_id` binding + amount equality + `merchant_prepare_id` binding; Payme Basic auth with `PAYME_KEY`, integer
+    amount equality in tiyin, one active transaction per order (partial unique index + `-31051`), 12-hour timeout; IP
     allow-lists are defence in depth only; a provider in fake mode under the production settings starts no transaction
     and honours no capture (§2.13.0; a Click Complete of a transaction attached while Click was live is accepted and
-    reversed with a manual refund). Every handler takes the Order lock before reading state and names the payment it changes (§2.13.0).
-    Click callbacks are idempotent from state (a re-signed retry of an applied call succeeds again). Captures on
-    non-payable orders, on payments we failed (including a Click attachment superseded by a newer Prepare) and double
-    payments are **refused captures**: accepted, reversed through the Click Merchant API by `click_paydoc_id` and
-    alerted, as Click's protocol requires; a reversal Click refuses becomes a staff payout. A transaction can be started only before
-    `reservation_expires_at`; only completing one gets the 5-minute grace. Every callback is stored (WebhookInbox,
-    append-only, 180-day retention, C4) with credentials stripped; forged requests are stored only as bounded, per-IP
-    capped rows.
+    reversed with a manual refund). Every handler takes the Order lock before reading state and names the payment it
+    changes (§2.13.0). Click callbacks are idempotent from state (a re-signed retry of an applied call succeeds again).
+    Captures on non-payable orders, on payments we failed (including a Click attachment superseded by a newer Prepare)
+    and double payments are **refused captures**: accepted, reversed through the Click Merchant API by `click_paydoc_id`
+    and alerted, as Click's protocol requires; a reversal Click refuses becomes a staff payout. A transaction can be
+    started only before `reservation_expires_at`; only completing one gets the 5-minute grace. Every callback is stored
+    (WebhookInbox, append-only, 180-day retention, C4) with credentials stripped; forged requests are stored only as
+    bounded, per-IP capped rows.
 12. **Financial invariants** (spec): money as integer so'm (tiyin only inside the Payme adapter); lock order (Customer
     → Cart →) ProductStock → Order → Payment → LoyaltyAccount; the balance changes only in
     `loyalty.services.post_entry`; cashback holds are checked under the account lock; stock and visibility are
@@ -2400,22 +2405,22 @@ code a customer view can raise to an existing key.
       reported by `GET /api/v1/health/?ready=1` (`providers`) and by admin `GET settings/` (`integrations.providers`,
       admin §2.11, §2.15). Fake and live providers may be **mixed** (live adapters arrive one at a time in M3), so the
       rule is per provider: in that posture a fake adapter never reports a real-money or real-world effect that did not
-      happen and never accepts a made-up credential. Fake Click/Payme/BTS start no transaction and honour no capture (§2.13.0: a Click Complete of a
-      transaction attached while Click was live is accepted and reversed, so a switch to fake never strands a
-      customer's money) and fake payment providers are not offered (§2.4), so no order is ever paid through a fake
-      provider; a Click refund through the fake port becomes `manual_required`,
-      never `succeeded` (§2.13.0); fake BTS turns home delivery off (§2.6: pickup only, `fulfilment_methods`) and never
-      makes up a tariff, a parcel, a tracking number or a cancellation (§2.14.3), so a customer paying through a live
-      provider is never charged a fake tariff for a parcel nobody ships; fake Billz never records a sale it did not
-      send: the `billz.push_sale` handler does not call it, leaves the purchase's `billz_pushed_at` null (no
-      `billz_sale_id`, no `billz_sale_recorded` event) and logs WARNING `billz.sale_not_pushed {order_id,
-      purchase_id}`, so staff enter the sale in Billz by hand and the M3 live adapter can find every unpushed online
-      sale; fake OAuth turns social sign-in off for customers **and staff** — 404 on the customer social routes
-      (§2.1.8) and on the staff `POST auth/oauth/{provider}/` and `POST auth/oauth/{provider}/link/` (admin §2.1;
-      unlinking keeps working, email + password sign-in is unaffected) — because a fake verifier accepts any
-      `fake:<subject>:<email>` code with a caller-chosen nonce and would sign anyone in as any linked identity, and with
-      `STAFF_GOOGLE_AUTOLINK` even as any staff email; fake Eskiz delivers no SMS (demo/staging
-      posture, §2.14.1); fake FCM delivers no push; fakes keep no message history (§2.14.1, §2.14.2).
+      happen and never accepts a made-up credential. Fake Click/Payme/BTS start no transaction and honour no capture
+      (§2.13.0: a Click Complete of a transaction attached while Click was live is accepted and reversed, so a switch to
+      fake never strands a customer's money) and fake payment providers are not offered (§2.4), so no order is ever paid
+      through a fake provider; a Click refund through the fake port becomes `manual_required`, never `succeeded`
+      (§2.13.0); fake BTS turns home delivery off (§2.6: pickup only, `fulfilment_methods`) and never makes up a tariff,
+      a parcel, a tracking number or a cancellation (§2.14.3), so a customer paying through a live provider is never
+      charged a fake tariff for a parcel nobody ships; fake Billz never records a sale it did not send: the
+      `billz.push_sale` handler does not call it, leaves the purchase's `billz_pushed_at` null (no `billz_sale_id`, no
+      `billz_sale_recorded` event) and logs WARNING `billz.sale_not_pushed {order_id, purchase_id}`, so staff enter the
+      sale in Billz by hand and the M3 live adapter can find every unpushed online sale; fake OAuth turns social sign-in
+      off for customers **and staff** — 404 on the customer social routes (§2.1.8) and on the staff `POST
+      auth/oauth/{provider}/` and `POST auth/oauth/{provider}/link/` (admin §2.1; unlinking keeps working, email +
+      password sign-in is unaffected) — because a fake verifier accepts any `fake:<subject>:<email>` code with a
+      caller-chosen nonce and would sign anyone in as any linked identity, and with `STAFF_GOOGLE_AUTOLINK` even as any
+      staff email; fake Eskiz delivers no SMS (demo/staging posture, §2.14.1); fake FCM delivers no push; fakes keep no
+      message history (§2.14.1, §2.14.2).
     - **Dev switches** — `FAKE_PAYMENTS_ENABLED` (dev simulate, §2.15), `FAKE_SCENARIO_HEADER_ENABLED` (§1.2),
       `ESKIZ_FAKE_CODE` (fixed OTP), `POS_API_KEYS` (seeded POS keys, §2.10), `FAKE_NOW` and the `*` nonce wildcard of
       the OAuth fakes — work only under the local/test settings (`DEV_FEATURES_ALLOWED`, a settings-module constant,
@@ -2498,5 +2503,5 @@ the client may still revise it later through a setting or a data field:
 | M2-N1 | Show the admin's adjustment reason to the customer? | No (generic "Bonus qo‘shildi" / "Balans tuzatildi") |
 | M2-N2 | Push for a customer's own order cancellation | Yes (state machine row 5 pushes `cancelled`) |
 | M2-N3 | Security notices (social link/unlink, password reset and change) | Push + inbox row (`account_security`), and for a reset or a social completion a visible push to the replaced device plus a 401 message there; no SMS (re-evaluated in revision 2: a reset needs the SMS code, so an SMS notice would reach whoever did it; an SMS template would also need Eskiz approval) |
-| M2-F1 | May production run fake provider adapters? | **Decided by the product owner (2026-10-26):** yes, warned at startup and reported per provider in `health/?ready=1` and admin settings; fake callbacks are refused, fake payment providers are not offered, the dev simulate endpoint and the fixed OTP exist only under local/test settings, and fake Eskiz delivers no SMS (demo/staging posture, §6.14). Mixed with live providers, a fake never reports an effect that did not happen: fake BTS turns home delivery off (pickup only) and makes up no parcel; fake Billz records no sale (pushed by hand) (§2.6, §2.14.3, §6.14) |
+| M2-F1 | May production run fake provider adapters? | **Decided by the product owner (2026-10-26):** yes, warned at startup and reported per provider in `health/?ready=1` and admin settings; fake callbacks are refused (a Click Complete of a transaction attached while Click was live is accepted and reversed), fake payment providers are not offered, the dev simulate endpoint and the fixed OTP exist only under local/test settings, and fake Eskiz delivers no SMS (demo/staging posture, §6.14). Mixed with live providers, a fake never reports an effect that did not happen: fake BTS turns home delivery off (pickup only) and makes up no parcel; fake Billz records no sale (pushed by hand) (§2.6, §2.14.3, §6.14) |
 | M2-T1 | Terms not yet versioned in settings | Registration answers 503 `terms_not_published` until staff publish `terms_version` with the uz terms and privacy texts |
