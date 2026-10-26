@@ -57,7 +57,7 @@ from glowderma.integrations.bts.ports import BtsUnavailable
 from glowderma.integrations.click.registry import get_click
 from glowderma.integrations.payme.registry import get_payme
 from glowderma.loyalty import selectors as loyalty_selectors
-from glowderma.site_config.models import SiteSettings
+from glowderma.site_config import selectors as site_config_selectors
 
 BULK_DELETE_MAX = 50
 FAKE_SCENARIO_HEADER = "X-GD-Fake-Scenario"
@@ -116,8 +116,8 @@ def _own_order(customer: Customer, order_id: int) -> Order:
 
 def _consent_current(customer: Customer) -> None:
     """Checkout refuses an outdated consent (customer contract §2.2.4): 409 ``terms_update_required``."""
-    current = SiteSettings.load().terms_version
-    if current and customer.terms_version != current:
+    current = site_config_selectors.outdated_consent(customer.terms_version)
+    if current is not None:
         raise TermsUpdateRequired(details={"current_version": current})
 
 

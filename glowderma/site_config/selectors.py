@@ -47,6 +47,16 @@ def current_terms() -> Terms:
     return Terms(row.terms_version, published, row.terms_updated_at)
 
 
+def outdated_consent(customer_terms_version: str) -> str | None:
+    """The published terms version when the customer's consent is older (C§2.2.4), else ``None``: the one rule
+    checkout and booking refuse with 409 ``terms_update_required`` (and ``me/`` reports as
+    ``update_required``). Unpublished terms (§2.1.3) never block."""
+    terms = current_terms()
+    if terms.published and customer_terms_version != terms.version:
+        return terms.version
+    return None
+
+
 def _texts(row: SiteSettings, field: str) -> dict[str, str]:
     return {lang: str(getattr(row, f"{field}_{lang}")) for lang in LANGUAGES}
 
