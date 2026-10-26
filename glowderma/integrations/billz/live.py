@@ -92,6 +92,7 @@ from .ports import (
     BillzPaymentPending,
     BillzProduct,
     BillzRejected,
+    BillzSaleBusy,
     BillzShiftClosed,
     BillzUnavailable,
     ImportMode,
@@ -123,6 +124,8 @@ SALE_LOCK_TTL = 600
 # One push ends within this (every wait and timeout honours it): below the outbox lease of core.tasks (5 min),
 # so a redelivery never meets a push still running, and well below SALE_LOCK_TTL, so the lock cannot expire.
 PUSH_DEADLINE_SECONDS = 240.0
+# Another worker holds the sale lock: look again this much later (no attempt spent; the lock expires anyway).
+SALE_BUSY_RETRY = timedelta(minutes=1)
 # A payment whose answer was lost is looked at again only after this quiet period (review B2).
 PAYMENT_QUIET_PERIOD = timedelta(minutes=10)
 SEARCH_LIMIT = 50
@@ -553,8 +556,8 @@ class LiveBillz:
         self._require_configured()
         lock = SaleLock(self.cache, SALE_LOCK_KEY.format(order_uuid=request.order_uuid), SALE_LOCK_TTL)
         if not lock.acquire():
-            raise BillzUnavailable(
-                f"another worker is pushing the sale of order {request.order_id}", not_applied=True
+            raise BillzSaleBusy(
+                f"another worker is pushing the sale of order {request.order_id}", retry_after=SALE_BUSY_RETRY
             )
         try:
             with self.client.deadline(PUSH_DEADLINE_SECONDS):

@@ -20,8 +20,9 @@ outbox. Delivery is at-least-once: each handler is idempotent at the provider bo
   (``BillzRejected``: unknown product, a bill that is not what the customer paid, …) dead-letters the
   message at once with the reason (``outbox.PermanentFailure``); a closed shift is deferred every
   ``BILLZ_SHIFT_RETRY_MINUTES`` for ``BILLZ_SHIFT_RETRY_MAX_HOURS`` and a payment whose answer was lost
-  waits its quiet period (``outbox.RetryLater``: no attempt spent); any other failure raises and is
-  retried; a conflict raises, never a silent success.
+  waits its quiet period and a sale another worker is pushing (its lock held) is looked at a minute later
+  (``outbox.RetryLater``: no attempt spent); any other failure raises and is retried; a conflict raises,
+  never a silent success.
 * ``refund.submit`` — Click: status check by ``provider_txn_id`` before any reversal; ``mark_submitting``
   (a fenced compare-and-set) is committed before the reversal call; ``succeeded`` / ``failed`` / ``unknown``
   (+ events); ``unknown`` is never retried automatically. Raises only on a transport error **before**
@@ -61,6 +62,7 @@ from glowderma.integrations import services as integration_services
 from glowderma.integrations.billz.ports import (
     BillzPaymentPending,
     BillzRejected,
+    BillzSaleBusy,
     BillzShiftClosed,
     SaleCancelled,
 )
@@ -309,6 +311,10 @@ def push_sale(payload: dict[str, Any]) -> None:
         # review B2: a payment whose answer was lost is looked at again after a quiet period, never resent
         logger.warning("billz.sale_deferred order_id=%s reason=payment_pending", order_id)
         raise outbox.RetryLater(exc.retry_after, f"Billz payment of order {order_id} pending: {exc}") from exc
+    except BillzSaleBusy as exc:
+        # NEW-9: another worker is pushing this sale (its lock expires by itself): no attempt spent
+        logger.info("billz.sale_deferred order_id=%s reason=sale_busy", order_id)
+        raise outbox.RetryLater(exc.retry_after, f"Billz sale of order {order_id} busy: {exc}") from exc
     except BillzRejected as exc:
         logger.error("billz.sale_rejected order_id=%s error_code=%s", order_id, exc.error_code)
         raise outbox.PermanentFailure(f"Billz refused the sale of order {order_id}: {exc}") from exc

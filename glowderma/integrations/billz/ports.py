@@ -26,15 +26,16 @@ which re-checks the order (:class:`SaleCancelled` stops the push) and persists t
 answer lost in transit is never followed by a second payment.
 
 Failures are typed: :class:`BillzUnavailable` is transient (transport, 429, 5xx, timeouts, auth,
-configuration: retry later), with two deferrals the caller retries without spending its attempts —
-:class:`BillzShiftClosed` (the shift or cash box is closed) and :class:`BillzPaymentPending` (a payment whose
-outcome is still unknown); :class:`BillzRejected` is Billz refusing for good (validation, unknown product …:
-never retried) and its subclass :class:`BillzCheckByHand` the adapter stopping on purpose because staff must
-look at the Billz sale (a bill that differs from what the customer paid, a payment outcome that stayed
-unknown); :class:`BillzNotSupported` an explicit stub for what the Billz API does not offer (decision
-2026-10-26: refunds of paid sales, per-receipt discovery of in-store sales, webhooks). Every error carries
-``http_status`` / ``error_code`` when Billz answered, and ``not_applied`` when Billz certainly did not apply
-the request (it was never sent, or Billz answered with a refusal).
+configuration: retry later), with three deferrals the caller retries without spending its attempts —
+:class:`BillzShiftClosed` (the shift or cash box is closed), :class:`BillzPaymentPending` (a payment whose
+outcome is still unknown) and :class:`BillzSaleBusy` (another worker is pushing the same sale);
+:class:`BillzRejected` is Billz refusing for good (validation, unknown product …: never retried) and its
+subclass :class:`BillzCheckByHand` the adapter stopping on purpose because staff must look at the Billz sale
+(a bill that differs from what the customer paid, a payment outcome that stayed unknown);
+:class:`BillzNotSupported` an explicit stub for what the Billz API does not offer (decision 2026-10-26:
+refunds of paid sales, per-receipt discovery of in-store sales, webhooks). Every error carries ``http_status``
+/ ``error_code`` when Billz answered, and ``not_applied`` when Billz certainly did not apply the request (it
+was never sent, or Billz answered with a refusal).
 """
 
 from collections.abc import Iterator, Sequence
@@ -108,6 +109,15 @@ class BillzPaymentPending(BillzUnavailable):
 
     def __init__(self, message: str, *, retry_after: timedelta) -> None:
         super().__init__(message)
+        self.retry_after = retry_after
+
+
+class BillzSaleBusy(BillzUnavailable):
+    """Another worker holds this sale's lock (it is pushing the sale now): look again after ``retry_after``
+    without spending an attempt (review NEW-9). Nothing was sent."""
+
+    def __init__(self, message: str, *, retry_after: timedelta) -> None:
+        super().__init__(message, not_applied=True)
         self.retry_after = retry_after
 
 

@@ -41,6 +41,7 @@ from glowderma.integrations.billz.ports import (
     BillzPaymentPending,
     BillzProduct,
     BillzRejected,
+    BillzSaleBusy,
     BillzShiftClosed,
     BillzUnavailable,
     SaleCancelled,
@@ -1110,9 +1111,10 @@ def test_a_push_another_attempt_finished_returns_its_receipt() -> None:
 def test_a_push_in_progress_elsewhere_is_retried_later() -> None:
     server = BillzServer()
     cache.add(billz_live.SALE_LOCK_KEY.format(order_uuid=ORDER_UUID), "another-worker", timeout=60)
-    with pytest.raises(BillzUnavailable, match="another worker") as caught:
+    with pytest.raises(BillzSaleBusy, match="another worker") as caught:
         live(server).push_sale(sale(), Journal(server))
     assert caught.value.not_applied and server.requests == []
+    assert caught.value.retry_after == billz_live.SALE_BUSY_RETRY  # NEW-9: deferred, no attempt spent
     assert cache.get(billz_live.SALE_LOCK_KEY.format(order_uuid=ORDER_UUID)) == "another-worker"
 
 

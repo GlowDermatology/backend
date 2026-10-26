@@ -25,7 +25,7 @@ from glowderma.core.models import AuditEntry, OutboxMessage
 from glowderma.core.seeding import pinned_clock
 from glowderma.core.tasks import dispatch_outbox
 from glowderma.integrations.billz.client import BillzClient
-from glowderma.integrations.billz.live import LiveBillz
+from glowderma.integrations.billz.live import SALE_BUSY_RETRY, SALE_LOCK_KEY, LiveBillz
 from glowderma.integrations.tests.billz_support import (
     CLIENT_ID,
     FOAM_ID,
@@ -348,6 +348,25 @@ def test_a_cache_blip_right_after_the_payment_never_pays_twice() -> None:
     assert len(server.sales[SALE_ID].payments) == 1
     purchase = Purchase.objects.get(order=order)
     assert purchase.billz_pushed_at is not None and purchase.billz_payment_attempted_at is not None
+
+
+@override_settings(BILLZ_MODE="live")
+def test_a_sale_another_worker_is_pushing_is_deferred_without_spending_an_attempt() -> None:
+    """NEW-9: the sale lock held by another worker is a deferral (``RetryLater``), not a failure."""
+    order = paid_order()
+    purchase = Purchase.objects.get(order=order)
+    key = SALE_LOCK_KEY.format(order_uuid=purchase.billz_order_uuid)
+    cache.add(key, "another-worker", timeout=60)
+    server = BillzServer()
+    start = timeutils.now()
+    with patch("glowderma.commerce.billz_sales.get_billz", return_value=live(server)), pinned_clock(start):
+        message = dispatch(message_of(order.pk))
+    assert (message.status, message.attempts) == ("failed", 0)
+    assert message.available_at == start + SALE_BUSY_RETRY and "busy" in message.last_error
+    assert server.requests == []
+    cache.delete(key)
+    with patch("glowderma.commerce.billz_sales.get_billz", return_value=live(server)):
+        assert dispatch(message).status == "done"
 
 
 @override_settings(BILLZ_MODE="live")
