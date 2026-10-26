@@ -6,7 +6,11 @@
 #
 # Header contract: Caddy trusts no upstream proxy, so X-Forwarded-For is overwritten with the TCP peer. The Next
 # BFF forwards that hop to Django as X-GD-Client-IP; Django trusts X-Forwarded-For only from this container
-# (TRUSTED_PROXIES). Never put a second proxy or CDN in front without collapsing X-Forwarded-For.
+# (TRUSTED_PROXIES). Never put a second proxy or CDN in front without collapsing X-Forwarded-For: the per-IP
+# throttles and the Click/Payme callback allow-lists read the client address from it.
+#
+# Validate: caddy validate --config deploy/Caddyfile --adapter caddyfile (with ACME_EMAIL, SITE_DOMAIN,
+# ADMIN_DOMAIN and API_DOMAIN in the environment).
 {
 	email {$ACME_EMAIL}
 }
@@ -17,9 +21,22 @@
 		-Server
 		Strict-Transport-Security "max-age=31536000"
 	}
+	# Access log (JSON on stdout, rotated by Docker). Secrets never reach it: the BTS webhook authenticates with
+	# ?token=<BTS_WEBHOOK_SECRET> (BTS cannot send a header), so the token query parameter is replaced; the
+	# token and internal-secret headers are dropped. Caddy already redacts Cookie, Set-Cookie, Authorization
+	# (Payme Basic auth, POS "Api-Key") and Proxy-Authorization.
 	log {
 		output stdout
-		format json
+		format filter {
+			wrap json
+			fields {
+				request>uri query {
+					replace token REDACTED
+				}
+				request>headers>X-Gd-Webhook-Token delete
+				request>headers>X-Gd-Internal-Secret delete
+			}
+		}
 	}
 }
 
@@ -50,7 +67,8 @@ www.{$SITE_DOMAIN} {
 	# Replace (not append to) the header Next already sends on /admin.
 	header >X-Robots-Tag "noindex, nofollow"
 	redir / /admin 302
-	# Server Actions carry product images (5 MB each) plus multipart overhead; Next refuses above 6 MB.
+	# Server Actions carry product and campaign images (5 MiB each) plus multipart overhead; Next refuses
+	# above 6 MB.
 	request_body {
 		max_size 7MB
 	}
@@ -72,15 +90,29 @@ www.{$SITE_DOMAIN} {
 	}
 
 	# Staff surfaces stay on the private network: the Next server calls api:8000 directly. Django refuses them
-	# from any other address as well (ADMIN_API_ALLOWED_NETS); this keeps them invisible from the internet.
-	@private path /api/v1/admin /api/v1/admin/* /api/v1/schema/* /api/v1/docs/* /django-admin /django-admin/*
+	# from any other address as well (ADMIN_API_ALLOWED_NETS + the internal secret); this keeps them invisible
+	# from the internet. /api/v1/dev/ never exists under the production settings.
+	@private path /api/v1/admin /api/v1/admin/* /api/v1/schema /api/v1/schema/* /api/v1/docs /api/v1/docs/* /api/v1/dev /api/v1/dev/* /django-admin /django-admin/*
 	handle @private {
 		respond 404
 	}
 
+	# Provider callbacks (public by design: Click Prepare/Complete, Payme Merchant API, BTS status with
+	# ?token=) and cashier terminals. Their bodies are a few KB (the webhook inbox keeps at most 64 KiB, the
+	# BTS view refuses more than 16 KiB), so the limit is far below the general one.
+	@callbacks path /api/v1/webhooks/* /api/v1/pos/*
+	handle @callbacks {
+		request_body {
+			max_size 1MiB
+		}
+		reverse_proxy {$API_UPSTREAM:api:8000}
+	}
+
+	# Customer API, health. Django's own ceiling is 6 MiB (DATA_UPLOAD_MAX_MEMORY_SIZE; the profile image
+	# upload is <= 5 MiB plus multipart framing).
 	handle {
 		request_body {
-			max_size 10MB
+			max_size 6MiB
 		}
 		reverse_proxy {$API_UPSTREAM:api:8000}
 	}
