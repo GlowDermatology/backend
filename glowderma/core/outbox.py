@@ -25,6 +25,7 @@ Handler = Callable[[OutboxMessage], None]
 
 _handlers: dict[str, Handler] = {}
 _dead_handlers: dict[str, Handler] = {}
+_deferral_windows: dict[str, Callable[[], timedelta]] = {}
 # Attempts after which a failing message goes dead (``core.tasks.dispatch_outbox``).
 MAX_ATTEMPTS = 10
 
@@ -83,12 +84,38 @@ def on_dead(topic: str) -> Callable[[Handler], Handler]:
     return decorate
 
 
+def register_deferral_window(topic: str, window: Callable[[], timedelta]) -> None:
+    """Declare how long a message of ``topic`` may stay deferred (:class:`RetryLater`) before it counts as
+    stuck — the ``give_up_after`` its handler passes. The nightly consistency report (K6) reads it; topics
+    that declare nothing get ``settings.OUTBOX_DEFERRAL_WINDOW_HOURS``."""
+    _deferral_windows[topic] = window
+
+
+def deferral_windows() -> dict[str, timedelta]:
+    """``{topic: window}`` of every topic that declared one (:func:`register_deferral_window`)."""
+    return {topic: window() for topic, window in _deferral_windows.items()}
+
+
 def notify_dead(message: OutboxMessage) -> None:
+    """Called once after ``message`` went dead and was audited: the ``outbox.dead`` alert (every topic but the
+    alert topic itself, so a broken alert webhook cannot loop) and the topic's :func:`on_dead` hook."""
+    from glowderma.core import alerts
+
+    try:
+        message.refresh_from_db()
+    except Exception:
+        logger.exception("Dead-letter hook failed topic=%s id=%s", message.topic, message.pk)
+        return
+    if message.topic != alerts.ALERT_TOPIC:
+        alerts.alert(
+            "outbox.dead",
+            {"topic": message.topic, "message_id": message.pk, "attempts": message.attempts},
+            scope=message.topic,
+        )
     handler = _dead_handlers.get(message.topic)
     if handler is None:
         return
     try:
-        message.refresh_from_db()
         handler(message)
     except Exception:
         logger.exception("Dead-letter hook failed topic=%s id=%s", message.topic, message.pk)
