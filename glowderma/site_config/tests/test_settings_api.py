@@ -40,6 +40,7 @@ def test_get_returns_the_typed_singleton(staff_client: APIClient) -> None:
         "booking_policy": {"uz": "", "ru": "", "en": ""},
         "terms_version": None,
         "terms_updated_at": None,
+        "terms_unpublished_changes": False,
         "integrations": {
             "mode": "fake",
             "providers": dict.fromkeys(("oauth", "billz", "fcm", "click", "payme", "bts", "eskiz"), "fake"),

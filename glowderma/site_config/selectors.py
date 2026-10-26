@@ -6,11 +6,16 @@ built under; ``services.update_settings`` starts a new generation when it commit
 read before that commit and writes back after it is never served (it carries the old generation). The
 provider-derived parts (``payment_providers``, ``fulfilment_methods``, ``online_sales_enabled``) and the app
 versions come from settings on every call. Reads never create the singleton row.
+
+The terms and the privacy policy served here, and checked by :func:`current_terms`, are the **published**
+copies (``terms_*`` / ``privacy_policy_*``), never the drafts staff edit (GS-2): a ``terms_version`` names
+exactly one text.
 """
 
 from __future__ import annotations
 
 import logging
+import unicodedata
 import uuid
 from dataclasses import dataclass
 from typing import Any, cast
@@ -38,15 +43,26 @@ class Terms:
     updated_at: Any
 
 
+VISIBLE_CATEGORIES = frozenset("LNPS")  # letters, numbers, punctuation, symbols (Unicode major classes)
+
+
+def has_visible_text(text: str) -> bool:
+    """Whether ``text`` holds at least one visible character: whitespace, control and format characters
+    (zero-width space, BOM, bidi marks: Unicode ``C*`` / ``Z*``) and lone combining marks do not count."""
+    return any(unicodedata.category(char)[0] in VISIBLE_CATEGORIES for char in text)
+
+
 def _row() -> SiteSettings:
     return SiteSettings.objects.get(pk=1)
 
 
 def current_terms() -> Terms:
-    """Published = ``terms_version`` set **and** the uz texts of the terms and the privacy policy filled
-    (``terms_version`` versions both documents)."""
+    """Published = ``terms_version`` set **and** the published uz texts of the terms and the privacy policy
+    visibly filled (``terms_version`` versions both documents)."""
     row = _row()
-    published = bool(row.terms_version and row.terms_uz.strip() and row.privacy_policy_uz.strip())
+    published = bool(
+        row.terms_version and has_visible_text(row.terms_uz) and has_visible_text(row.privacy_policy_uz)
+    )
     return Terms(row.terms_version, published, row.terms_updated_at)
 
 
@@ -146,7 +162,7 @@ def public_settings(lang: str) -> dict[str, Any]:
         "terms": localized(snapshot["terms"], lang),
         "booking_policy": localized(snapshot["booking_policy"], lang),
         "terms_version": snapshot["terms_version"] if _published(snapshot) else None,
-        "terms_updated_at": snapshot["terms_updated_at"],
+        "terms_updated_at": snapshot["terms_updated_at"] if _published(snapshot) else None,
         "reservation_minutes": snapshot["reservation_minutes"],
         "payment_providers": integration_modes.payable_providers(),
         "online_sales_enabled": integration_modes.online_sales_enabled(),
@@ -165,6 +181,6 @@ def public_settings(lang: str) -> dict[str, Any]:
 def _published(snapshot: dict[str, Any]) -> bool:
     return bool(
         snapshot["terms_version"]
-        and snapshot["terms"].get(enums.ContentLanguage.UZ, "").strip()
-        and snapshot["privacy_policy"].get(enums.ContentLanguage.UZ, "").strip()
+        and has_visible_text(snapshot["terms"].get(enums.ContentLanguage.UZ, ""))
+        and has_visible_text(snapshot["privacy_policy"].get(enums.ContentLanguage.UZ, ""))
     )

@@ -27,10 +27,11 @@ class SettingsView(AdminAPIView):
     @extend_schema(
         operation_id="admin_settings_partial_update",
         description=(
-            "Changes the sent fields only (each language of an i18n object separately). Saving the terms, "
-            "privacy or booking texts does not publish them: customers see the saved text at once, but are "
-            "asked to accept again only after `POST settings/terms/publish/`. While a version is published "
-            "the uz terms and privacy texts cannot be emptied (`blank`)."
+            "Changes the sent fields only (each language of an i18n object separately; keys other than "
+            "`uz`, `ru`, `en` answer `invalid`). `terms` and `privacy_policy` are drafts: customers keep "
+            "seeing the published copy until `POST settings/terms/publish/` "
+            "(`terms_unpublished_changes` tells whether a draft differs from it). The booking policy is not "
+            "versioned and is served as soon as it is saved."
         ),
         request=SettingsPatchSerializer,
         responses={200: SettingsSerializer, **ADMIN_ERRORS},
@@ -47,11 +48,12 @@ class TermsPublishView(AdminAPIView):
     @extend_schema(
         operation_id="admin_settings_terms_publish",
         description=(
-            "Publishes the current terms and privacy texts as a new `terms_version` (`YYYYMMDD-n`, the "
-            "Tashkent day and its publication count) and sets `terms_updated_at`. Registration then accepts "
+            "Publishes the terms and privacy drafts (copied into the published texts) as a new "
+            "`terms_version` (`YYYYMMDD-n`, the Tashkent day and its publication count) and sets "
+            "`terms_updated_at`. Registration then accepts "
             "only the new version and every customer is asked to accept it again at checkout and booking "
-            "(409 `terms_update_required`). 409 `conflict` while the uz terms or the uz privacy text is "
-            "empty. Empty body."
+            "(409 `terms_update_required`). 409 `conflict` while the uz terms or the uz privacy draft has "
+            "no visible character. Empty body."
         ),
         parameters=[IDEMPOTENCY_KEY_HEADER],
         request=None,

@@ -2,12 +2,13 @@
 
 * :func:`update_settings` — ``PATCH settings/``: the editable columns, audited as ``settings.updated``
   with the changed leaves only (the long legal texts as digests, never the texts themselves).
-* :func:`publish_terms` — ``POST settings/terms/publish/``: stamps a new ``terms_version`` (the customer
-  consent unit, customer contract §2.1.3 / §2.2.4) over the current texts, audited as
-  ``settings.terms_published``.
+* :func:`publish_terms` — ``POST settings/terms/publish/``: copies the terms and privacy drafts into the
+  published columns and stamps a new ``terms_version`` (the customer consent unit, customer contract §2.1.3 /
+  §2.2.4), audited as ``settings.terms_published``.
 
-Editing the texts never publishes them: the customers see a saved text at once (``settings/public/``), but
-they are asked to accept again only once staff publish a new version.
+The terms and the privacy policy have a draft and a published copy (GS-2): ``PATCH`` edits the drafts only,
+``settings/public/`` and registration use the published copies only, so a ``terms_version`` always names one
+text. The booking policy is not versioned: a saved booking policy is served at once.
 """
 
 from __future__ import annotations
@@ -17,10 +18,9 @@ from datetime import date, datetime
 from typing import Any
 
 from django.db import transaction
-from rest_framework.exceptions import ValidationError
 
 from glowderma.core import audit, timeutils
-from glowderma.core.api.exceptions import Conflict, field_error
+from glowderma.core.api.exceptions import Conflict
 from glowderma.site_config import selectors
 from glowderma.site_config.models import SiteSettings
 
@@ -40,28 +40,44 @@ TEXT_DOCUMENTS: tuple[str, ...] = ("terms", "privacy_policy", "booking_policy")
 VERSIONED_DOCUMENTS: tuple[str, ...] = ("terms", "privacy_policy")
 I18N_FIELDS: tuple[str, ...] = ("pickup_address", *TEXT_DOCUMENTS)
 
+
+def text_column(field: str, language: str) -> str:
+    """The column ``PATCH settings/`` writes for a language of an i18n field: the draft of a versioned
+    document (``terms_draft_uz``), else the served column (``booking_policy_uz``, ``pickup_address_uz``)."""
+    return f"{field}_draft_{language}" if field in VERSIONED_DOCUMENTS else f"{field}_{language}"
+
+
 # Columns PATCH settings/ may change, keyed by their column names (contract §2.11).
 EDITABLE_FIELDS: tuple[str, ...] = (
     "reservation_minutes",
     *CONTACT_FIELDS,
-    *(f"{field}_{language}" for field in I18N_FIELDS for language in LANGUAGES),
+    *(text_column(field, language) for field in I18N_FIELDS for language in LANGUAGES),
 )
 SHA256_PREFIX = 16  # hex characters of a text digest in the audit log
 
 TERMS_INCOMPLETE = (
     "Foydalanish shartlari va maxfiylik siyosatining o‘zbekcha matnini kiriting, so‘ng e’lon qiling."
 )
-PUBLISHED_TEXT_REQUIRED = "E’lon qilingan matnning o‘zbekcha nusxasini bo‘sh qoldirib bo‘lmaydi."
 
 
 def settings_snapshot(row: SiteSettings) -> dict[str, Any]:
-    """The image of the editable fields as the API shows them (contacts ``""`` ↔ ``null``, i18n objects)."""
+    """The image of the editable fields as the API shows them (contacts ``""`` ↔ ``null``, i18n objects; the
+    terms and privacy policy are their drafts)."""
     snapshot: dict[str, Any] = {"reservation_minutes": row.reservation_minutes}
     for name in CONTACT_FIELDS:
         snapshot[name] = getattr(row, name) or None
     for field in I18N_FIELDS:
-        snapshot[field] = {language: getattr(row, f"{field}_{language}") for language in LANGUAGES}
+        snapshot[field] = {language: getattr(row, text_column(field, language)) for language in LANGUAGES}
     return snapshot
+
+
+def unpublished_changes(row: SiteSettings) -> bool:
+    """Whether a terms or privacy draft differs from its published copy (``terms_unpublished_changes``)."""
+    return any(
+        getattr(row, f"{document}_draft_{language}") != getattr(row, f"{document}_{language}")
+        for document in VERSIONED_DOCUMENTS
+        for language in LANGUAGES
+    )
 
 
 def leaf_diff(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
@@ -98,29 +114,14 @@ def audit_diff(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
     return diff
 
 
-def _check_published_texts(row: SiteSettings, changes: dict[str, Any]) -> None:
-    """While a version is published its uz terms and privacy texts stay filled: emptying one would silently
-    unpublish the terms and stop every registration (503 ``terms_not_published``)."""
-    if not row.terms_version:
-        return
-    errors: dict[str, Any] = {}
-    for document in VERSIONED_DOCUMENTS:
-        column = f"{document}_uz"
-        if column in changes and not str(getattr(row, column)).strip():
-            errors[document] = {"uz": [field_error("blank", PUBLISHED_TEXT_REQUIRED)]}
-    if errors:
-        raise ValidationError(errors)
-
-
 @transaction.atomic
 def update_settings(changes: dict[str, Any], *, actor: Any, request: Any = None) -> SiteSettings:
     """Apply ``changes`` (column name → value; a contact may be ``None``) and audit the diff.
 
     Audit ``settings.updated`` (contract §2.11) carries :func:`audit_diff` as its data: only the changed
     leaves, each ``{"from", "to"}`` (a long text as ``{"changed", "old_len", "new_len", "sha256"}``). A PATCH
-    that changes nothing writes no audit entry and keeps ``updated_at`` / ``updated_by``. The texts never
-    publish themselves (:func:`publish_terms`); while a version is published the uz terms and privacy texts
-    cannot be emptied (field error ``blank``).
+    that changes nothing writes no audit entry and keeps ``updated_at`` / ``updated_by``. The terms and
+    privacy changes land in the drafts and are published only by :func:`publish_terms`.
     """
     row = SiteSettings.objects.select_for_update().get(pk=1)
     before = settings_snapshot(row)
@@ -128,7 +129,6 @@ def update_settings(changes: dict[str, Any], *, actor: Any, request: Any = None)
         if name not in EDITABLE_FIELDS:
             raise ValueError(f"{name} is not an editable setting")
         setattr(row, name, "" if value is None and name in CONTACT_FIELDS else value)
-    _check_published_texts(row, changes)
     diff = audit_diff(before, settings_snapshot(row))
     if not diff:
         return row
@@ -174,25 +174,33 @@ def next_terms_version(current: str, today: date) -> str:
 
 @transaction.atomic
 def publish_terms(*, actor: Any, request: Any = None) -> SiteSettings:
-    """Publish the current terms and privacy texts as a new ``terms_version`` (contract §2.11).
+    """Publish the terms and privacy drafts as a new ``terms_version`` (contract §2.11).
 
-    Refused with 409 ``conflict`` while the uz terms or the uz privacy text is empty (after strip). The new
-    version is :func:`next_terms_version` of the Tashkent day; ``terms_updated_at`` = now; ``updated_at`` /
-    ``updated_by`` follow. Every customer whose consent names another version is asked to accept again at
-    checkout and booking (409 ``terms_update_required``, customer contract §2.2.4); registration accepts only
-    the new version. The public-settings cache starts a new generation on commit. Audit
-    ``settings.terms_published`` ``{from, to, sha256}`` (``sha256``: the digest of every published text).
+    Refused with 409 ``conflict`` while the uz terms or the uz privacy draft has no visible character
+    (:func:`selectors.has_visible_text`: whitespace and invisible format characters do not count). Every
+    draft (uz/ru/en) is copied into its published column. The new version is :func:`next_terms_version` of
+    the Tashkent day; ``terms_updated_at`` = now; ``updated_at`` / ``updated_by`` follow. Every customer
+    whose consent names another version is asked to accept again at checkout and booking (409
+    ``terms_update_required``, customer contract §2.2.4); registration accepts only the new version.
+    The public-settings cache starts a new generation on commit. Audit ``settings.terms_published``
+    ``{from, to, sha256}`` (``sha256``: the digest of every published text).
     """
     row = SiteSettings.objects.select_for_update().get(pk=1)
-    if not row.terms_uz.strip() or not row.privacy_policy_uz.strip():
+    if not all(selectors.has_visible_text(getattr(row, f"{doc}_draft_uz")) for doc in VERSIONED_DOCUMENTS):
         raise Conflict(TERMS_INCOMPLETE)
+    published_columns = [f"{doc}_{language}" for doc in VERSIONED_DOCUMENTS for language in LANGUAGES]
+    for column in published_columns:
+        document, language = column.rsplit("_", 1)
+        setattr(row, column, getattr(row, f"{document}_draft_{language}"))
     now = timeutils.now()
     previous = row.terms_version or None
     row.terms_version = next_terms_version(row.terms_version, timeutils.local_date(now))
     row.terms_updated_at = now
     row.updated_at = now
     row.updated_by = actor
-    row.save(update_fields=["terms_version", "terms_updated_at", "updated_at", "updated_by"])
+    row.save(
+        update_fields=[*published_columns, "terms_version", "terms_updated_at", "updated_at", "updated_by"]
+    )
     transaction.on_commit(selectors.invalidate_public_settings, robust=True)
     audit.record(
         action="settings.terms_published",

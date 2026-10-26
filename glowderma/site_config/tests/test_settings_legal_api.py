@@ -47,8 +47,14 @@ def publish(client: APIClient, key: str | None = None) -> Any:
 
 
 def fill_texts(**overrides: str) -> None:
+    """Write the terms / privacy **drafts** (``terms_uz=`` → ``terms_draft_uz``) the way a PATCH would."""
     values = {"terms_uz": TERMS_UZ, "privacy_policy_uz": PRIVACY_UZ, **overrides}
-    SiteSettings.objects.filter(pk=1).update(**values)
+    SiteSettings.objects.filter(pk=1).update(
+        **{
+            f"{name.rsplit('_', 1)[0]}_draft_{name.rsplit('_', 1)[1]}": value
+            for name, value in values.items()
+        }
+    )
 
 
 @pytest.fixture
@@ -123,6 +129,21 @@ INSTAGRAM_INVALID = "Instagram havolasi https://instagram.com/… ko‘rinishida
         ({"telegram_url": "https://t.me/"}, [("telegram_url", "invalid", TELEGRAM_INVALID)]),
         ({"instagram_url": "https://instagr.am/x"}, [("instagram_url", "invalid", INSTAGRAM_INVALID)]),
         ({"instagram_url": "https://instagram.com"}, [("instagram_url", "invalid", INSTAGRAM_INVALID)]),
+        ({"instagram_url": "https://instagram.com/../"}, [("instagram_url", "invalid", INSTAGRAM_INVALID)]),
+        ({"telegram_url": "https://t.me/./"}, [("telegram_url", "invalid", TELEGRAM_INVALID)]),
+        ({"telegram_url": "https://t.me/glow/derma"}, [("telegram_url", "invalid", TELEGRAM_INVALID)]),
+        (
+            {"telegram_url": 'https://t.me/x"><script>alert(1)</script>'},
+            [("telegram_url", "invalid", URL_INVALID)],
+        ),
+        ({"telegram_url": "https://t.me/x`y"}, [("telegram_url", "invalid", URL_INVALID)]),
+        ({"website_url": "https://glowderma.uz/\u202eexe"}, [("website_url", "invalid", URL_INVALID)]),
+        ({"website_url": "https://glowderma.uz/\u200b"}, [("website_url", "invalid", URL_INVALID)]),
+        ({"website_url": "https://glowderma.uz/a\\b"}, [("website_url", "invalid", URL_INVALID)]),
+        ({"website_url": "https://localhost/"}, [("website_url", "invalid", URL_INVALID)]),
+        ({"website_url": "https://127.0.0.1/"}, [("website_url", "invalid", URL_INVALID)]),
+        ({"website_url": "https://10.0.0.1/"}, [("website_url", "invalid", URL_INVALID)]),
+        ({"website_url": "https://[::1]/"}, [("website_url", "invalid", URL_INVALID)]),
         (
             {"terms": {"uz": "x" * 50_001}},
             [("terms.uz", "max_length", "50000 belgidan oshmasin.")],
@@ -132,6 +153,21 @@ INSTAGRAM_INVALID = "Instagram havolasi https://instagram.com/… ko‘rinishida
             [("booking_policy.ru", "max_length", "5000 belgidan oshmasin.")],
         ),
         ({"privacy_policy": None}, [("privacy_policy", "null", "Majburiy maydon.")]),
+        ({"terms": "abc"}, [("terms", "invalid", "Noto‘g‘ri qiymat.")]),
+        ({"booking_policy": ["uz"]}, [("booking_policy", "invalid", "Noto‘g‘ri qiymat.")]),
+        ({"terms": {"xx": "a"}}, [("terms.xx", "invalid", "Faqat uz, ru va en kalitlarini yuboring.")]),
+        (
+            {"privacy_policy": {"UZ": "a", "uz": "b"}},
+            [("privacy_policy.UZ", "invalid", "Faqat uz, ru va en kalitlarini yuboring.")],
+        ),
+        (
+            {"pickup_address": {"kk": "Toshkent"}},
+            [("pickup_address.kk", "invalid", "Faqat uz, ru va en kalitlarini yuboring.")],
+        ),
+        (
+            {"terms_unpublished_changes": False},
+            [("terms_unpublished_changes", "read_only", "Bu maydonni o‘zgartirib bo‘lmaydi.")],
+        ),
         ({"terms_version": "1"}, [("terms_version", "read_only", "Bu maydonni o‘zgartirib bo‘lmaydi.")]),
         (
             {"terms_updated_at": "2026-10-01T00:00:00+05:00"},
@@ -151,9 +187,14 @@ def test_patch_validation_rows(staff_client: APIClient, body: dict[str, Any], ex
 @pytest.mark.django_db
 def test_accepted_link_hosts(staff_client: APIClient) -> None:
     SiteSettingsFactory.create()
-    for url in ("https://t.me/glowderma", "https://telegram.me/glowderma", "https://T.ME/GlowDerma"):
+    for url in ("https://t.me/glowderma", "https://telegram.me/glowderma", "https://t.me/+AbC_12"):
         response = staff_client.patch(URL, {"telegram_url": url}, format="json")
         assert response.status_code == 200, (url, response.data)
+        assert response.data["telegram_url"] == url
+    # the scheme and host are stored lowercase, the path as typed
+    response = staff_client.patch(URL, {"telegram_url": "HTTPS://T.ME/GlowDerma/"}, format="json")
+    assert response.data["telegram_url"] == "https://t.me/GlowDerma/"
+    assert SiteSettings.objects.get(pk=1).telegram_url == "https://t.me/GlowDerma/"
     for url in ("https://instagram.com/glowderma", "https://www.instagram.com/glowderma?igsh=1"):
         response = staff_client.patch(URL, {"instagram_url": url}, format="json")
         assert response.status_code == 200, (url, response.data)
@@ -184,10 +225,14 @@ def test_patch_texts_are_trimmed_audited_as_digests_and_never_publish(
     assert response.data["terms"] == {"uz": TERMS_UZ, "ru": "Условия", "en": ""}
     assert response.data["privacy_policy"] == {"uz": PRIVACY_UZ, "ru": "", "en": ""}
     assert response.data["booking_policy"]["uz"] == "Qabulni 2 soat oldin bekor qiling."
-    # editing never publishes: no version, and the app still sees unpublished terms
+    # editing never publishes: no version, the texts are drafts the app does not see yet
     assert (response.data["terms_version"], response.data["terms_updated_at"]) == (None, None)
+    assert response.data["terms_unpublished_changes"] is True
     public = APIClient().get(PUBLIC, HTTP_ACCEPT_LANGUAGE="ru").json()
-    assert public["terms"] == "Условия" and public["terms_version"] is None
+    assert (public["terms"], public["privacy_policy"], public["terms_version"]) == ("", "", None)
+    assert public["booking_policy"] == "Qabulni 2 soat oldin bekor qiling."  # not versioned: served at once
+    row = SiteSettings.objects.get(pk=1)
+    assert (row.terms_draft_uz, row.terms_uz) == (TERMS_UZ, "")
     entry = AuditEntry.objects.get(action="settings.updated")
     assert entry.after == {
         "terms": {
@@ -217,20 +262,82 @@ def test_patch_texts_are_trimmed_audited_as_digests_and_never_publish(
 
 
 @pytest.mark.django_db
-def test_published_uz_texts_cannot_be_emptied(staff_client: APIClient, pinned: list[datetime]) -> None:
+def test_edits_after_publishing_stay_drafts_until_the_next_publication(
+    staff_client: APIClient, pinned: list[datetime], django_capture_on_commit_callbacks: Any
+) -> None:
+    """Review should_fix (GS-2): a published ``terms_version`` always names the text that was published; an
+    edit, even emptying the uz draft, never changes what the app serves or what a consent refers to."""
     fill_texts()
-    assert publish(staff_client).status_code == 200
-    message = "E’lon qilingan matnning o‘zbekcha nusxasini bo‘sh qoldirib bo‘lmaydi."
-    response = staff_client.patch(URL, {"terms": {"uz": "  "}, "privacy_policy": {"uz": ""}}, format="json")
-    assert response.status_code == 400
-    assert errors(response) == [("terms.uz", "blank", message), ("privacy_policy.uz", "blank", message)]
+    with django_capture_on_commit_callbacks(execute=True):
+        first = publish(staff_client)
+    assert first.data["terms_version"] == "20261020-1" and first.data["terms_unpublished_changes"] is False
+    with django_capture_on_commit_callbacks(execute=True):
+        edited = staff_client.patch(
+            URL, {"terms": {"uz": "Butunlay boshqa matn B"}, "privacy_policy": {"uz": " "}}, format="json"
+        )
+    assert edited.status_code == 200, edited.data
+    assert (
+        edited.data["terms"]["uz"] == "Butunlay boshqa matn B" and edited.data["privacy_policy"]["uz"] == ""
+    )
+    assert (edited.data["terms_version"], edited.data["terms_unpublished_changes"]) == ("20261020-1", True)
+    public = APIClient().get(PUBLIC).json()
+    assert (public["terms"], public["privacy_policy"]) == (TERMS_UZ, PRIVACY_UZ)
+    assert public["terms_version"] == "20261020-1"
+    assert selectors.current_terms() == selectors.Terms("20261020-1", True, at(2026, 10, 20, 10, 0))
+    published = AuditEntry.objects.get(action="settings.terms_published").after
+    assert published is not None and published["sha256"]["terms"]["uz"] == sha(TERMS_UZ)
+    # the emptied uz privacy draft blocks the next publication, the published copy stays served
+    assert publish(staff_client).status_code == 409
+    assert APIClient().get(PUBLIC).json()["privacy_policy"] == PRIVACY_UZ
+    # filled again and published: a new version names the new text
+    staff_client.patch(URL, {"privacy_policy": {"uz": PRIVACY_UZ}}, format="json")
+    pinned.append(at(2026, 10, 20, 11, 0))
+    with django_capture_on_commit_callbacks(execute=True):
+        second = publish(staff_client)
+    assert (second.data["terms_version"], second.data["terms_unpublished_changes"]) == ("20261020-2", False)
+    public = APIClient().get(PUBLIC).json()
+    assert (public["terms"], public["terms_version"]) == ("Butunlay boshqa matn B", "20261020-2")
     row = SiteSettings.objects.get(pk=1)
-    assert (row.terms_uz, row.privacy_policy_uz) == (TERMS_UZ, PRIVACY_UZ)
-    # the other languages and the booking policy may be emptied; the uz texts may change
+    assert (row.terms_uz, row.privacy_policy_uz) == ("Butunlay boshqa matn B", PRIVACY_UZ)
+
+
+INVISIBLE = ["\u200b", " \u200b\n", "\ufeff", "\u200e\u200f\u2060", "\u00a0\u3000", "\u0301"]
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("text", INVISIBLE)
+def test_invisible_texts_are_stored_empty(staff_client: APIClient, text: str) -> None:
+    """Review should_fix: a text of only whitespace, zero-width or format characters counts as empty."""
     response = staff_client.patch(
-        URL, {"terms": {"ru": "", "uz": TERMS_UZ + " 2"}, "booking_policy": {"uz": ""}}, format="json"
+        URL,
+        {"terms": {"uz": text}, "privacy_policy": {"uz": text}, "booking_policy": {"ru": text}},
+        format="json",
     )
     assert response.status_code == 200, response.data
+    row = SiteSettings.objects.get(pk=1)
+    assert (row.terms_draft_uz, row.privacy_policy_draft_uz, row.booking_policy_ru) == ("", "", "")
+    assert publish(staff_client).status_code == 409
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("text", INVISIBLE)
+def test_publish_and_current_terms_ignore_invisible_characters(staff_client: APIClient, text: str) -> None:
+    """Written around the API (a legacy row): publishing refuses, and a published invisible text does not
+    count as published terms (registration stays closed)."""
+    fill_texts(terms_uz=text)
+    assert publish(staff_client).status_code == 409
+    SiteSettings.objects.filter(pk=1).update(
+        terms_version="20261020-1", terms_updated_at=at(2026, 10, 20), terms_uz=text, privacy_policy_uz="P"
+    )
+    assert selectors.current_terms().published is False
+    selectors.invalidate_public_settings()
+    public = APIClient().get(PUBLIC).json()
+    assert (public["terms_version"], public["terms_updated_at"]) == (None, None)
+
+
+def test_has_visible_text() -> None:
+    assert all(not selectors.has_visible_text(text) for text in ["", *INVISIBLE])
+    assert all(selectors.has_visible_text(text) for text in ["a", "\u200b1", "—", "§", "Ж", "\u200bx\u200b"])
 
 
 # --- publish ----------------------------------------------------------------------------------------------
