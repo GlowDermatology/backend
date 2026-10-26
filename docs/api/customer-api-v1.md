@@ -445,9 +445,12 @@ holds one.
 2. Login guard → 429 `throttled`: a **known** device counts its failures in scope `customer_login_device` keyed by the
    device row; an unknown device in scope `customer_login` keyed by `pii_ref(phone)` (§1.8). Someone who only knows the
    phone can lock the unknown-device path for that phone (residual risk, §6.3) but never the owner's known device.
-3. **Unknown device without `verification_token`:** if the phone cannot receive a code right now (lockout, daily code
-   cap, daily wrong-code cap, §2.1.1) → 429 `otp_locked` / `otp_daily_limit` **before the password is checked**, with
-   the same body for every password and for unknown phones, so a capped phone gives no password-correctness oracle.
+3. **Unknown device without `verification_token`:** if a code cannot be sent right now for **any** reason step 6 could
+   meet — the phone's lockout, daily code cap or daily wrong-code cap, the fid day cap, the IP day cap or the global
+   hourly budget (§2.1.1) — → 429 `otp_locked` / `otp_daily_limit` / `otp_network_limit` or 503 `sms_unavailable`
+   (each with its own code and `Retry-After`) **before the password is checked**, with the same body for every password
+   and for unknown phones, so no cap gives a password-correctness oracle. The check runs under the per-phone advisory
+   lock of §2.1.1, which the request keeps until it commits, so the phone-derived caps cannot change before step 6.
 4. Unknown phone, deleted customer, no password set (social-only account) or wrong password → **401
    `invalid_credentials`** "Telefon raqami yoki parol noto‘g‘ri." (same body and timing: whenever no stored hash is
    compared — unknown phone, deleted customer, empty password — the login service runs a dummy Argon2 check against a
@@ -456,8 +459,11 @@ holds one.
 5. **Known device** → **200 `AuthTokens`** (`device_key: null`; single-device rule applies). Audit
    `customer.login_succeeded {method: "password", new_device: false}`.
 6. **Unknown device, no `verification_token`** → **200 `NextStep`** `verify_device`. The server issues a
-   `login_new_device` code through the `send_code` internals (same advisory lock and caps; a live code younger than
-   60 s is reused and `otp.resend_in` is the remaining wait). Resending = calling `auth/login/` again with the
+   `login_new_device` code through the `send_code` internals (the advisory lock taken in step 3; a live code younger
+   than 60 s is reused and `otp.resend_in` is the remaining wait). Step 6 never answers a cap error: the caps were
+   checked in step 3, and the fid, IP and global Redis counters are incremented here without a second check (a
+   concurrent request may overshoot one of those cost caps by one; answering it after the password check would be the
+   oracle step 3 removes). Resending = calling `auth/login/` again with the
    password. No session is created.
 7. **Unknown device with `verification_token`** (purpose `login_new_device`, same phone) → password re-checked, token
    consumed → **200 `AuthTokens`** with a new `device_key`; audit `customer.login_succeeded {method: "password",
@@ -2381,8 +2387,9 @@ code a customer view can raise to an existing key.
       `FAKE_PAYMENTS_ENABLED` and the scenario header additionally require every relevant provider mode to be `fake`.
       Staging therefore cannot complete an online purchase or receive a code without live providers.
 15. **Enumeration.** Customer ids in URLs are sequential but always ownership-checked; phone existence is revealed only
-    by the register/reset branches of `send-code` under SMS throttles (§7 `M2-A9`); a capped phone answers `auth/login/`
-    the same way for any password; POS failures reveal nothing.
+    by the register/reset branches of `send-code` under SMS throttles (§7 `M2-A9`); a capped phone, device or network
+    and a tripped global SMS budget answer `auth/login/` the same way for any password (§2.1.4 step 3); POS failures
+    reveal nothing.
 16. **Account takeover recovery.** Linking a social identity needs the account's strongest factor: the SMS code plus
     the password when one is set (completion), or, from a signed-in session, the password — or an SMS code when the
     account has none (§2.2.8); unlinking needs the same. Every link, unlink, reset and password change sends an

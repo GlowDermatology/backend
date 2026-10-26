@@ -203,8 +203,8 @@ C§2.0 rows 1–23: `auth/send-code/`, `auth/verify-code/`, `auth/set-password/`
 | New | Where | Notes |
 |---|---|---|
 | `send_code(phone, purpose, *, ip, fid, lang, platform, social_jti=None) -> CodeIssue` | `accounts.services` | refuses `login_new_device`; global budget (Redis hour counter) → `SmsUnavailable`; `pg_advisory_xact_lock(hashtext('otp:'+phone))`; lockout, daily wrong-code cap, resend window, phone/fid/IP day caps (C§2.1.1); HMAC row; `secretbox.seal` → Redis `gd:otp:payload:{id}` (120 s); outbox `sms.send {sms_code_id, lang, platform}`; `gd:social:otp:{id}` = ticket jti for `link_social` |
-| `issue_login_code(phone, *, ip, fid, lang, platform)` | `accounts.services` | the `login_new_device` path used only by `auth/login/` (same internals; reuses a live code < 60 s) |
-| `otp_blocked(phone, now) -> OtpBlock \| None` | `accounts.services` | the pre-password check of login step 3 |
+| `issue_login_code(phone, *, ip, fid, lang, platform)` | `accounts.services` | the `login_new_device` path used only by `auth/login/` (same internals under the advisory lock `otp_blocked` took; reuses a live code < 60 s; increments the fid/IP/global counters **without** re-checking them, so it never raises a cap error after the password check) |
+| `otp_blocked(phone, *, fid, ip, now) -> OtpBlock \| None` | `accounts.services` | the pre-password check of login step 3: takes the per-phone advisory lock (held to commit), then every refusal `send_code` could meet — phone lockout, daily code cap, daily wrong-code cap, fid cap, IP cap (`otp_network_limit`), global budget (`sms_unavailable`) |
 | `verify_code(phone, purpose, code) -> raw verification token` | `accounts.services` | advisory lock + `select_for_update`; attempts, exhaustion, daily wrong cap |
 | `consume_verification(token, *, purpose, phone=None) -> (phone, sms_code_id)` | `accounts.services` | single use under lock |
 | `rotate_customer_refresh(raw, *, fid) -> RefreshResult` | `accounts.services` | C§2.1.6 steps 1–6: row lock on `refresh_hash OR previous_refresh_hash`, rotate / replay / re-rotate (bounded by `CUSTOMER_REFRESH_UNCONFIRMED_SECONDS`, dead hash remembered in `auth:refresh_dead:{hash}`, grace cache rewritten) / reuse → revoke `refresh_reused` + audit; grace cache written before commit and deleted on rollback |
@@ -259,8 +259,10 @@ None (P0 owns `accounts.0006`). The link-social ticket binding and the OTP fid/I
   token → tokens, new device key, the old session `SESSION_REPLACED`; timing parity: unknown phone, deleted customer,
   social-only (empty password) and wrong password each run exactly one hash (the dummy hash counted with a spy
   hasher); guard lockout; the unknown-device guard locked by 5 wrong passwords does not lock a login with a valid device
-  key (`customer_login_device`), and vice versa; **oracle test:** with the phone's code cap exhausted, a right and a
-  wrong password get the same 429 body.
+  key (`customer_login_device`), and vice versa; **oracle test:** with the phone's code cap exhausted, the fid cap
+  exhausted, the IP cap exhausted (`otp_network_limit`) and the global budget tripped (503 `sms_unavailable`), a right
+  and a wrong password each get the same body and status, and no password hash is checked (spy hasher); an unknown
+  phone gets the same body too.
 - Refresh: rotation (counter +1, `rotated_at` = `last_used_at` from one instant); concurrent refresh threads →
   identical tokens and one chain; lost response → retry after 45 s with the old token → the grace body (identical
   tokens); after 5 min → 200 by re-rotation, nothing revoked, the grace cache rewritten so two concurrent retries get
