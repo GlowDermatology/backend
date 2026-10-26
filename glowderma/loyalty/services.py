@@ -28,6 +28,7 @@ replay that names another customer, or a sale/order that belongs to another purc
 from __future__ import annotations
 
 import hashlib
+import logging
 import secrets
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -57,6 +58,8 @@ from glowderma.loyalty.models import (
     PurchaseItem,
 )
 from glowderma.loyalty.selectors import active_policy, next_effective_from, policy_at, scheduled_policy
+
+logger = logging.getLogger(__name__)
 
 # Contract §2.6 adjustment rules
 ADJUSTMENT_MIN_AMOUNT = 1
@@ -1330,10 +1333,17 @@ def pos_key_hash(raw_key: str) -> str:
 
 
 def _pos_device(prefix: str) -> PosDevice:
-    device = PosDevice.objects.select_for_update().filter(key_prefix=prefix.strip()).first()
-    if device is None:
+    """The one device with this key prefix, locked. ``key_prefix`` has no unique constraint, so a prefix
+    shared by two devices is refused (naming them) instead of acting on whichever sorts first."""
+    devices = list(
+        PosDevice.objects.select_for_update().filter(key_prefix=prefix.strip()).order_by("pk")[:10]
+    )
+    if not devices:
         raise PosDeviceError(f"No POS device with the key prefix {prefix!r}")
-    return device
+    if len(devices) > 1:
+        ids = ", ".join(str(device.pk) for device in devices)
+        raise PosDeviceError(f"The key prefix {prefix!r} is shared by the POS devices {ids}; fix it by hand")
+    return devices[0]
 
 
 def _audit_pos(action: str, device: PosDevice, actor: StaffUser, **extra: Any) -> None:
@@ -1397,14 +1407,17 @@ def rotate_pos_key(prefix: str, actor_email: str) -> str:
 
 
 def ensure_pos_device(name: str, raw_key: str, actor: StaffUser | None) -> bool:
-    """Insert a device for a known key unless its hash exists (the local/test ``POS_API_KEYS`` seeding);
-    returns whether a row was created."""
+    """Insert a device for a known key unless its hash or its key prefix exists (the local/test
+    ``POS_API_KEYS`` seeding); returns whether a row was created."""
     digest = pos_key_hash(raw_key)
     if PosDevice.objects.filter(key_hash=digest).exists():
         return False
-    PosDevice.objects.create(
-        name=name[:100], key_prefix=raw_key.split("_")[1][:12], key_hash=digest, created_by=actor
-    )
+    prefix = raw_key.split("_")[1][:12]
+    if PosDevice.objects.filter(key_prefix=prefix).exists():
+        # a second device on one prefix would make revokeposkey/rotateposkey ambiguous
+        logger.warning("pos.seed_prefix_in_use prefix=%s name=%s", prefix, name[:100])
+        return False
+    PosDevice.objects.create(name=name[:100], key_prefix=prefix, key_hash=digest, created_by=actor)
     return True
 
 
