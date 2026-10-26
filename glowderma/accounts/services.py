@@ -102,9 +102,25 @@ def tombstone_ttl() -> int:
 
 
 def _tombstone_on_commit(sessions: Iterable[AuthSession]) -> None:
+    """Write ``revoked:<reason>`` tombstones once the revocation committed.
+
+    Best effort (``robust``): the revocation already committed, so a Redis error must not turn the request
+    that made it into a 500 (the client would lose the tokens a sign-in just issued). An unwritten tombstone
+    leaves at most the add-only ``auth:sid`` active entry, whose TTL is ≤ 60 s; the failure logs ERROR.
+    """
     values = {f"auth:sid:{session.pk}": f"revoked:{session.revoke_reason}" for session in sessions}
-    if values:
-        transaction.on_commit(lambda: cache.set_many(values, timeout=tombstone_ttl()))
+    if not values:
+        return
+
+    def write() -> None:
+        try:
+            cache.set_many(values, timeout=tombstone_ttl())
+        except Exception:
+            logger.exception(
+                "auth.tombstone_failed sids=%s", sorted(key.rsplit(":", 1)[-1] for key in values)
+            )
+
+    transaction.on_commit(write, robust=True)
 
 
 @transaction.atomic
@@ -503,8 +519,7 @@ def delete_customer(customer: Customer | int) -> Customer:
     if stored.status == enums.CustomerStatus.DELETED:
         return _refreshed(customer, stored)
     instant = timeutils.now()
-    if stored.image:
-        stored.image.delete(save=False)
+    _delete_image_on_commit(stored)
     stored.status = enums.CustomerStatus.DELETED
     stored.deleted_at = instant
     stored.name = ""
@@ -541,6 +556,15 @@ def delete_customer(customer: Customer | int) -> Customer:
     )
     revoke_customer_sessions(stored.pk, enums.SessionRevokeReason.DEACTIVATED)
     return _refreshed(customer, stored)
+
+
+def _delete_image_on_commit(customer: Customer) -> None:
+    """Delete the customer's image file once the transaction that clears the column commits; a rollback
+    keeps both the column and the file (a deleted file behind a kept name would break ``image_url``)."""
+    if not customer.image:
+        return
+    storage, name = customer.image.storage, str(customer.image.name)
+    transaction.on_commit(lambda: storage.delete(name), robust=True)
 
 
 def _refreshed(customer: Customer | int, stored: Customer) -> Customer:
@@ -992,7 +1016,7 @@ def _fid_counter_key(fid: str, now: datetime) -> str:
 
 
 def _ip_counter_key(ip: str, now: datetime) -> str:
-    return f"gd:otp:ip:{ip}:{_day_tag(now)}"
+    return f"gd:otp:ip:{pii_ref(ip)}:{_day_tag(now)}"
 
 
 def _global_counter_key(now: datetime) -> str:
@@ -1102,7 +1126,15 @@ def _count_issue(*, fid: str, ip: str, now: datetime) -> None:
 
 
 def _create_code(
-    phone: str, stored_purpose: str, *, ip: str, fid: str, lang: str, platform: str, now: datetime
+    phone: str,
+    stored_purpose: str,
+    *,
+    purpose: str,
+    ip: str,
+    fid: str,
+    lang: str,
+    platform: str,
+    now: datetime,
 ) -> SmsCode:
     """Supersede the live code, store a new HMAC row, seal the plain code into Redis for the handler, count it
     and enqueue ``sms.send`` (no phone, no text, no code in the payload)."""
@@ -1127,7 +1159,7 @@ def _create_code(
         {"sms_code_id": row.pk, "lang": lang, "platform": platform},
         dedupe_key=topics.sms_send_key(row.pk),
     )
-    logger.info("otp.issued purpose=%s phone_ref=%s", stored_purpose, pii_ref(phone))
+    logger.info("otp.issued purpose=%s phone_ref=%s", purpose, pii_ref(phone))  # the contract literal
     return row
 
 
@@ -1186,7 +1218,9 @@ def send_code(
         block = _cap_block(phone, fid=fid, ip=ip, now=now)
         if block is not None:
             raise block
-        row = _create_code(phone, stored, ip=ip, fid=fid, lang=lang, platform=platform, now=now)
+        row = _create_code(
+            phone, stored, purpose=purpose, ip=ip, fid=fid, lang=lang, platform=platform, now=now
+        )
         if social_jti:
             cache.set(social_otp_key(row.pk), social_jti, SOCIAL_OTP_TTL_SECONDS)
         return _issue(row, purpose, now)
@@ -1226,7 +1260,16 @@ def issue_login_code(phone: str, *, ip: str, fid: str, lang: str, platform: str)
         .first()
     )
     if live is None:
-        live = _create_code(phone, stored, ip=ip, fid=fid, lang=lang, platform=platform, now=now)
+        live = _create_code(
+            phone,
+            stored,
+            purpose=enums.OtpPurpose.LOGIN_NEW_DEVICE,
+            ip=ip,
+            fid=fid,
+            lang=lang,
+            platform=platform,
+            now=now,
+        )
     return _issue(live, enums.OtpPurpose.LOGIN_NEW_DEVICE, now)
 
 
@@ -1431,6 +1474,7 @@ def rotate_customer_refresh(raw: str, *, fid: str, platform: str | None = None) 
                 ):
                     remaining = max(1, int((session.absolute_expires_at - now).total_seconds()))
                     cache.set(_dead_key(session.refresh_hash), str(session.pk), remaining)
+                    written.append(_dead_key(session.refresh_hash))  # removed again on rollback
                     new_raw = secrets.token_urlsafe(32)
                     session.refresh_hash = hash_secret(new_raw)
                     session.rotation += 1
@@ -1478,13 +1522,29 @@ def logout_customer(raw: str, *, request: Any = None) -> AuthSession:
     """``auth/logout/`` (customer contract §2.1.7): revoke the session owning the refresh token (``logout``,
     tombstone on commit), the device inactive with no push and no token (its key hash kept), the customer's QR
     keys deleted on commit; audit ``customer.logout``. Unknown, revoked or expired → 401
-    ``SESSION_EXPIRED``."""
+    ``SESSION_EXPIRED``.
+
+    Lock order Customer → session → device (C§2.7.1), as every other customer write: the session is first
+    resolved without a lock, the customer-level lock taken, then the session re-read ``FOR UPDATE`` and
+    re-checked (a sign-in, ``DELETE me/`` or ``PUT me/device/`` racing the logout serializes instead of
+    deadlocking with it).
+    """
     digest = hash_secret(raw)
+    match = Q(refresh_hash=digest) | Q(previous_refresh_hash=digest)
+    customer_id = (
+        AuthSession.objects.filter(audience="customer")
+        .filter(match)
+        .values_list("customer_id", flat=True)
+        .first()
+    )
+    if customer_id is None:
+        raise AuthFailed("SESSION_EXPIRED")
+    lock_customer(customer_id)
     session = (
         AuthSession.objects.select_for_update(of=("self",))
         .select_related("customer")
-        .filter(audience="customer")
-        .filter(Q(refresh_hash=digest) | Q(previous_refresh_hash=digest))
+        .filter(audience="customer", customer_id=customer_id)
+        .filter(match)
         .first()
     )
     if session is None or session.revoked_at is not None or session.absolute_expires_at <= timeutils.now():
@@ -1496,11 +1556,11 @@ def logout_customer(raw: str, *, request: Any = None) -> AuthSession:
         Device.objects.filter(pk=session.device_id).update(
             is_active=False, push_enabled=False, fcm_token="", updated_at=timeutils.now()
         )
-    _revoke_qr_on_commit(session.customer_id or 0)
+    _revoke_qr_on_commit(customer_id)
     audit.record(
         action="customer.logout",
         entity_type="customer",
-        entity_id=str(session.customer_id),
+        entity_id=str(customer_id),
         actor=session.customer,
         request=request,
         after={"sid": str(session.pk)},
@@ -1541,3 +1601,206 @@ def remember_id_token(provider: str, raw_token: str, *, expires_at: int) -> bool
     share every claim."""
     ttl = max(1, int(expires_at - timeutils.now().timestamp()))
     return bool(cache.add(SOCIAL_SEEN_KEY.format(digest=_sha256(f"{provider}:{raw_token}")), 1, ttl))
+
+
+# --- P1: customer writes the ``customers`` orchestrators make (AGENTS.md: cross-module writes go through the
+# owning module's services). Every helper runs inside the caller's transaction, under its customer-level lock.
+
+
+def lock_customer_by_phone(phone: str) -> Customer | None:
+    """The customer-level lock of the row holding ``phone`` (any status), or ``None``."""
+    return Customer.objects.select_for_update(no_key=True).filter(phone=phone).first()
+
+
+def lock_signed_in_customer(customer_id: int, sid: uuid.UUID | str | None) -> Customer:
+    """The customer-level lock of a signed-in write (customer contract §2.2, §6.17), re-checked under it.
+
+    A request authenticated before a concurrent ``DELETE me/``, a reset or a sign-in elsewhere committed must
+    not write to the account afterwards: the customer must still be ``active`` and the request's session
+    (``sid``) still open and unexpired, else 401 (``SESSION_REPLACED`` / ``password_changed`` for those
+    revocations, ``SESSION_EXPIRED`` otherwise). The session row is locked (``FOR NO KEY UPDATE``) after the
+    customer, the order ``start_customer_session`` uses, so a revocation either committed before (refused
+    here) or waits for this write.
+    """
+    stored = lock_customer(customer_id)
+    if stored.status != enums.CustomerStatus.ACTIVE:
+        raise AuthFailed("SESSION_EXPIRED")
+    if sid is not None:
+        session = (
+            AuthSession.objects.select_for_update(no_key=True)
+            .filter(pk=sid, audience="customer", customer_id=customer_id)
+            .first()
+        )
+        if session is None:
+            raise AuthFailed("SESSION_EXPIRED")
+        if session.revoked_at is not None:
+            raise_revoked_session(session.revoke_reason)
+        if session.absolute_expires_at <= timeutils.now():
+            raise AuthFailed("SESSION_EXPIRED")
+    return stored
+
+
+def create_customer(phone: str, *, name: str, language: str) -> Customer:
+    """A new customer row (registration, social completion). ``IntegrityError`` when the phone was taken
+    meanwhile (inside its own savepoint, so the caller's transaction stays usable)."""
+    with transaction.atomic():
+        return Customer.objects.create(phone=phone, name=name, language=language)
+
+
+def set_customer_language(customer_id: int, language: str) -> None:
+    Customer.objects.filter(pk=customer_id).update(language=language, updated_at=timeutils.now())
+
+
+def stamp_consent(customer_id: int, *, terms_version: str, ip: str) -> None:
+    """Accept the terms (customer contract §2.1.3, §2.2.4): version, instant and client IP."""
+    instant = timeutils.now()
+    Customer.objects.filter(pk=customer_id).update(
+        terms_version=terms_version, consent_at=instant, consent_ip=ip or None, updated_at=instant
+    )
+
+
+_KEEP: Any = object()
+
+
+def update_customer_profile(
+    customer_id: int, *, fid: str, name: str = _KEEP, language: str = _KEEP, push_enabled: bool = _KEEP
+) -> None:
+    """``PATCH me/``: name and language on the customer, ``push_enabled`` on the current device (field
+    ``push_enabled`` ``push_token_missing`` without a stored FCM token)."""
+    if push_enabled is not _KEEP:
+        device = Device.objects.select_for_update().get(customer_id=customer_id, fid=fid)
+        if push_enabled and not device.fcm_token:
+            raise ValidationError(
+                {"push_enabled": [field_error("push_token_missing", message_key="field.push_token_missing")]}
+            )
+        device.push_enabled = bool(push_enabled)
+        device.save(update_fields=["push_enabled", "updated_at"])
+    fields = {key: value for key, value in (("name", name), ("language", language)) if value is not _KEEP}
+    if fields:
+        Customer.objects.filter(pk=customer_id).update(**fields, updated_at=timeutils.now())
+
+
+def clear_device_keys(customer_id: int, *, except_fid: str | None = None) -> int:
+    """Forget every device key of the customer (but ``except_fid``'s): those installs need the SMS code on
+    their next password sign-in (reset, dormant reset; customer contract §2.1.5, §2.2.3)."""
+    queryset = Device.objects.filter(customer_id=customer_id)
+    if except_fid is not None:
+        queryset = queryset.exclude(fid=except_fid)
+    return queryset.exclude(key_hash="").update(key_hash="", updated_at=timeutils.now())
+
+
+def scrub_profile_for_dormant(customer_id: int, *, language: str) -> None:
+    """The profile part of the dormant reset (customer contract §2.2.3, M2-A16): name, image (file deleted on
+    commit), address text and addresses gone, language = the request language, consent cleared."""
+    stored = Customer.objects.get(pk=customer_id)
+    _delete_image_on_commit(stored)
+    Customer.objects.filter(pk=customer_id).update(
+        name="",
+        image="",
+        address_text="",
+        language=language,
+        terms_version="",
+        consent_at=None,
+        consent_ip=None,
+        updated_at=timeutils.now(),
+    )
+    Address.objects.filter(customer_id=customer_id).delete()
+
+
+def scrub_deleted_for_reactivation(customer_id: int) -> None:
+    """Backstop before a deleted row is reactivated (registration, social completion): whatever a write that
+    raced ``DELETE me/`` left on it — password, image, addresses, social identities (Apple revoked) — never
+    reaches the next holder of the number (customer contract §6.17)."""
+    stored = Customer.objects.get(pk=customer_id)
+    if stored.status != enums.CustomerStatus.DELETED:
+        return
+    _delete_image_on_commit(stored)
+    Customer.objects.filter(pk=customer_id).update(
+        password="", image="", address_text="", updated_at=timeutils.now()
+    )
+    Address.objects.filter(customer_id=customer_id).delete()
+    for identity in list(CustomerSocialIdentity.objects.filter(customer_id=customer_id)):
+        unlink_customer_identity(identity)
+
+
+def link_customer_identity(
+    customer_id: int,
+    *,
+    provider: str,
+    subject: str,
+    email: str,
+    sealed_token: str = "",
+    client_id: str = "",
+    signed_in: bool = False,
+) -> CustomerSocialIdentity:
+    """Link a social identity (customer contract §2.1.9, §2.2.8). ``IntegrityError`` (inside its own
+    savepoint) when the subject or the customer's provider slot was taken meanwhile."""
+    with transaction.atomic():
+        return CustomerSocialIdentity.objects.create(
+            customer_id=customer_id,
+            provider=provider,
+            subject=subject,
+            email_at_link=email[:254] if "@" in email else "",
+            last_login_at=timeutils.now() if signed_in else None,
+            provider_refresh_token=sealed_token,
+            provider_client_id=client_id,
+        )
+
+
+def unlink_customer_identity(identity: CustomerSocialIdentity) -> None:
+    """Delete one identity; an Apple identity holding a refresh token gets its ``apple.revoke``."""
+    enqueue_apple_revoke(identity)
+    identity.delete()
+
+
+def touch_identity_sign_in(
+    identity_id: int, customer_id: int, *, sealed_token: str = "", client_id: str = ""
+) -> bool:
+    """A linked identity signs in: lock it (after the customer-level lock), stamp ``last_login_at`` and store
+    a newly exchanged Apple refresh token. ``False`` when the identity is gone (unlinked by a reset, the
+    dormant rule or the customer meanwhile)."""
+    identity = (
+        CustomerSocialIdentity.objects.select_for_update()
+        .filter(pk=identity_id, customer_id=customer_id)
+        .first()
+    )
+    if identity is None:
+        return False
+    fields: dict[str, Any] = {"last_login_at": timeutils.now()}
+    if sealed_token and not identity.provider_refresh_token:
+        fields.update(provider_refresh_token=sealed_token, provider_client_id=client_id)
+    CustomerSocialIdentity.objects.filter(pk=identity_id).update(**fields)
+    return True
+
+
+def enqueue_apple_token_revoke(sealed_token: str, *, client_id: str) -> None:
+    """Revoke an Apple refresh token the code exchange produced for a flow that was then refused (nothing
+    linked): ``apple.revoke`` without an identity, deduplicated on the sealed token."""
+    if not sealed_token:
+        return
+    outbox.enqueue(
+        topics.APPLE_REVOKE,
+        {"identity_id": None, "client_id": client_id, "sealed_token": sealed_token},
+        dedupe_key=f"{topics.APPLE_REVOKE}:token:{hash_secret(sealed_token)[:32]}",
+    )
+
+
+def update_customer_address(address_id: int, customer_id: int, **changes: Any) -> Address:
+    """``PATCH me/addresses/{id}/`` on the row re-read under the customer-level lock (404 when another
+    request removed it meanwhile)."""
+    return update_address(_locked_address(address_id, customer_id), **changes)
+
+
+def set_customer_default_address(address_id: int, customer_id: int) -> Address:
+    return set_default_address(_locked_address(address_id, customer_id))
+
+
+def remove_customer_address(address_id: int, customer_id: int) -> None:
+    remove_address(_locked_address(address_id, customer_id))
+
+
+def _locked_address(address_id: int, customer_id: int) -> Address:
+    address = Address.objects.select_for_update().filter(pk=address_id, customer_id=customer_id).first()
+    if address is None:
+        raise NotFound
+    return address

@@ -17,7 +17,7 @@ from django.db.models import Q
 
 from glowderma.accounts import services, topics
 from glowderma.accounts.models import AuthSession, Device, SmsCode
-from glowderma.core import enums, i18n, outbox, secretbox, timeutils
+from glowderma.core import enums, i18n, integration_modes, outbox, secretbox, timeutils
 from glowderma.core.models import OutboxMessage
 from glowderma.integrations import services as integration_services
 from glowderma.integrations.eskiz.ports import EskizRejected, EskizUnavailable, SmsMessage
@@ -112,26 +112,26 @@ def sms_text(code: str, lang: str, platform: str) -> str:
 def send_sms(message: OutboxMessage) -> None:
     """Send one OTP (customer contract §2.14.1).
 
-    ``sent_at`` is claimed in its own transaction **before** the provider call, so a redelivery never sends
-    twice. The plain code exists only as the sealed Redis payload: missing (expired or flushed) → nothing is
-    sent (INFO; the user resends after 60 s). A connect failure (nothing left the process) un-claims and
-    re-raises (outbox retry, the payload is kept); a timeout or 5xx after sending keeps the claim and is never
-    resent; a 4xx is logged with ``IntegrationState(eskiz)`` and not retried. After a definitive outcome the
-    Redis key is deleted.
+    The sealed Redis payload and the ``SmsCode`` row are read **before** ``sent_at`` is claimed, so a Redis
+    or database error on the way fails the delivery while nothing is claimed (the outbox retries and the
+    retry still sends). ``sent_at`` is then claimed in its own transaction before the provider call, so a
+    redelivery never sends twice. The plain code exists only as the sealed Redis payload: missing (expired
+    or flushed) → nothing is sent (INFO; the user resends after 60 s). A connect failure (nothing left the
+    process) un-claims and re-raises (outbox retry, the payload is kept); a timeout or 5xx after sending
+    keeps the claim and is never resent; a 4xx is logged with ``IntegrationState(eskiz)`` and not retried.
+    After a definitive outcome the Redis key is deleted.
     """
     payload = _payload(message)
     sms_code_id = int(payload.get("sms_code_id") or 0)
-    with transaction.atomic():
-        claimed = SmsCode.objects.filter(pk=sms_code_id, sent_at__isnull=True).update(sent_at=timeutils.now())
-    if not claimed:
-        logger.info("sms.send already claimed sms_code_id=%s", sms_code_id)
-        return
     key = services.otp_payload_key(sms_code_id)
     sealed = cache.get(key)
     if not isinstance(sealed, str):
         logger.info("sms.send payload missing sms_code_id=%s", sms_code_id)
         return
-    row = SmsCode.objects.get(pk=sms_code_id)
+    row = SmsCode.objects.filter(pk=sms_code_id).first()
+    if row is None:
+        logger.info("sms.send code row missing sms_code_id=%s", sms_code_id)
+        return
     try:
         code = secretbox.open_(sealed, aad=str(sms_code_id).encode()).decode("ascii")
     except secretbox.SecretboxError:
@@ -139,6 +139,11 @@ def send_sms(message: OutboxMessage) -> None:
         cache.delete(key)
         return
     text = sms_text(code, str(payload.get("lang") or "uz"), str(payload.get("platform") or ""))
+    with transaction.atomic():
+        claimed = SmsCode.objects.filter(pk=sms_code_id, sent_at__isnull=True).update(sent_at=timeutils.now())
+    if not claimed:
+        logger.info("sms.send already claimed sms_code_id=%s", sms_code_id)
+        return
     try:
         message_id = get_eskiz_port().send(SmsMessage(phone=row.phone, text=text, sms_code_id=sms_code_id))
     except EskizUnavailable as exc:
@@ -151,32 +156,51 @@ def send_sms(message: OutboxMessage) -> None:
         integration_services.record_failure("eskiz", f"rejected: {exc}")
     else:
         SmsCode.objects.filter(pk=sms_code_id).update(provider_message_id=message_id[:64])
-    cache.delete(key)
+    try:
+        cache.delete(key)
+    except Exception:  # the SMS went out; the sealed payload expires with the code anyway
+        logger.warning("sms.send payload not deleted sms_code_id=%s", sms_code_id, exc_info=True)
+
+
+class AppleRevokeNotSent(RuntimeError):
+    """The revocation was not sent: OAuth runs its fake adapter under the production settings."""
 
 
 @outbox.register(topics.APPLE_REVOKE)
 def revoke_apple_token(message: OutboxMessage) -> None:
     """Revoke a sealed Apple refresh token at ``https://appleid.apple.com/auth/revoke`` with the ``client_id``
-    it was issued to (customer contract §2.1.8). Transport errors propagate (outbox retry); an Apple 4xx (the
-    token is already invalid) is final with a WARNING. After a final outcome the sealed token is blanked
-    in the
-    stored payload."""
+    it was issued to (customer contract §2.1.8). Transport errors and Apple misconfiguration answers
+    (``unavailable``) propagate (outbox retry, then ``apple.revoke_dead``); an Apple 400 for a token that is
+    already invalid is final with a WARNING. After a final outcome the sealed token is blanked in the stored
+    payload.
+
+    While OAuth is fake under the production settings (C§6.14) the fake is never called — it would report a
+    revocation that did not happen: ERROR ``apple.revoke_not_sent`` and the handler raises, so the sealed
+    token stays in the payload, the outbox retries (OAuth may be live again by then) and a message that
+    never gets through ends ``dead`` with the ``apple.revoke_dead`` alert (staff revoke by hand).
+    """
     payload = _payload(message)
     sealed = str(payload.get("sealed_token") or "")
     if not sealed:
         return
+    identity_id = payload.get("identity_id")
+    if integration_modes.fake_in_production("oauth"):
+        logger.error(
+            "apple.revoke_not_sent identity_id=%s (OAuth is fake under the production settings)", identity_id
+        )
+        raise AppleRevokeNotSent(f"apple.revoke not sent for identity {identity_id}")
     client_id = str(payload.get("client_id") or "")
     try:
         refresh_token = services.open_apple_refresh(sealed, client_id=client_id)
     except secretbox.SecretboxError:
-        logger.error("apple.revoke token does not open identity_id=%s", payload.get("identity_id"))
+        logger.error("apple.revoke token does not open identity_id=%s", identity_id)
     else:
         try:
             get_apple_service(require_available=False).revoke(refresh_token, client_id=client_id)
         except OAuthExchangeError as exc:
             if exc.kind == "unavailable":
                 raise
-            logger.warning("apple.revoke refused identity_id=%s (final)", payload.get("identity_id"))
+            logger.warning("apple.revoke refused identity_id=%s (final)", identity_id)
     OutboxMessage.objects.filter(pk=message.pk).update(
         payload={**payload, "sealed_token": ""}, updated_at=timeutils.now()
     )
