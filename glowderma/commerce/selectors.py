@@ -51,6 +51,12 @@ def available_stock(product_ids: Iterable[int]) -> dict[int, int]:
     counting once a read after the push reflects the sale, and for a cancelled order whose sale never reached
     Billz (the unit never left Billz's stock). ``synced_at`` null (never read from Billz) → converted units
     are ignored. A product without a stock row has 0 available.
+
+    Staff entering a dead sale in Billz by hand record it with ``manage.py billz_mark_recorded`` (it sets
+    ``billz_pushed_at``), so it stops counting after the next read too (review NEW-2). A reservation whose
+    "stopped counting" is final is stamped ``billz_settled_at`` (``services.settle_billz_reservations``): the
+    read looks only at the unsettled ones (partial index ``reservation_unsettled_prod_idx``), so its cost does
+    not grow with the shop's sales history.
     """
     ids = list(product_ids)
     result = dict.fromkeys(ids, 0)
@@ -74,7 +80,10 @@ def available_stock(product_ids: Iterable[int]) -> dict[int, int]:
     )
     converted = (
         StockReservation.objects.filter(
-            unseen_by_billz, product_id=OuterRef("product_id"), state=StockReservation.State.CONVERTED
+            unseen_by_billz,
+            product_id=OuterRef("product_id"),
+            state=StockReservation.State.CONVERTED,
+            billz_settled_at__isnull=True,
         )
         .order_by()
         .values("product_id")

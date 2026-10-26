@@ -356,6 +356,10 @@ class StockReservation(TimeStampedModel):
     converted_at = models.DateTimeField(null=True)
     released_at = models.DateTimeField(null=True)
     release_reason = models.CharField(max_length=16, blank=True, choices=ReleaseReason.choices)
+    # A converted reservation stops counting against availability for good once Billz has (or staff recorded)
+    # the sale and the stock was read after it (``services.settle_billz_reservations``, NEW-2): the hot
+    # availability read touches only the unsettled ones.
+    billz_settled_at = models.DateTimeField(null=True)
 
     class Meta:
         ordering = ["order_id", "id"]
@@ -394,6 +398,11 @@ class StockReservation(TimeStampedModel):
             ),
             models.Index(
                 fields=["expires_at"], condition=Q(state="active"), name="reservation_active_expires_idx"
+            ),
+            models.Index(
+                fields=["product"],
+                condition=Q(state="converted", billz_settled_at__isnull=True),
+                name="reservation_unsettled_prod_idx",
             ),
         ]
 

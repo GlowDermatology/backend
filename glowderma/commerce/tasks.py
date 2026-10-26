@@ -48,9 +48,10 @@ from django.conf import settings
 from django.core.cache import cache
 from django.db import connection, transaction
 
+from glowderma.catalog import topics as catalog_topics
 from glowderma.commerce import selectors, services, topics
 from glowderma.commerce.billz_sales import PurchaseJournal, get_sale_port, sale_request
-from glowderma.commerce.models import Order
+from glowderma.commerce.models import Order, StockReservation
 from glowderma.core import enums, integration_modes, outbox, timeutils
 from glowderma.core.api.exceptions import InvalidTransition
 from glowderma.core.models import OutboxMessage
@@ -267,7 +268,9 @@ def push_sale(payload: dict[str, Any]) -> None:
             f"Purchase {purchase_id} was pushed as Billz order {info.billz_order_uuid}, not {order_uuid}"
         )
     if integration_modes.fake_in_production("billz"):
-        # §6.14: a fake records no Billz sale; billz_pushed_at stays null so the sale is entered by hand
+        # §6.14: a fake records no Billz sale; billz_pushed_at stays null so the sale is entered by hand — and
+        # its units are settled now, so they never start counting at the first live stock read (NEW-2)
+        services.settle_order_reservations(order_id)
         logger.warning("billz.sale_not_pushed order_id=%s purchase_id=%s", order_id, purchase_id)
         return
     order = Order.objects.select_related("customer").get(pk=order_id)
@@ -341,11 +344,28 @@ def push_sale(payload: dict[str, Any]) -> None:
             services.record_event(
                 locked, _E.BILLZ_SALE_RECORDED, {"billz_order_id": receipt.billz_order_id}, at=now
             )
+    # NEW-2: settle what Billz's stock already reflects for these products (this sale settles after the next
+    # read, at the next catalog.stock_synced)
+    services.settle_billz_reservations(_order_product_ids(order_id))
+
+
+def _order_product_ids(order_id: int) -> list[int]:
+    return list(
+        StockReservation.objects.filter(order_id=order_id).values_list("product_id", flat=True).distinct()
+    )
 
 
 @outbox.register(topics.BILLZ_PUSH_SALE)
 def handle_billz_push_sale(message: OutboxMessage) -> None:
     push_sale(_payload(message))
+
+
+@outbox.register(catalog_topics.STOCK_SYNCED)
+def handle_stock_synced(message: OutboxMessage) -> None:
+    """A Billz import read the stock again: settle the sold units it now reflects (NEW-2; idempotent)."""
+    settled = services.settle_billz_reservations()
+    if settled:
+        logger.info("billz.reservations_settled count=%s", settled)
 
 
 def on_billz_push_dead(message: OutboxMessage) -> None:
@@ -586,6 +606,7 @@ __all__ = [
     "create_shipment",
     "expire_reservations",
     "handle_billz_push_sale",
+    "handle_stock_synced",
     "handle_bts_create_shipment",
     "handle_refund_submit",
     "on_billz_push_dead",

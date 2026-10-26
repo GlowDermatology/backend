@@ -7,8 +7,9 @@ inline, so an API test sees the finished job after ``django_capture_on_commit_ca
 
 A run applies every row the port yields, then — for a ``full`` run, whose listing the port guarantees
 complete — hides the active products Billz no longer lists (``services.hide_missing_from_billz``; result
-key ``hidden``), and only then lets the port advance its cursor (``sync_succeeded``) and records the sync.
-A failure anywhere leaves the cursor and ``billz.last_sync_at`` where they were.
+key ``hidden``), and only then lets the port advance its cursor (``sync_succeeded``) and records the sync;
+a finished run announces ``catalog.stock_synced`` on the outbox (commerce settles the sold units the stock
+now reflects). A failure anywhere leaves the cursor and ``billz.last_sync_at`` where they were.
 
 Beat (``config/celery.py``): ``catalog.billz_sync_delta`` hourly and ``catalog.billz_sync_full`` daily start
 the same ``billz_import`` job through ``start_job`` (``created_by`` = system), so they single-flight with an
@@ -25,7 +26,7 @@ from celery import shared_task  # type: ignore[import-untyped]
 from celery.exceptions import SoftTimeLimitExceeded  # type: ignore[import-untyped]
 from django.conf import settings
 
-from glowderma.catalog import billz, services
+from glowderma.catalog import billz, services, topics
 from glowderma.core import audit, enums, integration_modes, outbox, timeutils
 from glowderma.core.api.exceptions import MESSAGES
 from glowderma.core.models import OutboxMessage
@@ -119,6 +120,8 @@ def run_billz_import(job_id: int) -> None:
         port.sync_succeeded(port_mode)
         job_services.record_sync_success(IntegrationState.Provider.BILLZ, synced_at=timeutils.now())
         finished = job_services.finish_job(job, counters)
+        # the stock was read again: the module above settles the sold units it now reflects (NEW-2)
+        outbox.enqueue(topics.STOCK_SYNCED, {"job_id": job.pk}, dedupe_key=f"{topics.STOCK_SYNCED}:{job.pk}")
     except BillzError as exc:
         logger.warning("Billz import job %s failed: %s", job_id, exc)
         # the message is the generic catalog one; the code tells "Billz down" from "listing incomplete" or a
