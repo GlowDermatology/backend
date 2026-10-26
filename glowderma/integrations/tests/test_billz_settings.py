@@ -44,6 +44,16 @@ def test_fake_billz_in_production_needs_no_billz_variable(
     assert production.BILLZ_MODE == "fake" and production.BILLZ_SECRET_KEY == ""
 
 
+def test_integrations_mode_live_makes_billz_live_and_demands_its_values(
+    production_env: None, load_fresh_production: Callable[[], ModuleType], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("INTEGRATIONS_MODE", "live")
+    monkeypatch.setenv("OAUTH_MODE", "fake")
+    monkeypatch.delenv("BILLZ_MODE", raising=False)
+    with pytest.raises(ImproperlyConfigured, match="BILLZ_SECRET_KEY is required"):
+        load_fresh_production()
+
+
 def test_live_billz_in_production_starts_with_every_value(
     production_env: None, load_fresh_production: Callable[[], ModuleType], monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -265,27 +265,31 @@ def test_rate_limiter_spaces_requests_across_two_clients() -> None:
 
 
 def test_rate_limiter_holds_across_threads_with_the_real_clock() -> None:
+    """Three threads, each with its own limiter on the shared cache: every slot is won once, slots are at
+    least one interval apart, and no thread starts before its slot (a late wake-up only delays a request)."""
     limiter_rate = 20.0
-    server = BillzServer()
-    starts: list[float] = []
+    slots: list[tuple[float, float]] = []
     lock = threading.Lock()
 
     def worker() -> None:
         limiter = RateLimiter(limiter_rate)
         for _ in range(4):
-            limiter.acquire()
+            start = limiter.acquire()
             with lock:
-                starts.append(time.time())
+                slots.append((start, time.time()))
 
     threads = [threading.Thread(target=worker) for _ in range(3)]
     for thread in threads:
         thread.start()
     for thread in threads:
         thread.join(10)
-    starts.sort()
+    starts = sorted(start for start, _ in slots)
+    assert len(starts) == 12
     gaps = [later - earlier for earlier, later in zip(starts, starts[1:], strict=False)]
-    assert len(starts) == 12 and not server.requests
-    assert min(gaps) >= 0.8 / limiter_rate  # one slot apart (minus scheduler wake-up jitter)
+    assert (
+        min(gaps) >= 1 / limiter_rate - 1e-6
+    )  # never two requests in one slot (float epsilon at epoch scale)
+    assert all(woke >= start - 0.005 for start, woke in slots)  # (5 ms of clock granularity)
 
 
 def test_rate_limiter_refuses_to_queue_beyond_its_wait() -> None:

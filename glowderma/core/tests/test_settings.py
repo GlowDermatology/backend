@@ -291,6 +291,7 @@ def test_integrations_mode_validated_at_startup(
 ) -> None:
     monkeypatch.setenv("INTEGRATIONS_MODE", value)
     monkeypatch.setenv("OAUTH_MODE", "fake")  # live OAuth would also demand provider credentials
+    monkeypatch.setenv("BILLZ_MODE", "fake")  # live Billz would demand its key and ids (M3)
     if ok:
         assert load_fresh_production().INTEGRATIONS_MODE == value
     else:
@@ -489,6 +490,7 @@ def test_live_oauth_follows_integrations_mode_and_rejects_placeholders(
 ) -> None:
     monkeypatch.delenv("OAUTH_MODE", raising=False)
     monkeypatch.setenv("INTEGRATIONS_MODE", "live")
+    monkeypatch.setenv("BILLZ_MODE", "fake")  # live Billz would demand its key and ids (M3)
     for name, value in LIVE_OAUTH_ENV.items():
         monkeypatch.setenv(name, value)
     production = load_fresh_production()
