@@ -50,7 +50,7 @@ from django.db import connection, transaction
 from glowderma.commerce import selectors, services, topics
 from glowderma.commerce.billz_sales import PurchaseJournal, get_sale_port, sale_request
 from glowderma.commerce.models import Order
-from glowderma.core import enums, integration_modes, outbox, timeutils
+from glowderma.core import alerts, enums, integration_modes, outbox, timeutils
 from glowderma.core.api.exceptions import InvalidTransition
 from glowderma.core.models import OutboxMessage
 from glowderma.delivery import selectors as delivery_selectors
@@ -277,6 +277,7 @@ def push_sale(payload: dict[str, Any]) -> None:
                 order_id,
                 info.billz_sale_id,
             )
+            _alert_cancelled_sale(order_id, purchase_id, "push_stopped")
         else:
             logger.warning("billz.sale_skipped_cancelled order_id=%s purchase_id=%s", order_id, purchase_id)
         return
@@ -294,6 +295,7 @@ def push_sale(payload: dict[str, Any]) -> None:
             order_id,
             draft.billz_sale_id if draft is not None else "",
         )
+        _alert_cancelled_sale(order_id, purchase_id, "cancelled_during_push")
         return
     except BillzShiftClosed as exc:
         # decision D2: wait for the next shift without spending the attempts, then give up "shift closed"
@@ -331,15 +333,30 @@ def push_sale(payload: dict[str, Any]) -> None:
                 order_id,
                 receipt.billz_order_id,
             )
+            transaction.on_commit(lambda: _alert_cancelled_sale(order_id, purchase_id, "paid_after_cancel"))
         elif not locked.events.filter(type=_E.BILLZ_SALE_RECORDED).exists():
             services.record_event(
                 locked, _E.BILLZ_SALE_RECORDED, {"billz_order_id": receipt.billz_order_id}, at=now
             )
 
 
+def _alert_cancelled_sale(order_id: int, purchase_id: int, case: str) -> None:
+    """The ``billz.sale_of_cancelled_order`` alert (ids only; the ERROR line names the Billz sale)."""
+    alerts.alert(
+        "billz.sale_of_cancelled_order", {"order_id": order_id, "purchase_id": purchase_id, "case": case}
+    )
+
+
 @outbox.register(topics.BILLZ_PUSH_SALE)
 def handle_billz_push_sale(message: OutboxMessage) -> None:
     push_sale(_payload(message))
+
+
+# A deferred sale (closed shift, decision D2) gives up after BILLZ_SHIFT_RETRY_MAX_HOURS: past that the
+# nightly consistency report (K6) counts a message still deferred as stuck.
+outbox.register_deferral_window(
+    topics.BILLZ_PUSH_SALE, lambda: timedelta(hours=int(settings.BILLZ_SHIFT_RETRY_MAX_HOURS))
+)
 
 
 def on_billz_push_dead(message: OutboxMessage) -> None:
@@ -357,6 +374,10 @@ def on_billz_push_dead(message: OutboxMessage) -> None:
         purchase_id,
         (info.billz_sale_id if info is not None else "") or "-",  # the draft staff complete or delete
         message.last_error,
+    )
+    alerts.alert(
+        "billz.sale_dead",
+        {"order_id": payload.get("order_id"), "purchase_id": purchase_id, "message_id": message.pk},
     )
 
 

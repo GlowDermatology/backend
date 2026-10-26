@@ -44,7 +44,7 @@ from glowderma.commerce.models import (
     OrderItem,
     StockReservation,
 )
-from glowderma.core import audit, enums, integration_modes, outbox, timeutils
+from glowderma.core import alerts, audit, enums, integration_modes, outbox, timeutils
 from glowderma.core.api.exceptions import (
     AlreadyPaid,
     AuthFailed,
@@ -853,15 +853,20 @@ def _announce_billz_refund(order_id: int, purchase_id: int) -> None:
     if info is None or not info.billz_sale_id:
         return
     sale_id, pushed = info.billz_sale_id, info.billz_pushed_at is not None
-    transaction.on_commit(
-        lambda: logger.error(
+
+    def announce() -> None:
+        logger.error(
             "billz.refund_by_hand order_id=%s billz_order_id=%s pushed=%s: the order was cancelled; "
             "refund the Billz sale (or delete its draft) in Billz by hand",
             order_id,
             sale_id,
             pushed,
         )
-    )
+        alerts.alert(
+            "billz.refund_by_hand", {"order_id": order_id, "purchase_id": purchase_id, "pushed": pushed}
+        )
+
+    transaction.on_commit(announce)
 
 
 def cancel_order(
