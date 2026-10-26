@@ -6,6 +6,7 @@ from django.test import override_settings
 
 from glowderma.integrations.fcm import registry
 from glowderma.integrations.fcm.fake import FakeFcm
+from glowderma.integrations.fcm.live import LiveFcm
 from glowderma.integrations.fcm.ports import UNREGISTERED, FcmUnavailable, PushMessage
 
 
@@ -34,8 +35,14 @@ def test_fake_down_token_fails_the_whole_batch() -> None:
     assert fcm.sent == []
 
 
-def test_registry_returns_the_shared_fake_and_refuses_live() -> None:
+def test_registry_returns_the_shared_fake_or_the_live_adapter() -> None:
     assert registry.get_fcm_port() is registry.get_fcm_port()
     assert isinstance(registry.get_fcm_port(), FakeFcm)
-    with override_settings(FCM_MODE="live"), pytest.raises(ImproperlyConfigured, match="FCM_MODE"):
+    with override_settings(
+        FCM_MODE="live", FCM_PROJECT_ID="glow-derma", FCM_CREDENTIALS_FILE="/run/fcm.json"
+    ):
+        live = registry.get_fcm_port()
+    assert isinstance(live, LiveFcm)
+    assert (live.project_id, live.credentials_file) == ("glow-derma", "/run/fcm.json")
+    with override_settings(FCM_MODE="sandbox"), pytest.raises(ImproperlyConfigured, match="FCM_MODE"):
         registry.get_fcm_port()

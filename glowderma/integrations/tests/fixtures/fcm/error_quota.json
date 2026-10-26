@@ -1,0 +1,13 @@
+{
+  "error": {
+    "code": 429,
+    "message": "Quota exceeded for quota metric 'Send requests'",
+    "status": "RESOURCE_EXHAUSTED",
+    "details": [
+      {
+        "@type": "type.googleapis.com/google.firebase.fcm.v1.FcmError",
+        "errorCode": "QUOTA_EXCEEDED"
+      }
+    ]
+  }
+}

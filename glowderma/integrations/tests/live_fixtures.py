@@ -1,9 +1,10 @@
 """Recorded provider answers for the live-adapter tests, served through ``httpx.MockTransport`` — no test ever
 reaches the network.
 
-The JSON files under ``fixtures/<provider>/`` are the answers the providers' public documentation shows (see
-the ``_source`` keys and ``docs/integrations/<provider>.md``), adapted to our ids; none was recorded from a
-live sandbox (no credentials exist yet).
+The JSON files under ``fixtures/<provider>/`` are the answers the providers' public documentation shows
+(``docs/integrations/<provider>.md`` names the pages), adapted to our ids; a ``_source`` key marks the ones
+whose shape or values the documentation does not show. None was recorded from a live sandbox (no credentials
+exist yet).
 """
 
 from __future__ import annotations
