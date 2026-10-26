@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Version | 1.0.2 (2026-10-26), M1 admin vertical; M2 cross-references from `docs/api/customer-api-v1.md` in §2.1 (staff OAuth under fake OAuth in production), §2.2 (manual Click refunds on cancel), §2.3 (Billz import and product create refused while Billz is fake in production), §2.10 (revenue, `attention.bts_polling_failing`), §2.11 (`integrations.providers`), §2.14 (`billz_fake_mode`), §2.15 (`providers`), §3.1 (`refresh_reused`), §3.2, §4 (`refund_requested.manual_reason`), §5.1/§5.7 (refund lines by provider, BTS polling attention), §6 (refund pending display, live-to-fake switch) and §7 items 3 and 18 (refund state line, refund resolve with a fresh Click status check) |
+| Version | 1.0.2 (2026-10-26), M1 admin vertical; M2 cross-references from `docs/api/customer-api-v1.md` in §2.1 (staff OAuth under fake OAuth in production), §2.2 (manual Click refunds on cancel), §2.3 (Billz import and product create refused while Billz is fake in production), §2.10 (revenue, `attention.bts_polling_failing`), §2.11 (`integrations.providers`), §2.14 (`billz_fake_mode`), §2.15 (`providers`), §3.1 (`refresh_reused`), §3.2, §4 (`refund_requested.manual_reason`), §5.1/§5.7 (refund lines by provider, BTS polling attention), §6 (refund pending display, live-to-fake switch) and §7 items 3 and 18 (refund state line, refund resolve with a fresh Click status check). Gap closure, staff package (2026-10-27): §1.6, §1.7 (required keys of the staff writes, stored credentials), §2.0, §2.1 (`Me.is_manager`), §2.6 (`devices`, `device.platform`, `online_orders.all_count`), §2.16 (staff management), §3.2 (`staff.*`), §5.3, §5.8, §6 and §7 items 19–20 |
 | Implemented by | Django 6.1 / DRF 3.18 backend (Codex) and the Next.js admin data layer (`frontend/src/data/api/*`, Claude) |
 | Source of truth | `docs/specs/2026-10-24-backend-foundation-design.md`. Where this file and the spec disagree, the spec wins and this file is fixed. |
 | Enforced by | drf-spectacular schema (`openapi/schema.yaml`, `--validate --fail-on-warn`), backend contract tests, frontend mapper tests (order №10248, Malika's ledger) |
@@ -104,13 +104,13 @@ Collections embedded in a resource (customer ledger and purchases, order items, 
 | 406 | `not_acceptable` | `Accept` header cannot be satisfied |
 | 400 | `idempotency_key_required` | Missing or non-UUID `Idempotency-Key` on an endpoint that requires it |
 | 401 | `not_authenticated` · `SESSION_EXPIRED` · `SESSION_REPLACED` · `invalid_credentials` | §1.2 |
-| 403 | `permission_denied` | Outside the allowed networks (a token with an audience other than `staff` fails decoding → 401 `not_authenticated`) |
+| 403 | `permission_denied` | Outside the allowed networks (a token with an audience other than `staff` fails decoding → 401 `not_authenticated`); a staff management call (§2.16) by a staff member who is not a manager |
 | 404 | `not_found` | Unknown id, slug or route |
 | 405 | `method_not_allowed` | |
 | 409 | `invalid_transition` | A state machine refuses (order transition, appointment action, retry-shipment precondition) |
 | 409 | `click_not_reversed` | M3: `payments/{id}/refunds/{refund_id}/resolve/` of a failed Click refund without `manual_payout` while Click still shows the payment paid (§7 item 18); the UI then offers "Qo‘lda to‘landi" |
 | 409 | `not_cancellable` | Order cancel refused (§2.2) |
-| 409 | `conflict` | Other state conflicts (category has products, BTS message in flight, last image of an active product, …) |
+| 409 | `conflict` | Other state conflicts (category has products, BTS message in flight, last image of an active product, a manager acting on their own account or removing the last active manager (§2.16), …) |
 | 409 | `request_in_progress` | The same `Idempotency-Key` is still executing; `Retry-After: 1` |
 | 413 | `payload_too_large` | Body > 6 MiB |
 | 415 | `unsupported_media_type` | Wrong `Content-Type` |
@@ -146,9 +146,11 @@ Default top-level messages: `not_authenticated` "Avtorizatsiya talab qilinadi." 
   - `customers/{id}/cashback-adjustments/`;
   - `cashback/policy-versions/`;
   - `POST notifications/`;
-  - `appointments/{id}/{confirm|reject|attend}/`.
+  - `appointments/{id}/{confirm|reject|attend}/`;
+  - `POST staff/`, `staff/{id}/deactivate/`, `staff/{id}/reset-password/` (§2.16).
 - **Optional:** honoured when sent on any other *authenticated* POST, PUT, PATCH or DELETE. `auth/*` endpoints ignore the header: their responses carry credentials or end sessions, so they are never stored.
 - **Scope:** (audience `staff`, actor staff id, method, resolved path including ids, key). The same key on two different orders is two separate records.
+- **Stored credentials:** a response field that carries a credential — `temporary_password` of `POST staff/` and `staff/{id}/reset-password/` (§2.16) — is stored **sealed** (AES-256-GCM under `SECRETBOX_KEY`, bound to the key's scope and the field) and opened for the replay, so the replay shows the same password and the database never holds it in clear. A replay after a `SECRETBOX_KEY` rotation within the key's lifetime carries `null` there (reset the password again).
 - **Fingerprint:** SHA-256 over the canonical body. JSON is parsed, keys sorted and serialised compactly. Multipart uses the sorted non-file fields plus the SHA-256 of each file.
 - **Storage:** written in the same transaction as the effect. Only 2xx responses are stored; an error rolls back and stores nothing, so a retry runs again. Kept for at least 24 h; after that a key counts as new.
 
@@ -250,7 +252,10 @@ The FE creates one key per form/dialog instance (`crypto.randomUUID()`), reuses 
 | GET / PATCH | `settings/` | | 200 |
 | GET | `payments/`, `audit-log/` | P E | 200 |
 | POST | `payments/{id}/refunds/{refund_id}/retry/`, `…/resolve/` (§2.12) | I optional | 200 |
-| GET | `staff/` (§2.16) | P | 200 |
+| GET / POST | `staff/` (§2.16; POST manager only) | P / I | 200 / 201 |
+| GET / PATCH | `staff/{id}/` (manager only) | – / I optional | 200 |
+| POST | `staff/{id}/deactivate/`, `staff/{id}/reset-password/` (manager only) | I | 200 |
+| POST | `staff/{id}/reactivate/` (manager only) | I optional | 200 |
 | GET | `/api/v1/health/` | no auth | 200 / 503 |
 
 Shared shapes: `Actor` = `{"id": int, "display_name": str}`, where `display_name` is the staff full name, else the email. `null` actor means system. `CustomerRef` = `{"id": int, "name": str, "phone": str}`; `name` is `""` once the customer is deleted (scrubbed). Both are single OpenAPI components (`Actor`, `CustomerRef`) used by every module (orders, payments, appointments).
@@ -315,10 +320,12 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 **`GET auth/me/`** → `Me`:
 ```jsonc
 {"id": 1, "email": "admin@glowderma.uz", "display_name": "Administrator", "is_superuser": false,
+ "is_manager": true,                                   // gap closure: may manage staff (§2.16)
  "linked_providers": ["google"],                       // social identities linked to this staff account
  "session_expires_at": "2026-10-25T00:00:00+05:00",
  "auth_method": "password"}                            // M3: how the current session's sign-in was proven
 ```
+- `is_manager` (gap closure, §2.16) = the caller may manage staff; the UI shows the staff screen ("Xodimlar") only then. It is read from the database on every request, so a removed role applies at once.
 - `auth_method` (M3) = `AuthSession.auth_method` of the caller's session: `password` (`auth/login/`) or the provider of a social sign-in (`google`, `facebook`); `null` for a session opened before the method was recorded (`accounts.0007`). The same `Me` is the `user` of the `auth/login/` and `auth/oauth/{provider}/` answers. Only a `password` session may link an identity (`link/` → 403 otherwise, above), so the UI hides "Bog‘lash" unless `auth_method` is `password`.
 
 ### 2.2 Orders
@@ -580,14 +587,19 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
  "registered_at": "2025-03-12T10:20:00+05:00", "deleted_at": null,
  "language": "uz", "address": "Toshkent, Chilonzor, 9-kvartal",            // null if none
  "totals": {"store": 9940000, "online": 3640000, "lifetime": 13580000},    // non-reversed purchases
- "online_orders": {"count": 12, "last_order_id": 10248, "last_order_at": "2026-10-23T14:02:00+05:00"},  // ids/time null if none
+ "online_orders": {"count": 12, "last_order_id": 10248, "last_order_at": "2026-10-23T14:02:00+05:00",  // ids/time null if none
+                   "all_count": 13},                                        // gap closure: every order of any status
  "tier": {"policy_version": 3, "percent": "1.00",                          // null if no tier covers lifetime
           "next": {"percent": "2.00", "from": 20000000, "remaining": 6420000, "progress": 0.679}},  // null if no next tier
  "balance": 48600, "held": 0, "available": 48600,                         // available = balance − active holds
  "groups": [{"id": 1, "name": "Doimiy mijozlar"}, {"id": 2, "name": "10 mln+ xarid"}],
  "upcoming_appointments": 1,                                               // confirmed|requested with start ≥ now
- "device": {"model": "iPhone 14", "os": "iOS 18.1", "app_version": "1.0.0",
+ "device": {"platform": "ios", "model": "iPhone 14", "os": "iOS 18.1", "app_version": "1.0.0",
             "last_active_at": "2026-10-24T09:12:00+05:00", "push_enabled": true},   // null if none
+ "devices": [                                                              // gap closure (ADM-8.1); [] if none
+   {"id": 5, "platform": "ios", "model": "iPhone 14", "os": "iOS 18.1", "app_version": "1.0.0",
+    "push_enabled": true, "is_active": true, "last_active_at": "2026-10-24T09:12:00+05:00",
+    "created_at": "2025-03-12T10:20:00+05:00"}],
  "ledger": [ /* LedgerEntry[], full history, newest first (at desc, id desc) */ ],
  "purchases": [ /* Purchase[], full history, newest first */ ]}
 ```
@@ -605,6 +617,9 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
  "reversed": false}                                       // true once the order was cancelled/refunded
 ```
 
+- `online_orders.all_count` (gap closure, ADM-8.1) = every order of the customer, any status — the rows `orders/?customer={id}` lists, so the card's "Buyurtmalari" link can show it; `count` stays the paid, non-reversed online purchases the loyalty programme counts.
+- `device` = the most recently active of the customer's **active** devices (`null` when none: logged out everywhere, or deleted); gap closure: it carries `platform` (`OrderChannel`: `ios` | `android`).
+- `devices` (gap closure, ADM-8.1) = the customer's app installations, active ones first, then by `last_active_at` (newest first), ties by `id` desc, at most **20**. `is_active` turns `false` after a logout, a sign-in on another phone (single-device rule) or the account deletion; `push_enabled` is whether pushes reach it now; `created_at` is the installation's first sign-in. Never carries the FCM token, the device key (hash) or the Firebase installation id. A deleted customer keeps the list (every entry inactive). One query with `device`, so the card's query count does not grow.
 - `billz_sale_ref` (Purchase): the Billz document number (≤ 32), `null` when none. A `store_qr` purchase always has one. An `online` purchase gets one the moment Billz created its sale (M3 live push), **while that sale may still be a draft**: it is the number staff look up in Billz when the push is deferred (closed shift) or dead (the sale is then completed, or deleted, by hand). The order history's `billz_sale_recorded` event marks the sale as paid in Billz; while Billz is fake (or before the push ran) it is `null`.
 
 | `kind` | `source_type` | Populated |
@@ -929,8 +944,10 @@ Export `tolovlar` (§1.8): the `Qaytarish` column is the §5.1 refund-state line
 - **M3 — sandboxes.** Callers past the same gate also get `sandbox`: the live providers configured against a sandbox — `bts` (BTS's test host as `BTS_BASE_URL`), `payme` (`PAYME_TEST_MODE=true` or Payme's sandbox checkout host), `eskiz` (Eskiz's test sender `4546`) — in that order, `[]` when none. Informational (a sandbox never fails readiness; each one also logs a startup WARNING); it must be empty in production, where money and parcels are real.
 - **The 503 rule.** `?ready=1` answers **503** (`"status": "error"`) when any of `database`, `cache`, `broker` is `error` **or** any live provider is not configured — for **every** caller. Outside the gate the body then carries no reason: `"status": "error"` with every check `ok` means a live provider is misconfigured (ask from inside the gate, or see docs/ops/monitoring.md §4). A fake provider never fails readiness. A failure of the provider probe itself is logged (WARNING) and does not fail readiness. Without `?ready=1` the answer is always 200 (liveness).
 
-### 2.16 Staff directory
-**`GET staff/`** (P; read-only) → `Page<StaffListItem>`, the options of the audit-log `actor` filter.
+### 2.16 Staff (directory and management)
+Gap closure FND-4 (decisions GST-1..GST-6 in `docs/decisions/open-questions.md`). The client has one role, admin: every staff member has the same rights everywhere else. **Managers** (`StaffUser.is_manager`, `Me.is_manager`) additionally manage staff accounts: every route below except `GET staff/` answers **403 `permission_denied`** "Ruxsat yo‘q." to anyone else (checked before the id is looked up). A superuser is always a manager; migration `accounts.0008` made every superuser a manager and, when that left none, the first active account; `createstaff` makes the first account of an install a manager; the seeded `admin@glowderma.uz` is one. At least one **active** manager always remains (below).
+
+**`GET staff/`** (P; every staff member) → `Page<StaffListItem>`: the options of the audit-log `actor` filter, and the staff screen's rows for a manager.
 
 | Param | Values | Default | Rule |
 |---|---|---|---|
@@ -939,9 +956,57 @@ Export `tolovlar` (§1.8): the `Qaytarish` column is the §5.1 refund-state line
 | `page`, `page_size` | §1.5 (20, 50, 100) | 50 | |
 
 ```jsonc
-// StaffListItem — Actor plus email and is_active; ordered by display_name (case-insensitive), then id
-{"id": 1, "display_name": "Administrator", "email": "admin@glowderma.uz", "is_active": true}
+// StaffListItem — ordered by display_name (case-insensitive), then id
+{"id": 7, "display_name": "Nodira Rahimova", "email": "nodira@glowderma.uz", "is_active": true,   // every caller
+ "full_name": "Nodira Rahimova", "is_manager": false,                                            // manager only, else null
+ "last_login_at": "2026-10-24T18:30:00+05:00", "linked_providers": ["google"],                   // manager only, else null
+ "created_at": "2026-10-20T09:00:00+05:00"}                                                      // manager only, else null
 ```
+- The first four keys are the directory every caller gets (the audit-log filter uses `id` and `display_name`). The other five are filled only when the **caller** is a manager; for anyone else they are `null` (`linked_providers` too, so "not shown" differs from "none linked", `[]`).
+- `last_login_at` = the start of the member's newest session (every password or social sign-in opens one; staff sessions are never purged); `null` = never signed in. `linked_providers` = the linked social identities (`google`, `facebook`), by provider. `created_at` = when the account was created.
+- The query count does not grow with the rows (one correlated subquery for `last_login_at`, one prefetch for the providers).
+
+```jsonc
+// StaffMember — the manager's view of one account; every write below answers with it
+{"id": 7, "display_name": "Nodira Rahimova", "email": "nodira@glowderma.uz", "full_name": "Nodira Rahimova",
+ "is_active": true, "is_manager": false, "last_login_at": null,            // null: never signed in
+ "linked_providers": [], "created_at": "2026-10-27T10:15:00+05:00"}
+// StaffCredentials — 201 of POST staff/, 200 of …/reset-password/
+{"staff": { /* StaffMember */ }, "temporary_password": "Kp7m-Qx3r-Wt9z-Hn2v"}
+```
+
+**`POST staff/`** (manager; **I**) body `{"email": str, "full_name": str, "is_manager": bool = false}` → **201 `StaffCredentials`**. Creates an active account that signs in with `email` and the temporary password.
+
+| Check | Field, code and message |
+|---|---|
+| `email` missing / empty / not an email / > 254 | `email` `required` / `blank` / `invalid` / `max_length` (generic messages) |
+| `email` (trimmed, lower-cased) already belongs to an account, active or not (case-insensitive) | `email` `unique` "Bu email bilan xodim allaqachon bor (nofaol bo‘lsa, uni qayta faollashtiring)." |
+| `full_name` missing, or trimmed outside 2..150 | `full_name` `required` / `min_length` "Kamida 2 ta belgi kiriting." / `max_length` "150 belgidan oshmasin." |
+| `is_manager` not a boolean | `is_manager` `invalid` |
+
+- **Temporary password**: generated by the server, `xxxx-xxxx-xxxx-xxxx` from letters and digits without look-alikes (no `0 O 1 l I`; ~92 bits), passing the password validators. It is **shown once**: never logged or audited; a replay of the same `Idempotency-Key` returns it again (stored sealed, §1.7 "Stored credentials"). There is no forced change at the first sign-in (decision GST-3): the person changes it under "Parolni o‘zgartirish" (`auth/change-password/`, §2.1); the UI shows the password once with a copy button and tells the manager to hand it over in person.
+- Audit `staff.created` `{email, full_name, is_manager}`.
+
+**`GET staff/{id}/`** (manager) → `StaffMember`; unknown id → 404.
+
+**`PATCH staff/{id}/`** (manager; I optional) body any of `{"full_name": str (trimmed 2..150), "is_manager": bool}` → 200 `StaffMember`.
+- `email`, `is_active`, `password` in the body → 400 `read_only` "Bu maydonni o‘zgartirib bo‘lmaydi." on each (the email is the sign-in identity: create a new account instead; the state and the password have the actions below).
+- Removing the manager role of the caller's own account → 409 `conflict` "O‘zingizni menejerlikdan chiqara olmaysiz."; of the last active manager → 409 `conflict` "Kamida bitta faol menejer qolishi kerak. Avval boshqa xodimni menejer qiling." (The active managers are locked before the check, so two managers removing each other at the same time cannot both succeed.)
+- Only changed values are written; audit `staff.updated` with `before` / `after` of the changed fields (none changed → nothing written, 200).
+
+**`POST staff/{id}/deactivate/`** (manager; **I**; empty body) → 200 `StaffMember` (`is_active: false`).
+- Every open session of the account is revoked (`deactivated`; tombstones on commit, so its access tokens get 401 `SESSION_EXPIRED` on the next request on every API worker) and it can no longer sign in (password or social). Linked identities and the manager role are kept for a reactivation.
+- The caller's own account → 409 `conflict` "O‘z hisobingizni faolsizlantira olmaysiz."; the last active manager → 409 `conflict` (message above). An inactive account → 200 unchanged, nothing written.
+- Audit `staff.deactivated` (before `{is_active: true}`, after `{is_active: false, revoked_count}`) and one `auth.session_revoked` `{sid, reason}` per revoked session.
+
+**`POST staff/{id}/reactivate/`** (manager; I optional; empty body) → 200 `StaffMember`. The account signs in again with its password or a linked identity; the sessions revoked at deactivation stay revoked. An active account → 200 unchanged. Audit `staff.reactivated`.
+
+**`POST staff/{id}/reset-password/`** (manager; **I**; empty body) → 200 `StaffCredentials`.
+- Replaces the password with a new temporary one (rules above) and revokes every open session (`password_changed`); linked identities stay. A running login lockout of the account (§1.9) ends with it. Works on an inactive account too.
+- The caller's own account → 409 `conflict` "O‘z parolingizni «Parolni o‘zgartirish» orqali almashtiring." (`auth/change-password/` asks for the current password, so a stolen session cannot take the account over).
+- Audit `staff.password_reset` `{revoked_count, generated: true}` and one `auth.session_revoked` per revoked session; the password is never recorded.
+
+**Operator commands** (server shell; decision GST-6) run the same audited services, for when no manager can sign in: `createstaff <email> [--manager] [--superuser] [--full-name] [--password-stdin]` (audited `staff.created` now), `deactivatestaff <email>`, `reactivatestaff <email>`, `resetstaffpassword <email> [--password-stdin]` (prints a temporary password once unless one is read from stdin) and `setstaffmanager <email> [--off]`. Each takes `--actor <email>` (an active staff member who asked for it; default: the system) and audits with `reason` "manage.py <command>". They may act on the actor's own account; the last-active-manager rule still holds.
 
 ---
 
@@ -1000,7 +1065,8 @@ Export `tolovlar` (§1.8): the `Qaytarish` column is the §5.1 refund-state line
 
 | Area | `action` values |
 |---|---|
-| Auth | `auth.login_succeeded`, `auth.login_failed`, `auth.logout` (`{scope, revoked_count}`), `auth.password_changed`, `auth.session_revoked` (`{sid, reason}`), `auth.staff_deactivated` (`{revoked_count}`), `auth.staff_reactivated`, `auth.social_linked`, `auth.social_unlinked` |
+| Auth | `auth.login_succeeded`, `auth.login_failed`, `auth.logout` (`{scope, revoked_count}`), `auth.password_changed`, `auth.session_revoked` (`{sid, reason}`), `auth.social_linked`, `auth.social_unlinked` |
+| Staff (§2.16, gap closure) | `staff.created` (`{email, full_name, is_manager}`), `staff.updated` (before / after of the changed `full_name` / `is_manager`), `staff.deactivated` (before `{is_active: true}`, after `{is_active: false, revoked_count}`), `staff.reactivated` (before `{is_active: false}`, after `{is_active: true}`), `staff.password_reset` (`{revoked_count, generated}`; never the password); every session they revoke adds `auth.session_revoked`. Entity `staff`, id = the account. From the admin API the actor is the manager; from the operator commands it is the `--actor` staff member or `system`, with `reason` "manage.py <command>". They replace M1's `auth.staff_deactivated` / `auth.staff_reactivated`, which were never written (their services had no caller; decision GST-5). |
 | System | `outbox.dead` (`{topic, dedupe_key, attempts, last_error}`), `outbox.requeued` (M3, actor `system`, reason "manage.py requeue_outbox"; before `{status, attempts, last_error}`, after `{topic, dedupe_key, status: "pending"}`), `outbox.resolved` (M3, `requeue_outbox --resolved`: a dead message handled by hand is closed as `done` without running it — a `billz.push_sale` only once its sale is recorded with `billz_mark_recorded`; reason "manage.py requeue_outbox --resolved", before as above, after `{topic, dedupe_key, status: "done"}`); `billz.sale_recorded_by_hand` (M3, entity `order`, actor = the staff member named by `manage.py billz_mark_recorded --actor`, reason "manage.py billz_mark_recorded"; before `{purchase_id, billz_sale_id, billz_pushed_at: null, billz_payment_attempted_at, push_status}`, after `{purchase_id, billz_sale_id, billz_sale_ref, billz_pushed_at}`), `billz.payment_attempt_forgotten` (M3, entity `order`, actor = `requeue_outbox --forget-payment-attempt --actor`, reason "manage.py requeue_outbox --forget-payment-attempt"; before `{purchase_id, billz_sale_id, billz_payment_attempted_at}`, after `{purchase_id, billz_payment_attempted_at: null}`) |
 | Orders | `order.cancelled`, `order.status_changed`, `order.shipment_retry_requested`, `refund.requested`, `refund.state_changed` (system) |
 | Catalog | `product.created`, `product.updated`, `product.image_added`, `product.image_deleted`, `product.images_reordered`, `billz.import_started`, `billz.import_finished`, `category.created`, `category.updated`, `category.deleted`, `category.reordered`, `banner.created`, `banner.updated`, `banner.deleted`, `banner.reordered` |
@@ -1127,7 +1193,8 @@ Generic mapping applies throughout: snake_case → camelCase; integer ids → `S
 | FE field | API source | Rule |
 |---|---|---|
 | `Customer.totals` | `totals.store`, `totals.online` | As is; lifetime = `totals.lifetime` |
-| `Customer.onlineOrders` | `online_orders` | `{count, lastOrderId: last_order_id ?? undefined, lastOrderAt}` |
+| `Customer.onlineOrders` | `online_orders` | `{count, lastOrderId: last_order_id ?? undefined, lastOrderAt, allCount: all_count}` |
+| Card orders link (new) | `online_orders.all_count` | `` `Buyurtmalari (${N(all_count)})` `` → `/admin/orders?customer=${id}`; shown when `all_count > 0` |
 | `Customer.groups: string[]` | `groups[].name` | Names only |
 | Balance card | `balance` | Server value (no longer the ledger sum) |
 | Tier card (`TierInfo`) | `tier` | `{percent: percent && parseFloat(percent), next: next && {percent: parseFloat, remaining, progress}}` |
@@ -1136,7 +1203,8 @@ Generic mapping applies throughout: snake_case → camelCase; integer ids → `S
 | Ledger BALANS column | `balance_after` | Replaces `withRunningBalance` |
 | `CustomerPurchase.document` | `source`, `order_id`, `billz_sale_ref` | online → `` `№${order_id}` ``; store_qr → `billz_sale_ref` |
 | `CustomerPurchase.promoAmount` | `promo_amount` | As is |
-| `Customer.device.appVersion` | `device.app_version` | `device ?? undefined` |
+| `Customer.device.appVersion` | `device.app_version` | `device ?? undefined`; `platform` labelled per §5.8 |
+| `Customer.devices[]` (new) | `devices[]` | `{id: String(id), platform, model, os, appVersion, pushEnabled, isActive, lastActiveAt, createdAt}`; an inactive row is shown muted ("Faol emas") |
 | Adjustment result | 201 `entry`, `balance` | Mapped with the LedgerEntry rules; the view uses `balance` |
 
 ### 5.4 Cashback policy
@@ -1205,6 +1273,8 @@ Generic mapping applies throughout: snake_case → camelCase; integer ids → `S
 | LedgerKind | credit "Hisoblandi" · debit "Ishlatildi" · adjustment "Tuzatish" · reversal "Qaytarildi" |
 | NotificationState / Kind | scheduled "Rejalashtirilgan" · queued "Navbatda" · sent "Yuborildi" · cancelled "Bekor qilindi" (M3) / promo "Aksiya" · general "Umumiy" |
 | Booleans in exports | "Ha" / "Yo‘q" |
+| Staff (§2.16; UI only, no export) | `is_manager` true "Menejer" · false "Xodim" / `is_active` true "Faol" · false "Nofaol" |
+| Device platform (§2.6; UI only) | ios "iOS" · android "Android" |
 
 ---
 
@@ -1225,6 +1295,8 @@ Provisional, configurable rules that shape payloads:
 - **Price authority.** Admin `price`; `billz_price` is stored for reference (`PRICE_SOURCE`). M3 (decision D1, provisional): the Billz sale of an online order records each line at the `unit_price` the customer was charged and is paid only when Billz's bill equals Σ `unit_price` × `quantity` exactly; otherwise the push stops for staff (dead-lettered with the reason).
 - **Customer delete and re-register.** Phone is unique. Delete scrubs the name, image and address (`name: ""`). Re-registration reactivates the same id, so ledger and purchases persist.
 - **Production media storage.** Open; URLs are always absolute from `PUBLIC_MEDIA_BASE_URL`.
+- **Staff management (GST-1..GST-6).** One role plus the manager flag: only managers manage staff; at least one active manager remains; a manager never deactivates, demotes or resets the password of their own account through the API; temporary passwords are shown once (sealed for the idempotent replay) with no forced change at the first sign-in; operator commands exist for when no manager can sign in.
+- **Customer devices on the card (GST-7).** At most 20 installations, active first; never a token, key or installation id.
 
 ---
 
@@ -1299,3 +1371,8 @@ Provisional, configurable rules that shape payloads:
     - Refund operations for the Payments screen (M1c, consumed by F3): `POST payments/{id}/refunds/{refund_id}/retry/` (from `failed`) and `…/resolve/` `{state: succeeded|failed}` (from `unknown` / `manual_required`, audited `refund.state_changed` with the actor). M2 (customer contract §2.13.0): `…/resolve/ {state: succeeded, manual_payout?: bool}` also closes a `failed` **Click** refund (Click refuses reversals of a previous month, of offline/Humo cards, or when UZCARD declines). The server first asks Click for the payment's status (a fresh check through the port, never under a row lock): `reversed` → closed `succeeded` (Click returned the money; do not pay out); still `paid` → 409 **`click_not_reversed`** (M3; `invalid_transition` before) "Click to‘lovni qaytarmagan. Avval mijozga qo‘lda to‘lang, so‘ng «qo‘lda to‘landi» belgisi bilan yakunlang yoki qaytarishni qayta urinib ko‘ring." unless the body carries `manual_payout: true` (staff paid the customer outside Click; then closed `succeeded`, audited with `manual_payout: true`); Click unreachable → 503 `provider_unavailable`; Click fake under the production settings → 409 `invalid_transition` "Click sinov rejimida: to‘lov holatini tekshirib bo‘lmaydi. Click ulanganidan keyin yakunlang."; a payment without a Click payment id is **not checked** (Click cannot be asked about it) and needs `manual_payout: true` — without it 409 `conflict` "Bu to‘lovda Click to‘lov raqami yo‘q, shuning uchun Click’dan holatini tekshirib bo‘lmaydi. Mijozga qo‘lda to‘lang, so‘ng «qo‘lda to‘landi» belgisi bilan yakunlang." (M3: never the "Click to‘lovni qaytarmagan" answer, since Click was not asked). The UI therefore offers "Yakunlash" (no flag) first and, after the 409 `click_not_reversed` (or this `conflict`), "Qo‘lda to‘landi" (`manual_payout: true`) once the payout is done. The close is allowed only while it is the payment's newest refund, the payment is still `paid` and no other refund of the payment is open or succeeded (otherwise 409 `invalid_transition` "Bu qaytarishni yakunlab bo‘lmaydi.", so a refund retried with `…/retry/` cannot be paid out twice); M3: this guard runs **before** the Click status check (a refund that can no longer be closed is refused without asking Click) and again under the row locks. `manual_payout` is ignored for `unknown` / `manual_required` refunds, whose resolve is unchanged. While Click is fake under the production settings, `…/retry/` of a `failed` Click refund also answers 409 `invalid_transition` "Click sinov rejimida: to‘lov holatini tekshirib bo‘lmaydi. Click ulanganidan keyin yakunlang." (nothing written), so a retried refund can never skip the status check.
     - The logout action posts `{refresh: <gd_admin_refresh cookie>, scope: "current"}` and clears both cookies whatever the response (a 401 `SESSION_EXPIRED` counts as logged out). Settings (A1) can offer "others" and "all".
     - The login page, `auth.actions.ts`, cookies and `proxy.ts` follow the spec's "Auth" section.
+19. **Staff screen "Xodimlar" (gap closure FND-4, §2.16).**
+    - Shown in the sidebar only when `Me.is_manager`; the audit-log actor picker keeps reading `GET staff/` for everyone (it uses `id` and `display_name` only).
+    - The table reads `GET staff/` (`is_active` tab "Faol" / "Nofaol", `search`) with the manager's columns; "Yangi xodim" posts `POST staff/` with one key per dialog; the answer's `temporary_password` is shown once in a dialog with a copy button and the hint "Parolni xodimga shaxsan bering; u «Parolni o‘zgartirish» orqali almashtiradi." (never stored client-side).
+    - Row actions with confirmation dialogs: edit name / manager role (`PATCH`), "Faolsizlantirish" (`deactivate/`, I), "Qayta faollashtirish" (`reactivate/`), "Parolni tiklash" (`reset-password/`, I; the same once-only password dialog). Hide the role, deactivate and reset actions on the caller's own row (the server answers 409 `conflict` anyway); show the 409 message as the toast.
+20. **Customer card devices and orders (gap closure ADM-8.1, §2.6).** A "Qurilmalar" block lists `devices` (platform label §5.8, model, OS, app version, push on/off, last activity; inactive rows muted); the card links "Buyurtmalari (N)" (`online_orders.all_count`) to `/admin/orders?customer={id}`, so unpaid, expired and cancelled orders are reachable from the card.
