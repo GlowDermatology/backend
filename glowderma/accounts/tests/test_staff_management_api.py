@@ -35,7 +35,7 @@ MEMBER_KEYS = {
 }
 
 
-def key() -> dict[str, str]:
+def key() -> dict[str, Any]:
     return {"HTTP_IDEMPOTENCY_KEY": str(uuid.uuid4())}
 
 
