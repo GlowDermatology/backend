@@ -23,9 +23,11 @@ rule may be overridden per order through ``Order.metadata["fake"]["bts"]`` (desi
       ``status = scenario["status"]`` or ``"100"``.
 
 ``cancel(parcel)``
-    ``scenario["cancel"] == "unavailable"`` → :class:`BtsUnavailable`; ``"refused"`` → refused; otherwise the
-    effective status (``scenario["status"]`` if set, else the parcel's last known status, ``""`` = none yet)
-    decides: ``""`` or ``"100"`` → cancelled, anything else → refused with reason ``"posilka kuryerda"``.
+    ``scenario["cancel"] == "unavailable"`` → :class:`BtsUnavailable`; a parcel this process already
+    cancelled → cancelled again (idempotent: a cancel whose transaction rolled back is repeated);
+    ``"refused"`` → refused; otherwise the effective status (``scenario["status"]`` if set, else the parcel's
+    last known status, ``""`` = none yet) decides: ``""`` or ``"100"`` → cancelled, anything else → refused
+    with reason ``"posilka kuryerda"``.
 """
 
 from collections.abc import Mapping
@@ -41,11 +43,13 @@ REFUSAL_REASON = "posilka kuryerda"
 
 # The fake's "remote" parcels by clientId, per process (see the module docstring).
 _parcels: dict[str, Parcel] = {}
+_cancelled: set[str] = set()
 
 
 def reset() -> None:
-    """Forget every parcel the fake created (tests)."""
+    """Forget every parcel the fake created or cancelled (tests)."""
     _parcels.clear()
+    _cancelled.clear()
 
 
 def tracking_number_for(order_id: int) -> str:
@@ -81,7 +85,7 @@ class FakeBts:
         if self.scenario.get("down"):
             raise BtsUnavailable("BTS did not answer (fake: down)")
         found = _parcels.get(client_id)
-        if found is None and self.scenario.get("existing"):
+        if found is None and self.scenario.get("existing") and client_id not in _cancelled:
             found = self._parcel(client_id)
         return found
 
@@ -99,7 +103,10 @@ class FakeBts:
         if answer == "unavailable":
             raise BtsUnavailable("BTS did not answer (fake: cancel unavailable)")
         status = str(self.scenario.get("status") or parcel.status or "")
+        if parcel.client_id in _cancelled:
+            return CancelResult(ok=True, status=status)
         if answer == "refused" or status not in ("", STATUS_ACCEPTED):
             return CancelResult(ok=False, status=status, reason=REFUSAL_REASON)
         _parcels.pop(parcel.client_id, None)
+        _cancelled.add(parcel.client_id)
         return CancelResult(ok=True, status=status)

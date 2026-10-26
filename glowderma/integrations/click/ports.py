@@ -7,12 +7,21 @@ the order's ``metadata["fake"]["click"]`` (the fake reads it, a live adapter ign
 The handler always asks :meth:`ClickPort.payment_status` before reversing (a redelivery after a crash must
 find an already reversed payment instead of reversing twice). :class:`ClickUnavailable` is a transport error;
 :class:`ClickRefundRejected` a definitive refusal.
+
+Bounded calls (normative for every adapter, M3 live included): no call blocks longer than
+:data:`CONNECT_TIMEOUT_SECONDS` to connect and :data:`TOTAL_TIMEOUT_SECONDS` in total (a timeout is a
+:class:`ClickUnavailable`). The ``refund.submit`` handler relies on it: a refund claimed longer ago than the
+outbox lease (5 minutes) cannot still have a reversal call in flight, so a redelivery may submit again.
 """
 
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
 type PaymentState = Literal["paid", "reversed"]
+
+# Transport bounds every adapter honours (see the module docstring); a timeout raises ClickUnavailable.
+CONNECT_TIMEOUT_SECONDS = 3.0
+TOTAL_TIMEOUT_SECONDS = 10.0
 
 
 @dataclass(frozen=True, slots=True)

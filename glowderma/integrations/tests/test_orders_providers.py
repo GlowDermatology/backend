@@ -67,10 +67,14 @@ def test_bts_cancel_rules() -> None:
     assert get_bts().cancel(Parcel("12", "1", "x", 1, "")).ok  # no status yet
     refused = bts.cancel(Parcel("13", "1", "x", 1, "200"))
     assert (refused.ok, refused.reason, refused.status) == (False, "posilka kuryerda", "200")
-    assert not get_bts({"status": "300"}).cancel(parcel).ok
-    assert not get_bts({"cancel": "refused"}).cancel(parcel).ok
+    # a parcel BTS already cancelled answers ok again (idempotent at the provider boundary)
+    assert get_bts({"status": "300"}).cancel(parcel).ok
+    assert get_bts({"cancel": "refused"}).cancel(parcel).ok
+    live = bts.create(_request("14"))
+    assert not get_bts({"status": "300"}).cancel(live).ok
+    assert not get_bts({"cancel": "refused"}).cancel(live).ok
     with pytest.raises(BtsUnavailable):
-        get_bts({"cancel": "unavailable"}).cancel(parcel)
+        get_bts({"cancel": "unavailable"}).cancel(live)
 
 
 def test_click_refund_scenarios() -> None:
