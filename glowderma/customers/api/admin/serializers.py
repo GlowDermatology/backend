@@ -90,9 +90,12 @@ class CustomerTotalsSerializer(serializers.Serializer[Any]):
 
 
 class OnlineOrdersSerializer(serializers.Serializer[Any]):
-    count = serializers.IntegerField()
-    last_order_id = serializers.IntegerField(allow_null=True)
+    count = serializers.IntegerField(help_text="Paid, non-reversed online purchases.")
+    last_order_id = serializers.IntegerField(allow_null=True, help_text="The newest order of any status.")
     last_order_at = serializers.DateTimeField(allow_null=True)
+    all_count = serializers.IntegerField(
+        help_text="Every order of any status: what `orders/?customer={id}` lists (the card's orders link)."
+    )
 
 
 NextTierSerializer = cast(
@@ -124,11 +127,31 @@ class CustomerGroupSerializer(serializers.Serializer[Any]):
 
 
 class CustomerDeviceSerializer(serializers.Serializer[Any]):
+    """The card's current ``device``: the most recently active of the customer's active devices."""
+
+    platform = serializers.ChoiceField(choices=enums.OrderChannel.values)
     model = serializers.CharField(allow_blank=True)
     os = serializers.CharField(allow_blank=True)
     app_version = serializers.CharField(allow_blank=True)
     last_active_at = serializers.DateTimeField()
     push_enabled = serializers.BooleanField()
+
+
+class CustomerDeviceRowSerializer(serializers.Serializer[Any]):
+    """One of the card's ``devices`` (gap ADM-8.1): every installation, active ones first; never the FCM
+    token, the device key or the Firebase installation id."""
+
+    id = serializers.IntegerField()
+    platform = serializers.ChoiceField(choices=enums.OrderChannel.values)
+    model = serializers.CharField(allow_blank=True)
+    os = serializers.CharField(allow_blank=True)
+    app_version = serializers.CharField(allow_blank=True)
+    push_enabled = serializers.BooleanField()
+    is_active = serializers.BooleanField(
+        help_text="`false` after a logout, a sign-in elsewhere or the deletion."
+    )
+    last_active_at = serializers.DateTimeField()
+    created_at = serializers.DateTimeField(help_text="When the installation first signed in.")
 
 
 class CustomerCardSerializer(serializers.Serializer[Any]):
@@ -151,6 +174,7 @@ class CustomerCardSerializer(serializers.Serializer[Any]):
     groups = CustomerGroupSerializer(many=True)
     upcoming_appointments = serializers.IntegerField()
     device = CustomerDeviceSerializer(allow_null=True)
+    devices = CustomerDeviceRowSerializer(many=True)
     ledger = LedgerEntrySerializer(many=True)
     purchases = PurchaseSerializer(many=True)
 
