@@ -29,7 +29,7 @@ from glowderma.commerce.api.admin.serializers import (
 )
 from glowderma.commerce.models import Order
 from glowderma.core import labels
-from glowderma.core.api.exceptions import Conflict, MessageValidationError
+from glowderma.core.api.exceptions import Conflict, ContractValidationError
 from glowderma.core.api.schema import (
     ADMIN_ERRORS,
     EXPORT_PARAM,
@@ -138,7 +138,7 @@ class OrderCancelView(AdminAPIView):
             raise NotFound
         body = CancelOrderSerializer(data=request.data)
         if not body.is_valid():
-            raise MessageValidationError(body.errors, message=MESSAGE_REASON)
+            raise ContractValidationError(body.errors, message=MESSAGE_REASON)
         _order_or_404(
             lambda: services.cancel_order(
                 pk, body.validated_data["reason"], _actor_id(request), request=request

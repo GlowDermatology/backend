@@ -198,19 +198,6 @@ class NotCancellable(exceptions.APIException):
     default_detail = MESSAGES["validation_error"]
 
 
-class MessageValidationError(exceptions.ValidationError):
-    """A 400 ``validation_error`` whose top-level ``message`` comes from the endpoint table (contract §1.6).
-
-    ``raise MessageValidationError({"reason": [field_error("min_length", "Kamida 3 ta belgi kiriting.")]},
-    message="Sababni kiriting.")`` renders the field errors as usual and that message instead of the default
-    "Maydonlarni tekshiring.".
-    """
-
-    def __init__(self, detail: Any, *, message: str) -> None:
-        super().__init__(detail)
-        self.top_level_message = message
-
-
 class RequestInProgress(exceptions.APIException):
     status_code = 409
     default_code = "request_in_progress"
