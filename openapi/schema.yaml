@@ -7946,10 +7946,13 @@ components:
           $ref: '#/components/schemas/IntegrationModeEnum'
         bts:
           $ref: '#/components/schemas/IntegrationModeEnum'
+        eskiz:
+          $ref: '#/components/schemas/IntegrationModeEnum'
       required:
       - billz
       - bts
       - click
+      - eskiz
       - fcm
       - oauth
       - payme
