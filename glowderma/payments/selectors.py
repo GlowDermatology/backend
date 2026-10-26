@@ -29,7 +29,9 @@ from django.db.models import (
     Value,
     When,
 )
+from django.db.models.fields.json import KeyTextTransform, KeyTransform
 from django.db.models.functions import Cast, Coalesce, TruncDay, TruncHour
+from django.db.models.lookups import Regex
 
 from glowderma.core import enums, timeutils
 from glowderma.core.timeutils import TASHKENT
@@ -205,17 +207,37 @@ def payment_by_txn(provider: str, provider_txn_id: str) -> PaymentRow | None:
     return None if payment is None else payment_row(payment)
 
 
+# ``provider_state.time`` as a JSON integer that fits a bigint: the jsonb text of a number with no fraction or
+# exponent (a string keeps its quotes, a boolean is ``true``/``false``), at most 18 digits.
+_PAYME_TIME_INTEGER = r"^-?[0-9]{1,18}$"
+
+
+def _payme_time() -> Case:
+    """``(provider_state->>'time')::bigint``, NULL unless ``time`` is such an integer: the CASE keeps the cast
+    from ever seeing a string, a fraction, a boolean or an out-of-range number (a cast error would fail every
+    statement). An M3 expression index must index this same expression."""
+    return Case(
+        When(
+            Regex(Cast(KeyTransform("time", "provider_state"), TextField()), _PAYME_TIME_INTEGER),
+            then=Cast(KeyTextTransform("time", "provider_state"), BigIntegerField()),
+        ),
+        default=None,
+        output_field=BigIntegerField(),
+    )
+
+
 def payme_statement(from_ms: int, to_ms: int) -> list[PaymentRow]:
     """Payme ``GetStatement``: Payme payments whose Payme transaction time ``provider_state.time`` lies in
-    ``[from_ms, to_ms]``, ascending by that time (customer contract §2.13.2; M2 filters on the JSON key)."""
-    rows = []
-    for payment in Payment.objects.filter(
-        provider=enums.PaymentProvider.PAYME, provider_state__has_key="time"
-    ).exclude(provider_txn_id=""):
-        value = payment.provider_state.get("time")
-        if isinstance(value, int) and not isinstance(value, bool) and from_ms <= value <= to_ms:
-            rows.append(payment_row(payment))
-    return sorted(rows, key=lambda row: (int(row.provider_state["time"]), row.id))
+    ``[from_ms, to_ms]``, ascending by that time, then id (customer contract §2.13.2; M2 filters on the JSON
+    key, in SQL)."""
+    payments = (
+        Payment.objects.filter(provider=enums.PaymentProvider.PAYME)
+        .exclude(provider_txn_id="")
+        .annotate(payme_time=_payme_time())
+        .filter(payme_time__range=(from_ms, to_ms))
+        .order_by("payme_time", "id")
+    )
+    return [payment_row(payment) for payment in payments]
 
 
 def get_payment(payment_id: int) -> PaymentRow | None:

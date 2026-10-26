@@ -6,6 +6,7 @@ now.
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timedelta
 from typing import Any
@@ -652,4 +653,69 @@ def test_fake_click_in_production_refuses_a_misaddressed_complete_with_minus_1(
         assert complete(order, payment_id, service_id="99999")["error"] == -1
     row = rows("click")[-1]
     assert row.event_key.startswith("rejected:") and row.result["error_code"] == "fake_mode"
+    assert Payment.objects.get(pk=payment_id).status == "pending"
+
+
+# --- fix pass 2: an unparsable body is a -8 with a bounded row, never HTTP 500
+# -------------------------------------------
+
+
+def _post_raw(url: str, raw: str, content_type: str) -> Any:
+    return APIClient().generic("POST", url, raw, content_type=content_type)
+
+
+def test_a_form_body_with_too_many_fields_answers_minus_8(order: Order) -> None:
+    raw = urlencode(prepare_params(order)) + "&x=1" * 1000  # beyond DATA_UPLOAD_MAX_NUMBER_FIELDS
+    response = _post_raw(CLICK_PREPARE, raw, "application/x-www-form-urlencoded")
+    assert response.status_code == 200 and response.json()["error"] == -8
+    (row,) = rows("click")
+    assert row.event_key.startswith("rejected:") and row.raw_body == ""
+    assert row.result["error_code"] == "bad_request" and len(str(row.payload)) <= 1024
+    assert payments(order)[0].provider_txn_id == ""
+
+
+def test_an_oversized_body_is_413_not_a_500(order: Order, caplog: pytest.LogCaptureFixture) -> None:
+    raw = urlencode(prepare_params(order))
+    with override_settings(DATA_UPLOAD_MAX_MEMORY_SIZE=16):
+        response = _post_raw(CLICK_PREPARE, raw, "application/x-www-form-urlencoded")
+    assert response.status_code == 413 and "failed; everything rolled back" not in caplog.text
+    assert rows("click") == [] and payments(order)[0].provider_txn_id == ""
+
+
+def test_a_json_body_nested_too_deep_answers_minus_8(order: Order, monkeypatch: pytest.MonkeyPatch) -> None:
+    from glowderma.integrations.click import protocol
+
+    monkeypatch.setattr(protocol, "CLICK_ACCEPT_JSON", True)  # the verify-M3 switch of §2.13.1
+    response = _post_raw(CLICK_PREPARE, "[" * 200_000, "application/json")
+    assert response.status_code == 200 and response.json()["error"] == -8
+    (row,) = rows("click")
+    assert row.event_key.startswith("rejected:") and row.result["error_code"] == "bad_request"
+
+
+@pytest.mark.parametrize("variant", ["unparsable", "missing", "ip"])
+def test_fake_click_in_production_refuses_a_malformed_complete_with_minus_1(
+    order: Order, now: datetime, variant: str
+) -> None:
+    """C§2.13.0: every Complete that does not name a payment attached while Click was live answers -1 with a
+    bounded ``fake_mode`` row — also one refused before the signature (body, parameters, IP allow-list)."""
+    from ipaddress import ip_network
+
+    payment_id = _prepared(order, now)
+    params = complete_params(order, payment_id)
+    allowed: list[Any] = []
+    if variant == "missing":
+        del params["sign_time"]
+    if variant == "ip":
+        allowed = [ip_network("203.0.113.0/24")]
+    with override_settings(**PROD_FAKE_CLICK, CLICK_ALLOWED_IPS=allowed):
+        if variant == "unparsable":
+            response = _post_raw(CLICK_COMPLETE, json.dumps(params), "application/json")
+            answer = response.json()
+            assert response.status_code == 200
+        else:
+            answer = click(CLICK_COMPLETE, params)
+    assert answer["error"] == -1 and answer["error_note"] == "SIGN CHECK FAILED!"
+    row = rows("click")[-1]
+    assert row.event_key.startswith("rejected:") and row.raw_body == ""
+    assert row.result["error_code"] == "fake_mode" and row.result["body"]["error"] == -1
     assert Payment.objects.get(pk=payment_id).status == "pending"

@@ -4,8 +4,10 @@ Every answer is HTTP 200 with a JSON-RPC body; amounts are tiyin and exist only 
 Basic auth with ``PAYME_KEY`` first (``-32504``), then the JSON-RPC envelope, then the method — each method
 takes the advisory lock of its Payme transaction and ``commerce.services.lock_order`` before reading state,
 and the ``WebhookInbox`` row is written last (every delivery its own row; read-only methods without the raw
-body). An unexpected exception rolls everything back and answers ``-32400``. A Payme port that is fake under
-the production settings answers ``-32504`` to every call before anything is read.
+body). An unexpected exception rolls everything back and answers ``-32400`` — also one raised before the
+dispatch (auth, peek, parse, a refusal's inbox row), so the endpoint never answers anything but HTTP 200 with
+a JSON-RPC body. A Payme port that is fake under the production settings answers ``-32504`` to every call
+before anything is read.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import json
 import logging
 import time
 import uuid
+from collections.abc import Callable
 from typing import Any
 
 from django.conf import settings
@@ -37,6 +40,9 @@ from glowderma.payments import services as payment_services
 logger = logging.getLogger(__name__)
 PROVIDER = "payme"
 PAYME = enums.PaymentProvider.PAYME
+# What ``json.loads`` raises on a body that is not JSON: ``ValueError``, or ``RecursionError`` for one nested
+# deeper than the decoder allows (``"[" * 200000``).
+_UNPARSABLE = (ValueError, RecursionError)
 
 
 class RpcError(Exception):
@@ -78,7 +84,21 @@ class PaymeView(WebhookAPIView):
         auth=[],
     )
     def post(self, request: Request) -> Response:
+        return self._guarded(self._handle, request)
+
+    @staticmethod
+    def _guarded(handler: Callable[[Request, float], Response], request: Request) -> Response:
+        """The backstop of every step, including those before the dispatch transaction (auth, peek, parse,
+        envelope, a refusal's inbox row): an unexpected exception answers HTTP 200 with JSON-RPC ``-32400``
+        (``rpc.INTERNAL_ERROR_RESPONSE``), never the customer envelope; nothing is stored."""
         started = time.monotonic()
+        try:
+            return handler(request, started)
+        except Exception:
+            logger.exception("payme.request failed; nothing stored")
+            return Response(rpc.rpc_error(None, rpc.ERR_SYSTEM))
+
+    def _handle(self, request: Request, started: float) -> Response:
         if integration_modes.callbacks_refused(PROVIDER):  # nothing read before this check (§2.13.0)
             return self._rejected(request, None, None, "fake_mode", started)
         if not rpc.auth_ok(str(request.headers.get("Authorization", "")), str(settings.PAYME_KEY)):
@@ -88,7 +108,7 @@ class PaymeView(WebhookAPIView):
         raw = request.body.decode("utf-8", errors="replace")
         try:
             body = json.loads(raw)
-        except ValueError:
+        except _UNPARSABLE:
             return self._answer_error(request, raw, None, rpc.ERR_PARSE, None, "-", started)
         request_id = body.get("id") if isinstance(body, dict) else None
         if (
@@ -123,8 +143,11 @@ class PaymeView(WebhookAPIView):
     def get(self, request: Request) -> Response:
         """Any non-POST: JSON-RPC ``-32300`` (HTTP 200, as the protocol requires); a fake Payme under the
         production settings answers ``-32504`` to every call first (§2.13.0)."""
+        return self._guarded(self._non_post, request)
+
+    def _non_post(self, request: Request, started: float) -> Response:
         if integration_modes.callbacks_refused(PROVIDER):
-            return self._rejected(request, None, None, "fake_mode", time.monotonic())
+            return self._rejected(request, None, None, "fake_mode", started)
         return Response(rpc.rpc_error(None, rpc.ERR_TRANSPORT))
 
     put = patch = delete = head = get
@@ -141,7 +164,7 @@ class PaymeView(WebhookAPIView):
         """``(body, id)`` of an unauthenticated request, for the bounded row and the echoed id only."""
         try:
             body = json.loads(request.body.decode("utf-8", errors="replace"))
-        except ValueError:
+        except _UNPARSABLE:
             return None, None
         return body, body.get("id") if isinstance(body, dict) else None
 

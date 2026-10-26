@@ -107,6 +107,7 @@ def test_payme_protocol() -> None:
     header = payme.basic_auth("secret")
     assert payme.auth_ok(header, "secret") and not payme.auth_ok(header, "other")
     assert not payme.auth_ok("Basic !!!", "secret") and not payme.auth_ok("Bearer x", "secret")
+    assert not payme.auth_ok("Basic é" + "A" * 20, "secret")  # a non-ASCII header: plain ValueError
     assert not payme.auth_ok(header, "")
     samples: list[object] = [5, True, 5.0, "5"]
     assert [payme.is_int(value) for value in samples] == [True, False, False, False]

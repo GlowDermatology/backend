@@ -4,11 +4,14 @@ selector and the dashboard revenue (net of succeeded refunds, attributed to the 
 from datetime import datetime, timedelta
 
 import pytest
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 
 from glowderma.core.api.exceptions import Conflict, InvalidTransition
 from glowderma.core.models import AuditEntry, OutboxMessage
 from glowderma.core.timeutils import TASHKENT
 from glowderma.payments import selectors, services
+from glowderma.payments.models import Payment
 from glowderma.payments.tests.factories import OrderRowFactory, PaymentFactory, RefundFactory
 
 pytestmark = pytest.mark.django_db
@@ -163,3 +166,45 @@ def test_revenue_buckets_attribute_refunds_to_the_payment_bucket() -> None:
     assert hours == {day.replace(hour=9): 200_000, day.replace(hour=11): 150_000}
     days = selectors.revenue_buckets(day - timedelta(days=1), day + timedelta(days=1), "day")
     assert days == {day: 350_000}
+
+
+# --- Payme GetStatement (customer contract §2.13.2) -------------------------------------------------------
+
+
+_NO_TIME = object()
+
+
+def _payme(time: object, *, txn: bool = True) -> Payment:
+    state = {} if time is _NO_TIME else {"time": time}
+    if txn:
+        return PaymentFactory.create(order__payme=True, provider_state=state)
+    return PaymentFactory.create(pending=True, order__payme=True, provider_state=state)
+
+
+def test_payme_statement_selects_by_the_integer_payme_time_ascending() -> None:
+    first_tie = _payme(1_500)
+    lower = _payme(1_000)
+    upper = _payme(2_000)
+    second_tie = _payme(1_500)
+    outside_low, outside_high = _payme(999).pk, _payme(2_001).pk
+    for odd in ("1500", 1_500.5, 1_500.0, True, 10**30, -(10**30), _NO_TIME):
+        _payme(odd)  # not a JSON integer within bigint: never listed, never a cast error
+    _payme(1_500, txn=False)  # no Payme transaction attached
+    PaymentFactory.create(provider_state={"time": 1_500})  # a Click payment
+    found = [row.id for row in selectors.payme_statement(1_000, 2_000)]
+    assert found == [lower.pk, first_tie.pk, second_tie.pk, upper.pk]
+    everything = [row.id for row in selectors.payme_statement(-(2**63), 2**63 - 1)]
+    assert everything == [outside_low, lower.pk, first_tie.pk, second_tie.pk, upper.pk, outside_high]
+    assert selectors.payme_statement(2_001, 1_000) == []
+    # bounds beyond bigint are no overflow error; a ``time`` beyond 18 digits is no epoch-ms value: not listed
+    assert len(selectors.payme_statement(-(10**40), 10**40)) == 6
+
+
+def test_payme_statement_filters_and_orders_in_sql() -> None:
+    _payme(1_500)
+    _payme(5_000)
+    with CaptureQueriesContext(connection) as queries:
+        rows = selectors.payme_statement(1_000, 2_000)
+    assert len(rows) == 1
+    (query,) = queries.captured_queries
+    assert "BETWEEN" in query["sql"] and "ORDER BY" in query["sql"]  # not loaded and sorted in Python

@@ -18,6 +18,7 @@ import time
 from typing import Any
 
 from django.conf import settings
+from django.core.exceptions import SuspiciousOperation, TooManyFieldsSent
 from django.db import connection, transaction
 from django.http import QueryDict
 from drf_spectacular.types import OpenApiTypes
@@ -49,16 +50,21 @@ def advisory_lock(key: str) -> None:
 
 def _parse(request: Request) -> tuple[dict[str, str] | None, str]:
     """``(params, raw_body)``: form fields as raw strings; JSON only with ``CLICK_ACCEPT_JSON`` (strings
-    required). ``None`` for any other content type or an unparsable body."""
+    required). ``None`` for any other content type or an unparsable body — including more form fields than
+    ``DATA_UPLOAD_MAX_NUMBER_FIELDS`` and JSON nested deeper than the decoder allows, which would otherwise
+    escape as HTTP 500."""
     raw = request.body.decode("utf-8", errors="replace")
     content_type = (request.content_type or "").split(";")[0].strip().lower()
     if content_type == FORM_CONTENT_TYPE:
-        query = QueryDict(raw, encoding="utf-8")
+        try:
+            query = QueryDict(raw, encoding="utf-8")
+        except TooManyFieldsSent:
+            return None, raw
         return {key: query.get(key, "") for key in query}, raw
     if protocol.CLICK_ACCEPT_JSON and content_type == "application/json":
         try:
             data = json.loads(raw, parse_int=str, parse_float=str)
-        except ValueError:
+        except ValueError, RecursionError:
             return None, raw
         if isinstance(data, dict) and all(isinstance(v, str) for v in data.values()):
             return dict(data), raw
@@ -75,7 +81,15 @@ class _ClickCallback(WebhookAPIView):
     def _event_prefix(self) -> str:
         return "complete" if self.complete else "prepare"
 
-    def _rejected(self, request: Request, params: Any, error: int, code: str, started: float) -> Response:
+    def _rejected(
+        self, request: Request, params: Any, error: int, code: str, started: float, *, fake: bool = False
+    ) -> Response:
+        """A bounded ``rejected:`` row (capped per IP). ``fake``: Click is fake under the production settings,
+        where a refused Complete names no payment attached while Click was live — whatever the refusal
+        (body, parameters, IP allow-list, signature) it answers ``-1`` with ``error_code`` ``fake_mode``
+        (§2.13.0)."""
+        if fake:
+            error, code = protocol.SIGN_FAILED, FAKE_MODE
         body = self._answer(params if isinstance(params, dict) else {}, error)
         inbox.store_rejected(
             PROVIDER, request, params, status=200, body=body, error_code=code, started=started
@@ -86,6 +100,8 @@ class _ClickCallback(WebhookAPIView):
         started = time.monotonic()
         try:
             return self._handle(request, started)
+        except SuspiciousOperation:
+            raise  # an oversized body or too many fields: core's handler answers 400/413; nothing written
         except Exception:
             logger.exception("click.%s failed; everything rolled back", self._event_prefix)
             return Response({"error": protocol.UPDATE_FAILED, "error_note": "Internal error"}, status=500)
@@ -97,16 +113,19 @@ class _ClickCallback(WebhookAPIView):
         params, raw = _parse(request)
         if params is None:
             return self._rejected(
-                request, raw[: inbox.REJECTED_PAYLOAD_MAX], protocol.BAD_REQUEST, "bad_request", started
+                request,
+                raw[: inbox.REJECTED_PAYLOAD_MAX],
+                protocol.BAD_REQUEST,
+                "bad_request",
+                started,
+                fake=fake,
             )
         if protocol.missing_or_malformed(params, complete=self.complete):
-            return self._rejected(request, params, protocol.BAD_REQUEST, "bad_request", started)
+            return self._rejected(request, params, protocol.BAD_REQUEST, "bad_request", started, fake=fake)
         if not inbox.ip_allowed(request, settings.CLICK_ALLOWED_IPS):
-            return self._rejected(request, params, protocol.BAD_REQUEST, "ip_not_allowed", started)
+            return self._rejected(request, params, protocol.BAD_REQUEST, "ip_not_allowed", started, fake=fake)
         if not protocol.sign_ok(params, str(settings.CLICK_SECRET_KEY), complete=self.complete):
-            return self._rejected(
-                request, params, protocol.SIGN_FAILED, FAKE_MODE if fake else BAD_SIGNATURE, started
-            )
+            return self._rejected(request, params, protocol.SIGN_FAILED, BAD_SIGNATURE, started, fake=fake)
         # Past the signature the request is authenticated: these refusals are stored uncapped, with the raw
         # body, as their own ``rejected:{uuid4}`` rows — never under the delivery's key, where their foreign
         # action / service id / reference would make the correct delivery a fingerprint conflict (-8).
@@ -203,22 +222,28 @@ class _ClickCallback(WebhookAPIView):
         if self._conflicting(params):
             return self._conflict(request, params, started)
         txn = params["click_trans_id"]
+        # Which payment the transaction is bound to never changes once bound (the advisory lock above
+        # serialises this transaction's deliveries), so it may be looked up before the Order lock; its
+        # *status* may not (§2.13.0 step 3) and is read below, under the lock.
         bound = payment_selectors.payment_by_txn(PROVIDER, txn)
-        if bound is not None:
-            # A transaction we already bound is answered from state, never re-attached: re-running step 8
-            # would supersede the order's live attempt for a transaction that can no longer be attached.
-            if bound.order_id != order_id:
-                return self._store(request, params, protocol.BAD_REQUEST, raw, started, order_id=order_id)
-            if bound.status in _PREPARED:  # a plain or re-signed retry (refunded: captured, then returned)
-                return self._store(request, params, protocol.OK, raw, started, payment_id=bound.id)
-            # failed (by Click, superseded, expired or cancelled): a repeated attempt of a cancelled payment
-            return self._store(
-                request, params, protocol.TRANSACTION_CANCELLED, raw, started, payment_id=bound.id
-            )
+        if bound is not None and bound.order_id != order_id:
+            return self._store(request, params, protocol.BAD_REQUEST, raw, started, order_id=order_id)
         try:
             order = services.lock_order(order_id)
         except services.OrderNotFound:
             return self._store(request, params, protocol.USER_NOT_FOUND, raw, started)
+        if bound is not None:
+            # A transaction we already bound is answered from state, never re-attached: re-running step 8
+            # would supersede the order's live attempt for a transaction that can no longer be attached.
+            # Read under the Order lock: a concurrent expiry, cancel or pay switch is wholly before or after.
+            current = payment_selectors.get_payment(bound.id)
+            assert current is not None  # noqa: S101 - payments are never deleted
+            if current.status in _PREPARED:  # a plain or re-signed retry (refunded: captured, then returned)
+                return self._store(request, params, protocol.OK, raw, started, payment_id=current.id)
+            # failed (by Click, superseded, expired or cancelled): a repeated attempt of a cancelled payment
+            return self._store(
+                request, params, protocol.TRANSACTION_CANCELLED, raw, started, payment_id=current.id
+            )
         now = timeutils.now()
         if order.status in state.PAID_STATUSES or selectors.honoured_paid(order.pk):
             return self._store(request, params, protocol.ALREADY_PAID, raw, started, order_id=order.pk)

@@ -510,10 +510,11 @@ POLL_CURSOR_KEY = "poll_cursor"
 
 @dataclass(frozen=True, slots=True)
 class PollResult:
-    tracked: list[int]  # order ids whose parcel was tracked
+    tracked: list[int]  # order ids whose parcel was tracked and its status applied
     rejected: int
     unavailable: int
     stopped: bool
+    apply_failed: int = 0  # parcels whose track or apply raised anything else (a poison parcel, skipped)
 
 
 def stable_payload(parcel: Parcel) -> dict[str, Any]:
@@ -548,9 +549,10 @@ def run_bts_poll() -> PollResult:
     ``IntegrationState(bts).data["poll_cursor"]`` (written after every attempted parcel), at most
     ``BTS_POLL_BATCH`` parcels and ``BTS_POLL_MAX_SECONDS``; per-parcel failures are skipped, the run stops
     only after ``BTS_POLL_MAX_CONSECUTIVE_FAILURES`` transport failures in a row. Outcome: stopped →
-    ``record_failure``; ≥ 1 tracked → ``record_sync_success``; attempted but none tracked → ``record_failure``
-    + ERROR ``bts.poll_nothing_tracked``; no candidate → nothing written. Returns at once while BTS is fake
-    under the production settings."""
+    ``record_failure``; ≥ 1 tracked and applied → ``record_sync_success``; attempted but none applied (each
+    parcel rejected, unavailable or failing to apply) → ``record_failure`` + ERROR
+    ``bts.poll_nothing_tracked``; no candidate → nothing written. Returns at once while BTS is fake under the
+    production settings."""
     empty = PollResult(tracked=[], rejected=0, unavailable=0, stopped=False)
     if integration_modes.fake_in_production("bts"):
         return empty
@@ -576,7 +578,7 @@ def _poll() -> PollResult:
     after = [row for row in candidates if row[0] > cursor]
     batch = (after or candidates)[: settings.BTS_POLL_BATCH]
     tracked: list[int] = []
-    rejected = unavailable = streak = 0
+    rejected = unavailable = apply_failed = streak = 0
     stopped = False
     for shipment_id, order_id, tracking_number in batch:
         if (timeutils.now() - started).total_seconds() >= settings.BTS_POLL_MAX_SECONDS:
@@ -600,6 +602,7 @@ def _poll() -> PollResult:
             integration_services.set_state_data("bts", POLL_CURSOR_KEY, shipment_id)
             continue
         except Exception:  # noqa: BLE001 - a poison parcel must not hold the cursor (§2.13.3)
+            apply_failed += 1
             streak = 0
             logger.exception("bts.poll_parcel_failed %s", {"shipment_id": shipment_id, "kind": "apply"})
             integration_services.set_state_data("bts", POLL_CURSOR_KEY, shipment_id)
@@ -611,12 +614,23 @@ def _poll() -> PollResult:
         integration_services.record_failure("bts", f"poll stopped: {streak} transport failures in a row")
     elif tracked:
         integration_services.record_sync_success("bts")
-    elif rejected or unavailable:
+    elif rejected or unavailable or apply_failed:  # attempted, nothing applied: no evidence BTS works
         integration_services.record_failure(
-            "bts", f"poll: no parcel tracked (rejected {rejected}, unavailable {unavailable})"
+            "bts",
+            f"poll: no parcel tracked (rejected {rejected}, unavailable {unavailable}, "
+            f"apply failed {apply_failed})",
         )
-        logger.error("bts.poll_nothing_tracked %s", {"rejected": rejected, "unavailable": unavailable})
-    return PollResult(tracked=tracked, rejected=rejected, unavailable=unavailable, stopped=stopped)
+        logger.error(
+            "bts.poll_nothing_tracked %s",
+            {"rejected": rejected, "unavailable": unavailable, "apply_failed": apply_failed},
+        )
+    return PollResult(
+        tracked=tracked,
+        rejected=rejected,
+        unavailable=unavailable,
+        stopped=stopped,
+        apply_failed=apply_failed,
+    )
 
 
 @shared_task(name="commerce.poll_bts")  # type: ignore[untyped-decorator]

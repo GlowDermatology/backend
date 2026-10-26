@@ -18,6 +18,7 @@ import uuid
 from typing import Any
 
 from django.conf import settings
+from django.core.exceptions import SuspiciousOperation
 from django.db import transaction
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema
@@ -63,6 +64,8 @@ class BtsWebhookView(WebhookAPIView):
         started = time.monotonic()
         try:
             return self._handle(request, started)
+        except SuspiciousOperation:
+            raise  # an oversized body or too many fields: core's handler answers 400/413; nothing written
         except Exception:
             logger.exception("bts.webhook failed; everything rolled back")
             return Response(REFUSED, status=500)
@@ -76,7 +79,7 @@ class BtsWebhookView(WebhookAPIView):
         raw = request.body.decode("utf-8", errors="replace")
         try:
             payload: Any = json.loads(raw) if raw else {}
-        except ValueError:
+        except ValueError, RecursionError:  # RecursionError: a body nested deeper than the decoder allows
             payload = None
         token = str(request.headers.get(TOKEN_HEADER) or request.query_params.get("token") or "")
         secret = str(settings.BTS_WEBHOOK_SECRET)

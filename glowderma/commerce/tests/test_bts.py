@@ -156,6 +156,35 @@ def test_unknown_parcel_rejected_and_down(caplog: pytest.LogCaptureFixture) -> N
     assert len(rows("bts")) == count  # nothing stored
 
 
+def test_a_body_nested_too_deep_is_unparsable() -> None:
+    """``json.loads`` raises RecursionError (not ValueError) on ``"[" * 200000``: without the token it is a
+    401 with a bounded row, never an HTTP 500 with nothing stored."""
+    deep = "[" * 200_000
+    response = APIClient().generic("POST", BTS_URL, deep, content_type="application/json")
+    assert response.status_code == 401 and response.json() == {"ok": False}
+    (row,) = rows("bts")
+    assert row.event_key.startswith("rejected:") and row.raw_body == ""
+    assert row.result["error_code"] == "bad_token" and len(str(row.payload)) <= 1024
+    authenticated = APIClient().generic(
+        "POST", BTS_URL, deep, content_type="application/json", HTTP_X_GD_WEBHOOK_TOKEN=SECRET
+    )
+    assert authenticated.status_code == 200 and authenticated.json() == {"ok": True, "ignored": True}
+
+
+def test_an_oversized_body_or_too_many_query_fields_is_a_client_error_not_a_500(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Django's own limits (``DATA_UPLOAD_MAX_MEMORY_SIZE``, ``DATA_UPLOAD_MAX_NUMBER_FIELDS``) reach core's
+    handler (413 / 400) instead of the webhook's catch-all, which would answer 500 with an ERROR."""
+    with override_settings(DATA_UPLOAD_MAX_MEMORY_SIZE=64):
+        big = APIClient().generic("POST", BTS_URL, "x" * 1024, content_type="application/json")
+    assert big.status_code == 413
+    many = "&".join(f"f{n}=1" for n in range(1200))
+    crowded = APIClient().generic("POST", f"{BTS_URL}?{many}", "{}", content_type="application/json")
+    assert crowded.status_code == 400
+    assert "bts.webhook failed" not in caplog.text and rows("bts") == []
+
+
 def test_fake_bts_in_production_answers_401() -> None:
     shipment = parcel()
     with override_settings(DEV_FEATURES_ALLOWED=False, BTS_MODE="fake"):
@@ -251,6 +280,25 @@ def test_a_parcel_whose_apply_fails_never_holds_the_cursor(
     assert result.tracked == [last.order_id]
     assert "bts.poll_parcel_failed" in caplog.text and "'kind': 'apply'" in caplog.text
     assert state().data["poll_cursor"] == last.pk and state().last_sync_at is not None
+
+
+def test_a_run_whose_every_apply_fails_is_a_failure(caplog: pytest.LogCaptureFixture) -> None:
+    """Every tracked parcel's apply raised: nothing was applied, so the run is no success (no
+    ``last_sync_at``) and counts a failure with the ERROR alert, like a run that tracked nothing."""
+    first, second = parcel(), parcel()
+    before = state()
+
+    def apply(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("cannot apply")
+
+    with mock.patch.object(services, "apply_bts_status", apply), caplog.at_level(logging.ERROR):
+        result = tasks.run_bts_poll()
+    assert result.tracked == [] and result.apply_failed == 2 and not result.stopped
+    after = state()
+    assert after.consecutive_failures == 1 and after.last_sync_at == before.last_sync_at
+    assert after.data["poll_cursor"] == second.pk and first.pk < second.pk
+    assert "bts.poll_nothing_tracked" in caplog.text and "'apply_failed': 2" in caplog.text
+    assert bts_polling_failing() is True
 
 
 def test_three_transport_failures_in_a_row_stop_the_run(tracked: list[str]) -> None:

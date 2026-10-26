@@ -329,3 +329,32 @@ def test_a_poll_never_applies_a_status_older_than_a_concurrent_webhook() -> None
     )
     assert statuses[-1] == "300"
     assert Order.objects.get(pk=order.pk).status == "delivered"
+
+
+def test_a_stale_prepare_replay_reads_the_payment_under_the_order_lock() -> None:
+    """C§2.13.0 step 3: the replay of a bound Prepare reads the payment state after ``lock_order``. A pay
+    switch holding the Order lock abandons the Click payment; the replay waits for it and answers -9 from the
+    committed state (read before the lock it answered 0 for a payment being abandoned)."""
+    seed_policies()
+    now = real_now()
+    order = place(shopper(), fulfilment="pickup", when=now)
+    with pinned_clock(now + timedelta(seconds=5)):
+        payment_id = int(prepare(order)["merchant_prepare_id"])
+    locked = threading.Event()
+
+    def switch() -> None:
+        with transaction.atomic():
+            services.ensure_payable_payment(order.pk, "payme")  # Click left the in-flight window
+            locked.set()
+            time.sleep(0.5)
+
+    def replay() -> dict[str, Any]:
+        locked.wait(TIMEOUT)
+        return prepare(order)  # Click re-sends the Prepare of the same transaction
+
+    with pinned_clock(now + timedelta(minutes=4)):
+        results = _race(switch, replay)
+    assert results[1]["error"] == -9 and results[1]["merchant_prepare_id"] is None, results
+    abandoned = Payment.objects.get(pk=payment_id)
+    assert (abandoned.status, abandoned.error_code) == ("failed", "abandoned")
+    assert Payment.objects.get(order=order, provider="payme").status == "pending"

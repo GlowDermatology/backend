@@ -3,6 +3,7 @@ code (design 03 §7.7/§7.8): the §4 №10248 history and §2.2 detail, Malika'
 negative balance, the status counts and the dashboard numbers at the anchor; a second run adds nothing."""
 
 from datetime import datetime
+from io import StringIO
 from typing import Any
 
 import pytest
@@ -333,11 +334,27 @@ def test_seed_demo_force_under_the_production_settings_skips_the_demo_orders(
     """Staging runs the production settings with fakes and seeds with ``--force``: the run succeeds, the demo
     orders are skipped (their effects would go through ports that are live or report no effect there) and
     the store sales are still recorded."""
+    out = StringIO()
     with override_settings(DEV_FEATURES_ALLOWED=False), caplog.at_level("WARNING"):
-        call_command("seed_demo", force=True, verbosity=0)
+        call_command("seed_demo", force=True, verbosity=0, stdout=out)
     assert not Order.objects.exists()
     assert "seed.commerce_orders_skipped" in caplog.text
     assert Customer.objects.exists() and Product.objects.exists()
+    # the operator sees the skip next to "ran: … commerce", not only in the log
+    assert "commerce: demo orders skipped under the production settings" in out.getvalue()
+    from glowderma.core.management.commands.seed_demo import Command
+
+    usage = " ".join(Command().create_parser("manage.py", "seed_demo").format_help().split())
+    assert "the commerce seeder skips the demo orders" in usage
+
+
+def test_seed_demo_reports_no_skip_under_the_local_settings() -> None:
+    from glowderma.commerce import seeds
+    from glowderma.core.seeding import SeedContext
+
+    context = SeedContext(anchor=ANCHOR, keep_open=True)
+    seeds.seed_commerce(context)  # standalone (no lower layers): store sales only, nothing skipped
+    assert context.notes == []
 
 
 def test_the_seeder_delivery_fee_never_calls_the_bts_port() -> None:
