@@ -1626,7 +1626,9 @@ admin-only by DB constraint).
   manual investigation at Click. So: `commerce.services.record_late_capture(order_id, payment.id, "click",
   click_trans_id, case=<"failed_by_us" | "not_payable" | "double_payment" | "fake_mode">)` under the Order → Payment
   locks: `payments.services.mark_late_captured(payment_id, provider_txn_id, at)` — the **only** transition into `paid`
-  from `failed` (or from `pending` in case (c)) and only for this case: status `paid`, `confirmed_at = at`, `failed_at =
+  from `failed` (case (a); case (b) once the order was cancelled) or from `pending` (case (b) while the expiry job has
+  not run yet, case (c), and case (d), where the payment attached while Click was live is normally still `pending`)
+  and only for this case: status `paid`, `confirmed_at = at`, `failed_at =
   null`, `error_code = "late_capture"`, `provider_state` merged; the `payment_one_active_per_order` partial unique
   excludes `error_code = 'late_capture'` (migration `payments.0002_payment_active_excludes_late_capture`), so case (c)
   can coexist with the order's real paid payment, and the payment selectors treat such rows by the display rule of §2.8
