@@ -291,13 +291,16 @@ def test_unknown_staff_is_404_for_every_action(manager_client: APIClient) -> Non
 # --- reset password -----------------------------------------------------------------------------------------
 
 
-def test_reset_password(manager_client: APIClient, manager: StaffUser, staff: StaffUser) -> None:
+def test_reset_password(
+    manager_client: APIClient, manager: StaffUser, staff: StaffUser, django_capture_on_commit_callbacks: Any
+) -> None:
     AuthSessionFactory.create(staff=staff)
     guard = LoginGuard()
     for _ in range(5):
         guard.record_failure("login", email_hash(staff.email))
     headers = key()
-    response = manager_client.post(detail(staff.pk, "reset-password"), **headers)
+    with django_capture_on_commit_callbacks(execute=True):  # the lockout ends once the reset commits
+        response = manager_client.post(detail(staff.pk, "reset-password"), **headers)
     assert response.status_code == 200, response.data
     password = response.data["temporary_password"]
     assert TEMPORARY.fullmatch(password) and set(response.data["staff"]) == MEMBER_KEYS
@@ -347,3 +350,26 @@ def test_me_reports_the_manager_role(staff_client: APIClient, manager_client: AP
 
     assert me(staff_client)["is_manager"] is False
     assert me(manager_client)["is_manager"] is True
+
+
+# --- fix pass: superusers are always managers ---------------------------------------------------------------
+
+
+def test_a_superuser_cannot_be_removed_from_the_managers(manager_client: APIClient) -> None:
+    root = StaffUser.objects.create_superuser("root@x.uz", "x-Strong-Pass-991", full_name="Root")
+    response = manager_client.patch(detail(root.pk), {"is_manager": False})
+    assert response.status_code == 409
+    assert (response.data["code"], response.data["message"]) == ("conflict", services.STAFF_SUPERUSER_MANAGER)
+    root.refresh_from_db()
+    assert root.is_manager and not AuditEntry.objects.filter(action="staff.updated").exists()
+
+
+def test_a_superuser_without_the_flag_still_manages_staff(manager: StaffUser) -> None:
+    """A row written before the rule (or by hand) with ``is_superuser`` and no ``is_manager`` still passes."""
+    root = StaffUser.objects.create_superuser("root@x.uz", "x-Strong-Pass-991", full_name="Root")
+    StaffUser.objects.filter(pk=root.pk).update(is_manager=False)
+    root.refresh_from_db()
+    client = bearer_client(root)
+    assert client.get(detail(manager.pk)).status_code == 200
+    assert client.get(URL).data["results"][0]["is_manager"] is not None
+    assert client.get("/api/v1/admin/auth/me/").data["is_manager"] is True

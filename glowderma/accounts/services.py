@@ -21,6 +21,7 @@ from django.db.models import Q, Sum
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 
 from glowderma.accounts import tokens, topics
+from glowderma.accounts.api.guard import LoginGuard, email_hash
 from glowderma.accounts.models import (
     Address,
     AuthSession,
@@ -60,13 +61,32 @@ SOCIAL_SUBJECT_LINKED = "Bu ijtimoiy hisob allaqachon bog‘langan."
 SOCIAL_PROVIDER_LINKED = "Bu provayder allaqachon bog‘langan."
 
 
+@transaction.atomic
 def start_staff_session(
-    user: StaffUser, *, device_label: str, auth_method: str = AuthSession.AuthMethod.PASSWORD
+    user: StaffUser,
+    *,
+    device_label: str,
+    auth_method: str = AuthSession.AuthMethod.PASSWORD,
+    failure_code: str = "invalid_credentials",
 ) -> tuple[AuthSession, str]:
     """Open a staff session; ``auth_method`` records how the sign-in was proven (``password`` for email +
-    password, the provider for a social sign-in): only a password session may link an identity (§2.1)."""
+    password, the provider for a social sign-in): only a password session may link an identity (§2.1).
+
+    The session is created under the staff row lock that :func:`reset_staff_password` and
+    :func:`deactivate_staff` also take, and the proof is checked again under it: the account must still be
+    active and, for a password sign-in, its stored hash must still be the one ``user`` was authenticated
+    with. A sign-in that raced a reset or a deactivation therefore never opens a session the revocation
+    missed; it fails with ``failure_code`` (401) instead.
+    """
     if auth_method not in AuthSession.AuthMethod.values:
         raise ValueError(f"Unknown auth method {auth_method!r}")
+    locked = StaffUser.objects.select_for_update().filter(pk=user.pk).only("password", "is_active").first()
+    if (
+        locked is None
+        or not locked.is_active
+        or (auth_method == AuthSession.AuthMethod.PASSWORD and locked.password != user.password)
+    ):
+        raise AuthFailed(failure_code)
     refresh = secrets.token_urlsafe(32)
     session = AuthSession.objects.create(
         audience="staff",
@@ -171,9 +191,12 @@ STAFF_EMAIL_TAKEN = "Bu email bilan xodim allaqachon bor (nofaol bo‘lsa, uni q
 STAFF_LAST_MANAGER = "Kamida bitta faol menejer qolishi kerak. Avval boshqa xodimni menejer qiling."
 STAFF_SELF_DEACTIVATE = "O‘z hisobingizni faolsizlantira olmaysiz."
 STAFF_SELF_DEMOTE = "O‘zingizni menejerlikdan chiqara olmaysiz."
+STAFF_SUPERUSER_MANAGER = "Superadmin doim menejer bo‘ladi: uni menejerlikdan chiqarib bo‘lmaydi."
 STAFF_SELF_RESET = "O‘z parolingizni «Parolni o‘zgartirish» orqali almashtiring."
 # Editable through ``PATCH staff/{id}/`` (the email is the sign-in identity and stays as created).
 STAFF_EDITABLE_FIELDS = ("full_name", "is_manager")
+# Login lockout scopes a password reset ends (``LoginView`` and the guarded Django admin login form).
+STAFF_LOGIN_SCOPES = ("login", "django_admin_login")
 # A temporary password: four groups of four characters without look-alikes (0/O, 1/l/I), ~92 bits.
 TEMPORARY_PASSWORD_ALPHABET = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789"  # noqa: S105 - alphabet
 TEMPORARY_PASSWORD_GROUPS = 4
@@ -251,7 +274,8 @@ def create_staff(
     if StaffUser.objects.filter(email__iexact=email).exists():
         raise ValidationError({"email": [field_error("unique", STAFF_EMAIL_TAKEN)]})
     manager = is_manager or is_superuser
-    if not manager and not StaffUser.objects.filter(is_active=True, is_manager=True).exists():
+    # Locked so two concurrent first accounts (or a concurrent demotion) see one another's result.
+    if not manager and not _lock_active_managers():
         manager = True
     user = StaffUser(email=email, full_name=full_name, is_manager=manager)
     raw = password if password is not None else generate_temporary_password(user)
@@ -287,8 +311,8 @@ def update_staff(
 
     Only the values that differ are written and audited (``staff.updated`` with ``before`` / ``after`` of the
     changed fields); no difference writes nothing. Removing the manager role is refused (409 ``conflict``)
-    for the caller's own account (``refuse_self``; the operator commands pass ``False``) and for the last
-    active manager.
+    for the caller's own account (``refuse_self``; the operator commands pass ``False``), for a superuser
+    (a superuser is always a manager, decision GST-1) and for the last active manager.
     """
     unknown = set(changes) - set(STAFF_EDITABLE_FIELDS)
     if unknown:
@@ -302,6 +326,8 @@ def update_staff(
         if getattr(stored, name) != value:
             before[name], after[name] = getattr(stored, name), value
     if after.get("is_manager") is False:
+        if stored.is_superuser:
+            raise Conflict(STAFF_SUPERUSER_MANAGER)
         if refuse_self and actor is not None and actor.pk == stored.pk:
             raise Conflict(STAFF_SELF_DEMOTE)
         if stored.is_active and managers == [stored.pk]:
@@ -395,6 +421,22 @@ def reactivate_staff(
     return True
 
 
+def _unlock_on_commit(email: str) -> None:
+    """End the login lockouts of ``email`` once the surrounding transaction commits (a rolled-back reset
+    leaves them). Best effort: a Redis error logs and never fails the committed reset."""
+    hashed = email_hash(email)
+
+    def unlock() -> None:
+        guard = LoginGuard()
+        for scope in STAFF_LOGIN_SCOPES:
+            try:
+                guard.unlock(scope, hashed)
+            except Exception:
+                logger.exception("auth.unlock_failed scope=%s", scope)
+
+    transaction.on_commit(unlock, robust=True)
+
+
 @transaction.atomic
 def reset_staff_password(
     user: StaffUser,
@@ -412,7 +454,9 @@ def reset_staff_password(
     password is refused (``refuse_self``, 409 ``conflict``): staff change it with ``auth/change-password/``,
     which asks for the current one, so a stolen session cannot take the account over. Social identities stay
     linked. Works on an inactive account too (prepared before a reactivation). Returns ``(password,
-    revoked_count)``; audited ``staff.password_reset`` plus one ``auth.session_revoked`` per session.
+    revoked_count)``; audited ``staff.password_reset`` plus one ``auth.session_revoked`` per session. Once the
+    reset commits, a running login lockout of the account ends (both :data:`STAFF_LOGIN_SCOPES`), for the API
+    and ``manage.py resetstaffpassword`` alike.
     """
     if refuse_self and actor is not None and actor.pk == user.pk:
         raise Conflict(STAFF_SELF_RESET)
@@ -421,6 +465,7 @@ def reset_staff_password(
     stored.set_password(raw)
     stored.save(update_fields=["password"])
     sessions = _revoke_user_sessions(stored, "password_changed")
+    _unlock_on_commit(stored.email)
     audit.record(
         action="staff.password_reset",
         entity_type="staff",
@@ -500,7 +545,12 @@ def social_login(
                 )
                 _record_link(user, provider, claims, auto=True, request=request)
         if user is not None and identity is not None:
-            session, refresh = start_staff_session(user, device_label=device_label, auth_method=provider)
+            session, refresh = start_staff_session(
+                user,
+                device_label=device_label,
+                auth_method=provider,
+                failure_code="social_account_not_allowed",
+            )
             identity.last_login_at = timeutils.now()
             identity.save(update_fields=["last_login_at"])
             audit.record(

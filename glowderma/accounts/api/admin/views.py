@@ -73,7 +73,7 @@ def _me(user: StaffUser, session: AuthSession) -> dict[str, Any]:
         "email": user.email,
         "display_name": user.full_name or user.email,
         "is_superuser": user.is_superuser,
-        "is_manager": user.is_manager,
+        "is_manager": user.is_manager or user.is_superuser,
         "linked_providers": list(
             user.social_identities.order_by("provider").values_list("provider", flat=True)
         ),
@@ -392,7 +392,8 @@ class StaffViewSet(mixins.ListModelMixin, AdminGenericViewSet):
         return [IsManager()]
 
     def _is_manager(self) -> bool:
-        return bool(getattr(self.request.user, "is_manager", False))
+        user = self.request.user
+        return bool(getattr(user, "is_manager", False) or getattr(user, "is_superuser", False))
 
     def get_queryset(self) -> QuerySet[StaffUser]:
         query = StaffListQuerySerializer(data=self.request.query_params.dict())
@@ -528,5 +529,4 @@ class StaffViewSet(mixins.ListModelMixin, AdminGenericViewSet):
         password, _ = services.reset_staff_password(
             user, actor=cast(StaffUser, request.user), request=request
         )
-        LoginGuard().unlock("login", email_hash(user.email))  # a lockout from earlier guesses ends with it
         return Response({"staff": _member(user.pk), TEMPORARY_PASSWORD: password})

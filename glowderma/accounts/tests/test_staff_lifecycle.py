@@ -61,8 +61,12 @@ def test_deactivate_is_idempotent(staff: StaffUser, actor: StaffUser) -> None:
         "is_active": False,
         "revoked_count": 0,
     }
-    # Already inactive: revokes nothing (even a stray open session), returns 0, writes nothing.
+    # Already inactive: revokes nothing (even a stray open session), returns 0, writes nothing. The service
+    # refuses to open a session for an inactive account, so the stray one is opened while it is active.
+    StaffUser.objects.filter(pk=staff.pk).update(is_active=True)
+    staff.refresh_from_db()
     AuthSessionFactory.create(staff=staff)
+    StaffUser.objects.filter(pk=staff.pk).update(is_active=False)
     assert services.deactivate_staff(staff, actor=actor) == 0
     assert AuthSession.objects.filter(revoked_at__isnull=True).count() == 1
     assert AuditEntry.objects.filter(action="staff.deactivated").count() == 1

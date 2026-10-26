@@ -9,8 +9,10 @@ from unittest.mock import patch
 import pytest
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from rest_framework.test import APIClient
 
 from glowderma.accounts import services
+from glowderma.accounts.api.guard import LoginGuard, email_hash
 from glowderma.accounts.models import AuthSession, StaffUser
 from glowderma.accounts.tests.factories import TEST_PASSWORD, AuthSessionFactory, StaffUserFactory
 from glowderma.core.models import AuditEntry
@@ -128,3 +130,29 @@ def test_setstaffmanager_grants_and_removes_the_role(manager: StaffUser) -> None
     with pytest.raises(CommandError, match=services.STAFF_LAST_MANAGER):
         run("setstaffmanager", "next@x.uz", off=True)
     assert StaffUser.objects.get(email="next@x.uz").is_manager is True
+
+
+def test_setstaffmanager_cannot_remove_a_superuser(manager: StaffUser) -> None:
+    StaffUser.objects.create_superuser("root@x.uz", "x-Strong-Pass-991", full_name="Root")
+    with pytest.raises(CommandError, match=services.STAFF_SUPERUSER_MANAGER):
+        run("setstaffmanager", "root@x.uz", off=True)
+    assert StaffUser.objects.get(email="root@x.uz").is_manager is True
+
+
+def test_resetstaffpassword_ends_a_running_login_lockout(
+    manager: StaffUser, staff: StaffUser, django_capture_on_commit_callbacks: Any
+) -> None:
+    """The recovery path when nobody can sign in: after the command the person signs in with the printed
+    password at once, instead of waiting out the lockout (429)."""
+    hashed = email_hash(staff.email)
+    guard = LoginGuard()
+    for _ in range(5):
+        guard.record_failure("login", hashed)
+    login = {"email": staff.email, "password": "whatever"}
+    assert APIClient().post("/api/v1/admin/auth/login/", login, format="json").status_code == 429
+    with django_capture_on_commit_callbacks(execute=True):
+        out = run("resetstaffpassword", staff.email)
+    match = re.search(r"Temporary password \(shown once\): (\S+)", out)
+    assert match is not None
+    login["password"] = match.group(1)
+    assert APIClient().post("/api/v1/admin/auth/login/", login, format="json").status_code == 200

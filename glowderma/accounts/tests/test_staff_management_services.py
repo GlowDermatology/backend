@@ -8,13 +8,16 @@ from typing import Any
 
 import pytest
 from django.contrib.auth import authenticate
-from django.db import connection
+from django.core.cache import cache
+from django.db import connection, transaction
 from rest_framework.exceptions import ValidationError
+from rest_framework.test import APIClient
 
 from glowderma.accounts import services
+from glowderma.accounts.api.guard import LoginGuard, email_hash
 from glowderma.accounts.models import AuthSession, SocialIdentity, StaffUser
 from glowderma.accounts.tests.factories import TEST_PASSWORD, AuthSessionFactory, StaffUserFactory
-from glowderma.core.api.exceptions import Conflict
+from glowderma.core.api.exceptions import AuthFailed, Conflict
 from glowderma.core.models import AuditEntry
 
 TEMPORARY = re.compile(r"^[A-Za-z2-9]{4}(-[A-Za-z2-9]{4}){3}$")
@@ -229,3 +232,122 @@ def test_two_managers_removing_each_other_leave_one_active_manager(monkeypatch: 
     assert list(
         StaffUser.objects.filter(is_active=True, is_manager=True).values_list("email", flat=True)
     ) == ["a@x.uz"]
+
+
+# --- fix pass: sign-in races, superuser role, lockout on reset ----------------------------------------------
+
+
+@pytest.mark.django_db
+def test_a_sign_in_authenticated_before_a_reset_opens_no_session(
+    manager: StaffUser, staff: StaffUser
+) -> None:
+    """``authenticate`` passed with the old password, then the reset committed: the session is refused under
+    the row lock instead of being opened after the revocation."""
+    authenticated = authenticate(email=staff.email, password=TEST_PASSWORD)
+    assert isinstance(authenticated, StaffUser)
+    services.reset_staff_password(staff, actor=manager)
+    with pytest.raises(AuthFailed) as caught:
+        services.start_staff_session(authenticated, device_label="t")
+    assert caught.value.get_codes() == "invalid_credentials"
+    assert not AuthSession.objects.filter(staff=staff).exists()
+
+
+@pytest.mark.django_db
+def test_a_sign_in_authenticated_before_a_deactivation_opens_no_session(
+    manager: StaffUser, staff: StaffUser
+) -> None:
+    authenticated = authenticate(email=staff.email, password=TEST_PASSWORD)
+    assert isinstance(authenticated, StaffUser)
+    services.deactivate_staff(staff, actor=manager)
+    for method, code in (("password", "invalid_credentials"), ("google", "social_account_not_allowed")):
+        with pytest.raises(AuthFailed) as caught:
+            services.start_staff_session(
+                authenticated, device_label="t", auth_method=method, failure_code=code
+            )
+        assert caught.value.get_codes() == code
+    assert not AuthSession.objects.filter(staff=staff).exists()
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("revoke", ["reset", "deactivate"])
+def test_a_sign_in_racing_a_revocation_leaves_no_live_session(
+    monkeypatch: pytest.MonkeyPatch, revoke: str
+) -> None:
+    """The probe of the review: the sign-in passes ``authenticate``, the reset (or deactivation) commits, then
+    the sign-in creates its session. No session of the account may stay live afterwards."""
+    manager = StaffUserFactory.create(email="m@x.uz", is_manager=True)
+    staff = StaffUserFactory.create(email="victim@x.uz")
+    authed, go = threading.Event(), threading.Event()
+    real = services.start_staff_session
+
+    def slow(*args: Any, **kwargs: Any) -> Any:
+        authed.set()
+        assert go.wait(10)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(services, "start_staff_session", slow)
+    out: dict[str, int] = {}
+
+    def login() -> None:
+        try:
+            response = APIClient().post(
+                "/api/v1/admin/auth/login/", {"email": staff.email, "password": TEST_PASSWORD}, format="json"
+            )
+            out["status"] = response.status_code
+        finally:
+            connection.close()
+
+    thread = threading.Thread(target=login)
+    thread.start()
+    assert authed.wait(10)
+    if revoke == "reset":
+        services.reset_staff_password(staff, actor=manager)
+    else:
+        services.deactivate_staff(staff, actor=manager)
+    go.set()
+    thread.join(10)
+    assert not thread.is_alive()
+    assert out["status"] == 401
+    if revoke == "deactivate":  # nothing opened during the deactivation comes back with the account
+        services.reactivate_staff(staff, actor=manager)
+    assert not AuthSession.objects.filter(staff=staff, revoked_at__isnull=True).exists()
+
+
+@pytest.mark.django_db
+def test_a_superuser_keeps_the_manager_role(manager: StaffUser) -> None:
+    root = StaffUser.objects.create_superuser("root@x.uz", "x-Strong-Pass-991", full_name="Root")
+    assert root.is_manager
+    by_manager = conflict_message(lambda: services.update_staff(root, {"is_manager": False}, actor=manager))
+    by_operator = conflict_message(
+        lambda: services.update_staff(root, {"is_manager": False}, actor=None, refuse_self=False)
+    )
+    assert by_manager == by_operator == services.STAFF_SUPERUSER_MANAGER
+    root.refresh_from_db()
+    assert root.is_manager
+    assert not AuditEntry.objects.filter(action="staff.updated").exists()
+
+
+@pytest.mark.django_db
+def test_reset_ends_the_login_lockouts_only_once_committed(
+    manager: StaffUser, staff: StaffUser, django_capture_on_commit_callbacks: Any
+) -> None:
+    hashed = email_hash(staff.email)
+    lock_keys = [f"auth:lock:{scope}:{hashed}" for scope in services.STAFF_LOGIN_SCOPES]
+    guard = LoginGuard()
+    for scope in services.STAFF_LOGIN_SCOPES:
+        for _ in range(5):
+            guard.record_failure(scope, hashed)
+    assert all(cache.get(k) is not None for k in lock_keys)
+    # A reset that rolls back leaves the lockouts.
+    with django_capture_on_commit_callbacks(execute=False):
+        try:
+            with transaction.atomic():
+                services.reset_staff_password(staff, actor=manager)
+                raise RuntimeError("roll back")
+        except RuntimeError:
+            pass
+    assert all(cache.get(k) is not None for k in lock_keys)
+    with django_capture_on_commit_callbacks(execute=True) as callbacks:
+        services.reset_staff_password(staff, actor=manager)
+    assert callbacks
+    assert all(cache.get(k) is None for k in lock_keys)
