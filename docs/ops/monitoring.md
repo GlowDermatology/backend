@@ -19,7 +19,8 @@ The admin audit log (`GET audit-log/`) keeps the durable trail: `outbox.dead`, `
 **Dead messages are kept until resolved.** Retention purges only `done` outbox rows; a `dead` one stays (it is
 what `requeue_outbox` replays and what K1/K6 list) until staff either replay it (`requeue_outbox --topic <topic>
 --dead [--id N]`) or, when they handled it by hand (a sale entered in Billz, a refund paid out in a cabinet),
-close it: `manage.py requeue_outbox --topic <topic> --dead --resolved --id <message id>` (dry run first; audited
+close it: first `manage.py requeue_outbox --topic <topic> --dead --resolved --id <message id> --dry-run` (check the
+listed message: `--resolved` marks it done without running its handler), then the same without `--dry-run` (audited
 `outbox.resolved`; the row becomes `done` and is purged with the others after `OUTBOX_RETENTION_DAYS`). A
 `billz.push_sale` closes only once its sale is recorded with `billz_mark_recorded` (docs/integrations/billz.md §7).
 
@@ -155,7 +156,7 @@ first due row (no sort, no done row visited), and the outbox checks filter its f
 |---|---|
 | `k1_billz_sale_unrecorded` | Look at the order's `billz.push_sale` message: deferred for a closed shift → it goes through when the shift opens; dead → `billz.sale_dead`; done without a sale → the order was paid while Billz was fake (`billz.sale_not_pushed`): enter the sale in Billz by hand. Then record it with `manage.py billz_mark_recorded --order <id> --actor <staff email> [--billz-sale-id <uuid>]` (docs/integrations/billz.md §7): it sets the purchase's `billz_pushed_at` and Billz sale id, so the order leaves this check (and `_backlog`) at the next report; until then a sale entered by hand stays listed |
 | `k1_billz_sale_unrecorded_backlog` | as `k1_billz_sale_unrecorded`; these are older than the look-back, so their push message is usually dead (§2 `billz.sale_dead`) or was done while Billz was fake |
-| `k1_billz_sale_dead` | as `billz.sale_dead` (§2); a sale entered in Billz by hand → first `billz_mark_recorded` (above), then close its message with `requeue_outbox --topic billz.push_sale --dead --resolved --order <order id>` (or `--id <message id>`, named in the `billz.sale_dead` line and the `outbox.dead` audit row); `--resolved` refuses a sale not recorded yet |
+| `k1_billz_sale_dead` | as `billz.sale_dead` (§2); a sale entered in Billz by hand → first `billz_mark_recorded` (above), then close its message with `requeue_outbox --topic billz.push_sale --dead --resolved --order <order id> --dry-run` and, once the listed message is that order's, the same without `--dry-run` (or `--id <message id>`, named in the `billz.sale_dead` line and the `outbox.dead` audit row); `--resolved` refuses a sale not recorded yet |
 | `k2_payment_pending_stuck` | Check the transaction in the provider's cabinet. Payme keeps a state-1 transaction up to its 12 h timeout and then cancels it: a Payme row younger than ~13 h usually resolves itself. Money taken → follow the late-capture refund |
 | `k2_click_paid_without_paydoc` | The Click Complete arrived without `click_paydoc_id` (see the webhook inbox row `payment:<id>`): a protocol issue for the developers; refunds of such payments are paid out by hand |
 | `k3_refund_open` | Payments screen (`refund_state` filter): `manual_required` (Payme) → refund in the Payme cabinet, Payme confirms it; `unknown` → check the payment in the Click cabinet and *Resolve*; `requested` / `submitting` for a day → the outbox is stuck (K6) |
@@ -231,16 +232,20 @@ never blocks writes): `core.0010` (`outbox_unfinished_idx`), `payments.0003` (`p
 record the migration; re-running `migrate` then fails with `relation "…" already exists`. Recover:
 
 ```bash
-# 1. list invalid indexes
+# 1. which of the three is INVALID, and that no CREATE INDEX is still running (a second migrate, a killed client
+#    whose backend still builds): an index being built is INVALID until it finishes
 docker compose -f compose.prod.yaml exec postgres psql -U glowderma -d glowderma -c \
-  "SELECT indexrelid::regclass AS index FROM pg_index WHERE NOT indisvalid;"
-# 2. drop each one the failed migration left (never inside a transaction block)
+  "SELECT indexrelid::regclass AS index FROM pg_index WHERE NOT indisvalid AND indexrelid::regclass::text IN ('outbox_unfinished_idx', 'purchase_unpushed_online_idx', 'payment_late_capture_open_idx');" \
+  -c "SELECT pid, state, query FROM pg_stat_activity WHERE query ILIKE 'CREATE INDEX%' AND pid <> pg_backend_pid();"
+# 2. only when step 1 lists it and no build runs: drop it (never inside a transaction block)
 docker compose -f compose.prod.yaml exec postgres psql -U glowderma -d glowderma -c \
   "DROP INDEX CONCURRENTLY IF EXISTS outbox_unfinished_idx;"
-# 3. re-run the migrations: the index is built again from scratch
-docker compose -f compose.prod.yaml exec api python manage.py migrate
+# 3. re-run the migrations with the NEW release's image: `run` starts a container of the image .env names
+#    (deploy/pin-release.sh); `exec api` would run the previous release, which has no such migration
+docker compose -f compose.prod.yaml run --rm api migrate
 ```
 
-Check afterwards that the query in step 1 returns no row. A development database that applied an earlier draft of
+Check afterwards that the first query of step 1 returns no row. Never drop another INVALID index this way: find out
+what builds it first. A development database that applied an earlier draft of
 `core.0010` (keyed `(status, available_at)`) gets the current index with `manage.py migrate core 0009` followed by
 `manage.py migrate`.

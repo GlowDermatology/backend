@@ -45,7 +45,7 @@ lists every production variable.
 | Cache | session tombstones, throttle counters keyed by `pii_ref` (HMAC) of phones and device ids, the sealed OTP (120 s), QR token HMACs (60 s), Billz client ids keyed by `pii_ref(phone)` (30 days), provider tokens | Redis DB 0 | No plain phone number is a cache key |
 | Task queue | task names and ids | Redis DB 1 (Celery broker) | |
 | Logs | key=value lines with `request_id`; phones only as `pii_ref`; provider free text scrubbed (`core.pii.scrub_free_text`) | container stdout (Docker json-file, rotated 5 × 20 MB) | httpx request lines are silenced (Billz URLs carry a phone) |
-| Backups | full `pg_dump` and a tarball of the media volume | host `/srv/backups` (14 days) plus the off-host copy | Contain everything above |
+| Backups | full `pg_dump` and a tarball of the media volume | host `/srv/backups` (root only, 14 days) plus the off-host copy, encrypted before it leaves the host (`docs/ops/deploy.md` §11) | Contain everything above |
 
 Reviewed model by model (every table of `glowderma.*`, 2026-10-27). No personal data: `catalog_*` (products,
 categories, banners, images — `uploaded_by` / `last_change_actor` are staff ids), `professionals_service`,
@@ -136,7 +136,7 @@ retention), raw provider callbacks (purged after 180 days), Billz's own client r
 | Idempotency records | 24 h | `core.purge_idempotency_records`, 03:00 |
 | Sealed OTP, QR tokens, refresh grace entries (Redis) | 120 s / 60 s / 120 s | key TTL |
 | Container logs | 5 × 20 MB per container | Docker json-file rotation (`compose.prod.yaml`) |
-| Backups | 14 days on the host | cron in `docs/ops/deploy.md` §11; the off-host copy needs its own rule (Q6) |
+| Backups | 14 days on the host | `deploy/backup.sh` from cron (`docs/ops/deploy.md` §11); the off-host copy's rule is a placeholder until Q6 |
 | Audit log (`AuditEntry`) | kept indefinitely | **not purged** — legal retention unknown (Q1). The purge window allows `core_auditentry`, but no job uses it |
 | Orders, payments, refunds, ledger, purchases, appointments | kept indefinitely | accounting and loyalty history (Q2) |
 | Customer row and phone after deletion | kept | decision A1 (Q3) |
