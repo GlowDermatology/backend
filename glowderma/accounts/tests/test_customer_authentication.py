@@ -103,7 +103,6 @@ def bearer_client(token: str, **headers: Any) -> APIClient:
 
 
 # --- audience separation
-# -------------------------------------------------------------------------------------
 
 
 def test_customer_client_reaches_a_customer_route(customer_client: APIClient, customer: Customer) -> None:
@@ -169,7 +168,6 @@ def test_customer_access_ttl_and_rot_claim(customer_session: tuple[AuthSession, 
 
 
 # --- revocation through the cache
-# ------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -267,7 +265,6 @@ def test_a_staff_session_id_in_a_customer_token_is_refused(staff_session: tuple[
 
 
 # --- device headers
-# ---------------------------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -358,7 +355,6 @@ def test_device_bump_is_rate_limited(
 
 
 # --- rotation confirmation (§2.1.6)
-# -----------------------------------------------------------------------------
 
 
 def test_the_first_request_with_the_current_rot_confirms_once(
@@ -433,7 +429,6 @@ def test_a_concurrent_confirmation_never_overwrites_a_revocation() -> None:
 
 
 # --- public, auth and webhook bases
-# ------------------------------------------------------------------------------
 
 
 def test_public_route_caches_anonymous_reads_only(customer_token: str) -> None:
@@ -475,7 +470,6 @@ def test_webhook_base_has_no_auth_and_no_store() -> None:
 
 
 # --- idempotency with a customer principal (§1.7)
-# --------------------------------------------------------------
 
 
 def test_idempotency_replays_refuses_reuse_and_scopes_by_audience(

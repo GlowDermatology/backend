@@ -145,7 +145,6 @@ def test_customer_auth_matrix_over_the_mounted_routes() -> None:
 
 
 # --- the walker itself, over sample views of every class
-# ------------------------------------------------------
 
 
 class SampleCustomerView(CustomerAPIView):

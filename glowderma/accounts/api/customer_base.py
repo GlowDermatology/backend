@@ -1,16 +1,15 @@
 """Base views of the customer audience (customer contract §1.1–§1.3; plan §1 P0).
 
-=========================  ==================================  ======================  ==========
-============ Base                       Authentication                      Permission              Throttles
- ``audience`` =========================  ==================================  ======================
- ==========  ============
-``CustomerAPIView`` (C)    ``CustomerJWTAuthentication``       ``IsActiveCustomer``    customer    customer
-``CustomerAuthAPIView``    none (``auth/*``; logout adds one)  ``AllowAny``            auth device
-customer_auth ``PublicAPIView`` (O)      ``OptionalCustomerAuthentication``  ``AllowAny``            public
-  public ``WebhookAPIView`` (S)     none: provider signatures           ``AllowAny``            none
-  webhook
-=========================  ==================================  ======================  ==========
-============
+Base classes (``audience`` drives the exception handler):
+
+* ``CustomerAPIView`` (C, audience ``customer``): ``CustomerJWTAuthentication``, ``IsActiveCustomer``,
+  throttle ``customer``.
+* ``CustomerAuthAPIView`` (``auth/*``, audience ``customer_auth``): no authentication (logout adds one),
+  ``AllowAny``, throttles ``customer_auth_device`` and ``customer_auth_ip``.
+* ``PublicAPIView`` (O, audience ``public``): ``OptionalCustomerAuthentication``, ``AllowAny``, throttles
+  ``public`` and ``public_ip`` (anonymous) or ``customer`` (signed in).
+* ``WebhookAPIView`` (S, audience ``webhook``): no authentication (provider signatures), ``AllowAny``, no
+  throttle.
 
 ``PosAPIView`` (K) lives in ``loyalty/api/pos/base.py`` (P3): its authentication reads ``loyalty.PosDevice``,
 which ``accounts`` may not import. Every class except the webhook one parses the device headers first
@@ -145,7 +144,11 @@ class PublicAPIView(DeviceHeadersMixin, APIView):
 class WebhookAPIView(APIView):
     """Provider callbacks (**S**, customer contract §2.13): no DRF authentication (signatures are checked by
     the view), no throttle, parsers declared per provider view, provider-native bodies. DRF's ``as_view``
-    already exempts API views from CSRF; there is no cookie or session auth on this API."""
+    already exempts API views from CSRF; there is no cookie or session auth on this API.
+
+    Errors the view does not answer itself (405, 415, a parse error, an unexpected exception) use the customer
+    envelope (``audience`` ``webhook`` is in ``CUSTOMER_AUDIENCES``). A provider whose protocol needs a native
+    error body (Click, Payme: P2) overrides ``get_exception_handler`` on its view."""
 
     audience: ClassVar[str] = "webhook"
     parser_classes = []

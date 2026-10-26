@@ -367,7 +367,6 @@ def cancel(appointment_id: int, *, reason: str = "", actor: Any, request: Any = 
 
 
 # --- M2 seam (plan §1 P0): the customer cancel, implemented by P3
-# --------------------------------------------
 
 
 def cancel_by_customer(

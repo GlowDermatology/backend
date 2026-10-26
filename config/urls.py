@@ -38,7 +38,8 @@ ADMIN_API_MODULES = (
 )
 
 # Customer API (M2): one include per module, all mounted at api/v1/ (each urls.py carries its own prefixes:
-# auth/, me/, catalog/, cart/, orders/, …), in layer order; customer contract §1.1.
+# auth/, me/, catalog/, cart/, orders/, …), in the plan's order (§1 P0; the prefixes never overlap, so the
+# order does not change which view a path resolves to); customer contract §1.1.
 CUSTOMER_API_MODULES = (
     "customers",
     "site_config",

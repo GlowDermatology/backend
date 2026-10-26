@@ -92,7 +92,6 @@ def anon_client() -> APIClient:
 
 
 # --- M2 customer audience (plan §1 P0)
-# -----------------------------------------------------------------------
 
 
 @pytest.fixture

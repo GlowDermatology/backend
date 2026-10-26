@@ -1041,7 +1041,6 @@ __all__ = [
 
 
 # --- M2 seams (plan §1 P0): stubs P2 replaces, and the cart helper P1 needs now
-# ---------------------------------
 
 
 def cancel_by_customer(order_id: int, customer_id: int, *, at: datetime | None = None) -> int:
