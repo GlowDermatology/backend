@@ -30,7 +30,7 @@ merge order into feat/m2-integration: P2 → P3 → P1 → lead e2e + schema reg
 |---|---|---|---|
 | **P0 seams** | Everything two packages would otherwise both edit: customer auth class + base views, device headers and device key, the `accounts.0006` migration, i18n catalog, error codes + `details`, throttle scopes, enums, settings/env/beat, URL mounts, fixtures, the FCM port extension, small core helpers (`secretbox`, `pii`, `qr_store`), the cross-package service stubs | `/home/user/wt/m2-p0`, `feat/m2-p0-seams` | `test_gd_m2_p0` |
 | **P1 accounts** | Customer auth (OTP, register, login, reset, refresh, logout, social incl. Apple and the nonce), `me/*` incl. delete + addresses + device + social identities, public catalog, `settings/public/`, Eskiz port | `/home/user/wt/m2-p1`, `feat/m2-p1-accounts` | `test_gd_m2_p1` |
-| **P2 commerce** | Cart, delivery regions/calculate, checkout, pay, customer cancel, reorder, Click/Payme callbacks, refused-capture refunds and the Click status check, expiry grace, customer orders + timeline, BTS webhook + polling, dev simulate | `/home/user/wt/m2-p2`, `feat/m2-p2-commerce` | `test_gd_m2_p2` |
+| **P2 commerce** | Cart, delivery regions/calculate, checkout, pay, customer cancel, reorder, Click/Payme callbacks, refused-capture reversals (accept and reverse), expiry grace, customer orders + timeline, BTS webhook + polling, dev simulate | `/home/user/wt/m2-p2`, `feat/m2-p2-commerce` | `test_gd_m2_p2` |
 | **P3 engagement** | Loyalty summary/ledger, QR + POS resolve + POS key commands, specialists/services/slots, booking + customer cancel, inbox list/read/ack, push senders (`inbox_id`, customer titles, account-security notices, token pruning rules) | `/home/user/wt/m2-p3`, `feat/m2-p3-engagement` | `test_gd_m2_p3` |
 
 Why this split (instead of the suggested three): the customer authentication class, the error-envelope extension,
@@ -275,8 +275,8 @@ C§2.0 rows 23–34 and 49–52: `cart/*`, `delivery/regions/`, `delivery/calcul
 | `cashback_max(items_subtotal, delivery_fee, available)` | `commerce.selectors` | the one formula of C§2.7 (cart, calculate, checkout) |
 | `create_order(…, delivery_fee: int, expected_total: int \| None = None, min_payable: int = 0, visible_only: bool = False)` | `commerce.services` (B5, changed) | **B5 changes, all of them:** (1) the BTS quote leaves `create_order` — the caller passes `delivery_fee` (no HTTP call under `ProductStock` locks; the seeder passes its fee); (2) visibility through `catalog.selectors.customer_visible_products()` when `visible_only` (status, price ≥ 1000, active category) under the stock locks; (3) `OutOfStock(lines=[{product_id, name, requested, available, status}])` with every problem line; (4) `CashbackAboveMax(max)` from `min_payable` evaluated on the live subtotal (replaces the bare `cashback_used ≤ items_subtotal` check); (5) `PriceChanged(totals)` when `expected_total` differs; (6) typed `AddressNotFound` / `AddressIncomplete` instead of the generic `CheckoutError`; (7) evaluation order stock → cashback max → expected total → rows → `create_hold` (`InsufficientCashback`) |
 | `checkout(customer_id, request) -> order_id` | `commerce.services` | quote first (no row lock), then `select_for_update` on the Customer row, open-order rule and cart read under it, `create_order`, cart emptied, `Cart.last_checkout_order` |
-| `is_payable(order, payment, now, *, attaching)`, `in_flight(payment, now)`, `customer_inflight_order(customer_id)` | `commerce.services` / `selectors` | C§2.7.2 definitions; the selector replaces the P0 stub |
-| `ensure_payable_payment(order_id, provider) -> PaymentRow` | `commerce.services` | reuse / in-flight refusal (`PaymentInProgress`) / switch (`abandoned`) / stale Click attachment → new row / new row after a failure; updates `Order.payment_provider`; under `lock_order` |
+| `is_payable(order, payment, now, *, attaching)`, `is_open(payment)`, `in_flight(payment, now)`, `customer_inflight_order(customer_id)` | `commerce.services` / `selectors` | C§2.7.2 definitions (open transaction vs in flight; `CLICK_INFLIGHT_SECONDS` = 120); the selector replaces the P0 stub |
+| `ensure_payable_payment(order_id, provider, *, superseding: str \| None = None) -> PaymentRow` | `commerce.services` | same provider → reuse as is (the pay endpoint never writes for it); `superseding=<click_trans_id>` (Click Prepare only) → an active Click payment attached to another transaction is failed `abandoned` and a new row created (C§2.7.2 supersede rule); other provider in flight → `PaymentInProgress`; other provider not in flight → switch (`abandoned`); new row after a failure; updates `Order.payment_provider`; under `lock_order` |
 | `cancel_by_customer(order_id, customer_id, *, at=None)` | `commerce.services` | replaces the P0 stub; state.py row 5; Click in flight → `PaymentInProgress` |
 | `mark_paid(order_id, payment_id, provider, provider_txn_id, at=None)` | `commerce.services` (B5, **signature changed**) | refuses unless `payment_id` is the order's pending payment of `provider`; callers (seed, sandbox) updated |
 | `fail_payment_effects(order_id, payment_id, error_code, at=None, *, provider_txn_id=None)` | `commerce.services` (B5, **signature changed**) | acts on that payment only |
@@ -285,13 +285,13 @@ C§2.0 rows 23–34 and 49–52: `cart/*`, `delivery/regions/`, `delivery/calcul
 | `customer_orders(customer_id, scope)`, `customer_order_detail(order_id, customer_id, lang)`, `customer_timeline(order, lang)`, `progress(order, lang)` | `commerce.selectors` | C§2.8, C§4; history horizon (`Customer.reactivated_at`); live item names in the resolved language |
 | `build(order_id)`, `verify(ref) -> order_id \| None` | `commerce.payment_ref` | C§1.4/C§2.7.2 account reference, `compare_digest` |
 | `poll_bts()` | `commerce.tasks` | replaces the P0 stub; C§2.13.3 |
-| handler `payments.click_status_check` | `commerce.tasks` | C§2.13.0 `true` mode: Click `payment_status(click_paydoc_id)` → `record_late_capture` if still paid |
 | webhook inbox helper (`store_delivery`, `store_rejected` with the per-IP cap and 1 KiB truncation, `semantic_fingerprint`) | `commerce/api/webhooks/inbox.py` | C§2.13.0 |
 | fake-mode refusal: every webhook view first checks `core.providers.callbacks_refused(provider)` → Click `-1` / Payme `-32504` / BTS 401, bounded `rejected:` row with `error_code: "fake_mode"`, nothing else read or written | `commerce/api/webhooks/*` | C§2.13.0 (production may run fake adapters; fake mode never pays an order) |
 | checkout and pay accept only `core.providers.payable_providers()` (400 `invalid_choice` otherwise) | `commerce/api/customer/*` | C§2.4, C§2.7 |
 | `attach_transaction(payment_id, provider_txn_id, provider_state)` (refuses a different existing txn id → `TransactionTaken`), `merge_provider_state(payment_id, patch)`, `mark_late_captured(payment_id, provider_txn_id, at, raw=None)` (pending or failed-by-us → `paid`, `error_code="late_capture"`, `failed_at=None`) | `payments.services` | under the Payment lock |
 | `active_payment`, `display_payment` ignore `error_code = "late_capture"`; `payme_statement(from_ms, to_ms)` by `provider_state.time`; `payment_by_txn(provider, txn_id)` | `payments.selectors` (B5, changed) | |
-| `refund.submit` payload for Click carries `provider_state.click_paydoc_id` | `payments.services` (`_new_refund`) | C§2.13.0 |
+| Payme protocol reads `account[PAYME_ACCOUNT_FIELD]` and answers `data = PAYME_ACCOUNT_FIELD` (the same setting builds the checkout URL's `ac.` key) | `integrations.payme.protocol`, `commerce/api/webhooks/payme.py` | C§2.13.2 |
+| Click refunds keyed by `click_paydoc_id`: `RefundRow.provider_payment_ref` (= `Payment.provider_state["click_paydoc_id"]`, `""` when absent) in `payments.selectors.refund_row`; B5's `commerce.tasks.submit_refund`, `_resolve_after_failure` and `_reversed` pass it (never `provider_txn_id` = `click_trans_id`) to `ClickPort.refund` / `payment_status`; a Click refund whose payment has no `click_paydoc_id` is created `manual_required` and re-checked by `submit_refund` before any port call; the seeded Click payments of `commerce/seeds.py` get a `click_paydoc_id`. `resolve_refund` also accepts a `failed` Click refund → `succeeded` (staff payout after a refused reversal, admin §7 item 18) | `payments.selectors`, `payments.services`, `commerce.tasks`, `commerce.services` | C§2.13.0 (Click Merchant API reversal/status are keyed by the payment id) |
 | a Click refund is `manual_required` (created with `manual=True`, and re-checked by `submit_refund` before any port call) while the Click port is fake under the production settings (`core.providers.callbacks_refused("click")`): the fake would report a reversal that moved no money | `commerce.services` (refund creation call sites), `commerce.tasks.submit_refund` | C§2.13.0, C§6.14 |
 | `region_catalog()` | `delivery.selectors` | BTS `regions()` cached 24 h (`gd:bts:regions`) |
 | Click protocol (`sign_ok`, `parse_amount`, `fingerprint`, `ERRORS`, `CLICK_ACCEPT_JSON`), Payme protocol (`auth_ok`, `rpc_error`, `MESSAGES`, `TIMEOUT_MS`, `ERR_ORDER_NOT_FOUND = -31050`, `ERR_ORDER_BUSY = -31051`, `INTERNAL_ERROR_RESPONSE`) | `integrations.{click,payme}.protocol` | pure functions and constants, no DB |
@@ -333,8 +333,9 @@ create_refund}`, `payments.selectors.{active_payment, display_payment, refunds_f
   blocks on the Customer row lock).
 - **Race — checkout vs the Customer lock held by a delete** (a thread holding `select_for_update` on the customer and
   then deactivating it): checkout ends with 401 `SESSION_EXPIRED`, no order.
-- Pay: reuse, switch Click↔Payme (`abandoned`), Click in flight → `payment_in_progress`, stale Click attachment → new
-  row, Payme state-1 refusal, not payable → 409 `order_expired` **with no write** (the order stays `awaiting_payment`
+- Pay: same provider reuses the row with no write (also while a Click transaction is open or in flight), switch
+  Click↔Payme (`abandoned`), switch while Click is in flight (< 120 s) → `payment_in_progress` and allowed after it,
+  Payme state-1 refusal, `actions.pay` true while Click is in flight and false while Payme is in state 1, not payable → 409 `order_expired` **with no write** (the order stays `awaiting_payment`
   until the job), already paid, URL format (Click query with `account_ref`, Payme base64 with tiyin, language and
   `account_ref`), `return_url` https.
 - Customer cancel: from `awaiting_payment` (Click pending failed; Payme state-1 left pending), Click in flight → 409,
@@ -345,13 +346,21 @@ create_refund}`, `payments.selectors.{active_payment, display_payment, refunds_f
 - **Click sandbox suite (offline, §5.1)** and **Payme sandbox suite (offline, §5.2)** — every row.
 - **Race — expiry vs late callback:** (a) Click complete holding the Order lock while the expiry job runs → the job
   skips (`skip_locked`), the payment wins; (b) the job wins first → complete is a refused capture: `0` + late-capture
-  refund (default) or `-9` + a delayed status check (`true`); (c) prepare at T−30 s, expiry at T, complete at T+60 s →
+  refund; (c) prepare at T−30 s, expiry at T, complete at T+200 s (Click no longer in flight, still open) → the job
+  skipped the order until T+300 s → paid (grace); (c′) prepare at T−30 s, expiry at T, complete at T+60 s →
   paid (grace); (d) complete after the grace → refused capture; (e) prepare at T+10 s → `-9` (attaching after
   `reservation_expires_at`).
 - **Race — pay switch vs Click complete** (threads): the switch to Payme and the Complete of the prepared Click payment
   run concurrently → either the Complete wins (Click paid, the switch answers `already_paid`) or the switch is refused
   `payment_in_progress`; never a Payme row confirmed with a Click transaction id.
 - **Race — duplicate concurrent Click complete** (two threads, same payload): one effect, both answers `0`.
+- **Race — superseding Prepare vs Complete of the old transaction** (threads): exactly one of the two Click payments
+  ends `paid` normally; the other is either never captured or a refused capture (`late_capture` + refund); never two
+  normal captures.
+- Click refunds by `click_paydoc_id`: an admin cancel of a Click-paid order and a late-capture refund call the fake
+  port's `refund` / `payment_status` with the payment's `click_paydoc_id` (asserted on the fake's recorded calls, not on
+  the outbox payload); a payment without one → refund `manual_required`, no port call; a refused reversal → `failed`,
+  then `…/resolve/ {state: succeeded}` closes it.
 - **Race — two Payme `CreateTransaction` with different ids for one order** (threads): one state-1 transaction, the
   other `-31051`; the first transaction stays `CheckTransaction`-able (never overwritten).
 - Account reference: a wrong HMAC part → Click `-5`, Payme `-31050` (`data: "order_id"`), before any order lookup.
@@ -460,37 +469,37 @@ Run with the real webhook views and a pinned clock; signatures built by `integra
 
 | # | Call | Input variation | Expected `error` | Expected state |
 |---|---|---|---|---|
-| 1 | prepare | valid | 0, `merchant_prepare_id` 301 | payment pending, txn attached, `prepare_at`, `click_paydoc_id` stored |
-| 2 | prepare | same payload again | 0 (replayed) | unchanged; one effect |
-| 3 | prepare | same `click_trans_id`, re-signed (new `sign_time`) | 0, same prepare id | unchanged |
+| 1 | prepare | valid | 0, `merchant_prepare_id` 301 | payment pending, txn attached, `prepare_at`, `click_paydoc_id` stored; one inbox row |
+| 2 | prepare | same payload again | 0 (replayed) | unchanged; one effect; inbox rows: the original + one `dup:` row |
+| 3 | prepare | same `click_trans_id`, re-signed (new `sign_time`) | 0, same prepare id | unchanged; one more `dup:` row |
 | 4 | prepare | wrong `sign_string` | -1 | nothing; bounded `rejected:` row |
 | 5 | prepare | `action=1` on prepare URL | -3 | nothing |
 | 6 | prepare | unknown order / wrong HMAC part / bare order id | -5 | nothing |
 | 7 | prepare | `amount=784401` / `"784400.50"` / `"abc"` | -2 | nothing |
-| 8 | prepare | `service_id` other / missing param / missing `click_paydoc_id` / JSON body | -8 | nothing |
+| 8 | prepare | `service_id` other / missing param / missing `click_paydoc_id` / JSON body / same `click_trans_id` with another amount (conflicting fingerprint) | -8 | nothing; `rejected:` row for the conflict |
 | 9 | prepare | order cancelled, or `now ≥ R` | -9 | nothing |
 | 10 | prepare | order paid | -4 | nothing |
-| 11 | prepare | new `click_trans_id` while 301 is prepared < 10 min ago | -9 | 301 untouched |
-| 12 | prepare | new `click_trans_id` while 301 was prepared > 10 min ago (before `R`) | 0, new prepare id | 301 failed `abandoned`, new pending |
+| 11 | prepare | new `click_trans_id` while 301 is attached without a Complete (prepared 30 s ago, i.e. still in flight, and again 10 min ago; both before `R`) | 0, new prepare id | 301 failed `abandoned` (no `payment_failed` event), new pending row attached (supersede, C§2.7.2) |
+| 12 | complete | of the superseded 301 after row 11, `error=0` (money taken) | 0, `merchant_confirm_id` 301 | refused capture: 301 `paid` `late_capture`, refund `{case: failed_by_us}`; the new payment untouched and still payable |
 | 13 | prepare | while a Payme transaction is in state 1 | -9 | nothing |
 | 14 | complete | valid | 0, `merchant_confirm_id` 301 | paid, order `processing`, events, outbox |
-| 15 | complete | same payload again | 0 (replayed) | one purchase, one credit |
-| 16 | complete | re-signed retry after success | 0 (from state) | one purchase, one credit |
+| 15 | complete | same payload again | 0 (replayed) | one purchase, one credit; inbox rows: the original + one `dup:` row |
+| 16 | complete | re-signed retry after success | 0 (from state) | one purchase, one credit; one more `dup:` row |
 | 17 | complete | unknown `merchant_prepare_id` | -6 | nothing |
 | 18 | complete | `error=-5017` | -9 | payment failed, `payment_failed` event, order still payable |
 | 19 | complete | amount differs | -2 | pending |
-| 20 | complete | prepared before `R`, complete within the grace | 0 | paid normally |
-| 21 | complete | after expiry beyond the grace (order cancelled by the job, payment failed `expired`), reverses=false | 0 | payment `paid` `late_capture`, `Refund(late_capture)` requested + `refund.submit` (with `click_paydoc_id`) + `refund_requested` event + audit `payment.late_capture {case: failed_by_us}` |
-| 22 | complete | as 21, reverses=true | -9 | payment stays failed; `payments.click_status_check` enqueued with a 900 s delay |
-| 23 | complete | as 22, status check finds the payment still paid (`click.status = "paid"`) | – | late-capture refund created, ERROR `payment.click_not_reversed` |
-| 24 | complete | as 22, status check finds it reversed | – | nothing, INFO log |
-| 25 | complete | 301 failed `abandoned` by a switch to Payme, reverses=false | 0 | late-capture refund `{case: failed_by_us}`; the Payme payment untouched |
-| 26 | complete | the order was meanwhile paid by Payme (double payment), reverses=false | 0 | 301 `paid` `late_capture` next to the Payme paid row (index allows it), refund `{case: double_payment}`, order unchanged |
-| 27 | complete | as 26, reverses=true | -4 | status check enqueued |
-| 28 | complete | after a customer cancel (only possible once Click left the in-flight window), reverses=false | 0 | refund `{case: failed_by_us}` |
+| 20 | complete | prepared before `R`, complete within the grace (also after Click left the 120 s in-flight window) | 0 | paid normally |
+| 21 | complete | after expiry beyond the grace (order cancelled by the job, payment failed `expired`) | 0 | payment `paid` `late_capture`, `Refund(late_capture)` requested + `refund.submit` + `refund_requested` event + audit `payment.late_capture {case: failed_by_us}`; the refund handler calls the fake port's `refund` with `click_paydoc_id` (asserted on the fake's recorded call, not on the payload) |
+| 22–24 | — | removed in revision 2 (PAY-2: no error-answer mode, no delayed status check) | — | — |
+| 25 | complete | 301 failed `abandoned` by a switch to Payme | 0 | late-capture refund `{case: failed_by_us}`; the Payme payment untouched |
+| 26 | complete | the order was meanwhile paid by Payme (double payment) | 0 | 301 `paid` `late_capture` next to the Payme paid row (index allows it), refund `{case: double_payment}`, order unchanged; order list/filter/detail show the Payme payment (C§2.8) |
+| 27 | — | removed in revision 2 (PAY-2) | — | — |
+| 28 | complete | after a customer cancel (only possible once Click left the in-flight window) | 0 | refund `{case: failed_by_us}` |
 | 29 | complete | bad signature (incl. `merchant_prepare_id` tampered) | -1 | nothing |
 | 30 | complete | payment failed by Click earlier (`error_code "-5017"`) | -9 | nothing |
-| 31 | complete | payment already refunded after a capture | 0 (from state) | nothing new |
+| 31 | complete | payment already refunded after a capture | 0 (from state) | nothing new but a `dup:` row |
+| 32 | complete | refused capture of a payment whose reversal the fake refuses (`click.refund: failed`) | 0 | refund `failed`, counted in `attention.refunds_needing_action`; `…/resolve/ {state: succeeded}` closes it |
+| 33 | prepare / complete | any request, correctly signed, with `CLICK_MODE=fake` under `override_settings(DEV_FEATURES_ALLOWED=False)` | -1 | order and payments unchanged; bounded `rejected:` row `error_code: "fake_mode"` |
 
 ### 5.2 Payme (mirrors the `test.paycom.uz` checklist; amounts in tiyin 78 440 000; codes marked † verify M3)
 
@@ -498,7 +507,7 @@ Run with the real webhook views and a pinned clock; signatures built by `integra
 |---|---|---|---|
 | 1 | any | no/wrong Basic auth | -32504 (bounded `rejected:` row) |
 | 2 | – | body not JSON / no `method` / unknown method / `ChangePassword` / GET | -32700 / -32600 / -32601 / -32601 / -32300 |
-| 3 | CheckPerformTransaction | unknown order / wrong HMAC part / missing `order_id` | -31050 (`data: "order_id"`) |
+| 3 | CheckPerformTransaction | unknown order / wrong HMAC part / missing `order_id` | -31050 (`data: "order_id"`; with `PAYME_ACCOUNT_FIELD=invoice` the account key and `data` are `invoice`) |
 | 4 | CheckPerformTransaction | wrong amount / amount `78440000.5` / amount `0` | -31001 |
 | 5 | CheckPerformTransaction | cancelled / paid / `now ≥ R` order | -31008 |
 | 6 | CheckPerformTransaction | another transaction in state 1, or a Click transaction in flight | -31051 † (`data: "order_id"`) |
@@ -522,6 +531,7 @@ Run with the real webhook views and a pinned clock; signatures built by `integra
 | 24 | CheckTransaction | each state | fields per C§2.13.2 (0 for missing times, `reason` null) |
 | 25 | GetStatement | window covering the Payme `time` of 8 and 19 | both, ascending by Payme `time` (not our `create_time`) † |
 | 26 | any | an exception inside the handler | JSON-RPC -32400 †, nothing written |
+| 27 | any | correct Basic auth with `PAYME_MODE=fake` under `override_settings(DEV_FEATURES_ALLOWED=False)` | -32504, order unchanged, bounded `rejected:` row `error_code: "fake_mode"` |
 
 ---
 
@@ -540,8 +550,7 @@ behaviour: under the production settings the fakes run without scenarios, record
 | BTS | `bts.quote`: `"rejected"` / `"down"`; `bts.tariff`: int | 409 `delivery_unavailable` / 503 / fixed fee |
 | BTS | `bts.fail_attempts`, `bts.down`, `bts.existing`, `bts.tracking_number`, `bts.status`, `bts.cancel` | B5 rules (create/cancel) |
 | BTS | `bts.track_status`: `"100"`/`"200"`/`"300"`/other | what `track()` answers (webhook re-track, polling) |
-| Click | `click.refund`: `succeeded`/`failed`/`unknown`/`down` | B5 refund rules (also used by the late-capture refund) |
-| Click | `click.status`: `paid`/`reversed`/`down` | what `payment_status()` answers to the delayed status check |
+| Click | `click.refund`: `succeeded`/`failed`/`unknown`/`down` | B5 refund rules (also used by the late-capture reversal); the fake records the `click_paydoc_id` it was called with |
 | Click | `click.transaction_id`, `click.paydoc_id` | fixed ids for `dev/…/simulate/` |
 | Payme | `payme.transaction_id` | fixed Payme id for `dev/…/simulate/` |
 | FCM | token `…-bad` / `…-payload` / `…-down` | `unregistered` (device pruned) / `payload_invalid` (message failed, device untouched) / `FcmUnavailable` (retry) |
@@ -629,12 +638,11 @@ behaviour: under the production settings the fakes run without scenarios, record
 #CLICK_SECRET_KEY=
 #CLICK_PAY_URL=https://my.click.uz/services/pay
 #CLICK_ALLOWED_IPS=
-# A prepared Click payment counts as in flight (blocks switch/cancel/second prepare) for this many seconds.
-#CLICK_INFLIGHT_SECONDS=600
-# false (default): a Complete we cannot honour is accepted and refunded automatically; true (only after M3 proves
-# Click reverses on an error answer): answer an error and re-check the payment status after the delay below.
-#CLICK_REVERSES_ON_COMPLETE_ERROR=false
-#CLICK_STATUS_CHECK_DELAY_SECONDS=900
+# A prepared Click payment counts as in flight (blocks a switch to Payme, the customer cancel and DELETE me) for
+# this many seconds; must not exceed PAYMENT_IN_FLIGHT_GRACE_SECONDS. Paying again with Click is never blocked: a new
+# Prepare supersedes the open Click transaction. A Complete we cannot honour is always accepted and reversed (Click
+# SHOP API rule), so there is no switch for it.
+#CLICK_INFLIGHT_SECONDS=120
 # ---- Payme (Merchant API) ------------------------------------------------------
 # fake under the production settings: callbacks are refused and Payme is not offered to customers.
 #PAYME_MODE=fake
@@ -708,7 +716,6 @@ Validation (P0):
 | (exists, B5) `commerce-expire-reservations` | `commerce.expire_reservations` | every 60 s | B5; grace change by P2 |
 
 No beat entry for `loyalty.services.expire_holds`: it must stay unscheduled while the in-flight grace exists (C§2.9.1).
-The Click status check is an outbox message with a delay (`outbox.enqueue(…, delay=…)`), not a beat job.
 
 ---
 
@@ -739,7 +746,7 @@ The Click status check is an outbox message with a delay (`outbox.enqueue(…, d
    (refused-capture default, device key for A2, history horizon for A1).
 4. Ops: the website serves `apple-app-site-association` / `assetlinks.json` for `PAYMENT_RETURN_URL`; the edge proxy
    log format redacts `token=`; alerts on the ERROR events `otp.budget_tripped`, `payment.late_capture`,
-   `payment.click_not_reversed`, `push.payload_invalid`; throttle rates reviewed after two weeks of production metrics.
+   `push.payload_invalid`, `apple.revoke_dead`, and on refunds `failed` after a refused Click reversal (staff payout); throttle rates reviewed after two weeks of production metrics.
    A deployment that runs fake adapters shows them in the startup WARNINGs `providers.fake_in_production` and in
    `health/?ready=1` `providers`; the runbook lists what that posture cannot do (C§6.14: no online payment, no SMS, no
    push, no social sign-in with fake OAuth).

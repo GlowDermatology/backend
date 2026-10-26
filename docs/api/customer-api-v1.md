@@ -596,7 +596,7 @@ Customer → Order → Payment → LoyaltyAccount; the **Customer row lock comes
 concurrent checkout either finishes before the delete, whose step 1 then cancels it, or runs after it and is refused
 because the customer is no longer active):
 1. an `awaiting_payment` order whose Click payment is **in flight** (§2.7.2) → 409 `payment_in_progress` (nothing
-   written; the app asks the customer to finish or wait ≤10 minutes);
+   written; the app asks the customer to finish or wait ≤2 minutes, `CLICK_INFLIGHT_SECONDS`);
 2. every `awaiting_payment` order → `commerce.services.cancel_by_customer` (P2; reason `customer_request`;
    processing/shipped orders continue: BTS uses the order's recipient snapshot);
 3. every open future appointment → `appointments.services.cancel_by_customer` (P3; `reason = "account_deleted"`);
@@ -902,17 +902,25 @@ moves money, never creates order events and never expires an order.
 **Definitions** (`commerce.services`, P2; one definition for the app, the jobs and every provider callback):
 - **attached**: the payment carries a provider transaction — Click `provider_state.prepare_at` (a Prepare answered
   `0`), Payme `provider_state.create_time` (a `CreateTransaction` answered state 1). `attached_at` is that instant.
-- **in flight**: a Click payment that is `pending`, attached and has no Complete yet, while `now < prepare_at +
-  CLICK_INFLIGHT_SECONDS` (600; the customer is on Click's confirmation screen); a Payme payment that is `pending` in
-  `provider_state.state = 1` (until Payme performs or cancels it).
+- **open transaction**: a `pending` payment that is attached and not completed — Click: Prepare answered `0`, no
+  Complete yet; Payme: `provider_state.state = 1`.
+- **in flight**: an open transaction the customer may be confirming right now — Click: open and `now < prepare_at +
+  CLICK_INFLIGHT_SECONDS` (120; never longer than the grace, settings validation); Payme: open (state 1, until Payme
+  performs or cancels it). In flight blocks only a switch to the **other** provider, the customer cancel and `DELETE
+  me/`; it never blocks paying again with the same provider (below).
 - **payable** — `is_payable(order, payment, now, *, attaching: bool)`: `order.status = awaiting_payment` ∧ (`now <
   reservation_expires_at` ∨ (¬`attaching` ∧ the payment was attached **before** `reservation_expires_at` ∧ `now <
   reservation_expires_at + PAYMENT_IN_FLIGHT_GRACE_SECONDS` (300))). Starting a transaction (Click Prepare, Payme
   `CreateTransaction` with a new id) always needs `now < reservation_expires_at`; only completing a transaction that
   was already attached in time (Click Complete, Payme `PerformTransaction`) gets the grace. The grace is anchored to
   `reservation_expires_at`, so repeated prepares cannot extend an order.
-- The expiry job (`expire_due_reservations`) skips an order whose payment is in flight and was attached before
-  `reservation_expires_at`, until `reservation_expires_at + PAYMENT_IN_FLIGHT_GRACE_SECONDS`; then it expires the
+- **Click supersede rule.** Re-opening Click's pay page starts a **new** Click transaction (new `click_trans_id`). A
+  Prepare with a new `click_trans_id` for an order that is still payable (`attaching=True`) therefore supersedes the
+  order's open Click transaction, whatever its age: the old payment is failed `abandoned` and a new `pending` row is
+  attached (§2.13.1 Prepare step 8). If the old transaction still completes with money taken, that is a refused
+  capture (§2.13.0): accepted and reversed. So a customer who leaves Click's page after Prepare can pay again at once.
+- The expiry job (`expire_due_reservations`) skips an order whose payment has an **open transaction attached before
+  `reservation_expires_at`**, until `reservation_expires_at + PAYMENT_IN_FLIGHT_GRACE_SECONDS`; then it expires the
   order (a Click payment is failed `expired`; a Payme state-1 payment stays pending, P-2). A capture that still lands
   is a **refused capture** (§2.13.0) and is refunded.
 
@@ -922,17 +930,16 @@ moves money, never creates order events and never expires an order.
 | Status `processing`/`handed_to_courier`/`delivered`, or a `paid` payment exists | 409 `already_paid` "Buyurtma allaqachon to‘langan." · `error.already_paid` |
 | Status `cancelled` | 409 `not_payable` "Bu buyurtmani to‘lab bo‘lmaydi." · `error.not_payable` |
 | Not payable with `attaching=True` (`now ≥ reservation_expires_at`; the job has not run yet) | 409 `order_expired` "To‘lov muddati tugadi. Mahsulotlarni savatga qaytarib, qaytadan rasmiylashtiring." · `error.order_expired` — **nothing is written** (§1.7); the expiry job cancels the order |
-| `provider` differs from the in-flight payment's provider (Click prepared < 10 min ago, or Payme state 1) | 409 `payment_in_progress` "To‘lov {provider} ilovasida jarayonda. Uni yakunlang yoki biroz kuting." · `error.payment_in_progress`, `details {provider, order_id}` |
+| `provider` differs from the provider of an in-flight payment (Click prepared < `CLICK_INFLIGHT_SECONDS` ago without Complete, or Payme state 1) | 409 `payment_in_progress` "To‘lov {provider} ilovasida jarayonda. Uni yakunlang yoki biroz kuting." · `error.payment_in_progress`, `details {provider, order_id}` |
 | `provider` not in `settings/public` `payment_providers` (§2.4) | 400 `provider` `invalid_choice` |
 
 **Side effects** (`commerce.services.ensure_payable_payment(order_id, provider)`, P2, under `lock_order` → Payment
-locks): the active `pending` payment of the same provider is **reused** while it is not attached, or while it is in
-flight (the app re-opens the same provider page); a pending payment of the same provider that is attached but no
-longer in flight (Click prepared > 10 min ago without Complete) is failed `abandoned` and a new `pending` row is
-created; a pending payment of the **other** provider that is not in flight is failed with `error_code="abandoned"`
-(`payments.services.fail_payment(unilateral=True)`) and a new `pending` payment is created with `amount =
-order.total`, `Order.payment_provider` updated; a failed previous attempt gets a new `pending` row. One active payment
-per order is guaranteed by the partial unique index.
+locks): the active `pending` payment of the **same** provider is **reused** as it is, attached or not (nothing is
+written; the app opens the provider page again, and a Click Prepare with a new `click_trans_id` supersedes an open
+Click transaction, above); a pending payment of the **other** provider that is not in flight is failed with
+`error_code="abandoned"` (`payments.services.fail_payment(unilateral=True)`) and a new `pending` payment is created
+with `amount = order.total`, `Order.payment_provider` updated; a failed previous attempt gets a new `pending` row. One
+active payment per order is guaranteed by the partial unique index.
 ```jsonc
 // 200
 {"order_id": 10248, "payment_id": 301, "provider": "click", "amount": 784400,
@@ -953,7 +960,7 @@ per order is guaranteed by the partial unique index.
 (`commerce.payment_ref.build/verify`, P2; no migration, the value is recomputed). Click Prepare, Payme
 `CheckPerformTransaction` and `CreateTransaction` verify it with `hmac.compare_digest` before any lookup (§2.13), so a
 third party cannot open or block a payment for someone else's order by guessing ids. Echoes (`merchant_trans_id`,
-`account.order_id`) repeat the full reference.
+`account[PAYME_ACCOUNT_FIELD]`) repeat the full reference.
 
 **Opening the provider.** The app opens `web_url` in the **system browser** (iOS `SFSafariViewController` is not
 enough for the Click/Payme app hand-off: use `UIApplication.open`; Android a Custom Tab or the default browser), never
@@ -964,8 +971,9 @@ is not installed the page offers the custom-scheme fallback `PAYMENT_RETURN_FALL
 Both are server-configured (never taken from the client, no open redirect). On return **and on every app resume**
 while an order is `awaiting_payment`, the app polls `GET me/orders/{id}/` every 2 s for up to 60 s until
 `payment.status` is `paid`; while `payment.in_progress` is true it shows "To‘lov tekshirilmoqda"
-(`label.payment.in_progress`) instead of a countdown; a customer who never returns is covered by the push of the
-`processing` status.
+(`label.payment.in_progress`) instead of a countdown, and — for Click — keeps the "To‘lash" button (`actions.pay`): a
+customer who left Click's page can pay again at once (the new Click transaction supersedes the old one, §2.7.2); a
+customer who never returns is covered by the push of the `processing` status.
 
 #### 2.7.3 `POST orders/{id}/cancel/` (**C**, **I**)
 Empty body. Allowed only from `awaiting_payment` (C-6; design 03 §4.1 row 5) → 200 `OrderDetail`.
@@ -1033,8 +1041,10 @@ Only orders created at or after the history horizon (§2.2.3).
  "actions": {"pay": false, "cancel": false, "reorder": true}}
 ```
 - `payment` is the display payment (B5 `payments.selectors.display_payment`, which ignores late-captured rows,
-  §2.13.0). `actions.pay` = `awaiting_payment` ∧ `is_payable(…, attaching=True)` ∧ ¬`payment.in_progress`;
-  `actions.cancel` = `awaiting_payment` ∧ no Click payment in flight; `actions.reorder` = not `awaiting_payment` (or
+  §2.13.0). `actions.pay` = `awaiting_payment` ∧ `is_payable(…, attaching=True)` ∧ no Payme payment in state 1 (a Click
+  payment in flight does not block it: paying again with Click supersedes, §2.7.2; a switch to Payme answers 409
+  `payment_in_progress` for at most `CLICK_INFLIGHT_SECONDS`); `actions.cancel` = `awaiting_payment` ∧ no Click payment
+  in flight (≤ 2 minutes after its Prepare); `actions.reorder` = not `awaiting_payment` (or
   `pay_by` passed).
 - Item `name`: the live product name in the resolved language (fallback chain of §1.4) when the product still exists;
   otherwise the `OrderItem.name` snapshot, which B5 takes from `name_uz`. Prices, quantities and images are always the
@@ -1059,7 +1069,7 @@ Reads `loyalty.selectors.account_summary`, `customer_totals`, `tier_for`, the ac
            {"from": 30000000, "to": 50000000, "percent": "3.00"}],
  "earn_on_cashback_paid": false,                         // active policy flag (L2)
  "holds": [{"order_id": 10250, "amount": 20000,
-            "expires_at": "2026-10-26T12:15:00+05:00"}],   // EFFECTIVE expiry: reservation_expires_at, + PAYMENT_IN_FLIGHT_GRACE_SECONDS while a transaction attached in time is in flight (§2.7.2)
+            "expires_at": "2026-10-26T12:15:00+05:00"}],   // EFFECTIVE expiry: reservation_expires_at, + PAYMENT_IN_FLIGHT_GRACE_SECONDS while a transaction attached in time is still open (§2.7.2)
  "qr_ttl_seconds": 60}
 ```
 `CashbackHold.expires_at` itself stays at `reservation_expires_at`; holds are released only by the order transitions
@@ -1312,14 +1322,19 @@ admin-only by DB constraint).
      transaction", in flight) runs **after** this lock, so a concurrent `orders/{id}/pay/` switch, customer cancel,
      expiry or second provider callback is either fully before or fully after it;
   4. the state transition through a commerce service that names the **payment explicitly**:
-     `mark_paid(order_id, payment_id, provider, provider_txn_id, at)`, `fail_payment_effects(order_id, payment_id,
-     error_code, at, provider_txn_id)`, `record_late_capture(order_id, payment_id, provider, provider_txn_id, at)`.
+     `mark_paid(order_id, payment_id, provider, provider_txn_id, at=None)`, `fail_payment_effects(order_id,
+     payment_id, error_code, at=None, *, provider_txn_id=None)`, `record_late_capture(order_id, payment_id, provider,
+     provider_txn_id, *, case, at=None)` (the signatures of plan §3; callers pass `provider_txn_id` and `case` as
+     keywords).
      Each refuses (`InvalidTransition`) when that payment is not the order's payment for that provider in the state
      the call expects, so a capture can never confirm a different payment than the one the provider named (B5's
      `mark_paid(order_id, provider_txn_id)` picked "the pending payment of the order"; P2 changes the signatures);
      `payments.services.attach_transaction(payment_id, provider_txn_id, provider_state)` refuses with
      `TransactionTaken` a payment that already carries a **different** non-empty `provider_txn_id`;
-  5. the `WebhookInbox` row (below), inserted last in the same transaction.
+  5. the `WebhookInbox` row (below), inserted last in the same transaction — under the delivery's own `event_key`
+     for a first delivery, under `dup:{event_key}:{uuid4}` for a duplicate (a replay of a key that already has a row),
+     never a second row under the same key (`webhookinbox_provider_event_unique`; a violation would answer 500 and make
+     Click retry forever).
 - **WebhookInbox (T5):** `result = {"status", "body": <response>, "outcome": "accepted" | "duplicate" | "rejected" |
   "error", "error_code": str | null}`, `entity_ref` (`"order:10248"`, `"payment:301"`), allow-listed headers
   (`Content-Type`, `User-Agent`, `X-Forwarded-For`; never `Authorization`, tokens or the BTS secret), `path` without its
@@ -1330,44 +1345,57 @@ admin-only by DB constraint).
     the same way, and one sampled WARNING per IP per minute carries the count. Requests that pass authentication are
     never capped;
   - **Payme read-only methods** (`CheckPerformTransaction`, `CheckTransaction`, `GetStatement`): `raw_body = ""`
-    (the parsed `payload` is enough; these are frequent and change nothing).
+    (the parsed `payload` is enough; these are frequent and change nothing);
+  - **duplicates** (`dup:` rows, outcome `duplicate`): `raw_body = ""`; the answer is the stored body or the current
+    state (table below). Authenticated duplicates are never capped.
 
   | Provider | `event_key` | Duplicate handling |
   |---|---|---|
-  | Click | `prepare:{click_trans_id}` / `complete:{click_trans_id}` | **Idempotent from state first** (Prepare/Complete steps below): a re-signed retry (new `sign_time`/`sign_string`) of an applied Prepare or Complete answers the same success. The inbox compares a **semantic fingerprint** = SHA-256 over `click_trans_id, service_id, merchant_trans_id, merchant_prepare_id, amount, action, error` (excluding `sign_time`, `sign_string`, `error_note`, `click_paydoc_id`); same fingerprint → replay the stored body; a conflicting fingerprint under the same key → `-8` and a `rejected:` row |
+  | Click | `prepare:{click_trans_id}` / `complete:{click_trans_id}` | When a row already exists under the key, the **semantic fingerprint** = SHA-256 over `click_trans_id, service_id, merchant_trans_id, merchant_prepare_id, amount, action, error` (excluding `sign_time`, `sign_string`, `error_note`, `click_paydoc_id`) is compared first: a conflicting fingerprint → `-8` and a `rejected:{uuid4}` row; the same fingerprint (a plain or re-signed retry) → the Prepare/Complete steps below answer **from state** (an applied call answers the same success) and a `dup:` row is written |
   | Payme | `{method}:{params.id or "-"}:{uuid4}` — every delivery is its own row | never replayed: the Payme state machine below is idempotent on `params.id` (= `Payment.provider_txn_id`) and answers from the **current** state |
-  | BTS | `{our tracking number}:{status}:{event_time}` from the payload, else `{uuid4}` | replay `{"ok": true}` |
+  | BTS | `{our tracking number}:{status}:{event_time}` from the payload, else `{uuid4}` | replay `{"ok": true}` and a `dup:` row; no re-track |
   | any | **auth/signature failure** → `rejected:{uuid4}` | a forged request can never occupy the key of a real delivery |
 - Lock keys: Click `click:{click_trans_id}`; Payme `payme:{params.id}` (`payme:order:{order_id}` for
   `CheckPerformTransaction`); BTS `bts:{shipment id}`.
-- **Payable / in flight / attached:** exactly as defined in §2.7.2 (`commerce.services.is_payable(order, payment, now,
-  *, attaching)`, `in_flight(payment, now)`).
+- **Payable / open / in flight / attached / supersede:** exactly as defined in §2.7.2
+  (`commerce.services.is_payable(order, payment, now, *, attaching)`, `is_open(payment)`, `in_flight(payment, now)`).
 - **Refused capture** (spec Financial integrity: captures on non-awaiting orders are refused; one that still lands is
   refunded and alerted). A provider reports money taken (Click Complete with `error = 0`) for a payment we will not
   honour: (a) the payment was failed by **us** for a non-provider reason — `error_code` ∈ {`expired`, `abandoned`,
-  `cancelled`, `late_complete`}; (b) the order is `cancelled`, or `awaiting_payment` but not payable (`attaching=False`)
-  because the grace is over; (c) the order is already paid by **another** payment (double payment). One rule for all of
-  them, selected by `CLICK_REVERSES_ON_COMPLETE_ERROR`:
-  - **`false` (default until M3 proves otherwise):** `commerce.services.record_late_capture(order_id, payment_id,
-    "click", click_trans_id)` under the Order → Payment locks: `payments.services.mark_late_captured(payment_id,
-    provider_txn_id, at)` — the **only** transition into `paid` from `failed` and only for this case: status `paid`,
-    `confirmed_at = at`, `failed_at = null`, `error_code = "late_capture"`, `provider_state` merged; the
-    `payment_one_active_per_order` partial unique excludes `error_code = 'late_capture'` (migration
-    `payments.0002_payment_active_excludes_late_capture`), so case (c) can coexist with the order's real paid payment,
-    and `active_payment`/`display_payment` ignore such rows — then `Refund(origin=late_capture, amount=payment.amount)`
-    `requested` + outbox `refund.submit` (B5 `payments.services.create_refund`), event `refund_requested {refund_id,
-    amount, provider, manual: false}` (source system), audit `payment.late_capture {order_id, payment_id, provider,
-    case}`, ERROR log `payment.late_capture` (alert). The refund shows in `attention.refunds_needing_action` if it fails.
-    Answer `0` with `merchant_confirm_id = payment.id` (Click keeps the capture; we return it).
-  - **`true`:** answer `-9` (`-4` in case (c)); a pending payment is failed `late_complete`; outbox
-    `payments.click_status_check {payment_id}` with `delay = CLICK_STATUS_CHECK_DELAY_SECONDS` (900). Its handler asks
-    the Click Merchant API for the payment status by `provider_state.click_paydoc_id` **(verify M3)**; if Click still
-    reports it paid (Click did not reverse), it runs `record_late_capture` as above and logs ERROR
-    `payment.click_not_reversed`; if reversed, it logs INFO and stops; a transport error retries through the outbox.
-  The order itself never changes status because of a refused capture.
-- **Refund and status calls for Click** use `provider_state.click_paydoc_id` (the Click payment id of the Merchant
-  API), not `click_trans_id` **(verify M3)**; the B5 Click port's `refund(provider_txn_id, amount)` /
-  `payment_status(provider_txn_id)` receive that value from `refund.submit` (P2 changes the payload builder).
+  `cancelled`} (a superseded Click attachment is `abandoned`, §2.7.2); (b) the order is `cancelled`, or
+  `awaiting_payment` but not payable (`attaching=False`) because the grace is over; (c) the order is already paid by
+  **another** payment (double payment). **One rule for all of them: accept and reverse.** Click's SHOP API documentation
+  (docs.click.uz, SHOP API requests) settles it: after a successful Prepare and withdrawal of funds, the answer to
+  Complete cannot be an error except `-4` (this payment was already confirmed) or `-9` (a repeated attempt to confirm a
+  payment that was cancelled); if the goods cannot be provided, the merchant answers Complete **successfully** and
+  cancels the payment through the Merchant API (`payment/reversal`); repeated error answers send the payment to manual
+  investigation at Click. So: `commerce.services.record_late_capture(order_id, payment.id, "click", click_trans_id,
+  case=<"failed_by_us" | "not_payable" | "double_payment">)` under the Order → Payment locks:
+  `payments.services.mark_late_captured(payment_id, provider_txn_id, at)` — the **only** transition into `paid` from
+  `failed` (or from `pending` in case (c)) and only for this case: status `paid`, `confirmed_at = at`, `failed_at =
+  null`, `error_code = "late_capture"`, `provider_state` merged; the `payment_one_active_per_order` partial unique
+  excludes `error_code = 'late_capture'` (migration `payments.0002_payment_active_excludes_late_capture`), so case (c)
+  can coexist with the order's real paid payment, and the payment selectors treat such rows by the display rule of
+  §2.8 — then `Refund(origin=late_capture, amount=payment.amount)` `requested` + outbox `refund.submit` (B5
+  `payments.services.create_refund`), event `refund_requested {refund_id, amount, provider, manual: false}` (source
+  system), audit `payment.late_capture {order_id, payment_id, provider, case}`, ERROR log `payment.late_capture`
+  (alert). Answer `0` with `merchant_confirm_id = payment.id` (Click keeps the capture; we return it). The order itself
+  never changes status because of a refused capture.
+  - **A reversal Click refuses** — Click reverses only payments of the current reporting month made with an online card,
+    and UZCARD may refuse — ends as refund `failed` (B5 `submit_refund` → `mark_failed`, event `refund_failed`), which
+    shows in admin `attention.refunds_needing_action`. Staff either `retry` it (a transient refusal) or pay the customer
+    outside Click and close it with `…/resolve/ {state: "succeeded"}`, which P2 extends from `unknown` /
+    `manual_required` to a `failed` Click refund (admin §7 item 18). The customer keeps seeing "To‘lov qaytarilmoqda"
+    until then (§2.8).
+- **Refund and status calls for Click** are keyed by the Click payment id of the Merchant API (`DELETE
+  …/payment/reversal/{service_id}/{payment_id}`, `GET …/payment/status/{service_id}/{payment_id}`), which is our
+  `provider_state.click_paydoc_id` — never `click_trans_id` (`Payment.provider_txn_id`) **(verify M3)**. P2 exposes
+  it on `payments.selectors.RefundRow.provider_payment_ref` and changes B5's `commerce.tasks.submit_refund`,
+  `_resolve_after_failure` and `_reversed` to pass it to `ClickPort.refund` / `payment_status` (the built handler reads
+  `refund.provider_txn_id`; the `refund.submit` payload is not what it uses). A Click payment without a
+  `click_paydoc_id` (seeded or legacy rows) is never sent to Click with another id: its refund becomes
+  `manual_required` (created that way, and re-checked by `submit_refund` before any port call), as does any Click
+  refund while the Click port is fake under the production settings (§6.14).
 
 #### 2.13.1 Click SHOP API
 Configured in the Click merchant cabinet: Prepare URL `…/api/v1/webhooks/click/prepare/`, Complete URL
@@ -1409,46 +1437,50 @@ Responses are `application/json`.
 
 | `error` | `error_note` | We answer it when |
 |---|---|---|
-| 0 | `Success` | accepted (including a refused capture in `CLICK_REVERSES_ON_COMPLETE_ERROR=false` mode, §2.13.0) |
+| 0 | `Success` | accepted, including every refused capture (accepted and reversed, §2.13.0) |
 | -1 | `SIGN CHECK FAILED!` | signature mismatch; every request to a fake Click under the production settings (§2.13.0) |
 | -2 | `Incorrect parameter amount` | `amount` not a non-negative decimal with ≤2 dp, not integral so'm, or ≠ `payment.amount` (= `order.total`) |
 | -3 | `Action not found` | `action` ≠ 0 on prepare / ≠ 1 on complete |
-| -4 | `Already paid` | the order is already paid by another payment (prepare; complete only in `true` mode) |
+| -4 | `Already paid` | prepare only: the order is already paid (a Complete for a payment that is already captured answers `0` from state; a Complete for an order paid by another payment is a refused capture, `0`) |
 | -5 | `User does not exist` | `merchant_trans_id` is malformed, its HMAC part does not verify, or the order does not exist |
 | -6 | `Transaction does not exist` | complete: `merchant_prepare_id` is not a Click payment of this order bound to this `click_trans_id` |
 | -7 | `Failed to update user` | reserved (never sent: a DB failure answers 500 so Click retries) |
 | -8 | `Error in request from click` | missing/malformed parameters (incl. `click_paydoc_id`); wrong content type; `service_id` ≠ ours; IP outside `CLICK_ALLOWED_IPS` (when set); a conflicting semantic fingerprint under the same key |
-| -9 | `Transaction cancelled` | prepare: the order is cancelled or not payable with `attaching=True`; another transaction of this order is in flight; complete: Click reported `error < 0`; the payment failed at Click earlier; a refused capture in `true` mode |
+| -9 | `Transaction cancelled` | prepare: the order is cancelled or not payable with `attaching=True`; a Payme transaction of this order is open (state 1); complete: Click reported `error < 0`; the payment failed at Click earlier (a repeated Complete of a payment Click cancelled) |
 
 **Prepare (action 0).** Fake Click under the production settings → `-1` before anything else (§2.13.0). Steps 1 of §2.13.0 (params `-8` → content type `-8` → IP `-8` → signature `-1` → action `-3`
 → `service_id` `-8` → account reference `-5`), advisory lock, then:
-1. **state replay:** a payment with `provider = click`, `provider_txn_id = click_trans_id` exists and is `pending` or
-   `paid` → `0` with the same `merchant_prepare_id` (a re-signed retry); inbox fingerprint check (`-8` on conflict);
+1. **duplicate / state replay:** an inbox row under `prepare:{click_trans_id}` with a conflicting fingerprint → `-8`
+   (`rejected:` row); a payment with `provider = click`, `provider_txn_id = click_trans_id` exists and is `pending` or
+   `paid` → `0` with the same `merchant_prepare_id` (a plain or re-signed retry; `dup:` row, §2.13.0);
 2. `lock_order(order_id)`; order exists (`-5`);
 3. already paid (`processing`+ or a non-late `paid` payment) → `-4`;
 4. not payable with `attaching=True` (cancelled, or `now ≥ reservation_expires_at`) → `-9`;
-5. another transaction of this order is in flight (a Payme state-1 payment, or a pending Click payment bound to a
-   **different** `click_trans_id` prepared < `CLICK_INFLIGHT_SECONDS` ago) → `-9` (the customer is paying in another
-   window; the first one wins);
+5. a Payme transaction of this order is open (state 1) → `-9` (the customer is paying with Payme; Payme debits only on
+   `PerformTransaction`). An open **Click** transaction with another `click_trans_id` does **not** refuse: the new
+   Prepare supersedes it (§2.7.2, step 8);
 6. Click `error < 0` → `-9`, no effect;
 7. amount ≠ `order.total` → `-2`;
-8. `ensure_payable_payment(order, "click")` (a stale attached Click payment is failed `abandoned` and a new pending row
-   is created, §2.7.2), then `attach_transaction(payment.id, click_trans_id, {merchant_trans_id, merchant_prepare_id:
-   payment.id, click_trans_id, click_paydoc_id, service_id, prepare_at, sign_time})` → `0` with `merchant_prepare_id =
-   payment.id`. `TransactionTaken` (a concurrent prepare bound the row) cannot happen under the Order lock and maps to
+8. `ensure_payable_payment(order, "click", superseding=click_trans_id)`: the active Click payment is reused when it
+   is not attached; when it is attached to **another** `click_trans_id` (an open transaction, any age) it is failed
+   `abandoned` (unilateral, no `payment_failed` event, as B5's silent fails) and a new `pending` row is created — a later
+   Complete of the old transaction is a refused capture (§2.13.0); then `attach_transaction(payment.id, click_trans_id,
+   {merchant_trans_id, merchant_prepare_id: payment.id, click_trans_id, click_paydoc_id, service_id, prepare_at,
+   sign_time})` → `0` with `merchant_prepare_id = payment.id`. `TransactionTaken` (a concurrent prepare bound the row) cannot happen under the Order lock and maps to
    `-8` defensively. No order event (a prepare is not a state change).
 
 **Complete (action 1).** Steps 1 of §2.13.0 (as prepare), advisory lock, then:
-1. **state replay:** `Payment(id = merchant_prepare_id, provider click, provider_txn_id = click_trans_id)` was
-   already captured — `paid` (normally or as a late capture) or `refunded` afterwards — → `0` with
-   `merchant_confirm_id = payment.id`, whatever the payload hash (the signature was verified), and nothing is written
-   (a captured status is terminal for this transaction, so reading it before the Order lock is safe); inbox
-   fingerprint check (`-8` on conflict);
+1. **duplicate / state replay:** an inbox row under `complete:{click_trans_id}` with a conflicting fingerprint → `-8`
+   (`rejected:` row); `Payment(id = merchant_prepare_id, provider click, provider_txn_id = click_trans_id)` was already
+   captured — `paid` (normally or as a late capture) or `refunded` afterwards — → `0` with `merchant_confirm_id =
+   payment.id` and no state change, only a `dup:` row (a captured status is terminal for this transaction, so reading
+   it before the Order lock is safe; the signature of the retry was verified in step 1 of §2.13.0);
 2. `lock_order(order_id)`; order exists (`-5`);
 3. `Payment(id = merchant_prepare_id, order, provider click, provider_txn_id = click_trans_id)` exists, locked (`-6`);
-4. Click `error < 0`: a `pending` payment → `fail_payment_effects(order_id, payment.id, str(error), provider_txn_id)`
+4. Click `error < 0`: a `pending` payment → `fail_payment_effects(order_id, payment.id, str(error),
+   provider_txn_id=click_trans_id)`
    (payment `failed`, event `payment_failed {provider, transaction_id, error_code}`; the order stays payable until
-   expiry and the app may pay again); → `-9`;
+   expiry and the app may pay again); → `-9` (no money was taken: Click reports the payment failed);
 5. amount ≠ `payment.amount` → `-2` (payment unchanged);
 6. the payment was failed **by Click** earlier (numeric `error_code`) → `-9`;
 7. **honoured capture:** the payment is `pending`, it is the order's active payment, the order is not paid by another
@@ -1457,8 +1489,9 @@ Responses are `application/json`.
    + cashback credit, `processing`, events `payment_confirmed` (+ `cashback_credited`), outbox `billz.push_sale`,
    `bts.create_shipment` (delivery), `push.order_status processing`); `provider_state += {complete_at, error,
    error_note}` → `0` with `merchant_confirm_id = payment.id`;
-8. **otherwise** it is a refused capture (§2.13.0: failed by us, order cancelled or past the grace, or paid by
-   another payment) → the refused-capture rule.
+8. **otherwise** it is a refused capture (§2.13.0: failed by us — including a superseded attachment —, order
+   cancelled or past the grace, or paid by another payment) → `record_late_capture(order_id, payment.id, "click",
+   click_trans_id, case=…)` and `0` with `merchant_confirm_id = payment.id` (accept and reverse).
 
 #### 2.13.2 Payme Merchant API (JSON-RPC 2.0)
 Endpoint `POST …/api/v1/webhooks/payme/`, `Content-Type: application/json`. Every answer is HTTP 200 with a JSON-RPC
@@ -1472,7 +1505,7 @@ Missing or wrong → error `-32504`; under the production settings a fake Payme 
 // request
 {"jsonrpc": "2.0", "id": 12345, "method": "CreateTransaction",
  "params": {"id": "5305e3bab097f420a62ced0b", "time": 1729673880000, "amount": 78440000,
-            "account": {"order_id": "10248-3f9a0c1b2d"}}}
+            "account": {"order_id": "10248-3f9a0c1b2d"}}}   // key = PAYME_ACCOUNT_FIELD (default "order_id"), as configured in the Payme cabinet
 // success
 {"jsonrpc": "2.0", "id": 12345, "result": {"create_time": 1729673881000, "transaction": "301", "state": 1}}
 // error
@@ -1496,8 +1529,8 @@ Missing or wrong → error `-32504`; under the production settings a fake Payme 
 | -31003 | "Tranzaksiya topilmadi." / "Транзакция не найдена." / "Transaction not found." | unknown `params.id` |
 | -31007 | "Buyurtma bajarilgan, tranzaksiyani bekor qilib bo‘lmaydi." / "Заказ выполнен. Невозможно отменить транзакцию." / "The order is fulfilled; the transaction cannot be cancelled." | cancel of a performed transaction without an open refund |
 | -31008 | "Amalni bajarib bo‘lmaydi." / "Невозможно выполнить операцию." / "Unable to perform the operation." | order paid, cancelled or not payable; transaction not in state 1; 12-hour timeout |
-| -31050 | "Buyurtma topilmadi." / "Заказ не найден." / "Order not found." (`data: "order_id"`) | missing/malformed `account.order_id`, HMAC part not verifying, unknown order (`PAYME_ERR_ORDER_NOT_FOUND`) |
-| -31051 | "Buyurtma boshqa to‘lov bilan kutilmoqda." / "Заказ ожидает оплаты другой транзакцией." / "The order is awaiting another transaction." (`data: "order_id"`) | the order already has another active Payme transaction in state 1, or a Click transaction in flight (`PAYME_ERR_ORDER_BUSY`; the range −31050…−31099 is Payme's account-error range) |
+| -31050 | "Buyurtma topilmadi." / "Заказ не найден." / "Order not found." (`data` = `PAYME_ACCOUNT_FIELD`, default `"order_id"`) | missing/malformed `account[PAYME_ACCOUNT_FIELD]`, HMAC part not verifying, unknown order (`PAYME_ERR_ORDER_NOT_FOUND`) |
+| -31051 | "Buyurtma boshqa to‘lov bilan kutilmoqda." / "Заказ ожидает оплаты другой транзакцией." / "The order is awaiting another transaction." (`data` = `PAYME_ACCOUNT_FIELD`) | the order already has another active Payme transaction in state 1, or a Click transaction in flight (`PAYME_ERR_ORDER_BUSY`; the range −31050…−31099 is Payme's account-error range) |
 
 **States** (`provider_state.state`): `1` created, `2` performed, `-1` cancelled before perform, `-2` cancelled after
 perform. **Reasons** (`CancelTransaction.reason`, stored): 1 recipient not found/inactive, 2 debit error at the
@@ -1505,7 +1538,8 @@ processing centre, 3 transaction execution error, 4 cancelled by timeout, 5 refu
 **Timeout:** a state-1 transaction older than 12 h (`now − create_time > 43 200 000 ms`) is cancelled by us on the
 next touch (state −1, reason 4, payment failed, `payment_failed` event) and the call answers -31008.
 
-Every method resolves the order from `account.order_id` (CheckPerform, Create) or from the payment found by
+Every method resolves the order from `account[PAYME_ACCOUNT_FIELD]` (CheckPerform, Create; the one setting also builds
+the checkout URL's `ac.` key, §2.7.2) or from the payment found by
 `params.id` (the others), then takes the advisory lock and **`lock_order`** before reading state (§2.13.0).
 
 | Method | Params | Logic (in order) | `result` |
@@ -1515,7 +1549,7 @@ Every method resolves the order from `account.order_id` (CheckPerform, Create) o
 | `PerformTransaction` | `id` | unknown (-31003) → state 2: the stored answer → state ≠ 1: -31008 → timed out: cancel (reason 4), -31008 → not payable with `attaching=False` (cancelled, paid by another payment, or expired beyond the grace): -31008, the transaction stays in state 1 and Payme cancels it **(verify M3)**; no money is taken, so this is not a refused capture → `mark_paid(order_id, payment.id, "payme", id)`; `provider_state += {state: 2, perform_time: now_ms}` | `{"transaction", "perform_time", "state": 2}` |
 | `CancelTransaction` | `id`, `reason` | unknown (-31003) → state 1: state −1, `cancel_time`, `reason`; `fail_payment_effects(order_id, payment.id, str(reason), provider_txn_id=id)` (payment failed, `payment_failed` event; also on an already cancelled/expired order) → state 2 **with an open `manual_required` refund** (staff refunded in the Payme cabinet after an admin cancel, O5): state −2, `cancel_time`, `reason`; `commerce.services.resolve_refund(refund_id, "succeeded", actor_id=None)` (refund succeeded, payment `refunded`, event `refund_succeeded`) → state 2 without an open refund: -31007 → state −1/−2: the stored answer | `{"transaction", "cancel_time", "state"}` |
 | `CheckTransaction` | `id` | unknown (-31003) | `{"create_time", "perform_time" (0 if none), "cancel_time" (0 if none), "transaction", "state", "reason" (null if none)}` |
-| `GetStatement` | `from`, `to` (ms) | Payme payments whose **Payme** transaction time `provider_state.time` (the `params.time` of `CreateTransaction`) ∈ [`from`, `to`], ascending by that time **(verify M3)**. M2 filters on the JSON key (volumes are small); M3 adds an expression index on `(provider_state->>'time')::bigint` for Payme rows if the statement is slow | `{"transactions": [{"id", "time", "amount", "account": {"order_id"}, "create_time", "perform_time", "cancel_time", "transaction", "state", "reason", "receivers": null}]}` |
+| `GetStatement` | `from`, `to` (ms) | Payme payments whose **Payme** transaction time `provider_state.time` (the `params.time` of `CreateTransaction`) ∈ [`from`, `to`], ascending by that time **(verify M3)**. M2 filters on the JSON key (volumes are small); M3 adds an expression index on `(provider_state->>'time')::bigint` for Payme rows if the statement is slow | `{"transactions": [{"id", "time", "amount", "account": {<PAYME_ACCOUNT_FIELD>: account_ref}, "create_time", "perform_time", "cancel_time", "transaction", "state", "reason", "receivers": null}]}` |
 
 Every method writes a `WebhookInbox` row (§2.13.0). The `transaction` value is our `Payment.id` as a string; the
 Payme id is `Payment.provider_txn_id`.
@@ -1950,7 +1984,7 @@ handler renders through the catalog. Placeholders: `{n}`, `{m}`, `{limit}`, `{ma
    403); rows before a reactivated account's history horizon are treated as another customer's (§2.2.3). A contract
    test walks every **C** route with a second customer's ids. Webhooks bind each callback to the order/payment it
    names (`merchant_trans_id` with its HMAC reference + `merchant_prepare_id` + `click_trans_id`; Payme
-   `account.order_id` with its HMAC reference + `params.id`) and act on that payment only (§2.13.0 step 4).
+   `account[PAYME_ACCOUNT_FIELD]` with its HMAC reference + `params.id`) and act on that payment only (§2.13.0 step 4).
 2. **Audience separation.** Customer tokens carry `aud="customer"`; staff tokens `aud="staff"`; each authentication
    class pins its audience, so neither token works on the other API. The URL-walk test (spec) covers every customer
    route with anonymous, staff-token, Basic and Django-session requests; POS routes with a customer token; webhook
@@ -1996,11 +2030,12 @@ handler renders through the catalog. Placeholders: `{n}`, `{m}`, `{limit}`, `{ma
     account value is an HMAC-protected reference, not a guessable id (§2.7.2). Click MD5 over raw form strings +
     `service_id` binding + amount equality + `merchant_prepare_id` binding; Payme Basic auth with `PAYME_KEY`, integer amount
     equality in tiyin, one active transaction per order (partial unique index + `-31051`), 12-hour timeout; IP
-    allow-lists are defence in depth only. Every handler takes the Order lock before reading state and names the
-    payment it changes (§2.13.0). Click callbacks are idempotent from state (a re-signed retry of an applied call
-    succeeds again). Captures on non-payable orders, on payments we failed and double payments are **refused
-    captures**: refunded automatically and alerted, or (only if M3 proves Click reverses) answered with an error plus a
-    delayed status check that refunds if Click did not reverse. A transaction can be started only before
+    allow-lists are defence in depth only; a provider in fake mode under the production settings accepts no callback
+    (§2.13.0). Every handler takes the Order lock before reading state and names the payment it changes (§2.13.0).
+    Click callbacks are idempotent from state (a re-signed retry of an applied call succeeds again). Captures on
+    non-payable orders, on payments we failed (including a Click attachment superseded by a newer Prepare) and double
+    payments are **refused captures**: accepted, reversed through the Click Merchant API by `click_paydoc_id` and
+    alerted, as Click's protocol requires; a reversal Click refuses becomes a staff payout. A transaction can be started only before
     `reservation_expires_at`; only completing one gets the 5-minute grace. Every callback is stored (WebhookInbox,
     append-only, 180-day retention, C4) with credentials stripped; forged requests are stored only as bounded, per-IP
     capped rows.
@@ -2084,8 +2119,8 @@ New M2 points (the plan adds them to `open-questions.md`; each default is implem
 | M2-O10 | Pickup "ready to collect" notification | None in M2 (no status for it); staff mark pickup orders delivered |
 | M2-P5 | Payme fiscal receipt data (IKPU / package codes per product) | Not sent (`PAYME_FISCAL_DETAIL_ENABLED=false`); enabling needs product fiscal codes (a catalog migration) |
 | M2-P6 | Payme `ChangePassword` | Not supported (-32601); keys rotate through env |
-| M2-P7 | Click Complete that we cannot honour (expired, cancelled, failed by us, double payment) | Accept (`0`) and refund automatically (`CLICK_REVERSES_ON_COMPLETE_ERROR=false`); switch to `true` only after M3 proves Click reverses on an error answer, and even then a delayed status check refunds if it did not |
-| M2-P8 | Grace for a payment already started at the provider when the reservation ends | 5 minutes after `reservation_expires_at` (`PAYMENT_IN_FLIGHT_GRACE_SECONDS=300`), only for completing a transaction started before it; Click counts as in flight for 10 minutes after Prepare (`CLICK_INFLIGHT_SECONDS=600`) |
+| M2-P7 | Click Complete that we cannot honour (expired, cancelled, failed by us, superseded, double payment) | **Decided by the provider protocol (2026-10-26):** accept (`0`) and reverse through `payment/reversal` by `click_paydoc_id` — Click's SHOP API allows no other answer after funds were withdrawn; a reversal Click refuses ends as refund `failed` for a staff payout (§2.13.0) |
+| M2-P8 | Grace for a payment already started at the provider when the reservation ends | 5 minutes after `reservation_expires_at` (`PAYMENT_IN_FLIGHT_GRACE_SECONDS=300`), only for completing a transaction started before it; Click counts as in flight for 2 minutes after Prepare (`CLICK_INFLIGHT_SECONDS=120`, never longer than the grace), which blocks only a provider switch, the customer cancel and `DELETE me/`; paying again with Click supersedes the open Click transaction |
 | M2-P9 | Provider deep links (PDF §16.3) and the return address | No `app_url` in v1: the system browser opens `web_url` and the provider page hands off to its app; return through the https link `PAYMENT_RETURN_URL` with the `glowderma://` fallback; the website must serve the app-link files |
 | M2-P10 | Payme error for "order awaiting another transaction" | `-31051` (account-error range), confirmed against the test.paycom.uz checklist in M3 |
 | M2-L9 | What the cashier sees after scanning | Phone (full for Billz, masked for display), available cashback, tier percent, an opaque `customer_ref`; no name, no internal id |
