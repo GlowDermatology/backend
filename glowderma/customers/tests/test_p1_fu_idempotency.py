@@ -24,6 +24,7 @@ from glowderma.accounts.tests.factories import CustomerSocialIdentityFactory
 from glowderma.core.models import IdempotencyRecord
 from glowderma.customers.services import LOGIN_SCOPE, REAUTH_SCOPE, phone_guard_key
 from glowderma.customers.tests.p1_support import (
+    FID,
     OTHER_FID,
     PASSWORD,
     TERMS,
@@ -45,7 +46,7 @@ def fakes() -> Iterator[None]:
     reset_fakes()
 
 
-def key() -> dict[str, str]:
+def key() -> dict[str, Any]:
     return {"HTTP_IDEMPOTENCY_KEY": str(uuid.uuid4())}
 
 
@@ -111,9 +112,7 @@ def route(name: str, signed: Signed) -> Route:
             ME + "device/",
             lambda: {"fcm_token": "fcm-idem-0001", "push_enabled": True, "model": "iPhone 15"},
             lambda: {"fcm_token": "fcm-idem-0002", "push_enabled": True, "model": "iPhone 15"},
-            lambda: assert_equal(
-                Device.objects.get(pk=signed.started.session.device_id).fcm_token, "fcm-idem-0001"
-            ),
+            lambda: assert_equal(Device.objects.get(customer=customer, fid=FID).fcm_token, "fcm-idem-0001"),
         )
     if name == "social_unlink":
         CustomerSocialIdentityFactory.create(customer=customer, provider="google", subject="g-idem-1")
@@ -156,7 +155,7 @@ def assert_equal(actual: Any, expected: Any) -> None:
     assert actual == expected
 
 
-def send(signed: Signed, spec: Route, data: Any, headers: dict[str, str]) -> Any:
+def send(signed: Signed, spec: Route, data: Any, headers: dict[str, Any]) -> Any:
     call = getattr(signed.client, spec.method)
     if spec.multipart:
         return call(spec.path, data, format="multipart", **headers)
