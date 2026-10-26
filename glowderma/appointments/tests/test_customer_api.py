@@ -8,16 +8,16 @@ from typing import Any
 
 import psycopg
 import pytest
-from django.db import OperationalError, connection
+from django.db import IntegrityError, OperationalError, connection, transaction
 from django.test import override_settings
 from rest_framework.test import APIClient
 
 from glowderma.accounts.models import Customer
 from glowderma.accounts.tests.factories import CustomerFactory
-from glowderma.appointments import services
+from glowderma.appointments import selectors, services
 from glowderma.appointments.models import Appointment, AppointmentEvent
 from glowderma.appointments.tests.factories import AppointmentFactory
-from glowderma.core.api.exceptions import BookingLimit, SlotTaken
+from glowderma.core.api.exceptions import AuthFailed, BookingLimit, CustomerError, SlotTaken
 from glowderma.core.models import AuditEntry
 from glowderma.core.timeutils import TASHKENT
 from glowderma.professionals.models import ProfessionalService
@@ -684,8 +684,159 @@ def test_cancel_refusals_and_ownership(clock: None, customer: Customer, customer
     assert Appointment.objects.get(pk=foreign.pk).status == "requested"
 
 
-def test_account_deletion_cancels_whatever_the_start(clock: None, customer: Customer) -> None:
-    started = AppointmentFactory.create(customer=customer, start=at(MONDAY, 7, 30))
-    done = services.cancel_by_customer(started.pk, customer.pk, reason=services.ACCOUNT_DELETED_REASON)
+def test_account_deletion_skips_only_the_lead_rule(clock: None, customer: Customer) -> None:
+    soon = AppointmentFactory.create(customer=customer, start=at(MONDAY, 9))
+    with override_settings(BOOKING_CANCEL_MIN_LEAD_MINUTES=120):
+        done = services.cancel_by_customer(soon.pk, customer.pk, reason=services.ACCOUNT_DELETED_REASON)
     assert done.status == "cancelled"
     assert done.events.get(type="cancelled").data["reason"] == "account_deleted"
+    # C§2.2.3 step 3 cancels open *future* appointments: one that already began is not cancellable
+    started = AppointmentFactory.create(customer=customer, start=at(MONDAY, 7, 30))
+    with pytest.raises(CustomerError) as refused:
+        services.cancel_by_customer(started.pk, customer.pk, reason=services.ACCOUNT_DELETED_REASON)
+    assert refused.value.get_codes() == "not_cancellable"
+    assert Appointment.objects.get(pk=started.pk).status == "requested"
+
+
+def test_the_account_deleted_flag_is_server_side(clock: None, customer: Customer) -> None:
+    soon = AppointmentFactory.create(customer=customer, start=at(MONDAY, 9))
+    with override_settings(BOOKING_CANCEL_MIN_LEAD_MINUTES=120), pytest.raises(CustomerError) as refused:
+        services.cancel_by_customer(
+            soon.pk, customer.pk, reason=services.ACCOUNT_DELETED_REASON, account_deleted=False
+        )
+    assert refused.value.get_codes() == "not_cancellable"
+    with override_settings(BOOKING_CANCEL_MIN_LEAD_MINUTES=120):
+        done = services.cancel_by_customer(soon.pk, customer.pk, account_deleted=True)
+    assert done.status == "cancelled"
+
+
+@pytest.mark.parametrize("reason", ["account_deleted", " account_deleted "])
+def test_a_customer_cannot_claim_the_account_deleted_reason(
+    clock: None, customer: Customer, customer_client: APIClient, reason: str
+) -> None:
+    started = AppointmentFactory.create(customer=customer, start=at(MONDAY, 7, 30))  # began at 07:30
+    soon = AppointmentFactory.create(customer=customer, start=at(MONDAY, 9))
+    assert cancel(customer_client, started.pk).status_code == 409
+    response = cancel(customer_client, started.pk, reason)
+    assert field_errors(response) == [("reason", "invalid", "Noto‘g‘ri qiymat.")]
+    with override_settings(BOOKING_CANCEL_MIN_LEAD_MINUTES=120):
+        assert field_errors(cancel(customer_client, soon.pk, reason))[0][:2] == ("reason", "invalid")
+        assert cancel(customer_client, soon.pk, "account deleted soon").status_code == 409
+    assert set(Appointment.objects.values_list("status", flat=True)) == {"requested"}
+    assert not AppointmentEvent.objects.filter(type="cancelled").exists()
+    assert not AuditEntry.objects.filter(action="appointment.cancelled").exists()
+    # the view always enforces the lead rule, whatever the reason
+    calls: list[dict[str, Any]] = []
+    real = services.cancel_by_customer
+
+    def spy(*args: Any, **kwargs: Any) -> Any:
+        calls.append(kwargs)
+        return real(*args, **kwargs)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(services, "cancel_by_customer", spy)
+        assert cancel(customer_client, soon.pk, "Rejalar o‘zgardi").status_code == 200
+    assert calls[0]["account_deleted"] is False
+
+
+# --- booking edge cases (fix pass 1) ----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("start", "code"),
+    [
+        ("9999-12-31T23:59:00+05:00", "out_of_range"),  # start + duration overflows
+        ("9999-12-31T23:59:00-10:00", "out_of_range"),  # the conversion to Tashkent time overflows
+        ("0001-01-01T00:00:00+14:00", "in_past"),
+    ],
+)
+def test_booking_at_the_edge_of_the_datetime_range(
+    clock: None, customer_client: APIClient, start: str, code: str
+) -> None:
+    link = setup_link()
+    response = book(customer_client, body_for(link, start))
+    assert field_errors(response)[0][:2] == ("start", code)
+    assert not Appointment.objects.exists()
+
+
+def test_booking_after_the_customer_was_deleted_answers_session_expired(
+    clock: None, customer: Customer, customer_client: APIClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    link = setup_link()
+    real = selectors.offered_link
+
+    def deleted_meanwhile(*args: Any, **kwargs: Any) -> Any:
+        # DELETE me/ commits between the authentication and the customer lock
+        Customer.objects.filter(pk=customer.pk).update(status="deleted", deleted_at=ANCHOR)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(selectors, "offered_link", deleted_meanwhile)
+    response = book(customer_client, body_for(link, at(MONDAY, 10)))
+    assert response.status_code == 401, response.content
+    assert response.json()["code"] == "SESSION_EXPIRED"
+    assert not Appointment.objects.exists()
+
+
+@pytest.mark.django_db(transaction=True)
+def test_booking_races_with_the_account_deletion(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("glowderma.core.timeutils.now", lambda: ANCHOR)
+    link = setup_link()
+    customer = CustomerFactory.create()
+    locked = threading.Event()
+    release = threading.Event()
+    outcomes: dict[str, Any] = {}
+
+    def delete_account() -> None:
+        try:
+            with transaction.atomic():
+                row = Customer.objects.select_for_update(no_key=True).get(pk=customer.pk)
+                row.status = "deleted"
+                row.deleted_at = ANCHOR
+                row.save(update_fields=["status", "deleted_at"])
+                locked.set()
+                release.wait(10)
+        finally:
+            connection.close()
+
+    def book_slot() -> None:
+        try:
+            outcomes["booking"] = services.request_by_customer(
+                customer.pk, link.professional_id, link.service_id, at(MONDAY, 10)
+            )
+        except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
+            outcomes["booking"] = exc
+        finally:
+            connection.close()
+
+    deleter = threading.Thread(target=delete_account)
+    deleter.start()
+    assert locked.wait(10)
+    booker = threading.Thread(target=book_slot)
+    booker.start()
+    booker.join(timeout=1)
+    assert booker.is_alive()  # waits on the customer lock
+    release.set()
+    deleter.join(timeout=10)
+    booker.join(timeout=10)
+    result = outcomes["booking"]
+    assert isinstance(result, AuthFailed), outcomes
+    assert result.get_codes() == "SESSION_EXPIRED" and result.status_code == 401
+    assert not Appointment.objects.exists()
+
+
+def test_only_the_no_overlap_exclusion_is_a_lost_slot(
+    clock: None, customer: Customer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    link = setup_link()
+    check = IntegrityError("new row violates check constraint")
+    check.__cause__ = psycopg.errors.CheckViolation("check")
+
+    def raise_check(*args: Any, **kwargs: Any) -> Any:
+        raise check
+
+    monkeypatch.setattr(Appointment.objects, "create", raise_check)
+    with pytest.raises(IntegrityError):
+        services.request_by_customer(customer.pk, link.professional_id, link.service_id, at(MONDAY, 10))
+    assert services._lost_the_slot(check) is False
+    plain = IntegrityError("no cause")
+    assert services._lost_the_slot(plain) is False

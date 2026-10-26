@@ -222,7 +222,11 @@ class AppointmentCancelView(CustomerAPIView):
         if selectors.customer_appointment(customer.pk, pk, horizon=customer.history_from) is None:
             raise Http404
         services.cancel_by_customer(
-            pk, customer.pk, reason=body.validated_data.get("reason") or "", request=request
+            pk,
+            customer.pk,
+            reason=body.validated_data.get("reason") or "",
+            request=request,
+            account_deleted=False,  # the lead rule always applies to the customer route
         )
         return _appointment_response(request, self, pk)
 

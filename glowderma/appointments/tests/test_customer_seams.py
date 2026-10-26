@@ -83,6 +83,6 @@ def test_rejected_and_cancelled_count_only_by_creation() -> None:
 
 def test_cancel_by_customer_is_implemented_by_p3() -> None:
     customer = CustomerFactory.create()
-    appointment = make(customer, "requested")
+    appointment = at(make(customer, "requested"), created_days_ago=1, start_days=2)  # an open future one
     cancelled = services.cancel_by_customer(appointment.pk, customer.pk, reason="account_deleted")
     assert (cancelled.status, cancelled.cancelled_by) == ("cancelled", "customer")

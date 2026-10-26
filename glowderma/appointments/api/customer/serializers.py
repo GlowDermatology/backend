@@ -11,10 +11,13 @@ from typing import Any
 
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
+from rest_framework.exceptions import ValidationError
 
 from glowderma.appointments import selectors
 from glowderma.appointments.models import Appointment
+from glowderma.appointments.services import ACCOUNT_DELETED_REASON
 from glowderma.core import enums, i18n, timeutils
+from glowderma.core.api.exceptions import field_error
 from glowderma.core.media import absolute_media_url
 from glowderma.professionals.models import Location, Professional, ProfessionalService
 
@@ -176,6 +179,13 @@ class BookingSerializer(serializers.Serializer[dict[str, Any]]):
 
 class CancelSerializer(serializers.Serializer[dict[str, Any]]):
     reason = serializers.CharField(max_length=300, allow_null=True, allow_blank=True, required=False)
+
+    def validate_reason(self, value: str | None) -> str | None:
+        """``account_deleted`` is the reason ``DELETE me/`` records (C§2.2.3); a customer cannot claim it, so
+        the event and the audit never show a false account deletion."""
+        if value is not None and value.strip() == ACCOUNT_DELETED_REASON:
+            raise ValidationError(field_error("invalid"))
+        return value
 
 
 class AppointmentSpecialistSerializer(serializers.Serializer[Professional]):
