@@ -24,7 +24,9 @@ def ok(response: Any, status: int = 200) -> dict[str, Any]:
 
 def slot_starts(client: APIClient, specialist_id: int, service_id: int) -> list[str]:
     body = ok(
-        client.get(f"/api/v1/specialists/{specialist_id}/slots/", {"date": MONDAY, "service_id": service_id})
+        client.get(
+            f"/api/v1/specialists/{specialist_id}/slots/", {"date": MONDAY, "service_id": str(service_id)}
+        )
     )
     return [slot["start"] for slot in body["slots"]]
 

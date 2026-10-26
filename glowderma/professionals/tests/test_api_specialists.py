@@ -419,18 +419,18 @@ def test_photo_upload_replace_and_delete(
     with django_capture_on_commit_callbacks(execute=True):
         response = staff_client.put(url(professional, "photo/"), {"file": upload("PNG")}, format="multipart")
     assert response.status_code == 200, response.json()
-    first = Professional.objects.get().photo
-    assert first.name.startswith(f"professionals/{professional.pk}/") and first.name.endswith(".png")
-    assert response.json()["photo_url"] == absolute_media_url(first.name)
-    storage = first.storage
-    assert storage.exists(first.name)
+    photo = Professional.objects.get().photo
+    first, storage = photo.name or "", photo.storage
+    assert first.startswith(f"professionals/{professional.pk}/") and first.endswith(".png")
+    assert response.json()["photo_url"] == absolute_media_url(first)
+    assert storage.exists(first)
     with django_capture_on_commit_callbacks(execute=True):
         replaced = staff_client.put(
             url(professional, "photo/"), {"file": upload("JPEG", size=(30, 20))}, format="multipart"
         )
-    second = Professional.objects.get().photo.name
-    assert replaced.status_code == 200 and second.endswith(".jpg") and second != first.name
-    assert not storage.exists(first.name) and storage.exists(second)
+    second = Professional.objects.get().photo.name or ""
+    assert replaced.status_code == 200 and second.endswith(".jpg") and second != first
+    assert not storage.exists(first) and storage.exists(second)
     # the same bytes again change nothing
     staff_client.put(url(professional, "photo/"), {"file": upload("JPEG", size=(30, 20))}, format="multipart")
     assert [e.action for e in AuditEntry.objects.order_by("id")] == ["professional.photo_updated"] * 2

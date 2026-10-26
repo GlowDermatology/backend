@@ -10,7 +10,7 @@ from django.db import connection
 from django.db.migrations.recorder import MigrationRecorder
 
 from glowderma.core import enums
-from glowderma.professionals.models import Professional, Service
+from glowderma.professionals.models import Location, Service
 from glowderma.professionals.services import OVERRIDE_CONSTRAINT, STAFF_USER_CONSTRAINT
 from glowderma.professionals.tests.factories import ProfessionalServiceFactory, ServiceFactory
 
@@ -140,7 +140,7 @@ def test_0002_infers_the_category_from_who_offers_the_service() -> None:
 def test_the_previous_release_can_still_insert_rows() -> None:
     """The new NOT NULL columns have database defaults: an INSERT without them (a process of the previous
     release during the rollout) succeeds."""
-    location = Professional._meta.get_field("location").related_model.objects.create(name_uz="Klinika")
+    location = Location.objects.create(name_uz="Klinika")
     with connection.cursor() as cursor:
         cursor.execute(
             "INSERT INTO professionals_service (created_at, updated_at, name_uz, name_ru, name_en, "

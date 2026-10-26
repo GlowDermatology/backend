@@ -40,7 +40,7 @@ def names(client: APIClient, **params: Any) -> list[str]:
 
 def test_create_defaults_and_audit(staff_client: APIClient, staff: StaffUser) -> None:
     ServiceFactory.create(position=3)
-    body = {
+    body: dict[str, Any] = {
         "name": {"uz": "Lazer epilyatsiya — to‘liq kurs va konsultatsiya bilan birga", "ru": "Лазер"},
         "category": "cosmetology",
         "default_duration_min": 45,
