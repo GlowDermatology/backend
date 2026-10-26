@@ -28,7 +28,8 @@ class RequestIdMiddleware:
         response["X-Request-ID"] = request_id
         if request.path_info.startswith("/api/"):
             response.setdefault("Cache-Control", "no-store")
-            response["Content-Language"] = "uz"
+            # Customer views set the resolved language themselves (customer contract §1.3); admin stays "uz".
+            response.setdefault("Content-Language", "uz")
         return response
 
     def handle(self, request: HttpRequest, request_id: str) -> HttpResponse:

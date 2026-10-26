@@ -856,6 +856,11 @@ def customer_exception_handler(exc: Exception, context: dict[str, Any]) -> Respo
         code = codes if isinstance(codes, str) else str(exc.default_code)
     else:
         code = "permission_denied"
+    view = context.get("view")
+    if response.status_code == 401 and not response.has_header("WWW-Authenticate") and view is not None:
+        challenge = view.get_authenticate_header(request) if request is not None else None
+        if challenge:
+            response["WWW-Authenticate"] = challenge
     response.data = customer_error_body(
         code,
         request,
