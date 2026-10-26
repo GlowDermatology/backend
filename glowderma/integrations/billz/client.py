@@ -80,6 +80,7 @@ from django.core.cache import cache as default_cache
 from django.core.cache.backends.base import BaseCache
 from redis.exceptions import RedisError
 
+from glowderma.core import alerts
 from glowderma.core.pii import clean_text, scrub_free_text
 
 from .ports import (
@@ -253,6 +254,7 @@ class SafeCache:
             return call()
         except CACHE_BACKEND_ERRORS as exc:
             logger.error("billz.cache_unavailable operation=%s error=%s", operation, type(exc).__name__)
+            alerts.alert("billz.cache_unavailable", {"operation": operation, "error": type(exc).__name__})
             raise BillzUnavailable("Billz: shared cache unavailable", not_applied=True) from exc
 
     def get(self, key: str, default: Any = None) -> Any:
@@ -558,6 +560,9 @@ class BillzClient:
                     label,
                     CIRCUIT_OPEN_SECONDS,
                 )
+                alerts.alert(
+                    "billz.circuit_open", {"failures": failures, "open_seconds": CIRCUIT_OPEN_SECONDS}
+                )
         except BillzUnavailable:
             logger.warning("billz.circuit_bookkeeping_skipped %s: the shared cache is unavailable", label)
 
@@ -777,6 +782,9 @@ class BillzClient:
                 raise self._failure(label, response.status_code, body, False)
             if 400 <= response.status_code < 500:
                 logger.error("billz.configuration_error %s: Billz refused the integration key", label)
+                alerts.alert(
+                    "billz.configuration_error", {"case": "key_refused", "http_status": response.status_code}
+                )
                 raise BillzAuthError(
                     f"{label}: Billz refused the integration key (HTTP {response.status_code})",
                     http_status=response.status_code,
@@ -958,6 +966,10 @@ class BillzClient:
         error = classify(label, status, body, resource=resource)
         if isinstance(error, BillzMisconfigured):
             logger.error("billz.configuration_error %s", error)
+            alerts.alert(
+                "billz.configuration_error",
+                {"case": "refused", "http_status": status, "error_code": error.error_code},
+            )
         return error
 
 

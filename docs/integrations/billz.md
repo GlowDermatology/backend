@@ -31,7 +31,9 @@ breaker, retries, error mapping), `registry.py`. Orchestration: `glowderma/catal
   `BILLZ_SHIFT_RETRY_MINUTES` (15) without spending the outbox attempt budget (`outbox.RetryLater`), for at most
   `BILLZ_SHIFT_RETRY_MAX_HOURS` (36) after the first refusal, then dead-lettered with the reason "shift closed".
 * **D3 — configuration-type failures.** 3xx, 403, a 404 of a route (not `GET /v2/order/{id}`), 20009, 20085 and a
-  refused key are `BillzMisconfigured` (retryable) with an ERROR `billz.configuration_error` so monitoring alerts; a
+  refused key are `BillzMisconfigured` (retryable) with an ERROR `billz.configuration_error` and its webhook alert
+  (docs/ops/monitoring.md §2, like `billz.circuit_open`, `billz.cache_unavailable`, `billz.sale_state_unclear` and
+  `billz.sale_total_differs`: codes and ids only); a
   circuit breaker stops a failing Billz from holding workers; once the setting is fixed,
   `manage.py requeue_outbox --topic billz.push_sale --dead [--since ISO] [--order ID] [--dry-run]` replays the dead
   sales (§7).

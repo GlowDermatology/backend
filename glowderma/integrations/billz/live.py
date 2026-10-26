@@ -80,7 +80,7 @@ import httpx
 from django.core.cache import cache as default_cache
 from django.core.cache.backends.base import BaseCache
 
-from glowderma.core import timeutils
+from glowderma.core import alerts, timeutils
 from glowderma.core.pii import pii_ref
 from glowderma.integrations import selectors, services
 from glowderma.integrations.models import IntegrationState
@@ -835,6 +835,9 @@ class LiveBillz:
                     _str(order.get("sold_at")),
                     len(_payments(order) or []),
                 )
+                alerts.alert(
+                    "billz.sale_state_unclear", {"order_id": request.order_id}, scope=str(request.order_id)
+                )
                 raise BillzUnavailable(
                     f"the Billz sale {billz_order_id} shows contradicting paid/open signals; not paying"
                 )
@@ -858,6 +861,9 @@ class LiveBillz:
                 billz_order_id,
                 f"{total:g}",
                 expected,
+            )
+            alerts.alert(
+                "billz.sale_total_differs", {"order_id": request.order_id}, scope=str(request.order_id)
             )
             raise BillzCheckByHand(
                 f"Billz bills {total:g} so'm for sale {billz_order_id} of order {request.order_id}, but the "
