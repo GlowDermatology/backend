@@ -145,19 +145,20 @@ Codes added for this audience (admin §1.6 codes keep their meaning):
 | 409 | `delivery_unavailable` | BTS does not deliver to the address (§2.6) | null |
 | 409 | `not_payable` · `order_expired` · `already_paid` | `orders/{id}/pay/` refusals (§2.7.2) | null |
 | 409 | `payment_in_progress` | A provider transaction of this order is in flight (§2.7.2): pay with the other provider, customer cancel, `DELETE me/` | `{"provider": str, "order_id": int}` |
-| 409 | `not_cancellable` | Order or appointment cancel refused | null |
+| 409 | `not_cancellable` | Order or appointment cancel refused (catalog key per resource, §5.0) | null |
+| 409 | `invalid_transition` | A state machine refuses a transition that a reused B5/B6 service checks itself (admin §1.6 code; rare for customers, e.g. a concurrent admin change) | null |
 | 409 | `slot_taken` | Booking race lost (§2.11) | null |
 | 409 | `conflict` | Other state conflicts (generic) | null |
 | 409 | `booking_limit` · `address_limit` | Count limits | `{"limit": int}` |
 | 409 | `qr_invalid` | POS: token unknown, expired, used or of a non-active customer (one code for all, no oracle) | null |
 | 426 | `app_update_required` | App below the minimum version | `{"min_version": str, "store_url": str}` |
-| 429 | `otp_resend_too_soon` · `otp_daily_limit` · `otp_locked` | OTP limits (§2.1.1) | `{"retry_after": int}` (seconds; also `Retry-After`) |
+| 429 | `otp_resend_too_soon` · `otp_daily_limit` · `otp_network_limit` · `otp_locked` | OTP limits (§2.1.1) | `{"retry_after": int}` (seconds; also `Retry-After`) |
 | 503 | `sms_unavailable` | The global SMS budget tripped (§2.1.1) | `{"retry_after": int}` |
 | 503 | `terms_not_published` | Registration while the terms are not published (§2.1.3) | null |
 
 Generic field codes (admin §1.6 table) render their messages in the resolved language (catalog keys `field.<code>`).
 Endpoint-specific field codes are listed in each endpoint table and registered in
-`core.api.exceptions.ENDPOINT_FIELD_CODES` by P0.
+`core.api.exceptions.ENDPOINT_FIELD_CODES` by P0. Which catalog key each code renders is §5.0.
 
 ### 1.7 Idempotency
 Mechanism, fingerprint, storage and responses as admin §1.7 (`core.idempotency.idempotent`). Differences:
@@ -190,7 +191,7 @@ high pure-IP ceiling as a backstop; the per-phone rules are the main protection 
 | `sms_phone` | `pii_ref(phone)` (§6.4) | 5/min | `auth/send-code/` |
 | **`sms_device`** (new) | fid | 10/min | `auth/send-code/` |
 | `sms_ip` | client IP (backstop) | 600/min (was 20/min; the scope is used only by this route) | `auth/send-code/` |
-| OTP rules (not a DRF throttle; §2.1.1) | phone (DB-derived, survive a cache flush); fid and IP daily counters in Redis | resend ≥ 60 s per (phone, purpose); ≤ 10 codes per phone per Tashkent day; ≤ 10 wrong codes per phone per day; 15 min lockout after 5 wrong codes on one code; ≤ 10 codes per fid and ≤ 200 per IP per day; global ≤ `SMS_GLOBAL_HOURLY_LIMIT` per hour | `auth/send-code/`, `auth/verify-code/`, `auth/login/` |
+| OTP rules (not a DRF throttle; §2.1.1) | phone (DB-derived, survive a cache flush); fid and IP daily counters in Redis | resend ≥ 60 s per (phone, purpose); ≤ 10 codes per phone per Tashkent day; ≤ 10 wrong codes per phone per day; 15 min lockout after 5 wrong codes on one code; ≤ 10 codes per fid and ≤ 1000 per IP per day (`otp_network_limit`); global ≤ `SMS_GLOBAL_HOURLY_LIMIT` per hour | `auth/send-code/`, `auth/verify-code/`, `auth/login/` |
 | **`customer_auth_device`** (new) | fid | 30/min | `auth/verify-code/`, `auth/set-password/`, `auth/login/`, `auth/reset-password/`, `auth/social/`, `auth/social/nonce/`, `auth/social/complete/` |
 | **`customer_auth_ip`** (new) | client IP (backstop) | 1200/min | the same routes |
 | customer login guard (`LoginGuard`, scope `customer_login`) | `pii_ref(phone)` | 5 failures/min, then lockout 1 → 15 min exponential | `auth/login/` on a device without a valid device key; every other password check of the customer — `auth/social/complete/`, `me/social/` (POST and DELETE), `me/password/`, `DELETE me/` — so a stolen access token gets no second guessing budget |
@@ -330,7 +331,7 @@ IP per minute, the rest only counted and sampled in the log).
  "phone_mask": "+998 90 *** ** 67",              // verify_device only, else null
  "otp": {"expires_in": 120, "resend_in": 60, "length": 6},   // verify_device: the code just sent (or the live one); null for verify_phone
  "social_ticket": null,                          // verify_phone only: opaque signed ticket, 10 min, single use, bound to this fid
- "provider": null,                               // verify_phone only: SocialProvider
+ "provider": null,                               // verify_phone only: CustomerSocialProvider
  "email_mask": null,                             // verify_phone only: masked provider email | null
  "expires_in": 600}                              // validity of the ticket / of this step in seconds
 ```
@@ -368,7 +369,8 @@ Body `{"phone": str, "purpose": "register" | "reset_password" | "link_social", "
 | A row for the phone with `exhausted_at` > now − 15 min | 429 `otp_locked` | "Urinishlar soni tugadi. {m} daqiqadan so‘ng qayta urinib ko‘ring." · `error.otp_locked` |
 | Σ `attempts` (wrong codes) over the phone's rows of the current Tashkent day ≥ `CUSTOMER_OTP_DAILY_WRONG_LIMIT` (10) | 429 `otp_locked`, `retry_after` = seconds to Tashkent midnight | `error.otp_locked` |
 | The newest row for (phone, purpose) is younger than 60 s | 429 `otp_resend_too_soon` | "Yangi kodni {n} soniyadan so‘ng so‘rashingiz mumkin." · `error.otp_resend_too_soon` |
-| ≥ `CUSTOMER_OTP_DAILY_LIMIT` (10) rows for the phone in the current Tashkent day, or ≥ `CUSTOMER_OTP_DEVICE_DAILY_LIMIT` (10) codes for this fid, or ≥ `CUSTOMER_OTP_IP_DAILY_LIMIT` (200) for this IP (Redis day counters keyed by `pii_ref(fid)` / IP) | 429 `otp_daily_limit` | "Bugungi SMS kodlar limiti tugadi. Ertaga qayta urinib ko‘ring." · `error.otp_daily_limit` |
+| ≥ `CUSTOMER_OTP_DAILY_LIMIT` (10) rows for the phone in the current Tashkent day, or ≥ `CUSTOMER_OTP_DEVICE_DAILY_LIMIT` (10) codes for this fid (Redis day counter keyed by `pii_ref(fid)`; the fid is self-asserted, so this cap only stops a looping or buggy client, not an attacker) | 429 `otp_daily_limit` | "Bugungi SMS kodlar limiti tugadi. Ertaga qayta urinib ko‘ring." · `error.otp_daily_limit` |
+| ≥ `CUSTOMER_OTP_IP_DAILY_LIMIT` (1000; provisional, tuned from metrics) codes for this client IP today (Redis day counter) — a cost control that, behind carrier-grade NAT, can also hit legitimate users, so it has its own code and message | 429 `otp_network_limit` | "Bu tarmoqdan bugun juda ko‘p kod so‘raldi. Boshqa tarmoq (Wi-Fi yoki mobil internet) orqali urinib ko‘ring." · `error.otp_network_limit` |
 
 ```jsonc
 // 200
@@ -397,7 +399,7 @@ Body `{"phone": str, "purpose": OtpPurpose, "code": str}`.
 | `code` `^\d{6}$` | `invalid` | "6 xonali kodni kiriting." · `field.otp_format` |
 | No live code (none, expired, consumed, superseded) | 400 `otp_expired` | "Kod muddati tugagan. Yangi kod oling." · `error.otp_expired` |
 | Row exhausted, lockout active, or the daily wrong-code cap reached | 429 `otp_locked` | `error.otp_locked` |
-| HMAC mismatch (`hmac.compare_digest`) | 400 `otp_invalid`, `details.attempts_left`; field `code` `otp_invalid` | "Kod noto‘g‘ri. Yana {n} marta urinishingiz mumkin." · `error.otp_invalid`; at 0 left (on this code or for the day) → 429 `otp_locked` |
+| HMAC mismatch (`hmac.compare_digest`) | 400 `otp_invalid`, `details.attempts_left`; field `code` `otp_invalid` | "Kod noto‘g‘ri. Yana {n} marta urinishingiz mumkin." · `error.otp_invalid` (field message: `field.otp_invalid`, same text); at 0 left (on this code or for the day) → 429 `otp_locked` |
 
 ```jsonc
 // 200
@@ -643,7 +645,7 @@ the push to the new device and a visible push to the device this sign-in replace
  "language": "uz",                                  // ContentLanguage: push texts and the default Accept-Language
  "image_url": null,                                  // absolute URL | null
  "registered_at": "2025-03-12T10:20:00+05:00",      // Customer.history_from when set (reactivated or dormant-reset account, §2.2.3), else registered_at
- "has_password": true, "linked_providers": ["google"],   // SocialProvider[]
+ "has_password": true, "linked_providers": ["google"],   // CustomerSocialProvider[]
  "push_enabled": true,                               // of the CURRENT device
  "consent": {"terms_version": "2026-10-01", "accepted_at": "2025-03-12T10:20:00+05:00",
              "current_version": "2026-10-01", "update_required": false},
@@ -778,7 +780,7 @@ consumed under the customer-level lock — the app asks for an SMS code first (`
 `verify-code`). Otherwise a stolen session (even a 15-minute access token) could attach the thief's own Google,
 Facebook or Apple identity, which then signs in on any device without SMS (`M2-A10`).
 
-- **`POST me/social/`** (**C**, **I**). Body `{"provider": SocialProvider, "token": str, "token_type": SocialTokenType |
+- **`POST me/social/`** (**C**, **I**). Body `{"provider": CustomerSocialProvider, "token": str, "token_type": SocialTokenType |
   null, "nonce": str | null, "authorization_code": str | null, "password": str | null, "verification_token": str |
   null}`. The token is verified exactly as in §2.1.8 (allowed pairs, nonce, replay cache; Apple: the authorization code
   is required and exchanged, the refresh token stored sealed) and the caller re-authenticated as above. → 200 `Me`. Errors: 400
@@ -1421,7 +1423,12 @@ admin-only by DB constraint).
 ```
 - **`GET me/notifications/`** → `Page<InboxItem>` + top-level `"unread_count": int`; newest first; limited to the
   history horizon (§2.2.3). Rows exist also for pushes that could not be sent (`push_state = no_device`, N-10), so the
-  feed is complete after a reinstall. `InboxKind` `general` also carries the `account_security` notices (§2.14.2).
+  feed is complete after a reinstall. `InboxKind` `general` also carries the `account_security` notices (§2.14.2):
+  they are stored with `source_type = "account"` and `source_id` = the customer id (migration
+  `notifications.0003_inbox_account_source`: the `account` source and the CHECK `kind = 'general' AND source_type =
+  'account' AND template_status = ''`; the built model admits `general` only for campaigns), `link = {"kind":
+  "none"}`, `dedupe_key = "account:{customer_id}:{event}:{event_id}"` where `event_id` is the uuid carried in the outbox
+  payload, so a redelivered message never adds a second row.
 - **`GET me/notifications/unread-count/`** → `{"unread_count": 3}` (badge polling; `inbox_customer_unread_idx`).
 - **`POST me/notifications/{id}/read/`** → 200 `{"id", "read_at", "unread_count"}`; idempotent. 404 for another
   customer's row. Reading implies delivery: the row goes through the **same** `notifications.services.acknowledge`
@@ -1818,8 +1825,10 @@ pushes are reported `sent` but reach no device (§6.14).
   `accounts.services.invalidate_fcm_token(device_id)` (`fcm_token=""`, `push_enabled=False`, `fcm_invalidated_at=now`)
   in the same handler; the app re-registers through `PUT me/device/` (it does so on every cold start).
 - **Any other `INVALID_ARGUMENT`** (a malformed message: bad data value, payload too large, bad APNs header) →
-  result error `payload_invalid`: the outbox message is marked failed (no retry), ERROR log `push.payload_invalid
-  {topic, field}` (alert), and the device is **never** touched, so a payload bug in a deploy cannot wipe every token.
+  result error `payload_invalid`: the inbox row gets `push_state = failed`, `push_error = "payload_invalid"`, the
+  handler logs ERROR `push.payload_invalid {topic, field}` (alert) and **returns normally**, so the outbox message ends
+  `done` (no retry, no `outbox.dead` audit), and the device is **never** touched, so a payload bug in a deploy cannot
+  wipe every token. (In the outbox `failed` means "retry later"; a handler cannot end a message as failed.)
 - `UNAVAILABLE`, `INTERNAL`, `QUOTA_EXCEEDED`, HTTP 5xx, transport errors → `FcmUnavailable` (outbox retry).
 
 #### 2.14.3 BTS (`integrations/bts/`; B5 port + P2 additions; live adapter M3)
@@ -1850,7 +1859,10 @@ provider accounts. → 200 `{"order_id", "provider", "steps": [{"call": "prepare
 ---
 ## 3. Enumerations (customer-facing subsets)
 
-Literals live in `glowderma/core/enums.py` (P0 adds the new classes); labels in §5.
+Literals live in `glowderma/core/enums.py` (P0 adds the new classes); labels in §5. Every new enum must have a choice
+set of its own (drf-spectacular 0.30 reports two override names for one set as an error, and `spectacular
+--fail-on-warn` fails); P0 runs the schema validation with all of them registered. `SessionRevokeReason` (admin §3)
+gains `refresh_reused` (§2.1.6).
 
 | Enum | Literals | Used in |
 |---|---|---|
@@ -1866,9 +1878,9 @@ Literals live in `glowderma/core/enums.py` (P0 adds the new classes); labels in 
 | BannerLinkKind | `none`, `product`, `category` | banners |
 | **OtpPurpose** (new) | `register`, `login_new_device`, `reset_password`, `link_social` (`send-code` accepts all but `login_new_device`) | `auth/send-code/`, `auth/verify-code/` |
 | **NextStep** (new) | `verify_device`, `verify_phone` | `auth/login/`, `auth/social/` |
-| **SocialProvider** (new) | `google`, `facebook`, `apple` | `auth/social/`, `me/social/`, `Me.linked_providers` |
+| **CustomerSocialProvider** (new; component `CustomerSocialProviderEnum`) | `google`, `facebook`, `apple` | `auth/social/`, `me/social/`, `Me.linked_providers`. The staff OAuth routes keep their own `SocialProviderEnum` (`google`, `facebook`; admin §2.1), so Apple never appears on staff routes |
 | **SocialTokenType** (new) | `id_token`, `access_token` | `auth/social/`, `me/social/` |
-| **DevicePlatform** (new; same literals as OrderChannel) | `ios`, `android` | `X-GD-Platform`, `me/device/` |
+| OrderChannel (admin §3) | `ios`, `android` | also the device platform: `X-GD-Platform`, `me/device/` `platform` (one enum: a second enum with the same literals would break `ENUM_NAME_OVERRIDES`, which refuses two names for one choice set) |
 | **StockStatus** (new) | `in_stock`, `out_of_stock` | products |
 | **CustomerProductOrdering** (new) | `default`, `price`, `-price`, `name` | `catalog/products/` |
 | **CartLineStatus** (new) | `ok`, `insufficient`, `out_of_stock`, `unavailable` | cart, `OUT_OF_STOCK.details.lines[].status` |
@@ -1980,6 +1992,23 @@ in §2–§4 exists. The admin audience keeps its Uzbek strings (`core.api.excep
 handler renders through the catalog. Placeholders: `{n}`, `{m}`, `{limit}`, `{max}`, `{available}`, `{order_id}`,
 `{provider}`, `{amount}`, `{percent}`, `{item_count}`, `{total}`, `{tracking_number}`, `{code}` (SMS only).
 
+### 5.0 Code → catalog key
+A top-level code renders `error.<code>` and a field code `field.<code>`, unless the endpoint table names another key;
+`CustomerError(code, status, *, key=None, details=None, params=None)` (P0) carries that key explicitly (default
+`error.<code>`), and `field_error(code, message_key=…)` does the same for fields. The codes whose key is not the default:
+
+| Code | Where | Catalog key |
+|---|---|---|
+| `not_cancellable` | `orders/{id}/cancel/` · `appointments/{id}/cancel/` · any other (a reused B5/B6 service raising `NotCancellable`) | `error.order_not_cancellable` · `error.appointment_not_cancellable` · `error.not_cancellable` |
+| `OUT_OF_STOCK` | cart add / patch (one product) · checkout (lines) | `error.out_of_stock_one` · `error.OUT_OF_STOCK` |
+| `invalid_transition` | any customer view (a reused service raising `InvalidTransition`) | `error.invalid_transition` |
+| field `otp_invalid` (on `code`) | `auth/verify-code/` | `field.otp_invalid` |
+| field `invalid` | `phone` (every auth body) · `code` (verify) · booking grid | `field.phone_invalid` · `field.otp_format` · `field.booking_grid` |
+| field `does_not_exist` / `min_length` / `max_value` / `in_past` / `out_of_range` / `required` | as named in the endpoint tables (e.g. `field.address_not_found`, `field.name_min`, `field.cashback_max`, `field.booking_too_soon`, `field.booking_horizon`, `field.address_required`) | the key in the table; elsewhere the generic `field.<code>` |
+
+A package that meets a code with no key here or in its table stops and reports (plan §0.1); a contract test maps every
+code a customer view can raise to an existing key.
+
 ### 5.1 Top-level codes (`error.*`)
 
 | Key | uz | ru | en |
@@ -2009,6 +2038,7 @@ handler renders through the catalog. Placeholders: `{n}`, `{m}`, `{limit}`, `{ma
 | `error.conflict` | Amalni bajarib bo‘lmadi. Ma’lumotlarni yangilang. | Не удалось выполнить действие. Обновите данные. | The action could not be completed. Please refresh. |
 | `error.otp_resend_too_soon` | Yangi kodni {n} soniyadan so‘ng so‘rashingiz mumkin. | Новый код можно запросить через {n} с. | You can request a new code in {n} s. |
 | `error.otp_daily_limit` | Bugungi SMS kodlar limiti tugadi. Ertaga qayta urinib ko‘ring. | Лимит SMS-кодов на сегодня исчерпан. Попробуйте завтра. | Today's SMS code limit is reached. Please try tomorrow. |
+| `error.otp_network_limit` | Bu tarmoqdan bugun juda ko‘p kod so‘raldi. Boshqa tarmoq (Wi-Fi yoki mobil internet) orqali urinib ko‘ring. | С этой сети сегодня запрошено слишком много кодов. Попробуйте через другую сеть (Wi-Fi или мобильный интернет). | Too many codes were requested from this network today. Please try over another network (Wi-Fi or mobile data). |
 | `error.otp_locked` | Urinishlar soni tugadi. {m} daqiqadan so‘ng qayta urinib ko‘ring. | Попытки закончились. Повторите через {m} мин. | No attempts left. Try again in {m} min. |
 | `error.otp_invalid` | Kod noto‘g‘ri. Yana {n} marta urinishingiz mumkin. | Неверный код. Осталось попыток: {n}. | Wrong code. {n} attempts left. |
 | `error.otp_expired` | Kod muddati tugagan. Yangi kod oling. | Срок действия кода истёк. Получите новый код. | The code has expired. Please request a new one. |
@@ -2037,6 +2067,8 @@ handler renders through the catalog. Placeholders: `{n}`, `{m}`, `{limit}`, `{ma
 | `error.order_expired` | To‘lov muddati tugadi. Mahsulotlarni savatga qaytarib, qaytadan rasmiylashtiring. | Время на оплату истекло. Верните товары в корзину и оформите заказ заново. | The payment time has expired. Put the products back in the cart and place the order again. |
 | `error.payment_in_progress` | To‘lov {provider} ilovasida jarayonda. Uni yakunlang yoki biroz kuting. | Оплата в {provider} уже идёт. Завершите её или подождите. | A {provider} payment is in progress. Please finish it or wait. |
 | `error.order_not_cancellable` | Bu buyurtmani ilovadan bekor qilib bo‘lmaydi. Sotuvchi bilan bog‘laning. | Этот заказ нельзя отменить в приложении. Свяжитесь с продавцом. | This order cannot be cancelled in the app. Please contact the seller. |
+| `error.not_cancellable` | Buni bekor qilib bo‘lmaydi. | Это нельзя отменить. | This cannot be cancelled. |
+| `error.invalid_transition` | Bu amalni hozir bajarib bo‘lmaydi. Ma’lumotlarni yangilang. | Это действие сейчас недоступно. Обновите данные. | This action is not available right now. Please refresh. |
 | `error.booking_limit` | Sizda {limit} ta faol qabul bor. Yangisini olishdan oldin birini bekor qiling. | У вас {limit} активных записи. Отмените одну, чтобы записаться снова. | You have {limit} active appointments. Cancel one to book another. |
 | `error.slot_taken` | Bu vaqt band bo‘lib qoldi. Boshqa vaqtni tanlang. | Это время уже занято. Выберите другое. | This time has just been taken. Please choose another. |
 | `error.appointment_not_cancellable` | Bu qabulni bekor qilib bo‘lmaydi. | Эту запись нельзя отменить. | This appointment cannot be cancelled. |
@@ -2062,6 +2094,7 @@ handler renders through the catalog. Placeholders: `{n}`, `{m}`, `{limit}`, `{ma
 | `field.mismatch` | Ro‘yxat joriy elementlarga mos emas. | Список не совпадает с текущими элементами. | The list does not match the current items. |
 | `field.phone_invalid` | Telefon raqamini to‘g‘ri kiriting. | Введите корректный номер телефона. | Please enter a valid phone number. |
 | `field.otp_format` | 6 xonali kodni kiriting. | Введите 6-значный код. | Enter the 6-digit code. |
+| `field.otp_invalid` | Kod noto‘g‘ri. Yana {n} marta urinishingiz mumkin. | Неверный код. Осталось попыток: {n}. | Wrong code. {n} attempts left. |
 | `field.social_ticket_required` | Ijtimoiy tarmoq orqali kirishni qaytadan boshlang. | Начните вход через соцсеть заново. | Please start social sign-in again. |
 | `field.name_min` | Ismingizni kiriting (kamida 2 belgi). | Введите имя (минимум 2 символа). | Enter your name (at least 2 characters). |
 | `field.password_too_short` | Parol kamida {limit} ta belgidan iborat bo‘lsin. | Пароль должен быть не короче {limit} символов. | The password must be at least {limit} characters. |
@@ -2162,7 +2195,12 @@ handler renders through the catalog. Placeholders: `{n}`, `{m}`, `{limit}`, `{ma
 3. **Rate limits** (§1.8) on SMS, verification, login, refresh (per token and per IP for unknown tokens), social,
    checkout, pay, QR, POS (including failed key auth) and anonymous reads, keyed on the device first because of CGNAT.
    OTP day caps, the daily wrong-code cap and lockouts are derived from `SmsCode` rows so a cache flush does not reset
-   them; the global SMS budget is a circuit breaker with an alert (§2.1.1). Residual risk: a distributed attacker can
+   them; the global SMS budget is a circuit breaker with an alert (§2.1.1). Residual risk: a few IPs can trip the
+   global breaker (`SMS_GLOBAL_HOURLY_LIMIT`, 500 per hour) and stop sign-up, reset and new-device sign-in for every
+   customer until the next hour — an outage by design (it caps the SMS bill); the ERROR `otp.budget_tripped` pages the
+   on-call, whose runbook is to check the per-IP counters, block the abusing networks at the edge proxy and, if the
+   traffic is real, raise the limit; M3 considers a per-/24 (IPv4) or per-/48 (IPv6) hourly counter in front of the
+   breaker. A distributed attacker can
    still exhaust one victim's daily SMS cap (denial of reset/new-device sign-in for that day), and anyone who knows a
    phone can keep its **unknown-device** password sign-in locked by sending 5 wrong passwords per lock cycle (1 to 15
    minutes) — the owner's known device has its own guard and stays usable (§2.1.4); M3 evaluates App Attest / Play

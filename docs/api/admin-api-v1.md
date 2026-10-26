@@ -956,12 +956,12 @@ Templates are editable in the admin UI through `GET` / `PUT` below.
 | DashboardRange / Bucket | `today`, `week`, `month`, `custom` / `hour`, `day` | |
 | JobKind / JobState | `billz_import` / `queued`, `running`, `succeeded`, `failed` | |
 | BillzImportMode | `delta`, `full` | |
-| SessionRevokeReason | `logout`, `expired`, `password_changed`, `deactivated`, `replaced`, `admin_revoked` | AuthSession, audit |
+| SessionRevokeReason | `logout`, `expired`, `password_changed`, `deactivated`, `replaced`, `admin_revoked`, `refresh_reused` (M2: a customer refresh token came back after its rotation, customer contract §2.1.6) | AuthSession, audit |
 | LogoutScope | `current`, `others`, `all` | `auth/logout/` |
 | ExportFormat | `csv`, `xlsx` | |
 | IntegrationMode | `fake`, `live` | `settings/` `integrations`, `health/?ready=1` |
 
-### 3.2 Audit actions (M1)
+### 3.2 Audit actions (M1; M2 cross-reference row)
 
 | Area | `action` values |
 |---|---|
@@ -973,6 +973,7 @@ Templates are editable in the admin UI through `GET` / `PUT` below.
 | Notifications | `notification.created`, `notification_template.updated`, `segment.created`, `segment.updated`, `segment.deleted`, `segment.members_added`, `segment.member_removed`, `notification.push_dead` (system; a dead `push.order_status` / `push.appointment` / `campaign.send_batch` message: `{topic, dedupe_key, attempts, last_error, customer_id, campaign_id}`) |
 | Appointments | `appointment.confirmed`, `appointment.rejected`, `appointment.attended`, `appointment.created`, `appointment.rescheduled` (`{…, from_start, from_end, reschedule_no}`), `appointment.cancelled` (`{…, reason}`) |
 | Shell | `settings.updated` (changed leaves only, each `{from, to}`, §2.11), `export.downloaded` |
+| M2 (customer API) | The customer, payment and POS actions listed in `docs/api/customer-api-v1.md` §3 ("Audit actions added in M2"): `customer.*`, `auth.device_mismatch`, `appointment.requested`, `appointment.cancelled` (`by: "customer"`), `payment.late_capture`, `pos.*`. The `audit-log/` filters accept them unchanged. |
 | Django admin (editable models) | `<model>.created`, `<model>.updated`, `<model>.deleted` for `location`, `professional`, `service`, `professional_service`, `working_hours`, `blocked_period`; `working_hours_override.created`, `working_hours_override.updated`, `working_hours_override.deleted` (the override is the seventh editable model, T13) |
 
 ---
