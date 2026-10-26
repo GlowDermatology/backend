@@ -1,12 +1,17 @@
 """Deterministic BTS for tests, the demo seed and local end-to-end runs (``BTS_MODE=fake``).
 
 The admin e2e scripts and ``commerce.seeds`` rely on these rules; change them only together with them. Every
-rule may be overridden per order through ``Order.metadata["fake"]["bts"]`` (design 03 §1.3), handed in as
-``scenario``:
+rule may be overridden per order through ``Order.metadata["fake"]["bts"]`` (design 03 §1.3, plan §6), handed in
+as ``scenario``:
+
+``regions()``
+    the four regions of the tariff table (``10`` Toshkent shahri, ``11`` Toshkent viloyati, ``12`` Sirdaryo,
+    ``13`` Samarqand) with two cities each.
 
 ``quote(region_code, city_code)``
-    ``scenario["tariff"]`` if set, else :data:`TARIFFS` by BTS region code (``"10"`` Tashkent city 25 000,
-    ``"11"`` Tashkent region 26 000, ``"12"`` Sirdaryo 27 000, ``"13"`` Samarkand 28 000), else 25 000.
+    ``scenario["quote"] == "rejected"`` → :class:`BtsRejected` ``route_not_served``; ``"down"`` →
+    :class:`BtsUnavailable`; else ``scenario["tariff"]`` if set, else :data:`TARIFFS` by BTS region code
+    (``"10"`` 25 000, ``"11"`` 26 000, ``"12"`` 27 000, ``"13"`` 28 000), else 25 000.
 
 ``find_by_client_id(client_id)``
     the parcel this process created for ``clientId`` (the fake's in-memory "BTS database", so a redelivery
@@ -28,18 +33,48 @@ rule may be overridden per order through ``Order.metadata["fake"]["bts"]`` (desi
     ``"refused"`` → refused; otherwise the effective status (``scenario["status"]`` if set, else the parcel's
     last known status, ``""`` = none yet) decides: ``""`` or ``"100"`` → cancelled, anything else → refused
     with reason ``"posilka kuryerda"``.
+
+``track(tracking_number)``
+    ``scenario["track"] == "rejected"`` → :class:`BtsRejected` ``parcel_not_found``; ``"down"`` →
+    :class:`BtsUnavailable`; else the parcel with status ``scenario["track_status"]``, else the status of the
+    parcel this process created under that number, else ``"100"``.
+
+**Under the production settings** (``core.integration_modes.fake_in_production("bts")``, customer contract
+§2.14.3) the fake never reports a remote effect that did not happen and keeps nothing in :data:`_parcels`:
+``regions()`` → ``[]``; ``quote()`` / ``create()`` → :class:`BtsRejected` ``fake_mode``;
+``find_by_client_id()`` → ``None``; ``cancel()`` / ``track()`` → :class:`BtsUnavailable`; scenarios are ignored.
 """
 
 from collections.abc import Mapping
 from typing import Any
 
-from .ports import STATUS_ACCEPTED, BtsRejected, BtsUnavailable, CancelResult, CreateRequest, Parcel
+from glowderma.core import integration_modes
+
+from .ports import (
+    STATUS_ACCEPTED,
+    BtsRejected,
+    BtsUnavailable,
+    CancelResult,
+    City,
+    CreateRequest,
+    Parcel,
+    Region,
+)
 
 DEFAULT_TARIFF = 25_000
 TARIFFS: dict[str, int] = {"10": 25_000, "11": 26_000, "12": 27_000, "13": 28_000}
 TRACKING_BASE = 48_200_000
 ADDRESS_NOT_FOUND = "address_not_found"
+ROUTE_NOT_SERVED = "route_not_served"
+PARCEL_NOT_FOUND = "parcel_not_found"
+FAKE_MODE = "fake_mode"
 REFUSAL_REASON = "posilka kuryerda"
+REGIONS: tuple[Region, ...] = (
+    Region("10", "Toshkent shahri", (City("1001", "Chilonzor tumani"), City("1002", "Yunusobod tumani"))),
+    Region("11", "Toshkent viloyati", (City("1101", "Chirchiq shahri"), City("1102", "Zangiota tumani"))),
+    Region("12", "Sirdaryo viloyati", (City("1201", "Guliston shahri"), City("1202", "Sirdaryo tumani"))),
+    Region("13", "Samarqand viloyati", (City("1301", "Samarqand shahri"), City("1302", "Urgut tumani"))),
+)
 
 # The fake's "remote" parcels by clientId, per process (see the module docstring).
 _parcels: dict[str, Parcel] = {}
@@ -56,11 +91,15 @@ def tracking_number_for(order_id: int) -> str:
     return str(TRACKING_BASE + order_id % 100_000)
 
 
+def _production() -> bool:
+    return integration_modes.fake_in_production("bts")
+
+
 class FakeBts:
     name = "bts"
 
     def __init__(self, scenario: Mapping[str, Any] | None = None) -> None:
-        self.scenario: Mapping[str, Any] = scenario or {}
+        self.scenario: Mapping[str, Any] = {} if _production() else (scenario or {})
 
     def _tariff(self, region_code: str) -> int:
         override = self.scenario.get("tariff")
@@ -78,10 +117,24 @@ class FakeBts:
             status=str(self.scenario.get("status") or STATUS_ACCEPTED),
         )
 
+    def regions(self) -> list[Region]:
+        if _production():
+            return []
+        return list(REGIONS)
+
     def quote(self, region_code: str, city_code: str) -> int:
+        if _production():
+            raise BtsRejected(FAKE_MODE, "BTS is fake under the production settings")
+        answer = self.scenario.get("quote")
+        if answer == "rejected":
+            raise BtsRejected(ROUTE_NOT_SERVED, "BTS does not deliver to this area (fake)")
+        if answer == "down":
+            raise BtsUnavailable("BTS did not answer (fake: quote down)")
         return self._tariff(region_code)
 
     def find_by_client_id(self, client_id: str) -> Parcel | None:
+        if _production():
+            return None
         if self.scenario.get("down"):
             raise BtsUnavailable("BTS did not answer (fake: down)")
         found = _parcels.get(client_id)
@@ -90,6 +143,8 @@ class FakeBts:
         return found
 
     def create(self, request: CreateRequest) -> Parcel:
+        if _production():
+            raise BtsRejected(FAKE_MODE, "BTS is fake under the production settings")
         if self.scenario.get("down"):
             raise BtsUnavailable("BTS did not answer (fake: down)")
         if request.attempt <= int(self.scenario.get("fail_attempts") or 0):
@@ -99,6 +154,8 @@ class FakeBts:
         return parcel
 
     def cancel(self, parcel: Parcel) -> CancelResult:
+        if _production():
+            raise BtsUnavailable("BTS is fake under the production settings: no cancellation is made up")
         answer = self.scenario.get("cancel")
         if answer == "unavailable":
             raise BtsUnavailable("BTS did not answer (fake: cancel unavailable)")
@@ -110,3 +167,22 @@ class FakeBts:
         _parcels.pop(parcel.client_id, None)
         _cancelled.add(parcel.client_id)
         return CancelResult(ok=True, status=status)
+
+    def track(self, tracking_number: str) -> Parcel:
+        if _production():
+            raise BtsUnavailable("BTS is fake under the production settings: no status is made up")
+        answer = self.scenario.get("track")
+        if answer == "rejected":
+            raise BtsRejected(PARCEL_NOT_FOUND, "BTS does not know this parcel (fake)")
+        if answer == "down":
+            raise BtsUnavailable("BTS did not answer (fake: track down)")
+        known = next((p for p in _parcels.values() if p.tracking_number == tracking_number), None)
+        status = self.scenario.get("track_status") or (known.status if known is not None else STATUS_ACCEPTED)
+        return Parcel(
+            client_id=known.client_id if known is not None else "",
+            tracking_number=tracking_number,
+            bts_order_id=known.bts_order_id if known is not None else "",
+            tariff=known.tariff if known is not None else None,
+            status=str(status),
+            status_at=str(self.scenario.get("track_status_at") or ""),
+        )
