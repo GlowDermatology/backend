@@ -319,6 +319,10 @@ def test_login_guard_locks_and_device_guard_is_separate() -> None:
 def test_capped_login_is_no_password_oracle(
     setting: dict[str, int], code: str, status: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # One instant for every request: details.retry_after (seconds to midnight or to the next hour) would
+    # differ between two requests that straddle a second boundary on the wall clock.
+    instant = timeutils.now()
+    monkeypatch.setattr(timeutils, "now", lambda: instant)
     customer = password_customer(PHONE)
     with override_settings(**setting):
         # exhaust the cap with one code for this phone/device/IP
