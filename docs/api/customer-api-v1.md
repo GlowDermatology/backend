@@ -137,8 +137,9 @@ Codes added for this audience (admin §1.6 codes keep their meaning):
 | 409 | `phone_registered` · `phone_not_registered` | Purpose does not fit the phone (§2.1.1) | null |
 | 409 | `email_registered` · `email_not_registered` | Purpose does not fit the e-mail address (§2.1.1, hybrid identity) | null |
 | 409 | `phone_required` | Checkout, pay, booking or the QR of an account without a verified phone (§2.2.10) | null |
-| 409 | `phone_taken` · `email_taken` | Attaching a phone or an e-mail address another account holds; never a merge (§2.2.10) | null |
+| 409 | `phone_taken` · `email_taken` | Attaching a phone or an e-mail address another account holds, answered only after a correct code; never a merge (§2.2.10) | `phone_taken`: `{"deleted": bool}` (true: the holder was deleted → register with the number again); `email_taken`: null |
 | 409 | `reauth_required` | A sign-in-method change of an account with no password, phone or e-mail whose session is older than `CUSTOMER_REAUTH_FRESH_SECONDS` (§2.2.10) | null |
+| 409 | `phone_or_email_required` | `me/password/` on an account without a phone or an e-mail: a password could never sign in (§2.2.9) | null |
 | 409 | `social_provider_linked` · `social_identity_linked` | Link refused (§2.1.9, §2.2.8) | `{"provider": str}` |
 | 409 | `last_sign_in_method` | Unlinking the only way to sign in (§2.2.8) | `{"provider": str}` |
 | 409 | `terms_update_required` | Consent older than the current terms (§2.2.4) on checkout and booking | `{"current_version": str}` |
@@ -904,12 +905,16 @@ Facebook or Apple identity, which then signs in on any device without SMS (`M2-A
 - **`DELETE me/social/{provider}/`** (**C**). Body `{"password": str | null, "verification_token": str | null}`,
   re-authenticated as above (checked first). → 200 `Me`; idempotent (not linked → 200). Refused with 409
   `last_sign_in_method` "Bu yagona kirish usuli. Avval parol o‘rnating." (`error.last_sign_in_method`, `details
-  {provider}`) when the customer has no password and this is the only identity; the app then offers `POST me/password/`
+  {provider}`) when this is the only identity and the password is no way in — no password, or (hybrid identity) a
+  password without a phone or an e-mail to sign in with; the app then offers `POST me/password/`
   (§2.2.9), which keeps the identity. Side effects: identity deleted (Apple: `apple.revoke`, §2.1.8); audit
   `customer.social_unlinked {provider, reason: "customer"}`; outbox `push.account_security` (payload §2.14.2: `event:
   "social_unlinked"`, `provider`, `farewell_tokens: []`).
 
 #### 2.2.9 `POST me/password/` (**C**, **I**) — set or change the password while signed in
+Hybrid identity: an account without a phone or an e-mail answers **409 `phone_or_email_required`** "Parol o‘rnatish
+uchun avval telefon raqami yoki emailni qo‘shing." (`error.phone_or_email_required`) first — such a password could
+never sign in, and unlinking the last identity afterwards would strand the account (§2.2.8).
 Body `{"current_password": str | null, "verification_token": str | null, "password": str}`.
 
 | Field / check | Code · message (uz) · key |
@@ -937,34 +942,52 @@ refuses a phoneless account as `qr_invalid`) always have one. Browsing, the cart
 
 **`POST me/phone/code/`** (**C**; throttles `customer`, `sms_phone`, `sms_device`). Body `{"phone": str}` → 200
 `CodeIssue` (§2.1.1, `purpose: "attach_phone"`, every OTP limit applies). 409 `conflict` when the account already has
-a phone (it is never replaced); 409 **`phone_taken`** "Bu raqam boshqa hisobga bog‘langan — shu raqam bilan kiring."
-(`error.phone_taken`) when any other account holds the number — active, or deleted (A1 keeps the number with its
-loyalty account; registering with it reactivates that account). **No automatic merge:** the app offers to sign in
-with that phone instead.
+a phone (it is never replaced). Who holds the number is **not** checked here: these routes are no oracle of which
+numbers have an account — `phone_taken` comes only after a correct code (below).
 
-**`POST me/phone/`** (**C**; no `Idempotency-Key`: a wrong code is counted in its own committed transaction, as
-`auth/verify-code/`). Body `{"phone": str, "code": str, "password": str | null, "verification_token": str | null}`.
-Checks in order: 409 `conflict` (already has a phone); **re-authentication** — waived when the request's session
-signed in within `CUSTOMER_REAUTH_FRESH_SECONDS` (600; `AuthSession.created_at`, a refresh keeps it), else
-`password` when `has_password` (`required` / `password_incorrect`, guard `customer_reauth`), else a `reset_password`
-`verification_token` of the account's own e-mail (or phone), else 409 **`reauth_required`** "Xavfsizlik uchun
-hisobingizga qaytadan kiring." (`error.reauth_required`: an account with no password, phone or e-mail — a social
-sign-up — signs in with its provider again); 409 `phone_taken`; the code (`otp_expired` / `otp_invalid` with
-`details.attempts_left` and the field error on `code` / `otp_locked`, exactly as §2.1.2). Re-authentication runs
-before the code, so its refusal never spends the code. → **200 `Me`** with the phone. Side effects under the
-signed-in lock (C§6.17): `Customer.phone`; a unique-key race answers `phone_taken`; audit `customer.phone_attached`.
+**`POST me/phone/`** (**C**; throttles `customer`, `sms_phone`, `sms_device`, like `send-code`; no
+`Idempotency-Key`: a wrong code is counted in its own committed transaction, as `auth/verify-code/`). Body
+`{"phone": str, "code": str, "password": str | null, "verification_token": str | null}`. Checks in order:
+1. 409 `conflict` — the account already has a phone;
+2. **re-authentication**, however fresh the session (review B-W2: a social sign-in has no new-device step, M2-A10, so
+   a session alone must never add a way in): `password` when `has_password` (`required` / `password_incorrect`, guard
+   `customer_reauth`; each failure also counts in the account's `customer_login` budget), else a `reset_password`
+   `verification_token` of the account's own phone or e-mail; only an account with **no password, phone or e-mail**
+   (a phoneless social sign-up) has nothing to prove with — its session passes when it signed in within
+   `CUSTOMER_REAUTH_FRESH_SECONDS` (600; `AuthSession.created_at`, a refresh keeps it), else 409 **`reauth_required`**
+   "Xavfsizlik uchun hisobingizga qaytadan kiring." (`error.reauth_required`: the app signs in with the provider
+   again). It runs before the code, so its refusal never spends the code;
+3. the code (`otp_expired` / `otp_invalid` with `details.attempts_left` and the field error on `code` / `otp_locked`,
+   exactly as §2.1.2);
+4. 409 **`phone_taken`** when another account holds the number, `details {"deleted": bool}`: an active holder → "Bu
+   raqam boshqa hisobga bog‘langan — shu raqam bilan kiring." (`error.phone_taken`: the app offers to sign in with
+   it); a deleted holder (A1 keeps the number with its loyalty account) → "Bu raqam o‘chirilgan hisobga tegishli —
+   shu raqam bilan qayta ro‘yxatdan o‘ting." (`error.phone_taken_deleted`: registering with it reactivates that
+   account). **No automatic merge.**
+
+→ **200 `Me`** with the phone. Side effects under the signed-in lock (C§6.17): `Customer.phone` (a unique-key race
+answers `phone_taken`); outbox `push.account_security` (`event: "phone_attached"`, §2.14.2: inbox row and push to the
+account's devices); audit `customer.phone_attached`.
 
 **`POST me/email/code/`** and **`POST me/email/`** — the same for an e-mail address (`purpose: "verify_email"`, code
-by e-mail; body `{"email": str}` / `{"email", "code", "password", "verification_token"}`): 409 `conflict` when it
-already is the account's address, 409 **`email_taken`** "Bu email boshqa hisobga bog‘langan — shu email bilan kiring."
-(`error.email_taken`) for another account's. A new address **replaces** the previous one (`email_verified_at` = now).
-Audit `customer.email_attached {replaced}`. The address then signs in (`auth/login/` with `email`) and recovers the
-password (`reset_password` by e-mail).
+by e-mail; body `{"email": str}` / `{"email", "code", "password", "verification_token"}`; same throttles, keyed by the
+address): 409 `conflict` when it already is the account's address; after a correct code, 409 **`email_taken`** "Bu
+email boshqa hisobga bog‘langan — shu email bilan kiring." (`error.email_taken`, `details: null`) for another
+account's. A new address **replaces** the previous one (`email_verified_at` = now): `push.account_security` (`event:
+"email_attached"`) and, for a replacement, a notice e-mail to the **previous** address (outbox `email.notice`, the
+address sealed in the payload, §2.14.4). Audit `customer.email_attached {replaced}`. The address then signs in
+(`auth/login/` with `email`) and recovers the password (`reset_password` by e-mail).
 
 **Re-authentication of the other sign-in-method changes** (`me/social/`, `DELETE me/social/{provider}/`,
-`me/password/`, `DELETE me/`): unchanged for accounts with a password or a phone; an account without a password
-proves itself with a `reset_password` token of its own phone **or e-mail**; one with neither (a phoneless social
-sign-up) passes only with a fresh session (as above), else 409 `reauth_required`.
+`me/password/`, `DELETE me/`): the same rule — the password, or a `reset_password` token of the account's own phone
+**or e-mail**; only an account with none of them passes on a fresh session, else 409 `reauth_required`.
+
+**Budgets per account.** Once an identifier resolves to an account, the unknown-device `customer_login` guard is
+checked and counted for the identifier **and** for the account (`customer:{id}`), and the OTP lockout and daily
+wrong-code cap count the codes of the account's phone and e-mail together, so an account with both gets one budget.
+An unknown identifier keeps only its own key, so no answer reveals an account. **Staff bookings**
+(`appointments.services.create_by_admin`, admin §2.9) are intentionally not phone-gated: staff book by phone or by
+customer id on the customer's behalf.
 
 ---
 ### 2.3 Catalog (public, **O**)
@@ -2259,6 +2282,12 @@ deletes done/dead rows after 24 h). The message: subject `email.otp.subject`, a 
 (`accounts/email/otp.txt` / `.html`) in the request language (uz/ru/en): `email.otp.intro.<purpose>`, the code,
 `email.otp.expiry` (`{m}` minutes), `email.otp.ignore`, `email.otp.footer`; header `Auto-Submitted: auto-generated`.
 Logs carry `sms_code_id` only — never the address (`pii_ref(email)` in `otp.issued`), the subject or the code.
+Addresses are stored, looked up and kept unique in one form (`core.pii.normalize_email`): NFC, trimmed, lower case,
+the domain in IDNA ASCII (punycode); plus-addressing is kept. One client IP may request at most
+`EMAIL_OTP_IP_HOURLY_LIMIT` (20) e-mail codes per hour (429 `otp_network_limit`), so no IP can exhaust
+`EMAIL_GLOBAL_HOURLY_LIMIT`. **Security notices** (`email.notice {to: sealed, lang, kind}`, kind `email_replaced`):
+subject and body `email.notice.<kind>.subject` / `.body`, templates `accounts/email/notice.{txt,html}`; the sealed
+address is blanked after a definitive outcome; a relay that accepted nothing retries.
 
 ### 2.15 `POST dev/payments/{order_id}/simulate/` (local/test settings only)
 Mounted only when `DEV_FEATURES_ALLOWED` (local/test settings), `FAKE_PAYMENTS_ENABLED=true` **and** `CLICK_MODE` =
@@ -2312,7 +2341,7 @@ gains `refresh_reused` (§2.1.6).
 | **InboxKind** (new; = `InboxNotification.Kind`) | `promo`, `general`, `order_status`, `appointment` | inbox |
 | **InboxLinkKind** (new) | `none`, `product`, `order`, `appointment`, `url` (gap ADM-10.1) | inbox |
 | **PushDataType** (new; FCM `data.type`) | `order_status`, `appointment`, `campaign`, `account_security`, `session_replaced` | §2.14.2 |
-| **AccountSecurityEvent** (new) | `social_linked`, `social_unlinked`, `password_reset`, `password_changed` | `push.account_security`, §2.14.2 |
+| **AccountSecurityEvent** (new) | `social_linked`, `social_unlinked`, `password_reset`, `password_changed`, and (hybrid identity, added backward-compatibly: the push and inbox carry server-rendered texts, so an app that does not know a value shows them as they are) `phone_attached`, `email_attached` | `push.account_security`, §2.14.2 |
 
 **Audit actions added in M2** (shown by the admin `audit-log/`; `actor_type` in brackets):
 
@@ -2497,6 +2526,8 @@ code a customer view can raise to an existing key.
 | `error.email_not_registered` | Bu email bilan hisob topilmadi. Ro‘yxatdan o‘ting. | Аккаунт с этим email не найден. Зарегистрируйтесь. | No account uses this e-mail. Please sign up. |
 | `error.phone_taken` | Bu raqam boshqa hisobga bog‘langan — shu raqam bilan kiring. | Этот номер привязан к другому аккаунту — войдите с этим номером. | This number belongs to another account — please sign in with it. |
 | `error.email_taken` | Bu email boshqa hisobga bog‘langan — shu email bilan kiring. | Этот email привязан к другому аккаунту — войдите с этим email. | This e-mail belongs to another account — please sign in with it. |
+| `error.phone_taken_deleted` | Bu raqam o‘chirilgan hisobga tegishli — shu raqam bilan qayta ro‘yxatdan o‘ting. | Этот номер принадлежит удалённому аккаунту — зарегистрируйтесь с ним заново. | This number belongs to a deleted account — please sign up again with it. |
+| `error.phone_or_email_required` | Parol o‘rnatish uchun avval telefon raqami yoki emailni qo‘shing. | Чтобы задать пароль, сначала добавьте номер телефона или email. | Add a phone number or an e-mail first to set a password. |
 | `error.phone_required` | Davom etish uchun telefon raqamingizni tasdiqlang. | Чтобы продолжить, подтвердите номер телефона. | Please verify your phone number to continue. |
 | `error.reauth_required` | Xavfsizlik uchun hisobingizga qaytadan kiring. | В целях безопасности войдите в аккаунт заново. | For your security, please sign in again. |
 | `error.qr_invalid` | QR kod yaroqsiz yoki muddati o‘tgan. Mijozdan ilovada QR kodni yangilashni so‘rang. | QR-код недействителен или устарел. Попросите клиента обновить его в приложении. | The QR code is invalid or expired. Ask the customer to refresh it in the app. |
