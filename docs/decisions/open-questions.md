@@ -200,6 +200,21 @@ the product owner or the client may still revise it.
 | PS-16 | Range of the overrides / blocks list filters | `date_from` / `date_to` within 3660 days (≈10 years) of today, else `out_of_range` (a `date_to` of 9999-12-31 overflowed the day bounds and answered 500) | `ScheduleRangeQuerySerializer` | provisional default (2026-10-26) |
 | PS-17 | Second writers of `Professional.is_active` | The Django admin (`services.save_row`) takes the row `FOR UPDATE` and refuses `true → false` while appointments are ahead (form error, no `force`); the admin REST API stays the only way to force it. A PATCH resending the staff account already linked is accepted even if that account was deactivated since. The specialists export's `Xizmatlar` lists only active offers of active services | `professionals.services.save_row`, admin §2.17 | provisional default (2026-10-26) |
 
+## Web client (B-W1: website, sessions, SEO) — provisional defaults (recorded 2026-10-27)
+| # | Question | Provisional default (implemented) | Where |
+|---|---|---|---|
+| W-1 | May a customer be signed in on several devices at once? | Yes, any number of phones and browsers; one open session per device (a re-sign-in on the same install/browser replaces its own session). `SESSION_REPLACED` and the `push.session_replaced` farewell are retired for customers (the handler only drains old messages). | C§1.9 |
+| W-2 | `X-GD-App-Version` for `X-GD-Platform: web` | Optional; validated when sent; no minimum version, store URL or 426 for web. | C§1.2 |
+| W-3 | Session list "Location" | Local GeoIP City `.mmdb` only (`GEOIP_CITY_DB`, MaxMind GeoLite2-City or DB-IP City Lite, operator refreshes monthly); English place names; "—" when unset/unknown/private; resolved at sign-in and when the IP changes (≤ every 5 min). | C§2.2.10 |
+| W-4 | Session list "Device" label | Built-in user-agent parser (no dependency); the BFF forwards the browser UA as `X-GD-Client-UA`, trusted only with the internal secret; app sessions use the `PUT me/device/` model/OS. | C§2.2.10 |
+| W-5 | Pushes with several devices | Transactional pushes (order status, appointments, account security) fan out to every pushable device (≤10, newest first); campaigns stay one device per customer (reach counts unchanged). | C§2.14.2 |
+| W-6 | QR with several devices | A QR token is bound to its session (2 live per session) and dies with it; the POS resolve re-checks the session. | C§2.9.3 |
+| W-7 | Website payment return | `PAYMENT_WEB_RETURN_URL` template (`{order_id}`, `{lang}`, `{locale_prefix}`), chosen when the pay request comes from `web`; default `https://glowderma.uz{locale_prefix}/buyurtmalar/{order_id}?paid=1` — the frontend must serve that route (or the env changes). | C§2.7.2 |
+| W-8 | Website social sign-in | Same endpoints; `GOOGLE_WEB_CLIENT_IDS`, the existing `FACEBOOK_APP_ID`, `APPLE_SERVICES_IDS` + `APPLE_WEB_REDIRECT_URI` (server-configured, never from the client). Needs the client's Google web client id and Apple Services ID. | C§2.1.8 |
+| W-9 | Product / specialist slugs | Derived once at creation from the uz name (else Billz name), transliterated, unique (`-2`…), never only digits, staff-editable; no slug history/redirects server-side (the website 301s id URLs to the slug). | C§2.3, admin §2.3/§2.17 |
+| W-10 | SEO texts and checklist | Optional per-language `seo_title` (≤120) / `seo_description` (≤300) on products and categories, shown only in their own language; «SEO holati» bounds 15–60 / 50–160 chars, description ≥80. | admin §2.3/§2.4 |
+| W-11 | Merge with B-W2 (hybrid identity) | B-W1 adds `accounts.0010_web_client_sessions`; B-W2 will also add an `accounts` migration — the later branch renumbers or adds a merge migration. | — |
+
 ## Compliance (gates M3 / production)
 | # | Requirement | Plan |
 |---|---|---|

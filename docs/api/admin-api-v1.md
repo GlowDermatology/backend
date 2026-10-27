@@ -480,7 +480,14 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
  "images": [{"id": 31, "url": "https://media.example.uz/products/1/9f2c.webp", "position": 0}],
  "last_change": {"at": "2026-10-22T18:04:00+05:00", "actor": {"id": 1, "display_name": "Administrator"},
                  "kind": "price_changed", "old_price": 175000, "new_price": 185000},   // null if never edited
- "created_at": "2026-06-01T09:00:00+05:00", "updated_at": "2026-10-22T18:04:00+05:00"}
+ "slug": "gialuron-kislotali-serum",          // B-W1: the website URL segment (unique, never only digits)
+ "seo": {"uz": {"title": "", "description": ""},   // B-W1: optional page title (≤120) / meta description (≤300)
+         "ru": {"title": "", "description": ""},   // per language; "" = the website builds one
+         "en": {"title": "", "description": ""}},
+ "seo_status": {"ok": false,                       // B-W1 «SEO holati»: ok = no error and no warning
+                "issues": [{"code": "description_missing", "severity": "error", "language": "uz",
+                            "message": "Tavsif (o‘zbekcha) yo‘q."}]},   // SeoIssueCode / SeoSeverity, errors first
+ "created_at": "2026-06-01T09:00:00+05:00", "updated_at": "2026-10-22T18:04:00+05:00"}   // updated_at moves on gallery changes too (B-W1)
 ```
 
 **`GET products/`** → `Page<Product>`
@@ -512,12 +519,15 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 | `category` | slug or `null`; an unknown slug → `does_not_exist` |
 | `promo` | bool, default `false` |
 | `status` | `active` or `hidden`, default `hidden` |
+| `slug` (B-W1) | optional; on create derived from `texts.uz.name` (else `billz_name`, else `mahsulot-<billz_id>`; Uzbek apostrophes dropped, Cyrillic transliterated, `-2`, `-3`… when taken); never changes on its own. When sent: `^[a-z0-9]+(-[a-z0-9]+)*$`, not only digits, ≤140 (`invalid` "Faqat lotin kichik harflari, raqamlar va chiziqcha (faqat raqam emas).", `max_length`), unique (`unique` "Bu manzil (slug) boshqa mahsulotda bor.", a lost race too). Changing it changes the website URL (no redirect history kept) |
+| `seo.{uz,ru,en}.{title,description}` (B-W1) | optional, merged leaf by leaf; title ≤120, description ≤300 (`max_length`); trimmed. The customer API shows each only in its own language |
 | Active rule | Whenever the resulting status is `active`: `category` must be set (`required_for_active` "Faol mahsulot uchun kategoriyani tanlang."), the product needs ≥1 image (field `images`, `required_for_active` "Faol mahsulotda kamida bitta rasm bo‘lsin.") and `price ≥ 1000` (field `price`, `min_value` "Narx kamida 1 000 so‘m bo‘lsin." — imported products may carry `price = 0` while hidden). A create with `active` therefore always fails; the FE creates `hidden`. |
 
 - Every successful create or PATCH sets `is_new_from_billz=false`.
 - Responses of `POST products/` and `PATCH products/{id}/`: 201/200 `Product`, 400 `validation_error`, 404 (PATCH), 409 `conflict` (fake Billz in production), 503 `provider_unavailable` (the Billz lookup above).
 - `last_change.kind` is chosen by priority: `created` > `price_changed` > `activated`/`hidden` > `promo_added`/`promo_removed` > `updated`. Image calls do not change `last_change`.
-- Audit `product.created` / `product.updated` (field diff).
+- Audit `product.created` / `product.updated` (field diff; B-W1 adds `slug` and `seo.<lang>.<title|description>` leaves).
+- **«SEO holati» checklist** (B-W1, `catalog.seo`, server-computed on every Product, no extra query): errors — `name_missing` (uz), `description_missing` (uz), `images_missing`; warnings — `name_translation_missing` (ru/en), `description_missing` (ru/en), `description_short` (<80), `alt_text_fallback` (images but no uz name: alt text falls back to the Billz name), `category_missing`, `seo_title_short` (<15) / `seo_title_long` (>60), `seo_description_short` (<50) / `seo_description_long` (>160); hints (`info`) — `seo_title_missing`, `seo_description_missing` (the website builds a fallback). Messages are Uzbek; ordered errors → warnings → hints.
 
 - PATCH request shape: every field optional and `texts` merged leaf by leaf — any subset of languages and leaves (OpenAPI `PatchedProductPatchRequest`).
 
@@ -549,7 +559,10 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 // Category
 {"slug": "serums", "name": {"uz": "Serumlar", "ru": "Сыворотки", "en": "Serums"},
  "image_url": "https://media.example.uz/categories/2/77aa1b2c3d4e5f60.webp",   // gap ADM-5.1 | null
- "position": 0, "is_active": true, "product_count": 42, "created_at": "…", "updated_at": "…"}
+ "position": 0, "is_active": true, "product_count": 42,
+ "seo": {"uz": {"title": "", "description": ""}, "ru": {…}, "en": {…}},   // B-W1, as products
+ "seo_status": {"ok": false, "issues": […]},   // B-W1: name_translation_missing, image_missing, no_active_products, seo_* bounds/hints
+ "created_at": "…", "updated_at": "…"}
 ```
 - `GET categories/` (P E; ordered by `position`; filter `is_active`).
 - **Bodies** (gap ADM-5.1, open question GC-4): `POST` and `PATCH` take JSON **or** `multipart/form-data` (anything else → 415). Multipart names are dotted like the banners' (`slug`, `name.uz`, `name.ru`, `name.en`, `is_active`) plus the optional file part `image`:
@@ -559,6 +572,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
   - `slug`: `^[a-z0-9-]{2,40}$`, unique, not `order` or `none` (reserved → `slug` `invalid` "Bu slug band."), immutable afterwards; a lost unique race is reported as `slug` `unique` too;
   - `name.uz` 2..60 required; `name.ru`, `name.en` ≤60, optional (default `""`);
   - `is_active` default `true`;
+  - `seo.{uz,ru,en}.{title,description}` (B-W1): optional, as products (JSON nested, multipart dotted `seo.uz.title`); PATCH merges leaf by leaf; the audit snapshot carries the leaves;
   - appended last.
 - `GET`/`PATCH categories/{slug}/`. Sending `slug` in PATCH → `read_only`.
 - `DELETE categories/{slug}/` → 204, or 409 `conflict` "Kategoriyada mahsulotlar bor." when `product_count > 0`.
@@ -641,8 +655,8 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 ```
 
 - `online_orders.all_count` (gap closure, ADM-8.1) = every order of the customer, any status — the rows `orders/?customer={id}` lists, so the card's "Buyurtmalari" link can show it; `count` stays the paid, non-reversed online purchases the loyalty programme counts.
-- `device` = the most recently active of the customer's **active** devices (`null` when none: logged out everywhere, or deleted); gap closure: it carries `platform` (`OrderChannel`: `ios` | `android`).
-- `devices` (gap closure, ADM-8.1) = the customer's app installations, active ones first, then by `last_active_at` (newest first), ties by `id` desc, at most **20**. `is_active` turns `false` after a logout, a sign-in on another phone (single-device rule) or the account deletion; `push_enabled` is whether pushes reach it now; `created_at` is the installation's first sign-in. Never carries the FCM token, the device key (hash) or the Firebase installation id. A deleted customer keeps the list (every entry inactive). One query with `device`, so the card's query count does not grow.
+- `device` = the most recently active of the customer's **active** devices (`null` when none: logged out everywhere, or deleted); gap closure: it carries `platform` (`OrderChannel`: `ios` | `android` | `web`).
+- `devices` (gap closure, ADM-8.1) = the customer's app installations and (B-W1) website browsers (`platform` `web`), active ones first, then by `last_active_at` (newest first), ties by `id` desc, at most **20**. Several can be active at once (B-W1: the single-device rule is retired, customer contract §1.9). `is_active` turns `false` once no session is left on the device (a logout, a session signed out from the list, a password change or reset elsewhere) or the account deletion; `push_enabled` is whether pushes reach it now; `created_at` is the installation's first sign-in. Never carries the FCM token, the device key (hash) or the Firebase installation id. A deleted customer keeps the list (every entry inactive). One query with `device`, so the card's query count does not grow.
 - `billz_sale_ref` (Purchase): the Billz document number (≤ 32), `null` when none. A `store_qr` purchase always has one. An `online` purchase gets one the moment Billz created its sale (M3 live push), **while that sale may still be a draft**: it is the number staff look up in Billz when the push is deferred (closed shift) or dead (the sale is then completed, or deleted, by hand). The order history's `billz_sale_recorded` event marks the sale as paid in Billz; while Billz is fake (or before the push ran) it is `null`.
 
 | `kind` | `source_type` | Populated |
@@ -651,6 +665,16 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 | `debit` | `order` | `order_id`, `source_ref` |
 | `reversal` | `order` (or `billz_sale`) | `reverses_id`, `order_id` / `source_ref` |
 | `adjustment` | `admin` | `reason`, `actor` |
+
+**`GET customers/{id}/sessions/`** (B-W1; P, `page_size` 20 | 50) → `Page<AdminCustomerSession>`: the customer's open sessions — each signed-in phone and browser — most recently active first, exactly as the customer's «Faol seanslar» list (customer contract §2.2.10) without `current`. 404 for an unknown customer; a deleted customer has none.
+```jsonc
+// AdminCustomerSession
+{"id": "6f0c1d2e-…", "device": "Chrome (Windows)",   // "Glow Derma iOS (iPhone 15)" for the app
+ "platform": "web",                                   // OrderChannel | null
+ "location": "Tashkent, Tashkent, UZ",               // local GeoIP City database; "—" when unknown
+ "created_at": "…", "updated_at": "…"}                // sign-in; last activity (≤ every 5 min)
+```
+**`DELETE customers/{id}/sessions/{session_id}/`** (B-W1; optional `Idempotency-Key`) → 204: signs that session out (reason `admin_revoked`; the customer's client answers 401 `SESSION_EXPIRED`; the device stops receiving pushes when no other session is left on it). 404 for an unknown customer, or a session that is unknown, already ended or another customer's. Audit `customer.session_revoked` (`{sid, current: false}`, actor the staff member, entity the customer).
 
 **`POST customers/{id}/cashback-adjustments/`** (I). Body `{"direction": "add"|"subtract", "amount": int, "reason": str}`.
 
@@ -1104,6 +1128,7 @@ Staff manage the bookable side of the clinic here (until now only the disabled D
  "working_hours": [                                                            // WorkingDay[], by weekday (0 = Monday … 6 = Sunday); a missing weekday = not working
    {"weekday": 0, "start": "09:00", "end": "18:00", "break_start": "13:00", "break_end": "14:00"}],  // break: both or null
  "upcoming_appointments": 4,                                                   // requested|confirmed appointments starting now or later
+ "slug": "dilnoza-yusupova",                                                   // B-W1: the website URL segment
  "created_at": "…", "updated_at": "…"}
 ```
 
@@ -1130,6 +1155,7 @@ Staff manage the bookable side of the clinic here (until now only the disabled D
 | `staff_user_id` | an **active** staff user not linked to another specialist, or null; the account already linked to this specialist is accepted back unchanged even once deactivated (a resent form) | `does_not_exist` "Xodim topilmadi." · `unique` "Bu xodim boshqa mutaxassisga bog‘langan." (also when a concurrent request linked it first) |
 | `position` | int 0..100000; default: appended last | `min_value` · `max_value` |
 | `is_active` | bool; **default `false` on create** (decision PS-6: add the offer and the hours, then activate) | |
+| `slug` (B-W1) | optional; on create derived from `name` (transliterated; `mutaxassis` when empty; `-2`… when taken); never changes on its own; when sent `^[a-z0-9]+(-[a-z0-9]+)*$`, not only digits, ≤160 | `invalid` "Faqat lotin kichik harflari, raqamlar va chiziqcha (faqat raqam emas)." · `unique` "Bu manzil (slug) boshqa mutaxassisda bor." (a lost race too) |
 | `force` | PATCH only, bool, default `false` | |
 
 - **Deactivation guard** (`is_active: true → false`). Under the specialist's row lock the open appointments ahead are counted; when there are any and `force` is not `true` → **409 `conflict`** "Mutaxassisda {n} ta kelgusi qabul bor (kutilayotgan yoki tasdiqlangan). Qabullar o‘zgarmaydi: avval ularni boshqa vaqtga yoki mutaxassisga ko‘chiring yoki bekor qiling, yoki baribir nofaol qiling." and nothing of the PATCH is written. The UI shows the message and offers "Baribir nofaol qilish" (the same PATCH with `force: true`); `upcoming_appointments` gives the count beforehand. With `force` (or with nothing ahead) the specialist leaves the customer catalogue, the slots (`specialists/{id}/` answers 404 to customers) and the booking dialogs at once; the appointments stay as they were (still confirmable, attendable, reschedulable to another specialist and cancellable) and the day board keeps the specialist's column on the days it still has appointments (§2.9, `is_active: false`). A booking that races the deactivation is refused (`specialist_id` `does_not_exist`), or is counted by it — never both missed. The Django admin (disabled in production) applies the same guard without a `force`: unchecking `is_active` there with appointments ahead is a form error on `is_active` "Mutaxassisda {n} ta kelgusi qabul bor (kutilayotgan yoki tasdiqlangan). Avval ularni boshqa vaqtga yoki mutaxassisga ko‘chiring yoki bekor qiling." under the same row lock.
@@ -1239,7 +1265,7 @@ Audit `schedule.hours_updated` (entity `professional`) with the week before and 
 | PaymentStatus | `pending`, `paid`, `failed`, `refunded` | order payment, payments |
 | PaymentProvider | `click`, `payme` | |
 | FulfilmentMethod | `delivery`, `pickup` | |
-| OrderChannel | `ios`, `android` | |
+| OrderChannel | `ios`, `android`, `web` | `web` (B-W1): an order placed on the customer website, a website session |
 | OrderPeriod | `today`, `week`, `month`, `all` | `orders/`, `payments/` |
 | EventSource | `system`, `bts`, `admin` | OrderEvent |
 | OrderEventType | 16 values, §4 | OrderEvent |
@@ -1281,6 +1307,8 @@ Audit `schedule.hours_updated` (entity `professional`) with the week before and 
 | LogoutScope | `current`, `others`, `all` | `auth/logout/` |
 | ExportFormat | `csv`, `xlsx` | |
 | IntegrationMode | `fake`, `live` | `settings/` `integrations`, `health/?ready=1` |
+| SeoSeverity (B-W1) | `error`, `warning`, `info` | `seo_status.issues[].severity` (§2.3, §2.4) |
+| SeoIssueCode (B-W1) | `name_missing`, `name_translation_missing`, `description_missing`, `description_short`, `images_missing`, `alt_text_fallback`, `category_missing`, `seo_title_missing`, `seo_title_short`, `seo_title_long`, `seo_description_missing`, `seo_description_short`, `seo_description_long`, `image_missing`, `no_active_products` | `seo_status.issues[].code` (§2.3, §2.4) |
 
 ### 3.2 Audit actions (M1; M2 cross-reference row)
 
@@ -1295,7 +1323,7 @@ Audit `schedule.hours_updated` (entity `professional`) with the week before and 
 | Notifications | `notification.created`, `notification.cancelled` (M3; before `{state: "scheduled", scheduled_at}`, after `{state: "cancelled", cancelled_at}`), `notification_template.updated`, `segment.created`, `segment.updated`, `segment.deleted`, `segment.members_added`, `segment.member_removed`, `notification.push_dead` (system; a dead `push.order_status` / `push.appointment` / `campaign.send_batch` message: `{topic, dedupe_key, attempts, last_error, customer_id, campaign_id}`) |
 | Appointments | `appointment.confirmed`, `appointment.rejected`, `appointment.attended`, `appointment.created`, `appointment.rescheduled` (`{…, from_start, from_end, reschedule_no}`), `appointment.cancelled` (`{…, reason}`) |
 | Shell | `settings.updated` (changed leaves only, each `{from, to}`; legal-text leaves as `{changed, old_len, new_len, sha256}`, §2.11), `settings.terms_published` (`{from, to, sha256}`, §2.11), `export.downloaded` |
-| M2 (customer API) | The customer, payment and POS actions listed in `docs/api/customer-api-v1.md` §3 ("Audit actions added in M2"): `customer.*`, `auth.device_mismatch`, `appointment.requested`, `appointment.cancelled` (`by: "customer"`), `payment.late_capture`, `pos.*`. The `audit-log/` filters accept them unchanged. |
+| M2 (customer API) | The customer, payment and POS actions listed in `docs/api/customer-api-v1.md` §3 ("Audit actions added in M2"): `customer.*` (B-W1 adds `customer.session_revoked`, also by staff from §2.6, and `customer.sessions_revoked`), `auth.device_mismatch`, `appointment.requested`, `appointment.cancelled` (`by: "customer"`), `payment.late_capture`, `pos.*`. The `audit-log/` filters accept them unchanged. |
 | Specialists and services (admin API, §2.17) | `professional.created` (the new row), `professional.updated` (changed fields `{field: old}` / `{field: new}`), `professional.deactivated` (changed fields + `upcoming_appointments`, `forced`), `professional.activated`, `professional.photo_updated` (`{photo}` / `{photo, sha256}`), `professional.photo_deleted`, `professional.services_updated` (`{services: [{service_id, price, duration_min, is_active}]}` before / after), `schedule.hours_updated` (`{days: [WorkingDay]}` before / after), `schedule.override_created`, `schedule.override_deleted` (`{override_id, date, start, end, note}`), `schedule.block_created`, `schedule.block_deleted` (`{block_id, start, end, kind, label}`) — all with object type `professional` and the specialist's id, so `audit-log/?object_type=professional&object_id=…` is one specialist's history; `service.created`, `service.updated`, `service.deactivated`, `service.activated` (object type `service`); `location.created`, `location.updated` (object type `location`). One row per operation, none when nothing changed. |
 | Django admin (editable models) | `<model>.created`, `<model>.updated`, `<model>.deleted` for `location`, `professional`, `service`, `professional_service`, `working_hours`, `blocked_period`; `working_hours_override.created`, `working_hours_override.updated`, `working_hours_override.deleted` (the override is the seventh editable model, T13) |
 
@@ -1499,7 +1527,7 @@ Generic mapping applies throughout: snake_case → camelCase; integer ids → `S
 | `is_active` of specialists and services (§2.17) | true "Faol" · false "Nofaol" |
 | Booleans in exports | "Ha" / "Yo‘q" |
 | Staff (§2.16; UI only, no export) | `is_manager` true "Menejer" · false "Xodim" / `is_active` true "Faol" · false "Nofaol" |
-| Device platform (§2.6; UI only) | ios "iOS" · android "Android" |
+| Device platform / OrderChannel (§2.6, orders; UI only) | ios "iOS" · android "Android" · web "Veb-sayt" (B-W1) |
 
 ---
 
