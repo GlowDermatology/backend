@@ -15,7 +15,7 @@ from django.db.models.functions import Coalesce
 from glowderma.catalog import media
 from glowderma.core import enums, slugs
 from glowderma.core.models import TimeStampedModel
-from glowderma.core.search import SearchFold
+from glowderma.core.search import SearchKey
 
 SLUG_MAX_LENGTH = 140
 PRODUCT_SLUG_CONSTRAINT = "product_slug_unique"
@@ -115,10 +115,11 @@ class Product(TimeStampedModel):
     seo_description_uz = models.CharField(max_length=300, blank=True, default="", db_default="")
     seo_description_ru = models.CharField(max_length=300, blank=True, default="", db_default="")
     seo_description_en = models.CharField(max_length=300, blank=True, default="", db_default="")
-    # search (stored generated column, §6.2): folded like every search term (core.search, decision GC-1), so
-    # ko'pik / ko‘pik / koʻpik and ё / е match each other
+    # search (stored generated column, §6.2): the search key of every search term (core.search.SearchKey:
+    # case, ё = е, decision GC-1; apostrophes removed, catalog.0006), so kopik / ko'pik / ko‘pik / koʻpik and
+    # ё / е match each other
     search_text = models.GeneratedField(
-        expression=SearchFold(
+        expression=SearchKey(
             JoinText(
                 F("name_uz"),
                 Value(" "),

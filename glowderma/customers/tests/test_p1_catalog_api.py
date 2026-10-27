@@ -112,6 +112,14 @@ def test_filters_search_ordering_and_page_size() -> None:
     assert app_client().get(PRODUCTS, {"page_size": 30}).data["errors"][0]["field"] == "page_size"
 
 
+def test_search_without_the_apostrophe_finds_the_uzbek_name() -> None:
+    """``kopik`` finds ``ko‘pik`` (and ``ko'pik`` still does): the apostrophe is removed on both sides."""
+    foam = stocked(name_uz="Yumshoq tozalovchi ko\u2018pik")
+    stocked(name_uz="Qimmat serum")
+    for term in ("kopik", "ko'pik", "ko\u02bbpik", "TOZALOVCHI KOPIK"):
+        assert ids(app_client().get(PRODUCTS, {"search": term})) == [foam.pk], term
+
+
 def test_optional_auth_cart_quantity_and_cache_headers() -> None:
     product = stocked()
     anonymous = APIClient().get(PRODUCTS)

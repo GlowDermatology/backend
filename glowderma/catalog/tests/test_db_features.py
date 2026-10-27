@@ -197,6 +197,18 @@ def test_search_folds_every_uzbek_apostrophe_variant(term: str) -> None:
     assert ids(filter_products_search(base, "ko`z")) == {cream.pk}
 
 
+@pytest.mark.parametrize("term", ["kopik", "KOPIK", "tozalovchi kopik", "ko''pik"])
+def test_search_matches_spellings_without_the_apostrophe(term: str) -> None:
+    """``feat/customer-web``: people type ``kopik`` for ``ko‘pik`` — the search key removes every apostrophe
+    variant from the indexed text and from the term."""
+    foam = ProductFactory.create(name_uz="Yumshoq tozalovchi ko\u2018pik")
+    cream = ProductFactory.create(name_uz="Ko\u02bbz atrofi kremi", name_ru="Крем для век")
+    base = Product.objects.all()
+    assert ids(filter_products_search(base, term)) == {foam.pk}
+    assert ids(filter_products_search(base, "koz atrofi")) == {cream.pk}
+    assert ids(filter_products_search(base, "'\u2018")) == {foam.pk, cream.pk}  # apostrophes only: no filter
+
+
 def test_search_folds_yo_to_ye_both_ways() -> None:
     yo = ProductFactory.create(name_uz="Krem", name_ru="Ёлочный крем с мёдом")
     ye = ProductFactory.create(name_uz="Balzam", name_ru="Бальзам с медом")

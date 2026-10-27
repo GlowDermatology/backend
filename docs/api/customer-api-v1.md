@@ -1142,7 +1142,7 @@ the staff-written `seo_title` / `seo_description` in the resolved language only 
 
 | Param | Values | Rule |
 |---|---|---|
-| `search` | str ≤64 (trimmed; longer input cut to 64) | Case-insensitive partial match over the uz/ru/en names, `billz_name`, `billz_id` (`catalog.selectors.filter_products_search`, pg_trgm), folded on both sides: the Uzbek o‘/g‘ mark typed as `'`, `` ` ``, `‘`, `’`, `ʻ` or `ʼ` is one character and `ё` = `е` (`ko'pik` finds "ko‘pik"; open question GC-1). Fewer than 2 characters is ignored. |
+| `search` | str ≤64 (trimmed; longer input cut to 64) | Case-insensitive partial match over the uz/ru/en names, `billz_name`, `billz_id` (`catalog.selectors.filter_products_search`, pg_trgm), folded on both sides: the Uzbek o‘/g‘ mark typed as `'`, `` ` ``, `‘`, `’`, `ʻ` or `ʼ` is **removed** on both sides and `ё` = `е` (`ko'pik` and `kopik` find "ko‘pik"; open question GC-1, apostrophe-free since `catalog.0006`, `core.search.SearchKey`). Fewer than 2 characters is ignored. |
 | `category` | slug | unknown or inactive slug → 400 `invalid_choice` |
 | `in_stock` | bool | `available > 0` (no product while online selling is off) |
 | `promo` | bool | |
@@ -3005,7 +3005,7 @@ provisional defaults):
 
 | # | Point | Provisional default used here |
 |---|---|---|
-| GC-1 | Search over names in three languages with partial matches (Backend EN §4) | Folded on both sides: six apostrophe encodings of o‘/g‘ are one character, `ё` = `е` (§2.3 `search`) |
+| GC-1 | Search over names in three languages with partial matches (Backend EN §4) | Folded on both sides: the six apostrophe encodings of o‘/g‘ are removed from the product search key (`kopik` = `ko‘pik`, `feat/customer-web`), `ё` = `е` (§2.3 `search`) |
 | GC-3 | Banner and campaign destinations "product or link" | `link.kind` `url` with an absolute `https` `url` ≤500 (§2.3 banners, §2.12, FCM `link_url` §2.14.2) |
 | GC-5 / GC-6 | "Recheck stock against Billz (or a very recent cache) at cart and checkout" | Delta every 300 s; cart writes and checkout re-read lines older than 900 s (4 s budget, before the transaction); checkout refuses 503 only when Billz cannot confirm a line older than 3600 s; cart writes never refuse; a pushed sale's products are re-read 30 s later (§2.5, §2.7.1 row 4a) |
 

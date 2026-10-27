@@ -494,7 +494,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 
 | Param | Values | Rule |
 |---|---|---|
-| `search` | str ≤64 (longer input is trimmed to 64) | Case-insensitive substring over `texts.{uz,ru,en}.name`, `billz_name` and `billz_id` (pg_trgm GIN), folded on both sides (§1.4: apostrophe variants, `ё` = `е`; the stored `search_text` column is folded since `catalog.0002`). An ASCII-digit term of ≤18 digits also matches `id` exactly. |
+| `search` | str ≤64 (longer input is trimmed to 64) | Case-insensitive substring over `texts.{uz,ru,en}.name`, `billz_name` and `billz_id` (pg_trgm GIN), folded on both sides (§1.4: apostrophe variants, `ё` = `е`; the stored `search_text` column is folded since `catalog.0002`, and since `catalog.0006` every apostrophe is removed from it and from the term, so `kopik` finds "ko‘pik"). An ASCII-digit term of ≤18 digits also matches `id` exactly. |
 | `category` | slug or `none` | `none` = no category (hence `none` is a reserved slug, §2.4); an unknown slug → 400 `invalid_choice` |
 | `status` | `active`, `hidden` | |
 | `promo`, `out_of_stock`, `is_new` | bool | `out_of_stock` = `stock ≤ 0`; `is_new` = `is_new_from_billz` |
