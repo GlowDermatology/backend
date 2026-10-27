@@ -68,7 +68,7 @@ def test_day_schedule_equals_the_design(staff_client: APIClient, seeded: None) -
     assert body["appointments"][0] == {
         "id": 1,
         "specialist_id": 1,
-        "customer": {"id": 8, "name": "Kamola Nazarova", "phone": "+998909741823"},
+        "customer": {"id": 8, "name": "Kamola Nazarova", "phone": "+998909741823", "email": None},
         "service_id": 1,
         "service_name": "Dermatolog konsultatsiyasi",
         "service_short_name": "Konsultatsiya",
@@ -203,7 +203,7 @@ def test_admin_create_reschedule_cancel_flow(staff_client: APIClient, seeded: No
     assert created.status_code == 201, created.data
     item = created.data
     assert item["status"] == "confirmed" and item["requested_via"] == "admin"
-    assert item["customer"] == {"id": 5, "name": "Malika Karimova", "phone": "+998901234567"}
+    assert item["customer"] == {"id": 5, "name": "Malika Karimova", "phone": "+998901234567", "email": None}
     assert (item["service_short_name"], item["duration_min"], item["price"]) == ("Qayta ko‘rik", 20, 100000)
     assert item["start"] == at("2026-10-26", "10:00") and item["end"] == at("2026-10-26", "10:20")
     assert item["requested_at"] == "2026-10-24T12:05:00+05:00"

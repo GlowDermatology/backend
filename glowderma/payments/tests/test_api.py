@@ -37,7 +37,7 @@ def test_shape_and_refunds(staff_client: APIClient) -> None:
     assert row == {
         "id": payment.pk,
         "order_id": payment.order_id,
-        "customer": {"id": customer.pk, "name": "Malika Karimova", "phone": "+998901234567"},
+        "customer": {"id": customer.pk, "name": "Malika Karimova", "phone": "+998901234567", "email": None},
         "provider": "click",
         "status": "paid",
         "amount": payment.amount,

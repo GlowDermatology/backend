@@ -122,7 +122,7 @@ def _item(
 
 DETAIL_10248: dict[str, Any] = {  # contract §2.2 example (ids pinned, image URLs normalised)
     "id": 10248,
-    "customer": {"id": 5, "name": "Malika Karimova", "phone": "+998901234567"},
+    "customer": {"id": 5, "name": "Malika Karimova", "phone": "+998901234567", "email": None},
     "created_at": "2026-10-23T14:02:00+05:00",
     "total": 784400,
     "status": "handed_to_courier",

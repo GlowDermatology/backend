@@ -383,3 +383,25 @@ def test_email_code_ip_cap_counts_the_forwarded_browser_ip_not_the_bff(world: Wo
         )
         assert sent.status_code == 200, sent.content
     assert {m.to for m in fake_email().sent} == {"cap0@example.uz", "cap1@example.uz", "cap3@example.uz"}
+
+
+# --- the admin CustomerRef names a phoneless customer -----------------------------------------------------
+
+
+def test_customer_ref_carries_the_email_of_a_phoneless_customer(world: World) -> None:
+    """Orders, payments and appointments render ``CustomerRef``: a phoneless (e-mail) customer is named by
+    the address instead of "—"; deletion scrubs it there too."""
+    from glowderma.core.api.serializers import CustomerRefSerializer
+
+    web = browser(world, "web-cw-ref-0001")
+    signed = email_sign_up(web, "gulnora@example.uz", name="Gulnora")
+    customer = Customer.objects.get(pk=signed["customer"]["id"])
+    assert CustomerRefSerializer(customer).data == {
+        "id": customer.pk,
+        "name": "Gulnora",
+        "phone": None,
+        "email": "gulnora@example.uz",
+    }
+    assert web.delete("me/", {"password": PASSWORD}).status_code == 204
+    customer.refresh_from_db()
+    assert CustomerRefSerializer(customer).data["email"] is None

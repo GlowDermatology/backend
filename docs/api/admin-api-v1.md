@@ -274,7 +274,7 @@ The FE creates one key per form/dialog instance (`crypto.randomUUID()`), reuses 
 | GET / PATCH | `location/` | | 200 |
 | GET | `/api/v1/health/` | no auth | 200 / 503 |
 
-Shared shapes: `Actor` = `{"id": int, "display_name": str}`, where `display_name` is the staff full name, else the email. `null` actor means system. `CustomerRef` = `{"id": int, "name": str, "phone": str | null}`; `name` is `""` once the customer is deleted (scrubbed); `phone` is null only for an account without a phone yet (hybrid identity: never on orders and payments, which are phone-gated; a staff booking may name one). Both are single OpenAPI components (`Actor`, `CustomerRef`) used by every module (orders, payments, appointments).
+Shared shapes: `Actor` = `{"id": int, "display_name": str}`, where `display_name` is the staff full name, else the email. `null` actor means system. `CustomerRef` = `{"id": int, "name": str, "phone": str | null, "email": str | null}`; `name` is `""` once the customer is deleted (scrubbed); `phone` is null only for an account without a phone yet (hybrid identity: never on orders and payments, which are phone-gated; a staff booking may name one); `email` (additive, `feat/customer-web`) is the verified e-mail address, null without one or once deleted — show it (or the name) instead of "—" for a phoneless customer. Both are single OpenAPI components (`Actor`, `CustomerRef`) used by every module (orders, payments, appointments).
 
 ### 2.1 Auth
 **`POST auth/login/`** (no bearer). Body `{"email": str (email, ≤254; trimmed and lower-cased before lookup), "password": str 1..128}`.
