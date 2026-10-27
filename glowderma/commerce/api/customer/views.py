@@ -186,7 +186,15 @@ def _refresh_stock(request: Request, product_ids: list[int], *, key_required: bo
     return services.refresh_stale_stock(wanted) if wanted else services.FRESH
 
 
-def _return_url(order_id: int) -> str:
+def _return_url(order_id: int, *, platform: str | None = None, language: str = "uz") -> str:
+    """Where the provider page sends the payer back (C§2.7.2): the app's https link ``PAYMENT_RETURN_URL``
+    with ``order_id`` appended, or — for a website request (``X-GD-Platform: web``) — the website's own page
+    ``PAYMENT_WEB_RETURN_URL``, a template with ``{order_id}``, ``{lang}`` and ``{locale_prefix}`` (``""`` for
+    Uzbek, ``/ru``, ``/en``). Both are server-configured, never taken from the client."""
+    if platform == enums.OrderChannel.WEB:
+        lang = language if language in enums.ContentLanguage.values else enums.ContentLanguage.UZ
+        prefix = "" if lang == enums.ContentLanguage.UZ else f"/{lang}"
+        return str(settings.PAYMENT_WEB_RETURN_URL).format(order_id=order_id, lang=lang, locale_prefix=prefix)
     base = str(settings.PAYMENT_RETURN_URL)
     separator = "&" if "?" in base else "?"
     return f"{base}{separator}{urlencode({'order_id': order_id})}"
@@ -483,7 +491,10 @@ class PayView(CustomerAPIView):
             raise _field("provider", "invalid_choice")
         payment = services.ensure_payable_payment(order.pk, provider, at=now)
         reference = payment_ref.build(order.pk)
-        return_url = _return_url(order.pk)
+        device = self.device
+        return_url = _return_url(
+            order.pk, platform=device.platform if device is not None else None, language=self.language
+        )
         scenario = services.fake_scenario(order, provider)
         if provider == enums.PaymentProvider.CLICK:
             web_url = get_click(scenario).pay_url(reference, payment.amount, return_url)
