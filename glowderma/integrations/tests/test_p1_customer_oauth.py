@@ -351,3 +351,73 @@ def test_fake_apple_code_bound_to_another_subject_is_refused() -> None:
     with pytest.raises(OAuthExchangeError) as error:
         fake.exchange_code("fake-code-sub:someone-else", client_id=BUNDLE, subject="a-1")
     assert error.value.kind == "exchange_failed"
+
+
+# --- B-W1: the website's client ids ----------------------------------------------------------------------
+
+SERVICES_ID = "uz.glowderma.web"
+WEB_REDIRECT = "https://glowderma.uz/auth/apple/callback"
+
+
+def test_apple_web_services_id_token_and_code_exchange_with_the_redirect_uri(
+    recorder: Recorder, ec_pem: bytes, jwk_client: StaticJWKClient, sign: Callable[..., str]
+) -> None:
+    provider = AppleProvider(
+        bundle_ids=[BUNDLE],
+        services_ids=[SERVICES_ID],
+        team_id="TEAM123456",
+        key_id="KEY1234567",
+        private_key=ec_pem,
+        transport=recorder.transport,
+        jwk_client=jwk_client,
+    )
+    token = sign(iss="https://appleid.apple.com", aud=SERVICES_ID, nonce=nonce_digest("raw"))
+    assert provider.verify_app_token(token, "id_token", "raw").audience == SERVICES_ID
+    id_token = sign(iss="https://appleid.apple.com", aud=SERVICES_ID, sub="s")
+    recorder.route("/auth/token", httpx.Response(200, json={"refresh_token": "r-web", "id_token": id_token}))
+    assert (
+        provider.exchange_code("code-w", client_id=SERVICES_ID, subject="s", redirect_uri=WEB_REDIRECT)
+        == "r-web"
+    )
+    form = parse_qs(recorder.requests[-1].content.decode())
+    assert form["redirect_uri"] == [WEB_REDIRECT] and form["client_id"] == [SERVICES_ID]
+    recorder.route(
+        "/auth/token",
+        httpx.Response(
+            200,
+            json={
+                "refresh_token": "r-app",
+                "id_token": sign(iss="https://appleid.apple.com", aud=BUNDLE, sub="s"),
+            },
+        ),
+    )
+    provider.exchange_code("code-a", client_id=BUNDLE, subject="s")
+    assert "redirect_uri" not in parse_qs(recorder.requests[-1].content.decode())  # the app's code: none
+
+
+def test_live_registry_accepts_the_web_client_ids() -> None:
+    with override_settings(
+        OAUTH_MODE="live",
+        GOOGLE_APP_CLIENT_IDS=[GOOGLE_IOS],
+        GOOGLE_WEB_CLIENT_IDS=["web-client.apps.googleusercontent.com", GOOGLE_IOS],
+        APPLE_BUNDLE_IDS=[],
+        APPLE_SERVICES_IDS=[SERVICES_ID],
+        APPLE_TEAM_ID="T",
+        APPLE_KEY_ID="K",
+    ):
+        google = registry.get_app_verifier("google")
+        assert isinstance(google, GoogleAppTokenVerifier)
+        assert google.client_ids == [GOOGLE_IOS, "web-client.apps.googleusercontent.com"]
+        apple_provider = registry.get_app_verifier("apple")  # a Services ID alone offers Apple
+        assert isinstance(apple_provider, AppleProvider) and apple_provider.services_ids == [SERVICES_ID]
+
+
+def test_fake_apple_accepts_a_configured_services_id_and_records_the_redirect() -> None:
+    fake = FakeApple()
+    with override_settings(APPLE_BUNDLE_IDS=[BUNDLE], APPLE_SERVICES_IDS=[SERVICES_ID]):
+        claims = fake.verify_app_token(f"fake-apple:w-1:x@y.z:{SERVICES_ID}", "id_token", None)
+        assert claims.audience == SERVICES_ID
+        with pytest.raises(OAuthExchangeError):
+            fake.verify_app_token("fake-apple:w-1:x@y.z:uz.other", "id_token", None)
+    fake.exchange_code("fake-code:w", client_id=SERVICES_ID, subject="w-1", redirect_uri=WEB_REDIRECT)
+    assert fake.redirect_uris == [WEB_REDIRECT]

@@ -78,8 +78,12 @@ class AppleTokenService(Protocol):
     """Sign in with Apple's server calls (customer contract §2.1.8): the authorization-code exchange and the
     refresh-token revocation, both authenticated by an ES256 client secret."""
 
-    def exchange_code(self, code: str, *, client_id: str, subject: str) -> str:
-        """Apple's refresh token for ``code`` (``exchange_failed`` when Apple refuses, ``unavailable``)."""
+    def exchange_code(
+        self, code: str, *, client_id: str, subject: str, redirect_uri: str | None = None
+    ) -> str:
+        """Apple's refresh token for ``code`` (``exchange_failed`` when Apple refuses, ``unavailable``).
+        ``redirect_uri``: the website's Sign in with Apple JS flow (a Services ID ``client_id``) must send the
+        redirect URI its authorization used; the native app's code has none (B-W1)."""
         ...
 
     def revoke(self, refresh_token: str, *, client_id: str) -> None:

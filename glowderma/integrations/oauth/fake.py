@@ -120,7 +120,13 @@ class FakeGoogleApp:
 
     def verify_app_token(self, token: str, token_type: str, nonce: str | None) -> AppTokenClaims:
         subject, email, _ = _parse_app_token(token, frozenset({"fake", "fake-unverified"}))
-        audience = _first(getattr(settings, "GOOGLE_APP_CLIENT_IDS", []), FAKE_GOOGLE_CLIENT_ID)
+        audience = _first(
+            [
+                *getattr(settings, "GOOGLE_APP_CLIENT_IDS", []),
+                *getattr(settings, "GOOGLE_WEB_CLIENT_IDS", []),
+            ],
+            FAKE_GOOGLE_CLIENT_ID,
+        )
         return AppTokenClaims(self.name, subject, email, audience, _now() + FAKE_TOKEN_LIFETIME_SECONDS)
 
 
@@ -145,16 +151,25 @@ class FakeApple:
     def __init__(self) -> None:
         self.revoked: list[tuple[str, str]] = []
         self.exchanged: list[tuple[str, str]] = []
+        self.redirect_uris: list[str | None] = []  # the redirect_uri of each recorded exchange (B-W1 web)
 
     def verify_app_token(self, token: str, token_type: str, nonce: str | None) -> AppTokenClaims:
         subject, email, bundle_id = _parse_app_token(token, frozenset({"fake-apple"}))
-        configured = [str(value) for value in getattr(settings, "APPLE_BUNDLE_IDS", [])]
+        configured = [
+            str(value)
+            for value in [
+                *getattr(settings, "APPLE_BUNDLE_IDS", []),
+                *getattr(settings, "APPLE_SERVICES_IDS", []),
+            ]
+        ]
         audience = bundle_id or _first(configured, FAKE_APPLE_BUNDLE_ID)
         if configured and audience not in configured:
             raise OAuthExchangeError("invalid_token", "aud is not a configured bundle id")
         return AppTokenClaims(self.name, subject, email, audience, _now() + FAKE_TOKEN_LIFETIME_SECONDS)
 
-    def exchange_code(self, code: str, *, client_id: str, subject: str) -> str:
+    def exchange_code(
+        self, code: str, *, client_id: str, subject: str, redirect_uri: str | None = None
+    ) -> str:
         if code == "fake-code-fail":
             raise OAuthExchangeError("exchange_failed", "fake code refused")
         if code == "fake-code-down":
@@ -168,6 +183,7 @@ class FakeApple:
             raise OAuthExchangeError("exchange_failed", "unknown fake code")
         if _records():
             self.exchanged.append((code, client_id))
+            self.redirect_uris.append(redirect_uri)
         return f"fake-apple-refresh-{subject}"
 
     def revoke(self, refresh_token: str, *, client_id: str) -> None:

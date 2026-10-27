@@ -8,6 +8,8 @@
   is optional (often a private relay address); ``email_verified`` is ignored (Apple may send a string).
 * **Client secret:** an ES256 JWT (``iss`` = team id, ``sub`` = the bundle id used as ``client_id``, ``aud =
   https://appleid.apple.com``, ``kid`` = key id) signed with the ``.p8`` key of ``APPLE_PRIVATE_KEY_FILE``.
+* **Web (B-W1):** ID tokens of the website's Services IDs (``APPLE_SERVICES_IDS``) are accepted too; their
+  codes are exchanged with ``client_id`` = that Services ID and ``redirect_uri`` = ``APPLE_WEB_REDIRECT_URI``.
 * **Code exchange:** ``POST /auth/token`` (form, ``grant_type=authorization_code``) → Apple's refresh token,
   kept only when the response's ``id_token`` names the same ``sub`` as the identity token; 4xx or a
   mismatch → ``exchange_failed``, 5xx / transport → ``unavailable``.
@@ -64,6 +66,7 @@ class AppleProvider:
         self,
         *,
         bundle_ids: list[str],
+        services_ids: list[str] | None = None,
         team_id: str,
         key_id: str,
         private_key_file: str = "",
@@ -72,6 +75,9 @@ class AppleProvider:
         jwk_client: jwt.PyJWKClient | None = None,
     ) -> None:
         self.bundle_ids = list(bundle_ids)
+        # B-W1: the website's Sign in with Apple JS client ids (Services IDs); their ID tokens carry them as
+        # ``aud`` and their codes are exchanged with the redirect URI.
+        self.services_ids = list(services_ids or [])
         self.team_id = team_id
         self.key_id = key_id
         self.private_key_file = private_key_file
@@ -82,12 +88,13 @@ class AppleProvider:
     # --- ID token ---------------------------------------------------------------------------------------
 
     def verify_app_token(self, token: str, token_type: str, nonce: str | None) -> AppTokenClaims:
-        if token_type != ID_TOKEN or not self.bundle_ids:
+        audiences = [*self.bundle_ids, *self.services_ids]
+        if token_type != ID_TOKEN or not audiences:
             raise OAuthExchangeError("invalid_token", "unsupported token")
         claims = verify_rs256(
             token,
             client=self.jwk_client or jwks_client(),
-            audience=self.bundle_ids,
+            audience=audiences,
             issuer=APPLE_ISSUER,
             required=APP_REQUIRED_CLAIMS,
         )
@@ -132,20 +139,23 @@ class AppleProvider:
             raise OAuthExchangeError("unavailable", f"apple {response.status_code}")
         return response.status_code, http.json_body(response)
 
-    def exchange_code(self, code: str, *, client_id: str, subject: str) -> str:
+    def exchange_code(
+        self, code: str, *, client_id: str, subject: str, redirect_uri: str | None = None
+    ) -> str:
         """Exchange the authorization code for Apple's refresh token, bound to ``subject``: the token
         response's ``id_token`` (RS256 against Apple's JWKS, ``iss``, ``aud == client_id``) must carry
         ``sub == subject``, else ``exchange_failed`` — a code of another Apple account is never stored on
-        this identity (its revocation would hit the wrong grant)."""
-        status, body = self._post(
-            TOKEN_URL,
-            {
-                "client_id": client_id,
-                "client_secret": self.client_secret(client_id),
-                "code": code,
-                "grant_type": "authorization_code",
-            },
-        )
+        this identity (its revocation would hit the wrong grant). A web code (B-W1) is exchanged with the
+        ``redirect_uri`` its authorization used."""
+        form = {
+            "client_id": client_id,
+            "client_secret": self.client_secret(client_id),
+            "code": code,
+            "grant_type": "authorization_code",
+        }
+        if redirect_uri:
+            form["redirect_uri"] = redirect_uri
+        status, body = self._post(TOKEN_URL, form)
         if status >= 400:
             raise OAuthExchangeError("exchange_failed", str(body.get("error", status)))
         refresh_token = body.get("refresh_token")
