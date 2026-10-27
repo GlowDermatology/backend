@@ -101,7 +101,7 @@ class Product(TimeStampedModel):
     usage_en = models.TextField(blank=True)
     # B-W1 SEO (admin contract §2.3): the website's URL segment — set once from the Uzbek name (else the Billz
     # name) when the row is created, unique, never only digits, edited only by staff (stable URLs).
-    slug = models.CharField(max_length=SLUG_MAX_LENGTH, blank=True)
+    slug = models.CharField(max_length=SLUG_MAX_LENGTH, blank=True, default="", db_default="")
     seo_title_uz = models.CharField(max_length=120, blank=True, default="", db_default="")
     seo_title_ru = models.CharField(max_length=120, blank=True, default="", db_default="")
     seo_title_en = models.CharField(max_length=120, blank=True, default="", db_default="")
@@ -164,9 +164,11 @@ class Product(TimeStampedModel):
                 | Q(last_change_old_price__isnull=False, last_change_new_price__isnull=False),
                 name="product_price_change_has_prices",
             ),
-            models.UniqueConstraint(fields=["slug"], name=PRODUCT_SLUG_CONSTRAINT),
+            # "" = a row written by the previous release during a deploy; the next save derives one
+            models.UniqueConstraint(fields=["slug"], condition=~Q(slug=""), name=PRODUCT_SLUG_CONSTRAINT),
             models.CheckConstraint(
-                condition=Q(slug__regex=slugs.SLUG_PATTERN) & ~Q(slug__regex=slugs.DIGITS_ONLY_PATTERN),
+                condition=Q(slug="")
+                | (Q(slug__regex=slugs.SLUG_PATTERN) & ~Q(slug__regex=slugs.DIGITS_ONLY_PATTERN)),
                 name="product_slug_format",
             ),
         ]

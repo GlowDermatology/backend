@@ -79,13 +79,17 @@ class Professional(TimeStampedModel):
     is_active = models.BooleanField(default=True)
     # B-W1 SEO (admin contract §2.17): the website's URL segment, set once from the name when the row is
     # created, unique, never only digits, edited only by staff (stable URLs).
-    slug = models.CharField(max_length=SLUG_MAX_LENGTH, blank=True)
+    slug = models.CharField(max_length=SLUG_MAX_LENGTH, blank=True, default="", db_default="")
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=["slug"], name=PROFESSIONAL_SLUG_CONSTRAINT),
+            # "" = a row written by the previous release during a deploy; the next save derives one
+            models.UniqueConstraint(
+                fields=["slug"], condition=~Q(slug=""), name=PROFESSIONAL_SLUG_CONSTRAINT
+            ),
             models.CheckConstraint(
-                condition=Q(slug__regex=slugs.SLUG_PATTERN) & ~Q(slug__regex=slugs.DIGITS_ONLY_PATTERN),
+                condition=Q(slug="")
+                | (Q(slug__regex=slugs.SLUG_PATTERN) & ~Q(slug__regex=slugs.DIGITS_ONLY_PATTERN)),
                 name="professional_slug_format",
             ),
             models.CheckConstraint(condition=~Q(name=""), name="professional_name_required"),

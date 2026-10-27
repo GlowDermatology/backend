@@ -99,19 +99,25 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="product",
             name="slug",
-            field=models.CharField(blank=True, max_length=140),
+            field=models.CharField(blank=True, db_default="", default="", max_length=140),
         ),
         migrations.RunPython(backfill_product_slugs, migrations.RunPython.noop, elidable=True),
         migrations.AddConstraint(
             model_name="product",
-            constraint=models.UniqueConstraint(fields=("slug",), name="product_slug_unique"),
+            constraint=models.UniqueConstraint(
+                condition=models.Q(("slug", ""), _negated=True), fields=("slug",), name="product_slug_unique"
+            ),
         ),
         migrations.AddConstraint(
             model_name="product",
             constraint=models.CheckConstraint(
                 condition=models.Q(
-                    ("slug__regex", "^[a-z0-9]+(?:-[a-z0-9]+)*$"),
-                    models.Q(("slug__regex", "^[0-9]+$"), _negated=True),
+                    ("slug", ""),
+                    models.Q(
+                        ("slug__regex", "^[a-z0-9]+(?:-[a-z0-9]+)*$"),
+                        models.Q(("slug__regex", "^[0-9]+$"), _negated=True),
+                    ),
+                    _connector="OR",
                 ),
                 name="product_slug_format",
             ),

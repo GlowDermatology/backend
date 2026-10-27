@@ -44,6 +44,14 @@ from glowderma.professionals.tests.factories import (
     WorkingHoursOverrideFactory,
 )
 
+NEW_KEYS = frozenset({"slug", "seo", "seo_status", "updated_at", "seo_title", "seo_description"})
+
+
+def without_bw1(row: dict[str, Any], keep: frozenset[str] = frozenset()) -> dict[str, Any]:
+    """The row without the B-W1 SEO keys (tested in ``catalog/tests/test_seo.py``)."""
+    return {key: value for key, value in row.items() if key not in NEW_KEYS - keep}
+
+
 pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("clock")]
 
 BASE = "/api/v1/admin/specialists/"
@@ -71,7 +79,8 @@ def test_create_defaults_to_the_clinic_and_inactive(staff_client: APIClient, sta
     response = staff_client.post(BASE, {"name": "  Malika Usmonova ", "role": "cosmetologist"})
     assert response.status_code == 201, response.json()
     professional = Professional.objects.get()
-    assert response.json() == {
+    assert response.json()["slug"]
+    assert without_bw1(response.json(), frozenset({"updated_at"})) == {
         "id": professional.pk,
         "name": "Malika Usmonova",
         "role": "cosmetologist",

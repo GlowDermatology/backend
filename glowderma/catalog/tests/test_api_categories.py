@@ -30,6 +30,14 @@ pytestmark = pytest.mark.django_db
 CATEGORIES = "/api/v1/admin/categories/"
 
 
+NEW_KEYS = frozenset({"slug", "seo", "seo_status", "updated_at", "seo_title", "seo_description"})
+
+
+def without_bw1(row: dict[str, Any], keep: frozenset[str] = frozenset()) -> dict[str, Any]:
+    """The row without the B-W1 SEO keys (tested in ``catalog/tests/test_seo.py``)."""
+    return {key: value for key, value in row.items() if key not in NEW_KEYS - keep}
+
+
 def slugs(response: Any) -> list[str]:
     return [item["slug"] for item in response.json()["results"]]
 
@@ -43,7 +51,8 @@ def test_list_ordered_by_position_with_product_count_and_filter(staff_client: AP
     assert response.status_code == 200
     body = response.json()
     assert (body["count"], body["page"], body["page_size"], body["page_count"]) == (2, 1, 20, 1)
-    assert body["results"][0] == {
+    assert set(body["results"][0]) >= {"seo", "seo_status"}
+    assert without_bw1(body["results"][0], frozenset({"slug", "updated_at"})) == {
         "slug": "serums",
         "name": {"uz": "Serumlar", "ru": "Сыворотки", "en": ""},
         "image_url": None,
@@ -85,7 +94,7 @@ def test_create_appends_last_and_audits(staff_client: APIClient, staff: StaffUse
     )
     assert response.status_code == 201, response.json()
     category = Category.objects.get(slug="toners")
-    assert response.json() == {
+    assert without_bw1(response.json(), frozenset({"slug", "updated_at"})) == {
         "slug": "toners",
         "name": {"uz": "Tonerlar", "ru": "", "en": ""},
         "image_url": None,
@@ -224,7 +233,7 @@ def test_reorder(staff_client: APIClient) -> None:
         ("serums", 1),
         ("toners", 2),
     ]
-    assert set(response.json()["results"][0]) == {
+    assert set(response.json()["results"][0]) - {"seo", "seo_status"} == {
         "slug",
         "name",
         "image_url",

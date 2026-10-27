@@ -625,7 +625,8 @@ def test_a_tombstone_failure_after_a_committed_login_still_returns_the_tokens(
             raise ConnectionError("redis down")
 
     monkeypatch.setattr(account_services, "cache", SetManyFails())
-    result = services.login(customer.phone, PASSWORD, token, device=ctx(FID_B), device_key=None)
+    # B-W1: only a sign-in on the same install ends the earlier session (a tombstone to write)
+    result = services.login(customer.phone, PASSWORD, token, device=ctx(FID_A), device_key=None)
     assert isinstance(result, services.SignIn) and result.started.raw_device_key
     assert AuthSession.objects.get(pk=old.session.pk).revoke_reason == "replaced"
 

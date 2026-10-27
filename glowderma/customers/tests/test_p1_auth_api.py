@@ -237,7 +237,7 @@ def test_login_unknown_device_asks_for_the_code_then_signs_in(
         is True
     )
     old.session.refresh_from_db()
-    assert old.session.revoke_reason == "replaced"
+    assert old.session.revoked_at is None  # B-W1: the other device stays signed in
     assert row.purpose == "new_device"
     bad = login(verification_token="nope")
     assert bad.data["code"] == "verification_invalid"

@@ -264,8 +264,9 @@ def test_pay_from_the_website_returns_to_the_website(
     customer: Customer, now: datetime, language: str, expected: str
 ) -> None:
     order = place(customer, fulfilment="pickup", when=now)
+    client = _web_client(customer)  # the token's iat must not be in the (pinned) future
     with at(now + timedelta(seconds=10)):
-        body = pay(_web_client(customer), order, HTTP_ACCEPT_LANGUAGE=language).json()
+        body = pay(client, order, HTTP_ACCEPT_LANGUAGE=language).json()
     assert body["return_url"] == expected.format(id=order.pk)
     assert parse_qs(urlsplit(body["web_url"]).query)["return_url"] == [body["return_url"]]
 
@@ -273,8 +274,9 @@ def test_pay_from_the_website_returns_to_the_website(
 def test_the_web_return_template_takes_the_language(customer: Customer, now: datetime, settings: Any) -> None:
     settings.PAYMENT_WEB_RETURN_URL = "https://shop.example.uz/{lang}/orders/{order_id}/paid"
     order = place(customer, fulfilment="pickup", when=now)
+    client = _web_client(customer)
     with at(now + timedelta(seconds=10)):
-        body = pay(_web_client(customer), order, "payme", HTTP_ACCEPT_LANGUAGE="ru").json()
+        body = pay(client, order, "payme", HTTP_ACCEPT_LANGUAGE="ru").json()
     assert body["return_url"] == f"https://shop.example.uz/ru/orders/{order.pk}/paid"
     decoded = base64.b64decode(body["web_url"].removeprefix("https://checkout.paycom.uz/")).decode()
     assert "c=https%3A%2F%2Fshop.example.uz%2Fru%2Forders%2F" in decoded

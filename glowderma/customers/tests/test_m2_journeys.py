@@ -601,7 +601,6 @@ def test_journey_1_register_second_device_refresh_reuse_and_logout(world: World)
     assert created["customer"]["consent"]["update_required"] is False
     assert first.get("me/").json()["id"] == created["customer"]["id"]
     register_push(first, "fcm-journey1-first")
-    first_sid = first.sid
 
     # a second install: the password alone is not enough on an unknown device (A2)
     second = world.app("fid-journey1-second", platform="android")
@@ -626,15 +625,13 @@ def test_journey_1_register_second_device_refresh_reuse_and_logout(world: World)
     assert signed.json()["device_key"] != first.device_key
     second.store(signed.json())
 
-    # the first install is signed out (single-device rule) and told so by a data-only push with its sid
-    replaced = error(first.get("me/"), 401, "SESSION_REPLACED")
-    assert replaced["message"] == "Hisobingizga boshqa qurilmadan kirildi."
-    error(first.post("auth/refresh/", {"refresh": first.refresh}, auth=False), 401, "SESSION_REPLACED")
-    farewell = pushes(world, "session_replaced")
-    assert [(m.token, m.data, m.data_only) for m in farewell] == [
-        ("fcm-journey1-first", {"type": "session_replaced", "sid": first_sid}, True)
-    ]
-    assert Device.objects.get(fid=first.fid).fcm_token == ""
+    # B-W1: the first install stays signed in next to the second one; nobody is told to sign out
+    assert first.get("me/").status_code == 200
+    assert pushes(world, "session_replaced") == []
+    assert Device.objects.get(fid=first.fid).fcm_token == "fcm-journey1-first"
+    listed = second.get("me/sessions/").json()["results"]
+    assert {row["platform"] for row in listed} == {"ios", "android"}
+    assert [row["current"] for row in listed if row["platform"] == "android"] == [True]
 
     # refresh rotates; the old token replays the very same tokens inside the grace window
     old = second.refresh
@@ -1189,8 +1186,9 @@ def test_journey_4c_payme_expiry_perform_refused_then_payme_cancels(world: World
 @pytest.mark.django_db
 def test_journey_5_qr_is_single_use_and_dies_with_the_session(world: World, pos_client: APIClient) -> None:
     """C§2.9.3, §2.10, §1.9: the personal QR resolves once at the cashier (no name, no id, the spendable
-    cashback and tier), a second scan is ``qr_invalid``; a token outlives neither a logout nor a sign-in on
-    another install; a resolve records nothing but the audit row."""
+    cashback and tier), a second scan is ``qr_invalid``; a token outlives neither a logout nor its session
+    being signed out from another device (B-W1: a sign-in elsewhere keeps it); a resolve records nothing
+    but the audit row."""
     phone = "+998901230055"
     app = world.app("fid-journey5-phone")
     customer_id = int(sign_up(app, phone)["customer"]["id"])
@@ -1243,7 +1241,8 @@ def test_journey_5_qr_is_single_use_and_dies_with_the_session(world: World, pos_
     assert app.post("auth/logout/", {"refresh": app.refresh}, auth=False).status_code == 204
     error(resolve(pending), 409, "qr_invalid")
 
-    # a sign-in on another install replaces the session and revokes the tokens of the old one
+    # B-W1: a sign-in on another install leaves this session (and its token) alone; signing this session
+    # out from the other device's session list revokes it
     back = app.post("auth/login/", {"phone": phone, "password": PASSWORD}, auth=False)
     assert back.status_code == 200 and back.json()["device_key"] is None
     app.store(back.json())
@@ -1258,7 +1257,12 @@ def test_journey_5_qr_is_single_use_and_dies_with_the_session(world: World, pos_
         "auth/login/", {"phone": phone, "password": PASSWORD, "verification_token": code}, auth=False
     )
     assert signed.status_code == 200, signed.content
-    error(resolve(left_behind), 409, "qr_invalid")
+    other.store(signed.json())
+    kept = app.get("me/qr/").json()["token"]
+    assert resolve(left_behind).status_code == 200
+    with world.commit():
+        assert other.post("me/sessions/revoke-others/").json() == {"revoked": 1}
+    error(resolve(kept), 409, "qr_invalid")
     outbox_clean()
 
 

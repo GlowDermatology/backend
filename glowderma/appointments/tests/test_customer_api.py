@@ -32,6 +32,14 @@ from glowderma.professionals.tests.factories import (
 )
 from glowderma.site_config.models import SiteSettings
 
+NEW_KEYS = frozenset({"slug", "seo", "seo_status", "updated_at", "seo_title", "seo_description"})
+
+
+def without_bw1(row: dict[str, Any], keep: frozenset[str] = frozenset()) -> dict[str, Any]:
+    """The row without the B-W1 SEO keys (tested in ``catalog/tests/test_seo.py``)."""
+    return {key: value for key, value in row.items() if key not in NEW_KEYS - keep}
+
+
 pytestmark = pytest.mark.django_db
 
 MONDAY = date(2026, 11, 2)
@@ -112,7 +120,8 @@ def test_specialists_list_and_detail(public_client: APIClient) -> None:
     body = public_client.get("/api/v1/specialists/").json()
     assert [row["id"] for row in body["results"]] == [link.professional_id]
     specialist = body["results"][0]
-    assert specialist == {
+    assert specialist["slug"] and specialist["updated_at"]
+    assert without_bw1(specialist) == {
         "id": link.professional_id,
         "name": "Nodira Rahimova",
         "role": "dermatologist",

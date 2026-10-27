@@ -139,6 +139,7 @@ def test_the_session_list_names_devices_places_and_the_current_one() -> None:
     stranger = start_test_session(CustomerFactory.create(), fid="fid-stranger-01")
     assert stranger.session.pk
 
+    cache.add(f"auth:devbump:{app.session.pk}", 1, timeout=300)  # no activity bump during this request
     response = client_for(app).get(SESSIONS, HTTP_ACCEPT_LANGUAGE="uz")
     assert response.status_code == 200
     body = response.json()
@@ -305,11 +306,12 @@ def test_another_customers_session_or_a_bad_id_is_not_found() -> None:
     assert other.session.revoked_at is None
 
 
-def test_deleting_the_current_session_is_a_logout() -> None:
+def test_deleting_the_current_session_is_a_logout(django_capture_on_commit_callbacks: Any) -> None:
     customer = CustomerFactory.create()
     app = start_test_session(customer)
     client = client_for(app)
-    assert client.delete(f"{SESSIONS}{app.session.pk}/").status_code == 204
+    with django_capture_on_commit_callbacks(execute=True):
+        assert client.delete(f"{SESSIONS}{app.session.pk}/").status_code == 204
     entry = AuditEntry.objects.get(action="customer.session_revoked")
     assert entry.after == {"sid": str(app.session.pk), "current": True}
     assert client.get("/api/v1/me/").json()["code"] == "SESSION_EXPIRED"

@@ -160,7 +160,7 @@ def test_delete_me_vs_a_foreign_put_device_does_not_deadlock(monkeypatch: pytest
 def test_reset_vs_a_foreign_put_device_does_not_deadlock(monkeypatch: pytest.MonkeyPatch) -> None:
     """The account-recovery path: the holder's reset from a third install while A's PUT takes the token."""
     taker, holder, _holder_started = two_customers_sharing_an_install()
-    locked, go = pause_after(monkeypatch, "revoke_customer_sessions", "holder")
+    locked, go = pause_after(monkeypatch, "sign_out_customer", "holder")
     token = verification(holder.phone, "reset_password")
     out = race(
         lambda: services.reset_password(token, password=NEW_PASSWORD, device=ctx(FID_C)), locked, go, taker
@@ -241,7 +241,7 @@ def test_two_customers_put_the_same_new_token_concurrently(monkeypatch: pytest.M
     """A and B PUT me/device/ with a token no row holds yet. A pauses after saving the token on its device
     (inside its transaction); B's PUT then waits for A instead of saving the token too and failing on
     ``device_active_fcm_token_unique`` (500). Both answer 200; B, the later one, holds the token and A's
-    install is signed out with ``SESSION_REPLACED`` (customer contract §2.2.6, §1.9)."""
+    install is signed out with ``SESSION_EXPIRED`` (customer contract §2.2.6, §1.9; B-W1)."""
     first = Signed(password_customer("+998905551011"), fid=FID_A)
     second = Signed(password_customer("+998905551012"), fid=FID_B)
     original_save = Device.save
@@ -278,4 +278,4 @@ def test_two_customers_put_the_same_new_token_concurrently(monkeypatch: pytest.M
     assert (loser.fcm_token, loser.push_enabled, loser.is_active) == ("", False, False)
     assert AuthSession.objects.get(pk=first.started.session.pk).revoke_reason == "replaced"
     replaced = first.client.get("/api/v1/me/")
-    assert (replaced.status_code, replaced.data["code"]) == (401, "SESSION_REPLACED")
+    assert (replaced.status_code, replaced.data["code"]) == (401, "SESSION_EXPIRED")

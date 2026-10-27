@@ -98,7 +98,7 @@ def test_specialists_get_a_slug_too() -> None:
 
 
 def test_admin_product_shows_and_edits_slug_and_seo(staff_client: APIClient) -> None:
-    product = ProductFactory.create(name_uz="Gialuron serum", description_uz="")
+    product = ProductFactory.create(name_uz="Gialuron serum", description_uz="", status="hidden")
     ProductStockFactory.create(product=product)
     response = staff_client.get(f"{PRODUCTS}{product.pk}/")
     body = response.json()
@@ -134,14 +134,14 @@ def test_admin_product_shows_and_edits_slug_and_seo(staff_client: APIClient) -> 
 )
 def test_admin_product_slug_rules(staff_client: APIClient, slug: str, code: str) -> None:
     ProductFactory.create(slug="taken-slug")
-    product = ProductFactory.create()
+    product = ProductFactory.create(status="hidden")
     response = staff_client.patch(f"{PRODUCTS}{product.pk}/", {"slug": slug})
     assert response.status_code == 400
     assert [(e["field"], e["code"]) for e in response.json()["errors"]] == [("slug", code)]
 
 
 def test_admin_product_seo_limits(staff_client: APIClient) -> None:
-    product = ProductFactory.create()
+    product = ProductFactory.create(status="hidden")
     response = staff_client.patch(
         f"{PRODUCTS}{product.pk}/", {"seo": {"en": {"title": "t" * 121, "description": "d" * 301}}}
     )
@@ -151,7 +151,7 @@ def test_admin_product_seo_limits(staff_client: APIClient) -> None:
 
 
 def test_image_changes_move_the_product_updated_at(staff_client: APIClient) -> None:
-    product = ProductFactory.create()
+    product = ProductFactory.create(status="hidden")
     before = Product.objects.get(pk=product.pk).updated_at
     image = ProductImageFactory.create(product=product)
     from glowderma.catalog import services  # noqa: PLC0415
@@ -312,3 +312,30 @@ def test_admin_specialist_slug_is_editable(staff_client: APIClient) -> None:
     response = staff_client.patch(url, {"slug": "dr-aziza"})
     assert response.status_code == 200 and response.json()["slug"] == "dr-aziza"
     assert AuditEntry.objects.filter(action="professional.updated").latest("id").after == {"slug": "dr-aziza"}
+
+
+def test_the_migrations_backfill_slugs_of_existing_rows() -> None:
+    """``catalog.0005`` / ``professionals.0003``: rows from before B-W1 (and a previous release writing during
+    a deploy, slug ``""``) get unique slugs; a later save of such a row derives one too."""
+    import importlib  # noqa: PLC0415
+
+    from django.apps import apps  # noqa: PLC0415
+
+    first = ProductFactory.create(name_uz="Krem")
+    second = ProductFactory.create(name_uz="Krem")
+    numeric = ProductFactory.create(name_uz="", billz_name="", billz_id="46079999990")
+    doctor = ProfessionalFactory.create(name="Aziza")
+    Product.objects.filter(pk__in=[first.pk, second.pk, numeric.pk]).update(slug="")
+    Professional.objects.filter(pk=doctor.pk).update(slug="")
+    importlib.import_module("glowderma.catalog.migrations.0005_seo_slugs").backfill_product_slugs(apps, None)
+    importlib.import_module("glowderma.professionals.migrations.0003_seo_slugs").backfill_professional_slugs(
+        apps, None
+    )
+    slugs_by_pk = dict(Product.objects.values_list("pk", "slug"))
+    assert (slugs_by_pk[first.pk], slugs_by_pk[second.pk]) == ("krem", "krem-2")
+    assert slugs_by_pk[numeric.pk] == "mahsulot-46079999990"
+    assert Professional.objects.get(pk=doctor.pk).slug == "aziza"
+    Product.objects.filter(pk=first.pk).update(slug="")
+    reloaded = Product.objects.get(pk=first.pk)
+    reloaded.save()
+    assert reloaded.slug == "krem"

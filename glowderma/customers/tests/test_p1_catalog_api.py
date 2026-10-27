@@ -65,7 +65,8 @@ def test_card_shape_language_fallback_and_availability() -> None:
         return dict(next(row for row in rows if row["id"] == product.pk))
 
     card = card_of("ru")
-    assert set(card) == {
+    assert {"slug", "updated_at"} <= set(card)
+    assert set(card) - {"slug", "updated_at"} == {
         "id",
         "name",
         "volume",
@@ -166,7 +167,16 @@ def test_categories_count_visible_products() -> None:
     stocked(category=category, status=enums.ProductStatus.HIDDEN)
     CategoryFactory.create(slug="hidden", is_active=False)
     rows = app_client(HTTP_ACCEPT_LANGUAGE="ru").get(CATEGORIES).data["results"]
-    assert rows == [{"slug": "creams", "name": "Кремы", "image_url": None, "product_count": 1}]
+    assert [{k: v for k, v in row.items() if k != "updated_at"} for row in rows] == [
+        {
+            "slug": "creams",
+            "name": "Кремы",
+            "image_url": None,
+            "product_count": 1,
+            "seo_title": "",
+            "seo_description": "",
+        }
+    ]
 
 
 @override_settings(DEV_FEATURES_ALLOWED=False, BILLZ_MODE="fake")

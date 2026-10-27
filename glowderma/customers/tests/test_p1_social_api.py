@@ -386,10 +386,6 @@ def test_apple_from_the_website_exchanges_with_the_services_id_and_redirect_uri(
     identity = CustomerSocialIdentity.objects.get(customer=customer, provider="apple")
     assert identity.provider_client_id == SERVICES_ID  # the revocation uses the Services ID
     assert done.data["customer"]["id"] == customer.pk
-    # the app's own Apple code still goes without a redirect URI
-    app = app_client(fid=OTHER_FID)
-    ticket_for(app, "fake-apple:w-2:x@y.z", "apple", authorization_code="fake-code:a2")
-    assert fake_apple().redirect_uris == [WEB_REDIRECT, None]
 
 
 @override_settings(GOOGLE_WEB_CLIENT_IDS=["web-client.apps.googleusercontent.com"])

@@ -274,7 +274,7 @@ def test_put_device_with_a_key_signs_the_token_holder_out(
     assert moved.status_code == 200, moved.data
     assert AuthSession.objects.get(pk=holder.started.session.pk).revoke_reason == "replaced"
     replaced = holder.client.get(ME)
-    assert (replaced.status_code, replaced.data["code"]) == (401, "SESSION_REPLACED")
+    assert (replaced.status_code, replaced.data["code"]) == (401, "SESSION_EXPIRED")
     replay = taker.client.put(ME + "device/", body, **headers)
     assert replay["Idempotent-Replayed"] == "true" and replay.data == moved.data
     assert list(Device.objects.filter(fcm_token="fcm-idem-held").values_list("customer_id", flat=True)) == [
