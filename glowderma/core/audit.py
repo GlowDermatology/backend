@@ -1,14 +1,15 @@
 from typing import Any
 
 from glowderma.core.models import AuditEntry
-from glowderma.core.pii import mask_phone
+from glowderma.core.pii import mask_email, mask_phone
 
 
 def actor_identity(actor: Any) -> tuple[str, str]:
     """``(actor_type, actor_label)`` of an audit actor.
 
     Staff users (they have ``get_username``) → ``staff`` and the full name or email; customers (an
-    ``accounts.Customer``: a ``phone``) → ``customer`` and the masked phone, never the number itself; POS
+    ``accounts.Customer``: a ``phone``) → ``customer`` and the masked phone, never the number itself (a
+    phoneless customer, hybrid identity: the masked e-mail, else ``***``); POS
     devices (a ``loyalty.PosDevice``: a ``key_prefix``) → ``integration`` and the device name; no actor →
     ``system``. Duck-typed because ``core`` imports no module above it.
     """
@@ -19,7 +20,10 @@ def actor_identity(actor: Any) -> tuple[str, str]:
     if hasattr(actor, "get_username"):
         return "staff", str(actor.get_username())
     if hasattr(actor, "phone"):
-        return "customer", mask_phone(str(actor.phone))
+        if actor.phone:
+            return "customer", mask_phone(str(actor.phone))
+        email = getattr(actor, "email", None)
+        return "customer", mask_email(str(email)) if email else "***"
     if hasattr(actor, "key_prefix"):
         return "integration", str(getattr(actor, "name", ""))
     raise TypeError(f"Unsupported audit actor {type(actor).__name__}")

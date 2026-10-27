@@ -110,7 +110,7 @@ def test_link_social_after_a_concurrent_reset_links_nothing(monkeypatch: pytest.
 
     def verify_then_reset(*args: Any, **kwargs: Any) -> Any:
         claims = original(*args, **kwargs)
-        token = verification(signed.customer.phone, "reset_password")
+        token = verification(str(signed.customer.phone), "reset_password")
         services.reset_password(token, password=NEW_PASSWORD, device=ctx(FID_B))
         return claims
 
@@ -210,7 +210,7 @@ def test_signed_in_writes_after_a_concurrent_delete_write_nothing(
 @pytest.mark.django_db
 def test_a_write_from_a_session_the_reset_revoked_is_refused() -> None:
     signed = Signed(password_customer("+998907770034"))
-    token = verification(signed.customer.phone, "reset_password")
+    token = verification(str(signed.customer.phone), "reset_password")
     services.reset_password(token, password=NEW_PASSWORD, device=ctx(FID_B))
     # the request authenticated before the reset (stale auth cache): the service re-checks the sid
     with pytest.raises(PasswordChanged):
@@ -245,7 +245,7 @@ def test_reactivation_scrubs_what_a_racing_write_left_on_the_deleted_row(
         provider_client_id="uz.glowderma.app",
     )
     Customer.objects.filter(pk=customer.pk).update(password="argon2$stale")
-    token = verification(customer.phone, "register")
+    token = verification(str(customer.phone), "register")
     with django_capture_on_commit_callbacks(execute=False):
         signed_in = services.register(
             token,
@@ -396,7 +396,7 @@ def test_social_sign_in_of_an_identity_a_reset_unlinked_gets_the_phone_step(
         out,
     )
     assert paused.wait(WAIT)
-    token = verification(customer.phone, "reset_password")
+    token = verification(str(customer.phone), "reset_password")
     reset = services.reset_password(token, password=NEW_PASSWORD, device=ctx(FID_B))  # the owner recovers
     go.set()
     social.join(WAIT)
@@ -426,12 +426,12 @@ def test_known_device_login_with_the_old_password_loses_to_a_committed_reset(
     login = run(
         "login",
         lambda: services.login(
-            customer.phone, PASSWORD, None, device=ctx(FID_A), device_key=started.raw_device_key
+            str(customer.phone), PASSWORD, None, device=ctx(FID_A), device_key=started.raw_device_key
         ),
         out,
     )
     assert checked.wait(WAIT)
-    token = verification(customer.phone, "reset_password")
+    token = verification(str(customer.phone), "reset_password")
     reset = services.reset_password(token, password=NEW_PASSWORD, device=ctx(FID_B))
     go.set()
     login.join(WAIT)
@@ -444,7 +444,7 @@ def test_known_device_login_with_the_old_password_loses_to_a_committed_reset(
 def test_one_reset_token_at_reset_and_delete_me_does_not_deadlock() -> None:
     customer = Customer.objects.create(phone="+998901000020", name="Social only")
     started = start_test_session(customer, fid=FID_A)
-    token = verification(customer.phone, "reset_password")
+    token = verification(str(customer.phone), "reset_password")
     barrier = threading.Barrier(2, timeout=WAIT)
     out: dict[str, Any] = {}
 
@@ -615,7 +615,7 @@ def test_a_tombstone_failure_after_a_committed_login_still_returns_the_tokens(
 ) -> None:
     customer = password_customer("+998901000016")
     old = start_test_session(customer, fid=FID_A)
-    token = verification(customer.phone, "login_new_device")
+    token = verification(str(customer.phone), "login_new_device")
 
     class SetManyFails:
         def __getattr__(self, name: str) -> Any:
@@ -625,7 +625,7 @@ def test_a_tombstone_failure_after_a_committed_login_still_returns_the_tokens(
             raise ConnectionError("redis down")
 
     monkeypatch.setattr(account_services, "cache", SetManyFails())
-    result = services.login(customer.phone, PASSWORD, token, device=ctx(FID_B), device_key=None)
+    result = services.login(str(customer.phone), PASSWORD, token, device=ctx(FID_B), device_key=None)
     assert isinstance(result, services.SignIn) and result.started.raw_device_key
     assert AuthSession.objects.get(pk=old.session.pk).revoke_reason == "replaced"
 
@@ -638,7 +638,7 @@ def test_login_failure_of_a_deleted_customer_audits_the_actor() -> None:
     customer = password_customer("+998901000017")
     account_services.delete_customer(customer.pk)
     with pytest.raises(AuthFailed):
-        services.login(customer.phone, PASSWORD, None, device=ctx(FID_A), device_key=None)
+        services.login(str(customer.phone), PASSWORD, None, device=ctx(FID_A), device_key=None)
     entry = AuditEntry.objects.filter(action="customer.login_failed").latest("id")
     assert entry.actor_id == customer.pk
 

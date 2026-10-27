@@ -55,9 +55,9 @@ CATALOG: Final[dict[str, dict[str, str]]] = {
         "en": "Your password was changed. Please sign in again. If this wasn't you, contact the seller.",
     },
     "error.invalid_credentials": {
-        "uz": "Telefon raqami yoki parol noto‘g‘ri.",
-        "ru": "Неверный номер телефона или пароль.",
-        "en": "Wrong phone number or password.",
+        "uz": "Telefon raqami, email yoki parol noto‘g‘ri.",
+        "ru": "Неверный номер телефона, email или пароль.",
+        "en": "Wrong phone number, e-mail or password.",
     },
     "error.permission_denied": {
         "uz": "Ruxsat yo‘q.",
@@ -144,6 +144,11 @@ CATALOG: Final[dict[str, dict[str, str]]] = {
         "ru": "Лимит SMS-кодов на сегодня исчерпан. Попробуйте завтра.",
         "en": "Today's SMS code limit is reached. Please try tomorrow.",
     },
+    "error.otp_daily_limit_email": {
+        "uz": "Bugungi tasdiqlash kodlari limiti tugadi. Ertaga qayta urinib ko‘ring.",
+        "ru": "Лимит кодов подтверждения на сегодня исчерпан. Попробуйте завтра.",
+        "en": "Today's verification code limit is reached. Please try tomorrow.",
+    },
     "error.otp_network_limit": {
         "uz": (
             "Bu tarmoqdan bugun juda ko‘p kod so‘raldi. Boshqa tarmoq "
@@ -178,6 +183,11 @@ CATALOG: Final[dict[str, dict[str, str]]] = {
         "ru": "SMS-сервис временно недоступен. Попробуйте чуть позже.",
         "en": "The SMS service is temporarily unavailable. Please try again later.",
     },
+    "error.email_unavailable": {
+        "uz": "Email xizmati vaqtincha ishlamayapti. Birozdan so‘ng urinib ko‘ring.",
+        "ru": "Почтовый сервис временно недоступен. Попробуйте чуть позже.",
+        "en": "The e-mail service is temporarily unavailable. Please try again later.",
+    },
     "error.verification_invalid": {
         "uz": "Tasdiqlash muddati tugagan. Kodni qaytadan oling.",
         "ru": "Подтверждение истекло. Получите код заново.",
@@ -192,6 +202,36 @@ CATALOG: Final[dict[str, dict[str, str]]] = {
         "uz": "Bu raqam bilan hisob topilmadi. Ro‘yxatdan o‘ting.",
         "ru": "Аккаунт с этим номером не найден. Зарегистрируйтесь.",
         "en": "No account uses this number. Please sign up.",
+    },
+    "error.email_registered": {
+        "uz": "Bu email ro‘yxatdan o‘tgan. Hisobingizga kiring.",
+        "ru": "Этот email уже зарегистрирован. Войдите в аккаунт.",
+        "en": "This e-mail is already registered. Please sign in.",
+    },
+    "error.email_not_registered": {
+        "uz": "Bu email bilan hisob topilmadi. Ro‘yxatdan o‘ting.",
+        "ru": "Аккаунт с этим email не найден. Зарегистрируйтесь.",
+        "en": "No account uses this e-mail. Please sign up.",
+    },
+    "error.phone_taken": {
+        "uz": "Bu raqam boshqa hisobga bog‘langan — shu raqam bilan kiring.",
+        "ru": "Этот номер привязан к другому аккаунту — войдите с этим номером.",
+        "en": "This number belongs to another account — please sign in with it.",
+    },
+    "error.email_taken": {
+        "uz": "Bu email boshqa hisobga bog‘langan — shu email bilan kiring.",
+        "ru": "Этот email привязан к другому аккаунту — войдите с этим email.",
+        "en": "This e-mail belongs to another account — please sign in with it.",
+    },
+    "error.phone_required": {
+        "uz": "Davom etish uchun telefon raqamingizni tasdiqlang.",
+        "ru": "Чтобы продолжить, подтвердите номер телефона.",
+        "en": "Please verify your phone number to continue.",
+    },
+    "error.reauth_required": {
+        "uz": "Xavfsizlik uchun hisobingizga qaytadan kiring.",
+        "ru": "В целях безопасности войдите в аккаунт заново.",
+        "en": "For your security, please sign in again.",
     },
     "error.terms_not_published": {
         "uz": "Ro‘yxatdan o‘tish vaqtincha mavjud emas. Keyinroq urinib ko‘ring.",
@@ -428,6 +468,21 @@ CATALOG: Final[dict[str, dict[str, str]]] = {
         "ru": "Введите корректный номер телефона.",
         "en": "Please enter a valid phone number.",
     },
+    "field.email_invalid": {
+        "uz": "Email manzilini to‘g‘ri kiriting.",
+        "ru": "Введите корректный email.",
+        "en": "Please enter a valid e-mail address.",
+    },
+    "field.identifier_required": {
+        "uz": "Telefon raqami yoki emailni kiriting.",
+        "ru": "Введите номер телефона или email.",
+        "en": "Enter a phone number or an e-mail.",
+    },
+    "field.identifier_ambiguous": {
+        "uz": "Telefon raqami yoki emaildan faqat bittasini yuboring.",
+        "ru": "Укажите либо номер телефона, либо email.",
+        "en": "Send either a phone number or an e-mail, not both.",
+    },
     "field.otp_format": {
         "uz": "6 xonali kodni kiriting.",
         "ru": "Введите 6-значный код.",
@@ -467,6 +522,11 @@ CATALOG: Final[dict[str, dict[str, str]]] = {
         "uz": "Parol telefon raqamingizga juda o‘xshash.",
         "ru": "Пароль слишком похож на номер телефона.",
         "en": "The password is too similar to your phone number.",
+    },
+    "field.password_too_similar_email": {
+        "uz": "Parol emailingizga juda o‘xshash.",
+        "ru": "Пароль слишком похож на ваш email.",
+        "en": "The password is too similar to your e-mail.",
     },
     "field.password_unchanged": {
         "uz": "Yangi parol eskisidan farq qilsin.",
@@ -952,6 +1012,53 @@ CATALOG: Final[dict[str, dict[str, str]]] = {
         "uz": "Glow Derma: tasdiqlash kodingiz {code}. Kodni hech kimga bermang.",
         "ru": "Glow Derma: ваш код подтверждения {code}. Никому его не сообщайте.",
         "en": "Glow Derma: your verification code is {code}. Do not share it with anyone.",
+    },
+    # E-mail OTP texts (hybrid identity, C§2.14.4), rendered into accounts/email/otp.{txt,html}; the code is a
+    # template variable, never a catalog placeholder.
+    "email.otp.subject": {
+        "uz": "Glow Derma: tasdiqlash kodi",
+        "ru": "Glow Derma: код подтверждения",
+        "en": "Glow Derma: verification code",
+    },
+    "email.otp.intro.register": {
+        "uz": "Glow Derma’da ro‘yxatdan o‘tish uchun tasdiqlash kodingiz:",
+        "ru": "Ваш код для регистрации в Glow Derma:",
+        "en": "Your code to sign up for Glow Derma:",
+    },
+    "email.otp.intro.login_new_device": {
+        "uz": "Yangi qurilmadan kirish uchun tasdiqlash kodingiz:",
+        "ru": "Ваш код для входа с нового устройства:",
+        "en": "Your code to sign in on a new device:",
+    },
+    "email.otp.intro.reset_password": {
+        "uz": "Parolni tiklash uchun tasdiqlash kodingiz:",
+        "ru": "Ваш код для восстановления пароля:",
+        "en": "Your code to reset your password:",
+    },
+    "email.otp.intro.verify_email": {
+        "uz": "Emailingizni tasdiqlash uchun kod:",
+        "ru": "Код для подтверждения вашего email:",
+        "en": "Your code to verify this e-mail address:",
+    },
+    "email.otp.intro.link_social": {
+        "uz": "Ijtimoiy tarmoq profilini bog‘lash uchun tasdiqlash kodingiz:",
+        "ru": "Ваш код для привязки профиля соцсети:",
+        "en": "Your code to link your social profile:",
+    },
+    "email.otp.expiry": {
+        "uz": "Kod {m} daqiqa amal qiladi. Uni hech kimga bermang.",
+        "ru": "Код действует {m} мин. Никому его не сообщайте.",
+        "en": "The code is valid for {m} min. Do not share it with anyone.",
+    },
+    "email.otp.ignore": {
+        "uz": "Agar bu siz bo‘lmasangiz, bu xatni e’tiborsiz qoldiring.",
+        "ru": "Если это были не вы, просто проигнорируйте это письмо.",
+        "en": "If this wasn't you, you can ignore this e-mail.",
+    },
+    "email.otp.footer": {
+        "uz": "Bu xat avtomatik yuborildi, unga javob bermang.",
+        "ru": "Письмо отправлено автоматически, не отвечайте на него.",
+        "en": "This message was sent automatically; please do not reply.",
     },
 }
 

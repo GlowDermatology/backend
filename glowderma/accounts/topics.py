@@ -13,6 +13,7 @@ from typing import Any, Final
 from glowderma.core import enums
 
 SMS_SEND: Final = "sms.send"
+EMAIL_SEND: Final = "email.send"
 PUSH_SESSION_REPLACED: Final = "push.session_replaced"
 PUSH_ACCOUNT_SECURITY: Final = "push.account_security"
 APPLE_REVOKE: Final = "apple.revoke"
@@ -30,6 +31,10 @@ ACCOUNT_SECURITY_PAYLOAD_KEYS: Final[tuple[str, ...]] = (
 
 def sms_send_key(sms_code_id: int) -> str:
     return f"{SMS_SEND}:{sms_code_id}"
+
+
+def email_send_key(sms_code_id: int) -> str:
+    return f"{EMAIL_SEND}:{sms_code_id}"
 
 
 def session_replaced_key(session_id: Any) -> str:

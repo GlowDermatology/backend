@@ -91,7 +91,14 @@ CONTRACT_TABLE: dict[str, list[str]] = {
 }
 # Copied literally from docs/api/customer-api-v1.md section 3 (the enums marked new).
 CUSTOMER_TABLE: dict[str, list[str]] = {
-    "OtpPurpose": ["register", "login_new_device", "reset_password", "link_social"],
+    "OtpPurpose": [
+        "register",
+        "login_new_device",
+        "reset_password",
+        "link_social",
+        "verify_email",
+        "attach_phone",
+    ],
     "NextStep": ["verify_device", "verify_phone"],
     "CustomerSocialProvider": ["google", "facebook", "apple"],
     "SocialTokenType": ["id_token", "access_token"],

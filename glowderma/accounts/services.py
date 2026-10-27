@@ -36,6 +36,9 @@ from glowderma.core import alerts, audit, enums, outbox, qr_store, secretbox, ti
 from glowderma.core.api.exceptions import (
     AuthFailed,
     Conflict,
+    EmailNotRegistered,
+    EmailRegistered,
+    EmailServiceUnavailable,
     OtpDailyLimit,
     OtpExpired,
     OtpInvalid,
@@ -45,6 +48,7 @@ from glowderma.core.api.exceptions import (
     PasswordChanged,
     PhoneNotRegistered,
     PhoneRegistered,
+    PhoneRequired,
     RequestInProgress,
     SmsUnavailable,
     VerificationInvalid,
@@ -52,6 +56,7 @@ from glowderma.core.api.exceptions import (
 )
 from glowderma.core.models import IdempotencyRecord
 from glowderma.core.pii import pii_ref
+from glowderma.integrations.email import registry as email_registry
 from glowderma.integrations.eskiz import registry as eskiz_registry
 from glowderma.integrations.oauth.ports import SocialClaims
 
@@ -774,7 +779,8 @@ def delete_customer(customer: Customer | int) -> Customer:
     the row.
 
     Under the customer-level lock (``FOR NO KEY UPDATE``, so a concurrent capture's ``Purchase`` insert does
-    not wait): ``status=deleted``; name, image, address text, password scrubbed; ``language`` reset to ``uz``;
+    not wait): ``status=deleted``; name, image, address text, password and e-mail address (hybrid identity)
+    scrubbed; ``language`` reset to ``uz``;
     consent (``terms_version``, ``consent_at``, ``consent_ip``) and ``last_login_at`` cleared (the audit log
     keeps the consent history); addresses and social identities deleted (one ``apple.revoke`` outbox message
     per Apple identity holding a token); every device inactive with no push, token or key hash; every session
@@ -795,6 +801,8 @@ def delete_customer(customer: Customer | int) -> Customer:
     stored.address_text = ""
     stored.image = ""
     stored.password = ""
+    stored.email = None  # hybrid identity: the address goes with the scrub (the phone stays, A1)
+    stored.email_verified_at = None
     stored.language = enums.ContentLanguage.UZ
     stored.terms_version = ""
     stored.consent_at = None
@@ -808,6 +816,8 @@ def delete_customer(customer: Customer | int) -> Customer:
             "address_text",
             "image",
             "password",
+            "email",
+            "email_verified_at",
             "language",
             "terms_version",
             "consent_at",
@@ -1322,6 +1332,11 @@ def invalidate_fcm_token(device_id: int, *, token: str | None = None) -> bool:
 
 
 # --- P1: OTP, verification tokens, rotating refresh, logout, social nonce (customer contract §2.1) ---------
+#
+# Hybrid identity: one engine for codes sent by SMS (to a phone) and by e-mail (to an address). Every rule is
+# keyed by the code's *target* (:class:`OtpTarget`): the per-target advisory lock, the lockout, the daily caps
+# (codes and wrong codes), the resend window and the rows themselves; the fid and IP day counters are shared
+# by both channels and each channel has its own global hourly breaker. Codes are stored as HMACs only.
 
 # OtpPurpose (API) → SmsCode.Purpose (stored), customer contract §2.1.
 OTP_PURPOSES: dict[str, str] = {
@@ -1329,6 +1344,15 @@ OTP_PURPOSES: dict[str, str] = {
     enums.OtpPurpose.LOGIN_NEW_DEVICE: SmsCode.Purpose.NEW_DEVICE,
     enums.OtpPurpose.RESET_PASSWORD: SmsCode.Purpose.RESET,
     enums.OtpPurpose.LINK_SOCIAL: SmsCode.Purpose.SOCIAL_LINK,
+    enums.OtpPurpose.VERIFY_EMAIL: SmsCode.Purpose.VERIFY_EMAIL,
+    enums.OtpPurpose.ATTACH_PHONE: SmsCode.Purpose.ATTACH_PHONE,
+}
+SMS_CHANNEL = "sms"
+EMAIL_CHANNEL = "email"
+# Purposes bound to one channel: attaching a phone is proven by SMS, verifying an e-mail by e-mail.
+CHANNEL_ONLY_PURPOSES: dict[str, str] = {
+    enums.OtpPurpose.ATTACH_PHONE: SMS_CHANNEL,
+    enums.OtpPurpose.VERIFY_EMAIL: EMAIL_CHANNEL,
 }
 OTP_CODE_LENGTH = 6
 OTP_PAYLOAD_KEY = "gd:otp:payload:{sms_code_id}"
@@ -1340,17 +1364,74 @@ REFRESH_GRACE_KEY = "auth:refresh_grace:{digest}"
 REFRESH_DEAD_KEY = "auth:refresh_dead:{digest}"
 
 
+def normalize_email(value: str) -> str:
+    """The stored form of an e-mail address: trimmed, lower case (one account per address, C§2.1)."""
+    return value.strip().lower()
+
+
+@dataclass(frozen=True, slots=True)
+class OtpTarget:
+    """Where a code goes: a phone (``sms``, E.164) or an e-mail address (``email``, normalised)."""
+
+    channel: str
+    value: str
+
+    @property
+    def is_email(self) -> bool:
+        return self.channel == EMAIL_CHANNEL
+
+    @property
+    def lookup(self) -> dict[str, str]:
+        """The ``SmsCode`` / ``Customer`` filter of this target."""
+        return {"email": self.value} if self.is_email else {"phone": self.value}
+
+    def codes(self) -> Any:
+        return SmsCode.objects.filter(**self.lookup)
+
+    @property
+    def lock_key(self) -> str:
+        # The phone key is unchanged ("otp:+998…"); an address can never collide with it.
+        return f"otp:email:{self.value}" if self.is_email else f"otp:{self.value}"
+
+    @property
+    def log_ref(self) -> str:
+        return f"{'email' if self.is_email else 'phone'}_ref={pii_ref(self.value)}"
+
+
+def otp_target(identifier: str | OtpTarget) -> OtpTarget:
+    """A target from a validated identifier: an address holds ``@``, an E.164 phone never does."""
+    if isinstance(identifier, OtpTarget):
+        return identifier
+    if "@" in identifier:
+        return OtpTarget(EMAIL_CHANNEL, normalize_email(identifier))
+    return OtpTarget(SMS_CHANNEL, identifier)
+
+
+def row_target(row: SmsCode) -> OtpTarget:
+    return OtpTarget(EMAIL_CHANNEL, row.email) if row.email else OtpTarget(SMS_CHANNEL, row.phone)
+
+
+def row_identifier(row: SmsCode) -> str:
+    """The phone or the e-mail address a code row was sent to."""
+    return row.email or row.phone
+
+
 @dataclass(frozen=True, slots=True)
 class CodeIssue:
     """``auth/send-code/`` 200 and the ``otp`` block of ``NextStep`` (customer contract §2.1.1, §2.1.4)."""
 
     sms_code_id: int
-    phone: str
+    phone: str  # "" for an e-mail code
     purpose: str
     expires_in: int
     resend_in: int
     attempts: int
     length: int = OTP_CODE_LENGTH
+    email: str = ""  # "" for an SMS code
+
+    @property
+    def channel(self) -> str:
+        return EMAIL_CHANNEL if self.email else SMS_CHANNEL
 
 
 @dataclass(frozen=True, slots=True)
@@ -1387,8 +1468,9 @@ def _ip_counter_key(ip: str, now: datetime) -> str:
     return f"gd:otp:ip:{pii_ref(ip)}:{_day_tag(now)}"
 
 
-def _global_counter_key(now: datetime) -> str:
-    return f"gd:otp:global:{now.astimezone(timeutils.TASHKENT).strftime('%Y%m%d%H')}"
+def _global_counter_key(now: datetime, channel: str = SMS_CHANNEL) -> str:
+    prefix = "gd:otp:email_global" if channel == EMAIL_CHANNEL else "gd:otp:global"
+    return f"{prefix}:{now.astimezone(timeutils.TASHKENT).strftime('%Y%m%d%H')}"
 
 
 def _seconds_to_next_hour(now: datetime) -> int:
@@ -1415,7 +1497,7 @@ def _incr(key: str, timeout: int) -> int:
 
 
 def code_hmac(code: str) -> str:
-    """``HMAC-SHA256(code, SMS_CODE_HMAC_KEY)`` hex: the only stored form of an SMS code (§6.4)."""
+    """``HMAC-SHA256(code, SMS_CODE_HMAC_KEY)`` hex: the only stored form of a code, SMS or e-mail (§6.4)."""
     return hmac.new(
         str(settings.SMS_CODE_HMAC_KEY).encode("utf-8"), code.encode("utf-8"), hashlib.sha256
     ).hexdigest()
@@ -1429,60 +1511,78 @@ def social_otp_key(sms_code_id: int) -> str:
     return SOCIAL_OTP_KEY.format(sms_code_id=sms_code_id)
 
 
-def _lock_phone(phone: str) -> None:
-    """``pg_advisory_xact_lock(hashtext('otp:' + phone))``: serialises every OTP decision of one phone until
-    the surrounding transaction ends (customer contract §2.1.1)."""
+def _lock_target(target: OtpTarget) -> None:
+    """``pg_advisory_xact_lock(hashtext('otp:' + phone))`` (``'otp:email:' + address`` for e-mail):
+    serialises every OTP decision of one target until the surrounding transaction ends (customer contract
+    §2.1.1)."""
     if not transaction.get_connection().in_atomic_block:
-        raise RuntimeError("the per-phone OTP lock needs a transaction")
+        raise RuntimeError("the per-target OTP lock needs a transaction")
     with transaction.get_connection().cursor() as cursor:
-        cursor.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ["otp:" + phone])
+        cursor.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", [target.lock_key])
 
 
-def active_customer_by_phone(phone: str) -> Customer | None:
-    return Customer.objects.filter(phone=phone, status=enums.CustomerStatus.ACTIVE).first()
+def active_customer_by_phone(identifier: str | OtpTarget) -> Customer | None:
+    """The active customer of a phone — or, given an address (hybrid identity), of an e-mail."""
+    target = otp_target(identifier)
+    return Customer.objects.filter(**target.lookup, status=enums.CustomerStatus.ACTIVE).first()
 
 
-def _phone_block(phone: str, now: datetime) -> Exception | None:
-    """The phone-derived refusals (DB rows, they survive a cache flush): lockout, daily wrong-code cap."""
+def active_customer_by_email(email: str) -> Customer | None:
+    return active_customer_by_phone(OtpTarget(EMAIL_CHANNEL, normalize_email(email)))
+
+
+def _phone_block(target: OtpTarget, now: datetime) -> Exception | None:
+    """The target-derived refusals (DB rows, they survive a cache flush): lockout, daily wrong-code cap."""
     lockout = timedelta(minutes=int(settings.CUSTOMER_OTP_LOCKOUT_MINUTES))
     exhausted = (
-        SmsCode.objects.filter(phone=phone, exhausted_at__gt=now - lockout)
+        target.codes()
+        .filter(exhausted_at__gt=now - lockout)
         .order_by("-exhausted_at")
         .values_list("exhausted_at", flat=True)
         .first()
     )
     if exhausted is not None:
         return OtpLocked(retry_after=_seconds(exhausted + lockout - now))
-    if wrong_codes_today(phone, now) >= int(settings.CUSTOMER_OTP_DAILY_WRONG_LIMIT):
+    if wrong_codes_today(target, now) >= int(settings.CUSTOMER_OTP_DAILY_WRONG_LIMIT):
         return OtpLocked(retry_after=_to_midnight(now))
     return None
 
 
-def wrong_codes_today(phone: str, now: datetime) -> int:
+def wrong_codes_today(identifier: str | OtpTarget, now: datetime) -> int:
+    target = otp_target(identifier)
     return int(
-        SmsCode.objects.filter(phone=phone, created_at__gte=_day_start(now)).aggregate(total=Sum("attempts"))[
-            "total"
-        ]
-        or 0
+        target.codes().filter(created_at__gte=_day_start(now)).aggregate(total=Sum("attempts"))["total"] or 0
     )
 
 
-def _cap_block(phone: str, *, fid: str, ip: str, now: datetime) -> Exception | None:
-    """The day caps: codes per phone (DB), per fid and per client IP (Redis counters)."""
-    if SmsCode.objects.filter(phone=phone, created_at__gte=_day_start(now)).count() >= int(
+def _daily_limit(target: OtpTarget, now: datetime) -> Exception:
+    key = "error.otp_daily_limit_email" if target.is_email else None
+    return OtpDailyLimit(retry_after=_to_midnight(now), key=key)
+
+
+def _cap_block(target: OtpTarget, *, fid: str, ip: str, now: datetime) -> Exception | None:
+    """The day caps: codes per target (DB), per fid and per client IP (Redis counters)."""
+    if target.codes().filter(created_at__gte=_day_start(now)).count() >= int(
         settings.CUSTOMER_OTP_DAILY_LIMIT
     ) or _counter(_fid_counter_key(fid, now)) >= int(settings.CUSTOMER_OTP_DEVICE_DAILY_LIMIT):
-        return OtpDailyLimit(retry_after=_to_midnight(now))
+        return _daily_limit(target, now)
     if ip and _counter(_ip_counter_key(ip, now)) >= int(settings.CUSTOMER_OTP_IP_DAILY_LIMIT):
         return OtpNetworkLimit(retry_after=_to_midnight(now))
     return None
 
 
-def _budget_block(now: datetime) -> Exception | None:
-    """The global hourly SMS breaker (503 ``sms_unavailable`` + ERROR ``otp.budget_tripped`` + the alert of
-    the same name, once per dedupe window). The alert insert belongs to the caller's transaction:
-    ``auth/login/`` rolls its transaction back with the refusal (the ERROR line stays), ``auth/send-code/``
-    has none."""
+def _budget_block(now: datetime, channel: str = SMS_CHANNEL) -> Exception | None:
+    """The global hourly breaker of a channel: SMS → 503 ``sms_unavailable`` + ERROR ``otp.budget_tripped``
+    and the alert of the same name; e-mail → 503 ``email_unavailable`` + ``otp.email_budget_tripped``, once
+    per dedupe window. The alert insert belongs to the caller's transaction: ``auth/login/`` rolls its
+    transaction back with the refusal (the ERROR line stays), ``auth/send-code/`` has none."""
+    if channel == EMAIL_CHANNEL:
+        limit = int(settings.EMAIL_GLOBAL_HOURLY_LIMIT)
+        if _counter(_global_counter_key(now, channel)) >= limit:
+            logger.error("otp.email_budget_tripped limit=%s", limit)
+            alerts.alert("otp.email_budget_tripped", {"limit": limit})
+            return EmailServiceUnavailable(retry_after=_seconds_to_next_hour(now))
+        return None
     if _counter(_global_counter_key(now)) >= int(settings.SMS_GLOBAL_HOURLY_LIMIT):
         logger.error("otp.budget_tripped limit=%s", settings.SMS_GLOBAL_HOURLY_LIMIT)
         alerts.alert("otp.budget_tripped", {"limit": int(settings.SMS_GLOBAL_HOURLY_LIMIT)})
@@ -1490,15 +1590,15 @@ def _budget_block(now: datetime) -> Exception | None:
     return None
 
 
-def _count_issue(*, fid: str, ip: str, now: datetime) -> None:
-    _incr(_global_counter_key(now), 3600 + 60)
+def _count_issue(*, fid: str, ip: str, now: datetime, channel: str = SMS_CHANNEL) -> None:
+    _incr(_global_counter_key(now, channel), 3600 + 60)
     _incr(_fid_counter_key(fid, now), 2 * 86400)
     if ip:
         _incr(_ip_counter_key(ip, now), 2 * 86400)
 
 
 def _create_code(
-    phone: str,
+    target: OtpTarget,
     stored_purpose: str,
     *,
     purpose: str,
@@ -1509,14 +1609,14 @@ def _create_code(
     now: datetime,
 ) -> SmsCode:
     """Supersede the live code, store a new HMAC row, seal the plain code into Redis for the handler, count it
-    and enqueue ``sms.send`` (no phone, no text, no code in the payload)."""
-    SmsCode.objects.filter(
-        phone=phone, purpose=stored_purpose, consumed_at__isnull=True, expires_at__gt=now
-    ).update(expires_at=now)
-    code = eskiz_registry.new_code()
+    and enqueue ``sms.send`` / ``email.send`` (no phone, no address, no text, no code in the payload)."""
+    target.codes().filter(purpose=stored_purpose, consumed_at__isnull=True, expires_at__gt=now).update(
+        expires_at=now
+    )
+    code = email_registry.new_code() if target.is_email else eskiz_registry.new_code()
     ttl = int(settings.CUSTOMER_OTP_TTL_SECONDS)
     row = SmsCode.objects.create(
-        phone=phone,
+        **target.lookup,
         purpose=stored_purpose,
         code_hmac=code_hmac(code),
         max_attempts=int(settings.CUSTOMER_OTP_MAX_ATTEMPTS),
@@ -1525,13 +1625,21 @@ def _create_code(
         request_ip=ip or None,
     )
     cache.set(otp_payload_key(row.pk), secretbox.seal(code.encode("ascii"), aad=str(row.pk).encode()), ttl)
-    _count_issue(fid=fid, ip=ip, now=now)
-    outbox.enqueue(
-        topics.SMS_SEND,
-        {"sms_code_id": row.pk, "lang": lang, "platform": platform},
-        dedupe_key=topics.sms_send_key(row.pk),
-    )
-    logger.info("otp.issued purpose=%s phone_ref=%s", purpose, pii_ref(phone))  # the contract literal
+    _count_issue(fid=fid, ip=ip, now=now, channel=target.channel)
+    if target.is_email:
+        outbox.enqueue(
+            topics.EMAIL_SEND,
+            {"sms_code_id": row.pk, "lang": lang, "purpose": purpose},
+            dedupe_key=topics.email_send_key(row.pk),
+        )
+        logger.info("otp.issued purpose=%s channel=email %s", purpose, target.log_ref)
+    else:
+        outbox.enqueue(
+            topics.SMS_SEND,
+            {"sms_code_id": row.pk, "lang": lang, "platform": platform},
+            dedupe_key=topics.sms_send_key(row.pk),
+        )
+        logger.info("otp.issued purpose=%s phone_ref=%s", purpose, pii_ref(target.value))  # contract literal
     return row
 
 
@@ -1540,6 +1648,7 @@ def _issue(row: SmsCode, purpose: str, now: datetime) -> CodeIssue:
     return CodeIssue(
         sms_code_id=row.pk,
         phone=row.phone,
+        email=row.email,
         purpose=purpose,
         expires_in=max(0, int((row.expires_at - now).total_seconds())),
         resend_in=max(0, int((resend_at - now).total_seconds() + 0.999)),
@@ -1547,8 +1656,15 @@ def _issue(row: SmsCode, purpose: str, now: datetime) -> CodeIssue:
     )
 
 
+def check_channel(purpose: str, target: OtpTarget) -> None:
+    """A purpose bound to one channel refuses the other (a programming error: the serializers refuse it)."""
+    channel = CHANNEL_ONLY_PURPOSES.get(purpose)
+    if channel is not None and channel != target.channel:
+        raise ValueError(f"{purpose!r} codes go by {channel} only")
+
+
 def send_code(
-    phone: str,
+    identifier: str | OtpTarget,
     purpose: str,
     *,
     ip: str,
@@ -1557,71 +1673,87 @@ def send_code(
     platform: str,
     social_jti: str | None = None,
 ) -> CodeIssue:
-    """``auth/send-code/`` (customer contract §2.1.1), checks in contract order.
+    """``auth/send-code/`` (customer contract §2.1.1), checks in contract order, for a phone or an e-mail.
 
-    ``login_new_device`` is refused (only ``auth/login/`` issues it, after the password). Phone state
-    (``phone_registered`` / ``phone_not_registered``), the global hourly budget, then under the per-phone
-    advisory lock: lockout, daily wrong-code cap, resend window, phone and fid day caps, IP day cap. For
-    ``link_social`` the ticket's ``jti`` is remembered for the code (``gd:social:otp:{id}``, 15 min).
+    ``login_new_device`` is refused (only ``auth/login/`` issues it, after the password). Target state
+    (``phone_registered`` / ``phone_not_registered``, ``email_registered`` / ``email_not_registered``), the
+    channel's global hourly budget, then under the per-target advisory lock: lockout, daily wrong-code cap,
+    resend window, target and fid day caps, IP day cap. For ``link_social`` the ticket's ``jti`` is remembered
+    for the code (``gd:social:otp:{id}``, 15 min). ``attach_phone`` / ``verify_email`` (the signed-in
+    ``me/phone/code/`` and ``me/email/code/``) check nothing about the target here: their caller refuses a
+    phone or an address of another account first (``phone_taken`` / ``email_taken``).
     """
     if purpose not in OTP_PURPOSES or purpose == enums.OtpPurpose.LOGIN_NEW_DEVICE:
         raise ValueError(f"send_code cannot issue {purpose!r}")
     if purpose == enums.OtpPurpose.LINK_SOCIAL and not social_jti:
         raise ValueError("link_social codes need the ticket jti")
-    customer = active_customer_by_phone(phone)
+    target = otp_target(identifier)
+    check_channel(purpose, target)
+    customer = active_customer_by_phone(target)
     if purpose == enums.OtpPurpose.REGISTER and customer is not None:
-        raise PhoneRegistered()
+        raise EmailRegistered() if target.is_email else PhoneRegistered()
     if purpose == enums.OtpPurpose.RESET_PASSWORD and customer is None:
-        raise PhoneNotRegistered()
+        raise EmailNotRegistered() if target.is_email else PhoneNotRegistered()
     now = timeutils.now()
-    budget = _budget_block(now)
+    budget = _budget_block(now, target.channel)
     if budget is not None:
         raise budget
     stored = OTP_PURPOSES[purpose]
     with transaction.atomic():
-        _lock_phone(phone)
-        block = _phone_block(phone, now)
+        _lock_target(target)
+        block = _phone_block(target, now)
         if block is not None:
             raise block
-        newest = SmsCode.objects.filter(phone=phone, purpose=stored).order_by("-created_at", "-id").first()
+        newest = target.codes().filter(purpose=stored).order_by("-created_at", "-id").first()
         resend = timedelta(seconds=int(settings.CUSTOMER_OTP_RESEND_SECONDS))
         if newest is not None and newest.created_at > now - resend:
             raise OtpResendTooSoon(retry_after=_seconds(newest.created_at + resend - now))
-        block = _cap_block(phone, fid=fid, ip=ip, now=now)
+        block = _cap_block(target, fid=fid, ip=ip, now=now)
         if block is not None:
             raise block
         row = _create_code(
-            phone, stored, purpose=purpose, ip=ip, fid=fid, lang=lang, platform=platform, now=now
+            target, stored, purpose=purpose, ip=ip, fid=fid, lang=lang, platform=platform, now=now
         )
         if social_jti:
             cache.set(social_otp_key(row.pk), social_jti, SOCIAL_OTP_TTL_SECONDS)
         return _issue(row, purpose, now)
 
 
-def otp_blocked(phone: str, *, fid: str, ip: str, now: datetime) -> Exception | None:
-    """The pre-password check of ``auth/login/`` step 3 (customer contract §2.1.4): takes the per-phone
+def otp_blocked(identifier: str | OtpTarget, *, fid: str, ip: str, now: datetime) -> Exception | None:
+    """The pre-password check of ``auth/login/`` step 3 (customer contract §2.1.4): takes the per-target
     advisory lock (held until the caller's transaction ends) and returns the refusal ``send_code`` could
-    meet — lockout, daily code cap, daily wrong-code cap, fid cap, IP cap (``otp_network_limit``), global
-    budget (``sms_unavailable``) — or ``None``. The same answer for every password and for unknown phones."""
-    _lock_phone(phone)
-    return _phone_block(phone, now) or _cap_block(phone, fid=fid, ip=ip, now=now) or _budget_block(now)
+    meet — lockout, daily code cap, daily wrong-code cap, fid cap, IP cap (``otp_network_limit``), the
+    channel's global budget (``sms_unavailable`` / ``email_unavailable``) — or ``None``. The same answer for
+    every password and for unknown phones and addresses."""
+    target = otp_target(identifier)
+    _lock_target(target)
+    return (
+        _phone_block(target, now)
+        or _cap_block(target, fid=fid, ip=ip, now=now)
+        or _budget_block(now, target.channel)
+    )
 
 
-def issue_login_code(phone: str, *, ip: str, fid: str, lang: str, platform: str) -> CodeIssue:
-    """The ``login_new_device`` code of ``auth/login/`` step 6, after the password check.
+def issue_login_code(
+    identifier: str | OtpTarget, *, ip: str, fid: str, lang: str, platform: str
+) -> CodeIssue:
+    """The ``login_new_device`` code of ``auth/login/`` step 6, after the password check, sent to what the
+    customer signed in with (phone → SMS, e-mail → e-mail).
 
     Runs under the advisory lock :func:`otp_blocked` took (the caller's transaction). A live code younger than
-    the resend window is reused (no SMS; ``resend_in`` = the remaining wait); otherwise a new one is issued.
-    The fid, IP and global counters are incremented without a second check, so this never answers a cap
-    error after the password was checked (a concurrent request may overshoot one of those cost caps by one).
+    the resend window is reused (nothing sent; ``resend_in`` = the remaining wait); otherwise a new one is
+    issued. The fid, IP and global counters are incremented without a second check, so this never answers a
+    cap error after the password was checked (a concurrent request may overshoot one of those cost caps by
+    one).
     """
+    target = otp_target(identifier)
     now = timeutils.now()
-    _lock_phone(phone)
+    _lock_target(target)
     stored = SmsCode.Purpose.NEW_DEVICE
     resend = timedelta(seconds=int(settings.CUSTOMER_OTP_RESEND_SECONDS))
     live = (
-        SmsCode.objects.filter(
-            phone=phone,
+        target.codes()
+        .filter(
             purpose=stored,
             consumed_at__isnull=True,
             exhausted_at__isnull=True,
@@ -1633,7 +1765,7 @@ def issue_login_code(phone: str, *, ip: str, fid: str, lang: str, platform: str)
     )
     if live is None:
         live = _create_code(
-            phone,
+            target,
             stored,
             purpose=enums.OtpPurpose.LOGIN_NEW_DEVICE,
             ip=ip,
@@ -1645,28 +1777,24 @@ def issue_login_code(phone: str, *, ip: str, fid: str, lang: str, platform: str)
     return _issue(live, enums.OtpPurpose.LOGIN_NEW_DEVICE, now)
 
 
-def verify_code(phone: str, purpose: str, code: str) -> Verification:
-    """``auth/verify-code/`` (customer contract §2.1.2) under the per-phone advisory lock and a row lock.
+def verify_code(identifier: str | OtpTarget, purpose: str, code: str) -> Verification:
+    """``auth/verify-code/`` (customer contract §2.1.2) under the per-target advisory lock and a row lock.
 
     No live code (none, expired, consumed, superseded) → ``otp_expired``; exhausted row, lockout or daily
     wrong-code cap → ``otp_locked``; HMAC mismatch → ``attempts += 1`` (``exhausted_at`` at the max) is
     **committed** and then ``otp_invalid`` (``attempts_left`` = min(this code's, the day's)) or, at 0 left,
     ``otp_locked``. A match issues the single-use verification token (SHA-256 stored, 10 min).
     """
+    target = otp_target(identifier)
     stored = OTP_PURPOSES[purpose]
     now = timeutils.now()
     refusal: Exception | None = None
     with transaction.atomic():
-        _lock_phone(phone)
-        row = (
-            SmsCode.objects.select_for_update()
-            .filter(phone=phone, purpose=stored)
-            .order_by("-created_at", "-id")
-            .first()
-        )
+        _lock_target(target)
+        row = target.codes().select_for_update().filter(purpose=stored).order_by("-created_at", "-id").first()
         if row is None or row.consumed_at is not None or row.expires_at <= now:
             raise OtpExpired()
-        block = _phone_block(phone, now)
+        block = _phone_block(target, now)
         if row.exhausted_at is not None or block is not None:
             raise block or OtpLocked(retry_after=60 * int(settings.CUSTOMER_OTP_LOCKOUT_MINUTES))
         if not hmac.compare_digest(row.code_hmac, code_hmac(code)):
@@ -1674,10 +1802,10 @@ def verify_code(phone: str, purpose: str, code: str) -> Verification:
             if row.attempts >= row.max_attempts:
                 row.exhausted_at = now
             row.save(update_fields=["attempts", "exhausted_at"])
-            day_left = int(settings.CUSTOMER_OTP_DAILY_WRONG_LIMIT) - wrong_codes_today(phone, now)
+            day_left = int(settings.CUSTOMER_OTP_DAILY_WRONG_LIMIT) - wrong_codes_today(target, now)
             left = min(row.max_attempts - row.attempts, day_left)
             if left <= 0:
-                refusal = _phone_block(phone, now) or OtpLocked(retry_after=_to_midnight(now))
+                refusal = _phone_block(target, now) or OtpLocked(retry_after=_to_midnight(now))
             else:
                 refusal = OtpInvalid(details={"attempts_left": left}, params={"n": left})
         else:
@@ -1687,14 +1815,21 @@ def verify_code(phone: str, purpose: str, code: str) -> Verification:
             row.verification_token_hash = hash_secret(token)
             row.verification_expires_at = now + timedelta(seconds=ttl)
             row.save(update_fields=["consumed_at", "verification_token_hash", "verification_expires_at"])
-            return Verification(token, ttl, purpose, active_customer_by_phone(phone) is not None)
+            return Verification(token, ttl, purpose, active_customer_by_phone(target) is not None)
     raise refusal
 
 
-def verification_row(token: str, *, purpose: str, phone: str | None = None, lock: bool = False) -> SmsCode:
-    """The usable ``SmsCode`` of a verification token (unused, unexpired, of ``purpose`` and ``phone``), else
-    400 ``verification_invalid``. With ``lock`` the row is locked (``FOR UPDATE``) for
-    :func:`consume_verification`."""
+def verification_row(
+    token: str,
+    *,
+    purpose: str,
+    phone: str | None = None,
+    lock: bool = False,
+    email: str | None = None,
+) -> SmsCode:
+    """The usable ``SmsCode`` of a verification token (unused, unexpired, of ``purpose`` and, when given,
+    of ``phone`` / ``email``), else 400 ``verification_invalid``. With ``lock`` the row is locked (``FOR
+    UPDATE``) for :func:`consume_verification`."""
     if not token:
         raise VerificationInvalid()
     queryset = SmsCode.objects.filter(verification_token_hash=hash_secret(token))
@@ -1708,20 +1843,23 @@ def verification_row(token: str, *, purpose: str, phone: str | None = None, lock
         or row.verification_expires_at is None
         or row.verification_expires_at <= timeutils.now()
         or (phone is not None and row.phone != phone)
+        or (email is not None and row.email != normalize_email(email))
     ):
         raise VerificationInvalid()
     return row
 
 
-def consume_verification(token: str, *, purpose: str, phone: str | None = None) -> tuple[str, int]:
+def consume_verification(
+    token: str, *, purpose: str, phone: str | None = None, email: str | None = None
+) -> tuple[str, int]:
     """Mark a verification token used under its row lock (single use; part of the caller's transaction, so a
-    refusal later in the flow rolls the use back). Returns ``(phone, sms_code_id)``."""
+    refusal later in the flow rolls the use back). Returns ``(phone or e-mail address, sms_code_id)``."""
     if not transaction.get_connection().in_atomic_block:
         raise RuntimeError("consume_verification needs the caller's transaction")
-    row = verification_row(token, purpose=purpose, phone=phone, lock=True)
+    row = verification_row(token, purpose=purpose, phone=phone, email=email, lock=True)
     row.verification_used_at = timeutils.now()
     row.save(update_fields=["verification_used_at"])
-    return row.phone, row.pk
+    return row_identifier(row), row.pk
 
 
 # --- rotating customer refresh (customer contract §2.1.6) ---
@@ -1995,9 +2133,10 @@ def remember_id_token(provider: str, raw_token: str, *, expires_at: int) -> bool
 # owning module's services). Every helper runs inside the caller's transaction, under its customer-level lock.
 
 
-def lock_customer_by_phone(phone: str) -> Customer | None:
-    """The customer-level lock of the row holding ``phone`` (any status), or ``None``."""
-    return Customer.objects.select_for_update(no_key=True).filter(phone=phone).first()
+def lock_customer_by_phone(identifier: str | OtpTarget) -> Customer | None:
+    """The customer-level lock of the row holding the phone — or, given an address, the e-mail — (any status),
+    or ``None``."""
+    return Customer.objects.select_for_update(no_key=True).filter(**otp_target(identifier).lookup).first()
 
 
 class NoSession(enum.Enum):
@@ -2039,11 +2178,47 @@ def lock_signed_in_customer(customer_id: int, sid: uuid.UUID | str | NoSession) 
     return stored
 
 
-def create_customer(phone: str, *, name: str, language: str) -> Customer:
-    """A new customer row (registration, social completion). ``IntegrityError`` when the phone was taken
-    meanwhile (inside its own savepoint, so the caller's transaction stays usable)."""
+def create_customer(phone: str | None, *, name: str, language: str, email: str | None = None) -> Customer:
+    """A new customer row (registration, social completion): with a verified phone, a verified e-mail
+    (``email_verified_at`` = now), both, or neither (a social sign-up, hybrid identity). ``IntegrityError``
+    when the phone or the address was taken meanwhile (inside its own savepoint, so the caller's transaction
+    stays usable)."""
+    address = normalize_email(email) if email else None
     with transaction.atomic():
-        return Customer.objects.create(phone=phone, name=name, language=language)
+        return Customer.objects.create(
+            phone=phone or None,
+            email=address,
+            email_verified_at=timeutils.now() if address else None,
+            name=name,
+            language=language,
+        )
+
+
+def require_phone(customer: Customer) -> None:
+    """The phone gate (hybrid identity, customer contract §2.2.10): checkout, pay, booking and the QR answer
+    409 ``phone_required`` until the account has a verified phone (``me/phone/``). Every stored phone was
+    verified by an SMS code (registration, social completion or attach), and a phone is never removed."""
+    if not customer.phone:
+        raise PhoneRequired()
+
+
+def set_customer_phone(customer_id: int, phone: str) -> None:
+    """Attach a verified phone to a phoneless account (hybrid identity, customer contract §2.2.10), under the
+    caller's customer-level lock; ``IntegrityError`` (own savepoint) when another row holds it."""
+    with transaction.atomic():
+        Customer.objects.filter(pk=customer_id, phone__isnull=True).update(
+            phone=phone, updated_at=timeutils.now()
+        )
+
+
+def set_customer_email(customer_id: int, email: str) -> None:
+    """Set the verified e-mail address (replacing a previous one), ``email_verified_at`` = now, under the
+    caller's customer-level lock; ``IntegrityError`` (own savepoint) when another row holds it."""
+    instant = timeutils.now()
+    with transaction.atomic():
+        Customer.objects.filter(pk=customer_id).update(
+            email=normalize_email(email), email_verified_at=instant, updated_at=instant
+        )
 
 
 def set_customer_language(customer_id: int, language: str) -> None:
@@ -2090,13 +2265,16 @@ def clear_device_keys(customer_id: int, *, except_fid: str | None = None) -> int
 
 def scrub_profile_for_dormant(customer_id: int, *, language: str) -> None:
     """The profile part of the dormant reset (customer contract §2.2.3, M2-A16): name, image (file deleted on
-    commit), address text and addresses gone, language = the request language, consent cleared."""
+    commit), address text and addresses gone, the e-mail address too (hybrid identity: the previous holder of
+    the number keeps no way in), language = the request language, consent cleared."""
     stored = Customer.objects.get(pk=customer_id)
     _delete_image_on_commit(stored)
     Customer.objects.filter(pk=customer_id).update(
         name="",
         image="",
         address_text="",
+        email=None,
+        email_verified_at=None,
         language=language,
         terms_version="",
         consent_at=None,
@@ -2108,14 +2286,15 @@ def scrub_profile_for_dormant(customer_id: int, *, language: str) -> None:
 
 def scrub_deleted_for_reactivation(customer_id: int) -> None:
     """Backstop before a deleted row is reactivated (registration, social completion): whatever a write that
-    raced ``DELETE me/`` left on it — password, image, addresses, social identities (Apple revoked) — never
+    raced ``DELETE me/`` left on it — password, image, e-mail, addresses, social identities (Apple revoked) —
+    never
     reaches the next holder of the number (customer contract §6.17)."""
     stored = Customer.objects.get(pk=customer_id)
     if stored.status != enums.CustomerStatus.DELETED:
         return
     _delete_image_on_commit(stored)
     Customer.objects.filter(pk=customer_id).update(
-        password="", image="", address_text="", updated_at=timeutils.now()
+        password="", image="", address_text="", email=None, email_verified_at=None, updated_at=timeutils.now()
     )
     Address.objects.filter(customer_id=customer_id).delete()
     for identity in list(CustomerSocialIdentity.objects.filter(customer_id=customer_id)):

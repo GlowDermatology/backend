@@ -342,6 +342,8 @@ class OtpPurpose(TextChoices):
     LOGIN_NEW_DEVICE = "login_new_device"
     RESET_PASSWORD = "reset_password"  # noqa: S105
     LINK_SOCIAL = "link_social"
+    VERIFY_EMAIL = "verify_email"  # hybrid identity: me/email/code/ (e-mail only)
+    ATTACH_PHONE = "attach_phone"  # hybrid identity: me/phone/code/ (SMS only)
 
 
 class NextStep(TextChoices):

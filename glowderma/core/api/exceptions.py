@@ -398,6 +398,49 @@ class PhoneNotRegistered(CustomerError):
     status_code = 409
 
 
+class EmailRegistered(CustomerError):
+    """409 ``email_registered``: An active customer has this e-mail (hybrid identity)."""
+
+    error_code = "email_registered"
+    status_code = 409
+
+
+class EmailNotRegistered(CustomerError):
+    """409 ``email_not_registered``: No active customer has this e-mail."""
+
+    error_code = "email_not_registered"
+    status_code = 409
+
+
+class PhoneTaken(CustomerError):
+    """409 ``phone_taken``: Attaching a phone that belongs to another account (no merge: sign in with it)."""
+
+    error_code = "phone_taken"
+    status_code = 409
+
+
+class EmailTaken(CustomerError):
+    """409 ``email_taken``: Attaching an e-mail that belongs to another account."""
+
+    error_code = "email_taken"
+    status_code = 409
+
+
+class PhoneRequired(CustomerError):
+    """409 ``phone_required``: Checkout, pay, booking and the QR need a verified phone first."""
+
+    error_code = "phone_required"
+    status_code = 409
+
+
+class ReauthRequired(CustomerError):
+    """409 ``reauth_required``: A sign-in-method change of an account with no password, phone or e-mail needs
+    a fresh sign-in."""
+
+    error_code = "reauth_required"
+    status_code = 409
+
+
 class SocialProviderLinked(CustomerError):
     """409 ``social_provider_linked``: The customer already has this provider."""
 
@@ -574,6 +617,14 @@ class SmsUnavailable(CustomerError):
     """503 ``sms_unavailable``: The global SMS budget tripped."""
 
     error_code = "sms_unavailable"
+    retry_after_details = True
+    status_code = 503
+
+
+class EmailServiceUnavailable(CustomerError):
+    """503 ``email_unavailable``: The global e-mail budget tripped (e-mail twin of ``sms_unavailable``)."""
+
+    error_code = "email_unavailable"
     retry_after_details = True
     status_code = 503
 

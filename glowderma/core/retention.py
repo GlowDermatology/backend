@@ -7,8 +7,8 @@ task ``core.purge_outbox``.
 ``dead`` messages are **never** purged here: each is an action item until staff replay it (``manage.py
 requeue_outbox --dead``, which needs the row) or close it as handled by hand (``requeue_outbox --dead
 --resolved``: it becomes ``done`` and ages out), and the consistency report reads them without a look-back
-(K1 ``k1_billz_sale_dead``; K6 ``k6_outbox_dead`` counts the recent ones). The one exception is ``sms.send``
-(phone and code in the payload), which ``accounts.cleanup_auth`` deletes done or dead after 24 h.
+(K1 ``k1_billz_sale_dead``; K6 ``k6_outbox_dead`` counts the recent ones). The exceptions are ``sms.send``
+and ``email.send`` (OTP bookkeeping), which ``accounts.cleanup_auth`` deletes done or dead after 24 h.
 
 The outbox is not an append-only table: the ORM deletes it, which also clears
 ``delivery.Shipment.create_message`` (``SET_NULL``) of the rows it removes. The audit log (``AuditEntry``) is
