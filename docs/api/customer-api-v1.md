@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Version | 1.4.0-draft (2026-10-26, review revision 4 on top of revisions 2–3 and the product-owner decisions of 2026-10-26), milestone M2: the iOS/Android customer app, provider callbacks and the cashier QR endpoint |
+| Version | 1.5.0-draft (2026-10-27: hybrid identity, B-W2 — e-mail sign-up, sign-in and reset, phoneless social sign-up, the phone gate and `me/phone/`, `me/email/`; §2.1, §2.2.10, §2.14.4) on top of 1.4.0-draft (2026-10-26, review revision 4 on top of revisions 2–3 and the product-owner decisions of 2026-10-26), milestone M2: the iOS/Android customer app, provider callbacks and the cashier QR endpoint |
 | Implemented by | the Django 6.1 / DRF 3.18 backend (Codex, packages P0–P3 of `docs/plans/2026-10-26-m2-customer-api.md`); consumed by the native iOS and Android apps (not in this repo) |
 | Source of truth | `docs/specs/2026-10-24-backend-foundation-design.md` (Auth and request security → Customer (M2); Financial integrity; Milestones → M2; Provisional business rules). If this file and the spec disagree, the spec wins and this file gets fixed. |
 | Shared rules | `docs/api/admin-api-v1.md` §1 (envelope, pagination, idempotency, values), §3 (enums), §4 (OrderEvent types), §5.8 (Uzbek labels). This file **references** them and lists only what is different for the customer audience. |
@@ -135,6 +135,10 @@ Codes added for this audience (admin §1.6 codes keep their meaning):
 | 400 | `social_ticket_invalid` | `social_ticket` unknown, expired, used or issued to another device | null |
 | 401 | `password_changed` | The session was revoked because the password was reset or changed on another device (§1.2, §2.1.5) | null |
 | 409 | `phone_registered` · `phone_not_registered` | Purpose does not fit the phone (§2.1.1) | null |
+| 409 | `email_registered` · `email_not_registered` | Purpose does not fit the e-mail address (§2.1.1, hybrid identity) | null |
+| 409 | `phone_required` | Checkout, pay, booking or the QR of an account without a verified phone (§2.2.10) | null |
+| 409 | `phone_taken` · `email_taken` | Attaching a phone or an e-mail address another account holds; never a merge (§2.2.10) | null |
+| 409 | `reauth_required` | A sign-in-method change of an account with no password, phone or e-mail whose session is older than `CUSTOMER_REAUTH_FRESH_SECONDS` (§2.2.10) | null |
 | 409 | `social_provider_linked` · `social_identity_linked` | Link refused (§2.1.9, §2.2.8) | `{"provider": str}` |
 | 409 | `last_sign_in_method` | Unlinking the only way to sign in (§2.2.8) | `{"provider": str}` |
 | 409 | `terms_update_required` | Consent older than the current terms (§2.2.4) on checkout and booking | `{"current_version": str}` |
@@ -156,6 +160,7 @@ Codes added for this audience (admin §1.6 codes keep their meaning):
 | 429 | `otp_resend_too_soon` · `otp_daily_limit` · `otp_network_limit` · `otp_locked` | OTP limits (§2.1.1) | `{"retry_after": int}` (seconds; also `Retry-After`) |
 | 503 | `sms_unavailable` | The global SMS budget tripped (§2.1.1) | `{"retry_after": int}` |
 | 503 | `terms_not_published` | Registration while the terms are not published (§2.1.3) | null |
+| 503 | `email_unavailable` | The global e-mail budget tripped (`EMAIL_GLOBAL_HOURLY_LIMIT`, §2.1.1) | `{"retry_after": int}` |
 
 Generic field codes (admin §1.6 table) render their messages in the resolved language (catalog keys `field.<code>`).
 Endpoint-specific field codes are listed in each endpoint table and registered in
@@ -191,7 +196,7 @@ high pure-IP ceiling as a backstop; the per-phone rules are the main protection 
 
 | Scope (existing unless marked new) | Key | Default | Applies to |
 |---|---|---|---|
-| `sms_phone` | `pii_ref(phone)` (§6.4) | 5/min | `auth/send-code/` |
+| `sms_phone` | `pii_ref(phone)`, or `pii_ref(email)` for an e-mail body (§6.4) | 5/min | `auth/send-code/`, `me/phone/code/`, `me/email/code/` |
 | **`sms_device`** (new) | fid | 10/min | `auth/send-code/` |
 | `sms_ip` | client IP (backstop) | 600/min (was 20/min; the scope is used only by this route) | `auth/send-code/` |
 | OTP rules (not a DRF throttle; §2.1.1) | phone (DB-derived, survive a cache flush); fid and IP daily counters in Redis | resend ≥ 60 s per (phone, purpose); ≤ 10 codes per phone per Tashkent day; ≤ 10 wrong codes per phone per day; 15 min lockout after 5 wrong codes on one code; ≤ 10 codes per fid and ≤ 1000 per IP per day (`otp_network_limit`); global ≤ `SMS_GLOBAL_HOURLY_LIMIT` per hour | `auth/send-code/`, `auth/verify-code/`, `auth/login/` |
@@ -279,6 +284,8 @@ IP per minute, the rest only counted and sampled in the log).
 | 13 | PUT / DELETE | `me/image/` | C | multipart / – | 200 / 204 | P1 |
 | 14 | PUT | `me/device/` | C | | 200 | P1 |
 | 15 | POST | `me/password/` | C | I | 200 | P1 |
+| 15a | POST | `me/phone/code/`, `me/phone/` | C | | 200 / 200 | B-W2 (§2.2.10) |
+| 15b | POST | `me/email/code/`, `me/email/` | C | | 200 / 200 | B-W2 (§2.2.10) |
 | 16 | POST / DELETE | `me/social/`, `me/social/{provider}/` (DELETE with a JSON body) | C | I (POST) | 200 / 200 | P1 |
 | 17 | GET / POST | `me/addresses/` | C | I (POST) | 200 / 201 | P1 |
 | 18 | PATCH / DELETE | `me/addresses/{id}/` | C | | 200 / 204 | P1 |
@@ -343,11 +350,25 @@ IP per minute, the rest only counted and sampled in the log).
 ### 2.1 Auth
 
 Common to every `auth/*` endpoint: device headers required (§1.2); phone fields are E.164 (`invalid` "Telefon raqamini
-to‘g‘ri kiriting."; catalog `field.phone_invalid`); bodies are JSON; audit rows use `actor_type="customer"`
+to‘g‘ri kiriting."; catalog `field.phone_invalid`); bodies are JSON;
+
+**Hybrid identity (B-W2).** An account is created with a phone **or** an e-mail address (each verified by a code)
+**or** a social identity; the phone is required only at the first real action (checkout, pay, booking, the QR: 409
+`phone_required`, §2.2.10). Every body that names who signs in (`send-code`, `verify-code`, `login`) takes `phone`
+**or** `email` — exactly one: neither → field `phone` `required` "Telefon raqami yoki emailni kiriting."
+(`field.identifier_required`); both → field `email` `invalid` "Telefon raqami yoki emaildan faqat bittasini yuboring."
+(`field.identifier_ambiguous`); a malformed address → `email` `invalid` "Email manzilini to‘g‘ri kiriting."
+(`field.email_invalid`). Addresses are trimmed and lower-cased (one account per address). E-mail codes use the same
+engine as SMS codes — the same TTL, resend window, attempts, lockout and day caps per target, the same fid/IP day
+counters, the HMAC at rest and the sealed Redis payload — sent through the outbox topic `email.send` (§2.14.4); the
+e-mail channel has its own hourly breaker (`EMAIL_GLOBAL_HOURLY_LIMIT`, 503 `email_unavailable`). The verification
+token carries its target, so `set-password`, `reset-password` and `social/complete` need no identifier field. audit rows use `actor_type="customer"`
 (`actor_id` = customer id when known, `entity_type="customer"`), never the raw code, password, token or device key.
 
 OTP purposes (`OtpPurpose`) map to `SmsCode.Purpose`: `register` → `signup`, `login_new_device` → `new_device`,
-`reset_password` → `reset`, `link_social` → `social_link`. `login_new_device` codes are issued **only** by
+`reset_password` → `reset`, `link_social` → `social_link`, and (hybrid identity, signed-in only, §2.2.10)
+`attach_phone` → `attach_phone` (SMS only) and `verify_email` → `verify_email` (e-mail only); `send-code` and
+`verify-code` refuse those two (`invalid_choice`). `login_new_device` codes are issued **only** by
 `auth/login/` after the password check (§2.1.4); `send-code` refuses that purpose, so nobody can make the server text
 a registered phone without its password.
 
@@ -357,7 +378,8 @@ identities. `auth/reset-password/` (§2.1.5) is the **unauthenticated recovery**
 takeover): it revokes every session and unlinks every social identity.
 
 #### 2.1.1 `POST auth/send-code/`
-Body `{"phone": str, "purpose": "register" | "reset_password" | "link_social", "social_ticket": str | null}`.
+Body `{"phone": str, "purpose": "register" | "reset_password" | "link_social", "social_ticket": str | null}` — or
+`{"email": str, …}` instead of `phone` (hybrid identity: the code goes by e-mail).
 
 | Field / check (in order) | Code | Message (uz) · catalog key |
 |---|---|---|
@@ -367,6 +389,8 @@ Body `{"phone": str, "purpose": "register" | "reset_password" | "link_social", "
 | `social_ticket` valid (signature, ≤10 min, unused, its `fid` = `X-GD-Device-Id`) | 400 `social_ticket_invalid` | "Ijtimoiy tarmoq orqali kirish muddati tugadi. Qaytadan boshlang." · `error.social_ticket_invalid` |
 | `register` and an **active** customer with this phone exists | 409 `phone_registered` | "Bu raqam ro‘yxatdan o‘tgan. Hisobingizga kiring." · `error.phone_registered` |
 | `reset_password` and no active customer (deleted counts as none) | 409 `phone_not_registered` | "Bu raqam bilan hisob topilmadi. Ro‘yxatdan o‘ting." · `error.phone_not_registered` |
+| E-mail: `register` and an active customer has the address / `reset_password` and none has it | 409 `email_registered` / `email_not_registered` | "Bu email ro‘yxatdan o‘tgan. Hisobingizga kiring." · `error.email_registered` / "Bu email bilan hisob topilmadi. Ro‘yxatdan o‘ting." · `error.email_not_registered` |
+| E-mail: the global e-mail budget (`gd:otp:email_global:{YYYYMMDDHH}` ≥ `EMAIL_GLOBAL_HOURLY_LIMIT`, 500) | 503 `email_unavailable`, `Retry-After`; ERROR log `otp.email_budget_tripped` (alert) | "Email xizmati vaqtincha ishlamayapti. Birozdan so‘ng urinib ko‘ring." · `error.email_unavailable` |
 | `sms_phone` / `sms_device` / `sms_ip` throttle | 429 `throttled` | admin message, localized · `error.throttled` |
 | Global budget: the Redis counter `gd:otp:global:{YYYYMMDDHH}` ≥ `SMS_GLOBAL_HOURLY_LIMIT` (500) | 503 `sms_unavailable`, `Retry-After` = seconds to the next hour; ERROR log `otp.budget_tripped` (alert) | "SMS xizmati vaqtincha ishlamayapti. Birozdan so‘ng urinib ko‘ring." · `error.sms_unavailable` |
 | — from here on under `pg_advisory_xact_lock(hashtext('otp:' + phone))`, so two concurrent calls for one phone are serialised — | | |
@@ -378,9 +402,13 @@ Body `{"phone": str, "purpose": "register" | "reset_password" | "link_social", "
 
 ```jsonc
 // 200
-{"phone_mask": "+998 90 *** ** 67", "purpose": "register",
+{"phone_mask": "+998 90 *** ** 67",              // the code went by SMS; null for an e-mail code
+ "email_mask": null,                             // the code went by e-mail: "m***@gmail.com"; null for SMS
+ "purpose": "register",
  "expires_in": 120, "resend_in": 60, "attempts": 5, "length": 6}
 ```
+The day cap of an e-mail target answers `otp_daily_limit` with "Bugungi tasdiqlash kodlari limiti tugadi. Ertaga qayta
+urinib ko‘ring." (`error.otp_daily_limit_email`).
 **Side effects** (`accounts.services.send_code`, one transaction): previous unconsumed code of (phone, purpose) gets
 `expires_at=now`; new `SmsCode` row (`code_hmac = HMAC-SHA256(code, SMS_CODE_HMAC_KEY)` hex, 6 random digits from
 `secrets`, `expires_at = now + 120 s`, `max_attempts = 5`, `request_ip`); the global, fid and IP counters are
@@ -396,7 +424,7 @@ Phone enumeration through `register`/`reset_password` answers is an accepted UX 
 (§7 `M2-A9`).
 
 #### 2.1.2 `POST auth/verify-code/`
-Body `{"phone": str, "purpose": OtpPurpose, "code": str}`.
+Body `{"phone": str, "purpose": OtpPurpose, "code": str}` — or `email` instead of `phone` (hybrid identity).
 
 | Field / check | Code | Message (uz) · key |
 |---|---|---|
@@ -431,6 +459,11 @@ Body `{"verification_token": str (purpose register), "password": str, "name": st
 | `language` | `invalid_choice` | generic; default = resolved request language |
 | An **active** customer with the phone exists (race with another registration) | 409 `phone_registered` | `error.phone_registered` |
 
+A token of an **e-mail** code creates the account with that verified address and **no phone** (`Me.phone: null`,
+`email_verified_at` = now; `email_registered` on the race); the password must not be similar to the address
+(`password_too_similar` "Parol emailingizga juda o‘xshash." · `field.password_too_similar_email`). A deleted account's
+address was scrubbed, so an e-mail registration never reactivates (reactivation stays by phone, A1).
+
 → **201 `AuthTokens`** (with a `device_key`). Side effects (one transaction, `customers.services.register`):
 - new `Customer(phone, name, language)` or, for a deleted row, `accounts.services.reactivate_customer(name=…)`
   (same id; `registered_at` kept, `reactivated_at=now`; `LoyaltyAccount`, `Purchase`, `Order` history intact, A1 —
@@ -441,8 +474,10 @@ Body `{"verification_token": str (purpose register), "password": str, "name": st
 - audit `customer.registered {reactivated: bool, terms_version}`.
 
 #### 2.1.4 `POST auth/login/`
-Body `{"phone": str, "password": str 1..128, "verification_token": str | null}`; header `X-GD-Device-Key` when the app
-holds one.
+Body `{"phone": str, "password": str 1..128, "verification_token": str | null}` — or `email` instead of `phone`
+(hybrid identity: every rule below applies to the address; the new-device code of step 6 goes **by e-mail** and the
+`NextStep` carries `email_mask` instead of `phone_mask`; the guard key is `pii_ref(email)`); header `X-GD-Device-Key`
+when the app holds one. `invalid_credentials` reads "Telefon raqami, email yoki parol noto‘g‘ri." for both.
 1. The device is **known** when the active customer of this phone has `Device(customer, fid)` with `key_hash =
    SHA-256(X-GD-Device-Key)` (§1.9); an unknown phone, a missing, malformed or wrong key = unknown device. This is
    evaluated first and reveals nothing by itself (the answer does not differ until the password is checked).
@@ -477,7 +512,9 @@ holds one.
 The app keeps the typed password in memory only until step 7 (≤10 minutes) and never persists it.
 
 #### 2.1.5 `POST auth/reset-password/`
-Body `{"verification_token": str (purpose reset_password), "password": str}`. Password rules as §2.1.3, plus
+Body `{"verification_token": str (purpose reset_password), "password": str}`; the token may come from an SMS or an
+e-mail code (hybrid identity: 409 `email_not_registered` for an address whose account was deleted in between; the
+dormant-account rule applies to phone resets only — addresses are not recycled). Password rules as §2.1.3, plus
 `password_unchanged` "Yangi parol eskisidan farq qilsin." (`field.password_unchanged`).
 This is the **unauthenticated recovery** path (forgotten password, account takeover); a signed-in customer changes or
 sets the password with `POST me/password/` (§2.2.9), which unlinks nothing.
@@ -642,7 +679,15 @@ The fakes' `*` nonce wildcard exists only under the local/test settings. `author
   production settings; 429 `throttled`.
 
 #### 2.1.9 `POST auth/social/complete/`
-Body `{"social_ticket": str, "verification_token": str (purpose link_social), "password": str | null, "name": str | null, "terms_version": str | null, "language": ContentLanguage | null}`.
+Body `{"social_ticket": str, "verification_token": str (purpose link_social) | null, "password": str | null, "name": str | null, "terms_version": str | null, "language": ContentLanguage | null}`.
+
+**Hybrid identity.** `NextStep.verify_phone` is optional: the app may (a) verify a phone — or an e-mail address
+(`send-code` `link_social` with `email`) — and complete with that `verification_token` (the table below, with "phone"
+read as "phone or e-mail"; the dormant rule applies to phones only), or (b) **skip** it and complete with
+`verification_token: null`, `name` (2..150) and `terms_version`: a **new account without a phone** is created
+(→ **201**, `is_new_customer: true`, `Me.phone: null`, `Me.email: null`; the provider's e-mail stays on the identity
+only, never on the account). Nothing is merged: (b) never links to an existing account. The phone is asked at the
+first checkout, payment, booking or QR (§2.2.10).
 The phone is the one the verification token is bound to. Checks: ticket valid and its `fid` = `X-GD-Device-Id` (400
 `social_ticket_invalid`); the token's `SmsCode` row was requested with **this** ticket (`gd:social:otp:{sms_code_id}`
 = ticket `jti`; missing or different → 400 `verification_invalid`).
@@ -671,7 +716,9 @@ the push to the new device and a visible push to the device this sign-in replace
 
 #### 2.2.1 `GET me/` → `Me`
 ```jsonc
-{"id": 5, "phone": "+998901234567", "name": "Malika Karimova",
+{"id": 5, "phone": "+998901234567",              // null until a phone is attached (hybrid identity, §2.2.10)
+ "email": null,                                     // the verified e-mail address (lower case) | null
+ "name": "Malika Karimova",
  "language": "uz",                                  // ContentLanguage: push texts and the default Accept-Language
  "image_url": null,                                  // absolute URL | null
  "registered_at": "2025-03-12T10:20:00+05:00",      // Customer.history_from when set (reactivated or dormant-reset account, §2.2.3), else registered_at
@@ -722,7 +769,8 @@ paid):
    skipped and not counted; it never aborts the delete (integration, 2026-10-26);
 4. cart lines deleted (`commerce.services.delete_cart_lines`, P0);
 5. `accounts.services.delete_customer` (A1; P0 extends the built function): under the customer-level lock
-   (`no_key=True`): `status=deleted`, `deleted_at`, name/image/address/password scrubbed, `language` reset to `uz`,
+   (`no_key=True`): `status=deleted`, `deleted_at`, name/image/address/password and the e-mail address with its
+   `email_verified_at` (hybrid identity) scrubbed, `language` reset to `uz`,
    `terms_version=""`, `consent_at`/`consent_ip`/`last_login_at` cleared (the audit log keeps the consent history),
    addresses deleted, social identities deleted (an `apple.revoke` outbox message for each Apple identity holding a
    token, §2.1.8), devices `is_active=False, push_enabled=False, fcm_token="", key_hash=""`, every session revoked
@@ -878,6 +926,45 @@ device key and every social identity are kept**; outbox `push.account_security` 
 `customer.password_changed {first_password: bool}`. This is the route the `last_sign_in_method` message points to, and
 the way a social-only customer adds a password; the unauthenticated `auth/reset-password/` stays the recovery path that
 unlinks everything (§2.1.5).
+
+#### 2.2.10 Hybrid identity: the phone gate, `me/phone/` and `me/email/` (B-W2)
+
+**Phone gate.** `orders/checkout/` (after row 0 of §2.7.1), `orders/{id}/pay/`, `appointments/` and `me/qr/` answer
+**409 `phone_required`** "Davom etish uchun telefon raqamingizni tasdiqlang." (`error.phone_required`, `details: null`)
+while `Me.phone` is null; the app then runs the attach flow below and retries. Every stored phone was verified by an
+SMS code, and a phone is never removed, so money, cashback, BTS recipients, the QR and the POS (§2.10, which also
+refuses a phoneless account as `qr_invalid`) always have one. Browsing, the cart and `delivery/calculate/` need none.
+
+**`POST me/phone/code/`** (**C**; throttles `customer`, `sms_phone`, `sms_device`). Body `{"phone": str}` → 200
+`CodeIssue` (§2.1.1, `purpose: "attach_phone"`, every OTP limit applies). 409 `conflict` when the account already has
+a phone (it is never replaced); 409 **`phone_taken`** "Bu raqam boshqa hisobga bog‘langan — shu raqam bilan kiring."
+(`error.phone_taken`) when any other account holds the number — active, or deleted (A1 keeps the number with its
+loyalty account; registering with it reactivates that account). **No automatic merge:** the app offers to sign in
+with that phone instead.
+
+**`POST me/phone/`** (**C**; no `Idempotency-Key`: a wrong code is counted in its own committed transaction, as
+`auth/verify-code/`). Body `{"phone": str, "code": str, "password": str | null, "verification_token": str | null}`.
+Checks in order: 409 `conflict` (already has a phone); **re-authentication** — waived when the request's session
+signed in within `CUSTOMER_REAUTH_FRESH_SECONDS` (600; `AuthSession.created_at`, a refresh keeps it), else
+`password` when `has_password` (`required` / `password_incorrect`, guard `customer_reauth`), else a `reset_password`
+`verification_token` of the account's own e-mail (or phone), else 409 **`reauth_required`** "Xavfsizlik uchun
+hisobingizga qaytadan kiring." (`error.reauth_required`: an account with no password, phone or e-mail — a social
+sign-up — signs in with its provider again); 409 `phone_taken`; the code (`otp_expired` / `otp_invalid` with
+`details.attempts_left` and the field error on `code` / `otp_locked`, exactly as §2.1.2). Re-authentication runs
+before the code, so its refusal never spends the code. → **200 `Me`** with the phone. Side effects under the
+signed-in lock (C§6.17): `Customer.phone`; a unique-key race answers `phone_taken`; audit `customer.phone_attached`.
+
+**`POST me/email/code/`** and **`POST me/email/`** — the same for an e-mail address (`purpose: "verify_email"`, code
+by e-mail; body `{"email": str}` / `{"email", "code", "password", "verification_token"}`): 409 `conflict` when it
+already is the account's address, 409 **`email_taken`** "Bu email boshqa hisobga bog‘langan — shu email bilan kiring."
+(`error.email_taken`) for another account's. A new address **replaces** the previous one (`email_verified_at` = now).
+Audit `customer.email_attached {replaced}`. The address then signs in (`auth/login/` with `email`) and recovers the
+password (`reset_password` by e-mail).
+
+**Re-authentication of the other sign-in-method changes** (`me/social/`, `DELETE me/social/{provider}/`,
+`me/password/`, `DELETE me/`): unchanged for accounts with a password or a phone; an account without a password
+proves itself with a `reset_password` token of its own phone **or e-mail**; one with neither (a phoneless social
+sign-up) passes only with a fresh session (as above), else 409 `reauth_required`.
 
 ---
 ### 2.3 Catalog (public, **O**)
@@ -1141,6 +1228,7 @@ Checks, in this order (the first failure answers):
 | # | Check | Result · message (uz) · key |
 |---|---|---|
 | 0 | Online selling on (§2.3: not while Billz is fake under the production settings); nothing is read or quoted | 409 `online_sales_unavailable` "Onlayn buyurtma vaqtincha mavjud emas. Mahsulotlarni do‘konimizdan xarid qilishingiz mumkin." · `error.online_sales_unavailable` |
+| 0a | The account has a verified phone (hybrid identity, §2.2.10); nothing is read (also no Billz re-read before the transaction) | 409 `phone_required` · `error.phone_required` |
 | 1 | Body fields | 400: `fulfilment` `invalid_choice`; `payment_provider` `invalid_choice` (also when it is not in `payment_providers`, §2.4); `address_id` `required` (`field.address_required`) / `invalid` (pickup with an address); `cashback_to_use` `min_value`; `expected_total` `required`/`min_value`; `customer_note` `max_length` |
 | 2 | Consent current (§2.2.4) | 409 `terms_update_required` · `error.terms_update_required`, `details {current_version}` |
 | 3 | Delivery: offered (§2.6; else 409 `delivery_unavailable` · `error.delivery_not_offered`, no BTS call), address own (`does_not_exist` `field.address_not_found`), region/city known (`address_incomplete`) | 409 / 400 |
@@ -2158,6 +2246,20 @@ fake never reports a remote effect that did not happen and keeps nothing in its 
 BTS was live answers 503 until BTS is live again, never a false `bts_cancelled: true`), and `commerce.poll_bts`
 returns at once without polling.
 
+#### 2.14.4 E-mail codes (`integrations/email/`, hybrid identity)
+`EMAIL_MODE=fake` (default; nothing delivered — under the production settings it is allowed with the startup WARNING
+and the `email: fake` flag of `health/?ready=1` and admin settings, like every fake provider, §6.14; local/test keep
+the messages and use the fixed `ESKIZ_FAKE_CODE`) or `smtp` (any relay: `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`,
+`EMAIL_HOST_PASSWORD`, `EMAIL_USE_TLS` (STARTTLS) / `EMAIL_USE_SSL` (implicit TLS), `EMAIL_TIMEOUT`, `EMAIL_FROM`;
+production requires a host, a real sender and TLS). The outbox message `email.send {sms_code_id, lang, purpose}`
+(dedupe `email.send:{id}`) carries no address and no code; its handler follows `sms.send` exactly (payload and row read
+first, `sent_at` claimed before the relay call, a relay that accepted nothing un-claims and retries, an unknown outcome
+is never resent, a refusal is final; the sealed payload is deleted after a definitive outcome; `accounts.cleanup_auth`
+deletes done/dead rows after 24 h). The message: subject `email.otp.subject`, a plain-text part and an HTML part
+(`accounts/email/otp.txt` / `.html`) in the request language (uz/ru/en): `email.otp.intro.<purpose>`, the code,
+`email.otp.expiry` (`{m}` minutes), `email.otp.ignore`, `email.otp.footer`; header `Auto-Submitted: auto-generated`.
+Logs carry `sms_code_id` only — never the address (`pii_ref(email)` in `otp.issued`), the subject or the code.
+
 ### 2.15 `POST dev/payments/{order_id}/simulate/` (local/test settings only)
 Mounted only when `DEV_FEATURES_ALLOWED` (local/test settings), `FAKE_PAYMENTS_ENABLED=true` **and** `CLICK_MODE` =
 `PAYME_MODE` = `fake`; settings validation refuses `FAKE_PAYMENTS_ENABLED` together with any live payment mode, and the
@@ -2190,7 +2292,7 @@ gains `refresh_reused` (§2.1.6).
 | ServiceCategory (admin §3.1, FND-7) | `dermatology`, `cosmetology` | `services/` `category` |
 | AppointmentStatus | `requested`, `confirmed`, `rejected`, `attended`, `cancelled` (the `cancelled` literal reserved by T3 is now public) | appointments |
 | BannerLinkKind | `none`, `product`, `category`, `url` (gap X-BANNER-URL) | banners |
-| **OtpPurpose** (new) | `register`, `login_new_device`, `reset_password`, `link_social` (`send-code` accepts all but `login_new_device`) | `auth/send-code/`, `auth/verify-code/` |
+| **OtpPurpose** (new) | `register`, `login_new_device`, `reset_password`, `link_social`, `verify_email`, `attach_phone` (`send-code` accepts `register`, `reset_password`, `link_social`; `verify-code` all but the last two, which `me/email/` and `me/phone/` verify themselves) | `auth/send-code/`, `auth/verify-code/`, `me/phone/code/`, `me/email/code/` |
 | **NextStep** (new) | `verify_device`, `verify_phone` | `auth/login/`, `auth/social/` |
 | **CustomerSocialProvider** (new; component `CustomerSocialProviderEnum`) | `google`, `facebook`, `apple` | `auth/social/`, `me/social/`, `Me.linked_providers`. The staff OAuth routes keep their own `SocialProviderEnum` (`google`, `facebook`; admin §2.1), so Apple never appears on staff routes |
 | **SocialTokenType** (new) | `id_token`, `access_token` | `auth/social/`, `me/social/` |
@@ -2216,7 +2318,7 @@ gains `refresh_reused` (§2.1.6).
 
 | Area | `action` values |
 |---|---|
-| Customer auth (`customer`) | `customer.registered` (`{reactivated, terms_version}`), `customer.login_succeeded` (`{method, new_device}`), `customer.login_failed` (`{method}`), `customer.logout`, `customer.password_reset`, `customer.password_changed` (`{first_password}`), `customer.history_reset` (`{reason: "dormant", last_activity_at}`), `customer.refresh_reused` (`{sid}`), `customer.social_linked` (`{provider, via?}`), `customer.social_unlinked` (`{provider, reason: "customer" \| "password_reset" \| "dormant"}`), `customer.consent_accepted` (`{terms_version}`), `customer.deleted` (`{orders_cancelled, appointments_cancelled}`), `auth.device_mismatch` (`{sid}`, ≤1 per session per hour) |
+| Customer auth (`customer`) | `customer.registered` (`{reactivated, terms_version}`), `customer.login_succeeded` (`{method, new_device}`), `customer.login_failed` (`{method}`), `customer.logout`, `customer.password_reset`, `customer.password_changed` (`{first_password}`), `customer.history_reset` (`{reason: "dormant", last_activity_at}`), `customer.refresh_reused` (`{sid}`), `customer.social_linked` (`{provider, via?}`), `customer.social_unlinked` (`{provider, reason: "customer" \| "password_reset" \| "dormant"}`), `customer.consent_accepted` (`{terms_version}`), `customer.phone_attached`, `customer.email_attached` (`{replaced}`), `customer.deleted` (`{orders_cancelled, appointments_cancelled}`), `auth.device_mismatch` (`{sid}`, ≤1 per session per hour) |
 | Appointments (`customer`) | `appointment.requested`, `appointment.cancelled` (with `by: "customer"`) |
 | Payments (`system`) | `payment.late_capture` (`{order_id, payment_id, provider, case: "failed_by_us" \| "not_payable" \| "double_payment" \| "fake_mode"}`) |
 | POS (`integration` for resolves; `staff` for the commands) | `pos.qr_resolved` (`{pos_device_id, customer_id, sale_ref}`), `pos.qr_rejected` (`{pos_device_id, reason}`), `pos.device_created` (`{pos_device_id, name}`), `pos.device_revoked` (`{pos_device_id}`), `pos.device_rotated` (`{pos_device_id}`) — the three command actions carry the `--actor` staff user |
@@ -2335,7 +2437,7 @@ code a customer view can raise to an existing key.
 | `error.SESSION_EXPIRED` | Sessiya tugadi. Qayta kiring. | Сессия истекла. Войдите снова. | Your session has ended. Please sign in again. |
 | `error.SESSION_REPLACED` | Hisobingizga boshqa qurilmadan kirildi. | В ваш аккаунт вошли с другого устройства. | Your account was signed in on another device. |
 | `error.password_changed` | Parolingiz o‘zgartirildi. Qayta kiring. Bu siz bo‘lmasangiz, sotuvchi bilan bog‘laning. | Пароль изменён. Войдите снова. Если это были не вы, свяжитесь с продавцом. | Your password was changed. Please sign in again. If this wasn't you, contact the seller. |
-| `error.invalid_credentials` | Telefon raqami yoki parol noto‘g‘ri. | Неверный номер телефона или пароль. | Wrong phone number or password. |
+| `error.invalid_credentials` | Telefon raqami, email yoki parol noto‘g‘ri. | Неверный номер телефона, email или пароль. | Wrong phone number, e-mail or password. |
 | `error.permission_denied` | Ruxsat yo‘q. | Доступ запрещён. | Access denied. |
 | `error.not_found` | Topilmadi. | Не найдено. | Not found. |
 | `error.method_not_allowed` | Bu amal qo‘llab-quvvatlanmaydi. | Действие не поддерживается. | This action is not supported. |
@@ -2389,6 +2491,14 @@ code a customer view can raise to an existing key.
 | `error.booking_limit` | Sizda {limit} ta faol qabul bor. Yangisini olishdan oldin birini bekor qiling. | У вас {limit} активных записи. Отмените одну, чтобы записаться снова. | You have {limit} active appointments. Cancel one to book another. |
 | `error.slot_taken` | Bu vaqt band bo‘lib qoldi. Boshqa vaqtni tanlang. | Это время уже занято. Выберите другое. | This time has just been taken. Please choose another. |
 | `error.appointment_not_cancellable` | Bu qabulni bekor qilib bo‘lmaydi. | Эту запись нельзя отменить. | This appointment cannot be cancelled. |
+| `error.otp_daily_limit_email` | Bugungi tasdiqlash kodlari limiti tugadi. Ertaga qayta urinib ko‘ring. | Лимит кодов подтверждения на сегодня исчерпан. Попробуйте завтра. | Today's verification code limit is reached. Please try tomorrow. |
+| `error.email_unavailable` | Email xizmati vaqtincha ishlamayapti. Birozdan so‘ng urinib ko‘ring. | Почтовый сервис временно недоступен. Попробуйте чуть позже. | The e-mail service is temporarily unavailable. Please try again later. |
+| `error.email_registered` | Bu email ro‘yxatdan o‘tgan. Hisobingizga kiring. | Этот email уже зарегистрирован. Войдите в аккаунт. | This e-mail is already registered. Please sign in. |
+| `error.email_not_registered` | Bu email bilan hisob topilmadi. Ro‘yxatdan o‘ting. | Аккаунт с этим email не найден. Зарегистрируйтесь. | No account uses this e-mail. Please sign up. |
+| `error.phone_taken` | Bu raqam boshqa hisobga bog‘langan — shu raqam bilan kiring. | Этот номер привязан к другому аккаунту — войдите с этим номером. | This number belongs to another account — please sign in with it. |
+| `error.email_taken` | Bu email boshqa hisobga bog‘langan — shu email bilan kiring. | Этот email привязан к другому аккаунту — войдите с этим email. | This e-mail belongs to another account — please sign in with it. |
+| `error.phone_required` | Davom etish uchun telefon raqamingizni tasdiqlang. | Чтобы продолжить, подтвердите номер телефона. | Please verify your phone number to continue. |
+| `error.reauth_required` | Xavfsizlik uchun hisobingizga qaytadan kiring. | В целях безопасности войдите в аккаунт заново. | For your security, please sign in again. |
 | `error.qr_invalid` | QR kod yaroqsiz yoki muddati o‘tgan. Mijozdan ilovada QR kodni yangilashni so‘rang. | QR-код недействителен или устарел. Попросите клиента обновить его в приложении. | The QR code is invalid or expired. Ask the customer to refresh it in the app. |
 
 ### 5.2 Field codes (`field.*`)
@@ -2418,6 +2528,10 @@ code a customer view can raise to an existing key.
 | `field.password_too_common` | Bu parol juda oddiy. | Этот пароль слишком простой. | This password is too common. |
 | `field.password_entirely_numeric` | Parol faqat raqamlardan iborat bo‘lmasin. | Пароль не должен состоять только из цифр. | The password cannot be only digits. |
 | `field.password_too_similar` | Parol telefon raqamingizga juda o‘xshash. | Пароль слишком похож на номер телефона. | The password is too similar to your phone number. |
+| `field.email_invalid` | Email manzilini to‘g‘ri kiriting. | Введите корректный email. | Please enter a valid e-mail address. |
+| `field.identifier_required` | Telefon raqami yoki emailni kiriting. | Введите номер телефона или email. | Enter a phone number or an e-mail. |
+| `field.identifier_ambiguous` | Telefon raqami yoki emaildan faqat bittasini yuboring. | Укажите либо номер телефона, либо email. | Send either a phone number or an e-mail, not both. |
+| `field.password_too_similar_email` | Parol emailingizga juda o‘xshash. | Пароль слишком похож на ваш email. | The password is too similar to your e-mail. |
 | `field.password_unchanged` | Yangi parol eskisidan farq qilsin. | Новый пароль должен отличаться от старого. | The new password must differ from the old one. |
 | `field.password_incorrect` | Parol noto‘g‘ri. | Неверный пароль. | Wrong password. |
 | `field.terms_outdated` | Foydalanish shartlarining yangi tahririni qabul qiling. | Примите новую редакцию условий использования. | Please accept the updated terms of use. |
@@ -2662,6 +2776,12 @@ code a customer view can raise to an existing key.
     when nothing happened on it for `CUSTOMER_DORMANT_DAYS` — sign-ins, purchases, orders and appointments, including
     staff bookings and attended visits — so it never has an open order or appointment to cancel.
 18. **Uploads** (`me/image/`) go through `core.images.process_image` (re-encode, EXIF strip, 5 MiB, type sniffing).
+19. **Hybrid identity.** A phone or an address is attached only after its own code **and** a re-authentication (or a
+    sign-in within `CUSTOMER_REAUTH_FRESH_SECONDS`), because it becomes a way in (sign-in, reset); a stolen access
+    token older than that window cannot add one. Accounts are never merged (`phone_taken` / `email_taken`): balances,
+    holds, orders and the QR stay with the account they belong to. An e-mail address is unique case-insensitively and
+    scrubbed at deletion, at a reactivation backstop and by the dormant reset (the previous holder of a number keeps
+    no way in). No address ever reaches a log line or an outbox payload.
 
 ---
 
@@ -2723,6 +2843,7 @@ the client may still revise it later through a setting or a data field:
 | M2-N2 | Push for a customer's own order cancellation | Yes (state machine row 5 pushes `cancelled`) |
 | M2-N3 | Security notices (social link/unlink, password reset and change) | Push + inbox row (`account_security`), and for a reset or a social completion a visible push to the replaced device plus a 401 message there; no SMS (re-evaluated in revision 2: a reset needs the SMS code, so an SMS notice would reach whoever did it; an SMS template would also need Eskiz approval) |
 | M2-F1 | May production run fake provider adapters? | **Decided by the product owner (2026-10-26):** yes, warned at startup and reported per provider in `health/?ready=1` and admin settings; fake callbacks are refused (a Click Complete of a transaction attached while Click was live is accepted and reversed), fake payment providers are not offered, the dev simulate endpoint and the fixed OTP exist only under local/test settings, and fake Eskiz delivers no SMS (demo/staging posture, §6.14). Mixed with live providers, a fake never reports an effect that did not happen: fake BTS turns home delivery off (pickup only) and makes up no parcel; online selling requires live Billz — with fake Billz the stock is unknown, every product is unavailable online (`online_sales_enabled: false`), the admin import is refused and no sale is recorded (an earlier order's sale is entered by hand). Switching a payment provider from live to fake is an operator procedure: not while it holds open money (open transactions, unsettled refunds; the worker logs an ERROR at start listing them), and money a provider switched to fake still holds is reconciled by hand in its cabinet (§2.3, §2.6, §2.14.3, §6.14) |
+| H-1…H-6 | Hybrid identity (B-W2): phone optional until checkout/pay/booking/QR; no merge; reauth waiver window; e-mail login and reset; phoneless social sign-up; dormant rule for phones only | see `docs/decisions/open-questions.md` "Hybrid identity" |
 | M2-T1 | Terms not yet versioned in settings | Registration answers 503 `terms_not_published` until staff publish `terms_version` with the uz terms and privacy texts |
 
 Gap closure — catalog package (`feat/gap-catalog`, 2026-10-26; recorded in `docs/decisions/open-questions.md` as

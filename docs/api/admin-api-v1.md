@@ -274,7 +274,7 @@ The FE creates one key per form/dialog instance (`crypto.randomUUID()`), reuses 
 | GET / PATCH | `location/` | | 200 |
 | GET | `/api/v1/health/` | no auth | 200 / 503 |
 
-Shared shapes: `Actor` = `{"id": int, "display_name": str}`, where `display_name` is the staff full name, else the email. `null` actor means system. `CustomerRef` = `{"id": int, "name": str, "phone": str}`; `name` is `""` once the customer is deleted (scrubbed). Both are single OpenAPI components (`Actor`, `CustomerRef`) used by every module (orders, payments, appointments).
+Shared shapes: `Actor` = `{"id": int, "display_name": str}`, where `display_name` is the staff full name, else the email. `null` actor means system. `CustomerRef` = `{"id": int, "name": str, "phone": str | null}`; `name` is `""` once the customer is deleted (scrubbed); `phone` is null only for an account without a phone yet (hybrid identity: never on orders and payments, which are phone-gated; a staff booking may name one). Both are single OpenAPI components (`Actor`, `CustomerRef`) used by every module (orders, payments, appointments).
 
 ### 2.1 Auth
 **`POST auth/login/`** (no bearer). Body `{"email": str (email, ≤254; trimmed and lower-cased before lookup), "password": str 1..128}`.
@@ -591,22 +591,34 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 
 | Param | Values | Rule |
 |---|---|---|
-| `search` | str ≤64 | Name contains the term (case-insensitive and folded, §1.4; index `accounts_customer_fold_trgm`, `accounts.0008`), or (≥3 digits) the phone contains them |
+| `search` | str ≤64 | Name contains the term (case-insensitive and folded, §1.4; index `accounts_customer_fold_trgm`, `accounts.0008`), or (≥3 digits) the phone contains them, or (≥3 characters, hybrid identity) the e-mail address contains the term (case-insensitive) |
 | `status` | `active`, `deleted` | |
 | `segment` | int | Segment membership (§2.8) |
 | `ordering` | `-registered_at` (default), `registered_at`, `name`, `-name`, `lifetime_total`, `-lifetime_total`, `balance`, `-balance` | Ties by `id` |
 
 ```jsonc
 // CustomerListItem
-{"id": 5, "name": "Malika Karimova", "phone": "+998901234567", "status": "active",
+{"id": 5, "name": "Malika Karimova",
+ "phone": "+998901234567",              // null for an account without a phone yet (hybrid identity)
+ "email": null,                         // verified e-mail address | null; show it when phone is null
+ "status": "active",
  "registered_at": "2025-03-12T10:20:00+05:00", "lifetime_total": 13580000,
  "percent": "1.00",                      // active-policy rate for lifetime_total | null
  "balance": 48600, "online_orders_count": 12}
 ```
 
+**Hybrid identity (customer contract §2.2.10).** A customer may sign up by e-mail or a social identity and attach
+the phone at the first checkout, payment, booking or QR. Such an account has `phone: null` and, usually, an `email`;
+lists, the card and segment members show the e-mail then, and the CSV/XLSX exports of customers and segment members
+put the e-mail in the "Telefon" column. Phone-only actions skip it: a one-customer notification (§2.8
+`audience.phone`) and an admin booking by phone cannot name it (a booking by `customer_id` can). Deletion scrubs the
+e-mail (the phone stays, A1).
+
 **`GET customers/{id}/`** → `CustomerCard`; 404.
 ```jsonc
-{"id": 5, "name": "Malika Karimova", "phone": "+998901234567", "status": "active",
+{"id": 5, "name": "Malika Karimova", "phone": "+998901234567",   // phone null until attached
+ "email": null,                                                   // verified e-mail address | null
+ "status": "active",
  "registered_at": "2025-03-12T10:20:00+05:00", "deleted_at": null,
  "language": "uz", "address": "Toshkent, Chilonzor, 9-kvartal",            // null if none
  "totals": {"store": 9940000, "online": 3640000, "lifetime": 13580000},    // non-reversed purchases
@@ -911,7 +923,7 @@ Templates are editable in the admin UI through `GET` / `PUT` below.
  "terms_unpublished_changes": false,                            // read-only; a terms / privacy draft differs from the published copy
  "integrations": {"mode": "fake",                               // read-only, from INTEGRATIONS_MODE (every provider's default)
                   "providers": {"oauth": "fake", "billz": "fake", "fcm": "fake",
-                                "click": "fake", "payme": "fake", "bts": "fake"}},   // read-only, each provider's *_MODE (M2 adds "eskiz")
+                                "click": "fake", "payme": "fake", "bts": "fake"}},   // read-only, each provider's *_MODE (M2 adds "eskiz"; hybrid identity adds "email": EMAIL_MODE, smtp reads "live")
  "updated_at": "…", "updated_by": null}                         // Actor | null (null = system)
 ```
 **Drafts and published copies (GS-2).** `terms` and `privacy_policy` exist twice: the **draft** that `GET` / `PATCH settings/` show and edit, and the **published copy** that only `POST settings/terms/publish/` writes (it copies every language of both drafts). `settings/public/` (customer contract §2.4), registration and the consent checks use the published copy only, so a `terms_version` always names exactly one text; `terms_unpublished_changes` is `true` while any draft language differs from its published copy. `booking_policy` is not versioned: it has one copy, served as soon as it is saved.
