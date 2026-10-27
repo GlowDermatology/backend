@@ -55,7 +55,7 @@ class CustomerViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
             yield (
                 customer.pk,
                 customer.name,
-                customer.phone,
+                customer.phone or customer.email or "",  # hybrid identity: the e-mail of a phoneless account
                 format_export_datetime(customer.registered_at),
                 int(getattr(customer, "lifetime_total", 0)),
                 "" if percent is None else f"{percent:.2f}",
@@ -66,8 +66,10 @@ class CustomerViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
     @extend_schema(
         operation_id="admin_customers_list",
         description=(
-            "`search`: the name contains the term, or (≥ 3 digits) the phone contains its digits. `segment`: "
-            "segment membership (rules or manual, active customers only). Orderings tie by `id`."
+            "`search`: the name contains the term, or (≥ 3 digits) the phone contains its digits, or "
+            "(≥ 3 characters) the e-mail address contains it. `segment`: segment membership (rules or "
+            "manual, active customers only). Orderings tie by `id`. Accounts without a phone yet show "
+            "`phone: null` and their `email` (exports put the e-mail in the phone column)."
         ),
         parameters=[CustomerListQuerySerializer, EXPORT_PARAM],
         responses={200: CustomerListItemSerializer(many=True), **ADMIN_ERRORS},

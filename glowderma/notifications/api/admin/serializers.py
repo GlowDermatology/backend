@@ -457,7 +457,8 @@ class CustomerListItemSerializer(serializers.Serializer[Customer]):
 
     id = serializers.IntegerField()
     name = serializers.CharField(allow_blank=True)
-    phone = serializers.CharField()
+    phone = serializers.CharField(allow_null=True, help_text="Null for an account without a phone yet.")
+    email = serializers.CharField(allow_null=True, help_text="Verified e-mail address | null.")
     status = serializers.ChoiceField(choices=enums.CustomerStatus.values)
     registered_at = serializers.DateTimeField()
     lifetime_total = serializers.IntegerField()

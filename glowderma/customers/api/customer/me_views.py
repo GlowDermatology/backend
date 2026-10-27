@@ -18,13 +18,15 @@ from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.parsers import MultiPartParser
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.throttling import BaseThrottle
 
 from glowderma.accounts import services as account_services
 from glowderma.accounts.api.customer_base import CustomerAPIView
+from glowderma.accounts.api.throttles import CustomerRateThrottle, SmsDeviceThrottle, SmsPhoneThrottle
 from glowderma.accounts.authentication import DeviceHeaders
 from glowderma.accounts.models import Address, Customer
 from glowderma.core import timeutils
-from glowderma.core.api.exceptions import field_error
+from glowderma.core.api.exceptions import OtpInvalid, field_error
 from glowderma.core.api.schema import (
     ACCEPT_LANGUAGE_HEADER,
     CUSTOMER_ERRORS,
@@ -35,7 +37,13 @@ from glowderma.core.api.schema import (
 from glowderma.core.idempotency import idempotent
 from glowderma.customers import selectors, services
 from glowderma.customers.api.customer import serializers as s
-from glowderma.customers.api.customer.auth_views import client_ip, require_social_available
+from glowderma.customers.api.customer.auth_views import (
+    client_ip,
+    code_issue_body,
+    device_context,
+    otp_invalid_response,
+    require_social_available,
+)
 from glowderma.customers.api.customer.schema import DeleteBodyAutoSchema
 from glowderma.integrations.oauth.registry import CUSTOMER_PROVIDERS
 
@@ -288,6 +296,122 @@ class SocialUnlinkView(MeBase):
             sid=self.sid,
             request=request,
         )
+        return Response(self.me())
+
+
+# --- hybrid identity: attach a phone / an e-mail (customer contract §2.2.10) -------------------------------
+# No Idempotency-Key: the code checks count wrong codes in their own committed transaction (as
+# auth/verify-code/), which an idempotent request transaction would roll back with the refusal.
+
+CODE_THROTTLES: list[type[BaseThrottle]] = [CustomerRateThrottle, SmsPhoneThrottle, SmsDeviceThrottle]
+
+
+class PhoneCodeView(MeBase):
+    throttle_classes = CODE_THROTTLES
+
+    @extend_schema(
+        operation_id="customer_me_phone_code",
+        description=(
+            "Send an `attach_phone` SMS code to the phone a phoneless account wants to attach (every OTP "
+            "limit of `auth/send-code/`). 409 `conflict` when the account has a phone, `phone_taken` when "
+            "another account (active or deleted) holds the number: no merge, the customer signs in with that "
+            "phone."
+        ),
+        parameters=PARAMETERS,
+        request=s.MePhoneCodeSerializer,
+        responses={200: s.CodeIssueSerializer, **CUSTOMER_ERRORS},
+    )
+    def post(self, request: Request) -> Response:
+        serializer = s.MePhoneCodeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        issue = services.send_attach_phone_code(
+            self.customer.pk, serializer.validated_data["phone"], device=device_context(self, request)
+        )
+        return Response(code_issue_body(issue))
+
+
+class PhoneView(MeBase):
+    @extend_schema(
+        operation_id="customer_me_phone_attach",
+        description=(
+            "Attach the phone with its SMS code. Re-authentication (`password`, or a `reset_password` "
+            "`verification_token` of the account's own e-mail without a password) unless the session signed "
+            "in within 10 minutes; an account with neither answers `reauth_required` once that window is "
+            "over. "
+            "→ 200 `Me` with the phone set (checkout, pay, booking and the QR open up)."
+        ),
+        parameters=PARAMETERS,
+        request=s.MePhoneSerializer,
+        responses={200: s.CustomerMeSerializer, **CUSTOMER_ERRORS},
+    )
+    def post(self, request: Request) -> Response:
+        serializer = s.MePhoneSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        try:
+            services.attach_phone(
+                self.customer.pk,
+                data["phone"],
+                data["code"],
+                password=data.get("password"),
+                verification_token=data.get("verification_token"),
+                sid=self.sid,
+                request=request,
+            )
+        except OtpInvalid as exc:
+            return otp_invalid_response(exc, request, self.language)
+        return Response(self.me())
+
+
+class EmailCodeView(MeBase):
+    throttle_classes = CODE_THROTTLES
+
+    @extend_schema(
+        operation_id="customer_me_email_code",
+        description=(
+            "Send a `verify_email` code to the address to attach (or to replace the current one). 409 "
+            "`conflict` when it already is the account's address, `email_taken` when another account has it."
+        ),
+        parameters=PARAMETERS,
+        request=s.MeEmailCodeSerializer,
+        responses={200: s.CodeIssueSerializer, **CUSTOMER_ERRORS},
+    )
+    def post(self, request: Request) -> Response:
+        serializer = s.MeEmailCodeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        issue = services.send_verify_email_code(
+            self.customer.pk, serializer.validated_data["email"], device=device_context(self, request)
+        )
+        return Response(code_issue_body(issue))
+
+
+class EmailView(MeBase):
+    @extend_schema(
+        operation_id="customer_me_email_attach",
+        description=(
+            "Attach (or replace) the verified e-mail address with its code; re-authentication as "
+            "`me/phone/`. → 200 `Me`."
+        ),
+        parameters=PARAMETERS,
+        request=s.MeEmailSerializer,
+        responses={200: s.CustomerMeSerializer, **CUSTOMER_ERRORS},
+    )
+    def post(self, request: Request) -> Response:
+        serializer = s.MeEmailSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        try:
+            services.attach_email(
+                self.customer.pk,
+                data["email"],
+                data["code"],
+                password=data.get("password"),
+                verification_token=data.get("verification_token"),
+                sid=self.sid,
+                request=request,
+            )
+        except OtpInvalid as exc:
+            return otp_invalid_response(exc, request, self.language)
         return Response(self.me())
 
 

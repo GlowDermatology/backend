@@ -85,7 +85,8 @@ def _iso(value: Any) -> str:
 
 def code_issue_body(issue: account_services.CodeIssue) -> dict[str, Any]:
     return {
-        "phone_mask": mask_phone(issue.phone),
+        "phone_mask": mask_phone(issue.phone) if issue.phone else None,
+        "email_mask": mask_email(issue.email) if issue.email else None,
         "purpose": issue.purpose,
         "expires_in": issue.expires_in,
         "resend_in": issue.resend_in,
@@ -98,11 +99,12 @@ def device_step_body(step: services.DeviceStep) -> dict[str, Any]:
     issue = step.issue
     return {
         "next_step": enums.NextStep.VERIFY_DEVICE.value,
-        "phone_mask": mask_phone(issue.phone),
+        # the code went where the customer signed in with (hybrid identity): one mask, the other null
+        "phone_mask": mask_phone(issue.phone) if issue.phone else None,
         "otp": {"expires_in": issue.expires_in, "resend_in": issue.resend_in, "length": issue.length},
         "social_ticket": None,
         "provider": None,
-        "email_mask": None,
+        "email_mask": mask_email(issue.email) if issue.email else None,
         # The step lasts as long as the app may keep the password and the verification token (C§2.0,
         # §2.1.4: 10 min), not the code's own TTL (that is otp.expires_in).
         "expires_in": int(settings.CUSTOMER_VERIFICATION_TTL_SECONDS),
@@ -119,6 +121,23 @@ def phone_step_body(step: services.PhoneStep) -> dict[str, Any]:
         "email_mask": mask_email(step.email) if step.email else None,
         "expires_in": step.expires_in,
     }
+
+
+def otp_invalid_response(exc: OtpInvalid, request: Request, lang: str) -> Response:
+    """400 ``otp_invalid`` with ``details.attempts_left`` and the field error on ``code`` (customer contract
+    §2.1.2; also ``me/phone/`` and ``me/email/``)."""
+    left = int(exc.details["attempts_left"])
+    body = customer_error_body(
+        "otp_invalid",
+        request,
+        lang=lang,
+        params={"n": left},
+        details=exc.details,
+        errors=[
+            {"field": "code", "code": "otp_invalid", "message": i18n.t("field.otp_invalid", lang, n=left)}
+        ],
+    )
+    return Response(body, status=400)
 
 
 def require_social_available(provider: object = None) -> None:
@@ -152,7 +171,7 @@ class SendCodeView(CustomerAuthAPIView):
             require_social_available()
             jti = services.read_social_ticket(str(data["social_ticket"]), fid=device.fid).jti
         issue = account_services.send_code(
-            data["phone"],
+            data["identifier"],
             data["purpose"],
             ip=device.ip,
             fid=device.fid,
@@ -176,27 +195,9 @@ class VerifyCodeView(CustomerAuthAPIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
         try:
-            result = account_services.verify_code(data["phone"], data["purpose"], data["code"])
+            result = account_services.verify_code(data["identifier"], data["purpose"], data["code"])
         except OtpInvalid as exc:
-            # 400 otp_invalid with details.attempts_left and the field error on ``code`` (customer
-            # contract §2.1.2).
-            lang = self.language
-            left = int(exc.details["attempts_left"])
-            body = customer_error_body(
-                "otp_invalid",
-                request,
-                lang=lang,
-                params={"n": left},
-                details=exc.details,
-                errors=[
-                    {
-                        "field": "code",
-                        "code": "otp_invalid",
-                        "message": i18n.t("field.otp_invalid", lang, n=left),
-                    }
-                ],
-            )
-            return Response(body, status=400)
+            return otp_invalid_response(exc, request, self.language)
         return Response(
             {
                 "verification_token": result.token,
@@ -252,7 +253,7 @@ class LoginView(CustomerAuthAPIView):
         data = serializer.validated_data
         device = device_context(self, request)
         result = services.login(
-            data["phone"],
+            data["identifier"],
             data["password"],
             data.get("verification_token") or None,
             device=device,
@@ -384,7 +385,7 @@ class SocialCompleteView(CustomerAuthAPIView):
         device = device_context(self, request)
         sign_in = services.complete_social(
             data["social_ticket"],
-            data["verification_token"],
+            data.get("verification_token") or None,
             password=data.get("password"),
             name=data.get("name"),
             terms_version=data.get("terms_version"),

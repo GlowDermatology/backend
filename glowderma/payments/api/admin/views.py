@@ -49,7 +49,7 @@ class PaymentViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
                 payment.pk,
                 payment.order_id,
                 customer.name,
-                customer.phone,
+                customer.phone or "",
                 labels.PROVIDER[payment.provider],
                 labels.PAYMENT_STATUS[payment.status],
                 payment.amount,

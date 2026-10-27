@@ -159,7 +159,8 @@ class CustomerCardSerializer(serializers.Serializer[Any]):
 
     id = serializers.IntegerField()
     name = serializers.CharField(allow_blank=True)
-    phone = serializers.CharField()
+    phone = serializers.CharField(allow_null=True, help_text="Null for an account without a phone yet.")
+    email = serializers.CharField(allow_null=True, help_text="Verified e-mail address | null.")
     status = serializers.ChoiceField(choices=enums.CustomerStatus.values)
     registered_at = serializers.DateTimeField()
     deleted_at = serializers.DateTimeField(allow_null=True)

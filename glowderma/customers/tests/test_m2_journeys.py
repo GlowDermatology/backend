@@ -315,6 +315,7 @@ def sign_up(
     assert sent.status_code == 200, sent.content
     assert sent.json() == {
         "phone_mask": mask(phone),
+        "email_mask": None,
         "purpose": "register",
         "expires_in": 120,
         "resend_in": 60,
