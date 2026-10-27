@@ -779,7 +779,8 @@ def delete_customer(customer: Customer | int) -> Customer:
     keeps the consent history); addresses and social identities deleted (one ``apple.revoke`` outbox message
     per Apple identity holding a token); every device inactive with no push, token or key hash; every session
     revoked ``deactivated`` (tombstones and the QR keys' deletion on commit); the customer's stored
-    Idempotency-Key responses deleted (they hold Me and Address payloads). ``LoyaltyAccount``,
+    Idempotency-Key responses deleted (they hold Me and Address payloads); every session's user agent, IP and
+    location blanked (B-W1). ``LoyaltyAccount``,
     ``Purchase``, ``Order`` and ``Appointment`` rows keep pointing at it (``PROTECT``). Idempotent: an already
     deleted customer is returned unchanged.
     """
@@ -824,6 +825,9 @@ def delete_customer(customer: Customer | int) -> Customer:
         is_active=False, push_enabled=False, fcm_token="", key_hash="", updated_at=instant
     )
     revoke_customer_sessions(stored.pk, enums.SessionRevokeReason.DEACTIVATED)
+    # B-W1: the session list's client facts are personal data; the rows themselves go with the 90-day
+    # retention of accounts.cleanup_auth
+    AuthSession.objects.filter(customer_id=stored.pk).update(user_agent="", last_ip=None, location="")
     # The stored responses of the customer's Idempotency-Key requests (Me and Address payloads: phone, name,
     # address text, coordinates) go with the scrub instead of outliving it by up to 24 h.
     IdempotencyRecord.objects.filter(audience="customer", actor_id=stored.pk).delete()
@@ -952,6 +956,17 @@ def retire_sessionless_devices(
     if keep_device_id is not None:
         queryset = queryset.exclude(pk=keep_device_id)
     return _retire_devices(queryset, at=at or timeutils.now())
+
+
+def customers_with_sessionless_devices() -> list[int]:
+    """Customers holding an active device without an open, unexpired session (``accounts.cleanup_auth``)."""
+    return sorted(
+        set(
+            Device.objects.filter(is_active=True)
+            .exclude(_open_session_exists())
+            .values_list("customer_id", flat=True)
+        )
+    )
 
 
 @transaction.atomic
@@ -1850,6 +1865,7 @@ def rotate_customer_refresh(
     digest = hash_secret(raw)
     written: list[str] = []
     refusal: Exception | None = None
+    reused: tuple[int, Any, bool] | None = None
     try:
         with transaction.atomic():
             session = (
@@ -1940,26 +1956,40 @@ def rotate_customer_refresh(
                 cache.set(_grace_key(digest), body, grace_ttl)
                 written.append(_grace_key(digest))
                 return RefreshResult(body, str(session.pk))
-            # reuse: one of the holders is not the app (from this install or another one)
-            _revoke_open_customer_sessions(
-                AuthSession.objects.filter(pk=session.pk), enums.SessionRevokeReason.REFRESH_REUSED, at=now
-            )
-            _revoke_qr_on_commit(session.customer_id or 0)
-            audit.record(
-                action="customer.refresh_reused",
-                entity_type="customer",
-                entity_id=str(session.customer_id),
-                actor=customer,
-                request=request,
-                after={"sid": str(session.pk)},
-            )
-            logger.warning("customer.refresh_reused sid=%s foreign_device=%s", session.pk, foreign_device)
+            # reuse: one of the holders is not the app (from this install or another one). Nothing is
+            # written under this session-first lock: the revocation runs below in its own transaction in
+            # the customer → session → device order of every other customer write (C§2.7.1).
+            reused = (int(customer.pk), session.pk, foreign_device)
             refusal = AuthFailed("SESSION_EXPIRED")
     except Exception:
         for key in written:
             cache.delete(key)
         raise
+    if reused is not None:
+        _revoke_reused_session(*reused, request=request)
     raise refusal
+
+
+@transaction.atomic
+def _revoke_reused_session(customer_id: int, sid: Any, foreign_device: bool, *, request: Any) -> None:
+    """The reuse revocation of ``auth/refresh/`` step 6: under the customer-level lock, the session (if still
+    open) → ``refresh_reused`` with its tombstone and **its** QR keys on commit, its device retired when no
+    session is left on it (no push to a phone whose token was stolen); audit ``customer.refresh_reused``."""
+    customer = lock_customer(customer_id)
+    revoked = _revoke_open_customer_sessions(
+        AuthSession.objects.filter(pk=sid), enums.SessionRevokeReason.REFRESH_REUSED
+    )
+    retire_sessionless_devices(customer_id)
+    if revoked:
+        audit.record(
+            action="customer.refresh_reused",
+            entity_type="customer",
+            entity_id=str(customer_id),
+            actor=customer,
+            request=request,
+            after={"sid": str(sid)},
+        )
+    logger.warning("customer.refresh_reused sid=%s foreign_device=%s", sid, foreign_device)
 
 
 def raise_revoked_session(reason: str) -> None:
@@ -1976,8 +2006,9 @@ def logout_customer(raw: str, *, scope: str = enums.LogoutScope.CURRENT, request
     tombstone and its QR keys on commit) and retire its device (inactive, no push, no token; its key hash
     kept); audit ``customer.logout {sid, scope}``. ``scope`` (B-W1): ``current`` (default) only this session,
     ``others`` every other session of the customer (this one stays), ``all`` every session ("log out
-    everywhere"); the devices left without an open session are retired too. Unknown, revoked or expired →
-    401 ``SESSION_EXPIRED``.
+    everywhere"); the devices left without an open session are retired too. ``others`` / ``all`` need the
+    session's **current** refresh token (a previous one ends only its own session). Unknown, revoked or
+    expired → 401 ``SESSION_EXPIRED``.
 
     Lock order Customer → session → device (C§2.7.1), as every other customer write: the session is first
     resolved without a lock, the customer-level lock taken, then the session re-read ``FOR UPDATE`` and
@@ -2005,6 +2036,10 @@ def logout_customer(raw: str, *, scope: str = enums.LogoutScope.CURRENT, request
         .first()
     )
     if session is None or session.revoked_at is not None or session.absolute_expires_at <= timeutils.now():
+        raise AuthFailed("SESSION_EXPIRED")
+    if scope != enums.LogoutScope.CURRENT and session.refresh_hash != digest:
+        # signing other devices out needs the current refresh token: a previous one (still accepted to end
+        # its own session during the rotation grace) may be a stolen copy
         raise AuthFailed("SESSION_EXPIRED")
     reason = enums.SessionRevokeReason.LOGOUT
     if scope == enums.LogoutScope.CURRENT:

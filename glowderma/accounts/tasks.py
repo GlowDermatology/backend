@@ -77,7 +77,8 @@ def blank_dead_session_replaced_token(message: OutboxMessage) -> None:
 def cleanup_auth() -> dict[str, int]:
     """Hourly (beat ``accounts-cleanup-auth``): delete ``SmsCode`` rows older than 24 h, ``done``/``dead``
     ``sms.send`` outbox rows older than 24 h and customer sessions revoked or expired for more than 90
-    days."""
+    days (with them their user agent, IP and location — B-W1); retire every active device left without an
+    open, unexpired session (an expired session never revoked: no push to a signed-out phone)."""
     instant = timeutils.now()
     codes, _ = SmsCode.objects.filter(created_at__lt=instant - SMS_RETENTION).delete()
     messages, _ = OutboxMessage.objects.filter(
@@ -89,7 +90,17 @@ def cleanup_auth() -> dict[str, int]:
         .filter(Q(revoked_at__lt=horizon) | Q(revoked_at__isnull=True, absolute_expires_at__lt=horizon))
         .delete()
     )
-    return {"sms_codes": codes, "outbox_messages": messages, "sessions": sessions}
+    customers = services.customers_with_sessionless_devices()
+    for customer_id in customers:
+        with transaction.atomic():  # the customer lock first, as every sign-in (C§2.7.1)
+            services.lock_customer(customer_id)
+            services.retire_sessionless_devices(customer_id)
+    return {
+        "sms_codes": codes,
+        "outbox_messages": messages,
+        "sessions": sessions,
+        "customers_with_devices_retired": len(customers),
+    }
 
 
 # --- P1: sms.send and apple.revoke (customer contract §2.14.1, §2.1.8) --------------------------------------

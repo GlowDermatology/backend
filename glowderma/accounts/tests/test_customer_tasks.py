@@ -151,7 +151,12 @@ def test_cleanup_auth_purges_only_the_right_rows() -> None:
         revoked_at=now - timedelta(days=200),
     )
     result = tasks.cleanup_auth()
-    assert result == {"sms_codes": 1, "outbox_messages": 2, "sessions": 2}
+    assert result == {
+        "sms_codes": 1,
+        "outbox_messages": 2,
+        "sessions": 2,
+        "customers_with_devices_retired": 0,
+    }
     assert (
         not SmsCode.objects.filter(pk=old_code.pk).exists()
         and SmsCode.objects.filter(pk=fresh_code.pk).exists()
@@ -161,3 +166,22 @@ def test_cleanup_auth_purges_only_the_right_rows() -> None:
     sessions = set(AuthSession.objects.values_list("pk", flat=True))
     assert {revoked_recent.pk, open_session.pk, staff_session.pk} <= sessions
     assert not {revoked_old.pk, expired_old.pk} & sessions
+
+
+def test_cleanup_auth_retires_devices_whose_sessions_expired() -> None:
+    """B-W1: a session that simply expired (never revoked) leaves its device active; the hourly cleanup
+    retires it, so no push reaches a phone that no longer appears in «Faol seanslar»."""
+    customer = CustomerFactory.create()
+    expired = start_test_session(customer, fid="fid-expired-001")
+    alive = start_test_session(customer, fid="fid-alive-0001")
+    Device.objects.filter(sessions=expired.session).update(fcm_token="tok-expired", push_enabled=True)
+    Device.objects.filter(sessions=alive.session).update(fcm_token="tok-alive", push_enabled=True)
+    AuthSession.objects.filter(pk=expired.session.pk).update(
+        absolute_expires_at=timeutils.now() - timedelta(minutes=1)
+    )
+    result = tasks.cleanup_auth()
+    assert result["customers_with_devices_retired"] == 1
+    gone = Device.objects.get(fid="fid-expired-001")
+    assert (gone.is_active, gone.push_enabled, gone.fcm_token) == (False, False, "")
+    assert Device.objects.get(fid="fid-alive-0001").fcm_token == "tok-alive"
+    assert tasks.cleanup_auth()["customers_with_devices_retired"] == 0
