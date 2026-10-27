@@ -35,13 +35,19 @@ def peer_ip(request: HttpRequest) -> str:
         current = candidate
 
 
+def forwarded_client_ip(request: HttpRequest) -> str | None:
+    """The end user's IP a trusted BFF forwarded (``X-GD-Client-IP`` with a valid ``X-GD-Internal-Secret``),
+    else ``None`` (no secret, or the BFF called on its own behalf without a well-formed client IP)."""
+    if not has_internal_secret(request):
+        return None
+    try:
+        return str(ipaddress.ip_address(request.META.get("HTTP_X_GD_CLIENT_IP", "")))
+    except ValueError:
+        return None
+
+
 def client_ip(request: HttpRequest) -> str:
-    if has_internal_secret(request):
-        try:
-            return str(ipaddress.ip_address(request.META.get("HTTP_X_GD_CLIENT_IP", "")))
-        except ValueError:
-            pass
-    return peer_ip(request)
+    return forwarded_client_ip(request) or peer_ip(request)
 
 
 # Longest user agent kept (longer ones are cut); control characters are dropped.

@@ -219,6 +219,7 @@ high pure-IP ceiling as a backstop; the per-phone rules are the main protection 
 | POS failed auth (not a DRF throttle; inside `PosKeyAuthentication`, because DRF authenticates before throttling) | client IP, Redis counter | `POS_FAILED_AUTH_PER_IP_PER_MIN` (20); beyond it → 429 `throttled` without a key lookup | `pos/*` |
 | **`public`** (new) | fid when the device header is present, else client IP | 300/min | every **O** route when anonymous (a signed-in caller counts against `customer`) |
 | **`public_ip`** (new) | client IP (backstop) | 3000/min | every **O** route when anonymous |
+| **`public_bff`** (B-W1) | one bucket (`bff`) | 6000/min | every **O** route when anonymous **and** called by the website's BFF on its own behalf: a valid `X-GD-Internal-Secret` without a well-formed `X-GD-Client-IP` (cache revalidation, sitemap builds); such calls skip `public` (unless they carry a device id) and `public_ip`. With a forwarded `X-GD-Client-IP` (the `core.clientip` trust rule: only with the secret) `public` and `public_ip` key on the **browser's** IP, so website visitors never share the web server's bucket; a forged or missing secret leaves the peer IP in charge |
 
 Webhooks are not throttled when they authenticate (providers retry on 429 and would amplify); they are protected by
 signature checks and the optional IP allow-lists `CLICK_ALLOWED_IPS` / `PAYME_ALLOWED_IPS` (defence in depth only).

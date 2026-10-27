@@ -8,6 +8,7 @@ from rest_framework.throttling import SimpleRateThrottle
 
 from glowderma.accounts.authentication import FID_PATTERN
 from glowderma.accounts.models import Customer
+from glowderma.core.clientip import forwarded_client_ip, has_internal_secret
 from glowderma.core.pii import pii_ref
 from glowderma.core.throttling import rate_for
 
@@ -94,29 +95,54 @@ class QrThrottle(CustomerRateThrottle):
     scope = "qr"
 
 
+def bff_own_call(request: Request) -> bool:
+    """B-W1: the website's BFF calling with a valid ``X-GD-Internal-Secret`` but no forwarded browser IP — a
+    server-side read on its own behalf (cache revalidation, sitemap). Such calls count against
+    ``public_bff`` instead of the per-device / per-IP scopes, which would otherwise pool every visitor's
+    page renders on the web server's one IP. With a forwarded ``X-GD-Client-IP`` (the same trust rule as
+    ``core.clientip``) the ordinary scopes key on the browser's IP."""
+    django_request = request._request
+    return has_internal_secret(django_request) and forwarded_client_ip(django_request) is None
+
+
 class PublicDeviceThrottle(ClientIPThrottle):
     """Anonymous O requests: per device when the header is present, else per client IP (signed-in callers
-    count against ``customer``)."""
+    count against ``customer``). The client IP is the BFF-forwarded one when trusted (``core.clientip``)."""
 
     scope = "public"
 
     def get_cache_key(self, request: Request, view: Any) -> str | None:
         if _is_customer(request):
             return None
+        if bff_own_call(request) and device_ref(request) is None:
+            return None  # counted by PublicBffThrottle
         ref = device_ref(request)
         ident = f"fid:{ref}" if ref is not None else f"ip:{self.get_ident(request)}"
         return self.cache_format % {"scope": self.scope, "ident": ident}
 
 
 class PublicIPThrottle(ClientIPThrottle):
-    """Anonymous O requests: the per-IP backstop."""
+    """Anonymous O requests: the per-IP backstop (the browser's IP behind the website's BFF; not applied to
+    the BFF's own calls, which ``PublicBffThrottle`` bounds)."""
 
     scope = "public_ip"
 
     def get_cache_key(self, request: Request, view: Any) -> str | None:
-        if _is_customer(request):
+        if _is_customer(request) or bff_own_call(request):
             return None
         return self.cache_format % {"scope": self.scope, "ident": self.get_ident(request)}
+
+
+class PublicBffThrottle(ClientIPThrottle):
+    """B-W1: anonymous O requests the website's BFF makes on its own behalf (:func:`bff_own_call`), one
+    generous bucket so a runaway revalidation loop is still bounded."""
+
+    scope = "public_bff"
+
+    def get_cache_key(self, request: Request, view: Any) -> str | None:
+        if _is_customer(request) or not bff_own_call(request):
+            return None
+        return self.cache_format % {"scope": self.scope, "ident": "bff"}
 
 
 class _DeviceThrottle(ClientIPThrottle):
