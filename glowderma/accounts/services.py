@@ -2427,7 +2427,9 @@ def clear_device_keys(customer_id: int, *, except_fid: str | None = None) -> int
 def scrub_profile_for_dormant(customer_id: int, *, language: str) -> None:
     """The profile part of the dormant reset (customer contract §2.2.3, M2-A16): name, image (file deleted on
     commit), address text and addresses gone, the e-mail address too (hybrid identity: the previous holder of
-    the number keeps no way in), language = the request language, consent cleared."""
+    the number keeps no way in), language = the request language, consent cleared; the user agent, IP and
+    location of the previous holder's sessions blanked as at deletion (B-W1 session facts; the callers run it
+    before the new holder's session starts)."""
     stored = Customer.objects.get(pk=customer_id)
     _delete_image_on_commit(stored)
     Customer.objects.filter(pk=customer_id).update(
@@ -2443,6 +2445,7 @@ def scrub_profile_for_dormant(customer_id: int, *, language: str) -> None:
         updated_at=timeutils.now(),
     )
     Address.objects.filter(customer_id=customer_id).delete()
+    AuthSession.objects.filter(customer_id=customer_id).update(user_agent="", last_ip=None, location="")
 
 
 def scrub_deleted_for_reactivation(customer_id: int) -> None:
