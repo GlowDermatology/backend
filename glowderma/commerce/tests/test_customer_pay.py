@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from django.conf import settings
 from rest_framework.test import APIClient
 
 from glowderma.accounts.models import Customer
@@ -248,6 +249,7 @@ def _web_client(customer: Customer) -> APIClient:
         HTTP_AUTHORIZATION=f"Bearer {tokens.issue_access(started.session)[0]}",
         HTTP_X_GD_DEVICE_ID="web-browser-cookie-0009",
         HTTP_X_GD_PLATFORM="web",
+        HTTP_X_GD_INTERNAL_SECRET=settings.INTERNAL_API_SECRET,
     )
     return client
 

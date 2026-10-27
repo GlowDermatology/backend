@@ -453,7 +453,10 @@ def test_account_security_payloads_and_localized_errors(signed: Signed) -> None:
     link = {"provider": "facebook", "token": "fake:fb-5:a@x.uz", "password": PASSWORD}
     assert signed.client.post(ME + "social/", link, **signed.idem()).status_code == 200
     assert signed.client.delete(ME + "social/facebook/", {"password": PASSWORD}).status_code == 200
-    payloads = [message.payload for message in OutboxMessage.objects.filter(topic="push.account_security")]
+    payloads = [
+        message.payload
+        for message in OutboxMessage.objects.filter(topic="push.account_security").order_by("id")
+    ]
     assert [payload["event"] for payload in payloads] == ["social_linked", "social_unlinked"]
     for payload in payloads:
         assert set(payload) == set(topics.ACCOUNT_SECURITY_PAYLOAD_KEYS) and len(payload["event_id"]) == 32

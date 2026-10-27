@@ -3,6 +3,7 @@
 
 # ruff: noqa: S105, S106 - FCM tokens in fixtures are test data, not secrets
 
+from datetime import timedelta
 from typing import Any
 
 import maxminddb
@@ -21,6 +22,7 @@ from glowderma.accounts.tests.factories import (
     start_test_session,
 )
 from glowderma.core import geoip, qr_store, timeutils
+from glowderma.core.api.exceptions import AuthFailed
 from glowderma.core.models import AuditEntry
 from glowderma.customers.tests.p1_support import PASSWORD, TERMS, publish_terms, verification
 
@@ -82,7 +84,12 @@ def client_for(
 
 
 def web_headers(**extra: Any) -> dict[str, Any]:
-    headers = {"HTTP_X_GD_DEVICE_ID": WEB_FID, "HTTP_X_GD_PLATFORM": "web"}
+    """The website BFF's headers: ``web`` is accepted only with the internal secret."""
+    headers = {
+        "HTTP_X_GD_DEVICE_ID": WEB_FID,
+        "HTTP_X_GD_PLATFORM": "web",
+        "HTTP_X_GD_INTERNAL_SECRET": settings.INTERNAL_API_SECRET,
+    }
     headers.update(extra)
     return headers
 
@@ -99,6 +106,10 @@ def test_web_needs_no_app_version_and_has_no_floor(settings: Any) -> None:
     assert response.status_code == 200
     bad = client.get("/api/v1/catalog/categories/", **web_headers(HTTP_X_GD_APP_VERSION="next"))
     assert bad.status_code == 400 and bad.json()["code"] == "device_required"
+    # a self-asserted "web" (no or a wrong secret) is refused: it would skip the app's version floor
+    for secret in ("", "wrong-secret"):
+        forged = client.get("/api/v1/catalog/categories/", **web_headers(HTTP_X_GD_INTERNAL_SECRET=secret))
+        assert forged.status_code == 400 and forged.json()["code"] == "device_required"
     app = client.get(
         "/api/v1/catalog/categories/",
         HTTP_X_GD_DEVICE_ID="fid-app-000001",
@@ -431,3 +442,130 @@ def test_the_session_of_a_deleted_customer_is_gone_from_the_list(staff_client: A
     assert Customer.objects.get(pk=customer.pk).status == "deleted"
     response = staff_client.get(f"/api/v1/admin/customers/{customer.pk}/sessions/")
     assert response.status_code == 200 and response.json()["count"] == 0
+
+
+# --- fix pass (adversarial review) -----------------------------------------------------------------
+
+
+def test_refresh_reuse_ends_only_that_session_and_retires_its_device(
+    django_capture_on_commit_callbacks: Any,
+) -> None:
+    from glowderma.accounts import services  # noqa: PLC0415
+    from glowderma.accounts.tests.factories import raw_refresh  # noqa: PLC0415
+
+    customer = CustomerFactory.create()
+    stolen = start_test_session(customer)
+    other = start_test_session(customer, fid="fid-other-0003", platform="android")
+    Device.objects.filter(sessions=stolen.session).update(fcm_token="tok-stolen", push_enabled=True)
+    qr_store.put("s" * 64, customer.pk, ttl=60, max_live=2, session_id=str(stolen.session.pk))
+    qr_store.put("o" * 64, customer.pk, ttl=60, max_live=2, session_id=str(other.session.pk))
+    old = raw_refresh(stolen.session)
+    services.rotate_customer_refresh(old, fid="fid-test-0001", platform="ios")
+    AuthSession.objects.filter(pk=stolen.session.pk).update(rotation_confirmed=True)
+    cache.clear()  # the grace body is gone: the old token is a reuse now
+    with django_capture_on_commit_callbacks(execute=True), pytest.raises(AuthFailed):
+        services.rotate_customer_refresh(old, fid="fid-test-0001", platform="ios")
+    stolen.session.refresh_from_db()
+    assert stolen.session.revoke_reason == "refresh_reused"
+    device = Device.objects.get(sessions=stolen.session)
+    assert (device.is_active, device.fcm_token) == (False, "")
+    assert qr_store.take("s" * 64) is None
+    assert str(qr_store.take("o" * 64)).startswith(f"{customer.pk}:")  # the other phone's QR survives
+    other.session.refresh_from_db()
+    assert other.session.revoked_at is None
+    assert AuditEntry.objects.filter(action="customer.refresh_reused").count() == 1
+
+
+def test_logout_of_others_needs_the_current_refresh_token() -> None:
+    from glowderma.accounts import services  # noqa: PLC0415
+    from glowderma.accounts.tests.factories import raw_refresh  # noqa: PLC0415
+
+    customer = CustomerFactory.create()
+    app = start_test_session(customer)
+    web = start_test_session(customer, fid=WEB_FID, platform="web", app_version="")
+    old = raw_refresh(app.session)
+    services.rotate_customer_refresh(old, fid="fid-test-0001", platform="ios")
+    client = APIClient()
+    client.credentials(**device_headers())
+    for scope in ("others", "all"):
+        refused = client.post(LOGOUT, {"refresh": old, "scope": scope}, format="json")
+        assert refused.status_code == 401 and refused.json()["code"] == "SESSION_EXPIRED"
+    web.session.refresh_from_db()
+    assert web.session.revoked_at is None
+    assert client.post(LOGOUT, {"refresh": old, "scope": "current"}, format="json").status_code == 204
+
+
+def test_revoking_from_a_session_that_just_ended_is_refused() -> None:
+    customer = CustomerFactory.create()
+    app = start_test_session(customer)
+    web = start_test_session(customer, fid=WEB_FID, platform="web", app_version="")
+    client = client_for(app)
+    AuthSession.objects.filter(pk=app.session.pk).update(revoked_at=timeutils.now(), revoke_reason="logout")
+    with pytest.raises(AuthFailed) as caught:
+        account_sessions.revoke_session(
+            customer.pk,
+            str(web.session.pk),
+            actor=customer,
+            actor_type="customer",
+            current_sid=str(app.session.pk),
+        )
+    assert caught.value.get_codes() == "SESSION_EXPIRED"
+    web.session.refresh_from_db()
+    assert web.session.revoked_at is None
+    assert client is not None
+
+
+def test_deleting_the_customer_blanks_the_session_client_facts() -> None:
+    from glowderma.accounts import services  # noqa: PLC0415
+
+    customer = CustomerFactory.create()
+    web = start_test_session(customer, fid=WEB_FID, platform="web", app_version="")
+    account_sessions.stamp_session(web.session.pk, user_agent=CHROME_WINDOWS, ip="84.54.70.10")
+    services.delete_customer(customer.pk)
+    web.session.refresh_from_db()
+    assert (web.session.user_agent, web.session.last_ip, web.session.location) == ("", None, "")
+
+
+def test_a_web_request_without_forwarded_facts_bumps_only_the_activity() -> None:
+    """The BFF's own server-side call (secret, no X-GD-Client-IP) never records the web server's IP or user
+    agent as the browser's."""
+    customer = CustomerFactory.create()
+    web = start_test_session(customer, fid=WEB_FID, platform="web", app_version="")
+    account_sessions.stamp_session(web.session.pk, user_agent=CHROME_WINDOWS, ip="84.54.70.10")
+    before = AuthSession.objects.get(pk=web.session.pk).last_used_at
+    client = APIClient()
+    client.credentials(
+        HTTP_AUTHORIZATION=f"Bearer {tokens.issue_access(web.session)[0]}",
+        HTTP_USER_AGENT="node",
+        **web_headers(),
+    )
+    assert client.get("/api/v1/me/").status_code == 200
+    web.session.refresh_from_db()
+    assert (web.session.user_agent, web.session.last_ip) == (CHROME_WINDOWS, "84.54.70.10")
+    assert web.session.last_used_at >= before
+
+
+def test_pushes_skip_a_device_whose_session_expired() -> None:
+    from glowderma.notifications import selectors as notification_selectors  # noqa: PLC0415
+
+    customer = CustomerFactory.create()
+    expired = start_test_session(customer)
+    alive = start_test_session(customer, fid="fid-alive-0002", platform="android")
+    Device.objects.filter(sessions=expired.session).update(fcm_token="tok-exp", push_enabled=True)
+    Device.objects.filter(sessions=alive.session).update(fcm_token="tok-live", push_enabled=True)
+    AuthSession.objects.filter(pk=expired.session.pk).update(
+        absolute_expires_at=timeutils.now() - timedelta(seconds=1)
+    )
+    tokens_now = [device.fcm_token for device in notification_selectors.customer_push_devices(customer.pk)]
+    assert tokens_now == ["tok-live"]
+    pushed = notification_selectors.customer_push_device(customer.pk)
+    assert pushed is not None and pushed.fcm_token == "tok-live"
+
+
+def test_session_pages_have_a_total_order() -> None:
+    customer = CustomerFactory.create()
+    started = [start_test_session(customer, fid=f"fid-page-{n:04d}") for n in range(3)]
+    same = timeutils.now()
+    AuthSession.objects.filter(customer=customer).update(last_used_at=same)
+    rows = list(account_sessions.open_sessions(customer.pk))
+    assert [row.pk for row in rows] == sorted(start.session.pk for start in started)

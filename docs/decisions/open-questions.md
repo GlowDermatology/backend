@@ -213,6 +213,8 @@ the product owner or the client may still revise it.
 | W-8 | Website social sign-in | Same endpoints; `GOOGLE_WEB_CLIENT_IDS`, the existing `FACEBOOK_APP_ID`, `APPLE_SERVICES_IDS` + `APPLE_WEB_REDIRECT_URI` (server-configured, never from the client). Needs the client's Google web client id and Apple Services ID. | C§2.1.8 |
 | W-9 | Product / specialist slugs | Derived once at creation from the uz name (else Billz name), transliterated, unique (`-2`…), never only digits, staff-editable; no slug history/redirects server-side (the website 301s id URLs to the slug). | C§2.3, admin §2.3/§2.17 |
 | W-10 | SEO texts and checklist | Optional per-language `seo_title` (≤120) / `seo_description` (≤300) on products and categories, shown only in their own language; «SEO holati» bounds 15–60 / 50–160 chars, description ≥80. | admin §2.3/§2.4 |
+| W-12 | A separate internal secret for the website BFF (review B-W1)? | **Not done, documented:** the website and the admin BFF run in the same Next.js process and container, so a second secret would add no isolation (whoever reads one reads both). Revisit if the storefront moves to its own deployment. | C§1.1 |
+| W-13 | Digits-only names (a barcode as the Billz name, "2024", "007") | Slug `mahsulot-<digits>` / `mutaxassis-<digits>` (`core.slugs.derive_slug`, shared by the models and the backfills) | admin §2.3/§2.17 |
 | W-11 | Merge with B-W2 (hybrid identity) | B-W1 adds `accounts.0010_web_client_sessions`; B-W2 will also add an `accounts` migration — the later branch renumbers or adds a merge migration. | — |
 
 ## Compliance (gates M3 / production)

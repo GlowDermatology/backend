@@ -9,6 +9,7 @@ from collections.abc import Iterator
 from typing import Any
 
 import pytest
+from django.conf import settings
 from django.core.cache import cache
 from django.test import override_settings
 from rest_framework.test import APIClient
@@ -367,7 +368,11 @@ WEB_REDIRECT = "https://glowderma.uz/auth/apple/callback"
 def web_client() -> APIClient:
     client = APIClient()
     client.default_format = "json"
-    client.credentials(HTTP_X_GD_DEVICE_ID=WEB_FID, HTTP_X_GD_PLATFORM="web")
+    client.credentials(
+        HTTP_X_GD_DEVICE_ID=WEB_FID,
+        HTTP_X_GD_PLATFORM="web",
+        HTTP_X_GD_INTERNAL_SECRET=settings.INTERNAL_API_SECRET,
+    )
     return client
 
 

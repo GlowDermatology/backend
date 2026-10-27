@@ -58,7 +58,7 @@ Everything in admin §1 applies unless a row below says otherwise.
 | `Authorization: Bearer <access JWT>` | **C** routes; optional on **O** routes; absent on `auth/*` (except `auth/logout/`, where it is optional) | HS256, `kid` header, claims `iss, aud="customer", sub (customer id), sid, rot, iat, exp, jti`, all required. `rot` = the session's rotation counter `AuthSession.rotation` (integer, `0` before the first rotation) when the token was issued (§2.1.6). TTL `CUSTOMER_ACCESS_TTL` (900 s), capped at the session's `absolute_expires_at`. A staff token fails decoding (`aud`) → 401 `not_authenticated`. On an **O** route a present but invalid header is a 401, never silently anonymous. |
 | `X-GD-Device-Id` | `auth/*` and **C** routes | The Firebase installation id (`fid`) of this app install — for the website (B-W1) the BFF's random browser id kept in a long-lived HttpOnly cookie —, `^[A-Za-z0-9_-]{8,128}$`. Missing or malformed → 400 `device_required`. `auth/*`: the session is bound to `Device(customer, fid)` (created or reactivated on success). **C** routes: must equal the fid of the session's device, else 401 `not_authenticated` and audit `auth.device_mismatch` (at most one row per session per hour). The fid is an identifier, **not** a secret (§6.8). |
 | `X-GD-Device-Key` | `auth/login/` when the app holds one (social sign-in never reads it: `M2-A10`) | The device secret issued once in `AuthTokens.device_key` (§1.9): exactly 43 base64url characters, `^[A-Za-z0-9_-]{43}$`, no prefix (`secrets.token_urlsafe(32)`). Proves that this install completed a verified sign-in before; it is what makes a device **known** for A2 (§2.1.4). Never logged; compared as SHA-256 with `compare_digest`. Absent, malformed, over-long or wrong → the device is treated as unknown (never a 400). |
-| `X-GD-Platform` | with `X-GD-Device-Id` | `ios` \| `android` \| `web` (B-W1: the website's BFF; else 400 `device_required`). Stored on `Device.platform`; `Order.channel` is taken from the **session's device**, never from a body field. A different platform for an existing `(customer, fid)` → 401 `not_authenticated`. |
+| `X-GD-Platform` | with `X-GD-Device-Id` | `ios` \| `android` \| `web` (B-W1: the website's BFF — accepted **only with a valid `X-GD-Internal-Secret`**, so nobody can claim `web` to skip the app's version floor; else 400 `device_required`). Stored on `Device.platform`; `Order.channel` is taken from the **session's device**, never from a body field. A different platform for an existing `(customer, fid)` → 401 `not_authenticated`. |
 | `X-GD-App-Version` | with `X-GD-Device-Id` and `ios`/`android`; optional with `web` | `^\d{1,3}\.\d{1,3}\.\d{1,3}$`. Below `MIN_APP_VERSION_IOS` / `MIN_APP_VERSION_ANDROID` (default `0.0.0` = no floor) → 426 `app_update_required` with `details: {"min_version", "store_url"}`. **`web` (B-W1):** optional — absent is fine (stored as `""`), a present value must still match the pattern (else 400 `device_required`), and no minimum version, store URL or 426 ever applies (the website deploys with the API). Written to `Device.app_version` together with the `last_active_at` bump (at most every 5 minutes). |
 | `Accept-Language` | optional | First supported tag in q-order among `uz`, `ru`, `en` (region subtags ignored: `ru-RU` → `ru`). Absent or unsupported → the signed-in customer's `language`, else `uz`. Selects every `message`, every server-rendered label and every i18n data field (§1.4). Response header `Content-Language`. |
 | `Idempotency-Key` | on the **I** routes (§1.7) | UUID, 36 chars, as admin §1.7. |
@@ -553,7 +553,8 @@ step 2) revokes the session whichever install presents it — a token from anoth
 6. `previous_refresh_hash = h`, no grace body (5a), and the rotation is **confirmed** (`rotation_confirmed = true`)
    **or** the unconfirmed window is over (`now − rotated_at > CUSTOMER_REFRESH_UNCONFIRMED_SECONDS`), or a dead token
    came back (step 2) → **reuse**: one of the holders is not the app. Session revoked with reason `refresh_reused`
-   (tombstone on commit); audit `customer.refresh_reused {sid}`; WARNING log → 401 `SESSION_EXPIRED` (not
+   (tombstone, and that session's QR keys, on commit; its device retired when no session is left on it — written in a
+   second transaction taking the customer lock first, C§2.7.1); audit `customer.refresh_reused {sid}`; WARNING log → 401 `SESSION_EXPIRED` (not
    `password_changed`). This is the spec's "reuse after a short grace window revokes the
    session": the grace window is the 120 s replay of 5a; the first use of the new tokens ends only the longer
    re-rotation window of 5b.
@@ -585,7 +586,8 @@ raw refresh token is stored (§6). `auth:refresh_dead:*` holds hashes only.
 Body `{"refresh": str, "scope": "current" | "others" | "all"}` (`scope` optional, default `current`; `LogoutScope`,
 B-W1; another value → 400 `scope` `invalid_choice`) → **204**. `current` revokes the session owning the token
 (`logout`) — "Chiqish"; `others` every other open session of the customer, this one stays — "Boshqa qurilmalardan
-chiqish"; `all` every open session — "Hamma joydan chiqish". Tombstones and the revoked sessions' QR keys go on commit;
+chiqish"; `all` every open session — "Hamma joydan chiqish". `others` and `all` need the session's **current** refresh token (a
+previous one, still accepted during the rotation grace, ends only its own session; else 401 `SESSION_EXPIRED`). Tombstones and the revoked sessions' QR keys go on commit;
 every device left without an open session is retired (`is_active=False`, `push_enabled=False`, `fcm_token=""`, key hash
 kept). Unknown, revoked or expired token → 401 `SESSION_EXPIRED` (the app treats it as logged out). Audit
 `customer.logout {sid, scope}`.
@@ -924,7 +926,7 @@ an "Active sessions" table: **Device · Location · Created · Updated**, a «Jo
 menu «Chiqish», and «Boshqa qurilmalardan chiqish» / «Hamma joydan chiqish» (`auth/logout/` `scope`, §2.1.7).
 
 **`GET me/sessions/`** (**C**, **P**: `page_size` 20 | 50, default 20) → `Page<CustomerSession>`, most recently active
-first (`updated_at` desc, then `created_at` desc, id).
+first (`updated_at` desc, then `id`: a total order, pages never repeat a row).
 ```jsonc
 // CustomerSession
 {"id": "6f0c1d2e-…-uuid",                 // the session id (AuthSession.id)
@@ -948,6 +950,10 @@ first (`updated_at` desc, then `created_at` desc, id).
   (`AuthSession.last_ip`, `location`; names in English).
 - **Updated** = `AuthSession.last_used_at`, bumped by `CustomerJWTAuthentication` at most every
   `DEVICE_BUMP_SECONDS` (300) per session — the same throttle as `Device.last_active_at` — and by every refresh rotation.
+  For a `web` session the bump records a new user agent / IP only when the BFF forwarded them
+  (`X-GD-Client-UA` / `X-GD-Client-IP` with the secret); its own server-side calls bump the time only.
+- `DELETE me/` blanks every session's user agent, IP and location at once; revoked and expired session rows are
+  deleted after 90 days by `accounts.cleanup_auth`.
 
 **`DELETE me/sessions/{id}/`** (**C**; optional `Idempotency-Key`) → **204**: the row menu «Chiqish». Revokes that
 session (`logout`; tombstone and its QR keys on commit; its device retired when no session is left on it). The
@@ -2205,7 +2211,8 @@ pushes are reported `sent` but reach no device (§6.14).
    "farewell_tokens": []}              // FCM tokens of the devices a reset or a password change signed out, else []
   ```
 - **Fan-out (B-W1).** A transactional push (`order_status`, `appointment`, `account_security`) goes to **every** active,
-  push-enabled device of the customer with a token (newest `last_active_at` first, at most 10, one FCM batch, the same
+  push-enabled device of the customer with a token **and an open, unexpired session** (exactly the devices «Faol
+  seanslar» lists; `accounts.cleanup_auth` also retires, hourly, any device whose sessions merely expired) (newest `last_active_at` first, at most 10, one FCM batch, the same
   `inbox_id` in each). The inbox row is `sent` when at least one device got it; a dead token prunes its device; when no
   device got it and one answered `not_sent` the message is retried later. A campaign still targets one device per
   customer (its newest pushable one).

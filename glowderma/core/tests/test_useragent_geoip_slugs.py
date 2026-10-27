@@ -237,3 +237,67 @@ def test_candidates_keep_the_suffix_within_the_limit() -> None:
     assert slugs.candidate("serum", 1, max_length=10) == "serum"
     assert slugs.candidate("serum", 2, max_length=10) == "serum-2"
     assert slugs.candidate("abcdefghij", 12, max_length=10) == "abcdefg-12"
+
+
+# --- fix pass (adversarial review) -----------------------------------------------------------------
+
+
+def test_slugify_folds_compatibility_forms_and_sharp_s() -> None:
+    assert slugs.slugify_uz("Straße ﬁne") == "strasse-fine"
+    assert slugs.slugify_uz("Ｓｅｒｕｍ ３０") == "serum-30"  # full-width
+    assert slugs.slugify_uz("йод") == "yod"  # a decomposed й composes before transliteration
+
+
+@pytest.mark.parametrize(
+    ("names", "fallback", "expected"),
+    [
+        (("4607100012345",), "", "mahsulot-4607100012345"),
+        (("2024", "Serum"), "", "mahsulot-2024"),
+        (("", ""), "4607100000001", "mahsulot-4607100000001"),
+        (("—",), "", "mahsulot"),
+        (("2024-2025 kolleksiya",), "", "2024-2025-kolleksiya"),
+    ],
+)
+def test_derive_slug_never_gives_digits_only(names: tuple[str, ...], fallback: str, expected: str) -> None:
+    assert slugs.derive_slug(*names, prefix="mahsulot", fallback=fallback, max_length=140) == expected
+    assert slugs.is_valid_slug(expected, max_length=140)
+
+
+def test_geoip_reopens_a_replaced_file_and_retries_a_failed_open(
+    settings: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    geoip.reset()
+    settings.GEOIP_CITY_DB = "/srv/geoip/city.mmdb"
+    clock = [1000.0]
+    mtime = [1.0]
+    opened: list[FakeReader] = []
+    fail = [True]
+
+    def open_database(path: str) -> FakeReader:
+        if fail[0]:
+            raise OSError("missing")
+        reader = FakeReader(
+            {"84.54.70.10": TASHKENT}
+            if len(opened) == 0
+            else {"84.54.70.10": {"country": {"iso_code": "UZ"}}}
+        )
+        opened.append(reader)
+        return reader
+
+    monkeypatch.setattr(maxminddb, "open_database", open_database)
+    monkeypatch.setattr(geoip, "_clock", lambda: clock[0])
+    monkeypatch.setattr(geoip, "_mtime", lambda path: mtime[0])
+    assert geoip.locate("84.54.70.10") == ""  # the open failed
+    fail[0] = False
+    clock[0] += 30
+    assert geoip.locate("84.54.70.10") == ""  # not retried within a minute
+    clock[0] += 31
+    assert geoip.locate("84.54.70.10") == "Tashkent, Tashkent, UZ"  # retried after a minute
+    mtime[0] = 2.0  # the operator replaced the file
+    clock[0] += 10
+    assert geoip.locate("84.54.70.10") == "Tashkent, Tashkent, UZ"  # mtime checked at most once a minute
+    clock[0] += 60
+    assert geoip.locate("84.54.70.10") == "UZ" and opened[0].closed  # reopened, the old reader closed
+    clock[0] += 120
+    assert geoip.locate("84.54.70.10") == "UZ" and len(opened) == 2  # unchanged file: no reopen
+    geoip.reset()

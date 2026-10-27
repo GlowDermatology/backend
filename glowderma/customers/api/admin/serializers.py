@@ -148,7 +148,8 @@ class CustomerDeviceRowSerializer(serializers.Serializer[Any]):
     app_version = serializers.CharField(allow_blank=True)
     push_enabled = serializers.BooleanField()
     is_active = serializers.BooleanField(
-        help_text="`false` after a logout, a sign-in elsewhere or the deletion."
+        help_text="`false` once no session is left on it (a logout, a session signed out, a password reset "
+        "or change elsewhere) or after the deletion (B-W1: several devices may be active)."
     )
     last_active_at = serializers.DateTimeField()
     created_at = serializers.DateTimeField(help_text="When the installation first signed in.")
