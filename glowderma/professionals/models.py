@@ -17,6 +17,11 @@ SLUG_MAX_LENGTH = 160
 PROFESSIONAL_SLUG_CONSTRAINT = "professional_slug_unique"
 
 
+def professional_slug_base(name: str) -> str:
+    """The derived slug of a specialist (``Professional.save`` and the ``professionals.0003`` backfill)."""
+    return slugs.derive_slug(name, prefix="mutaxassis", max_length=SLUG_MAX_LENGTH)
+
+
 class Location(TimeStampedModel):
     """A branch/clinic address (one row today, several supported)."""
 
@@ -106,13 +111,15 @@ class Professional(TimeStampedModel):
         return f"{self.name} ({self.role})"
 
     def slug_base(self) -> str:
-        return slugs.slugify_uz(self.name, max_length=SLUG_MAX_LENGTH) or "mutaxassis"
+        return professional_slug_base(self.name)
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         """A new row without a slug gets the first free one derived from the name (B-W1)."""
         if self.slug:
             super().save(*args, **kwargs)
             return
+        if kwargs.get("update_fields") is not None:
+            kwargs["update_fields"] = {*kwargs["update_fields"], "slug"}  # the derived slug is written too
         slugs.save_with_unique_slug(
             self,
             lambda: super(Professional, self).save(*args, **kwargs),

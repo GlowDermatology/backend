@@ -14,7 +14,7 @@ def backfill_professional_slugs(apps: Any, schema_editor: Any) -> None:
     professional_model = apps.get_model("professionals", "Professional")
     taken: set[str] = set(professional_model.objects.exclude(slug="").values_list("slug", flat=True))
     for row in professional_model.objects.filter(slug="").order_by("id").only("id", "name"):
-        base = slugs.slugify_uz(row.name, max_length=SLUG_MAX_LENGTH) or "mutaxassis"
+        base = slugs.derive_slug(row.name, prefix="mutaxassis", max_length=SLUG_MAX_LENGTH)
         attempt = 1
         while (value := slugs.candidate(base, attempt, max_length=SLUG_MAX_LENGTH)) in taken:
             attempt += 1

@@ -17,10 +17,8 @@ def backfill_product_slugs(apps: Any, schema_editor: Any) -> None:
     for row in (
         product_model.objects.filter(slug="").order_by("id").only("id", "name_uz", "billz_name", "billz_id")
     ):
-        base = (
-            slugs.slugify_uz(row.name_uz, max_length=SLUG_MAX_LENGTH)
-            or slugs.slugify_uz(row.billz_name, max_length=SLUG_MAX_LENGTH)
-            or f"mahsulot-{row.billz_id}"
+        base = slugs.derive_slug(
+            row.name_uz, row.billz_name, prefix="mahsulot", fallback=row.billz_id, max_length=SLUG_MAX_LENGTH
         )
         attempt = 1
         while (value := slugs.candidate(base, attempt, max_length=SLUG_MAX_LENGTH)) in taken:

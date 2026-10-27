@@ -30,8 +30,10 @@ _CYRILLIC = {
 
 
 def _transliterate(text: str) -> str:
+    # NFKC first: compatibility forms (ligatures, full-width letters) unfold and a decomposed Cyrillic
+    # й / ё composes again before the table sees it (NFKD here would turn й into и); then the rest is folded.
     out: list[str] = []
-    for char in text.lower():
+    for char in unicodedata.normalize("NFKC", text).lower().replace("ß", "ss"):
         if char in _APOSTROPHES:
             continue
         out.append(_CYRILLIC.get(char, char))
@@ -46,6 +48,22 @@ def slugify_uz(text: str, *, max_length: int = 80) -> str:
         cut = slug[:max_length]
         slug = cut.rsplit("-", 1)[0] if "-" in cut else cut
     return slug.strip("-")
+
+
+def derive_slug(*sources: str, prefix: str, fallback: str = "", max_length: int) -> str:
+    """The slug base of a new row: the first of ``sources`` that slugifies to something; a digits-only
+    result (a barcode as the Billz name, a name like "2024" or "007") becomes ``"<prefix>-<digits>"`` — a
+    digits-only path segment is an id; nothing usable → ``fallback`` (itself slugified the same way), else
+    ``prefix``. Shared by the models' ``save`` and the backfill migrations, so both always give a slug the
+    ``*_slug_format`` check accepts."""
+    for source in (*sources, fallback):
+        slug = slugify_uz(source or "", max_length=max_length)
+        if not slug:
+            continue
+        if re.fullmatch(DIGITS_ONLY_PATTERN, slug):
+            slug = f"{prefix}-{slug}"[:max_length]
+        return slug
+    return prefix
 
 
 def is_valid_slug(value: str, *, max_length: int) -> bool:

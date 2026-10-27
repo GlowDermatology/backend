@@ -21,6 +21,13 @@ SLUG_MAX_LENGTH = 140
 PRODUCT_SLUG_CONSTRAINT = "product_slug_unique"
 
 
+def product_slug_base(name_uz: str, billz_name: str, billz_id: str) -> str:
+    """The derived slug of a product (``Product.save`` and the ``catalog.0005`` backfill)."""
+    return slugs.derive_slug(
+        name_uz, billz_name, prefix="mahsulot", fallback=billz_id, max_length=SLUG_MAX_LENGTH
+    )
+
+
 class JoinText(Func):
     """``a || b || c …`` — immutable text concatenation usable in a stored generated column.
 
@@ -194,17 +201,15 @@ class Product(TimeStampedModel):
         return self.name_uz or self.billz_name
 
     def slug_base(self) -> str:
-        return (
-            slugs.slugify_uz(self.name_uz, max_length=SLUG_MAX_LENGTH)
-            or slugs.slugify_uz(self.billz_name, max_length=SLUG_MAX_LENGTH)
-            or f"mahsulot-{self.billz_id}"
-        )
+        return product_slug_base(self.name_uz, self.billz_name, self.billz_id)
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         """A new row without a slug gets the first free one derived from its name (B-W1)."""
         if self.slug:
             super().save(*args, **kwargs)
             return
+        if kwargs.get("update_fields") is not None:
+            kwargs["update_fields"] = {*kwargs["update_fields"], "slug"}  # the derived slug is written too
         slugs.save_with_unique_slug(
             self,
             lambda: super(Product, self).save(*args, **kwargs),

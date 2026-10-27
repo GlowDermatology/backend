@@ -5,6 +5,7 @@ import threading
 from typing import Any
 
 import pytest
+from django.conf import settings
 from django.db import connection
 from rest_framework.test import APIClient
 
@@ -253,7 +254,11 @@ def test_checklist_bounds_and_hints() -> None:
 @pytest.fixture
 def web() -> APIClient:
     client = APIClient()
-    client.credentials(HTTP_X_GD_DEVICE_ID="web-browser-cookie-0002", HTTP_X_GD_PLATFORM="web")
+    client.credentials(
+        HTTP_X_GD_DEVICE_ID="web-browser-cookie-0002",
+        HTTP_X_GD_PLATFORM="web",
+        HTTP_X_GD_INTERNAL_SECRET=settings.INTERNAL_API_SECRET,
+    )
     return client
 
 
@@ -339,3 +344,62 @@ def test_the_migrations_backfill_slugs_of_existing_rows() -> None:
     reloaded = Product.objects.get(pk=first.pk)
     reloaded.save()
     assert reloaded.slug == "krem"
+
+
+# --- fix pass: digits-only names (adversarial review) ------------------------------------------------------
+
+
+def test_digits_only_names_get_a_prefixed_slug() -> None:
+    barcode = ProductFactory.create(name_uz="", billz_name="4607100012345")
+    year = ProductFactory.create(name_uz="2024")
+    agent = ProfessionalFactory.create(name="007")
+    assert barcode.slug == "mahsulot-4607100012345"
+    assert year.slug == "mahsulot-2024"
+    assert agent.slug == "mutaxassis-007"
+
+
+def test_the_billz_import_of_a_barcode_named_product() -> None:
+    import dataclasses  # noqa: PLC0415
+
+    from glowderma.catalog import services  # noqa: PLC0415
+    from glowderma.integrations.billz.fake import FakeBillz  # noqa: PLC0415
+
+    row = FakeBillz().get_product("4607100012345")
+    assert row is not None
+    assert services.upsert_from_billz(dataclasses.replace(row, billz_name="4607100012345")) == "created"
+    product = Product.objects.get(billz_id="4607100012345")
+    assert product.slug == "mahsulot-4607100012345"
+
+
+def test_the_backfill_handles_digits_only_names() -> None:
+    import importlib  # noqa: PLC0415
+
+    from django.apps import apps  # noqa: PLC0415
+
+    barcode = ProductFactory.create(name_uz="", billz_name="4607100099999")
+    year = ProductFactory.create(name_uz="2024")
+    agent = ProfessionalFactory.create(name="007")
+    Product.objects.filter(pk__in=[barcode.pk, year.pk]).update(slug="")
+    Professional.objects.filter(pk=agent.pk).update(slug="")
+    importlib.import_module("glowderma.catalog.migrations.0005_seo_slugs").backfill_product_slugs(apps, None)
+    importlib.import_module("glowderma.professionals.migrations.0003_seo_slugs").backfill_professional_slugs(
+        apps, None
+    )
+    assert Product.objects.get(pk=barcode.pk).slug == "mahsulot-4607100099999"
+    assert Product.objects.get(pk=year.pk).slug == "mahsulot-2024"
+    assert Professional.objects.get(pk=agent.pk).slug == "mutaxassis-007"
+
+
+def test_a_derived_slug_is_written_with_update_fields() -> None:
+    product = ProductFactory.create(name_uz="Tonik")
+    Product.objects.filter(pk=product.pk).update(slug="")
+    reloaded = Product.objects.get(pk=product.pk)
+    reloaded.price = 190_000
+    reloaded.save(update_fields=["price"])
+    assert Product.objects.get(pk=product.pk).slug == "tonik"
+    professional = ProfessionalFactory.create(name="Aziza")
+    Professional.objects.filter(pk=professional.pk).update(slug="")
+    again = Professional.objects.get(pk=professional.pk)
+    again.position = 9
+    again.save(update_fields=["position"])
+    assert Professional.objects.get(pk=professional.pk).slug == "aziza"
