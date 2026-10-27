@@ -1,4 +1,5 @@
-"""Demo specialists (design 03 §7.6): a location, three professionals, five services, prices, hours, a block.
+"""Demo specialists (design 03 §7.6): a location, three professionals (placeholder photos), five services,
+prices, hours, a block.
 
 Idempotent by natural keys: location ``name_uz``, professional ``name``, service ``name_uz``, link
 ``(professional, service)``, hours ``(professional, weekday)``, block ``(professional, start)``. Design rows
@@ -12,8 +13,9 @@ from django.db import transaction
 
 from glowderma.accounts.models import StaffUser
 from glowderma.core import enums
-from glowderma.core.seeding import SeedContext, register_seeder
+from glowderma.core.seeding import SeedContext, placeholder_art, register_seeder
 from glowderma.core.timeutils import TASHKENT
+from glowderma.professionals import services as professional_services
 from glowderma.professionals.models import (
     BlockedPeriod,
     Location,
@@ -29,6 +31,8 @@ LOCATION_NAME = "Glow Derma klinikasi"
 LOCATION_ADDRESS = "Toshkent, Chilonzor tumani, Bunyodkor shoh ko‘chasi, 12"
 LOCATION_PHONE = "+998712000000"
 
+# placeholder photo tone per professional id (core.seeding.placeholder_art "portrait", 1200×1500)
+PHOTO_TONES: dict[int, str] = {1: "default", 2: "dark-cap", 3: "night"}
 # id, name, role
 PROFESSIONALS: tuple[tuple[int, str, str], ...] = (
     (1, "Nodira Rahimova", enums.SpecialistRole.DERMATOLOGIST),
@@ -80,6 +84,16 @@ def _seed_professionals(location: Location) -> dict[int, Professional]:
             )
         rows[pk] = professional
     return rows
+
+
+def _seed_photos(professionals: dict[int, Professional]) -> None:
+    """A demo photo for each seeded professional without one (a photo staff uploaded is kept), stored through
+    the same processing and naming as an admin upload."""
+    for key, professional in professionals.items():
+        if not professional.photo:
+            professional_services.store_photo(
+                professional, placeholder_art("portrait", PHOTO_TONES.get(key, "default"))
+            )
 
 
 def _seed_services() -> dict[int, Service]:
@@ -144,6 +158,7 @@ def seed_professionals(context: SeedContext) -> None:
         admin = StaffUser.objects.filter(email=SEED_ADMIN_EMAIL).first()
         location = _seed_location()
         professionals = _seed_professionals(location)
+        _seed_photos(professionals)
         services = _seed_services()
         _seed_links(professionals, services)
         _seed_hours(professionals)

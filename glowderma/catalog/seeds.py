@@ -10,6 +10,7 @@ sequences afterwards.
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from hashlib import sha256
@@ -20,7 +21,7 @@ from django.db import transaction
 from glowderma.accounts.models import StaffUser
 from glowderma.catalog.models import Category, Product, ProductImage, ProductStock
 from glowderma.core import enums
-from glowderma.core.images import process_image
+from glowderma.core.images import ProcessedImage, process_image
 from glowderma.core.media import media_name
 from glowderma.core.seeding import MockRandom, SeedContext, placeholder_art, register_seeder
 from glowderma.core.timeutils import TASHKENT
@@ -464,8 +465,15 @@ def _seed_categories() -> dict[str, Category]:
     return categories
 
 
+@functools.lru_cache(maxsize=64)
+def _processed_art(kind: str, tone: str) -> ProcessedImage:
+    """``process_image`` of one placeholder, once per ``(kind, tone)`` and process: the 1200×1500 photos are
+    re-encoded a handful of times instead of once per product (the seed stays fast)."""
+    return process_image(placeholder_art(kind, tone))
+
+
 def _add_image(product: Product, position: int, kind: str, tone: str, at: datetime) -> ProductImage:
-    processed = process_image(placeholder_art(kind, tone))
+    processed = _processed_art(kind, tone)
     digest = sha256(processed.content).hexdigest()
     name = media_name("products", product.pk, processed.content, processed.extension).rsplit("/", 1)[-1]
     image = ProductImage(

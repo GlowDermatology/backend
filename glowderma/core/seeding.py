@@ -14,6 +14,7 @@ creating them.
 
 from __future__ import annotations
 
+import functools
 import importlib
 import importlib.util
 import math
@@ -98,20 +99,38 @@ _TONE_COLOURS: dict[str, tuple[int, int, int]] = {
     "night": (52, 48, 86),
     "dark-cap": (48, 48, 52),
 }
-PLACEHOLDER_SIDE = 96
+# Demo photos are shown full width on the website (product pages, specialist cards): 1200×1500 (4:5) so they
+# stay sharp on a retina screen; process_image keeps them (≤2400 px).
+PLACEHOLDER_WIDTH, PLACEHOLDER_HEIGHT = 1200, 1500
 
 
+def _shade(colour: tuple[int, int, int], factor: float) -> tuple[int, int, int]:
+    red, green, blue = (max(0, min(255, round(channel * factor))) for channel in colour)
+    return red, green, blue
+
+
+@functools.lru_cache(maxsize=64)
 def placeholder_art(kind: str, tone: str = "default") -> bytes:
-    """A small WebP per art kind/tone — the seeders' stand-in for product, banner and profile photos.
+    """A WebP per art kind/tone (1200×1500) — the seeders' stand-in for product and profile photos.
 
-    Deterministic bytes for a given ``(kind, tone)``, so re-running a seeder reproduces the same content hash.
+    Deterministic bytes for a given ``(kind, tone)`` (cached per process: the seed encodes each pair once),
+    so re-running a seeder reproduces the same content hash.
     """
+    width, height = PLACEHOLDER_WIDTH, PLACEHOLDER_HEIGHT
     background = _ART_COLOURS.get(kind, (220, 220, 220))
     accent = _TONE_COLOURS.get(tone, _TONE_COLOURS["default"])
-    image = Image.new("RGB", (PLACEHOLDER_SIDE, PLACEHOLDER_SIDE), background)
+    image = Image.new("RGB", (width, height), background)
     draw = ImageDraw.Draw(image)
-    draw.rounded_rectangle((28, 20, 68, 84), radius=10, fill=accent)
-    draw.rectangle((36, 10, 60, 22), fill=accent)
+    # a soft lower band and a floor shadow, so the shape does not float on a flat colour
+    draw.rectangle((0, round(height * 0.72), width, height), fill=_shade(background, 0.92))
+    draw.ellipse((300, 1150, 900, 1250), fill=_shade(background, 0.8))
+    if kind == "portrait":
+        draw.ellipse((420, 330, 780, 730), fill=accent)  # head
+        draw.rounded_rectangle((250, 780, 950, 1220), radius=220, fill=accent)  # shoulders
+    else:
+        draw.rounded_rectangle((380, 380, 820, 1200), radius=90, fill=accent)  # bottle
+        draw.rounded_rectangle((470, 220, 730, 400), radius=30, fill=_shade(accent, 0.85))  # cap
+        draw.rounded_rectangle((440, 640, 760, 900), radius=24, fill=_shade(background, 1.04))  # label
     output = BytesIO()
     image.save(output, format="WEBP", quality=80, method=4)
     return output.getvalue()

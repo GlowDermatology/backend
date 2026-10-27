@@ -109,6 +109,12 @@ def _validate(obj: models.Model) -> None:
         raise ValidationError(errors)
 
 
+def store_photo(professional: Professional, upload: Any) -> None:
+    """Process (``core.images``), name and save ``upload`` as the professional's photo (the admin upload path
+    and the demo seed)."""
+    _store_photo(professional, upload)
+
+
 def _store_photo(professional: Professional, upload: Any) -> None:
     try:
         processed = process_image(upload)

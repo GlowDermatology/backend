@@ -67,6 +67,8 @@ def test_seed_catalog_is_idempotent_and_matches_the_design() -> None:
     counts = (Product.objects.count(), Category.objects.count(), ProductImage.objects.count())
     assert counts == (248, 5, 246)  # 244 single images + two extra for product 1
     assert ProductStock.objects.count() == 248
+    # readable on the website: every demo photo is 1200×1500 (never the old 96 px thumbnails)
+    assert set(ProductImage.objects.values_list("width", "height").distinct()) == {(1200, 1500)}
     seed_catalog(CONTEXT)
     assert counts == (Product.objects.count(), Category.objects.count(), ProductImage.objects.count())
 
