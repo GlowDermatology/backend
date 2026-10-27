@@ -2164,6 +2164,159 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
+  /api/v1/admin/customers/{id}/sessions/:
+    get:
+      operationId: admin_customers_sessions_list
+      description: The customer's open sessions (signed-in phones and browsers), most
+        recently active first.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          enum:
+          - 20
+          - 50
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAdminCustomerSessionList'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/customers/{id}/sessions/{session_id}/:
+    delete:
+      operationId: admin_customers_sessions_destroy
+      description: Sign one session of the customer out (reason `admin_revoked`; the
+        device stops receiving pushes when no other session is left on it). Unknown
+        or already ended session → 404.
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Optional client-generated UUID; when sent, a retry with the
+          same body returns the stored 2xx response with `Idempotent-Replayed: true`
+          and another body answers 422 `idempotency_key_reused`.'
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: session_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '204':
+          description: No response body
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/admin/dashboard/:
     get:
       operationId: admin_dashboard
@@ -7134,8 +7287,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -7151,7 +7305,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - appointments
@@ -7243,8 +7399,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -7260,7 +7417,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       - in: path
         name: id
@@ -7349,8 +7508,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -7373,7 +7533,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - auth
@@ -7456,8 +7618,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -7473,7 +7636,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - auth
@@ -7481,7 +7646,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CustomerRefreshRequest'
+              $ref: '#/components/schemas/CustomerLogoutRequest'
         required: true
       responses:
         '204':
@@ -7552,8 +7717,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -7569,7 +7735,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - auth
@@ -7652,8 +7820,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -7669,7 +7838,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - auth
@@ -7752,8 +7923,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -7769,7 +7941,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - auth
@@ -7852,8 +8026,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -7869,7 +8044,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - auth
@@ -7952,8 +8129,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -7969,7 +8147,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - auth
@@ -8052,8 +8232,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -8069,7 +8250,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - auth
@@ -8158,8 +8341,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -8175,7 +8359,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - auth
@@ -8252,8 +8438,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -8269,7 +8456,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - auth
@@ -8344,8 +8533,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -8361,7 +8551,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - cart
@@ -8439,8 +8631,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -8456,7 +8649,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - cart
@@ -8535,8 +8730,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -8552,7 +8748,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - cart
@@ -8636,8 +8834,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -8653,7 +8852,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       - in: query
         name: product_id
@@ -8740,8 +8941,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -8757,7 +8959,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       - in: path
         name: product_id
@@ -8845,8 +9049,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -8862,7 +9067,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       - in: path
         name: product_id
@@ -8946,7 +9153,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -8961,7 +9170,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
       tags:
       - catalog
       security:
@@ -9022,7 +9233,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -9037,7 +9250,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
       tags:
       - catalog
       security:
@@ -9098,7 +9313,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -9113,7 +9330,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
       - in: query
         name: category
         schema:
@@ -9221,7 +9440,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -9236,11 +9457,97 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
       - in: path
         name: id
         schema:
           type: integer
+        required: true
+      tags:
+      - catalog
+      security:
+      - CustomerJWT: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductDetail'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '426':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+  /api/v1/catalog/products/{slug}/:
+    get:
+      operationId: customer_catalog_products_by_slug_retrieve
+      description: One visible product by its website slug (B-W1); the same shape
+        as the id route.
+      parameters:
+      - in: header
+        name: Accept-Language
+        schema:
+          type: string
+        description: First supported tag among uz, ru, en in q-order; else the customer's
+          language, else uz.
+      - in: header
+        name: X-GD-App-Version
+        schema:
+          type: string
+          pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
+      - in: header
+        name: X-GD-Device-Id
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{8,128}$
+        description: Firebase installation id of this app install (an identifier,
+          not a secret).
+      - in: header
+        name: X-GD-Platform
+        schema:
+          type: string
+          enum:
+          - android
+          - ios
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
+      - in: path
+        name: slug
+        schema:
+          type: string
         required: true
       tags:
       - catalog
@@ -9302,8 +9609,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -9319,7 +9627,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - delivery
@@ -9398,7 +9708,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -9413,7 +9725,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
       tags:
       - delivery
       security:
@@ -9501,8 +9815,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -9518,7 +9833,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - me
@@ -9602,8 +9919,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -9619,7 +9937,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - me
@@ -9708,8 +10028,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -9725,7 +10046,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - me
@@ -9804,8 +10127,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -9821,7 +10145,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - me
@@ -9905,8 +10231,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -9922,7 +10249,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - me
@@ -10015,8 +10344,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -10032,7 +10362,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       - in: path
         name: id
@@ -10128,8 +10460,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -10145,7 +10478,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       - in: path
         name: id
@@ -10231,8 +10566,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -10248,7 +10584,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       - in: path
         name: id
@@ -10331,8 +10669,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -10348,7 +10687,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       - name: page
         in: query
@@ -10447,8 +10788,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -10464,7 +10806,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       - in: path
         name: id
@@ -10548,8 +10892,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -10565,7 +10910,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - me
@@ -10644,8 +10991,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -10661,7 +11009,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       - name: page
         in: query
@@ -10760,8 +11110,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -10777,7 +11128,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - me
@@ -10868,8 +11221,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -10885,7 +11239,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - me
@@ -10976,8 +11332,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -10993,7 +11350,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - me
@@ -11086,8 +11445,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -11103,7 +11463,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - me
@@ -11177,8 +11539,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -11194,7 +11557,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       - name: page
         in: query
@@ -11294,8 +11659,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -11311,7 +11677,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       - in: path
         name: id
@@ -11403,8 +11771,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -11420,7 +11789,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - me
@@ -11511,8 +11882,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -11528,7 +11900,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - me
@@ -11605,8 +11979,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -11622,7 +11997,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - me
@@ -11693,8 +12070,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -11710,7 +12088,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       - name: page
         in: query
@@ -11811,8 +12191,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -11828,7 +12209,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       - in: path
         name: id
@@ -11918,8 +12301,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -11935,7 +12319,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - me
@@ -12020,8 +12406,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -12037,7 +12424,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - me
@@ -12049,6 +12438,333 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/QrToken'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '426':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+  /api/v1/me/sessions/:
+    get:
+      operationId: customer_sessions_list
+      description: Every open session of the customer (each signed-in phone or browser),
+        most recently active first; `current` marks the caller's own.
+      parameters:
+      - in: header
+        name: Accept-Language
+        schema:
+          type: string
+        description: First supported tag among uz, ru, en in q-order; else the customer's
+          language, else uz.
+      - in: header
+        name: X-GD-App-Version
+        schema:
+          type: string
+          pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
+      - in: header
+        name: X-GD-Device-Id
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{8,128}$
+        description: Firebase installation id of this app install (an identifier,
+          not a secret).
+        required: true
+      - in: header
+        name: X-GD-Platform
+        schema:
+          type: string
+          enum:
+          - android
+          - ios
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
+        required: true
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          enum:
+          - 20
+          - 50
+      tags:
+      - me
+      security:
+      - CustomerJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedCustomerSessionList'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '426':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+  /api/v1/me/sessions/{id}/:
+    delete:
+      operationId: customer_sessions_destroy
+      description: 'Sign one session out (the row menu «Chiqish»). The caller''s own
+        session may be named too: it is a logout. Unknown, already ended or another
+        customer''s session → 404.'
+      parameters:
+      - in: header
+        name: Accept-Language
+        schema:
+          type: string
+        description: First supported tag among uz, ru, en in q-order; else the customer's
+          language, else uz.
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Optional client-generated UUID; when sent, a retry with the
+          same body returns the stored 2xx response with `Idempotent-Replayed: true`
+          and another body answers 422 `idempotency_key_reused`.'
+      - in: header
+        name: X-GD-App-Version
+        schema:
+          type: string
+          pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
+      - in: header
+        name: X-GD-Device-Id
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{8,128}$
+        description: Firebase installation id of this app install (an identifier,
+          not a secret).
+        required: true
+      - in: header
+        name: X-GD-Platform
+        schema:
+          type: string
+          enum:
+          - android
+          - ios
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - me
+      security:
+      - CustomerJWT: []
+      responses:
+        '204':
+          description: No response body
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '426':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+  /api/v1/me/sessions/revoke-others/:
+    post:
+      operationId: customer_sessions_revoke_others
+      description: '«Boshqa qurilmalardan chiqish»: every session but the caller''s
+        own ends.'
+      parameters:
+      - in: header
+        name: Accept-Language
+        schema:
+          type: string
+        description: First supported tag among uz, ru, en in q-order; else the customer's
+          language, else uz.
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Optional client-generated UUID; when sent, a retry with the
+          same body returns the stored 2xx response with `Idempotent-Replayed: true`
+          and another body answers 422 `idempotency_key_reused`.'
+      - in: header
+        name: X-GD-App-Version
+        schema:
+          type: string
+          pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
+      - in: header
+        name: X-GD-Device-Id
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{8,128}$
+        description: Firebase installation id of this app install (an identifier,
+          not a secret).
+        required: true
+      - in: header
+        name: X-GD-Platform
+        schema:
+          type: string
+          enum:
+          - android
+          - ios
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
+        required: true
+      tags:
+      - me
+      security:
+      - CustomerJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevokedSessions'
           description: ''
         '400':
           content:
@@ -12122,8 +12838,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -12139,7 +12856,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - me
@@ -12230,8 +12949,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -12247,7 +12967,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       - in: path
         name: provider
@@ -12341,8 +13063,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -12358,7 +13081,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       - in: path
         name: id
@@ -12442,8 +13167,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -12459,7 +13185,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       - in: path
         name: id
@@ -12548,8 +13276,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -12565,7 +13294,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       - in: path
         name: id
@@ -12649,8 +13380,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
-        required: true
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -12666,7 +13398,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
         required: true
       tags:
       - orders
@@ -12804,7 +13538,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -12819,7 +13555,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
       tags:
       - services
       security:
@@ -12880,7 +13618,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -12895,7 +13635,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
       tags:
       - settings
       security:
@@ -12954,7 +13696,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -12969,7 +13713,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
       tags:
       - specialists
       security:
@@ -13028,7 +13774,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -13043,7 +13791,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
       - in: path
         name: id
         schema:
@@ -13109,7 +13859,9 @@ paths:
         schema:
           type: string
           pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
-        description: App version; below the platform's minimum → 426 `app_update_required`.
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
       - in: header
         name: X-GD-Device-Id
         schema:
@@ -13124,7 +13876,9 @@ paths:
           enum:
           - android
           - ios
-        description: Device platform (`OrderChannel` literals).
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
       - in: query
         name: date
         schema:
@@ -13152,6 +13906,90 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FreeSlots'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '426':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+  /api/v1/specialists/{slug}/:
+    get:
+      operationId: customer_specialists_by_slug_retrieve
+      description: One active specialist by its website slug (B-W1; 404 when inactive
+        or unknown).
+      parameters:
+      - in: header
+        name: Accept-Language
+        schema:
+          type: string
+        description: First supported tag among uz, ru, en in q-order; else the customer's
+          language, else uz.
+      - in: header
+        name: X-GD-App-Version
+        schema:
+          type: string
+          pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
+      - in: header
+        name: X-GD-Device-Id
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{8,128}$
+        description: Firebase installation id of this app install (an identifier,
+          not a secret).
+      - in: header
+        name: X-GD-Platform
+        schema:
+          type: string
+          enum:
+          - android
+          - ios
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
+      - in: path
+        name: slug
+        schema:
+          type: string
+        required: true
+      tags:
+      - specialists
+      security:
+      - CustomerJWT: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Specialist'
           description: ''
         '400':
           content:
@@ -13412,6 +14250,36 @@ components:
       description: |-
         * `add` - add
         * `subtract` - subtract
+    AdminCustomerSession:
+      type: object
+      description: One open session of the customer (``CustomerSession`` without ``current``).
+      properties:
+        id:
+          type: string
+          format: uuid
+        device:
+          type: string
+        platform:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/OrderChannelEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        location:
+          type: string
+          description: '"Tashkent, Tashkent, UZ"; "—" when unknown.'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+      - created_at
+      - device
+      - id
+      - location
+      - platform
+      - updated_at
     AppointmentCancelRequest:
       type: object
       description: '``POST appointments/{id}/cancel/``: optional ``reason`` (≤ 300),
@@ -14338,6 +15206,14 @@ components:
           type: boolean
         product_count:
           type: integer
+        seo:
+          allOf:
+          - $ref: '#/components/schemas/SeoTexts'
+          readOnly: true
+        seo_status:
+          allOf:
+          - $ref: '#/components/schemas/SeoStatus'
+          readOnly: true
         created_at:
           type: string
           format: date-time
@@ -14351,6 +15227,8 @@ components:
       - name
       - position
       - product_count
+      - seo
+      - seo_status
       - slug
       - updated_at
     CategoryFormRequest:
@@ -14375,6 +15253,24 @@ components:
         image:
           type: string
           format: binary
+        seo.uz.title:
+          type: string
+          maxLength: 120
+        seo.uz.description:
+          type: string
+          maxLength: 300
+        seo.ru.title:
+          type: string
+          maxLength: 120
+        seo.ru.description:
+          type: string
+          maxLength: 300
+        seo.en.title:
+          type: string
+          maxLength: 120
+        seo.en.description:
+          type: string
+          maxLength: 300
       required:
       - name.uz
       - slug
@@ -14426,6 +15322,8 @@ components:
         is_active:
           type: boolean
           default: true
+        seo:
+          $ref: '#/components/schemas/SeoTextsRequest'
       required:
       - name
       - slug
@@ -14592,6 +15490,9 @@ components:
       properties:
         id:
           type: integer
+        slug:
+          type: string
+          description: 'The website URL segment (B-W1): unique, editable.'
         name:
           type: string
         role:
@@ -14655,6 +15556,7 @@ components:
       - role
       - services
       - slot_step_min
+      - slug
       - staff_user
       - upcoming_appointments
       - updated_at
@@ -14704,6 +15606,11 @@ components:
         is_active:
           type: boolean
           default: false
+        slug:
+          type: string
+          minLength: 1
+          description: Optional on create (derived from the name).
+          maxLength: 160
       required:
       - name
       - role
@@ -15170,11 +16077,21 @@ components:
           nullable: true
         product_count:
           type: integer
+        updated_at:
+          type: string
+          format: date-time
+        seo_title:
+          type: string
+        seo_description:
+          type: string
       required:
       - image_url
       - name
       - product_count
+      - seo_description
+      - seo_title
       - slug
+      - updated_at
     CustomerCategoryList:
       type: object
       properties:
@@ -15484,6 +16401,22 @@ components:
       required:
       - password
       - phone
+    CustomerLogoutRequest:
+      type: object
+      description: |-
+        ``auth/logout/`` (B-W1): ``current`` = this session, ``others`` = every other session, ``all`` =
+        everywhere.
+      properties:
+        refresh:
+          type: string
+          minLength: 1
+          maxLength: 256
+        scope:
+          allOf:
+          - $ref: '#/components/schemas/LogoutScopeEnum'
+          default: current
+      required:
+      - refresh
     CustomerMe:
       type: object
       properties:
@@ -15835,6 +16768,43 @@ components:
       description: |-
         * `in_progress` - in_progress
         * `completed` - completed
+    CustomerSession:
+      type: object
+      description: One signed-in device of the customer (``CustomerSession``).
+      properties:
+        id:
+          type: string
+          format: uuid
+        device:
+          type: string
+          description: '"Chrome (Windows)", "Glow Derma iOS (iPhone 15)".'
+        platform:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/OrderChannelEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        location:
+          type: string
+          description: '"Tashkent, Tashkent, UZ"; "—" when unknown.'
+        created_at:
+          type: string
+          format: date-time
+          description: The sign-in.
+        updated_at:
+          type: string
+          format: date-time
+          description: The last activity (recorded at most every 5 minutes).
+        current:
+          type: boolean
+          description: This request's own session.
+      required:
+      - created_at
+      - current
+      - device
+      - id
+      - location
+      - platform
+      - updated_at
     CustomerShipment:
       type: object
       properties:
@@ -17575,10 +18545,12 @@ components:
       enum:
       - ios
       - android
+      - web
       type: string
       description: |-
         * `ios` - ios
         * `android` - android
+        * `web` - web
     OrderDetail:
       type: object
       description: Contract ``Order`` = ``OrderSummary`` + the detail keys (rendered
@@ -17862,6 +18834,27 @@ components:
         * `login_new_device` - login_new_device
         * `reset_password` - reset_password
         * `link_social` - link_social
+    PaginatedAdminCustomerSessionList:
+      type: object
+      required:
+      - count
+      - page
+      - page_size
+      - page_count
+      - results
+      properties:
+        count:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+        page_count:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminCustomerSession'
     PaginatedAuditEntryList:
       type: object
       required:
@@ -18051,6 +19044,27 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CustomerOrderSummary'
+    PaginatedCustomerSessionList:
+      type: object
+      required:
+      - count
+      - page
+      - page_size
+      - page_count
+      - results
+      properties:
+        count:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+        page_count:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/CustomerSession'
     PaginatedHoursOverrideList:
       type: object
       required:
@@ -18382,6 +19396,24 @@ components:
           format: binary
         remove_image:
           type: boolean
+        seo.uz.title:
+          type: string
+          maxLength: 120
+        seo.uz.description:
+          type: string
+          maxLength: 300
+        seo.ru.title:
+          type: string
+          maxLength: 120
+        seo.ru.description:
+          type: string
+          maxLength: 300
+        seo.en.title:
+          type: string
+          maxLength: 120
+        seo.en.description:
+          type: string
+          maxLength: 300
     PatchedCategoryPatchRequest:
       type: object
       description: |-
@@ -18397,6 +19429,8 @@ components:
         is_active:
           type: boolean
           default: true
+        seo:
+          $ref: '#/components/schemas/SeoTextsRequest'
         remove_image:
           type: boolean
           default: false
@@ -18501,6 +19535,11 @@ components:
         is_active:
           type: boolean
           default: false
+        slug:
+          type: string
+          minLength: 1
+          description: Optional on create (derived from the name).
+          maxLength: 160
         force:
           type: boolean
           default: false
@@ -18553,6 +19592,13 @@ components:
           allOf:
           - $ref: '#/components/schemas/ProductStatusEnum'
           default: hidden
+        slug:
+          type: string
+          minLength: 1
+          description: Optional on create (derived from the Uzbek name).
+          maxLength: 140
+        seo:
+          $ref: '#/components/schemas/SeoTextsRequest'
     PatchedSegmentWriteRequest:
       type: object
       description: '``POST segments/`` (``name`` 2..60 unique, ``rules``) and ``PATCH
@@ -18898,6 +19944,17 @@ components:
           - $ref: '#/components/schemas/LastChange'
           nullable: true
           readOnly: true
+        slug:
+          type: string
+          description: 'The website URL segment (B-W1): unique, editable.'
+        seo:
+          allOf:
+          - $ref: '#/components/schemas/SeoTexts'
+          readOnly: true
+        seo_status:
+          allOf:
+          - $ref: '#/components/schemas/SeoStatus'
+          readOnly: true
         created_at:
           type: string
           format: date-time
@@ -18917,6 +19974,9 @@ components:
       - main_image_url
       - price
       - promo
+      - seo
+      - seo_status
+      - slug
       - status
       - stock
       - texts
@@ -18927,6 +19987,9 @@ components:
       properties:
         id:
           type: integer
+        slug:
+          type: string
+          description: The website URL segment (B-W1); `catalog/products/{slug}/`.
         name:
           type: string
         volume:
@@ -18949,6 +20012,10 @@ components:
           $ref: '#/components/schemas/StockStatusEnum'
         in_cart_quantity:
           type: integer
+        updated_at:
+          type: string
+          format: date-time
+          description: Last change of the product page (sitemap `lastmod`).
       required:
       - available
       - category
@@ -18958,7 +20025,9 @@ components:
       - name
       - price
       - promo
+      - slug
       - stock_status
+      - updated_at
       - volume
     ProductCategory:
       type: object
@@ -18993,6 +20062,9 @@ components:
       properties:
         id:
           type: integer
+        slug:
+          type: string
+          description: The website URL segment (B-W1); `catalog/products/{slug}/`.
         name:
           type: string
         volume:
@@ -19015,6 +20087,10 @@ components:
           $ref: '#/components/schemas/StockStatusEnum'
         in_cart_quantity:
           type: integer
+        updated_at:
+          type: string
+          format: date-time
+          description: Last change of the product page (sitemap `lastmod`).
         description:
           type: string
         ingredients:
@@ -19027,6 +20103,12 @@ components:
             $ref: '#/components/schemas/CustomerProductImage'
         max_quantity:
           type: integer
+        seo_title:
+          type: string
+          description: Staff-written page title in this language; "" = none.
+        seo_description:
+          type: string
+          description: Staff-written meta description; "" = none.
       required:
       - available
       - category
@@ -19040,7 +20122,11 @@ components:
       - name
       - price
       - promo
+      - seo_description
+      - seo_title
+      - slug
       - stock_status
+      - updated_at
       - usage
       - volume
     ProductImage:
@@ -19252,6 +20338,13 @@ components:
           allOf:
           - $ref: '#/components/schemas/ProductStatusEnum'
           default: hidden
+        slug:
+          type: string
+          minLength: 1
+          description: Optional on create (derived from the Uzbek name).
+          maxLength: 140
+        seo:
+          $ref: '#/components/schemas/SeoTextsRequest'
       required:
       - billz_id
       - price
@@ -19715,6 +20808,14 @@ components:
       - phone
       - phone_mask
       - resolved_at
+    RevokedSessions:
+      type: object
+      properties:
+        revoked:
+          type: integer
+          minimum: 0
+      required:
+      - revoked
     ScheduleConflicts:
       type: object
       description: '``GET specialists/{id}/conflicts/``: open future appointments
@@ -19831,6 +20932,132 @@ components:
       required:
       - phone
       - purpose
+    SeoIssue:
+      type: object
+      properties:
+        code:
+          $ref: '#/components/schemas/SeoIssueCodeEnum'
+        severity:
+          $ref: '#/components/schemas/SeoSeverityEnum'
+        language:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/ContentLanguageEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        message:
+          type: string
+      required:
+      - code
+      - language
+      - message
+      - severity
+    SeoIssueCodeEnum:
+      enum:
+      - name_missing
+      - name_translation_missing
+      - description_missing
+      - description_short
+      - images_missing
+      - alt_text_fallback
+      - category_missing
+      - seo_title_missing
+      - seo_title_short
+      - seo_title_long
+      - seo_description_missing
+      - seo_description_short
+      - seo_description_long
+      - image_missing
+      - no_active_products
+      type: string
+      description: |-
+        * `name_missing` - name_missing
+        * `name_translation_missing` - name_translation_missing
+        * `description_missing` - description_missing
+        * `description_short` - description_short
+        * `images_missing` - images_missing
+        * `alt_text_fallback` - alt_text_fallback
+        * `category_missing` - category_missing
+        * `seo_title_missing` - seo_title_missing
+        * `seo_title_short` - seo_title_short
+        * `seo_title_long` - seo_title_long
+        * `seo_description_missing` - seo_description_missing
+        * `seo_description_short` - seo_description_short
+        * `seo_description_long` - seo_description_long
+        * `image_missing` - image_missing
+        * `no_active_products` - no_active_products
+    SeoSeverityEnum:
+      enum:
+      - error
+      - warning
+      - info
+      type: string
+      description: |-
+        * `error` - error
+        * `warning` - warning
+        * `info` - info
+    SeoStatus:
+      type: object
+      description: |-
+        «SEO holati» (B-W1): ``ok`` = no error and no warning; ``issues`` errors first, then warnings, then
+        hints (``info``: a fallback is used).
+      properties:
+        ok:
+          type: boolean
+        issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/SeoIssue'
+      required:
+      - issues
+      - ok
+    SeoText:
+      type: object
+      description: |-
+        One language of ``seo`` (B-W1): the page ``title`` (≤120) and meta ``description`` (≤300); ``""`` =
+        the website builds one from the name and description.
+      properties:
+        title:
+          type: string
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 300
+    SeoTextRequest:
+      type: object
+      description: |-
+        One language of ``seo`` (B-W1): the page ``title`` (≤120) and meta ``description`` (≤300); ``""`` =
+        the website builds one from the name and description.
+      properties:
+        title:
+          type: string
+          maxLength: 120
+        description:
+          type: string
+          maxLength: 300
+    SeoTexts:
+      type: object
+      description: |-
+        Language-first ``seo`` ``{uz: {title, description}, ru: …, en: …}``; every language and leaf optional
+        on write (merged leaf by leaf, like ``texts``).
+      properties:
+        uz:
+          $ref: '#/components/schemas/SeoText'
+        ru:
+          $ref: '#/components/schemas/SeoText'
+        en:
+          $ref: '#/components/schemas/SeoText'
+    SeoTextsRequest:
+      type: object
+      description: |-
+        Language-first ``seo`` ``{uz: {title, description}, ru: …, en: …}``; every language and leaf optional
+        on write (merged leaf by leaf, like ``texts``).
+      properties:
+        uz:
+          $ref: '#/components/schemas/SeoTextRequest'
+        ru:
+          $ref: '#/components/schemas/SeoTextRequest'
+        en:
+          $ref: '#/components/schemas/SeoTextRequest'
     ServiceCategoryEnum:
       enum:
       - dermatology
@@ -20261,6 +21488,9 @@ components:
       properties:
         id:
           type: integer
+        slug:
+          type: string
+          description: The website URL segment (B-W1); `specialists/{slug}/`.
         name:
           type: string
         role:
@@ -20290,6 +21520,10 @@ components:
           readOnly: true
         slot_step_min:
           type: integer
+        updated_at:
+          type: string
+          format: date-time
+          description: Last change of the specialist (sitemap `lastmod`).
       required:
       - bio
       - experience_years
@@ -20302,6 +21536,8 @@ components:
       - role_label
       - services
       - slot_step_min
+      - slug
+      - updated_at
     SpecialistDay:
       type: object
       properties:
