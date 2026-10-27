@@ -44,6 +44,23 @@ def client_ip(request: HttpRequest) -> str:
     return peer_ip(request)
 
 
+# Longest user agent kept (longer ones are cut); control characters are dropped.
+USER_AGENT_MAX = 512
+
+
+def client_user_agent(request: HttpRequest) -> str:
+    """The end user's browser or app user agent (B-W1 session list): the website's BFF forwards the
+    browser's as ``X-GD-Client-UA``, honoured only together with a valid ``X-GD-Internal-Secret`` (like
+    ``X-GD-Client-IP``); otherwise the request's own ``User-Agent``. Printable characters only, at most
+    ``USER_AGENT_MAX``."""
+    raw = ""
+    if has_internal_secret(request):
+        raw = str(request.META.get("HTTP_X_GD_CLIENT_UA", ""))
+    if not raw:
+        raw = str(request.META.get("HTTP_USER_AGENT", ""))
+    return "".join(char for char in raw if char.isprintable())[:USER_AGENT_MAX].strip()
+
+
 class ClientIPMiddleware:
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
         self.get_response = get_response

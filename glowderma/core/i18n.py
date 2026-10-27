@@ -563,6 +563,11 @@ CATALOG: Final[dict[str, dict[str, str]]] = {
         "ru": "У вас уже есть запись на это время.",
         "en": "You already have an appointment at this time.",
     },
+    "label.session.browser": {
+        "uz": "Veb-brauzer",
+        "ru": "Веб-браузер",
+        "en": "Web browser",
+    },
     "label.order_status.awaiting_payment": {
         "uz": "To‘lov kutilmoqda",
         "ru": "Ожидает оплаты",

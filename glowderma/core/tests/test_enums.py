@@ -10,7 +10,7 @@ CONTRACT_TABLE: dict[str, list[str]] = {
     "PaymentStatus": ["pending", "paid", "failed", "refunded"],
     "PaymentProvider": ["click", "payme"],
     "FulfilmentMethod": ["delivery", "pickup"],
-    "OrderChannel": ["ios", "android"],
+    "OrderChannel": ["ios", "android", "web"],
     "OrderPeriod": ["today", "week", "month", "all"],
     "EventSource": ["system", "bts", "admin"],
     "OrderEventType": [
@@ -88,6 +88,24 @@ CONTRACT_TABLE: dict[str, list[str]] = {
     "LogoutScope": ["current", "others", "all"],
     "ExportFormat": ["csv", "xlsx"],
     "IntegrationMode": ["fake", "live"],
+    "SeoSeverity": ["error", "warning", "info"],
+    "SeoIssueCode": [
+        "name_missing",
+        "name_translation_missing",
+        "description_missing",
+        "description_short",
+        "images_missing",
+        "alt_text_fallback",
+        "category_missing",
+        "seo_title_missing",
+        "seo_title_short",
+        "seo_title_long",
+        "seo_description_missing",
+        "seo_description_short",
+        "seo_description_long",
+        "image_missing",
+        "no_active_products",
+    ],
 }
 # Copied literally from docs/api/customer-api-v1.md section 3 (the enums marked new).
 CUSTOMER_TABLE: dict[str, list[str]] = {

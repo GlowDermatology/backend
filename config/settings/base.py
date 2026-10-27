@@ -123,6 +123,9 @@ GIT_SHA = env_str("GIT_SHA", "dev")
 # the FAKE_NOW variable; production refuses it.
 FAKE_NOW: datetime | None = None
 TRUSTED_PROXIES: tuple[Network, ...] = ()
+# B-W1 session list (customer contract §2.2.10): path of a local GeoIP City .mmdb (MaxMind GeoLite2-City or
+# DB-IP City Lite), mounted read-only; empty = no location ("—"). No online lookup service is ever used.
+GEOIP_CITY_DB = env_str("GEOIP_CITY_DB", "")
 # Celery: at-least-once delivery (acks late, requeue on worker loss), one task in flight per worker
 # process, hard limits so a stuck provider call cannot hold a worker forever.
 CELERY_TASK_ACKS_LATE = True
@@ -435,9 +438,14 @@ if ANDROID_SMS_APP_HASH and len(ANDROID_SMS_APP_HASH) != 11:
 SOCIAL_TICKET_TTL_SECONDS = env_positive_int("SOCIAL_TICKET_TTL_SECONDS", 600)
 SOCIAL_NONCE_TTL_SECONDS = env_positive_int("SOCIAL_NONCE_TTL_SECONDS", 600)
 GOOGLE_APP_CLIENT_IDS = env_list("GOOGLE_APP_CLIENT_IDS", [])
+GOOGLE_WEB_CLIENT_IDS = env_list("GOOGLE_WEB_CLIENT_IDS", [])
 # Sign in with Apple (product-owner decision 2026-10-26): empty = provider "apple" off (live) / fake
 # (local/test).
 APPLE_BUNDLE_IDS = env_list("APPLE_BUNDLE_IDS", [])
+# B-W1 customer website: Sign in with Apple JS Services IDs (comma separated) and the redirect URI its
+# authorization uses (the code exchange must repeat it); Google Identity Services web client ids.
+APPLE_SERVICES_IDS = env_list("APPLE_SERVICES_IDS", [])
+APPLE_WEB_REDIRECT_URI = env_str("APPLE_WEB_REDIRECT_URI", "")
 APPLE_TEAM_ID = env_str("APPLE_TEAM_ID", "")
 APPLE_KEY_ID = env_str("APPLE_KEY_ID", "")
 APPLE_PRIVATE_KEY_FILE = env_str("APPLE_PRIVATE_KEY_FILE", "")
@@ -462,6 +470,19 @@ CHECKOUT_MIN_PAYABLE = env_positive_int("CHECKOUT_MIN_PAYABLE", 1000)
 PAYMENT_IN_FLIGHT_GRACE_SECONDS = env_positive_int("PAYMENT_IN_FLIGHT_GRACE_SECONDS", 300)
 PAYMENT_RETURN_URL = env_str("PAYMENT_RETURN_URL", "https://glowderma.uz/pay/return")
 PAYMENT_RETURN_FALLBACK_URL = env_str("PAYMENT_RETURN_FALLBACK_URL", "glowderma://payment/return")
+# The website's return page (B-W1; used when the pay request comes from X-GD-Platform: web): a template with
+# {order_id} (required), {lang} (uz|ru|en) and {locale_prefix} ("" for uz, "/ru", "/en"); no app link.
+PAYMENT_WEB_RETURN_URL = env_str(
+    "PAYMENT_WEB_RETURN_URL", "https://glowderma.uz{locale_prefix}/buyurtmalar/{order_id}?paid=1"
+)
+try:
+    _web_return_probe = PAYMENT_WEB_RETURN_URL.format(order_id=1, lang="uz", locale_prefix="")
+except (KeyError, IndexError, ValueError) as _exc:
+    raise ImproperlyConfigured(
+        "PAYMENT_WEB_RETURN_URL may only use the {order_id}, {lang} and {locale_prefix} placeholders"
+    ) from _exc
+if "{order_id}" not in PAYMENT_WEB_RETURN_URL or not _web_return_probe.startswith(("https://", "http://")):
+    raise ImproperlyConfigured("PAYMENT_WEB_RETURN_URL must be an http(s) URL containing {order_id}")
 # Click SHOP API (C§2.13.1).
 CLICK_SERVICE_ID = env_value("CLICK_SERVICE_ID", "00000")
 CLICK_MERCHANT_ID = env_value("CLICK_MERCHANT_ID", "00000")

@@ -97,16 +97,20 @@ def device_headers(*, required: bool = True) -> list[OpenApiParameter]:
             type=OpenApiTypes.STR,
             location=OpenApiParameter.HEADER,
             required=required,
-            enum=["ios", "android"],
-            description="Device platform (`OrderChannel` literals).",
+            enum=["ios", "android", "web"],
+            description="Device platform (`OrderChannel` literals); `web` = the website's server-side BFF.",
         ),
         OpenApiParameter(
             name="X-GD-App-Version",
             type=OpenApiTypes.STR,
             location=OpenApiParameter.HEADER,
-            required=required,
+            # required with ios/android wherever the device id is; optional (and never floored) for web
+            required=False,
             pattern=r"^\d{1,3}\.\d{1,3}\.\d{1,3}$",
-            description="App version; below the platform's minimum → 426 `app_update_required`.",
+            description=(
+                "App version, required with `ios`/`android` (below the platform's minimum → 426 "
+                "`app_update_required`); optional for `web`, where no minimum applies."
+            ),
         ),
     ]
 

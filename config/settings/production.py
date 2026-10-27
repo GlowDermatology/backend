@@ -15,6 +15,8 @@ from config.env import env_bool, env_int, env_json, env_list, env_networks, env_
 from .base import *  # noqa: F403
 from .base import (
     APPLE_BUNDLE_IDS,
+    APPLE_SERVICES_IDS,
+    APPLE_WEB_REDIRECT_URI,
     BILLZ_BASE_URL,
     BILLZ_CASHBOX_ID,
     BILLZ_MODE,
@@ -36,6 +38,7 @@ from .base import (
     OAUTH_MODE,
     PAYME_CHECKOUT_URL,
     PAYME_MODE,
+    PAYMENT_WEB_RETURN_URL,
     database_config,
     redis_db_url,
 )
@@ -248,7 +251,7 @@ def _decoded_placeholders() -> set[bytes]:
 if _secretbox_raw in _decoded_placeholders():
     raise ImproperlyConfigured("SECRETBOX_KEY is a committed placeholder value; generate a real secret")
 # Sign in with Apple, live: the ES256 client secret needs the team id, the key id and a P-256 private key.
-if OAUTH_MODE == "live" and APPLE_BUNDLE_IDS:
+if OAUTH_MODE == "live" and (APPLE_BUNDLE_IDS or APPLE_SERVICES_IDS):
     for _name in ("APPLE_TEAM_ID", "APPLE_KEY_ID"):
         _refuse_placeholder(_name, env_str(_name))
     try:
@@ -269,6 +272,12 @@ def _https_url(name: str, value: str) -> None:
     parts = urlsplit(value)
     if parts.scheme != "https" or not parts.netloc or "change-me" in value.lower():
         raise ImproperlyConfigured(f"{name} must be an https URL")
+
+
+_https_url("PAYMENT_WEB_RETURN_URL", PAYMENT_WEB_RETURN_URL.format(order_id=1, lang="uz", locale_prefix=""))
+if OAUTH_MODE == "live" and APPLE_SERVICES_IDS:
+    # the website's Sign in with Apple code exchange repeats the redirect URI its authorization used (B-W1)
+    _https_url("APPLE_WEB_REDIRECT_URI", APPLE_WEB_REDIRECT_URI)
 
 
 def _required(name: str) -> str:
