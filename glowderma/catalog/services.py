@@ -24,7 +24,14 @@ from django.db.models import Q
 from rest_framework.exceptions import NotFound, ValidationError
 
 from glowderma.catalog import selectors
-from glowderma.catalog.models import Banner, Category, Product, ProductImage, ProductStock
+from glowderma.catalog.models import (
+    PRODUCT_SLUG_CONSTRAINT,
+    Banner,
+    Category,
+    Product,
+    ProductImage,
+    ProductStock,
+)
 from glowderma.core import audit, enums, integration_modes, timeutils
 from glowderma.core.api.exceptions import Conflict, field_error
 from glowderma.core.images import ImageError, ProcessedImage, process_image
@@ -42,6 +49,8 @@ CATEGORY_HAS_PRODUCTS = "Kategoriyada mahsulotlar bor."
 CATEGORY_LOCK = "catalog_category_position"
 BANNER_LOCK = "catalog_banner_position"
 BILLZ_ID_TAKEN = "Bu Billz ID bilan mahsulot allaqachon bor."
+PRODUCT_SLUG_TAKEN = "Bu manzil (slug) boshqa mahsulotda bor."
+SEO_FIELDS = ("title", "description")
 # Admin contract §2.3/§2.14, customer contract §2.3/§6.14: a fake Billz under the production settings never
 # invents or refreshes Billz fields or stock.
 BILLZ_FAKE_MODE = (
@@ -101,7 +110,11 @@ def _save_unique(save: Any, constraint: str, field: str, message: str | None = N
 
 
 def _save_product(product: Product) -> None:
-    _save_unique(product.save, PRODUCT_BILLZ_ID_CONSTRAINT, "billz_id", BILLZ_ID_TAKEN)
+    def save() -> None:
+        # a slug another request took meanwhile is the slug field's unique error, not a 500
+        _save_unique(product.save, PRODUCT_SLUG_CONSTRAINT, "slug", PRODUCT_SLUG_TAKEN)
+
+    _save_unique(save, PRODUCT_BILLZ_ID_CONSTRAINT, "billz_id", BILLZ_ID_TAKEN)
 
 
 def _process(uploaded: Any, field: str) -> ProcessedImage:
@@ -126,6 +139,23 @@ class ProductInput:
     category_set: bool = False  # distinguishes "category": null from an absent key
     promo: bool | None = None
     status: str | None = None
+    slug: str | None = None  # B-W1: an edited website URL segment (None = keep / derive on create)
+    seo: dict[str, dict[str, str]] | None = None  # B-W1: language-first {title, description}, leaf merge
+
+
+def _apply_seo(obj: Any, seo: dict[str, dict[str, str]] | None) -> None:
+    """Merge ``seo`` (B-W1, language-first ``{title, description}`` leaves) into ``seo_<leaf>_<language>``."""
+    for language, leaves in (seo or {}).items():
+        for leaf, value in leaves.items():
+            setattr(obj, f"seo_{leaf}_{language}", value.strip())
+
+
+def _seo_snapshot(obj: Any) -> dict[str, Any]:
+    return {
+        f"seo.{language}.{leaf}": getattr(obj, f"seo_{leaf}_{language}")
+        for language in LANGUAGES
+        for leaf in SEO_FIELDS
+    }
 
 
 def product_snapshot(product: Product) -> dict[str, Any]:
@@ -140,6 +170,8 @@ def product_snapshot(product: Product) -> dict[str, Any]:
     for language in LANGUAGES:
         for field in TEXT_FIELDS:
             snapshot[f"texts.{language}.{field}"] = getattr(product, f"{field}_{language}")
+    snapshot["slug"] = product.slug
+    snapshot.update(_seo_snapshot(product))
     return snapshot
 
 
@@ -232,6 +264,9 @@ def create_product(data: ProductInput, *, actor: Any, request: Any = None) -> Pr
         _apply_billz(product, data.billz_product)
         if data.texts:
             _apply_texts(product, data.texts)
+        _apply_seo(product, data.seo)
+        if data.slug:
+            product.slug = data.slug
         _check_active_rule(product, image_count=0)
         _set_last_change(product, enums.ProductChangeKind.CREATED, actor, None)
         _save_product(product)
@@ -275,6 +310,9 @@ def update_product(product_id: int, data: ProductInput, *, actor: Any, request: 
             product.promo = data.promo
         if data.status is not None:
             product.status = data.status
+        if data.slug:
+            product.slug = data.slug
+        _apply_seo(product, data.seo)
         _check_active_rule(product, image_count=product.images.count())
         after = product_snapshot(product)
         product.is_new_from_billz = False
@@ -308,6 +346,12 @@ def _locked_product(product_id: int) -> Product:
     if product is None:
         raise NotFound
     return product
+
+
+def _touch_product(product_id: int) -> None:
+    """A gallery change is a change of the product page: ``updated_at`` moves (the website's sitemap
+    ``lastmod``, B-W1); ``last_change`` does not (contract §2.3)."""
+    Product.objects.filter(pk=product_id).update(updated_at=timeutils.now())
 
 
 def _ordered_images(product: Product) -> list[ProductImage]:
@@ -344,6 +388,7 @@ def add_image(product_id: int, uploaded: Any, *, actor: Any, request: Any = None
         )
         image.file = ContentFile(processed.content, name=_basename(name))
         image.save()
+        _touch_product(product.pk)
         audit.record(
             action="product.image_added",
             entity_type="product",
@@ -371,6 +416,7 @@ def delete_image(product_id: int, image_id: int, *, actor: Any, request: Any = N
         _delete_file_on_commit(image.file)
         image.delete()  # nulls ``image.pk``: the remaining list is computed above
         _compact_positions(remaining)
+        _touch_product(product.pk)
         audit.record(
             action="product.image_deleted",
             entity_type="product",
@@ -393,6 +439,8 @@ def reorder_images(
             raise ValidationError({"image_ids": [field_error("mismatch")]})
         by_id = {image.pk: image for image in images}
         _compact_positions([by_id[image_id] for image_id in image_ids])
+        if list(image_ids) != current:
+            _touch_product(product.pk)
         audit.record(
             action="product.images_reordered",
             entity_type="product",
@@ -417,6 +465,7 @@ def _category_snapshot(category: Category) -> dict[str, Any]:
         "is_active": category.is_active,
         "position": category.position,
         "image": category.image.name or None,  # content-addressed: categories/<id>/<sha256[:16]>.<ext>
+        **_seo_snapshot(category),
     }
 
 
@@ -472,6 +521,7 @@ def create_category(
     *,
     is_active: bool = True,
     image: Any = None,
+    seo: dict[str, dict[str, str]] | None = None,
     actor: Any,
     request: Any = None,
 ) -> Category:
@@ -488,6 +538,7 @@ def create_category(
             is_active=is_active,
             position=_next_position(Category),
         )
+        _apply_seo(category, seo)
         _save_unique(category.save, CATEGORY_SLUG_CONSTRAINT, "slug")
         if processed is not None:
             _store_category_image(category, processed, stored)
@@ -509,6 +560,7 @@ def update_category(
     is_active: bool | None = None,
     image: Any = None,
     remove_image: bool = False,
+    seo: dict[str, dict[str, str]] | None = None,
     actor: Any,
     request: Any = None,
 ) -> Category:
@@ -524,6 +576,7 @@ def update_category(
             setattr(locked, f"name_{language}", value)
         if is_active is not None:
             locked.is_active = is_active
+        _apply_seo(locked, seo)
         locked.save()
         if processed is not None:
             _store_category_image(locked, processed, stored)

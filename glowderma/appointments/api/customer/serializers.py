@@ -18,6 +18,7 @@ from glowderma.appointments.models import Appointment
 from glowderma.appointments.services import ACCOUNT_DELETED_REASON
 from glowderma.core import enums, i18n, timeutils
 from glowderma.core.api.exceptions import field_error
+from glowderma.core.api.fields import AwareDateTimeField
 from glowderma.core.media import absolute_media_url
 from glowderma.professionals.models import Location, Professional, ProfessionalService
 
@@ -79,6 +80,7 @@ class SpecialistServiceSerializer(serializers.Serializer[ProfessionalService]):
 
 class SpecialistSerializer(serializers.Serializer[Professional]):
     id = serializers.IntegerField()
+    slug = serializers.CharField(help_text="The website URL segment (B-W1); `specialists/{slug}/`.")
     name = serializers.CharField()
     role = serializers.ChoiceField(choices=enums.SpecialistRole.values)
     role_label = serializers.SerializerMethodField()
@@ -89,6 +91,7 @@ class SpecialistSerializer(serializers.Serializer[Professional]):
     location = LocationSerializer()
     services = serializers.SerializerMethodField()
     slot_step_min = serializers.IntegerField()
+    updated_at = AwareDateTimeField(help_text="Last change of the specialist (sitemap `lastmod`).")
 
     def get_role_label(self, obj: Professional) -> str:
         return i18n.t(f"label.role.{obj.role}", _lang(self))

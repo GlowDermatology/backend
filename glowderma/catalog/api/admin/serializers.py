@@ -12,9 +12,9 @@ from typing import Any, cast
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
-from glowderma.catalog import billz, selectors, services
+from glowderma.catalog import billz, selectors, seo, services
 from glowderma.catalog.models import Banner, Category, Product, ProductImage
-from glowderma.core import enums
+from glowderma.core import enums, slugs
 from glowderma.core.api.exceptions import FIELD_MESSAGES, ProviderUnavailable, field_error
 from glowderma.core.api.fields import (
     AwareDateTimeField,
@@ -114,6 +114,63 @@ class ProductTextsPatchSerializer(ProductTextsSerializer):
     uz = ProductUzTextPatchSerializer(required=False)
 
 
+class SeoTextSerializer(serializers.Serializer[dict[str, str]]):
+    """One language of ``seo`` (B-W1): the page ``title`` (≤120) and meta ``description`` (≤300); ``""`` =
+    the website builds one from the name and description."""
+
+    title = serializers.CharField(max_length=120, allow_blank=True, required=False)
+    description = serializers.CharField(max_length=300, allow_blank=True, required=False)
+
+
+class SeoTextsSerializer(serializers.Serializer[dict[str, Any]]):
+    """Language-first ``seo`` ``{uz: {title, description}, ru: …, en: …}``; every language and leaf optional
+    on write (merged leaf by leaf, like ``texts``)."""
+
+    uz = SeoTextSerializer(required=False)
+    ru = SeoTextSerializer(required=False)
+    en = SeoTextSerializer(required=False)
+
+
+class SeoIssueSerializer(serializers.Serializer[dict[str, Any]]):
+    code = serializers.ChoiceField(choices=enums.SeoIssueCode.values)
+    severity = serializers.ChoiceField(choices=enums.SeoSeverity.values)
+    language = serializers.ChoiceField(choices=enums.ContentLanguage.values, allow_null=True)
+    message = serializers.CharField()
+
+
+class SeoStatusSerializer(serializers.Serializer[dict[str, Any]]):
+    """«SEO holati» (B-W1): ``ok`` = no error and no warning; ``issues`` errors first, then warnings, then
+    hints (``info``: a fallback is used)."""
+
+    ok = serializers.BooleanField()
+    issues = SeoIssueSerializer(many=True)
+
+
+def seo_texts(obj: Any) -> dict[str, dict[str, str]]:
+    return {
+        language: {
+            "title": getattr(obj, f"seo_title_{language}") or "",
+            "description": getattr(obj, f"seo_description_{language}") or "",
+        }
+        for language in services.LANGUAGES
+    }
+
+
+def validate_product_slug(value: str, *, current: Product | None) -> str:
+    """An edited product slug: ``^[a-z0-9]+(-[a-z0-9]+)*$``, not only digits, ≤140, unique."""
+    value = value.strip()
+    if not slugs.is_valid_slug(value, max_length=140):
+        raise serializers.ValidationError(
+            [field_error("invalid", "Faqat lotin kichik harflari, raqamlar va chiziqcha (faqat raqam emas).")]
+        )
+    others = Product.objects.filter(slug=value)
+    if current is not None:
+        others = others.exclude(pk=current.pk)
+    if others.exists():
+        raise serializers.ValidationError([field_error("unique", services.PRODUCT_SLUG_TAKEN)])
+    return value
+
+
 class LastChangeSerializer(serializers.Serializer[Product]):
     at = serializers.DateTimeField(source="last_change_at")
     actor = ActorSerializer(source="last_change_actor", allow_null=True)
@@ -150,8 +207,19 @@ class ProductSerializer(serializers.Serializer[Product]):
     main_image_url = serializers.SerializerMethodField()
     images = serializers.SerializerMethodField()
     last_change = serializers.SerializerMethodField()
+    slug = serializers.CharField(help_text="The website URL segment (B-W1): unique, editable.")
+    seo = serializers.SerializerMethodField()
+    seo_status = serializers.SerializerMethodField()
     created_at = serializers.DateTimeField()
     updated_at = serializers.DateTimeField()
+
+    @extend_schema_field(SeoTextsSerializer())
+    def get_seo(self, obj: Product) -> dict[str, dict[str, str]]:
+        return seo_texts(obj)
+
+    @extend_schema_field(SeoStatusSerializer())
+    def get_seo_status(self, obj: Product) -> dict[str, Any]:
+        return seo.status_payload(seo.product_issues(obj, image_count=len(self._images(obj))))
 
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_category(self, obj: Product) -> str | None:
@@ -251,6 +319,10 @@ class ProductWriteSerializer(serializers.Serializer[Any]):
     status = serializers.ChoiceField(
         choices=enums.ProductStatus.values, required=False, default=enums.ProductStatus.HIDDEN
     )
+    slug = serializers.CharField(
+        max_length=140, required=False, help_text="Optional on create (derived from the Uzbek name)."
+    )
+    seo = SeoTextsSerializer(required=False)
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -292,6 +364,9 @@ class ProductWriteSerializer(serializers.Serializer[Any]):
             raise serializers.ValidationError([field_error("does_not_exist")])
         return category
 
+    def validate_slug(self, value: str) -> str:
+        return validate_product_slug(value, current=self.product)
+
     def to_input(self) -> services.ProductInput:
         data = self.validated_data
         return services.ProductInput(
@@ -303,6 +378,8 @@ class ProductWriteSerializer(serializers.Serializer[Any]):
             category_set="category" in data,
             promo=data.get("promo"),
             status=data.get("status"),
+            slug=data.get("slug"),
+            seo=data.get("seo"),
         )
 
 
@@ -340,12 +417,25 @@ class CategorySerializer(serializers.Serializer[Category]):
     position = serializers.IntegerField()
     is_active = serializers.BooleanField()
     product_count = serializers.IntegerField()
+    seo = serializers.SerializerMethodField()
+    seo_status = serializers.SerializerMethodField()
     created_at = serializers.DateTimeField()
     updated_at = serializers.DateTimeField()
 
     @extend_schema_field(i18n_text(60))
     def get_name(self, obj: Category) -> dict[str, str]:
         return i18n_dict(obj, "name")
+
+    @extend_schema_field(SeoTextsSerializer())
+    def get_seo(self, obj: Category) -> dict[str, dict[str, str]]:
+        return seo_texts(obj)
+
+    @extend_schema_field(SeoStatusSerializer())
+    def get_seo_status(self, obj: Category) -> dict[str, Any]:
+        active = getattr(obj, "active_product_count", None)
+        if active is None:
+            active = obj.products.filter(status=enums.ProductStatus.ACTIVE).count()
+        return seo.status_payload(seo.category_issues(obj, active_products=int(active)))
 
     @extend_schema_field(serializers.URLField(allow_null=True))
     def get_image_url(self, obj: Category) -> str | None:
@@ -368,6 +458,7 @@ class CategoryWriteSerializer(serializers.Serializer[Any]):
     slug = SlugField()
     name = CategoryNameSerializer()
     is_active = serializers.BooleanField(required=False, default=True)
+    seo = SeoTextsSerializer(required=False)
 
     def to_internal_value(self, data: Any) -> dict[str, Any]:
         if self.instance is not None and isinstance(data, dict) and "slug" in data:

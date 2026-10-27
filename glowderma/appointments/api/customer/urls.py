@@ -7,6 +7,7 @@ from .views import (
     AppointmentCreateView,
     MyAppointmentsViewSet,
     ServiceListView,
+    SpecialistBySlugView,
     SpecialistDetailView,
     SpecialistListView,
     SpecialistSlotsView,
@@ -16,6 +17,7 @@ urlpatterns: list[URLPattern | URLResolver] = [
     path("specialists/", SpecialistListView.as_view(), name="customer-specialists"),
     path("specialists/<int:pk>/", SpecialistDetailView.as_view(), name="customer-specialist"),
     path("specialists/<int:pk>/slots/", SpecialistSlotsView.as_view(), name="customer-specialist-slots"),
+    path("specialists/<slug:slug>/", SpecialistBySlugView.as_view(), name="customer-specialist-by-slug"),
     path("services/", ServiceListView.as_view(), name="customer-services"),
     path("appointments/", AppointmentCreateView.as_view(), name="customer-appointments"),
     path(

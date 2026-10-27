@@ -60,9 +60,13 @@ def order_products(qs: QuerySet[Product], ordering: str) -> QuerySet[Product]:
 
 def category_queryset() -> QuerySet[Category]:
     """Contract §2.4: ordered by position, ``product_count`` = every product of the category (any status)."""
-    return Category.objects.annotate(product_count=Count("products", distinct=True)).order_by(
-        "position", "id"
-    )
+    return Category.objects.annotate(
+        product_count=Count("products", distinct=True),
+        # B-W1 «SEO holati»: a category without an active product is an empty page on the website
+        active_product_count=Count(
+            "products", filter=Q(products__status=enums.ProductStatus.ACTIVE), distinct=True
+        ),
+    ).order_by("position", "id")
 
 
 def banner_queryset() -> QuerySet[Banner]:

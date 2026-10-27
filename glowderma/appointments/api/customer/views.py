@@ -82,6 +82,20 @@ class SpecialistDetailView(PublicAPIView):
         return Response(SpecialistSerializer(professional, context={"lang": self.language}).data)
 
 
+class SpecialistBySlugView(PublicAPIView):
+    @extend_schema(
+        operation_id="customer_specialists_by_slug_retrieve",
+        description="One active specialist by its website slug (B-W1; 404 when inactive or unknown).",
+        parameters=PUBLIC_HEADERS,
+        responses={200: SpecialistSerializer, **PUBLIC_CUSTOMER_ERRORS},
+    )
+    def get(self, request: Request, slug: str) -> Response:
+        professional = selectors.specialist_by_slug(slug)
+        if professional is None:
+            raise Http404
+        return Response(SpecialistSerializer(professional, context={"lang": self.language}).data)
+
+
 class ServiceListView(PublicAPIView):
     @extend_schema(
         operation_id="customer_services_list",

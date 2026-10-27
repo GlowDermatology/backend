@@ -237,6 +237,13 @@ CategoryFormSerializer = inline_serializer(
         "name.en": serializers.CharField(max_length=60, required=False, allow_blank=True),
         "is_active": serializers.BooleanField(required=False),
         "image": serializers.FileField(required=False),
+        **{
+            f"seo.{language}.{leaf}": serializers.CharField(
+                max_length=limit, required=False, allow_blank=True
+            )
+            for language in ("uz", "ru", "en")
+            for leaf, limit in (("title", 120), ("description", 300))
+        },
     },
 )
 
@@ -250,6 +257,13 @@ CategoryPatchFormSerializer = inline_serializer(
         "is_active": serializers.BooleanField(required=False),
         "image": serializers.FileField(required=False),
         "remove_image": serializers.BooleanField(required=False),
+        **{
+            f"seo.{language}.{leaf}": serializers.CharField(
+                max_length=limit, required=False, allow_blank=True
+            )
+            for language in ("uz", "ru", "en")
+            for leaf, limit in (("title", 120), ("description", 300))
+        },
     },
 )
 
@@ -325,6 +339,7 @@ class CategoryViewSet(ExportMixin, mixins.ListModelMixin, ActionParsersViewSet):
             data["name"],
             is_active=data["is_active"],
             image=_category_image(request),
+            seo=data.get("seo"),
             actor=request.user,
             request=request,
         )
@@ -364,6 +379,7 @@ class CategoryViewSet(ExportMixin, mixins.ListModelMixin, ActionParsersViewSet):
             is_active=data.get("is_active"),
             image=image,
             remove_image=remove_image,
+            seo=data.get("seo"),
             actor=request.user,
             request=request,
         )

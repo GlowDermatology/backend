@@ -579,6 +579,7 @@ def product_cards(products: list[Product], lang: str, customer_id: int | None = 
         cards.append(
             {
                 "id": product.pk,
+                "slug": product.slug,
                 "name": product_name(product, lang),
                 "volume": product.volume,
                 "price": product.price,
@@ -592,6 +593,7 @@ def product_cards(products: list[Product], lang: str, customer_id: int | None = 
                     enums.StockStatus.IN_STOCK if quantity > 0 else enums.StockStatus.OUT_OF_STOCK
                 ).value,
                 "in_cart_quantity": int(in_cart.get(product.pk, 0)),
+                "updated_at": product.updated_at,
             }
         )
     return cards
@@ -609,6 +611,17 @@ def product_detail(product: Product, lang: str, customer_id: int | None = None) 
             {"id": image.pk, "url": media_url(image.file), "position": image.position} for image in images
         ],
         "max_quantity": min(card["available"], int(settings.CART_MAX_QTY_PER_LINE)),
+        **seo_payload(product, lang),
+    }
+
+
+def seo_payload(obj: Any, lang: str) -> dict[str, str]:
+    """``seo_title`` / ``seo_description`` (B-W1) in the resolved language only — never another language's
+    text in a page's meta tags; ``""`` = the website builds them (name, volume, category, price)."""
+    language = lang if lang in enums.ContentLanguage.values else enums.ContentLanguage.UZ
+    return {
+        "seo_title": str(getattr(obj, f"seo_title_{language}", "") or ""),
+        "seo_description": str(getattr(obj, f"seo_description_{language}", "") or ""),
     }
 
 
@@ -618,4 +631,6 @@ def category_payload(category: Category, lang: str) -> dict[str, Any]:
         "name": localized_field(category, "name", lang),
         "image_url": media_url(category.image),
         "product_count": int(getattr(category, "product_count", 0)),
+        "updated_at": category.updated_at,
+        **seo_payload(category, lang),
     }
