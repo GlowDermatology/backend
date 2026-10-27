@@ -2498,7 +2498,7 @@ failures) never reach the customer. Events of a late-captured payment (§2.13.0)
 | `cashback_credited` | folded into `payment_confirmed` | – | – |
 | `billz_sale_recorded` | hidden | – | – |
 | `payment_failed` | shown | "To‘lov amalga oshmadi" · `label.timeline.payment_failed` | "{provider} · qayta urinib ko‘ring" while `awaiting_payment` (`label.timeline.sub_payment_failed_retry`), else "{provider}" (`label.timeline.sub_provider`) |
-| `shipment_created` | shown | "Yetkazib berishga topshirildi" · `label.timeline.shipment_created` | "BTS kuzatuv raqami: {tracking_number}" · `label.timeline.sub_tracking` |
+| `shipment_created` | shown | "Yetkazib berish rasmiylashtirildi" · `label.timeline.shipment_created` (the BTS order is created right after payment, live and fake alike — spec "After payment", `docs/integrations/bts.md` — while the order is still `processing`; the label says the delivery is booked, not that the parcel left: that is `handed_to_courier`. Wording changed in `feat/customer-web` from "Yetkazib berishga topshirildi") | "BTS kuzatuv raqami: {tracking_number}" · `label.timeline.sub_tracking` |
 | `shipment_failed` | hidden (staff retry; the order stays "Tayyorlanmoqda") | – | – |
 | `status_changed` → `handed_to_courier` | shown as `handed_to_courier` | "Kuryerga topshirildi" · `label.timeline.handed_to_courier` | null |
 | `status_changed` → `delivered` | shown as `delivered` | delivery "Yetkazildi" · `label.timeline.delivered`; pickup "Olib ketildi" · `label.timeline.picked_up` | null |
@@ -2512,7 +2512,7 @@ failures) never reach the customer. Events of a late-captured payment (§2.13.0)
 
 Order №10248 test vector (admin §4 events) → customer timeline, newest first:
 1. `handed_to_courier` "Kuryerga topshirildi" — "BTS"
-2. `shipment_created` "Yetkazib berishga topshirildi" — "BTS kuzatuv raqami: 48213907"
+2. `shipment_created` "Yetkazib berish rasmiylashtirildi" — "BTS kuzatuv raqami: 48213907"
 3. `payment_confirmed` "To‘lov qabul qilindi" — "Click orqali · cashback +5 680 so‘m"
 4. `order_created` "Buyurtma berildi" — "3 ta mahsulot · 784 400 so‘m"
 
@@ -2730,7 +2730,7 @@ code a customer view can raise to an existing key.
 | `label.timeline.payment_failed` | To‘lov amalga oshmadi | Оплата не прошла | Payment failed |
 | `label.timeline.sub_payment_failed_retry` | {provider} · qayta urinib ko‘ring | {provider} · попробуйте ещё раз | {provider} · please try again |
 | `label.timeline.sub_provider` | {provider} | {provider} | {provider} |
-| `label.timeline.shipment_created` | Yetkazib berishga topshirildi | Передан в доставку | Handed over for delivery |
+| `label.timeline.shipment_created` | Yetkazib berish rasmiylashtirildi | Доставка оформлена | Delivery booked |
 | `label.timeline.sub_tracking` | BTS kuzatuv raqami: {tracking_number} | Трек-номер BTS: {tracking_number} | BTS tracking number: {tracking_number} |
 | `label.timeline.handed_to_courier` | Kuryerga topshirildi | Передан курьеру | With the courier |
 | `label.timeline.delivered` | Yetkazildi | Доставлен | Delivered |

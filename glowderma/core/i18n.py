@@ -769,9 +769,9 @@ CATALOG: Final[dict[str, dict[str, str]]] = {
         "en": "{provider}",
     },
     "label.timeline.shipment_created": {
-        "uz": "Yetkazib berishga topshirildi",
-        "ru": "Передан в доставку",
-        "en": "Handed over for delivery",
+        "uz": "Yetkazib berish rasmiylashtirildi",
+        "ru": "Доставка оформлена",
+        "en": "Delivery booked",
     },
     "label.timeline.sub_tracking": {
         "uz": "BTS kuzatuv raqami: {tracking_number}",

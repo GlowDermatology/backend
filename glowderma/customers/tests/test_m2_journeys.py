@@ -792,7 +792,7 @@ def test_journey_2_cart_checkout_click_and_order_timeline(world: World) -> None:
         and tracking
     )
     assert [(e["type"], e["title"], e["subtitle"]) for e in detail["timeline"]] == [
-        ("shipment_created", "Yetkazib berishga topshirildi", f"BTS kuzatuv raqami: {tracking}"),
+        ("shipment_created", "Yetkazib berish rasmiylashtirildi", f"BTS kuzatuv raqami: {tracking}"),
         ("payment_confirmed", "To‘lov qabul qilindi", f"Click orqali · cashback +{som(earned)} so‘m"),
         ("order_created", "Buyurtma berildi", f"{detail['item_count']} ta mahsulot · {som(total)} so‘m"),
     ]

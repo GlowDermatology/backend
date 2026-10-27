@@ -93,7 +93,7 @@ def test_the_10248_timeline_vector(customer_client: APIClient, customer: Custome
     uz = customer_client.get(url).json()["timeline"]
     assert [(e["type"], e["title"], e["subtitle"]) for e in uz] == [
         ("handed_to_courier", "Kuryerga topshirildi", "BTS"),
-        ("shipment_created", "Yetkazib berishga topshirildi", "BTS kuzatuv raqami: 48213907"),
+        ("shipment_created", "Yetkazib berish rasmiylashtirildi", "BTS kuzatuv raqami: 48213907"),
         ("payment_confirmed", "To‘lov qabul qilindi", "Click orqali · cashback +5 680 so‘m"),
         ("order_created", "Buyurtma berildi", "3 ta mahsulot · 784 400 so‘m"),
     ]
