@@ -24,8 +24,8 @@ def test_one_customer_ref_component_serves_every_module() -> None:
     generated = SchemaGenerator().get_schema(request=None, public=True)  # type: ignore[no-untyped-call]
     components = generated["components"]["schemas"]
     assert "OrderCustomerRef" not in components
-    assert set(components["CustomerRef"]["properties"]) == {"id", "name", "phone"}
-    assert components["CustomerRef"]["required"] == ["id", "name", "phone"]
+    assert set(components["CustomerRef"]["properties"]) == {"id", "name", "phone", "email"}
+    assert sorted(components["CustomerRef"]["required"]) == ["email", "id", "name", "phone"]
     for component in ("AppointmentItem", "OrderSummary", "OrderDetail", "Payment"):
         assert components[component]["properties"]["customer"] == {"$ref": "#/components/schemas/CustomerRef"}
 
