@@ -1897,8 +1897,10 @@ paths:
     get:
       operationId: admin_customers_list
       description: '`search`: the name contains the term, or (≥ 3 digits) the phone
-        contains its digits. `segment`: segment membership (rules or manual, active
-        customers only). Orderings tie by `id`.'
+        contains its digits, or (≥ 3 characters) the e-mail address contains it. `segment`:
+        segment membership (rules or manual, active customers only). Orderings tie
+        by `id`. Accounts without a phone yet show `phone: null` and their `email`
+        (exports put the e-mail in the phone column).'
       parameters:
       - in: query
         name: export
@@ -7263,7 +7265,8 @@ paths:
   /api/v1/appointments/:
     post:
       operationId: customer_appointments_create
-      description: 'Book a slot (`requested`; staff confirm it). Checks in order:
+      description: 'Book a slot (`requested`; staff confirm it). 409 `phone_required`
+        first while the account has no verified phone (`me/phone/`). Checks in order:
         specialist, service, consent, open appointments limit, then the start (aware,
         lead time, horizon, grid, hours, busy, own overlap); a lost race answers 409
         `slot_taken`.'
@@ -11308,6 +11311,215 @@ paths:
               schema:
                 $ref: '#/components/schemas/CustomerErrorEnvelope'
           description: ''
+  /api/v1/me/email/:
+    post:
+      operationId: customer_me_email_attach
+      description: Attach (or replace) the verified e-mail address with its code;
+        re-authentication as `me/phone/`. → 200 `Me`.
+      parameters:
+      - in: header
+        name: Accept-Language
+        schema:
+          type: string
+        description: First supported tag among uz, ru, en in q-order; else the customer's
+          language, else uz.
+      - in: header
+        name: X-GD-App-Version
+        schema:
+          type: string
+          pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
+      - in: header
+        name: X-GD-Device-Id
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{8,128}$
+        description: Firebase installation id of this app install (an identifier,
+          not a secret).
+        required: true
+      - in: header
+        name: X-GD-Platform
+        schema:
+          type: string
+          enum:
+          - android
+          - ios
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
+        required: true
+      tags:
+      - me
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MeEmailRequest'
+        required: true
+      security:
+      - CustomerJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerMe'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '426':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+  /api/v1/me/email/code/:
+    post:
+      operationId: customer_me_email_code
+      description: Send a `verify_email` code to the address to attach (or to replace
+        the current one). 409 `conflict` when it already is the account's address,
+        `email_taken` when another account has it.
+      parameters:
+      - in: header
+        name: Accept-Language
+        schema:
+          type: string
+        description: First supported tag among uz, ru, en in q-order; else the customer's
+          language, else uz.
+      - in: header
+        name: X-GD-App-Version
+        schema:
+          type: string
+          pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
+      - in: header
+        name: X-GD-Device-Id
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{8,128}$
+        description: Firebase installation id of this app install (an identifier,
+          not a secret).
+        required: true
+      - in: header
+        name: X-GD-Platform
+        schema:
+          type: string
+          enum:
+          - android
+          - ios
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
+        required: true
+      tags:
+      - me
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MeEmailCodeRequest'
+        required: true
+      security:
+      - CustomerJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodeIssue'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '426':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
   /api/v1/me/image/:
     put:
       operationId: customer_me_image_update
@@ -12388,12 +12600,226 @@ paths:
               schema:
                 $ref: '#/components/schemas/CustomerErrorEnvelope'
           description: ''
+  /api/v1/me/phone/:
+    post:
+      operationId: customer_me_phone_attach
+      description: Attach the phone with its SMS code. Re-authentication (`password`,
+        or a `reset_password` `verification_token` of the account's own e-mail without
+        a password) unless the session signed in within 10 minutes; an account with
+        neither answers `reauth_required` once that window is over. → 200 `Me` with
+        the phone set (checkout, pay, booking and the QR open up).
+      parameters:
+      - in: header
+        name: Accept-Language
+        schema:
+          type: string
+        description: First supported tag among uz, ru, en in q-order; else the customer's
+          language, else uz.
+      - in: header
+        name: X-GD-App-Version
+        schema:
+          type: string
+          pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
+      - in: header
+        name: X-GD-Device-Id
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{8,128}$
+        description: Firebase installation id of this app install (an identifier,
+          not a secret).
+        required: true
+      - in: header
+        name: X-GD-Platform
+        schema:
+          type: string
+          enum:
+          - android
+          - ios
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
+        required: true
+      tags:
+      - me
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MePhoneRequest'
+        required: true
+      security:
+      - CustomerJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerMe'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '426':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+  /api/v1/me/phone/code/:
+    post:
+      operationId: customer_me_phone_code
+      description: 'Send an `attach_phone` SMS code to the phone a phoneless account
+        wants to attach (every OTP limit of `auth/send-code/`). 409 `conflict` when
+        the account has a phone, `phone_taken` when another account (active or deleted)
+        holds the number: no merge, the customer signs in with that phone.'
+      parameters:
+      - in: header
+        name: Accept-Language
+        schema:
+          type: string
+        description: First supported tag among uz, ru, en in q-order; else the customer's
+          language, else uz.
+      - in: header
+        name: X-GD-App-Version
+        schema:
+          type: string
+          pattern: ^\d{1,3}\.\d{1,3}\.\d{1,3}$
+        description: App version, required with `ios`/`android` (below the platform's
+          minimum → 426 `app_update_required`); optional for `web`, where no minimum
+          applies.
+      - in: header
+        name: X-GD-Device-Id
+        schema:
+          type: string
+          pattern: ^[A-Za-z0-9_-]{8,128}$
+        description: Firebase installation id of this app install (an identifier,
+          not a secret).
+        required: true
+      - in: header
+        name: X-GD-Platform
+        schema:
+          type: string
+          enum:
+          - android
+          - ios
+          - web
+        description: Device platform (`OrderChannel` literals); `web` = the website's
+          server-side BFF.
+        required: true
+      tags:
+      - me
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MePhoneCodeRequest'
+        required: true
+      security:
+      - CustomerJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodeIssue'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '426':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
+        '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerErrorEnvelope'
+          description: ''
   /api/v1/me/qr/:
     get:
       operationId: customer_qr_retrieve
       description: A fresh single-use personal QR token (60 s; at most two live tokens
         per customer). Request a new one every `refresh_in_seconds` and whenever the
-        screen regains focus.
+        screen regains focus. 409 `phone_required` while the account has no verified
+        phone (`me/phone/`).
       parameters:
       - in: header
         name: Accept-Language
@@ -15619,6 +16045,12 @@ components:
       properties:
         phone_mask:
           type: string
+          nullable: true
+          description: The code went by SMS; else null.
+        email_mask:
+          type: string
+          nullable: true
+          description: The code went by e-mail; else null.
         purpose:
           $ref: '#/components/schemas/OtpPurposeEnum'
         expires_in:
@@ -15631,6 +16063,7 @@ components:
           type: integer
       required:
       - attempts
+      - email_mask
       - expires_in
       - length
       - phone_mask
@@ -15869,6 +16302,12 @@ components:
           type: string
         phone:
           type: string
+          nullable: true
+          description: Null for an account without a phone yet.
+        email:
+          type: string
+          nullable: true
+          description: Verified e-mail address | null.
         status:
           $ref: '#/components/schemas/CustomerStatusEnum'
         registered_at:
@@ -15926,6 +16365,7 @@ components:
       - deleted_at
       - device
       - devices
+      - email
       - groups
       - held
       - id
@@ -16071,6 +16511,15 @@ components:
           type: string
         name:
           type: string
+        content_language:
+          allOf:
+          - $ref: '#/components/schemas/ContentLanguageEnum'
+          description: |-
+            Language of `name`: the requested language, or `uz` when it fell back to Uzbek.
+
+            * `uz` - uz
+            * `ru` - ru
+            * `en` - en
         image_url:
           type: string
           format: uri
@@ -16085,6 +16534,7 @@ components:
         seo_description:
           type: string
       required:
+      - content_language
       - image_url
       - name
       - product_count
@@ -16358,6 +16808,12 @@ components:
           type: string
         phone:
           type: string
+          nullable: true
+          description: Null for an account without a phone yet.
+        email:
+          type: string
+          nullable: true
+          description: Verified e-mail address | null.
         status:
           $ref: '#/components/schemas/CustomerStatusEnum'
         registered_at:
@@ -16376,6 +16832,7 @@ components:
           type: integer
       required:
       - balance
+      - email
       - id
       - lifetime_total
       - name
@@ -16386,11 +16843,22 @@ components:
       - status
     CustomerLoginRequest:
       type: object
+      description: |-
+        ``phone`` **or** ``email`` (hybrid identity, customer contract §2.1): exactly one per call. Neither →
+        ``phone`` ``required`` (``field.identifier_required``); both → ``email`` ``invalid``
+        (``field.identifier_ambiguous``). ``validated_data["identifier"]`` is the one given (an address holds
+        ``@``, a phone never does).
       properties:
         phone:
           type: string
+          nullable: true
           minLength: 1
           maxLength: 32
+        email:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 270
         password:
           type: string
           writeOnly: true
@@ -16402,7 +16870,6 @@ components:
           maxLength: 128
       required:
       - password
-      - phone
     CustomerLogoutRequest:
       type: object
       description: |-
@@ -16426,6 +16893,13 @@ components:
           type: integer
         phone:
           type: string
+          nullable: true
+          description: Verified phone; null until attached (checkout, pay, booking,
+            QR need it).
+        email:
+          type: string
+          nullable: true
+          description: Verified e-mail address (lower case) | null.
         name:
           type: string
         language:
@@ -16454,6 +16928,7 @@ components:
       required:
       - consent
       - default_address
+      - email
       - has_password
       - id
       - image_url
@@ -16718,8 +17193,8 @@ components:
     CustomerRef:
       type: object
       description: |-
-        ``CustomerRef = {"id", "name", "phone"}`` (contract §2.0); ``name`` is ``""`` once the customer is
-        deleted (scrubbed).
+        ``CustomerRef = {"id", "name", "phone", "email"}`` (contract §2.0); ``name`` is ``""`` once the
+        customer is deleted (scrubbed).
       properties:
         id:
           type: integer
@@ -16727,7 +17202,12 @@ components:
           type: string
         phone:
           type: string
+          nullable: true
+        email:
+          type: string
+          nullable: true
       required:
+      - email
       - id
       - name
       - phone
@@ -18028,6 +18508,44 @@ components:
       - is_superuser
       - linked_providers
       - session_expires_at
+    MeEmailCodeRequest:
+      type: object
+      description: '``POST me/email/code/``.'
+      properties:
+        email:
+          type: string
+          minLength: 1
+          maxLength: 270
+      required:
+      - email
+    MeEmailRequest:
+      type: object
+      description: |-
+        ``POST me/email/``: the address, its e-mail code and, unless the session is fresh, the
+        re-authentication.
+      properties:
+        code:
+          type: string
+          minLength: 1
+          maxLength: 32
+        password:
+          type: string
+          writeOnly: true
+          nullable: true
+          minLength: 1
+          maxLength: 128
+        verification_token:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 128
+        email:
+          type: string
+          minLength: 1
+          maxLength: 270
+      required:
+      - code
+      - email
     MePasswordRequest:
       type: object
       properties:
@@ -18049,6 +18567,43 @@ components:
           maxLength: 128
       required:
       - password
+    MePhoneCodeRequest:
+      type: object
+      description: '``POST me/phone/code/``.'
+      properties:
+        phone:
+          type: string
+          minLength: 1
+          maxLength: 32
+      required:
+      - phone
+    MePhoneRequest:
+      type: object
+      description: '``POST me/phone/``: the phone, its SMS code and, unless the session
+        is fresh, the re-authentication.'
+      properties:
+        code:
+          type: string
+          minLength: 1
+          maxLength: 32
+        password:
+          type: string
+          writeOnly: true
+          nullable: true
+          minLength: 1
+          maxLength: 128
+        verification_token:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 128
+        phone:
+          type: string
+          minLength: 1
+          maxLength: 32
+      required:
+      - code
+      - phone
     MeSocialLinkRequest:
       type: object
       properties:
@@ -18830,12 +19385,16 @@ components:
       - login_new_device
       - reset_password
       - link_social
+      - verify_email
+      - attach_phone
       type: string
       description: |-
         * `register` - register
         * `login_new_device` - login_new_device
         * `reset_password` - reset_password
         * `link_social` - link_social
+        * `verify_email` - verify_email
+        * `attach_phone` - attach_phone
     PaginatedAdminCustomerSessionList:
       type: object
       required:
@@ -19994,6 +20553,15 @@ components:
           description: The website URL segment (B-W1); `catalog/products/{slug}/`.
         name:
           type: string
+        content_language:
+          allOf:
+          - $ref: '#/components/schemas/ContentLanguageEnum'
+          description: |-
+            Language of `name` (and, where set, the other texts): the requested language, or `uz` when the name fell back to Uzbek or to the Billz name.
+
+            * `uz` - uz
+            * `ru` - ru
+            * `en` - en
         volume:
           type: string
         price:
@@ -20021,6 +20589,7 @@ components:
       required:
       - available
       - category
+      - content_language
       - id
       - in_cart_quantity
       - main_image_url
@@ -20069,6 +20638,15 @@ components:
           description: The website URL segment (B-W1); `catalog/products/{slug}/`.
         name:
           type: string
+        content_language:
+          allOf:
+          - $ref: '#/components/schemas/ContentLanguageEnum'
+          description: |-
+            Language of `name` (and, where set, the other texts): the requested language, or `uz` when the name fell back to Uzbek or to the Billz name.
+
+            * `uz` - uz
+            * `ru` - ru
+            * `en` - en
         volume:
           type: string
         price:
@@ -20114,6 +20692,7 @@ components:
       required:
       - available
       - category
+      - content_language
       - description
       - id
       - images
@@ -20398,10 +20977,13 @@ components:
           $ref: '#/components/schemas/IntegrationModeEnum'
         eskiz:
           $ref: '#/components/schemas/IntegrationModeEnum'
+        email:
+          $ref: '#/components/schemas/IntegrationModeEnum'
       required:
       - billz
       - bts
       - click
+      - email
       - eskiz
       - fcm
       - oauth
@@ -20920,11 +21502,22 @@ components:
       - name
     SendCodeRequest:
       type: object
+      description: |-
+        ``phone`` **or** ``email`` (hybrid identity, customer contract §2.1): exactly one per call. Neither →
+        ``phone`` ``required`` (``field.identifier_required``); both → ``email`` ``invalid``
+        (``field.identifier_ambiguous``). ``validated_data["identifier"]`` is the one given (an address holds
+        ``@``, a phone never does).
       properties:
         phone:
           type: string
+          nullable: true
           minLength: 1
           maxLength: 32
+        email:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 270
         purpose:
           $ref: '#/components/schemas/OtpPurposeEnum'
         social_ticket:
@@ -20932,7 +21525,6 @@ components:
           nullable: true
           maxLength: 2048
       required:
-      - phone
       - purpose
     SeoIssue:
       type: object
@@ -21417,7 +22009,7 @@ components:
           maxLength: 2048
         verification_token:
           type: string
-          minLength: 1
+          nullable: true
           maxLength: 128
         password:
           type: string
@@ -21441,7 +22033,6 @@ components:
           - $ref: '#/components/schemas/NullEnum'
       required:
       - social_ticket
-      - verification_token
     SocialProviderEnum:
       enum:
       - google
@@ -21495,6 +22086,13 @@ components:
           description: The website URL segment (B-W1); `specialists/{slug}/`.
         name:
           type: string
+        content_language:
+          allOf:
+          - $ref: '#/components/schemas/ContentLanguageEnum'
+          description: 'Language of `bio` (else of `qualifications`): the requested
+            language, or `uz` when it fell back to Uzbek. `name` is the same in every
+            language.'
+          readOnly: true
         role:
           $ref: '#/components/schemas/SpecialistRoleEnum'
         role_label:
@@ -21528,6 +22126,7 @@ components:
           description: Last change of the specialist (sitemap `lastmod`).
       required:
       - bio
+      - content_language
       - experience_years
       - id
       - location
@@ -21945,11 +22544,22 @@ components:
       - verification_token
     VerifyCodeRequest:
       type: object
+      description: |-
+        ``phone`` **or** ``email`` (hybrid identity, customer contract §2.1): exactly one per call. Neither →
+        ``phone`` ``required`` (``field.identifier_required``); both → ``email`` ``invalid``
+        (``field.identifier_ambiguous``). ``validated_data["identifier"]`` is the one given (an address holds
+        ``@``, a phone never does).
       properties:
         phone:
           type: string
+          nullable: true
           minLength: 1
           maxLength: 32
+        email:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 270
         purpose:
           $ref: '#/components/schemas/OtpPurposeEnum'
         code:
@@ -21958,7 +22568,6 @@ components:
           maxLength: 32
       required:
       - code
-      - phone
       - purpose
     WorkingDay:
       type: object
