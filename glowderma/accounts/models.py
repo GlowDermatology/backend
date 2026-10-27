@@ -122,6 +122,7 @@ class Device(TimeStampedModel):
     class Platform(models.TextChoices):  # internal (same literals as enums.OrderChannel)
         IOS = "ios"
         ANDROID = "android"
+        WEB = "web"  # a browser of the customer website (its BFF holds the device id in a cookie)
 
     customer = models.ForeignKey("accounts.Customer", on_delete=models.CASCADE, related_name="devices")
     fid = models.CharField(max_length=128)  # Firebase installation id
@@ -324,6 +325,13 @@ class AuthSession(models.Model):
     # How the sign-in that opened this session was proven (admin contract §2.1: linking a staff identity
     # needs a password session). Kept on the row, so a customer refresh rotation carries it; "" = before 0007.
     auth_method = models.CharField(max_length=16, choices=AuthMethod.choices, blank=True)
+    # B-W1 session management (customer contract §2.2.10): the client's user agent (the website's BFF
+    # forwards the browser's as X-GD-Client-UA), the last client IP and the place a local GeoIP City database
+    # resolves it to ("" = unknown / no database). Customer sessions only; refreshed by the throttled activity
+    # bump (CustomerJWTAuthentication).
+    user_agent = models.CharField(max_length=512, blank=True, default="", db_default="")
+    last_ip = models.GenericIPAddressField(null=True, blank=True)
+    location = models.CharField(max_length=120, blank=True, default="", db_default="")
 
     class Meta:
         indexes = [

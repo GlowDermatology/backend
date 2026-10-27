@@ -1,14 +1,17 @@
-"""Read side of `accounts`: the staff directory and the staff accounts (contract §2.16 ``GET staff/``)."""
+"""Read side of `accounts`: the staff directory and the staff accounts (contract §2.16 ``GET staff/``), and
+the customer sessions (B-W1: customer contract §2.2.10, admin §2.6)."""
 
 from __future__ import annotations
 
 from typing import TypedDict
 
+from django.core.exceptions import ValidationError
 from django.db.models import F, OuterRef, Prefetch, Q, QuerySet, Subquery, Value
 from django.db.models.functions import Coalesce, Lower, NullIf
 from django.db.models.lookups import Contains
 
 from glowderma.accounts.models import AuthSession, SocialIdentity, StaffUser
+from glowderma.core import timeutils
 from glowderma.core.search import SearchFold
 
 # Only the directory columns: never the password hash (or last_login, is_superuser) per row.
@@ -65,3 +68,17 @@ def staff_list(filters: StaffFilters, *, members: bool = False) -> QuerySet[Staf
 def staff_member(staff_id: int) -> StaffUser | None:
     """One staff account with the ``StaffMember`` columns, or ``None``."""
     return with_member_columns(StaffUser.objects.filter(pk=staff_id)).first()
+
+
+def customer_session_open(session_id: str) -> bool:
+    """Whether the customer session ``session_id`` is open (not revoked, not past its absolute expiry): a
+    loyalty QR token is honoured only while the session that issued it is (B-W1)."""
+    try:
+        return AuthSession.objects.filter(
+            pk=session_id,
+            audience="customer",
+            revoked_at__isnull=True,
+            absolute_expires_at__gt=timeutils.now(),
+        ).exists()
+    except ValidationError:  # not a UUID
+        return False

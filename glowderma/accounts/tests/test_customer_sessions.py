@@ -39,7 +39,7 @@ def open_sessions(customer: Customer) -> list[AuthSession]:
 
 def test_first_sign_in_creates_device_session_and_key(django_capture_on_commit_callbacks: Any) -> None:
     customer = CustomerFactory.create()
-    qr_store.put("q" * 64, customer.pk, ttl=60, max_live=2)
+    qr_store.put("q" * 64, customer.pk, ttl=60, max_live=2, session_id="other-session")
     with django_capture_on_commit_callbacks(execute=True):
         started = services.start_customer_session(
             customer.pk, fid="fid-aaaa-0001", platform="android", app_version="1.2.3", issue_device_key=True
@@ -58,68 +58,69 @@ def test_first_sign_in_creates_device_session_and_key(django_capture_on_commit_c
     assert started.farewell_tokens == []
     customer.refresh_from_db()
     assert customer.last_login_at == session.created_at
-    assert qr_store.take("q" * 64) is None  # outstanding QR keys deleted on commit
+    # B-W1: a sign-in leaves the QR keys of the customer's other sessions alone
+    assert str(qr_store.take("q" * 64)).startswith(f"{customer.pk}:")
 
 
-def test_second_device_replaces_the_first(django_capture_on_commit_callbacks: Any) -> None:
+def test_a_second_device_keeps_the_first_signed_in(django_capture_on_commit_callbacks: Any) -> None:
+    """B-W1 (customer contract §1.9): any number of phones and browsers at once — a sign-in elsewhere
+    revokes nothing, retires no device and sends no ``push.session_replaced``."""
     customer = CustomerFactory.create()
     first = start_test_session(customer, fid="fid-first-001")
     first_device = Device.objects.get(pk=device_pk(first.session))
     Device.objects.filter(pk=first_device.pk).update(fcm_token="tok-first", push_enabled=True)
-    with django_capture_on_commit_callbacks(execute=False) as callbacks:
+    qr_store.put("f" * 64, customer.pk, ttl=60, max_live=2, session_id=str(first.session.pk))
+    with django_capture_on_commit_callbacks(execute=True):
         second = services.start_customer_session(
-            customer.pk, fid="fid-second-02", platform="ios", app_version="1.0.0", issue_device_key=False
+            customer.pk, fid="fid-second-02", platform="web", app_version="", issue_device_key=False
         )
-    assert second.raw_device_key is None
-    assert second.farewell_tokens == ["tok-first"]
+    assert second.raw_device_key is None and second.farewell_tokens == []
     first.session.refresh_from_db()
     first_device.refresh_from_db()
-    assert (first.session.revoke_reason, first.session.revoked_at is not None) == ("replaced", True)
-    assert not first_device.is_active and not first_device.push_enabled and first_device.fcm_token == ""
-    assert first_device.key_hash  # the key hash stays (signing in there again is a known device)
-    assert open_sessions(customer) == [second.session]
-    assert list(Device.objects.filter(customer=customer, is_active=True)) == [second.session.device]
-    message = OutboxMessage.objects.get(topic=topics.PUSH_SESSION_REPLACED)
-    assert message.payload == {
-        "session_id": str(first.session.pk),
-        "sid": str(first.session.pk),
-        "fcm_token": "tok-first",
-    }
-    assert message.dedupe_key == f"push.session_replaced:{first.session.pk}"
+    assert first.session.revoked_at is None
+    assert first_device.is_active and first_device.push_enabled and first_device.fcm_token == "tok-first"
+    assert {session.pk for session in open_sessions(customer)} == {first.session.pk, second.session.pk}
+    assert Device.objects.filter(customer=customer, is_active=True).count() == 2
+    assert Device.objects.get(pk=device_pk(second.session)).platform == "web"
+    assert not OutboxMessage.objects.filter(topic=topics.PUSH_SESSION_REPLACED).exists()
     assert cache.get(f"auth:sid:{first.session.pk}") is None
-    for callback in callbacks:
-        callback()
-    assert cache.get(f"auth:sid:{first.session.pk}") == "revoked:replaced"
+    assert str(qr_store.take("f" * 64)).startswith(f"{customer.pk}:")
 
 
-def test_no_farewell_when_another_active_row_holds_the_token() -> None:
-    """§1.9 step 4: the install changed accounts (another active row holds the token) → no push to it."""
+def test_a_sign_in_retires_the_devices_left_without_a_session() -> None:
+    """A device whose sessions all ended (a reset elsewhere revoked them) stops receiving pushes at the next
+    sign-in, and its token becomes a farewell candidate."""
     customer = CustomerFactory.create()
     first = start_test_session(customer, fid="fid-first-001")
-    # A revocation still pending on an inactive row that kept its token while another account's active
-    # install registered the same token (the partial unique index covers active rows only).
-    Device.objects.filter(pk=device_pk(first.session)).update(is_active=False, fcm_token="tok-moved")
-    DeviceFactory.create(fcm_token="tok-moved", push_enabled=True)
+    Device.objects.filter(pk=device_pk(first.session)).update(fcm_token="tok-first", push_enabled=True)
+    AuthSession.objects.filter(pk=first.session.pk).update(revoked_at=timeutils.now(), revoke_reason="logout")
     started = services.start_customer_session(
         customer.pk, fid="fid-second-02", platform="ios", app_version="1.0.0", issue_device_key=True
     )
-    first.session.refresh_from_db()
-    assert first.session.revoke_reason == "replaced"
-    assert started.farewell_tokens == []
-    assert not OutboxMessage.objects.filter(topic=topics.PUSH_SESSION_REPLACED).exists()
+    assert started.farewell_tokens == ["tok-first"]
+    first_device = Device.objects.get(pk=device_pk(first.session))
+    assert (first_device.is_active, first_device.push_enabled, first_device.fcm_token) == (False, False, "")
+    assert first_device.key_hash  # the key hash stays (signing in there again is a known device)
 
 
-def test_signing_in_again_on_the_same_install_replaces_without_a_push() -> None:
+def test_signing_in_again_on_the_same_install_replaces_without_a_push(
+    django_capture_on_commit_callbacks: Any,
+) -> None:
     customer = CustomerFactory.create()
     first = start_test_session(customer)
     Device.objects.filter(pk=device_pk(first.session)).update(fcm_token="tok-same", push_enabled=True)
-    again = start_test_session(customer, issue_device_key=False)
+    qr_store.put("o" * 64, customer.pk, ttl=60, max_live=2, session_id=str(first.session.pk))
+    with django_capture_on_commit_callbacks(execute=True):
+        again = start_test_session(customer, issue_device_key=False)
     assert again.session.device_id == first.session.device_id and again.farewell_tokens == []
     first.session.refresh_from_db()
     assert first.session.revoke_reason == "replaced"
+    assert cache.get(f"auth:sid:{first.session.pk}") == "revoked:replaced"
+    assert qr_store.take("o" * 64) is None  # the old session's QR keys die with it
     assert not OutboxMessage.objects.filter(topic=topics.PUSH_SESSION_REPLACED).exists()
     device = Device.objects.get(pk=device_pk(first.session))
     assert device.fcm_token == "tok-same" and device.is_active
+    assert open_sessions(customer) == [again.session]
 
 
 def test_reactivating_a_device_whose_token_another_account_took_clears_it() -> None:
@@ -134,7 +135,7 @@ def test_reactivating_a_device_whose_token_another_account_took_clears_it() -> N
 
 
 @pytest.mark.django_db(transaction=True)
-def test_two_concurrent_sign_ins_end_with_one_session_and_one_active_device() -> None:
+def test_concurrent_sign_ins_keep_one_session_per_device() -> None:
     customer = CustomerFactory.create()
     gate = threading.Event()
     errors: list[BaseException] = []
@@ -150,16 +151,20 @@ def test_two_concurrent_sign_ins_end_with_one_session_and_one_active_device() ->
         finally:
             connection.close()
 
-    threads = [threading.Thread(target=sign_in, args=(f"fid-race-000{n}",)) for n in (1, 2)]
+    threads = [threading.Thread(target=sign_in, args=(fid,)) for fid in ("fid-race-0001", "fid-race-0001")]
+    threads += [threading.Thread(target=sign_in, args=("fid-race-0002",))]
     for thread in threads:
         thread.start()
     gate.set()
     for thread in threads:
         thread.join(10)
     assert errors == []
-    assert len(open_sessions(customer)) == 1
-    assert Device.objects.filter(customer=customer, is_active=True).count() == 1
-    assert open_sessions(customer)[0].device_id == Device.objects.get(customer=customer, is_active=True).pk
+    # B-W1: one open session per device (the same install signing in twice keeps the later one), and both
+    # devices stay signed in
+    sessions = open_sessions(customer)
+    assert len(sessions) == 2
+    assert len({session.device_id for session in sessions}) == 2
+    assert Device.objects.filter(customer=customer, is_active=True).count() == 2
 
 
 def test_device_is_known_only_with_the_right_key() -> None:
@@ -243,7 +248,7 @@ def test_delete_customer_clears_keys_consent_and_queues_apple_revokes(
     )
     CustomerSocialIdentityFactory.create(customer=customer, provider="google")
     Address.objects.create(customer=customer, text="Toshkent")
-    qr_store.put("d" * 64, customer.pk, ttl=60, max_live=2)
+    qr_store.put("d" * 64, customer.pk, ttl=60, max_live=2, session_id=str(started.session.pk))
     with django_capture_on_commit_callbacks(execute=True), CaptureQueriesContext(connection) as queries:
         result = services.delete_customer(customer)
     assert result is customer
@@ -336,7 +341,7 @@ def test_register_device_signs_out_the_token_holder_it_deactivates(
     django_capture_on_commit_callbacks: Any,
 ) -> None:
     """Review nit (fix pass 2): the holder deactivated by a moved token loses its open session too, so its app
-    answers ``SESSION_REPLACED`` on every route, not only on ``PUT me/device/``."""
+    answers ``SESSION_EXPIRED`` on every route (B-W1), not only on ``PUT me/device/``."""
     holder_customer = CustomerFactory.create()
     holder = start_test_session(holder_customer, fid="fid-hold-0001")
     Device.objects.filter(pk=device_pk(holder.session)).update(fcm_token="tok-shared", push_enabled=True)
@@ -344,8 +349,8 @@ def test_register_device_signs_out_the_token_holder_it_deactivates(
     stale = start_test_session(stale_customer, fid="fid-stale-001")
     # An inactive row still holding the token: it loses the token, its customer's session stays open.
     Device.objects.filter(pk=device_pk(stale.session)).update(is_active=False, fcm_token="tok-shared")
-    qr_store.put("h" * 64, holder_customer.pk, ttl=60, max_live=2)
-    qr_store.put("s" * 64, stale_customer.pk, ttl=60, max_live=2)
+    qr_store.put("h" * 64, holder_customer.pk, ttl=60, max_live=2, session_id=str(holder.session.pk))
+    qr_store.put("s" * 64, stale_customer.pk, ttl=60, max_live=2, session_id=str(stale.session.pk))
     customer = CustomerFactory.create()
     mine = start_test_session(customer, fid="fid-mine-0002")
     with django_capture_on_commit_callbacks(execute=True):

@@ -3,7 +3,7 @@
 
 from django.urls import URLPattern, URLResolver, path
 
-from glowderma.customers.api.customer import auth_views, catalog_views, me_views
+from glowderma.customers.api.customer import auth_views, catalog_views, me_views, session_views
 
 urlpatterns: list[URLPattern | URLResolver] = [
     path("auth/send-code/", auth_views.SendCodeView.as_view()),
@@ -23,6 +23,9 @@ urlpatterns: list[URLPattern | URLResolver] = [
     path("me/password/", me_views.PasswordView.as_view()),
     path("me/social/", me_views.SocialLinkView.as_view()),
     path("me/social/<str:provider>/", me_views.SocialUnlinkView.as_view()),
+    path("me/sessions/", session_views.SessionListViewSet.as_view({"get": "list"})),
+    path("me/sessions/revoke-others/", session_views.RevokeOtherSessionsView.as_view()),
+    path("me/sessions/<uuid:pk>/", session_views.SessionDetailView.as_view()),
     path("me/addresses/", me_views.AddressListView.as_view()),
     path("me/addresses/<int:pk>/", me_views.AddressDetailView.as_view()),
     path("me/addresses/<int:pk>/default/", me_views.AddressDefaultView.as_view()),
@@ -30,4 +33,5 @@ urlpatterns: list[URLPattern | URLResolver] = [
     path("catalog/categories/", catalog_views.CategoriesView.as_view()),
     path("catalog/products/", catalog_views.ProductListView.as_view()),
     path("catalog/products/<int:pk>/", catalog_views.ProductDetailView.as_view()),
+    path("catalog/products/<slug:slug>/", catalog_views.ProductBySlugView.as_view()),
 ]

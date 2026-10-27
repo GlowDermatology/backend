@@ -16,7 +16,7 @@ from rest_framework import serializers
 from glowderma.accounts.api.throttles import canonical_phone
 from glowderma.core import enums
 from glowderma.core.api.exceptions import field_error
-from glowderma.core.api.fields import QueryBooleanField
+from glowderma.core.api.fields import AwareDateTimeField, QueryBooleanField
 
 CODE_PATTERN = re.compile(r"^[0-9]{6}$")
 REFERENCE_CODE = re.compile(r"^[0-9]{1,16}$")
@@ -116,6 +116,13 @@ class ResetPasswordSerializer(serializers.Serializer[dict[str, Any]]):
 
 class CustomerRefreshSerializer(serializers.Serializer[dict[str, Any]]):
     refresh = serializers.CharField(max_length=256, trim_whitespace=False)
+
+
+class CustomerLogoutSerializer(CustomerRefreshSerializer):
+    """``auth/logout/`` (B-W1): ``current`` = this session, ``others`` = every other session, ``all`` =
+    everywhere."""
+
+    scope = serializers.ChoiceField(choices=enums.LogoutScope.values, default=enums.LogoutScope.CURRENT)
 
 
 class SocialSerializer(serializers.Serializer[dict[str, Any]]):
@@ -382,6 +389,7 @@ class ProductCategorySerializer(serializers.Serializer[dict[str, Any]]):
 
 class ProductCardSerializer(serializers.Serializer[dict[str, Any]]):
     id = serializers.IntegerField()
+    slug = serializers.CharField(help_text="The website URL segment (B-W1); `catalog/products/{slug}/`.")
     name = serializers.CharField()
     volume = serializers.CharField()
     price = serializers.IntegerField()
@@ -391,6 +399,7 @@ class ProductCardSerializer(serializers.Serializer[dict[str, Any]]):
     available = serializers.IntegerField()
     stock_status = serializers.ChoiceField(choices=enums.StockStatus.values)
     in_cart_quantity = serializers.IntegerField()
+    updated_at = AwareDateTimeField(help_text="Last change of the product page (sitemap `lastmod`).")
 
 
 class CustomerProductImageSerializer(serializers.Serializer[dict[str, Any]]):
@@ -405,6 +414,8 @@ class ProductDetailSerializer(ProductCardSerializer):
     usage = serializers.CharField()
     images = CustomerProductImageSerializer(many=True)
     max_quantity = serializers.IntegerField()
+    seo_title = serializers.CharField(help_text='Staff-written page title in this language; "" = none.')
+    seo_description = serializers.CharField(help_text='Staff-written meta description; "" = none.')
 
 
 class CustomerBannerLinkSerializer(serializers.Serializer[dict[str, Any]]):
@@ -434,6 +445,9 @@ class CustomerCategorySerializer(serializers.Serializer[dict[str, Any]]):
     name = serializers.CharField()
     image_url = serializers.URLField(allow_null=True)
     product_count = serializers.IntegerField()
+    updated_at = AwareDateTimeField()
+    seo_title = serializers.CharField()
+    seo_description = serializers.CharField()
 
 
 class CustomerCategoryListSerializer(serializers.Serializer[dict[str, Any]]):

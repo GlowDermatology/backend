@@ -14,6 +14,7 @@ from drf_spectacular.utils import extend_schema
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from glowderma.accounts import selectors as account_selectors
 from glowderma.accounts.models import Customer
 from glowderma.core import audit, enums, timeutils
 from glowderma.core.api.exceptions import QrInvalid
@@ -58,10 +59,11 @@ class ResolveQrView(PosAPIView):
         token = str(data["token"])
         if not qr.is_well_formed(token):
             raise _reject(device, "format", request)
-        customer_id = qr.resolve_qr(token)
+        resolved = qr.resolve_qr(token)
         customer = (
-            Customer.objects.filter(pk=customer_id, status=enums.CustomerStatus.ACTIVE).first()
-            if customer_id is not None
+            Customer.objects.filter(pk=resolved.customer_id, status=enums.CustomerStatus.ACTIVE).first()
+            if resolved is not None
+            and (not resolved.session_id or account_selectors.customer_session_open(resolved.session_id))
             else None
         )
         if customer is None:

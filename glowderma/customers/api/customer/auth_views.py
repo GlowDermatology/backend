@@ -12,6 +12,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from glowderma.accounts import services as account_services
+from glowderma.accounts import sessions as account_sessions
 from glowderma.accounts import tokens
 from glowderma.accounts.api.customer_base import CustomerAuthAPIView
 from glowderma.accounts.api.throttles import (
@@ -62,9 +63,12 @@ def device_context(view: Any, request: Request) -> services.DeviceContext:
     )
 
 
-def auth_tokens(sign_in: services.SignIn, *, fid: str) -> dict[str, Any]:
-    """``AuthTokens`` (customer contract §2.0)."""
+def auth_tokens(sign_in: services.SignIn, *, fid: str, request: Request) -> dict[str, Any]:
+    """``AuthTokens`` (customer contract §2.0); records the new session's client (user agent, IP, location)
+    for the session list (B-W1, §2.2.10)."""
     session = sign_in.started.session
+    user_agent, ip = account_sessions.client_facts(request)
+    account_sessions.stamp_session(session.pk, user_agent=user_agent, ip=ip)
     access, expires = tokens.issue_access(session)
     customer = Customer.objects.get(pk=sign_in.customer_id)
     return {
@@ -235,7 +239,7 @@ class SetPasswordView(CustomerAuthAPIView):
             device=device,
             request=request,
         )
-        return Response(auth_tokens(sign_in, fid=device.fid), status=201)
+        return Response(auth_tokens(sign_in, fid=device.fid, request=request), status=201)
 
 
 class LoginView(CustomerAuthAPIView):
@@ -261,7 +265,7 @@ class LoginView(CustomerAuthAPIView):
         )
         if isinstance(result, services.DeviceStep):
             return Response(device_step_body(result))
-        return Response(auth_tokens(result, fid=device.fid))
+        return Response(auth_tokens(result, fid=device.fid, request=request))
 
 
 class ResetPasswordView(CustomerAuthAPIView):
@@ -280,7 +284,7 @@ class ResetPasswordView(CustomerAuthAPIView):
         sign_in = services.reset_password(
             data["verification_token"], password=data["password"], device=device, request=request
         )
-        return Response(auth_tokens(sign_in, fid=device.fid))
+        return Response(auth_tokens(sign_in, fid=device.fid, request=request))
 
 
 class RefreshView(CustomerAuthAPIView):
@@ -317,13 +321,15 @@ class LogoutView(CustomerAuthAPIView):
         operation_id="customer_auth_logout",
         auth=[],
         parameters=AUTH_PARAMETERS,
-        request=s.CustomerRefreshSerializer,
+        request=s.CustomerLogoutSerializer,
         responses={204: None, **CUSTOMER_ERRORS},
     )
     def post(self, request: Request) -> Response:
-        serializer = s.CustomerRefreshSerializer(data=request.data)
+        serializer = s.CustomerLogoutSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        account_services.logout_customer(serializer.validated_data["refresh"], request=request)
+        account_services.logout_customer(
+            serializer.validated_data["refresh"], scope=serializer.validated_data["scope"], request=request
+        )
         return Response(status=204)
 
 
@@ -365,7 +371,7 @@ class SocialView(CustomerAuthAPIView):
         )
         if isinstance(result, services.PhoneStep):
             return Response(phone_step_body(result))
-        return Response(auth_tokens(result, fid=device.fid))
+        return Response(auth_tokens(result, fid=device.fid, request=request))
 
 
 class SocialCompleteView(CustomerAuthAPIView):
@@ -393,4 +399,4 @@ class SocialCompleteView(CustomerAuthAPIView):
             request=request,
         )
         status = 201 if sign_in.is_new_customer or sign_in.reactivated else 200
-        return Response(auth_tokens(sign_in, fid=device.fid), status=status)
+        return Response(auth_tokens(sign_in, fid=device.fid, request=request), status=status)

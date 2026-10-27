@@ -88,5 +88,6 @@ class QrView(CustomerAPIView):
         responses={200: QrTokenSerializer, **CUSTOMER_ERRORS},
     )
     def get(self, request: Request) -> Response:
-        token = qr.issue_qr(request_customer(request).pk)
+        claims = request.auth if isinstance(request.auth, dict) else {}
+        token = qr.issue_qr(request_customer(request).pk, str(claims.get("sid", "")))
         return Response(QrTokenSerializer(asdict(token)).data)

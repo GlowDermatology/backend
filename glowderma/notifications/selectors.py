@@ -220,6 +220,20 @@ def total_devices() -> int:
     return Customer.objects.filter(has_pushable_device(), status=enums.CustomerStatus.ACTIVE).count()
 
 
+# At most this many devices of one customer receive a transactional push (B-W1 fan-out); the newest win.
+MAX_PUSH_DEVICES = 10
+
+
+def customer_push_devices(customer_id: int) -> list[Device]:
+    """Every pushable device of the customer, most recently active first (B-W1: a customer may be signed in
+    on several phones at once; transactional pushes reach each of them)."""
+    return list(
+        Device.objects.filter(PUSHABLE_DEVICE, customer_id=customer_id).order_by("-last_active_at", "-id")[
+            :MAX_PUSH_DEVICES
+        ]
+    )
+
+
 def customer_push_device(customer_id: int) -> Device | None:
     """The device a status push goes to: the customer's most recently active pushable device."""
     return (

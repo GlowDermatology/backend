@@ -1,8 +1,9 @@
 """State checks under the customer-level lock (customer contract §1.9, §2.2.3 step 5, §2.2.6, §2.7.1).
 
 A sign-in or a device registration that races ``DELETE me/`` (or another sign-in) waits for the customer lock
-and then re-reads the customer and the device, so a deleted or replaced account never regains a keyed device,
-an open session or a push token, and ``register_device`` never deadlocks with ``start_customer_session``.
+and then re-reads the customer and the device, so a deleted or signed-out account never regains a keyed
+device, an open session or a push token, and ``register_device`` never deadlocks with
+``start_customer_session``.
 """
 
 # ruff: noqa: S105, S106 - FCM tokens in fixtures are test data, not secrets
@@ -153,22 +154,24 @@ def test_register_device_refuses_a_deleted_customer() -> None:
     assert (device.fcm_token, device.push_enabled, device.is_active) == ("", False, False)
 
 
-def test_register_device_refuses_a_replaced_or_logged_out_device() -> None:
+def test_register_device_refuses_a_logged_out_device() -> None:
+    """B-W1: a sign-in on another device no longer ends this one; a logged-out device is refused with
+    ``SESSION_EXPIRED`` (``SESSION_REPLACED`` is retired for customers)."""
     customer = CustomerFactory.create()
-    start_test_session(customer, fid="fid-replaced-01")
+    start_test_session(customer, fid="fid-other-0001")
     start_test_session(customer, fid="fid-current-001")
-    with pytest.raises(AuthFailed) as caught:
-        services.register_device(customer.pk, "fid-replaced-01", fcm_token="tok-old", push_enabled=True)
-    assert caught.value.get_codes() == "SESSION_REPLACED"
+    other = services.register_device(customer.pk, "fid-other-0001", fcm_token="tok-old", push_enabled=True)
+    assert other.is_active and other.fcm_token == "tok-old"
     current = Device.objects.get(customer=customer, fid="fid-current-001")
     session = AuthSession.objects.get(device=current, revoked_at__isnull=True)
     services.revoke_customer_sessions(customer.pk, enums.SessionRevokeReason.LOGOUT)
-    Device.objects.filter(pk=current.pk).update(is_active=False)
     with pytest.raises(AuthFailed) as caught:
         services.register_device(customer.pk, "fid-current-001", fcm_token="tok-new", push_enabled=True)
     assert caught.value.get_codes() == "SESSION_EXPIRED"
     session.refresh_from_db()
     assert session.revoke_reason == "logout"
+    # every device lost its session, so every device was retired (no push reaches a signed-out phone)
+    assert not Device.objects.filter(customer=customer, is_active=True).exists()
     assert not Device.objects.filter(fcm_token__in=("tok-old", "tok-new")).exists()
 
 
@@ -202,7 +205,8 @@ def test_register_device_takes_the_customer_locks_first() -> None:
 def test_register_device_and_a_sign_in_on_another_device_serialize_without_a_deadlock() -> None:
     """The probe of the review: device A (signed in) registers token T, held by the customer's device B,
     while B signs in. Both now queue on the customer lock: whichever runs second sees the other's result
-    (no ``deadlock detected``), and the customer ends with one open session and one active device."""
+    (no ``deadlock detected``); the token ends on A either way (B-W1: B keeps its session only when its
+    sign-in ran first and A's registration then took its token — it is the same install's token)."""
     customer = CustomerFactory.create()
     start_test_session(customer, fid="fid-deadlock-A1")
     DeviceFactory.create(customer=customer, fid="fid-deadlock-B1", fcm_token="tok-shared", is_active=False)
@@ -235,12 +239,9 @@ def test_register_device_and_a_sign_in_on_another_device_serialize_without_a_dea
     release.set()
     for thread in (holder, *racers):
         thread.join(10)
-    # Only the device registration may lose (its device was replaced by the sign-in that ran first).
-    assert codes(errors) in ([], ["SESSION_REPLACED"])
-    assert open_sessions(customer.pk) == 1
-    active = Device.objects.get(customer=customer, is_active=True)
-    assert active.fid == "fid-deadlock-B1"
-    assert AuthSession.objects.get(customer=customer, revoked_at__isnull=True).device_id == active.pk
+    assert codes(errors) == []
+    assert open_sessions(customer.pk) in (1, 2)
+    assert Device.objects.get(fcm_token="tok-shared").fid == "fid-deadlock-A1"
     assert Device.objects.filter(fcm_token="tok-shared", is_active=False).count() == 0
 
 

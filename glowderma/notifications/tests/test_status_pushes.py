@@ -200,3 +200,39 @@ def test_appointment_texts_fall_back_to_uzbek() -> None:
     title, body, language = texts.appointment_text("rejected", "xx", start)
     assert language == "uz" and title == "Qabul rad etildi" and "26.10.2026 09:00" in body
     assert texts.appointment_text("cancelled", "en", start)[0] == "Appointment cancelled"
+
+
+# --- B-W1: several signed-in devices --------------------------------------------------------------------
+
+
+def test_a_status_push_fans_out_to_every_pushable_device(clock: Any, fcm: FakeFcm) -> None:
+    customer = CustomerFactory.create()
+    phone = DeviceFactory.create(customer=customer, fcm_token="tok-phone")  # noqa: S106
+    tablet = DeviceFactory.create(customer=customer, fcm_token="tok-tablet")  # noqa: S106
+    DeviceFactory.create(customer=customer, push_enabled=False, fcm_token="")  # the website: no push
+    DeviceFactory.create(customer=customer, fcm_token="tok-gone", is_active=False, push_enabled=False)  # noqa: S106
+    inbox = services.deliver_order_status(order_payload(customer.pk))
+    assert inbox is not None and inbox.push_state == "sent"
+    assert sorted(message.token for message in fcm.sent) == sorted([phone.fcm_token, tablet.fcm_token])
+    assert {message.data["inbox_id"] for message in fcm.sent} == {str(inbox.pk)}
+
+
+def test_a_fan_out_is_sent_when_one_device_got_it_and_prunes_the_dead_one(clock: Any, fcm: FakeFcm) -> None:
+    customer = CustomerFactory.create()
+    dead = DeviceFactory.create(customer=customer, fcm_token="tok-x-bad")  # noqa: S106
+    DeviceFactory.create(customer=customer, fcm_token="tok-alive")  # noqa: S106
+    inbox = services.deliver_order_status(order_payload(customer.pk))
+    assert inbox is not None and inbox.push_state == "sent"
+    dead.refresh_from_db()
+    assert (dead.fcm_token, dead.push_enabled) == ("", False)
+
+
+def test_a_fan_out_nobody_got_waits_for_the_busy_device(clock: Any, fcm: FakeFcm) -> None:
+    from glowderma.core import outbox as core_outbox  # noqa: PLC0415
+
+    customer = CustomerFactory.create()
+    DeviceFactory.create(customer=customer, fcm_token="tok-x-bad")  # noqa: S106
+    DeviceFactory.create(customer=customer, fcm_token="tok-x-busy")  # noqa: S106
+    with pytest.raises(core_outbox.RetryLater):
+        services.deliver_order_status(order_payload(customer.pk))
+    assert InboxNotification.objects.get(dedupe_key="order_status:10248:processing").push_state == "queued"

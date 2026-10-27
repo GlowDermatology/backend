@@ -493,7 +493,9 @@ def reset_password(
             raise PhoneNotRegistered()
         dormant, last_activity = selectors.is_dormant(customer.pk, now=timeutils.now())
         account_services.set_customer_password(customer, password)
-        account_services.revoke_customer_sessions(customer.pk, enums.SessionRevokeReason.PASSWORD_CHANGED)
+        farewell = account_services.sign_out_customer(
+            customer.pk, enums.SessionRevokeReason.PASSWORD_CHANGED, keep_fid=device.fid
+        )
         _unlink_all(customer, reason="password_reset", request=request)
         account_services.clear_device_keys(customer.pk, except_fid=device.fid)
         if dormant:
@@ -502,7 +504,9 @@ def reset_password(
             customer.pk, device.fid, device.platform, device.app_version, issue_device_key=True
         )
         _account_security(
-            customer.pk, enums.AccountSecurityEvent.PASSWORD_RESET, farewell_tokens=started.farewell_tokens
+            customer.pk,
+            enums.AccountSecurityEvent.PASSWORD_RESET,
+            farewell_tokens=[*farewell, *started.farewell_tokens],
         )
         _audit("customer.password_reset", customer, request)
         return SignIn(started, customer.pk)
@@ -546,9 +550,12 @@ def _exchange_apple(code: str | None, claims: AppTokenClaims) -> tuple[str, str]
     if not code:
         raise _field("authorization_code", "required")
     client_id = claims.audience
+    # B-W1: a code of the website's Sign in with Apple JS (its ID token's aud is a Services ID) is exchanged
+    # with the redirect URI the authorization used; the app's code has none.
+    redirect_uri = settings.APPLE_WEB_REDIRECT_URI if client_id in settings.APPLE_SERVICES_IDS else None
     try:
         refresh = oauth_registry.get_apple_service().exchange_code(
-            code, client_id=client_id, subject=claims.subject
+            code, client_id=client_id, subject=claims.subject, redirect_uri=redirect_uri or None
         )
     except OAuthExchangeError as exc:
         if exc.kind == "unavailable":
@@ -1092,10 +1099,10 @@ def change_password(
             secret_field="current_password",  # noqa: S106 - a field name
         )
         account_services.set_customer_password(customer, password)
-        account_services.revoke_customer_sessions(
+        farewell = account_services.sign_out_customer(
             customer_id, enums.SessionRevokeReason.PASSWORD_CHANGED, except_sid=sid
         )
-        _account_security(customer_id, enums.AccountSecurityEvent.PASSWORD_CHANGED)
+        _account_security(customer_id, enums.AccountSecurityEvent.PASSWORD_CHANGED, farewell_tokens=farewell)
         _audit("customer.password_changed", customer, request, {"first_password": first})
 
 

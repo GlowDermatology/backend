@@ -100,9 +100,9 @@ def test_a_dead_session_replaced_message_keeps_no_token(fcm: Any) -> None:
     assert message.payload["fcm_token"] == "" and message.payload["sid"]
 
 
-def test_sign_in_on_a_new_device_delivers_the_farewell_push(
-    fcm: Any, django_capture_on_commit_callbacks: Any
-) -> None:
+def test_sign_in_on_a_new_device_sends_no_push(fcm: Any, django_capture_on_commit_callbacks: Any) -> None:
+    """B-W1: the first device stays signed in, so nothing tells it to sign out (the ``push.session_replaced``
+    handler only drains messages queued before the release)."""
     customer = CustomerFactory.create()
     first = start_test_session(customer, fid="fid-first-001")
     Device.objects.filter(pk=device_pk(first.session)).update(fcm_token="tok-first", push_enabled=True)
@@ -110,8 +110,8 @@ def test_sign_in_on_a_new_device_delivers_the_farewell_push(
         services.start_customer_session(
             customer.pk, fid="fid-second-02", platform="ios", app_version="1.0.0", issue_device_key=True
         )
-    assert [push.data for push in fcm.sent] == [{"type": "session_replaced", "sid": str(first.session.pk)}]
-    assert OutboxMessage.objects.get(topic=topics.PUSH_SESSION_REPLACED).status == "done"
+    assert fcm.sent == []
+    assert not OutboxMessage.objects.filter(topic=topics.PUSH_SESSION_REPLACED).exists()
 
 
 def test_cleanup_auth_purges_only_the_right_rows() -> None:
