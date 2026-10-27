@@ -26,11 +26,11 @@ from django.db.models import (
 )
 from django.db.models.functions import Coalesce, Collate
 
-from glowderma.accounts.models import Customer, Device
+from glowderma.accounts.models import AuthSession, Customer, Device
 from glowderma.catalog.models import Product
 from glowderma.catalog.selectors import DISPLAY_NAME
 from glowderma.commerce.models import Order
-from glowderma.core import enums
+from glowderma.core import enums, timeutils
 from glowderma.loyalty.models import Purchase
 from glowderma.notifications.models import (
     Campaign,
@@ -224,23 +224,33 @@ def total_devices() -> int:
 MAX_PUSH_DEVICES = 10
 
 
+def _signed_in() -> Exists:
+    """The device holds an open, unexpired customer session (what «Faol seanslar» lists)."""
+    return Exists(
+        AuthSession.objects.filter(
+            device_id=OuterRef("pk"),
+            audience="customer",
+            revoked_at__isnull=True,
+            absolute_expires_at__gt=timeutils.now(),
+        )
+    )
+
+
 def customer_push_devices(customer_id: int) -> list[Device]:
-    """Every pushable device of the customer, most recently active first (B-W1: a customer may be signed in
-    on several phones at once; transactional pushes reach each of them)."""
+    """Every pushable device of the customer that is still signed in, most recently active first (B-W1: a
+    customer may be signed in on several phones at once; transactional pushes reach each of them, never a
+    device whose session ended or expired)."""
     return list(
-        Device.objects.filter(PUSHABLE_DEVICE, customer_id=customer_id).order_by("-last_active_at", "-id")[
-            :MAX_PUSH_DEVICES
-        ]
+        Device.objects.filter(PUSHABLE_DEVICE, _signed_in(), customer_id=customer_id).order_by(
+            "-last_active_at", "-id"
+        )[:MAX_PUSH_DEVICES]
     )
 
 
 def customer_push_device(customer_id: int) -> Device | None:
     """The device a status push goes to: the customer's most recently active pushable device."""
-    return (
-        Device.objects.filter(PUSHABLE_DEVICE, customer_id=customer_id)
-        .order_by("-last_active_at", "-id")
-        .first()
-    )
+    devices = customer_push_devices(customer_id)
+    return devices[0] if devices else None
 
 
 def audience_recipients(campaign: Campaign) -> list[tuple[int, int]]:

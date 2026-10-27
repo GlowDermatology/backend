@@ -10,7 +10,7 @@ import pytest
 
 from glowderma.accounts import topics as account_topics
 from glowderma.accounts.models import Customer, Device
-from glowderma.accounts.tests.factories import CustomerFactory, DeviceFactory
+from glowderma.accounts.tests.factories import CustomerFactory, SignedInDeviceFactory
 from glowderma.appointments.tests.factories import AppointmentFactory
 from glowderma.commerce.tests.factories import OrderFactory
 from glowderma.core import enums
@@ -60,7 +60,7 @@ def test_the_payload_keys_are_the_accounts_definition() -> None:
 @pytest.mark.parametrize("event", EVENTS)
 def test_account_security_notice_per_event(clock: Any, fcm: FakeFcm, event: str) -> None:
     customer = CustomerFactory.create(name="Malika Karimova", phone="+998901234567")
-    device = DeviceFactory.create(customer=customer)
+    device = SignedInDeviceFactory.create(customer=customer)
     payload = security_payload(customer, event)
     inbox = services.deliver_account_security(payload)
     assert inbox is not None
@@ -123,7 +123,7 @@ def test_account_security_texts(clock: Any, fcm: FakeFcm) -> None:
 
 def test_farewell_tokens_get_the_same_notice_and_are_blanked(clock: Any, fcm: FakeFcm) -> None:
     customer = CustomerFactory.create()
-    current = DeviceFactory.create(customer=customer)
+    current = SignedInDeviceFactory.create(customer=customer)
     payload = security_payload(
         customer, "password_reset", farewell_tokens=["old-device-token", current.fcm_token]
     )
@@ -160,9 +160,9 @@ def test_account_security_edge_cases(clock: Any, fcm: FakeFcm, caplog: pytest.Lo
 
 def test_a_dead_farewell_token_is_pruned_wherever_it_sits(clock: Any, fcm: FakeFcm) -> None:
     customer = CustomerFactory.create()
-    DeviceFactory.create(customer=customer)
+    SignedInDeviceFactory.create(customer=customer)
     # the install that held the token was deactivated by the reset; another inactive row still holds it
-    stale = DeviceFactory.create(
+    stale = SignedInDeviceFactory.create(
         customer=CustomerFactory.create(),
         fcm_token="old-device-bad",  # noqa: S106
         is_active=False,
@@ -177,9 +177,9 @@ def test_a_dead_farewell_token_is_pruned_wherever_it_sits(clock: Any, fcm: FakeF
 
 def test_a_farewell_token_now_on_an_active_device_gets_no_notice(clock: Any, fcm: FakeFcm) -> None:
     customer = CustomerFactory.create()
-    current = DeviceFactory.create(customer=customer)
+    current = SignedInDeviceFactory.create(customer=customer)
     # the install signed into another account after the reset: its token is now B's active device
-    other = DeviceFactory.create(customer=CustomerFactory.create(), fcm_token="moved-token")  # noqa: S106
+    other = SignedInDeviceFactory.create(customer=CustomerFactory.create(), fcm_token="moved-token")  # noqa: S106
     inbox = services.deliver_account_security(
         security_payload(customer, "password_reset", farewell_tokens=["moved-token", "gone-token"])
     )
@@ -221,7 +221,7 @@ def test_order_status_title_is_the_customer_label(
     clock: Any, fcm: FakeFcm, language: str, status: str, pickup: bool, title: str
 ) -> None:
     customer = CustomerFactory.create(language=language)
-    DeviceFactory.create(customer=customer)
+    SignedInDeviceFactory.create(customer=customer)
     inbox = services.deliver_order_status(order_push(customer, status, pickup=pickup))
     assert inbox is not None and inbox.title == title
     assert inbox.language == language  # the row is in the customer's language, like its title
@@ -242,7 +242,7 @@ def test_order_status_title_is_the_customer_label(
 
 def test_no_push_for_an_order_before_the_history_horizon(clock: Any, fcm: FakeFcm) -> None:
     customer = CustomerFactory.create(history_from=ANCHOR + timedelta(days=1))
-    DeviceFactory.create(customer=customer)
+    SignedInDeviceFactory.create(customer=customer)
     assert services.deliver_order_status(order_push(customer, "processing")) is None
     assert not InboxNotification.objects.exists() and fcm.sent == []
     assert (
@@ -273,7 +273,7 @@ def test_a_stale_appointment_action_is_skipped(
         "cancelled": {"cancelled_at": ANCHOR, "cancelled_by": "customer"},
     }
     appointment = AppointmentFactory.create(status=status, **timestamps[status])
-    DeviceFactory.create(customer=appointment.customer)
+    SignedInDeviceFactory.create(customer=appointment.customer)
     payload = {
         "appointment_id": appointment.pk,
         "action": action,
@@ -289,7 +289,7 @@ def test_a_stale_appointment_action_is_skipped(
 
 def test_appointment_push_channel(clock: Any, fcm: FakeFcm) -> None:
     appointment = AppointmentFactory.create()
-    DeviceFactory.create(customer=appointment.customer)
+    SignedInDeviceFactory.create(customer=appointment.customer)
     base = {"appointment_id": appointment.pk, "event_id": 1, "customer_id": appointment.customer_id}
     inbox = services.deliver_appointment({**base, "action": "confirmed", "reschedule_no": None})
     assert inbox is not None
@@ -301,7 +301,7 @@ def test_appointment_push_channel(clock: Any, fcm: FakeFcm) -> None:
 @pytest.mark.parametrize(("kind", "channel"), [("promo", "promo"), ("general", "general")])
 def test_campaign_push_channel_and_payload(clock: Any, fcm: FakeFcm, kind: str, channel: str) -> None:
     customer = CustomerFactory.create()
-    DeviceFactory.create(customer=customer)
+    SignedInDeviceFactory.create(customer=customer)
     campaign = CampaignFactory.create(kind=kind)
     services.materialise(campaign)
     campaign.save()
@@ -330,7 +330,7 @@ def test_push_texts_carry_no_pii_for_seeded_customers(clock: Any, fcm: FakeFcm) 
         for index, lang in enumerate(("uz", "ru", "en"))
     ]
     for index, customer in enumerate(customers):
-        DeviceFactory.create(customer=customer)
+        SignedInDeviceFactory.create(customer=customer)
         services.deliver_order_status(order_push(customer, "processing", order_id=20_000 + index))
         services.deliver_account_security(security_payload(customer, "social_linked"))
     assert len(fcm.sent) == 6
@@ -345,7 +345,7 @@ def test_push_texts_carry_no_pii_for_seeded_customers(clock: Any, fcm: FakeFcm) 
 
 def test_unregistered_prunes_the_device(clock: Any, fcm: FakeFcm) -> None:
     customer = CustomerFactory.create()
-    device = DeviceFactory.create(customer=customer, fcm_token="tok-bad")  # noqa: S106
+    device = SignedInDeviceFactory.create(customer=customer, fcm_token="tok-bad")  # noqa: S106
     inbox = services.deliver_order_status(order_push(customer, "processing"))
     assert inbox is not None and (inbox.push_state, inbox.push_error) == ("failed", "unregistered")
     device.refresh_from_db()
@@ -354,7 +354,7 @@ def test_unregistered_prunes_the_device(clock: Any, fcm: FakeFcm) -> None:
 
 def test_unregistered_campaign_recipient_prunes_its_device(clock: Any, fcm: FakeFcm) -> None:
     customer = CustomerFactory.create()
-    device = DeviceFactory.create(customer=customer, fcm_token="campaign-bad")  # noqa: S106
+    device = SignedInDeviceFactory.create(customer=customer, fcm_token="campaign-bad")  # noqa: S106
     campaign = CampaignFactory.create()
     services.materialise(campaign)
     campaign.save()
@@ -368,8 +368,8 @@ def test_payload_invalid_fails_the_message_and_leaves_devices_alone(
     clock: Any, fcm: FakeFcm, caplog: pytest.LogCaptureFixture
 ) -> None:
     customer = CustomerFactory.create()
-    device = DeviceFactory.create(customer=customer, fcm_token="tok-payload")  # noqa: S106
-    other = DeviceFactory.create(customer=CustomerFactory.create())
+    device = SignedInDeviceFactory.create(customer=customer, fcm_token="tok-payload")  # noqa: S106
+    other = SignedInDeviceFactory.create(customer=CustomerFactory.create())
     payload = order_push(customer, "processing")
     message = OutboxMessage.objects.create(
         topic="push.order_status", payload=payload, dedupe_key="push.order_status:10248:processing"
@@ -392,7 +392,7 @@ def test_campaign_payload_invalid_keeps_the_device(
     clock: Any, fcm: FakeFcm, caplog: pytest.LogCaptureFixture
 ) -> None:
     customer = CustomerFactory.create()
-    device = DeviceFactory.create(customer=customer, fcm_token="c-payload")  # noqa: S106
+    device = SignedInDeviceFactory.create(customer=customer, fcm_token="c-payload")  # noqa: S106
     campaign = CampaignFactory.create()
     services.materialise(campaign)
     campaign.save()

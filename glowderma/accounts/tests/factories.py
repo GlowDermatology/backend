@@ -152,6 +152,19 @@ class CustomerSessionFactory(DjangoModelFactory[AuthSession]):
     absolute_expires_at = LazyFunction(lambda: timeutils.now() + timedelta(days=30))  # type: ignore[no-untyped-call]
 
 
+class SignedInDeviceFactory(DeviceFactory):
+    """A device with an open customer session on it (B-W1: pushes reach only signed-in devices)."""
+
+    class Meta:
+        model = Device
+        skip_postgeneration_save = True
+
+    @post_generation  # type: ignore[untyped-decorator]
+    def signed_in(obj: Device, create: bool, extracted: Any, **kwargs: Any) -> None:
+        if create and extracted is not False:
+            CustomerSessionFactory.create(customer=obj.customer, device=obj)
+
+
 # --- M2 customer sessions (plan §1 P0) ----------------------------------------------------------------------
 
 TEST_FID = "fid-test-0001"
