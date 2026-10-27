@@ -32,17 +32,25 @@ the variables are listed in `deploy/env.production.example` and §15 of [`deploy
   release note before the storefront goes live.
 - **Take the pre-upgrade dump** (`deploy/backup.sh`).
 
-## Migrations (in this order; one maintenance window as usual, `migrate` before `up -d`)
+## Migrations (seven, in this order; one maintenance window as usual, `migrate` before `up -d`)
 | Migration | What | Online-safe |
 | --- | --- | --- |
 | `accounts.0010_web_client_sessions` | `AuthSession.user_agent`, `last_ip`, `location`; `Device.platform` gains `web` | yes (columns with defaults) |
 | `accounts.0011_hybrid_identity` | nullable `Customer.phone`, `Customer.email` + `email_verified_at`, `SmsCode.email`, constraints, index | see the hybrid release note (reverse refused once data would be lost) |
 | `catalog.0005_seo_slugs` | `Product.slug` (backfilled from the uz name, else the Billz name) and the SEO texts | backfill rewrites every product row once |
+| `catalog.0006_product_search_key` | `Product.search_text` rebuilt without apostrophes (`kopik` finds `ko‘pik`); drops the trigram index | short lock (column re-added, every product row recomputed) |
+| `catalog.0007_product_search_key_trgm_concurrently` | the trigram index again, `CONCURRENTLY` (non-atomic) | yes; on failure `DROP INDEX CONCURRENTLY catalog_product_search_trgm` and migrate again |
 | `commerce.0009_order_channel_web` | `Order.channel` gains `web` | yes (choices only) |
 | `professionals.0003_seo_slugs` | `Professional.slug` (backfilled from the name) | backfill rewrites every specialist row once |
 
 Rollback across this release: restore the pre-upgrade dump (`migrate accounts 0009` is refused once an e-mail or a
 phoneless account exists).
+
+## API additions (additive)
+- Customer: `content_language` on products, categories and specialists (contract §1.4); the shipment timeline entry
+  now reads "Yetkazib berish rasmiylashtirildi" (the BTS order is still created right after payment).
+- Admin: `CustomerRef.email` (nullable) on orders, payments and appointments.
+- Demo seed: 1200×1500 product photos and specialist portraits (`seed_demo` on staging only).
 
 ## After the upgrade
 - `GET /api/v1/me/sessions/` from the website lists "Chrome (Windows)", the city and the IP of each session; the admin
