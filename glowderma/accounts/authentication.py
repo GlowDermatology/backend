@@ -11,6 +11,7 @@ from glowderma.accounts import services, sessions, tokens
 from glowderma.accounts.models import AuthSession, Customer, Device, StaffUser
 from glowderma.core import audit, enums, timeutils
 from glowderma.core.api.exceptions import AppUpdateRequired, AuthFailed, DeviceRequired, PasswordChanged
+from glowderma.core.clientip import has_internal_secret
 from glowderma.core.pii import pii_ref
 
 # Customer contract §1.2.
@@ -59,8 +60,9 @@ def parse_device_headers(request: Any, *, required: bool) -> DeviceHeaders | Non
     Missing or malformed → 400 ``device_required`` when ``required`` (auth and C routes); on optional (O)
     routes no ``X-GD-Device-Id`` means no device (``None``), while a present one must come with valid
     companions. A version below the platform's minimum → 426 ``app_update_required`` with ``{min_version,
-    store_url}``. Platform ``web`` (the website's BFF): ``X-GD-App-Version`` is optional (validated when
-    present, ``""`` when absent) and no minimum version applies.
+    store_url}``. Platform ``web`` (the website's BFF) is accepted only with a valid ``X-GD-Internal-Secret``
+    (else 400 ``device_required``); its ``X-GD-App-Version`` is optional (validated when present, ``""``
+    when absent) and no minimum version applies.
     """
     headers = request.headers
     fid = str(headers.get("X-GD-Device-Id", ""))
@@ -74,6 +76,10 @@ def parse_device_headers(request: Any, *, required: bool) -> DeviceHeaders | Non
     elif not APP_VERSION_PATTERN.fullmatch(version):
         raise DeviceRequired()
     if not FID_PATTERN.fullmatch(fid) or platform not in PLATFORMS:
+        raise DeviceRequired()
+    if platform == enums.OrderChannel.WEB and not has_internal_secret(getattr(request, "_request", request)):
+        # only the website's server-side BFF (with the internal secret) is "web": a self-asserted web
+        # platform would skip the app's minimum-version floor
         raise DeviceRequired()
     if platform == enums.OrderChannel.WEB:
         return DeviceHeaders(fid=fid, platform=platform, app_version=version)
@@ -225,7 +231,7 @@ class CustomerJWTAuthentication(BaseAuthentication):
             Device.objects.filter(sessions__pk=sid).update(
                 last_active_at=timeutils.now(), app_version=device.app_version, updated_at=timeutils.now()
             )
-            user_agent, ip = sessions.client_facts(request)
+            user_agent, ip = sessions.activity_facts(request, platform=device.platform)
             sessions.touch_session(sid, user_agent=user_agent, ip=ip)
         return customer, claims
 

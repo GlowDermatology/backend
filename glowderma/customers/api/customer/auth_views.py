@@ -67,7 +67,8 @@ def auth_tokens(sign_in: services.SignIn, *, fid: str, request: Request) -> dict
     """``AuthTokens`` (customer contract §2.0); records the new session's client (user agent, IP, location)
     for the session list (B-W1, §2.2.10)."""
     session = sign_in.started.session
-    user_agent, ip = account_sessions.client_facts(request)
+    platform = session.device.platform if session.device is not None else ""
+    user_agent, ip = account_sessions.activity_facts(request, platform=platform)
     account_sessions.stamp_session(session.pk, user_agent=user_agent, ip=ip)
     access, expires = tokens.issue_access(session)
     customer = Customer.objects.get(pk=sign_in.customer_id)

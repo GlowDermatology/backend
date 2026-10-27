@@ -19,7 +19,7 @@ from django.db.models import QuerySet
 from glowderma.accounts import services
 from glowderma.accounts.models import AuthSession, Customer, Device
 from glowderma.core import audit, enums, geoip, i18n, timeutils, useragent
-from glowderma.core.clientip import USER_AGENT_MAX, client_user_agent
+from glowderma.core.clientip import USER_AGENT_MAX, client_user_agent, forwarded_client_ip
 
 # The location the list shows when nothing is known (no GeoIP database, a private or unknown address).
 UNKNOWN_LOCATION = "—"
@@ -57,6 +57,22 @@ def client_facts(request: Any) -> tuple[str, str]:
     return client_user_agent(django_request), ip
 
 
+def activity_facts(request: Any, *, platform: str) -> tuple[str, str]:
+    """What the activity bump may record about the client: the app's own ``User-Agent`` and peer IP; for
+    the website only what its BFF forwarded (``X-GD-Client-UA`` / ``X-GD-Client-IP`` with the internal
+    secret) — never the BFF server's own user agent or IP. ``""`` = leave the stored value."""
+    django_request = getattr(request, "_request", request)
+    if platform != enums.OrderChannel.WEB:
+        return client_facts(request)
+    forwarded_ip = forwarded_client_ip(django_request) or ""
+    forwarded_ua = ""
+    if forwarded_ip:
+        forwarded_ua = (
+            client_user_agent(django_request) if django_request.META.get("HTTP_X_GD_CLIENT_UA") else ""
+        )
+    return forwarded_ua, forwarded_ip
+
+
 def stamp_session(session_id: uuid.UUID | str, *, user_agent: str, ip: str) -> None:
     """Record the client of a just-opened session (every customer sign-in): user agent, IP and location."""
     AuthSession.objects.filter(pk=session_id, audience="customer").update(
@@ -85,7 +101,7 @@ def touch_session(session_id: uuid.UUID | str, *, user_agent: str, ip: str) -> N
 
 def open_sessions(customer_id: int) -> QuerySet[AuthSession]:
     """The customer's open sessions (not revoked, not past the absolute expiry), most recently active first
-    (``last_used_at``, then sign-in time, then id)."""
+    (``last_used_at`` desc, then id: a total order, so pages never repeat or skip a row)."""
     return (
         AuthSession.objects.filter(
             audience="customer",
@@ -94,7 +110,7 @@ def open_sessions(customer_id: int) -> QuerySet[AuthSession]:
             absolute_expires_at__gt=timeutils.now(),
         )
         .select_related("device")
-        .order_by("-last_used_at", "-created_at", "-id")
+        .order_by("-last_used_at", "id")
     )
 
 
@@ -162,7 +178,11 @@ def revoke_session(
     admin customer card (staff: reason ``admin_revoked``). Its tombstone and QR keys go on commit, its device
     is retired when no other session is left on it (no push). The customer's own current session may be
     revoked too (it is a logout). Audit ``customer.session_revoked {sid, current}``."""
-    services.lock_customer(customer_id)
+    if actor_type == "customer" and current_sid:
+        # the caller's own session must still be open under the lock (a concurrent revocation wins)
+        services.lock_signed_in_customer(customer_id, current_sid)
+    else:
+        services.lock_customer(customer_id)
     session = _locked_open_session(customer_id, session_id)
     reason = (
         enums.SessionRevokeReason.LOGOUT
