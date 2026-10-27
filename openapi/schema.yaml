@@ -20562,6 +20562,11 @@ components:
             * `uz` - uz
             * `ru` - ru
             * `en` - en
+        sku:
+          type: string
+          nullable: true
+          description: The Billz product id / barcode (`billz_id`), the shop's article
+            code; null if unknown.
         volume:
           type: string
         price:
@@ -20596,6 +20601,7 @@ components:
       - name
       - price
       - promo
+      - sku
       - slug
       - stock_status
       - updated_at
@@ -20647,6 +20653,11 @@ components:
             * `uz` - uz
             * `ru` - ru
             * `en` - en
+        sku:
+          type: string
+          nullable: true
+          description: The Billz product id / barcode (`billz_id`), the shop's article
+            code; null if unknown.
         volume:
           type: string
         price:
@@ -20705,6 +20716,7 @@ components:
       - promo
       - seo_description
       - seo_title
+      - sku
       - slug
       - stock_status
       - updated_at
