@@ -497,6 +497,10 @@ class ProductCardSerializer(serializers.Serializer[dict[str, Any]]):
             "name fell back to Uzbek or to the Billz name."
         ),
     )
+    sku = serializers.CharField(
+        allow_null=True,
+        help_text="The Billz product id / barcode (`billz_id`), the shop's article code; null if unknown.",
+    )
     volume = serializers.CharField()
     price = serializers.IntegerField()
     promo = serializers.BooleanField()

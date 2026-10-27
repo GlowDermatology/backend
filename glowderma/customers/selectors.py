@@ -589,6 +589,7 @@ def product_cards(products: list[Product], lang: str, customer_id: int | None = 
                 "slug": product.slug,
                 "name": product_name(product, lang),
                 "content_language": i18n.content_language(product, "name", lang, fallback_text=True),
+                "sku": product.billz_id or None,  # the Billz id / barcode: the only article code we hold
                 "volume": product.volume,
                 "price": product.price,
                 "promo": product.promo,

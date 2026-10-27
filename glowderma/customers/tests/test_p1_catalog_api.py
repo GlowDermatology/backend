@@ -12,6 +12,7 @@ from rest_framework.test import APIClient
 from glowderma.accounts import tokens
 from glowderma.accounts.models import Customer
 from glowderma.accounts.tests.factories import start_test_session
+from glowderma.catalog.models import Product
 from glowderma.catalog.tests.factories import (
     BannerFactory,
     CategoryFactory,
@@ -70,6 +71,7 @@ def test_card_shape_language_fallback_and_availability() -> None:
         "id",
         "name",
         "content_language",
+        "sku",
         "volume",
         "price",
         "promo",
@@ -81,6 +83,7 @@ def test_card_shape_language_fallback_and_availability() -> None:
     }
     assert card["name"] == "Сыворотка" and card["available"] == 1 and card["stock_status"] == "in_stock"
     assert card["main_image_url"].startswith("http")
+    assert card["sku"] == Product.objects.get(pk=card["id"]).billz_id  # the Billz id / barcode
     assert card_of("en")["name"] == "Zardob"
     bare = stocked(name_uz="", billz_name="BILLZ ONLY 30ML")
     names = {row["id"]: row["name"] for row in app_client().get(PRODUCTS, {"page_size": 50}).data["results"]}

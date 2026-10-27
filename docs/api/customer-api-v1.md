@@ -1109,6 +1109,7 @@ the fake Billz serves stock normally.
  "slug": "gialuron-kislotali-serum",                // B-W1: the website URL segment (unique, never only digits)
  "name": "Gialuron kislotali serum",       // resolved language → uz → billz_name
  "content_language": "uz",                          // where name came from: the requested language | "uz" (fallback)
+ "sku": "4607012301",                               // additive: the Billz product id / barcode (billz_id) | null
  "volume": "30 ml", "price": 185000, "promo": false,
  "category": {"slug": "serums", "name": "Serumlar"},
  "main_image_url": "https://media.example.uz/products/1/9f2c.webp",   // | null
@@ -1123,6 +1124,10 @@ the fake Billz serves stock normally.
  "seo_title": "",                                    // B-W1: staff-written page title in the resolved language ONLY
  "seo_description": ""}                              // (never another language's text); "" = the website builds one
 ```
+`sku` (`feat/customer-web`, additive) is the product's Billz id — the Billz product id or barcode stored as
+`billz_id`, the only article code the catalog holds. There is **no `brand`** (neither the model nor the Billz import
+carries one) and **no `old_price`**: the AKSIYA badge is the staff-set boolean `promo`, without a pre-discount or
+compare-at price (`billz_price` is Billz's reference price for staff comparison, O6, not a crossed-out price).
 
 **`GET catalog/banners/`** → `{"results": [Banner…]}` (not paginated, ≤20): `is_active` ∧ (`starts_at` null or ≤ now) ∧
 (`ends_at` null or > now), ordered by `position`, id.
