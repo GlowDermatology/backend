@@ -125,7 +125,7 @@
 | Database | psycopg[binary,pool] 3.3.6 using Django's pool |
 | Server | gunicorn 26.2 gthread; whitenoise |
 | Jobs | **Celery 5.6.3** + Redis broker with a static `beat_schedule`. Not django-celery-beat (it requires Django<6.1). Not `django.tasks` (no worker). redis-py pinned **6.4.0** (kombu bound). |
-| Libraries | PyJWT 2.15, argon2-cffi, django-filter 26.2, Pillow 13, openpyxl, httpx 0.28.1, tenacity, firebase-admin 7.7 (M2) |
+| Libraries | PyJWT 2.15, argon2-cffi, django-filter 26.2, Pillow 13, openpyxl, httpx 0.28.1, tenacity (FCM HTTP v1 through httpx + PyJWT; firebase-admin is not added — decided 2026-10-26, customer contract §2.14.2) |
 | Tooling | uv 0.13.5, ruff, mypy 2.3.1 + django-stubs/drf-stubs, pytest 9 + pytest-django + factory-boy, import-linter |
 | Images | `postgres:18-trixie` (volume at `/var/lib/postgresql`); `redis:8-alpine` (note the AGPL licensing; Valkey is the alternative) |
 
@@ -155,7 +155,7 @@ backend/  pyproject.toml uv.lock .python-version Dockerfile .dockerignore compos
     professionals/ Location, Professional, Service, ProfessionalService (price, duration), WorkingHours, BlockedPeriod
     appointments/  Appointment (price snapshot, state machine), AppointmentEvent
     notifications/ Campaign, Recipient, InboxNotification, StatusTemplate (uz/ru/en), CustomerSegment (typed rules)
-    integrations/  ports + FAKE adapters (billz, bts, click, payme, eskiz, fcm); WebhookInbox; INTEGRATIONS_MODE
+    integrations/  ports + FAKE adapters (billz, bts, click, payme, eskiz, fcm); WebhookInbox; INTEGRATIONS_MODE. Fake adapters are allowed under the production settings (product owner, 2026-10-26) with the guarantees of customer contract §6.14: no transaction started or capture honoured through a fake (a Click Complete of a transaction attached while Click was live is accepted and reversed), no payment offered, no fixed code, no simulate, no home delivery with fake BTS, no online selling with fake Billz (unknown stock), no Billz sale or stock recorded by a fake; a startup warning and the modes in health/admin settings make it visible
     site_config/   typed singleton SiteSettings
     reporting/     dashboard / nav-count / attention selectors
 ```
@@ -232,9 +232,9 @@ backend/  pyproject.toml uv.lock .python-version Dockerfile .dockerignore compos
   - Phone must match `^\+998\d{9}$` server-side; throttled per phone and per IP.
   - `verification_token`: single-use, bound to (phone, purpose), 10 min.
   - Single active device: login revokes other sessions with reason `replaced`.
-  - Refresh: 60-day sliding, rotating; reuse after a short grace window revokes the session.
+  - Refresh: 60-day sliding, rotating. After a rotation the same old token gets the identical new pair for `CUSTOMER_REFRESH_GRACE_SECONDS` (confirmed or not); while the rotation is unconfirmed and younger than `CUSTOMER_REFRESH_UNCONFIRMED_SECONDS` the old token may re-rotate; after that, or after the grace once an access token of the new rotation was used, presenting it is reuse and revokes the session (`refresh_reused`). The app refreshes single-flight (customer contract §1.2, §2.1.6).
   - Consent stored on Customer: terms version, time, IP.
-  - **Customer social login (Google, Facebook):** the app's native SDK returns an ID token / access token → `POST /api/v1/auth/social {provider, token}`. A linked customer gets tokens (single-device rule applies). An unknown identity gets `next_step: verify_phone` plus a short-lived signed `social_ticket`; after send-code/verify-code on a phone, the identity is linked to that phone's customer (created or reactivated). Phone stays the loyalty key; one identity per provider per customer.
+  - **Customer social login (Google, Facebook, Apple — Apple added by the product owner on 2026-10-26; Apple tokens are revoked on unlink and on account deletion, customer contract §2.1.8):** the app's native SDK returns an ID token / access token → `POST /api/v1/auth/social {provider, token}`. A linked customer gets tokens (single-device rule applies). An unknown identity gets `next_step: verify_phone` plus a short-lived signed `social_ticket`; after send-code/verify-code on a phone, the identity is linked to that phone's customer (created or reactivated). Phone stays the loyalty key; one identity per provider per customer.
 - **Client IP and network**
   - The Next API client sends `X-GD-Client-IP` plus an internal shared-secret header. Django honours the IP only if the secret matches (`compare_digest`).
   - Other traffic uses the rightmost untrusted `X-Forwarded-For` hop against `TRUSTED_PROXIES`.
@@ -337,10 +337,12 @@ backend/  pyproject.toml uv.lock .python-version Dockerfile .dockerignore compos
   - `auth.actions.ts`: login (Server Action). Logout is the `/admin/auth/logout` route handler; the sidebar logout button (replacing `NotConnectedButton`) posts to it.
   - **Token model: BFF (user decision 2026-10-24).** Browser JavaScript never sees a token; only the Next server uses them to call Django.
   - Access cookie `gd_admin_access`: HttpOnly, Secure (prod; `__Secure-` prefix in prod), SameSite=Strict, `Path=/admin`, max-age = access TTL.
-  - Refresh cookie `gd_admin_refresh`: HttpOnly, Secure, SameSite=Strict, **`Path=/admin/auth`** — sent by the browser only to the auth route handlers (`/admin/auth/refresh`, `/admin/auth/logout`), never to pages, Server Actions or `/admin/login`.
+  - Refresh cookie `gd_admin_refresh`: HttpOnly, Secure (prod), SameSite=Strict, **`Path=/admin/auth`** — sent by the browser only to the auth route handlers (`/admin/auth/refresh`, `/admin/auth/logout`), never to pages, Server Actions or `/admin/login`.
   - Logout is a POST route handler `/admin/auth/logout` (CSRF-checked) with `scope=current|others|all`: `current` revokes this session, `others` revokes every other session of the staff member, `all` revokes every session. It forwards the refresh token to Django and clears the cookies when the current session ends.
   - Refresh flow: `proxy.ts` sees a missing/near-expiry access cookie on a GET → 307 to `/admin/auth/refresh?next=…` (route handler: verifies Origin/`Sec-Fetch-Site`, calls Django refresh, sets a new access cookie, 303 back to a validated `next`). On 401 it clears both cookies and redirects to login. Server Actions that hit an expired access token return `session_expired`; the client calls the refresh route and retries once.
-  - **CSRF on everything state-changing:** SameSite=Strict on both cookies; Next's built-in Server Action Origin/Host check with explicit `serverActions.allowedOrigins`; plus a double-submit token — a per-session random `gd_csrf` value (readable cookie, SameSite=Strict, Path=/admin) that every Server Action receives as an argument and every POST route handler as an `X-CSRF-Token` header, compared in constant time against the cookie in `verifyStaff({ csrf })`. Login, logout and refresh route handlers are included. Django's admin API accepts calls only with a Bearer token plus the internal secret from the Next server, so it is not reachable by a browser at all.
+  - **CSRF on everything state-changing:** SameSite=Strict on both cookies; Next's built-in Server Action Origin/Host check with explicit `serverActions.allowedOrigins`; plus a double-submit token — a per-session random `gd_csrf` value (readable cookie, Secure (prod), SameSite=Strict, Path=/admin; minted by the proxy on admin GETs when missing) that every Server Action receives as an argument and every POST route handler as an `X-CSRF-Token` header, compared in constant time against the cookie in `verifyStaff({ csrf })`. Login, logout and refresh route handlers are included. `serverActions.allowedOrigins` and `GLOWDERMA_ALLOWED_ORIGINS` list exact `host[:port]` entries only (one shared parser; wildcards rejected) — `gd_csrf` cannot take the `__Host-` prefix (Path=/admin), so this list is what defeats a cookie planted from a sibling subdomain.
+  - **Refresh-route outcomes:** *ok* → new access cookie (maxAge = min(JWT exp, access_expires_at)) and back to `next`, plus a `gd_refresh_backoff` cookie when the new token is itself inside the refresh lead time; *ended* (Django 400/401, or no refresh cookie) → clear cookies, go to login; *transient* (429/5xx/timeout, or Django returned an unusable token) with a live access cookie → back to `next` with a 30 s backoff, without one → 503 retry page; a cross-site GET gets a same-origin bounce page (SameSite=Strict cookies are absent on cross-site navigations).
+  - **Edge contract (deployment):** TLS terminates at an edge proxy that appends/overwrites `X-Forwarded-For` and overwrites `X-Forwarded-Host`; the Next server is reachable only through that edge; production serves HTTPS (browsers drop `Secure`/`__Secure-` cookies over plain HTTP, which would make proxy↔refresh bounce). Django's admin API accepts calls only with a Bearer token plus the internal secret from the Next server, so it is not reachable by a browser at all.
   - DAL `src/data/auth.ts`, never read in layouts. Sidebar `<SidebarUser/>` and `<BillzStatus/>` are async components inside Suspense.
   - `src/proxy.ts`, matcher `/admin/:path*`:
     - GET only; `/admin/login` is exempt; non-GET passes through.
@@ -400,8 +402,8 @@ backend/  pyproject.toml uv.lock .python-version Dockerfile .dockerignore compos
   - `POST delivery/calculate` (BTS tariff port).
   - Checkout with reservation, cashback hold and an expiry job (which first refuses or cancels active provider transactions).
   - `POST orders/{id}/pay`.
-  - Click prepare/complete: MD5 over the raw strings, `compare_digest`, service_id binding, amount == payable (else -2), `merchant_prepare_id` binding; error<0 → cancel and -9.
-  - Payme JSON-RPC, all methods plus the sandbox scenarios: Basic auth per mode (-32504), amount == payable×100 (-31001), -31008 for a second active transaction or a non-payable order. The IP allow-list is defence in depth only.
+  - Click prepare/complete: MD5 over the raw strings, `compare_digest`, service_id binding, amount == payable (else -2), `merchant_prepare_id` binding; error<0 → cancel and -9. A Complete with error = 0 that we cannot honour (expired, cancelled, superseded, failed by us, double payment, fake mode) is **accepted (0) and reversed** through a refund, never answered with an error, because Click's SHOP API allows no error after funds were withdrawn (customer contract §2.13.0).
+  - Payme JSON-RPC, all methods plus the sandbox scenarios: Basic auth per mode (-32504), amount == payable×100 (-31001), -31051 (account-error range) when the order awaits another active transaction or a Click transaction is in flight, -31008 for a paid, cancelled or non-payable order. The IP allow-list is defence in depth only.
 - **After payment:** purchase + credit, Billz sale via the outbox, BTS create with automatic retry plus an attention item.
 - **Delivery tracking:** BTS webhook (secret token + re-track) and polling.
 - **QR:** 128-bit token, Redis stores its HMAC, 60 s, single-use via GETDEL; `POST pos/cashback/resolve-qr`.

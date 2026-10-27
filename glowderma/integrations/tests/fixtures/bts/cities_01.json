@@ -1,0 +1,25 @@
+{
+  "status": true,
+  "message": "Ma’lumot muvaffaqiyatli olindi.",
+  "status_code": 200,
+  "data": {
+    "items": [
+      {
+        "code": "0101",
+        "name": "Uchtepa tumani",
+        "office_exists": true
+      },
+      {
+        "code": "0102",
+        "name": "Olmazor tumani",
+        "office_exists": true
+      }
+    ],
+    "_meta": {
+      "totalCount": 2,
+      "pageCount": 1,
+      "currentPage": 1,
+      "perPage": 50
+    }
+  }
+}

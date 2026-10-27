@@ -1,0 +1,6 @@
+{"_source": "get_v1_client 200 (schema)",
+ "count": 1,
+ "clients": [{"id": "622c8993-9f82-45ae-a69d-63103d8506d5", "external_id": "1042", "first_name": "Malika",
+              "last_name": "", "middle_name": "", "created_at": "2026-01-10 10:00:00", "birth_date": "",
+              "first_transaction_date": "", "last_transaction_date": "", "balance": 0, "cards": [],
+              "company_name": "Glow Derma", "phone_numbers": ["+998901234567"], "gender": "female"}]}

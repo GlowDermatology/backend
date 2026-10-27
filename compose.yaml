@@ -1,0 +1,63 @@
+x-app: &app
+  build: .
+  env_file: .env
+  environment: &environment
+    DJANGO_SETTINGS_MODULE: config.settings.local
+    DATABASE_URL: postgres://glowderma:glowderma@postgres:5432/glowderma
+    REDIS_URL: redis://redis:6379/0
+    CELERY_BROKER_URL: redis://redis:6379/1
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  api:
+    <<: *app
+    command: api
+    ports: ["127.0.0.1:8000:8000"]
+    volumes: ["media:/app/media"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:8000/api/v1/health/', headers={'Host': 'localhost'}), timeout=5).read()"]
+      interval: 10s
+      timeout: 6s
+      retries: 6
+  worker:
+    <<: *app
+    command: worker
+    volumes: ["media:/app/media"]
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A config inspect ping -d celery@$$HOSTNAME --timeout 5"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+  beat:
+    <<: *app
+    command: beat
+    healthcheck: {disable: true}
+  postgres:
+    image: postgres:18-trixie
+    environment:
+      POSTGRES_USER: glowderma
+      POSTGRES_PASSWORD: glowderma
+      POSTGRES_DB: glowderma
+    ports: ["127.0.0.1:5433:5432"]
+    volumes: ["pgdata:/var/lib/postgresql"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "glowderma", "-d", "glowderma"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  redis:
+    image: redis:8-alpine
+    ports: ["127.0.0.1:6380:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:
+  media:

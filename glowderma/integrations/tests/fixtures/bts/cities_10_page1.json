@@ -1,0 +1,20 @@
+{
+  "status": true,
+  "message": "Ma’lumot muvaffaqiyatli olindi.",
+  "status_code": 200,
+  "data": {
+    "items": [
+      {
+        "code": "1001",
+        "name": "Chirchiq shahri",
+        "office_exists": true
+      }
+    ],
+    "_meta": {
+      "totalCount": 2,
+      "pageCount": 2,
+      "currentPage": 1,
+      "perPage": 1
+    }
+  }
+}

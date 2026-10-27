@@ -1,0 +1,13 @@
+{
+  "status": false,
+  "message": "error.validation",
+  "status_code": 422,
+  "errors": {
+    "receiverCityId": [
+      "«Receiver City Id» to`ldirish shart."
+    ],
+    "receiver": [
+      "Telefon +998901234567 noto‘g‘ri"
+    ]
+  }
+}

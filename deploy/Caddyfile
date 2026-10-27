@@ -1,0 +1,155 @@
+# Glow Derma edge proxy (compose.prod.yaml service "edge"). Caddy obtains and renews the TLS certificates.
+#
+#   SITE_DOMAIN   public landing (Next.js); www.SITE_DOMAIN redirects to it
+#   ADMIN_DOMAIN  admin panel (Next.js BFF); its session cookies are host-only
+#   API_DOMAIN    Django: mobile customer API, provider webhooks, POS, health, /media/ from the shared volume
+#
+# Header contract: Caddy trusts no upstream proxy, so X-Forwarded-For is overwritten with the TCP peer. The Next
+# BFF forwards that hop to Django as X-GD-Client-IP; Django trusts X-Forwarded-For only from this container
+# (TRUSTED_PROXIES). Never put a second proxy or CDN in front without collapsing X-Forwarded-For: the per-IP
+# throttles and the Click/Payme callback allow-lists read the client address from it.
+#
+# compose.prod.yaml mounts deploy/ (a directory, so a `git pull` is visible inside the container) at /etc/caddy.
+# After a change: docker compose -f compose.prod.yaml exec edge caddy reload --config /etc/caddy/Caddyfile
+# --adapter caddyfile (zero downtime; a config that does not load leaves the running one in place).
+# Validate: caddy validate --config deploy/Caddyfile --adapter caddyfile (with ACME_EMAIL, SITE_DOMAIN,
+# ADMIN_DOMAIN and API_DOMAIN in the environment). Behaviour probe: python3 deploy/edge_probe.py --caddy <binary>.
+
+# Log redaction, applied to the access logs AND to the default logger, which receives the error line of a
+# request the upstream could not answer (a 502 while api restarts carries the full request). Query strings
+# never reach a log: the BTS webhook authenticates with ?token=<BTS_WEBHOOK_SECRET> (BTS cannot send a header),
+# admin searches carry phone numbers (?q=), the staff OAuth callback carries code and state; the Referer of an
+# admin page repeats them. The token and internal-secret headers are dropped. Caddy itself redacts Cookie,
+# Set-Cookie, Authorization (Payme Basic auth, POS "Api-Key") and Proxy-Authorization.
+(redact) {
+	request>uri regexp "\?.*$" "?REDACTED"
+	request>headers>Referer regexp "\?.*$" "?REDACTED"
+	request>headers>X-Gd-Webhook-Token delete
+	request>headers>X-Gd-Internal-Secret delete
+}
+
+{
+	email {$ACME_EMAIL}
+	servers {
+		# A client must send its headers within 10 s and its whole request (headers and body) within 60 s: a
+		# trickling client cannot hold a connection for long. 60 s fits the largest body (a 5 MiB image at
+		# about 1 Mbit/s). Small bodies are buffered here before Django sees them (request_buffers below).
+		timeouts {
+			read_header 10s
+			read_body 60s
+		}
+	}
+	log default {
+		output stderr
+		format filter {
+			wrap json
+			fields {
+				import redact
+			}
+		}
+	}
+}
+
+(common) {
+	encode zstd gzip
+	header {
+		-Server
+		-Via
+		Strict-Transport-Security "max-age=31536000"
+	}
+	# Access log (JSON on stdout, rotated by Docker), redacted as described at the top.
+	log {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				import redact
+			}
+		}
+	}
+}
+
+(next) {
+	# Partially prerendered pages stream: flush every chunk to the browser.
+	reverse_proxy {$FRONTEND_UPSTREAM:frontend:3000} {
+		flush_interval -1
+	}
+}
+
+{$SITE_DOMAIN} {
+	import common
+	# The admin panel answers on its own host only.
+	redir /admin https://{$ADMIN_DOMAIN}/admin 308
+	redir /admin/* https://{$ADMIN_DOMAIN}{uri} 308
+	request_body {
+		max_size 1MB
+	}
+	import next
+}
+
+www.{$SITE_DOMAIN} {
+	import common
+	redir https://{$SITE_DOMAIN}{uri} 308
+}
+
+{$ADMIN_DOMAIN} {
+	import common
+	# Replace (not append to) the header Next already sends on /admin.
+	header >X-Robots-Tag "noindex, nofollow"
+	redir / /admin 302
+	# Server Actions carry product and campaign images (5 MiB each) plus multipart overhead; Next refuses
+	# above 6 MB.
+	request_body {
+		max_size 7MB
+	}
+	import next
+}
+
+{$API_DOMAIN} {
+	import common
+
+	# Uploaded media, re-encoded by Django and stored under content-hashed names.
+	handle_path /media/* {
+		root * {$MEDIA_ROOT:/srv/media}
+		header {
+			Cache-Control "public, max-age=604800"
+			X-Content-Type-Options nosniff
+			Content-Security-Policy "default-src 'none'; img-src 'self'; sandbox"
+		}
+		file_server
+	}
+
+	# Staff surfaces stay on the private network: the Next server calls api:8000 directly. Django refuses them
+	# from any other address as well (ADMIN_API_ALLOWED_NETS + the internal secret); this keeps them invisible
+	# from the internet. /api/v1/dev/ never exists under the production settings.
+	@private path /api/v1/admin /api/v1/admin/* /api/v1/schema /api/v1/schema/* /api/v1/docs /api/v1/docs/* /api/v1/dev /api/v1/dev/* /django-admin /django-admin/*
+	handle @private {
+		respond 404
+	}
+
+	# Provider callbacks (public by design: Click Prepare/Complete, Payme Merchant API, BTS status with
+	# ?token=) and cashier terminals. Their bodies are a few KB (the webhook inbox keeps at most 64 KiB, the
+	# BTS view refuses more than 16 KiB), so the limit is far below the general one. The whole body is read
+	# here before Django is contacted: a slow sender never holds one of gunicorn's 12 threads.
+	@callbacks path /api/v1/webhooks/* /api/v1/pos/*
+	handle @callbacks {
+		request_body {
+			max_size 1MiB
+		}
+		reverse_proxy {$API_UPSTREAM:api:8000} {
+			request_buffers 1MiB
+		}
+	}
+
+	# Customer API, health. Django's own ceiling is 6 MiB (DATA_UPLOAD_MAX_MEMORY_SIZE; the profile image
+	# upload is <= 5 MiB plus multipart framing). The first MiB is buffered here (every JSON request in full),
+	# so only an upload that already sent 1 MiB reaches Django while still arriving.
+	handle {
+		request_body {
+			max_size 6MiB
+		}
+		reverse_proxy {$API_UPSTREAM:api:8000} {
+			request_buffers 1MiB
+		}
+	}
+}

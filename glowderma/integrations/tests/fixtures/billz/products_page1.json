@@ -1,0 +1,40 @@
+{"_source": "get_v2_products 200 (schema; values after llms-full '2. Первый запрос' and 'Остатки и цены')",
+ "count": 4,
+ "products": [
+  {"id": "2ce40c63-4527-4898-a975-7c30c255fd50", "parent_id": "", "name": "HYALURONIC SERUM 30ML",
+   "sku": "GD-SER-30", "barcode": "4607012301", "description": "", "is_variative": false,
+   "brand_id": "e158f882-d0e0-499d-b6f8-9029ac1886ca", "brand_name": "Glow",
+   "categories": [{"id": "491e1d8a-0000-4000-8000-000000000001", "name": "Serums", "parent_id": ""}],
+   "updated_at": "2026-10-26 08:15:00", "main_image_url": "", "main_image_url_full": "",
+   "measurement_unit": {"id": "aee6d71d-0000-4000-8000-000000000001", "name": "piece", "short_name": "pc"},
+   "product_type_id": "18b5c3a0-0000-4000-8000-000000000001", "is_marked": false, "photos": [],
+   "shop_measurement_values": [
+     {"shop_id": "c1056fcc-539b-47ea-8bc4-d9e337c433f0", "shop_name": "Glow Derma Yunusobod", "active_measurement_value": 12},
+     {"shop_id": "6f244db4-75d6-4fac-9841-14867d45e36a", "shop_name": "Warehouse", "active_measurement_value": 40}],
+   "shop_prices": [
+     {"shop_id": "c1056fcc-539b-47ea-8bc4-d9e337c433f0", "shop_name": "Glow Derma Yunusobod", "retail_price": 185000, "retail_currency": "UZS",
+      "supply_price": 0, "supply_currency": "", "promo_price": 0, "promos": []},
+     {"shop_id": "6f244db4-75d6-4fac-9841-14867d45e36a", "shop_name": "Warehouse", "retail_price": 190000, "retail_currency": "UZS",
+      "supply_price": 0, "supply_currency": "", "promo_price": 0, "promos": null}],
+   "product_attributes": [{"attribute_id": "491e1d8a-0000-4000-8000-000000000002", "attribute_name": "Объём",
+                           "attribute_value_id": "aee6d71d-0000-4000-8000-000000000002", "attribute_value": "30 ml"}],
+   "custom_fields": null, "supply_price": 0, "supply_currency": "", "suppliers": [],
+   "product_supplier_stock": null},
+  {"id": "1b5e3f0d-ad00-44e5-981a-2c88af848ba3", "parent_id": "", "name": "GENTLE FOAM 150ML",
+   "sku": "GD-FOAM-150", "barcode": "4607012302", "description": "", "is_variative": false,
+   "brand_id": "", "brand_name": "", "categories": [], "updated_at": "2026-10-26 09:00:00",
+   "measurement_unit": {"id": "aee6d71d-0000-4000-8000-000000000001", "name": "piece", "short_name": "pc"},
+   "product_type_id": "18b5c3a0-0000-4000-8000-000000000001", "is_marked": false, "photos": [],
+   "shop_measurement_values": [
+     {"shop_id": "c1056fcc-539b-47ea-8bc4-d9e337c433f0", "shop_name": "Glow Derma Yunusobod", "active_measurement_value": 0}],
+   "shop_prices": [
+     {"shop_id": "c1056fcc-539b-47ea-8bc4-d9e337c433f0", "shop_name": "Glow Derma Yunusobod", "retail_price": 99000.4, "retail_currency": "UZS",
+      "supply_price": 0, "supply_currency": "", "promo_price": 79000,
+      "promos": [{"id": "d0d0d0d0-0000-4000-8000-000000000001", "external_id": "", "name": "autumn -20%",
+                  "discount_value": 20, "discount_type": "PERCENTAGE", "shop_ids": ["c1056fcc-539b-47ea-8bc4-d9e337c433f0"]}]}],
+   "product_attributes": [],
+   "custom_fields": [{"custom_field_name": "Объём", "custom_field_system_name": "volume",
+                      "custom_field_id": "3b6db763-0000-4000-8000-000000000001", "custom_field_value": "150 ml",
+                      "from_parent": false}],
+   "supply_price": 0, "supply_currency": "", "suppliers": [], "product_supplier_stock": null}
+ ]}

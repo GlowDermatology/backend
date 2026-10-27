@@ -1,0 +1,248 @@
+# Production stack on one VPS: Caddy edge (TLS) -> Next.js frontend and the Django API, with the Celery worker,
+# a single Celery beat, PostgreSQL 18 and Redis 8. Runbook: docs/ops/deploy.md (run its commands as root in
+# /srv/glowderma/backend).
+#
+#   deploy/pin-release.sh                                   # GIT_SHA / FRONTEND_GIT_SHA of the checkouts -> .env
+#   docker compose -f compose.prod.yaml build
+#   docker compose -f compose.prod.yaml run --rm api migrate
+#   docker compose -f compose.prod.yaml up -d
+#
+# Variables come from ./.env (Compose interpolation AND the backend containers' env_file, so every Django
+# setting written there reaches api, worker and beat); template: deploy/env.production.example. The
+# topology-derived settings below (hosts, networks, URLs, OAuth callbacks) are set here and win over .env.
+# The image tags come from .env as well (written by deploy/pin-release.sh), so every command in a fresh shell
+# runs the release that was built; an unset tag stops compose instead of building ":latest".
+#
+# Networks: "front" (edge, frontend, api) is the only one the internet-facing processes join; PostgreSQL and
+# Redis live on "back", which has no route out and which the edge and the frontend cannot reach; "egress" gives
+# the worker its outbound HTTPS to the providers (api has it through front).
+#
+# Memory (2 vCPU / 4 GB host): api, worker and frontend have limits from .env (defaults sized for that host),
+# beat and the edge fixed ones; PostgreSQL and Redis have none but are the last processes the kernel OOM
+# killer picks (oom_score_adj), and Redis refuses writes above REDIS_MAXMEMORY instead of growing.
+name: glowderma
+
+x-logging: &logging
+  driver: json-file
+  options: {max-size: "20m", max-file: "5"}
+
+x-backend: &backend
+  # Built once by the api service; worker and beat run the same image.
+  image: glowderma-backend:${GIT_SHA:?run deploy/pin-release.sh (docs/ops/deploy.md) to write GIT_SHA to .env}
+  env_file: .env
+  environment: &backend-environment
+    DJANGO_SETTINGS_MODULE: config.settings.production
+    # glowderma_app owns the database but is not a superuser (deploy/postgres/app-role.psql).
+    DATABASE_URL: postgres://glowderma_app:${POSTGRES_APP_PASSWORD:?set POSTGRES_APP_PASSWORD in .env}@postgres:5432/glowderma
+    REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis:6379/0
+    CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/1
+    # The public API host for the mobile app and webhooks, and "api" for the Next server's private calls.
+    ALLOWED_HOSTS: ${API_DOMAIN:?set API_DOMAIN in .env},api
+    # Only the Next container may call /api/v1/admin/ (plus the internal secret, enforced in production);
+    # requests arriving through the edge resolve to the edge's or the browser's IP and are refused.
+    ADMIN_API_ALLOWED_NETS: 172.30.0.20/32
+    # The edge overwrites X-Forwarded-For with the TCP peer; only its address is trusted.
+    TRUSTED_PROXIES: 172.30.0.10/32
+    PUBLIC_MEDIA_BASE_URL: https://${API_DOMAIN}/media/
+    # The Next BFF callbacks (admin contract 2.1); register exactly these URLs with Google and Facebook.
+    GOOGLE_OAUTH_REDIRECT_URI: https://${ADMIN_DOMAIN:?set ADMIN_DOMAIN in .env}/admin/auth/oauth/google/callback
+    FACEBOOK_OAUTH_REDIRECT_URI: https://${ADMIN_DOMAIN}/admin/auth/oauth/facebook/callback
+    GIT_SHA: ${GIT_SHA}
+    # env_file hands every .env line to these containers; the infrastructure passwords are blanked here: the
+    # superuser's never reaches the application, the other two only inside the URLs above.
+    POSTGRES_PASSWORD: ""
+    POSTGRES_APP_PASSWORD: ""
+    REDIS_PASSWORD: ""
+  volumes:
+    - media:/app/media
+    # Key files (FCM service account, Sign in with Apple .p8) read by the production settings at boot in every
+    # backend container; FCM_CREDENTIALS_FILE / APPLE_PRIVATE_KEY_FILE point inside. A directory mount, so a
+    # stack without live FCM/Apple needs no file. Group 10001 (the image's "app" user), files 0440.
+    - ${GLOWDERMA_SECRETS_DIR:-/srv/glowderma/secrets}:/run/secrets/glowderma:ro
+  networks: [back]
+  restart: unless-stopped
+  logging: *logging
+  depends_on:
+    postgres: {condition: service_healthy}
+    redis: {condition: service_healthy}
+
+services:
+  api:
+    <<: *backend
+    build:
+      context: .
+    command: api
+    networks: [front, back]
+    # gunicorn: GUNICORN_WORKERS (3) processes of about 120 MB plus image decoding peaks.
+    mem_limit: ${API_MEM_LIMIT:-1g}
+    pids_limit: 256
+    # Liveness, not readiness: plain health/ answers 200 while gunicorn serves. health/?ready=1 answers 503 when
+    # the database, Redis or the broker blips or a live provider is not configured; as the container check it
+    # would mark api unhealthy and keep `up` from starting the frontend and the edge (depends_on
+    # service_healthy), taking the admin panel down exactly when it is needed to fix things. Readiness belongs to
+    # the deploy smoke test and the external monitor (docs/ops/deploy.md, docs/ops/monitoring.md §4).
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:8000/api/v1/health/', headers={'Host': 'localhost'}), timeout=5).read()"]
+      interval: 15s
+      timeout: 6s
+      retries: 6
+      start_period: 20s
+    stop_grace_period: 40s  # gunicorn graceful_timeout is 30 s
+
+  worker:
+    <<: *backend
+    # Processes: at least 3 (long periodic jobs must not starve the outbox dispatcher); see CELERY_CONCURRENCY.
+    command: ["worker", "--concurrency", "${CELERY_CONCURRENCY:-4}"]
+    networks: [back, egress]
+    # CELERY_CONCURRENCY prefork children of about 120 MB plus the parent; raise with the concurrency.
+    mem_limit: ${WORKER_MEM_LIMIT:-1g}
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A config inspect ping -d celery@$$HOSTNAME --timeout 5"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+    # Warm shutdown lets running tasks finish; a task still running after this is redelivered (acks late).
+    stop_grace_period: 60s
+
+  # Exactly one beat process: two would enqueue every periodic task twice. Never scale this service.
+  beat:
+    <<: *backend
+    command: beat
+    mem_limit: 256m
+    pids_limit: 64
+    healthcheck: {disable: true}
+
+  frontend:
+    image: glowderma-frontend:${FRONTEND_GIT_SHA:?run deploy/pin-release.sh (docs/ops/deploy.md) to write FRONTEND_GIT_SHA to .env}
+    build:
+      context: ${FRONTEND_CONTEXT:-../frontend}
+      args:
+        NEXT_PUBLIC_SITE_URL: https://${SITE_DOMAIN:?set SITE_DOMAIN in .env}
+        GLOWDERMA_ALLOWED_ORIGINS: ${ADMIN_DOMAIN}
+        GLOWDERMA_MEDIA_HOSTS: ${API_DOMAIN}
+        GLOWDERMA_BUILD_SHA: ${FRONTEND_GIT_SHA}
+    environment:
+      GLOWDERMA_DATA_SOURCE: api
+      GLOWDERMA_API_URL: http://api:8000
+      # One secret, two names: Django reads INTERNAL_API_SECRET, the Next BFF sends it as X-GD-Internal-Secret.
+      GLOWDERMA_INTERNAL_SECRET: ${INTERNAL_API_SECRET:?set INTERNAL_API_SECRET in .env}
+      GLOWDERMA_ALLOWED_ORIGINS: ${ADMIN_DOMAIN}
+      GLOWDERMA_COOKIE_SECURE: "true"
+      # Staff social sign-in buttons: the providers to offer, Django's OAuth mode (fake disables them outside
+      # development) and the public client ids; the secrets stay in Django.
+      GLOWDERMA_OAUTH_PROVIDERS: ${STAFF_OAUTH_PROVIDERS:-}
+      GLOWDERMA_OAUTH_MODE: ${OAUTH_MODE:-${INTEGRATIONS_MODE:-fake}}
+      GLOWDERMA_GOOGLE_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+      GLOWDERMA_FACEBOOK_APP_ID: ${FACEBOOK_APP_ID:-}
+    networks:
+      front: {ipv4_address: 172.30.0.20}
+    mem_limit: ${FRONTEND_MEM_LIMIT:-768m}
+    pids_limit: 256
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      api: {condition: service_healthy}
+
+  edge:
+    image: caddy:2.10.2-alpine
+    # IPv4 only: the networks are IPv4, and an IPv6 client relayed by Docker's userland proxy would reach the
+    # edge as the bridge gateway, sharing one per-IP throttle bucket with every other IPv6 client. Publish A
+    # records only (docs/ops/deploy.md §2).
+    ports:
+      - "0.0.0.0:80:80"
+      - "0.0.0.0:443:443"
+      - "0.0.0.0:443:443/udp"
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+      SITE_DOMAIN: ${SITE_DOMAIN}
+      ADMIN_DOMAIN: ${ADMIN_DOMAIN}
+      API_DOMAIN: ${API_DOMAIN}
+    volumes:
+      # The deploy/ directory, not the single file: after `git pull` the new Caddyfile is visible inside the
+      # container, and `caddy reload` (docs/ops/deploy.md §4) applies it without dropping connections.
+      - ./deploy:/etc/caddy:ro
+      - media:/srv/media:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      front: {ipv4_address: 172.30.0.10}
+    mem_limit: 256m
+    pids_limit: 256
+    restart: unless-stopped
+    logging: *logging
+    depends_on:
+      frontend: {condition: service_started}
+      api: {condition: service_healthy}
+
+  postgres:
+    image: postgres:18.6-trixie
+    environment:
+      # The superuser (administration: psql, pg_dump, restore); the application connects as glowderma_app.
+      POSTGRES_USER: glowderma
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: glowderma
+      # Read by deploy/postgres/10-app-role.sh (on an empty volume, or by hand: docs/ops/deploy.md §5).
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?set POSTGRES_APP_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql
+      - ./deploy/postgres:/docker-entrypoint-initdb.d:ro
+    networks: [back]
+    oom_score_adj: -500
+    restart: unless-stopped
+    logging: *logging
+    shm_size: 256mb
+    stop_grace_period: 60s
+    healthcheck:
+      # Over TCP: while the image initialises an empty volume (deploy/postgres) its temporary server listens on
+      # the socket only, so the stack waits for the real server.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "glowderma", "-d", "glowderma"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:8.10-alpine
+    # AOF persistence: queued Celery messages survive a restart. noeviction (the default) because DB 1 is the
+    # broker: above maxmemory Redis refuses writes (visible errors) and never drops a queued task. The password
+    # is read from stdin, so it never appears in a process list; redis-cli reads REDISCLI_AUTH.
+    command:
+      - sh
+      - -c
+      - |
+        exec docker-entrypoint.sh redis-server - --appendonly yes --appendfsync everysec --maxmemory "$$REDIS_MAXMEMORY" <<EOF
+        requirepass $$REDISCLI_AUTH
+        EOF
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
+      REDIS_MAXMEMORY: ${REDIS_MAXMEMORY:-256mb}
+    volumes: ["redisdata:/data"]
+    networks: [back]
+    oom_score_adj: -500
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+networks:
+  front:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+          # Dynamic addresses come from the upper half, so the fixed edge (.10) and frontend (.20) addresses
+          # that TRUSTED_PROXIES and ADMIN_API_ALLOWED_NETS name can never be taken by another container.
+          ip_range: 172.30.0.128/25
+  back:
+    internal: true
+  egress: {}
+
+volumes:
+  pgdata:
+  redisdata:
+  media:
+  caddy_data:
+  caddy_config:

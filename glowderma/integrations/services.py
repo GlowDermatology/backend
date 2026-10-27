@@ -1,0 +1,297 @@
+"""Transactional writes of `integrations`: the ``Job`` state machine and the per-provider sync facts.
+
+``queued → running → succeeded | failed`` (design 01 §2.2). Starting a job is single-flight per kind: the
+partial unique index ``job_single_flight_per_kind`` rejects a second queued/running row and
+:func:`start_job` then returns the active one. The work itself belongs to the orchestrating module (the
+Billz import lives in ``catalog.tasks``); it is handed over through the outbox as a string topic, because
+``integrations`` sits below every module that could do the work.
+"""
+
+import json
+import logging
+import time
+from datetime import datetime, timedelta
+from typing import Any
+
+from django.core.serializers.json import DjangoJSONEncoder
+from django.db import IntegrityError, connection, transaction
+from django.db.models import F, Q
+
+from glowderma.core import audit, enums, outbox, timeutils
+from glowderma.core.db import PURGEABLE_TABLES, purge_window
+from glowderma.integrations.models import IntegrationState, Job, WebhookInbox
+
+logger = logging.getLogger(__name__)
+
+ACTIVE_STATES = (enums.JobState.QUEUED, enums.JobState.RUNNING)
+# Outbox topic of a freshly queued job; the orchestrating module registers the handler in its ``tasks.py``.
+JOB_QUEUED_TOPIC = "job.queued"
+# A running job whose worker has not touched ``heartbeat_at`` for this long lost its worker (design 01 §2.2):
+# a Celery redelivery may re-claim it, and ``tasks.reap_stale_jobs`` fails it so the single-flight index
+# never wedges the import button.
+STALE_JOB_AFTER = timedelta(minutes=15)
+WORKER_LOST_CODE = "worker_lost"
+WORKER_LOST_MESSAGE = "Jarayon uzilib qoldi. Qayta urinib ko‘ring."
+
+
+class JobNotActive(RuntimeError):
+    """A worker tried to move a job that is no longer queued/running (a duplicate delivery)."""
+
+
+def start_job(
+    kind: str, params: dict[str, Any], *, actor: Any = None, request: Any = None
+) -> tuple[Job, bool]:
+    """Queue a job of ``kind`` or return the one already queued/running (single-flight).
+
+    Returns ``(job, created)``. A created job is announced on the outbox topic ``job.queued`` with
+    ``{"job_id", "kind"}`` once the surrounding transaction commits; the ``billz_import`` kind also writes the
+    ``billz.import_started`` audit row (contract §2.3).
+    """
+    with transaction.atomic():
+        try:
+            with transaction.atomic():
+                job = Job.objects.create(kind=kind, params=params, created_by=actor)
+        except IntegrityError:
+            active = (
+                Job.objects.filter(kind=kind, state__in=ACTIVE_STATES).order_by("-created_at", "-id").first()
+            )
+            if active is None:  # the competing job finished between the two statements: queue ours again
+                job = Job.objects.create(kind=kind, params=params, created_by=actor)
+            else:
+                return active, False
+        if kind == enums.JobKind.BILLZ_IMPORT:
+            audit.record(
+                action="billz.import_started",
+                entity_type="job",
+                entity_id=str(job.pk),
+                actor=actor,
+                request=request,
+                after={"job_id": job.pk, "params": params},
+            )
+        outbox.enqueue(JOB_QUEUED_TOPIC, {"job_id": job.pk, "kind": kind}, dedupe_key=f"job:{job.pk}")
+        return job, True
+
+
+def is_stale(job: Job, *, now: Any = None) -> bool:
+    """A ``running`` job whose heartbeat is older than :data:`STALE_JOB_AFTER` (its worker was lost)."""
+    if job.state != enums.JobState.RUNNING:
+        return False
+    reference = job.heartbeat_at or job.started_at or job.created_at
+    return bool(reference < (now or timeutils.now()) - STALE_JOB_AFTER)
+
+
+def is_lost_in_queue(job: Job, *, now: Any = None) -> bool:
+    """A ``queued`` job no worker claimed within :data:`STALE_JOB_AFTER` (its ``job.queued`` message died or
+    its Celery task was lost): it would hold the single-flight slot for ever (review B14)."""
+    return job.state == enums.JobState.QUEUED and job.created_at < (now or timeutils.now()) - STALE_JOB_AFTER
+
+
+def claim_job(job_id: int) -> Job | None:
+    """Move a queued job to ``running`` (``attempts += 1``); ``None`` when it cannot be claimed.
+
+    A ``running`` job whose heartbeat is stale (:func:`is_stale`) is re-claimed the same way, keeping its
+    ``started_at``: that is a Celery redelivery after a worker loss (``acks_late`` +
+    ``task_reject_on_worker_lost``) resuming the idempotent work instead of leaving the row stuck.
+    """
+    with transaction.atomic():
+        job = Job.objects.select_for_update().filter(pk=job_id).first()
+        if job is None:
+            return None
+        instant = timeutils.now()
+        if job.state == enums.JobState.QUEUED:
+            job.started_at = instant
+        elif not is_stale(job, now=instant):
+            return None
+        job.state = enums.JobState.RUNNING
+        job.heartbeat_at = instant
+        job.attempts += 1
+        job.save(update_fields=["state", "started_at", "heartbeat_at", "attempts"])
+        return job
+
+
+def reap_stale_jobs(*, now: Any = None) -> list[Job]:
+    """Fail every stale running job — and every job still queued after :data:`STALE_JOB_AFTER` — with
+    ``{"code": "worker_lost"}`` (design 01 §2.2); returns them.
+
+    Each job is finished in its own transaction under the row lock, so a worker that is still alive and
+    heartbeats (or claims the queued job) concurrently wins (the row is re-checked after the lock). A
+    ``billz_import`` job also records the provider failure and the ``billz.import_finished`` audit row, like
+    the worker would. A late task of a reaped queued job finds it failed and does nothing.
+    """
+    instant = now or timeutils.now()
+    reaped: list[Job] = []
+    candidates = Job.objects.filter(
+        Q(state=enums.JobState.RUNNING, heartbeat_at__lt=instant - STALE_JOB_AFTER)
+        | Q(state=enums.JobState.QUEUED, created_at__lt=instant - STALE_JOB_AFTER)
+    ).values_list("pk", flat=True)
+    for job_id in list(candidates):
+        with transaction.atomic():
+            job = Job.objects.select_for_update().filter(pk=job_id).first()
+            if job is None or not (is_stale(job, now=instant) or is_lost_in_queue(job, now=instant)):
+                continue
+            if job.state == enums.JobState.QUEUED:
+                # _finish moves running jobs only, and a finished job needs a start (never started: the reap)
+                job.state = enums.JobState.RUNNING
+                job.started_at = instant
+                job.save(update_fields=["state", "started_at"])
+            job = _finish(
+                job, enums.JobState.FAILED, error={"code": WORKER_LOST_CODE, "message": WORKER_LOST_MESSAGE}
+            )
+            if job.kind == enums.JobKind.BILLZ_IMPORT:
+                record_failure(IntegrationState.Provider.BILLZ, WORKER_LOST_MESSAGE)
+                audit.record(
+                    action="billz.import_finished",
+                    entity_type="job",
+                    entity_id=str(job.pk),
+                    after={"job_id": job.pk, "state": job.state, "result": None, "error": job.error},
+                )
+        logger.warning(
+            "Reaped stale %s job %s (no heartbeat since %s, queued at %s)",
+            job.kind,
+            job.pk,
+            job.heartbeat_at,
+            job.created_at,
+        )
+        reaped.append(job)
+    return reaped
+
+
+def set_celery_task_id(job_id: int, task_id: str) -> None:
+    Job.objects.filter(pk=job_id).update(celery_task_id=task_id[:36])
+
+
+def report_progress(job: Job, done: int, total: int | None) -> None:
+    job.progress = None if total is None else {"done": done, "total": total}
+    job.heartbeat_at = timeutils.now()
+    job.save(update_fields=["progress", "heartbeat_at"])
+
+
+def _finish(job: Job, state: str, *, result: Any = None, error: Any = None) -> Job:
+    with transaction.atomic():
+        current = Job.objects.select_for_update().get(pk=job.pk)
+        if current.state != enums.JobState.RUNNING:
+            raise JobNotActive(f"job {job.pk} is {current.state}, not running")
+        instant = timeutils.now()
+        current.state = state
+        current.result = result
+        current.error = error
+        current.finished_at = instant
+        current.heartbeat_at = instant
+        current.progress = job.progress
+        current.save(update_fields=["state", "result", "error", "finished_at", "heartbeat_at", "progress"])
+        return current
+
+
+def finish_job(job: Job, result: dict[str, Any]) -> Job:
+    return _finish(job, enums.JobState.SUCCEEDED, result=result)
+
+
+def fail_job(job: Job, code: str, message: str) -> Job:
+    return _finish(job, enums.JobState.FAILED, error={"code": code, "message": message})
+
+
+def get_state(provider: str) -> IntegrationState:
+    """The provider's state row (created lazily; the migration and ``post_migrate`` normally keep it)."""
+    state, _ = IntegrationState.objects.get_or_create(provider=provider)
+    return state
+
+
+def record_sync_success(provider: str, *, synced_at: Any = None) -> IntegrationState:
+    """A successful sync (Billz) or poll (BTS): sets ``last_sync_at`` and clears the failure run."""
+    instant = synced_at or timeutils.now()
+    state = get_state(provider)
+    IntegrationState.objects.filter(pk=state.pk).update(
+        last_sync_at=instant,
+        last_success_at=instant,
+        consecutive_failures=0,
+        last_error="",
+        updated_at=timeutils.now(),
+    )
+    state.refresh_from_db()
+    return state
+
+
+def update_provider_data(provider: str, changes: dict[str, Any]) -> IntegrationState:
+    """Merge ``changes`` into the provider's cursor document (``IntegrationState.data``) under the row lock.
+
+    The Billz adapter keeps its sync cursor here (``delta_since``, ``full_count``, ``full_synced_at``); it
+    calls this only after the caller applied a whole run, so a failed run never moves the cursor.
+    """
+    get_state(provider)
+    with transaction.atomic():
+        state = IntegrationState.objects.select_for_update().get(provider=provider)
+        data = dict(state.data) if isinstance(state.data, dict) else {}
+        data.update(changes)
+        state.data = data
+        state.updated_at = timeutils.now()
+        state.save(update_fields=["data", "updated_at"])
+        return state
+
+
+def record_failure(provider: str, message: str) -> IntegrationState:
+    state = get_state(provider)
+    instant = timeutils.now()
+    IntegrationState.objects.filter(pk=state.pk).update(
+        last_error_at=instant,
+        last_error=message[:2000],
+        consecutive_failures=F("consecutive_failures") + 1,
+        updated_at=instant,
+    )
+    state.refresh_from_db()
+    return state
+
+
+def set_state_data(provider: str, key: str, value: Any) -> None:
+    """Set ``IntegrationState(provider).data[key] = value`` with one ``UPDATE … SET data = data ||
+    jsonb_build_object(key, value)`` (no read-modify-write, so a concurrent :func:`record_failure` or another
+    key's writer is never lost). The BTS poll cursor is its first user (customer contract §2.13.3)."""
+    get_state(provider)
+    table = IntegrationState._meta.db_table
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"UPDATE {table} SET data = data || jsonb_build_object(%s::text, %s::jsonb), "  # noqa: S608
+            "updated_at = %s WHERE provider = %s",
+            [key, json.dumps(value, cls=DjangoJSONEncoder), timeutils.now(), provider],
+        )
+
+
+# --- retention (docs/ops/compliance.md): raw provider callbacks ---------------------------------------------
+
+_INBOX_TABLE = WebhookInbox._meta.db_table
+if _INBOX_TABLE not in PURGEABLE_TABLES:  # the trigger lets a purge through only for these tables
+    raise RuntimeError(f"{_INBOX_TABLE} must be listed in core.db.PURGEABLE_TABLES")
+# Oldest rows of one provider first. Plan: ``integr_webhook_provider_time`` (provider, received_at) range.
+_PURGE_INBOX_SQL = (
+    f"DELETE FROM {_INBOX_TABLE} WHERE id IN ("  # noqa: S608 - the table name is a model constant
+    f"SELECT id FROM {_INBOX_TABLE} WHERE provider = %s AND received_at < %s ORDER BY received_at LIMIT %s)"
+)
+# A run stops starting new batches after this long (the Celery soft limit is 540 s); the next night continues.
+PURGE_MAX_SECONDS = 300.0
+
+
+def purge_webhook_inbox(before: datetime, *, batch_size: int, max_seconds: float = PURGE_MAX_SECONDS) -> int:
+    """Delete ``WebhookInbox`` rows received before ``before`` — raw provider payloads hold personal data —
+    ``batch_size`` rows per transaction, each inside ``core.db.purge_window()`` (the append-only trigger lets
+    that transaction's deletes through; nothing else changes). Audits ``integrations.inbox_purged {provider,
+    rows, before}`` per provider that lost rows; returns the total."""
+    deadline = time.monotonic() + max_seconds
+    total = 0
+    for provider in WebhookInbox.Provider.values:
+        rows = 0
+        while time.monotonic() < deadline:
+            with purge_window(), connection.cursor() as cursor:
+                cursor.execute(_PURGE_INBOX_SQL, [provider, before, batch_size])
+                deleted = max(cursor.rowcount, 0)
+            rows += deleted
+            if deleted < batch_size:
+                break
+        if rows:
+            audit.record(
+                action="integrations.inbox_purged",
+                entity_type="webhook_inbox",
+                entity_id=provider,
+                after={"provider": provider, "rows": rows, "before": before},
+            )
+        total += rows
+    logger.info("retention.webhook_inbox_purged rows=%s before=%s", total, before.isoformat())
+    return total

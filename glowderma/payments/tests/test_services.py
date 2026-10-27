@@ -1,0 +1,225 @@
+"""payments.services / selectors (design 02 §2.1–§2.2): payment states, the refund state machine, the list
+selector and the dashboard revenue (net of succeeded refunds, attributed to the payment's bucket)."""
+
+from datetime import datetime, timedelta
+
+import pytest
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
+
+from glowderma.core.api.exceptions import Conflict, InvalidTransition
+from glowderma.core.models import AuditEntry, OutboxMessage
+from glowderma.core.timeutils import TASHKENT
+from glowderma.payments import selectors, services
+from glowderma.payments.models import Payment
+from glowderma.payments.tests.factories import OrderRowFactory, PaymentFactory, RefundFactory
+
+pytestmark = pytest.mark.django_db
+AT = datetime(2026, 10, 23, 14, 5, tzinfo=TASHKENT)
+
+
+def test_payment_lifecycle() -> None:
+    order = OrderRowFactory.create()
+    created = services.create_payment(order.pk, "click", order.total)
+    assert (created.status, created.amount) == ("pending", order.total)
+    with pytest.raises(Conflict):
+        services.create_payment(order.pk, "payme", order.total)
+    with pytest.raises(ValueError):
+        services.create_payment(order.pk, "cash", 1)
+    with pytest.raises(ValueError):
+        services.create_payment(order.pk, "click", 0)
+    paid = services.confirm_payment(created.payment_id, "CLK-1", AT, raw={"click_trans_id": "1"})
+    assert (paid.status, paid.provider_txn_id, paid.confirmed_at, paid.changed) == ("paid", "CLK-1", AT, True)
+    assert not services.confirm_payment(created.payment_id, "CLK-1", AT).changed
+    with pytest.raises(InvalidTransition):
+        services.confirm_payment(created.payment_id, "CLK-2", AT)
+    with pytest.raises(ValueError):
+        services.confirm_payment(created.payment_id, "", AT)
+    with pytest.raises(InvalidTransition):
+        services.fail_payment(created.payment_id, "cancelled")
+    with pytest.raises(services.PaymentNotFound):
+        services.fail_payment(10**9, "x")
+    second = services.create_payment(OrderRowFactory.create().pk, "payme", 1000)
+    failed = services.fail_payment(second.payment_id, "expired", AT)
+    assert (failed.status, failed.changed) == ("failed", True)
+    assert not services.fail_payment(second.payment_id, "expired").changed
+    with pytest.raises(ValueError):
+        services.confirm_payment(created.payment_id, "CLK-1", AT.replace(tzinfo=None))
+
+
+def test_payme_state_one_is_left_pending_by_unilateral_fails() -> None:
+    payment = PaymentFactory.create(pending=True, provider="payme", provider_state={"state": 1})
+    assert not services.fail_payment(payment.pk, "cancelled", unilateral=True).changed
+    assert services.fail_payment(payment.pk, "-31008").changed  # Payme's own CancelTransaction
+    assert services.can_fail_unilaterally("payme", {"state": 2})
+
+
+def test_a_claim_click_did_not_process_is_released_by_its_owner_only() -> None:
+    """M3 Click reversal answered "not processed": ``submitting → requested`` (fenced by the attempt)."""
+    payment = PaymentFactory.create()
+    refund_id = services.create_refund(payment.pk, payment.amount, None, at=AT).refund_id
+    claim = services.mark_submitting(refund_id, AT)
+    assert not services.release_claim(refund_id, "stale", AT, expected_attempts=claim.attempts + 1).changed
+    released = services.release_claim(refund_id, "HTTP 429", AT, expected_attempts=claim.attempts)
+    assert (released.state, released.changed) == ("requested", True)
+    assert not services.release_claim(refund_id, "again", AT, expected_attempts=claim.attempts).changed
+    audit = AuditEntry.objects.filter(action="refund.state_changed").order_by("-id").first()
+    assert audit is not None and isinstance(audit.after, dict)
+    assert (audit.after["from"], audit.after["to"]) == ("submitting", "requested")
+    assert services.mark_submitting(refund_id, AT).attempts == claim.attempts + 1  # claimed again
+
+
+def test_click_refund_state_machine_and_audits() -> None:
+    payment = PaymentFactory.create()
+    staff = payment.order.cancelled_by
+    requested = services.create_refund(payment.pk, payment.amount, None, at=AT)
+    assert (requested.state, requested.changed) == ("requested", True)
+    assert (
+        OutboxMessage.objects.get(topic="refund.submit").dedupe_key == f"refund.submit:{requested.refund_id}"
+    )
+    again = services.create_refund(payment.pk, payment.amount, staff.pk if staff else None)
+    assert (again.refund_id, again.changed) == (requested.refund_id, False)
+    submitting = services.mark_submitting(requested.refund_id, AT)
+    assert (submitting.state, submitting.attempts) == ("submitting", 1)
+    with pytest.raises(services.StaleRefundClaim):  # claimed already: a second claim is refused
+        services.mark_submitting(requested.refund_id, AT)
+    with pytest.raises(services.StaleRefundClaim):  # a fresh claim: its worker may still be calling Click
+        services.mark_submitting(
+            requested.refund_id,
+            AT + timedelta(minutes=1),
+            expected_state="submitting",
+            expected_attempts=1,
+            resubmit_after=timedelta(minutes=5),
+        )
+    resubmitted = services.mark_submitting(  # a redelivery after the lease resubmits
+        requested.refund_id,
+        AT + timedelta(minutes=5),
+        expected_state="submitting",
+        expected_attempts=1,
+        resubmit_after=timedelta(minutes=5),
+    )
+    assert resubmitted.attempts == 2
+    unknown = services.mark_unknown(requested.refund_id, "timeout", AT)
+    assert unknown.state == "unknown" and not services.mark_unknown(requested.refund_id).changed
+    succeeded = services.mark_succeeded(
+        requested.refund_id, AT + timedelta(hours=1), provider_refund_id="R-1"
+    )
+    assert (succeeded.state, succeeded.payment_refunded) == ("succeeded", True)
+    assert not services.mark_succeeded(requested.refund_id).changed
+    payment.refresh_from_db()
+    assert (payment.status, payment.refunded_at) == ("refunded", AT + timedelta(hours=1))
+    with pytest.raises(InvalidTransition):
+        services.mark_failed(requested.refund_id, "late")
+    other = PaymentFactory.create()
+    with pytest.raises(InvalidTransition):
+        services.mark_unknown(services.create_refund(other.pk, other.amount, None).refund_id)
+    transitions = [
+        a["to"]  # type: ignore[index]
+        for a in AuditEntry.objects.filter(action="refund.state_changed").values_list("after", flat=True)
+    ]
+    assert transitions == ["submitting", "submitting", "unknown", "succeeded"]
+    assert AuditEntry.objects.filter(action="refund.requested").count() == 2
+
+
+def test_payme_refund_is_manual_and_resolvable() -> None:
+    payment = PaymentFactory.create(provider="payme")
+    refund = services.create_refund(payment.pk, payment.amount, None)
+    assert refund.state == "manual_required"
+    assert not OutboxMessage.objects.filter(topic="refund.submit").exists()
+    with pytest.raises(services.StaleRefundClaim):
+        services.mark_submitting(refund.refund_id)
+    assert not services.mark_failed(refund.refund_id, "dead_letter", expected_state="requested").changed
+    failed = services.mark_failed(refund.refund_id, "resolved_failed", actor_id=None)
+    assert failed.state == "failed" and not services.mark_failed(refund.refund_id, "again").changed
+    retried = services.retry_refund(refund.refund_id, None)
+    assert retried.state == "manual_required" and retried.refund_id != refund.refund_id
+    with pytest.raises(Conflict):
+        services.retry_refund(refund.refund_id, None)  # an open refund exists now
+    with pytest.raises(InvalidTransition):
+        services.retry_refund(retried.refund_id, None)  # not failed
+    with pytest.raises(services.RefundNotFound):
+        services.retry_refund(10**9, None)
+
+
+def test_refund_guards() -> None:
+    pending = PaymentFactory.create(pending=True)
+    with pytest.raises(InvalidTransition):
+        services.create_refund(pending.pk, pending.amount, None)
+    paid = PaymentFactory.create()
+    with pytest.raises(ValueError):
+        services.create_refund(paid.pk, 1, None)
+    with pytest.raises(ValueError):
+        services.create_refund(paid.pk, paid.amount, None, origin="bogus")
+    with pytest.raises(InvalidTransition):
+        services.retry_refund(RefundFactory.create(succeeded=True).pk, None)
+
+
+def test_selectors_display_payment_and_refunds() -> None:
+    order = OrderRowFactory.create()
+    assert selectors.display_payment(order.pk) is None
+    failed = PaymentFactory.create(order=order, failed=True)
+    assert selectors.display_payment(order.pk).id == failed.pk  # type: ignore[union-attr]
+    pending = PaymentFactory.create(order=order, pending=True)
+    assert selectors.display_payment(order.pk).id == pending.pk  # type: ignore[union-attr]
+    assert selectors.pick_display([failed, pending]) == pending and selectors.pick_display([]) is None
+    assert selectors.active_payment(order.pk, "pending").id == pending.pk  # type: ignore[union-attr]
+    assert selectors.get_payment(10**9) is None and selectors.get_refund(10**9) is None
+    refund = RefundFactory.create(failed=True)
+    assert selectors.refunds_needing_action() == 1
+    row = selectors.refunds_for_order(refund.payment.order_id)[0]
+    assert (row.id, row.state, row.provider) == (refund.pk, "failed", refund.payment.provider)
+
+
+def test_revenue_buckets_attribute_refunds_to_the_payment_bucket() -> None:
+    day = datetime(2026, 10, 24, tzinfo=TASHKENT)
+    nine = PaymentFactory.create(amount=300_000, confirmed_at=day.replace(hour=9, minute=10))
+    PaymentFactory.create(amount=200_000, confirmed_at=day.replace(hour=9, minute=50))
+    PaymentFactory.create(amount=150_000, confirmed_at=day.replace(hour=11))
+    PaymentFactory.create(pending=True, amount=999_999)
+    RefundFactory.create(payment=nine, succeeded=True, amount=300_000)
+    hours = selectors.revenue_buckets(day, day + timedelta(days=1), "hour")
+    assert hours == {day.replace(hour=9): 200_000, day.replace(hour=11): 150_000}
+    days = selectors.revenue_buckets(day - timedelta(days=1), day + timedelta(days=1), "day")
+    assert days == {day: 350_000}
+
+
+# --- Payme GetStatement (customer contract §2.13.2) -------------------------------------------------------
+
+
+_NO_TIME = object()
+
+
+def _payme(time: object, *, txn: bool = True) -> Payment:
+    state = {} if time is _NO_TIME else {"time": time}
+    if txn:
+        return PaymentFactory.create(order__payme=True, provider_state=state)
+    return PaymentFactory.create(pending=True, order__payme=True, provider_state=state)
+
+
+def test_payme_statement_selects_by_the_integer_payme_time_ascending() -> None:
+    first_tie = _payme(1_500)
+    lower = _payme(1_000)
+    upper = _payme(2_000)
+    second_tie = _payme(1_500)
+    outside_low, outside_high = _payme(999).pk, _payme(2_001).pk
+    for odd in ("1500", 1_500.5, 1_500.0, True, 10**30, -(10**30), _NO_TIME):
+        _payme(odd)  # not a JSON integer within bigint: never listed, never a cast error
+    _payme(1_500, txn=False)  # no Payme transaction attached
+    PaymentFactory.create(provider_state={"time": 1_500})  # a Click payment
+    found = [row.id for row in selectors.payme_statement(1_000, 2_000)]
+    assert found == [lower.pk, first_tie.pk, second_tie.pk, upper.pk]
+    everything = [row.id for row in selectors.payme_statement(-(2**63), 2**63 - 1)]
+    assert everything == [outside_low, lower.pk, first_tie.pk, second_tie.pk, upper.pk, outside_high]
+    assert selectors.payme_statement(2_001, 1_000) == []
+    # bounds beyond bigint are no overflow error; a ``time`` beyond 18 digits is no epoch-ms value: not listed
+    assert len(selectors.payme_statement(-(10**40), 10**40)) == 6
+
+
+def test_payme_statement_filters_and_orders_in_sql() -> None:
+    _payme(1_500)
+    _payme(5_000)
+    with CaptureQueriesContext(connection) as queries:
+        rows = selectors.payme_statement(1_000, 2_000)
+    assert len(rows) == 1
+    (query,) = queries.captured_queries
+    assert "BETWEEN" in query["sql"] and "ORDER BY" in query["sql"]  # not loaded and sorted in Python

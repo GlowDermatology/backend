@@ -1,0 +1,5 @@
+{"_source": "post_v1_recalculate_order_bill_order_id 200 (schema); the tests set total_price",
+ "order_id": "38c3920a-ffdd-4233-a823-8af3266f5f4f", "discount_unit": "", "discount_value": 0,
+ "customer": {"id": ""}, "items": [], "search_result": null, "returned_cashback": 0,
+ "total_price": 0, "is_postponed": false, "promo_codes": null, "free_price": 0,
+ "order_version": 3, "order_bill_version": 3, "is_calculated": true, "discount_reset": false}

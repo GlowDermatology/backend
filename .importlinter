@@ -1,0 +1,19 @@
+[importlinter]
+root_package = glowderma
+
+[importlinter:contract:layers]
+name = module layering (AGENTS.md "Architecture rules")
+type = layers
+layers =
+    glowderma.reporting | glowderma.customers
+    glowderma.notifications
+    glowderma.commerce | glowderma.appointments
+    glowderma.payments | glowderma.delivery | glowderma.loyalty | glowderma.catalog | glowderma.professionals
+    glowderma.site_config
+    glowderma.accounts
+    glowderma.integrations
+    glowderma.core
+# Test packages may build rows of upper layers (loyalty tests need orders/products): the layering applies to
+# production code; tests of a lower module may import any module's test factories.
+ignore_imports =
+    glowderma.*.tests.** -> glowderma.**

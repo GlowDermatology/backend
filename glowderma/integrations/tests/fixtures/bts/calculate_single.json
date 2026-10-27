@@ -1,0 +1,10 @@
+{
+  "status": true,
+  "message": "success.retrieved",
+  "status_code": 200,
+  "data": {
+    "available": true,
+    "price": 28000,
+    "reason": null
+  }
+}

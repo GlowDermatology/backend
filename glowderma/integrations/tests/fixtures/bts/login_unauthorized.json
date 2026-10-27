@@ -1,0 +1,7 @@
+{
+  "name": "Unauthorized",
+  "message": "Incorrect login or password.",
+  "code": 0,
+  "status": 401,
+  "type": "app\\exceptions\\ApiUnauthorizedException"
+}

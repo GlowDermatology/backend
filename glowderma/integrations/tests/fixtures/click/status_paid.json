@@ -1,0 +1,7 @@
+{
+  "_source": "docs.click.uz/en/merchant-api/requests (Check Payment Status example; payment_status 2 = successful per docs.click.uz/en/merchant-api/click-pass)",
+  "error_code": 0,
+  "error_note": "Success",
+  "payment_id": 5500010248,
+  "payment_status": 2
+}
