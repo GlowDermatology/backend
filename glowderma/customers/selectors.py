@@ -32,7 +32,7 @@ from glowderma.catalog import selectors as catalog_selectors
 from glowderma.catalog.models import Banner, Category, Product, ProductImage
 from glowderma.commerce import selectors as commerce_selectors
 from glowderma.commerce.models import CartItem, Order
-from glowderma.core import enums, timeutils
+from glowderma.core import enums, i18n, timeutils
 from glowderma.core.media import absolute_media_url
 from glowderma.core.search import SearchFold
 from glowderma.loyalty import selectors as loyalty_selectors
@@ -588,6 +588,7 @@ def product_cards(products: list[Product], lang: str, customer_id: int | None = 
                 "id": product.pk,
                 "slug": product.slug,
                 "name": product_name(product, lang),
+                "content_language": i18n.content_language(product, "name", lang, fallback_text=True),
                 "volume": product.volume,
                 "price": product.price,
                 "promo": product.promo,
@@ -636,6 +637,7 @@ def category_payload(category: Category, lang: str) -> dict[str, Any]:
     return {
         "slug": category.slug,
         "name": localized_field(category, "name", lang),
+        "content_language": i18n.content_language(category, "name", lang),
         "image_url": media_url(category.image),
         "product_count": int(getattr(category, "product_count", 0)),
         "updated_at": category.updated_at,

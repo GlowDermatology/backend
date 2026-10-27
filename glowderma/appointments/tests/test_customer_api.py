@@ -124,6 +124,7 @@ def test_specialists_list_and_detail(public_client: APIClient) -> None:
     assert without_bw1(specialist) == {
         "id": link.professional_id,
         "name": "Nodira Rahimova",
+        "content_language": "uz",
         "role": "dermatologist",
         "role_label": "Dermatolog",
         "photo_url": None,
@@ -158,6 +159,7 @@ def test_specialists_list_and_detail(public_client: APIClient) -> None:
     # FND-7: the qualifications, localized like the biography (uz fallback)
     link.professional.qualifications_uz = "Toshkent tibbiyot akademiyasi"
     link.professional.qualifications_en = "Tashkent Medical Academy"
+    link.professional.bio_en = ""
     link.professional.save()
     detail = f"/api/v1/specialists/{link.professional_id}/"
     assert public_client.get(detail, HTTP_ACCEPT_LANGUAGE="en").json()["qualifications"] == (
@@ -167,6 +169,9 @@ def test_specialists_list_and_detail(public_client: APIClient) -> None:
         "Toshkent tibbiyot akademiyasi"
     )
     assert ru["services"][0]["short_name"] == "Konsultatsiya"  # no ru text → uz
+    assert ru["content_language"] == "ru"  # the biography exists in Russian
+    english = public_client.get(detail, HTTP_ACCEPT_LANGUAGE="en").json()
+    assert english["content_language"] == "uz"  # no English biography: it fell back to Uzbek
     assert public_client.get(f"/api/v1/specialists/{inactive.pk}/").status_code == 404
     assert public_client.get("/api/v1/specialists/999999/").json()["code"] == "not_found"
 

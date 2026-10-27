@@ -490,6 +490,13 @@ class ProductCardSerializer(serializers.Serializer[dict[str, Any]]):
     id = serializers.IntegerField()
     slug = serializers.CharField(help_text="The website URL segment (B-W1); `catalog/products/{slug}/`.")
     name = serializers.CharField()
+    content_language = serializers.ChoiceField(
+        choices=enums.ContentLanguage.values,
+        help_text=(
+            "Language of `name` (and, where set, the other texts): the requested language, or `uz` when the "
+            "name fell back to Uzbek or to the Billz name."
+        ),
+    )
     volume = serializers.CharField()
     price = serializers.IntegerField()
     promo = serializers.BooleanField()
@@ -542,6 +549,10 @@ class CustomerBannerListSerializer(serializers.Serializer[dict[str, Any]]):
 class CustomerCategorySerializer(serializers.Serializer[dict[str, Any]]):
     slug = serializers.CharField()
     name = serializers.CharField()
+    content_language = serializers.ChoiceField(
+        choices=enums.ContentLanguage.values,
+        help_text="Language of `name`: the requested language, or `uz` when it fell back to Uzbek.",
+    )
     image_url = serializers.URLField(allow_null=True)
     product_count = serializers.IntegerField()
     updated_at = AwareDateTimeField()

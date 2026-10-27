@@ -1127,6 +1127,21 @@ def normalize_language(value: Any) -> str:
     return value if isinstance(value, str) and value in LANGUAGES else DEFAULT_LANGUAGE
 
 
+def content_language(obj: object, field: str, lang: str | None, *, fallback_text: bool = False) -> str:
+    """The language the ``<field>_<lang>`` → ``<field>_uz`` fallback of a catalog text actually returns
+    (customer contract §1.4, ``content_language``): ``lang`` when ``<field>_<lang>`` is set — or when there is
+    no Uzbek text to fall back to either — else ``uz``. ``fallback_text``: a further non-Uzbek-tagged fallback
+    exists (the product's Billz name), which counts as ``uz`` too."""
+    language = normalize_language(lang)
+    requested: object = getattr(obj, f"{field}_{language}", "")
+    uzbek: object = getattr(obj, f"{field}_{DEFAULT_LANGUAGE}", "")
+    if language == DEFAULT_LANGUAGE or requested:
+        return language
+    if uzbek or fallback_text:
+        return DEFAULT_LANGUAGE
+    return language
+
+
 def t(key: str, lang: str | None = None, **params: Any) -> str:
     """Render ``key`` in ``lang`` (unsupported or ``None`` → ``uz``) with ``params``.
 

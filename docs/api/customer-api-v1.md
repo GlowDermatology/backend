@@ -93,7 +93,7 @@ Admin §1.4 applies (snake_case, integer ids, money as integer so'm, ISO 8601 `+
 
 | Kind | Customer rule | Example |
 |---|---|---|
-| i18n data fields | Rendered as **one string** in the resolved language (§1.2), not `{uz, ru, en}`. Fallback chain: requested language → `uz` → `""`. A product `name` falls back further to `billz_name`. Admin objects keep the three-language shape. | `"name": "Сыворотка с гиалуроновой кислотой"` |
+| i18n data fields | Rendered as **one string** in the resolved language (§1.2), not `{uz, ru, en}`. Fallback chain: requested language → `uz` → `""`. A product `name` falls back further to `billz_name`. Admin objects keep the three-language shape. Products, categories and specialists also carry **`content_language`** (`uz`/`ru`/`en`, additive, `feat/customer-web`): the language their primary text actually came from — the requested language when it exists there (or when there is no Uzbek text to fall back to), else `uz` (a product name that fell back to `billz_name` counts as `uz`). Primary text: product and category `name`, specialist `bio` (`qualifications` when the bio is empty in both languages). Other texts fall back field by field, so a detail may still mix languages; the website uses it for `<html lang>` / `hreflang` and to avoid indexing fallback pages twice. | `"name": "Сыворотка с гиалуроновой кислотой"` |
 | Labels | Every enum that the app shows comes with a server-rendered `<field>_label` in the resolved language (§5). The enum literal stays authoritative; the label is presentation. | `"status": "processing", "status_label": "Tayyorlanmoqda"` |
 | Phone mask | `+998 XX *** ** NN` | `"+998 90 *** ** 67"` |
 | Email mask | first character, `***`, domain | `"m***@gmail.com"` |
@@ -1108,6 +1108,7 @@ the fake Billz serves stock normally.
 {"id": 1,
  "slug": "gialuron-kislotali-serum",                // B-W1: the website URL segment (unique, never only digits)
  "name": "Gialuron kislotali serum",       // resolved language → uz → billz_name
+ "content_language": "uz",                          // where name came from: the requested language | "uz" (fallback)
  "volume": "30 ml", "price": 185000, "promo": false,
  "category": {"slug": "serums", "name": "Serumlar"},
  "main_image_url": "https://media.example.uz/products/1/9f2c.webp",   // | null
@@ -1133,8 +1134,8 @@ the fake Billz serves stock normally.
 `link.kind` `url` (BannerLinkKind, admin §2.5): the app opens `link.url` — always an absolute `https` URL ≤500 (validated
 when staff save it; open question GC-3) — in the system browser (or the in-app browser), never in a web view with the
 session. Every key of `link` is always present (`null` when it does not apply).
-**`GET catalog/categories/`** → `{"results": [{"slug", "name", "image_url" | null, "product_count", "updated_at",
-"seo_title", "seo_description"}]}`: active categories by `position`; `product_count` = visible products; `image_url` is
+**`GET catalog/categories/`** → `{"results": [{"slug", "name", "content_language", "image_url" | null, "product_count",
+"updated_at", "seo_title", "seo_description"}]}` (`content_language`: §1.4): active categories by `position`; `product_count` = visible products; `image_url` is
 the image staff upload in the admin (admin §2.4, gap ADM-5.1), `null` without one; B-W1: `updated_at` (sitemap) and
 the staff-written `seo_title` / `seo_description` in the resolved language only (`""` = none).
 
@@ -1702,6 +1703,7 @@ links to active services (`professionals.selectors.booking_catalogue`).
 ```jsonc
 // Specialist
 {"id": 1, "name": "Nodira Rahimova", "role": "dermatologist", "role_label": "Dermatolog",
+ "content_language": "ru",                             // §1.4: the language bio came from (requested | "uz"); name is not localized
  "photo_url": null, "bio": "…",
  "qualifications": "…",                                // FND-7: diplomas, certificates (localized like bio; "" = none)
  "experience_years": 8,

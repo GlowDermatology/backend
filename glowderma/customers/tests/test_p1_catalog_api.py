@@ -69,6 +69,7 @@ def test_card_shape_language_fallback_and_availability() -> None:
     assert set(card) - {"slug", "updated_at"} == {
         "id",
         "name",
+        "content_language",
         "volume",
         "price",
         "promo",
@@ -118,6 +119,33 @@ def test_search_without_the_apostrophe_finds_the_uzbek_name() -> None:
     stocked(name_uz="Qimmat serum")
     for term in ("kopik", "ko'pik", "ko\u02bbpik", "TOZALOVCHI KOPIK"):
         assert ids(app_client().get(PRODUCTS, {"search": term})) == [foam.pk], term
+
+
+def test_content_language_says_where_the_texts_came_from() -> None:
+    """Additive ``content_language`` on products (list and detail) and categories: the requested language
+    when the name exists in it, ``uz`` when it fell back (to Uzbek or to the Billz name)."""
+    category = CategoryFactory.create(slug="kremlar", name_uz="Kremlar", name_ru="Кремы", name_en="")
+    translated = stocked(name_uz="Krem", name_ru="Крем", name_en="", category=category)
+    uzbek_only = stocked(name_uz="Ko‘pik", name_ru="", name_en="", category=category)
+    billz_only = stocked(name_uz="", name_ru="", name_en="", billz_name="FOAM 150ML", category=category)
+
+    def languages(lang: str) -> dict[int, str]:
+        rows = app_client(HTTP_ACCEPT_LANGUAGE=lang).get(PRODUCTS).data["results"]
+        return {row["id"]: row["content_language"] for row in rows}
+
+    assert languages("ru") == {translated.pk: "ru", uzbek_only.pk: "uz", billz_only.pk: "uz"}
+    assert languages("en") == {translated.pk: "uz", uzbek_only.pk: "uz", billz_only.pk: "uz"}
+    assert set(languages("uz").values()) == {"uz"}
+    detail = app_client(HTTP_ACCEPT_LANGUAGE="ru").get(f"{PRODUCTS}{translated.pk}/").data
+    assert (detail["name"], detail["content_language"]) == ("Крем", "ru")
+    categories = {
+        lang: {
+            row["slug"]: row["content_language"]
+            for row in app_client(HTTP_ACCEPT_LANGUAGE=lang).get(CATEGORIES).data["results"]
+        }
+        for lang in ("ru", "en")
+    }
+    assert categories["ru"]["kremlar"] == "ru" and categories["en"]["kremlar"] == "uz"
 
 
 def test_optional_auth_cart_quantity_and_cache_headers() -> None:
@@ -179,6 +207,7 @@ def test_categories_count_visible_products() -> None:
         {
             "slug": "creams",
             "name": "Кремы",
+            "content_language": "ru",
             "image_url": None,
             "product_count": 1,
             "seo_title": "",
