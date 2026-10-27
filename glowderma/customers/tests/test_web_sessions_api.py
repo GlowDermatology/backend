@@ -213,7 +213,6 @@ def test_activity_is_recorded_at_most_every_five_minutes_and_follows_the_ip(
     client = APIClient()
     client.credentials(
         HTTP_AUTHORIZATION=f"Bearer {access}",
-        HTTP_X_GD_INTERNAL_SECRET=settings.INTERNAL_API_SECRET,
         HTTP_X_GD_CLIENT_IP="84.54.70.10",
         HTTP_X_GD_CLIENT_UA=CHROME_WINDOWS,
         **web_headers(),
@@ -233,7 +232,6 @@ def test_activity_is_recorded_at_most_every_five_minutes_and_follows_the_ip(
     first_seen = web.session.last_used_at
     client.credentials(
         HTTP_AUTHORIZATION=f"Bearer {access}",
-        HTTP_X_GD_INTERNAL_SECRET=settings.INTERNAL_API_SECRET,
         HTTP_X_GD_CLIENT_IP="185.139.137.1",
         **web_headers(),
     )
@@ -252,7 +250,6 @@ def test_sign_in_through_the_api_stamps_the_session(settings: Any) -> None:
     publish_terms()
     client = APIClient()
     client.credentials(
-        HTTP_X_GD_INTERNAL_SECRET=settings.INTERNAL_API_SECRET,
         HTTP_X_GD_CLIENT_IP="84.54.70.10",
         HTTP_X_GD_CLIENT_UA=CHROME_WINDOWS,
         **web_headers(),
