@@ -13,9 +13,11 @@ from typing import Any
 
 import pytest
 from django.conf import settings
+from django.core.cache import cache
+from django.utils import timezone
 
 from glowderma.accounts.models import AuthSession, Customer, SmsCode
-from glowderma.core.models import AuditEntry
+from glowderma.core.models import AuditEntry, OutboxMessage
 from glowderma.customers.tests.test_m2_journeys import (  # noqa: F401 - fixtures requested by name
     PASSWORD,
     TERMS_V1,
@@ -158,7 +160,7 @@ def test_email_sign_up_cart_checkout_asks_phone_then_attach_then_checkout_and_pa
     error(app.get("me/qr/"), 409, "phone_required")
     error(app.post("orders/1/pay/", {"provider": None}, idem=True), 409, "phone_required")
 
-    attached = attach_phone(app, "+998901240001")  # a fresh session: no password asked
+    attached = attach_phone(app, "+998901240001", password=PASSWORD)  # a new way in: the password
     assert attached.status_code == 200, attached.content
     assert attached.json()["phone"] == "+998901240001" and attached.json()["email"] == "dilnoza@example.uz"
     assert AuditEntry.objects.filter(
@@ -179,18 +181,35 @@ def test_phone_taken_is_never_merged_sign_in_with_that_phone_instead(world: Worl
     sign_up(owner, phone)
     other = world.app("fid-hybrid-other")
     email_sign_up(other, "aziza@example.uz")
-    taken = error(other.post("me/phone/code/", {"phone": phone}), 409, "phone_taken")
+    # sending the code reveals nothing: who holds the number is answered only after a correct code
+    assert other.post("me/phone/code/", {"phone": phone}).status_code == 200
+    wrong = other.post("me/phone/", {"phone": phone, "code": "000000", "password": PASSWORD})
+    error(wrong, 400, "otp_invalid")
+    other.post("me/phone/code/", {"phone": phone})
+    taken = error(
+        other.post("me/phone/", {"phone": phone, "code": CODE, "password": PASSWORD}), 409, "phone_taken"
+    )
     assert taken["message"] == "Bu raqam boshqa hisobga bog‘langan — shu raqam bilan kiring."
-    # even with a code for it (sent before the owner registered, say) the attach refuses: no merge
-    taken = other.post("me/phone/", {"phone": phone, "code": CODE})
-    error(taken, 409, "phone_taken")
+    assert taken["details"] == {"deleted": False}
     assert Customer.objects.get(email="aziza@example.uz").phone is None
-    # the e-mail of another account is refused the same way
-    error(owner.post("me/email/code/", {"email": "Aziza@Example.uz"}), 409, "email_taken")
-    # a deleted holder keeps the number too (A1): registering with it reactivates that account instead
+    # the e-mail of another account is refused the same way, after its code
+    assert owner.post("me/email/code/", {"email": "Aziza@Example.uz"}).status_code == 200
+    taken = owner.post("me/email/", {"email": "aziza@example.uz", "code": CODE, "password": PASSWORD})
+    error(taken, 409, "email_taken")
+    # a deleted holder keeps the number (A1): registering with it again reactivates that account
     deleted = Customer.objects.get(phone=phone)
     Customer.objects.filter(pk=deleted.pk).update(status="deleted", deleted_at=deleted.registered_at)
-    error(other.post("me/phone/code/", {"phone": phone}), 409, "phone_taken")
+    cache.clear()  # the per-phone throttle (5/min) counted the attempts above
+    SmsCode.objects.filter(phone=phone).update(created_at=timezone.now() - timedelta(minutes=2))  # resend
+    resent = other.post("me/phone/code/", {"phone": phone})
+    assert resent.status_code == 200, resent.content
+    gone = error(
+        other.post("me/phone/", {"phone": phone, "code": CODE, "password": PASSWORD}), 409, "phone_taken"
+    )
+    assert gone["details"] == {"deleted": True}
+    assert (
+        gone["message"] == "Bu raqam o‘chirilgan hisobga tegishli — shu raqam bilan qayta ro‘yxatdan o‘ting."
+    )
 
 
 def test_social_phoneless_sign_up_booking_asks_phone_then_books(world: World) -> None:
@@ -253,12 +272,9 @@ def test_reset_by_email_and_email_sign_in_on_a_new_device(world: World) -> None:
     assert wrong["message"] == "Telefon raqami, email yoki parol noto‘g‘ri."
 
 
-def test_attach_needs_reauthentication_once_the_sign_in_is_old(world: World) -> None:
+def test_attach_always_reauthenticates_an_account_that_has_a_way_in(world: World) -> None:
     app = world.app("fid-hybrid-reauth")
-    email_sign_up(app, "nodira@example.uz")
-    AuthSession.objects.filter(pk=app.sid).update(
-        created_at=AuthSession.objects.get(pk=app.sid).created_at - timedelta(minutes=11)
-    )
+    email_sign_up(app, "nodira@example.uz")  # a fresh session: freshness waives nothing here
     phone = "+998901240030"
     refused = attach_phone(app, phone)
     body = error(refused, 400, "validation_error")
@@ -271,15 +287,57 @@ def test_attach_needs_reauthentication_once_the_sign_in_is_old(world: World) -> 
 
     social = world.app("fid-hybrid-reauth-social")
     social_phoneless(world, social, "sub-hybrid-reauth")
+    # nothing to re-authenticate with: a fresh social sign-in passes, a stale one must sign in again
     AuthSession.objects.filter(pk=social.sid).update(
         created_at=AuthSession.objects.get(pk=social.sid).created_at - timedelta(minutes=11)
     )
     stale = attach_phone(social, "+998901240031")
     assert error(stale, 409, "reauth_required")["message"] == "Xavfsizlik uchun hisobingizga qaytadan kiring."
-    # the same rule guards the other sign-in method changes of such an account
-    error(
-        social.post("me/password/", {"password": "Amber!Lantern-Deep55"}, idem=True), 409, "reauth_required"
+    # a password never signs in without a phone or an e-mail: refused, so the account cannot strand itself
+    no_way = error(
+        social.post("me/password/", {"password": "Amber!Lantern-Deep55"}, idem=True),
+        409,
+        "phone_or_email_required",
     )
+    assert no_way["message"] == "Parol o‘rnatish uchun avval telefon raqami yoki emailni qo‘shing."
+
+
+def test_a_social_sign_in_alone_cannot_add_a_way_in_to_a_password_account(world: World) -> None:
+    """Review B-W2 #1: someone holding only the victim's linked Google identity signs in (no new-device
+    step, M2-A10) and must not attach their own e-mail, then reset the password by it."""
+    phone = "+998901240060"
+    victim = world.app("fid-hybrid-victim")
+    sign_up(victim, phone)
+    nonce = victim.get("auth/social/nonce/", auth=False).json()["nonce"]
+    linked = victim.post(
+        "me/social/",
+        {"provider": "google", "token": "fake:sub-victim:v@gmail.com", "nonce": nonce, "password": PASSWORD},
+        idem=True,
+    )
+    assert linked.status_code == 200, linked.content
+    attacker = world.app("fid-hybrid-attacker")
+    nonce = attacker.get("auth/social/nonce/", auth=False).json()["nonce"]
+    signed = attacker.post(
+        "auth/social/",
+        {"provider": "google", "token": "fake:sub-victim:v@gmail.com:x2", "nonce": nonce},
+        auth=False,
+    )
+    assert signed.status_code == 200 and signed.json()["access"], signed.content
+    attacker.store(signed.json())
+    assert attacker.post("me/email/code/", {"email": "evil@attacker.test"}).status_code == 200
+    refused = attacker.post("me/email/", {"email": "evil@attacker.test", "code": CODE})
+    assert error(refused, 400, "validation_error")["errors"][0]["field"] == "password"
+    for path, body in (
+        ("me/phone/", {"phone": "+998901240061", "code": CODE}),
+        ("me/password/", {"password": "Attacker-Pass-2026!"}),
+    ):
+        response = attacker.post(path, body, idem=path == "me/password/")
+        assert response.status_code in (400, 409), response.content  # password required / phone already set
+    assert Customer.objects.get(phone=phone).email is None
+    reset = attacker.post(
+        "auth/send-code/", {"email": "evil@attacker.test", "purpose": "reset_password"}, auth=False
+    )
+    error(reset, 409, "email_not_registered")
 
 
 def test_attach_and_replace_email_then_deletion_scrubs_it(world: World) -> None:
@@ -290,11 +348,30 @@ def test_attach_and_replace_email_then_deletion_scrubs_it(world: World) -> None:
     sent = app.post("me/email/code/", {"email": "Zarina@Example.uz"})
     assert sent.status_code == 200 and sent.json()["email_mask"] == "z***@example.uz", sent.content
     assert any("Emailingizni tasdiqlash" in m.text for m in fake_email().sent)
-    wrong = app.post("me/email/", {"email": "zarina@example.uz", "code": "000000"})
+    wrong = app.post("me/email/", {"email": "zarina@example.uz", "code": "000000", "password": PASSWORD})
     body = error(wrong, 400, "otp_invalid")
     assert body["details"] == {"attempts_left": 4} and body["errors"][0]["field"] == "code"
-    done = app.post("me/email/", {"email": "zarina@example.uz", "code": CODE})
+    needs = app.post("me/email/", {"email": "zarina@example.uz", "code": CODE})
+    assert error(needs, 400, "validation_error")["errors"][0]["field"] == "password"
+    done = app.post("me/email/", {"email": "zarina@example.uz", "code": CODE, "password": PASSWORD})
     assert done.status_code == 200 and done.json()["email"] == "zarina@example.uz", done.content
+    notices = OutboxMessage.objects.filter(topic="push.account_security", payload__event="email_attached")
+    assert notices.count() == 1
+    # replacing the address notifies the previous one by e-mail (sealed in the payload, blanked once sent)
+    cache.clear()  # the per-address throttle (5/min) counted the attempts above
+    SmsCode.objects.filter(email="zarina2@example.uz").delete()
+    assert app.post("me/email/code/", {"email": "zarina2@example.uz"}).status_code == 200
+    replaced = app.post("me/email/", {"email": "zarina2@example.uz", "code": CODE, "password": PASSWORD})
+    assert replaced.status_code == 200 and replaced.json()["email"] == "zarina2@example.uz", replaced.content
+    [notice] = [m for m in fake_email().sent if m.to == "zarina@example.uz" and "o‘zgartirildi" in m.subject]
+    assert "endi hisobga kirish uchun ishlamaydi" in notice.text
+    assert OutboxMessage.objects.get(topic="email.notice").payload["to"] == ""
+    assert "zarina" not in str(OutboxMessage.objects.get(topic="email.notice").payload)
+    SmsCode.objects.filter(email="zarina@example.uz").update(created_at=timezone.now() - timedelta(minutes=2))
+    back = app.post("me/email/code/", {"email": "zarina@example.uz"})
+    assert back.status_code == 200, back.content
+    restored = app.post("me/email/", {"email": "zarina@example.uz", "code": CODE, "password": PASSWORD})
+    assert restored.status_code == 200, restored.content
     error(app.post("me/email/code/", {"email": "zarina@example.uz"}), 409, "conflict")
     # e-mail sign-in now works for the phone account too (known device: no code)
     tokens = app.post("auth/login/", {"email": "zarina@example.uz", "password": PASSWORD}, auth=False)

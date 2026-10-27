@@ -127,7 +127,14 @@ CUSTOMER_TABLE: dict[str, list[str]] = {
     "InboxKind": ["promo", "general", "order_status", "appointment"],
     "InboxLinkKind": ["none", "product", "order", "appointment", "url"],
     "PushDataType": ["order_status", "appointment", "campaign", "account_security", "session_replaced"],
-    "AccountSecurityEvent": ["social_linked", "social_unlinked", "password_reset", "password_changed"],
+    "AccountSecurityEvent": [
+        "social_linked",
+        "social_unlinked",
+        "password_reset",
+        "password_changed",
+        "phone_attached",
+        "email_attached",
+    ],
 }
 ALL_TABLES = {**CONTRACT_TABLE, **CUSTOMER_TABLE}
 
