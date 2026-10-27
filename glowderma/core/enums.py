@@ -479,6 +479,9 @@ class AccountSecurityEvent(TextChoices):
     SOCIAL_UNLINKED = "social_unlinked"
     PASSWORD_RESET = "password_reset"  # noqa: S105
     PASSWORD_CHANGED = "password_changed"  # noqa: S105
+    # hybrid identity (B-W2): added values; an app that does not know them shows the inbox text as is
+    PHONE_ATTACHED = "phone_attached"
+    EMAIL_ATTACHED = "email_attached"
 
 
 CONTRACT_ENUMS: tuple[type[TextChoices], ...] = (

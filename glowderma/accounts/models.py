@@ -225,7 +225,9 @@ class SmsCode(models.Model):
         ATTACH_PHONE = "attach_phone"  # attach a phone to a signed-in account (SMS only)
 
     phone = models.CharField(max_length=13, blank=True)
-    email = models.CharField(max_length=254, blank=True)  # normalised (lower case)
+    # normalised (lower case); db_default: a writer of the previous release (deploy window) inserts SMS codes
+    # without the column
+    email = models.CharField(max_length=254, blank=True, default="", db_default="")
     purpose = models.CharField(max_length=20, choices=Purpose.choices)
     code_hmac = models.CharField(max_length=64)  # HMAC-SHA256(code, SMS_CODE_HMAC_KEY), hex
     attempts = models.PositiveSmallIntegerField(default=0)

@@ -54,7 +54,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="smscode",
             name="email",
-            field=models.CharField(blank=True, max_length=254),
+            field=models.CharField(blank=True, db_default="", default="", max_length=254),
         ),
         migrations.AlterField(
             model_name="customer",

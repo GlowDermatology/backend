@@ -14,6 +14,7 @@ from glowderma.core import enums
 
 SMS_SEND: Final = "sms.send"
 EMAIL_SEND: Final = "email.send"
+EMAIL_NOTICE: Final = "email.notice"
 PUSH_SESSION_REPLACED: Final = "push.session_replaced"
 PUSH_ACCOUNT_SECURITY: Final = "push.account_security"
 APPLE_REVOKE: Final = "apple.revoke"

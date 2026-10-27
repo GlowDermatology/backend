@@ -224,6 +224,11 @@ def phone_guard_key(identifier: str) -> str:
     return ident or "invalid"
 
 
+def customer_guard_key(customer_id: int) -> str:
+    """The account-wide ``customer_login`` key: an account with a phone and an e-mail has one budget."""
+    return f"customer:{customer_id}"
+
+
 def target_kwargs(identifier: str) -> dict[str, str]:
     """``phone=`` or ``email=`` for the verification-token and customer lookups of ``identifier``."""
     return {"email": identifier} if is_email(identifier) else {"phone": identifier}
@@ -422,6 +427,10 @@ def register(
                 )
             except IntegrityError as exc:  # a concurrent registration won
                 raise registered() from exc
+        elif row.email:
+            # Reactivation is by phone only (A1); a deleted account's address was scrubbed, so a row still
+            # holding it here is a scrub race: refused, never revived through an e-mail code.
+            raise registered()
         else:
             customer = _reactivate(customer, name=name, language=language)
             reactivated = True
@@ -460,7 +469,14 @@ def login(
         scope, key = LOGIN_DEVICE_SCOPE, str(device_id)
     else:
         scope, key = LOGIN_SCOPE, phone_guard_key(identifier)
-    guard.check(scope, key)
+    # The unknown-device budget is per identifier and, once it resolves to an account, per account too: an
+    # account with a phone and an e-mail gets one budget, not two. An unknown identifier keeps its own key
+    # only, so the answer reveals nothing (the known-device scope stays per device, C§1.8).
+    keys = [(scope, key)]
+    if scope == LOGIN_SCOPE and customer is not None:
+        keys.append((LOGIN_SCOPE, customer_guard_key(customer.pk)))
+    for guard_scope, guard_key in keys:
+        guard.check(guard_scope, guard_key)
     with transaction.atomic():
         if not known and not verification_token:
             block = account_services.otp_blocked(
@@ -472,7 +488,8 @@ def login(
         if ok and customer is not None:
             ok = _login_still_valid(customer, device=device, device_key=device_key, known=known)
         if ok and customer is not None:
-            guard.reset(scope, key)
+            for guard_scope, guard_key in keys:
+                guard.reset(guard_scope, guard_key)
             if known:
                 started = account_services.start_customer_session(
                     customer.pk, device.fid, device.platform, device.app_version, issue_device_key=False
@@ -494,7 +511,8 @@ def login(
             )
             _audit("customer.login_succeeded", customer, request, {"method": "password", "new_device": True})
             return SignIn(started, customer.pk)
-    guard.record_failure(scope, key)
+    for guard_scope, guard_key in keys:
+        guard.record_failure(guard_scope, guard_key)
     # actor_id whenever the customer row exists, deleted included (C§2.1.4 step 4)
     actor = customer or Customer.objects.filter(**target_kwargs(identifier)).first()
     _audit("customer.login_failed", actor, request, {"method": "password"})
@@ -823,11 +841,15 @@ def complete_social(
             raise _field("password", "required")
         guard = LoginGuard()
         key = phone_guard_key(identifier)
+        account_key = customer_guard_key(customer.pk)
         guard.check(LOGIN_SCOPE, key)
+        guard.check(LOGIN_SCOPE, account_key)
         if not account_services.check_customer_password(customer, password):
             guard.record_failure(LOGIN_SCOPE, key)
+            guard.record_failure(LOGIN_SCOPE, account_key)
             raise _field("password", "password_incorrect", "field.password_incorrect")
         guard.reset(LOGIN_SCOPE, key)
+        guard.reset(LOGIN_SCOPE, account_key)
         checked_hash = customer.password
     used_key = SOCIAL_TICKET_USED_KEY.format(jti=social.jti)
     if not cache.add(used_key, 1, int(settings.SOCIAL_TICKET_TTL_SECONDS)):
@@ -925,6 +947,8 @@ def _complete_social(
                 except IntegrityError as exc:
                     raise (EmailRegistered() if is_email(identifier) else PhoneRegistered()) from exc
                 created = True
+            elif is_email(identifier):  # reactivation is by phone only (A1)
+                raise EmailRegistered()
             else:
                 customer = _reactivate(customer, name=(name or "").strip(), language=language or device.lang)
                 reactivated = True
@@ -1010,7 +1034,6 @@ def reauthenticate(
     verification_token: str | None,
     secret_field: str = "password",  # noqa: S107 - a field name, not a secret
     sid: str | account_services.NoSession | None = None,
-    fresh_waives: bool = False,
 ) -> bool:
     """The password checks of a signed-in customer: ``customer_reauth`` guard (checked and reset), each
     failure also counted in ``customer_login`` (never checked). A social-only account needs a
@@ -1018,12 +1041,12 @@ def reauthenticate(
     which is only checked here and consumed by the caller under the customer-level lock. Returns whether a
     verification token must be consumed.
 
-    Hybrid identity (C§2.2.10): with ``fresh_waives`` (attaching a phone or an e-mail) a session signed in
-    within ``CUSTOMER_REAUTH_FRESH_SECONDS`` needs nothing more. An account with no password, phone or e-mail
-    (a phoneless social sign-up) has nothing to re-authenticate with: only a fresh session passes, anything
-    else answers 409 ``reauth_required`` (the app signs in with the provider again)."""
-    if fresh_waives and session_is_fresh(sid):
-        return False
+    Hybrid identity (C§2.2.10): only an account with no password, phone or e-mail (a phoneless social
+    sign-up) has nothing to re-authenticate with — a session signed in within
+    ``CUSTOMER_REAUTH_FRESH_SECONDS`` passes, anything else answers 409 ``reauth_required`` (the app signs in
+    with the provider again). Every other account proves itself with its password or a code of its own phone
+    or e-mail, however fresh the session: a social sign-in alone (no new-device step, M2-A10) must never add
+    a way in to a password account. Every failure also counts against the account in ``customer_login``."""
     if customer.password:
         if not password:
             raise _field(secret_field, "required")
@@ -1032,6 +1055,7 @@ def reauthenticate(
         guard.check(REAUTH_SCOPE, key)
         if not account_services.check_customer_password(customer, password):
             guard.record_failure(REAUTH_SCOPE, key)
+            guard.record_failure(LOGIN_SCOPE, customer_guard_key(customer.pk))
             identifier = customer_identifier(customer)
             if identifier:
                 guard.record_failure(LOGIN_SCOPE, phone_guard_key(identifier))
@@ -1153,7 +1177,7 @@ def unlink_social(
         if identity is None:
             return
         if (
-            not customer.password
+            not password_signs_in(customer)
             and CustomerSocialIdentity.objects.filter(customer_id=customer_id).count() <= 1
         ):
             raise LastSignInMethod(details={"provider": provider})
@@ -1173,8 +1197,11 @@ def change_password(
     """``POST me/password/`` (customer contract §2.2.9): set or change the password while signed in; the
     current session, its device key and every identity are kept; other sessions → ``password_changed``.
     Under the lock the caller's session must still be open (a reset revokes it) and the checked hash
-    current, so a racing reset's new password is never overwritten."""
+    current, so a racing reset's new password is never overwritten. An account without a phone or an e-mail
+    (a phoneless social sign-up) cannot sign in with a password: 409 ``phone_or_email_required``."""
     snapshot = Customer.objects.get(pk=customer_id)
+    if not customer_identifier(snapshot):
+        raise CustomerError("phone_or_email_required", 409)
     needed = reauthenticate(
         snapshot,
         password=current_password,
@@ -1204,10 +1231,17 @@ def change_password(
 # --- hybrid identity: attach a phone or an e-mail address (customer contract §2.2.10)
 #
 # The phone gate (409 ``phone_required`` on checkout, pay, booking and the QR) sends a phoneless account here.
-# A phone or an address of another account is refused (``phone_taken`` / ``email_taken``): accounts are never
-# merged — the customer signs in with that phone instead, and money, cashback and the QR stay with the account
-# they belong to. Attaching adds a way to sign in, so it re-authenticates like ``me/social/`` unless the
-# session signed in within ``CUSTOMER_REAUTH_FRESH_SECONDS``.
+# A phone or an address of another account is refused (``phone_taken`` / ``email_taken``) — only after a
+# correct code, so the routes are no oracle of who holds a number: accounts are never merged, the customer
+# signs in with that phone instead (or registers with it again when its account was deleted), and money,
+# cashback and the QR stay with the account they belong to. Attaching adds a way in, so it re-authenticates
+# (:func:`reauthenticate`) and notifies the account (``push.account_security``; a replaced address also gets
+# an e-mail).
+
+
+def password_signs_in(customer: Customer) -> bool:
+    """Whether the password is a way in: it needs a phone or an e-mail to sign in with (C§2.2.8)."""
+    return bool(customer.password) and bool(customer_identifier(customer))
 
 
 def _already_set() -> CustomerError:
@@ -1215,10 +1249,17 @@ def _already_set() -> CustomerError:
 
 
 def _refuse_taken_phone(customer_id: int, phone: str) -> None:
-    """A phone held by any other account — active, or deleted (A1 keeps the number with the loyalty account
-    it belongs to; registering with it reactivates that account) — answers 409 ``phone_taken``."""
-    if Customer.objects.filter(phone=phone).exclude(pk=customer_id).exists():
-        raise PhoneTaken()
+    """A phone held by any other account answers 409 ``phone_taken`` with ``details.deleted``: an active
+    holder → sign in with it; a deleted one (A1 keeps the number with its loyalty account) → register with
+    it again, which reactivates that account (``error.phone_taken_deleted``)."""
+    holder = (
+        Customer.objects.filter(phone=phone).exclude(pk=customer_id).values_list("status", flat=True).first()
+    )
+    if holder is None:
+        return
+    if holder == enums.CustomerStatus.DELETED:
+        raise PhoneTaken(key="error.phone_taken_deleted", details={"deleted": True})
+    raise PhoneTaken(details={"deleted": False})
 
 
 def _refuse_taken_email(customer_id: int, email: str) -> None:
@@ -1230,12 +1271,11 @@ def send_attach_phone_code(
     customer_id: int, phone: str, *, device: DeviceContext
 ) -> account_services.CodeIssue:
     """``POST me/phone/code/``: an ``attach_phone`` SMS code for a phoneless account (409 ``conflict`` when it
-    has a phone already, ``phone_taken`` for another account's number); every OTP limit of
-    ``auth/send-code/`` applies."""
+    has a phone already); every OTP limit of ``auth/send-code/`` applies. Who holds the number is checked
+    only after a correct code (:func:`attach_phone`)."""
     customer = Customer.objects.get(pk=customer_id)
     if customer.phone:
         raise _already_set()
-    _refuse_taken_phone(customer_id, phone)
     return account_services.send_code(
         phone,
         enums.OtpPurpose.ATTACH_PHONE,
@@ -1250,11 +1290,10 @@ def send_verify_email_code(
     customer_id: int, email: str, *, device: DeviceContext
 ) -> account_services.CodeIssue:
     """``POST me/email/code/``: a ``verify_email`` code to the address (409 ``conflict`` when it is already
-    the account's, ``email_taken`` for another account's)."""
+    the account's); who holds the address is checked only after a correct code."""
     customer = Customer.objects.get(pk=customer_id)
     if customer.email == email:
         raise _already_set()
-    _refuse_taken_email(customer_id, email)
     return account_services.send_code(
         email,
         enums.OtpPurpose.VERIFY_EMAIL,
@@ -1275,19 +1314,16 @@ def attach_phone(
     sid: str | account_services.NoSession,
     request: Any = None,
 ) -> None:
-    """``POST me/phone/`` (C§2.2.10): re-authentication first (so a refusal never burns the code), then
-    ``phone_taken``, then the SMS code (``auth/verify-code/``'s engine: a wrong code is counted and
-    committed),
+    """``POST me/phone/`` (C§2.2.10): re-authentication first (so its refusal never burns the code), then the
+    SMS code (``auth/verify-code/``'s engine: a wrong code is counted and committed), then ``phone_taken``,
     then under the signed-in lock the phone is set (a unique-key race answers ``phone_taken``). Audit
-    ``customer.phone_attached``. The phone is never removed afterwards."""
+    ``customer.phone_attached`` and ``push.account_security`` ``phone_attached``. Never removed afterwards."""
     snapshot = Customer.objects.get(pk=customer_id)
     if snapshot.phone:
         raise _already_set()
-    needed = reauthenticate(
-        snapshot, password=password, verification_token=verification_token, sid=sid, fresh_waives=True
-    )
-    _refuse_taken_phone(customer_id, phone)
+    needed = reauthenticate(snapshot, password=password, verification_token=verification_token, sid=sid)
     verified = account_services.verify_code(phone, enums.OtpPurpose.ATTACH_PHONE, code)
+    _refuse_taken_phone(customer_id, phone)
     with transaction.atomic():
         customer = _lock_reauthenticated(customer_id, sid, snapshot, verification_token, needed)
         if customer.phone:
@@ -1299,7 +1335,8 @@ def attach_phone(
         try:
             account_services.set_customer_phone(customer_id, phone)
         except IntegrityError as exc:
-            raise PhoneTaken() from exc
+            raise PhoneTaken(details={"deleted": False}) from exc
+        _account_security(customer_id, enums.AccountSecurityEvent.PHONE_ATTACHED)
         _audit("customer.phone_attached", customer, request)
 
 
@@ -1315,15 +1352,14 @@ def attach_email(
 ) -> None:
     """``POST me/email/`` (C§2.2.10): as :func:`attach_phone` for an e-mail address (a new address replaces
     the previous one; ``email_taken`` for another account's). Audit ``customer.email_attached
-    {replaced: bool}``."""
+    {replaced: bool}``, ``push.account_security`` ``email_attached`` and, for a replacement, a notice e-mail
+    to the previous address."""
     snapshot = Customer.objects.get(pk=customer_id)
     if snapshot.email == email:
         raise _already_set()
-    needed = reauthenticate(
-        snapshot, password=password, verification_token=verification_token, sid=sid, fresh_waives=True
-    )
-    _refuse_taken_email(customer_id, email)
+    needed = reauthenticate(snapshot, password=password, verification_token=verification_token, sid=sid)
     verified = account_services.verify_code(email, enums.OtpPurpose.VERIFY_EMAIL, code)
+    _refuse_taken_email(customer_id, email)
     with transaction.atomic():
         customer = _lock_reauthenticated(customer_id, sid, snapshot, verification_token, needed)
         account_services.consume_verification(
@@ -1334,7 +1370,12 @@ def attach_email(
             account_services.set_customer_email(customer_id, email)
         except IntegrityError as exc:
             raise EmailTaken() from exc
-        _audit("customer.email_attached", customer, request, {"replaced": bool(snapshot.email)})
+        _account_security(customer_id, enums.AccountSecurityEvent.EMAIL_ATTACHED)
+        if customer.email:
+            account_services.enqueue_email_notice(
+                customer.email, lang=customer.language, kind="email_replaced"
+            )
+        _audit("customer.email_attached", customer, request, {"replaced": bool(customer.email)})
 
 
 # --- profile, consent, image, addresses (customer contract §2.2.2–§2.2.7)

@@ -331,6 +331,8 @@ class PhoneCodeView(MeBase):
 
 
 class PhoneView(MeBase):
+    throttle_classes = CODE_THROTTLES  # the code check is per target and device, like send-code
+
     @extend_schema(
         operation_id="customer_me_phone_attach",
         description=(
@@ -386,6 +388,8 @@ class EmailCodeView(MeBase):
 
 
 class EmailView(MeBase):
+    throttle_classes = CODE_THROTTLES  # the code check is per target and device, like send-code
+
     @extend_schema(
         operation_id="customer_me_email_attach",
         description=(

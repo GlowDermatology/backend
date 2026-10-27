@@ -55,6 +55,7 @@ from glowderma.core.api.exceptions import (
     field_error,
 )
 from glowderma.core.models import IdempotencyRecord
+from glowderma.core.pii import normalize_email as pii_normalize_email
 from glowderma.core.pii import pii_ref
 from glowderma.integrations.email import registry as email_registry
 from glowderma.integrations.eskiz import registry as eskiz_registry
@@ -1365,8 +1366,9 @@ REFRESH_DEAD_KEY = "auth:refresh_dead:{digest}"
 
 
 def normalize_email(value: str) -> str:
-    """The stored form of an e-mail address: trimmed, lower case (one account per address, C§2.1)."""
-    return value.strip().lower()
+    """The stored form of an e-mail address (``core.pii.normalize_email``: NFC, lower case, punycode domain;
+    one account per mailbox, C§2.1)."""
+    return pii_normalize_email(value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1468,6 +1470,10 @@ def _ip_counter_key(ip: str, now: datetime) -> str:
     return f"gd:otp:ip:{pii_ref(ip)}:{_day_tag(now)}"
 
 
+def _email_ip_counter_key(ip: str, now: datetime) -> str:
+    return f"gd:otp:email_ip:{pii_ref(ip)}:{now.astimezone(timeutils.TASHKENT).strftime('%Y%m%d%H')}"
+
+
 def _global_counter_key(now: datetime, channel: str = SMS_CHANNEL) -> str:
     prefix = "gd:otp:email_global" if channel == EMAIL_CHANNEL else "gd:otp:global"
     return f"{prefix}:{now.astimezone(timeutils.TASHKENT).strftime('%Y%m%d%H')}"
@@ -1511,14 +1517,36 @@ def social_otp_key(sms_code_id: int) -> str:
     return SOCIAL_OTP_KEY.format(sms_code_id=sms_code_id)
 
 
+def account_targets(target: OtpTarget) -> list[OtpTarget]:
+    """The target and, when it belongs to an active account, the account's other identifier (its phone or
+    e-mail): the lockout and the daily wrong-code cap are per account, so an account with both does not get
+    two budgets. An unknown target is only itself (nothing is revealed)."""
+    customer = Customer.objects.filter(**target.lookup, status=enums.CustomerStatus.ACTIVE).first()
+    targets = [target]
+    if customer is not None:
+        if customer.phone and customer.phone != target.value:
+            targets.append(OtpTarget(SMS_CHANNEL, customer.phone))
+        if customer.email and customer.email != target.value:
+            targets.append(OtpTarget(EMAIL_CHANNEL, customer.email))
+    return targets
+
+
+def _account_codes(target: OtpTarget) -> Any:
+    condition = Q()
+    for each in account_targets(target):
+        condition |= Q(**each.lookup)
+    return SmsCode.objects.filter(condition)
+
+
 def _lock_target(target: OtpTarget) -> None:
-    """``pg_advisory_xact_lock(hashtext('otp:' + phone))`` (``'otp:email:' + address`` for e-mail):
-    serialises every OTP decision of one target until the surrounding transaction ends (customer contract
-    §2.1.1)."""
+    """``pg_advisory_xact_lock(hashtext('otp:' + phone))`` (``'otp:email:' + address`` for e-mail) for the
+    target and its account's other identifier, in sorted order (no deadlock): serialises every OTP decision of
+    one account until the surrounding transaction ends (customer contract §2.1.1)."""
     if not transaction.get_connection().in_atomic_block:
         raise RuntimeError("the per-target OTP lock needs a transaction")
     with transaction.get_connection().cursor() as cursor:
-        cursor.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", [target.lock_key])
+        for key in sorted({each.lock_key for each in account_targets(target)}):
+            cursor.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", [key])
 
 
 def active_customer_by_phone(identifier: str | OtpTarget) -> Customer | None:
@@ -1532,10 +1560,11 @@ def active_customer_by_email(email: str) -> Customer | None:
 
 
 def _phone_block(target: OtpTarget, now: datetime) -> Exception | None:
-    """The target-derived refusals (DB rows, they survive a cache flush): lockout, daily wrong-code cap."""
+    """The account-derived refusals (DB rows, they survive a cache flush): lockout, daily wrong-code cap —
+    over the codes of the target and of its account's other identifier (:func:`account_targets`)."""
     lockout = timedelta(minutes=int(settings.CUSTOMER_OTP_LOCKOUT_MINUTES))
     exhausted = (
-        target.codes()
+        _account_codes(target)
         .filter(exhausted_at__gt=now - lockout)
         .order_by("-exhausted_at")
         .values_list("exhausted_at", flat=True)
@@ -1551,7 +1580,10 @@ def _phone_block(target: OtpTarget, now: datetime) -> Exception | None:
 def wrong_codes_today(identifier: str | OtpTarget, now: datetime) -> int:
     target = otp_target(identifier)
     return int(
-        target.codes().filter(created_at__gte=_day_start(now)).aggregate(total=Sum("attempts"))["total"] or 0
+        _account_codes(target)
+        .filter(created_at__gte=_day_start(now))
+        .aggregate(total=Sum("attempts"))["total"]
+        or 0
     )
 
 
@@ -1568,6 +1600,13 @@ def _cap_block(target: OtpTarget, *, fid: str, ip: str, now: datetime) -> Except
         return _daily_limit(target, now)
     if ip and _counter(_ip_counter_key(ip, now)) >= int(settings.CUSTOMER_OTP_IP_DAILY_LIMIT):
         return OtpNetworkLimit(retry_after=_to_midnight(now))
+    # E-mail codes are cheap to request and share one hourly breaker: one IP may not exhaust it.
+    if (
+        target.is_email
+        and ip
+        and _counter(_email_ip_counter_key(ip, now)) >= int(settings.EMAIL_OTP_IP_HOURLY_LIMIT)
+    ):
+        return OtpNetworkLimit(retry_after=_seconds_to_next_hour(now))
     return None
 
 
@@ -1592,6 +1631,8 @@ def _budget_block(now: datetime, channel: str = SMS_CHANNEL) -> Exception | None
 
 def _count_issue(*, fid: str, ip: str, now: datetime, channel: str = SMS_CHANNEL) -> None:
     _incr(_global_counter_key(now, channel), 3600 + 60)
+    if channel == EMAIL_CHANNEL and ip:
+        _incr(_email_ip_counter_key(ip, now), 3600 + 60)
     _incr(_fid_counter_key(fid, now), 2 * 86400)
     if ip:
         _incr(_ip_counter_key(ip, now), 2 * 86400)
@@ -2219,6 +2260,23 @@ def set_customer_email(customer_id: int, email: str) -> None:
         Customer.objects.filter(pk=customer_id).update(
             email=normalize_email(email), email_verified_at=instant, updated_at=instant
         )
+
+
+EMAIL_NOTICE_AAD = b"email.notice"
+EMAIL_NOTICE_KINDS = frozenset({"email_replaced"})
+
+
+def enqueue_email_notice(address: str, *, lang: str, kind: str) -> None:
+    """A security notice e-mail to ``address`` (hybrid identity: the previous address when it is replaced,
+    C§2.2.10) through the outbox topic ``email.notice``; the address travels sealed (``core.secretbox``),
+    never in clear in the payload."""
+    if kind not in EMAIL_NOTICE_KINDS:
+        raise ValueError(f"Unknown e-mail notice {kind!r}")
+    outbox.enqueue(
+        topics.EMAIL_NOTICE,
+        {"to": secretbox.seal(address.encode("utf-8"), aad=EMAIL_NOTICE_AAD), "lang": lang, "kind": kind},
+        dedupe_key=f"{topics.EMAIL_NOTICE}:{uuid.uuid4().hex}",
+    )
 
 
 def set_customer_language(customer_id: int, language: str) -> None:

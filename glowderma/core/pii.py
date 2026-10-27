@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import re
+import unicodedata
 
 from django.conf import settings
 
@@ -58,3 +59,19 @@ def scrub_free_text(value: str, limit: int | None = None) -> str:
     """A provider's free-text message made safe to keep: :func:`clean_text` plus every run of seven or more
     digits (a phone number the provider echoed) replaced by :data:`MASKED_NUMBER`."""
     return clean_text(_DIGIT_RUN.sub(MASKED_NUMBER, clean_text(value)), limit)
+
+
+def normalize_email(value: str) -> str:
+    """The one stored, looked-up and unique form of an e-mail address (hybrid identity): NFC, trimmed, lower
+    case, the domain in IDNA ASCII (punycode), so one mailbox written two ways is one account. Plus-addressing
+    is kept (``a+b@x`` and ``a@x`` stay two addresses). A domain IDNA refuses is kept lower-cased (the
+    validator refuses it later)."""
+    text = unicodedata.normalize("NFC", value).strip().lower()
+    local, sep, domain = text.rpartition("@")
+    if not sep:
+        return text
+    try:
+        ascii_domain = domain.encode("idna").decode("ascii")
+    except UnicodeError:
+        ascii_domain = domain
+    return f"{local}@{ascii_domain.lower()}"

@@ -475,6 +475,9 @@ SMTP_TIMEOUT = env_bounded_int("EMAIL_TIMEOUT", 10, minimum=1, maximum=60)
 EMAIL_FROM = env_value("EMAIL_FROM", "Glow Derma <no-reply@glowderma.uz>")
 # The e-mail twin of SMS_GLOBAL_HOURLY_LIMIT: codes per hour before 503 email_unavailable.
 EMAIL_GLOBAL_HOURLY_LIMIT = env_positive_int("EMAIL_GLOBAL_HOURLY_LIMIT", 500)
+# E-mail codes one client IP may request per hour (sign-up, reset, new device, attach) before 429
+# otp_network_limit: no single IP can exhaust EMAIL_GLOBAL_HOURLY_LIMIT.
+EMAIL_OTP_IP_HOURLY_LIMIT = env_positive_int("EMAIL_OTP_IP_HOURLY_LIMIT", 20)
 # Re-authentication waiver of a fresh sign-in (C§2.2.10): attaching a phone or an e-mail within this many
 # seconds of the session's sign-in needs no password or code of the account.
 CUSTOMER_REAUTH_FRESH_SECONDS = env_bounded_int("CUSTOMER_REAUTH_FRESH_SECONDS", 600, minimum=0, maximum=3600)

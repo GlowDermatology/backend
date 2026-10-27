@@ -218,6 +218,16 @@ CATALOG: Final[dict[str, dict[str, str]]] = {
         "ru": "Этот номер привязан к другому аккаунту — войдите с этим номером.",
         "en": "This number belongs to another account — please sign in with it.",
     },
+    "error.phone_taken_deleted": {
+        "uz": "Bu raqam o‘chirilgan hisobga tegishli — shu raqam bilan qayta ro‘yxatdan o‘ting.",
+        "ru": "Этот номер принадлежит удалённому аккаунту — зарегистрируйтесь с ним заново.",
+        "en": "This number belongs to a deleted account — please sign up again with it.",
+    },
+    "error.phone_or_email_required": {
+        "uz": "Parol o‘rnatish uchun avval telefon raqami yoki emailni qo‘shing.",
+        "ru": "Чтобы задать пароль, сначала добавьте номер телефона или email.",
+        "en": "Add a phone number or an e-mail first to set a password.",
+    },
     "error.email_taken": {
         "uz": "Bu email boshqa hisobga bog‘langan — shu email bilan kiring.",
         "ru": "Этот email привязан к другому аккаунту — войдите с этим email.",
@@ -1008,6 +1018,26 @@ CATALOG: Final[dict[str, dict[str, str]]] = {
         "ru": "Для аккаунта задан новый пароль. Если это были не вы, свяжитесь с продавцом.",
         "en": "A new password was set for your account. If this wasn't you, contact the seller.",
     },
+    "push.account_security.phone_attached.title": {
+        "uz": "Telefon raqami qo‘shildi",
+        "ru": "Номер телефона добавлен",
+        "en": "Phone number added",
+    },
+    "push.account_security.phone_attached.body": {
+        "uz": "Hisobingizga telefon raqami qo‘shildi. Agar bu siz bo‘lmasangiz, sotuvchi bilan bog‘laning.",
+        "ru": "К аккаунту добавлен номер телефона. Если это были не вы, свяжитесь с продавцом.",
+        "en": "A phone number was added to your account. If this wasn't you, contact the seller.",
+    },
+    "push.account_security.email_attached.title": {
+        "uz": "Email o‘zgartirildi",
+        "ru": "Email изменён",
+        "en": "E-mail changed",
+    },
+    "push.account_security.email_attached.body": {
+        "uz": "Hisobingizga yangi email bog‘landi. Agar bu siz bo‘lmasangiz, sotuvchi bilan bog‘laning.",
+        "ru": "К аккаунту привязан новый email. Если это были не вы, свяжитесь с продавцом.",
+        "en": "A new e-mail was linked to your account. If this wasn't you, contact the seller.",
+    },
     "sms.otp": {
         "uz": "Glow Derma: tasdiqlash kodingiz {code}. Kodni hech kimga bermang.",
         "ru": "Glow Derma: ваш код подтверждения {code}. Никому его не сообщайте.",
@@ -1059,6 +1089,25 @@ CATALOG: Final[dict[str, dict[str, str]]] = {
         "uz": "Bu xat avtomatik yuborildi, unga javob bermang.",
         "ru": "Письмо отправлено автоматически, не отвечайте на него.",
         "en": "This message was sent automatically; please do not reply.",
+    },
+    "email.notice.email_replaced.subject": {
+        "uz": "Glow Derma: emailingiz o‘zgartirildi",
+        "ru": "Glow Derma: ваш email изменён",
+        "en": "Glow Derma: your e-mail was changed",
+    },
+    "email.notice.email_replaced.body": {
+        "uz": (
+            "Glow Derma hisobingizga boshqa email bog‘landi, bu manzil endi hisobga kirish uchun ishlamaydi. "
+            "Agar bu siz bo‘lmasangiz, darhol sotuvchi bilan bog‘laning."
+        ),
+        "ru": (
+            "К вашему аккаунту Glow Derma привязан другой email, этот адрес больше не используется "
+            "для входа. Если это были не вы, срочно свяжитесь с продавцом."
+        ),
+        "en": (
+            "Another e-mail was linked to your Glow Derma account; this address no longer signs in. "
+            "If this wasn't you, contact the seller at once."
+        ),
     },
 }
 

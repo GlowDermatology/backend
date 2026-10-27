@@ -10,7 +10,7 @@ from rest_framework.throttling import SimpleRateThrottle
 
 from glowderma.accounts.authentication import FID_PATTERN
 from glowderma.accounts.models import Customer
-from glowderma.core.pii import pii_ref
+from glowderma.core.pii import normalize_email, pii_ref
 from glowderma.core.throttling import rate_for
 
 
@@ -163,12 +163,12 @@ _EMAIL_VALIDATOR = EmailValidator()
 
 
 def canonical_email(value: object) -> str | None:
-    """The stored form of a submitted e-mail address (trimmed, lower case; ≤254 characters, a valid address
-    by Django's ``EmailValidator``), or ``None`` (hybrid identity: one account and one throttle key per
-    address whatever its case)."""
+    """The stored form of a submitted e-mail address (``core.pii.normalize_email``: NFC, lower case, punycode
+    domain; ≤254 characters, a valid address by Django's ``EmailValidator``), or ``None`` (hybrid identity:
+    one account and one throttle key per mailbox however it is written)."""
     if not isinstance(value, str):
         return None
-    folded = value.strip().lower()
+    folded = normalize_email(value)
     if not folded or len(folded) > EMAIL_MAX_LENGTH:
         return None
     try:
