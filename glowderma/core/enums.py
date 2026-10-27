@@ -344,6 +344,8 @@ class OtpPurpose(TextChoices):
     LOGIN_NEW_DEVICE = "login_new_device"
     RESET_PASSWORD = "reset_password"  # noqa: S105
     LINK_SOCIAL = "link_social"
+    VERIFY_EMAIL = "verify_email"  # hybrid identity: me/email/code/ (e-mail only)
+    ATTACH_PHONE = "attach_phone"  # hybrid identity: me/phone/code/ (SMS only)
 
 
 class NextStep(TextChoices):
@@ -479,6 +481,9 @@ class AccountSecurityEvent(TextChoices):
     SOCIAL_UNLINKED = "social_unlinked"
     PASSWORD_RESET = "password_reset"  # noqa: S105
     PASSWORD_CHANGED = "password_changed"  # noqa: S105
+    # hybrid identity (B-W2): added values; an app that does not know them shows the inbox text as is
+    PHONE_ATTACHED = "phone_attached"
+    EMAIL_ATTACHED = "email_attached"
 
 
 # --- B-W1 SEO checklist (admin contract §2.3, §2.4 ``seo_status``) ----------------------------------------

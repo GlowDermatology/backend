@@ -70,11 +70,14 @@ def test_0006_reverse_refuses_to_lose_apple_tokens_or_history_horizons() -> None
     apple = CustomerSocialIdentityFactory.create(provider="apple", provider_refresh_token="sealed")  # noqa: S106
     with pytest.raises(IrreversibleError, match="1 Apple identity"):
         call_command("migrate", "accounts", "0005", verbosity=0)
+    # The later migrations (0007…) were reversed before 0006 refused: forward again before using the models.
+    call_command("migrate", "accounts", verbosity=0)
     apple.delete()
     horizon = CustomerFactory.create(history_from=instant - timedelta(days=3))
     with pytest.raises(IrreversibleError, match="1 customer"):
         call_command("migrate", "accounts", "0005", verbosity=0)
     assert "history_from" in columns("accounts_customer")
+    call_command("migrate", "accounts", verbosity=0)
     Customer.objects.filter(pk=horizon.pk).update(history_from=None)
     call_command("migrate", "accounts", "0005", verbosity=0)
     call_command("migrate", verbosity=0)

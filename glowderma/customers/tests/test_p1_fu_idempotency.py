@@ -233,7 +233,7 @@ def test_reauthentication_failures_survive_the_rolled_back_transaction(path: str
         wrong = signed.client.delete(path, {"password": WRONG}, **key())
         assert wrong.data["errors"][0]["code"] == "password_incorrect", wrong.data
         assert failures(REAUTH_SCOPE, str(signed.customer.pk)) == attempt
-        assert failures(LOGIN_SCOPE, phone_guard_key(signed.customer.phone)) == attempt
+        assert failures(LOGIN_SCOPE, phone_guard_key(str(signed.customer.phone))) == attempt
     locked = signed.client.delete(path, {"password": PASSWORD}, **key())
     assert (locked.status_code, locked.data["code"]) == (429, "throttled")
     assert not IdempotencyRecord.objects.exists()

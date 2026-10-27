@@ -29,7 +29,9 @@ class CustomerRefSerializer(serializers.Serializer[Any]):
 
     id = serializers.IntegerField(source="pk")
     name = serializers.CharField(allow_blank=True)
-    phone = serializers.CharField()
+    # Hybrid identity: null only for an account without a phone yet (never on orders and payments, which are
+    # phone-gated; a staff booking may name one).
+    phone = serializers.CharField(allow_null=True)
 
 
 # One field per entry of ``core.integration_modes.PROVIDER_MODE_SETTINGS`` (health ``?ready=1`` and

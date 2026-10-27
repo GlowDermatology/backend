@@ -45,6 +45,7 @@ from glowderma.site_config import selectors as site_config_selectors
 NAME_COLLATION = "glowderma_ci"  # ICU case-insensitive collation (core.0007), used in ORDER BY only
 SEARCH_MAX_LENGTH = 64
 PHONE_SEARCH_MIN_DIGITS = 3
+EMAIL_SEARCH_MIN_LENGTH = 3
 DEFAULT_ORDERING = "-registered_at"
 
 
@@ -72,7 +73,8 @@ def search_q(term: str) -> Q | None:
     """``name`` contains the term (case-insensitive and folded — apostrophe variants and ё, ``core.search``,
     decision GC-1: ``fold(name) LIKE '%' || fold(term) || '%'``, served by the trigram index
     ``accounts_customer_fold_trgm``), or, when the term carries at least three digits, the phone contains
-    those digits. Blank → no filter."""
+    those digits, or (hybrid identity) the e-mail address contains the term (case-insensitive). Blank → no
+    filter."""
     text = term.strip()
     if not text:
         return None
@@ -80,6 +82,8 @@ def search_q(term: str) -> Q | None:
     digits = re.sub(r"\D", "", text)
     if len(digits) >= PHONE_SEARCH_MIN_DIGITS:
         condition |= Q(phone__contains=digits)
+    if len(text) >= EMAIL_SEARCH_MIN_LENGTH:
+        condition |= Q(email__contains=text.lower())  # stored lower case
     return condition
 
 
@@ -148,7 +152,8 @@ class CustomerCard:
 
     id: int
     name: str
-    phone: str
+    phone: str | None  # hybrid identity: null until the customer attaches one
+    email: str | None
     status: str
     registered_at: datetime
     deleted_at: datetime | None
@@ -296,6 +301,7 @@ def customer_card(customer_id: int) -> CustomerCard | None:
         id=customer.pk,
         name=customer.name,
         phone=customer.phone,
+        email=customer.email,
         status=customer.status,
         registered_at=customer.registered_at,
         deleted_at=customer.deleted_at,
@@ -426,7 +432,8 @@ def me_payload(customer: Customer, *, fid: str | None) -> dict[str, Any]:
     default = Address.objects.filter(customer_id=customer.pk, is_default=True).first()
     return {
         "id": customer.pk,
-        "phone": customer.phone,
+        "phone": customer.phone or None,
+        "email": customer.email or None,
         "name": customer.name,
         "language": customer.language,
         "image_url": media_url(customer.image),

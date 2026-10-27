@@ -161,7 +161,7 @@ def test_reset_vs_a_foreign_put_device_does_not_deadlock(monkeypatch: pytest.Mon
     """The account-recovery path: the holder's reset from a third install while A's PUT takes the token."""
     taker, holder, _holder_started = two_customers_sharing_an_install()
     locked, go = pause_after(monkeypatch, "sign_out_customer", "holder")
-    token = verification(holder.phone, "reset_password")
+    token = verification(str(holder.phone), "reset_password")
     out = race(
         lambda: services.reset_password(token, password=NEW_PASSWORD, device=ctx(FID_C)), locked, go, taker
     )

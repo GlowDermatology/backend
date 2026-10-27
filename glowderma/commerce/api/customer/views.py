@@ -17,6 +17,7 @@ from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from glowderma.accounts import services as account_services
 from glowderma.accounts.api.customer_base import CustomerAPIView, CustomerGenericViewSet
 from glowderma.accounts.api.throttles import CheckoutThrottle, CustomerRateThrottle, PayThrottle
 from glowderma.accounts.models import Address, AuthSession, Customer
@@ -383,7 +384,11 @@ class CheckoutView(CustomerAPIView):
         # §2.7.1 row 4a: the cart's stale lines are re-read from Billz before the transaction; the refusal
         # (503) is decided in services.checkout after the BTS quote. A body that cannot pass reads nothing.
         stock = services.FRESH
-        if services.stock_freshness_on() and CustomerCheckoutSerializer(data=request.data).is_valid():
+        if (
+            _customer(request).phone  # a phoneless account is refused (phone_required): nothing is read
+            and services.stock_freshness_on()
+            and CustomerCheckoutSerializer(data=request.data).is_valid()
+        ):
             stock = _refresh_stock(
                 request, selectors.cart_product_ids(_customer(request).pk), key_required=True
             )
@@ -393,6 +398,7 @@ class CheckoutView(CustomerAPIView):
     def _checkout(self, request: Request, stock: services.StockCheck) -> Response:
         if not integration_modes.online_sales_enabled():  # row 0: nothing read or quoted
             raise OnlineSalesUnavailable()
+        account_services.require_phone(_customer(request))  # row 0a: hybrid identity, C§2.2.10
         body = CustomerCheckoutSerializer(data=request.data)
         body.is_valid(raise_exception=True)
         data = body.validated_data
@@ -469,6 +475,7 @@ class PayView(CustomerAPIView):
     @idempotent()
     def post(self, request: Request, pk: int) -> Response:
         customer = _customer(request)
+        account_services.require_phone(customer)  # hybrid identity, C§2.2.10
         _own_order(customer, pk)
         body = CustomerPaySerializer(data=request.data)
         body.is_valid(raise_exception=True)

@@ -50,7 +50,7 @@ def test_health_ready_other_failure_503(check: str, target: str, caplog: pytest.
 def test_health_ready_lists_every_provider_mode() -> None:
     from django.test import override_settings
 
-    modes = {f"{name}_MODE": "fake" for name in ("OAUTH", "BILLZ", "FCM", "PAYME", "BTS", "ESKIZ")}
+    modes = {f"{name}_MODE": "fake" for name in ("OAUTH", "BILLZ", "FCM", "PAYME", "BTS", "ESKIZ", "EMAIL")}
     with override_settings(**modes, CLICK_MODE="live"):
         response = Client().get("/api/v1/health/?ready=1")
     body = response.json()
@@ -62,6 +62,7 @@ def test_health_ready_lists_every_provider_mode() -> None:
         "payme": "fake",
         "bts": "fake",
         "eskiz": "fake",
+        "email": "fake",
     }
     assert set(body) == {
         "status",
@@ -155,13 +156,16 @@ def test_provider_modes_serializer_follows_the_settings_map(monkeypatch: pytest.
         "payme",
         "bts",
         "eskiz",
+        "email",
         "sms",
     ]
 
 
 # --- M3 readiness: live providers' configured flags and sync ages (docs/ops/monitoring.md) -----------------
 
-ALL_FAKE = {f"{name}_MODE": "fake" for name in ("OAUTH", "BILLZ", "FCM", "CLICK", "PAYME", "BTS", "ESKIZ")}
+ALL_FAKE = {
+    f"{name}_MODE": "fake" for name in ("OAUTH", "BILLZ", "FCM", "CLICK", "PAYME", "BTS", "ESKIZ", "EMAIL")
+}
 LIVE_BILLZ = {
     "BILLZ_MODE": "live",
     "BILLZ_SECRET_KEY": "billz-integration-key",

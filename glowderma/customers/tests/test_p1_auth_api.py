@@ -253,7 +253,7 @@ def test_login_wrong_password_and_unknown_phone_are_identical() -> None:
         == _strip(unknown.data)
         == {
             "code": "invalid_credentials",
-            "message": "Telefon raqami yoki parol noto‘g‘ri.",
+            "message": "Telefon raqami, email yoki parol noto‘g‘ri.",
             "errors": [],
             "details": None,
         }

@@ -3,6 +3,7 @@ import binascii
 import json
 import os
 import re
+from email.utils import parseaddr
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -31,6 +32,8 @@ from .base import (
     CLICK_MERCHANT_API_URL,
     CLICK_MODE,
     CLICK_PAY_URL,
+    EMAIL_FROM,
+    EMAIL_MODE,
     ESKIZ_BASE_URL,
     ESKIZ_CALLBACK_URL,
     ESKIZ_MODE,
@@ -39,6 +42,11 @@ from .base import (
     PAYME_CHECKOUT_URL,
     PAYME_MODE,
     PAYMENT_WEB_RETURN_URL,
+    SMTP_HOST,
+    SMTP_PASSWORD,
+    SMTP_USE_SSL,
+    SMTP_USE_TLS,
+    SMTP_USER,
     database_config,
     redis_db_url,
 )
@@ -373,6 +381,24 @@ if BILLZ_MODE == "live":
             raise ImproperlyConfigured(f"{_name} is the .env.example placeholder; set the real Billz id")
     if urlsplit(BILLZ_BASE_URL).scheme != "https":
         raise ImproperlyConfigured("BILLZ_BASE_URL must be an https URL")
+# --- E-mail OTP (hybrid identity, C§2.1) ---
+# fake is allowed (startup WARNING and the health flag, like every provider); smtp needs a host, a real sender
+# address and an encrypted connection (STARTTLS or implicit TLS); the account is optional (an IP-allow-listed
+# relay) but the user and the password come together.
+if EMAIL_MODE == "smtp":
+    _refuse_placeholder("EMAIL_HOST", SMTP_HOST)
+    _refuse_placeholder("EMAIL_FROM", EMAIL_FROM)
+    _sender = parseaddr(EMAIL_FROM)[1]
+    if not re.fullmatch(r"[^<>@\s]+@[^<>@\s]+\.[^<>@\s]+", _sender) or ("<" in EMAIL_FROM) != (
+        EMAIL_FROM.endswith(">")
+    ):
+        raise ImproperlyConfigured('EMAIL_FROM must be an address ("no-reply@example.uz" or "Name <addr>")')
+    if not (SMTP_USE_TLS or SMTP_USE_SSL):
+        raise ImproperlyConfigured("EMAIL_MODE=smtp needs EMAIL_USE_TLS or EMAIL_USE_SSL in production")
+    if bool(SMTP_USER) != bool(SMTP_PASSWORD):
+        raise ImproperlyConfigured("EMAIL_HOST_USER and EMAIL_HOST_PASSWORD are set together or not at all")
+    if SMTP_PASSWORD:
+        _refuse_placeholder("EMAIL_HOST_PASSWORD", SMTP_PASSWORD)
 # --- Alert webhook (core.alerts, docs/ops/monitoring.md) ---
 # Optional. When set it must be https (alerts carry ids and counts, but the URL itself often embeds a token)
 # and signed with a real secret of at least 32 characters.

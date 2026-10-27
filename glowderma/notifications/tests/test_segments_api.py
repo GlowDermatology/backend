@@ -267,6 +267,7 @@ def test_members_list_add_remove(staff_client: APIClient, staff: StaffUser, cloc
         "id": by_rule.pk,
         "name": "Malika Karimova",
         "phone": "+998901234567",
+        "email": None,
         "status": "active",
         "registered_at": "2025-03-12T10:20:00+05:00",
         "lifetime_total": lifetime(by_rule),

@@ -53,7 +53,7 @@ def test_changelists_change_pages_and_search_render() -> None:
         change = client.get(reverse(f"admin:{meta.app_label}_{meta.model_name}_change", args=[row.pk]))
         assert change.status_code == 200
         assert client.post(reverse(f"admin:{meta.app_label}_{meta.model_name}_add"), {}).status_code == 403
-    phone = event.appointment.customer.phone
+    phone = str(event.appointment.customer.phone)
     search = client.get(reverse("admin:appointments_appointment_changelist"), {"q": phone})
     assert search.status_code == 200 and phone.encode() in search.content
     by_id = client.get(

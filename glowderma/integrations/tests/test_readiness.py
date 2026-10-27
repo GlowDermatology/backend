@@ -19,7 +19,9 @@ LIVE_BILLZ = {
     "BILLZ_CASHBOX_ID": "7c4d1f0b-2e3a-4b6c-9d8e-0f1a2b3c4d5e",
     "BILLZ_PAYMENT_TYPE_ID": "8d5e2a1c-3f4b-4c7d-8e9f-1a2b3c4d5e6f",
 }
-ALL_LIVE = {f"{name}_MODE": "live" for name in ("OAUTH", "BILLZ", "FCM", "CLICK", "PAYME", "BTS", "ESKIZ")}
+ALL_LIVE = {
+    f"{name}_MODE": "live" for name in ("OAUTH", "BILLZ", "FCM", "CLICK", "PAYME", "BTS", "ESKIZ", "EMAIL")
+}
 
 
 def test_the_app_registers_its_probe() -> None:
@@ -49,6 +51,7 @@ def test_live_adapters_without_their_credentials_are_not_configured() -> None:
             "payme": False,
             "bts": False,
             "eskiz": False,
+            "email": False,
         }
 
 
@@ -67,6 +70,7 @@ LIVE_CREDENTIALS = {
     "ESKIZ_PASSWORD": "eskiz-password",
     "ESKIZ_SENDER": "GlowDerma",
     "FCM_PROJECT_ID": "glowderma-prod",
+    "SMTP_HOST": "smtp.example.uz",
 }
 
 
@@ -89,6 +93,8 @@ def test_live_adapters_with_their_credentials_are_configured(tmp_path: Path) -> 
         ("bts", {"BTS_SENDER_CITY_CODE": ""}),
         ("bts", {"BTS_PICKUP_TYPE": "branch", "BTS_SENDER_BRANCH_CODE": ""}),
         ("eskiz", {"ESKIZ_SENDER": ""}),
+        ("email", {"SMTP_HOST": ""}),
+        ("email", {"EMAIL_FROM": "no-address"}),
         ("fcm", {"FCM_CREDENTIALS_FILE": "/nonexistent/fcm.json"}),
         ("fcm", {"FCM_PROJECT_ID": ""}),
     ],

@@ -462,6 +462,33 @@ ESKIZ_PASSWORD = env_value("ESKIZ_PASSWORD", "")
 ESKIZ_SENDER = env_value("ESKIZ_SENDER", "4546")
 ESKIZ_CALLBACK_URL = env_value("ESKIZ_CALLBACK_URL", "")
 ESKIZ_FAKE_CODE = ""
+# E-mail OTP (hybrid identity, C§2.1): EMAIL_MODE fake (in-process, nothing delivered; the default, like every
+# provider allowed under the production settings with a startup WARNING and the health flag) or smtp (any SMTP
+# relay; the provider is chosen through these variables). EMAIL_USE_TLS = STARTTLS, EMAIL_USE_SSL = implicit
+# TLS (port 465); at most one. Codes go out through the outbox (``email.send``), never inline. The relay
+# values are read from the EMAIL_* variables into SMTP_* settings: Django 6.1 deprecates its own EMAIL_HOST…
+# settings (MAILERS), and the adapter talks to the relay with smtplib, not django.core.mail.
+EMAIL_MODE = env_value("EMAIL_MODE", "fake")
+if EMAIL_MODE not in {"fake", "smtp"}:
+    raise ImproperlyConfigured("EMAIL_MODE must be 'fake' or 'smtp'")
+SMTP_HOST = env_value("EMAIL_HOST", "")
+SMTP_PORT = env_bounded_int("EMAIL_PORT", 587, minimum=1, maximum=65535)
+SMTP_USER = env_value("EMAIL_HOST_USER", "")
+SMTP_PASSWORD = env_str("EMAIL_HOST_PASSWORD", "")
+SMTP_USE_TLS = env_bool("EMAIL_USE_TLS", True)
+SMTP_USE_SSL = env_bool("EMAIL_USE_SSL", False)
+if SMTP_USE_TLS and SMTP_USE_SSL:
+    raise ImproperlyConfigured("EMAIL_USE_TLS and EMAIL_USE_SSL are mutually exclusive")
+SMTP_TIMEOUT = env_bounded_int("EMAIL_TIMEOUT", 10, minimum=1, maximum=60)
+EMAIL_FROM = env_value("EMAIL_FROM", "Glow Derma <no-reply@glowderma.uz>")
+# The e-mail twin of SMS_GLOBAL_HOURLY_LIMIT: codes per hour before 503 email_unavailable.
+EMAIL_GLOBAL_HOURLY_LIMIT = env_positive_int("EMAIL_GLOBAL_HOURLY_LIMIT", 500)
+# E-mail codes one client IP may request per hour (sign-up, reset, new device, attach) before 429
+# otp_network_limit: no single IP can exhaust EMAIL_GLOBAL_HOURLY_LIMIT.
+EMAIL_OTP_IP_HOURLY_LIMIT = env_positive_int("EMAIL_OTP_IP_HOURLY_LIMIT", 20)
+# Re-authentication waiver of a fresh sign-in (C§2.2.10): attaching a phone or an e-mail within this many
+# seconds of the session's sign-in needs no password or code of the account.
+CUSTOMER_REAUTH_FRESH_SECONDS = env_bounded_int("CUSTOMER_REAUTH_FRESH_SECONDS", 600, minimum=0, maximum=3600)
 # Cart and checkout (C§2.5, §2.7).
 CART_MAX_LINES = env_positive_int("CART_MAX_LINES", 30)
 CART_MAX_QTY_PER_LINE = env_positive_int("CART_MAX_QTY_PER_LINE", 10)

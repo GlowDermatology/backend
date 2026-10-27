@@ -337,7 +337,7 @@ def test_push_texts_carry_no_pii_for_seeded_customers(clock: Any, fcm: FakeFcm) 
     for message, customer in zip(fcm.sent, [c for c in customers for _ in range(2)], strict=True):
         texts = (message.title, message.body, *message.data.values())
         for text in texts:
-            assert customer.name not in text and customer.phone[4:] not in text
+            assert customer.name not in text and str(customer.phone)[4:] not in text
 
 
 # --- token pruning and payload_invalid --------------------------------------------------------------------

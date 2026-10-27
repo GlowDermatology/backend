@@ -20,12 +20,13 @@ customer and the request's session under it (``accounts.services.lock_signed_in_
 from __future__ import annotations
 
 import logging
+import re
 import secrets
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 from pathlib import PurePosixPath
 from typing import Any
@@ -42,8 +43,8 @@ from rest_framework.exceptions import ValidationError
 from glowderma.accounts import services as account_services
 from glowderma.accounts import topics
 from glowderma.accounts.api.guard import LoginGuard
-from glowderma.accounts.api.throttles import phone_throttle_ident
-from glowderma.accounts.models import Address, Customer, CustomerSocialIdentity, Device
+from glowderma.accounts.api.throttles import email_throttle_ident, phone_throttle_ident
+from glowderma.accounts.models import Address, AuthSession, Customer, CustomerSocialIdentity, Device, SmsCode
 from glowderma.appointments import services as appointment_services
 from glowderma.appointments.models import Appointment
 from glowderma.commerce import selectors as commerce_selectors
@@ -54,11 +55,16 @@ from glowderma.core.api.exceptions import (
     AddressLimit,
     AuthFailed,
     CustomerError,
+    EmailNotRegistered,
+    EmailRegistered,
+    EmailTaken,
     LastSignInMethod,
     PaymentInProgress,
     PhoneNotRegistered,
     PhoneRegistered,
+    PhoneTaken,
     ProviderUnavailable,
+    ReauthRequired,
     SocialIdentityLinked,
     SocialProviderLinked,
     SocialTicketInvalid,
@@ -207,8 +213,30 @@ def check_login_password(customer: Customer | None, raw_password: str) -> bool:
     return account_services.check_customer_password(customer, raw_password)
 
 
-def phone_guard_key(phone: str) -> str:
-    return phone_throttle_ident(phone) or "invalid"
+def is_email(identifier: str) -> bool:
+    """Hybrid identity: a validated identifier is an e-mail address when it holds ``@`` (a phone never)."""
+    return "@" in identifier
+
+
+def phone_guard_key(identifier: str) -> str:
+    """The ``customer_login`` guard key of a phone or, given an address, of an e-mail (``pii_ref``)."""
+    ident = email_throttle_ident(identifier) if is_email(identifier) else phone_throttle_ident(identifier)
+    return ident or "invalid"
+
+
+def customer_guard_key(customer_id: int) -> str:
+    """The account-wide ``customer_login`` key: an account with a phone and an e-mail has one budget."""
+    return f"customer:{customer_id}"
+
+
+def target_kwargs(identifier: str) -> dict[str, str]:
+    """``phone=`` or ``email=`` for the verification-token and customer lookups of ``identifier``."""
+    return {"email": identifier} if is_email(identifier) else {"phone": identifier}
+
+
+def customer_identifier(customer: Customer) -> str:
+    """What the customer signs in with: the phone, else the e-mail address, else ``""`` (social only)."""
+    return customer.phone or customer.email or ""
 
 
 def _field(name: str, code: str, key: str | None = None, **params: Any) -> ValidationError:
@@ -217,14 +245,21 @@ def _field(name: str, code: str, key: str | None = None, **params: Any) -> Valid
     return ValidationError({name: [field_error(code, message_key=key, params=params or None)]})
 
 
-def _too_similar(password: str, phone: str, max_similarity: float = 0.7) -> bool:
+def _too_similar(password: str, identifier: str, max_similarity: float = 0.7) -> bool:
     """Django's ``UserAttributeSimilarityValidator`` rule applied to the phone's digits (customer contract
-    §2.1.3: "not similar to the phone"); the validator itself needs a model instance."""
-    value = phone.lstrip("+")
+    §2.1.3: "not similar to the phone") or to an e-mail address, its local part and the local part's words
+    (hybrid identity); the validator itself needs a model instance."""
     password = password.lower()
-    if len(password) >= 10 * len(value):
+    if is_email(identifier):
+        local = identifier.partition("@")[0]
+        parts = {identifier, local, *(word for word in re.split(r"\W+", local) if len(word) >= 3)}
+        value = identifier
+    else:
+        value = identifier.lstrip("+")
+        parts = {value, value[3:], value[-9:], value[-7:]}
+    if not value or len(password) >= 10 * len(value):
         return False
-    for part in {value, value[3:], value[-9:], value[-7:]}:
+    for part in parts:
         if part and SequenceMatcher(a=password, b=part).quick_ratio() >= max_similarity:
             return True
     return False
@@ -239,10 +274,11 @@ PASSWORD_CODE_KEYS = {
 
 
 def validate_customer_password(
-    password: str, phone: str, *, field: str = "password", current_hash: str = ""
+    password: str, identifier: str, *, field: str = "password", current_hash: str = ""
 ) -> None:
-    """M2-A11: ≥ ``CUSTOMER_PASSWORD_MIN_LENGTH``, not common, not only digits, not similar to the phone;
-    plus ``password_unchanged`` against ``current_hash`` (customer contract §2.1.3, §2.1.5, §2.2.9)."""
+    """M2-A11: ≥ ``CUSTOMER_PASSWORD_MIN_LENGTH``, not common, not only digits, not similar to the phone (or
+    the e-mail address, hybrid identity; ``""`` = nothing to compare); plus ``password_unchanged`` against
+    ``current_hash`` (customer contract §2.1.3, §2.1.5, §2.2.9)."""
     limit = int(settings.CUSTOMER_PASSWORD_MIN_LENGTH)
     validators: list[Any] = [
         password_validation.MinimumLengthValidator(min_length=limit),
@@ -263,8 +299,8 @@ def validate_customer_password(
                     details.append(field_error(code, message_key=key, limit=limit))
                 else:
                     details.append(field_error(code, message_key=key))
-    if _too_similar(password, phone):
-        key = PASSWORD_CODE_KEYS["password_too_similar"]
+    if identifier and _too_similar(password, identifier):
+        key = "field.password_too_similar_email" if is_email(identifier) else "field.password_too_similar"
         details.append(field_error("password_too_similar", message_key=key))
     if not details and current_hash and check_password(password, current_hash):
         details.append(field_error("password_unchanged", message_key="field.password_unchanged"))
@@ -366,25 +402,35 @@ def register(
 ) -> SignIn:
     """``auth/set-password/``: a new customer, or the reactivation of a deleted one (same id, history horizon
     at ``reactivated_at``); password, consent, the first session with a device key; audit
-    ``customer.registered``."""
+    ``customer.registered``. The verification token says what the account is created with: a phone, or an
+    e-mail address (hybrid identity: verified by the code, no phone until the first checkout or booking; a
+    deleted account's address was scrubbed, so an e-mail registration never reactivates)."""
     terms = _require_published_terms()
     row = account_services.verification_row(verification_token, purpose=enums.OtpPurpose.REGISTER)
-    validate_customer_password(password, row.phone)
+    identifier = account_services.row_identifier(row)
+    registered = EmailRegistered if row.email else PhoneRegistered
+    validate_customer_password(password, identifier)
     _check_terms_version(terms_version, terms)
     with transaction.atomic():
         # Lock order Customer → SmsCode (C§2.7.1), as every flow that consumes a verification token.
-        customer = account_services.lock_customer_by_phone(row.phone)
-        phone, _ = account_services.consume_verification(
-            verification_token, purpose=enums.OtpPurpose.REGISTER, phone=row.phone
+        customer = account_services.lock_customer_by_phone(identifier)
+        account_services.consume_verification(
+            verification_token, purpose=enums.OtpPurpose.REGISTER, **target_kwargs(identifier)
         )
         reactivated = False
         if customer is not None and customer.status == enums.CustomerStatus.ACTIVE:
-            raise PhoneRegistered()
+            raise registered()
         if customer is None:
             try:
-                customer = account_services.create_customer(phone, name=name, language=language)
+                customer = account_services.create_customer(
+                    row.phone or None, email=row.email or None, name=name, language=language
+                )
             except IntegrityError as exc:  # a concurrent registration won
-                raise PhoneRegistered() from exc
+                raise registered() from exc
+        elif row.email:
+            # Reactivation is by phone only (A1); a deleted account's address was scrubbed, so a row still
+            # holding it here is a scrub race: refused, never revived through an e-mail code.
+            raise registered()
         else:
             customer = _reactivate(customer, name=name, language=language)
             reactivated = True
@@ -403,7 +449,7 @@ def register(
 
 
 def login(
-    phone: str,
+    identifier: str,
     password: str,
     verification_token: str | None,
     *,
@@ -411,8 +457,9 @@ def login(
     device_key: str | None,
     request: Any = None,
 ) -> SignIn | DeviceStep:
-    """``auth/login/`` steps 1–7 (customer contract §2.1.4)."""
-    customer = account_services.active_customer_by_phone(phone)
+    """``auth/login/`` steps 1–7 (customer contract §2.1.4) with a phone or an e-mail address (hybrid
+    identity: the new-device code goes where the customer signed in with)."""
+    customer = account_services.active_customer_by_phone(identifier)
     known = customer is not None and account_services.device_is_known(customer.pk, device.fid, device_key)
     guard = LoginGuard()
     if known and customer is not None:
@@ -421,18 +468,28 @@ def login(
         )[0]
         scope, key = LOGIN_DEVICE_SCOPE, str(device_id)
     else:
-        scope, key = LOGIN_SCOPE, phone_guard_key(phone)
-    guard.check(scope, key)
+        scope, key = LOGIN_SCOPE, phone_guard_key(identifier)
+    # The unknown-device budget is per identifier and, once it resolves to an account, per account too: an
+    # account with a phone and an e-mail gets one budget, not two. An unknown identifier keeps its own key
+    # only, so the answer reveals nothing (the known-device scope stays per device, C§1.8).
+    keys = [(scope, key)]
+    if scope == LOGIN_SCOPE and customer is not None:
+        keys.append((LOGIN_SCOPE, customer_guard_key(customer.pk)))
+    for guard_scope, guard_key in keys:
+        guard.check(guard_scope, guard_key)
     with transaction.atomic():
         if not known and not verification_token:
-            block = account_services.otp_blocked(phone, fid=device.fid, ip=device.ip, now=timeutils.now())
+            block = account_services.otp_blocked(
+                identifier, fid=device.fid, ip=device.ip, now=timeutils.now()
+            )
             if block is not None:
                 raise block
         ok = check_login_password(customer, password)
         if ok and customer is not None:
             ok = _login_still_valid(customer, device=device, device_key=device_key, known=known)
         if ok and customer is not None:
-            guard.reset(scope, key)
+            for guard_scope, guard_key in keys:
+                guard.reset(guard_scope, guard_key)
             if known:
                 started = account_services.start_customer_session(
                     customer.pk, device.fid, device.platform, device.app_version, issue_device_key=False
@@ -443,20 +500,21 @@ def login(
                 return SignIn(started, customer.pk)
             if not verification_token:
                 issue = account_services.issue_login_code(
-                    phone, ip=device.ip, fid=device.fid, lang=device.lang, platform=device.platform
+                    identifier, ip=device.ip, fid=device.fid, lang=device.lang, platform=device.platform
                 )
                 return DeviceStep(issue)
             account_services.consume_verification(
-                verification_token, purpose=enums.OtpPurpose.LOGIN_NEW_DEVICE, phone=phone
+                verification_token, purpose=enums.OtpPurpose.LOGIN_NEW_DEVICE, **target_kwargs(identifier)
             )
             started = account_services.start_customer_session(
                 customer.pk, device.fid, device.platform, device.app_version, issue_device_key=True
             )
             _audit("customer.login_succeeded", customer, request, {"method": "password", "new_device": True})
             return SignIn(started, customer.pk)
-    guard.record_failure(scope, key)
+    for guard_scope, guard_key in keys:
+        guard.record_failure(guard_scope, guard_key)
     # actor_id whenever the customer row exists, deleted included (C§2.1.4 step 4)
-    actor = customer or Customer.objects.filter(phone=phone).first()
+    actor = customer or Customer.objects.filter(**target_kwargs(identifier)).first()
     _audit("customer.login_failed", actor, request, {"method": "password"})
     raise AuthFailed("invalid_credentials")
 
@@ -476,22 +534,28 @@ def _login_still_valid(
 def reset_password(
     verification_token: str, *, password: str, device: DeviceContext, request: Any = None
 ) -> SignIn:
-    """``auth/reset-password/`` (customer contract §2.1.5): the unauthenticated recovery."""
+    """``auth/reset-password/`` (customer contract §2.1.5): the unauthenticated recovery, by a code sent to
+    the phone or to the e-mail address of the account (hybrid identity)."""
     row = account_services.verification_row(verification_token, purpose=enums.OtpPurpose.RESET_PASSWORD)
-    customer = account_services.active_customer_by_phone(row.phone)
+    identifier = account_services.row_identifier(row)
+    not_registered = EmailNotRegistered if row.email else PhoneNotRegistered
+    customer = account_services.active_customer_by_phone(identifier)
     if customer is None:
-        raise PhoneNotRegistered()
-    validate_customer_password(password, row.phone, current_hash=customer.password)
+        raise not_registered()
+    validate_customer_password(password, identifier, current_hash=customer.password)
     with transaction.atomic():
         # Lock order Customer → SmsCode (C§2.7.1): the same order as DELETE me/ and me/password/, which
         # consume a reset_password token too.
         customer = account_services.lock_customer(customer.pk)
         account_services.consume_verification(
-            verification_token, purpose=enums.OtpPurpose.RESET_PASSWORD, phone=row.phone
+            verification_token, purpose=enums.OtpPurpose.RESET_PASSWORD, **target_kwargs(identifier)
         )
         if customer.status != enums.CustomerStatus.ACTIVE:
-            raise PhoneNotRegistered()
-        dormant, last_activity = selectors.is_dormant(customer.pk, now=timeutils.now())
+            raise not_registered()
+        # The dormant rule protects recycled phone numbers (M2-A16); e-mail addresses are not recycled.
+        dormant, last_activity = (
+            selectors.is_dormant(customer.pk, now=timeutils.now()) if row.phone else (False, None)
+        )
         account_services.set_customer_password(customer, password)
         farewell = account_services.sign_out_customer(
             customer.pk, enums.SessionRevokeReason.PASSWORD_CHANGED, keep_fid=device.fid
@@ -737,7 +801,7 @@ def read_social_ticket(ticket: str, *, fid: str) -> SocialTicket:
 
 def complete_social(
     ticket: str,
-    verification_token: str,
+    verification_token: str | None,
     *,
     password: str | None,
     name: str | None,
@@ -748,19 +812,27 @@ def complete_social(
 ) -> SignIn:
     """``auth/social/complete/`` (customer contract §2.1.9). A final refusal (409 ``social_provider_linked``
     / ``social_identity_linked``) drops the waiting Apple token and revokes it in its own transaction (never
-    while its subject is linked, C§2.1.8); other refusals keep it for a retry of the same ticket."""
+    while its subject is linked, C§2.1.8); other refusals keep it for a retry of the same ticket.
+
+    Hybrid identity: the ``link_social`` verification token proves a phone (SMS) or an e-mail address
+    (e-mail code) and links the identity to that account, or creates one with it. Without a verification
+    token the identity signs up a new account **without a phone** (name and terms required): the phone is
+    asked at the first checkout, payment, booking or QR (409 ``phone_required``); nothing is ever merged
+    into an existing account this way."""
     social = read_social_ticket(ticket, fid=device.fid)
-    row = account_services.verification_row(verification_token, purpose=enums.OtpPurpose.LINK_SOCIAL)
-    if cache.get(account_services.social_otp_key(row.pk)) != social.jti:
-        raise VerificationInvalid()
+    row: SmsCode | None = None
+    if verification_token:
+        row = account_services.verification_row(verification_token, purpose=enums.OtpPurpose.LINK_SOCIAL)
+        if cache.get(account_services.social_otp_key(row.pk)) != social.jti:
+            raise VerificationInvalid()
     apple: dict[str, str] | None = None
     if social.provider == enums.CustomerSocialProvider.APPLE:
         stored = cache.get(SOCIAL_APPLE_KEY.format(jti=social.jti))
         if not isinstance(stored, dict) or not stored.get("sealed"):
             raise SocialTicketInvalid()
         apple = stored
-    phone = row.phone
-    customer = Customer.objects.filter(phone=phone).first()
+    identifier = account_services.row_identifier(row) if row is not None else ""
+    customer = Customer.objects.filter(**target_kwargs(identifier)).first() if identifier else None
     active = customer is not None and customer.status == enums.CustomerStatus.ACTIVE
     terms = None
     if not active:
@@ -775,12 +847,16 @@ def complete_social(
         if not password:
             raise _field("password", "required")
         guard = LoginGuard()
-        key = phone_guard_key(phone)
+        key = phone_guard_key(identifier)
+        account_key = customer_guard_key(customer.pk)
         guard.check(LOGIN_SCOPE, key)
+        guard.check(LOGIN_SCOPE, account_key)
         if not account_services.check_customer_password(customer, password):
             guard.record_failure(LOGIN_SCOPE, key)
+            guard.record_failure(LOGIN_SCOPE, account_key)
             raise _field("password", "password_incorrect", "field.password_incorrect")
         guard.reset(LOGIN_SCOPE, key)
+        guard.reset(LOGIN_SCOPE, account_key)
         checked_hash = customer.password
     used_key = SOCIAL_TICKET_USED_KEY.format(jti=social.jti)
     if not cache.add(used_key, 1, int(settings.SOCIAL_TICKET_TTL_SECONDS)):
@@ -788,8 +864,8 @@ def complete_social(
     try:
         result = _complete_social(
             social,
-            verification_token,
-            phone,
+            verification_token or "",
+            identifier,
             active,
             apple,
             name,
@@ -832,7 +908,7 @@ def _best_effort(operation: Any, *args: Any) -> None:
 def _complete_social(
     social: SocialTicket,
     verification_token: str,
-    phone: str,
+    identifier: str,
     active: bool,
     apple: dict[str, str] | None,
     name: str | None,
@@ -844,22 +920,23 @@ def _complete_social(
     checked_hash: str,
 ) -> SignIn:
     with transaction.atomic():
-        # Lock order Customer → SmsCode (C§2.7.1).
-        customer = account_services.lock_customer_by_phone(phone)
-        account_services.consume_verification(
-            verification_token, purpose=enums.OtpPurpose.LINK_SOCIAL, phone=phone
-        )
+        # Lock order Customer → SmsCode (C§2.7.1). No identifier: a phoneless sign-up (nothing to lock).
+        customer = account_services.lock_customer_by_phone(identifier) if identifier else None
+        if identifier:
+            account_services.consume_verification(
+                verification_token, purpose=enums.OtpPurpose.LINK_SOCIAL, **target_kwargs(identifier)
+            )
         created = reactivated = False
         if customer is not None and customer.status == enums.CustomerStatus.ACTIVE:
             if not active:  # registered meanwhile: the name/terms branch no longer applies
-                raise PhoneRegistered()
+                raise EmailRegistered() if is_email(identifier) else PhoneRegistered()
             if customer.password != checked_hash:
                 # A password was set or changed after the unlocked check (C§2.1.9, §6.16: the SMS code plus
                 # the password when one is set): the client retries with the current password.
                 if not checked_hash:
                     raise _field("password", "required")
                 raise _field("password", "password_incorrect", "field.password_incorrect")
-            if not customer.password:
+            if not customer.password and not is_email(identifier):  # recycled numbers only (M2-A16)
                 dormant, last_activity = selectors.is_dormant(customer.pk, now=timeutils.now())
                 if dormant:
                     dormant_reset(customer.pk, lang=device.lang, last_activity=last_activity, request=request)
@@ -869,11 +946,16 @@ def _complete_social(
             if customer is None:
                 try:
                     customer = account_services.create_customer(
-                        phone, name=(name or "").strip(), language=language or device.lang
+                        identifier if identifier and not is_email(identifier) else None,
+                        email=identifier if is_email(identifier) else None,
+                        name=(name or "").strip(),
+                        language=language or device.lang,
                     )
                 except IntegrityError as exc:
-                    raise PhoneRegistered() from exc
+                    raise (EmailRegistered() if is_email(identifier) else PhoneRegistered()) from exc
                 created = True
+            elif is_email(identifier):  # reactivation is by phone only (A1)
+                raise EmailRegistered()
             else:
                 customer = _reactivate(customer, name=(name or "").strip(), language=language or device.lang)
                 reactivated = True
@@ -926,17 +1008,52 @@ def _complete_social(
 # --- signed-in re-authentication (customer contract §1.8, §2.2.3, §2.2.8, §2.2.9)
 
 
+def session_is_fresh(sid: str | account_services.NoSession | None) -> bool:
+    """The request's session signed in within ``CUSTOMER_REAUTH_FRESH_SECONDS`` (C§2.2.10): the sign-in that
+    opened it is recent enough to stand for a re-authentication. ``created_at`` is the sign-in instant (a
+    refresh rotation keeps it)."""
+    if sid is None or isinstance(sid, account_services.NoSession):
+        return False
+    window = int(settings.CUSTOMER_REAUTH_FRESH_SECONDS)
+    if window <= 0:
+        return False
+    since = timeutils.now() - timedelta(seconds=window)
+    return AuthSession.objects.filter(
+        pk=sid, audience="customer", revoked_at__isnull=True, created_at__gte=since
+    ).exists()
+
+
+def _own_verification_kwargs(customer: Customer, verification_token: str) -> dict[str, str]:
+    """``phone=`` / ``email=`` of the account's own target a ``reset_password`` token was sent to (its phone,
+    or its e-mail address — hybrid identity); a token of anything else → 400 ``verification_invalid``."""
+    row = account_services.verification_row(verification_token, purpose=enums.OtpPurpose.RESET_PASSWORD)
+    if customer.phone and row.phone == customer.phone:
+        return {"phone": customer.phone}
+    if customer.email and row.email and row.email == customer.email:
+        return {"email": customer.email}
+    raise VerificationInvalid()
+
+
 def reauthenticate(
     customer: Customer,
     *,
     password: str | None,
     verification_token: str | None,
     secret_field: str = "password",  # noqa: S107 - a field name, not a secret
+    sid: str | account_services.NoSession | None = None,
 ) -> bool:
     """The password checks of a signed-in customer: ``customer_reauth`` guard (checked and reset), each
     failure also counted in ``customer_login`` (never checked). A social-only account needs a
-    ``reset_password`` verification token of its own phone, which is only checked here and consumed by the
-    caller under the customer-level lock. Returns whether a verification token must be consumed."""
+    ``reset_password`` verification token of its own phone (or, hybrid identity, of its own e-mail address),
+    which is only checked here and consumed by the caller under the customer-level lock. Returns whether a
+    verification token must be consumed.
+
+    Hybrid identity (C§2.2.10): only an account with no password, phone or e-mail (a phoneless social
+    sign-up) has nothing to re-authenticate with — a session signed in within
+    ``CUSTOMER_REAUTH_FRESH_SECONDS`` passes, anything else answers 409 ``reauth_required`` (the app signs in
+    with the provider again). Every other account proves itself with its password or a code of its own phone
+    or e-mail, however fresh the session: a social sign-in alone (no new-device step, M2-A10) must never add
+    a way in to a password account. Every failure also counts against the account in ``customer_login``."""
     if customer.password:
         if not password:
             raise _field(secret_field, "required")
@@ -945,22 +1062,30 @@ def reauthenticate(
         guard.check(REAUTH_SCOPE, key)
         if not account_services.check_customer_password(customer, password):
             guard.record_failure(REAUTH_SCOPE, key)
-            guard.record_failure(LOGIN_SCOPE, phone_guard_key(customer.phone))
+            guard.record_failure(LOGIN_SCOPE, customer_guard_key(customer.pk))
+            identifier = customer_identifier(customer)
+            if identifier:
+                guard.record_failure(LOGIN_SCOPE, phone_guard_key(identifier))
             raise _field(secret_field, "password_incorrect", "field.password_incorrect")
         guard.reset(REAUTH_SCOPE, key)
         return False
+    if not customer_identifier(customer):
+        if session_is_fresh(sid):
+            return False
+        raise ReauthRequired()
     if not verification_token:
         raise _field("verification_token", "required")
-    account_services.verification_row(
-        verification_token, purpose=enums.OtpPurpose.RESET_PASSWORD, phone=customer.phone
-    )
+    _own_verification_kwargs(customer, verification_token)
     return True
 
 
 def _consume_reauth(customer: Customer, verification_token: str | None, needed: bool) -> None:
     if needed:
+        token = str(verification_token)
         account_services.consume_verification(
-            str(verification_token), purpose=enums.OtpPurpose.RESET_PASSWORD, phone=customer.phone
+            token,
+            purpose=enums.OtpPurpose.RESET_PASSWORD,
+            **_own_verification_kwargs(customer, token),
         )
 
 
@@ -1006,7 +1131,7 @@ def link_social(
     exchanged for a refused link is revoked."""
     oauth_registry.get_app_verifier(provider)  # 404 first
     snapshot = Customer.objects.get(pk=customer_id)
-    needed = reauthenticate(snapshot, password=password, verification_token=verification_token)
+    needed = reauthenticate(snapshot, password=password, verification_token=verification_token, sid=sid)
     claims = verify_social_token(provider, token, token_type, nonce, fid=fid)
     sealed = client_id = ""
     if provider == enums.CustomerSocialProvider.APPLE:
@@ -1052,14 +1177,14 @@ def unlink_social(
     """``DELETE me/social/{provider}/`` (customer contract §2.2.8): re-authentication first, then the
     idempotent no-op, ``last_sign_in_method``, the unlink (Apple revoked) and the notice."""
     snapshot = Customer.objects.get(pk=customer_id)
-    needed = reauthenticate(snapshot, password=password, verification_token=verification_token)
+    needed = reauthenticate(snapshot, password=password, verification_token=verification_token, sid=sid)
     with transaction.atomic():
         customer = _lock_reauthenticated(customer_id, sid, snapshot, verification_token, needed)
         identity = CustomerSocialIdentity.objects.filter(customer_id=customer_id, provider=provider).first()
         if identity is None:
             return
         if (
-            not customer.password
+            not password_signs_in(customer)
             and CustomerSocialIdentity.objects.filter(customer_id=customer_id).count() <= 1
         ):
             raise LastSignInMethod(details={"provider": provider})
@@ -1079,15 +1204,19 @@ def change_password(
     """``POST me/password/`` (customer contract §2.2.9): set or change the password while signed in; the
     current session, its device key and every identity are kept; other sessions → ``password_changed``.
     Under the lock the caller's session must still be open (a reset revokes it) and the checked hash
-    current, so a racing reset's new password is never overwritten."""
+    current, so a racing reset's new password is never overwritten. An account without a phone or an e-mail
+    (a phoneless social sign-up) cannot sign in with a password: 409 ``phone_or_email_required``."""
     snapshot = Customer.objects.get(pk=customer_id)
+    if not customer_identifier(snapshot):
+        raise CustomerError("phone_or_email_required", 409)
     needed = reauthenticate(
         snapshot,
         password=current_password,
         verification_token=verification_token,
         secret_field="current_password",  # noqa: S106 - a field name
+        sid=sid,
     )
-    validate_customer_password(password, snapshot.phone, current_hash=snapshot.password)
+    validate_customer_password(password, customer_identifier(snapshot), current_hash=snapshot.password)
     first = not snapshot.password
     with transaction.atomic():
         customer = _lock_reauthenticated(
@@ -1104,6 +1233,156 @@ def change_password(
         )
         _account_security(customer_id, enums.AccountSecurityEvent.PASSWORD_CHANGED, farewell_tokens=farewell)
         _audit("customer.password_changed", customer, request, {"first_password": first})
+
+
+# --- hybrid identity: attach a phone or an e-mail address (customer contract §2.2.10)
+#
+# The phone gate (409 ``phone_required`` on checkout, pay, booking and the QR) sends a phoneless account here.
+# A phone or an address of another account is refused (``phone_taken`` / ``email_taken``) — only after a
+# correct code, so the routes are no oracle of who holds a number: accounts are never merged, the customer
+# signs in with that phone instead (or registers with it again when its account was deleted), and money,
+# cashback and the QR stay with the account they belong to. Attaching adds a way in, so it re-authenticates
+# (:func:`reauthenticate`) and notifies the account (``push.account_security``; a replaced address also gets
+# an e-mail).
+
+
+def password_signs_in(customer: Customer) -> bool:
+    """Whether the password is a way in: it needs a phone or an e-mail to sign in with (C§2.2.8)."""
+    return bool(customer.password) and bool(customer_identifier(customer))
+
+
+def _already_set() -> CustomerError:
+    return CustomerError("conflict", 409)
+
+
+def _refuse_taken_phone(customer_id: int, phone: str) -> None:
+    """A phone held by any other account answers 409 ``phone_taken`` with ``details.deleted``: an active
+    holder → sign in with it; a deleted one (A1 keeps the number with its loyalty account) → register with
+    it again, which reactivates that account (``error.phone_taken_deleted``)."""
+    holder = (
+        Customer.objects.filter(phone=phone).exclude(pk=customer_id).values_list("status", flat=True).first()
+    )
+    if holder is None:
+        return
+    if holder == enums.CustomerStatus.DELETED:
+        raise PhoneTaken(key="error.phone_taken_deleted", details={"deleted": True})
+    raise PhoneTaken(details={"deleted": False})
+
+
+def _refuse_taken_email(customer_id: int, email: str) -> None:
+    if Customer.objects.filter(email=email).exclude(pk=customer_id).exists():
+        raise EmailTaken()
+
+
+def send_attach_phone_code(
+    customer_id: int, phone: str, *, device: DeviceContext
+) -> account_services.CodeIssue:
+    """``POST me/phone/code/``: an ``attach_phone`` SMS code for a phoneless account (409 ``conflict`` when it
+    has a phone already); every OTP limit of ``auth/send-code/`` applies. Who holds the number is checked
+    only after a correct code (:func:`attach_phone`)."""
+    customer = Customer.objects.get(pk=customer_id)
+    if customer.phone:
+        raise _already_set()
+    return account_services.send_code(
+        phone,
+        enums.OtpPurpose.ATTACH_PHONE,
+        ip=device.ip,
+        fid=device.fid,
+        lang=device.lang,
+        platform=device.platform,
+    )
+
+
+def send_verify_email_code(
+    customer_id: int, email: str, *, device: DeviceContext
+) -> account_services.CodeIssue:
+    """``POST me/email/code/``: a ``verify_email`` code to the address (409 ``conflict`` when it is already
+    the account's); who holds the address is checked only after a correct code."""
+    customer = Customer.objects.get(pk=customer_id)
+    if customer.email == email:
+        raise _already_set()
+    return account_services.send_code(
+        email,
+        enums.OtpPurpose.VERIFY_EMAIL,
+        ip=device.ip,
+        fid=device.fid,
+        lang=device.lang,
+        platform=device.platform,
+    )
+
+
+def attach_phone(
+    customer_id: int,
+    phone: str,
+    code: str,
+    *,
+    password: str | None,
+    verification_token: str | None,
+    sid: str | account_services.NoSession,
+    request: Any = None,
+) -> None:
+    """``POST me/phone/`` (C§2.2.10): re-authentication first (so its refusal never burns the code), then the
+    SMS code (``auth/verify-code/``'s engine: a wrong code is counted and committed), then ``phone_taken``,
+    then under the signed-in lock the phone is set (a unique-key race answers ``phone_taken``). Audit
+    ``customer.phone_attached`` and ``push.account_security`` ``phone_attached``. Never removed afterwards."""
+    snapshot = Customer.objects.get(pk=customer_id)
+    if snapshot.phone:
+        raise _already_set()
+    needed = reauthenticate(snapshot, password=password, verification_token=verification_token, sid=sid)
+    verified = account_services.verify_code(phone, enums.OtpPurpose.ATTACH_PHONE, code)
+    _refuse_taken_phone(customer_id, phone)
+    with transaction.atomic():
+        customer = _lock_reauthenticated(customer_id, sid, snapshot, verification_token, needed)
+        if customer.phone:
+            raise _already_set()
+        account_services.consume_verification(
+            verified.token, purpose=enums.OtpPurpose.ATTACH_PHONE, phone=phone
+        )
+        _refuse_taken_phone(customer_id, phone)
+        try:
+            account_services.set_customer_phone(customer_id, phone)
+        except IntegrityError as exc:
+            raise PhoneTaken(details={"deleted": False}) from exc
+        _account_security(customer_id, enums.AccountSecurityEvent.PHONE_ATTACHED)
+        _audit("customer.phone_attached", customer, request)
+
+
+def attach_email(
+    customer_id: int,
+    email: str,
+    code: str,
+    *,
+    password: str | None,
+    verification_token: str | None,
+    sid: str | account_services.NoSession,
+    request: Any = None,
+) -> None:
+    """``POST me/email/`` (C§2.2.10): as :func:`attach_phone` for an e-mail address (a new address replaces
+    the previous one; ``email_taken`` for another account's). Audit ``customer.email_attached
+    {replaced: bool}``, ``push.account_security`` ``email_attached`` and, for a replacement, a notice e-mail
+    to the previous address."""
+    snapshot = Customer.objects.get(pk=customer_id)
+    if snapshot.email == email:
+        raise _already_set()
+    needed = reauthenticate(snapshot, password=password, verification_token=verification_token, sid=sid)
+    verified = account_services.verify_code(email, enums.OtpPurpose.VERIFY_EMAIL, code)
+    _refuse_taken_email(customer_id, email)
+    with transaction.atomic():
+        customer = _lock_reauthenticated(customer_id, sid, snapshot, verification_token, needed)
+        account_services.consume_verification(
+            verified.token, purpose=enums.OtpPurpose.VERIFY_EMAIL, email=email
+        )
+        _refuse_taken_email(customer_id, email)
+        try:
+            account_services.set_customer_email(customer_id, email)
+        except IntegrityError as exc:
+            raise EmailTaken() from exc
+        _account_security(customer_id, enums.AccountSecurityEvent.EMAIL_ATTACHED)
+        if customer.email:
+            account_services.enqueue_email_notice(
+                customer.email, lang=customer.language, kind="email_replaced"
+            )
+        _audit("customer.email_attached", customer, request, {"replaced": bool(customer.email)})
 
 
 # --- profile, consent, image, addresses (customer contract §2.2.2–§2.2.7)
@@ -1239,7 +1518,7 @@ def delete_account(
     Click payment is in flight (nothing written), cancel unpaid orders and open future appointments, delete
     the cart lines, ``accounts.services.delete_customer`` and audit ``customer.deleted``."""
     snapshot = Customer.objects.get(pk=customer_id)
-    needed = reauthenticate(snapshot, password=password, verification_token=verification_token)
+    needed = reauthenticate(snapshot, password=password, verification_token=verification_token, sid=sid)
     with transaction.atomic():
         customer = account_services.lock_signed_in_customer(customer_id, sid)
         inflight = commerce_selectors.customer_inflight_order(customer_id)
