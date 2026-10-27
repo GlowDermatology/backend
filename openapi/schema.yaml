@@ -16289,7 +16289,9 @@ components:
           type: boolean
         is_active:
           type: boolean
-          description: '`false` after a logout, a sign-in elsewhere or the deletion.'
+          description: '`false` once no session is left on it (a logout, a session
+            signed out, a password reset or change elsewhere) or after the deletion
+            (B-W1: several devices may be active).'
         last_active_at:
           type: string
           format: date-time
