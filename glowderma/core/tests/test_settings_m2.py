@@ -340,7 +340,7 @@ def test_production_process_with_every_provider_fake_boots_and_warns(
     assert "integrations running in fake mode in production: oauth, billz, fcm, click, payme, bts, eskiz" in (
         result.stdout + result.stderr
     )
-    assert "MODES ['billz', 'bts', 'click', 'eskiz', 'fcm', 'oauth', 'payme']" in result.stdout
+    assert "MODES ['billz', 'bts', 'click', 'email', 'eskiz', 'fcm', 'oauth', 'payme']" in result.stdout
 
 
 def test_env_example_does_not_ship_switches_that_production_refuses_at_any_value() -> None:

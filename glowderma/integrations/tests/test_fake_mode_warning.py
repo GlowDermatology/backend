@@ -15,7 +15,9 @@ from glowderma.core import integration_modes
 from glowderma.integrations import apps as integrations_apps
 
 PRODUCTION = {"DEV_FEATURES_ALLOWED": False}
-ALL_FAKE = {f"{name}_MODE": "fake" for name in ("OAUTH", "BILLZ", "FCM", "CLICK", "PAYME", "BTS", "ESKIZ")}
+ALL_FAKE = {
+    f"{name}_MODE": "fake" for name in ("OAUTH", "BILLZ", "FCM", "CLICK", "PAYME", "BTS", "ESKIZ", "EMAIL")
+}
 
 
 @pytest.fixture(autouse=True)
@@ -51,7 +53,7 @@ def test_production_warns_once_per_process_listing_the_fake_providers(
         assert integrations_apps.warn_fake_providers() is False
         django_apps.get_app_config("integrations").ready()  # a second ready() in the process stays silent
     assert _lines(caplog) == [
-        ("WARNING", "integrations running in fake mode in production: billz, fcm, click, payme, eskiz")
+        ("WARNING", "integrations running in fake mode in production: billz, fcm, click, payme, eskiz, email")
     ]
 
 
@@ -77,7 +79,8 @@ def test_ready_emits_the_warning_and_no_system_check_reports_fake_mode(
     assert _lines(caplog) == [
         (
             "WARNING",
-            "integrations running in fake mode in production: oauth, billz, fcm, click, payme, bts, eskiz",
+            "integrations running in fake mode in production: oauth, billz, fcm, click, payme, bts, eskiz, "
+            "email",
         )
     ]
     assert not [m for m in messages if "fake" in str(m.msg).lower()]
@@ -93,5 +96,16 @@ def test_provider_modes_cover_every_mode_setting() -> None:
             "payme": "live",
             "bts": "fake",
             "eskiz": "fake",
+            "email": "fake",
         }
-        assert integration_modes.fake_providers() == ["oauth", "billz", "fcm", "click", "bts", "eskiz"]
+        assert integration_modes.fake_providers() == [
+            "oauth",
+            "billz",
+            "fcm",
+            "click",
+            "bts",
+            "eskiz",
+            "email",
+        ]
+    with override_settings(EMAIL_MODE="smtp"):
+        assert integration_modes.provider_mode("email") == "live"

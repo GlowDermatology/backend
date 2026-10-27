@@ -5,7 +5,7 @@ from django.test import override_settings
 
 from glowderma.core import integration_modes
 
-ALL = ("OAUTH", "BILLZ", "FCM", "CLICK", "PAYME", "BTS", "ESKIZ")
+ALL = ("OAUTH", "BILLZ", "FCM", "CLICK", "PAYME", "BTS", "ESKIZ", "EMAIL")
 
 
 def modes(mode: str, **overrides: str) -> dict[str, str]:
