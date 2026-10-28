@@ -48,4 +48,40 @@ def fold(text: str) -> str:
     return text.lower().translate(_TABLE)
 
 
-__all__ = ["APOSTROPHE", "APOSTROPHE_VARIANTS", "FOLD_FROM", "FOLD_TO", "SearchFold", "fold"]
+# The product search key (customer catalog search, ``feat/customer-web``): the fold above, but every
+# apostrophe encoding (the six of them, U+0027 included) is *removed* — ``translate`` drops the characters of
+# its second argument that have no counterpart in the third. People often type ``kopik`` for ``ko‘pik``;
+# with the apostrophe gone on both sides, ``kopik``, ``ko'pik`` and ``ko‘pik`` are one word.
+KEY_FROM = "\u0401\u0451" + APOSTROPHE + APOSTROPHE_VARIANTS  # Ё ё, then every apostrophe (dropped)
+KEY_TO = "\u0435\u0435"  # Cyrillic е е
+_KEY_TABLE = str.maketrans(KEY_FROM[: len(KEY_TO)], KEY_TO, KEY_FROM[len(KEY_TO) :])
+
+
+class SearchKey(Func):
+    """``translate(lower(<expression>), KEY_FROM, KEY_TO)``: lower case, ``ё`` → ``е``, apostrophes removed.
+    IMMUTABLE like :class:`SearchFold`, so it defines ``catalog.Product.search_text`` (stored, trigram
+    index) and is pre-evaluated on a constant term."""
+
+    function = "translate"
+    template = f"%(function)s(lower(%(expressions)s), {_sql_literal(KEY_FROM)}, {_sql_literal(KEY_TO)})"
+    arity = 1
+    output_field = TextField()
+
+
+def search_key(text: str) -> str:
+    """The Python mirror of :class:`SearchKey` (tests, logs)."""
+    return text.lower().translate(_KEY_TABLE)
+
+
+__all__ = [
+    "APOSTROPHE",
+    "APOSTROPHE_VARIANTS",
+    "FOLD_FROM",
+    "FOLD_TO",
+    "KEY_FROM",
+    "KEY_TO",
+    "SearchFold",
+    "SearchKey",
+    "fold",
+    "search_key",
+]

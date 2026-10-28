@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from glowderma.accounts.models import Customer
-from glowderma.accounts.tests.factories import CustomerFactory, DeviceFactory
+from glowderma.accounts.tests.factories import CustomerFactory, SignedInDeviceFactory
 from glowderma.appointments import services as appointment_services
 from glowderma.appointments.models import Appointment
 from glowderma.appointments.tests.factories import AppointmentFactory
@@ -34,7 +34,7 @@ def order_payload(customer_id: int, status: str = "processing", order_id: int = 
 
 def test_order_status_push_renders_the_template_in_the_customer_language(clock: Any, fcm: FakeFcm) -> None:
     customer = CustomerFactory.create(language="ru")
-    device = DeviceFactory.create(customer=customer)
+    device = SignedInDeviceFactory.create(customer=customer)
     inbox = services.deliver_order_status(order_payload(customer.pk))
     assert inbox is not None
     # P3 (C§4.3): the title is the customer label in the customer's language
@@ -61,7 +61,7 @@ def test_order_status_push_renders_the_template_in_the_customer_language(clock: 
     # a missing translation falls back to Uzbek in the body (delivered has no English text); the row stays in
     # the customer's language, like its title (C§2.12)
     english = CustomerFactory.create(language="en")
-    DeviceFactory.create(customer=english)
+    SignedInDeviceFactory.create(customer=english)
     delivered = services.deliver_order_status(order_payload(english.pk, "delivered", order_id=10250))
     assert delivered is not None and delivered.language == "en"
     assert delivered.body == "Buyurtma №10250 yetkazildi. Xaridingiz uchun rahmat."
@@ -70,7 +70,7 @@ def test_order_status_push_renders_the_template_in_the_customer_language(clock: 
 
 def test_order_status_push_is_idempotent_on_redelivery(clock: Any, fcm: FakeFcm) -> None:
     customer = CustomerFactory.create()
-    DeviceFactory.create(customer=customer)
+    SignedInDeviceFactory.create(customer=customer)
     message = OutboxMessage.objects.create(
         topic="push.order_status",
         payload=order_payload(customer.pk),
@@ -94,22 +94,22 @@ def test_order_status_push_is_idempotent_on_redelivery(clock: Any, fcm: FakeFcm)
 
 def test_order_status_push_without_a_device_keeps_the_inbox_row(clock: Any, fcm: FakeFcm) -> None:
     customer = CustomerFactory.create()
-    DeviceFactory.create(customer=customer, push_enabled=False, fcm_token="")
+    SignedInDeviceFactory.create(customer=customer, push_enabled=False, fcm_token="")
     inbox = services.deliver_order_status(order_payload(customer.pk))
     assert inbox is not None and inbox.push_state == "no_device" and fcm.sent == []
     # a device registered later does not resend an old status (the row is settled)
-    DeviceFactory.create(customer=customer)
+    SignedInDeviceFactory.create(customer=customer)
     again = services.deliver_order_status(order_payload(customer.pk))
     assert again is not None and again.pk == inbox.pk and again.push_state == "no_device" and fcm.sent == []
 
 
 def test_order_status_push_failures_and_outages(clock: Any, fcm: FakeFcm) -> None:
     customer = CustomerFactory.create()
-    DeviceFactory.create(customer=customer, fcm_token="tok-bad")  # noqa: S106
+    SignedInDeviceFactory.create(customer=customer, fcm_token="tok-bad")  # noqa: S106
     inbox = services.deliver_order_status(order_payload(customer.pk))
     assert inbox is not None and (inbox.push_state, inbox.push_error) == ("failed", "unregistered")
     other = CustomerFactory.create()
-    DeviceFactory.create(customer=other, fcm_token="tok-down")  # noqa: S106
+    SignedInDeviceFactory.create(customer=other, fcm_token="tok-down")  # noqa: S106
     with pytest.raises(FcmUnavailable):
         services.deliver_order_status(order_payload(other.pk, order_id=10249))
     queued = InboxNotification.objects.get(dedupe_key="order_status:10249:processing")
@@ -134,7 +134,7 @@ def test_appointment_push_through_the_outbox(clock: Any, fcm: FakeFcm, staff: An
     appointment = AppointmentFactory.create(start=datetime(2026, 10, 26, 9, tzinfo=TASHKENT))
     appointment.customer.language = "ru"
     appointment.customer.save()
-    device = DeviceFactory.create(customer=appointment.customer)
+    device = SignedInDeviceFactory.create(customer=appointment.customer)
     appointment_services.confirm(appointment.pk, actor=staff)
     dispatch_outbox(batch=5)
     inbox = InboxNotification.objects.get(dedupe_key=f"appointment:{appointment.pk}:confirmed")
@@ -167,7 +167,7 @@ def test_appointment_push_through_the_outbox(clock: Any, fcm: FakeFcm, staff: An
 
 def test_appointment_push_actions_are_numbered_for_reschedules(clock: Any, fcm: FakeFcm) -> None:
     appointment = AppointmentFactory.create(start=datetime(2026, 10, 26, 9, tzinfo=TASHKENT))
-    DeviceFactory.create(customer=appointment.customer)
+    SignedInDeviceFactory.create(customer=appointment.customer)
     base = {"appointment_id": appointment.pk, "event_id": 1, "customer_id": appointment.customer_id}
     first = services.deliver_appointment({**base, "action": "rescheduled", "reschedule_no": 1})
     second = services.deliver_appointment({**base, "action": "rescheduled", "reschedule_no": 2})
@@ -200,3 +200,39 @@ def test_appointment_texts_fall_back_to_uzbek() -> None:
     title, body, language = texts.appointment_text("rejected", "xx", start)
     assert language == "uz" and title == "Qabul rad etildi" and "26.10.2026 09:00" in body
     assert texts.appointment_text("cancelled", "en", start)[0] == "Appointment cancelled"
+
+
+# --- B-W1: several signed-in devices --------------------------------------------------------------------
+
+
+def test_a_status_push_fans_out_to_every_pushable_device(clock: Any, fcm: FakeFcm) -> None:
+    customer = CustomerFactory.create()
+    phone = SignedInDeviceFactory.create(customer=customer, fcm_token="tok-phone")  # noqa: S106
+    tablet = SignedInDeviceFactory.create(customer=customer, fcm_token="tok-tablet")  # noqa: S106
+    SignedInDeviceFactory.create(customer=customer, push_enabled=False, fcm_token="")  # the website: no push
+    SignedInDeviceFactory.create(customer=customer, fcm_token="tok-gone", is_active=False, push_enabled=False)  # noqa: S106
+    inbox = services.deliver_order_status(order_payload(customer.pk))
+    assert inbox is not None and inbox.push_state == "sent"
+    assert sorted(message.token for message in fcm.sent) == sorted([phone.fcm_token, tablet.fcm_token])
+    assert {message.data["inbox_id"] for message in fcm.sent} == {str(inbox.pk)}
+
+
+def test_a_fan_out_is_sent_when_one_device_got_it_and_prunes_the_dead_one(clock: Any, fcm: FakeFcm) -> None:
+    customer = CustomerFactory.create()
+    dead = SignedInDeviceFactory.create(customer=customer, fcm_token="tok-x-bad")  # noqa: S106
+    SignedInDeviceFactory.create(customer=customer, fcm_token="tok-alive")  # noqa: S106
+    inbox = services.deliver_order_status(order_payload(customer.pk))
+    assert inbox is not None and inbox.push_state == "sent"
+    dead.refresh_from_db()
+    assert (dead.fcm_token, dead.push_enabled) == ("", False)
+
+
+def test_a_fan_out_nobody_got_waits_for_the_busy_device(clock: Any, fcm: FakeFcm) -> None:
+    from glowderma.core import outbox as core_outbox  # noqa: PLC0415
+
+    customer = CustomerFactory.create()
+    SignedInDeviceFactory.create(customer=customer, fcm_token="tok-x-bad")  # noqa: S106
+    SignedInDeviceFactory.create(customer=customer, fcm_token="tok-x-busy")  # noqa: S106
+    with pytest.raises(core_outbox.RetryLater):
+        services.deliver_order_status(order_payload(customer.pk))
+    assert InboxNotification.objects.get(dedupe_key="order_status:10248:processing").push_state == "queued"

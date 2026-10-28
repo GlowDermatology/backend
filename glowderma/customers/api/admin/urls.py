@@ -5,6 +5,7 @@ Every route name is prefixed ``admin-`` and unique across modules; the auth matr
 
 from django.urls import URLPattern, URLResolver, path
 
+from .session_views import CustomerSessionDetailView, CustomerSessionsViewSet
 from .views import CashbackAdjustmentView, CustomerViewSet
 
 customers = CustomerViewSet.as_view({"get": "list"})
@@ -17,5 +18,15 @@ urlpatterns: list[URLPattern | URLResolver] = [
         "customers/<int:pk>/cashback-adjustments/",
         CashbackAdjustmentView.as_view(),
         name="admin-customers-cashback-adjustments",
+    ),
+    path(
+        "customers/<int:pk>/sessions/",
+        CustomerSessionsViewSet.as_view({"get": "list"}),
+        name="admin-customers-sessions",
+    ),
+    path(
+        "customers/<int:pk>/sessions/<uuid:session_id>/",
+        CustomerSessionDetailView.as_view(),
+        name="admin-customers-session-detail",
     ),
 ]

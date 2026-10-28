@@ -111,3 +111,22 @@ class ProductDetailView(PublicAPIView):
         if product is None:
             raise NotFound
         return Response(selectors.product_detail(product, self.language, customer_id(request)))
+
+
+class ProductBySlugView(PublicAPIView):
+    """B-W1: the website addresses a product by its slug (``catalog/products/{slug}/``); a digits-only path
+    segment is always the id route above (a slug is never only digits)."""
+
+    public_cache_seconds = 30
+
+    @extend_schema(
+        operation_id="customer_catalog_products_by_slug_retrieve",
+        description="One visible product by its website slug (B-W1); the same shape as the id route.",
+        parameters=[*PARAMETERS, OpenApiParameter("slug", OpenApiTypes.STR, OpenApiParameter.PATH)],
+        responses={200: s.ProductDetailSerializer, **PUBLIC_CUSTOMER_ERRORS},
+    )
+    def get(self, request: Request, slug: str) -> Response:
+        product = selectors.customer_products().filter(slug=slug).first()
+        if product is None:
+            raise NotFound
+        return Response(selectors.product_detail(product, self.language, customer_id(request)))

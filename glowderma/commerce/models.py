@@ -116,7 +116,7 @@ class Order(TimeStampedModel):
     """A customer's online order; ``id`` is the order number shown everywhere (№10248, from 10001)."""
 
     customer = models.ForeignKey("accounts.Customer", on_delete=models.PROTECT, related_name="orders")
-    channel = models.CharField(max_length=8, choices=enums.OrderChannel.choices)  # ios|android
+    channel = models.CharField(max_length=8, choices=enums.OrderChannel.choices)  # ios|android|web
     fulfilment = models.CharField(max_length=16, choices=enums.FulfilmentMethod.choices)  # delivery|pickup
     status = models.CharField(
         max_length=24, choices=enums.OrderStatus.choices, default=enums.OrderStatus.AWAITING_PAYMENT

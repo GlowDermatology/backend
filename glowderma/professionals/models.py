@@ -4,12 +4,22 @@ All times in this module are Tashkent wall-clock: ``WorkingHours``/``WorkingHour
 ``TimeField``s interpreted in ``timeutils.TASHKENT``; ``BlockedPeriod`` keeps aware instants.
 """
 
+from typing import Any
+
 from django.db import models
 from django.db.models import F, Q
 
-from glowderma.core import enums
+from glowderma.core import enums, slugs
 from glowderma.core.models import TimeStampedModel, timestamp_default
 from glowderma.professionals import media
+
+SLUG_MAX_LENGTH = 160
+PROFESSIONAL_SLUG_CONSTRAINT = "professional_slug_unique"
+
+
+def professional_slug_base(name: str) -> str:
+    """The derived slug of a specialist (``Professional.save`` and the ``professionals.0003`` backfill)."""
+    return slugs.derive_slug(name, prefix="mutaxassis", max_length=SLUG_MAX_LENGTH)
 
 
 class Location(TimeStampedModel):
@@ -72,9 +82,21 @@ class Professional(TimeStampedModel):
     slot_step_min = models.PositiveSmallIntegerField(default=30)  # slot grid used by M2 /slots
     position = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
+    # B-W1 SEO (admin contract §2.17): the website's URL segment, set once from the name when the row is
+    # created, unique, never only digits, edited only by staff (stable URLs).
+    slug = models.CharField(max_length=SLUG_MAX_LENGTH, blank=True, default="", db_default="")
 
     class Meta:
         constraints = [
+            # "" = a row written by the previous release during a deploy; the next save derives one
+            models.UniqueConstraint(
+                fields=["slug"], condition=~Q(slug=""), name=PROFESSIONAL_SLUG_CONSTRAINT
+            ),
+            models.CheckConstraint(
+                condition=Q(slug="")
+                | (Q(slug__regex=slugs.SLUG_PATTERN) & ~Q(slug__regex=slugs.DIGITS_ONLY_PATTERN)),
+                name="professional_slug_format",
+            ),
             models.CheckConstraint(condition=~Q(name=""), name="professional_name_required"),
             models.CheckConstraint(
                 condition=Q(slot_step_min__in=[10, 15, 20, 30, 60]), name="professional_slot_step_allowed"
@@ -87,6 +109,24 @@ class Professional(TimeStampedModel):
 
     def __str__(self) -> str:
         return f"{self.name} ({self.role})"
+
+    def slug_base(self) -> str:
+        return professional_slug_base(self.name)
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """A new row without a slug gets the first free one derived from the name (B-W1)."""
+        if self.slug:
+            super().save(*args, **kwargs)
+            return
+        if kwargs.get("update_fields") is not None:
+            kwargs["update_fields"] = {*kwargs["update_fields"], "slug"}  # the derived slug is written too
+        slugs.save_with_unique_slug(
+            self,
+            lambda: super(Professional, self).save(*args, **kwargs),
+            base=self.slug_base(),
+            constraint=PROFESSIONAL_SLUG_CONSTRAINT,
+            max_length=SLUG_MAX_LENGTH,
+        )
 
 
 class Service(TimeStampedModel):

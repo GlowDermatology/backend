@@ -47,6 +47,7 @@ def test_list_shape_ordering_and_paging(staff_client: APIClient) -> None:
             "id": orders[0].customer_id,
             "name": orders[0].customer.name,
             "phone": orders[0].customer.phone,
+            "email": orders[0].customer.email,
         },
         "created_at": "2026-10-20T12:00:00+05:00",
         "total": orders[0].total,

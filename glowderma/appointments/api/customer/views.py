@@ -19,6 +19,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from glowderma.accounts import services as account_services
 from glowderma.accounts.api.customer_base import CustomerAPIView, CustomerGenericViewSet, PublicAPIView
 from glowderma.accounts.models import Customer
 from glowderma.appointments import selectors, services
@@ -77,6 +78,20 @@ class SpecialistDetailView(PublicAPIView):
     )
     def get(self, request: Request, pk: int) -> Response:
         professional = selectors.specialist(pk)
+        if professional is None:
+            raise Http404
+        return Response(SpecialistSerializer(professional, context={"lang": self.language}).data)
+
+
+class SpecialistBySlugView(PublicAPIView):
+    @extend_schema(
+        operation_id="customer_specialists_by_slug_retrieve",
+        description="One active specialist by its website slug (B-W1; 404 when inactive or unknown).",
+        parameters=PUBLIC_HEADERS,
+        responses={200: SpecialistSerializer, **PUBLIC_CUSTOMER_ERRORS},
+    )
+    def get(self, request: Request, slug: str) -> Response:
+        professional = selectors.specialist_by_slug(slug)
         if professional is None:
             raise Http404
         return Response(SpecialistSerializer(professional, context={"lang": self.language}).data)
@@ -179,7 +194,8 @@ class AppointmentCreateView(CustomerAPIView):
     @extend_schema(
         operation_id="customer_appointments_create",
         description=(
-            "Book a slot (`requested`; staff confirm it). Checks in order: specialist, service, consent, "
+            "Book a slot (`requested`; staff confirm it). 409 `phone_required` first while the account has "
+            "no verified phone (`me/phone/`). Checks in order: specialist, service, consent, "
             "open appointments limit, then the start (aware, lead time, horizon, grid, hours, busy, own "
             "overlap); a lost race answers 409 `slot_taken`."
         ),
@@ -189,6 +205,7 @@ class AppointmentCreateView(CustomerAPIView):
     )
     @idempotent()
     def post(self, request: Request) -> Response:
+        account_services.require_phone(_customer(request))  # hybrid identity, C§2.2.10
         body = BookingSerializer(data=request.data)
         body.is_valid(raise_exception=True)
         data = body.validated_data

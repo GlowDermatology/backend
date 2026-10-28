@@ -1,3 +1,4 @@
+# ruff: noqa: S106 - internal secrets in fixtures are test data
 """Customer throttle classes (customer contract §1.8): device-first keys, IP backstops, refresh misses."""
 
 from types import SimpleNamespace
@@ -40,6 +41,7 @@ def test_every_customer_throttle_has_a_default_scope() -> None:
         throttles.QrThrottle,
         throttles.PublicDeviceThrottle,
         throttles.PublicIPThrottle,
+        throttles.PublicBffThrottle,
         throttles.SmsPhoneThrottle,
         throttles.SmsDeviceThrottle,
         throttles.SmsIPThrottle,
@@ -168,3 +170,63 @@ def test_malformed_phones_of_one_device_do_not_throttle_another_devices_typo() -
     assert throttles.SmsPhoneThrottle().allow_request(typo, VIEW)
     key = str(throttles.SmsPhoneThrottle().get_cache_key(noisy, VIEW))
     assert key == f"throttle_sms_phone_invalid:{pii_ref('fid-noisy-0001')}" and "fid-noisy" not in key
+
+
+# --- B-W1: the website's server-side BFF ------------------------------------------------------------------
+
+
+@override_settings(INTERNAL_API_SECRET="s" * 40)
+def test_public_throttles_behind_the_website_bff() -> None:
+    """With a valid secret and a forwarded browser IP the per-IP scopes key on that IP (``client_ip`` is set
+    from it by ``ClientIPMiddleware``); the BFF's own calls (secret, no forwarded IP) skip the per-IP
+    scopes and count in one ``public_bff`` bucket; a forged secret changes nothing."""
+    trusted = request(HTTP_X_GD_INTERNAL_SECRET="s" * 40, HTTP_X_GD_CLIENT_IP="84.54.70.10")
+    trusted._request.client_ip = "84.54.70.10"  # type: ignore[attr-defined]
+    assert throttles.PublicDeviceThrottle().get_cache_key(trusted, VIEW) == "throttle_public_ip:84.54.70.10"
+    assert throttles.PublicIPThrottle().get_cache_key(trusted, VIEW) == "throttle_public_ip_84.54.70.10"
+    assert throttles.PublicBffThrottle().get_cache_key(trusted, VIEW) is None
+
+    own = request(HTTP_X_GD_INTERNAL_SECRET="s" * 40)
+    assert throttles.PublicDeviceThrottle().get_cache_key(own, VIEW) is None
+    assert throttles.PublicIPThrottle().get_cache_key(own, VIEW) is None
+    assert throttles.PublicBffThrottle().get_cache_key(own, VIEW) == "throttle_public_bff_bff"
+    own_with_device = request(HTTP_X_GD_INTERNAL_SECRET="s" * 40, **device_headers(fid="web-cookie-0001"))
+    assert throttles.PublicDeviceThrottle().get_cache_key(own_with_device, VIEW) == (
+        f"throttle_public_fid:{pii_ref('web-cookie-0001')}"
+    )
+    garbage_ip = request(HTTP_X_GD_INTERNAL_SECRET="s" * 40, HTTP_X_GD_CLIENT_IP="not-an-ip")
+    assert throttles.PublicBffThrottle().get_cache_key(garbage_ip, VIEW) == "throttle_public_bff_bff"
+
+    forged = request(HTTP_X_GD_INTERNAL_SECRET="wrong", HTTP_X_GD_CLIENT_IP="84.54.70.10")
+    assert throttles.PublicIPThrottle().get_cache_key(forged, VIEW) == "throttle_public_ip_203.0.113.9"
+    assert throttles.PublicBffThrottle().get_cache_key(forged, VIEW) is None
+    assert (
+        throttles.PublicBffThrottle().get_cache_key(
+            request(customer(), HTTP_X_GD_INTERNAL_SECRET="s" * 40), VIEW
+        )
+        is None
+    )
+
+
+@pytest.mark.django_db
+def test_website_visitors_do_not_share_one_bucket(settings: Any) -> None:
+    """Through the API: anonymous page renders the BFF makes for two browsers (forwarded IPs) are throttled
+    per browser IP, not pooled on the web server's IP."""
+    from django.core.cache import cache  # noqa: PLC0415
+    from rest_framework.test import APIClient  # noqa: PLC0415
+
+    settings.THROTTLE_RATES = {"public": "2/min", "public_ip": "2/min", "public_bff": "3/min"}
+    cache.clear()
+    client = APIClient()
+    secret = {"HTTP_X_GD_INTERNAL_SECRET": settings.INTERNAL_API_SECRET}
+    url = "/api/v1/catalog/categories/"
+    for ip in ("84.54.70.10", "84.54.70.11"):
+        statuses = [client.get(url, HTTP_X_GD_CLIENT_IP=ip, **secret).status_code for _ in range(3)]
+        assert statuses == [200, 200, 429], ip
+    own = [client.get(url, **secret).status_code for _ in range(4)]
+    assert own == [200, 200, 200, 429]  # the BFF's own bucket
+    forged = APIClient()
+    assert [
+        forged.get(url, HTTP_X_GD_INTERNAL_SECRET="wrong", HTTP_X_GD_CLIENT_IP=f"84.54.70.{n}").status_code
+        for n in (20, 21, 22)
+    ] == [200, 200, 429]  # without the secret the forwarded IP is ignored: one peer, one bucket

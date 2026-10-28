@@ -37,6 +37,8 @@ class FulfilmentMethod(TextChoices):
 class OrderChannel(TextChoices):
     IOS = "ios"
     ANDROID = "android"
+    # The customer website (B-W1): its server-side BFF sends ``X-GD-Platform: web``; no app version floor.
+    WEB = "web"
 
 
 class OrderPeriod(TextChoices):
@@ -342,6 +344,8 @@ class OtpPurpose(TextChoices):
     LOGIN_NEW_DEVICE = "login_new_device"
     RESET_PASSWORD = "reset_password"  # noqa: S105
     LINK_SOCIAL = "link_social"
+    VERIFY_EMAIL = "verify_email"  # hybrid identity: me/email/code/ (e-mail only)
+    ATTACH_PHONE = "attach_phone"  # hybrid identity: me/phone/code/ (SMS only)
 
 
 class NextStep(TextChoices):
@@ -477,6 +481,36 @@ class AccountSecurityEvent(TextChoices):
     SOCIAL_UNLINKED = "social_unlinked"
     PASSWORD_RESET = "password_reset"  # noqa: S105
     PASSWORD_CHANGED = "password_changed"  # noqa: S105
+    # hybrid identity (B-W2): added values; an app that does not know them shows the inbox text as is
+    PHONE_ATTACHED = "phone_attached"
+    EMAIL_ATTACHED = "email_attached"
+
+
+# --- B-W1 SEO checklist (admin contract §2.3, §2.4 ``seo_status``) ----------------------------------------
+
+
+class SeoSeverity(TextChoices):
+    ERROR = "error"  # the page is weak in search results until fixed
+    WARNING = "warning"
+    INFO = "info"  # a fallback is used; fine, but a hand-written text is better
+
+
+class SeoIssueCode(TextChoices):
+    NAME_MISSING = "name_missing"
+    NAME_TRANSLATION_MISSING = "name_translation_missing"
+    DESCRIPTION_MISSING = "description_missing"
+    DESCRIPTION_SHORT = "description_short"
+    IMAGES_MISSING = "images_missing"
+    ALT_TEXT_FALLBACK = "alt_text_fallback"
+    CATEGORY_MISSING = "category_missing"
+    SEO_TITLE_MISSING = "seo_title_missing"
+    SEO_TITLE_SHORT = "seo_title_short"
+    SEO_TITLE_LONG = "seo_title_long"
+    SEO_DESCRIPTION_MISSING = "seo_description_missing"
+    SEO_DESCRIPTION_SHORT = "seo_description_short"
+    SEO_DESCRIPTION_LONG = "seo_description_long"
+    IMAGE_MISSING = "image_missing"
+    NO_ACTIVE_PRODUCTS = "no_active_products"
 
 
 CONTRACT_ENUMS: tuple[type[TextChoices], ...] = (
@@ -548,6 +582,8 @@ CONTRACT_ENUMS: tuple[type[TextChoices], ...] = (
     InboxLinkKind,
     PushDataType,
     AccountSecurityEvent,
+    SeoSeverity,
+    SeoIssueCode,
 )
 
 

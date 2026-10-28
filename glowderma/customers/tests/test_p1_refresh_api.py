@@ -126,7 +126,7 @@ def test_device_mismatch_and_revoked_sessions(started: Any) -> None:
     AuthSession.objects.filter(pk=started.session.pk).update(
         revoked_at=timezone.now(), revoke_reason="replaced"
     )
-    assert refresh(started.raw_refresh).data["code"] == "SESSION_REPLACED"
+    assert refresh(started.raw_refresh).data["code"] == "SESSION_EXPIRED"  # B-W1
     AuthSession.objects.filter(pk=started.session.pk).update(revoke_reason="password_changed")
     assert refresh(started.raw_refresh).data["code"] == "password_changed"
 

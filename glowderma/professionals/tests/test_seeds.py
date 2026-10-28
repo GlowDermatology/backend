@@ -122,3 +122,16 @@ def test_registered_after_catalog() -> None:
     discover_seeders()  # imports every module's seeds.py (a static sibling import would break the layering)
     orders = {name: order for name, order, _ in registered_seeders()}
     assert orders["professionals"] == 50 and orders["professionals"] > orders["catalog"]
+
+
+def test_seeded_specialists_have_sharp_photos_and_a_rerun_keeps_them() -> None:
+    from PIL import Image
+
+    seed_professionals(CONTEXT)
+    names = {p.pk: p.photo.name for p in Professional.objects.all()}
+    assert all(names.values())
+    for professional in Professional.objects.all():
+        with professional.photo.open("rb") as stored, Image.open(stored) as image:
+            assert image.size == (1200, 1500)
+    seed_professionals(CONTEXT)
+    assert {p.pk: p.photo.name for p in Professional.objects.all()} == names  # not re-uploaded

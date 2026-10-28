@@ -49,9 +49,17 @@ class Customer(TimeStampedModel):
     """The loyalty identity of a person: one row per phone number for the lifetime of the business.
 
     Soft delete + reactivation (decision A1): the row is never deleted, ``phone`` is never reused.
+
+    Hybrid identity (customer contract §2.1, §2.2.10): an account may start without a phone — signed up by a
+    verified e-mail or a social identity — and gets its phone (verified by SMS) at the first real action
+    (checkout, pay, booking, the in-store QR answer 409 ``phone_required`` until then). A phone once attached
+    is never removed. ``email`` is stored normalised (trimmed, lower case) and only once verified by a code;
+    deletion scrubs it (the phone stays, A1).
     """
 
-    phone = models.CharField(max_length=13, unique=True)  # E.164 "+998XXXXXXXXX"
+    phone = models.CharField(max_length=13, unique=True, null=True, blank=True)  # E.164 "+998XXXXXXXXX"
+    email = models.CharField(max_length=254, unique=True, null=True, blank=True)  # normalised, verified
+    email_verified_at = models.DateTimeField(null=True)
     name = models.CharField(max_length=150, blank=True)  # "" after delete (scrubbed)
     language = models.CharField(
         max_length=2, choices=enums.ContentLanguage.choices, default=enums.ContentLanguage.UZ
@@ -81,6 +89,14 @@ class Customer(TimeStampedModel):
         constraints = [
             models.CheckConstraint(condition=Q(phone__regex=PHONE_E164_REGEX), name="customer_phone_e164"),
             models.CheckConstraint(
+                condition=Q(email__isnull=True)
+                | (
+                    Q(email=Lower("email"), email__contains="@", email_verified_at__isnull=False)
+                    & ~Q(email__regex=r"\s")
+                ),
+                name="customer_email_normalised_verified",
+            ),
+            models.CheckConstraint(
                 condition=(
                     Q(status=enums.CustomerStatus.ACTIVE, deleted_at__isnull=True)
                     | Q(status=enums.CustomerStatus.DELETED, deleted_at__isnull=False)
@@ -103,7 +119,7 @@ class Customer(TimeStampedModel):
         ordering = ["-registered_at", "-id"]
 
     def __str__(self) -> str:
-        return f"{self.phone} {self.name}".strip()
+        return f"{self.phone or self.email or f'#{self.pk}'} {self.name}".strip()
 
     # DRF and core.idempotency treat request.user as a user object: a customer signed in through
     # CustomerJWTAuthentication is authenticated (no SQL behind either property).
@@ -122,6 +138,7 @@ class Device(TimeStampedModel):
     class Platform(models.TextChoices):  # internal (same literals as enums.OrderChannel)
         IOS = "ios"
         ANDROID = "android"
+        WEB = "web"  # a browser of the customer website (its BFF holds the device id in a cookie)
 
     customer = models.ForeignKey("accounts.Customer", on_delete=models.CASCADE, related_name="devices")
     fid = models.CharField(max_length=128)  # Firebase installation id
@@ -196,15 +213,22 @@ class Address(TimeStampedModel):
 
 
 class SmsCode(models.Model):
-    """One OTP issuance for a phone and purpose, plus the single-use verification token it unlocks."""
+    """One OTP issuance for a phone **or an e-mail address** (hybrid identity; the historical name stays) and
+    purpose, plus the single-use verification token it unlocks. Exactly one of ``phone`` / ``email`` is set:
+    the code went out by SMS or by e-mail, with the same engine, limits and HMAC at rest."""
 
     class Purpose(models.TextChoices):  # internal
         SIGNUP = "signup"
         RESET = "reset"
         NEW_DEVICE = "new_device"
         SOCIAL_LINK = "social_link"
+        VERIFY_EMAIL = "verify_email"  # attach an e-mail to a signed-in account (e-mail only)
+        ATTACH_PHONE = "attach_phone"  # attach a phone to a signed-in account (SMS only)
 
-    phone = models.CharField(max_length=13)
+    phone = models.CharField(max_length=13, blank=True)
+    # normalised (lower case); db_default: a writer of the previous release (deploy window) inserts SMS codes
+    # without the column
+    email = models.CharField(max_length=254, blank=True, default="", db_default="")
     purpose = models.CharField(max_length=20, choices=Purpose.choices)
     code_hmac = models.CharField(max_length=64)  # HMAC-SHA256(code, SMS_CODE_HMAC_KEY), hex
     attempts = models.PositiveSmallIntegerField(default=0)
@@ -223,10 +247,19 @@ class SmsCode(models.Model):
     class Meta:
         indexes = [
             models.Index(fields=["phone", "purpose", "created_at"], name="accounts_smscode_phone_purpose"),
+            models.Index(
+                fields=["email", "purpose", "created_at"],
+                condition=~Q(email=""),
+                name="accounts_smscode_email_purpose",
+            ),
             models.Index(fields=["expires_at"], name="accounts_smscode_expires"),
         ]
         constraints = [
-            models.CheckConstraint(condition=Q(phone__regex=PHONE_E164_REGEX), name="smscode_phone_e164"),
+            models.CheckConstraint(
+                condition=(Q(phone__regex=PHONE_E164_REGEX) & Q(email=""))
+                | (Q(phone="") & Q(email__contains="@")),
+                name="smscode_one_target",
+            ),
             models.CheckConstraint(
                 condition=Q(attempts__lte=models.F("max_attempts")), name="smscode_attempts_bound"
             ),
@@ -238,7 +271,7 @@ class SmsCode(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.purpose} code for {self.phone} ({self.created_at:%Y-%m-%d %H:%M})"
+        return f"{self.purpose} code for {self.phone or self.email} ({self.created_at:%Y-%m-%d %H:%M})"
 
 
 class CustomerSocialIdentity(models.Model):
@@ -324,6 +357,13 @@ class AuthSession(models.Model):
     # How the sign-in that opened this session was proven (admin contract §2.1: linking a staff identity
     # needs a password session). Kept on the row, so a customer refresh rotation carries it; "" = before 0007.
     auth_method = models.CharField(max_length=16, choices=AuthMethod.choices, blank=True)
+    # B-W1 session management (customer contract §2.2.10): the client's user agent (the website's BFF
+    # forwards the browser's as X-GD-Client-UA), the last client IP and the place a local GeoIP City database
+    # resolves it to ("" = unknown / no database). Customer sessions only; refreshed by the throttled activity
+    # bump (CustomerJWTAuthentication).
+    user_agent = models.CharField(max_length=512, blank=True, default="", db_default="")
+    last_ip = models.GenericIPAddressField(null=True, blank=True)
+    location = models.CharField(max_length=120, blank=True, default="", db_default="")
 
     class Meta:
         indexes = [

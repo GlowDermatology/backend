@@ -3,11 +3,23 @@ name = "glowderma-backend"
 version = "0.1.0"
 requires-python = ">=3.14,<3.15"
 dependencies = [
- "Django==6.1.2", "djangorestframework==3.18.3", "drf-spectacular==0.30.0",
- "psycopg[binary,pool]==3.3.6", "gunicorn==26.2.0", "whitenoise==6.12.0",
- "celery[redis]==5.6.3", "redis==6.4.0", "PyJWT[crypto]==2.15.1", "argon2-cffi==25.1.0",
- "django-filter==26.2", "Pillow==13.0.0", "openpyxl==3.1.5", "httpx==0.28.1", "tenacity==9.2.1",
+ "Django==6.1.2",
+ "djangorestframework==3.18.3",
+ "drf-spectacular==0.30.0",
+ "psycopg[binary,pool]==3.3.6",
+ "gunicorn==26.2.0",
+ "whitenoise==6.12.0",
+ "celery[redis]==5.6.3",
+ "redis==6.4.0",
+ "PyJWT[crypto]==2.15.1",
+ "argon2-cffi==25.1.0",
+ "django-filter==26.2",
+ "Pillow==13.0.0",
+ "openpyxl==3.1.5",
+ "httpx==0.28.1",
+ "tenacity==9.2.1",
  "drf-spectacular-sidecar==2026.10.1",
+ "maxminddb==2.8.2",
 ]
 
 [dependency-groups]

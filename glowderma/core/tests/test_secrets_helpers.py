@@ -108,10 +108,25 @@ def test_qr_max_live_evicts_the_oldest_and_revoke_all_empties() -> None:
         qr_store.put(name * 64, 11, ttl=60, max_live=2)
     assert qr_store.take("1" * 64) is None  # evicted
     qr_store.put("4" * 64, 12, ttl=60, max_live=2)  # another customer
-    assert qr_store.revoke_all(11) == 2
+    assert qr_store.revoke_all(11) == 3  # the customer list names every key it issued, evicted ones too
     assert qr_store.take("2" * 64) is None and qr_store.take("3" * 64) is None
     assert qr_store.take("4" * 64) is not None
     assert qr_store.revoke_all(11) == 0
+
+
+def test_qr_keys_are_bound_to_their_session() -> None:
+    """B-W1: each session keeps its own ``max_live`` keys (two phones never evict each other's QR), the
+    stored value names the session, and ``revoke_session`` ends only that session's keys."""
+    for name in ("5", "6"):
+        qr_store.put(name * 64, 31, ttl=60, max_live=2, session_id="sid-a")
+    for name in ("7", "8"):
+        qr_store.put(name * 64, 31, ttl=60, max_live=2, session_id="sid-b")
+    assert qr_store.revoke_session(31, "sid-a") == 2
+    assert qr_store.take("5" * 64) is None and qr_store.take("6" * 64) is None
+    value = qr_store.take("7" * 64)
+    assert value is not None and value.startswith("31:") and value.endswith(":sid-b")
+    assert qr_store.revoke_all(31) == 4
+    assert qr_store.take("8" * 64) is None
 
 
 def test_qr_entries_expire() -> None:
@@ -156,5 +171,12 @@ def test_qr_store_on_real_redis_uses_literal_keys(redis_cache: Any) -> None:
     assert redis_cache.get(qr_store.token_key("r1" * 32)) is None  # oldest evicted
     assert qr_store.take("r2" * 32) is not None
     assert qr_store.take("r2" * 32) is None
-    assert qr_store.revoke_all(21) == 2
+    assert qr_store.revoke_all(21) == 3
     assert redis_cache.get(qr_store.token_key("r3" * 32)) is None
+    qr_store.put("s1" * 32, 22, ttl=60, max_live=2, session_id="sid-x")
+    qr_store.put("s2" * 32, 22, ttl=60, max_live=2, session_id="sid-y")
+    assert redis_cache.get(qr_store.token_key("s1" * 32)).decode().endswith(":sid-x")
+    assert qr_store.revoke_session(22, "sid-x") == 1
+    assert redis_cache.get(qr_store.token_key("s1" * 32)) is None
+    assert redis_cache.get(qr_store.token_key("s2" * 32)) is not None
+    assert 0 < redis_cache.ttl(qr_store.session_live_key(22, "sid-y")) <= 60

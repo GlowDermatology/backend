@@ -5,15 +5,27 @@ the price. ``Product.search_text`` is a stored generated column maintained by Po
 path (import ``bulk_update``, seeder, raw SQL) can let it drift.
 """
 
+from typing import Any
+
 from django.contrib.postgres.indexes import GinIndex
 from django.db import models
 from django.db.models import Deferrable, F, Func, Q, TextField, Value
 from django.db.models.functions import Coalesce
 
 from glowderma.catalog import media
-from glowderma.core import enums
+from glowderma.core import enums, slugs
 from glowderma.core.models import TimeStampedModel
-from glowderma.core.search import SearchFold
+from glowderma.core.search import SearchKey
+
+SLUG_MAX_LENGTH = 140
+PRODUCT_SLUG_CONSTRAINT = "product_slug_unique"
+
+
+def product_slug_base(name_uz: str, billz_name: str, billz_id: str) -> str:
+    """The derived slug of a product (``Product.save`` and the ``catalog.0005`` backfill)."""
+    return slugs.derive_slug(
+        name_uz, billz_name, prefix="mahsulot", fallback=billz_id, max_length=SLUG_MAX_LENGTH
+    )
 
 
 class JoinText(Func):
@@ -38,6 +50,14 @@ class Category(TimeStampedModel):
     position = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
     image = models.ImageField(upload_to=media.category_image_path, blank=True, max_length=255)
+    # B-W1 SEO (admin contract §2.4): optional per-language page title and meta description; "" = the
+    # website builds one from the name.
+    seo_title_uz = models.CharField(max_length=120, blank=True, default="", db_default="")
+    seo_title_ru = models.CharField(max_length=120, blank=True, default="", db_default="")
+    seo_title_en = models.CharField(max_length=120, blank=True, default="", db_default="")
+    seo_description_uz = models.CharField(max_length=300, blank=True, default="", db_default="")
+    seo_description_ru = models.CharField(max_length=300, blank=True, default="", db_default="")
+    seo_description_en = models.CharField(max_length=300, blank=True, default="", db_default="")
 
     class Meta:
         verbose_name_plural = "categories"
@@ -86,10 +106,20 @@ class Product(TimeStampedModel):
     usage_uz = models.TextField(blank=True)  # ≤1000
     usage_ru = models.TextField(blank=True)
     usage_en = models.TextField(blank=True)
-    # search (stored generated column, §6.2): folded like every search term (core.search, decision GC-1), so
-    # ko'pik / ko‘pik / koʻpik and ё / е match each other
+    # B-W1 SEO (admin contract §2.3): the website's URL segment — set once from the Uzbek name (else the Billz
+    # name) when the row is created, unique, never only digits, edited only by staff (stable URLs).
+    slug = models.CharField(max_length=SLUG_MAX_LENGTH, blank=True, default="", db_default="")
+    seo_title_uz = models.CharField(max_length=120, blank=True, default="", db_default="")
+    seo_title_ru = models.CharField(max_length=120, blank=True, default="", db_default="")
+    seo_title_en = models.CharField(max_length=120, blank=True, default="", db_default="")
+    seo_description_uz = models.CharField(max_length=300, blank=True, default="", db_default="")
+    seo_description_ru = models.CharField(max_length=300, blank=True, default="", db_default="")
+    seo_description_en = models.CharField(max_length=300, blank=True, default="", db_default="")
+    # search (stored generated column, §6.2): the search key of every search term (core.search.SearchKey:
+    # case, ё = е, decision GC-1; apostrophes removed, catalog.0006), so kopik / ko'pik / ko‘pik / koʻpik and
+    # ё / е match each other
     search_text = models.GeneratedField(
-        expression=SearchFold(
+        expression=SearchKey(
             JoinText(
                 F("name_uz"),
                 Value(" "),
@@ -142,6 +172,13 @@ class Product(TimeStampedModel):
                 | Q(last_change_old_price__isnull=False, last_change_new_price__isnull=False),
                 name="product_price_change_has_prices",
             ),
+            # "" = a row written by the previous release during a deploy; the next save derives one
+            models.UniqueConstraint(fields=["slug"], condition=~Q(slug=""), name=PRODUCT_SLUG_CONSTRAINT),
+            models.CheckConstraint(
+                condition=Q(slug="")
+                | (Q(slug__regex=slugs.SLUG_PATTERN) & ~Q(slug__regex=slugs.DIGITS_ONLY_PATTERN)),
+                name="product_slug_format",
+            ),
         ]
         indexes = [
             GinIndex(fields=["search_text"], name="catalog_product_search_trgm", opclasses=["gin_trgm_ops"]),
@@ -163,6 +200,24 @@ class Product(TimeStampedModel):
     @property
     def display_name(self) -> str:
         return self.name_uz or self.billz_name
+
+    def slug_base(self) -> str:
+        return product_slug_base(self.name_uz, self.billz_name, self.billz_id)
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        """A new row without a slug gets the first free one derived from its name (B-W1)."""
+        if self.slug:
+            super().save(*args, **kwargs)
+            return
+        if kwargs.get("update_fields") is not None:
+            kwargs["update_fields"] = {*kwargs["update_fields"], "slug"}  # the derived slug is written too
+        slugs.save_with_unique_slug(
+            self,
+            lambda: super(Product, self).save(*args, **kwargs),
+            base=self.slug_base(),
+            constraint=PRODUCT_SLUG_CONSTRAINT,
+            max_length=SLUG_MAX_LENGTH,
+        )
 
 
 class ProductStock(models.Model):

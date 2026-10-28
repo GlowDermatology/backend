@@ -122,6 +122,7 @@ def test_migrate_zero_and_forward_again() -> None:
         "0006_stockreservation_billz_settled_at",
         "0007_settle_billz_reservations",
         "0008_backfill_refund_manual_reason",
+        "0009_order_channel_web",
     }
     assert OrderFactory.create().pk == 10001
     call_command("migrate", verbosity=0)  # re-apply any app that depends on commerce (loyalty, payments, …)

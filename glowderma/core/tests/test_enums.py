@@ -10,7 +10,7 @@ CONTRACT_TABLE: dict[str, list[str]] = {
     "PaymentStatus": ["pending", "paid", "failed", "refunded"],
     "PaymentProvider": ["click", "payme"],
     "FulfilmentMethod": ["delivery", "pickup"],
-    "OrderChannel": ["ios", "android"],
+    "OrderChannel": ["ios", "android", "web"],
     "OrderPeriod": ["today", "week", "month", "all"],
     "EventSource": ["system", "bts", "admin"],
     "OrderEventType": [
@@ -88,10 +88,35 @@ CONTRACT_TABLE: dict[str, list[str]] = {
     "LogoutScope": ["current", "others", "all"],
     "ExportFormat": ["csv", "xlsx"],
     "IntegrationMode": ["fake", "live"],
+    "SeoSeverity": ["error", "warning", "info"],
+    "SeoIssueCode": [
+        "name_missing",
+        "name_translation_missing",
+        "description_missing",
+        "description_short",
+        "images_missing",
+        "alt_text_fallback",
+        "category_missing",
+        "seo_title_missing",
+        "seo_title_short",
+        "seo_title_long",
+        "seo_description_missing",
+        "seo_description_short",
+        "seo_description_long",
+        "image_missing",
+        "no_active_products",
+    ],
 }
 # Copied literally from docs/api/customer-api-v1.md section 3 (the enums marked new).
 CUSTOMER_TABLE: dict[str, list[str]] = {
-    "OtpPurpose": ["register", "login_new_device", "reset_password", "link_social"],
+    "OtpPurpose": [
+        "register",
+        "login_new_device",
+        "reset_password",
+        "link_social",
+        "verify_email",
+        "attach_phone",
+    ],
     "NextStep": ["verify_device", "verify_phone"],
     "CustomerSocialProvider": ["google", "facebook", "apple"],
     "SocialTokenType": ["id_token", "access_token"],
@@ -120,7 +145,14 @@ CUSTOMER_TABLE: dict[str, list[str]] = {
     "InboxKind": ["promo", "general", "order_status", "appointment"],
     "InboxLinkKind": ["none", "product", "order", "appointment", "url"],
     "PushDataType": ["order_status", "appointment", "campaign", "account_security", "session_replaced"],
-    "AccountSecurityEvent": ["social_linked", "social_unlinked", "password_reset", "password_changed"],
+    "AccountSecurityEvent": [
+        "social_linked",
+        "social_unlinked",
+        "password_reset",
+        "password_changed",
+        "phone_attached",
+        "email_attached",
+    ],
 }
 ALL_TABLES = {**CONTRACT_TABLE, **CUSTOMER_TABLE}
 

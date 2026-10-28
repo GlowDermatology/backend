@@ -195,7 +195,10 @@ def test_a_replaced_customer_session_is_refused_by_another_worker(
     assert worker.authenticate("customer", token, headers=headers) == {"ok": customer.pk}
     assert str(sid_entry(shared_redis, first.session.pk)).startswith("active:")
 
-    start_test_session(customer, fid="fid-other-0002")  # a sign-in on another phone replaces the session
+    start_test_session(customer, fid="fid-other-0002")  # B-W1: a sign-in on another phone ends nothing
+    assert worker.authenticate("customer", token, headers=headers) == {"ok": customer.pk}
+
+    start_test_session(customer)  # the same install signing in again replaces its own earlier session
 
     assert sid_entry(shared_redis, first.session.pk) == "revoked:replaced"
-    assert worker.authenticate("customer", token, headers=headers, no_db=True) == {"code": "SESSION_REPLACED"}
+    assert worker.authenticate("customer", token, headers=headers, no_db=True) == {"code": "SESSION_EXPIRED"}

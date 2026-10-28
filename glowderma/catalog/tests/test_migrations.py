@@ -87,11 +87,37 @@ def test_search_fold_migrations_round_trip() -> None:
     assert "gin_trgm_ops" in (search_index() or "")
     with connection.cursor() as cursor:
         cursor.execute("SELECT search_text FROM catalog_product WHERE id = %s", [product.pk])
-        assert "ko'pik" in cursor.fetchone()[0]
+        assert "kopik" in cursor.fetchone()[0]  # 0006: the apostrophe is removed, not only unified
 
 
-def test_search_index_migration_is_concurrent() -> None:
-    migration = import_module("glowderma.catalog.migrations.0003_product_search_trgm_concurrently").Migration
+@pytest.mark.django_db(transaction=True)
+def test_search_key_migrations_round_trip() -> None:
+    """0006 rebuilds the generated column without apostrophes, 0007 its trigram index concurrently; the
+    reverse restores the folded column of 0002 (ko'pik)."""
+    from glowderma.catalog.tests.factories import ProductFactory
+
+    product = ProductFactory.create(name_uz="Yumshoq tozalovchi ko‘pik", billz_id="4607099902")
+    try:
+        call_command("migrate", "catalog", "0005", verbosity=0)
+        assert "gin_trgm_ops" in (search_index() or "")
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT search_text FROM catalog_product WHERE id = %s", [product.pk])
+            assert "ko'pik" in cursor.fetchone()[0]
+        call_command("migrate", "catalog", "0006", verbosity=0)
+        assert search_index() is None
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT search_text FROM catalog_product WHERE id = %s", [product.pk])
+            assert "tozalovchi kopik" in cursor.fetchone()[0]
+    finally:
+        call_command("migrate", verbosity=0)
+    assert "gin_trgm_ops" in (search_index() or "")
+
+
+@pytest.mark.parametrize(
+    "name", ["0003_product_search_trgm_concurrently", "0007_product_search_key_trgm_concurrently"]
+)
+def test_search_index_migration_is_concurrent(name: str) -> None:
+    migration = import_module(f"glowderma.catalog.migrations.{name}").Migration
     assert migration.atomic is False
     assert [type(op).__name__ for op in migration.operations] == ["AddIndexConcurrently"]
 

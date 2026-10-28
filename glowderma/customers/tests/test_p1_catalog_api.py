@@ -12,6 +12,7 @@ from rest_framework.test import APIClient
 from glowderma.accounts import tokens
 from glowderma.accounts.models import Customer
 from glowderma.accounts.tests.factories import start_test_session
+from glowderma.catalog.models import Product
 from glowderma.catalog.tests.factories import (
     BannerFactory,
     CategoryFactory,
@@ -65,9 +66,12 @@ def test_card_shape_language_fallback_and_availability() -> None:
         return dict(next(row for row in rows if row["id"] == product.pk))
 
     card = card_of("ru")
-    assert set(card) == {
+    assert {"slug", "updated_at"} <= set(card)
+    assert set(card) - {"slug", "updated_at"} == {
         "id",
         "name",
+        "content_language",
+        "sku",
         "volume",
         "price",
         "promo",
@@ -79,6 +83,7 @@ def test_card_shape_language_fallback_and_availability() -> None:
     }
     assert card["name"] == "Сыворотка" and card["available"] == 1 and card["stock_status"] == "in_stock"
     assert card["main_image_url"].startswith("http")
+    assert card["sku"] == Product.objects.get(pk=card["id"]).billz_id  # the Billz id / barcode
     assert card_of("en")["name"] == "Zardob"
     bare = stocked(name_uz="", billz_name="BILLZ ONLY 30ML")
     names = {row["id"]: row["name"] for row in app_client().get(PRODUCTS, {"page_size": 50}).data["results"]}
@@ -109,6 +114,41 @@ def test_filters_search_ordering_and_page_size() -> None:
     }
     assert app_client().get(PRODUCTS, {"page_size": 50}).data["page_size"] == 50
     assert app_client().get(PRODUCTS, {"page_size": 30}).data["errors"][0]["field"] == "page_size"
+
+
+def test_search_without_the_apostrophe_finds_the_uzbek_name() -> None:
+    """``kopik`` finds ``ko‘pik`` (and ``ko'pik`` still does): the apostrophe is removed on both sides."""
+    foam = stocked(name_uz="Yumshoq tozalovchi ko\u2018pik")
+    stocked(name_uz="Qimmat serum")
+    for term in ("kopik", "ko'pik", "ko\u02bbpik", "TOZALOVCHI KOPIK"):
+        assert ids(app_client().get(PRODUCTS, {"search": term})) == [foam.pk], term
+
+
+def test_content_language_says_where_the_texts_came_from() -> None:
+    """Additive ``content_language`` on products (list and detail) and categories: the requested language
+    when the name exists in it, ``uz`` when it fell back (to Uzbek or to the Billz name)."""
+    category = CategoryFactory.create(slug="kremlar", name_uz="Kremlar", name_ru="Кремы", name_en="")
+    translated = stocked(name_uz="Krem", name_ru="Крем", name_en="", category=category)
+    uzbek_only = stocked(name_uz="Ko‘pik", name_ru="", name_en="", category=category)
+    billz_only = stocked(name_uz="", name_ru="", name_en="", billz_name="FOAM 150ML", category=category)
+
+    def languages(lang: str) -> dict[int, str]:
+        rows = app_client(HTTP_ACCEPT_LANGUAGE=lang).get(PRODUCTS).data["results"]
+        return {row["id"]: row["content_language"] for row in rows}
+
+    assert languages("ru") == {translated.pk: "ru", uzbek_only.pk: "uz", billz_only.pk: "uz"}
+    assert languages("en") == {translated.pk: "uz", uzbek_only.pk: "uz", billz_only.pk: "uz"}
+    assert set(languages("uz").values()) == {"uz"}
+    detail = app_client(HTTP_ACCEPT_LANGUAGE="ru").get(f"{PRODUCTS}{translated.pk}/").data
+    assert (detail["name"], detail["content_language"]) == ("Крем", "ru")
+    categories = {
+        lang: {
+            row["slug"]: row["content_language"]
+            for row in app_client(HTTP_ACCEPT_LANGUAGE=lang).get(CATEGORIES).data["results"]
+        }
+        for lang in ("ru", "en")
+    }
+    assert categories["ru"]["kremlar"] == "ru" and categories["en"]["kremlar"] == "uz"
 
 
 def test_optional_auth_cart_quantity_and_cache_headers() -> None:
@@ -166,7 +206,17 @@ def test_categories_count_visible_products() -> None:
     stocked(category=category, status=enums.ProductStatus.HIDDEN)
     CategoryFactory.create(slug="hidden", is_active=False)
     rows = app_client(HTTP_ACCEPT_LANGUAGE="ru").get(CATEGORIES).data["results"]
-    assert rows == [{"slug": "creams", "name": "Кремы", "image_url": None, "product_count": 1}]
+    assert [{k: v for k, v in row.items() if k != "updated_at"} for row in rows] == [
+        {
+            "slug": "creams",
+            "name": "Кремы",
+            "content_language": "ru",
+            "image_url": None,
+            "product_count": 1,
+            "seo_title": "",
+            "seo_description": "",
+        }
+    ]
 
 
 @override_settings(DEV_FEATURES_ALLOWED=False, BILLZ_MODE="fake")

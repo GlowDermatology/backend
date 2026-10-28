@@ -2,8 +2,9 @@
 
 A token is ``"GD1:" + base64url(16 random bytes)`` (26 characters, 128 bits from ``secrets.token_bytes``). The
 raw token is never stored server-side and never logged: ``core.qr_store`` keeps
-``gd:loyalty:qr:{hex(HMAC-SHA256(QR_HMAC_KEY, token))}`` → ``"{customer_id}:{issued_at_epoch}"`` for
-``QR_TOKEN_TTL_SECONDS`` (60) with at most ``QR_MAX_LIVE_TOKENS`` (2) live keys per customer, and the resolve
+``gd:loyalty:qr:{hex(HMAC-SHA256(QR_HMAC_KEY, token))}`` → ``"{customer_id}:{issued_at_epoch}:{session_id}"``
+for ``QR_TOKEN_TTL_SECONDS`` (60) with at most ``QR_MAX_LIVE_TOKENS`` (2) live keys per signed-in session
+(B-W1: a token is bound to the session that issued it and dies with it), and the resolve
 reads it with ``GETDEL`` — the only read — so two scans of one token race in Redis and exactly one wins.
 No database write and no audit on issue (one call per minute per open screen).
 """
@@ -60,14 +61,20 @@ def ttl_seconds() -> int:
     return int(settings.QR_TOKEN_TTL_SECONDS)
 
 
-def issue_qr(customer_id: int) -> QrToken:
-    """A fresh single-use token for the customer (``SET NX EX``; issuing beyond the live limit drops the
-    oldest key)."""
+@dataclass(frozen=True, slots=True)
+class ResolvedQr:
+    customer_id: int
+    session_id: str  # "" for a token stored before B-W1 (no session recorded)
+
+
+def issue_qr(customer_id: int, session_id: str = "") -> QrToken:
+    """A fresh single-use token for the customer's session ``session_id`` (``SET NX EX``; issuing beyond the
+    session's live limit drops its oldest key)."""
     ttl = ttl_seconds()
     max_live = int(settings.QR_MAX_LIVE_TOKENS)
     while True:
         token = new_token()
-        if qr_store.put(key_hash(token), customer_id, ttl, max_live):
+        if qr_store.put(key_hash(token), customer_id, ttl, max_live, session_id=session_id):
             break
     return QrToken(
         token=token,
@@ -77,17 +84,19 @@ def issue_qr(customer_id: int) -> QrToken:
     )
 
 
-def resolve_qr(token: str) -> int | None:
-    """The customer id behind a token, consuming it (``GETDEL``); ``None`` for a malformed, unknown, expired
-    or already used token. Whether the customer is still active is the caller's check."""
+def resolve_qr(token: str) -> ResolvedQr | None:
+    """The customer (and issuing session) behind a token, consuming it (``GETDEL``); ``None`` for a
+    malformed, unknown, expired or already used token. Whether the customer is still active and the session
+    still open is the caller's check."""
     if not is_well_formed(token):
         return None
     value = qr_store.take(key_hash(token))
     if value is None:
         return None
-    customer_part, _sep, _issued = value.partition(":")
+    customer_part, _sep, rest = value.partition(":")
+    _issued, _sep, session_id = rest.partition(":")
     try:
-        return int(customer_part)
+        return ResolvedQr(customer_id=int(customer_part), session_id=session_id)
     except ValueError:
         return None
 

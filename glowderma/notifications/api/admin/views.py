@@ -354,7 +354,7 @@ class SegmentMembersViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericView
             yield (
                 customer.pk,
                 customer.name,
-                customer.phone,
+                customer.phone or customer.email or "",  # hybrid identity: the e-mail of a phoneless account
                 format_export_datetime(customer.registered_at),
                 int(getattr(customer, "lifetime_total", 0)),
                 _percent_cell(getattr(customer, "percent", None)),

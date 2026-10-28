@@ -7,10 +7,11 @@ from django.core.cache import cache
 from rest_framework.authentication import BaseAuthentication, get_authorization_header
 from rest_framework.request import Request
 
-from glowderma.accounts import services, tokens
+from glowderma.accounts import services, sessions, tokens
 from glowderma.accounts.models import AuthSession, Customer, Device, StaffUser
 from glowderma.core import audit, enums, timeutils
 from glowderma.core.api.exceptions import AppUpdateRequired, AuthFailed, DeviceRequired, PasswordChanged
+from glowderma.core.clientip import has_internal_secret
 from glowderma.core.pii import pii_ref
 
 # Customer contract §1.2.
@@ -59,7 +60,9 @@ def parse_device_headers(request: Any, *, required: bool) -> DeviceHeaders | Non
     Missing or malformed → 400 ``device_required`` when ``required`` (auth and C routes); on optional (O)
     routes no ``X-GD-Device-Id`` means no device (``None``), while a present one must come with valid
     companions. A version below the platform's minimum → 426 ``app_update_required`` with ``{min_version,
-    store_url}``.
+    store_url}``. Platform ``web`` (the website's BFF) is accepted only with a valid ``X-GD-Internal-Secret``
+    (else 400 ``device_required``); its ``X-GD-App-Version`` is optional (validated when present, ``""``
+    when absent) and no minimum version applies.
     """
     headers = request.headers
     fid = str(headers.get("X-GD-Device-Id", ""))
@@ -67,12 +70,19 @@ def parse_device_headers(request: Any, *, required: bool) -> DeviceHeaders | Non
         return None
     platform = str(headers.get("X-GD-Platform", ""))
     version = str(headers.get("X-GD-App-Version", ""))
-    if (
-        not FID_PATTERN.fullmatch(fid)
-        or platform not in PLATFORMS
-        or not APP_VERSION_PATTERN.fullmatch(version)
-    ):
+    if platform == enums.OrderChannel.WEB and not version:
+        # The website (B-W1) has no installed app: the version header is optional and never has a floor.
+        version = ""
+    elif not APP_VERSION_PATTERN.fullmatch(version):
         raise DeviceRequired()
+    if not FID_PATTERN.fullmatch(fid) or platform not in PLATFORMS:
+        raise DeviceRequired()
+    if platform == enums.OrderChannel.WEB and not has_internal_secret(getattr(request, "_request", request)):
+        # only the website's server-side BFF (with the internal secret) is "web": a self-asserted web
+        # platform would skip the app's minimum-version floor
+        raise DeviceRequired()
+    if platform == enums.OrderChannel.WEB:
+        return DeviceHeaders(fid=fid, platform=platform, app_version=version)
     floor = min_app_version(platform)
     if _version_tuple(version) < _version_tuple(floor):
         raise AppUpdateRequired(details={"min_version": floor, "store_url": _store_url(platform)})
@@ -136,11 +146,9 @@ class StaffJWTAuthentication(BaseAuthentication):
 
 
 def raise_revoked(reason: str) -> None:
-    """The 401 of a revoked customer session (customer contract §1.2): only ``replaced`` →
-    ``SESSION_REPLACED``, only ``password_changed`` → ``password_changed``, every other reason →
-    ``SESSION_EXPIRED``."""
-    if reason == enums.SessionRevokeReason.REPLACED:
-        raise AuthFailed("SESSION_REPLACED")
+    """The 401 of a revoked customer session (customer contract §1.2): only ``password_changed`` →
+    ``password_changed``, every other reason → ``SESSION_EXPIRED`` (B-W1: sessions are no longer replaced by
+    a sign-in elsewhere, so the customer audience never answers ``SESSION_REPLACED``)."""
     if reason == enums.SessionRevokeReason.PASSWORD_CHANGED:
         raise PasswordChanged()
     raise AuthFailed("SESSION_EXPIRED")
@@ -161,7 +169,8 @@ class CustomerJWTAuthentication(BaseAuthentication):
     written on commit by a revocation), which lets the device and platform checks run without a query. The
     first request carrying the session's current ``rot`` confirms the rotation with one conditional UPDATE,
     remembered by the add-only flag ``auth:sidrot:{sid}:{rot}``. ``last_active_at`` / ``app_version`` of the
-    device are bumped at most every five minutes.
+    device and the session's activity (``last_used_at``, user agent, IP and its location — B-W1) are bumped
+    at most every five minutes.
     """
 
     def authenticate(self, request: Request) -> tuple[Customer, dict[str, Any]] | None:
@@ -222,6 +231,8 @@ class CustomerJWTAuthentication(BaseAuthentication):
             Device.objects.filter(sessions__pk=sid).update(
                 last_active_at=timeutils.now(), app_version=device.app_version, updated_at=timeutils.now()
             )
+            user_agent, ip = sessions.activity_facts(request, platform=device.platform)
+            sessions.touch_session(sid, user_agent=user_agent, ip=ip)
         return customer, claims
 
     @staticmethod

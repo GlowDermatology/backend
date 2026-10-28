@@ -173,7 +173,7 @@ def test_customer_access_ttl_and_rot_claim(customer_session: tuple[AuthSession, 
 @pytest.mark.parametrize(
     ("tombstone", "code"),
     [
-        ("revoked:replaced", "SESSION_REPLACED"),
+        ("revoked:replaced", "SESSION_EXPIRED"),  # B-W1: SESSION_REPLACED is retired for customers
         ("revoked:password_changed", "password_changed"),
         ("revoked:refresh_reused", "SESSION_EXPIRED"),
         ("revoked:logout", "SESSION_EXPIRED"),
@@ -196,7 +196,7 @@ def test_revocation_codes_come_from_the_cache_without_a_query(
 @pytest.mark.parametrize(
     ("reason", "code"),
     [
-        ("replaced", "SESSION_REPLACED"),
+        ("replaced", "SESSION_EXPIRED"),
         ("password_changed", "password_changed"),
         ("logout", "SESSION_EXPIRED"),
     ],

@@ -3,12 +3,15 @@ import re
 import unicodedata
 from typing import Any
 
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.validators import EmailValidator
 from rest_framework.request import Request
 from rest_framework.throttling import SimpleRateThrottle
 
 from glowderma.accounts.authentication import FID_PATTERN
 from glowderma.accounts.models import Customer
-from glowderma.core.pii import pii_ref
+from glowderma.core.clientip import forwarded_client_ip, has_internal_secret
+from glowderma.core.pii import normalize_email, pii_ref
 from glowderma.core.throttling import rate_for
 
 
@@ -94,29 +97,54 @@ class QrThrottle(CustomerRateThrottle):
     scope = "qr"
 
 
+def bff_own_call(request: Request) -> bool:
+    """B-W1: the website's BFF calling with a valid ``X-GD-Internal-Secret`` but no forwarded browser IP — a
+    server-side read on its own behalf (cache revalidation, sitemap). Such calls count against
+    ``public_bff`` instead of the per-device / per-IP scopes, which would otherwise pool every visitor's
+    page renders on the web server's one IP. With a forwarded ``X-GD-Client-IP`` (the same trust rule as
+    ``core.clientip``) the ordinary scopes key on the browser's IP."""
+    django_request = request._request
+    return has_internal_secret(django_request) and forwarded_client_ip(django_request) is None
+
+
 class PublicDeviceThrottle(ClientIPThrottle):
     """Anonymous O requests: per device when the header is present, else per client IP (signed-in callers
-    count against ``customer``)."""
+    count against ``customer``). The client IP is the BFF-forwarded one when trusted (``core.clientip``)."""
 
     scope = "public"
 
     def get_cache_key(self, request: Request, view: Any) -> str | None:
         if _is_customer(request):
             return None
+        if bff_own_call(request) and device_ref(request) is None:
+            return None  # counted by PublicBffThrottle
         ref = device_ref(request)
         ident = f"fid:{ref}" if ref is not None else f"ip:{self.get_ident(request)}"
         return self.cache_format % {"scope": self.scope, "ident": ident}
 
 
 class PublicIPThrottle(ClientIPThrottle):
-    """Anonymous O requests: the per-IP backstop."""
+    """Anonymous O requests: the per-IP backstop (the browser's IP behind the website's BFF; not applied to
+    the BFF's own calls, which ``PublicBffThrottle`` bounds)."""
 
     scope = "public_ip"
 
     def get_cache_key(self, request: Request, view: Any) -> str | None:
-        if _is_customer(request):
+        if _is_customer(request) or bff_own_call(request):
             return None
         return self.cache_format % {"scope": self.scope, "ident": self.get_ident(request)}
+
+
+class PublicBffThrottle(ClientIPThrottle):
+    """B-W1: anonymous O requests the website's BFF makes on its own behalf (:func:`bff_own_call`), one
+    generous bucket so a runaway revalidation loop is still bounded."""
+
+    scope = "public_bff"
+
+    def get_cache_key(self, request: Request, view: Any) -> str | None:
+        if _is_customer(request) or not bff_own_call(request):
+            return None
+        return self.cache_format % {"scope": self.scope, "ident": "bff"}
 
 
 class _DeviceThrottle(ClientIPThrottle):
@@ -156,9 +184,48 @@ def phone_throttle_ident(value: object) -> str | None:
     return pii_ref(canonical) if canonical is not None else INVALID_PHONE_BUCKET
 
 
+EMAIL_MAX_LENGTH = 254
+_EMAIL_VALIDATOR = EmailValidator()
+
+
+def canonical_email(value: object) -> str | None:
+    """The stored form of a submitted e-mail address (``core.pii.normalize_email``: NFC, lower case, punycode
+    domain; ≤254 characters, a valid address by Django's ``EmailValidator``), or ``None`` (hybrid identity:
+    one account and one throttle key per mailbox however it is written)."""
+    if not isinstance(value, str):
+        return None
+    folded = normalize_email(value)
+    if not folded or len(folded) > EMAIL_MAX_LENGTH:
+        return None
+    try:
+        _EMAIL_VALIDATOR(folded)
+    except DjangoValidationError:
+        return None
+    return folded
+
+
+def email_throttle_ident(value: object) -> str | None:
+    """:func:`phone_throttle_ident` for an e-mail: ``pii_ref`` of the canonical address, ``invalid`` for any
+    other present value, ``None`` when absent or blank."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    canonical = canonical_email(value)
+    return pii_ref(canonical) if canonical is not None else INVALID_PHONE_BUCKET
+
+
+def identifier_throttle_ident(data: object) -> str | None:
+    """The per-identifier ident of an auth body: its ``phone`` when present, else its ``email``."""
+    if not isinstance(data, dict):
+        return None
+    phone = phone_throttle_ident(data.get("phone"))
+    return phone if phone is not None else email_throttle_ident(data.get("email"))
+
+
 class SmsPhoneThrottle(ClientIPThrottle):
-    """``auth/send-code/`` per phone (:func:`phone_throttle_ident`: the canonical number, never the raw
-    string, so Unicode-digit variants of one number share its key).
+    """``auth/send-code/`` (and the signed-in ``me/phone/code/`` / ``me/email/code/``) per target: the phone
+    (:func:`phone_throttle_ident`: the canonical number, never the raw string, so Unicode-digit variants of
+    one number share its key) or, without one, the e-mail address (:func:`email_throttle_ident`, hybrid
+    identity).
 
     The ``invalid`` bucket is split per device (else per client IP): a malformed phone never reaches the SMS
     provider (400 ``invalid``), so one client sending malformed values cannot turn every other user's typo
@@ -167,8 +234,7 @@ class SmsPhoneThrottle(ClientIPThrottle):
     scope = "sms_phone"
 
     def get_cache_key(self, request: Request, view: Any) -> str | None:
-        data = request.data
-        ident = phone_throttle_ident(data.get("phone") if isinstance(data, dict) else None)
+        ident = identifier_throttle_ident(request.data)
         if ident is None:
             return None
         if ident == INVALID_PHONE_BUCKET:

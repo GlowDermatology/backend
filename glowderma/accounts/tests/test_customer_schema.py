@@ -94,7 +94,7 @@ def test_customer_views_and_every_new_enum_generate_without_warnings() -> None:
     components = schema["components"]["schemas"]
     for enum in NEW_ENUMS:
         assert components[f"{enum.__name__}Enum"]["enum"] == list(enum.values), enum.__name__
-    assert components["OrderChannelEnum"]["enum"] == ["ios", "android"]
+    assert components["OrderChannelEnum"]["enum"] == ["ios", "android", "web"]
     assert "DevicePlatformEnum" not in components
     assert set(components["CustomerErrorEnvelope"]["properties"]) == {
         "code",

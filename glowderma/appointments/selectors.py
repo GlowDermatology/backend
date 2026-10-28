@@ -319,6 +319,12 @@ def specialist(pk: int) -> Professional | None:
     return booking_catalogue().select_related("location").filter(pk=pk).first()
 
 
+def specialist_by_slug(slug: str) -> Professional | None:
+    """B-W1: the website addresses a specialist by slug (never only digits, so ``specialists/{id}/`` and
+    ``specialists/{slug}/`` cannot collide)."""
+    return booking_catalogue().select_related("location").filter(slug=slug).first()
+
+
 def offered_link(professional_id: int, service_id: int) -> ProfessionalService | None:
     """The active link of an active service of an active professional, else ``None``."""
     return (

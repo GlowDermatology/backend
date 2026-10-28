@@ -123,6 +123,9 @@ GIT_SHA = env_str("GIT_SHA", "dev")
 # the FAKE_NOW variable; production refuses it.
 FAKE_NOW: datetime | None = None
 TRUSTED_PROXIES: tuple[Network, ...] = ()
+# B-W1 session list (customer contract §2.2.10): path of a local GeoIP City .mmdb (MaxMind GeoLite2-City or
+# DB-IP City Lite), mounted read-only; empty = no location ("—"). No online lookup service is ever used.
+GEOIP_CITY_DB = env_str("GEOIP_CITY_DB", "")
 # Celery: at-least-once delivery (acks late, requeue on worker loss), one task in flight per worker
 # process, hard limits so a stuck provider call cannot hold a worker forever.
 CELERY_TASK_ACKS_LATE = True
@@ -435,9 +438,14 @@ if ANDROID_SMS_APP_HASH and len(ANDROID_SMS_APP_HASH) != 11:
 SOCIAL_TICKET_TTL_SECONDS = env_positive_int("SOCIAL_TICKET_TTL_SECONDS", 600)
 SOCIAL_NONCE_TTL_SECONDS = env_positive_int("SOCIAL_NONCE_TTL_SECONDS", 600)
 GOOGLE_APP_CLIENT_IDS = env_list("GOOGLE_APP_CLIENT_IDS", [])
+GOOGLE_WEB_CLIENT_IDS = env_list("GOOGLE_WEB_CLIENT_IDS", [])
 # Sign in with Apple (product-owner decision 2026-10-26): empty = provider "apple" off (live) / fake
 # (local/test).
 APPLE_BUNDLE_IDS = env_list("APPLE_BUNDLE_IDS", [])
+# B-W1 customer website: Sign in with Apple JS Services IDs (comma separated) and the redirect URI its
+# authorization uses (the code exchange must repeat it); Google Identity Services web client ids.
+APPLE_SERVICES_IDS = env_list("APPLE_SERVICES_IDS", [])
+APPLE_WEB_REDIRECT_URI = env_str("APPLE_WEB_REDIRECT_URI", "")
 APPLE_TEAM_ID = env_str("APPLE_TEAM_ID", "")
 APPLE_KEY_ID = env_str("APPLE_KEY_ID", "")
 APPLE_PRIVATE_KEY_FILE = env_str("APPLE_PRIVATE_KEY_FILE", "")
@@ -454,6 +462,33 @@ ESKIZ_PASSWORD = env_value("ESKIZ_PASSWORD", "")
 ESKIZ_SENDER = env_value("ESKIZ_SENDER", "4546")
 ESKIZ_CALLBACK_URL = env_value("ESKIZ_CALLBACK_URL", "")
 ESKIZ_FAKE_CODE = ""
+# E-mail OTP (hybrid identity, C§2.1): EMAIL_MODE fake (in-process, nothing delivered; the default, like every
+# provider allowed under the production settings with a startup WARNING and the health flag) or smtp (any SMTP
+# relay; the provider is chosen through these variables). EMAIL_USE_TLS = STARTTLS, EMAIL_USE_SSL = implicit
+# TLS (port 465); at most one. Codes go out through the outbox (``email.send``), never inline. The relay
+# values are read from the EMAIL_* variables into SMTP_* settings: Django 6.1 deprecates its own EMAIL_HOST…
+# settings (MAILERS), and the adapter talks to the relay with smtplib, not django.core.mail.
+EMAIL_MODE = env_value("EMAIL_MODE", "fake")
+if EMAIL_MODE not in {"fake", "smtp"}:
+    raise ImproperlyConfigured("EMAIL_MODE must be 'fake' or 'smtp'")
+SMTP_HOST = env_value("EMAIL_HOST", "")
+SMTP_PORT = env_bounded_int("EMAIL_PORT", 587, minimum=1, maximum=65535)
+SMTP_USER = env_value("EMAIL_HOST_USER", "")
+SMTP_PASSWORD = env_str("EMAIL_HOST_PASSWORD", "")
+SMTP_USE_TLS = env_bool("EMAIL_USE_TLS", True)
+SMTP_USE_SSL = env_bool("EMAIL_USE_SSL", False)
+if SMTP_USE_TLS and SMTP_USE_SSL:
+    raise ImproperlyConfigured("EMAIL_USE_TLS and EMAIL_USE_SSL are mutually exclusive")
+SMTP_TIMEOUT = env_bounded_int("EMAIL_TIMEOUT", 10, minimum=1, maximum=60)
+EMAIL_FROM = env_value("EMAIL_FROM", "Glow Derma <no-reply@glowderma.uz>")
+# The e-mail twin of SMS_GLOBAL_HOURLY_LIMIT: codes per hour before 503 email_unavailable.
+EMAIL_GLOBAL_HOURLY_LIMIT = env_positive_int("EMAIL_GLOBAL_HOURLY_LIMIT", 500)
+# E-mail codes one client IP may request per hour (sign-up, reset, new device, attach) before 429
+# otp_network_limit: no single IP can exhaust EMAIL_GLOBAL_HOURLY_LIMIT.
+EMAIL_OTP_IP_HOURLY_LIMIT = env_positive_int("EMAIL_OTP_IP_HOURLY_LIMIT", 20)
+# Re-authentication waiver of a fresh sign-in (C§2.2.10): attaching a phone or an e-mail within this many
+# seconds of the session's sign-in needs no password or code of the account.
+CUSTOMER_REAUTH_FRESH_SECONDS = env_bounded_int("CUSTOMER_REAUTH_FRESH_SECONDS", 600, minimum=0, maximum=3600)
 # Cart and checkout (C§2.5, §2.7).
 CART_MAX_LINES = env_positive_int("CART_MAX_LINES", 30)
 CART_MAX_QTY_PER_LINE = env_positive_int("CART_MAX_QTY_PER_LINE", 10)
@@ -462,6 +497,19 @@ CHECKOUT_MIN_PAYABLE = env_positive_int("CHECKOUT_MIN_PAYABLE", 1000)
 PAYMENT_IN_FLIGHT_GRACE_SECONDS = env_positive_int("PAYMENT_IN_FLIGHT_GRACE_SECONDS", 300)
 PAYMENT_RETURN_URL = env_str("PAYMENT_RETURN_URL", "https://glowderma.uz/pay/return")
 PAYMENT_RETURN_FALLBACK_URL = env_str("PAYMENT_RETURN_FALLBACK_URL", "glowderma://payment/return")
+# The website's return page (B-W1; used when the pay request comes from X-GD-Platform: web): a template with
+# {order_id} (required), {lang} (uz|ru|en) and {locale_prefix} ("" for uz, "/ru", "/en"); no app link.
+PAYMENT_WEB_RETURN_URL = env_str(
+    "PAYMENT_WEB_RETURN_URL", "https://glowderma.uz{locale_prefix}/buyurtmalar/{order_id}?paid=1"
+)
+try:
+    _web_return_probe = PAYMENT_WEB_RETURN_URL.format(order_id=1, lang="uz", locale_prefix="")
+except (KeyError, IndexError, ValueError) as _exc:
+    raise ImproperlyConfigured(
+        "PAYMENT_WEB_RETURN_URL may only use the {order_id}, {lang} and {locale_prefix} placeholders"
+    ) from _exc
+if "{order_id}" not in PAYMENT_WEB_RETURN_URL or not _web_return_probe.startswith(("https://", "http://")):
+    raise ImproperlyConfigured("PAYMENT_WEB_RETURN_URL must be an http(s) URL containing {order_id}")
 # Click SHOP API (C§2.13.1).
 CLICK_SERVICE_ID = env_value("CLICK_SERVICE_ID", "00000")
 CLICK_MERCHANT_ID = env_value("CLICK_MERCHANT_ID", "00000")

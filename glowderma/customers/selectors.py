@@ -32,7 +32,7 @@ from glowderma.catalog import selectors as catalog_selectors
 from glowderma.catalog.models import Banner, Category, Product, ProductImage
 from glowderma.commerce import selectors as commerce_selectors
 from glowderma.commerce.models import CartItem, Order
-from glowderma.core import enums, timeutils
+from glowderma.core import enums, i18n, timeutils
 from glowderma.core.media import absolute_media_url
 from glowderma.core.search import SearchFold
 from glowderma.loyalty import selectors as loyalty_selectors
@@ -45,6 +45,7 @@ from glowderma.site_config import selectors as site_config_selectors
 NAME_COLLATION = "glowderma_ci"  # ICU case-insensitive collation (core.0007), used in ORDER BY only
 SEARCH_MAX_LENGTH = 64
 PHONE_SEARCH_MIN_DIGITS = 3
+EMAIL_SEARCH_MIN_LENGTH = 3
 DEFAULT_ORDERING = "-registered_at"
 
 
@@ -72,7 +73,8 @@ def search_q(term: str) -> Q | None:
     """``name`` contains the term (case-insensitive and folded — apostrophe variants and ё, ``core.search``,
     decision GC-1: ``fold(name) LIKE '%' || fold(term) || '%'``, served by the trigram index
     ``accounts_customer_fold_trgm``), or, when the term carries at least three digits, the phone contains
-    those digits. Blank → no filter."""
+    those digits, or (hybrid identity) the e-mail address contains the term (case-insensitive). Blank → no
+    filter."""
     text = term.strip()
     if not text:
         return None
@@ -80,6 +82,8 @@ def search_q(term: str) -> Q | None:
     digits = re.sub(r"\D", "", text)
     if len(digits) >= PHONE_SEARCH_MIN_DIGITS:
         condition |= Q(phone__contains=digits)
+    if len(text) >= EMAIL_SEARCH_MIN_LENGTH:
+        condition |= Q(email__contains=text.lower())  # stored lower case
     return condition
 
 
@@ -148,7 +152,8 @@ class CustomerCard:
 
     id: int
     name: str
-    phone: str
+    phone: str | None  # hybrid identity: null until the customer attaches one
+    email: str | None
     status: str
     registered_at: datetime
     deleted_at: datetime | None
@@ -296,6 +301,7 @@ def customer_card(customer_id: int) -> CustomerCard | None:
         id=customer.pk,
         name=customer.name,
         phone=customer.phone,
+        email=customer.email,
         status=customer.status,
         registered_at=customer.registered_at,
         deleted_at=customer.deleted_at,
@@ -426,7 +432,8 @@ def me_payload(customer: Customer, *, fid: str | None) -> dict[str, Any]:
     default = Address.objects.filter(customer_id=customer.pk, is_default=True).first()
     return {
         "id": customer.pk,
-        "phone": customer.phone,
+        "phone": customer.phone or None,
+        "email": customer.email or None,
         "name": customer.name,
         "language": customer.language,
         "image_url": media_url(customer.image),
@@ -579,7 +586,10 @@ def product_cards(products: list[Product], lang: str, customer_id: int | None = 
         cards.append(
             {
                 "id": product.pk,
+                "slug": product.slug,
                 "name": product_name(product, lang),
+                "content_language": i18n.content_language(product, "name", lang, fallback_text=True),
+                "sku": product.billz_id or None,  # the Billz id / barcode: the only article code we hold
                 "volume": product.volume,
                 "price": product.price,
                 "promo": product.promo,
@@ -592,6 +602,7 @@ def product_cards(products: list[Product], lang: str, customer_id: int | None = 
                     enums.StockStatus.IN_STOCK if quantity > 0 else enums.StockStatus.OUT_OF_STOCK
                 ).value,
                 "in_cart_quantity": int(in_cart.get(product.pk, 0)),
+                "updated_at": product.updated_at,
             }
         )
     return cards
@@ -609,6 +620,17 @@ def product_detail(product: Product, lang: str, customer_id: int | None = None) 
             {"id": image.pk, "url": media_url(image.file), "position": image.position} for image in images
         ],
         "max_quantity": min(card["available"], int(settings.CART_MAX_QTY_PER_LINE)),
+        **seo_payload(product, lang),
+    }
+
+
+def seo_payload(obj: Any, lang: str) -> dict[str, str]:
+    """``seo_title`` / ``seo_description`` (B-W1) in the resolved language only — never another language's
+    text in a page's meta tags; ``""`` = the website builds them (name, volume, category, price)."""
+    language = lang if lang in enums.ContentLanguage.values else enums.ContentLanguage.UZ
+    return {
+        "seo_title": str(getattr(obj, f"seo_title_{language}", "") or ""),
+        "seo_description": str(getattr(obj, f"seo_description_{language}", "") or ""),
     }
 
 
@@ -616,6 +638,9 @@ def category_payload(category: Category, lang: str) -> dict[str, Any]:
     return {
         "slug": category.slug,
         "name": localized_field(category, "name", lang),
+        "content_language": i18n.content_language(category, "name", lang),
         "image_url": media_url(category.image),
         "product_count": int(getattr(category, "product_count", 0)),
+        "updated_at": category.updated_at,
+        **seo_payload(category, lang),
     }

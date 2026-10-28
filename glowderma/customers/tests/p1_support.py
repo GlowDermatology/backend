@@ -76,6 +76,7 @@ def reset_fakes() -> None:
     fake_eskiz().sent.clear()
     fake_apple().revoked.clear()
     fake_apple().exchanged.clear()
+    fake_apple().redirect_uris.clear()
 
 
 def password_customer(phone: str = "+998901112233", **fields: Any) -> Customer:

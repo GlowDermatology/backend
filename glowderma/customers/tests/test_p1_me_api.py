@@ -79,6 +79,7 @@ def test_me_shape(signed: Signed) -> None:
     assert set(data) == {
         "id",
         "phone",
+        "email",
         "name",
         "language",
         "image_url",
@@ -223,7 +224,7 @@ def test_change_password_refusals(signed: Signed) -> None:
 def test_social_only_sets_a_first_password_with_an_sms_token(social_only: Signed) -> None:
     missing = social_only.client.post(ME + "password/", {"password": NEW_PASSWORD}, **social_only.idem())
     assert missing.data["errors"][0]["field"] == "verification_token"
-    token = verification(social_only.customer.phone, "reset_password")
+    token = verification(str(social_only.customer.phone), "reset_password")
     response = social_only.client.post(
         ME + "password/", {"verification_token": token, "password": NEW_PASSWORD}, **social_only.idem()
     )
@@ -272,7 +273,7 @@ def test_social_only_link_needs_an_sms_token(social_only: Signed) -> None:
         ).data["code"]
         == "verification_invalid"
     )
-    token = verification(social_only.customer.phone, "reset_password")
+    token = verification(str(social_only.customer.phone), "reset_password")
     ok = social_only.client.post(ME + "social/", {**body, "verification_token": token}, **social_only.idem())
     assert ok.status_code == 200, ok.data
     used = social_only.client.post(
@@ -284,7 +285,7 @@ def test_social_only_link_needs_an_sms_token(social_only: Signed) -> None:
 
 
 def test_unlink_social(social_only: Signed) -> None:
-    token = verification(social_only.customer.phone, "reset_password")
+    token = verification(str(social_only.customer.phone), "reset_password")
     last = social_only.client.delete(ME + "social/google/", {"verification_token": token})
     assert (last.status_code, last.data["code"]) == (409, "last_sign_in_method")
     assert last.data["details"] == {"provider": "google"}
@@ -294,7 +295,7 @@ def test_unlink_social(social_only: Signed) -> None:
         provider_refresh_token=account_services.seal_apple_refresh("r", client_id="uz.glowderma.beta"),
         provider_client_id="uz.glowderma.beta",
     )
-    token = verification(social_only.customer.phone, "reset_password")
+    token = verification(str(social_only.customer.phone), "reset_password")
     response = social_only.client.delete(ME + "social/apple/", {"verification_token": token})
     assert response.status_code == 200 and response.data["linked_providers"] == ["google"]
     revoke = OutboxMessage.objects.get(topic="apple.revoke")
@@ -303,7 +304,7 @@ def test_unlink_social(social_only: Signed) -> None:
         "provider": "apple",
         "reason": "customer",
     }
-    noop_token = verification(social_only.customer.phone, "reset_password")
+    noop_token = verification(str(social_only.customer.phone), "reset_password")
     assert (
         social_only.client.delete(ME + "social/facebook/", {"verification_token": noop_token}).status_code
         == 200
@@ -398,7 +399,7 @@ def test_delete_me_scrubs_and_revokes(signed: Signed) -> None:
 
 def test_delete_me_social_only_needs_an_sms_token(social_only: Signed) -> None:
     assert social_only.client.delete(ME, {}).data["errors"][0]["field"] == "verification_token"
-    token = verification(social_only.customer.phone, "reset_password")
+    token = verification(str(social_only.customer.phone), "reset_password")
     assert social_only.client.delete(ME, {"verification_token": token}).status_code == 204
 
 
@@ -453,7 +454,10 @@ def test_account_security_payloads_and_localized_errors(signed: Signed) -> None:
     link = {"provider": "facebook", "token": "fake:fb-5:a@x.uz", "password": PASSWORD}
     assert signed.client.post(ME + "social/", link, **signed.idem()).status_code == 200
     assert signed.client.delete(ME + "social/facebook/", {"password": PASSWORD}).status_code == 200
-    payloads = [message.payload for message in OutboxMessage.objects.filter(topic="push.account_security")]
+    payloads = [
+        message.payload
+        for message in OutboxMessage.objects.filter(topic="push.account_security").order_by("id")
+    ]
     assert [payload["event"] for payload in payloads] == ["social_linked", "social_unlinked"]
     for payload in payloads:
         assert set(payload) == set(topics.ACCOUNT_SECURITY_PAYLOAD_KEYS) and len(payload["event_id"]) == 32

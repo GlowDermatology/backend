@@ -233,7 +233,7 @@ def test_reauthentication_failures_survive_the_rolled_back_transaction(path: str
         wrong = signed.client.delete(path, {"password": WRONG}, **key())
         assert wrong.data["errors"][0]["code"] == "password_incorrect", wrong.data
         assert failures(REAUTH_SCOPE, str(signed.customer.pk)) == attempt
-        assert failures(LOGIN_SCOPE, phone_guard_key(signed.customer.phone)) == attempt
+        assert failures(LOGIN_SCOPE, phone_guard_key(str(signed.customer.phone))) == attempt
     locked = signed.client.delete(path, {"password": PASSWORD}, **key())
     assert (locked.status_code, locked.data["code"]) == (429, "throttled")
     assert not IdempotencyRecord.objects.exists()
@@ -274,7 +274,7 @@ def test_put_device_with_a_key_signs_the_token_holder_out(
     assert moved.status_code == 200, moved.data
     assert AuthSession.objects.get(pk=holder.started.session.pk).revoke_reason == "replaced"
     replaced = holder.client.get(ME)
-    assert (replaced.status_code, replaced.data["code"]) == (401, "SESSION_REPLACED")
+    assert (replaced.status_code, replaced.data["code"]) == (401, "SESSION_EXPIRED")
     replay = taker.client.put(ME + "device/", body, **headers)
     assert replay["Idempotent-Replayed"] == "true" and replay.data == moved.data
     assert list(Device.objects.filter(fcm_token="fcm-idem-held").values_list("customer_id", flat=True)) == [

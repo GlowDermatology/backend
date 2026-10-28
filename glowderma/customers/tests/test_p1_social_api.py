@@ -9,6 +9,7 @@ from collections.abc import Iterator
 from typing import Any
 
 import pytest
+from django.conf import settings
 from django.core.cache import cache
 from django.test import override_settings
 from rest_framework.test import APIClient
@@ -355,3 +356,55 @@ def test_staff_oauth_is_404_with_fake_oauth_in_production(
         ).status_code
         == 200
     )
+
+
+# --- B-W1: social sign-in from the website ------------------------------------------------------------------
+
+WEB_FID = "web-browser-cookie-0003"
+SERVICES_ID = "uz.glowderma.web"
+WEB_REDIRECT = "https://glowderma.uz/auth/apple/callback"
+
+
+def web_client() -> APIClient:
+    client = APIClient()
+    client.default_format = "json"
+    client.credentials(
+        HTTP_X_GD_DEVICE_ID=WEB_FID,
+        HTTP_X_GD_PLATFORM="web",
+        HTTP_X_GD_INTERNAL_SECRET=settings.INTERNAL_API_SECRET,
+    )
+    return client
+
+
+@override_settings(APPLE_SERVICES_IDS=[SERVICES_ID], APPLE_WEB_REDIRECT_URI=WEB_REDIRECT)
+def test_apple_from_the_website_exchanges_with_the_services_id_and_redirect_uri() -> None:
+    client = web_client()
+    ticket = ticket_for(
+        client, f"fake-apple:w-1:x@y.z:{SERVICES_ID}", "apple", authorization_code="fake-code:w1"
+    )
+    assert fake_apple().exchanged == [("fake-code:w1", SERVICES_ID)]
+    assert fake_apple().redirect_uris == [WEB_REDIRECT]
+    customer = Customer.objects.create(phone=PHONE, name="Web")
+    jti = services.read_social_ticket(ticket, fid=WEB_FID).jti
+    done = complete(client, ticket, verification(PHONE, "link_social", jti=jti))
+    assert done.status_code == 200, done.data
+    identity = CustomerSocialIdentity.objects.get(customer=customer, provider="apple")
+    assert identity.provider_client_id == SERVICES_ID  # the revocation uses the Services ID
+    assert done.data["customer"]["id"] == customer.pk
+
+
+@override_settings(GOOGLE_WEB_CLIENT_IDS=["web-client.apps.googleusercontent.com"])
+def test_google_from_the_website_signs_a_linked_identity_in() -> None:
+    customer = password_customer(PHONE)
+    CustomerSocialIdentityFactory.create(customer=customer, provider="google", subject="g-web")
+    response = social(web_client(), "fake:g-web:m@gmail.com", "google")
+    assert response.status_code == 200 and "access" in response.data
+    session = customer.sessions.get(revoked_at__isnull=True)
+    assert session.device is not None and session.device.platform == "web"
+
+
+def test_a_website_nonce_is_bound_to_the_browser() -> None:
+    client = web_client()
+    raw = nonce(client)
+    other = app_client()
+    assert social(other, "fake:g-1:m@gmail.com", "google", nonce=raw).data["code"] == "social_token_invalid"

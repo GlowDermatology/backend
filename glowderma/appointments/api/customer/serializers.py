@@ -18,6 +18,7 @@ from glowderma.appointments.models import Appointment
 from glowderma.appointments.services import ACCOUNT_DELETED_REASON
 from glowderma.core import enums, i18n, timeutils
 from glowderma.core.api.exceptions import field_error
+from glowderma.core.api.fields import AwareDateTimeField
 from glowderma.core.media import absolute_media_url
 from glowderma.professionals.models import Location, Professional, ProfessionalService
 
@@ -79,7 +80,14 @@ class SpecialistServiceSerializer(serializers.Serializer[ProfessionalService]):
 
 class SpecialistSerializer(serializers.Serializer[Professional]):
     id = serializers.IntegerField()
+    slug = serializers.CharField(help_text="The website URL segment (B-W1); `specialists/{slug}/`.")
     name = serializers.CharField()
+    content_language = serializers.SerializerMethodField(
+        help_text=(
+            "Language of `bio` (else of `qualifications`): the requested language, or `uz` when it fell back "
+            "to Uzbek. `name` is the same in every language."
+        )
+    )
     role = serializers.ChoiceField(choices=enums.SpecialistRole.values)
     role_label = serializers.SerializerMethodField()
     photo_url = serializers.SerializerMethodField()
@@ -89,9 +97,15 @@ class SpecialistSerializer(serializers.Serializer[Professional]):
     location = LocationSerializer()
     services = serializers.SerializerMethodField()
     slot_step_min = serializers.IntegerField()
+    updated_at = AwareDateTimeField(help_text="Last change of the specialist (sitemap `lastmod`).")
 
     def get_role_label(self, obj: Professional) -> str:
         return i18n.t(f"label.role.{obj.role}", _lang(self))
+
+    @extend_schema_field(serializers.ChoiceField(choices=enums.ContentLanguage.values))
+    def get_content_language(self, obj: Professional) -> str:
+        field = "bio" if obj.bio_uz or getattr(obj, f"bio_{_lang(self)}", "") else "qualifications"
+        return i18n.content_language(obj, field, _lang(self))
 
     def get_photo_url(self, obj: Professional) -> str | None:
         return _photo_url(obj)

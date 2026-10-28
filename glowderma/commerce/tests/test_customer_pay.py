@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from django.conf import settings
 from rest_framework.test import APIClient
 
 from glowderma.accounts.models import Customer
@@ -233,3 +234,51 @@ def test_cancel_of_another_customers_order(customer_client: APIClient, now: date
     other = place(shopper(), fulfilment="pickup", when=now)
     assert cancel(customer_client, other).status_code == 404
     assert selectors.customer_inflight_order(other.customer_id) is None
+
+
+# --- B-W1: the website -----------------------------------------------------------------------------------
+
+
+def _web_client(customer: Customer) -> APIClient:
+    from glowderma.accounts import tokens  # noqa: PLC0415
+    from glowderma.accounts.tests.factories import start_test_session  # noqa: PLC0415
+
+    started = start_test_session(customer, fid="web-browser-cookie-0009", platform="web", app_version="")
+    client = APIClient()
+    client.credentials(
+        HTTP_AUTHORIZATION=f"Bearer {tokens.issue_access(started.session)[0]}",
+        HTTP_X_GD_DEVICE_ID="web-browser-cookie-0009",
+        HTTP_X_GD_PLATFORM="web",
+        HTTP_X_GD_INTERNAL_SECRET=settings.INTERNAL_API_SECRET,
+    )
+    return client
+
+
+@pytest.mark.parametrize(
+    ("language", "expected"),
+    [
+        ("uz", "https://glowderma.uz/buyurtmalar/{id}?paid=1"),
+        ("ru", "https://glowderma.uz/ru/buyurtmalar/{id}?paid=1"),
+        ("en", "https://glowderma.uz/en/buyurtmalar/{id}?paid=1"),
+    ],
+)
+def test_pay_from_the_website_returns_to_the_website(
+    customer: Customer, now: datetime, language: str, expected: str
+) -> None:
+    order = place(customer, fulfilment="pickup", when=now)
+    client = _web_client(customer)  # the token's iat must not be in the (pinned) future
+    with at(now + timedelta(seconds=10)):
+        body = pay(client, order, HTTP_ACCEPT_LANGUAGE=language).json()
+    assert body["return_url"] == expected.format(id=order.pk)
+    assert parse_qs(urlsplit(body["web_url"]).query)["return_url"] == [body["return_url"]]
+
+
+def test_the_web_return_template_takes_the_language(customer: Customer, now: datetime, settings: Any) -> None:
+    settings.PAYMENT_WEB_RETURN_URL = "https://shop.example.uz/{lang}/orders/{order_id}/paid"
+    order = place(customer, fulfilment="pickup", when=now)
+    client = _web_client(customer)
+    with at(now + timedelta(seconds=10)):
+        body = pay(client, order, "payme", HTTP_ACCEPT_LANGUAGE="ru").json()
+    assert body["return_url"] == f"https://shop.example.uz/ru/orders/{order.pk}/paid"
+    decoded = base64.b64decode(body["web_url"].removeprefix("https://checkout.paycom.uz/")).decode()
+    assert "c=https%3A%2F%2Fshop.example.uz%2Fru%2Forders%2F" in decoded

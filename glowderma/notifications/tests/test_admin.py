@@ -92,6 +92,6 @@ def test_changelists_change_pages_and_search_render() -> None:
     search = client.get(reverse("admin:notifications_campaign_changelist"), {"q": "Kuzgi"})
     assert search.status_code == 200 and b"Kuzgi namlik" in search.content
     by_phone = client.get(
-        reverse("admin:notifications_segmentmember_changelist"), {"q": member.customer.phone}
+        reverse("admin:notifications_segmentmember_changelist"), {"q": str(member.customer.phone)}
     )
-    assert by_phone.status_code == 200 and member.customer.phone.encode() in by_phone.content
+    assert by_phone.status_code == 200 and str(member.customer.phone).encode() in by_phone.content

@@ -254,6 +254,7 @@ def test_full_card(staff_client: APIClient, history: dict[str, Any]) -> None:
         "id": customer.pk,
         "name": "Malika Karimova",
         "phone": "+998901234567",
+        "email": None,
         "status": "active",
         "registered_at": iso(customer.registered_at),
         "deleted_at": None,

@@ -34,6 +34,9 @@ DEFAULT_THROTTLE_RATES: Final[dict[str, str]] = {
     "qr": "6/min",
     "public": "300/min",
     "public_ip": "3000/min",
+    # B-W1: the website's server-side calls made on its own behalf (secret, no forwarded browser IP: cache
+    # revalidation, sitemap builds); with a forwarded IP the per-IP scopes key on the browser's IP instead.
+    "public_bff": "6000/min",
 }
 
 # DRF ``SimpleRateThrottle.parse_rate``: "<requests>/<period>" where the period's first letter is one of

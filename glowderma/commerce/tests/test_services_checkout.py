@@ -137,7 +137,7 @@ def test_cashback_becomes_a_hold_until_the_reservation_expires() -> None:
     [
         {"items": []},
         {"fulfilment": "drone"},
-        {"channel": "web"},
+        {"channel": "kiosk"},
         {"payment_provider": "cash"},
         {"cashback_used": 10**9},
         {"address_text": ""},

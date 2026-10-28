@@ -33,6 +33,7 @@ from glowderma.accounts.api.throttles import (
     CustomerAuthDeviceThrottle,
     CustomerAuthIPThrottle,
     CustomerRateThrottle,
+    PublicBffThrottle,
     PublicDeviceThrottle,
     PublicIPThrottle,
 )
@@ -137,6 +138,7 @@ class PublicAPIView(DeviceHeadersMixin, APIView):
     throttle_classes = [
         PublicDeviceThrottle,
         PublicIPThrottle,
+        PublicBffThrottle,
         CustomerRateThrottle,
     ]
 

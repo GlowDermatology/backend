@@ -516,7 +516,7 @@ def create_order(
             address_city_code=address["city_code"],
             address_comment=address["comment"],
             recipient_name=customer.name,
-            recipient_phone=customer.phone,
+            recipient_phone=customer.phone or "",  # checkout is phone-gated (C§2.2.10)
             customer_note=customer_note,
             items_subtotal=items_subtotal,
             promo_subtotal=promo_subtotal,

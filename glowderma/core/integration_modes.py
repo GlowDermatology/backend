@@ -26,7 +26,10 @@ PROVIDER_MODE_SETTINGS: dict[str, str] = {
     "payme": "PAYME_MODE",
     "bts": "BTS_MODE",
     "eskiz": "ESKIZ_MODE",
+    "email": "EMAIL_MODE",
 }
+# Setting values that name the live adapter of a provider with its own vocabulary (``EMAIL_MODE=smtp``).
+LIVE_MODE_ALIASES: dict[str, str] = {"smtp": "live"}
 # Payment providers in the order ``settings/public/`` lists them (customer contract §2.4).
 PAYMENT_PROVIDERS: tuple[str, ...] = (enums.PaymentProvider.CLICK.value, enums.PaymentProvider.PAYME.value)
 # Providers whose callbacks (webhooks) are refused while they are fake under the production settings
@@ -37,7 +40,7 @@ PRODUCTION_SETTINGS_MODULE = "config.settings.production"
 
 def provider_modes() -> dict[str, str]:
     """``{provider: "fake" | "live"}`` for every provider with a ``*_MODE`` setting, in a fixed order."""
-    return {provider: str(getattr(settings, name)) for provider, name in PROVIDER_MODE_SETTINGS.items()}
+    return {provider: provider_mode(provider) for provider in PROVIDER_MODE_SETTINGS}
 
 
 def fake_providers() -> list[str]:
@@ -56,8 +59,10 @@ def dev_features_allowed() -> bool:
 
 
 def provider_mode(provider: str) -> str:
-    """The mode of one provider; an unknown name is a programming error (``KeyError``)."""
-    return str(getattr(settings, PROVIDER_MODE_SETTINGS[provider]))
+    """The mode of one provider (``fake`` | ``live``; ``EMAIL_MODE=smtp`` reads ``live``); an unknown name
+    is a programming error (``KeyError``)."""
+    value = str(getattr(settings, PROVIDER_MODE_SETTINGS[provider]))
+    return LIVE_MODE_ALIASES.get(value, value)
 
 
 def fake_in_production(provider: str) -> bool:

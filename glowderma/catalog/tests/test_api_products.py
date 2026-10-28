@@ -33,6 +33,14 @@ pytestmark = pytest.mark.django_db
 PRODUCTS = "/api/v1/admin/products/"
 
 
+NEW_KEYS = frozenset({"slug", "seo", "seo_status", "updated_at", "seo_title", "seo_description"})
+
+
+def without_bw1(row: dict[str, Any], keep: frozenset[str] = frozenset()) -> dict[str, Any]:
+    """The row without the B-W1 SEO keys (tested in ``catalog/tests/test_seo.py``)."""
+    return {key: value for key, value in row.items() if key not in NEW_KEYS - keep}
+
+
 def ids(response: Any) -> list[int]:
     return [item["id"] for item in response.json()["results"]]
 
@@ -83,7 +91,8 @@ def test_list_item_shape(staff_client: APIClient, staff: StaffUser) -> None:
     image = ProductImageFactory.create(product=product)
     item = staff_client.get(PRODUCTS).json()["results"][0]
     url = f"{settings.PUBLIC_MEDIA_BASE_URL.rstrip('/')}/{image.file.name}"
-    assert item == {
+    assert set(item) >= {"slug", "seo", "seo_status"}
+    assert without_bw1(item, frozenset({"updated_at"})) == {
         "id": product.pk,
         "billz_id": "4607012301",
         "billz_name": "HYALURONIC SERUM 30ML",
@@ -401,7 +410,8 @@ def test_create_happy_path_full_shape(staff_client: APIClient, staff: StaffUser)
     product = Product.objects.get(billz_id="4607012301")
     stock = ProductStock.objects.get(product=product)
     data = response.json()
-    assert data == {
+    assert set(data) >= {"slug", "seo", "seo_status"}
+    assert without_bw1(data, frozenset({"updated_at"})) == {
         "id": product.pk,
         "billz_id": "4607012301",
         "billz_name": "BILLZ ITEM 4607012301",  # fake Billz synthetic product

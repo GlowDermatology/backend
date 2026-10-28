@@ -1,0 +1,6 @@
+{% autoescape off %}{{ body }}
+
+--
+Glow Derma
+{{ footer }}
+{% endautoescape %}

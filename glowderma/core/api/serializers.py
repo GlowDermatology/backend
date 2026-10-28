@@ -23,13 +23,18 @@ class ActorSerializer(serializers.Serializer[Any]):
 
 # Takes any ``accounts.Customer`` instance; the one ``CustomerRef`` component every module renders.
 class CustomerRefSerializer(serializers.Serializer[Any]):
-    """``CustomerRef = {"id", "name", "phone"}`` (contract §2.0); ``name`` is ``""`` once the customer is
-    deleted (scrubbed).
+    """``CustomerRef = {"id", "name", "phone", "email"}`` (contract §2.0); ``name`` is ``""`` once the
+    customer is deleted (scrubbed).
     """
 
     id = serializers.IntegerField(source="pk")
     name = serializers.CharField(allow_blank=True)
-    phone = serializers.CharField()
+    # Hybrid identity: null only for an account without a phone yet (never on orders and payments, which are
+    # phone-gated; a staff booking may name one).
+    phone = serializers.CharField(allow_null=True)
+    # Additive (``feat/customer-web``): the verified e-mail address, so the admin can name a phoneless
+    # customer instead of "—"; null without one (and after deletion, which scrubs it).
+    email = serializers.CharField(allow_null=True)
 
 
 # One field per entry of ``core.integration_modes.PROVIDER_MODE_SETTINGS`` (health ``?ready=1`` and

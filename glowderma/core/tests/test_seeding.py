@@ -138,8 +138,10 @@ def test_pinned_clock_and_context_helpers() -> None:
     assert art != seeding.placeholder_art("dropper")
     with Image.open(BytesIO(art)) as image:
         assert image.format == "WEBP"
-        assert image.size == (seeding.PLACEHOLDER_SIDE, seeding.PLACEHOLDER_SIDE)
+        assert image.size == (seeding.PLACEHOLDER_WIDTH, seeding.PLACEHOLDER_HEIGHT) == (1200, 1500)
     assert seeding.placeholder_art("unknown-kind", "unknown-tone")  # falls back to grey
+    portrait = seeding.placeholder_art("portrait")
+    assert portrait != seeding.placeholder_art("jar") and len(portrait) < 100_000  # small enough for the seed
 
 
 @pytest.mark.django_db

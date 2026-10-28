@@ -60,6 +60,7 @@ def test_send_code_issues_a_sealed_code_and_the_sms(django_capture_on_commit_cal
     assert response.status_code == 200, response.data
     assert response.data == {
         "phone_mask": "+998 90 *** ** 11",
+        "email_mask": None,
         "purpose": "register",
         "expires_in": 120,
         "resend_in": 60,

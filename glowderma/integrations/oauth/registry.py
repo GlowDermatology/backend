@@ -4,9 +4,10 @@
 * :func:`get_oauth_provider` (staff ``auth/oauth/{provider}/``): ``google`` / ``facebook`` only
   (``PROVIDER_NAMES`` = ``STAFF_PROVIDERS``; ``apple`` never reaches the staff routes).
 * :func:`get_app_verifier` (customer ``auth/social/``, ``me/social/``): ``google`` / ``facebook`` / ``apple``
-  (``CUSTOMER_PROVIDERS``); ``apple`` additionally needs ``APPLE_BUNDLE_IDS`` with ``OAUTH_MODE=live``
-  (empty →
-  404), while the fake Apple adapter answers with ``OAUTH_MODE=fake`` (local/test) even without it.
+  (``CUSTOMER_PROVIDERS``); ``apple`` additionally needs ``APPLE_BUNDLE_IDS`` or ``APPLE_SERVICES_IDS``
+  (the website, B-W1) with ``OAUTH_MODE=live`` (both empty → 404), while the fake Apple adapter answers
+  with ``OAUTH_MODE=fake`` (local/test) even without them. Google accepts ``GOOGLE_APP_CLIENT_IDS`` and
+  ``GOOGLE_WEB_CLIENT_IDS``.
 * :func:`get_apple_service`: the Apple code exchange and revocation (fake or live).
 
 ``settings.OAUTH_MODE`` (default ``INTEGRATIONS_MODE``) selects the implementation; an unknown provider
@@ -67,6 +68,7 @@ def _facebook() -> FacebookOAuthProvider:
 def _apple() -> AppleProvider:
     return AppleProvider(
         bundle_ids=list(settings.APPLE_BUNDLE_IDS),
+        services_ids=list(settings.APPLE_SERVICES_IDS),
         team_id=settings.APPLE_TEAM_ID,
         key_id=settings.APPLE_KEY_ID,
         private_key_file=settings.APPLE_PRIVATE_KEY_FILE,
@@ -77,7 +79,12 @@ def customer_provider_available(name: str) -> bool:
     """Whether customer social sign-in with ``name`` is offered (else the routes answer 404)."""
     if name not in CUSTOMER_PROVIDERS or integration_modes.fake_in_production("oauth"):
         return False
-    return not (name == "apple" and settings.OAUTH_MODE == "live" and not settings.APPLE_BUNDLE_IDS)
+    return not (
+        name == "apple"
+        and settings.OAUTH_MODE == "live"
+        and not settings.APPLE_BUNDLE_IDS
+        and not settings.APPLE_SERVICES_IDS
+    )
 
 
 def get_app_verifier(name: str) -> AppTokenVerifier:
@@ -89,7 +96,10 @@ def get_app_verifier(name: str) -> AppTokenVerifier:
             return _fake_apple
         return FakeGoogleApp() if name == "google" else FakeFacebookApp()
     if name == "google":
-        return GoogleAppTokenVerifier(client_ids=list(settings.GOOGLE_APP_CLIENT_IDS))
+        # B-W1: the website's Google Identity Services client ids are accepted next to the app's.
+        return GoogleAppTokenVerifier(
+            client_ids=list(dict.fromkeys([*settings.GOOGLE_APP_CLIENT_IDS, *settings.GOOGLE_WEB_CLIENT_IDS]))
+        )
     if name == "facebook":
         return _facebook()
     return _apple()

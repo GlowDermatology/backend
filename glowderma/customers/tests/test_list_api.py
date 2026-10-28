@@ -143,6 +143,7 @@ def test_item_shape(staff_client: APIClient, staff: StaffUser, policies: dict[in
         "id": malika.pk,
         "name": "Malika Karimova",
         "phone": "+998901234567",
+        "email": None,
         "status": "active",
         "registered_at": (ANCHOR - timedelta(days=30)).isoformat(),
         "lifetime_total": 13_580_000,

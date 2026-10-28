@@ -221,7 +221,7 @@ def create_campaign(data: CampaignInput, image: Any = None, *, actor: Any, reque
         audience_segment=data.audience_segment,
         audience_segment_name=data.audience_segment.name if data.audience_segment is not None else "",
         audience_customer=data.audience_customer,
-        audience_phone=data.audience_customer.phone if data.audience_customer is not None else "",
+        audience_phone=(data.audience_customer.phone or "") if data.audience_customer is not None else "",
         state=Campaign.State.SCHEDULED if scheduled else Campaign.State.QUEUED,
         scheduled_at=data.scheduled_at,
         author=actor,
@@ -559,15 +559,18 @@ def _deliver(
     """Claim protocol (design 03 §3.6): ``get_or_create`` the inbox row, claim it, call FCM outside the
     transaction, record the outcome. A redelivery finds the row settled and does nothing.
 
-    ``data`` gets the row's ``inbox_id`` (C§2.14.2) and the message the channel/priority of its type. A dead
-    token (``unregistered``) prunes the device; ``payload_invalid`` fails the row with ``push_error =
-    "payload_invalid"`` and an ERROR log and returns normally (the outbox message ends ``done``), never
-    touching the device. ``FcmUnavailable`` gives the claim back and raises (outbox retry); ``not_sent`` gives
-    it back and defers the message (``outbox.RetryLater``); any other exception (a soft time limit) fails the
-    row ``interrupted`` — never resent, never left ``sending`` — and re-raises.
+    B-W1: the push fans out to **every** pushable device of the customer (one FCM batch, newest device
+    first, at most ``selectors.MAX_PUSH_DEVICES``), all carrying the same ``inbox_id``. ``data`` gets the
+    row's ``inbox_id`` (C§2.14.2) and the message the channel/priority of its type. The row is ``sent`` when
+    at least one device got it; a dead token (``unregistered``) prunes that device; ``payload_invalid``
+    fails the row with ``push_error = "payload_invalid"`` and an ERROR log and returns normally (the outbox
+    message ends ``done``), never touching a device. ``FcmUnavailable`` gives the claim back and raises
+    (outbox retry); when no device got it and one answered ``not_sent`` the claim is given back and the
+    message deferred (``outbox.RetryLater``); any other exception (a soft time limit) fails the row
+    ``interrupted`` — never resent, never left ``sending`` — and re-raises.
     """
     with transaction.atomic():
-        device = selectors.customer_push_device(customer.pk)
+        devices = selectors.customer_push_devices(customer.pk)
         inbox, _created = InboxNotification.objects.get_or_create(
             dedupe_key=dedupe_key,
             defaults={
@@ -581,23 +584,26 @@ def _deliver(
                 "template_status": template_status,
                 "language": language,
                 "push_state": (
-                    InboxNotification.PushState.QUEUED if device else InboxNotification.PushState.NO_DEVICE
+                    InboxNotification.PushState.QUEUED if devices else InboxNotification.PushState.NO_DEVICE
                 ),
             },
         )
         if inbox.push_state != InboxNotification.PushState.QUEUED:
             return inbox
-        if device is None:
+        if not devices:
             inbox.push_state = InboxNotification.PushState.NO_DEVICE
             inbox.save(update_fields=["push_state"])
             return inbox
         inbox.push_state = InboxNotification.PushState.SENDING
         inbox.save(update_fields=["push_state"])
-        token, device_id = device.fcm_token, device.pk
-    message = _typed_message(token, inbox.title, inbox.body, {**data, "inbox_id": str(inbox.pk)})
+        targets = list(dict.fromkeys((device.fcm_token, device.pk) for device in devices))
+    messages = [
+        _typed_message(token, inbox.title, inbox.body, {**data, "inbox_id": str(inbox.pk)})
+        for token, _device_id in targets
+    ]
     sending = InboxNotification.objects.filter(pk=inbox.pk, push_state=InboxNotification.PushState.SENDING)
     try:
-        [result] = get_fcm_port().send([message])
+        results = get_fcm_port().send(messages)
     except FcmUnavailable:
         sending.update(push_state=InboxNotification.PushState.QUEUED)
         raise
@@ -605,17 +611,20 @@ def _deliver(
         # an outcome nobody knows (a soft time limit, a bug): failed, never resent, never stuck "sending"
         sending.update(push_state=InboxNotification.PushState.FAILED, push_error=INTERRUPTED)
         raise
-    if result.error == NOT_SENT:
+    now = timeutils.now()
+    delivered = any(result.ok for result in results)
+    for (token, device_id), result in zip(targets, results, strict=True):
+        if not result.ok and result.error != NOT_SENT:
+            _after_failure(result, token, device_id, topic, inbox.pk)
+    if not delivered and any(result.error == NOT_SENT for result in results):
         sending.update(push_state=InboxNotification.PushState.QUEUED)
         raise outbox.RetryLater(
             NOT_SENT_RETRY, f"push {inbox.pk} not sent by FCM", give_up_after=NOT_SENT_GIVE_UP
         )
-    now = timeutils.now()
-    if result.ok:
+    if delivered:
         inbox.push_state, inbox.pushed_at = InboxNotification.PushState.SENT, now
     else:
-        inbox.push_state, inbox.push_error = InboxNotification.PushState.FAILED, result.error
-        _after_failure(result, token, device_id, topic, inbox.pk)
+        inbox.push_state, inbox.push_error = InboxNotification.PushState.FAILED, results[0].error
     inbox.save(update_fields=["push_state", "pushed_at", "push_error"])
     return inbox
 
@@ -736,10 +745,10 @@ def deliver_appointment(payload: dict[str, Any]) -> InboxNotification | None:
 def deliver_account_security(payload: dict[str, Any]) -> InboxNotification | None:
     """Handler body of ``push.account_security`` (C§2.14.2, §2.12): one ``general`` inbox row per
     ``event_id`` (``source_type=account``, ``source_id`` = the customer, ``link {"kind": "none"}``, dedupe
-    ``account:{customer_id}:{event}:{event_id}``), the visible notice to the current device, then the same
-    notice (same ``inbox_id``) to each ``farewell_token`` — the devices a reset or a social completion
-    deactivated. The handler blanks those tokens in the stored payload afterwards. No PII: the texts carry
-    the provider name only.
+    ``account:{customer_id}:{event}:{event_id}``), the visible notice to every signed-in pushable device
+    (B-W1 fan-out), then the same notice (same ``inbox_id``) to each ``farewell_token`` — the devices a reset
+    or a password change signed out. The handler blanks those tokens in the stored payload afterwards. No
+    PII: the texts carry the provider name only.
     """
     missing = set(account_topics.ACCOUNT_SECURITY_PAYLOAD_KEYS) - set(payload)
     if missing:
@@ -771,12 +780,12 @@ def deliver_account_security(payload: dict[str, Any]) -> InboxNotification | Non
         data=data,
         topic=account_topics.PUSH_ACCOUNT_SECURITY,
     )
-    current = selectors.customer_push_device(customer_id)
+    current = {device.fcm_token for device in selectors.customer_push_devices(customer_id)}
     candidates = list(
         dict.fromkeys(
             str(token)
             for token in payload.get("farewell_tokens") or []
-            if token and (current is None or str(token) != current.fcm_token)
+            if token and str(token) not in current
         )
     )
     # C§1.9 step 4 (the push.session_replaced rule): a token now held by an active Device row belongs to an

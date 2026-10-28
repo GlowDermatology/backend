@@ -39,6 +39,7 @@ def test_defaults_match_contract_1_9() -> None:
         "qr",
         "public",
         "public_ip",
+        "public_bff",  # B-W1
     }
     for rate in DEFAULT_THROTTLE_RATES.values():
         validate_throttle_rates({"login": rate})

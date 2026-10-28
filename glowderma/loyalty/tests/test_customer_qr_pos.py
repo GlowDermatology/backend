@@ -15,9 +15,10 @@ from django.test import override_settings
 from rest_framework.test import APIClient
 
 from glowderma.accounts import services as account_services
-from glowderma.accounts.models import Customer
+from glowderma.accounts import sessions as account_sessions
+from glowderma.accounts.models import AuthSession, Customer
 from glowderma.accounts.tests.factories import CustomerFactory, StaffUserFactory, start_test_session
-from glowderma.core import qr_store
+from glowderma.core import qr_store, timeutils
 from glowderma.core.models import AuditEntry
 from glowderma.core.seeding import pinned_clock
 from glowderma.loyalty import qr, seeds
@@ -60,7 +61,7 @@ def test_qr_raw_token_is_not_stored_and_not_logged(
     customer: Customer, customer_client: APIClient, caplog: pytest.LogCaptureFixture
 ) -> None:
     token = _token(customer_client)
-    # only the HMAC of the token is a key; the stored value is "{customer_id}:{epoch}"
+    # only the HMAC of the token is a key; the stored value is "{customer_id}:{epoch}:{session_id}"
     assert qr_store._local.values  # LocMem stand-in under the test settings
     for key, (value, _expiry) in qr_store._local.values.items():
         assert token not in key and token not in value
@@ -94,10 +95,11 @@ def test_qr_throttle(customer_client: APIClient) -> None:
     assert throttled.json()["code"] == "throttled" and throttled.has_header("Retry-After")
 
 
-@pytest.mark.parametrize("how", ["logout", "replaced", "deleted"])
+@pytest.mark.parametrize("how", ["logout", "replaced", "session_revoked", "deleted"])
 def test_tokens_are_revoked_on_logout_replace_and_delete(
     how: str,
     customer: Customer,
+    customer_session: tuple[AuthSession, str],
     customer_client: APIClient,
     pos_client: APIClient,
     django_capture_on_commit_callbacks: Callable[..., Any],
@@ -107,9 +109,42 @@ def test_tokens_are_revoked_on_logout_replace_and_delete(
         if how == "logout":
             account_services.revoke_customer_sessions(customer.pk, "logout")
         elif how == "replaced":
-            start_test_session(customer, fid="fid-second-device")
+            start_test_session(customer)  # the same install signs in again: its old session ends
+        elif how == "session_revoked":
+            account_sessions.revoke_session(
+                customer.pk, str(customer_session[0].pk), actor=customer, actor_type="customer"
+            )
         else:
             account_services.delete_customer(customer.pk)
+    response = _resolve(pos_client, token)
+    assert response.status_code == 409 and response.json()["code"] == "qr_invalid"
+
+
+def test_a_sign_in_on_another_device_keeps_the_token(
+    customer: Customer,
+    customer_client: APIClient,
+    pos_client: APIClient,
+    django_capture_on_commit_callbacks: Callable[..., Any],
+) -> None:
+    """B-W1: the phone showing the QR stays signed in while the customer signs in on the website."""
+    token = _token(customer_client)
+    with django_capture_on_commit_callbacks(execute=True):
+        start_test_session(customer, fid="fid-website-01", platform="web", app_version="")
+    assert _resolve(pos_client, token).status_code == 200
+
+
+def test_a_token_of_an_ended_session_is_refused_even_if_its_key_survived(
+    customer: Customer,
+    customer_session: tuple[AuthSession, str],
+    customer_client: APIClient,
+    pos_client: APIClient,
+) -> None:
+    """The resolve re-checks the issuing session: a revocation whose on-commit key deletion was lost (Redis
+    down at that moment) still makes the token worthless."""
+    token = _token(customer_client)
+    AuthSession.objects.filter(pk=customer_session[0].pk).update(
+        revoked_at=timeutils.now(), revoke_reason="logout"
+    )
     response = _resolve(pos_client, token)
     assert response.status_code == 409 and response.json()["code"] == "qr_invalid"
 
@@ -349,7 +384,7 @@ def test_pos_api_keys_are_seeded_only_with_dev_features(db: None) -> None:
 
 def test_resolve_qr_is_single_use_under_two_threads(db: None) -> None:
     customer = CustomerFactory.create()
-    token = qr.issue_qr(customer.pk).token
+    token = qr.issue_qr(customer.pk, "sid-race").token
     start = threading.Event()
     results: list[int | None] = []
     lock = threading.Lock()
@@ -358,7 +393,7 @@ def test_resolve_qr_is_single_use_under_two_threads(db: None) -> None:
         start.wait(10)
         value = qr.resolve_qr(token)
         with lock:
-            results.append(value)
+            results.append(value.customer_id if value is not None else None)
 
     threads = [threading.Thread(target=scan) for _ in range(2)]
     for thread in threads:

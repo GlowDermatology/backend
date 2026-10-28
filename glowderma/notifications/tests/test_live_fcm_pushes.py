@@ -17,7 +17,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from django.test import override_settings
 
-from glowderma.accounts.tests.factories import CustomerFactory, DeviceFactory
+from glowderma.accounts.tests.factories import CustomerFactory, SignedInDeviceFactory
 from glowderma.commerce.tests.factories import OrderFactory
 from glowderma.core import outbox
 from glowderma.integrations import httpclient
@@ -70,7 +70,7 @@ def order_push(customer_id: int) -> dict[str, Any]:
 
 def test_an_accepted_push_carries_the_inbox_id(clock: Any, live_fcm: Script) -> None:
     customer = CustomerFactory.create()
-    DeviceFactory.create(customer=customer, fcm_token="live-device-1")
+    SignedInDeviceFactory.create(customer=customer, fcm_token="live-device-1")
     live_fcm.on("POST", SEND_PATH, reply("fcm", "send_ok"))
     inbox = services.deliver_order_status(order_push(customer.pk))
     assert inbox is not None and inbox.push_state == "sent"
@@ -81,7 +81,7 @@ def test_an_accepted_push_carries_the_inbox_id(clock: Any, live_fcm: Script) -> 
 
 def test_a_dead_token_answer_prunes_the_device(clock: Any, live_fcm: Script) -> None:
     customer = CustomerFactory.create()
-    device = DeviceFactory.create(customer=customer, fcm_token="live-device-gone")
+    device = SignedInDeviceFactory.create(customer=customer, fcm_token="live-device-gone")
     live_fcm.on("POST", SEND_PATH, reply("fcm", "error_unregistered", 404))
     inbox = services.deliver_order_status(order_push(customer.pk))
     assert inbox is not None and (inbox.push_state, inbox.push_error) == ("failed", "unregistered")
@@ -102,7 +102,7 @@ def test_a_transient_failure_never_touches_the_device(
     clock: Any, live_fcm: Script, fixture: str, status: int
 ) -> None:
     customer = CustomerFactory.create()
-    device = DeviceFactory.create(customer=customer, fcm_token="live-device-2")
+    device = SignedInDeviceFactory.create(customer=customer, fcm_token="live-device-2")
     live_fcm.on("POST", SEND_PATH, reply("fcm", fixture, status))
     with pytest.raises(FcmUnavailable):
         services.deliver_order_status(order_push(customer.pk))
@@ -113,9 +113,9 @@ def test_a_transient_failure_never_touches_the_device(
 
 def test_a_campaign_batch_records_one_result_per_recipient(clock: Any, live_fcm: Script) -> None:
     alive, gone, broken = CustomerFactory.create(), CustomerFactory.create(), CustomerFactory.create()
-    DeviceFactory.create(customer=alive, fcm_token="c-alive")
-    dead = DeviceFactory.create(customer=gone, fcm_token="c-gone")
-    kept = DeviceFactory.create(customer=broken, fcm_token="c-payload")
+    SignedInDeviceFactory.create(customer=alive, fcm_token="c-alive")
+    dead = SignedInDeviceFactory.create(customer=gone, fcm_token="c-gone")
+    kept = SignedInDeviceFactory.create(customer=broken, fcm_token="c-payload")
     live_fcm.on(
         "POST",
         SEND_PATH,
@@ -144,9 +144,9 @@ def test_a_campaign_batch_gives_back_what_fcm_did_not_take(clock: Any, live_fcm:
     """R4 / A-S7: one recipient's QUOTA_EXCEEDED does not fail it (nor the rest): its claim is given back,
     the cursor stays, and the outbox delivers the same batch again later for it alone."""
     first, busy, last = CustomerFactory.create(), CustomerFactory.create(), CustomerFactory.create()
-    DeviceFactory.create(customer=first, fcm_token="q-first")
-    DeviceFactory.create(customer=busy, fcm_token="q-busy")
-    DeviceFactory.create(customer=last, fcm_token="q-last")
+    SignedInDeviceFactory.create(customer=first, fcm_token="q-first")
+    SignedInDeviceFactory.create(customer=busy, fcm_token="q-busy")
+    SignedInDeviceFactory.create(customer=last, fcm_token="q-last")
     answers = {
         "q-first": reply("fcm", "send_ok"),
         "q-busy": reply("fcm", "error_quota", 429),
@@ -178,7 +178,7 @@ def test_a_status_push_whose_outcome_is_unknown_is_failed_never_stuck_sending(
     """R1 / R15: an answer lost after sending fails the row (never resent); a soft time limit while sending
     fails it ``interrupted`` and propagates — never ``sending`` forever."""
     customer = CustomerFactory.create()
-    DeviceFactory.create(customer=customer, fcm_token="u-device")
+    SignedInDeviceFactory.create(customer=customer, fcm_token="u-device")
 
     def garbled(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, headers={"Content-Encoding": "gzip"}, stream=httpx.ByteStream(b"not gzip"))
@@ -191,7 +191,7 @@ def test_a_status_push_whose_outcome_is_unknown_is_failed_never_stuck_sending(
         raise SoftTimeLimitExceeded()
 
     other = CustomerFactory.create()
-    DeviceFactory.create(customer=other, fcm_token="u-other")
+    SignedInDeviceFactory.create(customer=other, fcm_token="u-other")
     live_fcm.on("POST", SEND_PATH, soft_limit)
     OrderFactory.create(id=10249, customer_id=other.pk, created_at=ANCHOR)
     with pytest.raises(SoftTimeLimitExceeded):

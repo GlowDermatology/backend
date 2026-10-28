@@ -19,7 +19,7 @@ from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from glowderma.accounts.models import StaffUser
-from glowderma.core import enums, timeutils
+from glowderma.core import enums, slugs, timeutils
 from glowderma.core.api.exceptions import field_error
 from glowderma.core.api.fields import (
     AwareDateTimeField,
@@ -203,6 +203,7 @@ class ClinicSpecialistSerializer(serializers.Serializer[Professional]):
     """
 
     id = serializers.IntegerField()
+    slug = serializers.CharField(help_text="The website URL segment (B-W1): unique, editable.")
     name = serializers.CharField()
     role = serializers.ChoiceField(choices=enums.SpecialistRole.values)
     qualifications = serializers.SerializerMethodField()
@@ -266,6 +267,28 @@ class ClinicSpecialistWriteSerializer(serializers.Serializer[dict[str, Any]]):
     staff_user_id = _int(required=False, allow_null=True, help_text="An active staff account, or null.")
     position = serializers.IntegerField(min_value=0, max_value=MAX_POSITION, required=False)
     is_active = serializers.BooleanField(required=False, default=False)
+    slug = serializers.CharField(
+        max_length=160, required=False, help_text="Optional on create (derived from the name)."
+    )
+
+    def validate_slug(self, value: str) -> str:
+        """B-W1: ``^[a-z0-9]+(-[a-z0-9]+)*$``, not only digits, ≤160, unique."""
+        value = value.strip()
+        if not slugs.is_valid_slug(value, max_length=160):
+            raise serializers.ValidationError(
+                field_error(
+                    "invalid", "Faqat lotin kichik harflari, raqamlar va chiziqcha (faqat raqam emas)."
+                )
+            )
+        taken = Professional.objects.filter(slug=value)
+        editing = self.context.get("professional_id")
+        if editing is not None:
+            taken = taken.exclude(pk=editing)
+        if taken.exists():
+            raise serializers.ValidationError(
+                field_error("unique", "Bu manzil (slug) boshqa mutaxassisda bor.")
+            )
+        return value
 
     def validate_slot_step_min(self, value: int) -> int:
         if value not in SLOT_STEPS:

@@ -87,7 +87,7 @@ class OrderViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
             yield (
                 order.pk,
                 order.customer.name,
-                order.customer.phone,
+                order.customer.phone or "",
                 format_export_datetime(order.created_at),
                 order.total,
                 labels.PAYMENT_STATUS[payment["status"]],

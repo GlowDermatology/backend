@@ -15,6 +15,7 @@ from rest_framework import mixins
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from glowderma.accounts import services as account_services
 from glowderma.accounts.api.customer_base import CustomerAPIView, CustomerGenericViewSet
 from glowderma.accounts.api.throttles import CustomerRateThrottle, QrThrottle
 from glowderma.accounts.models import Customer
@@ -82,11 +83,15 @@ class QrView(CustomerAPIView):
         operation_id="customer_qr_retrieve",
         description=(
             "A fresh single-use personal QR token (60 s; at most two live tokens per customer). Request a "
-            "new one every `refresh_in_seconds` and whenever the screen regains focus."
+            "new one every `refresh_in_seconds` and whenever the screen regains focus. 409 `phone_required` "
+            "while the account has no verified phone (`me/phone/`)."
         ),
         parameters=HEADERS,
         responses={200: QrTokenSerializer, **CUSTOMER_ERRORS},
     )
     def get(self, request: Request) -> Response:
-        token = qr.issue_qr(request_customer(request).pk)
+        claims = request.auth if isinstance(request.auth, dict) else {}
+        customer = request_customer(request)
+        account_services.require_phone(customer)  # the cashier attaches the sale by phone (C§2.10)
+        token = qr.issue_qr(customer.pk, str(claims.get("sid", "")))
         return Response(QrTokenSerializer(asdict(token)).data)

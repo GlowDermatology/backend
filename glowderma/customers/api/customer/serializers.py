@@ -13,10 +13,10 @@ from typing import Any
 
 from rest_framework import serializers
 
-from glowderma.accounts.api.throttles import canonical_phone
+from glowderma.accounts.api.throttles import EMAIL_MAX_LENGTH, canonical_email, canonical_phone
 from glowderma.core import enums
 from glowderma.core.api.exceptions import field_error
-from glowderma.core.api.fields import QueryBooleanField
+from glowderma.core.api.fields import AwareDateTimeField, QueryBooleanField
 
 CODE_PATTERN = re.compile(r"^[0-9]{6}$")
 REFERENCE_CODE = re.compile(r"^[0-9]{1,16}$")
@@ -40,6 +40,50 @@ class CustomerPhoneField(serializers.CharField):
         return phone
 
 
+class CustomerEmailField(serializers.CharField):
+    """An e-mail address, returned normalised (trimmed, lower case); else ``invalid``
+    (``field.email_invalid``, hybrid identity)."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        kwargs.setdefault("max_length", EMAIL_MAX_LENGTH + 16)  # surrounding spaces are trimmed first
+        super().__init__(**kwargs)
+
+    def to_internal_value(self, data: Any) -> str:
+        value = super().to_internal_value(data)
+        email = canonical_email(value)
+        if email is None:
+            raise serializers.ValidationError([field_error("invalid", message_key="field.email_invalid")])
+        return email
+
+
+class IdentifierSerializer(serializers.Serializer[dict[str, Any]]):
+    """``phone`` **or** ``email`` (hybrid identity, customer contract §2.1): exactly one per call. Neither →
+    ``phone`` ``required`` (``field.identifier_required``); both → ``email`` ``invalid``
+    (``field.identifier_ambiguous``). ``validated_data["identifier"]`` is the one given (an address holds
+    ``@``, a phone never does)."""
+
+    phone = CustomerPhoneField(required=False, allow_null=True)
+    email = CustomerEmailField(required=False, allow_null=True)
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        phone, email = attrs.get("phone"), attrs.get("email")
+        if phone and email:
+            raise serializers.ValidationError(
+                {"email": [field_error("invalid", message_key="field.identifier_ambiguous")]}
+            )
+        if not phone and not email:
+            raise serializers.ValidationError(
+                {"phone": [field_error("required", message_key="field.identifier_required")]}
+            )
+        attrs["identifier"] = phone or email
+        return attrs
+
+
+# Purposes ``auth/send-code/`` and ``auth/verify-code/`` refuse (``invalid_choice``): the new-device code is
+# issued only by ``auth/login/``; ``attach_phone`` / ``verify_email`` belong to ``me/phone/`` / ``me/email/``.
+SIGNED_IN_PURPOSES = frozenset({enums.OtpPurpose.ATTACH_PHONE, enums.OtpPurpose.VERIFY_EMAIL})
+
+
 def _password(**kwargs: Any) -> serializers.CharField:
     return serializers.CharField(max_length=128, trim_whitespace=False, write_only=True, **kwargs)
 
@@ -61,17 +105,18 @@ def clean_name(value: str | None) -> str | None:
     return value
 
 
-class SendCodeSerializer(serializers.Serializer[dict[str, Any]]):
-    phone = CustomerPhoneField()
+class SendCodeSerializer(IdentifierSerializer):
     purpose = serializers.ChoiceField(choices=enums.OtpPurpose.values)
     social_ticket = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=2048)
 
     def validate_purpose(self, value: str) -> str:
-        if value == enums.OtpPurpose.LOGIN_NEW_DEVICE:  # issued only by auth/login/ after the password
+        # login_new_device: issued only by auth/login/ after the password
+        if value == enums.OtpPurpose.LOGIN_NEW_DEVICE or value in SIGNED_IN_PURPOSES:
             raise serializers.ValidationError([field_error("invalid_choice")])
         return value
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        attrs = super().validate(attrs)
         if attrs["purpose"] == enums.OtpPurpose.LINK_SOCIAL and not attrs.get("social_ticket"):
             raise serializers.ValidationError(
                 {"social_ticket": [field_error("required", message_key="field.social_ticket_required")]}
@@ -79,10 +124,24 @@ class SendCodeSerializer(serializers.Serializer[dict[str, Any]]):
         return attrs
 
 
-class VerifyCodeSerializer(serializers.Serializer[dict[str, Any]]):
-    phone = CustomerPhoneField()
+def _code() -> serializers.CharField:
+    return serializers.CharField(max_length=32)
+
+
+def clean_code(value: str) -> str:
+    if not CODE_PATTERN.fullmatch(value):
+        raise serializers.ValidationError([field_error("invalid", message_key="field.otp_format")])
+    return value
+
+
+class VerifyCodeSerializer(IdentifierSerializer):
     purpose = serializers.ChoiceField(choices=enums.OtpPurpose.values)
-    code = serializers.CharField(max_length=32)
+    code = _code()
+
+    def validate_purpose(self, value: str) -> str:
+        if value in SIGNED_IN_PURPOSES:  # verified by me/phone/ and me/email/ themselves
+            raise serializers.ValidationError([field_error("invalid_choice")])
+        return value
 
     def validate_code(self, value: str) -> str:
         if not CODE_PATTERN.fullmatch(value):
@@ -101,8 +160,7 @@ class SetPasswordSerializer(serializers.Serializer[dict[str, Any]]):
         return clean_name(value)
 
 
-class CustomerLoginSerializer(serializers.Serializer[dict[str, Any]]):
-    phone = CustomerPhoneField()
+class CustomerLoginSerializer(IdentifierSerializer):
     password = _password()
     verification_token = serializers.CharField(
         max_length=128, required=False, allow_null=True, allow_blank=True
@@ -116,6 +174,13 @@ class ResetPasswordSerializer(serializers.Serializer[dict[str, Any]]):
 
 class CustomerRefreshSerializer(serializers.Serializer[dict[str, Any]]):
     refresh = serializers.CharField(max_length=256, trim_whitespace=False)
+
+
+class CustomerLogoutSerializer(CustomerRefreshSerializer):
+    """``auth/logout/`` (B-W1): ``current`` = this session, ``others`` = every other session, ``all`` =
+    everywhere."""
+
+    scope = serializers.ChoiceField(choices=enums.LogoutScope.values, default=enums.LogoutScope.CURRENT)
 
 
 class SocialSerializer(serializers.Serializer[dict[str, Any]]):
@@ -137,7 +202,10 @@ class SocialSerializer(serializers.Serializer[dict[str, Any]]):
 
 class SocialCompleteSerializer(serializers.Serializer[dict[str, Any]]):
     social_ticket = serializers.CharField(max_length=2048)
-    verification_token = serializers.CharField(max_length=128)
+    # null = sign up a new account without a phone (hybrid identity, C§2.1.9)
+    verification_token = serializers.CharField(
+        max_length=128, required=False, allow_null=True, allow_blank=True
+    )
     password = _password(required=False, allow_null=True)
     name = _name(required=False)
     terms_version = serializers.CharField(max_length=32, required=False, allow_null=True)
@@ -163,6 +231,40 @@ class MePasswordSerializer(serializers.Serializer[dict[str, Any]]):
     current_password = _password(required=False, allow_null=True)
     verification_token = serializers.CharField(max_length=128, required=False, allow_null=True)
     password = _password()
+
+
+class MePhoneCodeSerializer(serializers.Serializer[dict[str, Any]]):
+    """``POST me/phone/code/``."""
+
+    phone = CustomerPhoneField()
+
+
+class MeEmailCodeSerializer(serializers.Serializer[dict[str, Any]]):
+    """``POST me/email/code/``."""
+
+    email = CustomerEmailField()
+
+
+class _AttachSerializer(serializers.Serializer[dict[str, Any]]):
+    code = _code()
+    password = _password(required=False, allow_null=True)
+    verification_token = serializers.CharField(max_length=128, required=False, allow_null=True)
+
+    def validate_code(self, value: str) -> str:
+        return clean_code(value)
+
+
+class MePhoneSerializer(_AttachSerializer):
+    """``POST me/phone/``: the phone, its SMS code and, unless the session is fresh, the re-authentication."""
+
+    phone = CustomerPhoneField()
+
+
+class MeEmailSerializer(_AttachSerializer):
+    """``POST me/email/``: the address, its e-mail code and, unless the session is fresh, the
+    re-authentication."""
+
+    email = CustomerEmailField()
 
 
 class MePatchSerializer(serializers.Serializer[dict[str, Any]]):
@@ -292,7 +394,10 @@ class ConsentStateSerializer(serializers.Serializer[dict[str, Any]]):
 
 class CustomerMeSerializer(serializers.Serializer[dict[str, Any]]):
     id = serializers.IntegerField()
-    phone = serializers.CharField()
+    phone = serializers.CharField(
+        allow_null=True, help_text="Verified phone; null until attached (checkout, pay, booking, QR need it)."
+    )
+    email = serializers.CharField(allow_null=True, help_text="Verified e-mail address (lower case) | null.")
     name = serializers.CharField()
     language = serializers.ChoiceField(choices=enums.ContentLanguage.values)
     image_url = serializers.URLField(allow_null=True)
@@ -334,7 +439,8 @@ class NextStepSerializer(serializers.Serializer[dict[str, Any]]):
 
 
 class CodeIssueSerializer(serializers.Serializer[dict[str, Any]]):
-    phone_mask = serializers.CharField()
+    phone_mask = serializers.CharField(allow_null=True, help_text="The code went by SMS; else null.")
+    email_mask = serializers.CharField(allow_null=True, help_text="The code went by e-mail; else null.")
     purpose = serializers.ChoiceField(choices=enums.OtpPurpose.values)
     expires_in = serializers.IntegerField()
     resend_in = serializers.IntegerField()
@@ -382,7 +488,19 @@ class ProductCategorySerializer(serializers.Serializer[dict[str, Any]]):
 
 class ProductCardSerializer(serializers.Serializer[dict[str, Any]]):
     id = serializers.IntegerField()
+    slug = serializers.CharField(help_text="The website URL segment (B-W1); `catalog/products/{slug}/`.")
     name = serializers.CharField()
+    content_language = serializers.ChoiceField(
+        choices=enums.ContentLanguage.values,
+        help_text=(
+            "Language of `name` (and, where set, the other texts): the requested language, or `uz` when the "
+            "name fell back to Uzbek or to the Billz name."
+        ),
+    )
+    sku = serializers.CharField(
+        allow_null=True,
+        help_text="The Billz product id / barcode (`billz_id`), the shop's article code; null if unknown.",
+    )
     volume = serializers.CharField()
     price = serializers.IntegerField()
     promo = serializers.BooleanField()
@@ -391,6 +509,7 @@ class ProductCardSerializer(serializers.Serializer[dict[str, Any]]):
     available = serializers.IntegerField()
     stock_status = serializers.ChoiceField(choices=enums.StockStatus.values)
     in_cart_quantity = serializers.IntegerField()
+    updated_at = AwareDateTimeField(help_text="Last change of the product page (sitemap `lastmod`).")
 
 
 class CustomerProductImageSerializer(serializers.Serializer[dict[str, Any]]):
@@ -405,6 +524,8 @@ class ProductDetailSerializer(ProductCardSerializer):
     usage = serializers.CharField()
     images = CustomerProductImageSerializer(many=True)
     max_quantity = serializers.IntegerField()
+    seo_title = serializers.CharField(help_text='Staff-written page title in this language; "" = none.')
+    seo_description = serializers.CharField(help_text='Staff-written meta description; "" = none.')
 
 
 class CustomerBannerLinkSerializer(serializers.Serializer[dict[str, Any]]):
@@ -432,8 +553,15 @@ class CustomerBannerListSerializer(serializers.Serializer[dict[str, Any]]):
 class CustomerCategorySerializer(serializers.Serializer[dict[str, Any]]):
     slug = serializers.CharField()
     name = serializers.CharField()
+    content_language = serializers.ChoiceField(
+        choices=enums.ContentLanguage.values,
+        help_text="Language of `name`: the requested language, or `uz` when it fell back to Uzbek.",
+    )
     image_url = serializers.URLField(allow_null=True)
     product_count = serializers.IntegerField()
+    updated_at = AwareDateTimeField()
+    seo_title = serializers.CharField()
+    seo_description = serializers.CharField()
 
 
 class CustomerCategoryListSerializer(serializers.Serializer[dict[str, Any]]):

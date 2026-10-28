@@ -30,6 +30,7 @@ from glowderma.core.images import ImageError, process_image
 from glowderma.core.media import media_name
 from glowderma.professionals import bookings, selectors
 from glowderma.professionals.models import (
+    PROFESSIONAL_SLUG_CONSTRAINT,
     BlockedPeriod,
     Location,
     Professional,
@@ -106,6 +107,12 @@ def _validate(obj: models.Model) -> None:
             errors = exc.update_error_dict(errors)
     if errors:
         raise ValidationError(errors)
+
+
+def store_photo(professional: Professional, upload: Any) -> None:
+    """Process (``core.images``), name and save ``upload`` as the professional's photo (the admin upload path
+    and the demo seed)."""
+    _store_photo(professional, upload)
 
 
 def _store_photo(professional: Professional, upload: Any) -> None:
@@ -333,6 +340,7 @@ API_MESSAGES = {
     "override_taken": "Bu sana uchun alohida jadval allaqachon bor.",
     "block_overlap": "Bu vaqt boshqa band vaqt bilan kesishadi.",
     "latlng_pair": "Kenglik va uzunlikni birga kiriting.",
+    "slug_taken": "Bu manzil (slug) boshqa mutaxassisda bor.",
 }
 
 
@@ -389,6 +397,15 @@ def _set_i18n(obj: models.Model, prefix: str, texts: dict[str, str] | None) -> N
         setattr(obj, f"{prefix}_{language}", value)
 
 
+def _save_specialist(professional: Professional) -> None:
+    """Save with both unique races (the staff link, the B-W1 slug) reported as field errors, not a 500."""
+
+    def save() -> None:
+        _save_unique(professional.save, PROFESSIONAL_SLUG_CONSTRAINT, "slug", API_MESSAGES["slug_taken"])
+
+    _save_unique(save, STAFF_USER_CONSTRAINT, "staff_user_id", API_MESSAGES["staff_taken"])
+
+
 def _specialist_state(professional: Professional) -> dict[str, Any]:
     return {
         "name": professional.name,
@@ -401,6 +418,7 @@ def _specialist_state(professional: Professional) -> dict[str, Any]:
         "staff_user_id": professional.staff_user_id,
         "position": professional.position,
         "is_active": professional.is_active,
+        "slug": professional.slug,
     }
 
 
@@ -415,6 +433,8 @@ def _apply_specialist(professional: Professional, data: dict[str, Any]) -> None:
         professional.location = data["location"]
     if "staff_user" in data:
         professional.staff_user = data["staff_user"]
+    if data.get("slug"):
+        professional.slug = data["slug"]  # B-W1: staff edit the website URL segment
     _set_i18n(professional, "qualifications", data.get("qualifications"))
     _set_i18n(professional, "bio", data.get("bio"))
 
@@ -430,7 +450,7 @@ def create_specialist(data: dict[str, Any], *, actor: Any, request: Any = None) 
             )
         professional = Professional(location=location, position=_next_position(Professional))
         _apply_specialist(professional, {**data, "location": location})
-        _save_unique(professional.save, STAFF_USER_CONSTRAINT, "staff_user_id", API_MESSAGES["staff_taken"])
+        _save_specialist(professional)
         audit.record(
             action="professional.created",
             entity_type="professional",
@@ -465,7 +485,7 @@ def update_specialist(
             if upcoming and not force:
                 raise Conflict(API_MESSAGES["has_upcoming"].format(n=upcoming))
             extra = {"upcoming_appointments": upcoming, "forced": bool(upcoming)}
-        _save_unique(professional.save, STAFF_USER_CONSTRAINT, "staff_user_id", API_MESSAGES["staff_taken"])
+        _save_specialist(professional)
         diff_before, diff_after = _diff(before, after)
         audit.record(
             action=action,
