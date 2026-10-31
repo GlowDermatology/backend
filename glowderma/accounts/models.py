@@ -92,7 +92,9 @@ class Customer(TimeStampedModel):
     reactivated_at = models.DateTimeField(null=True, verbose_name="qayta faollashgan")
     last_login_at = models.DateTimeField(null=True, verbose_name="oxirgi kirish")
     # M2 credentials (password login after OTP sign-up; never AbstractBaseUser — StaffUser is AUTH_USER_MODEL)
-    password = models.CharField(max_length=128, blank=True)  # Django hasher format; "" = not set
+    password = models.CharField(
+        max_length=128, blank=True, verbose_name="parol"
+    )  # Django hasher format; "" = not set
     password_changed_at = models.DateTimeField(null=True, verbose_name="parol o‘zgargan")
     # M2 consent record (C3)
     terms_version = models.CharField(max_length=32, blank=True, verbose_name="shartlar versiyasi")
@@ -170,14 +172,18 @@ class Device(TimeStampedModel):
     model = models.CharField(max_length=80, blank=True, verbose_name="model")  # "iPhone 14"
     os = models.CharField(max_length=40, blank=True, verbose_name="OT")  # "iOS 18.1"
     app_version = models.CharField(max_length=20, blank=True, verbose_name="ilova versiyasi")  # "1.0.0"
-    locale = models.CharField(max_length=8, blank=True)  # device locale as reported, informational
-    fcm_token = models.CharField(max_length=512, blank=True)
+    locale = models.CharField(
+        max_length=8, blank=True, verbose_name="til"
+    )  # device locale as reported, informational
+    fcm_token = models.CharField(max_length=512, blank=True, verbose_name="FCM token")
     push_enabled = models.BooleanField(default=False, verbose_name="push yoqilgan")
     is_active = models.BooleanField(default=True, verbose_name="faol")  # false after logout/replace/delete
     last_active_at = models.DateTimeField(default=timestamp_default, verbose_name="oxirgi faollik")
-    fcm_invalidated_at = models.DateTimeField(null=True)  # set when FCM reports the token dead
+    fcm_invalidated_at = models.DateTimeField(
+        null=True, verbose_name="FCM token bekor qilingan"
+    )  # set when FCM reports the token dead
     # M2 (customer contract §1.9): SHA-256 hex of the device key issued once on a verified sign-in; "" = none.
-    key_hash = models.CharField(max_length=64, blank=True)
+    key_hash = models.CharField(max_length=64, blank=True, verbose_name="kalit xeshi")
 
     class Meta:
         verbose_name = "qurilma"
@@ -220,8 +226,8 @@ class Address(TimeStampedModel):
     region_code = models.CharField(max_length=16, blank=True, verbose_name="viloyat kodi")
     city_code = models.CharField(max_length=16, blank=True, verbose_name="shahar kodi")  # BTS city id
     comment = models.CharField(max_length=200, blank=True, verbose_name="izoh")  # entrance, floor, intercom
-    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True)
-    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True)
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, verbose_name="kenglik")
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, verbose_name="uzunlik")
     is_default = models.BooleanField(default=False, verbose_name="asosiy")
 
     class Meta:
@@ -267,7 +273,9 @@ class SmsCode(models.Model):
     # without the column
     email = models.CharField(max_length=254, blank=True, default="", db_default="", verbose_name="email")
     purpose = models.CharField(max_length=20, choices=Purpose.choices, verbose_name="maqsad")
-    code_hmac = models.CharField(max_length=64)  # HMAC-SHA256(code, SMS_CODE_HMAC_KEY), hex
+    code_hmac = models.CharField(
+        max_length=64, verbose_name="kod HMAC"
+    )  # HMAC-SHA256(code, SMS_CODE_HMAC_KEY), hex
     attempts = models.PositiveSmallIntegerField(default=0, verbose_name="urinishlar")
     max_attempts = models.PositiveSmallIntegerField(default=5, verbose_name="maks. urinishlar")
     created_at = models.DateTimeField(default=timestamp_default, verbose_name="yaratilgan")
@@ -277,11 +285,17 @@ class SmsCode(models.Model):
     consumed_at = models.DateTimeField(null=True, verbose_name="ishlatilgan")  # verified successfully
     # attempts reached max_attempts
     exhausted_at = models.DateTimeField(null=True, verbose_name="tugagan urinishlar vaqti")
-    verification_token_hash = models.CharField(max_length=64, blank=True)  # SHA-256 of the issued token
-    verification_expires_at = models.DateTimeField(null=True)  # consumed_at + 10 min
-    verification_used_at = models.DateTimeField(null=True)  # single use
-    request_ip = models.GenericIPAddressField(null=True)
-    provider_message_id = models.CharField(max_length=64, blank=True)  # Eskiz message id (fake: "fake-<id>")
+    verification_token_hash = models.CharField(
+        max_length=64, blank=True, verbose_name="tasdiq tokeni xeshi"
+    )  # SHA-256 of the issued token
+    verification_expires_at = models.DateTimeField(
+        null=True, verbose_name="tasdiq muddati"
+    )  # consumed_at + 10 min
+    verification_used_at = models.DateTimeField(null=True, verbose_name="tasdiq ishlatilgan")  # single use
+    request_ip = models.GenericIPAddressField(null=True, verbose_name="so‘rov IP manzili")
+    provider_message_id = models.CharField(
+        max_length=64, blank=True, verbose_name="provayder xabar ID"
+    )  # Eskiz message id (fake: "fake-<id>")
 
     class Meta:
         verbose_name = "SMS kod"
@@ -332,10 +346,10 @@ class CustomerSocialIdentity(models.Model):
     created_at = models.DateTimeField(default=timestamp_default, editable=False, verbose_name="yaratilgan")
     last_login_at = models.DateTimeField(null=True, verbose_name="oxirgi kirish")
     # Apple's refresh token sealed with core.secretbox (customer contract §2.1.8), revoked on unlink/deletion.
-    provider_refresh_token = models.TextField(blank=True)
+    provider_refresh_token = models.TextField(blank=True, verbose_name="provayder refresh tokeni")
     # The OAuth client the refresh token was issued to (Apple: the ID token's ``aud`` bundle id, which is the
     # ``client_id`` of the code exchange and therefore of the revocation); "" = none or before 0007.
-    provider_client_id = models.CharField(max_length=255, blank=True)
+    provider_client_id = models.CharField(max_length=255, blank=True, verbose_name="provayder ilova ID")
 
     class Meta:
         verbose_name = "ijtimoiy kirish"
@@ -387,7 +401,7 @@ class AuthSession(models.Model):
         verbose_name="qurilma",
     )
     device_label = models.CharField(max_length=100, verbose_name="qurilma nomi")
-    refresh_hash = models.CharField(max_length=64, unique=True)
+    refresh_hash = models.CharField(max_length=64, unique=True, verbose_name="refresh token xeshi")
     created_at = models.DateTimeField(default=date_joined_default, editable=False, verbose_name="yaratilgan")
     last_used_at = models.DateTimeField(default=date_joined_default, verbose_name="oxirgi foydalanish")
     absolute_expires_at = models.DateTimeField(verbose_name="mutlaq muddat")
@@ -400,22 +414,26 @@ class AuthSession(models.Model):
             ("expired", "Muddati tugadi"),
             ("password_changed", "Parol o‘zgartirildi"),
             ("deactivated", "Hisob faolsizlantirildi"),
-            ("replaced", "Yangi seans bilan almashtirildi"),
+            ("replaced", "Yangi sessiya bilan almashtirildi"),
             ("admin_revoked", "Admin tugatdi"),
             ("refresh_reused", "Eski token qayta ishlatildi"),
         ],
         verbose_name="tugatish sababi",
     )
     # M2 rotating refresh (customers only; staff refresh is non-rotating and leaves these empty)
-    previous_refresh_hash = models.CharField(max_length=64, blank=True)
-    rotated_at = models.DateTimeField(null=True)
+    previous_refresh_hash = models.CharField(
+        max_length=64, blank=True, verbose_name="oldingi refresh token xeshi"
+    )
+    rotated_at = models.DateTimeField(null=True, verbose_name="token yangilangan")
     # Customer contract §2.1.6: the access-token claim ``rot`` is this counter (never a timestamp); the first
     # request carrying the current ``rot`` sets ``rotation_confirmed`` (CustomerJWTAuthentication).
-    rotation = models.PositiveIntegerField(default=0)
-    rotation_confirmed = models.BooleanField(default=False)
+    rotation = models.PositiveIntegerField(default=0, verbose_name="token yangilanishlari soni")
+    rotation_confirmed = models.BooleanField(default=False, verbose_name="yangilanish tasdiqlangan")
     # How the sign-in that opened this session was proven (admin contract §2.1: linking a staff identity
     # needs a password session). Kept on the row, so a customer refresh rotation carries it; "" = before 0007.
-    auth_method = models.CharField(max_length=16, choices=AuthMethod.choices, blank=True)
+    auth_method = models.CharField(
+        max_length=16, choices=AuthMethod.choices, blank=True, verbose_name="kirish usuli"
+    )
     # B-W1 session management (customer contract §2.2.10): the client's user agent (the website's BFF
     # forwards the browser's as X-GD-Client-UA), the last client IP and the place a local GeoIP City database
     # resolves it to ("" = unknown / no database). Customer sessions only; refreshed by the throttled activity
@@ -424,11 +442,13 @@ class AuthSession(models.Model):
         max_length=512, blank=True, default="", db_default="", verbose_name="user-agent"
     )
     last_ip = models.GenericIPAddressField(null=True, blank=True, verbose_name="oxirgi IP")
-    location = models.CharField(max_length=120, blank=True, default="", db_default="")
+    location = models.CharField(
+        max_length=120, blank=True, default="", db_default="", verbose_name="joylashuv"
+    )
 
     class Meta:
-        verbose_name = "seans"
-        verbose_name_plural = "seanslar"
+        verbose_name = "sessiya"
+        verbose_name_plural = "sessiyalar"
         indexes = [
             models.Index(fields=["customer", "revoked_at"], name="accounts_authsession_cust_rev"),
             models.Index(fields=["staff", "revoked_at"], name="accounts_authsession_staff_rev"),
@@ -449,7 +469,7 @@ class AuthSession(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.get_audience_display()} seansi {self.pk}"
+        return f"{self.get_audience_display()} sessiyasi {self.pk}"
 
 
 class SocialIdentity(models.Model):

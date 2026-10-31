@@ -61,7 +61,7 @@ class OrderEventType(TextChoices):
     RESERVATION_CREATED = "reservation_created", "Mahsulot band qilindi"
     PAYMENT_CONFIRMED = "payment_confirmed", "To‘lov tasdiqlandi"
     BILLZ_SALE_RECORDED = "billz_sale_recorded", "Billz savdosi yozildi"
-    CASHBACK_CREDITED = "cashback_credited", "Keshbek hisoblandi"
+    CASHBACK_CREDITED = "cashback_credited", "Cashback hisoblandi"
     PAYMENT_FAILED = "payment_failed", "To‘lov amalga oshmadi"
     SHIPMENT_CREATED = "shipment_created", "Jo‘natma yaratildi"
     SHIPMENT_FAILED = "shipment_failed", "Jo‘natma yaratilmadi"
@@ -315,7 +315,7 @@ class SessionRevokeReason(TextChoices):
     EXPIRED = "expired", "Muddati tugadi"
     PASSWORD_CHANGED = "password_changed", "Parol o‘zgartirildi"  # noqa: S105
     DEACTIVATED = "deactivated", "Hisob faolsizlantirildi"
-    REPLACED = "replaced", "Yangi seans bilan almashtirildi"
+    REPLACED = "replaced", "Yangi sessiya bilan almashtirildi"
     ADMIN_REVOKED = "admin_revoked", "Admin tugatdi"
     # M2 (customer contract §2.1.6): an old customer refresh token came back after the grace window.
     REFRESH_REUSED = "refresh_reused", "Eski token qayta ishlatildi"

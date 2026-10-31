@@ -69,10 +69,14 @@ class CashbackPolicy(AppendOnlyModel):
     effective_from = models.DateTimeField(verbose_name="amal qilish boshlanishi")
     # before_purchase|with_purchase
     basis = models.CharField(max_length=16, choices=enums.RateBasis.choices, verbose_name="hisob asosi")
-    earn_on_cashback_paid = models.BooleanField()
+    earn_on_cashback_paid = models.BooleanField(verbose_name="cashback bilan to‘langan qismga ham cashback")
     # null = system / seed ("Tizim")
     author = models.ForeignKey(
-        "accounts.StaffUser", null=True, on_delete=models.PROTECT, related_name="cashback_policies"
+        "accounts.StaffUser",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="cashback_policies",
+        verbose_name="muallif",
     )
     created_at = models.DateTimeField(default=timestamp_default, editable=False, verbose_name="yaratilgan")
 
@@ -91,7 +95,7 @@ class CashbackPolicy(AppendOnlyModel):
 
     def __str__(self) -> str:
         basis = self.get_basis_display()
-        return f"Keshbek siyosati v{self.version} ({basis}, {self.effective_from:%Y-%m-%d} dan)"
+        return f"Cashback siyosati v{self.version} ({basis}, {self.effective_from:%Y-%m-%d} dan)"
 
     # Derived columns: ``with_derived()`` attaches them as annotations (Django assigns them through the
     # setters below); a plain instance loads both lazily with one query. They depend on *other* rows (a
@@ -196,7 +200,7 @@ class LoyaltyAccount(TimeStampedModel):
         verbose_name_plural = "cashback hisoblari"
 
     def __str__(self) -> str:
-        return f"Mijoz #{self.customer_id} keshbek hisobi: {som_text(self.balance)}"
+        return f"Mijoz #{self.customer_id} cashback hisobi: {som_text(self.balance)}"
 
 
 class LedgerEntry(AppendOnlyModel):
@@ -233,7 +237,9 @@ class LedgerEntry(AppendOnlyModel):
     # eligible amount the percent was applied to
     base = models.BigIntegerField(null=True, verbose_name="asos")
     percent = models.DecimalField(max_digits=5, decimal_places=2, null=True, verbose_name="foiz")
-    promo_excluded = models.BooleanField(default=False)  # promo items were excluded from the base
+    promo_excluded = models.BooleanField(
+        default=False, verbose_name="aksiya mahsulotlari chiqarilgan"
+    )  # promo items were excluded from the base
     policy = models.ForeignKey(
         "loyalty.CashbackPolicy",
         null=True,
@@ -242,7 +248,13 @@ class LedgerEntry(AppendOnlyModel):
         verbose_name="siyosat",
     )
     # reversal-only
-    reverses = models.OneToOneField("self", null=True, on_delete=models.PROTECT, related_name="reversed_by")
+    reverses = models.OneToOneField(
+        "self",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="reversed_by",
+        verbose_name="bekor qilinadigan yozuv",
+    )
     # adjustment-only
     reason = models.TextField(blank=True, verbose_name="sabab")
     actor = models.ForeignKey(
@@ -363,7 +375,11 @@ class CashbackHold(TimeStampedModel):
     # = Order.reservation_expires_at at creation
     expires_at = models.DateTimeField(verbose_name="amal qilish muddati")
     captured_entry = models.OneToOneField(
-        "loyalty.LedgerEntry", null=True, on_delete=models.PROTECT, related_name="captured_hold"
+        "loyalty.LedgerEntry",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="captured_hold",
+        verbose_name="yechish yozuvi",
     )
     captured_at = models.DateTimeField(null=True, verbose_name="yechib olingan")
     released_at = models.DateTimeField(null=True, verbose_name="bo‘shatilgan")
@@ -450,15 +466,21 @@ class Purchase(TimeStampedModel):
         verbose_name="buyurtma",
     )
     # Billz identifiers
-    billz_sale_id = models.CharField(max_length=64, blank=True)  # Billz's own sale id (store, or online echo)
-    billz_sale_ref = models.CharField(max_length=32, blank=True)  # human document number ("S-88213")
+    billz_sale_id = models.CharField(
+        max_length=64, blank=True, verbose_name="Billz sotuv ID"
+    )  # Billz's own sale id (store, or online echo)
+    billz_sale_ref = models.CharField(
+        max_length=32, blank=True, verbose_name="Billz sotuv raqami"
+    )  # human document number ("S-88213")
     # online: our correlation id, generated BEFORE the push (the outbox dedupe key, logs); Billz's own sale id
     # is billz_sale_id, stored the moment Billz created the sale (still a draft until billz_pushed_at is set)
-    billz_order_uuid = models.UUIDField(null=True)
-    billz_pushed_at = models.DateTimeField(null=True)  # online: set when billz.push_sale succeeded
+    billz_order_uuid = models.UUIDField(null=True, verbose_name="Billz buyurtma UUID")
+    billz_pushed_at = models.DateTimeField(
+        null=True, verbose_name="Billz’ga yuborilgan"
+    )  # online: set when billz.push_sale succeeded
     # online: a Billz payment request was sent at this instant and its outcome is not known yet (never paid
     # twice: the next attempt waits and re-reads the sale; cleared when Billz certainly did not take it)
-    billz_payment_attempted_at = models.DateTimeField(null=True)
+    billz_payment_attempted_at = models.DateTimeField(null=True, verbose_name="Billz to‘lovi urinilgan")
     # engine inputs (snapshots)
     # gross total before cashback redemption (items_subtotal online)
     amount = models.BigIntegerField(verbose_name="summa")
@@ -466,7 +488,9 @@ class Purchase(TimeStampedModel):
     promo_amount = models.BigIntegerField(default=0, verbose_name="aksiya summasi")
     # part paid from the balance (= Order.cashback_used)
     cashback_paid = models.BigIntegerField(default=0, verbose_name="cashback bilan to‘langan")
-    lifetime_before = models.BigIntegerField()  # Σ non-reversed purchases of the customer before this one
+    lifetime_before = models.BigIntegerField(
+        verbose_name="oldingi umrbod xaridlar"
+    )  # Σ non-reversed purchases of the customer before this one
     # engine result
     # version active at `at`; null = no policy existed
     policy = models.ForeignKey(
@@ -479,14 +503,22 @@ class Purchase(TimeStampedModel):
     # credited so'm (0 when no tier covers / eligible 0)
     cashback_amount = models.BigIntegerField(default=0, verbose_name="cashback summasi")
     credited_entry = models.OneToOneField(
-        "loyalty.LedgerEntry", null=True, on_delete=models.PROTECT, related_name="credited_purchase"
+        "loyalty.LedgerEntry",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="credited_purchase",
+        verbose_name="hisoblangan yozuv",
     )
     # reversal
     reversed = models.BooleanField(default=False, verbose_name="bekor qilingan")
     reversed_at = models.DateTimeField(null=True, verbose_name="bekor qilingan vaqt")
     # the reversal of credited_entry (null if nothing was credited)
     reversal_entry = models.OneToOneField(
-        "loyalty.LedgerEntry", null=True, on_delete=models.PROTECT, related_name="reversed_purchase"
+        "loyalty.LedgerEntry",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="reversed_purchase",
+        verbose_name="bekor qilish yozuvi",
     )
     # business time: payment confirmation / Billz sale
     at = models.DateTimeField(default=timestamp_default, verbose_name="vaqt")
@@ -578,7 +610,7 @@ class PurchaseItem(models.Model):
         related_name="purchase_items",
         verbose_name="mahsulot",
     )
-    billz_product_id = models.CharField(max_length=32, blank=True)
+    billz_product_id = models.CharField(max_length=32, blank=True, verbose_name="Billz mahsulot ID")
     # uz display name at purchase time, or the Billz name
     name = models.CharField(max_length=200, verbose_name="nomi")
     quantity = models.PositiveIntegerField(verbose_name="miqdor")
@@ -609,7 +641,9 @@ class PosDevice(TimeStampedModel):
     location_label = models.CharField(max_length=100, blank=True, verbose_name="joy nomi")
     # first 8–12 chars of the key; names the device
     key_prefix = models.CharField(max_length=12, unique=True, verbose_name="kalit prefiksi")
-    key_hash = models.CharField(max_length=64, unique=True)  # SHA-256 hex of the full key
+    key_hash = models.CharField(
+        max_length=64, unique=True, verbose_name="kalit xeshi"
+    )  # SHA-256 hex of the full key
     is_active = models.BooleanField(default=True, verbose_name="faol")
     last_used_at = models.DateTimeField(null=True, verbose_name="oxirgi foydalanish")
     created_by = models.ForeignKey(

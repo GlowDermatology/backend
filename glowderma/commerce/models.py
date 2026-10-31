@@ -82,7 +82,11 @@ class Cart(TimeStampedModel):
     )
     # the order the last successful checkout produced (debug aid; the M2 checkout is @idempotent anyway)
     last_checkout_order = models.ForeignKey(
-        "commerce.Order", null=True, on_delete=models.SET_NULL, related_name="+"
+        "commerce.Order",
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name="oxirgi rasmiylashtirilgan buyurtma",
     )
 
     class Meta:
@@ -145,9 +149,11 @@ class Order(TimeStampedModel):
     )
     # delivery snapshot (delivery only; "" for pickup)
     address_text = models.CharField(max_length=300, blank=True, verbose_name="manzil")
-    address_region_code = models.CharField(max_length=16, blank=True)  # BTS region id from accounts.Address
-    address_city_code = models.CharField(max_length=16, blank=True)  # BTS city id
-    address_comment = models.CharField(max_length=200, blank=True)
+    address_region_code = models.CharField(
+        max_length=16, blank=True, verbose_name="viloyat kodi"
+    )  # BTS region id from accounts.Address
+    address_city_code = models.CharField(max_length=16, blank=True, verbose_name="shahar kodi")  # BTS city id
+    address_comment = models.CharField(max_length=200, blank=True, verbose_name="manzil izohi")
     # D-3: BTS needs a name after a scrub
     recipient_name = models.CharField(max_length=150, blank=True, verbose_name="qabul qiluvchi")
     recipient_phone = models.CharField(max_length=13, blank=True, verbose_name="qabul qiluvchi telefoni")
@@ -166,7 +172,9 @@ class Order(TimeStampedModel):
         max_length=16, choices=enums.PaymentProvider.choices, verbose_name="to‘lov provayderi"
     )
     # reservation
-    reservation_minutes = models.PositiveSmallIntegerField()  # SiteSettings.reservation_minutes at checkout
+    reservation_minutes = models.PositiveSmallIntegerField(
+        verbose_name="zaxira muddati (daqiqa)"
+    )  # SiteSettings.reservation_minutes at checkout
     # set while awaiting_payment; kept afterwards for history
     reservation_expires_at = models.DateTimeField(null=True, verbose_name="band muddati")
     # lifecycle
@@ -185,7 +193,11 @@ class Order(TimeStampedModel):
     # admin reason text (3..500)
     cancellation_note = models.CharField(max_length=500, blank=True, verbose_name="bekor qilish izohi")
     cancelled_by = models.ForeignKey(
-        "accounts.StaffUser", null=True, on_delete=models.PROTECT, related_name="cancelled_orders"
+        "accounts.StaffUser",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="cancelled_orders",
+        verbose_name="bekor qilgan",
     )
     # internal; keys in design 03 §1.3 (seed, fake.* provider knobs, checkout.* diagnostics)
     metadata = models.JSONField(
@@ -321,7 +333,7 @@ class OrderItem(models.Model):
     name = models.CharField(max_length=200, verbose_name="nomi")
     billz_id = models.CharField(max_length=14, verbose_name="Billz ID")
     # media storage path of images[0] at checkout ("products/1/9f2c.webp"); rendered absolute by
-    image_url = models.CharField(max_length=500, blank=True)
+    image_url = models.CharField(max_length=500, blank=True, verbose_name="rasm havolasi")
     # core.media.absolute_media_url at serialization time; "" → null
     quantity = models.PositiveIntegerField(verbose_name="miqdor")
     unit_price = models.BigIntegerField(verbose_name="birlik narxi")  # Product.price at checkout
@@ -411,7 +423,7 @@ class StockReservation(TimeStampedModel):
     quantity = models.PositiveIntegerField(verbose_name="miqdor")
     state = models.CharField(max_length=16, choices=State.choices, default=State.ACTIVE, verbose_name="holat")
     expires_at = models.DateTimeField(verbose_name="amal qilish muddati")  # = Order.reservation_expires_at
-    converted_at = models.DateTimeField(null=True)
+    converted_at = models.DateTimeField(null=True, verbose_name="sotuvga aylangan")
     released_at = models.DateTimeField(null=True, verbose_name="bo‘shatilgan")
     release_reason = models.CharField(
         max_length=16, blank=True, choices=ReleaseReason.choices, verbose_name="bo‘shatish sababi"
@@ -419,7 +431,7 @@ class StockReservation(TimeStampedModel):
     # A converted reservation stops counting against availability for good once Billz has (or staff recorded)
     # the sale and the stock was read after it (``services.settle_billz_reservations``, NEW-2): the hot
     # availability read touches only the unsettled ones.
-    billz_settled_at = models.DateTimeField(null=True)
+    billz_settled_at = models.DateTimeField(null=True, verbose_name="Billz’da hisoblangan")
 
     class Meta:
         verbose_name = "zaxira bandi"

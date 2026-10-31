@@ -59,13 +59,17 @@ class Shipment(TimeStampedModel):
     # BTS create attempts that got an answer (failed or created)
     attempts = models.PositiveIntegerField(default=0, verbose_name="urinishlar")
     # outbox enqueues (automatic + manual retries); part of the dedupe key
-    create_requests = models.PositiveIntegerField(default=0)
-    last_attempt_at = models.DateTimeField(null=True)
-    last_error_code = models.CharField(max_length=32, blank=True)
+    create_requests = models.PositiveIntegerField(default=0, verbose_name="yaratish so‘rovlari")
+    last_attempt_at = models.DateTimeField(null=True, verbose_name="oxirgi urinish")
+    last_error_code = models.CharField(max_length=32, blank=True, verbose_name="oxirgi xato kodi")
     last_error = models.TextField(blank=True, verbose_name="oxirgi xato")
     # the newest `bts.create_shipment` message; `pending` is derived from its status
     create_message = models.ForeignKey(
-        "core.OutboxMessage", null=True, on_delete=models.SET_NULL, related_name="+"
+        "core.OutboxMessage",
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name="yaratish xabari (outbox)",
     )
 
     objects = ShipmentQuerySet.as_manager()

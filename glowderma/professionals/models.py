@@ -15,6 +15,8 @@ from glowderma.core.models import TimeStampedModel, timestamp_default
 from glowderma.professionals import media
 
 SLUG_MAX_LENGTH = 160
+# The weekday column (0 = Monday … 6 = Sunday) as the console shows it: Uzbek day names, the value stays 0–6.
+WEEKDAY_CHOICES = list(enumerate(WEEKDAYS))
 PROFESSIONAL_SLUG_CONSTRAINT = "professional_slug_unique"
 
 
@@ -33,8 +35,8 @@ class Location(TimeStampedModel):
     address_ru = models.CharField(max_length=300, blank=True, verbose_name="manzil (ru)")
     address_en = models.CharField(max_length=300, blank=True, verbose_name="manzil (en)")
     phone = models.CharField(max_length=13, blank=True, verbose_name="telefon")
-    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True)
-    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True)
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, verbose_name="kenglik")
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, verbose_name="uzunlik")
     is_active = models.BooleanField(default=True, verbose_name="faol")
     position = models.PositiveIntegerField(default=0, verbose_name="tartib")
 
@@ -62,7 +64,10 @@ class Professional(TimeStampedModel):
     """A bookable specialist."""
 
     location = models.ForeignKey(
-        "professionals.Location", on_delete=models.PROTECT, related_name="professionals"
+        "professionals.Location",
+        on_delete=models.PROTECT,
+        related_name="professionals",
+        verbose_name="filial",
     )
     name = models.CharField(max_length=150, verbose_name="nomi")  # shown as-is in every language
     # dermatologist | cosmetologist
@@ -94,7 +99,9 @@ class Professional(TimeStampedModel):
     is_active = models.BooleanField(default=True, verbose_name="faol")
     # B-W1 SEO (admin contract §2.17): the website's URL segment, set once from the name when the row is
     # created, unique, never only digits, edited only by staff (stable URLs).
-    slug = models.CharField(max_length=SLUG_MAX_LENGTH, blank=True, default="", db_default="")
+    slug = models.CharField(
+        max_length=SLUG_MAX_LENGTH, blank=True, default="", db_default="", verbose_name="slug (URL)"
+    )
 
     class Meta:
         verbose_name = "mutaxassis"
@@ -240,7 +247,7 @@ class WorkingHours(models.Model):
         verbose_name="mutaxassis",
     )
     # 0 = Monday … 6 = Sunday (Python date.weekday())
-    weekday = models.PositiveSmallIntegerField(verbose_name="hafta kuni")
+    weekday = models.PositiveSmallIntegerField(choices=WEEKDAY_CHOICES, verbose_name="hafta kuni")
     start = models.TimeField(verbose_name="boshlanishi")  # Tashkent wall-clock
     end = models.TimeField(verbose_name="tugashi")
     # optional recurring break → block kind "off"

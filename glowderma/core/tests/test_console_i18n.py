@@ -232,7 +232,7 @@ def test_project_apps_have_uzbek_labels() -> None:
     assert labels["commerce"] == "Savdo"
     assert labels["catalog"] == "Katalog"
     assert labels["accounts"] == "Hisoblar"
-    assert labels["payments"] == "To‘lovlar"
+    assert labels["payments"] == "To‘lov va qaytarishlar"  # never the same as its model list (breadcrumbs)
     # django_otp's device apps (no verbose_name of their own: the index showed "Otp_Totp")
     assert labels["otp_totp"] == "Ikki bosqichli kirish (TOTP)"
     from glowderma.core.otp_apps import OtpStaticConfig
@@ -257,7 +257,9 @@ def test_the_compiled_catalog_reads_back_with_gettext() -> None:
     for entry in parse(CATALOG.read_text(encoding="utf-8")):
         if not entry.msgid:
             continue
-        if entry.msgid_plural is None:
+        if entry.msgctxt is not None:
+            assert translations.pgettext(entry.msgctxt, entry.msgid) == entry.msgstr[0], entry.msgid
+        elif entry.msgid_plural is None:
             assert translations.gettext(entry.msgid) == entry.msgstr[0], entry.msgid
         else:
             assert translations.ngettext(entry.msgid, entry.msgid_plural, 2) == entry.msgstr[0]

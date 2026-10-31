@@ -125,6 +125,7 @@ def test_migrate_zero_and_forward_again() -> None:
         "0009_order_channel_web",
         "0010_uz_verbose_names",
         "0011_uz_choice_labels",
+        "0012_uz_field_labels",
     }
     assert OrderFactory.create().pk == 10001
     call_command("migrate", verbosity=0)  # re-apply any app that depends on commerce (loyalty, payments, …)

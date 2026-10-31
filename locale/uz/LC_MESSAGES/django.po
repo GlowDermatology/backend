@@ -301,13 +301,13 @@ msgid "Sorting priority: %(priority_number)s"
 msgstr "Saralash ustuvorligi: %(priority_number)s"
 
 msgid "Select %s"
-msgstr "%s tanlang"
+msgstr "Tanlang: %s"
 
 msgid "Select %s to change"
-msgstr "O‘zgartirish uchun %s tanlang"
+msgstr "O‘zgartirish uchun tanlang: %s"
 
 msgid "Select %s to view"
-msgstr "Ko‘rish uchun %s tanlang"
+msgstr "Ko‘rish uchun tanlang: %s"
 
 msgid "Select action"
 msgstr "Amalni tanlang"
@@ -503,3 +503,89 @@ msgstr[0] "%(total_count)s ta tanlandi"
 msgid "0 of %(cnt)s selected"
 msgid_plural "0 of %(cnt)s selected"
 msgstr[0] "%(cnt)s tadan 0 tasi tanlandi"
+
+# Month names inside a date ("31-oktabr, 2026-yil", Django's ``E`` format) are written in lower case.
+
+msgctxt "alt. month"
+msgid "January"
+msgstr "yanvar"
+
+msgctxt "alt. month"
+msgid "February"
+msgstr "fevral"
+
+msgctxt "alt. month"
+msgid "March"
+msgstr "mart"
+
+msgctxt "alt. month"
+msgid "April"
+msgstr "aprel"
+
+msgctxt "alt. month"
+msgid "May"
+msgstr "may"
+
+msgctxt "alt. month"
+msgid "June"
+msgstr "iyun"
+
+msgctxt "alt. month"
+msgid "July"
+msgstr "iyul"
+
+msgctxt "alt. month"
+msgid "August"
+msgstr "avgust"
+
+msgctxt "alt. month"
+msgid "September"
+msgstr "sentabr"
+
+msgctxt "alt. month"
+msgid "October"
+msgstr "oktabr"
+
+msgctxt "alt. month"
+msgid "November"
+msgstr "noyabr"
+
+msgctxt "alt. month"
+msgid "December"
+msgstr "dekabr"
+
+# The inline «add» link: Django capitalises the model name, so it follows a colon.
+msgid "Add another %(verbose_name)s"
+msgstr "Qo‘shish: %(verbose_name)s"
+
+# Inline rows of the editable professionals pages.
+msgid "Click to cancel"
+msgstr "Bekor qilish"
+
+msgid "This item will be deleted."
+msgstr "Bu qator o‘chiriladi."
+
+# django.contrib.auth fields of the staff model (the groups and permissions columns are not shown).
+msgid "superuser status"
+msgstr "superadmin"
+
+msgid "Designates that this user has all permissions without explicitly assigning them."
+msgstr "Barcha huquqlarga alohida berilmasdan ega bo‘ladi."
+
+msgid "last login"
+msgstr "oxirgi kirish"
+
+msgid "password"
+msgstr "parol"
+
+msgid "groups"
+msgstr "guruhlar"
+
+msgid "user permissions"
+msgstr "foydalanuvchi huquqlari"
+
+msgid "The groups this user belongs to. A user will get all permissions granted to each of their groups."
+msgstr "Xodim a’zo bo‘lgan guruhlar: xodim har bir guruhning barcha huquqlarini oladi."
+
+msgid "Specific permissions for this user."
+msgstr "Xodimning alohida huquqlari."

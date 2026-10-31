@@ -78,7 +78,9 @@ class Appointment(TimeStampedModel):
     rejected_at = models.DateTimeField(null=True, verbose_name="rad etilgan")
     attended_at = models.DateTimeField(null=True, verbose_name="kelgan")
     cancelled_at = models.DateTimeField(null=True, verbose_name="bekor qilingan")
-    cancelled_by = models.CharField(max_length=8, blank=True, choices=CancelledBy.choices)
+    cancelled_by = models.CharField(
+        max_length=8, blank=True, choices=CancelledBy.choices, verbose_name="bekor qilgan"
+    )
     reschedule_count = models.PositiveSmallIntegerField(default=0, verbose_name="ko‘chirishlar soni")
 
     class Meta:

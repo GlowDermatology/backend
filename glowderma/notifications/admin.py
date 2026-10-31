@@ -10,6 +10,7 @@ from glowderma.core.admin import (
     display,
     dropdown,
     register_read_only,
+    som,
     status_column,
 )
 from glowderma.notifications.models import (
@@ -26,12 +27,12 @@ RECIPIENT_STATE_VARIANTS = {"pending": INFO, "sent": SUCCESS, "failed": DANGER}
 PUSH_STATE_VARIANTS = {"queued": INFO, "sending": PRIMARY, "sent": SUCCESS, "failed": DANGER}
 
 
-@display(description="rules")
+@display(description="Qoidalar")
 def segment_rules(segment: CustomerSegment) -> str:
-    """``min_online_orders`` / ``min_lifetime_amount`` with ``null`` for a rule that is off."""
-    orders = "null" if segment.min_online_orders is None else str(segment.min_online_orders)
-    amount = "null" if segment.min_lifetime_amount is None else str(segment.min_lifetime_amount)
-    return f"orders ≥ {orders} · lifetime ≥ {amount}"
+    """``onlayn buyurtmalar ≥ 3 · umrbod xarid ≥ 1 000 000 so‘m``; a rule that is off reads «yo‘q»."""
+    orders = "yo‘q" if segment.min_online_orders is None else f"≥ {segment.min_online_orders}"
+    amount = "yo‘q" if segment.min_lifetime_amount is None else f"≥ {som(segment.min_lifetime_amount)}"
+    return f"onlayn buyurtmalar {orders} · umrbod xarid {amount}"
 
 
 register_read_only(
