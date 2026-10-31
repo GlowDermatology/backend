@@ -7,18 +7,26 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 from django.core.exceptions import ImproperlyConfigured
 
 from config.env import Network, env_bool, env_int, env_json, env_list, env_networks, env_str
+from config.settings.ops_admin import UNFOLD as UNFOLD
 from glowderma.core.enums import enum_name_overrides
 from glowderma.core.throttling import validate_throttle_rates
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 INSTALLED_APPS = [
-    "django.contrib.admin",
+    # Unfold's templates override the admin's, so it comes first; the basic config leaves ``admin.site`` to
+    # ``OpsAdminConfig.default_site`` (the ops console, glowderma.core.admin_site).
+    "unfold.apps.BasicAppConfig",
+    "unfold.contrib.filters",
+    "glowderma.core.admin_apps.OpsAdminConfig",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "django.contrib.postgres",
+    # TOTP second factor of the ops console (devices only; the login flow lives in glowderma.accounts).
+    "django_otp",
+    "django_otp.plugins.otp_totp",
     "rest_framework",
     "drf_spectacular",
     "drf_spectacular_sidecar",
@@ -62,6 +70,8 @@ USE_TZ = True
 LANGUAGE_CODE = "uz"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 DATA_UPLOAD_MAX_MEMORY_SIZE = 6 * 1024 * 1024
+# The ops console's environment badge (glowderma.core.admin_site); production sets PRODUCTION or STAGING.
+OPS_ENVIRONMENT_LABEL = "LOCAL"
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"

@@ -1,35 +1,182 @@
-"""Read-only Django admin.
+"""Read-only Django admin (the Unfold "Glow Derma Ops" console, ``glowderma.core.admin_site``).
 
 The Django admin is an operator's inspection window, never a write path: every registration goes
 through ``ReadOnlyAdmin`` (or ``register_read_only``), which lets active ``is_staff`` users view
 records and refuses add, change and delete.
+
+The column helpers below (:func:`status_column`, :func:`money_column`, :func:`masked_phone_column`, …) build
+``list_display`` callables with Unfold's ``display`` attributes, so every module renders statuses, so‘m
+amounts and personal data the same way.
 """
 
 import json
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable, Mapping
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from django.contrib import admin
 from django.db import models
 from django.http import HttpRequest
 from django.utils.html import format_html
 from django.utils.safestring import SafeString
+from unfold.admin import ModelAdmin as UnfoldModelAdmin
+from unfold.admin import TabularInline as UnfoldTabularInline
+from unfold.contrib.filters.admin import (
+    ChoicesDropdownFilter,
+    RangeDateTimeFilter,
+)
+from unfold.decorators import display as unfold_display
 
+from glowderma.core.i18n import format_number
 from glowderma.core.models import AuditEntry, IdempotencyRecord, OutboxMessage
+from glowderma.core.pii import mask_email, mask_phone
 
 if TYPE_CHECKING:
     _ModelAdmin = admin.ModelAdmin[models.Model]
-else:
-    _ModelAdmin = admin.ModelAdmin  # the runtime class is not generic
+    _TabularInline = admin.TabularInline[models.Model, models.Model]
+else:  # the runtime classes are Unfold's (not generic, untyped)
+    _ModelAdmin = UnfoldModelAdmin
+    _TabularInline = UnfoldTabularInline
+
+# Public bases for the few editable admins (professionals): Unfold at runtime, Django's types for mypy.
+OpsModelAdmin = _ModelAdmin
+OpsTabularInline = _TabularInline
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+# A ``list_display`` callable built below (its return shape depends on the Unfold display mode).
+Column = Callable[[models.Model], Any]
+
+# Unfold label variants (``unfold/helpers/label.html``).
+SUCCESS, WARNING, DANGER, INFO, PRIMARY = "success", "warning", "danger", "info", "primary"
 
 
-def _json_renderer(field: models.Field[Any, Any]) -> Callable[[models.Model], str]:
+def display(**options: Any) -> Callable[[_F], _F]:
+    """Typed wrapper of :func:`unfold.decorators.display` (``label=``, ``header=``, ``ordering=``, …)."""
+    return cast(Callable[[_F], _F], unfold_display(**options))
+
+
+def som(value: int | None) -> str:
+    """An integer so‘m amount as the admin panel shows it: ``1 250 000 so‘m`` (NBSP groups)."""
+    return "-" if value is None else f"{format_number(int(value), 'uz')} so‘m"
+
+
+def _resolve(obj: Any, path: str) -> Any:
+    for part in path.split("__"):
+        if obj is None:
+            return None
+        obj = getattr(obj, part, None)
+    return obj
+
+
+def money_column(path: str, description: str) -> Column:
+    """A ``list_display`` column rendering the so‘m amount at ``path`` (``total``, ``payment__amount``)."""
+
+    @display(description=description, ordering=path)
+    def column(obj: models.Model) -> str:
+        return som(_resolve(obj, path))
+
+    column.__name__ = f"{path}_som"
+    column.source_field = path  # type: ignore[attr-defined]
+    return column
+
+
+def status_column(
+    path: str,
+    description: str,
+    variants: Mapping[str, str],
+    labels: Mapping[str, str] | None = None,
+) -> Column:
+    """A coloured status label: ``variants`` maps a value to an Unfold variant (``success``, ``danger``, …),
+    ``labels`` to its Uzbek text (default: the ``choices`` label, else the raw value)."""
+
+    @display(description=description, ordering=path, label=dict(variants))
+    def column(obj: models.Model) -> tuple[str, str]:
+        value = _resolve(obj, path)
+        if value in (None, ""):
+            return ("", "-")
+        text = (labels or {}).get(value)
+        if text is None:
+            getter = getattr(obj, f"get_{path}_display", None) if "__" not in path else None
+            text = str(getter()) if callable(getter) else str(value)
+        return (str(value), text)
+
+    column.__name__ = f"{path}_label"
+    column.source_field = path  # type: ignore[attr-defined]
+    return column
+
+
+def masked_phone_column(path: str, description: str = "Telefon") -> Column:
+    """``+998 90 *** ** 67``: phones never appear in full on a list page (customer contract §1.4)."""
+
+    @display(description=description, empty_value="-")
+    def column(obj: models.Model) -> str | None:
+        value = _resolve(obj, path)
+        return mask_phone(str(value)) if value else None
+
+    column.__name__ = f"{path}_masked"
+    column.source_field = path  # type: ignore[attr-defined]
+    return column
+
+
+def masked_email_column(path: str, description: str = "Email") -> Column:
+    """``m***@gmail.com`` on list pages."""
+
+    @display(description=description, empty_value="-")
+    def column(obj: models.Model) -> str | None:
+        value = _resolve(obj, path)
+        return mask_email(str(value)) if value else None
+
+    column.__name__ = f"{path}_masked"
+    column.source_field = path  # type: ignore[attr-defined]
+    return column
+
+
+def customer_column(path: str = "customer", description: str = "Mijoz") -> Column:
+    """Two-line customer cell: name (or ``#id``) over the masked phone, else the masked email — the full
+    contact stays on the change page. Pair it with ``list_select_related``."""
+
+    @display(description=description, header=True, ordering=path)
+    def column(obj: models.Model) -> list[str]:
+        customer = _resolve(obj, path)
+        if customer is None:
+            return ["-", ""]
+        phone = getattr(customer, "phone", "") or ""
+        email = getattr(customer, "email", "") or ""
+        contact = mask_phone(phone) if phone else (mask_email(email) if email else "")
+        name = getattr(customer, "name", "") or f"#{customer.pk}"
+        return [str(name), contact]
+
+    column.__name__ = f"{path}_card"
+    column.source_field = path  # type: ignore[attr-defined]
+    return column
+
+
+def column_field(entry: Any) -> str:
+    """The model field behind a ``list_display`` / ``list_filter`` entry: a plain name, a column built by the
+    helpers above (``source_field``), a ``(field, FilterClass)`` pair or another callable's name."""
+    if isinstance(entry, str):
+        return entry
+    if isinstance(entry, tuple):
+        return str(entry[0])
+    return str(getattr(entry, "source_field", getattr(entry, "__name__", entry)))
+
+
+def dropdown(field: str) -> tuple[str, type[ChoicesDropdownFilter]]:
+    """``list_filter`` entry: a choices field as an Unfold dropdown."""
+    return (field, ChoicesDropdownFilter)
+
+
+def date_range(field: str) -> tuple[str, type[RangeDateTimeFilter]]:
+    """``list_filter`` entry: a datetime field as an Unfold from/to range."""
+    return (field, RangeDateTimeFilter)
+
+
+def _json_renderer(field: models.Field[Any, Any]) -> Column:
     def render(obj: models.Model) -> str:
         value = getattr(obj, field.name)
         if value is None:
             return "-"
         text = json.dumps(value, indent=2, ensure_ascii=False, sort_keys=True, default=str)
-        rendered: SafeString = format_html("<pre>{}</pre>", text)
+        rendered: SafeString = format_html('<pre class="gd-json">{}</pre>', text)
         return rendered
 
     render.__name__ = f"{field.name}_pretty"
@@ -46,7 +193,7 @@ def is_active_staff(request: HttpRequest) -> bool:
 _is_active_staff = is_active_staff
 
 
-class ReadOnlyTabularInline(admin.TabularInline):  # type: ignore[type-arg]
+class ReadOnlyTabularInline(_TabularInline):
     """View-only inline: the same grant as ``ReadOnlyAdmin``, never a write path."""
 
     can_delete = False
@@ -86,6 +233,12 @@ class ReadOnlyAdmin(_ModelAdmin):
     actions = None
     list_per_page = 50
     show_full_result_count = False
+    # Unfold: filters apply on "Apply" (one query, not one per click); no "add" link even for a view grant.
+    list_filter_submit = True
+    show_add_link = False
+    # Optional change-page tabs: ``(("Tab name", ("field", "json_field_pretty", …)), …)``. Every readonly
+    # field not named lands on a last "Boshqa" tab, so a new column is never silently hidden.
+    tab_groups: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
     def __init__(self, model: type[models.Model], admin_site: admin.AdminSite) -> None:
         super().__init__(model, admin_site)
@@ -127,6 +280,22 @@ class ReadOnlyAdmin(_ModelAdmin):
         names.extend(name for name in self.readonly_fields if name not in names)
         return names
 
+    def get_fieldsets(self, request: HttpRequest, obj: models.Model | None = None) -> Any:
+        if not self.tab_groups:
+            return super().get_fieldsets(request, obj)
+        available = self.get_readonly_fields(request, obj)
+        listed: set[str] = set()
+        fieldsets: list[tuple[str, dict[str, Any]]] = []
+        for name, fields in self.tab_groups:
+            present = [field for field in fields if field in available]
+            listed.update(present)
+            if present:
+                fieldsets.append((name, {"fields": present, "classes": ["tab"]}))
+        rest = [field for field in available if field not in listed]
+        if rest:
+            fieldsets.append(("Boshqa", {"fields": rest, "classes": ["tab"]}))
+        return fieldsets
+
 
 def register_read_only(
     model: type[models.Model], *, site: admin.AdminSite = admin.site, **options: Any
@@ -137,6 +306,14 @@ def register_read_only(
     """
     site.register(model, ReadOnlyAdmin, **options)
 
+
+OUTBOX_STATUS_VARIANTS = {
+    "pending": INFO,
+    "in_flight": PRIMARY,
+    "done": SUCCESS,
+    "failed": WARNING,
+    "dead": DANGER,
+}
 
 register_read_only(
     AuditEntry,
@@ -150,15 +327,23 @@ register_read_only(
         "entity_id",
         "ip",
     ),
-    list_filter=("actor_type", "action", "entity_type"),
+    list_filter=(dropdown("actor_type"), "action", "entity_type", date_range("created_at")),
     search_fields=("actor_label", "action", "entity_type", "entity_id", "request_id", "ip"),
     ordering=("-id",),
     date_hierarchy="created_at",
 )
 register_read_only(
     OutboxMessage,
-    list_display=("id", "topic", "dedupe_key", "status", "attempts", "available_at", "updated_at"),
-    list_filter=("status", "topic"),
+    list_display=(
+        "id",
+        "topic",
+        "dedupe_key",
+        status_column("status", "Holat", OUTBOX_STATUS_VARIANTS),
+        "attempts",
+        "available_at",
+        "updated_at",
+    ),
+    list_filter=(dropdown("status"), "topic", date_range("updated_at")),
     search_fields=("topic", "dedupe_key", "last_error"),
     ordering=("-id",),
 )

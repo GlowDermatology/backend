@@ -9,6 +9,7 @@ from glowderma.accounts.api import guard
 from glowderma.accounts.models import AuthSession, SocialIdentity, StaffUser
 from glowderma.accounts.tests.factories import AuthSessionFactory, StaffUserFactory
 from glowderma.core.admin import ReadOnlyAdmin
+from glowderma.core.tests.admin_pages import rendered_field_names
 
 pytestmark = pytest.mark.django_db
 
@@ -39,12 +40,13 @@ def test_secrets_are_never_shown(super_client: Client, staff: StaffUser) -> None
     page = super_client.get(reverse("admin:accounts_staffuser_change", args=[staff.pk]))
     assert page.status_code == 200
     assert staff.password.encode() not in page.content
-    assert b"field-password" not in page.content
-    assert b"field-email" in page.content
+    shown = rendered_field_names(page)
+    assert "password" not in shown and "email" in shown
+    assert staff.email.encode() in page.content
     page = super_client.get(reverse("admin:accounts_authsession_change", args=[session.pk]))
     assert page.status_code == 200
     assert session.refresh_hash.encode() not in page.content
-    assert b"field-refresh_hash" not in page.content
+    assert "refresh_hash" not in rendered_field_names(page)
     for model in (StaffUser, AuthSession, SocialIdentity):
         assert (
             super_client.get(reverse(f"admin:accounts_{model._meta.model_name}_changelist")).status_code

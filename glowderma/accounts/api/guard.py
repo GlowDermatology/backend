@@ -1,6 +1,6 @@
 import hashlib
 import math
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django.contrib import admin
 from django.contrib.admin.forms import AdminAuthenticationForm
@@ -9,6 +9,7 @@ from django.core.cache.backends.redis import RedisCache
 from django.core.exceptions import ValidationError
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from rest_framework.exceptions import Throttled
+from unfold.forms import AuthenticationForm as UnfoldAuthenticationForm
 
 from glowderma.core import timeutils
 from glowderma.core.api.exceptions import error_body
@@ -68,7 +69,14 @@ class LoginGuard:
         cache.delete(f"auth:lock:{scope}:{hashed_email}")
 
 
-class GuardedAdminAuthenticationForm(AdminAuthenticationForm):
+# Unfold's admin login form: a ``django.contrib.admin.forms.AdminAuthenticationForm`` with styled widgets.
+if TYPE_CHECKING:
+    _AdminAuthenticationForm = AdminAuthenticationForm
+else:
+    _AdminAuthenticationForm = UnfoldAuthenticationForm
+
+
+class GuardedAdminAuthenticationForm(_AdminAuthenticationForm):
     def clean(self) -> dict[str, Any]:
         username = str(self.cleaned_data.get("username", "")).strip().lower()
         self.cleaned_data["username"] = username
