@@ -179,26 +179,9 @@ class Command(BaseCommand):
     def _before(message: OutboxMessage) -> dict[str, Any]:
         return {"status": message.status, "attempts": message.attempts, "last_error": message.last_error}
 
-    @classmethod
-    def _requeue(cls, message: OutboxMessage) -> None:
-        before = cls._before(message)
-        OutboxMessage.objects.filter(pk=message.pk).update(
-            status="pending",
-            attempts=0,
-            available_at=timeutils.now(),
-            lease_expires_at=None,
-            claim_token=None,
-            deferred_since=None,
-            updated_at=timeutils.now(),
-        )
-        audit.record(
-            action="outbox.requeued",
-            entity_type="outbox",
-            entity_id=str(message.pk),
-            before=before,
-            after={"topic": message.topic, "dedupe_key": message.dedupe_key, "status": "pending"},
-            reason=REASON,
-        )
+    @staticmethod
+    def _requeue(message: OutboxMessage) -> None:
+        outbox.mark_requeued(message, reason=REASON)
 
     @classmethod
     def _resolve(cls, message: OutboxMessage) -> None:

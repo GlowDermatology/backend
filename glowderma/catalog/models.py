@@ -44,23 +44,38 @@ class Category(TimeStampedModel):
     """A product grouping addressed by its immutable slug."""
 
     slug = models.SlugField(max_length=40, unique=True)  # ^[a-z0-9-]{2,40}$, never "order"
-    name_uz = models.CharField(max_length=60)
-    name_ru = models.CharField(max_length=60, blank=True)
-    name_en = models.CharField(max_length=60, blank=True)
-    position = models.PositiveIntegerField(default=0)
-    is_active = models.BooleanField(default=True)
-    image = models.ImageField(upload_to=media.category_image_path, blank=True, max_length=255)
+    name_uz = models.CharField(max_length=60, verbose_name="nomi (uz)")
+    name_ru = models.CharField(max_length=60, blank=True, verbose_name="nomi (ru)")
+    name_en = models.CharField(max_length=60, blank=True, verbose_name="nomi (en)")
+    position = models.PositiveIntegerField(default=0, verbose_name="tartib")
+    is_active = models.BooleanField(default=True, verbose_name="faol")
+    image = models.ImageField(
+        upload_to=media.category_image_path, blank=True, max_length=255, verbose_name="rasm"
+    )
     # B-W1 SEO (admin contract §2.4): optional per-language page title and meta description; "" = the
     # website builds one from the name.
-    seo_title_uz = models.CharField(max_length=120, blank=True, default="", db_default="")
-    seo_title_ru = models.CharField(max_length=120, blank=True, default="", db_default="")
-    seo_title_en = models.CharField(max_length=120, blank=True, default="", db_default="")
-    seo_description_uz = models.CharField(max_length=300, blank=True, default="", db_default="")
-    seo_description_ru = models.CharField(max_length=300, blank=True, default="", db_default="")
-    seo_description_en = models.CharField(max_length=300, blank=True, default="", db_default="")
+    seo_title_uz = models.CharField(
+        max_length=120, blank=True, default="", db_default="", verbose_name="SEO sarlavha (uz)"
+    )
+    seo_title_ru = models.CharField(
+        max_length=120, blank=True, default="", db_default="", verbose_name="SEO sarlavha (ru)"
+    )
+    seo_title_en = models.CharField(
+        max_length=120, blank=True, default="", db_default="", verbose_name="SEO sarlavha (en)"
+    )
+    seo_description_uz = models.CharField(
+        max_length=300, blank=True, default="", db_default="", verbose_name="SEO tavsif (uz)"
+    )
+    seo_description_ru = models.CharField(
+        max_length=300, blank=True, default="", db_default="", verbose_name="SEO tavsif (ru)"
+    )
+    seo_description_en = models.CharField(
+        max_length=300, blank=True, default="", db_default="", verbose_name="SEO tavsif (en)"
+    )
 
     class Meta:
-        verbose_name_plural = "categories"
+        verbose_name = "kategoriya"
+        verbose_name_plural = "kategoriyalar"
         constraints = [
             models.CheckConstraint(
                 condition=Q(slug__regex=r"^[a-z0-9-]{2,40}$"), name="category_slug_format"
@@ -79,42 +94,65 @@ class Product(TimeStampedModel):
     """A sellable item."""
 
     # Billz-owned (read-only in the admin API)
-    billz_id = models.CharField(max_length=14, unique=True)  # ^\d{6,14}$ (Billz product id or barcode)
-    billz_name = models.CharField(max_length=255, blank=True)
-    volume = models.CharField(max_length=40, blank=True)  # "30 ml"
-    billz_price = models.BigIntegerField(null=True)  # reference only (O6)
-    billz_synced_at = models.DateTimeField(null=True)  # last time billz_* were refreshed
+    # ^\d{6,14}$ (Billz product id or barcode)
+    billz_id = models.CharField(max_length=14, unique=True, verbose_name="Billz ID")
+    billz_name = models.CharField(max_length=255, blank=True, verbose_name="Billz nomi")
+    volume = models.CharField(max_length=40, blank=True, verbose_name="hajm")  # "30 ml"
+    billz_price = models.BigIntegerField(null=True, verbose_name="Billz narxi")  # reference only (O6)
+    # last time billz_* were refreshed
+    billz_synced_at = models.DateTimeField(null=True, verbose_name="Billz bilan sinxronlangan")
     # Glow Derma-owned
-    price = models.BigIntegerField(default=0)  # admin price; the API requires 1000..100_000_000
+    # admin price; the API requires 1000..100_000_000
+    price = models.BigIntegerField(default=0, verbose_name="narx")
     category = models.ForeignKey(
-        "catalog.Category", null=True, on_delete=models.SET_NULL, related_name="products"
+        "catalog.Category",
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="products",
+        verbose_name="kategoriya",
     )
-    promo = models.BooleanField(default=False)
+    promo = models.BooleanField(default=False, verbose_name="aksiya")
     status = models.CharField(
-        max_length=8, choices=enums.ProductStatus.choices, default=enums.ProductStatus.HIDDEN, db_index=True
+        max_length=8,
+        choices=enums.ProductStatus.choices,
+        default=enums.ProductStatus.HIDDEN,
+        db_index=True,
+        verbose_name="holat",
     )
-    is_new_from_billz = models.BooleanField(default=False)
-    name_uz = models.CharField(max_length=120, blank=True)
-    name_ru = models.CharField(max_length=120, blank=True)
-    name_en = models.CharField(max_length=120, blank=True)
-    description_uz = models.TextField(blank=True)  # ≤2000 (serializer)
-    description_ru = models.TextField(blank=True)
-    description_en = models.TextField(blank=True)
-    ingredients_uz = models.TextField(blank=True)  # ≤1000
-    ingredients_ru = models.TextField(blank=True)
-    ingredients_en = models.TextField(blank=True)
-    usage_uz = models.TextField(blank=True)  # ≤1000
-    usage_ru = models.TextField(blank=True)
-    usage_en = models.TextField(blank=True)
+    is_new_from_billz = models.BooleanField(default=False, verbose_name="Billz’dan yangi")
+    name_uz = models.CharField(max_length=120, blank=True, verbose_name="nomi (uz)")
+    name_ru = models.CharField(max_length=120, blank=True, verbose_name="nomi (ru)")
+    name_en = models.CharField(max_length=120, blank=True, verbose_name="nomi (en)")
+    description_uz = models.TextField(blank=True, verbose_name="tavsif (uz)")  # ≤2000 (serializer)
+    description_ru = models.TextField(blank=True, verbose_name="tavsif (ru)")
+    description_en = models.TextField(blank=True, verbose_name="tavsif (en)")
+    ingredients_uz = models.TextField(blank=True, verbose_name="tarkib (uz)")  # ≤1000
+    ingredients_ru = models.TextField(blank=True, verbose_name="tarkib (ru)")
+    ingredients_en = models.TextField(blank=True, verbose_name="tarkib (en)")
+    usage_uz = models.TextField(blank=True, verbose_name="qo‘llash (uz)")  # ≤1000
+    usage_ru = models.TextField(blank=True, verbose_name="qo‘llash (ru)")
+    usage_en = models.TextField(blank=True, verbose_name="qo‘llash (en)")
     # B-W1 SEO (admin contract §2.3): the website's URL segment — set once from the Uzbek name (else the Billz
     # name) when the row is created, unique, never only digits, edited only by staff (stable URLs).
     slug = models.CharField(max_length=SLUG_MAX_LENGTH, blank=True, default="", db_default="")
-    seo_title_uz = models.CharField(max_length=120, blank=True, default="", db_default="")
-    seo_title_ru = models.CharField(max_length=120, blank=True, default="", db_default="")
-    seo_title_en = models.CharField(max_length=120, blank=True, default="", db_default="")
-    seo_description_uz = models.CharField(max_length=300, blank=True, default="", db_default="")
-    seo_description_ru = models.CharField(max_length=300, blank=True, default="", db_default="")
-    seo_description_en = models.CharField(max_length=300, blank=True, default="", db_default="")
+    seo_title_uz = models.CharField(
+        max_length=120, blank=True, default="", db_default="", verbose_name="SEO sarlavha (uz)"
+    )
+    seo_title_ru = models.CharField(
+        max_length=120, blank=True, default="", db_default="", verbose_name="SEO sarlavha (ru)"
+    )
+    seo_title_en = models.CharField(
+        max_length=120, blank=True, default="", db_default="", verbose_name="SEO sarlavha (en)"
+    )
+    seo_description_uz = models.CharField(
+        max_length=300, blank=True, default="", db_default="", verbose_name="SEO tavsif (uz)"
+    )
+    seo_description_ru = models.CharField(
+        max_length=300, blank=True, default="", db_default="", verbose_name="SEO tavsif (ru)"
+    )
+    seo_description_en = models.CharField(
+        max_length=300, blank=True, default="", db_default="", verbose_name="SEO tavsif (en)"
+    )
     # search (stored generated column, §6.2): the search key of every search term (core.search.SearchKey:
     # case, ё = е, decision GC-1; apostrophes removed, catalog.0006), so kopik / ko'pik / ko‘pik / koʻpik and
     # ё / е match each other
@@ -136,7 +174,7 @@ class Product(TimeStampedModel):
         db_persist=True,
     )
     # last admin change (contract last_change; null when never edited through the API)
-    last_change_at = models.DateTimeField(null=True)
+    last_change_at = models.DateTimeField(null=True, verbose_name="oxirgi o‘zgarish")
     last_change_kind = models.CharField(max_length=16, choices=enums.ProductChangeKind.choices, blank=True)
     last_change_old_price = models.BigIntegerField(null=True)
     last_change_new_price = models.BigIntegerField(null=True)
@@ -145,6 +183,8 @@ class Product(TimeStampedModel):
     )
 
     class Meta:
+        verbose_name = "mahsulot"
+        verbose_name_plural = "mahsulotlar"
         constraints = [
             models.CheckConstraint(
                 condition=Q(billz_id__regex=r"^\d{6,14}$"), name="product_billz_id_format"
@@ -224,13 +264,21 @@ class ProductStock(models.Model):
     """Billz-owned stock quantity, one row per product, written only by ``catalog.services.sync_stock``."""
 
     product = models.OneToOneField(
-        "catalog.Product", primary_key=True, on_delete=models.CASCADE, related_name="stock"
+        "catalog.Product",
+        primary_key=True,
+        on_delete=models.CASCADE,
+        related_name="stock",
+        verbose_name="mahsulot",
     )
-    quantity = models.IntegerField(default=0)  # Billz can report negatives after returns
-    synced_at = models.DateTimeField(null=True)  # when quantity was last read from Billz
+    # Billz can report negatives after returns
+    quantity = models.IntegerField(default=0, verbose_name="miqdor")
+    # when quantity was last read from Billz
+    synced_at = models.DateTimeField(null=True, verbose_name="sinxronlangan")
     billz_updated_at = models.DateTimeField(null=True)  # Billz's own timestamp when provided
 
     class Meta:
+        verbose_name = "qoldiq"
+        verbose_name_plural = "qoldiqlar"
         indexes = [models.Index(fields=["quantity"], condition=Q(quantity__lte=0), name="catalog_stock_out")]
 
     def __str__(self) -> str:
@@ -240,21 +288,30 @@ class ProductStock(models.Model):
 class ProductImage(TimeStampedModel):
     """An uploaded, re-encoded photo of a product with an explicit gallery position."""
 
-    product = models.ForeignKey("catalog.Product", on_delete=models.CASCADE, related_name="images")
-    file = models.ImageField(
-        upload_to=media.product_image_path, max_length=255, width_field="width", height_field="height"
+    product = models.ForeignKey(
+        "catalog.Product", on_delete=models.CASCADE, related_name="images", verbose_name="mahsulot"
     )
-    position = models.PositiveSmallIntegerField()
-    width = models.PositiveIntegerField()
-    height = models.PositiveIntegerField()
-    content_type = models.CharField(max_length=32)  # image/jpeg | image/png | image/webp (after re-encode)
-    size_bytes = models.PositiveIntegerField()
+    file = models.ImageField(
+        upload_to=media.product_image_path,
+        max_length=255,
+        width_field="width",
+        height_field="height",
+        verbose_name="fayl",
+    )
+    position = models.PositiveSmallIntegerField(verbose_name="tartib")
+    width = models.PositiveIntegerField(verbose_name="eni")
+    height = models.PositiveIntegerField(verbose_name="bo‘yi")
+    # image/jpeg | image/png | image/webp (after re-encode)
+    content_type = models.CharField(max_length=32, verbose_name="fayl turi")
+    size_bytes = models.PositiveIntegerField(verbose_name="hajmi (bayt)")
     sha256 = models.CharField(max_length=64)  # of the stored (re-encoded) bytes; also the file stem
     uploaded_by = models.ForeignKey(
-        "accounts.StaffUser", null=True, on_delete=models.SET_NULL, related_name="+"
+        "accounts.StaffUser", null=True, on_delete=models.SET_NULL, related_name="+", verbose_name="yuklagan"
     )
 
     class Meta:
+        verbose_name = "mahsulot rasmi"
+        verbose_name_plural = "mahsulot rasmlari"
         constraints = [
             models.UniqueConstraint(
                 fields=["product", "position"],
@@ -276,34 +333,48 @@ class ProductImage(TimeStampedModel):
 class Banner(TimeStampedModel):
     """A home-screen banner with an optional deep link and an optional schedule."""
 
-    title_uz = models.CharField(max_length=80)
-    title_ru = models.CharField(max_length=80, blank=True)
-    title_en = models.CharField(max_length=80, blank=True)
+    title_uz = models.CharField(max_length=80, verbose_name="sarlavha (uz)")
+    title_ru = models.CharField(max_length=80, blank=True, verbose_name="sarlavha (ru)")
+    title_en = models.CharField(max_length=80, blank=True, verbose_name="sarlavha (en)")
     image = models.ImageField(
         upload_to=media.banner_image_path,
         max_length=255,
         width_field="image_width",
         height_field="image_height",
+        verbose_name="rasm",
     )
     image_width = models.PositiveIntegerField()
     image_height = models.PositiveIntegerField()
     link_kind = models.CharField(
-        max_length=8, choices=enums.BannerLinkKind.choices, default=enums.BannerLinkKind.NONE
+        max_length=8,
+        choices=enums.BannerLinkKind.choices,
+        default=enums.BannerLinkKind.NONE,
+        verbose_name="havola turi",
     )
     link_product = models.ForeignKey(
-        "catalog.Product", null=True, on_delete=models.SET_NULL, related_name="banners"
+        "catalog.Product",
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="banners",
+        verbose_name="havola mahsuloti",
     )
     link_category = models.ForeignKey(
-        "catalog.Category", null=True, on_delete=models.SET_NULL, related_name="banners"
+        "catalog.Category",
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="banners",
+        verbose_name="havola kategoriyasi",
     )
     # gap X-BANNER-URL: an https link the app opens (kind "url" only; "" otherwise; decision GC-3)
-    link_url = models.CharField(max_length=500, blank=True, default="")
-    is_active = models.BooleanField(default=True)
-    starts_at = models.DateTimeField(null=True)
-    ends_at = models.DateTimeField(null=True)
-    position = models.PositiveIntegerField(default=0)
+    link_url = models.CharField(max_length=500, blank=True, default="", verbose_name="havola URL")
+    is_active = models.BooleanField(default=True, verbose_name="faol")
+    starts_at = models.DateTimeField(null=True, verbose_name="boshlanishi")
+    ends_at = models.DateTimeField(null=True, verbose_name="tugashi")
+    position = models.PositiveIntegerField(default=0, verbose_name="tartib")
 
     class Meta:
+        verbose_name = "banner"
+        verbose_name_plural = "bannerlar"
         constraints = [
             models.CheckConstraint(condition=~Q(title_uz=""), name="banner_title_uz_required"),
             models.CheckConstraint(

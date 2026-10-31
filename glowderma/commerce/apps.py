@@ -3,6 +3,7 @@ from django.apps import AppConfig
 
 class CommerceConfig(AppConfig):
     name = "glowderma.commerce"
+    verbose_name = "Savdo"
 
     def ready(self) -> None:
         # The outbox handlers (bts.create_shipment, billz.push_sale, refund.submit), their dead-letter hooks

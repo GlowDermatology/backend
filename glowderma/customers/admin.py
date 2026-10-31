@@ -3,10 +3,18 @@
 ``Customer`` lives in ``accounts``, but its change page shows rows of the upper modules (orders, the loyalty
 account, appointments) as inline tabs, so it is registered here, in the top layer. Secrets stay out:
 ``Customer.password`` is excluded, and the device/session inlines list no token or hash column.
+
+Safe audited action (glowderma.core.admin_actions): «Barcha seanslarni tugatish» signs the customer out
+everywhere through ``accounts.sessions.revoke_all_sessions`` (reason ``admin_revoked``).
 """
 
-from django.contrib import admin
+from typing import Any, cast
 
+from django.contrib import admin
+from django.db import models
+from django.http import HttpRequest
+
+from glowderma.accounts import sessions
 from glowderma.accounts.models import Address, AuthSession, Customer, CustomerSocialIdentity, Device
 from glowderma.appointments.models import Appointment
 from glowderma.commerce.admin import ORDER_STATUS_VARIANTS
@@ -24,7 +32,17 @@ from glowderma.core.admin import (
     status_badge,
     status_column,
 )
+from glowderma.core.admin_actions import (
+    ActionResult,
+    ActionVariant,
+    ConfirmForm,
+    OpsActionsMixin,
+    done,
+    ops_action,
+    refused,
+)
 from glowderma.core.labels import CUSTOMER_STATUS, ORDER_STATUS
+from glowderma.core.pii import mask_email, mask_phone
 from glowderma.loyalty.models import LoyaltyAccount
 
 
@@ -97,7 +115,11 @@ class CustomerSocialInline(ReadOnlyTabularInline):
     verbose_name_plural = "Ijtimoiy kirishlar"
 
 
-class CustomerAdmin(ReadOnlyAdmin):
+def _no_open_session(model_admin: Any, request: HttpRequest, customer: Customer) -> str:
+    return "" if sessions.open_sessions(customer.pk).exists() else "Mijozning ochiq seansi yo‘q."
+
+
+class CustomerAdmin(OpsActionsMixin, ReadOnlyAdmin):
     exclude = ("password",)
     list_display = (
         "id",
@@ -149,6 +171,43 @@ class CustomerAdmin(ReadOnlyAdmin):
         ),
         ("Rozilik", ("terms_version", "consent_at", "consent_ip")),
     )
+    actions_detail = ("revoke_all_sessions",)
+
+    def object_title(self, obj: models.Model) -> str:
+        """``Mijoz #12 · Malika Karimova · +998 90 *** ** 67``: the title never carries the full phone or
+        e-mail (the fields below still show them; this page is the customer's record)."""
+        customer = cast(Customer, obj)
+        contact = mask_phone(customer.phone) if customer.phone else ""
+        if not contact and customer.email:
+            contact = mask_email(customer.email)
+        return " · ".join(part for part in (f"Mijoz #{customer.pk}", customer.name, contact) if part)
+
+    @ops_action(
+        description="Barcha seanslarni tugatish",
+        title="Mijozning barcha seanslarini tugatish",
+        body=(
+            "Mijoz barcha telefon va brauzerlardan chiqariladi (sabab: admin_revoked), seanssiz qolgan "
+            "qurilmalarga push yuborilmaydi. Yo‘qolgan telefon yoki begona kirish gumon qilinganda ishlating."
+        ),
+        submit="Hammasini tugatish",
+        icon="logout",
+        variant=ActionVariant.DANGER,
+        url_path="revoke-all-sessions",
+        available=_no_open_session,
+    )
+    def revoke_all_sessions(
+        self, request: HttpRequest, customer: Customer, form: ConfirmForm
+    ) -> ActionResult:
+        count = sessions.revoke_all_sessions(customer.pk, actor=request.user, request=request)
+        if not count:
+            return refused("Mijozning ochiq seansi yo‘q: hech narsa o‘zgarmadi.")
+        return done(
+            f"{count} ta seans tugatildi.",
+            audit_action="ops.customer_sessions_revoked",
+            entity_type="customer",
+            entity_id=customer.pk,
+            after={"count": count},
+        )
 
 
 admin.site.register(Customer, CustomerAdmin)

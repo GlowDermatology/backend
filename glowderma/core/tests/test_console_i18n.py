@@ -1,0 +1,240 @@
+"""Uzbek ops console: model and app names, the project catalog (locale/uz) and no English leftovers of Unfold
+or the Django admin on the pages staff use."""
+
+from __future__ import annotations
+
+import gettext
+import io
+import re
+from html.parser import HTMLParser
+from pathlib import Path
+
+import pytest
+from django.apps import apps
+from django.conf import settings
+from django.contrib import admin
+from django.core.management import call_command
+from django.test import Client
+from django.urls import reverse
+from django.utils.translation import gettext as _
+from django.utils.translation import ngettext
+
+from glowderma.core.models import AuditEntry, OutboxMessage
+from glowderma.core.po import compile_po, parse
+from glowderma.core.tests.console import console_client
+
+CATALOG = Path(settings.BASE_DIR) / "locale" / "uz" / "LC_MESSAGES" / "django.po"
+
+# English strings of Unfold / the Django admin that must not reach a console page (word-bounded).
+ENGLISH = (
+    "Welcome back to",
+    "Log in",
+    "Filters",
+    "Type to search",
+    "Search apps and models",
+    "General",
+    "History",
+    "Close",
+    "All applications",
+    "Show all",
+    "results",
+    "result",
+    "total",
+    "to view",
+    "Change history",
+    "Recent actions",
+    "Home",
+    "Apply Filters",
+    "No results found",
+    "Select action",
+    "Cancel",
+    "Submit",
+    "View",
+    "Password",
+    "Toggle",
+    "Previous",
+    "Next",
+)
+# Model names Django would derive from the class name (``"auth session"``) must not be shown either.
+ENGLISH_MODEL_NAMES = ("audit entry", "outbox message", "idempotency record", "auth session", "staff user")
+
+
+class _VisibleText(HTMLParser):
+    """Text a person sees: element text plus ``title`` / ``placeholder`` / ``aria-label``, no scripts."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.parts: list[str] = []
+        self._skip = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in ("script", "style", "template"):
+            self._skip += 1
+        for name, value in attrs:
+            if name in ("title", "placeholder", "aria-label") and value:
+                self.parts.append(value)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in ("script", "style", "template") and self._skip:
+            self._skip -= 1
+
+    def handle_data(self, data: str) -> None:
+        if not self._skip and data.strip():
+            self.parts.append(data.strip())
+
+
+def visible_text(html: bytes) -> str:
+    parser = _VisibleText()
+    parser.feed(html.decode())
+    return "\n".join(parser.parts)
+
+
+def english_leftovers(html: bytes) -> list[str]:
+    text = visible_text(html)
+    found = [word for word in ENGLISH if re.search(rf"\b{re.escape(word)}\b", text)]
+    found += [name for name in ENGLISH_MODEL_NAMES if name in text.lower()]
+    return found
+
+
+# --- pages -------------------------------------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_login_page_is_uzbek() -> None:
+    page = Client().get(reverse("admin:login"))
+    assert page.status_code == 200
+    assert english_leftovers(page.content) == []
+    assert "Kirish" in visible_text(page.content)
+
+
+@pytest.mark.django_db
+def test_index_changelist_change_and_history_pages_are_uzbek() -> None:
+    dead = OutboxMessage.objects.create(topic="t.x", payload={}, dedupe_key="i18n-1", status="dead")
+    entry = AuditEntry.objects.create(actor_type="system", action="x.y", entity_type="outbox", entity_id="1")
+    client = console_client("manager")
+    pages = {
+        "index": reverse("admin:index"),
+        "app index": reverse("admin:app_list", args=["core"]),
+        "outbox list": reverse("admin:core_outboxmessage_changelist"),
+        "outbox list (filtered, empty)": reverse("admin:core_outboxmessage_changelist") + "?q=nothing-here",
+        "outbox change": reverse("admin:core_outboxmessage_change", args=[dead.pk]),
+        "outbox history": reverse("admin:core_outboxmessage_history", args=[dead.pk]),
+        "audit list": reverse("admin:core_auditentry_changelist"),
+        "audit change": reverse("admin:core_auditentry_change", args=[entry.pk]),
+        "action confirm": reverse("admin:core_outboxmessage_requeue", args=[dead.pk]),
+    }
+    for name, url in pages.items():
+        page = client.get(url)
+        assert page.status_code == 200, name
+        assert english_leftovers(page.content) == [], name
+
+
+@pytest.mark.django_db
+def test_change_page_title_is_readable_not_the_english_str() -> None:
+    dead = OutboxMessage.objects.create(topic="t.x", payload={}, dedupe_key="i18n-2", status="dead")
+    page = console_client("staff").get(reverse("admin:core_outboxmessage_change", args=[dead.pk]))
+    text = page.content.decode()
+    assert f"Outbox xabari #{dead.pk} | Outbox xabari | Glow Derma Ops</title>" in text
+    assert str(dead) not in visible_text(page.content)  # "t.x: i18n-2 (dead)"
+    assert page.context["original"].pk == dead.pk
+    confirm_page = console_client("staff").get(reverse("admin:core_outboxmessage_requeue", args=[dead.pk]))
+    assert f"Outbox xabari #{dead.pk}" in confirm_page.content.decode()
+    assert str(dead) not in visible_text(confirm_page.content)
+
+
+# --- names -------------------------------------------------------------------------------------------------
+
+UZBEK_LETTERS = re.compile(r"[og]'", re.IGNORECASE)  # o' / g' must use the turned comma ‘ (U+2018)
+
+
+def test_every_project_model_in_the_console_has_an_uzbek_name() -> None:
+    for model in admin.site._registry:
+        if not model.__module__.startswith("glowderma."):
+            continue  # django_otp's TOTPDevice keeps its own names (third-party migrations)
+        opts = model._meta
+        assert {"verbose_name", "verbose_name_plural"} <= set(opts.original_attrs), model
+        for name in (str(opts.verbose_name), str(opts.verbose_name_plural)):
+            assert not UZBEK_LETTERS.search(name), name
+
+
+def test_common_fields_are_labelled_in_uzbek() -> None:
+    expected = {
+        "created_at": "yaratilgan",
+        "updated_at": "yangilangan",
+        "status": "holat",
+        "customer": "mijoz",
+    }
+    seen: dict[str, set[str]] = {}
+    for model in apps.get_app_config("commerce").get_models():
+        for field in model._meta.concrete_fields:
+            if field.name in expected:
+                seen.setdefault(field.name, set()).add(str(field.verbose_name))
+    assert seen == {name: {label} for name, label in expected.items()}
+
+
+def test_project_apps_have_uzbek_labels() -> None:
+    labels = {config.label: str(config.verbose_name) for config in apps.get_app_configs()}
+    assert labels["commerce"] == "Savdo"
+    assert labels["catalog"] == "Katalog"
+    assert labels["accounts"] == "Hisoblar"
+    assert labels["payments"] == "To‘lovlar"
+    # django_otp's device apps (no verbose_name of their own: the index showed "Otp_Totp")
+    assert labels["otp_totp"] == "Ikki bosqichli kirish (TOTP)"
+    from glowderma.core.otp_apps import OtpStaticConfig
+
+    assert OtpStaticConfig.verbose_name == "Tiklash kodlari"
+    assert OtpStaticConfig.name == "django_otp.plugins.otp_static"
+    for config in apps.get_app_configs():
+        if config.name.startswith("glowderma."):
+            assert config.verbose_name != config.label.replace("_", " ").title(), config.name
+
+
+# --- the catalog -------------------------------------------------------------------------------------------
+
+
+def test_the_committed_mo_matches_the_po() -> None:
+    call_command("compile_locale", "--check", stdout=io.StringIO())
+    assert CATALOG.with_suffix(".mo").read_bytes() == compile_po(CATALOG.read_text(encoding="utf-8"))
+
+
+def test_the_compiled_catalog_reads_back_with_gettext() -> None:
+    translations = gettext.GNUTranslations(io.BytesIO(compile_po(CATALOG.read_text(encoding="utf-8"))))
+    for entry in parse(CATALOG.read_text(encoding="utf-8")):
+        if not entry.msgid:
+            continue
+        if entry.msgid_plural is None:
+            assert translations.gettext(entry.msgid) == entry.msgstr[0], entry.msgid
+        else:
+            assert translations.ngettext(entry.msgid, entry.msgid_plural, 2) == entry.msgstr[0]
+    assert translations.info()["plural-forms"] == "nplurals=1; plural=0;"
+
+
+def test_catalog_uses_the_uzbek_apostrophes() -> None:
+    for entry in parse(CATALOG.read_text(encoding="utf-8")):
+        for text in entry.msgstr.values():
+            assert not UZBEK_LETTERS.search(text), text
+
+
+def test_django_uses_the_project_catalog() -> None:
+    assert _("Log in") == "Kirish"
+    assert _("Change") == "O‘zgartirish"  # overrides Django's own "O'zgartirish"
+    assert ngettext("%(counter)s result", "%(counter)s results", 5) == "%(counter)s ta natija"
+
+
+def test_po_parser_handles_context_plurals_fuzzy_and_continuations() -> None:
+    text = (
+        'msgid ""\nmsgstr ""\n"Content-Type: text/plain; charset=UTF-8\\n"\n'
+        '"Plural-Forms: nplurals=2; plural=(n != 1);\\n"\n\n'
+        'msgctxt "menu"\nmsgid "Open"\nmsgstr "Och"\n\n'
+        '#, fuzzy\nmsgid "Draft"\nmsgstr "Qoralama"\n\n'
+        'msgid "Long "\n"line"\nmsgstr "Uzun "\n"qator \\"x\\""\n\n'
+        'msgid "one"\nmsgid_plural "many"\nmsgstr[0] "bitta"\nmsgstr[1] "ko‘p"\n\n'
+        'msgid "untranslated"\nmsgstr ""\n'
+    )
+    translations = gettext.GNUTranslations(io.BytesIO(compile_po(text)))
+    assert translations.pgettext("menu", "Open") == "Och"
+    assert translations.gettext("Draft") == "Draft"  # fuzzy: left out
+    assert translations.gettext("Long line") == 'Uzun qator "x"'
+    assert translations.ngettext("one", "many", 1) == "bitta"
+    assert translations.ngettext("one", "many", 3) == "ko‘p"
+    assert translations.gettext("untranslated") == "untranslated"

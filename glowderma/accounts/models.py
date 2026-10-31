@@ -24,20 +24,22 @@ def date_joined_default() -> datetime:
 
 
 class StaffUser(AbstractBaseUser, PermissionsMixin):
-    email = models.EmailField(max_length=254, unique=True)
-    full_name = models.CharField(max_length=150, blank=True)
-    role = models.CharField(max_length=10, choices=[("admin", "admin")], default="admin")
-    is_active = models.BooleanField(default=True)
-    is_staff = models.BooleanField(default=False)
+    email = models.EmailField(max_length=254, unique=True, verbose_name="email")
+    full_name = models.CharField(max_length=150, blank=True, verbose_name="to‘liq ism")
+    role = models.CharField(max_length=10, choices=[("admin", "admin")], default="admin", verbose_name="rol")
+    is_active = models.BooleanField(default=True, verbose_name="faol")
+    is_staff = models.BooleanField(default=False, verbose_name="konsolga kirish")
     # Admin contract §2.16: only a manager creates, edits, deactivates, reactivates staff or resets their
     # password. Every other staff right is the same for everyone (the client's single "admin" role).
-    is_manager = models.BooleanField(default=False)
-    date_joined = models.DateTimeField(default=date_joined_default)
+    is_manager = models.BooleanField(default=False, verbose_name="menejer")
+    date_joined = models.DateTimeField(default=date_joined_default, verbose_name="qo‘shilgan")
     objects = StaffUserManager()
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS: ClassVar[list[str]] = []
 
     class Meta:
+        verbose_name = "xodim"
+        verbose_name_plural = "xodimlar"
         constraints = [models.UniqueConstraint(Lower("email"), name="staffuser_email_ci_unique")]
 
     def save(self, *args: Any, **kwargs: Any) -> None:
@@ -57,35 +59,52 @@ class Customer(TimeStampedModel):
     deletion scrubs it (the phone stays, A1).
     """
 
-    phone = models.CharField(max_length=13, unique=True, null=True, blank=True)  # E.164 "+998XXXXXXXXX"
-    email = models.CharField(max_length=254, unique=True, null=True, blank=True)  # normalised, verified
-    email_verified_at = models.DateTimeField(null=True)
-    name = models.CharField(max_length=150, blank=True)  # "" after delete (scrubbed)
+    # E.164 "+998XXXXXXXXX"
+    phone = models.CharField(max_length=13, unique=True, null=True, blank=True, verbose_name="telefon")
+    # normalised, verified
+    email = models.CharField(max_length=254, unique=True, null=True, blank=True, verbose_name="email")
+    email_verified_at = models.DateTimeField(null=True, verbose_name="email tasdiqlangan")
+    name = models.CharField(max_length=150, blank=True, verbose_name="nomi")  # "" after delete (scrubbed)
     language = models.CharField(
-        max_length=2, choices=enums.ContentLanguage.choices, default=enums.ContentLanguage.UZ
+        max_length=2,
+        choices=enums.ContentLanguage.choices,
+        default=enums.ContentLanguage.UZ,
+        verbose_name="til",
     )
     status = models.CharField(
-        max_length=8, choices=enums.CustomerStatus.choices, default=enums.CustomerStatus.ACTIVE, db_index=True
+        max_length=8,
+        choices=enums.CustomerStatus.choices,
+        default=enums.CustomerStatus.ACTIVE,
+        db_index=True,
+        verbose_name="holat",
     )
-    image = models.ImageField(upload_to=media.customer_image_path, blank=True, max_length=255)
-    address_text = models.CharField(max_length=300, blank=True)  # denormalised default address
-    registered_at = models.DateTimeField(default=timestamp_default, db_index=True)
-    deleted_at = models.DateTimeField(null=True)
-    reactivated_at = models.DateTimeField(null=True)  # last re-registration, if any
-    last_login_at = models.DateTimeField(null=True)
+    image = models.ImageField(
+        upload_to=media.customer_image_path, blank=True, max_length=255, verbose_name="rasm"
+    )
+    # denormalised default address
+    address_text = models.CharField(max_length=300, blank=True, verbose_name="manzil")
+    registered_at = models.DateTimeField(
+        default=timestamp_default, db_index=True, verbose_name="ro‘yxatdan o‘tgan"
+    )
+    deleted_at = models.DateTimeField(null=True, verbose_name="o‘chirilgan")
+    # last re-registration, if any
+    reactivated_at = models.DateTimeField(null=True, verbose_name="qayta faollashgan")
+    last_login_at = models.DateTimeField(null=True, verbose_name="oxirgi kirish")
     # M2 credentials (password login after OTP sign-up; never AbstractBaseUser — StaffUser is AUTH_USER_MODEL)
     password = models.CharField(max_length=128, blank=True)  # Django hasher format; "" = not set
-    password_changed_at = models.DateTimeField(null=True)
+    password_changed_at = models.DateTimeField(null=True, verbose_name="parol o‘zgargan")
     # M2 consent record (C3)
-    terms_version = models.CharField(max_length=32, blank=True)
-    consent_at = models.DateTimeField(null=True)
-    consent_ip = models.GenericIPAddressField(null=True)
+    terms_version = models.CharField(max_length=32, blank=True, verbose_name="shartlar versiyasi")
+    consent_at = models.DateTimeField(null=True, verbose_name="rozilik vaqti")
+    consent_ip = models.GenericIPAddressField(null=True, verbose_name="rozilik IP manzili")
     # M2 history horizon (customer contract §2.2.3, M2-A15/A16): the customer's own orders, appointments and
     # inbox rows created before it belong to a previous holder of the number. Null = no horizon
     # (registered_at).
-    history_from = models.DateTimeField(null=True)
+    history_from = models.DateTimeField(null=True, verbose_name="tarix boshlanishi")
 
     class Meta:
+        verbose_name = "mijoz"
+        verbose_name_plural = "mijozlar"
         constraints = [
             models.CheckConstraint(condition=Q(phone__regex=PHONE_E164_REGEX), name="customer_phone_e164"),
             models.CheckConstraint(
@@ -140,22 +159,26 @@ class Device(TimeStampedModel):
         ANDROID = "android"
         WEB = "web"  # a browser of the customer website (its BFF holds the device id in a cookie)
 
-    customer = models.ForeignKey("accounts.Customer", on_delete=models.CASCADE, related_name="devices")
-    fid = models.CharField(max_length=128)  # Firebase installation id
-    platform = models.CharField(max_length=8, choices=Platform.choices)
-    model = models.CharField(max_length=80, blank=True)  # "iPhone 14"
-    os = models.CharField(max_length=40, blank=True)  # "iOS 18.1"
-    app_version = models.CharField(max_length=20, blank=True)  # "1.0.0"
+    customer = models.ForeignKey(
+        "accounts.Customer", on_delete=models.CASCADE, related_name="devices", verbose_name="mijoz"
+    )
+    fid = models.CharField(max_length=128, verbose_name="FID")  # Firebase installation id
+    platform = models.CharField(max_length=8, choices=Platform.choices, verbose_name="platforma")
+    model = models.CharField(max_length=80, blank=True, verbose_name="model")  # "iPhone 14"
+    os = models.CharField(max_length=40, blank=True, verbose_name="OT")  # "iOS 18.1"
+    app_version = models.CharField(max_length=20, blank=True, verbose_name="ilova versiyasi")  # "1.0.0"
     locale = models.CharField(max_length=8, blank=True)  # device locale as reported, informational
     fcm_token = models.CharField(max_length=512, blank=True)
-    push_enabled = models.BooleanField(default=False)
-    is_active = models.BooleanField(default=True)  # false after logout/replace/delete
-    last_active_at = models.DateTimeField(default=timestamp_default)
+    push_enabled = models.BooleanField(default=False, verbose_name="push yoqilgan")
+    is_active = models.BooleanField(default=True, verbose_name="faol")  # false after logout/replace/delete
+    last_active_at = models.DateTimeField(default=timestamp_default, verbose_name="oxirgi faollik")
     fcm_invalidated_at = models.DateTimeField(null=True)  # set when FCM reports the token dead
     # M2 (customer contract §1.9): SHA-256 hex of the device key issued once on a verified sign-in; "" = none.
     key_hash = models.CharField(max_length=64, blank=True)
 
     class Meta:
+        verbose_name = "qurilma"
+        verbose_name_plural = "qurilmalar"
         constraints = [
             models.UniqueConstraint(fields=["customer", "fid"], name="device_customer_fid_unique"),
             models.UniqueConstraint(
@@ -185,17 +208,22 @@ class Device(TimeStampedModel):
 class Address(TimeStampedModel):
     """A saved delivery address of a customer; checkout snapshots its text into the order."""
 
-    customer = models.ForeignKey("accounts.Customer", on_delete=models.CASCADE, related_name="addresses")
-    label = models.CharField(max_length=60, blank=True)  # "Uy", "Ish"
-    text = models.CharField(max_length=300)  # full human-readable address
-    region_code = models.CharField(max_length=16, blank=True)  # BTS region id (M2 tariff/create)
-    city_code = models.CharField(max_length=16, blank=True)  # BTS city id
-    comment = models.CharField(max_length=200, blank=True)  # entrance, floor, intercom
+    customer = models.ForeignKey(
+        "accounts.Customer", on_delete=models.CASCADE, related_name="addresses", verbose_name="mijoz"
+    )
+    label = models.CharField(max_length=60, blank=True, verbose_name="yorliq")  # "Uy", "Ish"
+    text = models.CharField(max_length=300, verbose_name="matn")  # full human-readable address
+    # BTS region id (M2 tariff/create)
+    region_code = models.CharField(max_length=16, blank=True, verbose_name="viloyat kodi")
+    city_code = models.CharField(max_length=16, blank=True, verbose_name="shahar kodi")  # BTS city id
+    comment = models.CharField(max_length=200, blank=True, verbose_name="izoh")  # entrance, floor, intercom
     latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True)
     longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True)
-    is_default = models.BooleanField(default=False)
+    is_default = models.BooleanField(default=False, verbose_name="asosiy")
 
     class Meta:
+        verbose_name = "manzil"
+        verbose_name_plural = "manzillar"
         constraints = [
             models.UniqueConstraint(
                 fields=["customer"], condition=Q(is_default=True), name="address_one_default_per_customer"
@@ -225,19 +253,21 @@ class SmsCode(models.Model):
         VERIFY_EMAIL = "verify_email"  # attach an e-mail to a signed-in account (e-mail only)
         ATTACH_PHONE = "attach_phone"  # attach a phone to a signed-in account (SMS only)
 
-    phone = models.CharField(max_length=13, blank=True)
+    phone = models.CharField(max_length=13, blank=True, verbose_name="telefon")
     # normalised (lower case); db_default: a writer of the previous release (deploy window) inserts SMS codes
     # without the column
-    email = models.CharField(max_length=254, blank=True, default="", db_default="")
-    purpose = models.CharField(max_length=20, choices=Purpose.choices)
+    email = models.CharField(max_length=254, blank=True, default="", db_default="", verbose_name="email")
+    purpose = models.CharField(max_length=20, choices=Purpose.choices, verbose_name="maqsad")
     code_hmac = models.CharField(max_length=64)  # HMAC-SHA256(code, SMS_CODE_HMAC_KEY), hex
-    attempts = models.PositiveSmallIntegerField(default=0)
-    max_attempts = models.PositiveSmallIntegerField(default=5)
-    created_at = models.DateTimeField(default=timestamp_default)
-    expires_at = models.DateTimeField()  # created_at + 120 s
-    sent_at = models.DateTimeField(null=True)  # claimed by the sms.send handler before the Eskiz call
-    consumed_at = models.DateTimeField(null=True)  # verified successfully
-    exhausted_at = models.DateTimeField(null=True)  # attempts reached max_attempts
+    attempts = models.PositiveSmallIntegerField(default=0, verbose_name="urinishlar")
+    max_attempts = models.PositiveSmallIntegerField(default=5, verbose_name="maks. urinishlar")
+    created_at = models.DateTimeField(default=timestamp_default, verbose_name="yaratilgan")
+    expires_at = models.DateTimeField(verbose_name="amal qilish muddati")  # created_at + 120 s
+    # claimed by the sms.send handler before the Eskiz call
+    sent_at = models.DateTimeField(null=True, verbose_name="yuborilgan")
+    consumed_at = models.DateTimeField(null=True, verbose_name="ishlatilgan")  # verified successfully
+    # attempts reached max_attempts
+    exhausted_at = models.DateTimeField(null=True, verbose_name="tugagan urinishlar vaqti")
     verification_token_hash = models.CharField(max_length=64, blank=True)  # SHA-256 of the issued token
     verification_expires_at = models.DateTimeField(null=True)  # consumed_at + 10 min
     verification_used_at = models.DateTimeField(null=True)  # single use
@@ -245,6 +275,8 @@ class SmsCode(models.Model):
     provider_message_id = models.CharField(max_length=64, blank=True)  # Eskiz message id (fake: "fake-<id>")
 
     class Meta:
+        verbose_name = "SMS kod"
+        verbose_name_plural = "SMS kodlar"
         indexes = [
             models.Index(fields=["phone", "purpose", "created_at"], name="accounts_smscode_phone_purpose"),
             models.Index(
@@ -278,15 +310,17 @@ class CustomerSocialIdentity(models.Model):
     """Links a Google/Facebook identity to a customer (decision A6); separate from the staff table."""
 
     customer = models.ForeignKey(
-        "accounts.Customer", on_delete=models.CASCADE, related_name="social_identities"
+        "accounts.Customer", on_delete=models.CASCADE, related_name="social_identities", verbose_name="mijoz"
     )
     provider = models.CharField(
-        max_length=16, choices=[("google", "google"), ("facebook", "facebook"), ("apple", "apple")]
+        max_length=16,
+        choices=[("google", "google"), ("facebook", "facebook"), ("apple", "apple")],
+        verbose_name="provayder",
     )
-    subject = models.CharField(max_length=254)
-    email_at_link = models.EmailField(max_length=254, blank=True)
-    created_at = models.DateTimeField(default=timestamp_default, editable=False)
-    last_login_at = models.DateTimeField(null=True)
+    subject = models.CharField(max_length=254, verbose_name="subyekt")
+    email_at_link = models.EmailField(max_length=254, blank=True, verbose_name="bog‘langandagi email")
+    created_at = models.DateTimeField(default=timestamp_default, editable=False, verbose_name="yaratilgan")
+    last_login_at = models.DateTimeField(null=True, verbose_name="oxirgi kirish")
     # Apple's refresh token sealed with core.secretbox (customer contract §2.1.8), revoked on unlink/deletion.
     provider_refresh_token = models.TextField(blank=True)
     # The OAuth client the refresh token was issued to (Apple: the ID token's ``aud`` bundle id, which is the
@@ -294,6 +328,8 @@ class CustomerSocialIdentity(models.Model):
     provider_client_id = models.CharField(max_length=255, blank=True)
 
     class Meta:
+        verbose_name = "ijtimoiy kirish"
+        verbose_name_plural = "ijtimoiy kirishlar"
         constraints = [
             models.UniqueConstraint(
                 fields=["provider", "subject"], name="customer_social_provider_subject_unique"
@@ -315,22 +351,37 @@ class AuthSession(models.Model):
         APPLE = "apple"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    audience = models.CharField(max_length=16, choices=[("staff", "staff"), ("customer", "customer")])
+    audience = models.CharField(
+        max_length=16, choices=[("staff", "staff"), ("customer", "customer")], verbose_name="auditoriya"
+    )
     staff = models.ForeignKey(
-        "accounts.StaffUser", null=True, on_delete=models.PROTECT, related_name="sessions"
+        "accounts.StaffUser",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="sessions",
+        verbose_name="xodim",
     )
     customer = models.ForeignKey(
-        "accounts.Customer", null=True, on_delete=models.PROTECT, related_name="sessions"
+        "accounts.Customer",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="sessions",
+        verbose_name="mijoz",
     )
+    # M2
     device = models.ForeignKey(
-        "accounts.Device", null=True, on_delete=models.SET_NULL, related_name="sessions"
-    )  # M2
-    device_label = models.CharField(max_length=100)
+        "accounts.Device",
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="sessions",
+        verbose_name="qurilma",
+    )
+    device_label = models.CharField(max_length=100, verbose_name="qurilma nomi")
     refresh_hash = models.CharField(max_length=64, unique=True)
-    created_at = models.DateTimeField(default=date_joined_default, editable=False)
-    last_used_at = models.DateTimeField(default=date_joined_default)
-    absolute_expires_at = models.DateTimeField()
-    revoked_at = models.DateTimeField(null=True)
+    created_at = models.DateTimeField(default=date_joined_default, editable=False, verbose_name="yaratilgan")
+    last_used_at = models.DateTimeField(default=date_joined_default, verbose_name="oxirgi foydalanish")
+    absolute_expires_at = models.DateTimeField(verbose_name="mutlaq muddat")
+    revoked_at = models.DateTimeField(null=True, verbose_name="tugatilgan")
     revoke_reason = models.CharField(
         max_length=24,
         blank=True,
@@ -346,6 +397,7 @@ class AuthSession(models.Model):
                 "refresh_reused",
             )
         ],
+        verbose_name="tugatish sababi",
     )
     # M2 rotating refresh (customers only; staff refresh is non-rotating and leaves these empty)
     previous_refresh_hash = models.CharField(max_length=64, blank=True)
@@ -361,11 +413,15 @@ class AuthSession(models.Model):
     # forwards the browser's as X-GD-Client-UA), the last client IP and the place a local GeoIP City database
     # resolves it to ("" = unknown / no database). Customer sessions only; refreshed by the throttled activity
     # bump (CustomerJWTAuthentication).
-    user_agent = models.CharField(max_length=512, blank=True, default="", db_default="")
-    last_ip = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(
+        max_length=512, blank=True, default="", db_default="", verbose_name="user-agent"
+    )
+    last_ip = models.GenericIPAddressField(null=True, blank=True, verbose_name="oxirgi IP")
     location = models.CharField(max_length=120, blank=True, default="", db_default="")
 
     class Meta:
+        verbose_name = "seans"
+        verbose_name_plural = "seanslar"
         indexes = [
             models.Index(fields=["customer", "revoked_at"], name="accounts_authsession_cust_rev"),
             models.Index(fields=["staff", "revoked_at"], name="accounts_authsession_staff_rev"),
@@ -391,15 +447,19 @@ class AuthSession(models.Model):
 
 class SocialIdentity(models.Model):
     staff = models.ForeignKey(
-        "accounts.StaffUser", on_delete=models.CASCADE, related_name="social_identities"
+        "accounts.StaffUser", on_delete=models.CASCADE, related_name="social_identities", verbose_name="xodim"
     )
-    provider = models.CharField(max_length=16, choices=[("google", "google"), ("facebook", "facebook")])
-    subject = models.CharField(max_length=254)
-    email_at_link = models.EmailField(max_length=254, blank=True)
-    created_at = models.DateTimeField(default=date_joined_default, editable=False)
-    last_login_at = models.DateTimeField(null=True)
+    provider = models.CharField(
+        max_length=16, choices=[("google", "google"), ("facebook", "facebook")], verbose_name="provayder"
+    )
+    subject = models.CharField(max_length=254, verbose_name="subyekt")
+    email_at_link = models.EmailField(max_length=254, blank=True, verbose_name="bog‘langandagi email")
+    created_at = models.DateTimeField(default=date_joined_default, editable=False, verbose_name="yaratilgan")
+    last_login_at = models.DateTimeField(null=True, verbose_name="oxirgi kirish")
 
     class Meta:
+        verbose_name = "xodim ijtimoiy kirishi"
+        verbose_name_plural = "xodim ijtimoiy kirishlari"
         constraints = [
             models.UniqueConstraint(fields=["provider", "subject"], name="social_provider_subject_unique"),
             models.UniqueConstraint(fields=["staff", "provider"], name="social_staff_provider_unique"),

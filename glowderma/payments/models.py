@@ -43,27 +43,37 @@ SUBMITTED_REFUND_STATES: tuple[str, ...] = (enums.RefundState.SUBMITTING, enums.
 class Payment(TimeStampedModel):
     """One attempt to collect an order's ``total`` with one provider; ``amount`` never changes."""
 
-    order = models.ForeignKey("commerce.Order", on_delete=models.PROTECT, related_name="payments")
-    provider = models.CharField(max_length=16, choices=enums.PaymentProvider.choices)  # click|payme
+    order = models.ForeignKey(
+        "commerce.Order", on_delete=models.PROTECT, related_name="payments", verbose_name="buyurtma"
+    )
+    # click|payme
+    provider = models.CharField(
+        max_length=16, choices=enums.PaymentProvider.choices, verbose_name="provayder"
+    )
+    # pending|paid|failed|refunded
     status = models.CharField(
-        max_length=16, choices=enums.PaymentStatus.choices, default=enums.PaymentStatus.PENDING
-    )  # pending|paid|failed|refunded
-    amount = models.BigIntegerField()  # = Order.total at creation
+        max_length=16,
+        choices=enums.PaymentStatus.choices,
+        default=enums.PaymentStatus.PENDING,
+        verbose_name="holat",
+    )
+    amount = models.BigIntegerField(verbose_name="summa")  # = Order.total at creation
+    # Click click_trans_id / Payme transaction id; "" → null in the API
     provider_txn_id = models.CharField(
-        max_length=64, blank=True, db_index=True
-    )  # Click click_trans_id / Payme transaction id; "" → null in the API
-    confirmed_at = models.DateTimeField(null=True)
-    failed_at = models.DateTimeField(null=True)
-    refunded_at = models.DateTimeField(null=True)
-    error_code = models.CharField(
-        max_length=32, blank=True
-    )  # provider error code as text ("-9", "-31008", "cancelled", "abandoned", "expired", "late_capture")
-    error_message = models.CharField(max_length=254, blank=True)
-    provider_state = models.JSONField(
-        default=dict, blank=True
-    )  # provider protocol state, keys in design 02 §2.1 (never a raw payload: WebhookInbox holds those)
+        max_length=64, blank=True, db_index=True, verbose_name="provayder tranzaksiya ID"
+    )
+    confirmed_at = models.DateTimeField(null=True, verbose_name="tasdiqlangan")
+    failed_at = models.DateTimeField(null=True, verbose_name="xato vaqti")
+    refunded_at = models.DateTimeField(null=True, verbose_name="qaytarilgan")
+    # provider error code as text ("-9", "-31008", "cancelled", "abandoned", "expired", "late_capture")
+    error_code = models.CharField(max_length=32, blank=True, verbose_name="xato kodi")
+    error_message = models.CharField(max_length=254, blank=True, verbose_name="xato matni")
+    # provider protocol state, keys in design 02 §2.1 (never a raw payload: WebhookInbox holds those)
+    provider_state = models.JSONField(default=dict, blank=True)
 
     class Meta:
+        verbose_name = "to‘lov"
+        verbose_name_plural = "to‘lovlar"
         ordering = ["-created_at", "-id"]
         constraints = [
             models.UniqueConstraint(
@@ -159,30 +169,51 @@ class Refund(TimeStampedModel):
         LATE_CAPTURE = "late_capture"  # capture landed after expiry (M2 auto-refund)
         MANUAL = "manual"  # staff-initiated retry (M3 command)
 
-    payment = models.ForeignKey("payments.Payment", on_delete=models.PROTECT, related_name="refunds")
+    payment = models.ForeignKey(
+        "payments.Payment", on_delete=models.PROTECT, related_name="refunds", verbose_name="to‘lov"
+    )
+    # requested|submitting|succeeded|failed|manual_required|unknown
     state = models.CharField(
-        max_length=16, choices=enums.RefundState.choices, default=enums.RefundState.REQUESTED
-    )  # requested|submitting|succeeded|failed|manual_required|unknown
-    amount = models.BigIntegerField()  # = payment.amount in M1 (full refunds only; service invariant)
-    origin = models.CharField(max_length=16, choices=Origin.choices, default=Origin.ORDER_CANCELLED)
-    provider_refund_id = models.CharField(max_length=64, blank=True)
+        max_length=16,
+        choices=enums.RefundState.choices,
+        default=enums.RefundState.REQUESTED,
+        verbose_name="holat",
+    )
+    # = payment.amount in M1 (full refunds only; service invariant)
+    amount = models.BigIntegerField(verbose_name="summa")
+    origin = models.CharField(
+        max_length=16, choices=Origin.choices, default=Origin.ORDER_CANCELLED, verbose_name="manba"
+    )
+    provider_refund_id = models.CharField(max_length=64, blank=True, verbose_name="provayder qaytarish ID")
+    # null = system
     requested_by = models.ForeignKey(
-        "accounts.StaffUser", null=True, on_delete=models.PROTECT, related_name="refunds_requested"
-    )  # null = system
-    requested_at = models.DateTimeField(default=timestamp_default)
-    submitted_at = models.DateTimeField(null=True)  # first handover to the provider
+        "accounts.StaffUser",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="refunds_requested",
+        verbose_name="so‘ragan",
+    )
+    requested_at = models.DateTimeField(default=timestamp_default, verbose_name="so‘ralgan")
+    # first handover to the provider
+    submitted_at = models.DateTimeField(null=True, verbose_name="yuborilgan")
     last_attempt_at = models.DateTimeField(null=True)
-    completed_at = models.DateTimeField(null=True)  # succeeded only
-    attempts = models.PositiveIntegerField(default=0)
-    error_code = models.CharField(max_length=32, blank=True)
-    last_error = models.TextField(blank=True)
-    provider_state = models.JSONField(
-        default=dict, blank=True
-    )  # click: {payment_status, error, error_note, checked_at}; payme: {cancel_time, reason, state: -2}
+    completed_at = models.DateTimeField(null=True, verbose_name="yakunlangan")  # succeeded only
+    attempts = models.PositiveIntegerField(default=0, verbose_name="urinishlar")
+    error_code = models.CharField(max_length=32, blank=True, verbose_name="xato kodi")
+    last_error = models.TextField(blank=True, verbose_name="oxirgi xato")
+    # click: {payment_status, error, error_note, checked_at}; payme: {cancel_time, reason, state: -2}
+    provider_state = models.JSONField(default=dict, blank=True)
     # why the refund is (or was) manual_required: payme | no_paydoc | fake_mode; "" = never manual (M3)
-    manual_reason = models.CharField(max_length=16, choices=enums.RefundManualReason.choices, blank=True)
+    manual_reason = models.CharField(
+        max_length=16,
+        choices=enums.RefundManualReason.choices,
+        blank=True,
+        verbose_name="qo‘lda kiritish sababi",
+    )
 
     class Meta:
+        verbose_name = "qaytarish"
+        verbose_name_plural = "qaytarishlar"
         ordering = ["-requested_at", "-id"]
         constraints = [
             models.UniqueConstraint(

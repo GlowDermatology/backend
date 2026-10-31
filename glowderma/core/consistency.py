@@ -81,6 +81,20 @@ def overdue_messages(now: datetime, overdue: timedelta, *, limit: int) -> Findin
     return finding(queryset, limit=limit)
 
 
+def overdue_cutoff(now: datetime) -> datetime:
+    """Open messages due before this instant are overdue (``CONSISTENCY_OUTBOX_OVERDUE_MINUTES``)."""
+    return now - timedelta(minutes=int(settings.CONSISTENCY_OUTBOX_OVERDUE_MINUTES))
+
+
+def is_overdue(message: OutboxMessage, now: datetime) -> bool:
+    """One message by the rule of :func:`overdue_messages` (the ops console's requeue button)."""
+    return (
+        message.status in OPEN_OUTBOX_STATUSES
+        and message.deferred_since is None
+        and message.available_at < overdue_cutoff(now)
+    )
+
+
 def deferred_past_window(now: datetime, grace: timedelta, *, limit: int) -> Finding:
     """Open messages deferred for longer than their topic's window (:func:`outbox.deferral_windows`, else
     ``OUTBOX_DEFERRAL_WINDOW_HOURS``) plus ``grace``: their handler should have given up and buried them."""
@@ -100,5 +114,7 @@ __all__ = [
     "dead_messages",
     "deferred_past_window",
     "finding",
+    "is_overdue",
+    "overdue_cutoff",
     "overdue_messages",
 ]

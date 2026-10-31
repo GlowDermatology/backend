@@ -13,6 +13,7 @@ from glowderma.core.labels import PRODUCT_STATUS
 
 register_read_only(
     Category,
+    title_format="Kategoriya: {obj.name_uz}",
     list_display=("slug", "name_uz", "position", "is_active"),
     list_filter=("is_active",),
     search_fields=("slug", "name_uz"),
@@ -20,6 +21,7 @@ register_read_only(
 )
 register_read_only(
     Product,
+    title_format="Mahsulot: {obj}",
     list_display=(
         "id",
         "billz_id",
@@ -53,6 +55,7 @@ register_read_only(
 )
 register_read_only(
     Banner,
+    title_format="Banner: {obj.title_uz}",
     list_display=("id", "title_uz", "link_kind", "is_active", "starts_at", "ends_at", "position"),
     list_filter=("link_kind", "is_active"),
     search_fields=("title_uz",),

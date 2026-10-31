@@ -86,6 +86,7 @@ class OrderCashbackHoldInline(ReadOnlyTabularInline):
 
 
 class OrderAdmin(ReadOnlyAdmin):
+    title_format = "Buyurtma №{obj.pk}"
     list_display = (
         "id",
         customer_column(),

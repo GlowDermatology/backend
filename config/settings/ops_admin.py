@@ -155,6 +155,8 @@ SIDEBAR_NAVIGATION: list[dict[str, Any]] = [
             _item("Sessiyalar", "devices", "accounts", "authsession"),
             _item("Qurilmalar", "smartphone", "accounts", "device"),
             _item("SMS kodlar", "pin", "accounts", "smscode"),
+            _item("2FA qurilmalar", "phonelink_lock", "otp_totp", "totpdevice"),
+            _item("Tiklash kodlari", "key", "otp_static", "staticdevice"),
             _item("Xodim ijtimoiy kirishlari", "link", "accounts", "socialidentity"),
             _item("Audit jurnali", "manage_search", "core", "auditentry"),
         ],

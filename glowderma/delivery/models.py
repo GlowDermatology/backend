@@ -36,36 +36,42 @@ class Shipment(TimeStampedModel):
         CREATED = "created"
         CANCELLED = "cancelled"
 
-    order = models.OneToOneField("commerce.Order", on_delete=models.PROTECT, related_name="shipment")
-    state = models.CharField(max_length=16, choices=State.choices, default=State.NOT_CREATED)
-    tracking_number = models.CharField(max_length=32, blank=True)
-    tariff = models.BigIntegerField(
-        null=True
-    )  # so'm; NULL until created; from the BTS create response, else Order.delivery_fee (D-2)
-    bts_order_id = models.CharField(max_length=64, blank=True)  # BTS's own id of the parcel
-    bts_status = models.CharField(max_length=16, blank=True)  # raw BTS status code as text ("100", "200", …)
-    via = models.CharField(
-        max_length=16, blank=True, choices=enums.ShipmentVia.choices
-    )  # source of the last status
-    last_status_at = models.DateTimeField(null=True)  # API `updated_at` of the created state
-    bts_created_at = models.DateTimeField(null=True)
-    cancelled_at = models.DateTimeField(null=True)
-    attempts = models.PositiveIntegerField(
-        default=0
-    )  # BTS create attempts that got an answer (failed or created)
-    create_requests = models.PositiveIntegerField(
-        default=0
-    )  # outbox enqueues (automatic + manual retries); part of the dedupe key
+    order = models.OneToOneField(
+        "commerce.Order", on_delete=models.PROTECT, related_name="shipment", verbose_name="buyurtma"
+    )
+    state = models.CharField(
+        max_length=16, choices=State.choices, default=State.NOT_CREATED, verbose_name="holat"
+    )
+    tracking_number = models.CharField(max_length=32, blank=True, verbose_name="trek raqami")
+    # so'm; NULL until created; from the BTS create response, else Order.delivery_fee (D-2)
+    tariff = models.BigIntegerField(null=True, verbose_name="tarif")
+    # BTS's own id of the parcel
+    bts_order_id = models.CharField(max_length=64, blank=True, verbose_name="BTS buyurtma ID")
+    # raw BTS status code as text ("100", "200", …)
+    bts_status = models.CharField(max_length=16, blank=True, verbose_name="BTS holati")
+    # source of the last status
+    via = models.CharField(max_length=16, blank=True, choices=enums.ShipmentVia.choices, verbose_name="manba")
+    # API `updated_at` of the created state
+    last_status_at = models.DateTimeField(null=True, verbose_name="oxirgi holat vaqti")
+    bts_created_at = models.DateTimeField(null=True, verbose_name="BTS’da yaratilgan")
+    cancelled_at = models.DateTimeField(null=True, verbose_name="bekor qilingan")
+    # BTS create attempts that got an answer (failed or created)
+    attempts = models.PositiveIntegerField(default=0, verbose_name="urinishlar")
+    # outbox enqueues (automatic + manual retries); part of the dedupe key
+    create_requests = models.PositiveIntegerField(default=0)
     last_attempt_at = models.DateTimeField(null=True)
     last_error_code = models.CharField(max_length=32, blank=True)
-    last_error = models.TextField(blank=True)
+    last_error = models.TextField(blank=True, verbose_name="oxirgi xato")
+    # the newest `bts.create_shipment` message; `pending` is derived from its status
     create_message = models.ForeignKey(
         "core.OutboxMessage", null=True, on_delete=models.SET_NULL, related_name="+"
-    )  # the newest `bts.create_shipment` message; `pending` is derived from its status
+    )
 
     objects = ShipmentQuerySet.as_manager()
 
     class Meta:
+        verbose_name = "jo‘natma"
+        verbose_name_plural = "jo‘natmalar"
         constraints = [
             models.CheckConstraint(
                 condition=Q(tariff__isnull=True) | Q(tariff__gte=0),
@@ -153,18 +159,22 @@ class ShipmentEvent(AppendOnlyModel):
         CANCELLED = "cancelled"
         CANCEL_REFUSED = "cancel_refused"
 
-    shipment = models.ForeignKey("delivery.Shipment", on_delete=models.PROTECT, related_name="events")
-    kind = models.CharField(max_length=16, choices=Kind.choices)
-    bts_status = models.CharField(max_length=16, blank=True)
-    via = models.CharField(max_length=16, blank=True, choices=enums.ShipmentVia.choices)
-    manual = models.BooleanField(default=False)  # the triggering create was a manual retry
-    error_code = models.CharField(max_length=32, blank=True)
-    payload = models.JSONField(
-        default=dict, blank=True, encoder=DjangoJSONEncoder
-    )  # BTS response / webhook body (PII-light: no customer name)
-    at = models.DateTimeField(default=timestamp_default, editable=False)
+    shipment = models.ForeignKey(
+        "delivery.Shipment", on_delete=models.PROTECT, related_name="events", verbose_name="jo‘natma"
+    )
+    kind = models.CharField(max_length=16, choices=Kind.choices, verbose_name="turi")
+    bts_status = models.CharField(max_length=16, blank=True, verbose_name="BTS holati")
+    via = models.CharField(max_length=16, blank=True, choices=enums.ShipmentVia.choices, verbose_name="manba")
+    # the triggering create was a manual retry
+    manual = models.BooleanField(default=False, verbose_name="qo‘lda")
+    error_code = models.CharField(max_length=32, blank=True, verbose_name="xato kodi")
+    # BTS response / webhook body (PII-light: no customer name)
+    payload = models.JSONField(default=dict, blank=True, encoder=DjangoJSONEncoder, verbose_name="ma’lumot")
+    at = models.DateTimeField(default=timestamp_default, editable=False, verbose_name="vaqt")
 
     class Meta:
+        verbose_name = "yetkazish hodisasi"
+        verbose_name_plural = "yetkazish tarixi"
         ordering = ["shipment_id", "at", "id"]
         indexes = [models.Index(fields=["shipment", "at", "id"], name="shipmentevent_shipment_at_idx")]
 

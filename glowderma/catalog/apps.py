@@ -3,6 +3,7 @@ from django.apps import AppConfig
 
 class CatalogConfig(AppConfig):
     name = "glowderma.catalog"
+    verbose_name = "Katalog"
 
     def ready(self) -> None:
         # Registers the outbox handler of ``job.queued`` (and the Celery task) in every process that can run
