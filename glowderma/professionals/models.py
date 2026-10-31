@@ -10,6 +10,7 @@ from django.db import models
 from django.db.models import F, Q
 
 from glowderma.core import enums, slugs
+from glowderma.core.labels import WEEKDAYS, som_text, stamp
 from glowderma.core.models import TimeStampedModel, timestamp_default
 from glowderma.professionals import media
 
@@ -119,7 +120,7 @@ class Professional(TimeStampedModel):
         ordering = ["position", "name", "id"]
 
     def __str__(self) -> str:
-        return f"{self.name} ({self.role})"
+        return f"{self.name} ({self.get_role_display()})"
 
     def slug_base(self) -> str:
         return professional_slug_base(self.name)
@@ -223,7 +224,10 @@ class ProfessionalService(models.Model):
         ordering = ["professional_id", "service_id"]
 
     def __str__(self) -> str:
-        return f"{self.professional_id}/{self.service_id}: {self.price} so'm, {self.duration_min} min"
+        return (
+            f"Mutaxassis #{self.professional_id} · xizmat #{self.service_id}: {som_text(self.price)}, "
+            f"{self.duration_min} daqiqa"
+        )
 
 
 class WorkingHours(models.Model):
@@ -266,7 +270,8 @@ class WorkingHours(models.Model):
         ordering = ["professional_id", "weekday"]
 
     def __str__(self) -> str:
-        return f"{self.professional_id} wd{self.weekday} {self.start:%H:%M}-{self.end:%H:%M}"
+        day = WEEKDAYS[self.weekday] if 0 <= self.weekday < len(WEEKDAYS) else f"kun {self.weekday}"
+        return f"Mutaxassis #{self.professional_id} · {day} {self.start:%H:%M}–{self.end:%H:%M}"
 
 
 class WorkingHoursOverride(models.Model):
@@ -303,8 +308,10 @@ class WorkingHoursOverride(models.Model):
         ordering = ["date"]
 
     def __str__(self) -> str:
-        hours = "off" if self.start is None or self.end is None else f"{self.start:%H:%M}-{self.end:%H:%M}"
-        return f"{self.professional_id} {self.date}: {hours}"
+        hours = (
+            "dam olish" if self.start is None or self.end is None else f"{self.start:%H:%M}–{self.end:%H:%M}"
+        )
+        return f"Mutaxassis #{self.professional_id} · {self.date}: {hours}"
 
 
 class BlockedPeriod(models.Model):
@@ -335,4 +342,5 @@ class BlockedPeriod(models.Model):
         ordering = ["start", "id"]
 
     def __str__(self) -> str:
-        return f"{self.kind} {self.start:%Y-%m-%d %H:%M}–{self.end:%H:%M} ({self.professional_id})"
+        end = stamp(self.end)[-5:]
+        return f"{self.get_kind_display()} {stamp(self.start)}–{end} (mutaxassis #{self.professional_id})"

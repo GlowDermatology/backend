@@ -12,6 +12,7 @@ from django.db import models
 from django.db.models import Q
 
 from glowderma.core import enums
+from glowderma.core.labels import som_text
 from glowderma.core.models import TimeStampedModel, timestamp_default
 
 # Payment statuses that make a payment "active" for the one-active-per-order partial unique.
@@ -139,7 +140,10 @@ class Payment(TimeStampedModel):
         ]
 
     def __str__(self) -> str:
-        return f"Payment #{self.pk} {self.provider} {self.status} {self.amount} (order {self.order_id})"
+        return (
+            f"To‘lov #{self.pk} {self.get_provider_display()} · {self.get_status_display()} · "
+            f"{som_text(self.amount)} (buyurtma №{self.order_id})"
+        )
 
 
 class Refund(TimeStampedModel):
@@ -165,9 +169,9 @@ class Refund(TimeStampedModel):
     """
 
     class Origin(models.TextChoices):  # internal
-        ORDER_CANCELLED = "order_cancelled"
-        LATE_CAPTURE = "late_capture"  # capture landed after expiry (M2 auto-refund)
-        MANUAL = "manual"  # staff-initiated retry (M3 command)
+        ORDER_CANCELLED = "order_cancelled", "Buyurtma bekor qilindi"
+        LATE_CAPTURE = "late_capture", "Kech kelgan to‘lov"  # capture landed after expiry (M2 auto-refund)
+        MANUAL = "manual", "Qo‘lda"  # staff-initiated retry (M3 command)
 
     payment = models.ForeignKey(
         "payments.Payment", on_delete=models.PROTECT, related_name="refunds", verbose_name="to‘lov"
@@ -244,4 +248,7 @@ class Refund(TimeStampedModel):
         ]
 
     def __str__(self) -> str:
-        return f"Refund #{self.pk} {self.state} {self.amount} (payment {self.payment_id})"
+        return (
+            f"Qaytarish #{self.pk} · {self.get_state_display()} · {som_text(self.amount)} "
+            f"(to‘lov #{self.payment_id})"
+        )

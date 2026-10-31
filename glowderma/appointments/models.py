@@ -12,6 +12,7 @@ from django.db import models
 from django.db.models import F, Q
 
 from glowderma.core import enums
+from glowderma.core.labels import stamp
 from glowderma.core.models import AppendOnlyModel, TimeStampedModel, timestamp_default
 
 
@@ -29,8 +30,8 @@ class Appointment(TimeStampedModel):
     """A booked visit of one customer with one professional for one service in one time slot."""
 
     class CancelledBy(models.TextChoices):  # internal, M2
-        CUSTOMER = "customer"
-        ADMIN = "admin"
+        CUSTOMER = "customer", "Mijoz"
+        ADMIN = "admin", "Admin"
 
     professional = models.ForeignKey(
         "professionals.Professional",
@@ -161,8 +162,8 @@ class Appointment(TimeStampedModel):
 
     def __str__(self) -> str:
         return (
-            f"Appointment #{self.pk} {self.status}: prof {self.professional_id} "
-            f"{self.start:%Y-%m-%d %H:%M} ({self.duration_min} min)"
+            f"Qabul #{self.pk} · {self.get_status_display()}: mutaxassis #{self.professional_id} "
+            f"{stamp(self.start)} ({self.duration_min} daqiqa)"
         )
 
 
@@ -170,17 +171,17 @@ class AppointmentEvent(AppendOnlyModel):
     """Immutable trail of an appointment (who did what, when, from where), mirroring ``OrderEvent``."""
 
     class Type(models.TextChoices):  # internal
-        REQUESTED = "requested"
-        CONFIRMED = "confirmed"
-        REJECTED = "rejected"
-        ATTENDED = "attended"
-        CANCELLED = "cancelled"
-        RESCHEDULED = "rescheduled"
+        REQUESTED = "requested", "So‘raldi"
+        CONFIRMED = "confirmed", "Tasdiqlandi"
+        REJECTED = "rejected", "Rad etildi"
+        ATTENDED = "attended", "Keldi"
+        CANCELLED = "cancelled", "Bekor qilindi"
+        RESCHEDULED = "rescheduled", "Vaqti ko‘chirildi"
 
     class Source(models.TextChoices):  # internal
-        SYSTEM = "system"
-        ADMIN = "admin"
-        CUSTOMER = "customer"
+        SYSTEM = "system", "Tizim"
+        ADMIN = "admin", "Admin"
+        CUSTOMER = "customer", "Mijoz"
 
     appointment = models.ForeignKey(
         "appointments.Appointment", on_delete=models.PROTECT, related_name="events", verbose_name="qabul"
@@ -216,4 +217,7 @@ class AppointmentEvent(AppendOnlyModel):
         ]
 
     def __str__(self) -> str:
-        return f"Appointment {self.appointment_id}: {self.type} ({self.source}) at {self.at:%Y-%m-%d %H:%M}"
+        return (
+            f"Qabul #{self.appointment_id}: {self.get_type_display()} ({self.get_source_display()}) · "
+            f"{stamp(self.at)}"
+        )

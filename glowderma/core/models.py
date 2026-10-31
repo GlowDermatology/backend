@@ -69,7 +69,12 @@ class AuditEntry(AppendOnlyModel):
     created_at = models.DateTimeField(default=timestamp_default, editable=False, verbose_name="yaratilgan")
     actor_type = models.CharField(
         max_length=16,
-        choices=[(x, x) for x in ("staff", "customer", "system", "integration")],
+        choices=[
+            ("staff", "Xodim"),
+            ("customer", "Mijoz"),
+            ("system", "Tizim"),
+            ("integration", "Integratsiya"),
+        ],
         verbose_name="bajaruvchi turi",
     )
     actor_id = models.BigIntegerField(null=True)
@@ -131,7 +136,13 @@ class OutboxMessage(TimeStampedModel):
     status = models.CharField(
         max_length=16,
         default="pending",
-        choices=[(value, value) for value in ("pending", "in_flight", "done", "failed", "dead")],
+        choices=[
+            ("pending", "Navbatda"),
+            ("in_flight", "Yuborilmoqda"),
+            ("done", "Bajarildi"),
+            ("failed", "Xato · qayta uriniladi"),
+            ("dead", "O‘lik"),
+        ],
         verbose_name="holat",
     )
     attempts = models.PositiveIntegerField(default=0, verbose_name="urinishlar")
@@ -158,4 +169,4 @@ class OutboxMessage(TimeStampedModel):
         ]
 
     def __str__(self) -> str:
-        return f"{self.topic}: {self.dedupe_key} ({self.status})"
+        return f"{self.topic}: {self.dedupe_key} ({self.get_status_display()})"

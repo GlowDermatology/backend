@@ -1,9 +1,17 @@
 """Uzbek labels shared by the admin UI and the exports (admin API v1, section 5.8).
 
-Each mapping is keyed by the contract enum value (see :mod:`glowderma.core.enums`).
+Each mapping is keyed by the contract enum value (see :mod:`glowderma.core.enums`). The small helpers at the
+end build the models' readable Uzbek ``__str__`` (the ops console's related-object cells, inlines and titles):
+amounts in so‘m, local timestamps and masked customer contacts.
 """
 
+from datetime import datetime
+
+from django.utils import timezone
+
 from glowderma.core import enums
+from glowderma.core.i18n import format_number
+from glowderma.core.pii import mask_email, mask_phone
 
 ORDER_STATUS: dict[str, str] = {
     enums.OrderStatus.AWAITING_PAYMENT: "To‘lov kutilmoqda",
@@ -209,3 +217,29 @@ PAYMENT_EXPORT_HEADERS: tuple[str, ...] = (
     "Tasdiqlangan",
     "Qaytarish",
 )
+
+
+# --- readable model titles (``__str__``) --------------------------------------------------------------------
+
+WEEKDAYS: tuple[str, ...] = ("Dushanba", "Seshanba", "Chorshanba", "Payshanba", "Juma", "Shanba", "Yakshanba")
+
+
+def som_text(amount: int | None) -> str:
+    """``1 250 000 so‘m`` (NBSP groups, the admin ``N()`` rule)."""
+    return "-" if amount is None else f"{format_number(int(amount), 'uz')} so‘m"
+
+
+def stamp(value: datetime | None) -> str:
+    """``2026-10-31 14:05`` in Tashkent time (a naive value is shown as is)."""
+    if value is None:
+        return "-"
+    if timezone.is_aware(value):
+        value = timezone.localtime(value)
+    return f"{value:%Y-%m-%d %H:%M}"
+
+
+def masked_contact(phone: str | None, email: str | None) -> str:
+    """The masked phone, else the masked e-mail, else ``""``: a title never shows a contact in full."""
+    if phone:
+        return mask_phone(phone)
+    return mask_email(email) if email else ""

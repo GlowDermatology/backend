@@ -282,7 +282,7 @@ class ProductStock(models.Model):
         indexes = [models.Index(fields=["quantity"], condition=Q(quantity__lte=0), name="catalog_stock_out")]
 
     def __str__(self) -> str:
-        return f"stock of product {self.product_id}: {self.quantity}"
+        return f"Mahsulot #{self.product_id} qoldig‘i: {self.quantity} dona"
 
 
 class ProductImage(TimeStampedModel):
@@ -327,7 +327,7 @@ class ProductImage(TimeStampedModel):
         ordering = ["position", "id"]
 
     def __str__(self) -> str:
-        return f"image {self.position} of product {self.product_id}"
+        return f"Mahsulot #{self.product_id} rasmi {self.position}"
 
 
 class Banner(TimeStampedModel):

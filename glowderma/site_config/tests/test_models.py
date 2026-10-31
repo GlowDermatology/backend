@@ -39,7 +39,7 @@ def test_load_returns_the_migrated_row_without_an_insert() -> None:
     assert len(queries) == 1 and "INSERT" not in queries[0]["sql"]
     assert row.pk == 1 and row.reservation_minutes == 15 and row.support_phone == ""
     assert row.updated_by is None and row.terms_version == ""
-    assert str(row) == "Site settings"
+    assert str(row) == "Sayt sozlamalari"
 
 
 def test_singleton_check_refuses_a_second_row() -> None:

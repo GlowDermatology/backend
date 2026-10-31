@@ -14,6 +14,7 @@ from django.db import models
 from django.db.models import BooleanField, Case, Q, Value, When
 
 from glowderma.core import enums
+from glowderma.core.labels import stamp
 from glowderma.core.models import AppendOnlyModel, TimeStampedModel, timestamp_default
 
 # Outbox statuses under which a BTS create message is still going to be delivered: ``pending`` and ``failed``
@@ -31,10 +32,10 @@ class Shipment(TimeStampedModel):
     """The BTS parcel of a delivery order; ``state`` is internal (the API shows ``cancelled`` as created)."""
 
     class State(models.TextChoices):  # internal; API ShipmentState adds `not_required` and hides `cancelled`
-        NOT_CREATED = "not_created"
-        FAILED = "failed"
-        CREATED = "created"
-        CANCELLED = "cancelled"
+        NOT_CREATED = "not_created", "Yaratilmagan"
+        FAILED = "failed", "Yaratib bo‘lmadi"
+        CREATED = "created", "Yaratilgan"
+        CANCELLED = "cancelled", "Bekor qilingan"
 
     order = models.OneToOneField(
         "commerce.Order", on_delete=models.PROTECT, related_name="shipment", verbose_name="buyurtma"
@@ -126,7 +127,7 @@ class Shipment(TimeStampedModel):
 
     def __str__(self) -> str:
         suffix = f" {self.tracking_number}" if self.tracking_number else ""
-        return f"Shipment of order {self.order_id}: {self.state}{suffix}"
+        return f"Buyurtma №{self.order_id} jo‘natmasi: {self.get_state_display()}{suffix}"
 
     @staticmethod
     def pending_q(prefix: str = "") -> Q:
@@ -153,11 +154,11 @@ class ShipmentEvent(AppendOnlyModel):
     """One immutable BTS protocol record of a shipment (creation answer, failure, status, cancellation)."""
 
     class Kind(models.TextChoices):  # internal
-        CREATED = "created"
-        CREATE_FAILED = "create_failed"
-        STATUS_RECEIVED = "status_received"
-        CANCELLED = "cancelled"
-        CANCEL_REFUSED = "cancel_refused"
+        CREATED = "created", "Yaratildi"
+        CREATE_FAILED = "create_failed", "Yaratib bo‘lmadi"
+        STATUS_RECEIVED = "status_received", "Holat keldi"
+        CANCELLED = "cancelled", "Bekor qilindi"
+        CANCEL_REFUSED = "cancel_refused", "Bekor qilish rad etildi"
 
     shipment = models.ForeignKey(
         "delivery.Shipment", on_delete=models.PROTECT, related_name="events", verbose_name="jo‘natma"
@@ -179,4 +180,5 @@ class ShipmentEvent(AppendOnlyModel):
         indexes = [models.Index(fields=["shipment", "at", "id"], name="shipmentevent_shipment_at_idx")]
 
     def __str__(self) -> str:
-        return f"Shipment {self.shipment_id}: {self.kind} {self.bts_status} ({self.at:%Y-%m-%d %H:%M})"
+        status = f" {self.bts_status}" if self.bts_status else ""
+        return f"Jo‘natma #{self.shipment_id}: {self.get_kind_display()}{status} · {stamp(self.at)}"

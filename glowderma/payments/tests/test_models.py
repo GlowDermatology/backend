@@ -71,7 +71,10 @@ def test_payment_factory_defaults_str_and_traits() -> None:
     assert payment.provider_txn_id.startswith("CLK-") and payment.confirmed_at == T0 + timedelta(minutes=3)
     assert payment.failed_at is None and payment.refunded_at is None
     assert payment.provider_state == {} and payment.error_code == "" and payment.error_message == ""
-    assert str(payment) == f"Payment #{payment.pk} click paid 210000 (order {payment.order_id})"
+    assert (
+        str(payment)
+        == f"To‘lov #{payment.pk} Click · To‘langan · 210\u00a0000 so‘m (buyurtma №{payment.order_id})"
+    )
     pending = PaymentFactory.create(pending=True)
     assert pending.status == "pending" and pending.provider_txn_id == "" and pending.confirmed_at is None
     assert pending.order.status == enums.OrderStatus.AWAITING_PAYMENT
@@ -190,7 +193,10 @@ def test_refund_factory_defaults_str_and_traits() -> None:
     assert refund.submitted_at is None and refund.completed_at is None and refund.last_attempt_at is None
     assert refund.payment.confirmed_at is not None
     assert refund.requested_at == refund.payment.confirmed_at + timedelta(hours=1)
-    assert str(refund) == f"Refund #{refund.pk} requested 210000 (payment {refund.payment_id})"
+    assert (
+        str(refund)
+        == f"Qaytarish #{refund.pk} · Qaytarish so‘raldi · 210\u00a0000 so‘m (to‘lov #{refund.payment_id})"
+    )
     submitting = RefundFactory.create(submitting=True)
     assert submitting.submitted_at is not None and submitting.attempts == 1
     succeeded = RefundFactory.create(succeeded=True)

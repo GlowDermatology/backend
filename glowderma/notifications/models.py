@@ -47,7 +47,7 @@ class StatusTemplate(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"Template {self.status}: {self.text_uz[:40]}"
+        return f"Shablon «{self.get_status_display()}»: {self.text_uz[:40]}"
 
 
 class CustomerSegment(TimeStampedModel):
@@ -112,7 +112,7 @@ class SegmentMember(models.Model):
         indexes = [models.Index(fields=["customer"], name="segmentmember_customer_idx")]
 
     def __str__(self) -> str:
-        return f"Customer {self.customer_id} in segment {self.segment_id}"
+        return f"Mijoz #{self.customer_id} · segment #{self.segment_id}"
 
 
 class Campaign(TimeStampedModel):
@@ -120,11 +120,14 @@ class Campaign(TimeStampedModel):
     result counters; the contract's ``NotificationRecord``."""
 
     class State(models.TextChoices):  # internal; API renders sending as "queued"
-        SCHEDULED = "scheduled"
-        QUEUED = "queued"
-        SENDING = "sending"
-        SENT = "sent"
-        CANCELLED = "cancelled"  # M3: a scheduled campaign staff cancelled before its send started
+        SCHEDULED = "scheduled", "Rejalashtirilgan"
+        QUEUED = "queued", "Navbatda"
+        SENDING = "sending", "Yuborilmoqda"
+        SENT = "sent", "Yuborildi"
+        CANCELLED = (
+            "cancelled",
+            "Bekor qilindi",
+        )  # M3: a scheduled campaign staff cancelled before its send started
 
     # promo|general
     kind = models.CharField(max_length=8, choices=enums.NotificationKind.choices, verbose_name="turi")
@@ -282,17 +285,17 @@ class Campaign(TimeStampedModel):
         ]
 
     def __str__(self) -> str:
-        return f"Campaign #{self.pk} [{self.kind}] {self.title} ({self.state})"
+        return f"Kampaniya #{self.pk} [{self.get_kind_display()}] {self.title} ({self.get_state_display()})"
 
 
 class CampaignRecipient(models.Model):
     """One target device of a campaign with its send outcome; the unit of idempotency for batched sends."""
 
     class State(models.TextChoices):  # internal
-        PENDING = "pending"
-        SENT = "sent"
-        FAILED = "failed"
-        SKIPPED = "skipped"  # device gone / push disabled between materialise and send
+        PENDING = "pending", "Kutilmoqda"
+        SENT = "sent", "Yuborildi"
+        FAILED = "failed", "Xato"
+        SKIPPED = "skipped", "O‘tkazib yuborildi"  # device gone / push disabled between materialise and send
 
     campaign = models.ForeignKey(
         "notifications.Campaign",
@@ -347,7 +350,7 @@ class CampaignRecipient(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"Campaign {self.campaign_id} → customer {self.customer_id} ({self.state})"
+        return f"Kampaniya #{self.campaign_id} → mijoz #{self.customer_id} ({self.get_state_display()})"
 
 
 class InboxNotification(TimeStampedModel):
@@ -355,24 +358,24 @@ class InboxNotification(TimeStampedModel):
     ``dedupe_key`` so at-least-once handlers never double-notify."""
 
     class Kind(models.TextChoices):  # internal
-        PROMO = "promo"
-        GENERAL = "general"
-        ORDER_STATUS = "order_status"
-        APPOINTMENT = "appointment"
+        PROMO = "promo", "Aksiya"
+        GENERAL = "general", "Umumiy"
+        ORDER_STATUS = "order_status", "Buyurtma holati"
+        APPOINTMENT = "appointment", "Qabul"
 
     class SourceType(models.TextChoices):  # internal
-        CAMPAIGN = "campaign"
-        ORDER = "order"
-        APPOINTMENT = "appointment"
+        CAMPAIGN = "campaign", "Kampaniya"
+        ORDER = "order", "Buyurtma"
+        APPOINTMENT = "appointment", "Qabul"
         # M2 account_security notices (customer contract §2.12): source_id = the customer id.
-        ACCOUNT = "account"
+        ACCOUNT = "account", "Hisob"
 
     class PushState(models.TextChoices):  # internal
-        NO_DEVICE = "no_device"
-        QUEUED = "queued"
-        SENDING = "sending"  # claimed before the FCM call (crash → never resent)
-        SENT = "sent"
-        FAILED = "failed"
+        NO_DEVICE = "no_device", "Qurilma yo‘q"
+        QUEUED = "queued", "Navbatda"
+        SENDING = "sending", "Yuborilmoqda"  # claimed before the FCM call (crash → never resent)
+        SENT = "sent", "Yuborildi"
+        FAILED = "failed", "Xato"
 
     customer = models.ForeignKey(
         "accounts.Customer", on_delete=models.CASCADE, related_name="inbox", verbose_name="mijoz"
@@ -426,4 +429,4 @@ class InboxNotification(TimeStampedModel):
         ]
 
     def __str__(self) -> str:
-        return f"Inbox {self.kind} → customer {self.customer_id}: {self.title[:40]}"
+        return f"Inbox «{self.get_kind_display()}» → mijoz #{self.customer_id}: {self.title[:40]}"

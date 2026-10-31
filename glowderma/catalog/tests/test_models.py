@@ -143,7 +143,7 @@ def test_category_delete_sets_product_category_null() -> None:
 def test_product_stock_is_keyed_by_product_and_cascades() -> None:
     stock = ProductStockFactory.create(quantity=-2)
     assert stock.pk == stock.product_id
-    assert str(stock) == f"stock of product {stock.product_id}: -2"
+    assert str(stock) == f"Mahsulot #{stock.product_id} qoldig‘i: -2 dona"
     assert ProductStock.objects.filter(quantity__lte=0).count() == 1
     violates("catalog_productstock_pkey", ProductStock.objects.create, product=stock.product, quantity=1)
     stock.product.delete()
@@ -155,7 +155,7 @@ def test_product_stock_is_keyed_by_product_and_cascades() -> None:
 
 def test_product_image_file_dimensions_and_str() -> None:
     image = ProductImageFactory.create()
-    assert str(image) == f"image 0 of product {image.product_id}"
+    assert str(image) == f"Mahsulot #{image.product_id} rasmi 0"
     assert image.file.name == f"products/{image.product_id}/{image.sha256[:16]}.webp"
     assert (image.width, image.height) == (24, 16)
     assert image.file.storage.exists(image.file.name)

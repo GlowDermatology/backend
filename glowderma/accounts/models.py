@@ -11,6 +11,7 @@ from django.db.models.functions import Lower
 
 from glowderma.accounts import media
 from glowderma.core import enums, timeutils
+from glowderma.core.labels import masked_contact, stamp
 from glowderma.core.models import TimeStampedModel, timestamp_default
 from glowderma.core.search import SearchFold
 
@@ -26,7 +27,7 @@ def date_joined_default() -> datetime:
 class StaffUser(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(max_length=254, unique=True, verbose_name="email")
     full_name = models.CharField(max_length=150, blank=True, verbose_name="to‘liq ism")
-    role = models.CharField(max_length=10, choices=[("admin", "admin")], default="admin", verbose_name="rol")
+    role = models.CharField(max_length=10, choices=[("admin", "Admin")], default="admin", verbose_name="rol")
     is_active = models.BooleanField(default=True, verbose_name="faol")
     is_staff = models.BooleanField(default=False, verbose_name="konsolga kirish")
     # Admin contract §2.16: only a manager creates, edits, deactivates, reactivates staff or resets their
@@ -138,7 +139,9 @@ class Customer(TimeStampedModel):
         ordering = ["-registered_at", "-id"]
 
     def __str__(self) -> str:
-        return f"{self.phone or self.email or f'#{self.pk}'} {self.name}".strip()
+        # «Malika · +998 90 *** ** 67»: the contact masked (customer contract §1.4); in full on its page only
+        contact = masked_contact(self.phone, self.email)
+        return " · ".join(part for part in (self.name, contact) if part) or f"Mijoz #{self.pk}"
 
     # DRF and core.idempotency treat request.user as a user object: a customer signed in through
     # CustomerJWTAuthentication is authenticated (no SQL behind either property).
@@ -155,9 +158,9 @@ class Device(TimeStampedModel):
     """A mobile installation of one customer; carries the FCM token used by notifications."""
 
     class Platform(models.TextChoices):  # internal (same literals as enums.OrderChannel)
-        IOS = "ios"
-        ANDROID = "android"
-        WEB = "web"  # a browser of the customer website (its BFF holds the device id in a cookie)
+        IOS = "ios", "iOS"
+        ANDROID = "android", "Android"
+        WEB = "web", "Veb-sayt"  # a browser of the customer website (its BFF holds the device id in a cookie)
 
     customer = models.ForeignKey(
         "accounts.Customer", on_delete=models.CASCADE, related_name="devices", verbose_name="mijoz"
@@ -202,7 +205,7 @@ class Device(TimeStampedModel):
         ]
 
     def __str__(self) -> str:
-        return f"{self.platform} {self.model or self.fid} of customer {self.customer_id}"
+        return f"{self.get_platform_display()} {self.model or self.fid} · mijoz #{self.customer_id}"
 
 
 class Address(TimeStampedModel):
@@ -237,7 +240,7 @@ class Address(TimeStampedModel):
         ordering = ["-is_default", "-updated_at"]
 
     def __str__(self) -> str:
-        return f"{self.label or 'address'} #{self.pk} of customer {self.customer_id}"
+        return f"{self.label or 'Manzil'} #{self.pk} · mijoz #{self.customer_id}"
 
 
 class SmsCode(models.Model):
@@ -246,12 +249,18 @@ class SmsCode(models.Model):
     the code went out by SMS or by e-mail, with the same engine, limits and HMAC at rest."""
 
     class Purpose(models.TextChoices):  # internal
-        SIGNUP = "signup"
-        RESET = "reset"
-        NEW_DEVICE = "new_device"
-        SOCIAL_LINK = "social_link"
-        VERIFY_EMAIL = "verify_email"  # attach an e-mail to a signed-in account (e-mail only)
-        ATTACH_PHONE = "attach_phone"  # attach a phone to a signed-in account (SMS only)
+        SIGNUP = "signup", "Ro‘yxatdan o‘tish"
+        RESET = "reset", "Parolni tiklash"
+        NEW_DEVICE = "new_device", "Yangi qurilma"
+        SOCIAL_LINK = "social_link", "Ijtimoiy tarmoqni bog‘lash"
+        VERIFY_EMAIL = (
+            "verify_email",
+            "E-pochtani tasdiqlash",
+        )  # attach an e-mail to a signed-in account (e-mail only)
+        ATTACH_PHONE = (
+            "attach_phone",
+            "Telefonni bog‘lash",
+        )  # attach a phone to a signed-in account (SMS only)
 
     phone = models.CharField(max_length=13, blank=True, verbose_name="telefon")
     # normalised (lower case); db_default: a writer of the previous release (deploy window) inserts SMS codes
@@ -303,7 +312,8 @@ class SmsCode(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.purpose} code for {self.phone or self.email} ({self.created_at:%Y-%m-%d %H:%M})"
+        contact = masked_contact(self.phone, self.email)
+        return f"{self.get_purpose_display()} kodi · {contact} · {stamp(self.created_at)}"
 
 
 class CustomerSocialIdentity(models.Model):
@@ -314,7 +324,7 @@ class CustomerSocialIdentity(models.Model):
     )
     provider = models.CharField(
         max_length=16,
-        choices=[("google", "google"), ("facebook", "facebook"), ("apple", "apple")],
+        choices=[("google", "Google"), ("facebook", "Facebook"), ("apple", "Apple")],
         verbose_name="provayder",
     )
     subject = models.CharField(max_length=254, verbose_name="subyekt")
@@ -340,19 +350,19 @@ class CustomerSocialIdentity(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.provider}: {self.subject} → customer {self.customer_id}"
+        return f"{self.get_provider_display()}: {self.subject} → mijoz #{self.customer_id}"
 
 
 class AuthSession(models.Model):
     class AuthMethod(models.TextChoices):  # internal: how the session's sign-in was proven
-        PASSWORD = "password"  # noqa: S105 - staff email + password, customer password (or SMS-verified)
-        GOOGLE = "google"
-        FACEBOOK = "facebook"
-        APPLE = "apple"
+        PASSWORD = "password", "Parol"  # noqa: S105 - staff email + password, customer password (or SMS-verified)
+        GOOGLE = "google", "Google"
+        FACEBOOK = "facebook", "Facebook"
+        APPLE = "apple", "Apple"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     audience = models.CharField(
-        max_length=16, choices=[("staff", "staff"), ("customer", "customer")], verbose_name="auditoriya"
+        max_length=16, choices=[("staff", "Xodim"), ("customer", "Mijoz")], verbose_name="auditoriya"
     )
     staff = models.ForeignKey(
         "accounts.StaffUser",
@@ -386,16 +396,13 @@ class AuthSession(models.Model):
         max_length=24,
         blank=True,
         choices=[
-            (value, value)
-            for value in (
-                "logout",
-                "expired",
-                "password_changed",
-                "deactivated",
-                "replaced",
-                "admin_revoked",
-                "refresh_reused",
-            )
+            ("logout", "Chiqish"),
+            ("expired", "Muddati tugadi"),
+            ("password_changed", "Parol o‘zgartirildi"),
+            ("deactivated", "Hisob faolsizlantirildi"),
+            ("replaced", "Yangi seans bilan almashtirildi"),
+            ("admin_revoked", "Admin tugatdi"),
+            ("refresh_reused", "Eski token qayta ishlatildi"),
         ],
         verbose_name="tugatish sababi",
     )
@@ -442,7 +449,7 @@ class AuthSession(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.audience}: {self.pk}"
+        return f"{self.get_audience_display()} seansi {self.pk}"
 
 
 class SocialIdentity(models.Model):
@@ -450,7 +457,7 @@ class SocialIdentity(models.Model):
         "accounts.StaffUser", on_delete=models.CASCADE, related_name="social_identities", verbose_name="xodim"
     )
     provider = models.CharField(
-        max_length=16, choices=[("google", "google"), ("facebook", "facebook")], verbose_name="provayder"
+        max_length=16, choices=[("google", "Google"), ("facebook", "Facebook")], verbose_name="provayder"
     )
     subject = models.CharField(max_length=254, verbose_name="subyekt")
     email_at_link = models.EmailField(max_length=254, blank=True, verbose_name="bog‘langandagi email")
@@ -466,4 +473,4 @@ class SocialIdentity(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.provider}: {self.subject}"
+        return f"{self.get_provider_display()}: {self.subject}"

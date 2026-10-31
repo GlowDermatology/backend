@@ -141,7 +141,7 @@ def test_the_email_breaker_is_separate_from_the_sms_one(caplog: pytest.LogCaptur
 def test_phoneless_helpers_scrubs_and_audit_label() -> None:
     customer = services.create_customer(None, name="Dilnoza", language="uz", email="Dilnoza@Example.uz")
     assert (customer.phone, customer.email) == (None, "dilnoza@example.uz") and customer.email_verified_at
-    assert str(customer) == "dilnoza@example.uz Dilnoza"
+    assert str(customer) == "Dilnoza · d***@example.uz"
     assert audit.actor_identity(customer) == ("customer", "d***@example.uz")
     assert audit.actor_identity(Customer(name="x")) == ("customer", "***")
     with pytest.raises(PhoneRequired):

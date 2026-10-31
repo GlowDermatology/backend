@@ -19,6 +19,7 @@ from django.db import models
 from django.db.models import Exists, F, OuterRef, Q, Subquery
 
 from glowderma.core import enums, timeutils
+from glowderma.core.labels import som_text
 from glowderma.core.models import AppendOnlyModel, AppendOnlyQuerySet, TimeStampedModel, timestamp_default
 
 
@@ -89,7 +90,8 @@ class CashbackPolicy(AppendOnlyModel):
         indexes = [models.Index(fields=["effective_from"], name="policy_effective_from_idx")]
 
     def __str__(self) -> str:
-        return f"Cashback policy v{self.version} ({self.basis}, from {self.effective_from:%Y-%m-%d})"
+        basis = self.get_basis_display()
+        return f"Keshbek siyosati v{self.version} ({basis}, {self.effective_from:%Y-%m-%d} dan)"
 
     # Derived columns: ``with_derived()`` attaches them as annotations (Django assigns them through the
     # setters below); a plain instance loads both lazily with one query. They depend on *other* rows (a
@@ -194,7 +196,7 @@ class LoyaltyAccount(TimeStampedModel):
         verbose_name_plural = "cashback hisoblari"
 
     def __str__(self) -> str:
-        return f"Loyalty account of customer {self.customer_id}: {self.balance}"
+        return f"Mijoz #{self.customer_id} keshbek hisobi: {som_text(self.balance)}"
 
 
 class LedgerEntry(AppendOnlyModel):
@@ -332,7 +334,8 @@ class LedgerEntry(AppendOnlyModel):
 
     def __str__(self) -> str:
         return (
-            f"Ledger #{self.pk} {self.kind} {self.amount:+} → {self.balance_after} (acct {self.account_id})"
+            f"Yozuv #{self.pk} {self.get_kind_display()} {self.amount:+} → {self.balance_after} "
+            f"(hisob #{self.account_id})"
         )
 
 
@@ -340,9 +343,9 @@ class CashbackHold(TimeStampedModel):
     """Cashback reserved at checkout for an unpaid order: captured into a debit on payment, else released."""
 
     class ReleaseReason(models.TextChoices):  # internal
-        RESERVATION_EXPIRED = "reservation_expired"
-        ORDER_CANCELLED = "order_cancelled"
-        PAYMENT_FAILED = "payment_failed"
+        RESERVATION_EXPIRED = "reservation_expired", "Band muddati tugadi"
+        ORDER_CANCELLED = "order_cancelled", "Buyurtma bekor qilindi"
+        PAYMENT_FAILED = "payment_failed", "To‘lov amalga oshmadi"
 
     account = models.ForeignKey(
         "loyalty.LoyaltyAccount", on_delete=models.PROTECT, related_name="holds", verbose_name="hisob"
@@ -419,7 +422,9 @@ class CashbackHold(TimeStampedModel):
         ]
 
     def __str__(self) -> str:
-        return f"Hold {self.amount} on order {self.order_id} ({self.state})"
+        return (
+            f"Ushlab turish {som_text(self.amount)} · buyurtma №{self.order_id} ({self.get_state_display()})"
+        )
 
 
 # An online purchase whose Billz sale is not recorded: not pushed, or pushed without Billz's sale id
@@ -550,12 +555,12 @@ class Purchase(TimeStampedModel):
 
     def __str__(self) -> str:
         ref = (
-            f"order {self.order_id}"
+            f"buyurtma №{self.order_id}"
             if self.source == enums.PurchaseSource.ONLINE
             else f"Billz {self.billz_sale_ref or self.billz_sale_id}"
         )
-        suffix = " reversed" if self.reversed else ""
-        return f"Purchase #{self.pk} {self.source} {self.amount} ({ref}){suffix}"
+        suffix = " · bekor qilingan" if self.reversed else ""
+        return f"Xarid #{self.pk} {self.get_source_display()} {som_text(self.amount)} ({ref}){suffix}"
 
 
 class PurchaseItem(models.Model):
@@ -593,7 +598,7 @@ class PurchaseItem(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.name} × {self.quantity} @ {self.unit_price} (purchase {self.purchase_id})"
+        return f"{self.name} × {self.quantity} @ {som_text(self.unit_price)} (xarid #{self.purchase_id})"
 
 
 class PosDevice(TimeStampedModel):
@@ -621,4 +626,4 @@ class PosDevice(TimeStampedModel):
         ordering = ["name"]
 
     def __str__(self) -> str:
-        return f"POS {self.name} ({self.key_prefix}…){'' if self.is_active else ' inactive'}"
+        return f"POS {self.name} ({self.key_prefix}…){'' if self.is_active else ' · nofaol'}"

@@ -157,6 +157,61 @@ def test_every_project_model_in_the_console_has_an_uzbek_name() -> None:
             assert not UZBEK_LETTERS.search(name), name
 
 
+# Values whose Uzbek label is the same proper name as the title-cased value (``click`` → «Click»).
+SAME_IN_UZBEK = {
+    "admin", "android", "apple", "billz", "bts", "click", "eskiz", "facebook", "fcm", "google", "payme",
+    "segment", "webhook",
+}  # fmt: skip
+
+
+def test_every_choice_shown_in_the_console_has_an_uzbek_label() -> None:
+    """Choice filters, status cells and change pages read ``field.flatchoices``: no Django-derived English
+    label (``"Handed To Courier"``) and no raw value. The stored values and the API stay the literals."""
+    checked = 0
+    for model in admin.site._registry:
+        if not model.__module__.startswith("glowderma."):
+            continue  # django_otp's TOTPDevice.digits (6 / 8) keeps its own choices
+        for field in model._meta.concrete_fields:
+            for value, label in field.flatchoices:
+                checked += 1
+                if value in SAME_IN_UZBEK:
+                    continue
+                text = str(label)
+                assert text not in (str(value), str(value).replace("_", " ").title()), (model, field.name)
+                assert not UZBEK_LETTERS.search(text), text
+    assert checked > 200
+
+
+def test_choice_labels_repeat_the_export_labels() -> None:
+    from glowderma.core import enums, labels
+
+    pairs = (
+        (labels.ORDER_STATUS, enums.OrderStatus),
+        (labels.PAYMENT_STATUS, enums.PaymentStatus),
+        (labels.FULFILMENT, enums.FulfilmentMethod),
+        (labels.CANCELLATION_REASON, enums.CancellationReason),
+        (labels.PRODUCT_STATUS, enums.ProductStatus),
+        (labels.CUSTOMER_STATUS, enums.CustomerStatus),
+        (labels.LEDGER_KIND, enums.LedgerKind),
+        (labels.NOTIFICATION_KIND, enums.NotificationKind),
+        (labels.SPECIALIST_ROLE, enums.SpecialistRole),
+        (labels.SERVICE_CATEGORY, enums.ServiceCategory),
+        (labels.REFUND_STATE, enums.RefundState),
+    )
+    for mapping, enum in pairs:
+        choices = dict(enum.choices)
+        assert {value: choices[value] for value in mapping} == mapping, enum.__name__
+
+
+@pytest.mark.django_db
+def test_choice_filter_and_status_cell_show_the_uzbek_label() -> None:
+    OutboxMessage.objects.create(topic="t.x", payload={}, dedupe_key="i18n-3", status="dead")
+    page = console_client("staff").get(reverse("admin:core_outboxmessage_changelist"))
+    text = visible_text(page.content)
+    assert "O‘lik" in text and "Yuborilmoqda" in text  # the status cell and the dropdown filter options
+    assert "In Flight" not in text and "Dead" not in text
+
+
 def test_common_fields_are_labelled_in_uzbek() -> None:
     expected = {
         "created_at": "yaratilgan",

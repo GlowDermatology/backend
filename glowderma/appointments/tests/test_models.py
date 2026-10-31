@@ -57,7 +57,7 @@ def test_appointment_defaults_str_and_ordering() -> None:
     assert first.customer_note == "" and first.staff_note == "" and first.confirmed_at is None
     assert (
         str(first)
-        == f"Appointment #{first.pk} requested: prof {first.professional_id} 2026-10-26 09:00 (30 min)"
+        == f"Qabul #{first.pk} · So‘ralgan: mutaxassis #{first.professional_id} 2026-10-26 09:00 (30 daqiqa)"
     )
     assert first.end == T0 + timedelta(minutes=30)
 
@@ -252,7 +252,7 @@ def test_event_defaults_str_and_ordering() -> None:
     assert list(AppointmentEvent.objects.all()) == [same, newer, older]  # -at, -id
     assert list(appointment.events.all()) == [same, newer, older]
     assert newer.actor is None and newer.data == {"via": "app", "price": 150_000}
-    assert str(newer) == f"Appointment {appointment.pk}: requested (customer) at 2026-10-24 12:05"
+    assert str(newer) == f"Qabul #{appointment.pk}: So‘raldi (Mijoz) · 2026-10-24 12:05"
     assert (
         AppointmentEvent.objects.create(appointment=appointment, type="cancelled", source="system").data == {}
     )

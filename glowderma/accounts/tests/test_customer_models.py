@@ -56,8 +56,8 @@ def test_customer_defaults_and_str() -> None:
     assert customer.status == enums.CustomerStatus.ACTIVE
     assert customer.registered_at is not None and customer.deleted_at is None
     assert customer.password == "" and customer.address_text == ""
-    assert str(customer) == "+998901234567 Malika Karimova"
-    assert str(CustomerFactory.create(phone="+998901234568", name="")) == "+998901234568"
+    assert str(customer) == "Malika Karimova · +998 90 *** ** 67"  # the phone masked (contract §1.4)
+    assert str(CustomerFactory.create(phone="+998901234568", name="")) == "+998 90 *** ** 68"
 
 
 @pytest.mark.parametrize("phone", ["998901234567", "+99890123456", "+998901234a67", "+790012345678", ""])
@@ -140,9 +140,9 @@ def test_customer_name_search_uses_the_trigram_index(term: str) -> None:
 def test_device_str_and_defaults() -> None:
     device = DeviceFactory.create(model="iPhone 14")
     assert device.is_active and device.push_enabled and device.locale == ""
-    assert str(device) == f"ios iPhone 14 of customer {device.customer_id}"
+    assert str(device) == f"iOS iPhone 14 · mijoz #{device.customer_id}"
     bare = DeviceFactory.create(model="", fid="abc", platform=Device.Platform.ANDROID)
-    assert str(bare) == f"android abc of customer {bare.customer_id}"
+    assert str(bare) == f"Android abc · mijoz #{bare.customer_id}"
 
 
 def test_device_fid_unique_per_customer() -> None:
@@ -204,8 +204,8 @@ def test_address_ordering_and_str() -> None:
     default = AddressFactory.create(customer=customer, is_default=True, label="Uy")
     newest = AddressFactory.create(customer=customer)
     assert list(Address.objects.filter(customer=customer)) == [default, newest, older]
-    assert str(default) == f"Uy #{default.pk} of customer {customer.pk}"
-    assert str(older) == f"address #{older.pk} of customer {customer.pk}"
+    assert str(default) == f"Uy #{default.pk} · mijoz #{customer.pk}"
+    assert str(older) == f"Manzil #{older.pk} · mijoz #{customer.pk}"
 
 
 # --- SmsCode ------------------------------------------------------------
@@ -240,7 +240,7 @@ def test_smscode_indexes_and_str() -> None:
     assert "expires_at" in indexes["accounts_smscode_expires"]
     assert "WHERE" in indexes["smscode_verification_token_unique"]
     code = SmsCodeFactory.create(phone="+998901234567", purpose=SmsCode.Purpose.RESET)
-    assert str(code).startswith("reset code for +998901234567 (")
+    assert str(code).startswith("Parolni tiklash kodi · +998 90 *** ** 67 · ")
 
 
 # --- CustomerSocialIdentity ------------------------------------------------------------
@@ -253,7 +253,7 @@ def test_customer_social_identity_uniques_and_str() -> None:
     with pytest.raises(IntegrityError), transaction.atomic():
         CustomerSocialIdentityFactory.create(customer=identity.customer, provider="google", subject="s-2")
     CustomerSocialIdentityFactory.create(customer=identity.customer, provider="facebook", subject="s-1")
-    assert str(identity) == f"google: s-1 → customer {identity.customer_id}"
+    assert str(identity) == f"Google: s-1 → mijoz #{identity.customer_id}"
 
 
 def test_staff_and_customer_social_identities_may_share_a_subject() -> None:

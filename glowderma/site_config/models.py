@@ -76,7 +76,7 @@ class SiteSettings(models.Model):
         ]
 
     def __str__(self) -> str:
-        return "Site settings"
+        return "Sayt sozlamalari"
 
     @classmethod
     def load(cls) -> SiteSettings:

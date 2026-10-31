@@ -5,6 +5,7 @@ from django.db import models
 from django.db.models import Q
 
 from glowderma.core import enums
+from glowderma.core.labels import stamp
 from glowderma.core.models import AppendOnlyModel, TimeStampedModel, timestamp_default
 
 
@@ -16,10 +17,10 @@ class WebhookInbox(AppendOnlyModel):
     """
 
     class Provider(models.TextChoices):  # internal
-        CLICK = "click"
-        PAYME = "payme"
-        BTS = "bts"
-        BILLZ = "billz"
+        CLICK = "click", "Click"
+        PAYME = "payme", "Payme"
+        BTS = "bts", "BTS"
+        BILLZ = "billz", "Billz"
 
     provider = models.CharField(max_length=16, choices=Provider.choices, verbose_name="provayder")
     # provider-specific natural key of the delivery
@@ -57,7 +58,7 @@ class WebhookInbox(AppendOnlyModel):
 
     def __str__(self) -> str:
         status = self.result.get("status") if isinstance(self.result, dict) else None
-        return f"{self.provider} {self.event_key} → {status if status is not None else '?'}"
+        return f"{self.get_provider_display()} {self.event_key} → {status if status is not None else '?'}"
 
 
 class Job(TimeStampedModel):
@@ -124,19 +125,19 @@ class Job(TimeStampedModel):
         ordering = ["-created_at", "-id"]
 
     def __str__(self) -> str:
-        return f"{self.kind} #{self.pk} ({self.state})"
+        return f"{self.get_kind_display()} #{self.pk} ({self.get_state_display()})"
 
 
 class IntegrationState(models.Model):
     """One row per provider with the last-sync facts the shell shows; never holds secrets."""
 
     class Provider(models.TextChoices):  # internal
-        BILLZ = "billz"
-        BTS = "bts"
-        CLICK = "click"
-        PAYME = "payme"
-        ESKIZ = "eskiz"
-        FCM = "fcm"
+        BILLZ = "billz", "Billz"
+        BTS = "bts", "BTS"
+        CLICK = "click", "Click"
+        PAYME = "payme", "Payme"
+        ESKIZ = "eskiz", "Eskiz"
+        FCM = "fcm", "FCM"
 
     provider = models.CharField(
         max_length=16, choices=Provider.choices, unique=True, verbose_name="provayder"
@@ -158,4 +159,5 @@ class IntegrationState(models.Model):
         verbose_name_plural = "integratsiya holatlari"
 
     def __str__(self) -> str:
-        return f"{self.provider}: synced {self.last_sync_at or 'never'}"
+        synced = stamp(self.last_sync_at) if self.last_sync_at else "hali yo‘q"
+        return f"{self.get_provider_display()}: oxirgi sinxronlash {synced}"

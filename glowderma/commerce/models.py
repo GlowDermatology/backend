@@ -12,6 +12,7 @@ from django.db import models
 from django.db.models import F, Q
 
 from glowderma.core import enums
+from glowderma.core.labels import som_text, stamp
 from glowderma.core.models import AppendOnlyModel, TimeStampedModel, timestamp_default
 
 PHONE_E164_REGEX = r"^\+998\d{9}$"
@@ -90,7 +91,7 @@ class Cart(TimeStampedModel):
         ordering = ["id"]
 
     def __str__(self) -> str:
-        return f"Cart of customer {self.customer_id}"
+        return f"Mijoz #{self.customer_id} savatchasi"
 
 
 class CartItem(models.Model):
@@ -121,7 +122,7 @@ class CartItem(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.quantity} × product {self.product_id} (cart {self.cart_id})"
+        return f"{self.quantity} × mahsulot #{self.product_id} (savatcha #{self.cart_id})"
 
 
 class Order(TimeStampedModel):
@@ -302,7 +303,8 @@ class Order(TimeStampedModel):
         ]
 
     def __str__(self) -> str:
-        return f"Order №{self.pk} ({self.status}, {self.total} so'm, customer {self.customer_id})"
+        status = self.get_status_display()
+        return f"Buyurtma №{self.pk} ({status}, {som_text(self.total)}, mijoz #{self.customer_id})"
 
 
 class OrderItem(models.Model):
@@ -341,7 +343,7 @@ class OrderItem(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.name} × {self.quantity} @ {self.unit_price} (order {self.order_id})"
+        return f"{self.name} × {self.quantity} @ {som_text(self.unit_price)} (buyurtma №{self.order_id})"
 
 
 class OrderEvent(AppendOnlyModel):
@@ -383,21 +385,22 @@ class OrderEvent(AppendOnlyModel):
         ]
 
     def __str__(self) -> str:
-        return f"Order {self.order_id}: {self.type} ({self.source}) at {self.at:%Y-%m-%d %H:%M}"
+        kind, source = self.get_type_display(), self.get_source_display()
+        return f"Buyurtma №{self.order_id}: {kind} ({source}) · {stamp(self.at)}"
 
 
 class StockReservation(TimeStampedModel):
     """Units of a product held for an unpaid order; converted on payment, released on expiry/cancel."""
 
     class State(models.TextChoices):  # internal
-        ACTIVE = "active"
-        CONVERTED = "converted"
-        RELEASED = "released"
+        ACTIVE = "active", "Faol"
+        CONVERTED = "converted", "Sotuvga aylandi"
+        RELEASED = "released", "Bo‘shatildi"
 
     class ReleaseReason(models.TextChoices):  # internal
-        EXPIRED = "expired"
-        CANCELLED = "cancelled"
-        PAYMENT_FAILED = "payment_failed"
+        EXPIRED = "expired", "Muddati tugadi"
+        CANCELLED = "cancelled", "Bekor qilindi"
+        PAYMENT_FAILED = "payment_failed", "To‘lov amalga oshmadi"
 
     order = models.ForeignKey(
         "commerce.Order", on_delete=models.CASCADE, related_name="reservations", verbose_name="buyurtma"
@@ -467,6 +470,6 @@ class StockReservation(TimeStampedModel):
 
     def __str__(self) -> str:
         return (
-            f"Reservation {self.quantity} × product {self.product_id} "
-            f"for order {self.order_id} ({self.state})"
+            f"Band: {self.quantity} × mahsulot #{self.product_id} · buyurtma №{self.order_id} "
+            f"({self.get_state_display()})"
         )
