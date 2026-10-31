@@ -10,12 +10,17 @@ amounts and personal data the same way.
 """
 
 import json
+import logging
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
+from django import forms
 from django.contrib import admin
-from django.db import models
+from django.core.cache import cache
+from django.db import models, transaction
+from django.db.models import Count
 from django.http import HttpRequest
+from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.safestring import SafeString
 from unfold.admin import ModelAdmin as UnfoldModelAdmin
@@ -27,9 +32,23 @@ from unfold.contrib.filters.admin import (
 from unfold.decorators import display as unfold_display
 from unfold.utils import display_for_label
 
+from glowderma.core import consistency, outbox, timeutils
+from glowderma.core.admin_actions import (
+    ActionResult,
+    ActionVariant,
+    ConfirmForm,
+    OpsActionsMixin,
+    done,
+    enqueue_task,
+    failed,
+    ops_action,
+    refused,
+)
 from glowderma.core.i18n import format_number
 from glowderma.core.models import AuditEntry, IdempotencyRecord, OutboxMessage
 from glowderma.core.pii import mask_email, mask_phone
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     _ModelAdmin = admin.ModelAdmin[models.Model]
@@ -339,9 +358,200 @@ OUTBOX_STATUS_VARIANTS = {
     "dead": DANGER,
 }
 
-register_read_only(
-    AuditEntry,
-    list_display=(
+# --- safe audited actions (glowderma.core.admin_actions) -------------------------------------------------
+REQUEUE_REASON = "ops console"
+# One click of "requeue every dead message of a topic" handles at most this many (the rest: click again).
+TOPIC_REQUEUE_LIMIT = 200
+# "Run the consistency report now": once per this many seconds, whoever clicks (the report reads every
+# ledger entry and may alert).
+CONSISTENCY_REPORT_COOLDOWN = 600
+CONSISTENCY_COOLDOWN_KEY = "ops:consistency_report"
+CONSISTENCY_TASK = "reporting.consistency_report"
+
+
+def _requeue_refusal(model_admin: Any, request: HttpRequest, message: OutboxMessage) -> str:
+    if message.status == "dead" or consistency.is_overdue(message, timeutils.now()):
+        return ""
+    if message.status == "done":
+        return "Xabar allaqachon yetkazilgan: qayta navbatga qo‘yish kerak emas."
+    return "Xabar navbatda va muddati o‘tmagan: dispetcher uni o‘zi yetkazadi."
+
+
+def _requeue_notes(model_admin: Any, request: HttpRequest, message: OutboxMessage) -> list[str]:
+    hooks = outbox.requeue_hooks(message.topic)
+    notes = [f"Topic: {message.topic} · urinishlar: {message.attempts}"]
+    about = hooks.describe(message) if hooks is not None else ""
+    if about:
+        notes.append(f"Tafsilot: {about}")
+    if message.status == "dead" and hooks is not None and hooks.warning:
+        notes.append(f"Ogohlantirish: {hooks.warning}")
+    return notes
+
+
+def _dead_topics() -> list[tuple[str, int]]:
+    rows = (
+        OutboxMessage.objects.filter(status="dead")
+        .values("topic")
+        .annotate(total=Count("id"))
+        .order_by("topic")
+    )
+    return [(str(row["topic"]), int(row["total"])) for row in rows]
+
+
+def _no_dead_messages(model_admin: Any, request: HttpRequest, obj: None) -> str:
+    return "" if OutboxMessage.objects.filter(status="dead").exists() else "O‘lik xabarlar yo‘q."
+
+
+def _topic_warnings(model_admin: Any, request: HttpRequest, obj: None) -> list[str]:
+    notes = []
+    for topic, _total in _dead_topics():
+        hooks = outbox.requeue_hooks(topic)
+        if hooks is not None and hooks.warning:
+            notes.append(f"Ogohlantirish ({topic}): {hooks.warning}")
+    return notes
+
+
+class DeadTopicForm(ConfirmForm):
+    topic = forms.ChoiceField(label="Topic")
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        field = cast(forms.ChoiceField, self.fields["topic"])
+        field.choices = [(topic, f"{topic} — {total} ta o‘lik") for topic, total in _dead_topics()]
+
+
+def row_action_link(url: str, label: str, icon: str) -> SafeString:
+    """A changelist cell button that opens an ops action's confirm step in Unfold's modal (only rendered for
+    the rows the action makes sense for; the URL is the action's change-page route)."""
+    rendered: SafeString = format_html(
+        '<a href="{0}" hx-get="{0}" hx-target="#modal-content" hx-select="#dialog" '
+        'x-on:htmx:after-on-load="openModal = true" class="gd-row-action">'
+        '<span class="material-symbols-outlined">{2}</span>{1}</a>',
+        url,
+        label,
+        icon,
+    )
+    return rendered
+
+
+class OutboxMessageAdmin(OpsActionsMixin, ReadOnlyAdmin):
+    list_display = (
+        "id",
+        "topic",
+        "dedupe_key",
+        status_column("status", "Holat", OUTBOX_STATUS_VARIANTS),
+        "attempts",
+        "available_at",
+        "updated_at",
+        "requeue_button",
+    )
+    list_filter = (dropdown("status"), "topic", date_range("updated_at"))
+    search_fields = ("topic", "dedupe_key", "last_error")
+    ordering = ("-id",)
+    actions_detail = ("requeue",)
+    actions_list = ("requeue_dead_topic",)
+
+    @display(description="Amal")
+    def requeue_button(self, message: OutboxMessage) -> SafeString | str:
+        if _requeue_refusal(self, cast(HttpRequest, None), message):
+            return ""
+        url = reverse("admin:core_outboxmessage_requeue", args=[message.pk])
+        back = reverse("admin:core_outboxmessage_changelist")
+        return row_action_link(f"{url}?next={back}", "Qayta navbatga", "replay")
+
+    @ops_action(
+        description="Qayta navbatga qo‘yish",
+        title="Xabarni qayta navbatga qo‘yish",
+        body=(
+            "O‘lik xabar yana «pending» holatiga qaytadi (urinishlar 0 dan boshlanadi) va dispetcher uni "
+            "darhol yetkazishga urinadi. Muddati o‘tgan xabar uchun dispetcher qayta ishga tushiriladi. "
+            "Ishlovchilar idempotent: muvaffaqiyatli bajarilgan amal takrorlanmaydi."
+        ),
+        submit="Qayta navbatga qo‘yish",
+        icon="replay",
+        available=_requeue_refusal,
+        notes=_requeue_notes,
+    )
+    def requeue(self, request: HttpRequest, message: OutboxMessage, form: ConfirmForm) -> ActionResult:
+        if message.status == "dead":
+            result = outbox.requeue_dead(
+                message.pk, reason=REQUEUE_REASON, actor=request.user, request=request
+            )
+            if result.outcome == "skipped":
+                return refused(f"Xabar #{message.pk} qayta navbatga qo‘yilmadi: {result.reason}")
+            if result.outcome != "requeued":
+                return refused(f"Xabar #{message.pk} endi o‘lik emas: hech narsa o‘zgarmadi.")
+            return done(
+                f"Xabar #{message.pk} qayta navbatga qo‘yildi.",
+                audit_action="ops.outbox_requeued",
+                entity_type="outbox",
+                entity_id=message.pk,
+                before={"status": "dead", "attempts": message.attempts},
+                after={"topic": message.topic, "status": "pending"},
+            )
+        from glowderma.core.tasks import dispatch_outbox
+
+        transaction.on_commit(dispatch_outbox.delay, robust=True)
+        return done(
+            f"Xabar #{message.pk} navbatda turibdi; dispetcher qayta ishga tushirildi.",
+            audit_action="ops.outbox_dispatch_kicked",
+            entity_type="outbox",
+            entity_id=message.pk,
+            before={"status": message.status, "available_at": message.available_at},
+            after={"topic": message.topic},
+        )
+
+    @ops_action(
+        description="Topic bo‘yicha o‘liklarni qayta navbatga",
+        title="Topicning barcha o‘lik xabarlarini qayta navbatga qo‘yish",
+        body=(
+            f"Tanlangan topicning o‘lik xabarlari (bir bosishda {TOPIC_REQUEUE_LIMIT} tagacha) qayta "
+            "navbatga qo‘yiladi. Ishi boshqa yo‘l bilan bajarilgan xabarlar o‘tkazib yuboriladi."
+        ),
+        submit="Hammasini qayta navbatga",
+        icon="restart_alt",
+        variant=ActionVariant.DANGER,
+        manager_only=True,
+        form_class=DeadTopicForm,
+        url_path="requeue-dead-topic",
+        available=_no_dead_messages,
+        notes=_topic_warnings,
+    )
+    def requeue_dead_topic(self, request: HttpRequest, obj: None, form: ConfirmForm) -> ActionResult:
+        topic = str(form.cleaned_data["topic"])
+        ids = list(
+            OutboxMessage.objects.filter(topic=topic, status="dead")
+            .order_by("id")
+            .values_list("pk", flat=True)[: TOPIC_REQUEUE_LIMIT + 1]
+        )
+        more = len(ids) > TOPIC_REQUEUE_LIMIT
+        requeued: list[int] = []
+        skipped: list[int] = []
+        for message_id in ids[:TOPIC_REQUEUE_LIMIT]:
+            result = outbox.requeue_dead(
+                message_id, reason=REQUEUE_REASON, actor=request.user, request=request
+            )
+            if result.outcome == "requeued":
+                requeued.append(message_id)
+            elif result.outcome == "skipped":
+                skipped.append(message_id)
+        if not requeued:
+            return refused(
+                f"{topic}: qayta navbatga qo‘yiladigan xabar topilmadi ({len(skipped)} ta o‘tkazildi)."
+            )
+        tail = " Yana o‘lik xabarlar qoldi — amalni takrorlang." if more else ""
+        return done(
+            f"{topic}: {len(requeued)} ta xabar qayta navbatga qo‘yildi, {len(skipped)} ta o‘tkazib "
+            f"yuborildi.{tail}",
+            audit_action="ops.outbox_topic_requeued",
+            entity_type="outbox_topic",
+            entity_id=topic,
+            after={"requeued": requeued, "skipped": skipped, "more": more},
+        )
+
+
+class AuditEntryAdmin(OpsActionsMixin, ReadOnlyAdmin):
+    list_display = (
         "id",
         "created_at",
         "actor_type",
@@ -350,27 +560,50 @@ register_read_only(
         "entity_type",
         "entity_id",
         "ip",
-    ),
-    list_filter=(dropdown("actor_type"), "action", "entity_type", date_range("created_at")),
-    search_fields=("actor_label", "action", "entity_type", "entity_id", "request_id", "ip"),
-    ordering=("-id",),
-    date_hierarchy="created_at",
-)
-register_read_only(
-    OutboxMessage,
-    list_display=(
-        "id",
-        "topic",
-        "dedupe_key",
-        status_column("status", "Holat", OUTBOX_STATUS_VARIANTS),
-        "attempts",
-        "available_at",
-        "updated_at",
-    ),
-    list_filter=(dropdown("status"), "topic", date_range("updated_at")),
-    search_fields=("topic", "dedupe_key", "last_error"),
-    ordering=("-id",),
-)
+    )
+    list_filter = (dropdown("actor_type"), "action", "entity_type", date_range("created_at"))
+    search_fields = ("actor_label", "action", "entity_type", "entity_id", "request_id", "ip")
+    ordering = ("-id",)
+    date_hierarchy = "created_at"
+    actions_list = ("run_consistency_report",)
+
+    @ops_action(
+        description="Hisobotni hozir ishga tushirish",
+        title="Moliyaviy muvofiqlik hisobotini hozir ishga tushirish",
+        body=(
+            "K1–K6 tekshiruvlari va cashback daftari solishtiruvi navbatga qo‘yiladi. Natija audit "
+            "jurnaliga «report.consistency» yozuvi bo‘lib tushadi; nomuvofiqlik bo‘lsa, ogohlantirish "
+            "yuboriladi. Hisobot 10 daqiqada bir martadan ko‘p ishga tushirilmaydi."
+        ),
+        submit="Ishga tushirish",
+        icon="fact_check",
+        manager_only=True,
+        url_path="run-consistency-report",
+    )
+    def run_consistency_report(self, request: HttpRequest, obj: None, form: ConfirmForm) -> ActionResult:
+        try:
+            claimed = cache.add(CONSISTENCY_COOLDOWN_KEY, 1, timeout=CONSISTENCY_REPORT_COOLDOWN)
+        except Exception:
+            logger.exception("ops.consistency_report cooldown unavailable")
+            return failed("Kesh ishlamayapti: hisobotni hozir ishga tushirib bo‘lmaydi.")
+        if not claimed:
+            return refused("Hisobot yaqinda ishga tushirilgan: 10 daqiqadan keyin qayta urinib ko‘ring.")
+        try:
+            enqueue_task(CONSISTENCY_TASK)
+        except Exception:
+            cache.delete(CONSISTENCY_COOLDOWN_KEY)
+            raise
+        return done(
+            "Muvofiqlik hisoboti navbatga qo‘yildi. Natija audit jurnalida «report.consistency» bo‘lib "
+            "chiqadi.",
+            audit_action="ops.consistency_report_requested",
+            entity_type="report",
+            entity_id="consistency",
+        )
+
+
+admin.site.register(AuditEntry, AuditEntryAdmin)
+admin.site.register(OutboxMessage, OutboxMessageAdmin)
 register_read_only(
     IdempotencyRecord,
     # the body hash and the stored answer stay out of the admin: bodies can carry passwords, answers tokens

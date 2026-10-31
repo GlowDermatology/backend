@@ -23,3 +23,37 @@ pre.gd-json {
   background: var(--color-base-900);
   color: var(--color-base-200);
 }
+
+/* Row buttons of the ops actions (glowderma.core.admin.row_action_link): shown only on rows the action fits. */
+a.gd-row-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid var(--color-base-200);
+  background: #fff;
+  color: var(--color-primary-700);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+a.gd-row-action:hover {
+  background: var(--color-primary-50);
+}
+
+a.gd-row-action .material-symbols-outlined {
+  font-size: 16px;
+}
+
+.dark a.gd-row-action {
+  border-color: var(--color-base-700);
+  background: transparent;
+  color: var(--color-primary-400);
+}
+
+/* The confirm step of an ops action without JavaScript: the page is the dialog. */
+.ops-action #dialog .gd-ops-note,
+.ops-action #dialog .gd-ops-refusal {
+  margin: 0;
+}

@@ -17,7 +17,7 @@ from typing import Any
 
 from django.db import transaction
 
-from glowderma.core import timeutils
+from glowderma.core import audit, timeutils
 from glowderma.core.models import OutboxMessage
 
 logger = logging.getLogger(__name__)
@@ -123,6 +123,60 @@ def on_requeue(topic: str, hooks: RequeueHooks) -> None:
 
 def requeue_hooks(topic: str) -> RequeueHooks | None:
     return _requeue_hooks.get(topic)
+
+
+@dataclass(frozen=True, slots=True)
+class RequeueResult:
+    """What :func:`requeue_dead` did: ``requeued``, ``skipped`` (the topic's ``skip_reason`` in ``reason``) or
+    ``not_dead`` (requeued, delivered or changed meanwhile: nothing to do)."""
+
+    outcome: str
+    reason: str = ""
+
+
+def mark_requeued(message: OutboxMessage, *, reason: str, actor: Any = None, request: Any = None) -> None:
+    """Put the dead ``message`` (locked by the caller) back in the queue: ``pending``, ``attempts = 0``,
+    ``available_at = now``, no lease, claim or deferral window; ``last_error`` stays until the next attempt.
+    Audit ``outbox.requeued`` with the state it left (``manage.py requeue_outbox`` and the ops console)."""
+    before = {"status": message.status, "attempts": message.attempts, "last_error": message.last_error}
+    OutboxMessage.objects.filter(pk=message.pk).update(
+        status="pending",
+        attempts=0,
+        available_at=timeutils.now(),
+        lease_expires_at=None,
+        claim_token=None,
+        deferred_since=None,
+        updated_at=timeutils.now(),
+    )
+    audit.record(
+        action="outbox.requeued",
+        entity_type="outbox",
+        entity_id=str(message.pk),
+        actor=actor,
+        request=request,
+        before=before,
+        after={"topic": message.topic, "dedupe_key": message.dedupe_key, "status": "pending"},
+        reason=reason,
+    )
+
+
+def requeue_dead(message_id: int, *, reason: str, actor: Any = None, request: Any = None) -> RequeueResult:
+    """Requeue one dead message under its row lock (:func:`mark_requeued`) unless its topic's
+    :class:`RequeueHooks` ``skip_reason`` says its effect was already done another way. Safe to repeat: a
+    message that is no longer dead is left alone (``not_dead``). The dispatcher is started on commit."""
+    from glowderma.core.tasks import dispatch_outbox
+
+    with transaction.atomic():
+        message = OutboxMessage.objects.select_for_update().filter(pk=message_id, status="dead").first()
+        if message is None:
+            return RequeueResult("not_dead")
+        hooks = requeue_hooks(message.topic)
+        skip = hooks.skip_reason(message) if hooks is not None else ""
+        if skip:
+            return RequeueResult("skipped", skip)
+        mark_requeued(message, reason=reason, actor=actor, request=request)
+        transaction.on_commit(dispatch_outbox.delay, robust=True)
+        return RequeueResult("requeued")
 
 
 def register_deferral_window(topic: str, window: Callable[[], timedelta]) -> None:
