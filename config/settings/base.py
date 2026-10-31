@@ -68,6 +68,9 @@ TIME_ZONE = "Asia/Tashkent"
 CELERY_TIMEZONE = TIME_ZONE
 USE_TZ = True
 LANGUAGE_CODE = "uz"
+# The project's own catalogs come first: the Uzbek strings of the ops console (Unfold and the Django admin;
+# compiled with ``manage.py compile_locale``, the .mo is committed).
+LOCALE_PATHS = [BASE_DIR / "locale"]
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 DATA_UPLOAD_MAX_MEMORY_SIZE = 6 * 1024 * 1024
 # Unfold's login template posts no ``next`` field: a direct visit of /django-admin/login/ lands on the console
