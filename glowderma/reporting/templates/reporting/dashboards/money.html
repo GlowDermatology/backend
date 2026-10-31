@@ -1,0 +1,92 @@
+{% extends "reporting/dashboards/base.html" %}
+
+{% block dashboard %}
+    {% with d=dashboard %}
+        {% if not d.report %}
+            <div class="gd-banner gd-banner--critical">
+                <div class="gd-banner__icon"><span class="material-symbols-outlined" aria-hidden="true">error</span></div>
+                <div>
+                    <div class="gd-banner__title">Tungi hisobot hali hech qachon ishlamagan</div>
+                    <div class="gd-banner__text">Beat vazifasi <span class="gd-mono">reporting-consistency-report</span> har kuni 03:40 da ishlashi kerak. Quyidagi «Hozir» ustuni tekshiruvlarni hozir qayta hisoblaydi.</div>
+                </div>
+            </div>
+        {% elif d.report.stale %}
+            <div class="gd-banner gd-banner--warn">
+                <div class="gd-banner__icon"><span class="material-symbols-outlined" aria-hidden="true">warning</span></div>
+                <div>
+                    <div class="gd-banner__title">Tungi hisobot eskirgan: oxirgisi {{ d.report.ago }}</div>
+                    <div class="gd-banner__text">36 soatdan ko‘p o‘tdi — beat yoki worker ishlamayotgan bo‘lishi mumkin. <a class="gd-link" href="{{ d.report.href }}">Oxirgi hisobot yozuvi</a></div>
+                </div>
+            </div>
+        {% endif %}
+
+        <div class="gd-grid gd-grid--5">
+            {% for tile in d.tiles %}{% include "reporting/dashboards/_tile.html" %}{% endfor %}
+        </div>
+
+        <section class="gd-panel" id="checks">
+            <header class="gd-panel__head">
+                <h2 class="gd-panel__title">K1–K6 tekshiruvlari</h2>
+                <p class="gd-panel__note">«Hisobot» — {% if d.report %}{{ d.report.ran_at }} dagi tungi natija{% else %}hisobot yo‘q{% endif %} · «Hozir» — xuddi shu tekshiruv hozir</p>
+            </header>
+            <div class="gd-scroll">
+                <table class="gd-table">
+                    <thead><tr><th>Tekshiruv</th><th class="num">Hisobot</th><th class="gd-hide-sm">Namuna</th><th class="num">Hozir</th><th>Holat</th></tr></thead>
+                    <tbody>
+                        {% for row in d.rows %}
+                            <tr>
+                                <td><span class="gd-code">{{ row.code }}</span><span class="strong">{{ row.label }}</span>
+                                    {% if row.live.note %}<div class="muted">{{ row.live.note }}</div>{% elif row.report.note %}<div class="muted">{{ row.report.note }}</div>{% endif %}</td>
+                                <td class="num">{% if row.report.href %}<a href="{{ row.report.href }}">{{ row.report.text }}</a>{% elif row.report.count == 0 %}<span class="zero">0</span>{% else %}{{ row.report.text }}{% endif %}</td>
+                                <td class="gd-hide-sm">
+                                    {% if row.report.samples %}
+                                        <div class="gd-ids">{% for sample in row.report.samples %}<a href="{{ sample.href }}">{{ sample.id }}</a>{% endfor %}{% if row.report.more %}<span class="muted">+{{ row.report.more }}</span>{% endif %}</div>
+                                    {% else %}<span class="muted">—</span>{% endif %}
+                                </td>
+                                <td class="num">{% if row.live.href %}<a href="{{ row.live.href }}">{{ row.live.text }}</a>{% elif row.live.count == 0 %}<span class="zero">0</span>{% else %}<span class="muted">{{ row.live.text }}</span>{% endif %}</td>
+                                <td>{% include "reporting/dashboards/_state.html" with s=row.state %}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <div class="gd-panel__foot">Har bir son o‘sha qatorlarning ro‘yxatiga olib boradi (birinchi 100 tasi). Hisobot hech narsani tuzatmaydi — har bir qator xodim harakatini talab qiladi.</div>
+        </section>
+
+        <div class="gd-cols">
+            <section class="gd-panel" id="policy">
+                <header class="gd-panel__head">
+                    <h2 class="gd-panel__title">Amaldagi cashback siyosati</h2>
+                    <p class="gd-panel__note">Daraja — mijozning umrbod xaridlari bo‘yicha</p>
+                </header>
+                {% if d.policy_tiers %}
+                    <div class="gd-scroll">
+                        <table class="gd-table">
+                            <thead><tr><th>Umrbod xarid</th><th class="num">Cashback</th></tr></thead>
+                            <tbody>{% for tier in d.policy_tiers %}<tr><td>{{ tier.range }}</td><td class="num strong">{{ tier.percent }}</td></tr>{% endfor %}</tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    {% include "reporting/dashboards/_empty.html" with icon="policy" text="Amaldagi siyosat yo‘q: xaridlar cashback olmaydi. Siyosatni admin panelda e’lon qiling." %}
+                {% endif %}
+            </section>
+
+            <section class="gd-panel" id="reconcile">
+                <header class="gd-panel__head">
+                    <h2 class="gd-panel__title">Daftar solishtiruvi tekshiruvlari</h2>
+                    <p class="gd-panel__note">Oxirgi <span class="gd-mono">reconcile_balances</span> natijasi (audit)</p>
+                </header>
+                {% if d.reconcile_checks %}
+                    <div class="gd-scroll">
+                        <table class="gd-table">
+                            <thead><tr><th>Tekshiruv</th><th class="num">Nomuvofiqlik</th></tr></thead>
+                            <tbody>{% for check in d.reconcile_checks %}<tr><td class="gd-mono">{{ check.name }}</td><td class="num">{{ check.count }}</td></tr>{% endfor %}</tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    {% include "reporting/dashboards/_empty.html" with icon="balance" text="Solishtiruv hali ishlamagan" %}
+                {% endif %}
+            </section>
+        </div>
+    {% endwith %}
+{% endblock %}

@@ -161,6 +161,46 @@ def schedules_for_days(professional: Professional, days: Collection[date]) -> di
     return result
 
 
+def schedules_for_many(
+    professionals: Collection[Professional], days: Collection[date]
+) -> dict[tuple[int, date], DaySchedule]:
+    """``{(professional id, day): DaySchedule}`` for every pair of ``professionals`` × ``days``, by the rules
+    of :func:`day_schedules`, in three queries whatever the number of professionals and days."""
+    wanted = sorted(set(days))
+    rows = list(professionals)
+    if not wanted or not rows:
+        return {}
+    ids = [row.pk for row in rows]
+    overrides = {
+        (o.professional_id, o.date): o
+        for o in WorkingHoursOverride.objects.filter(professional_id__in=ids, date__in=wanted)
+    }
+    weekly = {(w.professional_id, w.weekday): w for w in WorkingHours.objects.filter(professional_id__in=ids)}
+    span_start, _ = timeutils.day_bounds(wanted[0])
+    _, span_end = timeutils.day_bounds(wanted[-1])
+    raw_blocks: dict[int, list[BlockedPeriod]] = defaultdict(list)
+    for block in BlockedPeriod.objects.filter(
+        professional_id__in=ids, start__lt=span_end, end__gt=span_start
+    ).order_by("start", "id"):
+        raw_blocks[block.professional_id].append(block)
+    result: dict[tuple[int, date], DaySchedule] = {}
+    for professional in rows:
+        for day in wanted:
+            day_start, day_end = timeutils.day_bounds(day)
+            clipped = [
+                _clip(block, day_start, day_end)
+                for block in raw_blocks.get(professional.pk, [])
+                if block.start < day_end and block.end > day_start
+            ]
+            result[(professional.pk, day)] = _schedule(
+                professional,
+                overrides.get((professional.pk, day)),
+                weekly.get((professional.pk, day.weekday())),
+                clipped,
+            )
+    return result
+
+
 def booking_catalogue() -> QuerySet[Professional]:
     """Active professionals (by position, then name) with their active, bookable services prefetched.
 

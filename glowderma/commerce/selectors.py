@@ -21,6 +21,7 @@ from django.db.models import (
     Exists,
     F,
     IntegerField,
+    Max,
     OuterRef,
     Q,
     QuerySet,
@@ -37,7 +38,7 @@ from glowderma.accounts.models import Customer
 from glowderma.catalog import selectors as catalog_selectors
 from glowderma.catalog.models import Product, ProductStock
 from glowderma.commerce import state, topics
-from glowderma.commerce.models import Cart, CartItem, Order, OrderEvent, StockReservation
+from glowderma.commerce.models import Cart, CartItem, Order, OrderEvent, OrderItem, StockReservation
 from glowderma.core import enums, i18n, integration_modes, timeutils
 from glowderma.core.consistency import Finding, finding
 from glowderma.core.media import absolute_media_url
@@ -384,8 +385,83 @@ def count_created(start: datetime, end: datetime) -> int:
     return Order.objects.filter(created_at__gte=start, created_at__lt=end).count()
 
 
+# --- ops console sales dashboard (glowderma.reporting.dashboards) -------------------------------------------
+
+
+def paid_orders_by_day_and_channel(start: datetime, end: datetime) -> dict[tuple[date, str], int]:
+    """``{(Tashkent day, channel): orders}`` of the orders **paid** in ``[start, end)`` (by ``paid_at``,
+    cancelled ones included: the revenue chart nets their refunds the same way). One query."""
+    rows = (
+        Order.objects.filter(paid_at__gte=start, paid_at__lt=end)
+        .annotate(day=TruncDay("paid_at", tzinfo=TASHKENT))
+        .order_by()
+        .values("day", "channel")
+        .annotate(n=Count("id"))
+        .values_list("day", "channel", "n")
+    )
+    return {(day.astimezone(TASHKENT).date(), str(channel)): int(n) for day, channel, n in rows}
+
+
+def status_breakdown(start: datetime, end: datetime) -> dict[str, int]:
+    """``{status: orders}`` of the orders **created** in ``[start, end)`` (every status, zeros included):
+    where the window's orders stand now. One query over ``order_created_idx``."""
+    rows = (
+        Order.objects.filter(created_at__gte=start, created_at__lt=end)
+        .order_by()
+        .values("status")
+        .annotate(n=Count("id"))
+        .values_list("status", "n")
+    )
+    counts = dict.fromkeys(enums.OrderStatus.values, 0)
+    counts.update({str(status): int(n) for status, n in rows})
+    return counts
+
+
+@dataclass(frozen=True, slots=True)
+class TopProduct:
+    product_id: int
+    name: str
+    quantity: int
+    revenue: int  # Σ line_total (so'm, before cashback and delivery)
+    orders: int
+
+
+def top_products(start: datetime, end: datetime, *, limit: int = 10) -> list[TopProduct]:
+    """The ``limit`` products with the largest line totals over the orders paid in ``[start, end)`` and not
+    cancelled (a cancelled paid order is refunded), ties by product id. One query; the name is the order
+    line's (the product's display name at checkout)."""
+    rows = (
+        OrderItem.objects.filter(
+            order__paid_at__gte=start, order__paid_at__lt=end, order__status__in=list(_PAID_STATUSES)
+        )
+        .order_by()
+        .values("product_id")
+        .annotate(
+            name=Max("name"),
+            quantity=Sum("quantity"),
+            revenue=Sum("line_total"),
+            orders=Count("order_id", distinct=True),
+        )
+        .order_by("-revenue", "product_id")[:limit]
+    )
+    return [
+        TopProduct(
+            product_id=int(row["product_id"]),
+            name=str(row["name"]),
+            quantity=int(row["quantity"] or 0),
+            revenue=int(row["revenue"] or 0),
+            orders=int(row["orders"]),
+        )
+        for row in rows
+    ]
+
+
 __all__ = [
     "STATUS_COUNT_KEYS",
+    "TopProduct",
+    "paid_orders_by_day_and_channel",
+    "status_breakdown",
+    "top_products",
     "OpenMoney",
     "actions",
     "attached_at",

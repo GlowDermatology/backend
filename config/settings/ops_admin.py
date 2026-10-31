@@ -40,18 +40,23 @@ def _item(title: str, icon: str, app_label: str, model_name: str, badge: str | N
     return item
 
 
-# The dashboards of the console (package C) add their pages to this group's ``items``.
+DASHBOARD_VIEWS = "glowderma.reporting.admin_views"
+
+
+def _dashboard(title: str, icon: str, url_name: str) -> dict[str, Any]:
+    return {"title": title, "icon": icon, "link": reverse_lazy(url_name), "permission": STAFF_ONLY}
+
+
+# The four dashboards of the console (glowderma.reporting.dashboards): the index is «Ops holati».
 DASHBOARD_GROUP: dict[str, Any] = {
     "title": "Boshqaruv",
     "separator": False,
     "collapsible": False,
     "items": [
-        {
-            "title": "Bosh sahifa",
-            "icon": "space_dashboard",
-            "link": reverse_lazy("admin:index"),
-            "permission": STAFF_ONLY,
-        },
+        _dashboard("Ops holati", "monitor_heart", "admin:index"),
+        _dashboard("Pul solishtirish", "account_balance", "admin:reporting_money"),
+        _dashboard("Savdo va katalog", "query_stats", "admin:reporting_sales"),
+        _dashboard("Mijozlar va kirish", "diversity_3", "admin:reporting_customers"),
     ],
 }
 
@@ -213,4 +218,12 @@ UNFOLD: dict[str, Any] = {
         "navigation": SIDEBAR_NAVIGATION,
     },
     "COMMAND": {"search_models": False, "show_history": False},
+    "DASHBOARD_CALLBACK": f"{DASHBOARD_VIEWS}.dashboard_callback",
+    # (url under /django-admin/, url name in the admin namespace, view class): Unfold wraps each in
+    # ``admin_site.admin_view`` and passes ``admin_site`` to ``as_view``.
+    "SITE_VIEWS": [
+        ("dashboards/money/", "reporting_money", f"{DASHBOARD_VIEWS}.MoneyDashboardView"),
+        ("dashboards/sales/", "reporting_sales", f"{DASHBOARD_VIEWS}.SalesDashboardView"),
+        ("dashboards/customers/", "reporting_customers", f"{DASHBOARD_VIEWS}.CustomersDashboardView"),
+    ],
 }

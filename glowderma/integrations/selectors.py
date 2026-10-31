@@ -3,6 +3,8 @@
 from datetime import datetime
 from typing import Any
 
+from django.db.models import Count, Q
+
 from glowderma.core import enums
 from glowderma.integrations.models import IntegrationState, Job, WebhookInbox
 
@@ -44,3 +46,29 @@ def failed_webhooks_since(since: datetime) -> int:
     return WebhookInbox.objects.filter(
         received_at__gte=since, result__outcome__in=list(FAILED_WEBHOOK_OUTCOMES)
     ).count()
+
+
+def provider_states() -> dict[str, IntegrationState]:
+    """``{provider: IntegrationState}`` of every provider row (one query; the rows always exist)."""
+    return {state.provider: state for state in IntegrationState.objects.all()}
+
+
+def latest_jobs() -> dict[str, Job]:
+    """The most recent job of every kind that ever ran, ``{kind: Job}`` (one ``DISTINCT ON`` query)."""
+    rows = Job.objects.order_by("kind", "-created_at", "-id").distinct("kind")
+    return {job.kind: job for job in rows}
+
+
+def webhook_outcomes_since(since: datetime) -> dict[str, dict[str, int]]:
+    """``{provider: {"total", "failed"}}`` of the callbacks received at or after ``since`` (one query over
+    ``received_at``); "failed" is :data:`FAILED_WEBHOOK_OUTCOMES`, the rule of the sidebar badge."""
+    rows = (
+        WebhookInbox.objects.filter(received_at__gte=since)
+        .values("provider")
+        .annotate(
+            total=Count("id"),
+            failed=Count("id", filter=Q(result__outcome__in=list(FAILED_WEBHOOK_OUTCOMES))),
+        )
+        .order_by()
+    )
+    return {str(row["provider"]): {"total": int(row["total"]), "failed": int(row["failed"])} for row in rows}
