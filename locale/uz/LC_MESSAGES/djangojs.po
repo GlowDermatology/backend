@@ -1,0 +1,190 @@
+# Uzbek (Latin) strings of the Django admin's JavaScript in the ops console (date/time shortcuts, calendar, select
+# filters, the time widgets' time-zone note) that Django's own uz djangojs catalog leaves untranslated;
+# JavaScriptCatalog (the jsi18n catalog) merges LOCALE_PATHS over it.
+# Compile with `manage.py compile_locale` (stdlib, no GNU gettext); commit the .mo with it.
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: uz\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "Today (%(date)s)"
+msgstr "Bugun (%(date)s)"
+
+msgid "Yesterday (%(date)s)"
+msgstr "Kecha (%(date)s)"
+
+msgid "Tomorrow (%(date)s)"
+msgstr "Ertaga (%(date)s)"
+
+msgid "Previous (%(month)s %(year)s)"
+msgstr "Oldingi oy (%(month)s %(year)s)"
+
+msgid "Next (%(month)s %(year)s)"
+msgstr "Keyingi oy (%(month)s %(year)s)"
+
+msgid "%(month)s %(day)s, %(year)s"
+msgstr "%(day)s-%(month)s, %(year)s"
+
+msgid "%s (today)"
+msgstr "%s (bugun)"
+
+msgid "%s (current selection)"
+msgstr "%s (tanlangan)"
+
+msgid "%s (today, current selection)"
+msgstr "%s (bugun, tanlangan)"
+
+msgid "(click to clear)"
+msgstr "(tozalash uchun bosing)"
+
+# The time widgets' note when the browser's clock zone differs from the server's (Asia/Tashkent).
+msgid "server"
+msgstr "server"
+
+msgid "Note: Enter times in the %(timezone)s timezone. (You are %(offset)s hour ahead.)"
+msgid_plural "Note: Enter times in the %(timezone)s timezone. (You are %(offset)s hours ahead.)"
+msgstr[0] "Vaqtni %(timezone)s vaqt mintaqasida kiriting (siz %(offset)s soat oldindasiz)."
+
+msgid "Note: Enter times in the %(timezone)s timezone. (You are %(offset)s hour behind.)"
+msgid_plural "Note: Enter times in the %(timezone)s timezone. (You are %(offset)s hours behind.)"
+msgstr[0] "Vaqtni %(timezone)s vaqt mintaqasida kiriting (siz %(offset)s soat orqadasiz)."
+
+msgid "Monday"
+msgstr "Dushanba"
+
+msgid "Tuesday"
+msgstr "Seshanba"
+
+msgid "Wednesday"
+msgstr "Chorshanba"
+
+msgid "Thursday"
+msgstr "Payshanba"
+
+msgid "Friday"
+msgstr "Juma"
+
+msgid "Saturday"
+msgstr "Shanba"
+
+msgid "Sunday"
+msgstr "Yakshanba"
+
+msgid "May"
+msgstr "May"
+
+msgctxt "abbrev. day Monday"
+msgid "Mon"
+msgstr "Du"
+
+msgctxt "abbrev. day Tuesday"
+msgid "Tue"
+msgstr "Se"
+
+msgctxt "abbrev. day Wednesday"
+msgid "Wed"
+msgstr "Chor"
+
+msgctxt "abbrev. day Thursday"
+msgid "Thur"
+msgstr "Pay"
+
+msgctxt "abbrev. day Friday"
+msgid "Fri"
+msgstr "Ju"
+
+msgctxt "abbrev. day Saturday"
+msgid "Sat"
+msgstr "Sha"
+
+msgctxt "abbrev. day Sunday"
+msgid "Sun"
+msgstr "Yak"
+
+msgctxt "abbrev. month January"
+msgid "Jan"
+msgstr "Yan"
+
+msgctxt "abbrev. month February"
+msgid "Feb"
+msgstr "Fev"
+
+msgctxt "abbrev. month March"
+msgid "Mar"
+msgstr "Mar"
+
+msgctxt "abbrev. month April"
+msgid "Apr"
+msgstr "Apr"
+
+msgctxt "abbrev. month May"
+msgid "May"
+msgstr "May"
+
+msgctxt "abbrev. month June"
+msgid "Jun"
+msgstr "Iyn"
+
+msgctxt "abbrev. month July"
+msgid "Jul"
+msgstr "Iyl"
+
+msgctxt "abbrev. month August"
+msgid "Aug"
+msgstr "Avg"
+
+msgctxt "abbrev. month September"
+msgid "Sep"
+msgstr "Sen"
+
+msgctxt "abbrev. month October"
+msgid "Oct"
+msgstr "Okt"
+
+msgctxt "abbrev. month November"
+msgid "Nov"
+msgstr "Noy"
+
+msgctxt "abbrev. month December"
+msgid "Dec"
+msgstr "Dek"
+
+msgid "Choose all %s"
+msgstr "Hamma %s ni tanlash"
+
+msgid "Choose selected %s"
+msgstr "Belgilangan %s ni tanlash"
+
+msgid "Remove all %s"
+msgstr "Hamma %s ni olib tashlash"
+
+msgid "Remove selected %s"
+msgstr "Belgilangan %s ni olib tashlash"
+
+msgid "Choose %s by selecting them and then select the \"Choose\" arrow button."
+msgstr "%s ni belgilang, so‘ng «Tanlash» strelkasini bosing."
+
+msgid "Remove %s by selecting them and then select the \"Remove\" arrow button."
+msgstr "%s ni belgilang, so‘ng «Olib tashlash» strelkasini bosing."
+
+msgid "Type into this box to filter down the list of selected %s."
+msgstr "Tanlangan %s ro‘yxatini qisqartirish uchun shu yerga yozing."
+
+msgid "%s selected option not visible"
+msgid_plural "%s selected options not visible"
+msgstr[0] "%s ta tanlangan variant ko‘rinmayapti"
+
+msgid ""
+"You have selected an action, but you haven’t saved your changes to individual fields yet. Please click "
+"OK to save. You’ll need to re-run the action."
+msgstr ""
+"Amalni tanladingiz, lekin maydonlardagi o‘zgarishlar hali saqlanmagan. Saqlash uchun OK ni bosing, "
+"so‘ng amalni qayta ishga tushiring."
+
+msgid ""
+"You have selected an action, and you haven’t made any changes on individual fields. You’re probably "
+"looking for the Run button rather than the Save button."
+msgstr ""
+"Amalni tanladingiz va maydonlarda o‘zgarish yo‘q. Ehtimol, sizga «Saqlash» emas, «Bajarish» tugmasi "
+"kerak."

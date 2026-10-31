@@ -1,0 +1,25 @@
+{% extends 'accounts/console/base_step.html' %}
+{% load unfold %}
+
+{% block step %}
+    <p class="ops-signin-lead">2FA yoqilganda berilgan 10 ta zaxira koddan birini kiriting. Har bir kod faqat bir marta ishlaydi.</p>
+
+    <form action="{% url 'ops_2fa_recovery' %}" method="post" id="recovery-form" novalidate>
+        {% csrf_token %}
+        {% include "unfold/helpers/field.html" with field=form.code %}
+
+        <div class="flex flex-col gap-3 mt-6">
+            {% component "unfold/components/button.html" with submit=1 variant="primary" class="w-full" %}
+                Kirish <span class="material-symbols-outlined relative right-0 transition-all group-hover:-right-1 text-sm">arrow_forward</span>
+            {% endcomponent %}
+            {% url 'ops_2fa_verify' as verify_url %}
+            {% component "unfold/components/button.html" with href=verify_url variant="secondary" class="w-full" %}
+                Ilovadagi kod bilan kirish
+            {% endcomponent %}
+        </div>
+    </form>
+
+    <p class="ops-signin-hint">Zaxira kodlar ham yo‘qolgan bo‘lsa, menejerdan 2FA ni qayta o‘rnatishni so‘rang.</p>
+
+    {% include "accounts/console/_cancel.html" %}
+{% endblock %}

@@ -8,6 +8,7 @@ from django.test import Client, RequestFactory
 from django.urls import reverse
 
 from glowderma.accounts.tests.factories import StaffUserFactory
+from glowderma.accounts.tests.ops_helpers import ops_login
 from glowderma.core.admin import ReadOnlyAdmin
 from glowderma.loyalty.admin import CashbackPolicyAdmin, CashbackTierInline, PurchaseAdmin, PurchaseItemInline
 from glowderma.loyalty.models import (
@@ -46,7 +47,7 @@ MODELS = [
 def plain_staff_client() -> Client:
     """The audience ``ReadOnlyAdmin`` exists for: active ``is_staff``, no superuser flag, no model perms."""
     client = Client()
-    client.force_login(StaffUserFactory.create(email="ops@x.uz", is_staff=True))
+    ops_login(client, StaffUserFactory.create(email="ops@x.uz", is_staff=True))
     return client
 
 
@@ -68,7 +69,10 @@ def test_models_registered_read_only(model: type[models.Model]) -> None:
     assert model_admin.list_display != ("__str__",)
     for field in model._meta.concrete_fields:
         if field.is_relation:
-            assert field.name in model_admin.raw_id_fields, (model, field.name)
+            assert field.name in (*model_admin.raw_id_fields, *model_admin.autocomplete_fields), (
+                model,
+                field.name,
+            )
 
 
 def test_pos_device_key_hash_is_hidden() -> None:
@@ -110,8 +114,9 @@ def test_pages_render_for_a_plain_staff_user(plain_staff_client: Client) -> None
     change = plain_staff_client.get(url(CashbackPolicy, "change", policy.pk))
     assert change.status_code == 200
     content = change.content.decode()
-    assert "20000000" in content and "30000000" in content  # CashbackTier inline
-    assert "Superseded by" in content and "Effective to" in content  # derived columns (02 §1.1)
+    assert "20\xa0000\xa0000 so‘m" in content and "30\xa0000\xa0000 so‘m" in content  # CashbackTier inline
+    assert "O‘rnini olgan versiya" in content and "Amal qilish tugashi" in content  # derived (02 §1.1)
+    assert "Superseded by" not in content and "Effective to" not in content
     change = plain_staff_client.get(url(Purchase, "change", purchase.pk))
     assert change.status_code == 200
     content = change.content.decode()

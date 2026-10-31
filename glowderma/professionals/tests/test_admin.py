@@ -9,6 +9,7 @@ from django.test import Client, RequestFactory
 from django.urls import reverse
 
 from glowderma.accounts.tests.factories import StaffUserFactory
+from glowderma.accounts.tests.ops_helpers import ops_login
 from glowderma.core.models import AuditEntry
 from glowderma.professionals.admin import ServiceBackedAdmin
 from glowderma.professionals.models import (
@@ -69,7 +70,7 @@ def test_override_is_editable_through_the_services() -> None:
 
 def staff_client() -> Client:
     client = Client()
-    client.force_login(StaffUserFactory.create(is_staff=True))
+    ops_login(client, StaffUserFactory.create(is_staff=True))
     return client
 
 

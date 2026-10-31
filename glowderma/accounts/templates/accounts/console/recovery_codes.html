@@ -1,0 +1,45 @@
+{% extends 'accounts/console/base_step.html' %}
+{% load static unfold %}
+{% comment %}
+  The recovery codes of a finished enrolment, shown once (GET after the enrolment POST: a reload never re-posts
+  the form). Copy uses ops/recovery-codes.js (a static file: the edge's CSP runs no inline script); the
+  download link is a plain data: URL and works without JavaScript.
+{% endcomment %}
+
+{% block extrahead %}
+    {{ block.super }}
+    {% if recovery_codes %}
+        <script src="{% static 'ops/recovery-codes.js' %}" defer></script>
+    {% endif %}
+{% endblock %}
+
+{% block step %}
+    {% if recovery_codes %}
+        {% include "unfold/helpers/messages/success.html" with message="Ikki bosqichli himoya yoqildi." %}
+
+        <p class="ops-signin-lead">Telefoningiz yo‘qolsa, quyidagi zaxira kodlar bilan kirasiz. Ular <strong>faqat hozir</strong> ko‘rsatiladi: yozib oling yoki parol menejeriga saqlang. Har bir kod bir marta ishlaydi.</p>
+
+        <ul class="ops-recovery-codes" id="recovery-codes">
+            {% for code in recovery_codes %}
+                <li><code>{{ code }}</code></li>
+            {% endfor %}
+        </ul>
+
+        <div class="ops-recovery-tools">
+            <button type="button" class="ops-recovery-copy" data-copy-target="recovery-codes" data-copied-label="Nusxa olindi" hidden>
+                <span class="material-symbols-outlined">content_copy</span> Nusxa olish
+            </button>
+            <a class="ops-recovery-download" href="{{ codes_download }}" download="{{ codes_filename }}">
+                <span class="material-symbols-outlined">download</span> .txt faylga yuklab olish
+            </a>
+        </div>
+    {% else %}
+        {% include "unfold/helpers/messages/warning.html" with message=shown_once %}
+    {% endif %}
+
+    <div class="flex flex-col gap-3 mt-6">
+        {% component "unfold/components/button.html" with href=next_url variant="primary" class="w-full" %}
+            {% if recovery_codes %}Kodlarni saqladim, davom etish{% else %}Konsolga o‘tish{% endif %} <span class="material-symbols-outlined relative right-0 transition-all group-hover:-right-1 text-sm">arrow_forward</span>
+        {% endcomponent %}
+    </div>
+{% endblock %}

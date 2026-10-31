@@ -24,8 +24,8 @@ class AppendOnlyError(RuntimeError):
 
 
 class TimeStampedModel(models.Model):
-    created_at = models.DateTimeField(default=timestamp_default, editable=False)
-    updated_at = models.DateTimeField(default=timestamp_default)
+    created_at = models.DateTimeField(default=timestamp_default, editable=False, verbose_name="yaratilgan")
+    updated_at = models.DateTimeField(default=timestamp_default, verbose_name="yangilangan")
 
     class Meta:
         abstract = True
@@ -66,23 +66,32 @@ class AppendOnlyModel(models.Model):
 
 
 class AuditEntry(AppendOnlyModel):
-    created_at = models.DateTimeField(default=timestamp_default, editable=False)
+    created_at = models.DateTimeField(default=timestamp_default, editable=False, verbose_name="yaratilgan")
     actor_type = models.CharField(
-        max_length=16, choices=[(x, x) for x in ("staff", "customer", "system", "integration")]
+        max_length=16,
+        choices=[
+            ("staff", "Xodim"),
+            ("customer", "Mijoz"),
+            ("system", "Tizim"),
+            ("integration", "Integratsiya"),
+        ],
+        verbose_name="bajaruvchi turi",
     )
-    actor_id = models.BigIntegerField(null=True)
-    actor_label = models.CharField(max_length=254, blank=True)
-    action = models.CharField(max_length=100)
-    entity_type = models.CharField(max_length=100)
-    entity_id = models.CharField(max_length=254)
-    before = models.JSONField(null=True, encoder=DjangoJSONEncoder)
-    after = models.JSONField(null=True, encoder=DjangoJSONEncoder)
-    reason = models.TextField(blank=True)
-    ip = models.GenericIPAddressField(null=True)
-    user_agent = models.TextField(blank=True)
-    request_id = models.CharField(max_length=64, blank=True)
+    actor_id = models.BigIntegerField(null=True, verbose_name="bajaruvchi ID")
+    actor_label = models.CharField(max_length=254, blank=True, verbose_name="bajaruvchi")
+    action = models.CharField(max_length=100, verbose_name="amal")
+    entity_type = models.CharField(max_length=100, verbose_name="obyekt turi")
+    entity_id = models.CharField(max_length=254, verbose_name="obyekt ID")
+    before = models.JSONField(null=True, encoder=DjangoJSONEncoder, verbose_name="oldin")
+    after = models.JSONField(null=True, encoder=DjangoJSONEncoder, verbose_name="keyin")
+    reason = models.TextField(blank=True, verbose_name="sabab")
+    ip = models.GenericIPAddressField(null=True, verbose_name="IP manzil")
+    user_agent = models.TextField(blank=True, verbose_name="user-agent")
+    request_id = models.CharField(max_length=64, blank=True, verbose_name="so‘rov ID")
 
     class Meta:
+        verbose_name = "audit yozuvi"
+        verbose_name_plural = "audit jurnali"
         indexes = [
             models.Index(fields=["entity_type", "entity_id"]),
             models.Index(fields=["created_at"]),
@@ -94,18 +103,22 @@ class AuditEntry(AppendOnlyModel):
 
 
 class IdempotencyRecord(models.Model):
-    audience = models.CharField(max_length=32)
-    actor_id = models.BigIntegerField()
-    method = models.CharField(max_length=10)
-    path = models.CharField(max_length=2048)
-    key = models.UUIDField()
-    request_hash = models.CharField(max_length=64)
-    response_status = models.PositiveSmallIntegerField()
-    response_body = models.JSONField(encoder=DjangoJSONEncoder, null=True)
-    created_at = models.DateTimeField(default=timestamp_default, editable=False)
-    expires_at = models.DateTimeField(default=idempotency_expiry, db_index=True)
+    audience = models.CharField(max_length=32, verbose_name="auditoriya")
+    actor_id = models.BigIntegerField(verbose_name="bajaruvchi ID")
+    method = models.CharField(max_length=10, verbose_name="usul")
+    path = models.CharField(max_length=2048, verbose_name="yo‘l")
+    key = models.UUIDField(verbose_name="kalit")
+    request_hash = models.CharField(max_length=64, verbose_name="so‘rov xeshi")
+    response_status = models.PositiveSmallIntegerField(verbose_name="javob kodi")
+    response_body = models.JSONField(encoder=DjangoJSONEncoder, null=True, verbose_name="javob tanasi")
+    created_at = models.DateTimeField(default=timestamp_default, editable=False, verbose_name="yaratilgan")
+    expires_at = models.DateTimeField(
+        default=idempotency_expiry, db_index=True, verbose_name="amal qilish muddati"
+    )
 
     class Meta:
+        verbose_name = "idempotentlik yozuvi"
+        verbose_name_plural = "idempotentlik yozuvlari"
         constraints = [
             models.UniqueConstraint(
                 fields=["audience", "actor_id", "method", "path", "key"], name="idempotency_scope_unique"
@@ -117,23 +130,34 @@ class IdempotencyRecord(models.Model):
 
 
 class OutboxMessage(TimeStampedModel):
-    topic = models.CharField(max_length=100)
-    payload = models.JSONField(encoder=DjangoJSONEncoder)
-    dedupe_key = models.CharField(max_length=254, unique=True)
+    topic = models.CharField(max_length=100, verbose_name="mavzu")
+    payload = models.JSONField(encoder=DjangoJSONEncoder, verbose_name="ma’lumot")
+    dedupe_key = models.CharField(max_length=254, unique=True, verbose_name="takrorlanmaslik kaliti")
     status = models.CharField(
         max_length=16,
         default="pending",
-        choices=[(value, value) for value in ("pending", "in_flight", "done", "failed", "dead")],
+        choices=[
+            ("pending", "Navbatda"),
+            ("in_flight", "Yuborilmoqda"),
+            ("done", "Bajarildi"),
+            ("failed", "Xato · qayta uriniladi"),
+            ("dead", "O‘lik"),
+        ],
+        verbose_name="holat",
     )
-    attempts = models.PositiveIntegerField(default=0)
-    available_at = models.DateTimeField(default=timestamp_default, db_index=True)
-    lease_expires_at = models.DateTimeField(null=True)
-    claim_token = models.UUIDField(null=True, editable=False)
-    last_error = models.TextField(blank=True)
+    attempts = models.PositiveIntegerField(default=0, verbose_name="urinishlar")
+    available_at = models.DateTimeField(
+        default=timestamp_default, db_index=True, verbose_name="navbatdagi urinish"
+    )
+    lease_expires_at = models.DateTimeField(null=True, verbose_name="ijara muddati")
+    claim_token = models.UUIDField(null=True, editable=False, verbose_name="egallash tokeni")
+    last_error = models.TextField(blank=True, verbose_name="oxirgi xato")
     # first ``outbox.RetryLater`` of this message (``give_up_after`` counts from here); null = never deferred
-    deferred_since = models.DateTimeField(null=True)
+    deferred_since = models.DateTimeField(null=True, verbose_name="kechiktirilgan")
 
     class Meta:
+        verbose_name = "outbox xabari"
+        verbose_name_plural = "outbox xabarlari"
         indexes = [
             # every row that is not done (open and dead ones), in the dispatcher's claim order: the claim
             # (status pending/failed/in_flight, ORDER BY available_at, id LIMIT 1) reads it in order and stops
@@ -145,4 +169,4 @@ class OutboxMessage(TimeStampedModel):
         ]
 
     def __str__(self) -> str:
-        return f"{self.topic}: {self.dedupe_key} ({self.status})"
+        return f"{self.topic}: {self.dedupe_key} ({self.get_status_display()})"

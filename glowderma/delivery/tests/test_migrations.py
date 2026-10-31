@@ -51,7 +51,13 @@ def test_migration_dependencies_as_designed() -> None:
     from glowderma.delivery import migrations as package
 
     names = sorted(name for name in os.listdir(package.__path__[0]) if name[0].isdigit())
-    assert names == ["0001_initial.py", "0002_append_only.py"]
+    assert names == [
+        "0001_initial.py",
+        "0002_append_only.py",
+        "0003_uz_verbose_names.py",
+        "0004_uz_choice_labels.py",
+        "0005_uz_field_labels.py",
+    ]
 
 
 @pytest.mark.django_db(transaction=True)
@@ -76,6 +82,9 @@ def test_migrate_zero_and_forward_again() -> None:
     assert {row.name for row in MigrationRecorder.Migration.objects.filter(app="delivery")} == {
         "0001_initial",
         "0002_append_only",
+        "0003_uz_verbose_names",
+        "0004_uz_choice_labels",
+        "0005_uz_field_labels",
     }
     event = ShipmentEventFactory.create()
     assert event.pk is not None

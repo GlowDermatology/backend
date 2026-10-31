@@ -14,6 +14,7 @@ from django.db import models
 from django.db.models import BooleanField, Case, Q, Value, When
 
 from glowderma.core import enums
+from glowderma.core.labels import stamp
 from glowderma.core.models import AppendOnlyModel, TimeStampedModel, timestamp_default
 
 # Outbox statuses under which a BTS create message is still going to be delivered: ``pending`` and ``failed``
@@ -31,41 +32,51 @@ class Shipment(TimeStampedModel):
     """The BTS parcel of a delivery order; ``state`` is internal (the API shows ``cancelled`` as created)."""
 
     class State(models.TextChoices):  # internal; API ShipmentState adds `not_required` and hides `cancelled`
-        NOT_CREATED = "not_created"
-        FAILED = "failed"
-        CREATED = "created"
-        CANCELLED = "cancelled"
+        NOT_CREATED = "not_created", "Yaratilmagan"
+        FAILED = "failed", "Yaratib bo‘lmadi"
+        CREATED = "created", "Yaratilgan"
+        CANCELLED = "cancelled", "Bekor qilingan"
 
-    order = models.OneToOneField("commerce.Order", on_delete=models.PROTECT, related_name="shipment")
-    state = models.CharField(max_length=16, choices=State.choices, default=State.NOT_CREATED)
-    tracking_number = models.CharField(max_length=32, blank=True)
-    tariff = models.BigIntegerField(
-        null=True
-    )  # so'm; NULL until created; from the BTS create response, else Order.delivery_fee (D-2)
-    bts_order_id = models.CharField(max_length=64, blank=True)  # BTS's own id of the parcel
-    bts_status = models.CharField(max_length=16, blank=True)  # raw BTS status code as text ("100", "200", …)
-    via = models.CharField(
-        max_length=16, blank=True, choices=enums.ShipmentVia.choices
-    )  # source of the last status
-    last_status_at = models.DateTimeField(null=True)  # API `updated_at` of the created state
-    bts_created_at = models.DateTimeField(null=True)
-    cancelled_at = models.DateTimeField(null=True)
-    attempts = models.PositiveIntegerField(
-        default=0
-    )  # BTS create attempts that got an answer (failed or created)
-    create_requests = models.PositiveIntegerField(
-        default=0
-    )  # outbox enqueues (automatic + manual retries); part of the dedupe key
-    last_attempt_at = models.DateTimeField(null=True)
-    last_error_code = models.CharField(max_length=32, blank=True)
-    last_error = models.TextField(blank=True)
+    order = models.OneToOneField(
+        "commerce.Order", on_delete=models.PROTECT, related_name="shipment", verbose_name="buyurtma"
+    )
+    state = models.CharField(
+        max_length=16, choices=State.choices, default=State.NOT_CREATED, verbose_name="holat"
+    )
+    tracking_number = models.CharField(max_length=32, blank=True, verbose_name="trek raqami")
+    # so'm; NULL until created; from the BTS create response, else Order.delivery_fee (D-2)
+    tariff = models.BigIntegerField(null=True, verbose_name="tarif")
+    # BTS's own id of the parcel
+    bts_order_id = models.CharField(max_length=64, blank=True, verbose_name="BTS buyurtma ID")
+    # raw BTS status code as text ("100", "200", …)
+    bts_status = models.CharField(max_length=16, blank=True, verbose_name="BTS holati")
+    # source of the last status
+    via = models.CharField(max_length=16, blank=True, choices=enums.ShipmentVia.choices, verbose_name="manba")
+    # API `updated_at` of the created state
+    last_status_at = models.DateTimeField(null=True, verbose_name="oxirgi holat vaqti")
+    bts_created_at = models.DateTimeField(null=True, verbose_name="BTS’da yaratilgan")
+    cancelled_at = models.DateTimeField(null=True, verbose_name="bekor qilingan")
+    # BTS create attempts that got an answer (failed or created)
+    attempts = models.PositiveIntegerField(default=0, verbose_name="urinishlar")
+    # outbox enqueues (automatic + manual retries); part of the dedupe key
+    create_requests = models.PositiveIntegerField(default=0, verbose_name="yaratish so‘rovlari")
+    last_attempt_at = models.DateTimeField(null=True, verbose_name="oxirgi urinish")
+    last_error_code = models.CharField(max_length=32, blank=True, verbose_name="oxirgi xato kodi")
+    last_error = models.TextField(blank=True, verbose_name="oxirgi xato")
+    # the newest `bts.create_shipment` message; `pending` is derived from its status
     create_message = models.ForeignKey(
-        "core.OutboxMessage", null=True, on_delete=models.SET_NULL, related_name="+"
-    )  # the newest `bts.create_shipment` message; `pending` is derived from its status
+        "core.OutboxMessage",
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name="yaratish xabari (outbox)",
+    )
 
     objects = ShipmentQuerySet.as_manager()
 
     class Meta:
+        verbose_name = "jo‘natma"
+        verbose_name_plural = "jo‘natmalar"
         constraints = [
             models.CheckConstraint(
                 condition=Q(tariff__isnull=True) | Q(tariff__gte=0),
@@ -120,7 +131,7 @@ class Shipment(TimeStampedModel):
 
     def __str__(self) -> str:
         suffix = f" {self.tracking_number}" if self.tracking_number else ""
-        return f"Shipment of order {self.order_id}: {self.state}{suffix}"
+        return f"Buyurtma №{self.order_id} jo‘natmasi: {self.get_state_display()}{suffix}"
 
     @staticmethod
     def pending_q(prefix: str = "") -> Q:
@@ -147,26 +158,31 @@ class ShipmentEvent(AppendOnlyModel):
     """One immutable BTS protocol record of a shipment (creation answer, failure, status, cancellation)."""
 
     class Kind(models.TextChoices):  # internal
-        CREATED = "created"
-        CREATE_FAILED = "create_failed"
-        STATUS_RECEIVED = "status_received"
-        CANCELLED = "cancelled"
-        CANCEL_REFUSED = "cancel_refused"
+        CREATED = "created", "Yaratildi"
+        CREATE_FAILED = "create_failed", "Yaratib bo‘lmadi"
+        STATUS_RECEIVED = "status_received", "Holat keldi"
+        CANCELLED = "cancelled", "Bekor qilindi"
+        CANCEL_REFUSED = "cancel_refused", "Bekor qilish rad etildi"
 
-    shipment = models.ForeignKey("delivery.Shipment", on_delete=models.PROTECT, related_name="events")
-    kind = models.CharField(max_length=16, choices=Kind.choices)
-    bts_status = models.CharField(max_length=16, blank=True)
-    via = models.CharField(max_length=16, blank=True, choices=enums.ShipmentVia.choices)
-    manual = models.BooleanField(default=False)  # the triggering create was a manual retry
-    error_code = models.CharField(max_length=32, blank=True)
-    payload = models.JSONField(
-        default=dict, blank=True, encoder=DjangoJSONEncoder
-    )  # BTS response / webhook body (PII-light: no customer name)
-    at = models.DateTimeField(default=timestamp_default, editable=False)
+    shipment = models.ForeignKey(
+        "delivery.Shipment", on_delete=models.PROTECT, related_name="events", verbose_name="jo‘natma"
+    )
+    kind = models.CharField(max_length=16, choices=Kind.choices, verbose_name="turi")
+    bts_status = models.CharField(max_length=16, blank=True, verbose_name="BTS holati")
+    via = models.CharField(max_length=16, blank=True, choices=enums.ShipmentVia.choices, verbose_name="manba")
+    # the triggering create was a manual retry
+    manual = models.BooleanField(default=False, verbose_name="qo‘lda")
+    error_code = models.CharField(max_length=32, blank=True, verbose_name="xato kodi")
+    # BTS response / webhook body (PII-light: no customer name)
+    payload = models.JSONField(default=dict, blank=True, encoder=DjangoJSONEncoder, verbose_name="ma’lumot")
+    at = models.DateTimeField(default=timestamp_default, editable=False, verbose_name="vaqt")
 
     class Meta:
+        verbose_name = "yetkazish hodisasi"
+        verbose_name_plural = "yetkazish tarixi"
         ordering = ["shipment_id", "at", "id"]
         indexes = [models.Index(fields=["shipment", "at", "id"], name="shipmentevent_shipment_at_idx")]
 
     def __str__(self) -> str:
-        return f"Shipment {self.shipment_id}: {self.kind} {self.bts_status} ({self.at:%Y-%m-%d %H:%M})"
+        status = f" {self.bts_status}" if self.bts_status else ""
+        return f"Jo‘natma #{self.shipment_id}: {self.get_kind_display()}{status} · {stamp(self.at)}"

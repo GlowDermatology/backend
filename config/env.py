@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from datetime import datetime
 from ipaddress import IPv4Network, IPv6Network, ip_network
 from typing import Any
@@ -62,10 +63,10 @@ def env_datetime(name: str, default: Any = MISSING) -> datetime | None:
 
 
 def env_networks(name: str, default: Any = MISSING) -> tuple[Network, ...]:
+    """CIDRs separated by commas and/or whitespace (the edge's ``OPS_ALLOWED_IPS`` list is space separated:
+    Caddy splits ``{$VAR}`` on spaces, so one value can feed both)."""
     values = (
-        [value.strip() for value in env_str(name).split(",")]
-        if os.environ.get(name)
-        else env_list(name, default)
+        re.split(r"\s*,\s*|\s+", env_str(name).strip()) if os.environ.get(name) else env_list(name, default)
     )
     try:
         return tuple(ip_network(value, strict=True) for value in values)

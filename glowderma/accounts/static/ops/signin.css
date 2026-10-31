@@ -1,0 +1,188 @@
+/* Glow Derma Ops: the console's sign-in steps (glowderma/accounts/templates/accounts/console/), on top of
+   Unfold's compiled stylesheet. Light and dark; no inline styles (the edge's CSP allows only 'self' sheets
+   plus Unfold's own inline theme block). */
+
+.ops-signin-lead,
+.ops-signin-hint {
+  margin: 0 0 1rem;
+  line-height: 1.55;
+  color: var(--color-base-600);
+}
+
+.ops-signin-hint {
+  margin-top: 1.25rem;
+  font-size: 12px;
+  color: var(--color-base-500);
+}
+
+.ops-signin-account {
+  margin: -1rem 0 1rem;
+  font-weight: 500;
+  color: var(--color-base-700);
+}
+
+.ops-signin-steps {
+  margin: 0 0 1.25rem;
+  padding-left: 1.25rem;
+  list-style: decimal;
+  line-height: 1.55;
+  color: var(--color-base-600);
+}
+
+.ops-signin-steps li + li {
+  margin-top: 0.25rem;
+}
+
+.ops-qr-frame {
+  display: flex;
+  justify-content: center;
+  margin: 0 0 1rem;
+}
+
+.ops-qr-frame svg {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid var(--color-base-200);
+}
+
+.ops-manual-key {
+  margin: 0 0 1.25rem;
+  padding: 0.625rem 0.875rem;
+  border: 1px solid var(--color-base-200);
+  border-radius: 8px;
+  color: var(--color-base-600);
+}
+
+.ops-manual-key summary {
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--color-primary-600);
+}
+
+.ops-manual-key p {
+  margin: 0.5rem 0;
+  font-size: 12px;
+}
+
+.ops-manual-key code,
+.ops-recovery-codes code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  letter-spacing: 0.04em;
+  user-select: all;
+}
+
+.ops-manual-key code {
+  display: block;
+  padding: 0.5rem 0.625rem;
+  border-radius: 6px;
+  background: var(--color-base-100);
+  color: var(--color-base-900);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.ops-recovery-codes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0.875rem;
+  list-style: none;
+  border: 1px dashed var(--color-base-300);
+  border-radius: 8px;
+  background: var(--color-base-50);
+}
+
+.ops-recovery-codes code {
+  font-size: 14px;
+  color: var(--color-base-900);
+}
+
+.ops-recovery-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin-top: 0.75rem;
+  font-size: 13px;
+}
+
+.ops-recovery-copy,
+.ops-recovery-download {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--color-primary-600);
+}
+
+.ops-recovery-copy[hidden] {
+  display: none;
+}
+
+.ops-recovery-copy .material-symbols-outlined,
+.ops-recovery-download .material-symbols-outlined {
+  font-size: 18px;
+}
+
+.ops-signin-cancel {
+  margin-top: 1rem;
+  text-align: center;
+}
+
+.ops-signin-cancel button {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--color-base-500);
+  text-decoration: underline;
+}
+
+.dark .ops-signin-lead,
+.dark .ops-signin-steps,
+.dark .ops-manual-key {
+  color: var(--color-base-300);
+}
+
+.dark .ops-signin-account {
+  color: var(--color-base-200);
+}
+
+.dark .ops-signin-hint,
+.dark .ops-signin-cancel button {
+  color: var(--color-base-400);
+}
+
+.dark .ops-manual-key,
+.dark .ops-qr-frame svg {
+  border-color: var(--color-base-700);
+}
+
+.dark .ops-manual-key summary {
+  color: var(--color-primary-500);
+}
+
+.dark .ops-manual-key code {
+  background: var(--color-base-800);
+  color: var(--color-base-100);
+}
+
+.dark .ops-recovery-codes {
+  border-color: var(--color-base-600);
+  background: var(--color-base-800);
+}
+
+.dark .ops-recovery-codes code {
+  color: var(--color-base-100);
+}
+
+/* primary-600 is 3.3:1 on the dark card: the copy and download links use primary-400 there. */
+.dark .ops-recovery-copy,
+.dark .ops-recovery-download {
+  color: var(--color-primary-400);
+}

@@ -65,7 +65,7 @@ def constraint_names(table: str, types: str = "cu") -> set[str]:
 
 def test_cart_one_per_customer_str_and_on_delete_rules() -> None:
     cart = CartFactory.create()
-    assert str(cart) == f"Cart of customer {cart.customer_id}"
+    assert str(cart) == f"Mijoz #{cart.customer_id} savatchasi"
     assert cart.last_checkout_order is None
     violates("commerce_cart_customer_id_key", Cart.objects.create, customer=cart.customer)
     order = OrderFactory.create(customer=CustomerFactory.create())
@@ -83,7 +83,7 @@ def test_cart_item_unique_quantity_range_and_ordering() -> None:
     cart = CartFactory.create()
     product = ProductFactory.create()
     first = CartItemFactory.create(cart=cart, product=product, quantity=2)
-    assert str(first) == f"2 × product {product.pk} (cart {cart.pk})"
+    assert str(first) == f"2 × mahsulot #{product.pk} (savatcha #{cart.pk})"
     violates("cartitem_cart_product_unique", CartItemFactory.create, cart=cart, product=product)
     violates("cartitem_quantity_1_99", CartItemFactory.create, cart=cart, quantity=0)
     violates("cartitem_quantity_1_99", CartItemFactory.create, cart=cart, quantity=100)
@@ -107,7 +107,10 @@ def test_order_factory_defaults_satisfy_every_check_and_str() -> None:
     assert order.reservation_expires_at == T0 + timedelta(minutes=15)
     assert order.address_text == DESIGN_ADDRESS and order.recipient_phone == order.customer.phone
     assert order.metadata == {} and order.customer_note == "" and order.cancellation_reason == ""
-    assert str(order) == f"Order №{order.pk} (awaiting_payment, 210000 so'm, customer {order.customer_id})"
+    assert (
+        str(order)
+        == f"Buyurtma №{order.pk} (To‘lov kutilmoqda, 210\u00a0000 so‘m, mijoz #{order.customer_id})"
+    )
     assert [item.line_total for item in order.items.all()] == [185_000]
 
 
@@ -299,7 +302,7 @@ def test_orderitem_str_snapshot_and_ordering() -> None:
         312_000,
         312_000,
     )
-    assert str(item) == f"Seramidli namlantiruvchi krem × 1 @ 312000 (order {order.pk})"
+    assert str(item) == f"Seramidli namlantiruvchi krem × 1 @ 312\u00a0000 so‘m (buyurtma №{order.pk})"
     assert item.image_url == "" and item.promo is False and item.position == 0
     second = OrderItemFactory.create(order=order, position=5)
     first = OrderItemFactory.create(order=order, position=1)
@@ -356,7 +359,7 @@ def test_orderevent_str_ordering_and_defaults() -> None:
     created = OrderEventFactory.create(order=order)
     assert created.data == {"channel": "ios", "item_count": 1, "total": 210_000}
     assert created.at == T0 and created.actor is None
-    assert str(created) == f"Order {order.pk}: order_created (system) at 2026-10-23 14:02"
+    assert str(created) == f"Buyurtma №{order.pk}: Buyurtma yaratildi (Tizim) · 2026-10-23 14:02"
     reservation = OrderEventFactory.create(
         order=order,
         type="reservation_created",
@@ -493,9 +496,7 @@ def test_reservation_defaults_str_and_ordering() -> None:
     reservation = StockReservationFactory.create(order=order, quantity=2)
     assert reservation.state == "active" and reservation.expires_at == T0 + timedelta(minutes=15)
     assert reservation.converted_at is None and reservation.release_reason == ""
-    assert str(reservation) == (
-        f"Reservation 2 × product {reservation.product_id} for order {order.pk} (active)"
-    )
+    assert str(reservation) == (f"Band: 2 × mahsulot #{reservation.product_id} · buyurtma №{order.pk} (Faol)")
     other = StockReservationFactory.create(order=order)
     assert list(order.reservations.all()) == [reservation, other]
     assert list(reservation.product.reservations.all()) == [reservation]

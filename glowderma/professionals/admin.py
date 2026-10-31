@@ -9,15 +9,16 @@ the weekly-hours inline on a professional), which validates and audits ``<model>
 from __future__ import annotations
 
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from django.contrib import admin, messages
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.urls import reverse
+from unfold.widgets import UnfoldAdminTimeWidget
 
-from glowderma.core.admin import is_active_staff
+from glowderma.core.admin import OpsModelAdmin, OpsPaginator, OpsTabularInline, is_active_staff
 from glowderma.professionals import services
 from glowderma.professionals.models import (
     BlockedPeriod,
@@ -29,12 +30,8 @@ from glowderma.professionals.models import (
     WorkingHoursOverride,
 )
 
-if TYPE_CHECKING:
-    _ModelAdmin = admin.ModelAdmin[models.Model]
-    _TabularInline = admin.TabularInline[models.Model, models.Model]
-else:
-    _ModelAdmin = admin.ModelAdmin
-    _TabularInline = admin.TabularInline
+# Working hours are whole minutes: shown and typed as ``09:00``.
+TIME_FORMAT = "%H:%M"
 
 
 class ServiceRefused(Exception):
@@ -63,7 +60,7 @@ def _attach(form: Any, error: ValidationError) -> None:
         form.add_error(None, error)
 
 
-class ServiceBackedAdmin(_ModelAdmin):
+class ServiceBackedAdmin(OpsModelAdmin):
     """Editable ``ModelAdmin`` whose writes are the services' writes (design 03 §8).
 
     Bulk actions are off (the delete action would bypass ``delete_model``); the changelist never runs the
@@ -72,6 +69,7 @@ class ServiceBackedAdmin(_ModelAdmin):
 
     actions = None
     list_per_page = 50
+    paginator = OpsPaginator
     show_full_result_count = False
 
     # Bookkeeping columns are shown, never typed in: the services stamp them.
@@ -180,14 +178,20 @@ class ServiceBackedAdmin(_ModelAdmin):
         formset.save_m2m()
 
 
-class WorkingHoursInline(_TabularInline):
+class WorkingHoursInline(OpsTabularInline):
+    """The weekly hours on a professional's page: weekday as a select of Uzbek day names (the column's
+    choices), times as ``09:00`` (no seconds), no per-row caption (the rows are one table)."""
+
     model = WorkingHours
     extra = 0
     fields = ("weekday", "start", "end", "break_start", "break_end")
+    show_title = False
 
     def formfield_for_dbfield(self, db_field: Any, request: HttpRequest, **kwargs: Any) -> Any:
         if getattr(db_field, "null", False) and not db_field.blank:
             kwargs.setdefault("required", False)
+        if isinstance(db_field, models.TimeField):
+            kwargs["widget"] = UnfoldAdminTimeWidget(format=TIME_FORMAT)
         return super().formfield_for_dbfield(db_field, request, **kwargs)
 
     def has_view_permission(self, request: HttpRequest, obj: models.Model | None = None) -> bool:
@@ -217,7 +221,7 @@ class ProfessionalAdmin(ServiceBackedAdmin):
     list_filter = ("role", "is_active")
     search_fields = ("name",)
     ordering = ("position", "name", "id")
-    raw_id_fields = ("location",)
+    autocomplete_fields = ("location",)
     inlines = (WorkingHoursInline,)
 
 
@@ -243,7 +247,7 @@ class ProfessionalServiceAdmin(ServiceBackedAdmin):
     list_filter = ("is_active",)
     search_fields = ("professional__name", "service__name_uz")
     ordering = ("professional_id", "service_id")
-    raw_id_fields = ("professional", "service")
+    autocomplete_fields = ("professional", "service")
 
 
 @admin.register(WorkingHours)
@@ -252,7 +256,7 @@ class WorkingHoursAdmin(ServiceBackedAdmin):
     list_filter = ("weekday",)
     search_fields = ("professional__name",)
     ordering = ("professional_id", "weekday")
-    raw_id_fields = ("professional",)
+    autocomplete_fields = ("professional",)
 
 
 @admin.register(BlockedPeriod)
@@ -261,7 +265,7 @@ class BlockedPeriodAdmin(ServiceBackedAdmin):
     list_filter = ("kind",)
     search_fields = ("professional__name", "label")
     ordering = ("-start", "id")
-    raw_id_fields = ("professional",)
+    autocomplete_fields = ("professional",)
 
     def save_model(self, request: HttpRequest, obj: models.Model, form: Any, change: bool) -> None:
         if not change:
@@ -276,7 +280,7 @@ class WorkingHoursOverrideAdmin(ServiceBackedAdmin):
     list_display = ("id", "professional", "date", "start", "end", "created_by")
     search_fields = ("professional__name",)
     ordering = ("-date", "id")
-    raw_id_fields = ("professional",)
+    autocomplete_fields = ("professional",)
 
     def save_model(self, request: HttpRequest, obj: models.Model, form: Any, change: bool) -> None:
         if not change:

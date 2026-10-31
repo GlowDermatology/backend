@@ -11,6 +11,7 @@ from django.db import models
 from django.test import Client, RequestFactory
 from django.urls import reverse
 
+from glowderma.accounts.tests.ops_helpers import ops_login
 from glowderma.core import audit
 from glowderma.core.admin import ReadOnlyAdmin, register_read_only
 from glowderma.core.models import AuditEntry, IdempotencyRecord, OutboxMessage
@@ -31,7 +32,7 @@ def superuser() -> Any:
 @pytest.fixture
 def super_client(superuser: Any) -> Client:
     client = Client()
-    client.force_login(superuser)
+    ops_login(client, superuser)
     return client
 
 
@@ -64,7 +65,7 @@ def test_superuser_can_view_but_not_write(super_client: Client, entry: AuditEntr
     assert super_client.get(url(AuditEntry, "changelist")).status_code == 200
     change = super_client.get(url(AuditEntry, "change", entry.pk))
     assert change.status_code == 200
-    assert b"<pre>" in change.content
+    assert b'<pre class="gd-json">' in change.content
     assert b"&quot;name&quot;: &quot;Yangi&quot;" in change.content
     assert super_client.get(url(AuditEntry, "add")).status_code == 403
     assert super_client.post(url(AuditEntry, "add"), {"action": "x"}).status_code == 403
@@ -109,7 +110,7 @@ def test_readonly_fields_cover_every_field_with_pretty_json(entry: AuditEntry) -
     assert "before" not in fields and "after" not in fields
     assert {"action", "entity_type", "created_at", "ip"} <= set(fields)
     rendered = model_admin.after_pretty(entry)  # type: ignore[attr-defined]
-    assert rendered.startswith("<pre>") and "&quot;tiers&quot;: [\n" in rendered
+    assert rendered.startswith('<pre class="gd-json">') and "&quot;tiers&quot;: [\n" in rendered
     assert model_admin.before_pretty(entry) == "-"  # type: ignore[attr-defined]
     assert model_admin.get_fields(request, entry) == list(fields)
 
@@ -143,7 +144,7 @@ def test_register_read_only_defaults_to_the_global_site() -> None:
 def test_plain_staff_user_can_navigate_to_the_changelist(entry: AuditEntry) -> None:
     """Brief: view permission for active ``is_staff`` users, reachable through the admin navigation."""
     client = Client()
-    client.force_login(make_user("staff@x.uz", is_staff=True))
+    ops_login(client, make_user("staff@x.uz", is_staff=True))
     model_admin = admin.site._registry[AuditEntry]
     request = RequestFactory().get("/django-admin/")
     request.user = make_user("other@x.uz", is_staff=True)

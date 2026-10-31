@@ -1,0 +1,21 @@
+{% extends 'admin/login.html' %}
+{% load static %}
+{% comment %}
+  Unfold's login page (step 1 of the console sign-in) with the lockout notice of the guarded form; the second
+  factor follows on accounts/console/verify.html or enrol.html.
+{% endcomment %}
+
+{% block extrastyle %}
+    {{ block.super }}
+    <link href="{% static 'ops/signin.css' %}" rel="stylesheet">
+{% endblock %}
+
+{% block login_before %}
+    {% if lockout_message %}
+        {% include "unfold/helpers/messages/error.html" with error=lockout_message class="ops-lockout" %}
+    {% endif %}
+{% endblock %}
+
+{% block login_after %}
+    <p class="ops-signin-hint">Keyingi qadam: autentifikator ilovasidagi kod (ikki bosqichli himoya).</p>
+{% endblock %}

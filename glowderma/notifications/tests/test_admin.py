@@ -7,7 +7,8 @@ from django.test import Client, RequestFactory
 from django.urls import reverse
 
 from glowderma.accounts.tests.factories import StaffUserFactory
-from glowderma.core.admin import ReadOnlyAdmin
+from glowderma.accounts.tests.ops_helpers import ops_login
+from glowderma.core.admin import ReadOnlyAdmin, column_field
 from glowderma.notifications.admin import segment_rules
 from glowderma.notifications.models import (
     Campaign,
@@ -45,7 +46,7 @@ def test_registered_read_only(model: type[models.Model]) -> None:
 
 
 def test_design_columns() -> None:
-    assert admin.site._registry[Campaign].list_display == (
+    assert tuple(map(column_field, admin.site._registry[Campaign].list_display)) == (
         "id",
         "kind",
         "title",
@@ -56,8 +57,18 @@ def test_design_columns() -> None:
         "sent",
         "failed",
     )
-    assert admin.site._registry[Campaign].list_filter == ("kind", "state", "audience_type")
-    assert admin.site._registry[InboxNotification].list_filter == ("kind", "push_state", "source_type")
+    assert tuple(map(column_field, admin.site._registry[Campaign].list_filter)) == (
+        "kind",
+        "state",
+        "audience_type",
+        "sent_at",
+    )
+    assert tuple(map(column_field, admin.site._registry[InboxNotification].list_filter)) == (
+        "kind",
+        "push_state",
+        "source_type",
+        "created_at",
+    )
     assert admin.site._registry[StatusTemplate].list_display == (
         "status",
         "text_uz",
@@ -66,13 +77,13 @@ def test_design_columns() -> None:
     )
     assert admin.site._registry[CustomerSegment].list_display == ("id", "name", segment_rules, "created_at")
     assert segment_rules(CustomerSegmentFactory.build(min_online_orders=3, min_lifetime_amount=None)) == (
-        "orders ≥ 3 · lifetime ≥ null"
+        "onlayn buyurtmalar ≥ 3 · umrbod xarid yo‘q"
     )
 
 
 def test_changelists_change_pages_and_search_render() -> None:
     client = Client()
-    client.force_login(StaffUserFactory.create(is_staff=True, is_superuser=True))
+    ops_login(client, StaffUserFactory.create(is_staff=True, is_superuser=True))
     member = SegmentMemberFactory.create()
     recipient = CampaignRecipientFactory.create(campaign=SentCampaignFactory.create(title="Kuzgi namlik"))
     rows = [

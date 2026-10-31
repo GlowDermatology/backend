@@ -10,7 +10,7 @@ as ORM instances of another module; ``CashbackPolicy`` instances stay inside ``l
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -30,8 +30,9 @@ from django.db.models import (
     Value,
     When,
 )
-from django.db.models.functions import Coalesce
+from django.db.models.functions import Coalesce, TruncDay
 
+from glowderma.accounts.models import Customer
 from glowderma.core import enums, i18n, timeutils
 from glowderma.core.timeutils import TASHKENT
 from glowderma.loyalty import engine, hold_grace
@@ -724,3 +725,106 @@ __all__ = [
     "tier_for",
     "unpushed_online_order_ids",
 ]
+
+
+# --- Ops console dashboards (glowderma.reporting.dashboards) ---
+
+
+def store_purchases_by_day(start: datetime, end: datetime) -> dict[date, tuple[int, int]]:
+    """``{Tashkent day: (purchases, Σ amount)}`` of the in-store (POS QR) purchases made in ``[start, end)``
+    and not reversed — the "POS" channel of the sales chart. One query."""
+    rows = (
+        Purchase.objects.filter(
+            source=enums.PurchaseSource.STORE_QR, reversed=False, at__gte=start, at__lt=end
+        )
+        .annotate(day=TruncDay("at", tzinfo=TASHKENT))
+        .order_by()
+        .values("day")
+        .annotate(n=Count("id"), total=Sum("amount"))
+        .values_list("day", "n", "total")
+    )
+    return {day.astimezone(TASHKENT).date(): (int(n), int(total or 0)) for day, n, total in rows}
+
+
+@dataclass(frozen=True, slots=True)
+class CashbackFlow:
+    issued: int  # Σ credits (so'm)
+    redeemed: int  # Σ debits, as a positive amount
+    reversed: int  # Σ reversals (signed: a reversed credit is negative)
+    adjusted: int  # Σ staff adjustments (signed)
+    entries: int
+
+
+def cashback_flow(start: datetime, end: datetime) -> CashbackFlow:
+    """Ledger movement in ``[start, end)`` by business time ``at`` (one aggregate)."""
+    row = LedgerEntry.objects.filter(at__gte=start, at__lt=end).aggregate(
+        issued=Sum("amount", filter=Q(kind=enums.LedgerKind.CREDIT)),
+        redeemed=Sum("amount", filter=Q(kind=enums.LedgerKind.DEBIT)),
+        reversed=Sum("amount", filter=Q(kind=enums.LedgerKind.REVERSAL)),
+        adjusted=Sum("amount", filter=Q(kind=enums.LedgerKind.ADJUSTMENT)),
+        entries=Count("id"),
+    )
+    return CashbackFlow(
+        issued=int(row["issued"] or 0),
+        redeemed=-int(row["redeemed"] or 0),
+        reversed=int(row["reversed"] or 0),
+        adjusted=int(row["adjusted"] or 0),
+        entries=int(row["entries"] or 0),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class TierBucket:
+    from_amount: int
+    to_amount: int | None
+    percent: Decimal
+    customers: int
+
+
+@dataclass(frozen=True, slots=True)
+class TierDistribution:
+    policy_version: int | None
+    tiers: list[TierBucket]
+    uncovered: int  # active customers whose lifetime total no tier covers (below the first, or in a gap)
+
+
+def tier_distribution(policy: CashbackPolicy | None) -> TierDistribution:
+    """How many active customers each tier of ``policy`` covers by lifetime total (Σ non-reversed
+    purchases). One aggregate over the customers with a correlated lifetime subquery (the customers list's
+    ``list_annotations`` rule); ``policy`` comes with its tiers prefetched (:func:`active_policy`)."""
+    if policy is None:
+        return TierDistribution(policy_version=None, tiers=[], uncovered=0)
+    tiers = sorted(policy.tiers.all(), key=lambda tier: tier.from_amount)
+    lifetime = (
+        Purchase.objects.filter(customer_id=OuterRef("pk"), reversed=False)
+        .order_by()
+        .values("customer_id")
+        .annotate(total=Sum("amount"))
+        .values("total")[:1]
+    )
+    covered = Q(pk__in=[])
+    buckets: dict[str, Any] = {}
+    for index, tier in enumerate(tiers):
+        band = Q(lifetime__gte=tier.from_amount)
+        if tier.to_amount is not None:
+            band &= Q(lifetime__lt=tier.to_amount)
+        covered |= band
+        buckets[f"t{index}"] = Count("id", filter=band)
+    row = (
+        Customer.objects.filter(status=enums.CustomerStatus.ACTIVE)
+        .annotate(lifetime=Coalesce(Subquery(lifetime, output_field=BigIntegerField()), Value(0)))
+        .aggregate(total=Count("id"), covered=Count("id", filter=covered), **buckets)
+    )
+    return TierDistribution(
+        policy_version=policy.version,
+        tiers=[
+            TierBucket(
+                from_amount=tier.from_amount,
+                to_amount=tier.to_amount,
+                percent=tier.percent,
+                customers=int(row[f"t{index}"] or 0),
+            )
+            for index, tier in enumerate(tiers)
+        ],
+        uncovered=int(row["total"] or 0) - int(row["covered"] or 0),
+    )

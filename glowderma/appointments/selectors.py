@@ -19,6 +19,7 @@ from glowderma.professionals.selectors import (
     booking_catalogue,
     day_schedules,
     schedules_for_days,
+    schedules_for_many,
 )
 
 
@@ -95,18 +96,53 @@ def schedule_conflicts(professional: Professional, now: datetime | None = None) 
     if not rows:
         return []
     schedules = schedules_for_days(professional, {timeutils.local_date(row.start) for row in rows})
-    conflicts: list[Appointment] = []
-    for row in rows:
-        day = timeutils.local_date(row.start)
-        schedule = schedules[day]
-        if schedule.working_hours is None:
-            conflicts.append(row)
-            continue
-        hours_start, hours_end = (clock(day, label) for label in schedule.working_hours)
-        blocks = [(clock(day, block.start), clock(day, block.end)) for block in schedule.blocks]
-        if row.start < hours_start or row.end > hours_end or _overlaps(row.start, row.end, blocks):
-            conflicts.append(row)
-    return conflicts
+    return [row for row in rows if _conflicts(row, schedules[timeutils.local_date(row.start)])]
+
+
+def _conflicts(row: Appointment, schedule: DaySchedule) -> bool:
+    """Whether ``schedule`` (the day of ``row.start``) no longer covers the appointment."""
+    if schedule.working_hours is None:
+        return True
+    day = timeutils.local_date(row.start)
+    hours_start, hours_end = (clock(day, label) for label in schedule.working_hours)
+    blocks = [(clock(day, block.start), clock(day, block.end)) for block in schedule.blocks]
+    return row.start < hours_start or row.end > hours_end or _overlaps(row.start, row.end, blocks)
+
+
+def upcoming_conflicts(now: datetime, *, days: int) -> list[Appointment]:
+    """:func:`schedule_conflicts` of every specialist at once, for the open appointments starting in
+    ``[now, now + days)`` (the ops console): four queries whatever the number of specialists and days."""
+    rows = list(
+        appointment_queryset()
+        .filter(status__in=OPEN_STATUSES, start__gte=now, start__lt=now + timedelta(days=days))
+        .order_by("start", "id")
+    )
+    if not rows:
+        return []
+    professionals = {row.professional_id: row.professional for row in rows}
+    schedules = schedules_for_many(
+        list(professionals.values()), {timeutils.local_date(row.start) for row in rows}
+    )
+    return [
+        row
+        for row in rows
+        if _conflicts(row, schedules[(row.professional_id, timeutils.local_date(row.start))])
+    ]
+
+
+def day_status_counts(day: date) -> dict[str, int]:
+    """``{status: appointments}`` of the appointments of the Tashkent ``day`` (zeros included; one query)."""
+    start, end = timeutils.day_bounds(day)
+    rows = (
+        Appointment.objects.filter(start__gte=start, start__lt=end)
+        .order_by()
+        .values("status")
+        .annotate(n=Count("id"))
+        .values_list("status", "n")
+    )
+    counts = dict.fromkeys(enums.AppointmentStatus.values, 0)
+    counts.update({str(status): int(n) for status, n in rows})
+    return counts
 
 
 def upcoming_count(customer_id: int, now: datetime | None = None) -> int:

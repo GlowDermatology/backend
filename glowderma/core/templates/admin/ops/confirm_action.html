@@ -1,0 +1,73 @@
+{% extends "admin/base_site.html" %}
+{% load i18n unfold %}
+
+{% comment %}
+The confirm step of an ops console action (glowderma.core.admin_actions). Unfold's action buttons fetch this page
+with hx-get and show only #dialog in their modal; without JavaScript the whole page is the confirm step.
+The form posts normally (no hx-post): the action answers with a redirect and its message.
+{% endcomment %}
+
+{% block bodyclass %}{{ block.super }} app-{{ opts.app_label }} model-{{ opts.model_name }} ops-action{% endblock %}
+
+{% block content %}
+    <div class="border border-base-200 max-w-2xl rounded-default shadow-xs dark:border-base-800">
+        <div id="dialog" class="bg-white dark:bg-base-900 rounded-default">
+            <form method="post" action="{{ action_url }}" novalidate>
+                {% csrf_token %}
+
+                <div class="border-b border-base-200 flex flex-col gap-2 px-4 py-3 dark:border-base-700">
+                    <h1 class="font-semibold text-base text-important tracking-tight">{{ action_title }}</h1>
+                    {% if object_title %}
+                        <p class="text-font-subtle-light dark:text-font-subtle-dark">{{ object_title }}</p>
+                    {% endif %}
+                </div>
+
+                <div class="flex flex-col gap-4 p-4">
+                    {% if refusal %}
+                        <p class="gd-ops-refusal font-medium text-red-700 dark:text-red-400">{{ refusal }}</p>
+                    {% else %}
+                        <p class="leading-relaxed">{{ action_body }}</p>
+
+                        {% for note in action_notes %}
+                            {% if note.warning %}
+                                <p class="gd-ops-note gd-ops-note--warning leading-relaxed text-orange-700 dark:text-orange-400"><span class="material-symbols-outlined" aria-hidden="true">warning</span> {{ note.text }}</p>
+                            {% else %}
+                                <p class="gd-ops-note leading-relaxed text-font-subtle-light dark:text-font-subtle-dark">{{ note.text }}</p>
+                            {% endif %}
+                        {% endfor %}
+
+                        {% if form.non_field_errors %}
+                            <p class="text-red-700 dark:text-red-400">{{ form.non_field_errors|join:" " }}</p>
+                        {% endif %}
+
+                        {% for field in form.hidden_fields %}{{ field }}{% endfor %}
+
+                        <div class="flex flex-col gap-3 *:mb-0">
+                            {% for field in form.visible_fields %}
+                                {% include "unfold/helpers/field.html" %}
+                            {% endfor %}
+                        </div>
+                    {% endif %}
+                </div>
+
+                <div class="border-t border-base-200 flex flex-row justify-between px-4 py-3 dark:border-base-700">
+                    {% if in_modal %}
+                        {% component "unfold/components/button.html" with variant="default" href="#" extra_attrs="x-on:click.prevent='openModal = false'" %}
+                            Bekor qilish
+                        {% endcomponent %}
+                    {% else %}
+                        {% component "unfold/components/button.html" with variant="default" href=back_url %}
+                            Bekor qilish
+                        {% endcomponent %}
+                    {% endif %}
+
+                    {% if not refusal %}
+                        {% component "unfold/components/button.html" with submit=1 variant=action_variant name="_ops_confirm" %}
+                            {{ action_submit }}
+                        {% endcomponent %}
+                    {% endif %}
+                </div>
+            </form>
+        </div>
+    </div>
+{% endblock %}

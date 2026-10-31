@@ -9,6 +9,7 @@ from django.db.models import ProtectedError
 
 from glowderma.core import enums, timeutils
 from glowderma.core.db import purge_window
+from glowderma.core.labels import stamp
 from glowderma.core.models import AppendOnlyError
 from glowderma.integrations.models import IntegrationState, Job, WebhookInbox
 from glowderma.integrations.tests.factories import (
@@ -50,8 +51,8 @@ def test_webhookinbox_str_and_ordering() -> None:
     newer = WebhookInboxFactory.create(received_at=now, event_key="complete:9:1")
     same = WebhookInboxFactory.create(received_at=now, event_key="complete:9:2")
     assert list(WebhookInbox.objects.all()) == [same, newer, older]
-    assert str(newer) == "click complete:9:1 → 200"
-    assert str(WebhookInboxFactory.create(event_key="k", result={"body": {}})) == "click k → ?"
+    assert str(newer) == "Click complete:9:1 → 200"
+    assert str(WebhookInboxFactory.create(event_key="k", result={"body": {}})) == "Click k → ?"
 
 
 def test_webhookinbox_provider_event_key_unique() -> None:
@@ -124,7 +125,7 @@ def test_job_defaults_and_str() -> None:
     job = JobFactory.create()
     assert job.state == enums.JobState.QUEUED and job.attempts == 0 and job.created_by is None
     assert job.progress is None and job.result is None and job.error is None
-    assert str(job) == f"billz_import #{job.pk} (queued)"
+    assert str(job) == f"Billz importi #{job.pk} (Navbatda)"
 
 
 def test_job_single_flight_per_kind() -> None:
@@ -181,7 +182,7 @@ def test_six_provider_rows_come_from_the_data_migration() -> None:
     assert providers == ["billz", "bts", "click", "eskiz", "fcm", "payme"]
     billz = IntegrationState.objects.get(provider="billz")
     assert billz.last_sync_at is None and billz.consecutive_failures == 0 and billz.data == {}
-    assert str(billz) == "billz: synced never"
+    assert str(billz) == "Billz: oxirgi sinxronlash hali yo‘q"
 
 
 def test_integration_state_provider_unique() -> None:
@@ -191,4 +192,4 @@ def test_integration_state_provider_unique() -> None:
     instant = timeutils.now()
     IntegrationState.objects.filter(pk=state.pk).update(last_sync_at=instant)
     state.refresh_from_db()
-    assert str(state) == f"billz: synced {instant}"
+    assert str(state) == f"Billz: oxirgi sinxronlash {stamp(instant)}"

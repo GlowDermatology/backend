@@ -84,6 +84,9 @@ def test_migrate_zero_and_forward_again() -> None:
         "0004_purchase_billz_payment_attempted_at",
         "0005_purchase_unpushed_online_idx",
         "0006_bootstrap_cashback_policy",
+        "0007_uz_verbose_names",
+        "0008_uz_choice_labels",
+        "0009_uz_field_labels",
     }
     call_command("migrate", verbosity=0)  # re-apply whatever depends on loyalty for the rest of the phase
 

@@ -70,8 +70,10 @@ TIME_LIMIT = "time_limit"
 Check = Callable[[], Finding]
 
 
-def _checks(now: datetime) -> list[tuple[str, Check]]:
-    limit = int(settings.CONSISTENCY_SAMPLE_SIZE)
+def _checks(now: datetime, *, limit: int | None = None) -> list[tuple[str, Check]]:
+    """The K1–K6 checks at ``now``, each keeping ``limit`` sample ids (default ``CONSISTENCY_SAMPLE_SIZE``;
+    the ops console asks for more, to link every row it counts)."""
+    limit = int(settings.CONSISTENCY_SAMPLE_SIZE) if limit is None else limit
     lookback = now - timedelta(days=int(settings.CONSISTENCY_LOOKBACK_DAYS))
     grace = timedelta(seconds=int(settings.PAYMENT_IN_FLIGHT_GRACE_SECONDS))
     overdue = timedelta(minutes=int(settings.CONSISTENCY_OUTBOX_OVERDUE_MINUTES))
@@ -179,6 +181,11 @@ def _loyalty() -> dict[str, Any]:
     }
 
 
+# The ops console runs the same checks live (glowderma.reporting.dashboards.money), guarded alike.
+checks = _checks
+guarded = _guarded
+
+
 def run_consistency_report(now: datetime | None = None) -> dict[str, Any]:
     """Run every check once, record the audit row, log and alert on mismatches; returns the report."""
     instant = now or timeutils.now()
@@ -241,6 +248,8 @@ def consistency_report() -> dict[str, Any]:
 
 __all__ = [
     "CHECK_TIMEOUT_MS",
+    "checks",
+    "guarded",
     "LOYALTY_CHECK",
     "LOYALTY_TIMEOUT_MS",
     "TIME_LIMIT",

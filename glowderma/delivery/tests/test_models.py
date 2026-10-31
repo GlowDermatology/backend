@@ -11,6 +11,7 @@ from django.db import IntegrityError, connection, transaction
 from django.db.models import ProtectedError
 
 from glowderma.core import enums
+from glowderma.core.labels import stamp
 from glowderma.core.models import OutboxMessage
 from glowderma.core.timeutils import TASHKENT
 from glowderma.delivery.models import PENDING_MESSAGE_STATUSES, Shipment, ShipmentEvent
@@ -56,7 +57,7 @@ def test_shipment_factory_defaults_str_and_traits() -> None:
     assert shipment.tracking_number == "" and shipment.tariff is None and shipment.via == ""
     assert shipment.attempts == 0 and shipment.create_requests == 0 and shipment.create_message is None
     assert shipment.order.fulfilment == enums.FulfilmentMethod.DELIVERY
-    assert str(shipment) == f"Shipment of order {shipment.order_id}: not_created"
+    assert str(shipment) == f"Buyurtma №{shipment.order_id} jo‘natmasi: Yaratilmagan"
     assert ShipmentFactory.create(not_created=True).state == "not_created"
     failed = ShipmentFactory.create(failed=True)
     assert failed.attempts == 1 and failed.last_attempt_at is not None and failed.last_error_code
@@ -66,11 +67,11 @@ def test_shipment_factory_defaults_str_and_traits() -> None:
     assert created.tariff == created.order.delivery_fee == 25_000 and created.via == "polling"
     assert created.bts_created_at == created.last_status_at == created.last_attempt_at
     assert created.bts_status == "100" and created.cancelled_at is None
-    assert str(created) == f"Shipment of order {created.order_id}: created {created.tracking_number}"
+    assert str(created) == f"Buyurtma №{created.order_id} jo‘natmasi: Yaratilgan {created.tracking_number}"
     cancelled = ShipmentFactory.create(cancelled=True)
     assert cancelled.cancelled_at is not None and cancelled.bts_created_at is not None
     assert cancelled.order.status == enums.OrderStatus.CANCELLED and cancelled.order.paid_at is not None
-    assert str(cancelled).endswith(f"cancelled {cancelled.tracking_number}")
+    assert str(cancelled).endswith(f"Bekor qilingan {cancelled.tracking_number}")
 
 
 def test_shipment_one_per_order_and_protect() -> None:
@@ -223,7 +224,7 @@ def test_shipment_event_factory_defaults_str_ordering_and_protect() -> None:
     assert event.kind == ShipmentEvent.Kind.CREATED and event.bts_status == "100" and event.via == "polling"
     assert event.manual is False and event.error_code == "" and event.at == shipment.bts_created_at
     assert event.payload == {"tracking_number": shipment.tracking_number, "status": "100"}
-    assert str(event) == f"Shipment {shipment.pk}: created 100 ({event.at:%Y-%m-%d %H:%M})"
+    assert str(event) == f"Jo‘natma #{shipment.pk}: Yaratildi 100 · {stamp(event.at)}"
     assert ShipmentEvent.Kind.values == [
         "created",
         "create_failed",

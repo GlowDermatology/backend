@@ -7,7 +7,8 @@ from django.test import Client, RequestFactory
 from django.urls import reverse
 
 from glowderma.accounts.tests.factories import StaffUserFactory
-from glowderma.core.admin import ReadOnlyAdmin
+from glowderma.accounts.tests.ops_helpers import ops_login
+from glowderma.core.admin import ReadOnlyAdmin, column_field
 from glowderma.delivery.admin import ShipmentAdmin, ShipmentEventInline
 from glowderma.delivery.models import Shipment, ShipmentEvent
 from glowderma.delivery.tests.factories import ShipmentEventFactory, ShipmentFactory, create_message_for
@@ -21,7 +22,7 @@ MODELS = [Shipment, ShipmentEvent]
 def plain_staff_client() -> Client:
     """The audience ``ReadOnlyAdmin`` exists for: active ``is_staff``, no superuser flag, no model perms."""
     client = Client()
-    client.force_login(StaffUserFactory.create(email="ops@x.uz", is_staff=True))
+    ops_login(client, StaffUserFactory.create(email="ops@x.uz", is_staff=True))
     return client
 
 
@@ -43,13 +44,17 @@ def test_models_registered_read_only(model: type[models.Model]) -> None:
     assert model_admin.list_display != ("__str__",)
     for field in model._meta.concrete_fields:
         if field.is_relation:
-            assert field.name in model_admin.raw_id_fields, (model, field.name)
+            assert field.name in (*model_admin.raw_id_fields, *model_admin.autocomplete_fields), (
+                model,
+                field.name,
+            )
 
 
 def test_shipment_admin_as_designed() -> None:
     model_admin = admin.site._registry[Shipment]
     assert isinstance(model_admin, ShipmentAdmin)
-    assert model_admin.list_display == (
+    assert tuple(map(column_field, model_admin.list_display)) == (
+        "id",
         "order",
         "state",
         "tracking_number",
@@ -57,9 +62,10 @@ def test_shipment_admin_as_designed() -> None:
         "bts_status",
         "via",
         "attempts",
+        "last_error_code",
         "last_attempt_at",
     )
-    assert model_admin.list_filter == ("state", "via")
+    assert tuple(map(column_field, model_admin.list_filter)) == ("state", "via", "last_attempt_at")
     assert model_admin.search_fields == ("tracking_number", "=order__id")
     assert model_admin.inlines == (ShipmentEventInline,)
     request = RequestFactory().get("/django-admin/")
@@ -72,8 +78,15 @@ def test_shipment_admin_as_designed() -> None:
     assert not inline.has_delete_permission(request, None)
     assert set(inline.fields) <= set(inline.get_readonly_fields(request))
     event_admin = admin.site._registry[ShipmentEvent]
-    assert event_admin.list_display == ("at", "shipment", "kind", "bts_status", "via", "error_code")
-    assert event_admin.list_filter == ("kind", "via")
+    assert tuple(map(column_field, event_admin.list_display)) == (
+        "at",
+        "shipment",
+        "kind",
+        "bts_status",
+        "via",
+        "error_code",
+    )
+    assert tuple(map(column_field, event_admin.list_filter)) == ("kind", "via", "at")
     assert "payload_pretty" in event_admin.get_readonly_fields(request)
 
 

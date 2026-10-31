@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from django.conf import settings
-from django.db.models import Count, Q, QuerySet, Window
+from django.db.models import Count, Min, Q, QuerySet, Window
 
 from glowderma.core import outbox
 from glowderma.core.models import OutboxMessage
@@ -65,6 +65,12 @@ def dead_messages(since: datetime, *, limit: int, topic: str | None = None) -> F
     return finding(queryset, limit=limit)
 
 
+def dead_count() -> int:
+    """Every ``dead`` message (an action item until requeued): the ops console's sidebar badge. Reads the
+    partial ``outbox_unfinished_idx`` rows only."""
+    return OutboxMessage.objects.filter(status="dead").count()
+
+
 def overdue_messages(now: datetime, overdue: timedelta, *, limit: int) -> Finding:
     """Messages still open (pending, failed or in flight) although they were due more than ``overdue`` ago:
     the dispatcher is not running or a message is wedged. Deferred messages (``RetryLater``) are judged by
@@ -73,6 +79,20 @@ def overdue_messages(now: datetime, overdue: timedelta, *, limit: int) -> Findin
         status__in=OPEN_OUTBOX_STATUSES, available_at__lt=now - overdue, deferred_since__isnull=True
     )
     return finding(queryset, limit=limit)
+
+
+def overdue_cutoff(now: datetime) -> datetime:
+    """Open messages due before this instant are overdue (``CONSISTENCY_OUTBOX_OVERDUE_MINUTES``)."""
+    return now - timedelta(minutes=int(settings.CONSISTENCY_OUTBOX_OVERDUE_MINUTES))
+
+
+def is_overdue(message: OutboxMessage, now: datetime) -> bool:
+    """One message by the rule of :func:`overdue_messages` (the ops console's requeue button)."""
+    return (
+        message.status in OPEN_OUTBOX_STATUSES
+        and message.deferred_since is None
+        and message.available_at < overdue_cutoff(now)
+    )
 
 
 def deferred_past_window(now: datetime, grace: timedelta, *, limit: int) -> Finding:
@@ -87,11 +107,62 @@ def deferred_past_window(now: datetime, grace: timedelta, *, limit: int) -> Find
     return finding(queryset.filter(past), limit=limit)
 
 
+@dataclass(frozen=True, slots=True)
+class TopicBacklog:
+    """The unfinished outbox rows of one topic (the ops console's outbox table)."""
+
+    topic: str
+    open: int  # pending, failed (waiting for a retry) or in flight
+    dead: int
+    overdue: int  # open, not deferred, due more than ``overdue`` ago (K6)
+    deferred: int  # open and deferred by its handler (``RetryLater``)
+    oldest_due: datetime | None  # the earliest ``available_at`` of the open rows not deferred
+
+
+def backlog_by_topic(now: datetime, overdue: timedelta) -> list[TopicBacklog]:
+    """Every topic with an unfinished row (open or dead), worst first (dead, then overdue, then open).
+
+    One statement over the partial ``outbox_unfinished_idx`` (NOT status = 'done'): the done rows that make up
+    nearly the whole table are never read."""
+    open_q = Q(status__in=OPEN_OUTBOX_STATUSES)
+    rows = (
+        OutboxMessage.objects.exclude(status="done")
+        .values("topic")
+        .annotate(
+            open=Count("id", filter=open_q),
+            dead=Count("id", filter=Q(status="dead")),
+            overdue=Count(
+                "id", filter=open_q & Q(available_at__lt=now - overdue, deferred_since__isnull=True)
+            ),
+            deferred=Count("id", filter=open_q & Q(deferred_since__isnull=False)),
+            oldest_due=Min("available_at", filter=open_q & Q(deferred_since__isnull=True)),
+        )
+        .order_by()
+    )
+    backlog = [
+        TopicBacklog(
+            topic=str(row["topic"]),
+            open=int(row["open"]),
+            dead=int(row["dead"]),
+            overdue=int(row["overdue"]),
+            deferred=int(row["deferred"]),
+            oldest_due=row["oldest_due"],
+        )
+        for row in rows
+    ]
+    return sorted(backlog, key=lambda row: (-row.dead, -row.overdue, -row.open, row.topic))
+
+
 __all__ = [
     "OPEN_OUTBOX_STATUSES",
     "Finding",
+    "TopicBacklog",
+    "backlog_by_topic",
+    "dead_count",
     "dead_messages",
     "deferred_past_window",
     "finding",
+    "is_overdue",
+    "overdue_cutoff",
     "overdue_messages",
 ]

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Glow Derma">
+  <rect width="64" height="64" rx="14" fill="#2b2620"/>
+  <rect x="3" y="3" width="58" height="58" rx="11" fill="none" stroke="#c9a24b" stroke-opacity=".55" stroke-width="1.5"/>
+  <text x="32" y="42" text-anchor="middle" font-family="'Cormorant Garamond', Cormorant, Georgia, 'Times New Roman', serif" font-size="27" font-weight="600" letter-spacing="1" fill="#e2bc6a">GD</text>
+</svg>

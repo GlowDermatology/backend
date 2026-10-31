@@ -2,43 +2,45 @@
 
 Every class is a Django ``TextChoices`` whose values are the contract literals, copied verbatim.
 Class names are the contract enum names so that the OpenAPI component for each one is
-``<Name>Enum`` (see :func:`enum_name_overrides`). Human-facing Uzbek labels live in
-:mod:`glowderma.core.labels`; Django's default labels are only used by ``get_<field>_display()``.
+``<Name>Enum`` (see :func:`enum_name_overrides`). The members stored on models carry Uzbek labels for the ops
+console (its choice filters, status columns and change pages); the API never sends a label and the OpenAPI
+schema lists the values only (``.values`` in the serializers and the overrides). The admin-API exports use
+:mod:`glowderma.core.labels`, whose texts these labels repeat (``core/tests/test_console_i18n.py``).
 """
 
 from django.db.models import TextChoices
 
 
 class OrderStatus(TextChoices):
-    AWAITING_PAYMENT = "awaiting_payment"
-    PROCESSING = "processing"
-    HANDED_TO_COURIER = "handed_to_courier"
-    DELIVERED = "delivered"
-    CANCELLED = "cancelled"
+    AWAITING_PAYMENT = "awaiting_payment", "To‘lov kutilmoqda"
+    PROCESSING = "processing", "Jarayonda"
+    HANDED_TO_COURIER = "handed_to_courier", "Kuryerga topshirildi"
+    DELIVERED = "delivered", "Yetkazildi"
+    CANCELLED = "cancelled", "Bekor qilindi"
 
 
 class PaymentStatus(TextChoices):
-    PENDING = "pending"
-    PAID = "paid"
-    FAILED = "failed"
-    REFUNDED = "refunded"
+    PENDING = "pending", "Kutilmoqda"
+    PAID = "paid", "To‘langan"
+    FAILED = "failed", "Muvaffaqiyatsiz"
+    REFUNDED = "refunded", "Qaytarilgan"
 
 
 class PaymentProvider(TextChoices):
-    CLICK = "click"
-    PAYME = "payme"
+    CLICK = "click", "Click"
+    PAYME = "payme", "Payme"
 
 
 class FulfilmentMethod(TextChoices):
-    DELIVERY = "delivery"
-    PICKUP = "pickup"
+    DELIVERY = "delivery", "Yetkazib berish"
+    PICKUP = "pickup", "Olib ketish"
 
 
 class OrderChannel(TextChoices):
-    IOS = "ios"
-    ANDROID = "android"
+    IOS = "ios", "iOS"
+    ANDROID = "android", "Android"
     # The customer website (B-W1): its server-side BFF sends ``X-GD-Platform: web``; no app version floor.
-    WEB = "web"
+    WEB = "web", "Veb-sayt"
 
 
 class OrderPeriod(TextChoices):
@@ -49,34 +51,34 @@ class OrderPeriod(TextChoices):
 
 
 class EventSource(TextChoices):
-    SYSTEM = "system"
-    BTS = "bts"
-    ADMIN = "admin"
+    SYSTEM = "system", "Tizim"
+    BTS = "bts", "BTS"
+    ADMIN = "admin", "Admin"
 
 
 class OrderEventType(TextChoices):
-    ORDER_CREATED = "order_created"
-    RESERVATION_CREATED = "reservation_created"
-    PAYMENT_CONFIRMED = "payment_confirmed"
-    BILLZ_SALE_RECORDED = "billz_sale_recorded"
-    CASHBACK_CREDITED = "cashback_credited"
-    PAYMENT_FAILED = "payment_failed"
-    SHIPMENT_CREATED = "shipment_created"
-    SHIPMENT_FAILED = "shipment_failed"
-    STATUS_CHANGED = "status_changed"
-    HANDED_TO_COURIER = "handed_to_courier"
-    DELIVERED = "delivered"
-    CANCELLED = "cancelled"
-    RESERVATION_EXPIRED = "reservation_expired"
-    REFUND_REQUESTED = "refund_requested"
-    REFUND_SUCCEEDED = "refund_succeeded"
-    REFUND_FAILED = "refund_failed"
+    ORDER_CREATED = "order_created", "Buyurtma yaratildi"
+    RESERVATION_CREATED = "reservation_created", "Mahsulot band qilindi"
+    PAYMENT_CONFIRMED = "payment_confirmed", "To‘lov tasdiqlandi"
+    BILLZ_SALE_RECORDED = "billz_sale_recorded", "Billz savdosi yozildi"
+    CASHBACK_CREDITED = "cashback_credited", "Cashback hisoblandi"
+    PAYMENT_FAILED = "payment_failed", "To‘lov amalga oshmadi"
+    SHIPMENT_CREATED = "shipment_created", "Jo‘natma yaratildi"
+    SHIPMENT_FAILED = "shipment_failed", "Jo‘natma yaratilmadi"
+    STATUS_CHANGED = "status_changed", "Holat o‘zgardi"
+    HANDED_TO_COURIER = "handed_to_courier", "Kuryerga topshirildi"
+    DELIVERED = "delivered", "Yetkazildi"
+    CANCELLED = "cancelled", "Bekor qilindi"
+    RESERVATION_EXPIRED = "reservation_expired", "Band muddati tugadi"
+    REFUND_REQUESTED = "refund_requested", "Qaytarish so‘raldi"
+    REFUND_SUCCEEDED = "refund_succeeded", "Pul qaytarildi"
+    REFUND_FAILED = "refund_failed", "Qaytarib bo‘lmadi"
 
 
 class CancellationReason(TextChoices):
-    RESERVATION_EXPIRED = "reservation_expired"
-    ADMIN = "admin"
-    CUSTOMER_REQUEST = "customer_request"
+    RESERVATION_EXPIRED = "reservation_expired", "Band muddati tugadi"
+    ADMIN = "admin", "Admin bekor qildi"
+    CUSTOMER_REQUEST = "customer_request", "Mijoz bekor qildi"
 
 
 class ShipmentState(TextChoices):
@@ -87,31 +89,34 @@ class ShipmentState(TextChoices):
 
 
 class ShipmentVia(TextChoices):
-    WEBHOOK = "webhook"
-    POLLING = "polling"
+    WEBHOOK = "webhook", "Webhook"
+    POLLING = "polling", "So‘rov (polling)"
 
 
 class RefundState(TextChoices):
-    REQUESTED = "requested"
-    SUBMITTING = "submitting"
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
-    MANUAL_REQUIRED = "manual_required"
-    UNKNOWN = "unknown"
+    REQUESTED = "requested", "Qaytarish so‘raldi"
+    SUBMITTING = "submitting", "Qaytarilmoqda"
+    SUCCEEDED = "succeeded", "Qaytarildi"
+    FAILED = "failed", "Qaytarib bo‘lmadi"
+    MANUAL_REQUIRED = "manual_required", "Qo‘lda qaytarish kerak"
+    UNKNOWN = "unknown", "Holat noma’lum · tekshiring"
 
 
 class RefundManualReason(TextChoices):
     """Why a refund is ``manual_required`` (admin contract §2.2 ``Refund.manual_reason``, §4)."""
 
-    PAYME = "payme"  # Payme refunds are cabinet refunds
-    NO_PAYDOC = "no_paydoc"  # a Click payment without click_paydoc_id: Click cannot reverse it
-    FAKE_MODE = "fake_mode"  # the Click port is fake under the production settings
+    PAYME = "payme", "Payme kabinetida"  # Payme refunds are cabinet refunds
+    NO_PAYDOC = (
+        "no_paydoc",
+        "Click paydoc yo‘q",
+    )  # a Click payment without click_paydoc_id: Click cannot reverse it
+    FAKE_MODE = "fake_mode", "Click sinov rejimida"  # the Click port is fake under the production settings
 
 
 class CashbackHoldState(TextChoices):
-    ACTIVE = "active"
-    CAPTURED = "captured"
-    RELEASED = "released"
+    ACTIVE = "active", "Faol"
+    CAPTURED = "captured", "Yechildi"
+    RELEASED = "released", "Bo‘shatildi"
 
 
 class OrderCashbackKind(TextChoices):
@@ -121,16 +126,16 @@ class OrderCashbackKind(TextChoices):
 
 
 class LedgerKind(TextChoices):
-    CREDIT = "credit"
-    DEBIT = "debit"
-    ADJUSTMENT = "adjustment"
-    REVERSAL = "reversal"
+    CREDIT = "credit", "Hisoblandi"
+    DEBIT = "debit", "Ishlatildi"
+    ADJUSTMENT = "adjustment", "Tuzatish"
+    REVERSAL = "reversal", "Qaytarildi"
 
 
 class LedgerSourceType(TextChoices):
-    ORDER = "order"
-    BILLZ_SALE = "billz_sale"
-    ADMIN = "admin"
+    ORDER = "order", "Buyurtma"
+    BILLZ_SALE = "billz_sale", "Billz savdosi"
+    ADMIN = "admin", "Admin"
 
 
 class AdjustmentDirection(TextChoices):
@@ -139,13 +144,13 @@ class AdjustmentDirection(TextChoices):
 
 
 class PurchaseSource(TextChoices):
-    ONLINE = "online"
-    STORE_QR = "store_qr"
+    ONLINE = "online", "Onlayn"
+    STORE_QR = "store_qr", "Do‘kon (QR)"
 
 
 class RateBasis(TextChoices):
-    BEFORE_PURCHASE = "before_purchase"
-    WITH_PURCHASE = "with_purchase"
+    BEFORE_PURCHASE = "before_purchase", "Xariddan oldingi summa"
+    WITH_PURCHASE = "with_purchase", "Xarid bilan birga"
 
 
 class PolicyVersionState(TextChoices):
@@ -161,18 +166,18 @@ class TierWarning(TextChoices):
 
 
 class ProductStatus(TextChoices):
-    ACTIVE = "active"
-    HIDDEN = "hidden"
+    ACTIVE = "active", "Faol"
+    HIDDEN = "hidden", "Yashirin"
 
 
 class ProductChangeKind(TextChoices):
-    CREATED = "created"
-    PRICE_CHANGED = "price_changed"
-    ACTIVATED = "activated"
-    HIDDEN = "hidden"
-    PROMO_ADDED = "promo_added"
-    PROMO_REMOVED = "promo_removed"
-    UPDATED = "updated"
+    CREATED = "created", "Yaratildi"
+    PRICE_CHANGED = "price_changed", "Narx o‘zgardi"
+    ACTIVATED = "activated", "Faollashtirildi"
+    HIDDEN = "hidden", "Yashirildi"
+    PROMO_ADDED = "promo_added", "Aksiya qo‘shildi"
+    PROMO_REMOVED = "promo_removed", "Aksiya olib tashlandi"
+    UPDATED = "updated", "Yangilandi"
 
 
 class ProductOrdering(TextChoices):
@@ -182,26 +187,26 @@ class ProductOrdering(TextChoices):
 
 
 class ContentLanguage(TextChoices):
-    UZ = "uz"
-    RU = "ru"
-    EN = "en"
+    UZ = "uz", "O‘zbekcha"
+    RU = "ru", "Ruscha"
+    EN = "en", "Inglizcha"
 
 
 class CustomerStatus(TextChoices):
-    ACTIVE = "active"
-    DELETED = "deleted"
+    ACTIVE = "active", "Faol"
+    DELETED = "deleted", "O‘chirilgan"
 
 
 class SpecialistRole(TextChoices):
-    DERMATOLOGIST = "dermatologist"
-    COSMETOLOGIST = "cosmetologist"
+    DERMATOLOGIST = "dermatologist", "Dermatolog"
+    COSMETOLOGIST = "cosmetologist", "Kosmetolog"
 
 
 class ServiceCategory(TextChoices):
     """The discipline of a bookable service (FND-7): the counterpart of the specialist's ``role``."""
 
-    DERMATOLOGY = "dermatology"
-    COSMETOLOGY = "cosmetology"
+    DERMATOLOGY = "dermatology", "Dermatologiya"
+    COSMETOLOGY = "cosmetology", "Kosmetologiya"
 
 
 class DirectoryOrdering(TextChoices):
@@ -215,12 +220,12 @@ class DirectoryOrdering(TextChoices):
 
 
 class AppointmentStatus(TextChoices):
-    REQUESTED = "requested"
-    CONFIRMED = "confirmed"
-    REJECTED = "rejected"
-    ATTENDED = "attended"
+    REQUESTED = "requested", "So‘ralgan"
+    CONFIRMED = "confirmed", "Tasdiqlangan"
+    REJECTED = "rejected", "Rad etilgan"
+    ATTENDED = "attended", "Kelgan"
     # Not in the M1 admin contract: customers cancel their own appointments in M2.
-    CANCELLED = "cancelled"
+    CANCELLED = "cancelled", "Bekor qilingan"
 
 
 class AppointmentAction(TextChoices):
@@ -230,18 +235,18 @@ class AppointmentAction(TextChoices):
 
 
 class RequestedVia(TextChoices):
-    APP = "app"
-    ADMIN = "admin"
+    APP = "app", "Ilova"
+    ADMIN = "admin", "Admin"
 
 
 class BlockKind(TextChoices):
-    BUSY = "busy"
-    OFF = "off"
+    BUSY = "busy", "Band"
+    OFF = "off", "Dam olish"
 
 
 class NotificationKind(TextChoices):
-    PROMO = "promo"
-    GENERAL = "general"
+    PROMO = "promo", "Aksiya"
+    GENERAL = "general", "Umumiy"
 
 
 class NotificationState(TextChoices):
@@ -252,29 +257,29 @@ class NotificationState(TextChoices):
 
 
 class AudienceType(TextChoices):
-    ALL = "all"
-    SEGMENT = "segment"
-    CUSTOMER = "customer"
+    ALL = "all", "Hamma"
+    SEGMENT = "segment", "Segment"
+    CUSTOMER = "customer", "Bitta mijoz"
 
 
 class LinkKind(TextChoices):
-    NONE = "none"
-    PRODUCT = "product"
-    URL = "url"  # gap ADM-10.1: an https link (Campaign.link_url, decision GC-3)
+    NONE = "none", "Havolasiz"
+    PRODUCT = "product", "Mahsulot"
+    URL = "url", "Havola (URL)"  # gap ADM-10.1: an https link (Campaign.link_url, decision GC-3)
 
 
 class BannerLinkKind(TextChoices):
-    NONE = "none"
-    PRODUCT = "product"
-    CATEGORY = "category"
-    URL = "url"  # gap X-BANNER-URL: an https link (Banner.link_url, decision GC-3)
+    NONE = "none", "Havolasiz"
+    PRODUCT = "product", "Mahsulot"
+    CATEGORY = "category", "Kategoriya"
+    URL = "url", "Havola (URL)"  # gap X-BANNER-URL: an https link (Banner.link_url, decision GC-3)
 
 
 class TemplateStatus(TextChoices):
-    PROCESSING = "processing"
-    HANDED_TO_COURIER = "handed_to_courier"
-    DELIVERED = "delivered"
-    CANCELLED = "cancelled"
+    PROCESSING = "processing", "Jarayonda"
+    HANDED_TO_COURIER = "handed_to_courier", "Kuryerga topshirildi"
+    DELIVERED = "delivered", "Yetkazildi"
+    CANCELLED = "cancelled", "Bekor qilindi"
 
 
 class DashboardRange(TextChoices):
@@ -290,14 +295,14 @@ class DashboardBucket(TextChoices):
 
 
 class JobKind(TextChoices):
-    BILLZ_IMPORT = "billz_import"
+    BILLZ_IMPORT = "billz_import", "Billz importi"
 
 
 class JobState(TextChoices):
-    QUEUED = "queued"
-    RUNNING = "running"
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
+    QUEUED = "queued", "Navbatda"
+    RUNNING = "running", "Bajarilmoqda"
+    SUCCEEDED = "succeeded", "Muvaffaqiyatli"
+    FAILED = "failed", "Xato bilan tugadi"
 
 
 class BillzImportMode(TextChoices):
@@ -306,14 +311,14 @@ class BillzImportMode(TextChoices):
 
 
 class SessionRevokeReason(TextChoices):
-    LOGOUT = "logout"
-    EXPIRED = "expired"
-    PASSWORD_CHANGED = "password_changed"  # noqa: S105
-    DEACTIVATED = "deactivated"
-    REPLACED = "replaced"
-    ADMIN_REVOKED = "admin_revoked"
+    LOGOUT = "logout", "Chiqish"
+    EXPIRED = "expired", "Muddati tugadi"
+    PASSWORD_CHANGED = "password_changed", "Parol o‘zgartirildi"  # noqa: S105
+    DEACTIVATED = "deactivated", "Hisob faolsizlantirildi"
+    REPLACED = "replaced", "Yangi sessiya bilan almashtirildi"
+    ADMIN_REVOKED = "admin_revoked", "Admin tugatdi"
     # M2 (customer contract §2.1.6): an old customer refresh token came back after the grace window.
-    REFRESH_REUSED = "refresh_reused"
+    REFRESH_REUSED = "refresh_reused", "Eski token qayta ishlatildi"
 
 
 class LogoutScope(TextChoices):
@@ -356,9 +361,9 @@ class NextStep(TextChoices):
 class CustomerSocialProvider(TextChoices):
     """Customer social sign-in providers; the staff routes keep their own ``SocialProviderEnum``."""
 
-    GOOGLE = "google"
-    FACEBOOK = "facebook"
-    APPLE = "apple"
+    GOOGLE = "google", "Google"
+    FACEBOOK = "facebook", "Facebook"
+    APPLE = "apple", "Apple"
 
 
 class SocialTokenType(TextChoices):

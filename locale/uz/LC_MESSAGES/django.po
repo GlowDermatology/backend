@@ -1,0 +1,624 @@
+# Uzbek (Latin) strings of the Glow Derma ops console: Unfold and the Django admin.
+# Compile with `manage.py compile_locale` (stdlib, no GNU gettext); commit the .mo with it.
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: uz\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgid "Welcome back to"
+msgstr "Xush kelibsiz"
+
+msgid "Log in"
+msgstr "Kirish"
+
+msgid "Log out"
+msgstr "Chiqish"
+
+msgid "Log in again"
+msgstr "Qayta kirish"
+
+msgid "Forgotten your password or username?"
+msgstr "Parol yoki loginni unutdingizmi?"
+
+msgid "Return to site"
+msgstr "Saytga qaytish"
+
+msgid "Password:"
+msgstr "Parol:"
+
+msgid "Password"
+msgstr "Parol"
+
+msgid "Username:"
+msgstr "Login:"
+
+msgid "Toggle password visibility"
+msgstr "Parolni ko‘rsatish yoki yashirish"
+
+msgid "You have been successfully logged out from the administration"
+msgstr "Siz konsoldan muvaffaqiyatli chiqdingiz"
+
+msgid "Thanks for spending some quality time with the web site today."
+msgstr "Bugun saytda vaqt o‘tkazganingiz uchun rahmat."
+
+msgid "Logged out"
+msgstr "Tizimdan chiqildi"
+
+msgid "Change password"
+msgstr "Parolni o‘zgartirish"
+
+msgid "Your password was changed."
+msgstr "Parolingiz o‘zgartirildi."
+
+msgid "Please enter the correct %(username)s and password for a staff account. Note that both fields may be case-sensitive."
+msgstr "Xodim hisobi uchun to‘g‘ri %(username)s va parolni kiriting. Ikkala maydonda ham katta-kichik harf farqlanadi."
+
+msgid "This account is inactive."
+msgstr "Bu hisob faol emas."
+
+msgid "You are authenticated as %(username)s, but are not authorized to access this page. Would you like to login to a different account?"
+msgstr "Siz %(username)s sifatida kirgansiz, lekin bu sahifaga ruxsatingiz yo‘q. Boshqa hisob bilan kirasizmi?"
+
+msgid "Welcome,"
+msgstr "Xush kelibsiz,"
+
+msgid "View site"
+msgstr "Saytni ko‘rish"
+
+msgid "Documentation"
+msgstr "Qo‘llanma"
+
+msgid "Django site admin"
+msgstr "Glow Derma Ops"
+
+msgid "Django administration"
+msgstr "Glow Derma Ops"
+
+msgid "Site administration"
+msgstr "Boshqaruv"
+
+msgid "%(app)s administration"
+msgstr "%(app)s boshqaruvi"
+
+msgid "Home"
+msgstr "Bosh sahifa"
+
+msgid "Go back"
+msgstr "Orqaga"
+
+msgid "All applications"
+msgstr "Barcha bo‘limlar"
+
+msgid "Search apps and models..."
+msgstr "Bo‘lim va modellarni qidirish..."
+
+msgid "Models in the %(name)s application"
+msgstr "%(name)s bo‘limidagi modellar"
+
+msgid "Recent actions"
+msgstr "So‘nggi amallar"
+
+msgid "My actions"
+msgstr "Mening amallarim"
+
+msgid "None available"
+msgstr "Hech narsa yo‘q"
+
+msgid "Unknown content"
+msgstr "Noma’lum yozuv"
+
+msgid "You don’t have permission to view or edit anything."
+msgstr "Sizda hech narsani ko‘rish yoki o‘zgartirish huquqi yo‘q."
+
+msgid "Toggle sidebar"
+msgstr "Yon panelni ochish/yopish"
+
+msgid "Light"
+msgstr "Yorug‘"
+
+msgid "Dark"
+msgstr "Qorong‘i"
+
+msgid "System"
+msgstr "Tizim"
+
+msgid "Toggle dark/light mode"
+msgstr "Qorong‘i/yorug‘ rejim"
+
+msgid "Type to search"
+msgstr "Qidirish uchun yozing"
+
+msgid "Recent searches"
+msgstr "So‘nggi qidiruvlar"
+
+msgid "Nothing matched your search"
+msgstr "Qidiruv bo‘yicha hech narsa topilmadi"
+
+msgid "Navigate"
+msgstr "O‘tish"
+
+msgid "Select"
+msgstr "Tanlash"
+
+msgid "Clear"
+msgstr "Tozalash"
+
+msgid "Close"
+msgstr "Yopish"
+
+msgid "Available shortcuts"
+msgstr "Tezkor tugmalar"
+
+msgid "Global shortcuts"
+msgstr "Umumiy tezkor tugmalar"
+
+msgid "Changelist shortcuts"
+msgstr "Ro‘yxat tezkor tugmalari"
+
+msgid "Command tool shortcuts"
+msgstr "Buyruq oynasi tezkor tugmalari"
+
+msgid "Open command tool"
+msgstr "Buyruq oynasini ochish"
+
+msgid "Open shortcuts list"
+msgstr "Tezkor tugmalar ro‘yxatini ochish"
+
+msgid "Open selection"
+msgstr "Tanlanganni ochish"
+
+msgid "Open selection in new tab"
+msgstr "Tanlanganni yangi oynada ochish"
+
+msgid "Create new record"
+msgstr "Yangi yozuv yaratish"
+
+msgid "Toggle filter"
+msgstr "Filtrni ochish/yopish"
+
+msgid "Filters"
+msgstr "Filtrlar"
+
+msgid "Filter"
+msgstr "Filtr"
+
+msgid "Apply Filters"
+msgstr "Filtrlarni qo‘llash"
+
+msgid "Clear all filters"
+msgstr "Barcha filtrlarni tozalash"
+
+msgid "Reset filters"
+msgstr "Filtrlarni tozalash"
+
+msgid "Hide counts"
+msgstr "Sonlarni yashirish"
+
+msgid "Show counts"
+msgstr "Sonlarni ko‘rsatish"
+
+msgid " By %(filter_title)s "
+msgstr " %(filter_title)s bo‘yicha "
+
+msgid "By %(filter_title)s"
+msgstr "%(filter_title)s bo‘yicha"
+
+msgid "All"
+msgstr "Hammasi"
+
+msgid "Yes"
+msgstr "Ha"
+
+msgid "No"
+msgstr "Yo‘q"
+
+msgid "Unknown"
+msgstr "Noma’lum"
+
+msgid "True"
+msgstr "Ha"
+
+msgid "False"
+msgstr "Yo‘q"
+
+msgid "Any date"
+msgstr "Istalgan sana"
+
+msgid "Today"
+msgstr "Bugun"
+
+msgid "Past 7 days"
+msgstr "Oxirgi 7 kun"
+
+msgid "This month"
+msgstr "Shu oy"
+
+msgid "This year"
+msgstr "Shu yil"
+
+msgid "No date"
+msgstr "Sanasiz"
+
+msgid "Has date"
+msgstr "Sanali"
+
+msgid "Empty"
+msgstr "Bo‘sh"
+
+msgid "Not empty"
+msgstr "Bo‘sh emas"
+
+msgid "Date from"
+msgstr "Sanadan"
+
+msgid "Date to"
+msgstr "Sanagacha"
+
+msgid "From"
+msgstr "Dan"
+
+msgid "To"
+msgstr "Gacha"
+
+msgid "Date"
+msgstr "Sana"
+
+msgid "Time"
+msgstr "Vaqt"
+
+msgid "Search"
+msgstr "Qidirish"
+
+msgid "Show all"
+msgstr "Hammasini ko‘rsatish"
+
+msgid "%(full_result_count)s total"
+msgstr "jami %(full_result_count)s ta"
+
+msgid "No results found"
+msgstr "Hech narsa topilmadi"
+
+msgid "This page yielded into no results."
+msgstr "Bu sahifada natija yo‘q."
+
+msgid "No data"
+msgstr "Ma’lumot yo‘q"
+
+msgid "Next"
+msgstr "Keyingi"
+
+msgid "Previous"
+msgstr "Oldingi"
+
+msgid "Toggle sorting"
+msgstr "Saralashni almashtirish"
+
+msgid "Remove from sorting"
+msgstr "Saralashdan olib tashlash"
+
+msgid "Sorting priority: %(priority_number)s"
+msgstr "Saralash ustuvorligi: %(priority_number)s"
+
+msgid "Select %s"
+msgstr "Tanlang: %s"
+
+msgid "Select %s to change"
+msgstr "O‘zgartirish uchun tanlang: %s"
+
+msgid "Select %s to view"
+msgstr "Ko‘rish uchun tanlang: %s"
+
+msgid "Select action"
+msgstr "Amalni tanlang"
+
+msgid "Select action to run"
+msgstr "Bajariladigan amalni tanlang"
+
+msgid "Select all objects on this page for an action"
+msgstr "Sahifadagi barcha yozuvlarni tanlash"
+
+msgid "Select record"
+msgstr "Yozuvni tanlash"
+
+msgid "Select value"
+msgstr "Qiymatni tanlang"
+
+msgid "Run"
+msgstr "Bajarish"
+
+msgid "Run the selected action"
+msgstr "Tanlangan amalni bajarish"
+
+msgid "Clear selection"
+msgstr "Tanlovni bekor qilish"
+
+msgid "Record picture"
+msgstr "Yozuv rasmi"
+
+msgid "Add"
+msgstr "Qo‘shish"
+
+msgid "Add %(name)s"
+msgstr "%(name)s qo‘shish"
+
+msgid "Add %s"
+msgstr "%s qo‘shish"
+
+msgid "Change"
+msgstr "O‘zgartirish"
+
+msgid "Change %s"
+msgstr "%s: o‘zgartirish"
+
+msgid "View"
+msgstr "Ko‘rish"
+
+msgid "View %s"
+msgstr "%s: ko‘rish"
+
+msgid "Delete"
+msgstr "O‘chirish"
+
+msgid "Edit"
+msgstr "Tahrirlash"
+
+msgid "Cancel"
+msgstr "Bekor qilish"
+
+msgid "Submit"
+msgstr "Yuborish"
+
+msgid "General"
+msgstr "Asosiy"
+
+msgid "History"
+msgstr "Tarix"
+
+msgid "Change history: %s"
+msgstr "O‘zgarishlar tarixi: %s"
+
+msgid "Date/time"
+msgstr "Sana/vaqt"
+
+msgid "User"
+msgstr "Foydalanuvchi"
+
+msgid "Action"
+msgstr "Amal"
+
+msgid "This object doesn’t have a change history. It probably wasn’t added via this admin site."
+msgstr "Bu yozuvning o‘zgarishlar tarixi yo‘q: u konsol orqali yaratilmagan."
+
+msgid "Click to download"
+msgstr "Yuklab olish"
+
+msgid "Image preview"
+msgstr "Rasmni ko‘rish"
+
+msgid "Choose file to upload"
+msgstr "Yuklash uchun fayl tanlang"
+
+msgid "Save"
+msgstr "Saqlash"
+
+msgid "Save and add another"
+msgstr "Saqlab, yana qo‘shish"
+
+msgid "Save and continue editing"
+msgstr "Saqlab, tahrirlashda davom etish"
+
+msgid "Save and view"
+msgstr "Saqlab, ko‘rish"
+
+msgid "Save as new"
+msgstr "Yangi sifatida saqlash"
+
+msgid "Delete?"
+msgstr "O‘chirilsinmi?"
+
+msgid "Yes, I’m sure"
+msgstr "Ha, ishonchim komil"
+
+msgid "No, take me back"
+msgstr "Yo‘q, orqaga qaytish"
+
+msgid "Objects"
+msgstr "Yozuvlar"
+
+msgid "Summary"
+msgstr "Xulosa"
+
+msgid "Please correct the errors below."
+msgstr "Quyidagi xatolarni tuzating."
+
+msgid "The {name} “{obj}” was changed successfully."
+msgstr "{name} «{obj}» muvaffaqiyatli o‘zgartirildi."
+
+msgid "The {name} “{obj}” was added successfully."
+msgstr "{name} «{obj}» muvaffaqiyatli qo‘shildi."
+
+msgid "The %(name)s “%(obj)s” was deleted successfully."
+msgstr "%(name)s «%(obj)s» muvaffaqiyatli o‘chirildi."
+
+msgid "The {name} “{obj}” was added successfully. You may edit it again below."
+msgstr "{name} «{obj}» muvaffaqiyatli qo‘shildi. Uni quyida yana tahrirlashingiz mumkin."
+
+msgid "The {name} “{obj}” was added successfully. You may add another {name} below."
+msgstr "{name} «{obj}» muvaffaqiyatli qo‘shildi. Quyida yana bitta {name} qo‘shishingiz mumkin."
+
+msgid "The {name} “{obj}” was changed successfully. You may edit it again below."
+msgstr "{name} «{obj}» muvaffaqiyatli o‘zgartirildi. Uni quyida yana tahrirlashingiz mumkin."
+
+msgid "The {name} “{obj}” was changed successfully. You may add another {name} below."
+msgstr "{name} «{obj}» muvaffaqiyatli o‘zgartirildi. Quyida yana bitta {name} qo‘shishingiz mumkin."
+
+msgid ""
+"Are you sure you want to delete the %(object_name)s \"%(escaped_object)s\"? All of the following "
+"related items will be deleted:"
+msgstr ""
+"%(object_name)s «%(escaped_object)s» ni o‘chirishga ishonchingiz komilmi? Quyidagi bog‘liq yozuvlarning "
+"hammasi ham o‘chiriladi:"
+
+msgid ""
+"Deleting the %(object_name)s '%(escaped_object)s' would result in deleting related objects, but your "
+"account doesn't have permission to delete the following types of objects:"
+msgstr ""
+"%(object_name)s «%(escaped_object)s» ni o‘chirib bo‘lmaydi: unga bog‘langan yozuvlar ham o‘chishi kerak, "
+"lekin quyidagi turdagi yozuvlarni o‘chirish huquqingiz yo‘q:"
+
+msgid ""
+"Deleting the %(object_name)s '%(escaped_object)s' would require deleting the following protected related "
+"objects:"
+msgstr ""
+"%(object_name)s «%(escaped_object)s» ni o‘chirish uchun quyidagi himoyalangan bog‘liq yozuvlarni ham "
+"o‘chirish kerak bo‘ladi:"
+
+msgid "Cannot delete %(name)s"
+msgstr "%(name)s ni o‘chirib bo‘lmaydi"
+
+msgid "%(name)s with ID “%(key)s” doesn’t exist. Perhaps it was deleted?"
+msgstr "ID «%(key)s» bo‘lgan %(name)s topilmadi. Ehtimol, o‘chirilgan."
+
+msgid "Add another %(model)s"
+msgstr "Yana %(model)s qo‘shish"
+
+msgid "Change selected %(model)s"
+msgstr "Tanlangan %(model)sni o‘zgartirish"
+
+msgid "View selected %(model)s"
+msgstr "Tanlangan %(model)sni ko‘rish"
+
+msgid "Delete selected %(model)s"
+msgstr "Tanlangan %(model)sni o‘chirish"
+
+msgid "Currently:"
+msgstr "Hozir:"
+
+msgid "Change:"
+msgstr "O‘zgartirish:"
+
+msgid "Page not found"
+msgstr "Sahifa topilmadi"
+
+msgid "We’re sorry, but the requested page could not be found."
+msgstr "Kechirasiz, so‘ralgan sahifa topilmadi."
+
+msgid "Server error"
+msgstr "Server xatosi"
+
+msgid "Server Error <em>(500)</em>"
+msgstr "Server xatosi <em>(500)</em>"
+
+msgid "Popup closing…"
+msgstr "Oyna yopilmoqda…"
+
+msgid "%(counter)s result"
+msgid_plural "%(counter)s results"
+msgstr[0] "%(counter)s ta yozuv"
+
+msgid "entry"
+msgid_plural "entries"
+msgstr[0] "ta yozuv"
+
+msgid "Please correct the error below."
+msgid_plural "Please correct the errors below."
+msgstr[0] "Quyidagi xatolarni tuzating."
+
+msgid "%(count)s %(name)s was changed successfully."
+msgid_plural "%(count)s %(name)s were changed successfully."
+msgstr[0] "%(count)s ta %(name)s muvaffaqiyatli o‘zgartirildi."
+
+msgid "%(total_count)s selected"
+msgid_plural "All %(total_count)s selected"
+msgstr[0] "%(total_count)s ta tanlandi"
+
+msgid "0 of %(cnt)s selected"
+msgid_plural "0 of %(cnt)s selected"
+msgstr[0] "%(cnt)s tadan 0 tasi tanlandi"
+
+# Month names inside a date ("31-oktabr, 2026-yil", Django's ``E`` format) are written in lower case.
+
+msgctxt "alt. month"
+msgid "January"
+msgstr "yanvar"
+
+msgctxt "alt. month"
+msgid "February"
+msgstr "fevral"
+
+msgctxt "alt. month"
+msgid "March"
+msgstr "mart"
+
+msgctxt "alt. month"
+msgid "April"
+msgstr "aprel"
+
+msgctxt "alt. month"
+msgid "May"
+msgstr "may"
+
+msgctxt "alt. month"
+msgid "June"
+msgstr "iyun"
+
+msgctxt "alt. month"
+msgid "July"
+msgstr "iyul"
+
+msgctxt "alt. month"
+msgid "August"
+msgstr "avgust"
+
+msgctxt "alt. month"
+msgid "September"
+msgstr "sentabr"
+
+msgctxt "alt. month"
+msgid "October"
+msgstr "oktabr"
+
+msgctxt "alt. month"
+msgid "November"
+msgstr "noyabr"
+
+msgctxt "alt. month"
+msgid "December"
+msgstr "dekabr"
+
+# The inline «add» link: Django capitalises the model name, so it follows a colon.
+msgid "Add another %(verbose_name)s"
+msgstr "Qo‘shish: %(verbose_name)s"
+
+# Inline rows of the editable professionals pages.
+msgid "Click to cancel"
+msgstr "Bekor qilish"
+
+msgid "This item will be deleted."
+msgstr "Bu qator o‘chiriladi."
+
+# django.contrib.auth fields of the staff model (the groups and permissions columns are not shown).
+msgid "superuser status"
+msgstr "superadmin"
+
+msgid "Designates that this user has all permissions without explicitly assigning them."
+msgstr "Barcha huquqlarga alohida berilmasdan ega bo‘ladi."
+
+msgid "last login"
+msgstr "oxirgi kirish"
+
+msgid "password"
+msgstr "parol"
+
+msgid "groups"
+msgstr "guruhlar"
+
+msgid "user permissions"
+msgstr "foydalanuvchi huquqlari"
+
+msgid "The groups this user belongs to. A user will get all permissions granted to each of their groups."
+msgstr "Xodim a’zo bo‘lgan guruhlar: xodim har bir guruhning barcha huquqlarini oladi."
+
+msgid "Specific permissions for this user."
+msgstr "Xodimning alohida huquqlari."

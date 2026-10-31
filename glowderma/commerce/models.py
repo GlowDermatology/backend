@@ -12,6 +12,7 @@ from django.db import models
 from django.db.models import F, Q
 
 from glowderma.core import enums
+from glowderma.core.labels import som_text, stamp
 from glowderma.core.models import AppendOnlyModel, TimeStampedModel, timestamp_default
 
 PHONE_E164_REGEX = r"^\+998\d{9}$"
@@ -76,30 +77,46 @@ def _source_by_type_condition() -> Q:
 class Cart(TimeStampedModel):
     """The customer's server-side shopping cart (M2): one row per customer, emptied by a checkout."""
 
-    customer = models.OneToOneField("accounts.Customer", on_delete=models.CASCADE, related_name="cart")
+    customer = models.OneToOneField(
+        "accounts.Customer", on_delete=models.CASCADE, related_name="cart", verbose_name="mijoz"
+    )
+    # the order the last successful checkout produced (debug aid; the M2 checkout is @idempotent anyway)
     last_checkout_order = models.ForeignKey(
-        "commerce.Order", null=True, on_delete=models.SET_NULL, related_name="+"
-    )  # the order the last successful checkout produced (debug aid; the M2 checkout is @idempotent anyway)
+        "commerce.Order",
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name="oxirgi rasmiylashtirilgan buyurtma",
+    )
 
     class Meta:
+        verbose_name = "savat"
+        verbose_name_plural = "savatlar"
         ordering = ["id"]
 
     def __str__(self) -> str:
-        return f"Cart of customer {self.customer_id}"
+        return f"Mijoz #{self.customer_id} savatchasi"
 
 
 class CartItem(models.Model):
     """One product line of a cart; prices are read live at checkout, ``price_at_add`` only feeds the cart's
     "price changed since you added it" hint (customer contract §2.5, M2-C12)."""
 
-    cart = models.ForeignKey("commerce.Cart", on_delete=models.CASCADE, related_name="items")
-    product = models.ForeignKey("catalog.Product", on_delete=models.CASCADE, related_name="cart_items")
-    quantity = models.PositiveSmallIntegerField()
-    price_at_add = models.BigIntegerField(null=True)  # Product.price at the last write; null before 0004
-    added_at = models.DateTimeField(default=timestamp_default, editable=False)
-    updated_at = models.DateTimeField(default=timestamp_default)
+    cart = models.ForeignKey(
+        "commerce.Cart", on_delete=models.CASCADE, related_name="items", verbose_name="savat"
+    )
+    product = models.ForeignKey(
+        "catalog.Product", on_delete=models.CASCADE, related_name="cart_items", verbose_name="mahsulot"
+    )
+    quantity = models.PositiveSmallIntegerField(verbose_name="miqdor")
+    # Product.price at the last write; null before 0004
+    price_at_add = models.BigIntegerField(null=True, verbose_name="qo‘shilgandagi narx")
+    added_at = models.DateTimeField(default=timestamp_default, editable=False, verbose_name="qo‘shilgan")
+    updated_at = models.DateTimeField(default=timestamp_default, verbose_name="yangilangan")
 
     class Meta:
+        verbose_name = "savat qatori"
+        verbose_name_plural = "savat qatorlari"
         ordering = ["cart_id", "added_at", "id"]
         constraints = [
             models.UniqueConstraint(fields=["cart", "product"], name="cartitem_cart_product_unique"),
@@ -109,58 +126,87 @@ class CartItem(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.quantity} × product {self.product_id} (cart {self.cart_id})"
+        return f"{self.quantity} × mahsulot #{self.product_id} (savatcha #{self.cart_id})"
 
 
 class Order(TimeStampedModel):
     """A customer's online order; ``id`` is the order number shown everywhere (№10248, from 10001)."""
 
-    customer = models.ForeignKey("accounts.Customer", on_delete=models.PROTECT, related_name="orders")
-    channel = models.CharField(max_length=8, choices=enums.OrderChannel.choices)  # ios|android|web
-    fulfilment = models.CharField(max_length=16, choices=enums.FulfilmentMethod.choices)  # delivery|pickup
+    customer = models.ForeignKey(
+        "accounts.Customer", on_delete=models.PROTECT, related_name="orders", verbose_name="mijoz"
+    )
+    # ios|android|web
+    channel = models.CharField(max_length=8, choices=enums.OrderChannel.choices, verbose_name="kanal")
+    # delivery|pickup
+    fulfilment = models.CharField(
+        max_length=16, choices=enums.FulfilmentMethod.choices, verbose_name="olish usuli"
+    )
     status = models.CharField(
-        max_length=24, choices=enums.OrderStatus.choices, default=enums.OrderStatus.AWAITING_PAYMENT
+        max_length=24,
+        choices=enums.OrderStatus.choices,
+        default=enums.OrderStatus.AWAITING_PAYMENT,
+        verbose_name="holat",
     )
     # delivery snapshot (delivery only; "" for pickup)
-    address_text = models.CharField(max_length=300, blank=True)
-    address_region_code = models.CharField(max_length=16, blank=True)  # BTS region id from accounts.Address
-    address_city_code = models.CharField(max_length=16, blank=True)  # BTS city id
-    address_comment = models.CharField(max_length=200, blank=True)
-    recipient_name = models.CharField(max_length=150, blank=True)  # D-3: BTS needs a name after a scrub
-    recipient_phone = models.CharField(max_length=13, blank=True)
-    customer_note = models.CharField(max_length=300, blank=True)  # M2 "izoh"
+    address_text = models.CharField(max_length=300, blank=True, verbose_name="manzil")
+    address_region_code = models.CharField(
+        max_length=16, blank=True, verbose_name="viloyat kodi"
+    )  # BTS region id from accounts.Address
+    address_city_code = models.CharField(max_length=16, blank=True, verbose_name="shahar kodi")  # BTS city id
+    address_comment = models.CharField(max_length=200, blank=True, verbose_name="manzil izohi")
+    # D-3: BTS needs a name after a scrub
+    recipient_name = models.CharField(max_length=150, blank=True, verbose_name="qabul qiluvchi")
+    recipient_phone = models.CharField(max_length=13, blank=True, verbose_name="qabul qiluvchi telefoni")
+    customer_note = models.CharField(max_length=300, blank=True, verbose_name="mijoz izohi")  # M2 "izoh"
     # money (so'm)
-    items_subtotal = models.BigIntegerField()  # Σ OrderItem.line_total
-    promo_subtotal = models.BigIntegerField(default=0)  # Σ line_total WHERE promo
-    delivery_fee = models.BigIntegerField(default=0)  # quoted BTS tariff at checkout; 0 for pickup
-    cashback_used = models.BigIntegerField(default=0)  # = CashbackHold.amount
-    total = models.BigIntegerField()  # items_subtotal + delivery_fee − cashback_used
+    items_subtotal = models.BigIntegerField(verbose_name="mahsulotlar summasi")  # Σ OrderItem.line_total
+    # Σ line_total WHERE promo
+    promo_subtotal = models.BigIntegerField(default=0, verbose_name="aksiya chegirmasi")
+    # quoted BTS tariff at checkout; 0 for pickup
+    delivery_fee = models.BigIntegerField(default=0, verbose_name="yetkazish narxi")
+    # = CashbackHold.amount
+    cashback_used = models.BigIntegerField(default=0, verbose_name="ishlatilgan cashback")
+    total = models.BigIntegerField(verbose_name="jami")  # items_subtotal + delivery_fee − cashback_used
+    # chosen at checkout
     payment_provider = models.CharField(
-        max_length=16, choices=enums.PaymentProvider.choices
-    )  # chosen at checkout
-    # reservation
-    reservation_minutes = models.PositiveSmallIntegerField()  # SiteSettings.reservation_minutes at checkout
-    reservation_expires_at = models.DateTimeField(
-        null=True
-    )  # set while awaiting_payment; kept afterwards for history
-    # lifecycle
-    status_changed_at = models.DateTimeField(default=timestamp_default)
-    paid_at = models.DateTimeField(null=True)
-    handed_to_courier_at = models.DateTimeField(null=True)
-    delivered_at = models.DateTimeField(null=True)
-    cancelled_at = models.DateTimeField(null=True)
-    cancellation_reason = models.CharField(
-        max_length=24, blank=True, choices=enums.CancellationReason.choices
-    )  # reservation_expired|admin|customer_request
-    cancellation_note = models.CharField(max_length=500, blank=True)  # admin reason text (3..500)
-    cancelled_by = models.ForeignKey(
-        "accounts.StaffUser", null=True, on_delete=models.PROTECT, related_name="cancelled_orders"
+        max_length=16, choices=enums.PaymentProvider.choices, verbose_name="to‘lov provayderi"
     )
+    # reservation
+    reservation_minutes = models.PositiveSmallIntegerField(
+        verbose_name="zaxira muddati (daqiqa)"
+    )  # SiteSettings.reservation_minutes at checkout
+    # set while awaiting_payment; kept afterwards for history
+    reservation_expires_at = models.DateTimeField(null=True, verbose_name="band muddati")
+    # lifecycle
+    status_changed_at = models.DateTimeField(default=timestamp_default, verbose_name="holat o‘zgargan")
+    paid_at = models.DateTimeField(null=True, verbose_name="to‘langan")
+    handed_to_courier_at = models.DateTimeField(null=True, verbose_name="kuryerga berilgan")
+    delivered_at = models.DateTimeField(null=True, verbose_name="yetkazilgan")
+    cancelled_at = models.DateTimeField(null=True, verbose_name="bekor qilingan")
+    # reservation_expired|admin|customer_request
+    cancellation_reason = models.CharField(
+        max_length=24,
+        blank=True,
+        choices=enums.CancellationReason.choices,
+        verbose_name="bekor qilish sababi",
+    )
+    # admin reason text (3..500)
+    cancellation_note = models.CharField(max_length=500, blank=True, verbose_name="bekor qilish izohi")
+    cancelled_by = models.ForeignKey(
+        "accounts.StaffUser",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="cancelled_orders",
+        verbose_name="bekor qilgan",
+    )
+    # internal; keys in design 03 §1.3 (seed, fake.* provider knobs, checkout.* diagnostics)
     metadata = models.JSONField(
-        default=dict, blank=True, encoder=DjangoJSONEncoder
-    )  # internal; keys in design 03 §1.3 (seed, fake.* provider knobs, checkout.* diagnostics)
+        default=dict, blank=True, encoder=DjangoJSONEncoder, verbose_name="metama’lumot"
+    )
 
     class Meta:
+        verbose_name = "buyurtma"
+        verbose_name_plural = "buyurtmalar"
         ordering = ["-created_at", "-id"]
         constraints = [
             models.CheckConstraint(
@@ -269,27 +315,34 @@ class Order(TimeStampedModel):
         ]
 
     def __str__(self) -> str:
-        return f"Order №{self.pk} ({self.status}, {self.total} so'm, customer {self.customer_id})"
+        status = self.get_status_display()
+        return f"Buyurtma №{self.pk} ({status}, {som_text(self.total)}, mijoz #{self.customer_id})"
 
 
 class OrderItem(models.Model):
     """One product line of an order, fully snapshotted at checkout (name, Billz id, image, price, promo)."""
 
-    order = models.ForeignKey("commerce.Order", on_delete=models.CASCADE, related_name="items")
-    position = models.PositiveSmallIntegerField()
-    product = models.ForeignKey("catalog.Product", on_delete=models.PROTECT, related_name="order_items")
-    name = models.CharField(max_length=200)  # Product.name_uz, else billz_name, at checkout
-    billz_id = models.CharField(max_length=14)
-    image_url = models.CharField(
-        max_length=500, blank=True
-    )  # media storage path of images[0] at checkout ("products/1/9f2c.webp"); rendered absolute by
+    order = models.ForeignKey(
+        "commerce.Order", on_delete=models.CASCADE, related_name="items", verbose_name="buyurtma"
+    )
+    position = models.PositiveSmallIntegerField(verbose_name="tartib")
+    product = models.ForeignKey(
+        "catalog.Product", on_delete=models.PROTECT, related_name="order_items", verbose_name="mahsulot"
+    )
+    # Product.name_uz, else billz_name, at checkout
+    name = models.CharField(max_length=200, verbose_name="nomi")
+    billz_id = models.CharField(max_length=14, verbose_name="Billz ID")
+    # media storage path of images[0] at checkout ("products/1/9f2c.webp"); rendered absolute by
+    image_url = models.CharField(max_length=500, blank=True, verbose_name="rasm havolasi")
     # core.media.absolute_media_url at serialization time; "" → null
-    quantity = models.PositiveIntegerField()
-    unit_price = models.BigIntegerField()  # Product.price at checkout
-    promo = models.BooleanField(default=False)
-    line_total = models.BigIntegerField()  # quantity × unit_price
+    quantity = models.PositiveIntegerField(verbose_name="miqdor")
+    unit_price = models.BigIntegerField(verbose_name="birlik narxi")  # Product.price at checkout
+    promo = models.BooleanField(default=False, verbose_name="aksiya")
+    line_total = models.BigIntegerField(verbose_name="qator summasi")  # quantity × unit_price
 
     class Meta:
+        verbose_name = "buyurtma qatori"
+        verbose_name_plural = "buyurtma qatorlari"
         ordering = ["order_id", "position"]
         constraints = [
             models.UniqueConstraint(fields=["order", "position"], name="orderitem_position_unique"),
@@ -302,23 +355,35 @@ class OrderItem(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.name} × {self.quantity} @ {self.unit_price} (order {self.order_id})"
+        return f"{self.name} × {self.quantity} @ {som_text(self.unit_price)} (buyurtma №{self.order_id})"
 
 
 class OrderEvent(AppendOnlyModel):
     """One immutable, typed entry of an order's history (contract §4); written only by ``record_event``."""
 
-    order = models.ForeignKey("commerce.Order", on_delete=models.PROTECT, related_name="events")
-    type = models.CharField(max_length=32, choices=enums.OrderEventType.choices)
-    source = models.CharField(max_length=8, choices=enums.EventSource.choices)  # system|bts|admin
-    status_after = models.CharField(max_length=24, blank=True, choices=enums.OrderStatus.choices)  # "" → null
-    actor = models.ForeignKey(
-        "accounts.StaffUser", null=True, on_delete=models.PROTECT, related_name="order_events"
+    order = models.ForeignKey(
+        "commerce.Order", on_delete=models.PROTECT, related_name="events", verbose_name="buyurtma"
     )
-    data = models.JSONField(default=dict, encoder=DjangoJSONEncoder)
-    at = models.DateTimeField(default=timestamp_default, editable=False)
+    type = models.CharField(max_length=32, choices=enums.OrderEventType.choices, verbose_name="turi")
+    # system|bts|admin
+    source = models.CharField(max_length=8, choices=enums.EventSource.choices, verbose_name="manba")
+    # "" → null
+    status_after = models.CharField(
+        max_length=24, blank=True, choices=enums.OrderStatus.choices, verbose_name="keyingi holat"
+    )
+    actor = models.ForeignKey(
+        "accounts.StaffUser",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="order_events",
+        verbose_name="bajaruvchi",
+    )
+    data = models.JSONField(default=dict, encoder=DjangoJSONEncoder, verbose_name="ma’lumotlar")
+    at = models.DateTimeField(default=timestamp_default, editable=False, verbose_name="vaqt")
 
     class Meta:
+        verbose_name = "buyurtma hodisasi"
+        verbose_name_plural = "buyurtma tarixi"
         ordering = ["-at", "-id"]
         indexes = [models.Index(fields=["order", "at", "id"], name="orderevent_order_at_idx")]
         constraints = [
@@ -332,36 +397,45 @@ class OrderEvent(AppendOnlyModel):
         ]
 
     def __str__(self) -> str:
-        return f"Order {self.order_id}: {self.type} ({self.source}) at {self.at:%Y-%m-%d %H:%M}"
+        kind, source = self.get_type_display(), self.get_source_display()
+        return f"Buyurtma №{self.order_id}: {kind} ({source}) · {stamp(self.at)}"
 
 
 class StockReservation(TimeStampedModel):
     """Units of a product held for an unpaid order; converted on payment, released on expiry/cancel."""
 
     class State(models.TextChoices):  # internal
-        ACTIVE = "active"
-        CONVERTED = "converted"
-        RELEASED = "released"
+        ACTIVE = "active", "Faol"
+        CONVERTED = "converted", "Sotuvga aylandi"
+        RELEASED = "released", "Bo‘shatildi"
 
     class ReleaseReason(models.TextChoices):  # internal
-        EXPIRED = "expired"
-        CANCELLED = "cancelled"
-        PAYMENT_FAILED = "payment_failed"
+        EXPIRED = "expired", "Muddati tugadi"
+        CANCELLED = "cancelled", "Bekor qilindi"
+        PAYMENT_FAILED = "payment_failed", "To‘lov amalga oshmadi"
 
-    order = models.ForeignKey("commerce.Order", on_delete=models.CASCADE, related_name="reservations")
-    product = models.ForeignKey("catalog.Product", on_delete=models.PROTECT, related_name="reservations")
-    quantity = models.PositiveIntegerField()
-    state = models.CharField(max_length=16, choices=State.choices, default=State.ACTIVE)
-    expires_at = models.DateTimeField()  # = Order.reservation_expires_at
-    converted_at = models.DateTimeField(null=True)
-    released_at = models.DateTimeField(null=True)
-    release_reason = models.CharField(max_length=16, blank=True, choices=ReleaseReason.choices)
+    order = models.ForeignKey(
+        "commerce.Order", on_delete=models.CASCADE, related_name="reservations", verbose_name="buyurtma"
+    )
+    product = models.ForeignKey(
+        "catalog.Product", on_delete=models.PROTECT, related_name="reservations", verbose_name="mahsulot"
+    )
+    quantity = models.PositiveIntegerField(verbose_name="miqdor")
+    state = models.CharField(max_length=16, choices=State.choices, default=State.ACTIVE, verbose_name="holat")
+    expires_at = models.DateTimeField(verbose_name="amal qilish muddati")  # = Order.reservation_expires_at
+    converted_at = models.DateTimeField(null=True, verbose_name="sotuvga aylangan")
+    released_at = models.DateTimeField(null=True, verbose_name="bo‘shatilgan")
+    release_reason = models.CharField(
+        max_length=16, blank=True, choices=ReleaseReason.choices, verbose_name="bo‘shatish sababi"
+    )
     # A converted reservation stops counting against availability for good once Billz has (or staff recorded)
     # the sale and the stock was read after it (``services.settle_billz_reservations``, NEW-2): the hot
     # availability read touches only the unsettled ones.
-    billz_settled_at = models.DateTimeField(null=True)
+    billz_settled_at = models.DateTimeField(null=True, verbose_name="Billz’da hisoblangan")
 
     class Meta:
+        verbose_name = "zaxira bandi"
+        verbose_name_plural = "zaxira bandlari"
         ordering = ["order_id", "id"]
         constraints = [
             models.UniqueConstraint(
@@ -408,6 +482,6 @@ class StockReservation(TimeStampedModel):
 
     def __str__(self) -> str:
         return (
-            f"Reservation {self.quantity} × product {self.product_id} "
-            f"for order {self.order_id} ({self.state})"
+            f"Band: {self.quantity} × mahsulot #{self.product_id} · buyurtma №{self.order_id} "
+            f"({self.get_state_display()})"
         )

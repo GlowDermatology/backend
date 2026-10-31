@@ -59,6 +59,7 @@ def ensure_status_templates(sender: AppConfig, *, using: str, apps: Any = global
 
 class NotificationsConfig(AppConfig):
     name = "glowderma.notifications"
+    verbose_name = "Xabarnomalar"
 
     def ready(self) -> None:
         post_migrate.connect(

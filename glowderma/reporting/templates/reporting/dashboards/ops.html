@@ -1,0 +1,152 @@
+{% extends "reporting/dashboards/base.html" %}
+
+{% block dashboard %}
+    {% with d=dashboard %}
+        <div class="gd-banner gd-banner--{{ d.overall.key }}">
+            <div class="gd-banner__icon"><span class="material-symbols-outlined" aria-hidden="true">{{ d.overall.icon }}</span></div>
+            <div class="gd-banner__body">
+                <div class="gd-banner__title">{{ d.headline }}</div>
+                <div class="gd-banner__text">
+                    {% for problem in d.problems %}<span class="gd-problem gd-problem--{{ problem.state.key }}">{{ problem.label }}</span>{% if not forloop.last %} · {% endif %}{% empty %}Navbatlar, integratsiyalar va tungi tekshiruvlar{% endfor %}
+                    · {{ d.live_count }} ta provayder live rejimda
+                </div>
+            </div>
+            <form class="gd-lookup" method="get" action="{% url 'admin:commerce_order_lookup' %}" role="search">
+                <label for="gd-order-number">Buyurtma №</label>
+                <div class="gd-lookup__row">
+                    <input id="gd-order-number" name="number" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="10253" required>
+                    <button type="submit" aria-label="Buyurtmani ochish"><span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>
+                </div>
+            </form>
+        </div>
+
+        <div class="gd-grid gd-grid--3">
+            {% for tile in d.tiles %}{% include "reporting/dashboards/_tile.html" %}{% endfor %}
+        </div>
+
+        <section class="gd-panel" id="outbox">
+            <header class="gd-panel__head">
+                <h2 class="gd-panel__title">Outbox navbati mavzular bo‘yicha</h2>
+                <p class="gd-panel__note">Kechikkan = {{ d.thresholds.overdue_minutes }} daqiqadan ko‘p kutayotgan ochiq xabar (K6)</p>
+            </header>
+            {% if d.outbox %}
+                <div class="gd-scroll">
+                    <table class="gd-table">
+                        <thead><tr><th>Mavzu</th><th class="num">Navbatda</th><th class="num">Kechikkan</th><th class="num">O‘lik</th><th class="num gd-hide-sm">Kechiktirilgan</th><th class="gd-hide-sm">Eng eski</th><th>Holat</th></tr></thead>
+                        <tbody>
+                            {% for row in d.outbox %}
+                                <tr>
+                                    <td class="gd-mono strong">{{ row.topic }}</td>
+                                    <td class="num">{% if row.raw.open %}<a href="{{ row.links.open }}">{{ row.open }}</a>{% else %}<span class="zero">0</span>{% endif %}</td>
+                                    <td class="num">{% if row.raw.overdue %}<a href="{{ row.links.overdue }}">{{ row.overdue }}</a>{% else %}<span class="zero">0</span>{% endif %}</td>
+                                    <td class="num">{% if row.raw.dead %}<a href="{{ row.links.dead }}">{{ row.dead }}</a>{% else %}<span class="zero">0</span>{% endif %}</td>
+                                    <td class="num gd-hide-sm">{% if row.raw.deferred %}<a href="{{ row.links.deferred }}">{{ row.deferred }}</a>{% else %}<span class="zero">0</span>{% endif %}</td>
+                                    <td class="gd-hide-sm muted">{{ row.oldest }}</td>
+                                    <td>{% include "reporting/dashboards/_state.html" with s=row.state %}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                {% include "reporting/dashboards/_empty.html" with text="Navbat bo‘sh: barcha xabarlar yetkazilgan" %}
+            {% endif %}
+        </section>
+
+        <div class="gd-cols">
+            <div class="gd-stack">
+                <section class="gd-panel" id="webhooks">
+                    <header class="gd-panel__head">
+                        <h2 class="gd-panel__title">Webhooklar · 24 soat</h2>
+                        <p class="gd-panel__note">Xato = rad etilgan yoki ishlov xatosi; {{ d.thresholds.webhook_critical }}+ — jiddiy</p>
+                    </header>
+                    <div class="gd-scroll">
+                        <table class="gd-table">
+                            <thead><tr><th>Provayder</th><th class="num">Qabul qilindi</th><th class="num">Xato</th><th>Holat</th></tr></thead>
+                            <tbody>
+                                {% for row in d.webhooks %}
+                                    <tr>
+                                        <td class="strong">{{ row.provider }}</td>
+                                        <td class="num">{% if row.raw.total %}<a href="{{ row.href }}">{{ row.total }}</a>{% else %}<span class="zero">0</span>{% endif %}</td>
+                                        <td class="num">{% if row.raw.failed %}<a href="{{ row.failed_href }}">{{ row.failed }}</a>{% else %}<span class="zero">0</span>{% endif %}</td>
+                                        <td>{% include "reporting/dashboards/_state.html" with s=row.state %}</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+                <section class="gd-panel" id="jobs">
+                    <header class="gd-panel__head">
+                        <h2 class="gd-panel__title">Fon vazifalari (Job)</h2>
+                        <p class="gd-panel__note">Har bir turning oxirgi ishga tushishi; 15 daqiqadan beri yurak urishi yo‘q — osilgan</p>
+                    </header>
+                    <div class="gd-scroll">
+                        <table class="gd-table">
+                            <thead><tr><th>Tur</th><th>Holat</th><th>Boshlangan</th><th class="num">Davomiyligi</th><th></th></tr></thead>
+                            <tbody>
+                                {% for row in d.jobs %}
+                                    <tr>
+                                        <td class="strong"><a href="{{ row.href }}">{{ row.kind }}</a></td>
+                                        <td>{{ row.state_text }}</td>
+                                        <td class="muted">{{ row.when }}</td>
+                                        <td class="num">{{ row.duration }}</td>
+                                        <td>{% include "reporting/dashboards/_state.html" with s=row.state %}</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+
+            <section class="gd-panel" id="beat">
+                <header class="gd-panel__head">
+                    <h2 class="gd-panel__title">Davriy vazifalar (Celery beat)</h2>
+                    <p class="gd-panel__note">Oxirgi iz — vazifa qoldirgan yozuv bo‘yicha</p>
+                </header>
+                <div class="gd-scroll">
+                    <table class="gd-table">
+                        <thead><tr><th>Vazifa</th><th class="gd-hide-sm">Jadval</th><th>Oxirgi iz</th><th>Holat</th></tr></thead>
+                        <tbody>
+                            {% for row in d.beat %}
+                                <tr>
+                                    <td class="strong"><a href="{{ row.href }}">{{ row.task }}</a></td>
+                                    <td class="muted gd-hide-sm">{{ row.schedule }}</td>
+                                    <td>{{ row.trace }}</td>
+                                    <td>{% include "reporting/dashboards/_state.html" with s=row.state %}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+
+        <section class="gd-panel" id="readiness">
+            <header class="gd-panel__head">
+                <h2 class="gd-panel__title">Provayderlar tayyorligi</h2>
+                <p class="gd-panel__note">Live — haqiqiy adapter; Sinov — soxta (fake) adapter. Live, lekin sozlanmagan — jiddiy.</p>
+            </header>
+            <div class="gd-scroll">
+                <table class="gd-table">
+                    <thead><tr><th>Provayder</th><th>Rejim</th><th class="gd-hide-sm">Sozlangan</th><th class="gd-hide-sm">Oxirgi muvaffaqiyat</th><th class="num">Xatolar</th><th class="gd-hide-sm">Oxirgi xato</th><th>Holat</th></tr></thead>
+                    <tbody>
+                        {% for row in d.readiness %}
+                            <tr>
+                                <td class="strong">{% if row.href %}<a href="{{ row.href }}">{{ row.provider }}</a>{% else %}{{ row.provider }}{% endif %}</td>
+                                <td>{{ row.mode }}</td>
+                                <td class="gd-hide-sm">{{ row.configured }}</td>
+                                <td class="muted gd-hide-sm">{{ row.last_success }}</td>
+                                <td class="num">{{ row.failures }}</td>
+                                <td class="muted gd-hide-sm">{{ row.last_error }}</td>
+                                <td>{% include "reporting/dashboards/_state.html" with s=row.state %}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+    {% endwith %}
+{% endblock %}

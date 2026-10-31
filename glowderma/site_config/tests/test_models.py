@@ -13,6 +13,7 @@ from django.test import Client, RequestFactory
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
+from glowderma.accounts.tests.ops_helpers import ops_login
 from glowderma.core import seeding
 from glowderma.core.admin import ReadOnlyAdmin
 from glowderma.core.seeding import SeedContext
@@ -38,7 +39,7 @@ def test_load_returns_the_migrated_row_without_an_insert() -> None:
     assert len(queries) == 1 and "INSERT" not in queries[0]["sql"]
     assert row.pk == 1 and row.reservation_minutes == 15 and row.support_phone == ""
     assert row.updated_by is None and row.terms_version == ""
-    assert str(row) == "Site settings"
+    assert str(row) == "Sayt sozlamalari"
 
 
 def test_singleton_check_refuses_a_second_row() -> None:
@@ -121,7 +122,7 @@ def test_admin_registration_is_read_only() -> None:
     assert not model_admin.has_change_permission(request)
     assert not model_admin.has_delete_permission(request)
     client = Client()
-    client.force_login(request.user)
+    ops_login(client, request.user)
     assert client.get(reverse("admin:site_config_sitesettings_changelist")).status_code == 200
     assert client.get(reverse("admin:site_config_sitesettings_change", args=[1])).status_code == 200
     assert client.get(reverse("admin:site_config_sitesettings_add")).status_code == 403

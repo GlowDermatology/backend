@@ -7,7 +7,9 @@ from django.test import Client, RequestFactory
 from django.urls import reverse
 
 from glowderma.accounts.tests.factories import StaffUserFactory
-from glowderma.core.admin import ReadOnlyAdmin
+from glowderma.accounts.tests.ops_helpers import ops_login
+from glowderma.core.admin import ReadOnlyAdmin, column_field
+from glowderma.core.tests.admin_pages import rendered_field_names
 from glowderma.payments.admin import PaymentAdmin, RefundInline
 from glowderma.payments.models import Payment, Refund
 from glowderma.payments.tests.factories import PaymentFactory, RefundFactory
@@ -21,7 +23,7 @@ MODELS = [Payment, Refund]
 def plain_staff_client() -> Client:
     """The audience ``ReadOnlyAdmin`` exists for: active ``is_staff``, no superuser flag, no model perms."""
     client = Client()
-    client.force_login(StaffUserFactory.create(email="ops@x.uz", is_staff=True))
+    ops_login(client, StaffUserFactory.create(email="ops@x.uz", is_staff=True))
     return client
 
 
@@ -43,7 +45,10 @@ def test_models_registered_read_only(model: type[models.Model]) -> None:
     assert model_admin.list_display != ("__str__",)
     for field in model._meta.concrete_fields:
         if field.is_relation:
-            assert field.name in model_admin.raw_id_fields, (model, field.name)
+            assert field.name in (*model_admin.raw_id_fields, *model_admin.autocomplete_fields), (
+                model,
+                field.name,
+            )
     # provider_state is a JSON column: it renders through the pretty renderer, never as a form field
     assert "provider_state" in model_admin.get_exclude(request)
     assert "provider_state_pretty" in model_admin.get_readonly_fields(request)
@@ -52,7 +57,7 @@ def test_models_registered_read_only(model: type[models.Model]) -> None:
 def test_payment_admin_as_designed() -> None:
     model_admin = admin.site._registry[Payment]
     assert isinstance(model_admin, PaymentAdmin)
-    assert model_admin.list_display == (
+    assert tuple(map(column_field, model_admin.list_display)) == (
         "id",
         "order",
         "provider",
@@ -62,7 +67,12 @@ def test_payment_admin_as_designed() -> None:
         "confirmed_at",
         "created_at",
     )
-    assert model_admin.list_filter == ("provider", "status")
+    assert tuple(map(column_field, model_admin.list_filter)) == (
+        "provider",
+        "status",
+        "created_at",
+        "confirmed_at",
+    )
     assert model_admin.search_fields == ("provider_txn_id", "=order__id")
     assert model_admin.inlines == (RefundInline,)
     request = RequestFactory().get("/django-admin/")
@@ -75,7 +85,7 @@ def test_payment_admin_as_designed() -> None:
     assert not inline.has_delete_permission(request, None)
     assert set(inline.fields) <= set(inline.get_readonly_fields(request))
     refund_admin = admin.site._registry[Refund]
-    assert refund_admin.list_filter == ("state", "origin")
+    assert tuple(map(column_field, refund_admin.list_filter)) == ("state", "origin", "requested_at")
     assert refund_admin.search_fields == ("provider_refund_id", "=payment__id")
 
 
@@ -89,7 +99,7 @@ def test_pages_render_for_a_plain_staff_user(plain_staff_client: Client) -> None
     content = change.content.decode()
     assert "CLK-7741920385" in content
     assert "-31050" in content  # RefundInline
-    assert "provider_state" in content
+    assert "provider_state_pretty" in rendered_field_names(change)
     assert plain_staff_client.get(url(Refund, "change", refund.pk)).status_code == 200
     assert plain_staff_client.get(url(Payment, "changelist") + f"?q={payment.order_id}").status_code == 200
     assert plain_staff_client.get(url(Payment, "changelist") + "?q=CLK-77").status_code == 200

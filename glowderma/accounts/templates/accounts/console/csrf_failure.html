@@ -1,0 +1,15 @@
+{% extends 'accounts/console/base_step.html' %}
+{% load unfold %}
+{% comment %}
+  CSRF_FAILURE_VIEW of the console (glowderma.accounts.console.views.csrf_failure): served with status 403.
+{% endcomment %}
+
+{% block step %}
+    {% include "unfold/helpers/messages/error.html" with error=csrf_message %}
+
+    <div class="flex flex-col gap-3 mt-6">
+        {% component "unfold/components/button.html" with href=next_url variant="primary" class="w-full" %}
+            Davom etish <span class="material-symbols-outlined relative right-0 transition-all group-hover:-right-1 text-sm">arrow_forward</span>
+        {% endcomponent %}
+    </div>
+{% endblock %}

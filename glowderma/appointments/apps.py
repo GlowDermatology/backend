@@ -3,6 +3,7 @@ from django.apps import AppConfig
 
 class AppointmentsConfig(AppConfig):
     name = "glowderma.appointments"
+    verbose_name = "Klinika qabullari"
 
     def ready(self) -> None:
         # ``professionals`` (a lower layer) asks how many open appointments a specialist still has before it

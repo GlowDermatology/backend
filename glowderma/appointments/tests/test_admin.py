@@ -7,9 +7,10 @@ from django.test import Client, RequestFactory
 from django.urls import reverse
 
 from glowderma.accounts.tests.factories import StaffUserFactory
+from glowderma.accounts.tests.ops_helpers import ops_login
 from glowderma.appointments.models import Appointment, AppointmentEvent
 from glowderma.appointments.tests.factories import AppointmentEventFactory, AppointmentFactory
-from glowderma.core.admin import ReadOnlyAdmin
+from glowderma.core.admin import ReadOnlyAdmin, column_field
 
 pytestmark = pytest.mark.django_db
 
@@ -29,7 +30,7 @@ def test_registered_read_only(model: type[models.Model]) -> None:
 
 
 def test_design_columns() -> None:
-    assert admin.site._registry[Appointment].list_display == (
+    assert tuple(map(column_field, admin.site._registry[Appointment].list_display)) == (
         "id",
         "professional",
         "customer",
@@ -38,13 +39,18 @@ def test_design_columns() -> None:
         "requested_via",
         "price",
     )
-    assert admin.site._registry[Appointment].list_filter == ("status", "professional", "requested_via")
+    assert tuple(map(column_field, admin.site._registry[Appointment].list_filter)) == (
+        "status",
+        "professional",
+        "requested_via",
+        "start",
+    )
     assert admin.site._registry[AppointmentEvent].list_filter == ("type", "source")
 
 
 def test_changelists_change_pages_and_search_render() -> None:
     client = Client()
-    client.force_login(StaffUserFactory.create(is_staff=True, is_superuser=True))
+    ops_login(client, StaffUserFactory.create(is_staff=True, is_superuser=True))
     event = AppointmentEventFactory.create()
     other = AppointmentFactory.create()
     for row in (event.appointment, event, other):

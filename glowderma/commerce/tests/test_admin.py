@@ -7,7 +7,15 @@ from django.test import Client, RequestFactory
 from django.urls import reverse
 
 from glowderma.accounts.tests.factories import StaffUserFactory
-from glowderma.commerce.admin import OrderAdmin, OrderEventInline, OrderItemInline
+from glowderma.accounts.tests.ops_helpers import ops_login
+from glowderma.commerce.admin import (
+    OrderAdmin,
+    OrderCashbackHoldInline,
+    OrderEventInline,
+    OrderItemInline,
+    OrderPaymentInline,
+    OrderShipmentInline,
+)
 from glowderma.commerce.models import Cart, CartItem, Order, OrderEvent, OrderItem, StockReservation
 from glowderma.commerce.tests.factories import (
     CartItemFactory,
@@ -25,7 +33,7 @@ MODELS = [Order, OrderItem, OrderEvent, StockReservation, Cart, CartItem]
 @pytest.fixture
 def super_client() -> Client:
     client = Client()
-    client.force_login(StaffUserFactory.create(email="root@x.uz", is_staff=True, is_superuser=True))
+    ops_login(client, StaffUserFactory.create(email="root@x.uz", is_staff=True, is_superuser=True))
     return client
 
 
@@ -33,7 +41,7 @@ def super_client() -> Client:
 def plain_staff_client() -> Client:
     """The audience ``ReadOnlyAdmin`` exists for: active ``is_staff``, no superuser flag, no model perms."""
     client = Client()
-    client.force_login(StaffUserFactory.create(email="ops@x.uz", is_staff=True))
+    ops_login(client, StaffUserFactory.create(email="ops@x.uz", is_staff=True))
     return client
 
 
@@ -54,18 +62,28 @@ def test_models_registered_read_only(model: type[models.Model]) -> None:
     assert model_admin.list_display != ("__str__",)
     for field in model._meta.concrete_fields:
         if field.is_relation:
-            assert field.name in model_admin.raw_id_fields, (model, field.name)
+            assert field.name in (*model_admin.raw_id_fields, *model_admin.autocomplete_fields), (
+                model,
+                field.name,
+            )
 
 
 def test_order_admin_inlines_are_read_only() -> None:
     model_admin = admin.site._registry[Order]
     assert isinstance(model_admin, OrderAdmin)
-    assert model_admin.inlines == (OrderItemInline, OrderEventInline)
+    expected = [
+        OrderItemInline,
+        OrderEventInline,
+        OrderPaymentInline,
+        OrderShipmentInline,
+        OrderCashbackHoldInline,
+    ]
+    assert list(model_admin.inlines) == expected
     request = RequestFactory().get("/django-admin/")
     request.user = StaffUserFactory.create(is_staff=True)
     instances = model_admin.get_inline_instances(request)
-    # a plain staff user (no model permissions) keeps both inlines: the view grant mirrors ReadOnlyAdmin
-    assert [type(inline) for inline in instances] == [OrderItemInline, OrderEventInline]
+    # a plain staff user (no model permissions) keeps every inline: the view grant mirrors ReadOnlyAdmin
+    assert [type(inline) for inline in instances] == expected
     for inline in instances:
         assert inline.has_view_permission(request, None)
         assert not inline.has_add_permission(request, None)
@@ -85,7 +103,9 @@ def test_pages_render_for_a_superuser(super_client: Client) -> None:
     assert change.status_code == 200
     content = change.content.decode()
     assert order.items.get().billz_id in content  # OrderItem inline
-    assert "order_created" in content  # OrderEvent inline
+    assert (
+        "Buyurtma yaratildi" in content and "order_created" not in content
+    )  # OrderEvent inline, Uzbek label
     assert "Mijoz so‘rovi bilan" in content
     for model, pk in ((OrderEvent, event.pk), (StockReservation, reservation.pk), (CartItem, cart_item.pk)):
         assert super_client.get(url(model, "change", pk)).status_code == 200
@@ -110,7 +130,9 @@ def test_pages_render_for_a_plain_staff_user(plain_staff_client: Client) -> None
     assert change.status_code == 200
     content = change.content.decode()
     assert order.items.get().billz_id in content  # OrderItem inline
-    assert "order_created" in content  # OrderEvent inline
+    assert (
+        "Buyurtma yaratildi" in content and "order_created" not in content
+    )  # OrderEvent inline, Uzbek label
     assert "Mijoz so‘rovi bilan" in content
     for model, pk in ((OrderEvent, event.pk), (StockReservation, reservation.pk), (CartItem, cart_item.pk)):
         assert plain_staff_client.get(url(model, "change", pk)).status_code == 200

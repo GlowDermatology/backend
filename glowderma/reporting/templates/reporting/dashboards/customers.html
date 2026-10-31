@@ -1,0 +1,189 @@
+{% extends "reporting/dashboards/base.html" %}
+{% load unfold %}
+
+{% block dashboard %}
+    {% with d=dashboard %}
+        <div class="gd-grid gd-grid--3">
+            {% for tile in d.tiles %}{% include "reporting/dashboards/_tile.html" %}{% endfor %}
+        </div>
+
+        <div class="gd-cols gd-cols--wide">
+            <section class="gd-panel" id="signups">
+                <header class="gd-panel__head">
+                    <h2 class="gd-panel__title">Ro‘yxatdan o‘tish usuli bo‘yicha · 30 kun</h2>
+                    <p class="gd-panel__note">Usul akkaunt yaratilgan paytdagi identifikator bo‘yicha aniqlanadi</p>
+                </header>
+                <div class="gd-panel__body">
+                    {% if d.signups.total %}
+                        <div class="gd-chart" data-gd-chart="count">
+                            {% component "unfold/components/chart/bar.html" with data=d.signups.chart.data options=d.signups.chart.options class="h-full" %}{% endcomponent %}
+                        </div>
+                    {% else %}
+                        {% include "reporting/dashboards/_empty.html" with icon="person_add" text="30 kun ichida yangi mijoz yo‘q" %}
+                    {% endif %}
+                </div>
+            </section>
+
+            <section class="gd-panel">
+                <header class="gd-panel__head">
+                    <h2 class="gd-panel__title">Usullar</h2>
+                    <p class="gd-panel__note"><a class="gd-link" href="{{ d.signups.href }}">Barcha yangi mijozlar</a></p>
+                </header>
+                <div class="gd-scroll">
+                    <table class="gd-table gd-legend-table">
+                        <thead><tr><th>Usul</th><th class="num">Soni</th><th class="num">Ulush</th></tr></thead>
+                        <tbody>
+                            {% for row in d.signups.methods %}
+                                <tr><td class="strong"><span class="gd-swatch" style="background: var(--gd-method-{{ forloop.counter }})"></span>{{ row.label }}</td><td class="num">{{ row.count }}</td><td class="num">{{ row.percent }}%</td></tr>
+                            {% endfor %}
+                            {% for row in d.signups.providers %}
+                                <tr><td class="muted">&nbsp;&nbsp;&nbsp;&nbsp;↳ <a href="{{ row.href }}">{{ row.label }}</a></td><td class="num muted">{{ row.count }}</td><td></td></tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="gd-panel__body">
+                    <dl class="gd-kv">
+                        <dt>Faol akkauntlar</dt><dd>{{ d.coverage.active }}</dd>
+                        <dt>Telefonsiz (faol)</dt><dd>{{ d.coverage.phoneless }} · {{ d.coverage.phoneless_pct }}%</dd>
+                        <dt>Keyin telefon qo‘shgan</dt><dd><a class="gd-link" href="{{ d.coverage.attached_href }}">{{ d.coverage.attached }}</a></dd>
+                    </dl>
+                </div>
+            </section>
+        </div>
+
+        <div class="gd-cols">
+            <section class="gd-panel" id="otp">
+                <header class="gd-panel__head">
+                    <h2 class="gd-panel__title">Bir martalik kodlar (OTP)</h2>
+                    <p class="gd-panel__note">Bloklangan = noto‘g‘ri urinishlar chegarasiga yetgan kod · 7 kun</p>
+                </header>
+                {% if d.otp.rows %}
+                    <div class="gd-scroll">
+                        <table class="gd-table">
+                            <thead><tr><th>Kanal</th><th>Maqsad</th><th class="num">24 soat</th><th class="num">7 kun</th><th class="num gd-hide-sm">Tasdiqlangan</th><th class="num">Bloklangan</th></tr></thead>
+                            <tbody>
+                                {% for row in d.otp.rows %}
+                                    <tr>
+                                        <td class="strong">{{ row.channel }}</td>
+                                        <td>{{ row.purpose }}</td>
+                                        <td class="num">{{ row.day }}</td>
+                                        <td class="num"><a href="{{ row.href }}">{{ row.week }}</a></td>
+                                        <td class="num gd-hide-sm">{{ row.verified }}</td>
+                                        <td class="num">{% if row.locked_href %}<a href="{{ row.locked_href }}">{{ row.locked }}</a>{% else %}<span class="zero">0</span>{% endif %}</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    {% include "reporting/dashboards/_empty.html" with icon="sms" text="7 kun ichida kod yuborilmagan" %}
+                {% endif %}
+                <div class="gd-panel__foot">Kunlik va soatlik limitlar (Redis hisoblagichlari) yozuv qoldirmaydi — bu yerda faqat bazadagi kodlar.</div>
+            </section>
+
+            <section class="gd-panel" id="sessions">
+                <header class="gd-panel__head">
+                    <h2 class="gd-panel__title">Ochiq sessiyalar platforma bo‘yicha</h2>
+                    <p class="gd-panel__note">{{ d.session_total }} ta ochiq mijoz sessiyasi · har bir qator o‘sha sessiyalar ro‘yxatiga olib boradi</p>
+                </header>
+                <div class="gd-panel__body">
+                    {% if d.platforms %}
+                        <div class="gd-bars">
+                            {% for row in d.platforms %}
+                                <a class="gd-barrow" href="{{ row.href }}">
+                                    <span class="gd-barrow__label">{{ row.label }}</span>
+                                    <span class="gd-barrow__value">{{ row.count }}<small>{{ row.percent }}%</small></span>
+                                    <span class="gd-track"><span class="gd-fill{% if row.slot %} gd-fill--slot-{{ row.slot }}{% else %} gd-fill--muted{% endif %}" style="display:block;width: {{ row.percent }}%"></span></span>
+                                </a>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        {% include "reporting/dashboards/_empty.html" with icon="devices" text="Ochiq sessiya yo‘q" %}
+                    {% endif %}
+                </div>
+            </section>
+        </div>
+
+        <div class="gd-cols">
+            <section class="gd-panel" id="cashback">
+                <header class="gd-panel__head">
+                    <h2 class="gd-panel__title">Cashback · 30 kun</h2>
+                    <p class="gd-panel__note">Daftar yozuvlari bo‘yicha (so‘m)</p>
+                </header>
+                <div class="gd-panel__body">
+                    <div class="gd-bars">
+                        <a class="gd-barrow" href="{{ d.cashback.issued_href }}">
+                            <span class="gd-barrow__label">Berildi</span>
+                            <span class="gd-barrow__value">{{ d.cashback.issued }}</span>
+                            <span class="gd-track"><span class="gd-fill" style="display:block;width: {{ d.cashback.issued_pct }}%"></span></span>
+                        </a>
+                        <a class="gd-barrow" href="{{ d.cashback.redeemed_href }}">
+                            <span class="gd-barrow__label">Sarflandi</span>
+                            <span class="gd-barrow__value">{{ d.cashback.redeemed }}</span>
+                            <span class="gd-track"><span class="gd-fill gd-fill--muted" style="display:block;width: {{ d.cashback.redeemed_pct }}%"></span></span>
+                        </a>
+                    </div>
+                    <dl class="gd-kv" style="margin-top:16px">
+                        <dt>Bekor qilingan (reversal)</dt><dd>{{ d.cashback.reversed }}</dd>
+                        <dt>Qo‘lda tuzatish</dt><dd>{{ d.cashback.adjusted }}</dd>
+                        <dt>Sof o‘zgarish</dt><dd>{{ d.cashback.net }}</dd>
+                    </dl>
+                </div>
+            </section>
+
+            <section class="gd-panel" id="tiers">
+                <header class="gd-panel__head">
+                    <h2 class="gd-panel__title">Darajalar bo‘yicha mijozlar</h2>
+                    <p class="gd-panel__note">{% if d.cashback.policy_version %}<a class="gd-link" href="{{ d.cashback.policy_href }}">Siyosat v{{ d.cashback.policy_version }}</a> · faol mijozlar, umrbod xarid bo‘yicha{% else %}Amaldagi siyosat yo‘q{% endif %}</p>
+                </header>
+                <div class="gd-panel__body">
+                    {% if d.cashback.tiers %}
+                        <div class="gd-bars">
+                            {% for tier in d.cashback.tiers %}
+                                <div class="gd-barrow">
+                                    <span class="gd-barrow__label"><strong>{{ tier.label }}</strong> · {{ tier.range }}</span>
+                                    <span class="gd-barrow__value">{{ tier.customers }}<small>{{ tier.percent }}%</small></span>
+                                    <span class="gd-track"><span class="gd-fill" style="display:block;width: {{ tier.percent }}%"></span></span>
+                                </div>
+                            {% endfor %}
+                            {% if d.cashback.uncovered_raw %}<div class="gd-panel__note">Hech bir daraja qamramagan: {{ d.cashback.uncovered }}</div>{% endif %}
+                        </div>
+                    {% else %}
+                        {% include "reporting/dashboards/_empty.html" with icon="stairs" text="Amaldagi siyosat yo‘q — darajalar hisoblanmaydi" %}
+                    {% endif %}
+                </div>
+            </section>
+        </div>
+
+        <section class="gd-panel" id="clinic">
+            <header class="gd-panel__head">
+                <h2 class="gd-panel__title">Klinika: bugun va jadval ziddiyatlari</h2>
+                <p class="gd-panel__note">
+                    <a class="gd-link" href="{{ d.clinic.href }}">Bugun {{ d.clinic.total }} ta qabul</a>{% for row in d.clinic.statuses %} · <a class="gd-link" href="{{ row.href }}">{{ row.label }} {{ row.count }}</a>{% endfor %}
+                </p>
+            </header>
+            {% if d.clinic.conflicts %}
+                <div class="gd-scroll">
+                    <table class="gd-table">
+                        <thead><tr><th>Qabul</th><th>Vaqt</th><th>Mutaxassis</th><th class="gd-hide-sm">Xizmat</th><th>Holat</th></tr></thead>
+                        <tbody>
+                            {% for row in d.clinic.conflicts %}
+                                <tr>
+                                    <td><a href="{{ row.href }}">#{{ row.id }}</a></td>
+                                    <td class="num" style="text-align:left">{{ row.when }}</td>
+                                    <td class="strong">{{ row.professional }}</td>
+                                    <td class="gd-hide-sm">{{ row.service }}</td>
+                                    <td>{{ row.status }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="gd-panel__foot">Jadval o‘zgargani uchun ish vaqtiga to‘g‘ri kelmay qolgan ochiq qabullar (keyingi 14 kun) — ko‘chirish yoki bekor qilish kerak.</div>
+            {% else %}
+                {% include "reporting/dashboards/_empty.html" with text="Keyingi 14 kunda jadval ziddiyati yo‘q" %}
+            {% endif %}
+        </section>
+    {% endwith %}
+{% endblock %}

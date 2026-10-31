@@ -82,7 +82,7 @@ def test_policy_factory_defaults_str_ordering_and_checks() -> None:
     second = CashbackPolicyFactory.create(created_at=at(8, 1, 10), effective_from=at(8, 15))
     assert (first.version, second.version) == (1, 2)
     assert first.author is None and first.basis == "before_purchase" and first.earn_on_cashback_paid is False
-    assert str(first) == "Cashback policy v1 (before_purchase, from 2026-06-01)"
+    assert str(first) == "Cashback siyosati v1 (Xariddan oldingi summa, 2026-06-01 dan)"
     assert list(CashbackPolicy.objects.all()) == [second, first]  # ordering -version
     assert [(t.from_amount, t.to_amount, t.percent) for t in first.tiers.all()] == [
         (0, 20_000_000, Decimal("1.00"))
@@ -237,7 +237,7 @@ def test_policy_supersession_rule_t4() -> None:
 
 def test_account_one_per_customer_str_negative_allowed_and_protect() -> None:
     account = LoyaltyAccountFactory.create(balance=-5_000)  # L5: negative balances are allowed
-    assert str(account) == f"Loyalty account of customer {account.customer_id}: -5000"
+    assert str(account) == f"Mijoz #{account.customer_id} cashback hisobi: −5\u00a0000 so‘m"
     assert Customer.objects.get(pk=account.customer_id).loyalty_account == account
     violates(
         "loyalty_loyaltyaccount_customer_id_key", LoyaltyAccount.objects.create, customer=account.customer
@@ -264,8 +264,8 @@ def test_ledger_factory_chain_str_ordering_and_fk_rules() -> None:
     account.refresh_from_db()
     assert [e.balance_after for e in (credit, debit, adjustment, reversal)] == [2_310, 310, 3_260, 950]
     assert account.balance == 950
-    assert str(credit) == f"Ledger #{credit.pk} credit +2310 → 2310 (acct {account.pk})"
-    assert str(debit) == f"Ledger #{debit.pk} debit -2000 → 310 (acct {account.pk})"
+    assert str(credit) == f"Yozuv #{credit.pk} Hisoblandi +2310 → 2310 (hisob #{account.pk})"
+    assert str(debit) == f"Yozuv #{debit.pk} Ishlatildi -2000 → 310 (hisob #{account.pk})"
     # ordering -at, -id: ties on ``at`` fall back to id
     assert list(LedgerEntry.objects.all()) == [reversal, adjustment, debit, credit]
     assert list(account.entries.all()) == [reversal, adjustment, debit, credit]
@@ -419,7 +419,7 @@ def test_hold_factory_traits_str_and_fk_rules() -> None:
     hold = CashbackHoldFactory.create()
     assert hold.state == "active" and hold.amount == 20_000 == hold.order.cashback_used
     assert hold.expires_at == hold.order.reservation_expires_at
-    assert str(hold) == f"Hold 20000 on order {hold.order_id} (active)"
+    assert str(hold) == f"Ushlab turish 20\u00a0000 so‘m · buyurtma №{hold.order_id} (Faol)"
     assert hold.account.holds.get() == hold and hold.order.cashback_holds.get() == hold
     captured = CashbackHoldFactory.create(captured=True)
     assert captured.captured_entry is not None and captured.captured_entry.kind == "debit"
@@ -482,7 +482,7 @@ def test_purchase_factory_str_ordering_credit_and_reversal_rows() -> None:
     assert purchase.source == "online" and purchase.order is not None and purchase.order.purchase == purchase
     assert (purchase.amount, purchase.promo_amount, purchase.cashback_paid) == (185_000, 0, 0)
     assert purchase.cashback_amount == 0 and purchase.credited_entry is None and purchase.reversed is False
-    assert str(purchase) == f"Purchase #{purchase.pk} online 185000 (order {purchase.order_id})"
+    assert str(purchase) == f"Xarid #{purchase.pk} Onlayn 185\u00a0000 so‘m (buyurtma №{purchase.order_id})"
     assert [(i.position, i.line_total, i.promo) for i in purchase.items.all()] == [(0, 185_000, False)]
     store = PurchaseFactory.create(
         customer=purchase.customer, store=True, at=at(10, 21, 11, 47), credit=2_310
@@ -490,7 +490,7 @@ def test_purchase_factory_str_ordering_credit_and_reversal_rows() -> None:
     assert (
         store.order is None and store.billz_order_uuid is None and store.billz_sale_ref == store.billz_sale_id
     )
-    assert str(store) == f"Purchase #{store.pk} store_qr 231000 (Billz {store.billz_sale_ref})"
+    assert str(store) == f"Xarid #{store.pk} Do‘kon (QR) 231\u00a0000 so‘m (Billz {store.billz_sale_ref})"
     assert store.credited_entry is not None and store.credited_entry.purchase == store
     assert (store.credited_entry.source_type, store.credited_entry.source_ref) == ("billz_sale", store.billz_sale_ref)  # fmt: skip  # noqa: E501
     assert store.credited_entry.credited_purchase == store and store.cashback_amount == 2_310
@@ -508,7 +508,7 @@ def test_purchase_factory_str_ordering_credit_and_reversal_rows() -> None:
         and credited.reversal_entry == reversal
     )
     assert reversal.reversed_purchase == credited
-    assert str(credited).endswith(" reversed")
+    assert str(credited).endswith(" · bekor qilingan")
     # Re-read: mypy keeps the Literal[False] narrowing of ``purchase.reversed`` across the helper call.
     assert reverse_purchase_rows(purchase) is None and Purchase.objects.get(pk=purchase.pk).reversed is True
     with pytest.raises(ProtectedError):
@@ -588,7 +588,7 @@ def test_purchase_item_constraints_cascade_and_protect() -> None:
     product = ProductFactory.create(price=45_000)
     item = PurchaseItemFactory.create(purchase=purchase, product=product, quantity=2)
     assert (item.position, item.unit_price, item.line_total, item.billz_product_id) == (0, 45_000, 90_000, product.billz_id)  # fmt: skip  # noqa: E501
-    assert str(item) == f"{product.display_name} × 2 @ 45000 (purchase {purchase.pk})"
+    assert str(item) == f"{product.display_name} × 2 @ 45\u00a0000 so‘m (xarid #{purchase.pk})"
     billz_only = PurchaseItemFactory.create(
         purchase=purchase, product=None, name="Billz line", unit_price=1_000
     )
@@ -615,7 +615,7 @@ def test_pos_device_unique_key_str_ordering_and_protect() -> None:
     device = PosDeviceFactory.create(name="Yunusobod kassa", created_by=staff)
     assert str(device) == f"POS Yunusobod kassa ({device.key_prefix}…)"
     inactive = PosDeviceFactory.create(name="Chilonzor kassa", is_active=False)
-    assert str(inactive).endswith(" inactive")
+    assert str(inactive).endswith(" · nofaol")
     assert list(PosDevice.objects.all()) == [inactive, device]  # ordering name
     violates("loyalty_posdevice_key_hash_key", PosDeviceFactory.create, key_hash=device.key_hash)
     with pytest.raises(ProtectedError):

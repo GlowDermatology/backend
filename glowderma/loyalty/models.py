@@ -19,6 +19,7 @@ from django.db import models
 from django.db.models import Exists, F, OuterRef, Q, Subquery
 
 from glowderma.core import enums, timeutils
+from glowderma.core.labels import som_text
 from glowderma.core.models import AppendOnlyModel, AppendOnlyQuerySet, TimeStampedModel, timestamp_default
 
 
@@ -64,18 +65,26 @@ CashbackPolicyManager = models.Manager.from_queryset(CashbackPolicyQuerySet)
 class CashbackPolicy(AppendOnlyModel):
     """One immutable version of the cashback rules; its tiers are the bands of ``CashbackTier``."""
 
-    version = models.PositiveIntegerField(unique=True)
-    effective_from = models.DateTimeField()
-    basis = models.CharField(max_length=16, choices=enums.RateBasis.choices)  # before_purchase|with_purchase
-    earn_on_cashback_paid = models.BooleanField()
+    version = models.PositiveIntegerField(unique=True, verbose_name="versiya")
+    effective_from = models.DateTimeField(verbose_name="amal qilish boshlanishi")
+    # before_purchase|with_purchase
+    basis = models.CharField(max_length=16, choices=enums.RateBasis.choices, verbose_name="hisob asosi")
+    earn_on_cashback_paid = models.BooleanField(verbose_name="cashback bilan to‘langan qismga ham cashback")
+    # null = system / seed ("Tizim")
     author = models.ForeignKey(
-        "accounts.StaffUser", null=True, on_delete=models.PROTECT, related_name="cashback_policies"
-    )  # null = system / seed ("Tizim")
-    created_at = models.DateTimeField(default=timestamp_default, editable=False)
+        "accounts.StaffUser",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="cashback_policies",
+        verbose_name="muallif",
+    )
+    created_at = models.DateTimeField(default=timestamp_default, editable=False, verbose_name="yaratilgan")
 
     objects: ClassVar[CashbackPolicyManager[CashbackPolicy]] = CashbackPolicyManager()
 
     class Meta:
+        verbose_name = "cashback siyosati"
+        verbose_name_plural = "cashback siyosatlari"
         ordering = ["-version"]
         constraints = [
             models.CheckConstraint(
@@ -85,7 +94,8 @@ class CashbackPolicy(AppendOnlyModel):
         indexes = [models.Index(fields=["effective_from"], name="policy_effective_from_idx")]
 
     def __str__(self) -> str:
-        return f"Cashback policy v{self.version} ({self.basis}, from {self.effective_from:%Y-%m-%d})"
+        basis = self.get_basis_display()
+        return f"Cashback siyosati v{self.version} ({basis}, {self.effective_from:%Y-%m-%d} dan)"
 
     # Derived columns: ``with_derived()`` attaches them as annotations (Django assigns them through the
     # setters below); a plain instance loads both lazily with one query. They depend on *other* rows (a
@@ -148,13 +158,18 @@ class CashbackPolicy(AppendOnlyModel):
 class CashbackTier(AppendOnlyModel):
     """One band ``[from_amount, to_amount)`` of a policy version with its percent."""
 
-    policy = models.ForeignKey("loyalty.CashbackPolicy", on_delete=models.PROTECT, related_name="tiers")
-    from_amount = models.BigIntegerField()  # inclusive, so'm
-    to_amount = models.BigIntegerField(null=True)  # exclusive, so'm; null = open-ended
-    percent = models.DecimalField(max_digits=5, decimal_places=2)
-    created_at = models.DateTimeField(default=timestamp_default, editable=False)
+    policy = models.ForeignKey(
+        "loyalty.CashbackPolicy", on_delete=models.PROTECT, related_name="tiers", verbose_name="siyosat"
+    )
+    from_amount = models.BigIntegerField(verbose_name="summadan")  # inclusive, so'm
+    # exclusive, so'm; null = open-ended
+    to_amount = models.BigIntegerField(null=True, verbose_name="summagacha")
+    percent = models.DecimalField(max_digits=5, decimal_places=2, verbose_name="foiz")
+    created_at = models.DateTimeField(default=timestamp_default, editable=False, verbose_name="yaratilgan")
 
     class Meta:
+        verbose_name = "cashback darajasi"
+        verbose_name_plural = "cashback darajalari"
         ordering = ["policy_id", "from_amount"]
         constraints = [
             models.UniqueConstraint(fields=["policy", "from_amount"], name="tier_policy_from_unique"),
@@ -175,52 +190,86 @@ class LoyaltyAccount(TimeStampedModel):
     """The customer's cashback balance; one row per customer, created lazily by ``get_or_create_account``."""
 
     customer = models.OneToOneField(
-        "accounts.Customer", on_delete=models.PROTECT, related_name="loyalty_account"
+        "accounts.Customer", on_delete=models.PROTECT, related_name="loyalty_account", verbose_name="mijoz"
     )
-    balance = models.BigIntegerField(default=0)  # signed; negative allowed (L5) and flagged in selectors
+    # signed; negative allowed (L5) and flagged in selectors
+    balance = models.BigIntegerField(default=0, verbose_name="balans")
+
+    class Meta:
+        verbose_name = "cashback hisobi"
+        verbose_name_plural = "cashback hisoblari"
 
     def __str__(self) -> str:
-        return f"Loyalty account of customer {self.customer_id}: {self.balance}"
+        return f"Mijoz #{self.customer_id} cashback hisobi: {som_text(self.balance)}"
 
 
 class LedgerEntry(AppendOnlyModel):
     """One immutable, signed movement of a customer's cashback balance with the balance after it."""
 
-    account = models.ForeignKey("loyalty.LoyaltyAccount", on_delete=models.PROTECT, related_name="entries")
-    kind = models.CharField(
-        max_length=16, choices=enums.LedgerKind.choices
-    )  # credit|debit|adjustment|reversal
-    amount = models.BigIntegerField()  # signed so'm
-    balance_after = models.BigIntegerField()
+    account = models.ForeignKey(
+        "loyalty.LoyaltyAccount", on_delete=models.PROTECT, related_name="entries", verbose_name="hisob"
+    )
+    # credit|debit|adjustment|reversal
+    kind = models.CharField(max_length=16, choices=enums.LedgerKind.choices, verbose_name="turi")
+    amount = models.BigIntegerField(verbose_name="summa")  # signed so'm
+    balance_after = models.BigIntegerField(verbose_name="keyingi balans")
+    # order|billz_sale|admin
     source_type = models.CharField(
-        max_length=16, choices=enums.LedgerSourceType.choices
-    )  # order|billz_sale|admin
+        max_length=16, choices=enums.LedgerSourceType.choices, verbose_name="manba turi"
+    )
     order = models.ForeignKey(
-        "commerce.Order", null=True, on_delete=models.PROTECT, related_name="ledger_entries"
+        "commerce.Order",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="ledger_entries",
+        verbose_name="buyurtma",
     )
     purchase = models.ForeignKey(
-        "loyalty.Purchase", null=True, on_delete=models.PROTECT, related_name="ledger_entries"
+        "loyalty.Purchase",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="ledger_entries",
+        verbose_name="xarid",
     )
-    source_ref = models.CharField(
-        max_length=64, blank=True
-    )  # order → str(order_id); billz_sale → Billz document no.
+    # order → str(order_id); billz_sale → Billz document no.
+    source_ref = models.CharField(max_length=64, blank=True, verbose_name="manba havolasi")
     # credit-only snapshot of the engine inputs
-    base = models.BigIntegerField(null=True)  # eligible amount the percent was applied to
-    percent = models.DecimalField(max_digits=5, decimal_places=2, null=True)
-    promo_excluded = models.BooleanField(default=False)  # promo items were excluded from the base
+    # eligible amount the percent was applied to
+    base = models.BigIntegerField(null=True, verbose_name="asos")
+    percent = models.DecimalField(max_digits=5, decimal_places=2, null=True, verbose_name="foiz")
+    promo_excluded = models.BooleanField(
+        default=False, verbose_name="aksiya mahsulotlari chiqarilgan"
+    )  # promo items were excluded from the base
     policy = models.ForeignKey(
-        "loyalty.CashbackPolicy", null=True, on_delete=models.PROTECT, related_name="ledger_entries"
+        "loyalty.CashbackPolicy",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="ledger_entries",
+        verbose_name="siyosat",
     )
     # reversal-only
-    reverses = models.OneToOneField("self", null=True, on_delete=models.PROTECT, related_name="reversed_by")
-    # adjustment-only
-    reason = models.TextField(blank=True)
-    actor = models.ForeignKey(
-        "accounts.StaffUser", null=True, on_delete=models.PROTECT, related_name="ledger_adjustments"
+    reverses = models.OneToOneField(
+        "self",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="reversed_by",
+        verbose_name="bekor qilinadigan yozuv",
     )
-    at = models.DateTimeField(default=timestamp_default, editable=False)  # business time; API "at"
+    # adjustment-only
+    reason = models.TextField(blank=True, verbose_name="sabab")
+    actor = models.ForeignKey(
+        "accounts.StaffUser",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="ledger_adjustments",
+        verbose_name="bajaruvchi",
+    )
+    # business time; API "at"
+    at = models.DateTimeField(default=timestamp_default, editable=False, verbose_name="vaqt")
 
     class Meta:
+        verbose_name = "cashback daftari yozuvi"
+        verbose_name_plural = "cashback daftari"
         ordering = ["-at", "-id"]
         indexes = [
             models.Index(fields=["account", "at", "id"], name="ledger_account_at_idx"),
@@ -297,7 +346,8 @@ class LedgerEntry(AppendOnlyModel):
 
     def __str__(self) -> str:
         return (
-            f"Ledger #{self.pk} {self.kind} {self.amount:+} → {self.balance_after} (acct {self.account_id})"
+            f"Yozuv #{self.pk} {self.get_kind_display()} {self.amount:+} → {self.balance_after} "
+            f"(hisob #{self.account_id})"
         )
 
 
@@ -305,25 +355,41 @@ class CashbackHold(TimeStampedModel):
     """Cashback reserved at checkout for an unpaid order: captured into a debit on payment, else released."""
 
     class ReleaseReason(models.TextChoices):  # internal
-        RESERVATION_EXPIRED = "reservation_expired"
-        ORDER_CANCELLED = "order_cancelled"
-        PAYMENT_FAILED = "payment_failed"
+        RESERVATION_EXPIRED = "reservation_expired", "Band muddati tugadi"
+        ORDER_CANCELLED = "order_cancelled", "Buyurtma bekor qilindi"
+        PAYMENT_FAILED = "payment_failed", "To‘lov amalga oshmadi"
 
-    account = models.ForeignKey("loyalty.LoyaltyAccount", on_delete=models.PROTECT, related_name="holds")
-    order = models.ForeignKey("commerce.Order", on_delete=models.PROTECT, related_name="cashback_holds")
-    amount = models.BigIntegerField()
+    account = models.ForeignKey(
+        "loyalty.LoyaltyAccount", on_delete=models.PROTECT, related_name="holds", verbose_name="hisob"
+    )
+    order = models.ForeignKey(
+        "commerce.Order", on_delete=models.PROTECT, related_name="cashback_holds", verbose_name="buyurtma"
+    )
+    amount = models.BigIntegerField(verbose_name="summa")
     state = models.CharField(
-        max_length=16, choices=enums.CashbackHoldState.choices, default=enums.CashbackHoldState.ACTIVE
+        max_length=16,
+        choices=enums.CashbackHoldState.choices,
+        default=enums.CashbackHoldState.ACTIVE,
+        verbose_name="holat",
     )
-    expires_at = models.DateTimeField()  # = Order.reservation_expires_at at creation
+    # = Order.reservation_expires_at at creation
+    expires_at = models.DateTimeField(verbose_name="amal qilish muddati")
     captured_entry = models.OneToOneField(
-        "loyalty.LedgerEntry", null=True, on_delete=models.PROTECT, related_name="captured_hold"
+        "loyalty.LedgerEntry",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="captured_hold",
+        verbose_name="yechish yozuvi",
     )
-    captured_at = models.DateTimeField(null=True)
-    released_at = models.DateTimeField(null=True)
-    release_reason = models.CharField(max_length=24, blank=True, choices=ReleaseReason.choices)
+    captured_at = models.DateTimeField(null=True, verbose_name="yechib olingan")
+    released_at = models.DateTimeField(null=True, verbose_name="bo‘shatilgan")
+    release_reason = models.CharField(
+        max_length=24, blank=True, choices=ReleaseReason.choices, verbose_name="bo‘shatish sababi"
+    )
 
     class Meta:
+        verbose_name = "cashback bandi"
+        verbose_name_plural = "cashback bandlari"
         constraints = [
             models.UniqueConstraint(
                 fields=["order"],
@@ -372,7 +438,9 @@ class CashbackHold(TimeStampedModel):
         ]
 
     def __str__(self) -> str:
-        return f"Hold {self.amount} on order {self.order_id} ({self.state})"
+        return (
+            f"Ushlab turish {som_text(self.amount)} · buyurtma №{self.order_id} ({self.get_state_display()})"
+        )
 
 
 # An online purchase whose Billz sale is not recorded: not pushed, or pushed without Billz's sale id
@@ -385,43 +453,79 @@ UNPUSHED_ONLINE = Q(source=enums.PurchaseSource.ONLINE, reversed=False) & (
 class Purchase(TimeStampedModel):
     """One purchase counting towards the lifetime total (paid online order or in-store Billz sale)."""
 
-    customer = models.ForeignKey("accounts.Customer", on_delete=models.PROTECT, related_name="purchases")
-    source = models.CharField(max_length=16, choices=enums.PurchaseSource.choices)  # online|store_qr
+    customer = models.ForeignKey(
+        "accounts.Customer", on_delete=models.PROTECT, related_name="purchases", verbose_name="mijoz"
+    )
+    # online|store_qr
+    source = models.CharField(max_length=16, choices=enums.PurchaseSource.choices, verbose_name="manba")
     order = models.OneToOneField(
-        "commerce.Order", null=True, on_delete=models.PROTECT, related_name="purchase"
+        "commerce.Order",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="purchase",
+        verbose_name="buyurtma",
     )
     # Billz identifiers
-    billz_sale_id = models.CharField(max_length=64, blank=True)  # Billz's own sale id (store, or online echo)
-    billz_sale_ref = models.CharField(max_length=32, blank=True)  # human document number ("S-88213")
+    billz_sale_id = models.CharField(
+        max_length=64, blank=True, verbose_name="Billz sotuv ID"
+    )  # Billz's own sale id (store, or online echo)
+    billz_sale_ref = models.CharField(
+        max_length=32, blank=True, verbose_name="Billz sotuv raqami"
+    )  # human document number ("S-88213")
     # online: our correlation id, generated BEFORE the push (the outbox dedupe key, logs); Billz's own sale id
     # is billz_sale_id, stored the moment Billz created the sale (still a draft until billz_pushed_at is set)
-    billz_order_uuid = models.UUIDField(null=True)
-    billz_pushed_at = models.DateTimeField(null=True)  # online: set when billz.push_sale succeeded
+    billz_order_uuid = models.UUIDField(null=True, verbose_name="Billz buyurtma UUID")
+    billz_pushed_at = models.DateTimeField(
+        null=True, verbose_name="Billz’ga yuborilgan"
+    )  # online: set when billz.push_sale succeeded
     # online: a Billz payment request was sent at this instant and its outcome is not known yet (never paid
     # twice: the next attempt waits and re-reads the sale; cleared when Billz certainly did not take it)
-    billz_payment_attempted_at = models.DateTimeField(null=True)
+    billz_payment_attempted_at = models.DateTimeField(null=True, verbose_name="Billz to‘lovi urinilgan")
     # engine inputs (snapshots)
-    amount = models.BigIntegerField()  # gross total before cashback redemption (items_subtotal online)
-    promo_amount = models.BigIntegerField(default=0)  # part of amount that is promotional
-    cashback_paid = models.BigIntegerField(default=0)  # part paid from the balance (= Order.cashback_used)
-    lifetime_before = models.BigIntegerField()  # Σ non-reversed purchases of the customer before this one
+    # gross total before cashback redemption (items_subtotal online)
+    amount = models.BigIntegerField(verbose_name="summa")
+    # part of amount that is promotional
+    promo_amount = models.BigIntegerField(default=0, verbose_name="aksiya summasi")
+    # part paid from the balance (= Order.cashback_used)
+    cashback_paid = models.BigIntegerField(default=0, verbose_name="cashback bilan to‘langan")
+    lifetime_before = models.BigIntegerField(
+        verbose_name="oldingi umrbod xaridlar"
+    )  # Σ non-reversed purchases of the customer before this one
     # engine result
+    # version active at `at`; null = no policy existed
     policy = models.ForeignKey(
-        "loyalty.CashbackPolicy", null=True, on_delete=models.PROTECT, related_name="purchases"
-    )  # version active at `at`; null = no policy existed
-    cashback_amount = models.BigIntegerField(default=0)  # credited so'm (0 when no tier covers / eligible 0)
+        "loyalty.CashbackPolicy",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="purchases",
+        verbose_name="siyosat",
+    )
+    # credited so'm (0 when no tier covers / eligible 0)
+    cashback_amount = models.BigIntegerField(default=0, verbose_name="cashback summasi")
     credited_entry = models.OneToOneField(
-        "loyalty.LedgerEntry", null=True, on_delete=models.PROTECT, related_name="credited_purchase"
+        "loyalty.LedgerEntry",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="credited_purchase",
+        verbose_name="hisoblangan yozuv",
     )
     # reversal
-    reversed = models.BooleanField(default=False)
-    reversed_at = models.DateTimeField(null=True)
+    reversed = models.BooleanField(default=False, verbose_name="bekor qilingan")
+    reversed_at = models.DateTimeField(null=True, verbose_name="bekor qilingan vaqt")
+    # the reversal of credited_entry (null if nothing was credited)
     reversal_entry = models.OneToOneField(
-        "loyalty.LedgerEntry", null=True, on_delete=models.PROTECT, related_name="reversed_purchase"
-    )  # the reversal of credited_entry (null if nothing was credited)
-    at = models.DateTimeField(default=timestamp_default)  # business time: payment confirmation / Billz sale
+        "loyalty.LedgerEntry",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="reversed_purchase",
+        verbose_name="bekor qilish yozuvi",
+    )
+    # business time: payment confirmation / Billz sale
+    at = models.DateTimeField(default=timestamp_default, verbose_name="vaqt")
 
     class Meta:
+        verbose_name = "xarid"
+        verbose_name_plural = "xaridlar"
         ordering = ["-at", "-id"]
         constraints = [
             models.UniqueConstraint(
@@ -483,30 +587,40 @@ class Purchase(TimeStampedModel):
 
     def __str__(self) -> str:
         ref = (
-            f"order {self.order_id}"
+            f"buyurtma №{self.order_id}"
             if self.source == enums.PurchaseSource.ONLINE
             else f"Billz {self.billz_sale_ref or self.billz_sale_id}"
         )
-        suffix = " reversed" if self.reversed else ""
-        return f"Purchase #{self.pk} {self.source} {self.amount} ({ref}){suffix}"
+        suffix = " · bekor qilingan" if self.reversed else ""
+        return f"Xarid #{self.pk} {self.get_source_display()} {som_text(self.amount)} ({ref}){suffix}"
 
 
 class PurchaseItem(models.Model):
     """Line snapshot of a purchase (what was bought, at which unit price, promo or not)."""
 
-    purchase = models.ForeignKey("loyalty.Purchase", on_delete=models.CASCADE, related_name="items")
-    position = models.PositiveSmallIntegerField()
+    purchase = models.ForeignKey(
+        "loyalty.Purchase", on_delete=models.CASCADE, related_name="items", verbose_name="xarid"
+    )
+    position = models.PositiveSmallIntegerField(verbose_name="tartib")
+    # null for Billz lines not in the catalog
     product = models.ForeignKey(
-        "catalog.Product", null=True, on_delete=models.PROTECT, related_name="purchase_items"
-    )  # null for Billz lines not in the catalog
-    billz_product_id = models.CharField(max_length=32, blank=True)
-    name = models.CharField(max_length=200)  # uz display name at purchase time, or the Billz name
-    quantity = models.PositiveIntegerField()
-    unit_price = models.BigIntegerField()
-    promo = models.BooleanField(default=False)
-    line_total = models.BigIntegerField()  # quantity × unit_price
+        "catalog.Product",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="purchase_items",
+        verbose_name="mahsulot",
+    )
+    billz_product_id = models.CharField(max_length=32, blank=True, verbose_name="Billz mahsulot ID")
+    # uz display name at purchase time, or the Billz name
+    name = models.CharField(max_length=200, verbose_name="nomi")
+    quantity = models.PositiveIntegerField(verbose_name="miqdor")
+    unit_price = models.BigIntegerField(verbose_name="birlik narxi")
+    promo = models.BooleanField(default=False, verbose_name="aksiya")
+    line_total = models.BigIntegerField(verbose_name="qator summasi")  # quantity × unit_price
 
     class Meta:
+        verbose_name = "xarid qatori"
+        verbose_name_plural = "xarid qatorlari"
         ordering = ["purchase_id", "position"]
         constraints = [
             models.UniqueConstraint(fields=["purchase", "position"], name="purchaseitem_position_unique"),
@@ -516,24 +630,34 @@ class PurchaseItem(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.name} × {self.quantity} @ {self.unit_price} (purchase {self.purchase_id})"
+        return f"{self.name} × {self.quantity} @ {som_text(self.unit_price)} (xarid #{self.purchase_id})"
 
 
 class PosDevice(TimeStampedModel):
     """A cashier terminal allowed to call ``POST /api/v1/pos/cashback/resolve-qr`` (M2); key stored hashed."""
 
-    name = models.CharField(max_length=100)
-    location_label = models.CharField(max_length=100, blank=True)  # free text; no FK to professionals
-    key_prefix = models.CharField(max_length=12, unique=True)  # first 8–12 chars of the key; names the device
-    key_hash = models.CharField(max_length=64, unique=True)  # SHA-256 hex of the full key
-    is_active = models.BooleanField(default=True)
-    last_used_at = models.DateTimeField(null=True)
+    name = models.CharField(max_length=100, verbose_name="nomi")
+    # free text; no FK to professionals
+    location_label = models.CharField(max_length=100, blank=True, verbose_name="joy nomi")
+    # first 8–12 chars of the key; names the device
+    key_prefix = models.CharField(max_length=12, unique=True, verbose_name="kalit prefiksi")
+    key_hash = models.CharField(
+        max_length=64, unique=True, verbose_name="kalit xeshi"
+    )  # SHA-256 hex of the full key
+    is_active = models.BooleanField(default=True, verbose_name="faol")
+    last_used_at = models.DateTimeField(null=True, verbose_name="oxirgi foydalanish")
     created_by = models.ForeignKey(
-        "accounts.StaffUser", null=True, on_delete=models.PROTECT, related_name="pos_devices"
+        "accounts.StaffUser",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="pos_devices",
+        verbose_name="yaratgan",
     )
 
     class Meta:
+        verbose_name = "POS qurilma"
+        verbose_name_plural = "POS qurilmalar"
         ordering = ["name"]
 
     def __str__(self) -> str:
-        return f"POS {self.name} ({self.key_prefix}…){'' if self.is_active else ' inactive'}"
+        return f"POS {self.name} ({self.key_prefix}…){'' if self.is_active else ' · nofaol'}"

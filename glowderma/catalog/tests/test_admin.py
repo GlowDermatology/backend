@@ -7,6 +7,7 @@ from django.test import Client, RequestFactory
 from django.urls import reverse
 
 from glowderma.accounts.tests.factories import StaffUserFactory
+from glowderma.accounts.tests.ops_helpers import ops_login
 from glowderma.catalog.models import Banner, Category, Product, ProductImage, ProductStock
 from glowderma.catalog.tests.factories import (
     BannerFactory,
@@ -15,7 +16,7 @@ from glowderma.catalog.tests.factories import (
     ProductImageFactory,
     ProductStockFactory,
 )
-from glowderma.core.admin import ReadOnlyAdmin
+from glowderma.core.admin import ReadOnlyAdmin, column_field
 
 pytestmark = pytest.mark.django_db
 
@@ -42,7 +43,7 @@ EXPECTED = {
 def test_registered_read_only_with_design_columns(model: type[models.Model]) -> None:
     model_admin = admin.site._registry[model]
     assert isinstance(model_admin, ReadOnlyAdmin)
-    assert model_admin.list_display == EXPECTED[model]
+    assert tuple(map(column_field, model_admin.list_display)) == EXPECTED[model]
     request = RequestFactory().get("/django-admin/")
     request.user = StaffUserFactory.create(is_staff=True)
     assert model_admin.has_view_permission(request)
@@ -54,7 +55,7 @@ def test_registered_read_only_with_design_columns(model: type[models.Model]) -> 
 
 def test_changelists_and_change_pages_render() -> None:
     client = Client()
-    client.force_login(StaffUserFactory.create(is_staff=True, is_superuser=True))
+    ops_login(client, StaffUserFactory.create(is_staff=True, is_superuser=True))
     image = ProductImageFactory.create()
     rows = [
         CategoryFactory.create(),

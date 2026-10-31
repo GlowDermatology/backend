@@ -69,7 +69,7 @@ def test_four_template_rows_come_from_the_data_migration() -> None:
     delivered = rows[2]
     assert delivered.text_uz == "Buyurtma №{raqam} yetkazildi. Xaridingiz uchun rahmat."
     assert delivered.text_en == ""  # the mock shows en: false for this row
-    assert str(processing) == "Template processing: To‘lov qabul qilindi. Buyurtma №{raqam} "
+    assert str(processing) == "Shablon «Jarayonda»: To‘lov qabul qilindi. Buyurtma №{raqam} "
     assert StatusTemplateFactory.create(status="cancelled").pk == rows[3].pk  # get_or_create on status
 
 
@@ -170,7 +170,7 @@ def test_segment_member_unique_str_ordering_and_cascades() -> None:
     staff = StaffUserFactory.create()
     later = SegmentMemberFactory.create(segment=segment, added_at=NOW + timedelta(minutes=1))
     earlier = SegmentMemberFactory.create(segment=segment, added_at=NOW, added_by=staff)
-    assert str(earlier) == f"Customer {earlier.customer_id} in segment {segment.pk}"
+    assert str(earlier) == f"Mijoz #{earlier.customer_id} · segment #{segment.pk}"
     assert list(SegmentMember.objects.all()) == [earlier, later]  # segment_id, added_at, id
     assert list(segment.manual_members.all()) == [earlier, later]
     assert list(earlier.customer.segment_memberships.all()) == [earlier]
@@ -210,7 +210,7 @@ def test_campaign_defaults_str_and_ordering() -> None:
     assert older.sent is None and older.failed is None and older.delivered is None
     assert older.send_cursor == 0 and older.batches_dispatched == 0 and older.last_error == ""
     assert older.image.name == "" and older.author is None
-    assert str(older) == f"Campaign #{older.pk} [general] Birinchi (queued)"
+    assert str(older) == f"Kampaniya #{older.pk} [Umumiy] Birinchi (Navbatda)"
 
 
 def test_campaign_text_lengths() -> None:
@@ -336,7 +336,9 @@ def test_recipient_defaults_str_ordering_and_uniques() -> None:
     recipient = CampaignRecipientFactory.create()
     assert recipient.state == "pending" and recipient.error == "" and recipient.provider_state == {}
     assert recipient.provider_message_id == "" and recipient.sent_at is None and recipient.inbox is None
-    assert str(recipient) == f"Campaign {recipient.campaign_id} → customer {recipient.customer_id} (pending)"
+    assert (
+        str(recipient) == f"Kampaniya #{recipient.campaign_id} → mijoz #{recipient.customer_id} (Kutilmoqda)"
+    )
     second = CampaignRecipientFactory.create(campaign=recipient.campaign)
     assert list(recipient.campaign.recipients.all()) == [recipient, second]
     violates(
@@ -405,7 +407,7 @@ def test_inbox_defaults_str_and_ordering() -> None:
     assert older.push_state == "no_device" and older.pushed_at is None and older.push_error == ""
     assert older.read_at is None and older.delivered_at is None and older.image_url == ""
     assert older.template_status == "" and older.link == {"kind": "none"}
-    assert str(older) == f"Inbox general → customer {older.customer_id}: Yangi mahsulotlar keldi"
+    assert str(older) == f"Inbox «Umumiy» → mijoz #{older.customer_id}: Yangi mahsulotlar keldi"
     assert list(older.customer.inbox.all()) == [older]
 
 

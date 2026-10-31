@@ -70,7 +70,7 @@ def test_professional_str_ordering_and_checks() -> None:
     later = ProfessionalFactory.create(name="Zafar", position=1)
     second = ProfessionalFactory.create(name="Nodira Rahimova", position=0)
     first = ProfessionalFactory.create(name="Aziz", position=0, role=enums.SpecialistRole.COSMETOLOGIST)
-    assert str(second) == "Nodira Rahimova (dermatologist)"
+    assert str(second) == "Nodira Rahimova (Dermatolog)"
     assert list(Professional.objects.all()) == [first, second, later]  # position, name, id
     assert first.slot_step_min == 30 and first.photo.name == "" and first.experience_years is None
     violates("professional_name_required", ProfessionalFactory.create, name="")
@@ -118,7 +118,10 @@ def test_service_with_links_is_protected() -> None:
 
 def test_professional_service_str_unique_and_checks() -> None:
     link = ProfessionalServiceFactory.create(price=150_000, duration_min=30)
-    assert str(link) == f"{link.professional_id}/{link.service_id}: 150000 so'm, 30 min"
+    assert (
+        str(link)
+        == f"Mutaxassis #{link.professional_id} · xizmat #{link.service_id}: 150\u00a0000 so‘m, 30 daqiqa"
+    )
     assert link.is_active and link.created_at is not None and link.updated_at is not None
     violates(
         "professionalservice_unique",
@@ -138,7 +141,7 @@ def test_professional_service_str_unique_and_checks() -> None:
 
 def test_working_hours_str_unique_and_checks() -> None:
     hours = WorkingHoursFactory.create(weekday=0)
-    assert str(hours) == f"{hours.professional_id} wd0 09:00-18:00"
+    assert str(hours) == f"Mutaxassis #{hours.professional_id} · Dushanba 09:00–18:00"
     violates(
         "workinghours_professional_weekday_unique",
         WorkingHoursFactory.create,
@@ -181,9 +184,9 @@ def test_working_hours_break_edges_allowed() -> None:
 
 def test_override_str_unique_and_checks() -> None:
     override = WorkingHoursOverrideFactory.create(date=datetime(2026, 11, 2, tzinfo=TASHKENT).date())
-    assert str(override) == f"{override.professional_id} 2026-11-02: 10:00-16:00"
+    assert str(override) == f"Mutaxassis #{override.professional_id} · 2026-11-02: 10:00–16:00"
     off = WorkingHoursOverrideFactory.create(professional=override.professional, start=None, end=None)
-    assert str(off).endswith(": off") and off.created_by is None
+    assert str(off).endswith(": dam olish") and off.created_by is None
     violates(
         "hoursoverride_professional_date_unique",
         WorkingHoursOverrideFactory.create,
@@ -209,7 +212,7 @@ def test_blocked_period_str_ordering_and_check() -> None:
         end=datetime(2026, 10, 27, 10, 0, tzinfo=TASHKENT),
     )
     block = BlockedPeriodFactory.create()
-    assert str(block) == f"busy 2026-10-26 16:00–16:30 ({block.professional_id})"
+    assert str(block) == f"Band 2026-10-26 16:00–16:30 (mutaxassis #{block.professional_id})"
     assert list(BlockedPeriod.objects.all()) == [block, later]
     violates("blockedperiod_end_after_start", BlockedPeriodFactory.create, end=block.start)
     violates(

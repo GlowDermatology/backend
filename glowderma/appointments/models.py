@@ -12,6 +12,7 @@ from django.db import models
 from django.db.models import F, Q
 
 from glowderma.core import enums
+from glowderma.core.labels import stamp
 from glowderma.core.models import AppendOnlyModel, TimeStampedModel, timestamp_default
 
 
@@ -29,38 +30,62 @@ class Appointment(TimeStampedModel):
     """A booked visit of one customer with one professional for one service in one time slot."""
 
     class CancelledBy(models.TextChoices):  # internal, M2
-        CUSTOMER = "customer"
-        ADMIN = "admin"
+        CUSTOMER = "customer", "Mijoz"
+        ADMIN = "admin", "Admin"
 
     professional = models.ForeignKey(
-        "professionals.Professional", on_delete=models.PROTECT, related_name="appointments"
+        "professionals.Professional",
+        on_delete=models.PROTECT,
+        related_name="appointments",
+        verbose_name="mutaxassis",
     )
     service = models.ForeignKey(
-        "professionals.Service", on_delete=models.PROTECT, related_name="appointments"
+        "professionals.Service", on_delete=models.PROTECT, related_name="appointments", verbose_name="xizmat"
     )
-    customer = models.ForeignKey("accounts.Customer", on_delete=models.PROTECT, related_name="appointments")
-    start = models.DateTimeField()
-    end = models.DateTimeField()
-    duration_min = models.PositiveSmallIntegerField()  # snapshot of ProfessionalService.duration_min
-    price = models.BigIntegerField()  # snapshot of ProfessionalService.price
+    customer = models.ForeignKey(
+        "accounts.Customer", on_delete=models.PROTECT, related_name="appointments", verbose_name="mijoz"
+    )
+    start = models.DateTimeField(verbose_name="boshlanishi")
+    end = models.DateTimeField(verbose_name="tugashi")
+    # snapshot of ProfessionalService.duration_min
+    duration_min = models.PositiveSmallIntegerField(verbose_name="davomiyligi (daq.)")
+    price = models.BigIntegerField(verbose_name="narx")  # snapshot of ProfessionalService.price
+    # requested|confirmed|rejected|attended|cancelled (T3)
     status = models.CharField(
-        max_length=16, choices=enums.AppointmentStatus.choices, default=enums.AppointmentStatus.REQUESTED
-    )  # requested|confirmed|rejected|attended|cancelled (T3)
-    requested_via = models.CharField(max_length=8, choices=enums.RequestedVia.choices)  # app|admin
-    requested_at = models.DateTimeField(default=timestamp_default)
+        max_length=16,
+        choices=enums.AppointmentStatus.choices,
+        default=enums.AppointmentStatus.REQUESTED,
+        verbose_name="holat",
+    )
+    # app|admin
+    requested_via = models.CharField(
+        max_length=8, choices=enums.RequestedVia.choices, verbose_name="so‘rov manbasi"
+    )
+    requested_at = models.DateTimeField(default=timestamp_default, verbose_name="so‘ralgan")
+    # set iff requested_via = admin
     created_by = models.ForeignKey(
-        "accounts.StaffUser", null=True, on_delete=models.PROTECT, related_name="created_appointments"
-    )  # set iff requested_via = admin
-    customer_note = models.CharField(max_length=300, blank=True)  # M2 booking comment
-    staff_note = models.CharField(max_length=300, blank=True)  # admin-only remark (reschedule reason, …)
-    confirmed_at = models.DateTimeField(null=True)
-    rejected_at = models.DateTimeField(null=True)
-    attended_at = models.DateTimeField(null=True)
-    cancelled_at = models.DateTimeField(null=True)
-    cancelled_by = models.CharField(max_length=8, blank=True, choices=CancelledBy.choices)
-    reschedule_count = models.PositiveSmallIntegerField(default=0)
+        "accounts.StaffUser",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="created_appointments",
+        verbose_name="yaratgan",
+    )
+    # M2 booking comment
+    customer_note = models.CharField(max_length=300, blank=True, verbose_name="mijoz izohi")
+    # admin-only remark (reschedule reason, …)
+    staff_note = models.CharField(max_length=300, blank=True, verbose_name="xodim izohi")
+    confirmed_at = models.DateTimeField(null=True, verbose_name="tasdiqlangan")
+    rejected_at = models.DateTimeField(null=True, verbose_name="rad etilgan")
+    attended_at = models.DateTimeField(null=True, verbose_name="kelgan")
+    cancelled_at = models.DateTimeField(null=True, verbose_name="bekor qilingan")
+    cancelled_by = models.CharField(
+        max_length=8, blank=True, choices=CancelledBy.choices, verbose_name="bekor qilgan"
+    )
+    reschedule_count = models.PositiveSmallIntegerField(default=0, verbose_name="ko‘chirishlar soni")
 
     class Meta:
+        verbose_name = "qabul"
+        verbose_name_plural = "qabullar"
         ordering = ["start", "id"]
         constraints = [
             models.CheckConstraint(condition=Q(end__gt=F("start")), name="appointment_end_after_start"),
@@ -139,8 +164,8 @@ class Appointment(TimeStampedModel):
 
     def __str__(self) -> str:
         return (
-            f"Appointment #{self.pk} {self.status}: prof {self.professional_id} "
-            f"{self.start:%Y-%m-%d %H:%M} ({self.duration_min} min)"
+            f"Qabul #{self.pk} · {self.get_status_display()}: mutaxassis #{self.professional_id} "
+            f"{stamp(self.start)} ({self.duration_min} daqiqa)"
         )
 
 
@@ -148,30 +173,36 @@ class AppointmentEvent(AppendOnlyModel):
     """Immutable trail of an appointment (who did what, when, from where), mirroring ``OrderEvent``."""
 
     class Type(models.TextChoices):  # internal
-        REQUESTED = "requested"
-        CONFIRMED = "confirmed"
-        REJECTED = "rejected"
-        ATTENDED = "attended"
-        CANCELLED = "cancelled"
-        RESCHEDULED = "rescheduled"
+        REQUESTED = "requested", "So‘raldi"
+        CONFIRMED = "confirmed", "Tasdiqlandi"
+        REJECTED = "rejected", "Rad etildi"
+        ATTENDED = "attended", "Keldi"
+        CANCELLED = "cancelled", "Bekor qilindi"
+        RESCHEDULED = "rescheduled", "Vaqti ko‘chirildi"
 
     class Source(models.TextChoices):  # internal
-        SYSTEM = "system"
-        ADMIN = "admin"
-        CUSTOMER = "customer"
+        SYSTEM = "system", "Tizim"
+        ADMIN = "admin", "Admin"
+        CUSTOMER = "customer", "Mijoz"
 
     appointment = models.ForeignKey(
-        "appointments.Appointment", on_delete=models.PROTECT, related_name="events"
+        "appointments.Appointment", on_delete=models.PROTECT, related_name="events", verbose_name="qabul"
     )
-    type = models.CharField(max_length=16, choices=Type.choices)
-    source = models.CharField(max_length=8, choices=Source.choices)
+    type = models.CharField(max_length=16, choices=Type.choices, verbose_name="turi")
+    source = models.CharField(max_length=8, choices=Source.choices, verbose_name="manba")
     actor = models.ForeignKey(
-        "accounts.StaffUser", null=True, on_delete=models.PROTECT, related_name="appointment_events"
+        "accounts.StaffUser",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="appointment_events",
+        verbose_name="bajaruvchi",
     )
-    data = models.JSONField(default=dict, encoder=DjangoJSONEncoder)
-    at = models.DateTimeField(default=timestamp_default, editable=False)
+    data = models.JSONField(default=dict, encoder=DjangoJSONEncoder, verbose_name="ma’lumotlar")
+    at = models.DateTimeField(default=timestamp_default, editable=False, verbose_name="vaqt")
 
     class Meta:
+        verbose_name = "qabul hodisasi"
+        verbose_name_plural = "qabul tarixi"
         ordering = ["-at", "-id"]
         indexes = [models.Index(fields=["appointment", "at", "id"], name="apptevent_appointment_at_idx")]
         constraints = [
@@ -188,4 +219,7 @@ class AppointmentEvent(AppendOnlyModel):
         ]
 
     def __str__(self) -> str:
-        return f"Appointment {self.appointment_id}: {self.type} ({self.source}) at {self.at:%Y-%m-%d %H:%M}"
+        return (
+            f"Qabul #{self.appointment_id}: {self.get_type_display()} ({self.get_source_display()}) · "
+            f"{stamp(self.at)}"
+        )

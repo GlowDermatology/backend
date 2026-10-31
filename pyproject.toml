@@ -20,6 +20,9 @@ dependencies = [
  "tenacity==9.2.1",
  "drf-spectacular-sidecar==2026.10.1",
  "maxminddb==2.8.2",
+ "django-unfold==0.110.0",
+ "django-otp==1.7.5",
+ "segno==1.6.6",
 ]
 
 [dependency-groups]
@@ -41,6 +44,12 @@ python_version = "3.14"
 plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]
 strict = true
 warn_unreachable = true
+
+# Unfold and django-otp ship no type information: their classes are aliased to the Django ones under
+# TYPE_CHECKING (glowderma/core/admin.py) and their decorators wrapped in typed helpers.
+[[tool.mypy.overrides]]
+module = ["unfold.*", "django_otp.*"]
+ignore_missing_imports = true
 
 [tool.django-stubs]
 django_settings_module = "config.settings.test"

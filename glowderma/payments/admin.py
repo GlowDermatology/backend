@@ -2,32 +2,75 @@
 
 from django.contrib import admin
 
-from glowderma.core.admin import ReadOnlyAdmin, ReadOnlyTabularInline, register_read_only
+from glowderma.core.admin import (
+    DANGER,
+    INFO,
+    PRIMARY,
+    SUCCESS,
+    WARNING,
+    ReadOnlyAdmin,
+    ReadOnlyTabularInline,
+    date_range,
+    dropdown,
+    money_column,
+    number_link_column,
+    register_read_only,
+    status_badge,
+    status_column,
+)
+from glowderma.core.labels import PAYMENT_STATUS, REFUND_STATE
 from glowderma.payments.models import Payment, Refund
+
+PAYMENT_STATUS_VARIANTS = {"pending": WARNING, "paid": SUCCESS, "failed": DANGER, "refunded": INFO}
+REFUND_STATE_VARIANTS = {
+    "requested": INFO,
+    "submitting": PRIMARY,
+    "succeeded": SUCCESS,
+    "failed": DANGER,
+    "manual_required": WARNING,
+    "unknown": WARNING,
+}
 
 
 class RefundInline(ReadOnlyTabularInline):
     model = Refund
-    fields = ("id", "state", "origin", "amount", "requested_at", "completed_at", "error_code", "requested_by")
+    fields = (
+        "id",
+        "state_label",
+        "origin",
+        "amount_som",
+        "requested_at",
+        "completed_at",
+        "error_code",
+        "requested_by",
+    )
     ordering = ("-requested_at", "-id")
-    raw_id_fields = ("requested_by",)
+    state_label = staticmethod(status_badge("state", "Holat", REFUND_STATE_VARIANTS, REFUND_STATE))
+    amount_som = staticmethod(money_column("amount", "Summa"))
+    tab = True
+    verbose_name_plural = "Qaytarishlar"
 
 
 class PaymentAdmin(ReadOnlyAdmin):
     list_display = (
         "id",
-        "order",
+        number_link_column("order", "Buyurtma"),
         "provider",
-        "status",
-        "amount",
+        status_column("status", "Holat", PAYMENT_STATUS_VARIANTS, PAYMENT_STATUS),
+        money_column("amount", "Summa"),
         "provider_txn_id",
         "confirmed_at",
         "created_at",
     )
-    list_filter = ("provider", "status")
+    list_filter = (
+        dropdown("provider"),
+        dropdown("status"),
+        date_range("created_at"),
+        date_range("confirmed_at"),
+    )
     search_fields = ("provider_txn_id", "=order__id")
     ordering = ("-created_at", "-id")
-    raw_id_fields = ("order",)
+    autocomplete_fields = ("order",)
     inlines = (RefundInline,)
     date_hierarchy = "created_at"
 
@@ -37,16 +80,16 @@ register_read_only(
     Refund,
     list_display=(
         "id",
-        "payment",
-        "state",
+        number_link_column("payment", "To‘lov", prefix="#"),
+        status_column("state", "Holat", REFUND_STATE_VARIANTS, REFUND_STATE),
         "origin",
-        "amount",
+        money_column("amount", "Summa"),
         "requested_at",
         "completed_at",
         "error_code",
     ),
-    list_filter=("state", "origin"),
+    list_filter=(dropdown("state"), dropdown("origin"), date_range("requested_at")),
     search_fields=("provider_refund_id", "=payment__id"),
     ordering=("-requested_at", "-id"),
-    raw_id_fields=("payment", "requested_by"),
+    autocomplete_fields=("payment", "requested_by"),
 )

@@ -45,6 +45,9 @@ def test_no_further_payments_migrations() -> None:
         "0002_payment_active_excludes_late_capture.py",
         "0003_payment_late_capture_open_idx.py",
         "0004_refund_manual_reason.py",
+        "0005_uz_verbose_names.py",  # state only: verbose names of the ops console
+        "0006_uz_choice_labels.py",  # state only: Uzbek choice labels
+        "0007_uz_field_labels.py",  # state only: Uzbek field labels
     ]
 
 
@@ -77,6 +80,9 @@ def test_migrate_zero_and_forward_again() -> None:
         "0002_payment_active_excludes_late_capture",
         "0003_payment_late_capture_open_idx",
         "0004_refund_manual_reason",
+        "0005_uz_verbose_names",
+        "0006_uz_choice_labels",
+        "0007_uz_field_labels",
     }
     refund = RefundFactory.create(payment=PaymentFactory.create())
     assert refund.pk is not None
