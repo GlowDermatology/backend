@@ -103,7 +103,9 @@ def test_pages_render_for_a_superuser(super_client: Client) -> None:
     assert change.status_code == 200
     content = change.content.decode()
     assert order.items.get().billz_id in content  # OrderItem inline
-    assert "order_created" in content  # OrderEvent inline
+    assert (
+        "Buyurtma yaratildi" in content and "order_created" not in content
+    )  # OrderEvent inline, Uzbek label
     assert "Mijoz so‘rovi bilan" in content
     for model, pk in ((OrderEvent, event.pk), (StockReservation, reservation.pk), (CartItem, cart_item.pk)):
         assert super_client.get(url(model, "change", pk)).status_code == 200
@@ -128,7 +130,9 @@ def test_pages_render_for_a_plain_staff_user(plain_staff_client: Client) -> None
     assert change.status_code == 200
     content = change.content.decode()
     assert order.items.get().billz_id in content  # OrderItem inline
-    assert "order_created" in content  # OrderEvent inline
+    assert (
+        "Buyurtma yaratildi" in content and "order_created" not in content
+    )  # OrderEvent inline, Uzbek label
     assert "Mijoz so‘rovi bilan" in content
     for model, pk in ((OrderEvent, event.pk), (StockReservation, reservation.pk), (CartItem, cart_item.pk)):
         assert plain_staff_client.get(url(model, "change", pk)).status_code == 200

@@ -177,9 +177,9 @@ def test_enum_name_overrides_point_at_values() -> None:
 
 def test_enum_overrides_hash_like_the_schema_hook() -> None:
     """Regression: the hook hashes ``(value, value)`` pairs (hooks.py), so ``.values`` must match it and the
-    label hack (``label == value``) is not needed; Django's default labels stay intact."""
-    assert enums.OrderStatus.AWAITING_PAYMENT.label == "Awaiting Payment"
-    assert enums.OrderStatus.choices[0] == ("awaiting_payment", "Awaiting Payment")
+    label hack (``label == value``) is not needed; the labels are free to be the ops console's Uzbek texts."""
+    assert enums.OrderStatus.AWAITING_PAYMENT.label == "To‘lov kutilmoqda"
+    assert enums.OrderStatus.choices[0] == ("awaiting_payment", "To‘lov kutilmoqda")
     for enum in enums.CONTRACT_ENUMS:
         field_side = list_hash([(value, value) for value in enum.values])
         assert field_side == list_hash([(value, value) for value in enum.values if value not in ("", None)])
