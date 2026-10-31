@@ -3,6 +3,7 @@ the flash messages of a response and the confirm POST."""
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from django.contrib.auth import get_user_model
@@ -24,7 +25,7 @@ def console_client(role: str, *, enforce_csrf_checks: bool = False) -> Client:
         "staff": {"is_staff": True},
         "manager": {"is_staff": True, "is_manager": True},
     }[role]
-    user = get_user_model().objects.create_user(f"{role}@ops.uz", PASSWORD, **flags)
+    user = get_user_model().objects.create_user(f"{role}-{uuid.uuid4().hex[:8]}@ops.uz", PASSWORD, **flags)
     client.force_login(user)
     return client
 
