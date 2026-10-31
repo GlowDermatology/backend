@@ -326,12 +326,13 @@ def check_ops_host(probe: Probe, port: int, ops: str, upstream: Upstream) -> Non
         f"ops: / expected 302 to /django-admin/, got {root.status} {root.headers.get('location')}",
     )
     for path in ("/api/v1/health/", "/api/v1/admin/auth/me/", "/media/a.txt", "/admin"):
+        before = len(upstream.paths())  # the other hosts' checks may have sent the same path legitimately
         other = request(port, ops, "GET", path)
         probe.check(
             other.status == 404 and other.body == b"",
             f"ops: {path} expected an empty 404, got {other.status}",
         )
-        probe.check(path not in upstream.paths(), f"ops: {path} reached the upstream")
+        probe.check(path not in upstream.paths()[before:], f"ops: {path} reached the upstream")
     request(port, ops, "GET", f"/django-admin/accounts/customer/?q={SECRETS['ops_phone']}")
     before = len(upstream.paths())
     for path in ("/django-admin/login/", "/", "/static/unfold/css/styles.css"):
