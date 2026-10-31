@@ -19,6 +19,7 @@ from typing import Any
 
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
+from django.db.models import F
 from django.utils.crypto import get_random_string
 
 from glowderma.accounts.models import AuthSession, Customer, CustomerSocialIdentity, Device, SmsCode
@@ -28,6 +29,8 @@ from glowderma.commerce.models import Order, OrderItem
 from glowderma.core import audit, enums, integration_modes, timeutils
 from glowderma.core.models import OutboxMessage
 from glowderma.integrations.models import IntegrationState, Job, WebhookInbox
+from glowderma.loyalty.models import Purchase
+from glowderma.notifications.models import Campaign
 from glowderma.payments.models import Payment
 from glowderma.professionals.models import BlockedPeriod, ProfessionalService
 from glowderma.reporting.tasks import run_consistency_report
@@ -65,20 +68,82 @@ class Command(BaseCommand):
 
     # --- integrations ------------------------------------------------------------------------------------
 
+    def _push_sales(self, count: int) -> list[dict[str, Any]]:
+        """``billz.push_sale`` payloads in the handler's shape (commerce.tasks: purchase, order, Billz order
+        uuid) for paid online orders whose sale is not recorded yet (else the newest paid ones); a bare
+        database without purchases gets ``None`` ids (the rows only feed the dashboards)."""
+        purchases = list(
+            Purchase.objects.filter(order__isnull=False, order__paid_at__isnull=False).order_by(
+                F("billz_pushed_at").asc(nulls_first=True), "-order_id"
+            )[:count]
+        )
+        payloads: list[dict[str, Any]] = [
+            {
+                "purchase_id": purchase.pk,
+                "order_id": purchase.order_id,
+                "billz_order_uuid": str(purchase.billz_order_uuid) if purchase.billz_order_uuid else None,
+            }
+            for purchase in purchases
+        ]
+        payloads += [{"purchase_id": None, "order_id": None, "billz_order_uuid": None}] * (
+            count - len(payloads)
+        )
+        return payloads
+
     def _outbox(self, now: datetime) -> int:
+        paid = Order.objects.filter(paid_at__isnull=False).order_by("-id").first()
+        delivery = (
+            Order.objects.filter(fulfilment=enums.FulfilmentMethod.DELIVERY, paid_at__isnull=False)
+            .order_by("-id")
+            .first()
+        )
+        code = SmsCode.objects.exclude(phone="").order_by("-id").first()
+        campaign = Campaign.objects.order_by("-id").first()
+        sales = self._push_sales(3)
+        status_push = {
+            "order_id": paid.pk if paid else None,
+            "status": paid.status if paid else "processing",
+            "event_id": None,
+            "customer_id": paid.customer_id if paid else None,
+        }
+        shipment = {
+            "order_id": delivery.pk if delivery else None,
+            "manual": False,
+            "request_no": 1,
+            "actor_id": None,
+        }
+        # (topic, status, due, payload, last error) — the real topics and payload keys of their handlers
         rows = [
-            ("billz.push_sale", "dead", now - timedelta(hours=5), {"order_id": 10241}, "HTTP 503 x10"),
-            ("billz.push_sale", "dead", now - timedelta(hours=30), {"order_id": 10236}, "HTTP 422"),
-            ("push.order_status", "dead", now - timedelta(hours=2), {"order_id": 10244}, "FCM unavailable"),
-            ("sms.send", "failed", now - timedelta(minutes=95), {"code_id": 1}, "Eskiz timeout"),
-            ("sms.send", "pending", now - timedelta(minutes=80), {"code_id": 2}, ""),
-            ("bts.create_parcel", "pending", now - timedelta(minutes=3), {"order_id": 10245}, ""),
-            ("push.campaign", "pending", now - timedelta(minutes=1), {"campaign_id": 3}, ""),
-            ("billz.push_sale", "failed", now - timedelta(hours=2), {"order_id": 10246}, "deferred: shift"),
+            ("billz.push_sale", "dead", now - timedelta(hours=5), sales[0], "HTTP 503 x10"),
+            ("billz.push_sale", "dead", now - timedelta(hours=30), sales[1], "HTTP 422"),
+            ("push.order_status", "dead", now - timedelta(hours=2), status_push, "FCM unavailable"),
+            (
+                "sms.send",
+                "failed",
+                now - timedelta(minutes=95),
+                {"sms_code_id": code.pk if code else None},
+                "Eskiz timeout",
+            ),
+            (
+                "sms.send",
+                "pending",
+                now - timedelta(minutes=80),
+                {"sms_code_id": code.pk if code else None},
+                "",
+            ),
+            ("bts.create_shipment", "pending", now - timedelta(minutes=3), shipment, ""),
+            (
+                "campaign.send_batch",
+                "pending",
+                now - timedelta(minutes=1),
+                {"campaign_id": campaign.pk if campaign else None, "batch_no": 0},
+                "",
+            ),
+            ("billz.push_sale", "failed", now - timedelta(hours=2), sales[2], "deferred: shift"),
         ]
         made = 0
         for index, (topic, status, due, payload, error) in enumerate(rows):
-            _row, created = OutboxMessage.objects.get_or_create(
+            row, created = OutboxMessage.objects.get_or_create(
                 dedupe_key=f"{KEY}:outbox:{index}",
                 defaults={
                     "topic": topic,
@@ -90,8 +155,13 @@ class Command(BaseCommand):
                     "deferred_since": now - timedelta(hours=3) if "deferred" in error else None,
                 },
             )
-            if created and status == "dead":  # updated_at is "when it died" for K6
-                OutboxMessage.objects.filter(pk=_row.pk).update(updated_at=due)
+            if created:
+                # Enqueued an hour before it was due; touched last when it died (``updated_at`` is "when it
+                # died" for K6) or at its last attempt — never before it was created.
+                last_touch = due if status == "dead" else min(due, now) - timedelta(minutes=5)
+                OutboxMessage.objects.filter(pk=row.pk).update(
+                    created_at=due - timedelta(hours=1), updated_at=last_touch
+                )
             made += int(created)
         return made
 
@@ -104,9 +174,16 @@ class Command(BaseCommand):
             ("bts", "rejected", "unknown_parcel", 3),
             ("bts", "accepted", None, 18),
         ]
+        # what the real views store as the callback's object (commerce.api.webhooks): a payment for Click /
+        # Payme, an order for BTS — so an order page's «Diagnostika» finds its webhooks
+        payments = list(Payment.objects.order_by("-id").values_list("pk", "order_id")[:50])
         made = 0
         for provider, outcome, code, count in rows:
             for n in range(count):
+                entity = ""
+                if payments:
+                    payment_id, order_id = payments[n % len(payments)]
+                    entity = f"order:{order_id}" if provider == "bts" else f"payment:{payment_id}"
                 key = f"{KEY}:{provider}:{outcome}:{n}"
                 if WebhookInbox.objects.filter(provider=provider, event_key=key).exists():
                     continue
@@ -120,6 +197,7 @@ class Command(BaseCommand):
                     payload={"demo": True},
                     raw_body="{}",
                     result={"status": 200, "body": {}, "outcome": outcome, "error_code": code},
+                    entity_ref=entity if outcome == "accepted" else "",
                     processing_ms=40 + n,
                 )
                 made += 1

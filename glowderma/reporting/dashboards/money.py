@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlencode
 
 from django.urls import reverse
 
@@ -25,6 +26,7 @@ from glowderma.reporting.dashboards import (
     OK,
     WARN,
     ago,
+    capped,
     change,
     changelist,
     generated,
@@ -46,6 +48,27 @@ LOYALTY_CHECK = report_module.LOYALTY_CHECK
 
 CHECKS = report_module.CHECKS
 SKIPPED_LABELS = {tasks.BILLZ_NOT_LIVE: "Billz sinov rejimida — tekshirilmadi"}
+# What to do about a row that found something (the rows that need a person, in plain words).
+GUIDANCE: dict[str, str] = {
+    "k2_payment_pending_stuck": (
+        "Har bir to‘lovni oching va provayder kabinetida (Click / Payme) tranzaksiya ID bo‘yicha holatini "
+        "tekshiring. Pul yechilgan bo‘lsa — buyurtma raqamini texnik guruhga yuboring; yechilmagan bo‘lsa, "
+        "mijoz bilan bog‘lanib, qayta to‘lashni so‘rang."
+    ),
+    "k2_click_paid_without_paydoc": (
+        "Click kabinetida to‘lovning fiskal cheki (paydoc) chiqqanini tekshiring; chiqmagan bo‘lsa, texnik "
+        "guruhga to‘lov raqamini yuboring — chek bo‘lmasa, qaytarishni avtomatik yuborib bo‘lmaydi."
+    ),
+    "k3_refund_open": (
+        "Qaytarish uzoq ochiq turibdi: uni oching, holati va «oxirgi xato»ni ko‘ring. Holati noma’lum yoki "
+        "qo‘lda kiritish kerak bo‘lsa, provayder kabinetida pul qaytganini tekshiring va boshqaruv panelida "
+        "(To‘lovlar → Qaytarishlar) uni hal qilingan deb belgilang."
+    ),
+    "k3_refund_failed": (
+        "Qaytarish provayderda rad etilgan: «xato kodi»ni ko‘ring, so‘ng boshqaruv panelida (To‘lovlar → "
+        "Qaytarishlar) qayta yuboring yoki pulni qo‘lda qaytarib, «qo‘lda qaytarildi» deb belgilang."
+    ),
+}
 # The checks of the ledger reconciliation (glowderma.loyalty.tasks.CHECKS) in Uzbek; an unknown name is shown
 # as it is.
 RECONCILE_CHECK_LABELS = {
@@ -94,6 +117,7 @@ def _rows(
                 "text": num(finding.count),
                 "href": ids_link(info.model, finding.ids) if finding.count else None,
                 "count": finding.count,
+                "capped": capped(finding.count, finding.ids),
             }
         if reported is None:
             report_cell: dict[str, Any] = {"text": "—", "href": None, "count": None, "samples": []}
@@ -105,6 +129,7 @@ def _rows(
                 "href": ids_link(info.model, reported.ids) if reported.count and info.model else None,
                 "count": reported.count,
                 "samples": _samples(info.model, reported.ids),
+                "capped": capped(reported.count, reported.ids) if info.model else None,
                 "more": max(reported.count - min(len(reported.ids), SAMPLE_IDS), 0),
                 "note": SKIPPED_LABELS.get(reported.skipped) if reported.skipped else None,
             }
@@ -120,6 +145,7 @@ def _rows(
                 "name": name,
                 "code": info.code,
                 "label": info.label,
+                "guidance": GUIDANCE.get(name, "") if row_state in (WARN, CRITICAL) else "",
                 "report": report_cell,
                 "live": live_cell,
                 "state": state(row_state),
@@ -263,9 +289,10 @@ def build(now: datetime) -> dict[str, Any]:
             "title": "Osilib qolgan to‘lovlar",
             "icon": "hourglass_top",
             "value": num(stuck.count) if stuck else "—",
-            "unit": "pending",
+            "unit": "ta to‘lov",
             "hint": "Band muddati o‘tgan, tranzaksiyasi ochiq",
             "href": ids_link("payments_payment", stuck.ids) if stuck and stuck.count else None,
+            "note": capped(stuck.count, stuck.ids) if stuck else None,
             "state": state(CRITICAL if stuck and stuck.count else OK if stuck else CRITICAL),
         },
         policy["tile"],
@@ -288,6 +315,9 @@ def build(now: datetime) -> dict[str, Any]:
         "policy_tiers": policy["tiers"],
         "reconcile_checks": reconcile["checks"],
         "ops_url": reverse("admin:index"),
+        # the «Hisobotni hozir ishga tushirish» action of the audit log (its confirm step; managers only)
+        "run_report_url": f"{reverse('admin:core_auditentry_run_consistency_report')}?"
+        + urlencode({"next": reverse("admin:reporting_money")}),
     }
 
 

@@ -65,6 +65,7 @@ PLATFORMS: tuple[tuple[str, str], ...] = (
     ("android", "Android"),
     (account_selectors.NO_DEVICE, "Qurilmasiz"),
 )
+CHANNEL_SLOTS = {"web": 1, "ios": 2, "android": 3}
 OTP_PURPOSES = {
     "signup": "Ro‘yxatdan o‘tish",
     "reset": "Parolni tiklash",
@@ -327,6 +328,8 @@ def build(now: datetime) -> dict[str, Any]:
     platform_rows = [
         {
             "label": label,
+            # the channel colour slot of dashboards.css (web 1, iOS 2, Android 3; none for «Qurilmasiz»)
+            "slot": CHANNEL_SLOTS.get(key),
             "count": num(sessions.get(key, 0)),
             "raw": sessions.get(key, 0),
             "percent": percent(sessions.get(key, 0), session_total),

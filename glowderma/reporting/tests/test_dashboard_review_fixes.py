@@ -245,3 +245,81 @@ def test_the_order_lookup_opens_the_order_or_explains(ops_client: Client) -> Non
 def test_the_order_lookup_needs_the_console(client: Client) -> None:
     response = client.get("/django-admin/commerce/order/lookup/", {"number": "1"})
     assert response.status_code == 302 and "/login/" in response["Location"]
+
+
+# --- the demo data ------------------------------------------------------------------------------------------
+
+
+def test_seed_ops_demo_writes_coherent_outbox_rows() -> None:
+    """The seeded messages have the shape their handlers read (``billz.push_sale``: purchase, order, Billz
+    uuid of a paid order), real topics, and were never touched before they were created."""
+    from io import StringIO
+
+    from django.core.management import call_command
+
+    from glowderma.accounts.tests.factories import CustomerFactory
+    from glowderma.catalog.tests.factories import ProductFactory
+    from glowderma.loyalty.tests.factories import PurchaseFactory
+
+    CustomerFactory.create_batch(2)
+    ProductFactory.create()
+    purchase = PurchaseFactory.create()
+    call_command("seed_ops_demo", stdout=StringIO())
+    rows = list(OutboxMessage.objects.filter(dedupe_key__startswith="ops-demo:outbox:"))
+    assert rows and all(row.updated_at >= row.created_at for row in rows)
+    pushes = [row for row in rows if row.topic == "billz.push_sale"]
+    assert all(set(row.payload) == {"purchase_id", "order_id", "billz_order_uuid"} for row in pushes)
+    first = next(row for row in pushes if row.payload["purchase_id"] is not None)
+    assert first.payload == {
+        "purchase_id": purchase.pk,
+        "order_id": purchase.order_id,
+        "billz_order_uuid": str(purchase.billz_order_uuid),
+    }
+    assert purchase.order is not None and purchase.order.paid_at is not None
+    assert {row.topic for row in rows} <= {
+        "billz.push_sale",
+        "push.order_status",
+        "sms.send",
+        "bts.create_shipment",
+        "campaign.send_batch",
+    }
+
+
+# --- money: guidance, the report button, capped lists ------------------------------------------------------
+
+
+def test_k2_and_k3_rows_say_what_to_do_and_the_report_button_reuses_the_action(ops_client: Client) -> None:
+    from glowderma.core.tests.console import console_client
+    from glowderma.payments.tests.factories import RefundFactory
+
+    RefundFactory.create(failed=True)
+    data = money.build(NOW)
+    rows = {row["name"]: row for row in data["rows"]}
+    assert "Qaytarishlar" in rows["k3_refund_failed"]["guidance"]
+    assert rows["k2_payment_pending_stuck"]["guidance"] == ""  # nothing found: no advice
+    assert data["run_report_url"].startswith("/django-admin/core/auditentry/run-consistency-report/?next=")
+    staff_page = ops_client.get("/django-admin/dashboards/money/").content.decode()
+    assert "Hisobotni hozir ishga tushirish" not in staff_page  # managers only, like the action
+    manager_page = console_client("manager").get("/django-admin/dashboards/money/").content.decode()
+    assert "Hisobotni hozir ishga tushirish" in manager_page
+    confirm = console_client("manager").get(data["run_report_url"])
+    assert confirm.status_code == 200 and confirm.context["action_title"].startswith("Moliyaviy")
+
+
+def test_a_capped_id_list_says_so() -> None:
+    assert dashboards.capped(234, list(range(100))) == "Ro‘yxatda 100 / 234"
+    assert dashboards.capped(5, [1, 2, 3, 4, 5]) is None
+    assert dashboards.capped(0, []) is None
+
+
+def test_seo_errors_are_danger_and_channels_keep_one_colour() -> None:
+    from glowderma.reporting.dashboards import sales
+
+    data = sales.build(NOW, 30)
+    assert all(
+        row["state"]["key"] == (dashboards.CRITICAL if row["state"]["label"] == "Xato" else dashboards.WARN)
+        for row in data["seo"]
+    )
+    slots = {row["key"]: row["slot"] for row in data["channels"]}
+    assert slots == {"web": 1, "ios": 2, "android": 3, "pos": 4}
+    assert customers.CHANNEL_SLOTS == {key: slots[key] for key in ("web", "ios", "android")}

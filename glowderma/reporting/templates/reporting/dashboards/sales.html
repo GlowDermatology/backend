@@ -74,7 +74,7 @@
 
             <section class="gd-panel" id="top">
                 <header class="gd-panel__head">
-                    <h2 class="gd-panel__title">Top {{ d.top|length }} mahsulot</h2>
+                    <h2 class="gd-panel__title">{% if d.top %}Top {{ d.top|length }} mahsulot{% else %}Eng ko‘p sotilgan mahsulotlar{% endif %}</h2>
                     <p class="gd-panel__note">Tushum bo‘yicha · bekor qilinganlarsiz</p>
                 </header>
                 {% if d.top %}
@@ -118,7 +118,7 @@
                                 <tr>
                                     <td class="strong">{{ row.label }}</td>
                                     <td class="muted gd-hide-sm">{{ row.kind }}</td>
-                                    <td class="num">{% if row.href %}<a href="{{ row.href }}">{{ row.count }}</a>{% else %}{{ row.count }}{% endif %}</td>
+                                    <td class="num">{% if row.href %}<a href="{{ row.href }}">{{ row.count }}</a>{% if row.capped %}<div class="gd-capped">{{ row.capped }}</div>{% endif %}{% else %}{{ row.count }}{% endif %}</td>
                                     <td>{% include "reporting/dashboards/_state.html" with s=row.state %}</td>
                                 </tr>
                             {% endfor %}
