@@ -210,3 +210,17 @@ a.gd-row-action .material-symbols-outlined {
     margin-bottom: 10px;
   }
 }
+
+/* The professional editor's weekly hours: the whole day name in the weekday select, and time fields narrow
+   enough (Unfold's time widget asks for 14rem each) that the row's delete button stays on screen. */
+td.field-weekday select {
+  min-width: 9rem;
+}
+
+#working_hours-group td.field-tabular .min-w-56 {
+  min-width: 8.5rem;
+}
+
+#working_hours-group td.field-tabular input.vTimeField {
+  min-width: 0;
+}

@@ -275,7 +275,7 @@ def test_catalog_uses_the_uzbek_apostrophes() -> None:
 def test_django_uses_the_project_catalog() -> None:
     assert _("Log in") == "Kirish"
     assert _("Change") == "O‘zgartirish"  # overrides Django's own "O'zgartirish"
-    assert ngettext("%(counter)s result", "%(counter)s results", 5) == "%(counter)s ta natija"
+    assert ngettext("%(counter)s result", "%(counter)s results", 5) == "%(counter)s ta yozuv"
 
 
 def test_po_parser_handles_context_plurals_fuzzy_and_continuations() -> None:

@@ -1,5 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1200" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Glow Derma Ops">
-  <!-- The console sign-in's side panel (UNFOLD["LOGIN"]["image"]): the storefront's nav ink and gold. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="1200" viewBox="0 0 600 1200" role="img" aria-label="Glow Derma Ops">
+  <!-- The console sign-in's side panel (UNFOLD["LOGIN"]["image"]): the storefront's nav ink and gold. Unfold
+       draws it with background-size: cover from the top left, so the artwork is narrow and sits high. -->
   <defs>
     <radialGradient id="glow" cx="50%" cy="42%" r="62%">
       <stop offset="0" stop-color="#4a3f2c"/>
@@ -11,15 +12,15 @@
       <stop offset="1" stop-color="#9a7424"/>
     </linearGradient>
   </defs>
-  <rect width="900" height="1200" fill="url(#glow)"/>
+  <rect width="600" height="1200" fill="url(#glow)"/>
   <g fill="none" stroke="#c9a24b" stroke-opacity=".14">
-    <circle cx="450" cy="500" r="220"/>
-    <circle cx="450" cy="500" r="300"/>
-    <circle cx="450" cy="500" r="390"/>
-    <circle cx="450" cy="500" r="490"/>
+    <circle cx="300" cy="460" r="220"/>
+    <circle cx="300" cy="460" r="300"/>
+    <circle cx="300" cy="460" r="390"/>
+    <circle cx="300" cy="460" r="490"/>
   </g>
-  <rect x="370" y="420" width="160" height="160" rx="34" fill="#2b2620" stroke="url(#gold)" stroke-width="3"/>
-  <text x="450" y="526" text-anchor="middle" font-family="'Cormorant Garamond', Cormorant, Georgia, 'Times New Roman', serif" font-size="68" font-weight="600" letter-spacing="3" fill="url(#gold)">GD</text>
-  <text x="450" y="660" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="40" letter-spacing="2" fill="#f6ebd0">Glow Derma Ops</text>
-  <text x="450" y="704" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="20" letter-spacing="6" fill="#c9a24b" fill-opacity=".85">OPERATSION KONSOL</text>
+  <rect x="220" y="380" width="160" height="160" rx="34" fill="#2b2620" stroke="url(#gold)" stroke-width="3"/>
+  <text x="300" y="486" text-anchor="middle" font-family="'Cormorant Garamond', Cormorant, Georgia, 'Times New Roman', serif" font-size="68" font-weight="600" letter-spacing="3" fill="url(#gold)">GD</text>
+  <text x="300" y="620" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="40" letter-spacing="2" fill="#f6ebd0">Glow Derma Ops</text>
+  <text x="300" y="664" text-anchor="middle" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif" font-size="17" letter-spacing="5" fill="#c9a24b" fill-opacity=".85">OPERATSION KONSOL</text>
 </svg>

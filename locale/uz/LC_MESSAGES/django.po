@@ -482,7 +482,7 @@ msgstr "Oyna yopilmoqda…"
 
 msgid "%(counter)s result"
 msgid_plural "%(counter)s results"
-msgstr[0] "%(counter)s ta natija"
+msgstr[0] "%(counter)s ta yozuv"
 
 msgid "entry"
 msgid_plural "entries"

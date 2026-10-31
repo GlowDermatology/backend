@@ -67,7 +67,12 @@ def test_payment_admin_as_designed() -> None:
         "confirmed_at",
         "created_at",
     )
-    assert tuple(map(column_field, model_admin.list_filter)) == ("provider", "status", "created_at", "confirmed_at")
+    assert tuple(map(column_field, model_admin.list_filter)) == (
+        "provider",
+        "status",
+        "created_at",
+        "confirmed_at",
+    )
     assert model_admin.search_fields == ("provider_txn_id", "=order__id")
     assert model_admin.inlines == (RefundInline,)
     request = RequestFactory().get("/django-admin/")

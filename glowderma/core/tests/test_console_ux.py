@@ -190,3 +190,10 @@ def test_the_sign_in_page_has_the_brand_side_image() -> None:
 
     page = Client().get(reverse("admin:login"))
     assert "ops/login-side" in page.content.decode()
+
+
+def test_the_time_widgets_note_is_uzbek(ops_client) -> None:  # type: ignore[no-untyped-def]
+    """Django's admin JavaScript (jsi18n) warns about a browser in another time zone: the project's
+    djangojs catalog says it in Uzbek."""
+    catalog = ops_client.get(reverse("admin:jsi18n")).content.decode()
+    assert "soat orqadasiz" in catalog and "soat oldindasiz" in catalog
