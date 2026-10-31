@@ -24,6 +24,7 @@ def test_every_console_app_has_label_migrations() -> None:
     assert ("professionals", "0007_uz_field_labels") in LABEL_MIGRATIONS
 
 
+@pytest.mark.django_db
 @pytest.mark.parametrize(("app", "name"), LABEL_MIGRATIONS)
 def test_a_label_migration_prints_no_sql(app: str, name: str) -> None:
     out = io.StringIO()
