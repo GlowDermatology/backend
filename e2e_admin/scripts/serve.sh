@@ -23,10 +23,10 @@ case "${1:-}" in
   main)
     export DATABASE_URL="$PG/glowderma_e2e" REDIS_URL="$REDIS/9" CELERY_BROKER_URL="$REDIS/10"
     rm -rf "$STATE" && mkdir -p "$STATE"
-    manage e2e_console reset-db --data '{"names": ["glowderma_e2e"]}' >/dev/null
+    manage e2e_console --skip-checks reset-db --data '{"names": ["glowderma_e2e"]}' >/dev/null
     manage migrate --noinput -v 0
     # A copy of the freshly migrated database: what a new deployment looks like (no demo data).
-    manage e2e_console reset-db --data '{"names": ["glowderma_e2e_empty"], "template": "glowderma_e2e"}' >/dev/null
+    manage e2e_console --skip-checks reset-db --data '{"names": ["glowderma_e2e_empty"], "template": "glowderma_e2e"}' >/dev/null
     touch "$STATE/empty-ready"
     manage collectstatic --noinput -v 0
     manage e2e_console clear-cache --data '{"all": true}' >/dev/null
