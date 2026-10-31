@@ -9,12 +9,22 @@ excluded (design 01 §11), and so is the TOTP seed of the ops console's 2FA devi
 List pages show phones and emails masked; the change page of a record shows them in full.
 
 ``auth.Group`` is unregistered: staff have one role model (GST-1), groups are never used.
+
+Safe audited action (glowderma.core.admin_actions): «Seansni tugatish» signs one open customer session out
+through ``accounts.sessions.revoke_session`` — the same service as ``DELETE admin/customers/{id}/sessions/
+{sid}/`` (reason ``admin_revoked``) — from the session's change page or its row on the list.
 """
+
+from typing import Any
 
 from django.contrib import admin
 from django.contrib.auth.models import Group
+from django.http import HttpRequest
+from django.urls import reverse
+from django.utils.safestring import SafeString
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
+from glowderma.accounts import sessions
 from glowderma.accounts.models import (
     Address,
     AuthSession,
@@ -24,14 +34,19 @@ from glowderma.accounts.models import (
     SocialIdentity,
     StaffUser,
 )
+from glowderma.core import timeutils
 from glowderma.core.admin import (
+    ReadOnlyAdmin,
     customer_column,
     date_range,
+    display,
     dropdown,
     masked_email_column,
     masked_phone_column,
     register_read_only,
+    row_action_link,
 )
+from glowderma.core.admin_actions import ActionResult, ConfirmForm, OpsActionsMixin, done, ops_action, refused
 
 for _model in (Group, TOTPDevice):  # registered by django.contrib.auth / django_otp (editable, stock)
     if admin.site.is_registered(_model):
@@ -55,10 +70,19 @@ register_read_only(
     search_fields=("email", "full_name"),
     ordering=("id",),
 )
-register_read_only(
-    AuthSession,
-    exclude=("refresh_hash", "previous_refresh_hash"),
-    list_display=(
+
+
+def _session_refusal(model_admin: Any, request: HttpRequest | None, session: AuthSession) -> str:
+    if session.audience != "customer" or session.customer_id is None:
+        return "Xodim seanslari bu yerda tugatilmaydi."
+    if session.revoked_at is not None or session.absolute_expires_at <= timeutils.now():
+        return "Seans allaqachon tugagan."
+    return ""
+
+
+class AuthSessionAdmin(OpsActionsMixin, ReadOnlyAdmin):
+    exclude = ("refresh_hash", "previous_refresh_hash")
+    list_display = (
         "id",
         "audience",
         "staff",
@@ -69,13 +93,52 @@ register_read_only(
         "absolute_expires_at",
         "revoked_at",
         "revoke_reason",
-    ),
-    list_filter=(dropdown("audience"), dropdown("revoke_reason"), date_range("created_at")),
-    search_fields=("id", "staff__email", "customer__phone", "device_label"),
-    ordering=("-created_at",),
-    list_select_related=("staff", "customer"),
-    autocomplete_fields=("staff", "customer", "device"),
-)
+        "revoke_button",
+    )
+    list_filter = (dropdown("audience"), dropdown("revoke_reason"), date_range("created_at"))
+    search_fields = ("id", "staff__email", "customer__phone", "device_label")
+    ordering = ("-created_at",)
+    list_select_related = ("staff", "customer")
+    autocomplete_fields = ("staff", "customer", "device")
+    actions_detail = ("revoke",)
+
+    @display(description="Amal")
+    def revoke_button(self, session: AuthSession) -> SafeString | str:
+        if _session_refusal(self, None, session):
+            return ""
+        url = reverse("admin:accounts_authsession_revoke", args=[session.pk])
+        back = reverse("admin:accounts_authsession_changelist")
+        return row_action_link(f"{url}?next={back}", "Tugatish", "logout")
+
+    @ops_action(
+        description="Seansni tugatish",
+        title="Mijoz seansini tugatish",
+        body=(
+            "Mijoz shu qurilmada tizimdan chiqariladi (sabab: admin_revoked). Qurilmada boshqa ochiq seans "
+            "qolmasa, unga push xabarlar yuborilmaydi. Mijoz qaytadan kirishi mumkin."
+        ),
+        submit="Seansni tugatish",
+        icon="logout",
+        available=_session_refusal,
+    )
+    def revoke(self, request: HttpRequest, session: AuthSession, form: ConfirmForm) -> ActionResult:
+        customer_id = int(session.customer_id or 0)
+        try:
+            sessions.revoke_session(
+                customer_id, str(session.pk), actor=request.user, actor_type="staff", request=request
+            )
+        except sessions.SessionNotFound:
+            return refused("Seans allaqachon tugagan: hech narsa o‘zgarmadi.")
+        return done(
+            "Seans tugatildi.",
+            audit_action="ops.customer_session_revoked",
+            entity_type="customer",
+            entity_id=customer_id,
+            after={"sid": str(session.pk)},
+        )
+
+
+admin.site.register(AuthSession, AuthSessionAdmin)
 register_read_only(
     SocialIdentity,
     list_display=("id", "staff", "provider", "subject", "email_at_link", "created_at", "last_login_at"),

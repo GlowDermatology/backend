@@ -223,3 +223,27 @@ def revoke_other_sessions(customer_id: int, current_sid: str, *, actor: Customer
         after={"count": len(sessions), "scope": enums.LogoutScope.OTHERS},
     )
     return len(sessions)
+
+
+@transaction.atomic
+def revoke_all_sessions(customer_id: int, *, actor: Any, request: Any = None) -> int:
+    """Staff sign every session of the customer out (the ops console's «Barcha seanslarni tugatish»: a lost
+    phone, an account takeover): each open session → ``admin_revoked``, tombstones and QR keys on commit, the
+    devices left without a session retired (no push), under the customer lock like :func:`revoke_session`.
+    Audit ``customer.sessions_revoked {count, scope: "all"}`` when at least one session ended; safe to
+    repeat (0, nothing audited). Returns how many sessions ended."""
+    services.lock_customer(customer_id)
+    sessions, _farewell = services.sign_out_sessions(
+        customer_id, enums.SessionRevokeReason.ADMIN_REVOKED, except_sid=None
+    )
+    if sessions:
+        audit.record(
+            action="customer.sessions_revoked",
+            entity_type="customer",
+            entity_id=str(customer_id),
+            actor=actor,
+            actor_type="staff",
+            request=request,
+            after={"count": len(sessions), "scope": enums.LogoutScope.ALL},
+        )
+    return len(sessions)
