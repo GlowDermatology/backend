@@ -12,8 +12,9 @@ request from 127.0.0.2 (another loopback address, Linux) plays a browser outside
 Checks: the provider callbacks and POS reach Django with the query string intact; the private paths answer 404
 at the edge; the body limits; X-Forwarded-For is overwritten; no Server/Via header and HSTS on every host
 (www included); the ops console host (an allowed address reaches the login page with the CSP and the other
-security headers, / redirects to /django-admin/, any other path is an empty 404, an address outside the
-allow-list gets an empty 404 for everything and never reaches Django); a client trickling its body never
+security headers and the /media/ previews, / redirects to /django-admin/, any other path is an empty 404, an
+address outside the allow-list gets an empty 404 for everything and never reaches Django); a client
+trickling its body never
 reaches the upstream; the server timeouts; and no secret or
 personal value from a query string, a Referer or a token header appears in the access log (stdout) or the
 error log (stderr), including the error line of a 502 while the upstream is down. CI runs it with the binary
@@ -292,7 +293,9 @@ OPS_CSP_REQUIRED = (
 
 
 def check_ops_host(probe: Probe, port: int, ops: str, upstream: Upstream) -> None:
-    """The ops console host: allow-list first, then only /django-admin* and /static/* reach Django."""
+    """The ops console host: allow-list first, then only /django-admin* and /static/* reach Django; /media/
+    (the console's image previews) is served from the volume; a professional's photo upload fits the body
+    limit."""
     login = request(port, ops, "GET", "/django-admin/login/", headers={"X-Forwarded-For": "198.51.100.7"})
     probe.check(login.status == 200, f"ops: allowed address, login page expected 200, got {login.status}")
     probe.check("/django-admin/login/" in upstream.paths(), "ops: the login page did not reach the upstream")
@@ -325,7 +328,26 @@ def check_ops_host(probe: Probe, port: int, ops: str, upstream: Upstream) -> Non
         root.status == 302 and root.headers.get("location") == "/django-admin/",
         f"ops: / expected 302 to /django-admin/, got {root.status} {root.headers.get('location')}",
     )
-    for path in ("/api/v1/health/", "/api/v1/admin/auth/me/", "/media/a.txt", "/admin"):
+    before = len(upstream.paths())
+    media = request(port, ops, "GET", "/media/a.txt")
+    probe.check(
+        media.status == 200
+        and media.body == b"media"
+        and media.headers.get("x-content-type-options") == "nosniff",
+        f"ops: /media/ (the console's image previews) expected 200 with nosniff, got {media.status}",
+    )
+    probe.check("/media/a.txt" not in upstream.paths()[before:], "ops: /media/ reached the upstream")
+    photo = request(
+        port, ops, "POST", "/django-admin/professionals/professional/add/", body=b"x" * (5 * MIB + MIB // 2)
+    )
+    probe.check(
+        photo.status == 200, f"ops: a 5.5 MiB photo upload expected to reach Django, got {photo.status}"
+    )
+    too_big = request(
+        port, ops, "POST", "/django-admin/professionals/professional/add/", body=b"x" * (7 * MIB)
+    )
+    probe.check(too_big.status == 413, f"ops: a 7 MiB body expected 413, got {too_big.status}")
+    for path in ("/api/v1/health/", "/api/v1/admin/auth/me/", "/admin"):
         before = len(upstream.paths())  # the other hosts' checks may have sent the same path legitimately
         other = request(port, ops, "GET", path)
         probe.check(
@@ -335,7 +357,7 @@ def check_ops_host(probe: Probe, port: int, ops: str, upstream: Upstream) -> Non
         probe.check(path not in upstream.paths()[before:], f"ops: {path} reached the upstream")
     request(port, ops, "GET", f"/django-admin/accounts/customer/?q={SECRETS['ops_phone']}")
     before = len(upstream.paths())
-    for path in ("/django-admin/login/", "/", "/static/unfold/css/styles.css"):
+    for path in ("/django-admin/login/", "/", "/static/unfold/css/styles.css", "/media/a.txt"):
         denied = request(port, ops, "GET", path, source=OUTSIDE_ADDRESS)
         probe.check(
             denied.status == 404 and denied.body == b"",

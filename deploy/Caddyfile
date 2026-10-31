@@ -3,8 +3,9 @@
 #   SITE_DOMAIN   public landing (Next.js); www.SITE_DOMAIN redirects to it
 #   ADMIN_DOMAIN  admin panel (Next.js BFF); its session cookies are host-only
 #   API_DOMAIN    Django: mobile customer API, provider webhooks, POS, health, /media/ from the shared volume
-#   OPS_DOMAIN    Django ops console (Unfold at /django-admin/), only for OPS_ALLOWED_IPS (space separated
-#                 IPs/CIDRs); every other address gets an empty 404, as does every other path
+#   OPS_DOMAIN    Django ops console (Unfold at /django-admin/, its /static/ and the /media/ previews), only for
+#                 OPS_ALLOWED_IPS (space separated IPs/CIDRs); every other address gets an empty 404, as does
+#                 every other path
 #
 # Header contract: Caddy trusts no upstream proxy, so X-Forwarded-For is overwritten with the TCP peer. The Next
 # BFF forwards that hop to Django as X-GD-Client-IP; Django trusts X-Forwarded-For only from this container
@@ -175,9 +176,10 @@ www.{$SITE_DOMAIN} {
 		>Cross-Origin-Opener-Policy same-origin
 		>X-Robots-Tag "noindex, nofollow"
 	}
-	# Admin forms and actions post a few KB; nothing is uploaded through the console.
+	# Admin forms and actions post a few KB; the one upload is a professional's photo (≤ 5 MiB, re-encoded by
+	# Django; DATA_UPLOAD_MAX_MEMORY_SIZE is 6 MiB), as on ADMIN_DOMAIN.
 	request_body {
-		max_size 1MiB
+		max_size 7MB
 	}
 	# A literal order (route): an address outside the allow-list learns nothing, not even the redirect.
 	route {
@@ -185,6 +187,14 @@ www.{$SITE_DOMAIN} {
 		respond @denied 404
 		@root path /
 		redir @root /django-admin/ 302
+		# Image previews on the console's pages (banners, product images, a professional's photo) are
+		# MEDIA_URL paths: served here from the shared volume, read-only as on API_DOMAIN, so the CSP's
+		# img-src 'self' allows them.
+		handle_path /media/* {
+			root * {$MEDIA_ROOT:/srv/media}
+			header Cache-Control "public, max-age=604800"
+			file_server
+		}
 		@console path /django-admin /django-admin/* /static/*
 		reverse_proxy @console {$API_UPSTREAM:api:8000} {
 			request_buffers 1MiB
