@@ -177,6 +177,8 @@ UNFOLD: dict[str, Any] = {
     "SITE_FAVICONS": [
         {"rel": "icon", "type": "image/svg+xml", "href": lambda request: static("ops/favicon.svg")},
     ],
+    # The sign-in page's side panel (wide screens): the brand's ink and gold, served from static.
+    "LOGIN": {"image": lambda request: static("ops/login-side.svg")},
     "SHOW_HISTORY": True,
     "SHOW_VIEW_ON_SITE": False,
     "SHOW_BACK_BUTTON": True,

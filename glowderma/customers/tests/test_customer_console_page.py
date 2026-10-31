@@ -37,3 +37,16 @@ def test_customer_page_shows_related_records_in_tabs_without_secrets() -> None:
     listing = client.get(reverse("admin:accounts_customer_changelist"))
     assert listing.status_code == 200
     assert str(customer.phone) not in listing.content.decode()  # masked on the list
+
+
+def test_the_customer_page_masks_the_contact_like_the_list_and_the_title() -> None:
+    from glowderma.accounts.tests.factories import CustomerFactory
+    from glowderma.core import timeutils
+    from glowderma.core.pii import mask_email, mask_phone
+
+    customer = CustomerFactory.create(email="malika.k@example.uz", email_verified_at=timeutils.now())
+    client = Client()
+    ops_login(client, StaffUserFactory.create(is_staff=True))
+    content = client.get(reverse("admin:accounts_customer_change", args=[customer.pk])).content.decode()
+    assert str(customer.phone) not in content and "malika.k@example.uz" not in content
+    assert mask_phone(str(customer.phone)) in content and mask_email("malika.k@example.uz") in content

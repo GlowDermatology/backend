@@ -579,7 +579,7 @@ def test_a_requeue_skips_a_sale_recorded_by_hand() -> None:
     assert hooks is not None and hooks.describe_uz and hooks.skip_reason_uz and hooks.warning_uz
     assert hooks.describe_uz(dead).startswith(f"buyurtma №{order.pk}, Billz qoralamasi {SALE_ID}")
     assert hooks.skip_reason_uz(dead).startswith("Billz’da allaqachon yozilgan: ")
-    assert "billz_mark_recorded" in hooks.warning_uz
+    assert "billz_mark_recorded" not in hooks.warning_uz and "texnik guruhga" in hooks.warning_uz
 
 
 @override_settings(BILLZ_MODE="live")

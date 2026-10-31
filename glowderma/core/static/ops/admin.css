@@ -57,3 +57,156 @@ a.gd-row-action .material-symbols-outlined {
 .ops-action #dialog .gd-ops-refusal {
   margin: 0;
 }
+
+/* The filters a changelist applies (admin/ops/applied_filters.html): visible after a dashboard drill-down. */
+.gd-applied {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--color-primary-200);
+  background: var(--color-primary-50);
+  color: var(--color-base-700);
+  font-size: 13px;
+}
+
+.gd-applied .material-symbols-outlined {
+  font-size: 18px;
+  color: var(--color-primary-700);
+}
+
+.gd-applied__title {
+  font-weight: 600;
+}
+
+.gd-applied__chip {
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--color-base-200);
+  background: #fff;
+  overflow-wrap: anywhere;
+}
+
+.gd-applied__clear {
+  margin-left: auto;
+  color: var(--color-primary-700);
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.dark .gd-applied {
+  border-color: var(--color-base-700);
+  background: rgb(255 255 255 / 0.04);
+  color: var(--color-base-200);
+}
+
+.dark .gd-applied .material-symbols-outlined,
+.dark .gd-applied__clear {
+  color: var(--color-primary-400);
+}
+
+.dark .gd-applied__chip {
+  border-color: var(--color-base-700);
+  background: transparent;
+}
+
+/* A real warning on an action's confirm step (admin_actions.WarningNote); other notes stay neutral. */
+.gd-ops-note--warning {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fff7ed;
+}
+
+.gd-ops-note--warning .material-symbols-outlined {
+  font-size: 18px;
+}
+
+.dark .gd-ops-note--warning {
+  background: rgb(249 115 22 / 0.12);
+}
+
+/* Changelist cells: dates and so‘m amounts never wrap mid-value (Unfold puts ``field-<name>`` on the cell). */
+#result_list td[class*="field-"][class*="_at"],
+#result_list td[class*="field-"][class*="_som"],
+#result_list td[class*="field-at"],
+#result_list td[class*="field-start"],
+#result_list td[class*="field-available_at"] {
+  white-space: nowrap;
+}
+
+/* The «Diagnostika» block of an order page (glowderma.commerce.diagnostics). */
+.gd-diag {
+  display: grid;
+  grid-template-columns: minmax(9rem, max-content) 1fr;
+  gap: 10px 20px;
+  margin: 0;
+  width: 100%;
+}
+
+.gd-diag dt {
+  font-weight: 600;
+  color: var(--color-base-500);
+}
+
+.gd-diag dd {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: center;
+}
+
+.gd-diag a {
+  color: var(--color-primary-700);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.dark .gd-diag a {
+  color: var(--color-primary-400);
+}
+
+.gd-diag__muted {
+  color: var(--color-base-500);
+}
+
+.gd-diag__error {
+  display: flex;
+  gap: 4px;
+  align-items: flex-start;
+  width: 100%;
+  color: #b91c1c;
+}
+
+.gd-diag__error .material-symbols-outlined {
+  font-size: 18px;
+}
+
+.gd-diag a.gd-diag__danger,
+.gd-diag__warn,
+.gd-diag__warn a {
+  color: #c2410c;
+}
+
+.dark .gd-diag__error,
+.dark .gd-diag a.gd-diag__danger {
+  color: #f87171;
+}
+
+@media (max-width: 640px) {
+  .gd-diag {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .gd-diag dd {
+    margin-bottom: 10px;
+  }
+}

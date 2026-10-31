@@ -114,8 +114,9 @@ def test_pages_render_for_a_plain_staff_user(plain_staff_client: Client) -> None
     change = plain_staff_client.get(url(CashbackPolicy, "change", policy.pk))
     assert change.status_code == 200
     content = change.content.decode()
-    assert "20000000" in content and "30000000" in content  # CashbackTier inline
-    assert "Superseded by" in content and "Effective to" in content  # derived columns (02 §1.1)
+    assert "20\xa0000\xa0000 so‘m" in content and "30\xa0000\xa0000 so‘m" in content  # CashbackTier inline
+    assert "O‘rnini olgan versiya" in content and "Amal qilish tugashi" in content  # derived (02 §1.1)
+    assert "Superseded by" not in content and "Effective to" not in content
     change = plain_staff_client.get(url(Purchase, "change", purchase.pk))
     assert change.status_code == 200
     content = change.content.decode()

@@ -13,6 +13,7 @@ from glowderma.core.admin import (
     date_range,
     dropdown,
     money_column,
+    number_link_column,
     register_read_only,
     status_badge,
     status_column,
@@ -53,7 +54,7 @@ class RefundInline(ReadOnlyTabularInline):
 class PaymentAdmin(ReadOnlyAdmin):
     list_display = (
         "id",
-        "order",
+        number_link_column("order", "Buyurtma"),
         "provider",
         status_column("status", "Holat", PAYMENT_STATUS_VARIANTS, PAYMENT_STATUS),
         money_column("amount", "Summa"),
@@ -61,7 +62,12 @@ class PaymentAdmin(ReadOnlyAdmin):
         "confirmed_at",
         "created_at",
     )
-    list_filter = (dropdown("provider"), dropdown("status"), date_range("created_at"))
+    list_filter = (
+        dropdown("provider"),
+        dropdown("status"),
+        date_range("created_at"),
+        date_range("confirmed_at"),
+    )
     search_fields = ("provider_txn_id", "=order__id")
     ordering = ("-created_at", "-id")
     autocomplete_fields = ("order",)
@@ -74,7 +80,7 @@ register_read_only(
     Refund,
     list_display=(
         "id",
-        "payment",
+        number_link_column("payment", "To‘lov", prefix="#"),
         status_column("state", "Holat", REFUND_STATE_VARIANTS, REFUND_STATE),
         "origin",
         money_column("amount", "Summa"),

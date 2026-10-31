@@ -8,7 +8,7 @@ Secrets never reach the page: ``StaffUser.password``, ``Customer.password``, ``A
 ``verification_token_hash`` and ``CustomerSocialIdentity.provider_refresh_token`` (Apple's sealed refresh
 token) are excluded (design 01 §11), and so is the TOTP seed of the ops console's 2FA devices
 (``TOTPDevice.key``); recovery codes (``StaticToken``, keyed hashes) are never listed, only how many are left.
-List pages show phones and emails masked; the change page of a record shows them in full.
+List pages show phones and emails masked (so does the customer page, glowderma.customers.admin).
 
 ``auth.Group`` is unregistered: staff have one role model (GST-1), groups are never used.
 
@@ -16,7 +16,7 @@ Writes on these pages (each confirmed and audited):
 
 - the manager-only "2FA ni qayta o‘rnatish" action on the staff list
   (``glowderma.accounts.console.access.reset_two_factor``);
-- «Seansni tugatish» (glowderma.core.admin_actions) signs one open customer session out through
+- «Sessiyani tugatish» (glowderma.core.admin_actions) signs one open customer session out through
   ``accounts.sessions.revoke_session`` — the same service as ``DELETE admin/customers/{id}/sessions/{sid}/``
   (reason ``admin_revoked``) — from the session's change page or its row on the list.
 """
@@ -52,12 +52,14 @@ from glowderma.core.admin import (
     date_range,
     display,
     dropdown,
+    forget_cached_counts,
     masked_email_column,
     masked_phone_column,
     register_read_only,
     row_action_link,
 )
 from glowderma.core.admin_actions import ActionResult, ConfirmForm, OpsActionsMixin, done, ops_action, refused
+from glowderma.core.otp_apps import TOTP_FIELD_LABELS
 
 # registered by django.contrib.auth / django_otp (editable, stock; otp_static's inline lists the tokens)
 for _model in (Group, TOTPDevice, StaticDevice):
@@ -113,7 +115,8 @@ def _has_manager_permission(self: admin.ModelAdmin[StaffUser], request: HttpRequ
 register_read_only(
     StaffUser,
     title_format="Xodim: {obj.email}",
-    exclude=("password",),
+    # groups and permissions are never used (GST-1): one staff role, managers flagged by is_manager
+    exclude=("password", "groups", "user_permissions"),
     list_display=(
         "id",
         "email",
@@ -135,9 +138,9 @@ register_read_only(
 
 def _session_refusal(model_admin: Any, request: HttpRequest | None, session: AuthSession) -> str:
     if session.audience != "customer" or session.customer_id is None:
-        return "Xodim seanslari bu yerda tugatilmaydi."
+        return "Xodim sessiyalari bu yerda tugatilmaydi."
     if session.revoked_at is not None or session.absolute_expires_at <= timeutils.now():
-        return "Seans allaqachon tugagan."
+        return "Sessiya allaqachon tugagan."
     return ""
 
 
@@ -177,13 +180,13 @@ class AuthSessionAdmin(OpsActionsMixin, ReadOnlyAdmin):
         return row_action_link(f"{url}?next={back}", "Tugatish", "logout")
 
     @ops_action(
-        description="Seansni tugatish",
-        title="Mijoz seansini tugatish",
+        description="Sessiyani tugatish",
+        title="Mijoz sessiyasini tugatish",
         body=(
-            "Mijoz shu qurilmada tizimdan chiqariladi (sabab: admin_revoked). Qurilmada boshqa ochiq seans "
-            "qolmasa, unga push xabarlar yuborilmaydi. Mijoz qaytadan kirishi mumkin."
+            "Mijoz shu qurilmada tizimdan chiqariladi (sabab: «Admin tugatdi»). Qurilmada boshqa ochiq "
+            "sessiya qolmasa, unga push xabarlar yuborilmaydi. Mijoz qaytadan kirishi mumkin."
         ),
-        submit="Seansni tugatish",
+        submit="Sessiyani tugatish",
         icon="logout",
         available=_session_refusal,
     )
@@ -194,9 +197,10 @@ class AuthSessionAdmin(OpsActionsMixin, ReadOnlyAdmin):
                 customer_id, str(session.pk), actor=request.user, actor_type="staff", request=request
             )
         except sessions.SessionNotFound:
-            return refused("Seans allaqachon tugagan: hech narsa o‘zgarmadi.")
+            return refused("Sessiya allaqachon tugagan: hech narsa o‘zgarmadi.")
+        forget_cached_counts("dash:customers")
         return done(
-            "Seans tugatildi.",
+            "Sessiya tugatildi.",
             audit_action="ops.customer_session_revoked",
             entity_type="customer",
             entity_id=customer_id,
@@ -269,9 +273,14 @@ register_read_only(
     list_select_related=("customer",),
     autocomplete_fields=("customer",),
 )
+# django_otp's field help texts are English and have no translation hook: hidden (the labels are Uzbek,
+# glowderma.core.otp_apps).
+OTP_HELP_TEXTS_HIDDEN = {name: "" for name in TOTP_FIELD_LABELS}
+
 register_read_only(
     TOTPDevice,
     exclude=("key",),
+    field_help_texts=OTP_HELP_TEXTS_HIDDEN,
     list_display=(
         "id",
         "user",
@@ -296,6 +305,7 @@ _recovery_codes_left.short_description = "Qolgan kodlar"  # type: ignore[attr-de
 
 register_read_only(
     StaticDevice,
+    field_help_texts=OTP_HELP_TEXTS_HIDDEN,
     list_display=("id", "user", "name", "confirmed", "created_at", "last_used_at", _recovery_codes_left),
     list_filter=("confirmed",),
     search_fields=("user__email", "name"),

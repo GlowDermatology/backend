@@ -18,6 +18,7 @@ from typing import Any
 
 from django.contrib import admin
 from django.core.cache import cache
+from django.db.models import QuerySet
 from django.http import HttpRequest
 
 from glowderma.core import enums, integration_modes
@@ -43,11 +44,19 @@ from glowderma.core.admin_actions import (
     ops_action,
     refused,
 )
-from glowderma.integrations import services
+from glowderma.integrations import selectors, services
 from glowderma.integrations.models import IntegrationState, Job, WebhookInbox
 
 # ``WebhookInbox.result["outcome"]`` (commerce.api.webhooks.inbox).
 WEBHOOK_OUTCOME_VARIANTS = {"accepted": SUCCESS, "duplicate": INFO, "rejected": WARNING, "error": DANGER}
+WEBHOOK_OUTCOME_LABELS = {
+    "accepted": "Qabul qilindi",
+    "duplicate": "Takroriy",
+    "rejected": "Rad etildi",
+    "error": "Ishlov xatosi",
+}
+# The dashboards' "failed" drill-down (integrations.selectors.FAILED_WEBHOOK_OUTCOMES) is one choice.
+FAILED_OUTCOMES = ",".join(selectors.FAILED_WEBHOOK_OUTCOMES)
 JOB_STATE_VARIANTS = {"queued": INFO, "running": PRIMARY, "succeeded": SUCCESS, "failed": DANGER}
 
 
@@ -55,25 +64,47 @@ def _result(obj: WebhookInbox) -> dict[str, Any]:
     return obj.result if isinstance(obj.result, dict) else {}
 
 
+class WebhookOutcomeFilter(admin.SimpleListFilter):
+    """``result.outcome`` as a sidebar filter; its parameter is the lookup the dashboards link with
+    (``?result__outcome__in=rejected,error``), so a drill-down shows up as this filter's choice."""
+
+    title = "natija"
+    parameter_name = "result__outcome__in"
+
+    def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
+        return [
+            (FAILED_OUTCOMES, "Xato (rad etilgan yoki ishlov xatosi)"),
+            *WEBHOOK_OUTCOME_LABELS.items(),
+        ]
+
+    def queryset(self, request: HttpRequest, queryset: QuerySet[WebhookInbox]) -> QuerySet[WebhookInbox]:
+        value = self.value()
+        if not value:
+            return queryset
+        outcomes = [outcome for outcome in value.split(",") if outcome in WEBHOOK_OUTCOME_LABELS]
+        return queryset.filter(result__outcome__in=outcomes)
+
+
 class WebhookInboxAdmin(ReadOnlyAdmin):
     list_display = ("id", "received_at", "provider", "event_key", "entity_ref", "outcome", "result_status")
-    list_filter = (dropdown("provider"), date_range("received_at"))
+    list_filter = (dropdown("provider"), WebhookOutcomeFilter, date_range("received_at"))
     search_fields = ("event_key", "entity_ref", "request_id")
     ordering = ("-received_at", "-id")
     date_hierarchy = "received_at"
 
-    @display(description="result status")
+    @display(description="HTTP javob")
     def result_status(self, obj: WebhookInbox) -> str:
         status = _result(obj).get("status")
         return "-" if status is None else str(status)
 
-    @display(description="natija", label=WEBHOOK_OUTCOME_VARIANTS)
+    @display(description="Natija", label=WEBHOOK_OUTCOME_VARIANTS)
     def outcome(self, obj: WebhookInbox) -> tuple[str, str]:
         outcome = _result(obj).get("outcome")
         code = _result(obj).get("error_code")
         if not outcome:
             return ("", "-")
-        return (str(outcome), f"{outcome} · {code}" if code else str(outcome))
+        text = WEBHOOK_OUTCOME_LABELS.get(str(outcome), str(outcome))
+        return (str(outcome), f"{text} · {code}" if code else text)
 
 
 admin.site.register(WebhookInbox, WebhookInboxAdmin)

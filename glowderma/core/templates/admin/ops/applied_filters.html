@@ -1,0 +1,12 @@
+{% load ops_admin %}{% ops_applied_filters cl as applied %}
+{% comment %}Every field lookup the list is filtered by (glowderma.core.templatetags.ops_admin): a dashboard drill-down passes lookups no sidebar filter shows.{% endcomment %}
+{% if applied %}
+    <div class="gd-applied" role="status">
+        <span class="material-symbols-outlined" aria-hidden="true">filter_alt</span>
+        <span class="gd-applied__title">Qo‘llangan filtrlar:</span>
+        {% for row in applied %}
+            <span class="gd-applied__chip"><strong>{{ row.label }}</strong>{% if row.op == ":" %}:{% elif row.op %} {{ row.op }}{% endif %} {{ row.value }}</span>
+        {% endfor %}
+        <a class="gd-applied__clear" href="{{ request.path }}">Filtrlarni tozalash</a>
+    </div>
+{% endif %}

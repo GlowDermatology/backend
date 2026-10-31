@@ -51,7 +51,7 @@ def test_revoke_get_csrf_and_method() -> None:
     session = CustomerSessionFactory.create()
     client = console_client("staff")
     page = client.get(revoke_url(session))
-    assert page.status_code == 200 and "Mijoz seansini tugatish" in page.content.decode()
+    assert page.status_code == 200 and "Mijoz sessiyasini tugatish" in page.content.decode()
     assert confirm(console_client("staff", enforce_csrf_checks=True), revoke_url(session)).status_code == 403
     assert client.patch(revoke_url(session)).status_code == 405
     session.refresh_from_db()
@@ -63,7 +63,7 @@ def test_revoke_uses_the_admin_api_service_and_audits() -> None:
     session = AuthSession.objects.get(device=device)
     client = console_client("staff")
     response = confirm(client, revoke_url(session))
-    assert messages_of(response) == [("success", "Seans tugatildi.")]
+    assert messages_of(response) == [("success", "Sessiya tugatildi.")]
     device.refresh_from_db()
     assert device.is_active is False  # no other session left on it: no more pushes
     staff_id = user_of(client).pk
@@ -83,9 +83,9 @@ def test_revoke_repeat_and_ended_sessions_are_refused() -> None:
     client = console_client("staff")
     confirm(client, revoke_url(session))
     page = client.get(revoke_url(session)).content.decode()
-    assert "Seans allaqachon tugagan." in page and 'name="_ops_confirm"' not in page
+    assert "Sessiya allaqachon tugagan." in page and 'name="_ops_confirm"' not in page
     again = confirm(client, revoke_url(session))
-    assert messages_of(again)[-1] == ("warning", "Seans allaqachon tugagan.")
+    assert messages_of(again)[-1] == ("warning", "Sessiya allaqachon tugagan.")
     assert AuditEntry.objects.filter(action="ops.customer_session_revoked").count() == 1
     expired = CustomerSessionFactory.create(absolute_expires_at=timeutils.now() - timedelta(minutes=1))
     assert messages_of(confirm(client, revoke_url(expired)))[-1][0] == "warning"
@@ -95,7 +95,7 @@ def test_staff_sessions_are_not_revoked_here() -> None:
     staff_session = AuthSessionFactory.create()
     client = console_client("staff")
     response = confirm(client, revoke_url(staff_session))
-    assert messages_of(response) == [("warning", "Xodim seanslari bu yerda tugatilmaydi.")]
+    assert messages_of(response) == [("warning", "Xodim sessiyalari bu yerda tugatilmaydi.")]
     staff_session.refresh_from_db()
     assert staff_session.revoked_at is None
     change = client.get(reverse("admin:accounts_authsession_change", args=[staff_session.pk]))
@@ -137,10 +137,10 @@ def test_revoke_all_ends_every_session_and_audits() -> None:
     other = CustomerSessionFactory.create()  # another customer's session stays
     client = console_client("staff")
     page = client.get(revoke_all_url(customer.pk)).content.decode()
-    assert "Mijozning barcha seanslarini tugatish" in page
+    assert "Mijozning barcha sessiyalarini tugatish" in page
     response = confirm(client, revoke_all_url(customer.pk))
     assert response["Location"] == reverse("admin:accounts_customer_change", args=[customer.pk])
-    assert messages_of(response) == [("success", "2 ta seans tugatildi.")]
+    assert messages_of(response) == [("success", "2 ta sessiya tugatildi.")]
     assert set(AuthSession.objects.filter(customer=customer).values_list("revoke_reason", flat=True)) == {
         "admin_revoked"
     }
@@ -163,7 +163,7 @@ def test_revoke_all_without_open_sessions_is_unavailable_and_safe_to_repeat() ->
     confirm(client, revoke_all_url(customer.pk))
     assert revoke_all_url(customer.pk) not in client.get(change_url).content.decode()
     again = confirm(client, revoke_all_url(customer.pk))
-    assert messages_of(again)[-1] == ("warning", "Mijozning ochiq seansi yo‘q.")
+    assert messages_of(again)[-1] == ("warning", "Mijozning ochiq sessiyasi yo‘q.")
     assert AuditEntry.objects.filter(action="customer.sessions_revoked").count() == 1
     assert sessions.revoke_all_sessions(customer.pk, actor=None) == 0
 

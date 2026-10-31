@@ -54,6 +54,7 @@ def test_shipment_admin_as_designed() -> None:
     model_admin = admin.site._registry[Shipment]
     assert isinstance(model_admin, ShipmentAdmin)
     assert tuple(map(column_field, model_admin.list_display)) == (
+        "id",
         "order",
         "state",
         "tracking_number",
@@ -61,6 +62,7 @@ def test_shipment_admin_as_designed() -> None:
         "bts_status",
         "via",
         "attempts",
+        "last_error_code",
         "last_attempt_at",
     )
     assert tuple(map(column_field, model_admin.list_filter)) == ("state", "via", "last_attempt_at")

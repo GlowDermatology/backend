@@ -8,7 +8,9 @@ from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.urls import URLPattern, path, reverse
+from django.utils.safestring import SafeString
 
+from glowderma.commerce import diagnostics as order_diagnostics
 from glowderma.commerce.models import Cart, CartItem, Order, OrderEvent, OrderItem, StockReservation
 from glowderma.core.admin import (
     DANGER,
@@ -20,6 +22,7 @@ from glowderma.core.admin import (
     ReadOnlyTabularInline,
     customer_column,
     date_range,
+    display,
     dropdown,
     money_column,
     register_read_only,
@@ -27,6 +30,7 @@ from glowderma.core.admin import (
     status_column,
 )
 from glowderma.core.labels import ORDER_STATUS, PAYMENT_STATUS
+from glowderma.delivery.admin import bts_status
 from glowderma.delivery.models import Shipment
 from glowderma.loyalty.models import CashbackHold
 from glowderma.payments.admin import PAYMENT_STATUS_VARIANTS
@@ -57,7 +61,7 @@ class OrderEventInline(ReadOnlyTabularInline):
     fields = ("at", "type", "source", "status_after", "actor")
     ordering = ("-at", "-id")
     tab = True
-    verbose_name_plural = "Tarix"
+    verbose_name_plural = "Hodisalar"
 
 
 class OrderPaymentInline(ReadOnlyTabularInline):
@@ -72,8 +76,18 @@ class OrderPaymentInline(ReadOnlyTabularInline):
 
 class OrderShipmentInline(ReadOnlyTabularInline):
     model = Shipment
-    fields = ("state", "tracking_number", "tariff_som", "bts_status", "via", "attempts", "last_attempt_at")
+    fields = (
+        "state",
+        "tracking_number",
+        "tariff_som",
+        "bts_status_label",
+        "via",
+        "attempts",
+        "last_error_code",
+        "last_attempt_at",
+    )
     tariff_som = staticmethod(money_column("tariff", "Tarif"))
+    bts_status_label = staticmethod(bts_status)
     tab = True
     verbose_name_plural = "Yetkazish"
 
@@ -90,6 +104,11 @@ class OrderCashbackHoldInline(ReadOnlyTabularInline):
 
 class OrderAdmin(ReadOnlyAdmin):
     title_format = "Buyurtma №{obj.pk}"
+
+    @display(description="Holat xulosasi")
+    def diagnostics(self, order: Order) -> SafeString:
+        """Status, payment, shipment, Billz and the related outbox / webhook rows (commerce.diagnostics)."""
+        return order_diagnostics.render(order)
 
     def get_urls(self) -> list[URLPattern]:
         lookup = path("lookup/", self.admin_site.admin_view(self.lookup_view), name="commerce_order_lookup")
@@ -126,6 +145,7 @@ class OrderAdmin(ReadOnlyAdmin):
         dropdown("payment_provider"),
         dropdown("channel"),
         date_range("created_at"),
+        date_range("paid_at"),
     )
     list_select_related = ("customer",)
     search_fields = ("=id", "customer__phone", "customer__name")
@@ -138,8 +158,10 @@ class OrderAdmin(ReadOnlyAdmin):
         OrderShipmentInline,
         OrderCashbackHoldInline,
     )
-    date_hierarchy = "created_at"
+    # No date_hierarchy: its 30 day links took three lines; the «yaratilgan» / «to‘langan» ranges cover it.
+    readonly_fields = ("diagnostics",)
     tab_groups = (
+        ("Diagnostika", ("diagnostics",)),
         (
             "Buyurtma",
             ("id", "customer", "channel", "fulfilment", "status", "payment_provider", "customer_note"),
