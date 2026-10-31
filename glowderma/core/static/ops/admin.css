@@ -236,3 +236,19 @@ td.field-weekday select {
 #working_hours-group td.field-tabular input.vTimeField {
   min-width: 0;
 }
+
+/* A change page's inline tabs on a phone: Unfold moves the tabs that do not fit into its «…» menu, but it
+   measures before that menu is shown, so a strip that only just fits (the order page: «Hodisalar» …) ended
+   wider than the screen. The strip never exceeds the column and scrolls sideways if it must. */
+@media (max-width: 767px) {
+  #tabs-wrapper > .flex.flex-row.grow {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  #tabs-items {
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+}
