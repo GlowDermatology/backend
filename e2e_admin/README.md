@@ -42,6 +42,6 @@ reused; `E2E_FRESH=1` (or `CI`) always starts fresh ones. Ports: `E2E_PORT`, `E2
 - `lib/totp.ts` computes RFC 6238 codes from the staff member's secret (or the key read off the enrolment
   page), never reusing a time step.
 - Projects: `console` (read-mostly specs, in parallel), then `mutating` (actions, editable forms, badge
-  changes, password change) one test at a time, so the dashboards' counts stay stable while compared.
+  changes) one test at a time, so the dashboards' counts stay stable while compared.
 - `tests/models.spec.ts` reads the model list from `admin.site._registry` at collection time: a newly
   registered model is covered without editing the suite.

@@ -4,8 +4,8 @@
 #   ADMIN_DOMAIN  admin panel (Next.js BFF); its session cookies are host-only
 #   API_DOMAIN    Django: mobile customer API, provider webhooks, POS, health, /media/ from the shared volume
 #   OPS_DOMAIN    Django ops console (Unfold at /django-admin/, its /static/ and the /media/ previews), only for
-#                 OPS_ALLOWED_IPS (space separated IPs/CIDRs); every other address gets an empty 404, as does
-#                 every other path
+#                 OPS_ALLOWED_IPS (space separated IPs/CIDRs, never commas); every other address gets an empty
+#                 404, as does every other path
 #
 # Header contract: Caddy trusts no upstream proxy, so X-Forwarded-For is overwritten with the TCP peer. The Next
 # BFF forwards that hop to Django as X-GD-Client-IP; Django trusts X-Forwarded-For only from this container

@@ -47,6 +47,7 @@ from glowderma.core.admin_actions import (
     refused,
 )
 from glowderma.core.i18n import format_number
+from glowderma.core.jsonmask import mask_secrets
 from glowderma.core.models import AuditEntry, IdempotencyRecord, OutboxMessage
 from glowderma.core.pii import mask_email, mask_phone
 
@@ -215,14 +216,22 @@ def date_range(field: str) -> tuple[str, type[RangeDateTimeFilter]]:
     return (field, RangeDateTimeFilter)
 
 
+def render_json(value: Any) -> str:
+    """A JSON document as the console shows it: pretty-printed, secret-like keys masked
+    (:func:`glowderma.core.jsonmask.mask_secrets`: tokens, signatures, sealed values never reach a page)."""
+    if value is None:
+        return "-"
+    text = json.dumps(mask_secrets(value), indent=2, ensure_ascii=False, sort_keys=True, default=str)
+    rendered: SafeString = format_html('<pre class="gd-json">{}</pre>', text)
+    return rendered
+
+
 def _json_renderer(field: models.Field[Any, Any]) -> Column:
+    """``<name>_pretty``: the read-only display of a ``JSONField`` (every JSON field of the console, change
+    pages and inlines alike, goes through :func:`render_json`)."""
+
     def render(obj: models.Model) -> str:
-        value = getattr(obj, field.name)
-        if value is None:
-            return "-"
-        text = json.dumps(value, indent=2, ensure_ascii=False, sort_keys=True, default=str)
-        rendered: SafeString = format_html('<pre class="gd-json">{}</pre>', text)
-        return rendered
+        return render_json(getattr(obj, field.name))
 
     render.__name__ = f"{field.name}_pretty"
     render.short_description = field.verbose_name  # type: ignore[attr-defined]
@@ -259,6 +268,12 @@ class ReadOnlyTabularInline(_TabularInline):
     extra = 0
     show_change_link = True
 
+    def __init__(self, parent_model: type[models.Model], admin_site: admin.AdminSite) -> None:
+        super().__init__(parent_model, admin_site)
+        for field in self.model._meta.concrete_fields:
+            if isinstance(field, models.JSONField):
+                setattr(self, f"{field.name}_pretty", _json_renderer(field))
+
     def has_add_permission(self, request: HttpRequest, obj: models.Model | None = None) -> bool:
         return False
 
@@ -279,11 +294,17 @@ class ReadOnlyTabularInline(_TabularInline):
         else:
             names = [field.name for field in self.model._meta.concrete_fields]
         names.extend(name for name in self.readonly_fields if name not in names)
-        return names
+        # A JSON field is shown through its masking renderer, never raw.
+        json_fields = {f.name for f in self.model._meta.concrete_fields if isinstance(f, models.JSONField)}
+        return [f"{name}_pretty" if name in json_fields else name for name in names]
+
+    def get_fields(self, request: HttpRequest, obj: models.Model | None = None) -> Any:
+        return self.get_readonly_fields(request, obj)
 
 
 class ReadOnlyAdmin(_ModelAdmin):
-    """View-only ``ModelAdmin``: JSON fields render as preformatted text, nothing can be written.
+    """View-only ``ModelAdmin``: JSON fields render as preformatted text with secret-like keys masked
+    (:func:`render_json`), nothing can be written.
 
     Large tables (ledger, events, inbox) are the norm, so pages are short and the changelist never runs the
     full ``COUNT(*)``.

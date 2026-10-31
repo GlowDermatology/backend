@@ -219,6 +219,9 @@ UNFOLD: dict[str, Any] = {
         "navigation": SIDEBAR_NAVIGATION,
     },
     "COMMAND": {"search_models": False, "show_history": False},
+    # The user menu: the user's own staff record instead of Unfold's stock "Change password" link (the
+    # console has no password change; glowderma.core.admin_site).
+    "ACCOUNT": {"navigation": "glowderma.core.admin_site.account_links"},
     "DASHBOARD_CALLBACK": f"{DASHBOARD_VIEWS}.dashboard_callback",
     # (url under /django-admin/, url name in the admin namespace, view class): Unfold wraps each in
     # ``admin_site.admin_view`` and passes ``admin_site`` to ``as_view``.

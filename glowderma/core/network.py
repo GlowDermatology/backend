@@ -3,6 +3,7 @@ from collections.abc import Callable
 
 from django.conf import settings
 from django.http import HttpRequest, HttpResponse, HttpResponseNotFound, JsonResponse
+from django.http.request import split_domain_port
 
 from glowderma.core.api.exceptions import error_body
 from glowderma.core.clientip import has_internal_secret, peer_ip
@@ -37,6 +38,18 @@ def passes_console_gate(request: HttpRequest) -> bool:
     return any(client in net for net in settings.OPS_ADMIN_ALLOWED_NETS)
 
 
+def on_console_host(request: HttpRequest) -> bool:
+    """Whether the request names the console's own host: always while ``OPS_DOMAIN`` is unset (local
+    development, tests), else the ``Host`` (as ``ALLOWED_HOSTS`` validated it, port ignored) must be
+    ``OPS_DOMAIN`` — the API's or the storefront's host never serves the console, even from an allowed
+    address."""
+    domain = str(getattr(settings, "OPS_DOMAIN", "") or "").strip().lower()
+    if not domain:
+        return True
+    host, _port = split_domain_port(request.get_host())
+    return host == domain
+
+
 class AdminNetworkMiddleware:
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
         self.get_response = get_response
@@ -44,8 +57,9 @@ class AdminNetworkMiddleware:
     def __call__(self, request: HttpRequest) -> HttpResponse:
         path = request.path_info
         if path.startswith(CONSOLE_PREFIX):
-            # Like the edge: a browser outside the allowed networks never learns the console exists.
-            if not passes_console_gate(request):
+            # Like the edge: a browser outside the allowed networks, or on another host, never learns the
+            # console exists.
+            if not on_console_host(request) or not passes_console_gate(request):
                 return HttpResponseNotFound(b"")
         elif path.startswith(ADMIN_API_PREFIXES):
             if not passes_admin_gate(request):

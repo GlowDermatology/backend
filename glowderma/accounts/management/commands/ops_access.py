@@ -1,13 +1,16 @@
 """``manage.py ops_access grant|revoke|reset-2fa|status --email EMAIL [--actor EMAIL]``: ops console access.
 
-* ``grant`` — console access (``is_staff``); the user enrols TOTP at the first login (/django-admin/).
+* ``grant`` — console access (``is_staff``); the user enrols TOTP at the first login (/django-admin/) within
+  ``OPS_ENROL_WINDOW_SECONDS`` (default 24 h). On an account that already has access but no TOTP device it
+  opens a new enrolment window (``ops_access.enrolment_opened``).
 * ``revoke`` — no console access; deletes the user's TOTP device and recovery codes and ends their console
   sessions. The Next.js admin panel is not affected (``manage.py deactivatestaff`` ends that).
-* ``reset-2fa`` — deletes the TOTP device and recovery codes (lost phone): the next login enrols again.
+* ``reset-2fa`` — deletes the TOTP device and recovery codes (lost phone) and ends the user's console
+  sessions: the next login enrols again, within the enrolment window this opens.
 * ``status`` — access, devices, recovery codes left (read-only).
 
-Audited ``ops_access.granted`` / ``ops_access.revoked`` / ``ops_access.2fa_reset`` (actor: ``--actor`` or
-system; reason ``manage.py ops_access``).
+Audited ``ops_access.granted`` / ``ops_access.enrolment_opened`` / ``ops_access.revoked`` /
+``ops_access.2fa_reset`` (actor: ``--actor`` or system; reason ``manage.py ops_access``; ``via`` ``cli``).
 """
 
 from typing import Any
@@ -43,14 +46,27 @@ class Command(BaseCommand):
         if operation == "grant":
             if not user.is_active:
                 raise CommandError(f"{user.email} is deactivated; reactivate the account first")
-            if access.grant(user, actor=actor, reason=REASON):
+            if access.grant(user, actor=actor, reason=REASON, via=access.VIA_CLI):
+                window = access.enrolment_window(user)
+                until = window.until.isoformat(timespec="minutes") if window is not None else "-"
                 self.stdout.write(
                     self.style.SUCCESS(
-                        f"{user.email} may now use the ops console; 2FA is set up at the first login."
+                        f"{user.email} may now use the ops console; 2FA is set up at the first login "
+                        f"(before {until})."
+                    )
+                )
+            elif (until_at := access.open_enrolment(user, actor=actor, reason=REASON)) is not None:
+                self.stdout.write(
+                    self.style.SUCCESS(
+                        f"{user.email} already has ops console access but no 2FA device; enrolment is open "
+                        f"until {until_at.isoformat(timespec='minutes')}."
                     )
                 )
             else:
-                self.stdout.write(f"{user.email} already has ops console access; nothing changed.")
+                window = access.enrolment_window(user)
+                until = window.until.isoformat(timespec="minutes") if window is not None else ""
+                tail = f" (enrolment open until {until})" if until else ""
+                self.stdout.write(f"{user.email} already has ops console access; nothing changed{tail}.")
         elif operation == "revoke":
             result = access.revoke(user, actor=actor, reason=REASON)
             self.stdout.write(
@@ -61,10 +77,13 @@ class Command(BaseCommand):
                 )
             )
         else:
-            result = access.reset_two_factor(user, actor=actor, reason=REASON)
+            result = access.reset_two_factor(user, actor=actor, reason=REASON, via=access.VIA_CLI)
+            window = access.enrolment_window(user)
+            until = window.until.isoformat(timespec="minutes") if window is not None else "-"
             self.stdout.write(
                 self.style.SUCCESS(
                     f"2FA of {user.email} reset ({result['totp_devices']} TOTP device(s), "
-                    f"{result['recovery_codes']} recovery code(s) deleted); the next login sets it up again."
+                    f"{result['recovery_codes']} recovery code(s) deleted, {result['sessions']} console "
+                    f"session(s) ended); the next login before {until} sets it up again."
                 )
             )

@@ -4,6 +4,8 @@ from .local import *  # noqa: F403
 
 # Parallel workers (git worktrees) each run the suite against their own test database.
 DATABASES["default"]["TEST"] = {"NAME": env_str("TEST_DB_NAME", "test_glowderma")}  # noqa: F405
+# The console answers on any allowed host in tests (a developer's OPS_DOMAIN never binds the suite to it).
+OPS_DOMAIN = ""
 CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
 CELERY_TASK_ALWAYS_EAGER = True
 CELERY_TASK_EAGER_PROPAGATES = True

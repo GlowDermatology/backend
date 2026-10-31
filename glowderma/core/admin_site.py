@@ -10,14 +10,22 @@ Seams for the later console work:
 * The second factor is enforced here, without importing ``accounts``: every console view (``admin_view``,
   hence every model page, custom page and the index) requires ``request.user.is_verified()``, which
   django-otp's ``OTPMiddleware`` installs from the session's verified device (``OPS_REQUIRE_2FA``).
+* No password change here: the stock ``password_change/`` and ``password_change/done/`` pages answer 404 (a
+  console session could otherwise change the password with no lockout, no audit and without ending the
+  user's Next admin panel sessions). Staff change their password in the Next admin panel
+  (``auth/change-password/``: lockout, session revoke, audit); the user menu links to the user's own staff
+  record instead (``UNFOLD["ACCOUNT"]``, :func:`account_links`), so Unfold never renders a dead
+  "Change password" link.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
-from django.http import HttpRequest
+from django.contrib.auth import get_user_model
+from django.http import Http404, HttpRequest
+from django.urls import reverse
 from unfold.sites import UnfoldAdminSite
 
 if TYPE_CHECKING:
@@ -51,6 +59,27 @@ class OpsAdminSite(_BaseSite):
             return True
         is_verified = getattr(request.user, "is_verified", None)
         return callable(is_verified) and bool(is_verified())
+
+    def password_change(self, request: HttpRequest, extra_context: dict[str, Any] | None = None) -> Any:
+        """Not a console page: passwords change in the Next admin panel (module doc)."""
+        raise Http404
+
+    def password_change_done(self, request: HttpRequest, extra_context: dict[str, Any] | None = None) -> Any:
+        raise Http404
+
+
+ACCOUNT_LINK_TITLE = "Mening hisobim"
+
+
+def account_links(request: HttpRequest) -> list[dict[str, str]]:
+    """``UNFOLD["ACCOUNT"]["navigation"]``: the user menu's link to the signed-in user's own (read-only) staff
+    record. A non-empty list is what keeps Unfold from rendering its stock "Change password" link."""
+    user = getattr(request, "user", None)
+    if user is None or not user.is_authenticated or user.pk is None:
+        return []
+    opts = get_user_model()._meta
+    link = reverse(f"admin:{opts.app_label}_{opts.model_name}_change", args=[user.pk])
+    return [{"title": ACCOUNT_LINK_TITLE, "link": link}]
 
 
 def environment_callback(request: HttpRequest) -> list[str]:
