@@ -115,12 +115,13 @@ jobs:
         run: >-
           docker run --rm -v "$PWD/deploy:/etc/caddy:ro"
           -e ACME_EMAIL=ci@example.com -e SITE_DOMAIN=example.com -e ADMIN_DOMAIN=admin.example.com
-          -e API_DOMAIN=api.example.com caddy:2.10.2-alpine
+          -e API_DOMAIN=api.example.com -e OPS_DOMAIN=ops.example.com
+          -e "OPS_ALLOWED_IPS=192.0.2.10/32 198.51.100.0/24" caddy:2.10.2-alpine
           caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
       - name: Edge behaviour probe
         # The Caddyfile in the pinned Caddy, in front of a stub: callbacks forwarded with their query string,
-        # private paths 404, body limits and buffering, headers, and no query string, Referer query or token
-        # header in the access or error logs (a 502 included).
+        # private paths 404, body limits and buffering, headers, the ops console host (allow-list, CSP, 404s),
+        # and no query string, Referer query or token header in the access or error logs (a 502 included).
         run: |
           docker create --name caddy-bin caddy:2.10.2-alpine >/dev/null
           docker cp caddy-bin:/usr/bin/caddy "$RUNNER_TEMP/caddy"
