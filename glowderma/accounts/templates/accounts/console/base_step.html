@@ -1,0 +1,33 @@
+{% extends 'unfold/layouts/unauthenticated.html' %}
+{% load static %}
+{% comment %}
+  Shared frame of the console's sign-in steps: Unfold's unauthenticated layout (the login page's), the console
+  title, messages, the lockout notice and the step's form errors. Steps fill "step".
+{% endcomment %}
+
+{% block extrastyle %}
+    {{ block.super }}
+    <link href="{% static 'ops/signin.css' %}" rel="stylesheet">
+{% endblock %}
+
+{% block title %}{{ title }} | {{ site_title }}{% endblock %}
+
+{% block content %}
+    {% include "unfold/helpers/unauthenticated_title.html" with title=site_title subtitle=title %}
+
+    {% include "unfold/helpers/messages.html" %}
+
+    {% if lockout_message %}
+        {% include "unfold/helpers/messages/error.html" with error=lockout_message class="ops-lockout" %}
+    {% endif %}
+
+    {% if form.non_field_errors %}
+        {% include "unfold/helpers/messages/error.html" with errors=form.non_field_errors %}
+    {% endif %}
+
+    {% if email %}
+        <p class="ops-signin-account">{{ email }}</p>
+    {% endif %}
+
+    {% block step %}{% endblock %}
+{% endblock %}

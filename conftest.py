@@ -4,11 +4,12 @@ from collections.abc import Iterator
 import pytest
 from django.conf import settings
 from django.core.cache import cache
-from django.test import override_settings
+from django.test import Client, override_settings
 from rest_framework.test import APIClient
 
 from glowderma.accounts import tokens
 from glowderma.accounts.models import AuthSession, Customer, StaffUser
+from glowderma.accounts.tests import ops_helpers
 from glowderma.accounts.tests.factories import (
     AuthSessionFactory,
     CustomerFactory,
@@ -92,6 +93,22 @@ def staff_client(staff_token: str) -> APIClient:
     client.credentials(
         HTTP_AUTHORIZATION=f"Bearer {staff_token}", HTTP_X_GD_INTERNAL_SECRET=settings.INTERNAL_API_SECRET
     )
+    return client
+
+
+@pytest.fixture
+def ops_user(db: None) -> StaffUser:
+    """An active ``is_staff`` console user (``ops@x.uz``, ``TEST_PASSWORD``) with a confirmed TOTP device on
+    ``ops_helpers.KNOWN_TOTP_KEY``; not a superuser, not a manager."""
+    return ops_helpers.ops_staff()
+
+
+@pytest.fixture
+def ops_client(ops_user: StaffUser) -> Client:
+    """A Django test ``Client`` logged in to the ops console (``/django-admin/``) as ``ops_user`` with a
+    verified 2FA session (``ops_helpers.ops_login``)."""
+    client = Client()
+    ops_helpers.ops_login(client, ops_user)
     return client
 
 

@@ -13,6 +13,7 @@ from django.db import connection, models
 from django.test import Client, RequestFactory
 from django.urls import reverse
 
+from glowderma.accounts.tests.ops_helpers import ops_login
 from glowderma.core import enums, seeding
 from glowderma.core.admin import ReadOnlyAdmin
 from glowderma.core.seeding import SeedContext
@@ -27,7 +28,7 @@ CONTEXT = SeedContext(anchor=ANCHOR, keep_open=True)
 @pytest.fixture
 def super_client(db: None) -> Client:
     client = Client()
-    client.force_login(staff_actor(is_staff=True, is_superuser=True))
+    ops_login(client, staff_actor(is_staff=True, is_superuser=True))
     return client
 
 

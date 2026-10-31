@@ -7,6 +7,7 @@ from django.test import Client, RequestFactory
 from django.urls import reverse
 
 from glowderma.accounts.tests.factories import StaffUserFactory
+from glowderma.accounts.tests.ops_helpers import ops_login
 from glowderma.catalog.models import Banner, Category, Product, ProductImage, ProductStock
 from glowderma.catalog.tests.factories import (
     BannerFactory,
@@ -54,7 +55,7 @@ def test_registered_read_only_with_design_columns(model: type[models.Model]) -> 
 
 def test_changelists_and_change_pages_render() -> None:
     client = Client()
-    client.force_login(StaffUserFactory.create(is_staff=True, is_superuser=True))
+    ops_login(client, StaffUserFactory.create(is_staff=True, is_superuser=True))
     image = ProductImageFactory.create()
     rows = [
         CategoryFactory.create(),

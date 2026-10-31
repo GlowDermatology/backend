@@ -1,0 +1,23 @@
+{% extends 'accounts/console/base_step.html' %}
+{% load unfold %}
+
+{% block step %}
+    <p class="ops-signin-lead">Autentifikator ilovasini (Google Authenticator, Microsoft Authenticator, 1Password …) oching va «Glow Derma Ops» uchun ko‘rsatilgan kodni kiriting.</p>
+
+    <form action="{% url 'ops_2fa_verify' %}" method="post" id="otp-form" novalidate>
+        {% csrf_token %}
+        {% include "unfold/helpers/field.html" with field=form.code %}
+
+        <div class="flex flex-col gap-3 mt-6">
+            {% component "unfold/components/button.html" with submit=1 variant="primary" class="w-full" %}
+                Tasdiqlash <span class="material-symbols-outlined relative right-0 transition-all group-hover:-right-1 text-sm">arrow_forward</span>
+            {% endcomponent %}
+            {% url 'ops_2fa_recovery' as recovery_url %}
+            {% component "unfold/components/button.html" with href=recovery_url variant="secondary" class="w-full" %}
+                Telefon yo‘qmi? Zaxira kod bilan kirish
+            {% endcomponent %}
+        </div>
+    </form>
+
+    {% include "accounts/console/_cancel.html" %}
+{% endblock %}

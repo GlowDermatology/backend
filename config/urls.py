@@ -7,7 +7,7 @@ from django.urls import URLPattern, URLResolver, include, path
 from django.utils.module_loading import import_string
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
-from glowderma.accounts.api.guard import guarded_admin_login
+from glowderma.accounts.console import urls as console_urls
 from glowderma.core.api.health import HealthView
 
 handler404 = "glowderma.core.api.exceptions.not_found_view"
@@ -86,7 +86,8 @@ urlpatterns: list[URLPattern | URLResolver] = [
 if dev_routes_enabled():
     urlpatterns.append(path("api/v1/dev/", include("glowderma.commerce.api.dev.urls")))
 if settings.DJANGO_ADMIN_ENABLED:
-    urlpatterns.append(path("django-admin/login/", guarded_admin_login))
+    # The console's sign-in (password, TOTP 2FA, enrolment, logout) ahead of the site's own routes.
+    urlpatterns.extend(console_urls.urlpatterns)
     urlpatterns.append(path("django-admin/", admin.site.urls))
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

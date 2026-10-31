@@ -27,6 +27,8 @@ INSTALLED_APPS = [
     # TOTP second factor of the ops console (devices only; the login flow lives in glowderma.accounts).
     "django_otp",
     "django_otp.plugins.otp_totp",
+    # One-time recovery codes (stored as keyed hashes, glowderma.accounts.console.recovery).
+    "django_otp.plugins.otp_static",
     "rest_framework",
     "drf_spectacular",
     "drf_spectacular_sidecar",
@@ -56,7 +58,11 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    # ``request.user.is_verified()``: the console's second factor (glowderma.core.admin_site).
+    "django_otp.middleware.OTPMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+    # The console session's idle and absolute limits (after messages: it leaves a notice on the login page).
+    "glowderma.accounts.console.middleware.ConsoleSessionMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 ROOT_URLCONF = "config.urls"
@@ -75,6 +81,32 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = 6 * 1024 * 1024
 LOGIN_REDIRECT_URL = "/django-admin/"
 # The ops console's environment badge (glowderma.core.admin_site); production sets PRODUCTION or STAGING.
 OPS_ENVIRONMENT_LABEL = "LOCAL"
+# --- Ops console access (glowderma.accounts.console, glowderma.core.network; docs/ops/deploy.md) ---
+# Every console login needs a TOTP second factor (django-otp; recovery codes from otp_static). Production
+# refuses false; tests switch it off only with override_settings.
+OPS_REQUIRE_2FA = env_bool("OPS_REQUIRE_2FA", True)
+# A console session ends after this long without a request (idle) and this long after its login (absolute).
+OPS_SESSION_IDLE_SECONDS = env_int("OPS_SESSION_IDLE_SECONDS", 1800)
+OPS_SESSION_ABSOLUTE_SECONDS = env_int("OPS_SESSION_ABSOLUTE_SECONDS", 12 * 60 * 60)
+if not 300 <= OPS_SESSION_ABSOLUTE_SECONDS <= 24 * 60 * 60:
+    raise ImproperlyConfigured("OPS_SESSION_ABSOLUTE_SECONDS must be between 300 and 86400")
+if not 60 <= OPS_SESSION_IDLE_SECONDS <= OPS_SESSION_ABSOLUTE_SECONDS:
+    raise ImproperlyConfigured("OPS_SESSION_IDLE_SECONDS must be between 60 and OPS_SESSION_ABSOLUTE_SECONDS")
+# Browsers allowed to reach /django-admin/ (their address as the trusted edge forwards it, TRUSTED_PROXIES).
+# Local/test settings allow every address; production requires the list when the console is enabled.
+OPS_ADMIN_ALLOWED_NETS: tuple[Network, ...] = ()
+# The console's own host (production: ALLOWED_HOSTS and the CSRF trusted origin).
+OPS_DOMAIN = env_str("OPS_DOMAIN", "").strip().lower()
+# django-otp: the issuer shown in authenticator apps; the code steps are rate limited by LoginGuard (scope
+# django_admin_otp, the same ladder as the password step), so django-otp's own per-device delay is off.
+OTP_TOTP_ISSUER = "Glow Derma Ops"
+OTP_TOTP_THROTTLE_FACTOR = 0
+OTP_STATIC_THROTTLE_FACTOR = 0
+# Sessions exist only for the console (every API authenticates with tokens): host-only cookies (no
+# SESSION_COOKIE_DOMAIN), never sent on a cross-site request, at most the absolute lifetime.
+SESSION_COOKIE_AGE = OPS_SESSION_ABSOLUTE_SECONDS
+SESSION_COOKIE_SAMESITE = "Strict"
+CSRF_COOKIE_SAMESITE = "Strict"
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"

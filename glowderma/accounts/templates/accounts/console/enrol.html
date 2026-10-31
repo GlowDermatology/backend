@@ -1,0 +1,35 @@
+{% extends 'accounts/console/base_step.html' %}
+{% load unfold %}
+
+{% block step %}
+    <p class="ops-signin-lead">Konsolga kirish uchun ikki bosqichli himoya majburiy. Uni bir marta sozlaysiz:</p>
+
+    <ol class="ops-signin-steps">
+        <li>Telefoningizga autentifikator ilovasini o‘rnating (Google Authenticator, Microsoft Authenticator, 1Password …).</li>
+        <li>Ilovada «QR kodni skanerlash»ni tanlang va quyidagi kodni skanerlang.</li>
+        <li>Ilova ko‘rsatgan 6 xonali kodni kiriting.</li>
+    </ol>
+
+    <div class="ops-qr-frame">{{ qr_svg }}</div>
+
+    <details class="ops-manual-key">
+        <summary>QR kodni skanerlay olmayapsizmi? Kalitni qo‘lda kiriting</summary>
+        <p>Hisob: <strong>Glow Derma Ops</strong> · turi: vaqtga asoslangan (TOTP), 6 raqam, 30 soniya.</p>
+        <code id="manual-key">{{ manual_key }}</code>
+    </details>
+
+    <form action="{% url 'ops_2fa_enrol' %}" method="post" id="enrol-form" novalidate>
+        {% csrf_token %}
+        {% include "unfold/helpers/field.html" with field=form.code %}
+
+        <div class="flex flex-col gap-3 mt-6">
+            {% component "unfold/components/button.html" with submit=1 variant="primary" class="w-full" %}
+                Tasdiqlash va yoqish <span class="material-symbols-outlined relative right-0 transition-all group-hover:-right-1 text-sm">arrow_forward</span>
+            {% endcomponent %}
+        </div>
+    </form>
+
+    <p class="ops-signin-hint">Bu kalitni hech kimga bermang va skrinshot qilib saqlamang.</p>
+
+    {% include "accounts/console/_cancel.html" %}
+{% endblock %}

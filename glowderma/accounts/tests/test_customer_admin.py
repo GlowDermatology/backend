@@ -15,6 +15,7 @@ from glowderma.accounts.tests.factories import (
     SmsCodeFactory,
     StaffUserFactory,
 )
+from glowderma.accounts.tests.ops_helpers import ops_login
 from glowderma.core.admin import ReadOnlyAdmin
 from glowderma.core.tests.admin_pages import rendered_field_names
 
@@ -24,7 +25,7 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture
 def super_client() -> Client:
     client = Client()
-    client.force_login(StaffUserFactory.create(email="root@x.uz", is_staff=True, is_superuser=True))
+    ops_login(client, StaffUserFactory.create(email="root@x.uz", is_staff=True, is_superuser=True))
     return client
 
 

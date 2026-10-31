@@ -2,17 +2,23 @@ import hashlib
 import math
 from typing import TYPE_CHECKING, Any
 
+from django.conf import settings
 from django.contrib import admin
 from django.contrib.admin.forms import AdminAuthenticationForm
+from django.contrib.auth import REDIRECT_FIELD_NAME
+from django.contrib.auth.views import LoginView
 from django.core.cache import cache, caches
 from django.core.cache.backends.redis import RedisCache
 from django.core.exceptions import ValidationError
-from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.http import HttpRequest, HttpResponse, HttpResponseBase, HttpResponseRedirect
+from django.template.response import TemplateResponse
+from django.urls import reverse
+from django.utils.cache import add_never_cache_headers
 from rest_framework.exceptions import Throttled
 from unfold.forms import AuthenticationForm as UnfoldAuthenticationForm
 
+from glowderma.accounts.console import events, state, twofactor
 from glowderma.core import timeutils
-from glowderma.core.api.exceptions import error_body
 
 
 def email_hash(email: str) -> str:
@@ -95,19 +101,74 @@ class GuardedAdminAuthenticationForm(_AdminAuthenticationForm):
 # Wired once at import time (config.urls imports this module); the view never mutates the site.
 admin.site.login_form = GuardedAdminAuthenticationForm
 
+LOGIN_TEMPLATE = "accounts/console/login.html"
+LOCKOUT_MESSAGE = "Juda ko‘p urinish. {wait} soniyadan so‘ng qayta urinib ko‘ring."
 
-def guarded_admin_login(request: HttpRequest, extra_context: dict[str, Any] | None = None) -> HttpResponse:
+
+def lockout_message(exc: Throttled) -> tuple[str, int]:
+    wait = int(math.ceil(float(getattr(exc, "wait", None) or 0)))
+    return LOCKOUT_MESSAGE.format(wait=wait), wait
+
+
+class ConsolePasswordView(LoginView):
+    """The console's first step. A correct password logs nobody in while the second factor is required
+    (``OPS_REQUIRE_2FA``): it records a pending sign-in and sends the browser to the code step, or to the
+    enrolment step when the user has no confirmed TOTP device yet (``glowderma.accounts.console``)."""
+
+    def form_valid(self, form: Any) -> HttpResponse:
+        user = form.get_user()
+        next_url = state.safe_next(self.request, self.get_redirect_url() or None)
+        if not settings.OPS_REQUIRE_2FA:
+            state.complete_login(self.request, user, None)
+            events.record("console.login_succeeded", self.request, user, method="password")
+            return HttpResponseRedirect(next_url)
+        state.start_pending(self.request, user, next_url)
+        events.record("console.password_verified", self.request, user)
+        step = "ops_2fa_verify" if twofactor.has_second_factor(user) else "ops_2fa_enrol"
+        return HttpResponseRedirect(reverse(step))
+
+    def form_invalid(self, form: Any) -> HttpResponse:
+        email = str(form.data.get("username", "")).strip().lower()[:254]
+        events.record("console.login_failed", self.request, email=email)
+        return super().form_invalid(form)
+
+
+def _login_context(request: HttpRequest, extra_context: dict[str, Any] | None) -> dict[str, Any]:
+    """What ``AdminSite.login`` hands the template, so Unfold's login page renders unchanged."""
+    context: dict[str, Any] = {
+        **admin.site.each_context(request),
+        "title": "Kirish",
+        "subtitle": None,
+        "app_path": request.get_full_path(),
+        "username": "",
+    }
+    if REDIRECT_FIELD_NAME not in request.GET and REDIRECT_FIELD_NAME not in request.POST:
+        context[REDIRECT_FIELD_NAME] = reverse("admin:index", current_app=admin.site.name)
+    context.update(extra_context or {})
+    return context
+
+
+def guarded_admin_login(
+    request: HttpRequest, extra_context: dict[str, Any] | None = None
+) -> HttpResponseBase:
+    request.current_app = admin.site.name
+    if request.method == "GET" and admin.site.has_permission(request):
+        return HttpResponseRedirect(reverse("admin:index", current_app=admin.site.name))
+    context = _login_context(request, extra_context)
     try:
-        return admin.site.login(request, extra_context=extra_context)
+        return ConsolePasswordView.as_view(
+            extra_context=context,
+            authentication_form=admin.site.login_form,
+            template_name=LOGIN_TEMPLATE,
+        )(request)
     except Throttled as exc:
-        wait = getattr(exc, "wait", 0)
-        response = JsonResponse(
-            error_body(
-                "throttled",
-                request,
-                message=f"Juda ko‘p urinish. {wait} soniyadan so‘ng qayta urinib ko‘ring.",
-            ),
-            status=429,
+        message, wait = lockout_message(exc)
+        email = str(request.POST.get("username", "")).strip().lower()[:254]
+        events.record("console.login_locked", request, email=email, wait=wait)
+        form = GuardedAdminAuthenticationForm(request, initial={"username": email})
+        response = TemplateResponse(
+            request, LOGIN_TEMPLATE, {**context, "form": form, "lockout_message": message}, status=429
         )
         response["Retry-After"] = str(wait)
+        add_never_cache_headers(response)
         return response

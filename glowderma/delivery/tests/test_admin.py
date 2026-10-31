@@ -7,6 +7,7 @@ from django.test import Client, RequestFactory
 from django.urls import reverse
 
 from glowderma.accounts.tests.factories import StaffUserFactory
+from glowderma.accounts.tests.ops_helpers import ops_login
 from glowderma.core.admin import ReadOnlyAdmin, column_field
 from glowderma.delivery.admin import ShipmentAdmin, ShipmentEventInline
 from glowderma.delivery.models import Shipment, ShipmentEvent
@@ -21,7 +22,7 @@ MODELS = [Shipment, ShipmentEvent]
 def plain_staff_client() -> Client:
     """The audience ``ReadOnlyAdmin`` exists for: active ``is_staff``, no superuser flag, no model perms."""
     client = Client()
-    client.force_login(StaffUserFactory.create(email="ops@x.uz", is_staff=True))
+    ops_login(client, StaffUserFactory.create(email="ops@x.uz", is_staff=True))
     return client
 
 
