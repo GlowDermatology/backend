@@ -20,17 +20,21 @@ class StatusTemplate(models.Model):
     """The push text for one of the four order statuses that trigger a push; ``{raqam}`` is the only
     placeholder."""
 
-    status = models.CharField(max_length=24, choices=enums.TemplateStatus.choices, unique=True)
-    text_uz = models.CharField(max_length=180)
-    text_ru = models.CharField(max_length=180, blank=True)
-    text_en = models.CharField(max_length=180, blank=True)
-    created_at = models.DateTimeField(default=timestamp_default, editable=False)
-    updated_at = models.DateTimeField(default=timestamp_default)
+    status = models.CharField(
+        max_length=24, choices=enums.TemplateStatus.choices, unique=True, verbose_name="holat"
+    )
+    text_uz = models.CharField(max_length=180, verbose_name="matn (uz)")
+    text_ru = models.CharField(max_length=180, blank=True, verbose_name="matn (ru)")
+    text_en = models.CharField(max_length=180, blank=True, verbose_name="matn (en)")
+    created_at = models.DateTimeField(default=timestamp_default, editable=False, verbose_name="yaratilgan")
+    updated_at = models.DateTimeField(default=timestamp_default, verbose_name="yangilangan")
     updated_by = models.ForeignKey(
         "accounts.StaffUser", null=True, on_delete=models.SET_NULL, related_name="+"
     )
 
     class Meta:
+        verbose_name = "holat shabloni"
+        verbose_name_plural = "holat shablonlari"
         ordering = ["id"]
         constraints = [
             models.CheckConstraint(condition=Q(text_uz__regex=r"^.{5,180}$"), name="template_text_uz_5_180"),
@@ -50,14 +54,18 @@ class CustomerSegment(TimeStampedModel):
     """A named audience: rule-based (``min_online_orders``, ``min_lifetime_amount``, ANDed when set) plus
     manual members."""
 
-    name = models.CharField(max_length=60)
-    min_online_orders = models.PositiveIntegerField(null=True)  # null = rule off
-    min_lifetime_amount = models.BigIntegerField(null=True)  # so'm; null = rule off
+    name = models.CharField(max_length=60, verbose_name="nomi")
+    # null = rule off
+    min_online_orders = models.PositiveIntegerField(null=True, verbose_name="min. onlayn buyurtmalar")
+    # so'm; null = rule off
+    min_lifetime_amount = models.BigIntegerField(null=True, verbose_name="min. umumiy xarid")
     created_by = models.ForeignKey(
-        "accounts.StaffUser", null=True, on_delete=models.SET_NULL, related_name="+"
+        "accounts.StaffUser", null=True, on_delete=models.SET_NULL, related_name="+", verbose_name="yaratgan"
     )
 
     class Meta:
+        verbose_name = "segment"
+        verbose_name_plural = "segmentlar"
         ordering = ["id"]
         constraints = [
             models.UniqueConstraint(Lower("name"), name="segment_name_ci_unique"),
@@ -80,15 +88,25 @@ class SegmentMember(models.Model):
     """A manual membership of one customer in one segment."""
 
     segment = models.ForeignKey(
-        "notifications.CustomerSegment", on_delete=models.CASCADE, related_name="manual_members"
+        "notifications.CustomerSegment",
+        on_delete=models.CASCADE,
+        related_name="manual_members",
+        verbose_name="segment",
     )
     customer = models.ForeignKey(
-        "accounts.Customer", on_delete=models.CASCADE, related_name="segment_memberships"
+        "accounts.Customer",
+        on_delete=models.CASCADE,
+        related_name="segment_memberships",
+        verbose_name="mijoz",
     )
-    added_by = models.ForeignKey("accounts.StaffUser", null=True, on_delete=models.SET_NULL, related_name="+")
-    added_at = models.DateTimeField(default=timestamp_default, editable=False)
+    added_by = models.ForeignKey(
+        "accounts.StaffUser", null=True, on_delete=models.SET_NULL, related_name="+", verbose_name="qo‘shgan"
+    )
+    added_at = models.DateTimeField(default=timestamp_default, editable=False, verbose_name="qo‘shilgan")
 
     class Meta:
+        verbose_name = "segment a’zosi"
+        verbose_name_plural = "segment a’zolari"
         ordering = ["segment_id", "added_at", "id"]
         constraints = [models.UniqueConstraint(fields=["segment", "customer"], name="segmentmember_unique")]
         indexes = [models.Index(fields=["customer"], name="segmentmember_customer_idx")]
@@ -108,22 +126,32 @@ class Campaign(TimeStampedModel):
         SENT = "sent"
         CANCELLED = "cancelled"  # M3: a scheduled campaign staff cancelled before its send started
 
-    kind = models.CharField(max_length=8, choices=enums.NotificationKind.choices)  # promo|general
-    title = models.CharField(max_length=60)
-    body = models.CharField(max_length=180)
+    # promo|general
+    kind = models.CharField(max_length=8, choices=enums.NotificationKind.choices, verbose_name="turi")
+    title = models.CharField(max_length=60, verbose_name="sarlavha")
+    body = models.CharField(max_length=180, verbose_name="matn")
+    # MEDIA_ROOT/campaigns/<id>/<hash>.<ext>
     image = models.ImageField(
-        upload_to=media.campaign_image_path, blank=True, max_length=255
-    )  # MEDIA_ROOT/campaigns/<id>/<hash>.<ext>
+        upload_to=media.campaign_image_path, blank=True, max_length=255, verbose_name="rasm"
+    )
+    # none|product|url
     link_kind = models.CharField(
-        max_length=8, choices=enums.LinkKind.choices, default=enums.LinkKind.NONE
-    )  # none|product|url
+        max_length=8, choices=enums.LinkKind.choices, default=enums.LinkKind.NONE, verbose_name="havola turi"
+    )
     link_product = models.ForeignKey(
-        "catalog.Product", null=True, on_delete=models.SET_NULL, related_name="+"
+        "catalog.Product",
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name="havola mahsuloti",
     )
     link_product_label = models.CharField(max_length=120, blank=True)  # uz display name at creation
     # gap ADM-10.1: the https link the app opens (kind "url" only; "" otherwise; decision GC-3)
-    link_url = models.CharField(max_length=500, blank=True, default="")
-    audience_type = models.CharField(max_length=8, choices=enums.AudienceType.choices)  # all|segment|customer
+    link_url = models.CharField(max_length=500, blank=True, default="", verbose_name="havola URL")
+    # all|segment|customer
+    audience_type = models.CharField(
+        max_length=8, choices=enums.AudienceType.choices, verbose_name="auditoriya turi"
+    )
     audience_segment = models.ForeignKey(
         "notifications.CustomerSegment", null=True, on_delete=models.SET_NULL, related_name="campaigns"
     )
@@ -132,25 +160,28 @@ class Campaign(TimeStampedModel):
         "accounts.Customer", null=True, on_delete=models.PROTECT, related_name="+"
     )
     audience_phone = models.CharField(max_length=13, blank=True)  # snapshot
-    recipient_count = models.PositiveIntegerField(
-        default=0
-    )  # pushable devices at creation; recomputed at send
-    state = models.CharField(max_length=16, choices=State.choices, default=State.QUEUED)
-    scheduled_at = models.DateTimeField(null=True)
-    started_at = models.DateTimeField(null=True)
-    sent_at = models.DateTimeField(null=True)
-    cancelled_at = models.DateTimeField(null=True)  # M3: set with state cancelled only
-    sent = models.PositiveIntegerField(null=True)  # FCM accepted
-    failed = models.PositiveIntegerField(null=True)  # FCM rejected / no token
-    delivered = models.PositiveIntegerField(null=True)  # M2 acknowledgements; null in M1
+    # pushable devices at creation; recomputed at send
+    recipient_count = models.PositiveIntegerField(default=0, verbose_name="qabul qiluvchilar soni")
+    state = models.CharField(max_length=16, choices=State.choices, default=State.QUEUED, verbose_name="holat")
+    scheduled_at = models.DateTimeField(null=True, verbose_name="rejalashtirilgan")
+    started_at = models.DateTimeField(null=True, verbose_name="boshlangan")
+    sent_at = models.DateTimeField(null=True, verbose_name="yuborilgan")
+    # M3: set with state cancelled only
+    cancelled_at = models.DateTimeField(null=True, verbose_name="bekor qilingan")
+    sent = models.PositiveIntegerField(null=True, verbose_name="yuborildi")  # FCM accepted
+    failed = models.PositiveIntegerField(null=True, verbose_name="xato")  # FCM rejected / no token
+    # M2 acknowledgements; null in M1
+    delivered = models.PositiveIntegerField(null=True, verbose_name="yetkazildi")
     send_cursor = models.BigIntegerField(default=0)  # last CampaignRecipient.id handed to the adapter
     batches_dispatched = models.PositiveIntegerField(default=0)
-    last_error = models.TextField(blank=True)
+    last_error = models.TextField(blank=True, verbose_name="oxirgi xato")
     author = models.ForeignKey(
         "accounts.StaffUser", null=True, on_delete=models.PROTECT, related_name="campaigns"
     )
 
     class Meta:
+        verbose_name = "kampaniya"
+        verbose_name_plural = "kampaniyalar"
         ordering = [Coalesce("scheduled_at", "created_at").desc(), "-id"]
         constraints = [
             models.CheckConstraint(
@@ -264,27 +295,36 @@ class CampaignRecipient(models.Model):
         SKIPPED = "skipped"  # device gone / push disabled between materialise and send
 
     campaign = models.ForeignKey(
-        "notifications.Campaign", on_delete=models.CASCADE, related_name="recipients"
+        "notifications.Campaign",
+        on_delete=models.CASCADE,
+        related_name="recipients",
+        verbose_name="kampaniya",
     )
-    customer = models.ForeignKey("accounts.Customer", on_delete=models.CASCADE, related_name="+")
-    device = models.ForeignKey("accounts.Device", null=True, on_delete=models.SET_NULL, related_name="+")
-    state = models.CharField(max_length=8, choices=State.choices, default=State.PENDING)
-    error = models.CharField(max_length=254, blank=True)
+    customer = models.ForeignKey(
+        "accounts.Customer", on_delete=models.CASCADE, related_name="+", verbose_name="mijoz"
+    )
+    device = models.ForeignKey(
+        "accounts.Device", null=True, on_delete=models.SET_NULL, related_name="+", verbose_name="qurilma"
+    )
+    state = models.CharField(max_length=8, choices=State.choices, default=State.PENDING, verbose_name="holat")
+    error = models.CharField(max_length=254, blank=True, verbose_name="xato")
     provider_message_id = models.CharField(max_length=128, blank=True)  # FCM message id
-    provider_state = models.JSONField(
-        default=dict, blank=True, encoder=DjangoJSONEncoder
-    )  # FCM error / batch
-    sent_at = models.DateTimeField(null=True)
-    delivered_at = models.DateTimeField(null=True)  # M2 acknowledgement
+    # FCM error / batch
+    provider_state = models.JSONField(default=dict, blank=True, encoder=DjangoJSONEncoder)
+    sent_at = models.DateTimeField(null=True, verbose_name="yuborilgan")
+    delivered_at = models.DateTimeField(null=True, verbose_name="yetkazilgan")  # M2 acknowledgement
     inbox = models.OneToOneField(
         "notifications.InboxNotification",
         null=True,
         on_delete=models.SET_NULL,
         related_name="campaign_recipient",
+        verbose_name="inbox xabari",
     )
-    created_at = models.DateTimeField(default=timestamp_default, editable=False)
+    created_at = models.DateTimeField(default=timestamp_default, editable=False, verbose_name="yaratilgan")
 
     class Meta:
+        verbose_name = "qabul qiluvchi"
+        verbose_name_plural = "qabul qiluvchilar"
         ordering = ["campaign_id", "id"]
         constraints = [
             models.UniqueConstraint(
@@ -334,29 +374,36 @@ class InboxNotification(TimeStampedModel):
         SENT = "sent"
         FAILED = "failed"
 
-    customer = models.ForeignKey("accounts.Customer", on_delete=models.CASCADE, related_name="inbox")
-    kind = models.CharField(max_length=16, choices=Kind.choices)
-    title = models.CharField(max_length=80)
-    body = models.CharField(max_length=300)
-    link = models.JSONField(
-        default=dict, encoder=DjangoJSONEncoder
-    )  # {"kind":"none"} | {"kind":"product","product_id":4} | {"kind":"order","order_id":10248} |
+    customer = models.ForeignKey(
+        "accounts.Customer", on_delete=models.CASCADE, related_name="inbox", verbose_name="mijoz"
+    )
+    kind = models.CharField(max_length=16, choices=Kind.choices, verbose_name="turi")
+    title = models.CharField(max_length=80, verbose_name="sarlavha")
+    body = models.CharField(max_length=300, verbose_name="matn")
+    # {"kind":"none"} | {"kind":"product","product_id":4} | {"kind":"order","order_id":10248} |
+    link = models.JSONField(default=dict, encoder=DjangoJSONEncoder, verbose_name="havola")
     # {"kind":"url","url":"https://…"} | …
     image_url = models.CharField(max_length=500, blank=True)
-    source_type = models.CharField(max_length=16, choices=SourceType.choices)
+    source_type = models.CharField(max_length=16, choices=SourceType.choices, verbose_name="manba turi")
     source_id = models.BigIntegerField()  # campaign / order / appointment / customer (account) id
+    # order_status only
     template_status = models.CharField(
-        max_length=24, blank=True, choices=enums.TemplateStatus.choices
-    )  # order_status only
-    language = models.CharField(max_length=2, choices=enums.ContentLanguage.choices)  # rendering language
-    dedupe_key = models.CharField(max_length=120, unique=True)
-    push_state = models.CharField(max_length=16, choices=PushState.choices, default=PushState.NO_DEVICE)
-    pushed_at = models.DateTimeField(null=True)
-    push_error = models.CharField(max_length=254, blank=True)
-    read_at = models.DateTimeField(null=True)
-    delivered_at = models.DateTimeField(null=True)  # M2 acknowledgement
+        max_length=24, blank=True, choices=enums.TemplateStatus.choices, verbose_name="shablon holati"
+    )
+    # rendering language
+    language = models.CharField(max_length=2, choices=enums.ContentLanguage.choices, verbose_name="til")
+    dedupe_key = models.CharField(max_length=120, unique=True, verbose_name="takrorlanmaslik kaliti")
+    push_state = models.CharField(
+        max_length=16, choices=PushState.choices, default=PushState.NO_DEVICE, verbose_name="push holati"
+    )
+    pushed_at = models.DateTimeField(null=True, verbose_name="push yuborilgan")
+    push_error = models.CharField(max_length=254, blank=True, verbose_name="push xatosi")
+    read_at = models.DateTimeField(null=True, verbose_name="o‘qilgan")
+    delivered_at = models.DateTimeField(null=True, verbose_name="yetkazilgan")  # M2 acknowledgement
 
     class Meta:
+        verbose_name = "inbox xabari"
+        verbose_name_plural = "inbox xabarlari"
         ordering = ["-created_at", "-id"]
         constraints = [
             models.CheckConstraint(

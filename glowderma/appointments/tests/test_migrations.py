@@ -77,6 +77,7 @@ def test_migrate_zero_and_forward_again() -> None:
     ) == {
         "0001_initial",
         "0002_appointmentevent_append_only",
+        "0003_uz_verbose_names",
     }
 
 

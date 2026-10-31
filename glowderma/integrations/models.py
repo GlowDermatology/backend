@@ -21,21 +21,29 @@ class WebhookInbox(AppendOnlyModel):
         BTS = "bts"
         BILLZ = "billz"
 
-    provider = models.CharField(max_length=16, choices=Provider.choices)
-    event_key = models.CharField(max_length=160)  # provider-specific natural key of the delivery
-    received_at = models.DateTimeField(default=timestamp_default)
-    remote_ip = models.GenericIPAddressField(null=True)
-    request_id = models.CharField(max_length=64, blank=True)
-    method = models.CharField(max_length=8)  # HTTP method
-    path = models.CharField(max_length=200)
-    headers = models.JSONField(encoder=DjangoJSONEncoder, default=dict)  # allow-listed headers only
-    payload = models.JSONField(encoder=DjangoJSONEncoder, null=True)  # parsed body; null if unparsable
-    raw_body = models.TextField(blank=True)  # verbatim body (≤64 KiB; longer bodies truncated + flagged)
-    entity_ref = models.CharField(max_length=64, blank=True)  # "order:10248", "payment:301" — no FK upward
-    result = models.JSONField(encoder=DjangoJSONEncoder)  # {"status", "body", "outcome", "error_code"}
-    processing_ms = models.PositiveIntegerField(default=0)
+    provider = models.CharField(max_length=16, choices=Provider.choices, verbose_name="provayder")
+    # provider-specific natural key of the delivery
+    event_key = models.CharField(max_length=160, verbose_name="hodisa kaliti")
+    received_at = models.DateTimeField(default=timestamp_default, verbose_name="qabul qilingan")
+    remote_ip = models.GenericIPAddressField(null=True, verbose_name="IP manzil")
+    request_id = models.CharField(max_length=64, blank=True, verbose_name="so‘rov ID")
+    method = models.CharField(max_length=8, verbose_name="usul")  # HTTP method
+    path = models.CharField(max_length=200, verbose_name="yo‘l")
+    # allow-listed headers only
+    headers = models.JSONField(encoder=DjangoJSONEncoder, default=dict, verbose_name="HTTP sarlavhalari")
+    # parsed body; null if unparsable
+    payload = models.JSONField(encoder=DjangoJSONEncoder, null=True, verbose_name="ma’lumot")
+    # verbatim body (≤64 KiB; longer bodies truncated + flagged)
+    raw_body = models.TextField(blank=True, verbose_name="so‘rov tanasi")
+    # "order:10248", "payment:301" — no FK upward
+    entity_ref = models.CharField(max_length=64, blank=True, verbose_name="bog‘liq obyekt")
+    # {"status", "body", "outcome", "error_code"}
+    result = models.JSONField(encoder=DjangoJSONEncoder, verbose_name="natija")
+    processing_ms = models.PositiveIntegerField(default=0, verbose_name="ishlov vaqti (ms)")
 
     class Meta:
+        verbose_name = "webhook yozuvi"
+        verbose_name_plural = "webhooklar"
         constraints = [
             models.UniqueConstraint(
                 fields=["provider", "event_key"], name="webhookinbox_provider_event_unique"
@@ -55,24 +63,40 @@ class WebhookInbox(AppendOnlyModel):
 class Job(TimeStampedModel):
     """A background job the admin can start and poll (``billz_import`` in M1; the model is generic)."""
 
-    kind = models.CharField(max_length=32, choices=enums.JobKind.choices)
+    kind = models.CharField(max_length=32, choices=enums.JobKind.choices, verbose_name="turi")
     state = models.CharField(
-        max_length=16, choices=enums.JobState.choices, default=enums.JobState.QUEUED, db_index=True
+        max_length=16,
+        choices=enums.JobState.choices,
+        default=enums.JobState.QUEUED,
+        db_index=True,
+        verbose_name="holat",
     )
-    params = models.JSONField(encoder=DjangoJSONEncoder, default=dict)  # {"mode": "delta"|"full"}
-    progress = models.JSONField(encoder=DjangoJSONEncoder, null=True)  # {"done": 120, "total": 248} | null
-    result = models.JSONField(encoder=DjangoJSONEncoder, null=True)  # contract §2.14 result object
-    error = models.JSONField(encoder=DjangoJSONEncoder, null=True)  # {"code": …, "message": …}
-    started_at = models.DateTimeField(null=True)
-    finished_at = models.DateTimeField(null=True)
-    heartbeat_at = models.DateTimeField(null=True)  # worker touches it every batch
-    attempts = models.PositiveSmallIntegerField(default=0)  # worker pickups (celery redelivery)
+    # {"mode": "delta"|"full"}
+    params = models.JSONField(encoder=DjangoJSONEncoder, default=dict, verbose_name="parametrlar")
+    # {"done": 120, "total": 248} | null
+    progress = models.JSONField(encoder=DjangoJSONEncoder, null=True, verbose_name="jarayon")
+    # contract §2.14 result object
+    result = models.JSONField(encoder=DjangoJSONEncoder, null=True, verbose_name="natija")
+    # {"code": …, "message": …}
+    error = models.JSONField(encoder=DjangoJSONEncoder, null=True, verbose_name="xato")
+    started_at = models.DateTimeField(null=True, verbose_name="boshlangan")
+    finished_at = models.DateTimeField(null=True, verbose_name="tugagan")
+    # worker touches it every batch
+    heartbeat_at = models.DateTimeField(null=True, verbose_name="oxirgi signal")
+    # worker pickups (celery redelivery)
+    attempts = models.PositiveSmallIntegerField(default=0, verbose_name="urinishlar")
     created_by = models.ForeignKey(
-        "accounts.StaffUser", null=True, on_delete=models.PROTECT, related_name="jobs"
+        "accounts.StaffUser",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="jobs",
+        verbose_name="yaratgan",
     )
-    celery_task_id = models.CharField(max_length=36, blank=True)
+    celery_task_id = models.CharField(max_length=36, blank=True, verbose_name="Celery vazifa ID")
 
     class Meta:
+        verbose_name = "fon vazifasi"
+        verbose_name_plural = "fon vazifalari"
         constraints = [
             models.UniqueConstraint(
                 fields=["kind"],
@@ -114,17 +138,24 @@ class IntegrationState(models.Model):
         ESKIZ = "eskiz"
         FCM = "fcm"
 
-    provider = models.CharField(max_length=16, choices=Provider.choices, unique=True)
-    last_sync_at = models.DateTimeField(null=True)  # last successful full/delta sync (billz) or poll (bts)
-    last_success_at = models.DateTimeField(null=True)  # last successful call of any kind
-    last_error_at = models.DateTimeField(null=True)
-    last_error = models.TextField(blank=True)  # trimmed message of the last failure
-    consecutive_failures = models.PositiveIntegerField(default=0)
-    data = models.JSONField(encoder=DjangoJSONEncoder, default=dict)  # provider cursors
-    updated_at = models.DateTimeField(default=timestamp_default)
+    provider = models.CharField(
+        max_length=16, choices=Provider.choices, unique=True, verbose_name="provayder"
+    )
+    # last successful full/delta sync (billz) or poll (bts)
+    last_sync_at = models.DateTimeField(null=True, verbose_name="oxirgi sinxronlash")
+    # last successful call of any kind
+    last_success_at = models.DateTimeField(null=True, verbose_name="oxirgi muvaffaqiyat")
+    last_error_at = models.DateTimeField(null=True, verbose_name="oxirgi xato vaqti")
+    # trimmed message of the last failure
+    last_error = models.TextField(blank=True, verbose_name="oxirgi xato")
+    consecutive_failures = models.PositiveIntegerField(default=0, verbose_name="ketma-ket xatolar")
+    # provider cursors
+    data = models.JSONField(encoder=DjangoJSONEncoder, default=dict, verbose_name="ma’lumotlar")
+    updated_at = models.DateTimeField(default=timestamp_default, verbose_name="yangilangan")
 
     class Meta:
-        verbose_name = "integration state"
+        verbose_name = "integratsiya holati"
+        verbose_name_plural = "integratsiya holatlari"
 
     def __str__(self) -> str:
         return f"{self.provider}: synced {self.last_sync_at or 'never'}"

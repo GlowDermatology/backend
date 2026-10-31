@@ -67,6 +67,7 @@ def warn_sandbox_providers() -> bool:
 class IntegrationsConfig(AppConfig):
     name = "glowderma.integrations"
     label = "integrations"
+    verbose_name = "Integratsiyalar"
 
     def ready(self) -> None:
         from glowderma.core import readiness

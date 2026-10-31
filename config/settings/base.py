@@ -26,7 +26,7 @@ INSTALLED_APPS = [
     "django.contrib.postgres",
     # TOTP second factor of the ops console (devices only; the login flow lives in glowderma.accounts).
     "django_otp",
-    "django_otp.plugins.otp_totp",
+    "glowderma.core.otp_apps.OtpTotpConfig",  # django_otp.plugins.otp_totp with an Uzbek name
     "rest_framework",
     "drf_spectacular",
     "drf_spectacular_sidecar",

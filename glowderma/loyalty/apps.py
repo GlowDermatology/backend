@@ -3,6 +3,7 @@ from django.apps import AppConfig
 
 class LoyaltyConfig(AppConfig):
     name = "glowderma.loyalty"
+    verbose_name = "Sodiqlik"
 
     def ready(self) -> None:
         from glowderma.core import readiness
