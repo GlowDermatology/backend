@@ -57,3 +57,9 @@ a.gd-row-action .material-symbols-outlined {
 .ops-action #dialog .gd-ops-refusal {
   margin: 0;
 }
+
+/* Unfold's two-line list cell (display(header=True)) greys its second line with text-base-500 in both themes:
+   3.6:1 on the dark rows. Dark mode uses base-400 (6.2:1), as Unfold's other secondary text does. */
+html.dark #result_list .text-base-500 {
+  color: var(--color-base-400);
+}

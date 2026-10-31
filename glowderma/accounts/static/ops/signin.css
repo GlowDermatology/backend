@@ -133,6 +133,10 @@
   border-color: var(--color-base-700);
 }
 
+.dark .ops-manual-key summary {
+  color: var(--color-primary-500);
+}
+
 .dark .ops-manual-key code {
   background: var(--color-base-800);
   color: var(--color-base-100);

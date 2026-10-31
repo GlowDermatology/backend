@@ -11,7 +11,8 @@ Imported by ``config.settings.base``. Seams for the later console work:
 Brand colours are the storefront design tokens (``frontend/src/app/globals.css``: gold ``#c9a24b``,
 gold ink ``#9a7424``, gold soft ``#f6ebd0``, ink ``#2a2418``, surface ``#fbf8f2``, nav ``#2b2620``)
 converted to OKLCH and spread over Unfold's 50–950 scales (hue ≈ 84°, the gold family; the neutrals are
-the same warm taupe).
+the same warm taupe). ``primary-600`` (Unfold's text colour of links and the active sidebar entry) is a shade
+darker than the gold ink so that it reads at WCAG AA 4.5:1 on ``base-100`` (the active entry's background).
 """
 
 from typing import Any
@@ -205,7 +206,7 @@ UNFOLD: dict[str, Any] = {
             "300": "oklch(85.2% .095 87.0)",
             "400": "oklch(81.2% .110 85.0)",
             "500": "oklch(73.1% .115 85.0)",
-            "600": "oklch(55.5% .102 82.0)",
+            "600": "oklch(53.0% .102 82.0)",
             "700": "oklch(48.0% .090 80.0)",
             "800": "oklch(40.0% .074 78.0)",
             "900": "oklch(33.0% .058 76.0)",
