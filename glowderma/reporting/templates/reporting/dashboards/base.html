@@ -1,0 +1,29 @@
+{% extends "admin/base.html" %}
+{% load static unfold %}
+
+{% block title %}{{ title }} | {{ site_title|default:"Glow Derma Ops" }}{% endblock %}
+
+{% block extrastyle %}
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static 'reporting/dashboards.css' %}">
+{% endblock %}
+
+{% block extrahead %}
+    {{ block.super }}
+    <script src="{% static 'reporting/dashboards.js' %}" defer></script>
+{% endblock %}
+
+{% block content %}
+    <div class="gd-dash">
+        <div class="gd-bar">
+            {% component "unfold/components/navigation.html" with items=dashboard_nav %}{% endcomponent %}
+            <div class="gd-stamp">
+                <span>Yangilangan: <strong data-gd-generated="{{ dashboard.generated.iso }}">{{ dashboard.generated.clock }}</strong></span>
+                <a href="{{ dashboard_links.refresh }}" title="Keshni chetlab o‘tib qayta hisoblash">
+                    <span class="material-symbols-outlined">refresh</span>Yangilash
+                </a>
+            </div>
+        </div>
+        {% block dashboard %}{% endblock %}
+    </div>
+{% endblock %}

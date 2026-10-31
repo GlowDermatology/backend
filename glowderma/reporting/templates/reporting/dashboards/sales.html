@@ -1,0 +1,133 @@
+{% extends "reporting/dashboards/base.html" %}
+{% load unfold %}
+
+{% block dashboard %}
+    {% with d=dashboard %}
+        <div class="gd-subbar">
+            {% component "unfold/components/navigation.html" with items=d.windows %}{% endcomponent %}
+            <span class="gd-period">{{ d.period }} · Toshkent vaqti</span>
+        </div>
+
+        <div class="gd-grid">
+            {% for tile in d.tiles %}{% include "reporting/dashboards/_tile.html" %}{% endfor %}
+        </div>
+
+        <div class="gd-cols gd-cols--wide">
+            <section class="gd-panel" id="revenue">
+                <header class="gd-panel__head">
+                    <h2 class="gd-panel__title">Kunlik tushum kanallar bo‘yicha</h2>
+                    <p class="gd-panel__note">To‘lov tasdiqlangan kun · qaytarilganlar ayirilgan · POS — do‘kondagi QR xaridlar</p>
+                </header>
+                <div class="gd-panel__body">
+                    {% if d.has_sales %}
+                        <div class="gd-chart" data-gd-chart="som">
+                            {% component "unfold/components/chart/bar.html" with data=d.chart.data options=d.chart.options class="h-full" %}{% endcomponent %}
+                        </div>
+                    {% else %}
+                        {% include "reporting/dashboards/_empty.html" with icon="bar_chart" text="Bu davrda sotuv bo‘lmadi" %}
+                    {% endif %}
+                </div>
+            </section>
+
+            <section class="gd-panel" id="channels">
+                <header class="gd-panel__head">
+                    <h2 class="gd-panel__title">Kanallar</h2>
+                    <p class="gd-panel__note">{{ d.days }} kun</p>
+                </header>
+                <div class="gd-scroll">
+                    <table class="gd-table gd-legend-table">
+                        <thead><tr><th>Kanal</th><th class="num">Soni</th><th class="num">Tushum</th><th class="num">Ulush</th></tr></thead>
+                        <tbody>
+                            {% for row in d.channels %}
+                                <tr>
+                                    <td class="strong"><span class="gd-swatch" style="background: var(--gd-series-{{ row.slot }})"></span><a href="{{ row.href }}">{{ row.label }}</a></td>
+                                    <td class="num">{{ row.orders }}</td>
+                                    <td class="num">{{ row.revenue }}</td>
+                                    <td class="num">{{ row.share }}%</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="gd-panel__foot">O‘rtacha chek: {% for row in d.channels %}{{ row.label }} {{ row.aov }}{% if not forloop.last %} · {% endif %}{% endfor %}</div>
+            </section>
+        </div>
+
+        <div class="gd-cols">
+            <section class="gd-panel" id="funnel">
+                <header class="gd-panel__head">
+                    <h2 class="gd-panel__title">Buyurtmalar holati</h2>
+                    <p class="gd-panel__note">Davrda yaratilgan {{ d.funnel_total }} ta buyurtma hozir qayerda</p>
+                </header>
+                <div class="gd-panel__body">
+                    <div class="gd-bars">
+                        {% for row in d.funnel %}
+                            <a class="gd-barrow" href="{{ row.href }}">
+                                <span class="gd-barrow__label">{{ row.label }}</span>
+                                <span class="gd-barrow__value">{{ row.count }}<small>{{ row.percent }}%</small></span>
+                                <span class="gd-track"><span class="gd-fill{% if row.status == 'cancelled' %} gd-fill--muted{% endif %}" style="display:block;width: {{ row.percent }}%"></span></span>
+                            </a>
+                        {% endfor %}
+                    </div>
+                </div>
+            </section>
+
+            <section class="gd-panel" id="top">
+                <header class="gd-panel__head">
+                    <h2 class="gd-panel__title">Top {{ d.top|length }} mahsulot</h2>
+                    <p class="gd-panel__note">Tushum bo‘yicha · bekor qilinganlarsiz</p>
+                </header>
+                {% if d.top %}
+                    <div class="gd-scroll">
+                        <table class="gd-table">
+                            <thead><tr><th>Mahsulot</th><th class="num gd-hide-sm">Buyurtma</th><th class="num">Dona</th><th class="num">Tushum</th></tr></thead>
+                            <tbody>
+                                {% for row in d.top %}
+                                    <tr>
+                                        <td><a href="{{ row.href }}">{{ row.name }}</a></td>
+                                        <td class="num gd-hide-sm">{{ row.orders }}</td>
+                                        <td class="num">{{ row.quantity }}</td>
+                                        <td class="num strong">{{ row.revenue }}</td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    {% include "reporting/dashboards/_empty.html" with icon="inventory_2" text="Bu davrda to‘langan buyurtma yo‘q" %}
+                {% endif %}
+            </section>
+        </div>
+
+        <h2 class="gd-section-title">Katalog</h2>
+        <div class="gd-grid">
+            {% for tile in d.catalog_tiles %}{% include "reporting/dashboards/_tile.html" %}{% endfor %}
+        </div>
+
+        <section class="gd-panel" id="seo">
+            <header class="gd-panel__head">
+                <h2 class="gd-panel__title">SEO kamchiliklari</h2>
+                <p class="gd-panel__note">{{ d.seo_checked.products }} faol mahsulot va {{ d.seo_checked.categories }} kategoriya tekshirildi · 10 daqiqada bir qayta hisoblanadi</p>
+            </header>
+            {% if d.seo %}
+                <div class="gd-scroll">
+                    <table class="gd-table">
+                        <thead><tr><th>Kamchilik</th><th class="gd-hide-sm">Tur</th><th class="num">Soni</th><th>Daraja</th></tr></thead>
+                        <tbody>
+                            {% for row in d.seo %}
+                                <tr>
+                                    <td class="strong">{{ row.label }}</td>
+                                    <td class="muted gd-hide-sm">{{ row.kind }}</td>
+                                    <td class="num">{% if row.href %}<a href="{{ row.href }}">{{ row.count }}</a>{% else %}{{ row.count }}{% endif %}</td>
+                                    <td>{% include "reporting/dashboards/_state.html" with s=row.state %}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                {% include "reporting/dashboards/_empty.html" with icon="travel_explore" text="SEO kamchiligi topilmadi" %}
+            {% endif %}
+        </section>
+    {% endwith %}
+{% endblock %}

@@ -54,6 +54,18 @@ def audit_log(filters: AuditLogFilters) -> QuerySet[AuditEntry]:
     return qs.order_by("-created_at", "-id")
 
 
+def latest_audits(actions: list[str]) -> dict[str, AuditEntry]:
+    """The newest audit row of each of ``actions`` that has one, ``{action: AuditEntry}`` (one ``DISTINCT
+    ON`` statement over the ``action`` index): the ops console reads the nightly report and the ledger
+    reconciliation from their audit rows instead of running them."""
+    rows = (
+        AuditEntry.objects.filter(action__in=actions)
+        .order_by("action", "-created_at", "-id")
+        .distinct("action")
+    )
+    return {entry.action: entry for entry in rows}
+
+
 def audit_actor(entry: AuditEntry) -> dict[str, Any] | None:
     """``Actor | null``: staff entries carry the id and the label stored at write time; system is ``null``."""
     if entry.actor_type != "staff" or entry.actor_id is None:
