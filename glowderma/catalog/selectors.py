@@ -8,13 +8,17 @@ annotation of :func:`order_products` — never in ``LIKE``, equality, ``DISTINCT
 """
 
 from collections.abc import Iterator
+from dataclasses import dataclass, field
+from datetime import datetime
 from typing import TypedDict
 
 from django.db.models import Count, F, Prefetch, Q, QuerySet, Value
 from django.db.models.functions import Coalesce, Collate, NullIf
 
+from glowderma.catalog import seo
 from glowderma.catalog.models import Banner, Category, Product, ProductImage, ProductStock
 from glowderma.core import enums, timeutils
+from glowderma.core.consistency import Finding, finding
 from glowderma.core.search import SearchKey, search_key
 from glowderma.integrations.billz.ports import BillzProduct
 
@@ -181,4 +185,129 @@ def customer_visible_products() -> QuerySet[Product]:
         price__gte=CUSTOMER_MIN_PRICE,
         category__isnull=False,
         category__is_active=True,
+    )
+
+
+# --- ops console sales & catalog dashboard (glowderma.reporting.dashboards) ---------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class StockHealth:
+    out_of_stock: Finding  # active products with no stock row or a quantity <= 0 (product ids)
+    stale: Finding  # active products whose Billz quantity was last read before the cut-off (product ids)
+    new_from_billz: int  # created by a Billz import and not reviewed yet (any status)
+
+
+def stock_health(stale_before: datetime, *, limit: int) -> StockHealth:
+    """Stock problems of the sellable catalog, three statements (count + the first ``limit`` ids each)."""
+    active = Product.objects.filter(status=enums.ProductStatus.ACTIVE)
+    stale = active.filter(stock__isnull=False).filter(
+        Q(stock__synced_at__lt=stale_before) | Q(stock__synced_at__isnull=True)
+    )
+    return StockHealth(
+        out_of_stock=finding(active.filter(OUT_OF_STOCK), limit=limit),
+        stale=finding(stale, limit=limit),
+        new_from_billz=Product.objects.filter(is_new_from_billz=True).count(),
+    )
+
+
+SEO_TEXT_FIELDS: tuple[str, ...] = tuple(
+    f"{name}_{language}" for name in ("name", "seo_title", "seo_description") for language in seo.LANGUAGES
+)
+
+
+@dataclass(slots=True)
+class SeoIssueCount:
+    kind: str  # "product" | "category"
+    code: str
+    severity: str
+    count: int = 0
+    ids: list[int] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class SeoBacklog:
+    products_checked: int
+    products_with_errors: int
+    products_with_warnings: int  # warnings but no error
+    categories_checked: int
+    categories_with_issues: int  # an error or a warning
+    issues: list[SeoIssueCount]  # errors and warnings by (kind, code, severity), most frequent first
+
+
+def seo_backlog(*, limit: int) -> SeoBacklog:
+    """The «SEO holati» checklist (:mod:`glowderma.catalog.seo`) over every active product and active
+    category, counted by issue code (a row counts once per code; hints are left out).
+
+    The checklist is Python over loaded rows, so this reads the text columns of the whole active catalog
+    (two queries, ``only()`` the checked columns, image and product counts annotated) and runs the checks in
+    process: linear in the catalog (a few thousand rows), which is why the dashboard caches it longer than
+    its live counts."""
+    issues: dict[tuple[str, str, str], SeoIssueCount] = {}
+
+    def add(kind: str, pk: int, found: list[seo.SeoIssue]) -> tuple[bool, bool]:
+        seen: set[tuple[str, str]] = set()
+        for issue in found:
+            if issue.severity == enums.SeoSeverity.INFO or (issue.code, issue.severity) in seen:
+                continue
+            seen.add((issue.code, issue.severity))
+            entry = issues.setdefault(
+                (kind, issue.code, issue.severity), SeoIssueCount(kind, issue.code, issue.severity)
+            )
+            entry.count += 1
+            if len(entry.ids) < limit:
+                entry.ids.append(pk)
+        severities = {severity for _code, severity in seen}
+        return enums.SeoSeverity.ERROR in severities, enums.SeoSeverity.WARNING in severities
+
+    products = (
+        Product.objects.filter(status=enums.ProductStatus.ACTIVE)
+        .only(
+            "id",
+            "category_id",
+            *SEO_TEXT_FIELDS,
+            *(f"description_{language}" for language in seo.LANGUAGES),
+        )
+        .annotate(image_count=Count("images"))
+        .order_by("id")
+    )
+    checked = with_errors = with_warnings = 0
+    for product in products:
+        checked += 1
+        error, warning = add(
+            "product", product.pk, seo.product_issues(product, image_count=int(product.image_count))
+        )
+        with_errors += int(error)
+        with_warnings += int(warning and not error)
+    categories = (
+        Category.objects.filter(is_active=True)
+        .only("id", "image", *SEO_TEXT_FIELDS)
+        .annotate(active_products=Count("products", filter=Q(products__status=enums.ProductStatus.ACTIVE)))
+        .order_by("id")
+    )
+    categories_checked = categories_with_issues = 0
+    for category in categories:
+        categories_checked += 1
+        error, warning = add(
+            "category",
+            category.pk,
+            seo.category_issues(category, active_products=int(category.active_products)),
+        )
+        categories_with_issues += int(error or warning)
+    ranked = sorted(
+        issues.values(),
+        key=lambda entry: (
+            entry.severity != enums.SeoSeverity.ERROR,
+            -entry.count,
+            entry.kind,
+            entry.code,
+        ),
+    )
+    return SeoBacklog(
+        products_checked=checked,
+        products_with_errors=with_errors,
+        products_with_warnings=with_warnings,
+        categories_checked=categories_checked,
+        categories_with_issues=categories_with_issues,
+        issues=ranked,
     )
