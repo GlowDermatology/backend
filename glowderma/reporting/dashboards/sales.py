@@ -43,8 +43,7 @@ from glowderma.reporting.dashboards import (
 WINDOWS = (7, 30, 90)
 DEFAULT_WINDOW = 30
 TOP_PRODUCTS = 10
-# Billz quantities are refreshed by the delta sync every few minutes: a stock row older than a day is stale.
-STALE_STOCK_AFTER = timedelta(hours=24)
+STALE_STOCK_AFTER = catalog_selectors.STALE_STOCK_AFTER
 SEO_CACHE_SECONDS = 600
 POS = "pos"
 # Channel order of the stacked chart (bottom → top) and its validated palette slots (dashboards.css).
@@ -315,7 +314,8 @@ def build(now: datetime, days: int) -> dict[str, Any]:
             "value": num(stock.out_of_stock.count),
             "unit": "faol",
             "hint": "Qoldig‘i 0 yoki Billz’da yozuvi yo‘q",
-            "href": ids_link("catalog_product", stock.out_of_stock.ids),
+            # the product list's «Qoldiq» filter selects the same rows (an id list would stop at LINK_IDS)
+            "href": changelist("catalog_product", status__exact=enums.ProductStatus.ACTIVE, stock="out"),
             "state": state(by_count(stock.out_of_stock.count)),
         },
         {
@@ -324,7 +324,7 @@ def build(now: datetime, days: int) -> dict[str, Any]:
             "value": num(stock.stale.count),
             "unit": "faol",
             "hint": "Billz qoldig‘i 24 soatdan beri yangilanmagan",
-            "href": ids_link("catalog_product", stock.stale.ids),
+            "href": changelist("catalog_product", status__exact=enums.ProductStatus.ACTIVE, stock="stale"),
             "state": state(by_count(stock.stale.count)),
         },
         {

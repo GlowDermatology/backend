@@ -9,7 +9,7 @@ annotation of :func:`order_products` — never in ``LIKE``, equality, ``DISTINCT
 
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TypedDict
 
 from django.db.models import Count, F, Prefetch, Q, QuerySet, Value
@@ -101,6 +101,13 @@ class ProductFilters(TypedDict, total=False):
 
 
 OUT_OF_STOCK = Q(stock__quantity__lte=0) | Q(stock__isnull=True)
+# Billz quantities are refreshed by the delta sync every few minutes: a stock row older than a day is stale.
+STALE_STOCK_AFTER = timedelta(hours=24)
+
+
+def stale_stock(stale_before: datetime) -> Q:
+    """Products whose Billz quantity was last read before ``stale_before`` (or never), stock row present."""
+    return Q(stock__isnull=False) & (Q(stock__synced_at__lt=stale_before) | Q(stock__synced_at__isnull=True))
 
 
 def filter_products(qs: QuerySet[Product], filters: ProductFilters) -> QuerySet[Product]:
@@ -201,12 +208,9 @@ class StockHealth:
 def stock_health(stale_before: datetime, *, limit: int) -> StockHealth:
     """Stock problems of the sellable catalog, three statements (count + the first ``limit`` ids each)."""
     active = Product.objects.filter(status=enums.ProductStatus.ACTIVE)
-    stale = active.filter(stock__isnull=False).filter(
-        Q(stock__synced_at__lt=stale_before) | Q(stock__synced_at__isnull=True)
-    )
     return StockHealth(
         out_of_stock=finding(active.filter(OUT_OF_STOCK), limit=limit),
-        stale=finding(stale, limit=limit),
+        stale=finding(active.filter(stale_stock(stale_before)), limit=limit),
         new_from_billz=Product.objects.filter(is_new_from_billz=True).count(),
     )
 

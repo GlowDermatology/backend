@@ -79,3 +79,48 @@ def test_seo_backlog_counts_issue_codes_once_per_row(django_assert_num_queries: 
     assert found[("category", "no_active_products", "warning")][0] >= 1
     assert backlog.issues[0].severity == "error"  # errors first
     assert backlog.categories_checked == 4  # every active category (each factory product brings one)
+
+
+def test_the_product_list_stock_filter_selects_the_dashboard_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The «Savdo va katalog» tiles link to the product list's «Qoldiq» filter: the list shows every row the
+    tile counts (an id list stopped at the first hundred, so a tile of 234 listed 100)."""
+    from django.urls import reverse
+
+    from glowderma.core import timeutils
+    from glowderma.core.tests.console import console_client
+
+    monkeypatch.setattr(timeutils, "now", lambda: NOW)
+    fresh = NOW - timedelta(hours=1)
+    ProductStockFactory.create(quantity=5, synced_at=fresh)
+    empty = ProductStockFactory.create(quantity=0, synced_at=fresh)
+    missing = ProductFactory.create()
+    stale = ProductStockFactory.create(quantity=3, synced_at=NOW - timedelta(days=2))
+    hidden = ProductStockFactory.create(
+        quantity=0, product=ProductFactory.create(status=enums.ProductStatus.HIDDEN)
+    )
+    health = selectors.stock_health(NOW - selectors.STALE_STOCK_AFTER, limit=10)
+    client = console_client("staff")
+    url = reverse("admin:catalog_product_changelist")
+
+    def listed(query: str) -> list[int]:
+        page = client.get(f"{url}?{query}")
+        assert page.status_code == 200
+        return sorted(row.pk for row in page.context["cl"].result_list)
+
+    assert (
+        listed("status__exact=active&stock=out")
+        == health.out_of_stock.ids
+        == sorted([empty.product_id, missing.pk])
+    )
+    assert listed("status__exact=active&stock=stale") == health.stale.ids == [stale.product_id]
+    assert hidden.product_id in listed("stock=out")
+    assert empty.product_id not in listed("stock=in")
+
+
+def test_the_sales_tiles_link_to_the_stock_filter() -> None:
+    from glowderma.reporting.dashboards import sales
+
+    data = sales.build(NOW, 30)
+    hrefs = {tile["title"]: tile["href"] for tile in data["catalog_tiles"]}
+    assert hrefs["Tugagan mahsulotlar"] == "/django-admin/catalog/product/?status__exact=active&stock=out"
+    assert hrefs["Eskirgan qoldiq"] == "/django-admin/catalog/product/?status__exact=active&stock=stale"
