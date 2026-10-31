@@ -40,6 +40,9 @@ jobs:
       - run: uv run mypy .
       - run: uv run lint-imports
       - run: uv run python manage.py makemigrations --check --dry-run
+      - name: Committed Uzbek catalog matches its source
+        # locale/uz/LC_MESSAGES/django.mo is committed (stdlib compiler, no GNU gettext); it must match the .po.
+        run: uv run python manage.py compile_locale --check
       - name: Migrations run as the non-superuser application role
         # Production connects as glowderma_app (deploy/postgres/app-role.psql): database owner, not a superuser.
         # Every migration (extensions, collation, triggers, concurrent indexes) must work under it on PostgreSQL 18.
