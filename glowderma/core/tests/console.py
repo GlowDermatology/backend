@@ -10,13 +10,16 @@ from django.contrib.auth import get_user_model
 from django.contrib.messages import get_messages
 from django.test import Client
 
+from glowderma.accounts.tests import ops_helpers
+
 PASSWORD = "Saffron!Harbor-Long72"  # noqa: S105 - a test password
 ROLES = ("anon", "customer_like", "staff", "manager")
 
 
 def console_client(role: str, *, enforce_csrf_checks: bool = False) -> Client:
     """``anon`` (no session), ``customer_like`` (an active user without ``is_staff``), ``staff`` (a plain
-    active staff member) or ``manager`` (``is_manager``)."""
+    active staff member) or ``manager`` (``is_manager``). Every signed-in role holds a 2FA-verified console
+    session (``ops_helpers``), so a refusal is about the role, never about a missing second factor."""
     client = Client(enforce_csrf_checks=enforce_csrf_checks)
     if role == "anon":
         return client
@@ -26,7 +29,11 @@ def console_client(role: str, *, enforce_csrf_checks: bool = False) -> Client:
         "manager": {"is_staff": True, "is_manager": True},
     }[role]
     user = get_user_model().objects.create_user(f"{role}-{uuid.uuid4().hex[:8]}@ops.uz", PASSWORD, **flags)
-    client.force_login(user)
+    if user.is_staff:
+        ops_helpers.ops_login(client, user)
+    else:  # verified, but without console access: ops_login would grant is_staff
+        client.force_login(user)
+        ops_helpers.verify_session(client, user)
     return client
 
 
