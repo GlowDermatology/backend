@@ -15,6 +15,10 @@
 {% block content %}
     {% include "unfold/helpers/unauthenticated_title.html" with title=site_title subtitle=title %}
 
+    {% if email %}
+        <p class="ops-signin-account">{{ email }}</p>
+    {% endif %}
+
     {% include "unfold/helpers/messages.html" %}
 
     {% if lockout_message %}
@@ -23,10 +27,6 @@
 
     {% if form.non_field_errors %}
         {% include "unfold/helpers/messages/error.html" with errors=form.non_field_errors %}
-    {% endif %}
-
-    {% if email %}
-        <p class="ops-signin-account">{{ email }}</p>
     {% endif %}
 
     {% block step %}{% endblock %}

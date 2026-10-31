@@ -79,7 +79,7 @@
   background: var(--color-base-100);
   color: var(--color-base-900);
   font-size: 14px;
-  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 
 .ops-recovery-codes {
