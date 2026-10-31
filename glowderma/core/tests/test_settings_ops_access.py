@@ -77,6 +77,8 @@ def test_an_enabled_console_boots_with_its_host_nets_and_host_only_cookies(
         ("OPS_ALLOWED_IPS", "91.212.1.10/32 ::/0", "must not allow every address"),
         ("OPS_ALLOWED_IPS", "203.0.113.10/32", "documentation example range"),
         ("OPS_ALLOWED_IPS", "172.30.0.0/24", "must not include the TRUSTED_PROXIES"),
+        ("OPS_ALLOWED_IPS", "91.212.1.10/32,185.74.5.0/28", "separated by spaces, not commas"),
+        ("OPS_ALLOWED_IPS", "91.212.1.10/32, 185.74.5.0/28", "separated by spaces, not commas"),
         ("TRUSTED_PROXIES", "", "needs TRUSTED_PROXIES"),
         ("OPS_DOMAIN", "", "OPS_DOMAIN must be the console's host name"),
         ("OPS_DOMAIN", "https://ops.glowderma.uz", "OPS_DOMAIN must be the console's host name"),

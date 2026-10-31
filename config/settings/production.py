@@ -434,6 +434,14 @@ DOCUMENTATION_NETS = tuple(
 )
 if not OPS_REQUIRE_2FA:
     raise ImproperlyConfigured("OPS_REQUIRE_2FA must stay true in production (the console's second factor)")
+# The edge reads OPS_ALLOWED_IPS as Caddy's ``remote_ip`` list, which splits on spaces only: "a,b" would be
+# one unparsable range there while Django (commas or spaces) accepted it. One spelling for both: spaces.
+_ops_allowed_ips = os.environ.get("OPS_ALLOWED_IPS", "")
+if "," in _ops_allowed_ips:
+    raise ImproperlyConfigured(
+        "OPS_ALLOWED_IPS must be separated by spaces, not commas (Caddy's remote_ip list): "
+        "OPS_ALLOWED_IPS=203.0.113.10/32 198.51.100.0/28"
+    )
 # Default: the edge's own allow-list (OPS_ALLOWED_IPS reaches the backend containers through env_file).
 OPS_ADMIN_ALLOWED_NETS = (
     env_networks("OPS_ADMIN_ALLOWED_NETS")
