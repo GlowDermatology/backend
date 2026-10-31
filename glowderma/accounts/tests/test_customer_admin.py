@@ -16,6 +16,7 @@ from glowderma.accounts.tests.factories import (
     StaffUserFactory,
 )
 from glowderma.core.admin import ReadOnlyAdmin
+from glowderma.core.tests.admin_pages import rendered_field_names
 
 pytestmark = pytest.mark.django_db
 
@@ -61,7 +62,8 @@ def test_pages_render_without_secrets(super_client: Client) -> None:
     session = CustomerSessionFactory.create(customer=customer, previous_refresh_hash="p" * 64)
     page = super_client.get(reverse("admin:accounts_customer_change", args=[customer.pk]))
     assert page.status_code == 200
-    assert b"deadbeef" not in page.content and b"field-phone" in page.content
+    assert b"deadbeef" not in page.content and "phone" in rendered_field_names(page)
+    assert "password" not in rendered_field_names(page)
     page = super_client.get(reverse("admin:accounts_device_change", args=[device.pk]))
     assert page.status_code == 200 and b"fcm-secret-token" not in page.content
     page = super_client.get(reverse("admin:accounts_smscode_change", args=[code.pk]))

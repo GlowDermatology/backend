@@ -1,7 +1,15 @@
 """Read-only Django admin for the catalog (design 01 §11). Writes go through the admin API only."""
 
 from glowderma.catalog.models import Banner, Category, Product, ProductImage, ProductStock
-from glowderma.core.admin import register_read_only
+from glowderma.core.admin import (
+    SUCCESS,
+    WARNING,
+    dropdown,
+    money_column,
+    register_read_only,
+    status_column,
+)
+from glowderma.core.labels import PRODUCT_STATUS
 
 register_read_only(
     Category,
@@ -18,29 +26,30 @@ register_read_only(
         "name_uz",
         "billz_name",
         "category",
-        "price",
-        "status",
+        money_column("price", "Narx"),
+        status_column("status", "Holat", {"active": SUCCESS, "hidden": WARNING}, PRODUCT_STATUS),
         "promo",
         "is_new_from_billz",
     ),
-    list_filter=("status", "promo", "is_new_from_billz", "category"),
+    list_filter=(dropdown("status"), "promo", "is_new_from_billz", "category"),
+    list_select_related=("category",),
     search_fields=("billz_id", "name_uz", "billz_name"),
     ordering=("-id",),
-    raw_id_fields=("category", "last_change_actor"),
+    autocomplete_fields=("category", "last_change_actor"),
 )
 register_read_only(
     ProductStock,
     list_display=("product", "quantity", "synced_at"),
     search_fields=("product__billz_id",),
     ordering=("product_id",),
-    raw_id_fields=("product",),
+    autocomplete_fields=("product",),
 )
 register_read_only(
     ProductImage,
     list_display=("product", "position", "content_type", "width", "height", "uploaded_by"),
     search_fields=("product__billz_id",),
     ordering=("product_id", "position"),
-    raw_id_fields=("product", "uploaded_by"),
+    autocomplete_fields=("product", "uploaded_by"),
 )
 register_read_only(
     Banner,
@@ -48,5 +57,5 @@ register_read_only(
     list_filter=("link_kind", "is_active"),
     search_fields=("title_uz",),
     ordering=("position", "id"),
-    raw_id_fields=("link_product", "link_category"),
+    autocomplete_fields=("link_product", "link_category"),
 )

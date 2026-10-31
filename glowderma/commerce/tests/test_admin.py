@@ -7,7 +7,14 @@ from django.test import Client, RequestFactory
 from django.urls import reverse
 
 from glowderma.accounts.tests.factories import StaffUserFactory
-from glowderma.commerce.admin import OrderAdmin, OrderEventInline, OrderItemInline
+from glowderma.commerce.admin import (
+    OrderAdmin,
+    OrderCashbackHoldInline,
+    OrderEventInline,
+    OrderItemInline,
+    OrderPaymentInline,
+    OrderShipmentInline,
+)
 from glowderma.commerce.models import Cart, CartItem, Order, OrderEvent, OrderItem, StockReservation
 from glowderma.commerce.tests.factories import (
     CartItemFactory,
@@ -54,18 +61,28 @@ def test_models_registered_read_only(model: type[models.Model]) -> None:
     assert model_admin.list_display != ("__str__",)
     for field in model._meta.concrete_fields:
         if field.is_relation:
-            assert field.name in model_admin.raw_id_fields, (model, field.name)
+            assert field.name in (*model_admin.raw_id_fields, *model_admin.autocomplete_fields), (
+                model,
+                field.name,
+            )
 
 
 def test_order_admin_inlines_are_read_only() -> None:
     model_admin = admin.site._registry[Order]
     assert isinstance(model_admin, OrderAdmin)
-    assert model_admin.inlines == (OrderItemInline, OrderEventInline)
+    expected = [
+        OrderItemInline,
+        OrderEventInline,
+        OrderPaymentInline,
+        OrderShipmentInline,
+        OrderCashbackHoldInline,
+    ]
+    assert list(model_admin.inlines) == expected
     request = RequestFactory().get("/django-admin/")
     request.user = StaffUserFactory.create(is_staff=True)
     instances = model_admin.get_inline_instances(request)
-    # a plain staff user (no model permissions) keeps both inlines: the view grant mirrors ReadOnlyAdmin
-    assert [type(inline) for inline in instances] == [OrderItemInline, OrderEventInline]
+    # a plain staff user (no model permissions) keeps every inline: the view grant mirrors ReadOnlyAdmin
+    assert [type(inline) for inline in instances] == expected
     for inline in instances:
         assert inline.has_view_permission(request, None)
         assert not inline.has_add_permission(request, None)

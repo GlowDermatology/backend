@@ -15,7 +15,7 @@ from glowderma.catalog.tests.factories import (
     ProductImageFactory,
     ProductStockFactory,
 )
-from glowderma.core.admin import ReadOnlyAdmin
+from glowderma.core.admin import ReadOnlyAdmin, column_field
 
 pytestmark = pytest.mark.django_db
 
@@ -42,7 +42,7 @@ EXPECTED = {
 def test_registered_read_only_with_design_columns(model: type[models.Model]) -> None:
     model_admin = admin.site._registry[model]
     assert isinstance(model_admin, ReadOnlyAdmin)
-    assert model_admin.list_display == EXPECTED[model]
+    assert tuple(map(column_field, model_admin.list_display)) == EXPECTED[model]
     request = RequestFactory().get("/django-admin/")
     request.user = StaffUserFactory.create(is_staff=True)
     assert model_admin.has_view_permission(request)

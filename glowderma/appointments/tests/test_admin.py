@@ -9,7 +9,7 @@ from django.urls import reverse
 from glowderma.accounts.tests.factories import StaffUserFactory
 from glowderma.appointments.models import Appointment, AppointmentEvent
 from glowderma.appointments.tests.factories import AppointmentEventFactory, AppointmentFactory
-from glowderma.core.admin import ReadOnlyAdmin
+from glowderma.core.admin import ReadOnlyAdmin, column_field
 
 pytestmark = pytest.mark.django_db
 
@@ -29,7 +29,7 @@ def test_registered_read_only(model: type[models.Model]) -> None:
 
 
 def test_design_columns() -> None:
-    assert admin.site._registry[Appointment].list_display == (
+    assert tuple(map(column_field, admin.site._registry[Appointment].list_display)) == (
         "id",
         "professional",
         "customer",
@@ -38,7 +38,12 @@ def test_design_columns() -> None:
         "requested_via",
         "price",
     )
-    assert admin.site._registry[Appointment].list_filter == ("status", "professional", "requested_via")
+    assert tuple(map(column_field, admin.site._registry[Appointment].list_filter)) == (
+        "status",
+        "professional",
+        "requested_via",
+        "start",
+    )
     assert admin.site._registry[AppointmentEvent].list_filter == ("type", "source")
 
 

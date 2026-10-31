@@ -9,7 +9,7 @@ the weekly-hours inline on a professional), which validates and audits ``<model>
 from __future__ import annotations
 
 from contextvars import ContextVar
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from django.contrib import admin, messages
 from django.core.exceptions import ValidationError
@@ -17,7 +17,7 @@ from django.db import models
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.urls import reverse
 
-from glowderma.core.admin import is_active_staff
+from glowderma.core.admin import OpsModelAdmin, OpsTabularInline, is_active_staff
 from glowderma.professionals import services
 from glowderma.professionals.models import (
     BlockedPeriod,
@@ -28,13 +28,6 @@ from glowderma.professionals.models import (
     WorkingHours,
     WorkingHoursOverride,
 )
-
-if TYPE_CHECKING:
-    _ModelAdmin = admin.ModelAdmin[models.Model]
-    _TabularInline = admin.TabularInline[models.Model, models.Model]
-else:
-    _ModelAdmin = admin.ModelAdmin
-    _TabularInline = admin.TabularInline
 
 
 class ServiceRefused(Exception):
@@ -63,7 +56,7 @@ def _attach(form: Any, error: ValidationError) -> None:
         form.add_error(None, error)
 
 
-class ServiceBackedAdmin(_ModelAdmin):
+class ServiceBackedAdmin(OpsModelAdmin):
     """Editable ``ModelAdmin`` whose writes are the services' writes (design 03 §8).
 
     Bulk actions are off (the delete action would bypass ``delete_model``); the changelist never runs the
@@ -180,7 +173,7 @@ class ServiceBackedAdmin(_ModelAdmin):
         formset.save_m2m()
 
 
-class WorkingHoursInline(_TabularInline):
+class WorkingHoursInline(OpsTabularInline):
     model = WorkingHours
     extra = 0
     fields = ("weekday", "start", "end", "break_start", "break_end")
@@ -217,7 +210,7 @@ class ProfessionalAdmin(ServiceBackedAdmin):
     list_filter = ("role", "is_active")
     search_fields = ("name",)
     ordering = ("position", "name", "id")
-    raw_id_fields = ("location",)
+    autocomplete_fields = ("location",)
     inlines = (WorkingHoursInline,)
 
 
@@ -243,7 +236,7 @@ class ProfessionalServiceAdmin(ServiceBackedAdmin):
     list_filter = ("is_active",)
     search_fields = ("professional__name", "service__name_uz")
     ordering = ("professional_id", "service_id")
-    raw_id_fields = ("professional", "service")
+    autocomplete_fields = ("professional", "service")
 
 
 @admin.register(WorkingHours)
@@ -252,7 +245,7 @@ class WorkingHoursAdmin(ServiceBackedAdmin):
     list_filter = ("weekday",)
     search_fields = ("professional__name",)
     ordering = ("professional_id", "weekday")
-    raw_id_fields = ("professional",)
+    autocomplete_fields = ("professional",)
 
 
 @admin.register(BlockedPeriod)
@@ -261,7 +254,7 @@ class BlockedPeriodAdmin(ServiceBackedAdmin):
     list_filter = ("kind",)
     search_fields = ("professional__name", "label")
     ordering = ("-start", "id")
-    raw_id_fields = ("professional",)
+    autocomplete_fields = ("professional",)
 
     def save_model(self, request: HttpRequest, obj: models.Model, form: Any, change: bool) -> None:
         if not change:
@@ -276,7 +269,7 @@ class WorkingHoursOverrideAdmin(ServiceBackedAdmin):
     list_display = ("id", "professional", "date", "start", "end", "created_by")
     search_fields = ("professional__name",)
     ordering = ("-date", "id")
-    raw_id_fields = ("professional",)
+    autocomplete_fields = ("professional",)
 
     def save_model(self, request: HttpRequest, obj: models.Model, form: Any, change: bool) -> None:
         if not change:

@@ -1,21 +1,41 @@
 """Read-only Django admin for the accounts models.
 
+``Customer`` is registered by ``glowderma.customers.admin``: its change page also shows the customer's
+orders, loyalty account and appointments from the upper modules.
+
 Secrets never reach the page: ``StaffUser.password``, ``Customer.password``, ``AuthSession.refresh_hash`` /
 ``previous_refresh_hash``, ``Device.fcm_token`` and ``SmsCode.code_hmac`` / ``verification_token_hash`` are
-excluded (design 01 §11).
+excluded (design 01 §11), and so is the TOTP seed of the ops console's 2FA devices (``TOTPDevice.key``).
+List pages show phones and emails masked; the change page of a record shows them in full.
+
+``auth.Group`` is unregistered: staff have one role model (GST-1), groups are never used.
 """
+
+from django.contrib import admin
+from django.contrib.auth.models import Group
+from django_otp.plugins.otp_totp.models import TOTPDevice
 
 from glowderma.accounts.models import (
     Address,
     AuthSession,
-    Customer,
     CustomerSocialIdentity,
     Device,
     SmsCode,
     SocialIdentity,
     StaffUser,
 )
-from glowderma.core.admin import register_read_only
+from glowderma.core.admin import (
+    customer_column,
+    date_range,
+    dropdown,
+    masked_email_column,
+    masked_phone_column,
+    register_read_only,
+)
+
+for _model in (Group, TOTPDevice):  # registered by django.contrib.auth / django_otp (editable, stock)
+    if admin.site.is_registered(_model):
+        admin.site.unregister(_model)
 
 register_read_only(
     StaffUser,
@@ -42,7 +62,7 @@ register_read_only(
         "id",
         "audience",
         "staff",
-        "customer",
+        customer_column(),
         "device_label",
         "created_at",
         "last_used_at",
@@ -50,10 +70,11 @@ register_read_only(
         "revoked_at",
         "revoke_reason",
     ),
-    list_filter=("audience", "revoke_reason"),
+    list_filter=(dropdown("audience"), dropdown("revoke_reason"), date_range("created_at")),
     search_fields=("id", "staff__email", "customer__phone", "device_label"),
     ordering=("-created_at",),
-    raw_id_fields=("staff", "customer", "device"),
+    list_select_related=("staff", "customer"),
+    autocomplete_fields=("staff", "customer", "device"),
 )
 register_read_only(
     SocialIdentity,
@@ -61,22 +82,14 @@ register_read_only(
     list_filter=("provider",),
     search_fields=("staff__email", "subject", "email_at_link"),
     ordering=("-id",),
-    raw_id_fields=("staff",),
-)
-register_read_only(
-    Customer,
-    exclude=("password",),
-    list_display=("id", "phone", "name", "status", "language", "registered_at"),
-    list_filter=("status", "language"),
-    search_fields=("phone", "name"),
-    ordering=("-registered_at", "-id"),
+    autocomplete_fields=("staff",),
 )
 register_read_only(
     Device,
     exclude=("fcm_token",),
     list_display=(
         "id",
-        "customer",
+        customer_column(),
         "platform",
         "model",
         "app_version",
@@ -87,22 +100,25 @@ register_read_only(
     list_filter=("platform", "push_enabled", "is_active"),
     search_fields=("customer__phone", "fid"),
     ordering=("-last_active_at",),
-    raw_id_fields=("customer",),
+    list_select_related=("customer",),
+    autocomplete_fields=("customer",),
 )
 register_read_only(
     Address,
-    list_display=("id", "customer", "label", "text", "is_default"),
+    list_display=("id", customer_column(), "label", "text", "is_default"),
     list_filter=("is_default",),
     search_fields=("customer__phone", "text"),
     ordering=("-id",),
-    raw_id_fields=("customer",),
+    list_select_related=("customer",),
+    autocomplete_fields=("customer",),
 )
 register_read_only(
     SmsCode,
     exclude=("code_hmac", "verification_token_hash"),
     list_display=(
         "id",
-        "phone",
+        masked_phone_column("phone"),
+        masked_email_column("email"),
         "purpose",
         "created_at",
         "expires_at",
@@ -110,15 +126,33 @@ register_read_only(
         "exhausted_at",
         "attempts",
     ),
-    list_filter=("purpose",),
-    search_fields=("phone",),
+    list_filter=(dropdown("purpose"), date_range("created_at")),
+    search_fields=("phone", "email"),
     ordering=("-id",),
 )
 register_read_only(
     CustomerSocialIdentity,
-    list_display=("id", "customer", "provider", "email_at_link", "created_at"),
+    list_display=("id", customer_column(), "provider", masked_email_column("email_at_link"), "created_at"),
     list_filter=("provider",),
     search_fields=("subject", "email_at_link"),
     ordering=("-id",),
-    raw_id_fields=("customer",),
+    list_select_related=("customer",),
+    autocomplete_fields=("customer",),
+)
+register_read_only(
+    TOTPDevice,
+    exclude=("key",),
+    list_display=(
+        "id",
+        "user",
+        "name",
+        "confirmed",
+        "created_at",
+        "last_used_at",
+        "throttling_failure_count",
+    ),
+    list_filter=("confirmed",),
+    search_fields=("user__email", "name"),
+    ordering=("-id",),
+    list_select_related=("user",),
 )

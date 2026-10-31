@@ -6,5 +6,5 @@ from glowderma.site_config.models import SiteSettings
 register_read_only(
     SiteSettings,
     list_display=("id", "reservation_minutes", "support_phone", "updated_at", "updated_by"),
-    raw_id_fields=("updated_by",),
+    autocomplete_fields=("updated_by",),
 )

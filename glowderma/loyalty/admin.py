@@ -5,7 +5,21 @@ The only secret column of the module is ``PosDevice.key_hash`` (review minor 20)
 
 from django.contrib import admin
 
-from glowderma.core.admin import ReadOnlyAdmin, ReadOnlyTabularInline, register_read_only
+from glowderma.core.admin import (
+    DANGER,
+    INFO,
+    SUCCESS,
+    WARNING,
+    ReadOnlyAdmin,
+    ReadOnlyTabularInline,
+    customer_column,
+    date_range,
+    dropdown,
+    money_column,
+    register_read_only,
+    status_column,
+)
+from glowderma.core.labels import LEDGER_KIND
 from glowderma.loyalty.models import (
     CashbackHold,
     CashbackPolicy,
@@ -16,6 +30,9 @@ from glowderma.loyalty.models import (
     Purchase,
     PurchaseItem,
 )
+
+LEDGER_KIND_VARIANTS = {"credit": SUCCESS, "debit": INFO, "adjustment": WARNING, "reversal": DANGER}
+HOLD_STATE_VARIANTS = {"active": INFO, "captured": SUCCESS, "released": WARNING}
 
 
 class CashbackTierInline(ReadOnlyTabularInline):
@@ -33,8 +50,9 @@ class PurchaseItemInline(ReadOnlyTabularInline):
 class CashbackPolicyAdmin(ReadOnlyAdmin):
     list_display = ("version", "effective_from", "basis", "earn_on_cashback_paid", "author", "created_at")
     list_filter = ("basis",)
+    search_fields = ("=version",)
     ordering = ("-version",)
-    raw_id_fields = ("author",)
+    autocomplete_fields = ("author",)
     inlines = (CashbackTierInline,)
     readonly_fields = ("state", "effective_to", "superseded_by")  # derived (design 02 §1.1), change page only
 
@@ -42,19 +60,20 @@ class CashbackPolicyAdmin(ReadOnlyAdmin):
 class PurchaseAdmin(ReadOnlyAdmin):
     list_display = (
         "id",
-        "customer",
+        customer_column(),
         "source",
         "at",
-        "amount",
-        "cashback_amount",
+        money_column("amount", "Summa"),
+        money_column("cashback_amount", "Cashback"),
         "order",
         "billz_sale_ref",
         "reversed",
     )
-    list_filter = ("source", "reversed")
+    list_filter = (dropdown("source"), "reversed", date_range("at"))
+    list_select_related = ("customer", "order")
     search_fields = ("billz_sale_id", "billz_sale_ref", "=order__id", "customer__phone")
     ordering = ("-at", "-id")
-    raw_id_fields = ("customer", "order", "policy", "credited_entry", "reversal_entry")
+    autocomplete_fields = ("customer", "order", "policy", "credited_entry", "reversal_entry")
     inlines = (PurchaseItemInline,)
     date_hierarchy = "at"
 
@@ -66,14 +85,15 @@ register_read_only(
     list_display=("id", "policy", "from_amount", "to_amount", "percent", "created_at"),
     search_fields=("=policy__version",),
     ordering=("-policy_id", "from_amount"),
-    raw_id_fields=("policy",),
+    autocomplete_fields=("policy",),
 )
 register_read_only(
     LoyaltyAccount,
-    list_display=("id", "customer", "balance", "updated_at"),
-    search_fields=("customer__phone",),
+    list_display=("id", customer_column(), money_column("balance", "Balans"), "updated_at"),
+    list_select_related=("customer",),
+    search_fields=("customer__phone", "customer__name"),
     ordering=("-updated_at", "-id"),
-    raw_id_fields=("customer",),
+    autocomplete_fields=("customer",),
 )
 register_read_only(
     LedgerEntry,
@@ -81,27 +101,36 @@ register_read_only(
         "id",
         "at",
         "account",
-        "kind",
-        "amount",
-        "balance_after",
+        status_column("kind", "Turi", LEDGER_KIND_VARIANTS, LEDGER_KIND),
+        money_column("amount", "Summa"),
+        money_column("balance_after", "Balans"),
         "source_type",
         "source_ref",
         "order",
         "actor",
     ),
-    list_filter=("kind", "source_type"),
+    list_filter=(dropdown("kind"), dropdown("source_type"), date_range("at")),
     search_fields=("source_ref", "=order__id", "account__customer__phone"),
     ordering=("-at", "-id"),
-    raw_id_fields=("account", "order", "purchase", "policy", "reverses", "actor"),
+    autocomplete_fields=("account", "order", "purchase", "policy", "reverses", "actor"),
     date_hierarchy="at",
 )
 register_read_only(
     CashbackHold,
-    list_display=("id", "order", "account", "amount", "state", "expires_at", "captured_at", "released_at"),
-    list_filter=("state", "release_reason"),
+    list_display=(
+        "id",
+        "order",
+        "account",
+        money_column("amount", "Summa"),
+        status_column("state", "Holat", HOLD_STATE_VARIANTS),
+        "expires_at",
+        "captured_at",
+        "released_at",
+    ),
+    list_filter=(dropdown("state"), dropdown("release_reason")),
     search_fields=("=order__id",),
     ordering=("-id",),
-    raw_id_fields=("account", "order", "captured_entry"),
+    autocomplete_fields=("account", "order", "captured_entry"),
 )
 register_read_only(
     PurchaseItem,
@@ -112,12 +141,12 @@ register_read_only(
         "name",
         "billz_product_id",
         "quantity",
-        "unit_price",
+        money_column("unit_price", "Narx"),
         "promo",
     ),
     search_fields=("=purchase__id", "billz_product_id", "name"),
     ordering=("-purchase_id", "position"),
-    raw_id_fields=("purchase", "product"),
+    autocomplete_fields=("purchase", "product"),
 )
 register_read_only(
     PosDevice,
@@ -125,6 +154,6 @@ register_read_only(
     list_filter=("is_active",),
     search_fields=("name",),
     ordering=("name",),
-    raw_id_fields=("created_by",),
+    autocomplete_fields=("created_by",),
     exclude=("key_hash",),
 )

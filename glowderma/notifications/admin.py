@@ -1,8 +1,17 @@
 """Read-only Django admin for the notifications models (design 03 §8). Writes go through the services only."""
 
-from django.contrib import admin
-
-from glowderma.core.admin import register_read_only
+from glowderma.core.admin import (
+    DANGER,
+    INFO,
+    PRIMARY,
+    SUCCESS,
+    customer_column,
+    date_range,
+    display,
+    dropdown,
+    register_read_only,
+    status_column,
+)
 from glowderma.notifications.models import (
     Campaign,
     CampaignRecipient,
@@ -12,8 +21,12 @@ from glowderma.notifications.models import (
     StatusTemplate,
 )
 
+CAMPAIGN_STATE_VARIANTS = {"scheduled": INFO, "queued": PRIMARY, "sending": PRIMARY, "sent": SUCCESS}
+RECIPIENT_STATE_VARIANTS = {"pending": INFO, "sent": SUCCESS, "failed": DANGER}
+PUSH_STATE_VARIANTS = {"queued": INFO, "sending": PRIMARY, "sent": SUCCESS, "failed": DANGER}
 
-@admin.display(description="rules")
+
+@display(description="rules")
 def segment_rules(segment: CustomerSegment) -> str:
     """``min_online_orders`` / ``min_lifetime_amount`` with ``null`` for a rule that is off."""
     orders = "null" if segment.min_online_orders is None else str(segment.min_online_orders)
@@ -26,22 +39,23 @@ register_read_only(
     list_display=("status", "text_uz", "updated_at", "updated_by"),
     search_fields=("status", "text_uz"),
     ordering=("id",),
-    raw_id_fields=("updated_by",),
+    autocomplete_fields=("updated_by",),
 )
 register_read_only(
     CustomerSegment,
     list_display=("id", "name", segment_rules, "created_at"),
     search_fields=("name",),
     ordering=("id",),
-    raw_id_fields=("created_by",),
+    autocomplete_fields=("created_by",),
 )
 register_read_only(
     SegmentMember,
-    list_display=("id", "segment", "customer", "added_by", "added_at"),
+    list_display=("id", "segment", customer_column(), "added_by", "added_at"),
     list_filter=("segment",),
+    list_select_related=("segment", "customer", "added_by"),
     search_fields=("customer__phone",),
     ordering=("segment_id", "added_at", "id"),
-    raw_id_fields=("segment", "customer", "added_by"),
+    autocomplete_fields=("segment", "customer", "added_by"),
 )
 register_read_only(
     Campaign,
@@ -50,30 +64,47 @@ register_read_only(
         "kind",
         "title",
         "audience_type",
-        "state",
+        status_column("state", "Holat", CAMPAIGN_STATE_VARIANTS),
         "scheduled_at",
         "sent_at",
         "sent",
         "failed",
     ),
-    list_filter=("kind", "state", "audience_type"),
+    list_filter=(dropdown("kind"), dropdown("state"), dropdown("audience_type"), date_range("sent_at")),
     search_fields=("title",),
     ordering=("-id",),
-    raw_id_fields=("link_product", "audience_segment", "audience_customer", "author"),
+    autocomplete_fields=("link_product", "audience_segment", "audience_customer", "author"),
 )
 register_read_only(
     CampaignRecipient,
-    list_display=("id", "campaign", "customer", "device", "state", "sent_at"),
-    list_filter=("state",),
+    list_display=(
+        "id",
+        "campaign",
+        customer_column(),
+        "device",
+        status_column("state", "Holat", RECIPIENT_STATE_VARIANTS),
+        "sent_at",
+    ),
+    list_filter=(dropdown("state"),),
+    list_select_related=("campaign", "customer", "device"),
     search_fields=("campaign__id",),
     ordering=("campaign_id", "id"),
-    raw_id_fields=("campaign", "customer", "device", "inbox"),
+    autocomplete_fields=("campaign", "customer", "device", "inbox"),
 )
 register_read_only(
     InboxNotification,
-    list_display=("id", "customer", "kind", "title", "push_state", "created_at", "read_at"),
-    list_filter=("kind", "push_state", "source_type"),
+    list_display=(
+        "id",
+        customer_column(),
+        "kind",
+        "title",
+        status_column("push_state", "Push", PUSH_STATE_VARIANTS),
+        "created_at",
+        "read_at",
+    ),
+    list_filter=(dropdown("kind"), dropdown("push_state"), dropdown("source_type"), date_range("created_at")),
+    list_select_related=("customer",),
     search_fields=("dedupe_key", "customer__phone"),
     ordering=("-created_at", "-id"),
-    raw_id_fields=("customer",),
+    autocomplete_fields=("customer",),
 )

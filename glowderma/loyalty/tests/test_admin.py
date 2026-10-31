@@ -68,7 +68,10 @@ def test_models_registered_read_only(model: type[models.Model]) -> None:
     assert model_admin.list_display != ("__str__",)
     for field in model._meta.concrete_fields:
         if field.is_relation:
-            assert field.name in model_admin.raw_id_fields, (model, field.name)
+            assert field.name in (*model_admin.raw_id_fields, *model_admin.autocomplete_fields), (
+                model,
+                field.name,
+            )
 
 
 def test_pos_device_key_hash_is_hidden() -> None:
