@@ -18,6 +18,7 @@ from django.test import Client, RequestFactory, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 
+from glowderma.accounts.tests import ops_helpers
 from glowderma.accounts.tests.factories import (
     CustomerFactory,
     CustomerSessionFactory,
@@ -191,9 +192,19 @@ def test_anonymous_visitors_are_sent_to_the_login(client: Client, url: str) -> N
 
 @pytest.mark.parametrize("url", list(PAGES.values()))
 def test_signed_in_non_staff_never_see_a_dashboard(client: Client, url: str) -> None:
-    client.force_login(StaffUserFactory.create(is_staff=False))
+    user = StaffUserFactory.create(is_staff=False)
+    client.force_login(user)
+    ops_helpers.verify_session(client, user)  # even with a second factor
     response = client.get(url)
     assert response.status_code in (302, 403)
+    assert "dashboard" not in (response.context or {})
+
+
+@pytest.mark.parametrize("url", list(PAGES.values()))
+def test_staff_without_the_second_factor_never_see_a_dashboard(client: Client, url: str) -> None:
+    client.force_login(ops_helpers.ops_staff())  # password step only: the session is not verified
+    response = client.get(url)
+    assert response.status_code == 302
     assert "dashboard" not in (response.context or {})
 
 
