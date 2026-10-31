@@ -40,7 +40,7 @@ def test_local_and_test_defaults() -> None:
     assert settings.OPS_SESSION_IDLE_SECONDS == 1800
     assert settings.OPS_SESSION_ABSOLUTE_SECONDS == 12 * 60 * 60
     assert ip_network("0.0.0.0/0") in settings.OPS_ADMIN_ALLOWED_NETS  # local: every address
-    assert "glowderma.core.otp_apps.OtpStaticConfig" in settings.INSTALLED_APPS  # django_otp.plugins.otp_static
+    assert "glowderma.core.otp_apps.OtpStaticConfig" in settings.INSTALLED_APPS  # otp_static, Uzbek name
     middleware = settings.MIDDLEWARE
     assert middleware.index("django_otp.middleware.OTPMiddleware") > middleware.index(
         "django.contrib.auth.middleware.AuthenticationMiddleware"
