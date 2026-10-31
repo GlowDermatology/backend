@@ -441,8 +441,44 @@ msgstr "{name} «{obj}» muvaffaqiyatli o‘zgartirildi."
 msgid "The {name} “{obj}” was added successfully."
 msgstr "{name} «{obj}» muvaffaqiyatli qo‘shildi."
 
-msgid "The {name} “{obj}” was deleted successfully."
-msgstr "{name} «{obj}» muvaffaqiyatli o‘chirildi."
+msgid "The %(name)s “%(obj)s” was deleted successfully."
+msgstr "%(name)s «%(obj)s» muvaffaqiyatli o‘chirildi."
+
+msgid "The {name} “{obj}” was added successfully. You may edit it again below."
+msgstr "{name} «{obj}» muvaffaqiyatli qo‘shildi. Uni quyida yana tahrirlashingiz mumkin."
+
+msgid "The {name} “{obj}” was added successfully. You may add another {name} below."
+msgstr "{name} «{obj}» muvaffaqiyatli qo‘shildi. Quyida yana bitta {name} qo‘shishingiz mumkin."
+
+msgid "The {name} “{obj}” was changed successfully. You may edit it again below."
+msgstr "{name} «{obj}» muvaffaqiyatli o‘zgartirildi. Uni quyida yana tahrirlashingiz mumkin."
+
+msgid "The {name} “{obj}” was changed successfully. You may add another {name} below."
+msgstr "{name} «{obj}» muvaffaqiyatli o‘zgartirildi. Quyida yana bitta {name} qo‘shishingiz mumkin."
+
+msgid ""
+"Are you sure you want to delete the %(object_name)s \"%(escaped_object)s\"? All of the following "
+"related items will be deleted:"
+msgstr ""
+"%(object_name)s «%(escaped_object)s» ni o‘chirishga ishonchingiz komilmi? Quyidagi bog‘liq yozuvlarning "
+"hammasi ham o‘chiriladi:"
+
+msgid ""
+"Deleting the %(object_name)s '%(escaped_object)s' would result in deleting related objects, but your "
+"account doesn't have permission to delete the following types of objects:"
+msgstr ""
+"%(object_name)s «%(escaped_object)s» ni o‘chirib bo‘lmaydi: unga bog‘langan yozuvlar ham o‘chishi kerak, "
+"lekin quyidagi turdagi yozuvlarni o‘chirish huquqingiz yo‘q:"
+
+msgid ""
+"Deleting the %(object_name)s '%(escaped_object)s' would require deleting the following protected related "
+"objects:"
+msgstr ""
+"%(object_name)s «%(escaped_object)s» ni o‘chirish uchun quyidagi himoyalangan bog‘liq yozuvlarni ham "
+"o‘chirish kerak bo‘ladi:"
+
+msgid "Cannot delete %(name)s"
+msgstr "%(name)s ni o‘chirib bo‘lmaydi"
 
 msgid "%(name)s with ID “%(key)s” doesn’t exist. Perhaps it was deleted?"
 msgstr "ID «%(key)s» bo‘lgan %(name)s topilmadi. Ehtimol, o‘chirilgan."

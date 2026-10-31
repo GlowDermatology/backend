@@ -33,8 +33,8 @@ class Location(TimeStampedModel):
     address_ru = models.CharField(max_length=300, blank=True, verbose_name="manzil (ru)")
     address_en = models.CharField(max_length=300, blank=True, verbose_name="manzil (en)")
     phone = models.CharField(max_length=13, blank=True, verbose_name="telefon")
-    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True)
-    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True)
+    latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, verbose_name="kenglik")
+    longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, verbose_name="uzunlik")
     is_active = models.BooleanField(default=True, verbose_name="faol")
     position = models.PositiveIntegerField(default=0, verbose_name="tartib")
 
@@ -62,7 +62,10 @@ class Professional(TimeStampedModel):
     """A bookable specialist."""
 
     location = models.ForeignKey(
-        "professionals.Location", on_delete=models.PROTECT, related_name="professionals"
+        "professionals.Location",
+        on_delete=models.PROTECT,
+        related_name="professionals",
+        verbose_name="filial",
     )
     name = models.CharField(max_length=150, verbose_name="nomi")  # shown as-is in every language
     # dermatologist | cosmetologist
@@ -94,7 +97,9 @@ class Professional(TimeStampedModel):
     is_active = models.BooleanField(default=True, verbose_name="faol")
     # B-W1 SEO (admin contract §2.17): the website's URL segment, set once from the name when the row is
     # created, unique, never only digits, edited only by staff (stable URLs).
-    slug = models.CharField(max_length=SLUG_MAX_LENGTH, blank=True, default="", db_default="")
+    slug = models.CharField(
+        max_length=SLUG_MAX_LENGTH, blank=True, default="", db_default="", verbose_name="URL nomi (slug)"
+    )
 
     class Meta:
         verbose_name = "mutaxassis"

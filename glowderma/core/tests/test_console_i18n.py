@@ -293,3 +293,82 @@ def test_po_parser_handles_context_plurals_fuzzy_and_continuations() -> None:
     assert translations.ngettext("one", "many", 1) == "bitta"
     assert translations.ngettext("one", "many", 3) == "ko‘p"
     assert translations.gettext("untranslated") == "untranslated"
+
+
+# --- gaps found by the browser suite (e2e_admin/tests/uzbek.spec.ts, mutating/professionals.spec.ts) --------
+
+
+def test_django_otp_device_models_have_uzbek_names_without_a_migration() -> None:
+    from django_otp.plugins.otp_static.models import StaticDevice
+    from django_otp.plugins.otp_totp.models import TOTPDevice
+
+    assert (str(TOTPDevice._meta.verbose_name), str(TOTPDevice._meta.verbose_name_plural)) == (
+        "2FA qurilma",
+        "2FA qurilmalar",
+    )
+    assert str(StaticDevice._meta.verbose_name_plural) == "tiklash kodlari to‘plamlari"
+    # what the migration autodetector reads stays django_otp's own value
+    assert TOTPDevice._meta.original_attrs["verbose_name"] == "TOTP device"
+    assert "verbose_name" not in StaticDevice._meta.original_attrs
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "The {name} “{obj}” was added successfully. You may edit it again below.",
+        "The {name} “{obj}” was added successfully. You may add another {name} below.",
+        "The {name} “{obj}” was changed successfully. You may edit it again below.",
+        "The {name} “{obj}” was changed successfully. You may add another {name} below.",
+        "The %(name)s “%(obj)s” was deleted successfully.",
+        "Cannot delete %(name)s",
+        'Are you sure you want to delete the %(object_name)s "%(escaped_object)s"? All of the following '
+        "related items will be deleted:",
+        "Deleting the %(object_name)s '%(escaped_object)s' would result in deleting related objects, but "
+        "your account doesn't have permission to delete the following types of objects:",
+        "Deleting the %(object_name)s '%(escaped_object)s' would require deleting the following protected "
+        "related objects:",
+    ],
+)
+def test_the_editable_forms_messages_are_uzbek(message: str) -> None:
+    """The professionals pages' save / delete messages: Django's uz catalog leaves these untranslated."""
+    from django.utils import translation
+
+    with translation.override("uz"):
+        translated = _(message)
+    assert translated != message
+    for placeholder in re.findall(r"\{\w+\}|%\(\w+\)s", message):
+        assert placeholder in translated
+
+
+@pytest.mark.django_db
+def test_the_admin_javascript_catalog_is_uzbek() -> None:
+    """The date and time widgets' labels (the «Bugun» shortcut is announced as "Today (…)" otherwise)."""
+    page = console_client("staff").get("/django-admin/jsi18n/")
+    assert page.status_code == 200
+    text = page.content.decode()
+    for msgid, msgstr in (
+        ("Today (%(date)s)", "Bugun (%(date)s)"),
+        ("Yesterday (%(date)s)", "Kecha (%(date)s)"),
+        ("Previous (%(month)s %(year)s)", "Oldingi oy (%(month)s %(year)s)"),
+        ("Monday", "Dushanba"),
+    ):
+        assert f'"{msgid}": "{msgstr}"' in text
+
+
+def test_the_professionals_form_fields_are_labelled_in_uzbek() -> None:
+    from glowderma.professionals.models import Location, Professional
+
+    assert str(Professional._meta.get_field("location").verbose_name) == "filial"
+    assert str(Location._meta.get_field("latitude").verbose_name) == "kenglik"
+    for model in apps.get_app_config("professionals").get_models():
+        for field in model._meta.concrete_fields:
+            if field.editable and not field.primary_key:
+                assert str(field.verbose_name) != field.name.replace("_", " "), (model, field.name)
+
+
+def test_the_javascript_catalog_is_compiled_and_uses_the_uzbek_apostrophes() -> None:
+    js = CATALOG.with_name("djangojs.po")
+    assert js.with_suffix(".mo").read_bytes() == compile_po(js.read_text(encoding="utf-8"))
+    for entry in parse(js.read_text(encoding="utf-8")):
+        for text in entry.msgstr.values():
+            assert not UZBEK_LETTERS.search(text), text
