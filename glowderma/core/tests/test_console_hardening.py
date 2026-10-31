@@ -6,10 +6,11 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from django.conf import settings
 from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.db import models
-from django.test import Client, RequestFactory
+from django.test import Client, RequestFactory, override_settings
 
 from glowderma.accounts.tests.factories import TEST_PASSWORD
 from glowderma.accounts.tests.ops_helpers import ops_login
@@ -201,3 +202,30 @@ def test_every_json_field_of_the_console_goes_through_the_masking_renderer() -> 
                 html = str(renderer(row))
                 assert "MARKER-VALUE" not in html and MASK in html and "order_id" in html
     assert seen >= 15  # outbox, jobs, provider state, webhooks, audit, payments, campaigns, events …
+
+
+# --- finding 4: the console answers only on OPS_DOMAIN -------------------------------------------------
+
+BOUND = {"OPS_DOMAIN": "ops.glowderma.uz", "ALLOWED_HOSTS": ["ops.glowderma.uz", "api.glowderma.uz"]}
+
+
+@pytest.mark.parametrize("path", ["/django-admin/", "/django-admin/login/", "/django-admin/2fa/"])
+def test_with_ops_domain_another_host_never_reaches_the_console(path: str) -> None:
+    client, _user = verified_client()
+    with override_settings(**BOUND):
+        answer = client.get(path, HTTP_HOST="api.glowderma.uz")
+        assert answer.status_code == 404 and answer.content == b""
+        assert client.get(path, HTTP_HOST="ops.glowderma.uz").status_code in (200, 302)
+        assert client.get(path, HTTP_HOST="OPS.glowderma.uz:443").status_code in (200, 302)
+
+
+def test_with_ops_domain_the_api_still_answers_on_its_own_host() -> None:
+    with override_settings(**BOUND):
+        assert Client().get("/api/v1/health/", HTTP_HOST="api.glowderma.uz").status_code == 200
+
+
+def test_without_ops_domain_any_allowed_host_serves_the_console() -> None:
+    client, _user = verified_client()
+    assert settings.OPS_DOMAIN == ""  # local and test settings
+    for host in ("localhost", "127.0.0.1", "testserver"):
+        assert client.get("/django-admin/", HTTP_HOST=host).status_code == 200
