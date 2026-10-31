@@ -262,6 +262,26 @@ def _reconcile(now: datetime, entry: Any) -> dict[str, Any]:
     }
 
 
+def _live_tile(live: dict[str, Finding | None], total: int, worst_state: str) -> dict[str, Any]:
+    """The «Hozirgi topilmalar» tile. A live check that failed or timed out (``None``) is not «0 found»:
+    the tile then says the checks could not run and stays critical, so a broken reconciliation never
+    reads green."""
+    tile: dict[str, Any] = {"title": "Hozirgi topilmalar", "icon": "radar", "href": "#checks"}
+    if any(finding is None for name, finding in live.items() if name != LOYALTY_CHECK):
+        return tile | {
+            "value": "—",
+            "unit": "",
+            "hint": "Tekshiruvlarni bajarib bo‘lmadi (xato yoki vaqt tugadi) — sahifani yangilang",
+            "state": state(CRITICAL),
+        }
+    return tile | {
+        "value": num(total),
+        "unit": "qator",
+        "hint": "K1–K6 hozir qayta tekshirildi",
+        "state": state(worst_state if total else OK),
+    }
+
+
 def build(now: datetime) -> dict[str, Any]:
     audits = reporting_selectors.latest_audits([report_module.REPORT_ACTION, report_module.RECONCILE_ACTION])
     summary = report_module.summary(audits.get(report_module.REPORT_ACTION))
@@ -276,15 +296,7 @@ def build(now: datetime) -> dict[str, Any]:
     stuck = live.get("k2_payment_pending_stuck")
     tiles = [
         _report_tile(now, summary),
-        {
-            "title": "Hozirgi topilmalar",
-            "icon": "radar",
-            "value": num(live_total),
-            "unit": "qator",
-            "hint": "K1–K6 hozir qayta tekshirildi",
-            "href": "#checks",
-            "state": state(live_state if live_total else OK),
-        },
+        _live_tile(live, live_total, live_state),
         {
             "title": "Osilib qolgan to‘lovlar",
             "icon": "hourglass_top",

@@ -507,3 +507,24 @@ def test_seed_ops_demo_adds_signals_once() -> None:
 def test_seed_ops_demo_is_refused_in_production() -> None:
     with pytest.raises(CommandError):
         call_command("seed_ops_demo")
+
+
+def test_money_live_tile_is_critical_when_the_live_checks_could_not_run(
+    console: Client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed or timed-out live check is not «0 found»: the tile must not read green."""
+    from glowderma.reporting import tasks as reporting_tasks
+
+    monkeypatch.setattr(reporting_tasks, "guarded", lambda *args, **kwargs: None)
+    data = _get(console, PAGES["money"] + "?refresh=1").context["dashboard"]
+    tile = {tile["title"]: tile for tile in data["tiles"]}["Hozirgi topilmalar"]
+    assert tile["value"] == "—"
+    assert tile["state"]["key"] == dashboards.CRITICAL
+    assert "bajarib bo‘lmadi" in tile["hint"]
+
+
+def test_money_live_tile_is_green_when_the_checks_ran_and_found_nothing(console: Client) -> None:
+    data = _get(console, PAGES["money"] + "?refresh=1").context["dashboard"]
+    tile = {tile["title"]: tile for tile in data["tiles"]}["Hozirgi topilmalar"]
+    assert tile["value"] == "0"
+    assert tile["state"]["key"] == dashboards.OK
