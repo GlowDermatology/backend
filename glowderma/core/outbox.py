@@ -103,7 +103,9 @@ class RequeueHooks:
     * ``warning`` — printed once before the listing;
     * ``forget_payment_attempt(message, actor)`` — ``--forget-payment-attempt``: clears the topic's guard
       against a second payment once staff confirmed the provider never took the first one; audited by the
-      callback; returns a line to print; raises :class:`RequeueRefused` to stop.
+      callback; returns a line to print; raises :class:`RequeueRefused` to stop;
+    * ``describe_uz`` / ``skip_reason_uz`` / ``warning_uz`` — the same texts in Uzbek for the ops console's
+      requeue action (``core.admin``); the command keeps the English ones.
     """
 
     describe: Callable[[OutboxMessage], str]
@@ -111,6 +113,9 @@ class RequeueHooks:
     warning: str = ""
     forget_payment_attempt: Callable[[OutboxMessage, Any], str] | None = None
     resolve_refusal: Callable[[OutboxMessage], str] | None = None
+    describe_uz: Callable[[OutboxMessage], str] | None = None
+    skip_reason_uz: Callable[[OutboxMessage], str] | None = None
+    warning_uz: str = ""
 
 
 _requeue_hooks: dict[str, RequeueHooks] = {}

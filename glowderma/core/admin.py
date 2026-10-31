@@ -433,11 +433,12 @@ def _requeue_refusal(model_admin: Any, request: HttpRequest, message: OutboxMess
 def _requeue_notes(model_admin: Any, request: HttpRequest, message: OutboxMessage) -> list[str]:
     hooks = outbox.requeue_hooks(message.topic)
     notes = [f"Topic: {message.topic} · urinishlar: {message.attempts}"]
-    about = hooks.describe(message) if hooks is not None else ""
+    about = (hooks.describe_uz or hooks.describe)(message) if hooks is not None else ""
     if about:
         notes.append(f"Tafsilot: {about}")
-    if message.status == "dead" and hooks is not None and hooks.warning:
-        notes.append(f"Ogohlantirish: {hooks.warning}")
+    warning = (hooks.warning_uz or hooks.warning) if hooks is not None else ""
+    if message.status == "dead" and warning:
+        notes.append(f"Ogohlantirish: {warning}")
     return notes
 
 
@@ -459,8 +460,9 @@ def _topic_warnings(model_admin: Any, request: HttpRequest, obj: None) -> list[s
     notes = []
     for topic, _total in _dead_topics():
         hooks = outbox.requeue_hooks(topic)
-        if hooks is not None and hooks.warning:
-            notes.append(f"Ogohlantirish ({topic}): {hooks.warning}")
+        warning = (hooks.warning_uz or hooks.warning) if hooks is not None else ""
+        if warning:
+            notes.append(f"Ogohlantirish ({topic}): {warning}")
     return notes
 
 
@@ -531,7 +533,9 @@ class OutboxMessageAdmin(OpsActionsMixin, ReadOnlyAdmin):
                 message.pk, reason=REQUEUE_REASON, actor=request.user, request=request
             )
             if result.outcome == "skipped":
-                return refused(f"Xabar #{message.pk} qayta navbatga qo‘yilmadi: {result.reason}")
+                hooks = outbox.requeue_hooks(message.topic)
+                why = hooks.skip_reason_uz(message) if hooks is not None and hooks.skip_reason_uz else ""
+                return refused(f"Xabar #{message.pk} qayta navbatga qo‘yilmadi: {why or result.reason}")
             if result.outcome != "requeued":
                 return refused(f"Xabar #{message.pk} endi o‘lik emas: hech narsa o‘zgarmadi.")
             return done(

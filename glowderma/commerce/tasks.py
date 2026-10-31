@@ -63,6 +63,7 @@ from glowderma.commerce.billz_sales import PurchaseJournal, get_sale_port, sale_
 from glowderma.commerce.models import Order, StockReservation
 from glowderma.core import alerts, audit, enums, integration_modes, outbox, timeutils
 from glowderma.core.api.exceptions import InvalidTransition
+from glowderma.core.labels import stamp
 from glowderma.core.models import OutboxMessage
 from glowderma.delivery import selectors as delivery_selectors
 from glowderma.delivery import services as delivery_services
@@ -548,6 +549,12 @@ REQUEUE_WARNING = (
 )
 
 
+REQUEUE_WARNING_UZ = (
+    "sotuv Billz’ga qo‘lda kiritilmaganini tekshiring; qo‘lda kiritilganlar uchun billz_mark_recorded "
+    "ishlating (qayta navbat uni Billz’da ikkinchi marta yozadi)"
+)
+
+
 def _push_info(message: OutboxMessage) -> tuple[Any, Any]:
     payload = _payload(message)
     purchase_id = payload.get("purchase_id")
@@ -563,6 +570,24 @@ def describe_push(message: OutboxMessage) -> str:
     if info is not None and info.billz_payment_attempted_at is not None:
         text += f", payment attempted at {info.billz_payment_attempted_at.isoformat()}"
     return text
+
+
+def describe_push_uz(message: OutboxMessage) -> str:
+    """:func:`describe_push` for the ops console."""
+    order_id, info = _push_info(message)
+    text = f"buyurtma №{order_id if order_id is not None else '-'}, Billz qoralamasi "
+    text += (info.billz_sale_id if info is not None else "") or "-"
+    if info is not None and info.billz_payment_attempted_at is not None:
+        text += f", to‘lovga urinilgan: {stamp(info.billz_payment_attempted_at)}"
+    return text
+
+
+def push_already_recorded_uz(message: OutboxMessage) -> str:
+    """:func:`push_already_recorded` for the ops console."""
+    _, info = _push_info(message)
+    if info is None or info.billz_pushed_at is None:
+        return ""
+    return f"Billz’da allaqachon yozilgan: {stamp(info.billz_pushed_at)} (qo‘lda yoki oldingi yuborishda)"
 
 
 def push_already_recorded(message: OutboxMessage) -> str:
@@ -629,6 +654,9 @@ outbox.on_requeue(
         warning=REQUEUE_WARNING,
         forget_payment_attempt=forget_payment_attempt,
         resolve_refusal=push_not_recorded,
+        describe_uz=describe_push_uz,
+        skip_reason_uz=push_already_recorded_uz,
+        warning_uz=REQUEUE_WARNING_UZ,
     ),
 )
 

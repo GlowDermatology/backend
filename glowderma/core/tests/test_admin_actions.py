@@ -159,6 +159,30 @@ def test_a_topic_hook_skip_reason_refuses_the_requeue() -> None:
     assert not AuditEntry.objects.filter(action__startswith="ops.").exists()
 
 
+def test_the_console_shows_a_topic_hook_s_uzbek_texts_when_it_has_them() -> None:
+    dead = message()
+    hooks = outbox.RequeueHooks(
+        describe=lambda m: "order 7",
+        skip_reason=lambda m: "already recorded",
+        warning="check by hand",
+        describe_uz=lambda m: "buyurtma №7",
+        skip_reason_uz=lambda m: "allaqachon yozilgan",
+        warning_uz="qo‘lda tekshiring",
+    )
+    outbox.on_requeue(TOPIC, hooks)
+    try:
+        client = console_client("staff")
+        page = client.get(requeue_url(dead.pk)).content.decode()
+        response = confirm(client, requeue_url(dead.pk))
+    finally:
+        outbox._requeue_hooks.pop(TOPIC, None)
+    assert "Tafsilot: buyurtma №7" in page and "Ogohlantirish: qo‘lda tekshiring" in page
+    assert "order 7" not in page and "check by hand" not in page
+    assert messages_of(response) == [
+        ("warning", f"Xabar #{dead.pk} qayta navbatga qo‘yilmadi: allaqachon yozilgan"),
+    ]
+
+
 def test_an_overdue_open_message_kicks_the_dispatcher(django_capture_on_commit_callbacks: Any) -> None:
     late = message("pending", available_at=timeutils.now() - timedelta(hours=3))
     with (

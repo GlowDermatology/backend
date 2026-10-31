@@ -19,7 +19,7 @@ from glowderma.catalog.models import Product
 from glowderma.commerce import services, tasks, topics
 from glowderma.commerce.models import OrderEvent
 from glowderma.commerce.tests.support import AT, admin, pay, place, product, shopper
-from glowderma.core import timeutils
+from glowderma.core import outbox, timeutils
 from glowderma.core.api.exceptions import Conflict
 from glowderma.core.models import AuditEntry, OutboxMessage
 from glowderma.core.seeding import pinned_clock
@@ -575,6 +575,11 @@ def test_a_requeue_skips_a_sale_recorded_by_hand() -> None:
     assert "1 dead message(s) matched, 0 requeued, 1 skipped." in text
     dead.refresh_from_db()
     assert dead.status == "dead"
+    hooks = outbox.requeue_hooks(topics.BILLZ_PUSH_SALE)  # the ops console's Uzbek texts of the same facts
+    assert hooks is not None and hooks.describe_uz and hooks.skip_reason_uz and hooks.warning_uz
+    assert hooks.describe_uz(dead).startswith(f"buyurtma №{order.pk}, Billz qoralamasi {SALE_ID}")
+    assert hooks.skip_reason_uz(dead).startswith("Billz’da allaqachon yozilgan: ")
+    assert "billz_mark_recorded" in hooks.warning_uz
 
 
 @override_settings(BILLZ_MODE="live")
