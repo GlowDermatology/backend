@@ -14,6 +14,7 @@ from glowderma.core.admin import (
     dropdown,
     money_column,
     register_read_only,
+    status_badge,
     status_column,
 )
 from glowderma.core.labels import PAYMENT_STATUS, REFUND_STATE
@@ -32,8 +33,19 @@ REFUND_STATE_VARIANTS = {
 
 class RefundInline(ReadOnlyTabularInline):
     model = Refund
-    fields = ("id", "state", "origin", "amount", "requested_at", "completed_at", "error_code", "requested_by")
+    fields = (
+        "id",
+        "state_label",
+        "origin",
+        "amount_som",
+        "requested_at",
+        "completed_at",
+        "error_code",
+        "requested_by",
+    )
     ordering = ("-requested_at", "-id")
+    state_label = staticmethod(status_badge("state", "Holat", REFUND_STATE_VARIANTS, REFUND_STATE))
+    amount_som = staticmethod(money_column("amount", "Summa"))
     tab = True
     verbose_name_plural = "Qaytarishlar"
 

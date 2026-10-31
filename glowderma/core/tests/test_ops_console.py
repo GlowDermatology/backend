@@ -91,6 +91,12 @@ def test_login_page_is_unfold_styled_with_the_guarded_form() -> None:
     page = Client().get("/django-admin/login/")
     assert page.status_code == 200
     assert b"Glow Derma Ops" in page.content and b'name="username"' in page.content
+    # Unfold's form posts no ``next``: a direct login still lands on the console, not /accounts/profile/
+    get_user_model().objects.create_user("login@x.uz", "Saffron!Harbor-Long72", is_staff=True)
+    answer = Client().post(
+        "/django-admin/login/", {"username": "login@x.uz", "password": "Saffron!Harbor-Long72"}
+    )
+    assert answer.status_code == 302 and answer["Location"] == "/django-admin/"
 
 
 class _Customer:

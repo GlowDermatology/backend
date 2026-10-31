@@ -9,6 +9,7 @@ from django.contrib import admin
 
 from glowderma.accounts.models import Address, AuthSession, Customer, CustomerSocialIdentity, Device
 from glowderma.appointments.models import Appointment
+from glowderma.commerce.admin import ORDER_STATUS_VARIANTS
 from glowderma.commerce.models import Order
 from glowderma.core.admin import (
     DANGER,
@@ -19,17 +20,21 @@ from glowderma.core.admin import (
     dropdown,
     masked_email_column,
     masked_phone_column,
+    money_column,
+    status_badge,
     status_column,
 )
-from glowderma.core.labels import CUSTOMER_STATUS
+from glowderma.core.labels import CUSTOMER_STATUS, ORDER_STATUS
 from glowderma.loyalty.models import LoyaltyAccount
 
 
 class CustomerOrderInline(ReadOnlyTabularInline):
     model = Order
     fk_name = "customer"
-    fields = ("id", "status", "fulfilment", "total", "payment_provider", "channel", "created_at")
+    fields = ("id", "status_label", "fulfilment", "total_som", "payment_provider", "channel", "created_at")
     ordering = ("-created_at", "-id")
+    status_label = staticmethod(status_badge("status", "Holat", ORDER_STATUS_VARIANTS, ORDER_STATUS))
+    total_som = staticmethod(money_column("total", "Jami"))
     per_page = 10
     tab = True
     verbose_name_plural = "Buyurtmalar"
@@ -37,14 +42,16 @@ class CustomerOrderInline(ReadOnlyTabularInline):
 
 class CustomerLoyaltyInline(ReadOnlyTabularInline):
     model = LoyaltyAccount
-    fields = ("balance", "updated_at")
+    fields = ("balance_som", "updated_at")
+    balance_som = staticmethod(money_column("balance", "Balans"))
     tab = True
     verbose_name_plural = "Cashback"
 
 
 class CustomerAppointmentInline(ReadOnlyTabularInline):
     model = Appointment
-    fields = ("start", "professional", "service", "status", "requested_via", "price")
+    fields = ("start", "professional", "service", "status", "requested_via", "price_som")
+    price_som = staticmethod(money_column("price", "Narx"))
     ordering = ("-start", "-id")
     per_page = 10
     tab = True

@@ -70,6 +70,9 @@ USE_TZ = True
 LANGUAGE_CODE = "uz"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 DATA_UPLOAD_MAX_MEMORY_SIZE = 6 * 1024 * 1024
+# Unfold's login template posts no ``next`` field: a direct visit of /django-admin/login/ lands on the console
+# index instead of Django's /accounts/profile/ default (the admin is the only session login of the project).
+LOGIN_REDIRECT_URL = "/django-admin/"
 # The ops console's environment badge (glowderma.core.admin_site); production sets PRODUCTION or STAGING.
 OPS_ENVIRONMENT_LABEL = "LOCAL"
 STATIC_URL = "/static/"

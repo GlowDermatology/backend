@@ -25,6 +25,7 @@ from unfold.contrib.filters.admin import (
     RangeDateTimeFilter,
 )
 from unfold.decorators import display as unfold_display
+from unfold.utils import display_for_label
 
 from glowderma.core.i18n import format_number
 from glowderma.core.models import AuditEntry, IdempotencyRecord, OutboxMessage
@@ -100,6 +101,29 @@ def status_column(
         return (str(value), text)
 
     column.__name__ = f"{path}_label"
+    column.source_field = path  # type: ignore[attr-defined]
+    return column
+
+
+def status_badge(
+    path: str,
+    description: str,
+    variants: Mapping[str, str],
+    labels: Mapping[str, str] | None = None,
+) -> Column:
+    """:func:`status_column` rendered as ready HTML, for read-only rows (inlines, change pages) where Unfold
+    does not apply ``display(label=…)``. Use it as ``name = staticmethod(status_badge(...))``."""
+    base = status_column(path, description, variants, labels)
+
+    @display(description=description)
+    def column(obj: models.Model) -> SafeString | str:
+        value, text = base(obj)
+        if not value:
+            return "-"
+        rendered: SafeString = display_for_label((value, text), "-", dict(variants))
+        return rendered
+
+    column.__name__ = f"{path}_badge"
     column.source_field = path  # type: ignore[attr-defined]
     return column
 

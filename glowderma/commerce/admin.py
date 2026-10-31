@@ -20,11 +20,13 @@ from glowderma.core.admin import (
     dropdown,
     money_column,
     register_read_only,
+    status_badge,
     status_column,
 )
-from glowderma.core.labels import ORDER_STATUS
+from glowderma.core.labels import ORDER_STATUS, PAYMENT_STATUS
 from glowderma.delivery.models import Shipment
 from glowderma.loyalty.models import CashbackHold
+from glowderma.payments.admin import PAYMENT_STATUS_VARIANTS
 from glowderma.payments.models import Payment
 
 ORDER_STATUS_VARIANTS = {
@@ -39,8 +41,10 @@ RESERVATION_STATE_VARIANTS = {"active": INFO, "converted": SUCCESS}
 
 class OrderItemInline(ReadOnlyTabularInline):
     model = OrderItem
-    fields = ("position", "name", "billz_id", "quantity", "unit_price", "promo", "line_total")
+    fields = ("position", "name", "billz_id", "quantity", "unit_price_som", "promo", "line_total_som")
     ordering = ("position",)
+    unit_price_som = staticmethod(money_column("unit_price", "Narx"))
+    line_total_som = staticmethod(money_column("line_total", "Jami"))
     tab = True
     verbose_name_plural = "Mahsulotlar"
 
@@ -55,15 +59,18 @@ class OrderEventInline(ReadOnlyTabularInline):
 
 class OrderPaymentInline(ReadOnlyTabularInline):
     model = Payment
-    fields = ("id", "provider", "status", "amount", "provider_txn_id", "confirmed_at", "created_at")
+    fields = ("id", "provider", "status_label", "amount_som", "provider_txn_id", "confirmed_at", "created_at")
     ordering = ("-created_at", "-id")
+    status_label = staticmethod(status_badge("status", "Holat", PAYMENT_STATUS_VARIANTS, PAYMENT_STATUS))
+    amount_som = staticmethod(money_column("amount", "Summa"))
     tab = True
     verbose_name_plural = "To‘lovlar"
 
 
 class OrderShipmentInline(ReadOnlyTabularInline):
     model = Shipment
-    fields = ("state", "tracking_number", "tariff", "bts_status", "via", "attempts", "last_attempt_at")
+    fields = ("state", "tracking_number", "tariff_som", "bts_status", "via", "attempts", "last_attempt_at")
+    tariff_som = staticmethod(money_column("tariff", "Tarif"))
     tab = True
     verbose_name_plural = "Yetkazish"
 
@@ -71,8 +78,9 @@ class OrderShipmentInline(ReadOnlyTabularInline):
 class OrderCashbackHoldInline(ReadOnlyTabularInline):
     model = CashbackHold
     fk_name = "order"
-    fields = ("amount", "state", "expires_at", "captured_at", "released_at", "release_reason")
+    fields = ("amount_som", "state", "expires_at", "captured_at", "released_at", "release_reason")
     ordering = ("-id",)
+    amount_som = staticmethod(money_column("amount", "Summa"))
     tab = True
     verbose_name_plural = "Cashback bandlari"
 

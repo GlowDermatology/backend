@@ -65,5 +65,5 @@ def test_cache_outage_falls_back_to_the_count(monkeypatch: pytest.MonkeyPatch) -
     def broken(*args: Any, **kwargs: Any) -> Any:
         raise ConnectionError("redis down")
 
-    monkeypatch.setattr(admin_nav.cache, "get", broken)
+    monkeypatch.setattr(cache, "get", broken)
     assert admin_nav.dead_outbox(staff_request()) == "1"
