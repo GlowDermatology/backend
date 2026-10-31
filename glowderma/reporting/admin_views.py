@@ -1,8 +1,8 @@
 """The ops console's dashboards as Unfold pages (config/settings/ops_admin.py).
 
 * «Ops holati» is the console index: ``UNFOLD["DASHBOARD_CALLBACK"]`` = :func:`dashboard_callback` adds the
-  data to the index context and :class:`~glowderma.reporting.apps.ReportingConfig` points the site's
-  ``index_template`` at ``reporting/dashboards/ops.html``.
+  data to the index context and ``OpsAdminSite.index_template`` (glowderma.core.admin_site) names
+  ``reporting/dashboards/ops.html``.
 * «Pul solishtirish», «Savdo va katalog», «Mijozlar va kirish» are ``UNFOLD["SITE_VIEWS"]`` pages:
   Unfold mounts each under the admin site through ``admin_site.admin_view`` (so the console's login — and any
   later second factor that wraps ``admin_view`` — guards them) and :class:`UnfoldSiteViewMixin` gives them the

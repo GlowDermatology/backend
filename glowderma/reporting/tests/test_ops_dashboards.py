@@ -218,6 +218,23 @@ def test_the_view_refuses_a_non_staff_user_even_past_the_site_wrapper() -> None:
     assert admin_views.dashboard_callback(request, {"title": "x"}) == {"title": "x"}
 
 
+@pytest.mark.parametrize("url", list(PAGES.values()))
+def test_every_dashboard_carries_the_console_brand_in_the_sidebar(console: Client, url: str) -> None:
+    """The sidebar header (logo, «Glow Derma Ops», subheader) comes from the ``branding`` block of
+    ``admin/base_site.html``: a page extending ``admin/base.html`` showed an empty header."""
+    page = _get(console, url).content.decode()
+    assert '<div id="site-name"' in page
+    assert re.search(r'<img src="[^"]*ops/logo[^"]*\.svg"', page)
+    assert "Glow Derma Ops</a>" in re.sub(r"\s+", " ", page).replace(" </a>", "</a>")
+    assert "Operatsion konsol" in page
+
+
+def test_the_index_template_is_named_on_the_site_not_set_by_reporting() -> None:
+    from django.contrib import admin
+
+    assert admin.site.index_template == admin_views.OPS_TEMPLATE
+
+
 def test_the_sidebar_lists_the_four_dashboards_first(console: Client) -> None:
     response = _get(console, INDEX)
     first = response.context["sidebar_navigation"][0]

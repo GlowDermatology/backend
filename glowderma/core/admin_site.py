@@ -35,6 +35,10 @@ class OpsAdminSite(_BaseSite):
     site_header = SITE_NAME
     site_title = SITE_NAME
     index_title = "Boshqaruv"
+    # The index is the «Ops holati» dashboard (glowderma.reporting; ``UNFOLD["DASHBOARD_CALLBACK"]`` fills its
+    # context). Named, not imported, so ``core`` stays below ``reporting``: Unfold's own ``admin/index.html``
+    # comes first in the template search, hence the explicit name.
+    index_template = "reporting/dashboards/ops.html"
     # No public "view site" link: the console has no storefront of its own.
     site_url = None
 
