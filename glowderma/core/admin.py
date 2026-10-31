@@ -577,6 +577,7 @@ OUTBOX_STATUS_VARIANTS = {
 REQUEUE_REASON = "ops console"
 # One click of "requeue every dead message of a topic" handles at most this many (the rest: click again).
 TOPIC_REQUEUE_LIMIT = 200
+TOPIC_SCAN_LIMIT = 2000  # dead messages one click may look at, skipped ones included
 # "Run the consistency report now": once per this many seconds, whoever clicks (the report reads every
 # ledger entry and may alert).
 CONSISTENCY_REPORT_COOLDOWN = 600
@@ -808,25 +809,40 @@ class OutboxMessageAdmin(OpsActionsMixin, ReadOnlyAdmin):
     )
     def requeue_dead_topic(self, request: HttpRequest, obj: None, form: ConfirmForm) -> ActionResult:
         topic = str(form.cleaned_data["topic"])
-        ids = list(
-            OutboxMessage.objects.filter(topic=topic, status="dead")
-            .order_by("id")
-            .values_list("pk", flat=True)[: TOPIC_REQUEUE_LIMIT + 1]
-        )
-        more = len(ids) > TOPIC_REQUEUE_LIMIT
         requeued: list[int] = []
         skipped: list[int] = []
-        for message_id in ids[:TOPIC_REQUEUE_LIMIT]:
-            result = outbox.requeue_dead(
-                message_id, reason=REQUEUE_REASON, actor=request.user, request=request
+        # Walk the topic's dead messages by id, past the ones its hook skips (they stay dead for good),
+        # until TOPIC_REQUEUE_LIMIT are requeued or TOPIC_SCAN_LIMIT were looked at.
+        cursor, examined, more = 0, 0, False
+        while len(requeued) < TOPIC_REQUEUE_LIMIT:
+            batch = list(
+                OutboxMessage.objects.filter(topic=topic, status="dead", pk__gt=cursor)
+                .order_by("id")
+                .values_list("pk", flat=True)[:TOPIC_REQUEUE_LIMIT]
             )
-            if result.outcome == "requeued":
-                requeued.append(message_id)
-            elif result.outcome == "skipped":
-                skipped.append(message_id)
+            if not batch:
+                break
+            for message_id in batch:
+                if len(requeued) >= TOPIC_REQUEUE_LIMIT or examined >= TOPIC_SCAN_LIMIT:
+                    more = True
+                    break
+                cursor, examined = message_id, examined + 1
+                result = outbox.requeue_dead(
+                    message_id, reason=REQUEUE_REASON, actor=request.user, request=request
+                )
+                if result.outcome == "requeued":
+                    requeued.append(message_id)
+                elif result.outcome == "skipped":
+                    skipped.append(message_id)
+            if more:
+                break
+        if not more:
+            more = OutboxMessage.objects.filter(topic=topic, status="dead", pk__gt=cursor).exists()
         if not requeued:
+            scanned = f" Birinchi {examined} tasi ko‘rildi." if more else ""
             return refused(
-                f"{topic}: qayta navbatga qo‘yiladigan xabar topilmadi ({len(skipped)} ta o‘tkazildi)."
+                f"{topic}: qayta navbatga qo‘yiladigan xabar topilmadi "
+                f"({len(skipped)} ta o‘tkazildi).{scanned}"
             )
         tail = " Yana o‘lik xabarlar qoldi — amalni takrorlang." if more else ""
         forget_cached_counts(*OUTBOX_CACHED_COUNTS)

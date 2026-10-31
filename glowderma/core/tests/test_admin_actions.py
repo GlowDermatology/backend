@@ -280,6 +280,66 @@ def test_topic_requeue_requeues_the_dead_messages_of_that_topic_only() -> None:
     assert AuditEntry.objects.filter(action="ops.outbox_topic_requeued").count() == 1
 
 
+def test_topic_requeue_gets_past_messages_its_hook_always_skips(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Dead messages the topic hook refuses stay dead; a repeat must still reach the later ones."""
+    from glowderma.core import admin as core_admin
+
+    monkeypatch.setattr(core_admin, "TOPIC_REQUEUE_LIMIT", 2)
+    skipped_rows = [message(payload={"skip": True}) for _ in range(3)]
+    later = [message() for _ in range(3)]
+    hooks = outbox.RequeueHooks(
+        describe=lambda m: "", skip_reason=lambda m: "recorded by hand" if m.payload.get("skip") else ""
+    )
+    outbox.on_requeue(TOPIC, hooks)
+    try:
+        client = console_client("manager")
+        first = confirm(client, reverse(TOPIC_URL), topic=TOPIC)
+        second = confirm(client, reverse(TOPIC_URL), topic=TOPIC)
+    finally:
+        outbox._requeue_hooks.pop(TOPIC, None)
+    assert messages_of(first) == [
+        (
+            "success",
+            f"{TOPIC}: 2 ta xabar qayta navbatga qo‘yildi, 3 ta o‘tkazib yuborildi."
+            " Yana o‘lik xabarlar qoldi — amalni takrorlang.",
+        ),
+    ]
+    # the client never followed the first redirect, so its message is still queued ahead of the second one
+    assert messages_of(second)[-1] == (
+        "success",
+        f"{TOPIC}: 1 ta xabar qayta navbatga qo‘yildi, 3 ta o‘tkazib yuborildi.",
+    )
+    statuses = dict(OutboxMessage.objects.values_list("pk", "status"))
+    assert all(statuses[row.pk] == "dead" for row in skipped_rows)
+    assert all(statuses[row.pk] == "pending" for row in later)
+
+
+def test_topic_requeue_stops_after_the_scan_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    from glowderma.core import admin as core_admin
+
+    monkeypatch.setattr(core_admin, "TOPIC_SCAN_LIMIT", 3)
+    for _ in range(4):
+        message(payload={"skip": True})
+    last = message()
+    hooks = outbox.RequeueHooks(
+        describe=lambda m: "", skip_reason=lambda m: "recorded by hand" if m.payload.get("skip") else ""
+    )
+    outbox.on_requeue(TOPIC, hooks)
+    try:
+        response = confirm(console_client("manager"), reverse(TOPIC_URL), topic=TOPIC)
+    finally:
+        outbox._requeue_hooks.pop(TOPIC, None)
+    assert messages_of(response) == [
+        (
+            "warning",
+            f"{TOPIC}: qayta navbatga qo‘yiladigan xabar topilmadi (3 ta o‘tkazildi)."
+            " Birinchi 3 tasi ko‘rildi.",
+        ),
+    ]
+    last.refresh_from_db()
+    assert last.status == "dead"
+
+
 def test_topic_requeue_refuses_a_topic_without_dead_messages() -> None:
     message(topic="other.topic")
     response = confirm(console_client("manager"), reverse(TOPIC_URL), topic="nothing.here")
