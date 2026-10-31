@@ -412,3 +412,18 @@ if ALERT_WEBHOOK_URL:
     _refuse_placeholder("ALERT_WEBHOOK_SECRET", ALERT_WEBHOOK_SECRET)
     if len(ALERT_WEBHOOK_SECRET.strip()) < 32:
         raise ImproperlyConfigured("ALERT_WEBHOOK_SECRET must be at least 32 characters")
+# --- Ops console (Unfold, glowderma.core.admin_site) ---
+# The header badge: PRODUCTION, or STAGING for the staging deployment (which runs this module too).
+OPS_ENVIRONMENT_LABEL = (
+    env_str("OPS_ENVIRONMENT_LABEL", "STAGING" if ALERT_ENV.lower() == "staging" else "PRODUCTION")
+    .strip()
+    .upper()
+)
+if OPS_ENVIRONMENT_LABEL not in {"PRODUCTION", "STAGING"}:
+    raise ImproperlyConfigured("OPS_ENVIRONMENT_LABEL must be PRODUCTION or STAGING")
+# Hashed, pre-compressed static files (the console's Unfold assets are cache-busted by name); collectstatic in
+# the Dockerfile writes the manifest. Local and test settings keep the plain storage.
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+}
