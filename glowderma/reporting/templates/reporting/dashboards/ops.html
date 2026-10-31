@@ -120,13 +120,13 @@
             </header>
             <div class="gd-scroll">
                 <table class="gd-table">
-                    <thead><tr><th>Provayder</th><th>Rejim</th><th>Sozlangan</th><th class="gd-hide-sm">Oxirgi muvaffaqiyat</th><th class="num">Ketma-ket xato</th><th class="gd-hide-sm">Oxirgi xato</th><th>Holat</th></tr></thead>
+                    <thead><tr><th>Provayder</th><th>Rejim</th><th class="gd-hide-sm">Sozlangan</th><th class="gd-hide-sm">Oxirgi muvaffaqiyat</th><th class="num">Xatolar</th><th class="gd-hide-sm">Oxirgi xato</th><th>Holat</th></tr></thead>
                     <tbody>
                         {% for row in d.readiness %}
                             <tr>
                                 <td class="strong">{% if row.href %}<a href="{{ row.href }}">{{ row.provider }}</a>{% else %}{{ row.provider }}{% endif %}</td>
                                 <td>{{ row.mode }}</td>
-                                <td>{{ row.configured }}</td>
+                                <td class="gd-hide-sm">{{ row.configured }}</td>
                                 <td class="muted gd-hide-sm">{{ row.last_success }}</td>
                                 <td class="num">{{ row.failures }}</td>
                                 <td class="muted gd-hide-sm">{{ row.last_error }}</td>

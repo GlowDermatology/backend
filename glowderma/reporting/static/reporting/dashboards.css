@@ -194,5 +194,9 @@ html.dark .gd-kv dd { color: var(--color-base-50); }
   .gd-table th:last-child, .gd-table td:last-child { padding-right: 14px; }
   .gd-chart { height: 240px; }
   .gd-hide-sm { display: none; }
+  /* table states: icon only on a phone (the label stays readable to screen readers and in the tooltip) */
+  .gd-table .gd-badge { font-size: 0; gap: 0; padding: 0 4px; }
+  .gd-table .gd-badge .material-symbols-outlined { font-size: 16px; }
+  .gd-table td, .gd-table th { padding-left: 8px; padding-right: 8px; }
 }
 .gd-stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
