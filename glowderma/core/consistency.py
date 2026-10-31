@@ -65,6 +65,12 @@ def dead_messages(since: datetime, *, limit: int, topic: str | None = None) -> F
     return finding(queryset, limit=limit)
 
 
+def dead_count() -> int:
+    """Every ``dead`` message (an action item until requeued): the ops console's sidebar badge. Reads the
+    partial ``outbox_unfinished_idx`` rows only."""
+    return OutboxMessage.objects.filter(status="dead").count()
+
+
 def overdue_messages(now: datetime, overdue: timedelta, *, limit: int) -> Finding:
     """Messages still open (pending, failed or in flight) although they were due more than ``overdue`` ago:
     the dispatcher is not running or a message is wedged. Deferred messages (``RetryLater``) are judged by
@@ -90,6 +96,7 @@ def deferred_past_window(now: datetime, grace: timedelta, *, limit: int) -> Find
 __all__ = [
     "OPEN_OUTBOX_STATUSES",
     "Finding",
+    "dead_count",
     "dead_messages",
     "deferred_past_window",
     "finding",

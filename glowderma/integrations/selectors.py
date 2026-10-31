@@ -1,9 +1,13 @@
 """Read-side helpers of `integrations` (jobs, provider state). Reads never create rows."""
 
+from datetime import datetime
 from typing import Any
 
 from glowderma.core import enums
-from glowderma.integrations.models import IntegrationState, Job
+from glowderma.integrations.models import IntegrationState, Job, WebhookInbox
+
+# ``WebhookInbox.result["outcome"]`` values of a delivery we did not accept (commerce.api.webhooks.inbox).
+FAILED_WEBHOOK_OUTCOMES = ("rejected", "error")
 
 
 def get_job(job_id: int) -> Job | None:
@@ -33,3 +37,10 @@ def billz_status(*, configured: bool) -> dict[str, Any]:
         "connected": configured and (last is None or last.state != enums.JobState.FAILED),
         "last_sync_at": state.last_sync_at if state is not None else None,
     }
+
+
+def failed_webhooks_since(since: datetime) -> int:
+    """Provider callbacks received at or after ``since`` that were rejected or failed (ops console badge)."""
+    return WebhookInbox.objects.filter(
+        received_at__gte=since, result__outcome__in=list(FAILED_WEBHOOK_OUTCOMES)
+    ).count()
