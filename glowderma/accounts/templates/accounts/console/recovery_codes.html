@@ -1,0 +1,20 @@
+{% extends 'accounts/console/base_step.html' %}
+{% load unfold %}
+
+{% block step %}
+    {% include "unfold/helpers/messages/success.html" with message="Ikki bosqichli himoya yoqildi." %}
+
+    <p class="ops-signin-lead">Telefoningiz yo‘qolsa, quyidagi zaxira kodlar bilan kirasiz. Ular <strong>faqat hozir</strong> ko‘rsatiladi: yozib oling yoki parol menejeriga saqlang. Har bir kod bir marta ishlaydi.</p>
+
+    <ul class="ops-recovery-codes" id="recovery-codes">
+        {% for code in recovery_codes %}
+            <li><code>{{ code }}</code></li>
+        {% endfor %}
+    </ul>
+
+    <div class="flex flex-col gap-3 mt-6">
+        {% component "unfold/components/button.html" with href=next_url variant="primary" class="w-full" %}
+            Kodlarni saqladim, davom etish <span class="material-symbols-outlined relative right-0 transition-all group-hover:-right-1 text-sm">arrow_forward</span>
+        {% endcomponent %}
+    </div>
+{% endblock %}

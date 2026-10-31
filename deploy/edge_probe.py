@@ -4,13 +4,17 @@
 Usage: python3 deploy/edge_probe.py --caddy /path/to/caddy        (exit 0 = every check passed)
 
 The Caddyfile is run as committed except for what a local run needs: plain HTTP on a free port
-(auto_https off, no admin endpoint) and test host names (site.test, www.site.test, admin.test, api.test). The
-upstreams and the media root come from the variables the Caddyfile already reads (API_UPSTREAM,
-FRONTEND_UPSTREAM, MEDIA_ROOT).
+(auto_https off, no admin endpoint) and test host names (site.test, www.site.test, admin.test, api.test,
+ops.test). The upstreams and the media root come from the variables the Caddyfile already reads (API_UPSTREAM,
+FRONTEND_UPSTREAM, MEDIA_ROOT); the ops console's allow-list (OPS_ALLOWED_IPS) is 127.0.0.1 only, and a
+request from 127.0.0.2 (another loopback address, Linux) plays a browser outside it.
 
 Checks: the provider callbacks and POS reach Django with the query string intact; the private paths answer 404
 at the edge; the body limits; X-Forwarded-For is overwritten; no Server/Via header and HSTS on every host
-(www included); a client trickling its body never reaches the upstream; the server timeouts; and no secret or
+(www included); the ops console host (an allowed address reaches the login page with the CSP and the other
+security headers, / redirects to /django-admin/, any other path is an empty 404, an address outside the
+allow-list gets an empty 404 for everything and never reaches Django); a client trickling its body never
+reaches the upstream; the server timeouts; and no secret or
 personal value from a query string, a Referer or a token header appears in the access log (stdout) or the
 error log (stderr), including the error line of a 502 while the upstream is down. CI runs it with the binary
 of the pinned caddy image (.github/workflows/ci.yml); glowderma/core/tests/test_deploy_stack.py runs it when a
@@ -37,7 +41,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 CADDYFILE = Path(__file__).resolve().with_name("Caddyfile")
-HOSTS = {"SITE_DOMAIN": "site.test", "ADMIN_DOMAIN": "admin.test", "API_DOMAIN": "api.test"}
+HOSTS = {
+    "SITE_DOMAIN": "site.test",
+    "ADMIN_DOMAIN": "admin.test",
+    "API_DOMAIN": "api.test",
+    "OPS_DOMAIN": "ops.test",
+}
+OPS_ALLOWED = "127.0.0.1/32"
+OUTSIDE_ADDRESS = "127.0.0.2"  # a loopback source address outside OPS_ALLOWED
 # Values that must never appear in a log line (each is sent once, in a query string or a header).
 SECRETS = {
     "bts_token": "probe-bts-token-0123456789abcdef",
@@ -51,6 +62,7 @@ SECRETS = {
     "oauth_code": "probe-oauth-code-0123456789",
     "oauth_state": "probe-oauth-state-0123456789",
     "down_phone": "998909999999",
+    "ops_phone": "998905555555",
 }
 MIB = 1024 * 1024
 
@@ -96,6 +108,8 @@ def stub_server(upstream: Upstream) -> ThreadingHTTPServer:
             self.send_response(200)
             self.send_header("Content-Length", str(len(payload)))
             self.send_header("Server", "stub")
+            # Django's own value: the ops host must replace it with DENY (one header, not two).
+            self.send_header("X-Frame-Options", "SAMEORIGIN")
             self.end_headers()
             self.wfile.write(payload)
 
@@ -128,8 +142,8 @@ def probe_caddyfile(port: int) -> str:
     if count != 1:
         raise SystemExit("probe: the global options block no longer starts with `email {$ACME_EMAIL}`")
     text, sites = re.subn(r"^(\S*\{\$[A-Z_]+_DOMAIN\}) \{$", r"http://\1 {", text, flags=re.MULTILINE)
-    if sites != 4:
-        raise SystemExit(f"probe: expected 4 site blocks, found {sites}")
+    if sites != 5:
+        raise SystemExit(f"probe: expected 5 site blocks, found {sites}")
     return text
 
 
@@ -150,6 +164,7 @@ def running_caddy(caddy: str, workdir: Path, upstream_port: int) -> Iterator[tup
         "API_UPSTREAM": f"127.0.0.1:{upstream_port}",
         "FRONTEND_UPSTREAM": f"127.0.0.1:{upstream_port}",
         "MEDIA_ROOT": str(media),
+        "OPS_ALLOWED_IPS": OPS_ALLOWED,
         **HOSTS,
     }
     out, err = workdir / "caddy.out", workdir / "caddy.err"
@@ -187,6 +202,10 @@ class Answer:
     status: int
     headers: dict[str, str]
     body: bytes
+    all_headers: list[tuple[str, str]] = field(default_factory=list)
+
+    def values(self, name: str) -> list[str]:
+        return [value for key, value in self.all_headers if key.lower() == name.lower()]
 
 
 def request(
@@ -197,12 +216,16 @@ def request(
     *,
     body: bytes | None = None,
     headers: dict[str, str] | None = None,
+    source: str | None = None,
 ) -> Answer:
-    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=20)
+    connection = http.client.HTTPConnection(
+        "127.0.0.1", port, timeout=20, source_address=(source, 0) if source else None
+    )
     try:
         connection.request(method, path, body=body, headers={"Host": host, **(headers or {})})
         response = connection.getresponse()
-        return Answer(response.status, {k.lower(): v for k, v in response.getheaders()}, response.read())
+        raw = response.getheaders()
+        return Answer(response.status, {k.lower(): v for k, v in raw}, response.read(), raw)
     finally:
         connection.close()
 
@@ -229,6 +252,8 @@ def adapted_servers(caddy: str, workdir: Path) -> list[dict[str, object]]:
         "SITE_DOMAIN": "example.com",
         "ADMIN_DOMAIN": "admin.example.com",
         "API_DOMAIN": "api.example.com",
+        "OPS_DOMAIN": "ops.example.com",
+        "OPS_ALLOWED_IPS": "192.0.2.10/32 198.51.100.0/24",
     }
     result = subprocess.run(  # noqa: S603 - the caddy binary the caller names, fixed arguments
         [caddy, "adapt", "--config", str(CADDYFILE), "--adapter", "caddyfile"],
@@ -256,12 +281,78 @@ def slow_post(port: int, host: str, path: str, upstream: Upstream) -> list[str]:
         return upstream.paths()[before:]
 
 
+OPS_CSP_REQUIRED = (
+    "default-src 'none'",
+    "script-src 'self' 'unsafe-eval'",
+    "style-src 'self' 'unsafe-inline'",
+    "frame-ancestors 'none'",
+    "form-action 'self'",
+    "base-uri 'none'",
+)
+
+
+def check_ops_host(probe: Probe, port: int, ops: str, upstream: Upstream) -> None:
+    """The ops console host: allow-list first, then only /django-admin* and /static/* reach Django."""
+    login = request(port, ops, "GET", "/django-admin/login/", headers={"X-Forwarded-For": "198.51.100.7"})
+    probe.check(login.status == 200, f"ops: allowed address, login page expected 200, got {login.status}")
+    probe.check("/django-admin/login/" in upstream.paths(), "ops: the login page did not reach the upstream")
+    with upstream.lock:
+        seen = [entry for entry in upstream.requests if entry.path == "/django-admin/login/"]
+    probe.check(
+        bool(seen) and seen[-1].headers.get("X-Forwarded-For") == "127.0.0.1",
+        "ops: X-Forwarded-For must be the TCP peer only (a spoofed hop reached Django)",
+    )
+    csp = login.headers.get("content-security-policy", "")
+    for directive in OPS_CSP_REQUIRED:
+        probe.check(directive in csp, f"ops: Content-Security-Policy lacks {directive!r}: {csp!r}")
+    probe.check(
+        not re.search(r"https?:|\*", csp), f"ops: Content-Security-Policy allows another origin: {csp!r}"
+    )
+    probe.check(
+        login.values("X-Frame-Options") == ["DENY"], f"ops: X-Frame-Options {login.values('X-Frame-Options')}"
+    )
+    for name, expected in (
+        ("x-content-type-options", "nosniff"),
+        ("referrer-policy", "same-origin"),
+        ("x-robots-tag", "noindex, nofollow"),
+    ):
+        probe.check(login.headers.get(name) == expected, f"ops: {name} expected {expected!r}")
+    probe.check("camera=()" in login.headers.get("permissions-policy", ""), "ops: Permissions-Policy missing")
+    static = request(port, ops, "GET", "/static/unfold/css/styles.css")
+    probe.check(static.status == 200, f"ops: /static/ expected to reach Django, got {static.status}")
+    root = request(port, ops, "GET", "/")
+    probe.check(
+        root.status == 302 and root.headers.get("location") == "/django-admin/",
+        f"ops: / expected 302 to /django-admin/, got {root.status} {root.headers.get('location')}",
+    )
+    for path in ("/api/v1/health/", "/api/v1/admin/auth/me/", "/media/a.txt", "/admin"):
+        other = request(port, ops, "GET", path)
+        probe.check(
+            other.status == 404 and other.body == b"",
+            f"ops: {path} expected an empty 404, got {other.status}",
+        )
+        probe.check(path not in upstream.paths(), f"ops: {path} reached the upstream")
+    request(port, ops, "GET", f"/django-admin/accounts/customer/?q={SECRETS['ops_phone']}")
+    before = len(upstream.paths())
+    for path in ("/django-admin/login/", "/", "/static/unfold/css/styles.css"):
+        denied = request(port, ops, "GET", path, source=OUTSIDE_ADDRESS)
+        probe.check(
+            denied.status == 404 and denied.body == b"",
+            f"ops: {path} from an address outside OPS_ALLOWED_IPS expected an empty 404, got {denied.status}",
+        )
+        probe.check(
+            "content-security-policy" in denied.headers, f"ops: the 404 of {path} lacks the security headers"
+        )
+    probe.check(len(upstream.paths()) == before, "ops: a request from outside the allow-list reached Django")
+
+
 def run(caddy: str) -> Probe:
     probe = Probe()
     upstream = Upstream()
     server = stub_server(upstream)
     upstream_port = server.server_address[1]
     api, admin, site, www = HOSTS["API_DOMAIN"], HOSTS["ADMIN_DOMAIN"], HOSTS["SITE_DOMAIN"], "www.site.test"
+    ops = HOSTS["OPS_DOMAIN"]
     with tempfile.TemporaryDirectory(prefix="edge-probe-") as tmp:
         workdir = Path(tmp)
         for server_config in adapted_servers(caddy, workdir):
@@ -328,7 +419,13 @@ def run(caddy: str) -> Probe:
                 too_big.status == 413, f"customer body of 6 MiB + 1: expected 413, got {too_big.status}"
             )
             # Response headers on every host.
-            for host, path in ((api, "/api/v1/health/"), (admin, "/admin"), (site, "/"), (www, "/x?y=1")):
+            for host, path in (
+                (api, "/api/v1/health/"),
+                (admin, "/admin"),
+                (site, "/"),
+                (www, "/x?y=1"),
+                (ops, "/django-admin/login/"),
+            ):
                 answer = request(port, host, "GET", path)
                 probe.check("server" not in answer.headers, f"{host}: Server header present")
                 probe.check("via" not in answer.headers, f"{host}: Via header present")
@@ -346,6 +443,7 @@ def run(caddy: str) -> Probe:
                 media.status == 200 and media.headers.get("x-content-type-options") == "nosniff",
                 f"/media/: expected 200 with nosniff, got {media.status}",
             )
+            check_ops_host(probe, port, ops, upstream)
             # Personal data and OAuth values in admin URLs and their Referer.
             request(
                 port,

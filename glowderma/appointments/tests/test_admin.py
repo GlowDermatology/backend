@@ -7,6 +7,7 @@ from django.test import Client, RequestFactory
 from django.urls import reverse
 
 from glowderma.accounts.tests.factories import StaffUserFactory
+from glowderma.accounts.tests.ops_helpers import ops_login
 from glowderma.appointments.models import Appointment, AppointmentEvent
 from glowderma.appointments.tests.factories import AppointmentEventFactory, AppointmentFactory
 from glowderma.core.admin import ReadOnlyAdmin, column_field
@@ -49,7 +50,7 @@ def test_design_columns() -> None:
 
 def test_changelists_change_pages_and_search_render() -> None:
     client = Client()
-    client.force_login(StaffUserFactory.create(is_staff=True, is_superuser=True))
+    ops_login(client, StaffUserFactory.create(is_staff=True, is_superuser=True))
     event = AppointmentEventFactory.create()
     other = AppointmentFactory.create()
     for row in (event.appointment, event, other):

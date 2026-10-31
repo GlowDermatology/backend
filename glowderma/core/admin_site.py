@@ -5,8 +5,11 @@ Seams for the later console work:
 * ``UNFOLD`` (``config/settings/ops_admin.py``) holds the theme, the sidebar and the callbacks below;
   dashboards plug in through ``UNFOLD["DASHBOARD_CALLBACK"]`` and ``UNFOLD["SITE_VIEWS"]`` (custom
   pages), never by subclassing this site again.
-* The login form is wired by ``glowderma.accounts.api.guard`` (the lockout lives above ``core``); a second
-  login step (2FA) wraps :meth:`OpsAdminSite.login` / ``admin_view`` from ``accounts``.
+* The login form is wired by ``glowderma.accounts.api.guard`` (the lockout lives above ``core``); the login,
+  2FA and logout views live in ``glowderma.accounts.console`` and are mounted ahead of the site's URLs.
+* The second factor is enforced here, without importing ``accounts``: every console view (``admin_view``,
+  hence every model page, custom page and the index) requires ``request.user.is_verified()``, which
+  django-otp's ``OTPMiddleware`` installs from the session's verified device (``OPS_REQUIRE_2FA``).
 """
 
 from __future__ import annotations
@@ -34,6 +37,16 @@ class OpsAdminSite(_BaseSite):
     index_title = "Boshqaruv"
     # No public "view site" link: the console has no storefront of its own.
     site_url = None
+
+    def has_permission(self, request: HttpRequest) -> bool:
+        """An active staff user whose session passed the second factor (fails closed without
+        ``OTPMiddleware``: no ``is_verified`` means unverified)."""
+        if not super().has_permission(request):
+            return False
+        if not settings.OPS_REQUIRE_2FA:
+            return True
+        is_verified = getattr(request.user, "is_verified", None)
+        return callable(is_verified) and bool(is_verified())
 
 
 def environment_callback(request: HttpRequest) -> list[str]:

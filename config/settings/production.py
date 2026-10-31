@@ -1,5 +1,6 @@
 import base64
 import binascii
+import ipaddress
 import json
 import os
 import re
@@ -39,6 +40,7 @@ from .base import (
     ESKIZ_MODE,
     FCM_MODE,
     OAUTH_MODE,
+    OPS_REQUIRE_2FA,
     PAYME_CHECKOUT_URL,
     PAYME_MODE,
     PAYMENT_WEB_RETURN_URL,
@@ -421,6 +423,47 @@ OPS_ENVIRONMENT_LABEL = (
 )
 if OPS_ENVIRONMENT_LABEL not in {"PRODUCTION", "STAGING"}:
     raise ImproperlyConfigured("OPS_ENVIRONMENT_LABEL must be PRODUCTION or STAGING")
+# --- Ops console access (docs/ops/deploy.md "Ops console") ---
+# The console answers on its own host (OPS_DOMAIN, the edge's site block) and only to browsers in
+# OPS_ADMIN_ALLOWED_NETS (the edge allows OPS_ALLOWED_IPS first; Django checks again behind it). Its client
+# address is the one the edge forwards, so the edge must be the trusted proxy and never be allowed itself.
+# RFC 5737 / RFC 3849 example ranges (deploy/env.production.example uses one as its placeholder).
+DOCUMENTATION_NETS = tuple(
+    ipaddress.ip_network(network)
+    for network in ("192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24", "2001:db8::/32")
+)
+if not OPS_REQUIRE_2FA:
+    raise ImproperlyConfigured("OPS_REQUIRE_2FA must stay true in production (the console's second factor)")
+# Default: the edge's own allow-list (OPS_ALLOWED_IPS reaches the backend containers through env_file).
+OPS_ADMIN_ALLOWED_NETS = (
+    env_networks("OPS_ADMIN_ALLOWED_NETS")
+    if os.environ.get("OPS_ADMIN_ALLOWED_NETS")
+    else env_networks("OPS_ALLOWED_IPS", [])
+)
+OPS_DOMAIN = env_str("OPS_DOMAIN", "").strip().lower()
+if DJANGO_ADMIN_ENABLED:
+    if not OPS_ADMIN_ALLOWED_NETS:
+        raise ImproperlyConfigured("OPS_ADMIN_ALLOWED_NETS is required when DJANGO_ADMIN_ENABLED is true")
+    if any(network.prefixlen == 0 for network in OPS_ADMIN_ALLOWED_NETS):
+        raise ImproperlyConfigured("OPS_ADMIN_ALLOWED_NETS must not allow every address (0.0.0.0/0, ::/0)")
+    if not TRUSTED_PROXIES:
+        raise ImproperlyConfigured(
+            "DJANGO_ADMIN_ENABLED needs TRUSTED_PROXIES (the edge) to read the browser's address"
+        )
+    if any(net.overlaps(example) for net in OPS_ADMIN_ALLOWED_NETS for example in DOCUMENTATION_NETS):
+        raise ImproperlyConfigured(
+            "OPS_ADMIN_ALLOWED_NETS (default: OPS_ALLOWED_IPS) holds a documentation example range"
+        )
+    if any(network.overlaps(proxy) for network in OPS_ADMIN_ALLOWED_NETS for proxy in TRUSTED_PROXIES):
+        raise ImproperlyConfigured("OPS_ADMIN_ALLOWED_NETS must not include the TRUSTED_PROXIES addresses")
+    if not re.fullmatch(r"(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}", OPS_DOMAIN):
+        raise ImproperlyConfigured("OPS_DOMAIN must be the console's host name (DJANGO_ADMIN_ENABLED)")
+    ALLOWED_HOSTS.append(OPS_DOMAIN)
+    # TLS ends at the edge (request.is_secure() is false here), so the HTTPS origin is trusted explicitly.
+    CSRF_TRUSTED_ORIGINS = [f"https://{OPS_DOMAIN}"]
+# __Host- cookies: Secure, path /, never a Domain attribute (no other subdomain can set or read them).
+SESSION_COOKIE_NAME = "__Host-gd_session"
+CSRF_COOKIE_NAME = "__Host-gd_csrftoken"
 # Hashed, pre-compressed static files (the console's Unfold assets are cache-busted by name); collectstatic in
 # the Dockerfile writes the manifest. Local and test settings keep the plain storage.
 STORAGES = {

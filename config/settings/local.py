@@ -24,6 +24,7 @@ ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", ["localhost", "127.0.0.1", "testserver
 ADMIN_API_ALLOWED_NETS = env_networks("ADMIN_API_ALLOWED_NETS", ["0.0.0.0/0", "::/0"])
 ADMIN_API_REQUIRE_INTERNAL_SECRET = False
 TRUSTED_PROXIES = env_networks("TRUSTED_PROXIES", [])
+OPS_ADMIN_ALLOWED_NETS = env_networks("OPS_ADMIN_ALLOWED_NETS", ["0.0.0.0/0", "::/0"])
 DATABASE_URL = env_str("DATABASE_URL", "postgres://glowderma:glowderma@localhost:5433/glowderma")
 DATABASES = {"default": database_config(DATABASE_URL, pool=env_bool("DB_POOL", False))}
 REDIS_URL = env_str("REDIS_URL", "redis://localhost:6380/0")

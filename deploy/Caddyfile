@@ -3,17 +3,21 @@
 #   SITE_DOMAIN   public landing (Next.js); www.SITE_DOMAIN redirects to it
 #   ADMIN_DOMAIN  admin panel (Next.js BFF); its session cookies are host-only
 #   API_DOMAIN    Django: mobile customer API, provider webhooks, POS, health, /media/ from the shared volume
+#   OPS_DOMAIN    Django ops console (Unfold at /django-admin/), only for OPS_ALLOWED_IPS (space separated
+#                 IPs/CIDRs); every other address gets an empty 404, as does every other path
 #
 # Header contract: Caddy trusts no upstream proxy, so X-Forwarded-For is overwritten with the TCP peer. The Next
 # BFF forwards that hop to Django as X-GD-Client-IP; Django trusts X-Forwarded-For only from this container
 # (TRUSTED_PROXIES). Never put a second proxy or CDN in front without collapsing X-Forwarded-For: the per-IP
-# throttles and the Click/Payme callback allow-lists read the client address from it.
+# throttles, the Click/Payme callback allow-lists and the ops console's network gate (OPS_ADMIN_ALLOWED_NETS)
+# read the client address from it.
 #
 # compose.prod.yaml mounts deploy/ (a directory, so a `git pull` is visible inside the container) at /etc/caddy.
 # After a change: docker compose -f compose.prod.yaml exec edge caddy reload --config /etc/caddy/Caddyfile
 # --adapter caddyfile (zero downtime; a config that does not load leaves the running one in place).
 # Validate: caddy validate --config deploy/Caddyfile --adapter caddyfile (with ACME_EMAIL, SITE_DOMAIN,
-# ADMIN_DOMAIN and API_DOMAIN in the environment). Behaviour probe: python3 deploy/edge_probe.py --caddy <binary>.
+# ADMIN_DOMAIN, API_DOMAIN, OPS_DOMAIN and OPS_ALLOWED_IPS in the environment). Behaviour probe:
+# python3 deploy/edge_probe.py --caddy <binary>.
 
 # Log redaction, applied to the access logs AND to the default logger, which receives the error line of a
 # request the upstream could not answer (a 502 while api restarts carries the full request). Query strings
@@ -151,5 +155,40 @@ www.{$SITE_DOMAIN} {
 		reverse_proxy {$API_UPSTREAM:api:8000} {
 			request_buffers 1MiB
 		}
+	}
+}
+
+{$OPS_DOMAIN} {
+	import common
+	# The ops console (django-unfold 0.110.0). Its pages load only same-origin files: Unfold's CSS, fonts,
+	# Alpine.js, htmx and Chart.js from /static/, the 2FA QR code is inline SVG. Unfold needs
+	# 'unsafe-inline' styles (its theme <style> block, htmx's indicator style, style attributes) and Alpine's
+	# standard build evaluates x-data expressions ('unsafe-eval'); no inline script runs, nothing external
+	# loads. Deferred (>): these replace Django's own X-Frame-Options / nosniff / Referrer-Policy / COOP (one
+	# value each) and also cover the edge's own 404s.
+	header {
+		>Content-Security-Policy "default-src 'none'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'"
+		>X-Frame-Options DENY
+		>X-Content-Type-Options nosniff
+		>Referrer-Policy same-origin
+		>Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=(), interest-cohort=()"
+		>Cross-Origin-Opener-Policy same-origin
+		>X-Robots-Tag "noindex, nofollow"
+	}
+	# Admin forms and actions post a few KB; nothing is uploaded through the console.
+	request_body {
+		max_size 1MiB
+	}
+	# A literal order (route): an address outside the allow-list learns nothing, not even the redirect.
+	route {
+		@denied not remote_ip {$OPS_ALLOWED_IPS}
+		respond @denied 404
+		@root path /
+		redir @root /django-admin/ 302
+		@console path /django-admin /django-admin/* /static/*
+		reverse_proxy @console {$API_UPSTREAM:api:8000} {
+			request_buffers 1MiB
+		}
+		respond 404
 	}
 }

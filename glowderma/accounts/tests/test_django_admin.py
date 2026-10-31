@@ -29,4 +29,6 @@ def test_django_admin_login_locked_after_5_failures() -> None:
         )
     response = client.post("/django-admin/login/", {"username": "unknown@x.uz", "password": "wrong"})
     assert response.status_code == 429
-    assert response.json()["code"] == "throttled"
+    assert response["Retry-After"] == "60"
+    assert "Juda ko‘p urinish. 60 soniyadan so‘ng qayta urinib ko‘ring." in response.content.decode()
+    assert b'name="username"' in response.content  # the Unfold login page, not a JSON error

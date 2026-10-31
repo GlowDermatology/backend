@@ -7,6 +7,7 @@ from django.urls import reverse
 
 from glowderma.accounts.models import Customer
 from glowderma.accounts.tests.factories import CustomerSessionFactory, DeviceFactory, StaffUserFactory
+from glowderma.accounts.tests.ops_helpers import ops_login
 from glowderma.commerce.tests.factories import OrderFactory
 from glowderma.core.admin import ReadOnlyAdmin
 from glowderma.customers.admin import CustomerAdmin
@@ -24,7 +25,7 @@ def test_customer_page_shows_related_records_in_tabs_without_secrets() -> None:
     model_admin = admin.site._registry[Customer]
     assert isinstance(model_admin, CustomerAdmin) and isinstance(model_admin, ReadOnlyAdmin)
     client = Client()
-    client.force_login(StaffUserFactory.create(is_staff=True))
+    ops_login(client, StaffUserFactory.create(is_staff=True))
     page = client.get(reverse("admin:accounts_customer_change", args=[customer.pk]))
     assert page.status_code == 200
     content = page.content.decode()

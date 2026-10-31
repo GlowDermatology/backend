@@ -7,6 +7,7 @@ from django.test import Client, RequestFactory
 from django.urls import reverse
 
 from glowderma.accounts.tests.factories import StaffUserFactory
+from glowderma.accounts.tests.ops_helpers import ops_login
 from glowderma.commerce.admin import (
     OrderAdmin,
     OrderCashbackHoldInline,
@@ -32,7 +33,7 @@ MODELS = [Order, OrderItem, OrderEvent, StockReservation, Cart, CartItem]
 @pytest.fixture
 def super_client() -> Client:
     client = Client()
-    client.force_login(StaffUserFactory.create(email="root@x.uz", is_staff=True, is_superuser=True))
+    ops_login(client, StaffUserFactory.create(email="root@x.uz", is_staff=True, is_superuser=True))
     return client
 
 
@@ -40,7 +41,7 @@ def super_client() -> Client:
 def plain_staff_client() -> Client:
     """The audience ``ReadOnlyAdmin`` exists for: active ``is_staff``, no superuser flag, no model perms."""
     client = Client()
-    client.force_login(StaffUserFactory.create(email="ops@x.uz", is_staff=True))
+    ops_login(client, StaffUserFactory.create(email="ops@x.uz", is_staff=True))
     return client
 
 

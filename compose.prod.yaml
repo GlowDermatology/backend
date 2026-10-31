@@ -159,6 +159,10 @@ services:
       SITE_DOMAIN: ${SITE_DOMAIN}
       ADMIN_DOMAIN: ${ADMIN_DOMAIN}
       API_DOMAIN: ${API_DOMAIN}
+      # The ops console host and the addresses that may reach it (space separated IPs/CIDRs; everyone else
+      # gets a 404). Django checks OPS_ADMIN_ALLOWED_NETS again behind the edge (docs/ops/deploy.md).
+      OPS_DOMAIN: ${OPS_DOMAIN:?set OPS_DOMAIN in .env}
+      OPS_ALLOWED_IPS: ${OPS_ALLOWED_IPS:?set OPS_ALLOWED_IPS in .env}
     volumes:
       # The deploy/ directory, not the single file: after `git pull` the new Caddyfile is visible inside the
       # container, and `caddy reload` (docs/ops/deploy.md §4) applies it without dropping connections.

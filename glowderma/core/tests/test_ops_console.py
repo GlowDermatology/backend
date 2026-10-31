@@ -9,6 +9,7 @@ from django.contrib.auth import get_user_model
 from django.test import Client, RequestFactory, override_settings
 from django.urls import reverse
 
+from glowderma.accounts.tests.ops_helpers import ops_login
 from glowderma.core.admin import (
     ReadOnlyAdmin,
     column_field,
@@ -27,8 +28,8 @@ pytestmark = pytest.mark.django_db
 
 def staff_client(**flags: bool) -> Client:
     client = Client()
-    client.force_login(
-        get_user_model().objects.create_user("ops@x.uz", "Saffron!Harbor-Long72", is_staff=True)
+    ops_login(
+        client, get_user_model().objects.create_user("ops@x.uz", "Saffron!Harbor-Long72", is_staff=True)
     )
     return client
 
@@ -91,12 +92,13 @@ def test_login_page_is_unfold_styled_with_the_guarded_form() -> None:
     page = Client().get("/django-admin/login/")
     assert page.status_code == 200
     assert b"Glow Derma Ops" in page.content and b'name="username"' in page.content
-    # Unfold's form posts no ``next``: a direct login still lands on the console, not /accounts/profile/
+    # The password step leads to the second factor (here: enrolment, the user has no TOTP device yet); the
+    # console index is the default destination after it (glowderma.accounts.tests.test_console_2fa).
     get_user_model().objects.create_user("login@x.uz", "Saffron!Harbor-Long72", is_staff=True)
     answer = Client().post(
         "/django-admin/login/", {"username": "login@x.uz", "password": "Saffron!Harbor-Long72"}
     )
-    assert answer.status_code == 302 and answer["Location"] == "/django-admin/"
+    assert answer.status_code == 302 and answer["Location"] == "/django-admin/2fa/enrol/"
 
 
 class _Customer:
