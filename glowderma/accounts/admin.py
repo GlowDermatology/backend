@@ -4,9 +4,10 @@
 orders, loyalty account and appointments from the upper modules.
 
 Secrets never reach the page: ``StaffUser.password``, ``Customer.password``, ``AuthSession.refresh_hash`` /
-``previous_refresh_hash``, ``Device.fcm_token`` and ``SmsCode.code_hmac`` / ``verification_token_hash`` are
-excluded (design 01 §11), and so is the TOTP seed of the ops console's 2FA devices (``TOTPDevice.key``);
-recovery codes (``StaticToken``, keyed hashes) are never listed, only how many are left.
+``previous_refresh_hash``, ``Device.fcm_token`` / ``key_hash``, ``SmsCode.code_hmac`` /
+``verification_token_hash`` and ``CustomerSocialIdentity.provider_refresh_token`` (Apple's sealed refresh
+token) are excluded (design 01 §11), and so is the TOTP seed of the ops console's 2FA devices
+(``TOTPDevice.key``); recovery codes (``StaticToken``, keyed hashes) are never listed, only how many are left.
 List pages show phones and emails masked; the change page of a record shows them in full.
 
 ``auth.Group`` is unregistered: staff have one role model (GST-1), groups are never used.
@@ -209,7 +210,7 @@ register_read_only(
 )
 register_read_only(
     Device,
-    exclude=("fcm_token",),
+    exclude=("fcm_token", "key_hash"),  # key_hash: SHA-256 of the device key, like a refresh hash
     list_display=(
         "id",
         customer_column(),
@@ -255,6 +256,7 @@ register_read_only(
 )
 register_read_only(
     CustomerSocialIdentity,
+    exclude=("provider_refresh_token",),  # Apple's sealed refresh token (core.secretbox)
     list_display=("id", customer_column(), "provider", masked_email_column("email_at_link"), "created_at"),
     list_filter=("provider",),
     search_fields=("subject", "email_at_link"),
