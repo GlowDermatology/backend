@@ -180,3 +180,9 @@
 .dark .ops-recovery-codes code {
   color: var(--color-base-100);
 }
+
+/* primary-600 is 3.3:1 on the dark card: the copy and download links use primary-400 there. */
+.dark .ops-recovery-copy,
+.dark .ops-recovery-download {
+  color: var(--color-primary-400);
+}

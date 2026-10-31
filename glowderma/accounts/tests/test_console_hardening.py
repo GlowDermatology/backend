@@ -254,7 +254,7 @@ def test_the_console_reset_opens_a_window_and_the_enrolment_is_audited_and_alert
     manager_client = Client()
     ops_login(manager_client, manager)
     done = console_reset(manager_client, target)
-    assert "konsol seanslari tugatildi" in done.content.decode()
+    assert "konsol sessiyalari tugatildi" in done.content.decode()
     window = access.enrolment_window(target)
     assert window is not None and window.via == "console" and window.opened_by_id == manager.pk
     assert enrol_through_forms(Client(), target)["Location"] == CODES

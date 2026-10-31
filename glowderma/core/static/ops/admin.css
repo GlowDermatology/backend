@@ -183,6 +183,12 @@ html.dark #result_list .text-base-500 {
   color: var(--color-base-500);
 }
 
+/* base-500 is 3.6:1 on the dark panel: the secondary text uses base-400 there (6.2:1), as above. */
+.dark .gd-diag dt,
+.dark .gd-diag__muted {
+  color: var(--color-base-400);
+}
+
 .gd-diag__error {
   display: flex;
   gap: 4px;

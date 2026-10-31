@@ -114,7 +114,7 @@ def reset_two_factor(
         )
     modeladmin.message_user(
         request,
-        f"{len(targets)} ta xodimning 2FA qurilmasi o‘chirildi va konsol seanslari tugatildi: ular "
+        f"{len(targets)} ta xodimning 2FA qurilmasi o‘chirildi va konsol sessiyalari tugatildi: ular "
         f"{_enrol_window_text()} ichida keyingi kirishda 2FA ni qayta sozlashadi.",
         level=messages.SUCCESS,
     )
