@@ -25,3 +25,11 @@ Thumbs.db
 
 # Redis snapshot written by a dev server started in this directory
 dump.rdb
+
+# Playwright suite of the ops console (e2e_admin/): dependencies, run output, collected static, state
+e2e_admin/node_modules/
+e2e_admin/test-results/
+e2e_admin/playwright-report/
+e2e_admin/blob-report/
+e2e_admin/.static/
+e2e_admin/.state/
