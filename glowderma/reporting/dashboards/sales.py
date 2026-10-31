@@ -31,7 +31,6 @@ from glowderma.reporting.dashboards import (
     change,
     changelist,
     generated,
-    ids_link,
     iso,
     num,
     percent,
@@ -297,8 +296,10 @@ def build(now: datetime, days: int) -> dict[str, Any]:
             "code": issue["code"],
             "count": num(issue["count"]),
             "raw": issue["count"],
-            "href": ids_link(
-                "catalog_product" if issue["kind"] == "product" else "catalog_category", issue["ids"]
+            # the list's «SEO muammosi» filter: every row of the issue (an id list stops at LINK_IDS)
+            "href": changelist(
+                "catalog_product" if issue["kind"] == "product" else "catalog_category",
+                seo=f"{issue['code']}.{issue['severity']}",
             ),
             "state": state(
                 WARN if issue["severity"] == "error" else NEUTRAL,

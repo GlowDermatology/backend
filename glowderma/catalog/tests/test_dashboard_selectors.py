@@ -124,3 +124,29 @@ def test_the_sales_tiles_link_to_the_stock_filter() -> None:
     hrefs = {tile["title"]: tile["href"] for tile in data["catalog_tiles"]}
     assert hrefs["Tugagan mahsulotlar"] == "/django-admin/catalog/product/?status__exact=active&stock=out"
     assert hrefs["Eskirgan qoldiq"] == "/django-admin/catalog/product/?status__exact=active&stock=stale"
+
+
+def test_the_seo_filter_lists_every_row_of_a_backlog_issue() -> None:
+    """A backlog row's number and the list it links to agree, past the dashboard's id-link limit."""
+    from django.urls import reverse
+
+    from glowderma.core.tests.console import console_client
+    from glowderma.reporting.dashboards import sales
+
+    products = [ProductFactory.create() for _ in range(3)]  # no images, no descriptions: several issues each
+    capped = selectors.seo_backlog(limit=1)
+    issue = next(entry for entry in capped.issues if entry.kind == "product" and entry.count >= 3)
+    assert len(issue.ids) == 1  # the dashboard's own list stops at its limit
+    ids = selectors.seo_issue_ids("product", issue.code, issue.severity)
+    assert len(ids) == issue.count and {product.pk for product in products} <= set(ids)
+
+    page = console_client("staff").get(
+        reverse("admin:catalog_product_changelist") + f"?seo={issue.code}.{issue.severity}"
+    )
+    assert page.status_code == 200
+    assert sorted(row.pk for row in page.context["cl"].result_list) == sorted(ids)
+    plain = console_client("staff").get(reverse("admin:catalog_product_changelist"))
+    assert "SEO muammosi" not in plain.content.decode()  # offered only when applied (no checklist run)
+
+    rows = sales.build(NOW, 30)["seo"]
+    assert any(row["href"].endswith(f"?seo={issue.code}.{issue.severity}") for row in rows)

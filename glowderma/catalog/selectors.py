@@ -315,3 +315,12 @@ def seo_backlog(*, limit: int) -> SeoBacklog:
         categories_with_issues=categories_with_issues,
         issues=ranked,
     )
+
+
+def seo_issue_ids(kind: str, code: str, severity: str) -> list[int]:
+    """Every row (``kind`` ``product`` or ``category``) the «SEO holati» backlog counts under ``code`` /
+    ``severity``: what a backlog row's number covers (its own ``ids`` stop at the dashboard's link limit)."""
+    for issue in seo_backlog(limit=10**9).issues:
+        if (issue.kind, issue.code, issue.severity) == (kind, code, severity):
+            return issue.ids
+    return []

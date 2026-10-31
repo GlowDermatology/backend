@@ -44,11 +44,36 @@ class StockStateFilter(admin.SimpleListFilter):
         return queryset
 
 
+class SeoIssueFilter(admin.SimpleListFilter):
+    """«SEO»: the rows of one issue of the «SEO holati» backlog (``?seo=<code>.<severity>``), the target of
+    the sales dashboard's backlog rows. The checklist is Python over the whole active catalog, so the filter
+    offers only the applied value (it is reached from the dashboard, never built on a plain list load)."""
+
+    title = "SEO muammosi"
+    parameter_name = "seo"
+    kind = "product"
+
+    def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
+        value = self.value()
+        return [(value, value.replace(".", " · "))] if value else []
+
+    def queryset(self, request: HttpRequest, queryset: QuerySet[Model]) -> QuerySet[Model]:
+        value = self.value()
+        if not value:
+            return queryset
+        code, _dot, severity = value.partition(".")
+        return queryset.filter(pk__in=selectors.seo_issue_ids(self.kind, code, severity))
+
+
+class CategorySeoIssueFilter(SeoIssueFilter):
+    kind = "category"
+
+
 register_read_only(
     Category,
     title_format="Kategoriya: {obj.name_uz}",
     list_display=("slug", "name_uz", "position", "is_active"),
-    list_filter=("is_active",),
+    list_filter=("is_active", CategorySeoIssueFilter),
     search_fields=("slug", "name_uz"),
     ordering=("position", "id"),
 )
@@ -66,7 +91,14 @@ register_read_only(
         "promo",
         "is_new_from_billz",
     ),
-    list_filter=(dropdown("status"), StockStateFilter, "promo", "is_new_from_billz", "category"),
+    list_filter=(
+        dropdown("status"),
+        StockStateFilter,
+        "promo",
+        "is_new_from_billz",
+        "category",
+        SeoIssueFilter,
+    ),
     list_select_related=("category",),
     search_fields=("billz_id", "name_uz", "billz_name"),
     ordering=("-id",),
