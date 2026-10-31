@@ -61,6 +61,7 @@ if os.environ.get("FAKE_NOW"):
 # Development switches exist only under the local/test settings (customer contract §6.14): refused here
 # whatever the provider modes, so no internet-facing deployment (staging runs this module too) honours one.
 DEV_FEATURES_ALLOWED = False
+E2E_CONSOLE_ENABLED = False
 FAKE_PAYMENTS_ENABLED = False
 FAKE_SCENARIO_HEADER_ENABLED = False
 ESKIZ_FAKE_CODE = ""

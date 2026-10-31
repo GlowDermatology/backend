@@ -170,6 +170,8 @@ GIT_SHA = env_str("GIT_SHA", "dev")
 # A pinned clock for demo data and browser e2e checks (glowderma.core.timeutils.now). Local/test settings read
 # the FAKE_NOW variable; production refuses it.
 FAKE_NOW: datetime | None = None
+# ``manage.py e2e_console`` (the ops console's browser suite, e2e_admin/): on only under config.settings.e2e.
+E2E_CONSOLE_ENABLED = False
 TRUSTED_PROXIES: tuple[Network, ...] = ()
 # B-W1 session list (customer contract §2.2.10): path of a local GeoIP City .mmdb (MaxMind GeoLite2-City or
 # DB-IP City Lite), mounted read-only; empty = no location ("—"). No online lookup service is ever used.
