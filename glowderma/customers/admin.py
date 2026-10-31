@@ -8,9 +8,10 @@ Safe audited action (glowderma.core.admin_actions): «Barcha seanslarni tugatish
 everywhere through ``accounts.sessions.revoke_all_sessions`` (reason ``admin_revoked``).
 """
 
-from typing import Any
+from typing import Any, cast
 
 from django.contrib import admin
+from django.db import models
 from django.http import HttpRequest
 
 from glowderma.accounts import sessions
@@ -41,6 +42,7 @@ from glowderma.core.admin_actions import (
     refused,
 )
 from glowderma.core.labels import CUSTOMER_STATUS, ORDER_STATUS
+from glowderma.core.pii import mask_email, mask_phone
 from glowderma.loyalty.models import LoyaltyAccount
 
 
@@ -170,6 +172,15 @@ class CustomerAdmin(OpsActionsMixin, ReadOnlyAdmin):
         ("Rozilik", ("terms_version", "consent_at", "consent_ip")),
     )
     actions_detail = ("revoke_all_sessions",)
+
+    def object_title(self, obj: models.Model) -> str:
+        """``Mijoz #12 · Malika Karimova · +998 90 *** ** 67``: the title never carries the full phone or
+        e-mail (the fields below still show them; this page is the customer's record)."""
+        customer = cast(Customer, obj)
+        contact = mask_phone(customer.phone) if customer.phone else ""
+        if not contact and customer.email:
+            contact = mask_email(customer.email)
+        return " · ".join(part for part in (f"Mijoz #{customer.pk}", customer.name, contact) if part)
 
     @ops_action(
         description="Barcha seanslarni tugatish",

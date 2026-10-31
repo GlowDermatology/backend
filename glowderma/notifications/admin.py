@@ -43,6 +43,7 @@ register_read_only(
 )
 register_read_only(
     CustomerSegment,
+    title_format="Segment: {obj.name}",
     list_display=("id", "name", segment_rules, "created_at"),
     search_fields=("name",),
     ordering=("id",),
@@ -59,6 +60,7 @@ register_read_only(
 )
 register_read_only(
     Campaign,
+    title_format="Kampaniya #{obj.pk}: {obj.title}",
     list_display=(
         "id",
         "kind",

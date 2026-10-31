@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from django import forms
 from django.contrib import admin
+from django.contrib.admin.utils import unquote
 from django.core.cache import cache
 from django.db import models, transaction
 from django.db.models import Count
@@ -23,6 +24,7 @@ from django.http import HttpRequest
 from django.urls import reverse
 from django.utils.html import format_html
 from django.utils.safestring import SafeString
+from django.utils.text import capfirst
 from unfold.admin import ModelAdmin as UnfoldModelAdmin
 from unfold.admin import TabularInline as UnfoldTabularInline
 from unfold.contrib.filters.admin import (
@@ -227,6 +229,20 @@ def _json_renderer(field: models.Field[Any, Any]) -> Column:
     return render
 
 
+class TitledObject:
+    """``obj`` with a readable ``str()``: the change page's ``original`` (every attribute is ``obj``'s)."""
+
+    def __init__(self, obj: models.Model, title: str) -> None:
+        self._obj = obj
+        self._title = title
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._obj, name)
+
+    def __str__(self) -> str:
+        return self._title
+
+
 def is_active_staff(request: HttpRequest) -> bool:
     """The one predicate behind every view grant of the read-only admin (and its inlines)."""
     user = request.user
@@ -282,6 +298,10 @@ class ReadOnlyAdmin(_ModelAdmin):
     # Optional change-page tabs: ``(("Tab name", ("field", "json_field_pretty", …)), …)``. Every readonly
     # field not named lands on a last "Boshqa" tab, so a new column is never silently hidden.
     tab_groups: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    # The change page's heading, breadcrumb and browser title (:meth:`object_title`): a ``str.format``
+    # pattern over ``obj`` (``"Buyurtma №{obj.pk}"``); ``None`` = "<Verbose name> #<pk>". The model's
+    # ``__str__`` (English, asserted by tests, used in logs) is never shown as the page title.
+    title_format: str | None = None
 
     def __init__(self, model: type[models.Model], admin_site: admin.AdminSite) -> None:
         super().__init__(model, admin_site)
@@ -300,6 +320,39 @@ class ReadOnlyAdmin(_ModelAdmin):
 
     def has_view_permission(self, request: HttpRequest, obj: models.Model | None = None) -> bool:
         return _is_active_staff(request)
+
+    def object_title(self, obj: models.Model) -> str:
+        """A readable Uzbek title of ``obj`` for its change page (``title_format``)."""
+        if self.title_format is not None:
+            return self.title_format.format(obj=obj)
+        return f"{capfirst(str(self.model._meta.verbose_name))} #{obj.pk}"
+
+    def changeform_view(
+        self,
+        request: HttpRequest,
+        object_id: str | None = None,
+        form_url: str = "",
+        extra_context: dict[str, Any] | None = None,
+    ) -> Any:
+        obj = self.get_object(request, unquote(object_id)) if object_id else None
+        if obj is not None:
+            title = self.object_title(obj)
+            extra_context = {
+                **(extra_context or {}),
+                # Unfold's header breadcrumb renders ``original``; the proxy keeps pk/_meta for its links.
+                "original": TitledObject(obj, title),
+                "title": capfirst(str(self.model._meta.verbose_name)),
+                "subtitle": title,
+            }
+        return super().changeform_view(request, object_id, form_url, extra_context)
+
+    def history_view(
+        self, request: HttpRequest, object_id: str, extra_context: dict[str, Any] | None = None
+    ) -> Any:
+        obj = self.get_object(request, unquote(object_id))
+        if obj is not None:
+            extra_context = {**(extra_context or {}), "title": f"Tarix: {self.object_title(obj)}"}
+        return super().history_view(request, object_id, extra_context)
 
     def has_module_permission(self, request: HttpRequest) -> bool:
         # Same predicate as the view grant: otherwise the app index and the index links stay hidden

@@ -54,6 +54,7 @@ for _model in (Group, TOTPDevice):  # registered by django.contrib.auth / django
 
 register_read_only(
     StaffUser,
+    title_format="Xodim: {obj.email}",
     exclude=("password",),
     list_display=(
         "id",

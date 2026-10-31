@@ -17,8 +17,8 @@ The form posts normally (no hx-post): the action answers with a redirect and its
 
                 <div class="border-b border-base-200 flex flex-col gap-2 px-4 py-3 dark:border-base-700">
                     <h1 class="font-semibold text-base text-important tracking-tight">{{ action_title }}</h1>
-                    {% if object %}
-                        <p class="text-font-subtle-light dark:text-font-subtle-dark">{{ object }}</p>
+                    {% if object_title %}
+                        <p class="text-font-subtle-light dark:text-font-subtle-dark">{{ object_title }}</p>
                     {% endif %}
                 </div>
 

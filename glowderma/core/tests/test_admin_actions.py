@@ -315,3 +315,26 @@ def test_consistency_report_enqueues_the_registered_task() -> None:
     with mock.patch("glowderma.reporting.tasks.consistency_report.delay") as delay:
         confirm(console_client("manager"), reverse(REPORT_URL))
     delay.assert_called_once_with()
+
+
+def test_enqueue_task_finds_a_task_whose_module_the_web_process_never_imported() -> None:
+    from celery import current_app  # type: ignore[import-untyped]
+
+    from glowderma.core.admin_actions import enqueue_task
+
+    name = "reporting.consistency_report"
+    task = current_app.tasks.pop(name)
+    try:
+        with (
+            mock.patch.object(
+                current_app.loader,
+                "import_default_modules",
+                side_effect=lambda: current_app.tasks.register(task),
+            ) as discover,
+            mock.patch.object(task, "delay") as delay,
+        ):
+            enqueue_task(name)
+        discover.assert_called_once_with()
+        delay.assert_called_once_with()
+    finally:
+        current_app.tasks[name] = task

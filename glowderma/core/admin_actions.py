@@ -136,6 +136,10 @@ def enqueue_task(name: str, *args: Any, **kwargs: Any) -> Any:
     reports it and its audit row is rolled back)."""
     from celery import current_app  # type: ignore[import-untyped]
 
+    if name not in current_app.tasks:
+        # A web process imports a module's tasks.py only when something uses it; ``autodiscover_tasks``
+        # registers the rest when the loader imports its default modules (what a worker does at start).
+        current_app.loader.import_default_modules()
     return current_app.tasks[name].delay(*args, **kwargs)
 
 
@@ -225,12 +229,15 @@ def ops_action(
                     return HttpResponseRedirect(back)
             else:
                 form = form_class(initial={"confirm": True, "next": back}, request=request, obj=obj)
+            object_title = _object_title(model_admin, obj)
             context = {
                 **model_admin.admin_site.each_context(request),
                 "opts": model_admin.model._meta,
                 "title": title,
-                "subtitle": str(obj) if obj is not None else None,
-                "object": obj,
+                "subtitle": object_title,
+                # Unfold's header breadcrumb renders ``original``: the readable title, not the English str()
+                "original": _titled(obj, object_title),
+                "object_title": object_title,
                 "action_title": title,
                 "action_body": body,
                 "action_notes": [
@@ -266,6 +273,19 @@ def ops_action(
         return view
 
     return decorate
+
+
+def _object_title(model_admin: Any, obj: models.Model | None) -> str | None:
+    if obj is None:
+        return None
+    titled = getattr(model_admin, "object_title", None)
+    return str(titled(obj)) if callable(titled) else str(obj)
+
+
+def _titled(obj: models.Model | None, title: str | None) -> Any:
+    from glowderma.core.admin import TitledObject
+
+    return None if obj is None else TitledObject(obj, title or str(obj))
 
 
 def _run(
