@@ -3,9 +3,11 @@
 ``console.login_failed`` / ``console.login_locked`` (password step), ``console.password_verified``,
 ``console.otp_failed`` / ``console.otp_locked`` (code, recovery and enrolment steps),
 ``console.2fa_enrolled``, ``console.recovery_code_used``, ``console.login_succeeded`` (``method``: totp,
-recovery, enrolment, or password when OPS_REQUIRE_2FA is off), ``console.logout`` and
-``console.session_expired`` (``reason``: idle, absolute, unstamped). Never a password, a code or a secret:
-the e-mail typed on a failed login is kept as typed (the admin API's ``auth.login_failed`` does the same).
+recovery, enrolment, or password when OPS_REQUIRE_2FA is off), ``console.logout``,
+``console.session_expired`` (``reason``: idle, absolute, unstamped) and ``auth.password_changed`` (the
+console's «Parolni o‘zgartirish», ``revoked_count`` panel sessions; the panel's endpoint writes the same
+action). Never a password, a code or a secret: the e-mail typed on a failed login is kept as typed (the admin
+API's ``auth.login_failed`` does the same).
 """
 
 from __future__ import annotations

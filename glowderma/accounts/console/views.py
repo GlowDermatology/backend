@@ -4,6 +4,11 @@
 key, confirmed by a code, then the ten recovery codes shown once) all need a pending sign-in from the password
 step and share the ``django_admin_otp`` lockout (LoginGuard: five failures a minute lock the user out for
 1, 2, 4, 8, then 15 minutes). ``cancel`` drops a pending sign-in, ``logout`` ends a console session.
+
+``password_change`` replaces the admin site's own page («Parolni o‘zgartirish» in the user menu) so that a
+password changed in the console keeps the invariants of the panel's ``auth/change-password/``: every open
+panel session of the staff member is revoked (``password_changed``) and the change is audited
+(``auth.password_changed``); the console session that made the change stays signed in.
 """
 
 from __future__ import annotations
@@ -12,7 +17,9 @@ from collections.abc import Callable
 from typing import Any
 
 from django.contrib import admin, auth, messages
-from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
+from django.contrib.auth.views import PasswordChangeView
+from django.db import transaction
+from django.http import HttpRequest, HttpResponse, HttpResponseBase, HttpResponseRedirect
 from django.template.response import TemplateResponse
 from django.urls import reverse
 from django.utils.cache import add_never_cache_headers
@@ -21,7 +28,9 @@ from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.debug import sensitive_post_parameters
 from django.views.decorators.http import require_http_methods, require_POST
 from rest_framework.exceptions import Throttled
+from unfold.forms import AdminOwnPasswordChangeForm
 
+from glowderma.accounts import services
 from glowderma.accounts.api.guard import LoginGuard, email_hash, lockout_message
 from glowderma.accounts.console import events, state, twofactor
 from glowderma.accounts.console.forms import RecoveryCodeForm, TotpCodeForm
@@ -217,3 +226,35 @@ def logout(request: HttpRequest) -> HttpResponse:
     auth.logout(request)
     messages.info(request, LOGGED_OUT)
     return HttpResponseRedirect(LOGIN_PATH)
+
+
+class ConsolePasswordChangeView(PasswordChangeView):
+    """Django's own-password change (the current password, then the new one twice, validated by
+    ``AUTH_PASSWORD_VALIDATORS``) plus what the panel's change-password endpoint does on success."""
+
+    def form_valid(self, form: Any) -> HttpResponse:
+        with transaction.atomic():
+            response = super().form_valid(form)  # saves, keeps this session (update_session_auth_hash)
+            user = form.user
+            revoked = services.revoke_user_sessions(user, "password_changed")
+            events.record("auth.password_changed", self.request, user, revoked_count=revoked)
+        return response
+
+
+def _password_change(request: HttpRequest) -> HttpResponseBase:
+    site = admin.site
+    request.current_app = site.name
+    defaults: dict[str, Any] = {
+        # what UnfoldAdminSite.password_change passes (its styled form), for the same template
+        "form_class": site.password_change_form or AdminOwnPasswordChangeForm,
+        "success_url": reverse("admin:password_change_done", current_app=site.name),
+        "extra_context": site.each_context(request),
+    }
+    if site.password_change_template is not None:
+        defaults["template_name"] = site.password_change_template
+    return ConsolePasswordChangeView.as_view(**defaults)(request)
+
+
+def password_change(request: HttpRequest) -> HttpResponseBase:
+    """The console's «Parolni o‘zgartirish» page, behind the site's permission check (a verified session)."""
+    return admin.site.admin_view(_password_change)(request)
