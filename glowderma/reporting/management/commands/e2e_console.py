@@ -22,6 +22,7 @@ from typing import Any
 
 from django.conf import settings
 from django.contrib import admin
+from django.contrib.admin import SimpleListFilter
 from django.contrib.auth import BACKEND_SESSION_KEY, HASH_SESSION_KEY, SESSION_KEY
 from django.contrib.sessions.backends.db import SessionStore
 from django.contrib.sessions.models import Session
@@ -132,9 +133,15 @@ def _secret_values(model: type[models.Model], fields: list[str], rows: list[Any]
 def _filters(model_admin: Any) -> list[dict[str, Any]]:
     entries = []
     for index, entry in enumerate(model_admin.list_filter or ()):
+        if isinstance(entry, type) and issubclass(entry, SimpleListFilter):
+            # a custom filter: its own query parameter, not a field lookup the database can be asked about
+            entries.append(
+                {"index": index, "field": entry.parameter_name, "kind": entry.__name__, "simple": True}
+            )
+            continue
         field = column_field(entry)
         kind = entry[1].__name__ if isinstance(entry, tuple) else "default"
-        entries.append({"index": index, "field": field, "kind": kind})
+        entries.append({"index": index, "field": field, "kind": kind, "simple": False})
     return entries
 
 

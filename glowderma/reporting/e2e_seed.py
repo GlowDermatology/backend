@@ -6,6 +6,7 @@ filled. Development data only: reached through the e2e command, which refuses to
 from __future__ import annotations
 
 import hashlib
+import io
 import secrets
 import uuid
 from datetime import timedelta
@@ -16,6 +17,7 @@ from django.contrib.auth.hashers import make_password
 from django.core.files.base import ContentFile
 from django.db import models, transaction
 from django_otp.plugins.otp_static.models import StaticDevice
+from PIL import Image
 
 from glowderma.accounts.console import twofactor
 from glowderma.accounts.models import Customer, CustomerSocialIdentity, Device, SocialIdentity, StaffUser
@@ -60,9 +62,13 @@ def fill_empty_models() -> dict[str, Any]:
             )
             created.append("accounts.socialidentity")
         if _empty("catalog.banner"):
-            banner = Banner(title_uz="E2E banner", image_width=0, image_height=0)
+            art = placeholder_art("banner")
+            width, height = Image.open(io.BytesIO(art)).size
+            banner = Banner(title_uz="E2E banner", image_width=width, image_height=height)
             banner.save()  # the upload path is built from the id
-            banner.image.save("e2e.webp", ContentFile(placeholder_art("banner")), save=True)
+            banner.image.save("e2e.webp", ContentFile(art), save=False)
+            banner.image_width, banner.image_height = width, height
+            banner.save()
             created.append("catalog.banner")
         if _empty("commerce.cart") and customer is not None:
             cart = Cart.objects.create(customer=customer)
