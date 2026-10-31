@@ -94,7 +94,7 @@ def test_social_identity_list_loads_with_rows_its_sorts_and_the_dashboard_link(s
     url = reverse("admin:accounts_customersocialidentity_changelist")
     model_admin = admin.site._registry[CustomerSocialIdentity]
     assert "updated_at" not in {field.name for field in CustomerSocialIdentity._meta.get_fields()}
-    assert all(key.lstrip("-") in {"id", "created_at"} for key in model_admin.ordering)
+    assert all(str(key).lstrip("-") in {"id", "created_at"} for key in model_admin.ordering or ())
     for query in (
         "",
         "?provider__exact=apple&created_at__gte=2020-01-01T00:00:00%2B05:00",
