@@ -4,7 +4,10 @@ The order page groups its columns in tabs and shows the order's items, events, p
 holds as inline tabs (payments, delivery and loyalty sit below ``commerce`` in the layering).
 """
 
-from django.contrib import admin
+from django.contrib import admin, messages
+from django.core.exceptions import PermissionDenied
+from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
+from django.urls import URLPattern, path, reverse
 
 from glowderma.commerce.models import Cart, CartItem, Order, OrderEvent, OrderItem, StockReservation
 from glowderma.core.admin import (
@@ -87,6 +90,26 @@ class OrderCashbackHoldInline(ReadOnlyTabularInline):
 
 class OrderAdmin(ReadOnlyAdmin):
     title_format = "Buyurtma №{obj.pk}"
+
+    def get_urls(self) -> list[URLPattern]:
+        lookup = path("lookup/", self.admin_site.admin_view(self.lookup_view), name="commerce_order_lookup")
+        return [lookup, *super().get_urls()]
+
+    def lookup_view(self, request: HttpRequest) -> HttpResponse:
+        """«Buyurtma №» on the Ops dashboard: the order's page by its number (a read, never a write); an
+        unknown or malformed number lands on the order list with a warning."""
+        if not self.has_view_permission(request):
+            raise PermissionDenied
+        raw = request.GET.get("number", "").strip().lstrip("№#").strip()
+        changelist = reverse("admin:commerce_order_changelist")
+        if not raw.isdigit() or len(raw) > 18:
+            messages.warning(request, "Buyurtma raqamini kiriting (faqat raqamlar, masalan 10253).")
+            return HttpResponseRedirect(changelist)
+        if not Order.objects.filter(pk=int(raw)).exists():
+            messages.warning(request, f"№{raw} raqamli buyurtma topilmadi.")
+            return HttpResponseRedirect(changelist)
+        return HttpResponseRedirect(reverse("admin:commerce_order_change", args=[int(raw)]))
+
     list_display = (
         "id",
         customer_column(),

@@ -41,7 +41,16 @@ CONFLICT_DAYS = 14
 # Lockouts (a code's wrong attempts reached the limit) in the last 24 h: one is a typo, many an attack.
 LOCKOUTS_WARN = 1
 LOCKOUTS_CRITICAL = 20
+# Failed staff sign-ins of the last 24 h: the admin API's password step and every refusal of the console's
+# sign-in (wrong password, wrong code, and the lockouts of both steps; glowderma.accounts.console.events).
 STAFF_LOGIN_FAILED = "auth.login_failed"
+STAFF_LOGIN_FAILURES: tuple[str, ...] = (
+    STAFF_LOGIN_FAILED,
+    "console.login_failed",
+    "console.login_locked",
+    "console.otp_failed",
+    "console.otp_locked",
+)
 STAFF_FAILURES_WARN = 5
 SOCIAL = "social"
 SIGNUP_SERIES: tuple[tuple[str, str], ...] = (
@@ -304,7 +313,7 @@ def build(now: datetime) -> dict[str, Any]:
     sessions = account_selectors.open_customer_sessions_by_platform(now)
     otp = _otp(now)
     staff_failures = AuditEntry.objects.filter(
-        action=STAFF_LOGIN_FAILED, created_at__gte=now - timedelta(days=1)
+        action__in=STAFF_LOGIN_FAILURES, created_at__gte=now - timedelta(days=1)
     ).count()
     cashback = _cashback(now)
     clinic = _clinic(now)
@@ -321,9 +330,10 @@ def build(now: datetime) -> dict[str, Any]:
             "count": num(sessions.get(key, 0)),
             "raw": sessions.get(key, 0),
             "percent": percent(sessions.get(key, 0), session_total),
-            "href": changelist("accounts_device", platform__exact=key, is_active__exact="1")
+            # exactly the sessions behind the number (the open-session filters + the device's platform)
+            "href": f"{open_sessions}&device__platform__exact={key}"
             if key != account_selectors.NO_DEVICE
-            else open_sessions,
+            else f"{open_sessions}&device__isnull=True",
         }
         for key, label in PLATFORMS
         if key != account_selectors.NO_DEVICE or sessions.get(key)
@@ -343,7 +353,7 @@ def build(now: datetime) -> dict[str, Any]:
             "title": "Telefonsiz akkauntlar",
             "icon": "phone_disabled",
             "value": num(coverage.phoneless),
-            "unit": "faol",
+            "unit": "faol akkaunt",
             "hint": f"{num(coverage.attached_later)} tasi keyin telefon qo‘shgan",
             "href": changelist("accounts_customer", phone__isnull="True", status__exact="active"),
             "state": state(NEUTRAL),
@@ -352,7 +362,7 @@ def build(now: datetime) -> dict[str, Any]:
             "title": "Ochiq sessiyalar",
             "icon": "devices",
             "value": num(session_total),
-            "unit": "mijoz",
+            "unit": "sessiya",
             "hint": " · ".join(f"{row['label']} {row['count']}" for row in platform_rows) or "Sessiya yo‘q",
             "href": open_sessions,
             "state": state(NEUTRAL),
@@ -381,10 +391,10 @@ def build(now: datetime) -> dict[str, Any]:
             "icon": "gpp_maybe",
             "value": num(staff_failures),
             "unit": "24 soat",
-            "hint": "Noto‘g‘ri parol yoki bloklangan urinish",
+            "hint": "Noto‘g‘ri parol yoki kod, bloklangan urinishlar (API va konsol)",
             "href": changelist(
                 "core_auditentry",
-                action__exact=STAFF_LOGIN_FAILED,
+                action__in=",".join(STAFF_LOGIN_FAILURES),
                 created_at__gte=iso(now - timedelta(days=1)),
             ),
             "state": state(by_count(staff_failures, warn=STAFF_FAILURES_WARN)),

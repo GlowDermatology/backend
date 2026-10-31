@@ -80,7 +80,7 @@
                     <div class="gd-scroll">
                         <table class="gd-table">
                             <thead><tr><th>Tekshiruv</th><th class="num">Nomuvofiqlik</th></tr></thead>
-                            <tbody>{% for check in d.reconcile_checks %}<tr><td class="gd-mono">{{ check.name }}</td><td class="num">{{ check.count }}</td></tr>{% endfor %}</tbody>
+                            <tbody>{% for check in d.reconcile_checks %}<tr><td title="{{ check.name }}">{{ check.label }}</td><td class="num">{% if check.raw %}<strong>{{ check.count }}</strong>{% else %}<span class="zero">0</span>{% endif %}</td></tr>{% endfor %}</tbody>
                         </table>
                     </div>
                 {% else %}

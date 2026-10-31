@@ -156,7 +156,12 @@ class AuthSessionAdmin(OpsActionsMixin, ReadOnlyAdmin):
         "revoke_reason",
         "revoke_button",
     )
-    list_filter = (dropdown("audience"), dropdown("revoke_reason"), date_range("created_at"))
+    list_filter = (
+        dropdown("audience"),
+        dropdown("revoke_reason"),
+        dropdown("device__platform"),
+        date_range("created_at"),
+    )
     search_fields = ("id", "staff__email", "customer__phone", "device_label")
     ordering = ("-created_at",)
     list_select_related = ("staff", "customer")
