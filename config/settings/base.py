@@ -95,10 +95,26 @@ if not 300 <= OPS_SESSION_ABSOLUTE_SECONDS <= 24 * 60 * 60:
     raise ImproperlyConfigured("OPS_SESSION_ABSOLUTE_SECONDS must be between 300 and 86400")
 if not 60 <= OPS_SESSION_IDLE_SECONDS <= OPS_SESSION_ABSOLUTE_SECONDS:
     raise ImproperlyConfigured("OPS_SESSION_IDLE_SECONDS must be between 60 and OPS_SESSION_ABSOLUTE_SECONDS")
+# A staff member without a TOTP device may enrol one only inside a window a manager or the operator opened
+# (``ops_access grant`` / ``reset-2fa``, the console's "2FA ni qayta o‘rnatish"): this many seconds; the first
+# successful enrolment closes it (glowderma.accounts.console.access).
+OPS_ENROL_WINDOW_SECONDS = env_int("OPS_ENROL_WINDOW_SECONDS", 24 * 60 * 60)
+if not 600 <= OPS_ENROL_WINDOW_SECONDS <= 7 * 24 * 60 * 60:
+    raise ImproperlyConfigured("OPS_ENROL_WINDOW_SECONDS must be between 600 and 604800")
+# Per client address, on top of the per-account lockout ladder: at most this many failed console sign-in
+# attempts per window, counted separately for the password step and for the code steps (TOTP, recovery code,
+# enrolment); beyond it the address is refused until the window ends (glowderma.accounts.api.guard).
+OPS_IP_FAILURE_LIMIT = env_int("OPS_IP_FAILURE_LIMIT", 20)
+OPS_IP_FAILURE_WINDOW_SECONDS = env_int("OPS_IP_FAILURE_WINDOW_SECONDS", 15 * 60)
+if not 5 <= OPS_IP_FAILURE_LIMIT <= 1000:
+    raise ImproperlyConfigured("OPS_IP_FAILURE_LIMIT must be between 5 and 1000")
+if not 60 <= OPS_IP_FAILURE_WINDOW_SECONDS <= 24 * 60 * 60:
+    raise ImproperlyConfigured("OPS_IP_FAILURE_WINDOW_SECONDS must be between 60 and 86400")
 # Browsers allowed to reach /django-admin/ (their address as the trusted edge forwards it, TRUSTED_PROXIES).
 # Local/test settings allow every address; production requires the list when the console is enabled.
 OPS_ADMIN_ALLOWED_NETS: tuple[Network, ...] = ()
-# The console's own host (production: ALLOWED_HOSTS and the CSRF trusted origin).
+# The console's own host (production: ALLOWED_HOSTS and the CSRF trusted origin). When set, the console
+# answers only on it (glowderma.core.network: any other Host gets an empty 404); unset locally: any host.
 OPS_DOMAIN = env_str("OPS_DOMAIN", "").strip().lower()
 # django-otp: the issuer shown in authenticator apps; the code steps are rate limited by LoginGuard (scope
 # django_admin_otp, the same ladder as the password step), so django-otp's own per-device delay is off.
@@ -110,6 +126,9 @@ OTP_STATIC_THROTTLE_FACTOR = 0
 SESSION_COOKIE_AGE = OPS_SESSION_ABSOLUTE_SECONDS
 SESSION_COOKIE_SAMESITE = "Strict"
 CSRF_COOKIE_SAMESITE = "Strict"
+# A refused CSRF check (a reloaded form, an expired page) answers 403 with a console-styled Uzbek page instead
+# of Django's English one.
+CSRF_FAILURE_VIEW = "glowderma.accounts.console.views.csrf_failure"
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"

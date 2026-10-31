@@ -29,6 +29,8 @@ from glowderma.core import timeutils
 
 PENDING = "ops_signin"
 ENROLMENT_DEVICE = "ops_enrolment_device"
+# The fresh recovery codes between the enrolment POST and the page that shows them (one redirect).
+RECOVERY_CODES = "ops_recovery_codes"
 STARTED = "ops_started_at"
 SEEN = "ops_seen_at"
 PENDING_SECONDS = 300
@@ -98,6 +100,21 @@ def complete_login(request: HttpRequest, user: StaffUser, device: Device | None)
     if device is not None:
         otp_login(request, device)
     stamp(request)
+
+
+def keep_recovery_codes(request: HttpRequest, codes: list[str], next_url: str) -> None:
+    """Hold the enrolment's recovery codes for the one GET that shows them (``take_recovery_codes``)."""
+    request.session[RECOVERY_CODES] = {"codes": list(codes), "next": next_url, "at": _now()}
+
+
+def take_recovery_codes(request: HttpRequest) -> tuple[list[str], str] | None:
+    """The held recovery codes and the destination after them, removed from the session (shown once); ``None``
+    when there are none or they were held longer than ``PENDING_SECONDS``."""
+    data: Any = request.session.pop(RECOVERY_CODES, None)
+    if not isinstance(data, dict) or _now() - float(data.get("at", 0)) > PENDING_SECONDS:
+        return None
+    codes = [str(code) for code in data.get("codes") or []]
+    return (codes, str(data.get("next") or CONSOLE_INDEX)) if codes else None
 
 
 def end_console_sessions(user: StaffUser) -> int:

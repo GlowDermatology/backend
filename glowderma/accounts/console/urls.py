@@ -12,5 +12,6 @@ urlpatterns: list[URLPattern] = [
     path("django-admin/2fa/", views.verify, name="ops_2fa_verify"),
     path("django-admin/2fa/recovery/", views.recovery, name="ops_2fa_recovery"),
     path("django-admin/2fa/enrol/", views.enrol, name="ops_2fa_enrol"),
+    path("django-admin/2fa/recovery-codes/", views.recovery_codes, name="ops_2fa_recovery_codes"),
     path("django-admin/2fa/cancel/", views.cancel, name="ops_2fa_cancel"),
 ]

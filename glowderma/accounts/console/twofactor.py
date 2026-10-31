@@ -13,6 +13,11 @@ checked by recomputing that hash (also under each ``SECRET_KEY_FALLBACKS`` key, 
 codes) and deleting the matching row. No schema change: a database dump alone reveals no usable code, and the
 stock ``addstatictoken`` command's plain tokens never match a hash. Codes are ten base32 characters (50
 bits), shown once as ``xxxxx-xxxxx``; the code step's lockout bounds online guessing.
+
+Accepted risk: the TOTP seed (``TOTPDevice.key``) stays in plain text — django-otp reads the column directly
+to compute codes, and encrypting it would mean forking its device model. A database dump plus a known password
+can therefore produce codes; after a suspected leak every console user gets ``ops_access reset-2fa``
+(docs/ops/staff-access.md "Accepted risks").
 """
 
 from __future__ import annotations

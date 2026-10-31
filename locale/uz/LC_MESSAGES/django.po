@@ -7,7 +7,7 @@ msgstr ""
 "Plural-Forms: nplurals=1; plural=0;\n"
 
 msgid "Welcome back to"
-msgstr "Xush kelibsiz:"
+msgstr "Xush kelibsiz"
 
 msgid "Log in"
 msgstr "Kirish"

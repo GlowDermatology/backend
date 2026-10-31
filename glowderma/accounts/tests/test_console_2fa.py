@@ -17,7 +17,7 @@ from django_otp.plugins.otp_static.models import StaticDevice, StaticToken
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
 from glowderma.accounts.api.guard import email_hash
-from glowderma.accounts.console import state, twofactor
+from glowderma.accounts.console import access, state, twofactor
 from glowderma.accounts.models import StaffUser
 from glowderma.accounts.tests.factories import TEST_PASSWORD, StaffUserFactory
 from glowderma.accounts.tests.ops_helpers import (
@@ -42,6 +42,7 @@ LOGIN = "/django-admin/login/"
 VERIFY = "/django-admin/2fa/"
 RECOVERY = "/django-admin/2fa/recovery/"
 ENROL = "/django-admin/2fa/enrol/"
+CODES = "/django-admin/2fa/recovery-codes/"
 
 
 def password_step(client: Client, email: str, **extra: str) -> Any:
@@ -66,6 +67,7 @@ def shift_clock(monkeypatch: pytest.MonkeyPatch, seconds: float) -> None:
 
 def test_first_login_enrols_a_totp_device_and_shows_ten_recovery_codes_once() -> None:
     user = StaffUserFactory.create(email="new@x.uz", is_staff=True)
+    access.open_enrolment(user, actor=None, reason="test")
     client = Client()
     first = password_step(client, "new@x.uz")
     assert first.status_code == 302 and first["Location"] == ENROL
@@ -89,7 +91,9 @@ def test_first_login_enrols_a_totp_device_and_shows_ten_recovery_codes_once() ->
     assert wrong.status_code == 200 and "Kod noto‘g‘ri" in wrong.content.decode()
     assert not is_verified_console(client)
 
-    done = client.post(ENROL, {"code": totp_code(device)})
+    confirmed = client.post(ENROL, {"code": totp_code(device)})
+    assert confirmed.status_code == 302 and confirmed["Location"] == CODES
+    done = client.get(CODES)
     assert done.status_code == 200
     codes = re.findall(r"<code>([a-z2-7]{5}-[a-z2-7]{5})</code>", done.content.decode())
     assert len(codes) == 10 and len(set(codes)) == 10
@@ -110,7 +114,7 @@ def test_first_login_enrols_a_totp_device_and_shows_ten_recovery_codes_once() ->
 
 
 def test_enrolment_restarted_by_another_session_replaces_the_pending_secret() -> None:
-    StaffUserFactory.create(email="new@x.uz", is_staff=True)
+    access.open_enrolment(StaffUserFactory.create(email="new@x.uz", is_staff=True), actor=None, reason="test")
     first, second = Client(), Client()
     password_step(first, "new@x.uz")
     first.get(ENROL)

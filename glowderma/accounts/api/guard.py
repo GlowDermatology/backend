@@ -1,4 +1,16 @@
+"""The staff login lockouts (``LoginGuard``) and the ops console's password step.
+
+``LoginGuard`` is the per-account ladder (five failures a minute lock the account for 1, 2, 4, 8, then 15
+minutes). ``IpFailureBudget`` adds a per-address budget to the console's sign-in steps: at most
+``OPS_IP_FAILURE_LIMIT`` failed attempts per ``OPS_IP_FAILURE_WINDOW_SECONDS`` from one client address (an
+IPv6 client by its /64), counted separately for the password step and for the code steps; an attempt is
+reserved before it is checked (concurrent guesses share the budget) and given back when it succeeds. Beyond
+the budget the address is refused (429) until the window ends, audited ``console.ip_locked`` and alerted.
+"""
+
 import hashlib
+import ipaddress
+import logging
 import math
 from typing import TYPE_CHECKING, Any
 
@@ -18,7 +30,10 @@ from rest_framework.exceptions import Throttled
 from unfold.forms import AuthenticationForm as UnfoldAuthenticationForm
 
 from glowderma.accounts.console import events, state, twofactor
-from glowderma.core import timeutils
+from glowderma.core import alerts, timeutils
+from glowderma.core.clientip import peer_ip
+
+logger = logging.getLogger(__name__)
 
 
 def email_hash(email: str) -> str:
@@ -75,6 +90,67 @@ class LoginGuard:
         cache.delete(f"auth:lock:{scope}:{hashed_email}")
 
 
+class IpThrottled(Throttled):
+    """The client address used up its failure budget (``IpFailureBudget``), not the account its ladder."""
+
+
+def client_bucket(request: HttpRequest) -> str:
+    """The budget key of the request's client: its address as the console's network gate reads it
+    (``peer_ip``: the edge's ``X-Forwarded-For`` hop), an IPv6 address by its /64 (one host holds a whole
+    /64)."""
+    raw = peer_ip(request)
+    try:
+        address = ipaddress.ip_address(raw)
+    except ValueError:
+        return "unknown"
+    if address.version == 6:
+        return str(ipaddress.ip_network(f"{address}/64", strict=False))
+    return str(address)
+
+
+class IpFailureBudget:
+    """At most ``OPS_IP_FAILURE_LIMIT`` failed attempts of one ``step`` (``password``, ``code``) per client
+    address per ``OPS_IP_FAILURE_WINDOW_SECONDS`` (module doc)."""
+
+    def __init__(self, step: str) -> None:
+        self.step = step
+
+    def _count_key(self, bucket: str) -> str:
+        return f"auth:ipfail:{self.step}:{bucket}"
+
+    def _lock_key(self, bucket: str) -> str:
+        return f"auth:iplock:{self.step}:{bucket}"
+
+    def reserve(self, bucket: str) -> None:
+        """Count one attempt against the budget (raise :class:`IpThrottled` while it is used up)."""
+        lock_key = self._lock_key(bucket)
+        expiry = cache.get(lock_key)
+        now = timeutils.now().timestamp()
+        if expiry is not None:
+            wait = math.ceil(float(expiry) - now)
+            if wait > 0:
+                raise IpThrottled(wait=wait)
+            cache.delete(lock_key)
+        window = int(settings.OPS_IP_FAILURE_WINDOW_SECONDS)
+        if _increment(self._count_key(bucket), window) > int(settings.OPS_IP_FAILURE_LIMIT):
+            cache.set(lock_key, now + window, timeout=window)
+            raise IpThrottled(wait=window)
+
+    def refund(self, bucket: str) -> None:
+        """Give a reserved attempt back: it succeeded."""
+        try:
+            cache.decr(self._count_key(bucket))
+        except ValueError:  # the window ended meanwhile: nothing to give back
+            pass
+
+
+def record_ip_locked(request: HttpRequest, step: str, wait: int, email: str = "") -> None:
+    """Audit and alert an address over its budget (the address is in the audit row, never in the alert)."""
+    events.record("console.ip_locked", request, email=email, step=step, wait=wait)
+    logger.warning("console.ip_locked step=%s wait=%s", step, wait)
+    alerts.alert("console.ip_locked", {"step": step, "wait": wait}, scope=step)
+
+
 # Unfold's admin login form: a ``django.contrib.admin.forms.AdminAuthenticationForm`` with styled widgets.
 if TYPE_CHECKING:
     _AdminAuthenticationForm = AdminAuthenticationForm
@@ -86,6 +162,10 @@ class GuardedAdminAuthenticationForm(_AdminAuthenticationForm):
     def clean(self) -> dict[str, Any]:
         username = str(self.cleaned_data.get("username", "")).strip().lower()
         self.cleaned_data["username"] = username
+        budget = IpFailureBudget("password")
+        bucket = client_bucket(self.request) if self.request is not None else ""
+        if bucket:
+            budget.reserve(bucket)
         guard = LoginGuard()
         hashed = email_hash(username)
         guard.check("django_admin_login", hashed)
@@ -95,6 +175,8 @@ class GuardedAdminAuthenticationForm(_AdminAuthenticationForm):
             guard.record_failure("django_admin_login", hashed)
             raise
         guard.reset("django_admin_login", hashed)
+        if bucket:
+            budget.refund(bucket)
         return result
 
 
@@ -164,7 +246,10 @@ def guarded_admin_login(
     except Throttled as exc:
         message, wait = lockout_message(exc)
         email = str(request.POST.get("username", "")).strip().lower()[:254]
-        events.record("console.login_locked", request, email=email, wait=wait)
+        if isinstance(exc, IpThrottled):
+            record_ip_locked(request, "password", wait, email=email)
+        else:
+            events.record("console.login_locked", request, email=email, wait=wait)
         form = GuardedAdminAuthenticationForm(request, initial={"username": email})
         response = TemplateResponse(
             request, LOGIN_TEMPLATE, {**context, "form": form, "lockout_message": message}, status=429

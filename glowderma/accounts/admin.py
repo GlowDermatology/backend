@@ -23,6 +23,7 @@ Writes on these pages (each confirmed and audited):
 
 from typing import Any
 
+from django.conf import settings
 from django.contrib import admin, messages
 from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
 from django.contrib.auth.models import Group
@@ -72,12 +73,20 @@ def _is_manager(request: HttpRequest) -> bool:
     return bool(user.is_active and getattr(user, "is_manager", False))
 
 
+def _enrol_window_text() -> str:
+    """``OPS_ENROL_WINDOW_SECONDS`` in Uzbek: ``24 soat``, ``90 daqiqa``."""
+    seconds = int(settings.OPS_ENROL_WINDOW_SECONDS)
+    return f"{seconds // 3600} soat" if seconds % 3600 == 0 else f"{seconds // 60} daqiqa"
+
+
 @admin.action(description="2FA ni qayta o‘rnatish", permissions=["manager"])
 def reset_two_factor(
     modeladmin: admin.ModelAdmin[StaffUser], request: HttpRequest, queryset: QuerySet[StaffUser]
 ) -> TemplateResponse | None:
-    """Delete the selected staff members' TOTP devices and recovery codes (they enrol again at the next
-    login). Managers only, after a confirmation page; never one's own (use ``manage.py ops_access``)."""
+    """Delete the selected staff members' TOTP devices and recovery codes and end their console sessions;
+    they enrol again at the next login, inside the enrolment window this opens (``via`` console: refused
+    at enrolment if the same manager also reset the person's password, ``access`` module doc). Managers
+    only, after a confirmation page; never one's own (use ``manage.py ops_access``)."""
     targets = list(queryset.order_by("pk"))
     own = [user for user in targets if user.pk == request.user.pk]
     if own:
@@ -92,15 +101,19 @@ def reset_two_factor(
             "opts": modeladmin.model._meta,
             "targets": targets,
             "action_checkbox_name": ACTION_CHECKBOX_NAME,
+            "enrol_window": _enrol_window_text(),
         }
         request.current_app = modeladmin.admin_site.name
         return TemplateResponse(request, "accounts/console/reset_2fa_confirmation.html", context)
     actor: Any = request.user
     for user in targets:
-        access.reset_two_factor(user, actor=actor, reason=RESET_2FA_REASON, request=request)
+        access.reset_two_factor(
+            user, actor=actor, reason=RESET_2FA_REASON, request=request, via=access.VIA_CONSOLE
+        )
     modeladmin.message_user(
         request,
-        f"{len(targets)} ta xodimning 2FA qurilmasi o‘chirildi: keyingi kirishda qayta sozlashadi.",
+        f"{len(targets)} ta xodimning 2FA qurilmasi o‘chirildi va konsol seanslari tugatildi: ular "
+        f"{_enrol_window_text()} ichida keyingi kirishda 2FA ni qayta sozlashadi.",
         level=messages.SUCCESS,
     )
     return None

@@ -99,6 +99,36 @@
   color: var(--color-base-900);
 }
 
+.ops-recovery-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  margin-top: 0.75rem;
+  font-size: 13px;
+}
+
+.ops-recovery-copy,
+.ops-recovery-download {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--color-primary-600);
+}
+
+.ops-recovery-copy[hidden] {
+  display: none;
+}
+
+.ops-recovery-copy .material-symbols-outlined,
+.ops-recovery-download .material-symbols-outlined {
+  font-size: 18px;
+}
+
 .ops-signin-cancel {
   margin-top: 1rem;
   text-align: center;

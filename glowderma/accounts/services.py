@@ -22,6 +22,7 @@ from rest_framework.exceptions import NotFound, PermissionDenied, ValidationErro
 
 from glowderma.accounts import tokens, topics
 from glowderma.accounts.api.guard import LoginGuard, email_hash
+from glowderma.accounts.console import state as console_state
 from glowderma.accounts.models import (
     Address,
     AuthSession,
@@ -459,10 +460,11 @@ def reset_staff_password(
     ``manage.py resetstaffpassword --password-stdin`` passes the operator's validated one. The caller's own
     password is refused (``refuse_self``, 409 ``conflict``): staff change it with ``auth/change-password/``,
     which asks for the current one, so a stolen session cannot take the account over. Social identities stay
-    linked. Works on an inactive account too (prepared before a reactivation). Returns ``(password,
-    revoked_count)``; audited ``staff.password_reset`` plus one ``auth.session_revoked`` per session. Once the
-    reset commits, a running login lockout of the account ends (both :data:`STAFF_LOGIN_SCOPES`), for the API
-    and ``manage.py resetstaffpassword`` alike.
+    linked. Works on an inactive account too (prepared before a reactivation). The person's ops console
+    sessions end too, a sign-in pending on the old password included (``console_sessions`` in the audit
+    entry when there were any). Returns ``(password, revoked_count)``; audited ``staff.password_reset`` plus
+    one ``auth.session_revoked`` per session. Once the reset commits, a running login lockout of the account
+    ends (both :data:`STAFF_LOGIN_SCOPES`), for the API and ``manage.py resetstaffpassword`` alike.
     """
     if refuse_self and actor is not None and actor.pk == user.pk:
         raise Conflict(STAFF_SELF_RESET)
@@ -471,14 +473,18 @@ def reset_staff_password(
     stored.set_password(raw)
     stored.save(update_fields=["password"])
     sessions = _revoke_user_sessions(stored, "password_changed")
+    console_sessions = console_state.end_console_sessions(stored)
     _unlock_on_commit(stored.email)
+    details: dict[str, Any] = {"revoked_count": len(sessions), "generated": password is None}
+    if console_sessions:
+        details["console_sessions"] = console_sessions
     audit.record(
         action="staff.password_reset",
         entity_type="staff",
         entity_id=str(stored.pk),
         actor=actor,
         request=request,
-        after={"revoked_count": len(sessions), "generated": password is None},
+        after=details,
         reason=reason,
     )
     _audit_revoked_sessions(sessions, actor=actor, request=request, reason=reason)
