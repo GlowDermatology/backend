@@ -549,9 +549,12 @@ REQUEUE_WARNING = (
 )
 
 
+# The console's owner never runs a command: the next step is said in plain words (the technical team records a
+# hand-entered sale with ``billz_mark_recorded``).
 REQUEUE_WARNING_UZ = (
-    "sotuv Billz’ga qo‘lda kiritilmaganini tekshiring; qo‘lda kiritilganlar uchun billz_mark_recorded "
-    "ishlating (qayta navbat uni Billz’da ikkinchi marta yozadi)"
+    "avval Billz’da shu buyurtmaning sotuvi qo‘lda kiritilmaganini tekshiring. Kiritilgan bo‘lsa, qayta "
+    "navbatga qo‘ymang — sotuv Billz’da ikki marta yoziladi; texnik guruhga buyurtma raqamini yuboring, "
+    "ular sotuvni «qo‘lda yozilgan» deb belgilaydi."
 )
 
 
@@ -575,8 +578,9 @@ def describe_push(message: OutboxMessage) -> str:
 def describe_push_uz(message: OutboxMessage) -> str:
     """:func:`describe_push` for the ops console."""
     order_id, info = _push_info(message)
-    text = f"buyurtma №{order_id if order_id is not None else '-'}, Billz qoralamasi "
-    text += (info.billz_sale_id if info is not None else "") or "-"
+    text = f"buyurtma №{order_id if order_id is not None else '-'}, "
+    draft = info.billz_sale_id if info is not None else ""
+    text += f"Billz qoralamasi {draft}" if draft else "Billz qoralamasi hali yaratilmagan"
     if info is not None and info.billz_payment_attempted_at is not None:
         text += f", to‘lovga urinilgan: {stamp(info.billz_payment_attempted_at)}"
     return text

@@ -40,10 +40,11 @@ from glowderma.reporting.dashboards import report as report_module
 
 # --- thresholds ---------------------------------------------------------------------------------------------
 # Outbox: any dead message is an action item; open messages overdue (K6 rule) warn, many of them mean the
-# dispatcher is down; a long queue warns even when nothing is overdue yet.
+# dispatcher is down; a long queue warns even when nothing is overdue yet. The dispatcher runs every 10 s: a
+# due message waiting longer than OUTBOX_LAG_WARN warns. The topic rows, the tile and the dispatcher's beat
+# row apply the same rule (:func:`_backlog_state`), so one late message reads the same everywhere.
 OUTBOX_OVERDUE_CRITICAL = 20
 OUTBOX_OPEN_WARN = 500
-# The dispatcher runs every 10 s: the oldest due message waiting longer than this is a stall.
 OUTBOX_LAG_WARN = timedelta(minutes=5)
 # Provider callbacks rejected or failed in the last 24 h.
 WEBHOOK_WINDOW = timedelta(hours=24)
@@ -57,8 +58,8 @@ BILLZ_SYNC_MISSED_RUNS = 3
 BILLZ_SYNC_CRITICAL = timedelta(hours=24)
 # A running or queued job whose heartbeat (or creation) is older than this is stuck (the reaper's horizon).
 JOB_STUCK_AFTER = timedelta(minutes=15)
-# The nightly report: stale after 36 h (report_module.REPORT_STALE_AFTER), critical after three nights.
-REPORT_CRITICAL_AFTER = timedelta(hours=72)
+# The nightly report: stale after 36 h, critical after three nights (report_module.age_state).
+REPORT_CRITICAL_AFTER = report_module.REPORT_CRITICAL_AFTER
 
 PROVIDER_LABELS: dict[str, str] = {
     "click": "Click",
@@ -78,6 +79,23 @@ JOB_STATE_LABELS = {"queued": "Navbatda", "running": "Ishlamoqda", "succeeded": 
 
 def _state_link(provider: str) -> str:
     return changelist("integrations_integrationstate", provider__exact=provider)
+
+
+def _lag(now: datetime, rows: list[consistency.TopicBacklog]) -> timedelta | None:
+    """How long the oldest due open message of ``rows`` has been waiting (``None``: nothing is due)."""
+    due = [row.oldest_due for row in rows if row.oldest_due is not None and row.oldest_due <= now]
+    return now - min(due) if due else None
+
+
+def _backlog_state(overdue: int, lag: timedelta | None) -> str:
+    """Late outbox messages: ``warn`` from one overdue message (K6) or a due message waiting longer than
+    :data:`OUTBOX_LAG_WARN`, ``critical`` from :data:`OUTBOX_OVERDUE_CRITICAL` overdue ones."""
+    return worst(
+        [
+            by_count(overdue, critical=OUTBOX_OVERDUE_CRITICAL),
+            WARN if lag is not None and lag > OUTBOX_LAG_WARN else OK,
+        ]
+    )
 
 
 def _outbox(now: datetime, overdue: timedelta, topics: list[consistency.TopicBacklog]) -> dict[str, Any]:
@@ -103,12 +121,7 @@ def _outbox(now: datetime, overdue: timedelta, topics: list[consistency.TopicBac
 
     rows = []
     for row in topics:
-        row_state = worst(
-            [
-                CRITICAL if row.dead else OK,
-                by_count(row.overdue, critical=OUTBOX_OVERDUE_CRITICAL),
-            ]
-        )
+        row_state = worst([CRITICAL if row.dead else OK, _backlog_state(row.overdue, _lag(now, [row]))])
         rows.append(
             {
                 "topic": row.topic,
@@ -128,7 +141,7 @@ def _outbox(now: datetime, overdue: timedelta, topics: list[consistency.TopicBac
     tile_state = worst(
         [
             CRITICAL if dead else OK,
-            by_count(late, critical=OUTBOX_OVERDUE_CRITICAL),
+            _backlog_state(late, _lag(now, topics)),
             by_count(queued, warn=OUTBOX_OPEN_WARN),
         ]
     )
@@ -218,14 +231,17 @@ def _billz_tile(now: datetime, row: IntegrationState | None, live: bool) -> dict
         shown = state(tile_state)
     else:
         shown = state(NEUTRAL, "Sinov rejimi")
+    hint = f"{num(failures)} ketma-ket xato" if failures else "Ketma-ket xato yo‘q"
     return {
         "title": "Billz sinxroni",
         "icon": "sync",
         "value": ago(last, now),
         "unit": "",
-        "hint": f"{num(failures)} ketma-ket xato" if failures else "Ketma-ket xato yo‘q",
+        "hint": hint if live else f"Sinov adapteri · {hint.lower()}",
         "href": _state_link("billz"),
         "state": shown,
+        # fake mode: the numbers are the fake adapter's, never an alarm
+        "muted": not live,
     }
 
 
@@ -233,15 +249,26 @@ def _bts_tile(now: datetime, row: IntegrationState | None, live: bool) -> dict[s
     failures = row.consecutive_failures if row is not None else 0
     last = row.last_sync_at if row is not None else None
     # Polling writes a sync only when it tracked a parcel: an old stamp with no failure is a quiet day.
-    shown = state(_failures_state(row)) if live else state(NEUTRAL, "Sinov rejimi")
+    if live:
+        return {
+            "title": "BTS kuzatuvi",
+            "icon": "local_shipping",
+            "value": f"{num(failures)} xato" if failures else ago(last, now),
+            "unit": "",
+            "hint": f"Oxirgi kuzatuv: {stamp(last)}",
+            "href": _state_link("bts"),
+            "state": state(_failures_state(row)),
+        }
+    # Fake mode: the fake adapter's failures are no alarm, so they never become the big number.
     return {
         "title": "BTS kuzatuvi",
         "icon": "local_shipping",
-        "value": f"{num(failures)} xato" if failures else ago(last, now),
+        "value": ago(last, now),
         "unit": "",
-        "hint": f"Oxirgi kuzatuv: {stamp(last)}",
+        "hint": "Sinov adapteri" + (f" · {num(failures)} ketma-ket xato" if failures else ""),
         "href": _state_link("bts"),
-        "state": shown,
+        "state": state(NEUTRAL, "Sinov rejimi"),
+        "muted": True,
     }
 
 
@@ -254,6 +281,7 @@ def _job_row(now: datetime, kind: str, job: Job | None) -> dict[str, Any]:
             "duration": "—",
             "href": changelist("integrations_job", kind__exact=kind),
             "state": state(NEUTRAL),
+            "ran": False,
         }
     heartbeat = job.heartbeat_at or job.started_at or job.created_at
     if job.state == enums.JobState.FAILED:
@@ -271,6 +299,7 @@ def _job_row(now: datetime, kind: str, job: Job | None) -> dict[str, Any]:
         "duration": duration(took),
         "href": change("integrations_job", job.pk),
         "state": state(job_state),
+        "ran": True,
     }
 
 
@@ -294,6 +323,7 @@ def _readiness(
             shown = state(NEUTRAL, "Sinov rejimi")
         result.append(
             {
+                "topic": provider,
                 "provider": PROVIDER_LABELS[provider],
                 "mode": "Live" if live else "Sinov",
                 "live": live,
@@ -318,10 +348,9 @@ def _beat(
     audits: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """The periodic tasks (config/celery.py ``beat_schedule``) that leave a trace, judged by it."""
-    due = [row.oldest_due for row in topics if row.oldest_due is not None and row.oldest_due <= now]
-    oldest = min(due, default=None)
-    lag = now - oldest if oldest else None
-    dispatcher = OK if lag is None else by_age(lag, warn=OUTBOX_LAG_WARN, critical=overdue)
+    lag = _lag(now, topics)
+    oldest = now - lag if lag is not None else None
+    dispatcher = _backlog_state(sum(row.overdue for row in topics), lag)
     billz = rows.get("billz")
     bts = rows.get("bts")
     billz_live = modes.get("billz") == enums.IntegrationMode.LIVE
@@ -333,11 +362,7 @@ def _beat(
     reconcile_entry = audits.get(report_module.RECONCILE_ACTION)
 
     def audit_age_state(entry: Any) -> str:
-        return by_age(
-            None if entry is None else now - entry.created_at,
-            warn=report_module.REPORT_STALE_AFTER,
-            critical=REPORT_CRITICAL_AFTER,
-        )
+        return report_module.age_state(None if entry is None else entry.created_at, now)
 
     return [
         {
@@ -418,16 +443,9 @@ def _report_tile(now: datetime, summary: report_module.ReportSummary | None) -> 
             "unit": "",
             "hint": "Hisobot hali hech qachon ishlamagan",
             "href": money_url,
-            "state": state(CRITICAL),
+            "state": state(report_module.age_state(None, now)),
         }
-    age = now - summary.ran_at
-    tile_state = worst(
-        [
-            CRITICAL if summary.errors else OK,
-            by_count(summary.findings),
-            by_age(age, warn=report_module.REPORT_STALE_AFTER, critical=REPORT_CRITICAL_AFTER),
-        ]
-    )
+    tile_state = worst([report_module.findings_state(summary), report_module.age_state(summary.ran_at, now)])
     return {
         "title": "Konsistentlik hisoboti",
         "icon": "fact_check",
@@ -437,6 +455,46 @@ def _report_tile(now: datetime, summary: report_module.ReportSummary | None) -> 
         "href": money_url,
         "state": state(tile_state),
     }
+
+
+# What each signal is about: a tile, a readiness row and a beat row about the same thing (Billz: its tile,
+# its provider row, its delta-sync task) count as one problem in the headline.
+TILE_TOPICS = ("outbox", "webhooks", "billz", "bts", "report", "jobs")
+BEAT_TOPICS = ("outbox", "billz", "jobs", "bts", "report", "reconcile")
+TOPIC_LABELS: dict[str, str] = {
+    **PROVIDER_LABELS,
+    "outbox": "Outbox",
+    "webhooks": "Webhooklar",
+    "billz": "Billz",
+    "bts": "BTS",
+    "report": "Konsistentlik hisoboti",
+    "jobs": "Fon vazifalari",
+    "reconcile": "Cashback daftari solishtiruvi",
+}
+
+
+def _problems(signals: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Every topic whose worst signal warns or is critical, the critical ones first."""
+    by_topic: dict[str, str] = {}
+    for item in signals:
+        topic = str(item["topic"])
+        by_topic[topic] = worst([by_topic.get(topic, NEUTRAL), item["state"]["key"]])
+    ranked = sorted((key != CRITICAL, topic) for topic, key in by_topic.items() if key in (WARN, CRITICAL))
+    return [
+        {"topic": topic, "label": TOPIC_LABELS.get(topic, topic), "state": state(by_topic[topic])}
+        for _rank, topic in ranked
+    ]
+
+
+def _headline(problems: list[dict[str, Any]]) -> str:
+    """``Hammasi joyida`` · ``1 ta jiddiy muammo`` · ``1 ta jiddiy muammo, 2 ta ogohlantirish`` (zero parts
+    left out): the same signals as the banner's colour, so the two never disagree."""
+    critical = sum(1 for problem in problems if problem["state"]["key"] == CRITICAL)
+    warnings = len(problems) - critical
+    parts = [f"{critical} ta jiddiy muammo"] if critical else []
+    if warnings:
+        parts.append(f"{warnings} ta ogohlantirish")
+    return ", ".join(parts) or "Hammasi joyida"
 
 
 def build(now: datetime) -> dict[str, Any]:
@@ -464,26 +522,27 @@ def build(now: datetime) -> dict[str, Any]:
             "icon": "work_history",
             "value": first_job["state_text"],
             "unit": "",
-            "hint": f"{first_job['kind']} · {first_job['when']} · {first_job['duration']}",
+            "hint": f"{first_job['kind']} · {first_job['when']} · {first_job['duration']}"
+            if first_job["ran"]
+            else f"{first_job['kind']} hali ishga tushirilmagan",
             "href": first_job["href"],
             "state": state(job_tile_state),
         },
     ]
+    for tile, topic in zip(tiles, TILE_TOPICS, strict=True):
+        tile["topic"] = topic
     readiness_rows = _readiness(now, rows, modes, configured)
     beat = _beat(now, overdue, topics, rows, modes, jobs, audits)
-    overall = worst(
-        [tile["state"]["key"] for tile in tiles]
-        + [row["state"]["key"] for row in readiness_rows]
-        + [row["state"]["key"] for row in beat]
-    )
-    problems = [tile for tile in tiles if tile["state"]["key"] in (WARN, CRITICAL)]
+    for row, topic in zip(beat, BEAT_TOPICS, strict=True):
+        row["topic"] = topic
+    signals = [*tiles, *readiness_rows, *beat]
+    overall = worst(item["state"]["key"] for item in signals)
+    problems = _problems(signals)
     return {
         "generated": generated(now),
         "overall": state(overall),
-        "headline": "Hammasi joyida"
-        if overall in (OK, NEUTRAL)
-        else f"{len([t for t in problems if t['state']['key'] == CRITICAL])} ta jiddiy, "
-        f"{len([t for t in problems if t['state']['key'] == WARN])} ta diqqat talab qiladi",
+        "headline": _headline(problems),
+        "problems": problems,
         "tiles": tiles,
         "outbox": outbox["rows"],
         "outbox_totals": outbox["raw"],

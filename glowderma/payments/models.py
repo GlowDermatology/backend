@@ -70,7 +70,7 @@ class Payment(TimeStampedModel):
     error_code = models.CharField(max_length=32, blank=True, verbose_name="xato kodi")
     error_message = models.CharField(max_length=254, blank=True, verbose_name="xato matni")
     # provider protocol state, keys in design 02 §2.1 (never a raw payload: WebhookInbox holds those)
-    provider_state = models.JSONField(default=dict, blank=True)
+    provider_state = models.JSONField(default=dict, blank=True, verbose_name="provayder holati")
 
     class Meta:
         verbose_name = "to‘lov"
@@ -200,13 +200,13 @@ class Refund(TimeStampedModel):
     requested_at = models.DateTimeField(default=timestamp_default, verbose_name="so‘ralgan")
     # first handover to the provider
     submitted_at = models.DateTimeField(null=True, verbose_name="yuborilgan")
-    last_attempt_at = models.DateTimeField(null=True)
+    last_attempt_at = models.DateTimeField(null=True, verbose_name="oxirgi urinish")
     completed_at = models.DateTimeField(null=True, verbose_name="yakunlangan")  # succeeded only
     attempts = models.PositiveIntegerField(default=0, verbose_name="urinishlar")
     error_code = models.CharField(max_length=32, blank=True, verbose_name="xato kodi")
     last_error = models.TextField(blank=True, verbose_name="oxirgi xato")
     # click: {payment_status, error, error_note, checked_at}; payme: {cancel_time, reason, state: -2}
-    provider_state = models.JSONField(default=dict, blank=True)
+    provider_state = models.JSONField(default=dict, blank=True, verbose_name="provayder holati")
     # why the refund is (or was) manual_required: payme | no_paydoc | fake_mode; "" = never manual (M3)
     manual_reason = models.CharField(
         max_length=16,

@@ -16,8 +16,9 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.urls import reverse
+from unfold.widgets import UnfoldAdminTimeWidget
 
-from glowderma.core.admin import OpsModelAdmin, OpsTabularInline, is_active_staff
+from glowderma.core.admin import OpsModelAdmin, OpsPaginator, OpsTabularInline, is_active_staff
 from glowderma.professionals import services
 from glowderma.professionals.models import (
     BlockedPeriod,
@@ -28,6 +29,9 @@ from glowderma.professionals.models import (
     WorkingHours,
     WorkingHoursOverride,
 )
+
+# Working hours are whole minutes: shown and typed as ``09:00``.
+TIME_FORMAT = "%H:%M"
 
 
 class ServiceRefused(Exception):
@@ -65,6 +69,7 @@ class ServiceBackedAdmin(OpsModelAdmin):
 
     actions = None
     list_per_page = 50
+    paginator = OpsPaginator
     show_full_result_count = False
 
     # Bookkeeping columns are shown, never typed in: the services stamp them.
@@ -174,13 +179,19 @@ class ServiceBackedAdmin(OpsModelAdmin):
 
 
 class WorkingHoursInline(OpsTabularInline):
+    """The weekly hours on a professional's page: weekday as a select of Uzbek day names (the column's
+    choices), times as ``09:00`` (no seconds), no per-row caption (the rows are one table)."""
+
     model = WorkingHours
     extra = 0
     fields = ("weekday", "start", "end", "break_start", "break_end")
+    show_title = False
 
     def formfield_for_dbfield(self, db_field: Any, request: HttpRequest, **kwargs: Any) -> Any:
         if getattr(db_field, "null", False) and not db_field.blank:
             kwargs.setdefault("required", False)
+        if isinstance(db_field, models.TimeField):
+            kwargs["widget"] = UnfoldAdminTimeWidget(format=TIME_FORMAT)
         return super().formfield_for_dbfield(db_field, request, **kwargs)
 
     def has_view_permission(self, request: HttpRequest, obj: models.Model | None = None) -> bool:

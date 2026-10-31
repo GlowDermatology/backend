@@ -77,7 +77,7 @@ def test_design_columns() -> None:
     )
     assert admin.site._registry[CustomerSegment].list_display == ("id", "name", segment_rules, "created_at")
     assert segment_rules(CustomerSegmentFactory.build(min_online_orders=3, min_lifetime_amount=None)) == (
-        "orders ≥ 3 · lifetime ≥ null"
+        "onlayn buyurtmalar ≥ 3 · umrbod xarid yo‘q"
     )
 
 

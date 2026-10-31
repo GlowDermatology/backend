@@ -29,7 +29,11 @@ The form posts normally (no hx-post): the action answers with a redirect and its
                         <p class="leading-relaxed">{{ action_body }}</p>
 
                         {% for note in action_notes %}
-                            <p class="gd-ops-note leading-relaxed text-orange-700 dark:text-orange-400">{{ note }}</p>
+                            {% if note.warning %}
+                                <p class="gd-ops-note gd-ops-note--warning leading-relaxed text-orange-700 dark:text-orange-400"><span class="material-symbols-outlined" aria-hidden="true">warning</span> {{ note.text }}</p>
+                            {% else %}
+                                <p class="gd-ops-note leading-relaxed text-font-subtle-light dark:text-font-subtle-dark">{{ note.text }}</p>
+                            {% endif %}
                         {% endfor %}
 
                         {% if form.non_field_errors %}

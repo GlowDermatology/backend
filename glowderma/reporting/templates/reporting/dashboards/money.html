@@ -28,6 +28,7 @@
             <header class="gd-panel__head">
                 <h2 class="gd-panel__title">K1–K6 tekshiruvlari</h2>
                 <p class="gd-panel__note">«Hisobot» — {% if d.report %}{{ d.report.ran_at }} dagi tungi natija{% else %}hisobot yo‘q{% endif %} · «Hozir» — xuddi shu tekshiruv hozir</p>
+                {% if can_run_report %}<a class="gd-button" href="{{ d.run_report_url }}"><span class="material-symbols-outlined" aria-hidden="true">fact_check</span>Hisobotni hozir ishga tushirish</a>{% endif %}
             </header>
             <div class="gd-scroll">
                 <table class="gd-table">
@@ -36,21 +37,22 @@
                         {% for row in d.rows %}
                             <tr>
                                 <td><span class="gd-code">{{ row.code }}</span><span class="strong">{{ row.label }}</span>
-                                    {% if row.live.note %}<div class="muted">{{ row.live.note }}</div>{% elif row.report.note %}<div class="muted">{{ row.report.note }}</div>{% endif %}</td>
-                                <td class="num">{% if row.report.href %}<a href="{{ row.report.href }}">{{ row.report.text }}</a>{% elif row.report.count == 0 %}<span class="zero">0</span>{% else %}{{ row.report.text }}{% endif %}</td>
+                                    {% if row.live.note %}<div class="muted">{{ row.live.note }}</div>{% elif row.report.note %}<div class="muted">{{ row.report.note }}</div>{% endif %}
+                                    {% if row.guidance %}<div class="gd-guidance"><span class="material-symbols-outlined" aria-hidden="true">lightbulb</span>{{ row.guidance }}</div>{% endif %}</td>
+                                <td class="num">{% if row.report.href %}<a href="{{ row.report.href }}">{{ row.report.text }}</a>{% if row.report.capped %}<div class="gd-capped">{{ row.report.capped }}</div>{% endif %}{% elif row.report.count == 0 %}<span class="zero">0</span>{% else %}{{ row.report.text }}{% endif %}</td>
                                 <td class="gd-hide-sm">
                                     {% if row.report.samples %}
                                         <div class="gd-ids">{% for sample in row.report.samples %}<a href="{{ sample.href }}">{{ sample.id }}</a>{% endfor %}{% if row.report.more %}<span class="muted">+{{ row.report.more }}</span>{% endif %}</div>
                                     {% else %}<span class="muted">—</span>{% endif %}
                                 </td>
-                                <td class="num">{% if row.live.href %}<a href="{{ row.live.href }}">{{ row.live.text }}</a>{% elif row.live.count == 0 %}<span class="zero">0</span>{% else %}<span class="muted">{{ row.live.text }}</span>{% endif %}</td>
+                                <td class="num">{% if row.live.href %}<a href="{{ row.live.href }}">{{ row.live.text }}</a>{% if row.live.capped %}<div class="gd-capped">{{ row.live.capped }}</div>{% endif %}{% elif row.live.count == 0 %}<span class="zero">0</span>{% else %}<span class="muted">{{ row.live.text }}</span>{% endif %}</td>
                                 <td>{% include "reporting/dashboards/_state.html" with s=row.state %}</td>
                             </tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
-            <div class="gd-panel__foot">Har bir son o‘sha qatorlarning ro‘yxatiga olib boradi (birinchi 100 tasi). Hisobot hech narsani tuzatmaydi — har bir qator xodim harakatini talab qiladi.</div>
+            <div class="gd-panel__foot">Har bir son o‘sha qatorlarning ro‘yxatiga olib boradi; ro‘yxat ko‘pi bilan 100 qatorni ochadi — undan ko‘p bo‘lsa, son ostida «Ro‘yxatda 100 / N» yoziladi. Hisobot hech narsani tuzatmaydi — har bir qator xodim harakatini talab qiladi.</div>
         </section>
 
         <div class="gd-cols">
@@ -74,13 +76,13 @@
             <section class="gd-panel" id="reconcile">
                 <header class="gd-panel__head">
                     <h2 class="gd-panel__title">Daftar solishtiruvi tekshiruvlari</h2>
-                    <p class="gd-panel__note">Oxirgi <span class="gd-mono">reconcile_balances</span> natijasi (audit)</p>
+                    <p class="gd-panel__note">Oxirgi solishtiruv natijasi (audit jurnali)</p>
                 </header>
                 {% if d.reconcile_checks %}
                     <div class="gd-scroll">
                         <table class="gd-table">
                             <thead><tr><th>Tekshiruv</th><th class="num">Nomuvofiqlik</th></tr></thead>
-                            <tbody>{% for check in d.reconcile_checks %}<tr><td class="gd-mono">{{ check.name }}</td><td class="num">{{ check.count }}</td></tr>{% endfor %}</tbody>
+                            <tbody>{% for check in d.reconcile_checks %}<tr><td title="{{ check.name }}">{{ check.label }}</td><td class="num">{% if check.raw %}<strong>{{ check.count }}</strong>{% else %}<span class="zero">0</span>{% endif %}</td></tr>{% endfor %}</tbody>
                         </table>
                     </div>
                 {% else %}

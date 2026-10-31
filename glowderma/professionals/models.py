@@ -15,6 +15,8 @@ from glowderma.core.models import TimeStampedModel, timestamp_default
 from glowderma.professionals import media
 
 SLUG_MAX_LENGTH = 160
+# The weekday column (0 = Monday … 6 = Sunday) as the console shows it: Uzbek day names, the value stays 0–6.
+WEEKDAY_CHOICES = list(enumerate(WEEKDAYS))
 PROFESSIONAL_SLUG_CONSTRAINT = "professional_slug_unique"
 
 
@@ -245,7 +247,7 @@ class WorkingHours(models.Model):
         verbose_name="mutaxassis",
     )
     # 0 = Monday … 6 = Sunday (Python date.weekday())
-    weekday = models.PositiveSmallIntegerField(verbose_name="hafta kuni")
+    weekday = models.PositiveSmallIntegerField(choices=WEEKDAY_CHOICES, verbose_name="hafta kuni")
     start = models.TimeField(verbose_name="boshlanishi")  # Tashkent wall-clock
     end = models.TimeField(verbose_name="tugashi")
     # optional recurring break → block kind "off"

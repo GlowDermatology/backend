@@ -28,7 +28,7 @@ from glowderma.core.timeutils import TASHKENT
 logger = logging.getLogger(__name__)
 
 CACHE_SECONDS = 60
-CACHE_PREFIX = "ops:dash:"
+CACHE_PREFIX = "ops:dash:"  # = core.admin.DASHBOARD_CACHE_PREFIX (a console action clears its dashboards)
 # The most ids a "show these rows" link carries (``?id__in=…``); a longer list links its first ids.
 LINK_IDS = 100
 
@@ -82,6 +82,13 @@ def ids_link(model: str, ids: Iterable[int]) -> str | None:
     """The changelist of exactly these rows (``?id__in=``, at most :data:`LINK_IDS`); ``None`` for none."""
     chosen = [str(int(pk)) for pk in list(ids)[:LINK_IDS]]
     return changelist(model, id__in=",".join(chosen)) if chosen else None
+
+
+def capped(count: int, ids: Iterable[int]) -> str | None:
+    """``Ro‘yxatda 100 / 234`` when a ``?id__in=`` link (:func:`ids_link`) lists fewer rows than the number it
+    stands for (``None`` when it lists them all): the number is never silently larger than the list."""
+    shown = min(len(list(ids)), LINK_IDS)
+    return f"Ro‘yxatda {num(shown)} / {num(count)}" if shown and count > shown else None
 
 
 def iso(instant: datetime) -> str:
@@ -195,6 +202,7 @@ __all__ = [
     "by_age",
     "by_count",
     "cached",
+    "capped",
     "change",
     "changelist",
     "clock",

@@ -77,7 +77,7 @@ class AuditEntry(AppendOnlyModel):
         ],
         verbose_name="bajaruvchi turi",
     )
-    actor_id = models.BigIntegerField(null=True)
+    actor_id = models.BigIntegerField(null=True, verbose_name="bajaruvchi ID")
     actor_label = models.CharField(max_length=254, blank=True, verbose_name="bajaruvchi")
     action = models.CharField(max_length=100, verbose_name="amal")
     entity_type = models.CharField(max_length=100, verbose_name="obyekt turi")
@@ -104,13 +104,13 @@ class AuditEntry(AppendOnlyModel):
 
 class IdempotencyRecord(models.Model):
     audience = models.CharField(max_length=32, verbose_name="auditoriya")
-    actor_id = models.BigIntegerField()
+    actor_id = models.BigIntegerField(verbose_name="bajaruvchi ID")
     method = models.CharField(max_length=10, verbose_name="usul")
     path = models.CharField(max_length=2048, verbose_name="yo‘l")
     key = models.UUIDField(verbose_name="kalit")
-    request_hash = models.CharField(max_length=64)
+    request_hash = models.CharField(max_length=64, verbose_name="so‘rov xeshi")
     response_status = models.PositiveSmallIntegerField(verbose_name="javob kodi")
-    response_body = models.JSONField(encoder=DjangoJSONEncoder, null=True)
+    response_body = models.JSONField(encoder=DjangoJSONEncoder, null=True, verbose_name="javob tanasi")
     created_at = models.DateTimeField(default=timestamp_default, editable=False, verbose_name="yaratilgan")
     expires_at = models.DateTimeField(
         default=idempotency_expiry, db_index=True, verbose_name="amal qilish muddati"
@@ -130,7 +130,7 @@ class IdempotencyRecord(models.Model):
 
 
 class OutboxMessage(TimeStampedModel):
-    topic = models.CharField(max_length=100, verbose_name="topic")
+    topic = models.CharField(max_length=100, verbose_name="mavzu")
     payload = models.JSONField(encoder=DjangoJSONEncoder, verbose_name="ma’lumot")
     dedupe_key = models.CharField(max_length=254, unique=True, verbose_name="takrorlanmaslik kaliti")
     status = models.CharField(

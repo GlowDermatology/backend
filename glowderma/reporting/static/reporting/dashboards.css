@@ -2,14 +2,17 @@
    Light and dark: Unfold toggles ``html.dark``; every colour below is a token or has a .dark twin. */
 
 :root {
-  /* chart series — validated palettes (dataviz validator: light on #ffffff, dark on base-900 #1c1712) */
+  /* One colour = one meaning on every dashboard. Channels / platforms (sales chart, sessions by platform):
+     web gold, iOS blue, Android green, POS purple. Sign-up methods use their own hues (never a channel's),
+     and single-series bars (funnel, tiers, cashback) a neutral ink. */
   --gd-series-1: #b07a10; /* web (brand gold) */
   --gd-series-2: #2a78d6; /* iOS */
   --gd-series-3: #138f63; /* Android */
   --gd-series-4: #6250d6; /* POS */
-  --gd-method-1: #2a78d6; /* phone */
-  --gd-method-2: #b07a10; /* email */
-  --gd-method-3: #6250d6; /* social */
+  --gd-method-1: #0e7c86; /* phone (teal) */
+  --gd-method-2: #c2387a; /* email (magenta) */
+  --gd-method-3: #5f6b7a; /* social (slate) */
+  --gd-ink: var(--color-base-600);
   --gd-surface: #ffffff;
   --gd-ok: #15803d;
   --gd-ok-soft: #dcfce7;
@@ -30,9 +33,10 @@ html.dark {
   --gd-series-2: #3987e5;
   --gd-series-3: #199e70;
   --gd-series-4: #9085e9;
-  --gd-method-1: #3987e5;
-  --gd-method-2: #b8892e;
-  --gd-method-3: #9085e9;
+  --gd-method-1: #22a3ad;
+  --gd-method-2: #e0609c;
+  --gd-method-3: #8d99a8;
+  --gd-ink: var(--color-base-400);
   --gd-surface: #1c1712;
   --gd-ok: #4ade80;
   --gd-ok-soft: rgb(34 197 94 / 0.16);
@@ -69,6 +73,28 @@ html.dark .gd-banner { border-color: var(--color-base-800); }
 .gd-banner__title { font-size: 16px; font-weight: 600; color: var(--color-base-900); }
 html.dark .gd-banner__title { color: var(--color-base-100); }
 .gd-banner__text { color: var(--gd-text-subtle); font-size: 13px; }
+.gd-banner__body { flex: 1; min-width: 0; }
+.gd-problem { font-weight: 600; }
+.gd-problem--critical { color: var(--gd-critical); }
+.gd-problem--warn { color: var(--gd-warn); }
+/* «Buyurtma №» lookup on the Ops banner: a GET form, no write */
+.gd-lookup { display: flex; flex-direction: column; gap: 4px; flex: none; }
+.gd-lookup label { font-size: 12px; font-weight: 600; color: var(--gd-text-subtle); }
+.gd-lookup__row { display: flex; align-items: stretch; }
+.gd-lookup input { width: 120px; height: 34px; padding: 0 10px; border: 1px solid var(--color-base-200); border-right: 0;
+  border-radius: var(--border-radius, 8px) 0 0 var(--border-radius, 8px); background: transparent; font-size: 13px;
+  font-variant-numeric: tabular-nums; color: inherit; }
+.gd-lookup input:focus { outline: 2px solid var(--color-primary-500); outline-offset: -1px; }
+.gd-lookup button { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 34px;
+  border: 1px solid var(--color-primary-600); border-radius: 0 var(--border-radius, 8px) var(--border-radius, 8px) 0;
+  background: var(--color-primary-600); color: #fff; }
+.gd-lookup button .material-symbols-outlined { font-size: 18px; }
+html.dark .gd-lookup input { border-color: var(--color-base-700); }
+@media (max-width: 640px) {
+  .gd-banner { flex-wrap: wrap; }
+  .gd-lookup { width: 100%; }
+  .gd-lookup input { flex: 1; width: auto; }
+}
 .gd-banner--ok .gd-banner__icon, .gd-banner--neutral .gd-banner__icon { background: var(--gd-ok-soft); color: var(--gd-ok); }
 .gd-banner--warn .gd-banner__icon { background: var(--gd-warn-soft); color: var(--gd-warn); }
 .gd-banner--critical .gd-banner__icon { background: var(--gd-critical-soft); color: var(--gd-critical); }
@@ -90,15 +116,28 @@ html.dark a.gd-tile:hover { border-color: var(--color-base-700); }
 .gd-tile--critical::before { background: var(--gd-critical); opacity: 1; }
 .gd-tile__head { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .gd-tile__icon { font-size: 20px; color: var(--color-base-400); flex: none; }
-.gd-tile__title { font-size: 13px; font-weight: 500; color: var(--color-base-600); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+/* a title wraps to two lines (never an ellipsis that hides what the number is about) */
+.gd-tile__title { font-size: 13px; line-height: 1.3; font-weight: 500; color: var(--color-base-600); overflow: hidden; flex: 1; min-width: 0;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; }
+.gd-tile__head { align-items: flex-start; }
+.gd-tile__head .gd-badge { margin-top: -2px; }
 html.dark .gd-tile__title { color: var(--color-base-300); }
 .gd-tile__value { font-size: 26px; line-height: 1.15; font-weight: 600; letter-spacing: -0.02em; color: var(--color-base-900);
   font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 html.dark .gd-tile__value { color: var(--color-base-50); }
 .gd-tile__unit { font-size: 13px; font-weight: 500; letter-spacing: 0; color: var(--gd-text-subtle); }
 .gd-tile__hint { font-size: 12.5px; color: var(--gd-text-subtle); line-height: 1.4; }
+.gd-tile__note { font-size: 12px; color: var(--gd-text-subtle); line-height: 1.4; font-style: italic; }
+/* fake (sinov) mode: the number is the fake adapter's, shown muted */
+.gd-tile--muted .gd-tile__value { color: var(--gd-text-subtle); font-weight: 500; }
+/* a narrow tile shows its state badge as the icon alone (the label stays for screen readers and the tooltip) */
+.gd-tile { container-type: inline-size; }
+@container (max-width: 250px) {
+  .gd-tile__head .gd-badge { padding: 0 4px; gap: 0; }
+  .gd-tile__head .gd-badge .gd-badge__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}
 .gd-delta { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; font-weight: 600; padding: 1px 6px; border-radius: 999px;
-  background: var(--gd-neutral-soft); color: var(--color-base-600); margin-left: 6px; vertical-align: middle; }
+  background: var(--gd-neutral-soft); color: var(--color-base-600); margin-left: 2px; vertical-align: middle; white-space: nowrap; letter-spacing: 0; }
 html.dark .gd-delta { color: var(--color-base-300); }
 .gd-delta .material-symbols-outlined { font-size: 14px; }
 
@@ -172,9 +211,12 @@ html.dark .gd-barrow__value { color: var(--color-base-50); }
 .gd-barrow__value small { font-weight: 500; color: var(--gd-text-subtle); margin-left: 4px; }
 .gd-track { grid-column: 1 / -1; height: 8px; border-radius: 999px; background: var(--color-base-100); overflow: hidden; }
 html.dark .gd-track { background: var(--color-base-800); }
-.gd-fill { height: 100%; border-radius: 999px; background: var(--color-primary-600); min-width: 2px; }
-html.dark .gd-fill { background: var(--color-primary-500); }
-.gd-fill--blue, html.dark .gd-fill--blue { background: var(--gd-series-2); }
+.gd-fill { height: 100%; border-radius: 999px; background: var(--gd-ink); min-width: 2px; }
+html.dark .gd-fill { background: var(--gd-ink); }
+.gd-fill--slot-1, html.dark .gd-fill--slot-1 { background: var(--gd-series-1); }
+.gd-fill--slot-2, html.dark .gd-fill--slot-2 { background: var(--gd-series-2); }
+.gd-fill--slot-3, html.dark .gd-fill--slot-3 { background: var(--gd-series-3); }
+.gd-fill--slot-4, html.dark .gd-fill--slot-4 { background: var(--gd-series-4); }
 .gd-fill--muted, html.dark .gd-fill--muted { background: var(--color-base-400); }
 a.gd-barrow:hover .gd-barrow__label { text-decoration: underline; }
 
@@ -201,8 +243,25 @@ html.dark .gd-kv dd { color: var(--color-base-50); }
   .gd-chart { height: 240px; }
   .gd-hide-sm { display: none; }
   /* table states: icon only on a phone (the label stays readable to screen readers and in the tooltip) */
-  .gd-table .gd-badge { font-size: 0; gap: 0; padding: 0 4px; }
+  .gd-table .gd-badge { gap: 0; padding: 0 4px; }
+  .gd-table .gd-badge .gd-badge__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .gd-table .gd-badge .material-symbols-outlined { font-size: 16px; }
   .gd-table td, .gd-table th { padding-left: 8px; padding-right: 8px; }
 }
 .gd-stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+/* a link that opens fewer rows than its number (dashboards.capped) */
+.gd-capped { font-size: 11px; font-weight: 500; color: var(--gd-text-subtle); white-space: nowrap; }
+
+/* what to do about a check that found rows (money dashboard) */
+.gd-guidance { display: flex; gap: 6px; align-items: flex-start; margin-top: 6px; max-width: 62ch; font-size: 12.5px; line-height: 1.45;
+  color: var(--color-base-600); }
+html.dark .gd-guidance { color: var(--color-base-300); }
+.gd-guidance .material-symbols-outlined { font-size: 16px; color: var(--gd-warn); margin-top: 1px; }
+/* a dashboard button that opens an existing console action's confirm step */
+.gd-button { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: var(--border-radius, 8px);
+  border: 1px solid var(--color-base-200); font-size: 13px; font-weight: 500; color: var(--color-primary-700); background: var(--gd-surface); }
+.gd-button:hover { background: var(--color-primary-50); }
+html.dark .gd-button { border-color: var(--color-base-700); color: var(--color-primary-400); }
+html.dark .gd-button:hover { background: rgb(255 255 255 / 0.04); }
+.gd-button .material-symbols-outlined { font-size: 18px; }

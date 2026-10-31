@@ -1,4 +1,9 @@
-"""Read-only Django admin for the catalog (design 01 §11). Writes go through the admin API only."""
+"""Read-only Django admin for the catalog (design 01 §11). Writes go through the admin API only.
+
+The product list's «Qoldiq» filter and the product / category lists' «SEO muammosi» filter are the «Savdo va
+katalog» dashboard's tiles and SEO rows as real filters (the dashboard links with their parameters), so a
+drill-down lists every row behind the number, never a capped id list.
+"""
 
 from typing import Any
 

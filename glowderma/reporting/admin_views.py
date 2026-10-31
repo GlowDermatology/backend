@@ -24,6 +24,7 @@ from unfold.views import UnfoldSiteViewMixin
 
 from glowderma.core import timeutils
 from glowderma.core.admin import is_active_staff
+from glowderma.core.admin_actions import is_manager
 from glowderma.reporting import dashboards
 from glowderma.reporting.dashboards import customers, money, ops, sales
 
@@ -114,6 +115,12 @@ class MoneyDashboardView(DashboardView):
     title = "Pul solishtirish"
     template_name = "reporting/dashboards/money.html"
     cache_name = "money"
+
+    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
+        context = super().get_context_data(**kwargs)
+        # The report action is managers-only (core.admin AuditEntryAdmin); the button follows the same rule.
+        context["can_run_report"] = is_manager(self.request)
+        return context
 
     def build(self) -> dict[str, Any]:
         return money.build(timeutils.now())

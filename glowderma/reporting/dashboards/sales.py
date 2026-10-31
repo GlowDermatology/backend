@@ -17,11 +17,12 @@ from typing import Any
 
 from glowderma.catalog import selectors as catalog_selectors
 from glowderma.commerce import selectors as commerce_selectors
-from glowderma.core import enums, timeutils
+from glowderma.core import enums, integration_modes, timeutils
 from glowderma.core.labels import ORDER_STATUS
 from glowderma.loyalty import selectors as loyalty_selectors
 from glowderma.payments import selectors as payment_selectors
 from glowderma.reporting.dashboards import (
+    CRITICAL,
     LINK_IDS,
     NEUTRAL,
     OK,
@@ -302,32 +303,43 @@ def build(now: datetime, days: int) -> dict[str, Any]:
                 seo=f"{issue['code']}.{issue['severity']}",
             ),
             "state": state(
-                WARN if issue["severity"] == "error" else NEUTRAL,
+                CRITICAL if issue["severity"] == "error" else WARN,
                 "Xato" if issue["severity"] == "error" else "Ogohlantirish",
             ),
         }
         for issue in seo["issues"]
     ]
+    billz_live = integration_modes.provider_mode("billz") == enums.IntegrationMode.LIVE
+    stale_tile: dict[str, Any] = {
+        "title": "Eskirgan qoldiq",
+        "icon": "update",
+        "value": num(stock.stale.count),
+        "unit": "ta mahsulot",
+        "hint": "Billz qoldig‘i 24 soatdan beri yangilanmagan (faol mahsulotlar)",
+        # the product list's «Qoldiq» filter selects the same rows (an id list would stop at LINK_IDS)
+        "href": changelist("catalog_product", status__exact=enums.ProductStatus.ACTIVE, stock="stale"),
+        "state": state(by_count(stock.stale.count)),
+    }
+    if not billz_live:
+        # Billz is the fake adapter: nothing refreshes the quantities, so «stale» is no alarm (as on Ops).
+        stale_tile.update(
+            {
+                "state": state(NEUTRAL, "Sinov rejimi"),
+                "muted": True,
+                "hint": "Billz sinov rejimida: qoldiq yangilanmaydi",
+            }
+        )
     catalog_tiles = [
         {
             "title": "Tugagan mahsulotlar",
             "icon": "remove_shopping_cart",
             "value": num(stock.out_of_stock.count),
-            "unit": "faol",
-            "hint": "Qoldig‘i 0 yoki Billz’da yozuvi yo‘q",
-            # the product list's «Qoldiq» filter selects the same rows (an id list would stop at LINK_IDS)
+            "unit": "ta mahsulot",
+            "hint": "Faol, lekin qoldig‘i 0 yoki Billz’da yozuvi yo‘q",
             "href": changelist("catalog_product", status__exact=enums.ProductStatus.ACTIVE, stock="out"),
             "state": state(by_count(stock.out_of_stock.count)),
         },
-        {
-            "title": "Eskirgan qoldiq",
-            "icon": "update",
-            "value": num(stock.stale.count),
-            "unit": "faol",
-            "hint": "Billz qoldig‘i 24 soatdan beri yangilanmagan",
-            "href": changelist("catalog_product", status__exact=enums.ProductStatus.ACTIVE, stock="stale"),
-            "state": state(by_count(stock.stale.count)),
-        },
+        stale_tile,
         {
             "title": "Billz’dan yangi",
             "icon": "new_releases",

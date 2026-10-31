@@ -9,9 +9,9 @@ timeout) + 1 audit + 2 policy.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
+from urllib.parse import urlencode
 
 from django.urls import reverse
 
@@ -26,7 +26,7 @@ from glowderma.reporting.dashboards import (
     OK,
     WARN,
     ago,
-    by_count,
+    capped,
     change,
     changelist,
     generated,
@@ -43,50 +43,41 @@ from glowderma.reporting.dashboards import report as report_module
 LIVE_TIMEOUT_MS = 5_000
 # How many sample ids a row shows inline (the row's link lists up to LINK_IDS).
 SAMPLE_IDS = 5
-LOYALTY_CHECK = tasks.LOYALTY_CHECK
+LOYALTY_CHECK = report_module.LOYALTY_CHECK
 
 
-@dataclass(frozen=True, slots=True)
-class CheckInfo:
-    code: str
-    label: str
-    model: str  # the admin model its ids name ("" = no ids)
-    severity: str  # the state of a non-zero count
-
-
-CHECKS: dict[str, CheckInfo] = {
-    "k1_billz_sale_unrecorded": CheckInfo(
-        "K1", "Billz sotuvi yozilmagan (oxirgi kunlar)", "commerce_order", WARN
-    ),
-    "k1_billz_sale_unrecorded_backlog": CheckInfo(
-        "K1", "Billz sotuvi yozilmagan (eski)", "commerce_order", WARN
-    ),
-    "k1_billz_sale_dead": CheckInfo("K1", "Billz sotuvi: o‘lik xabar", "commerce_order", CRITICAL),
-    "k2_payment_pending_stuck": CheckInfo(
-        "K2", "Osilib qolgan to‘lovlar (pending)", "payments_payment", CRITICAL
-    ),
-    "k2_click_paid_without_paydoc": CheckInfo(
-        "K2", "Click: paydoc’siz to‘langan to‘lovlar", "payments_payment", CRITICAL
-    ),
-    "k3_refund_open": CheckInfo("K3", "Uzoq ochiq turgan qaytarishlar", "payments_refund", WARN),
-    "k3_refund_failed": CheckInfo(
-        "K3", "Muvaffaqiyatsiz qaytarishlar (harakat kerak)", "payments_refund", CRITICAL
-    ),
-    "k4_shipment_missing": CheckInfo(
-        "K4", "To‘langan, lekin jo‘natilmagan buyurtmalar", "commerce_order", WARN
-    ),
-    "k4_parcel_untracked": CheckInfo("K4", "Kuzatilmayotgan posilkalar", "commerce_order", WARN),
-    "k5_late_capture_unrefunded": CheckInfo(
-        "K5", "Kech yechilgan, qaytarilmagan pullar", "payments_payment", CRITICAL
-    ),
-    "k6_outbox_dead": CheckInfo("K6", "O‘lik outbox xabarlari (24 soat)", "core_outboxmessage", WARN),
-    "k6_outbox_overdue": CheckInfo("K6", "Kechikkan outbox xabarlari", "core_outboxmessage", WARN),
-    "k6_outbox_deferred_past_window": CheckInfo(
-        "K6", "Muddati o‘tgan kechiktirilgan xabarlar", "core_outboxmessage", WARN
-    ),
-    LOYALTY_CHECK: CheckInfo("L", "Cashback daftari solishtiruvi", "", CRITICAL),
-}
+CHECKS = report_module.CHECKS
 SKIPPED_LABELS = {tasks.BILLZ_NOT_LIVE: "Billz sinov rejimida — tekshirilmadi"}
+# What to do about a row that found something (the rows that need a person, in plain words).
+GUIDANCE: dict[str, str] = {
+    "k2_payment_pending_stuck": (
+        "Har bir to‘lovni oching va provayder kabinetida (Click / Payme) tranzaksiya ID bo‘yicha holatini "
+        "tekshiring. Pul yechilgan bo‘lsa — buyurtma raqamini texnik guruhga yuboring; yechilmagan bo‘lsa, "
+        "mijoz bilan bog‘lanib, qayta to‘lashni so‘rang."
+    ),
+    "k2_click_paid_without_paydoc": (
+        "Click kabinetida to‘lovning fiskal cheki (paydoc) chiqqanini tekshiring; chiqmagan bo‘lsa, texnik "
+        "guruhga to‘lov raqamini yuboring — chek bo‘lmasa, qaytarishni avtomatik yuborib bo‘lmaydi."
+    ),
+    "k3_refund_open": (
+        "Qaytarish uzoq ochiq turibdi: uni oching, holati va «oxirgi xato»ni ko‘ring. Holati noma’lum yoki "
+        "qo‘lda kiritish kerak bo‘lsa, provayder kabinetida pul qaytganini tekshiring va boshqaruv panelida "
+        "(To‘lovlar → Qaytarishlar) uni hal qilingan deb belgilang."
+    ),
+    "k3_refund_failed": (
+        "Qaytarish provayderda rad etilgan: «xato kodi»ni ko‘ring, so‘ng boshqaruv panelida (To‘lovlar → "
+        "Qaytarishlar) qayta yuboring yoki pulni qo‘lda qaytarib, «qo‘lda qaytarildi» deb belgilang."
+    ),
+}
+# The checks of the ledger reconciliation (glowderma.loyalty.tasks.CHECKS) in Uzbek; an unknown name is shown
+# as it is.
+RECONCILE_CHECK_LABELS = {
+    "ledger_sum": "Balans = daftar yozuvlari yig‘indisi",
+    "last_balance_after": "Balans = oxirgi yozuvdan keyingi balans",
+    "chain": "Yozuvlar zanjiri (har bir yozuvdan keyingi balans)",
+    "purchase_links": "Xarid ↔ hisoblangan cashback yozuvi",
+    "captured_holds": "Yechilgan band ↔ sarflash yozuvi",
+}
 
 
 def _live(now: datetime) -> dict[str, Finding | None]:
@@ -126,6 +117,7 @@ def _rows(
                 "text": num(finding.count),
                 "href": ids_link(info.model, finding.ids) if finding.count else None,
                 "count": finding.count,
+                "capped": capped(finding.count, finding.ids),
             }
         if reported is None:
             report_cell: dict[str, Any] = {"text": "—", "href": None, "count": None, "samples": []}
@@ -137,6 +129,7 @@ def _rows(
                 "href": ids_link(info.model, reported.ids) if reported.count and info.model else None,
                 "count": reported.count,
                 "samples": _samples(info.model, reported.ids),
+                "capped": capped(reported.count, reported.ids) if info.model else None,
                 "more": max(reported.count - min(len(reported.ids), SAMPLE_IDS), 0),
                 "note": SKIPPED_LABELS.get(reported.skipped) if reported.skipped else None,
             }
@@ -152,6 +145,7 @@ def _rows(
                 "name": name,
                 "code": info.code,
                 "label": info.label,
+                "guidance": GUIDANCE.get(name, "") if row_state in (WARN, CRITICAL) else "",
                 "report": report_cell,
                 "live": live_cell,
                 "state": state(row_state),
@@ -169,12 +163,10 @@ def _report_tile(now: datetime, summary: report_module.ReportSummary | None) -> 
             "unit": "",
             "hint": "Hisobot hali hech qachon ishlamagan (har kuni 03:40)",
             "href": changelist("core_auditentry", action__exact=report_module.REPORT_ACTION),
-            "state": state(CRITICAL),
+            "state": state(report_module.age_state(None, now)),
         }
     stale = summary.stale(now)
-    tile_state = worst(
-        [CRITICAL if summary.errors else OK, by_count(summary.findings), WARN if stale else OK]
-    )
+    tile_state = worst([report_module.findings_state(summary), report_module.age_state(summary.ran_at, now)])
     return {
         "title": "Oxirgi tungi hisobot",
         "icon": "fact_check",
@@ -231,9 +223,9 @@ def _reconcile(now: datetime, entry: Any) -> dict[str, Any]:
             "icon": "balance",
             "value": "—",
             "unit": "",
-            "hint": "Hali ishlamagan",
+            "hint": "Hali ishlamagan (tungi hisobot bilan ishlaydi)",
             "href": changelist("core_auditentry", action__exact=report_module.RECONCILE_ACTION),
-            "state": state(WARN),
+            "state": state(report_module.age_state(None, now)),
             "checks": [],
         }
     after = entry.after if isinstance(entry.after, dict) else {}
@@ -247,7 +239,7 @@ def _reconcile(now: datetime, entry: Any) -> dict[str, Any]:
         [
             CRITICAL if mismatches else OK,
             WARN if negative else OK,
-            WARN if now - entry.created_at > report_module.REPORT_STALE_AFTER else OK,
+            report_module.age_state(entry.created_at, now),
         ]
     )
     return {
@@ -258,7 +250,15 @@ def _reconcile(now: datetime, entry: Any) -> dict[str, Any]:
         "hint": f"{num(accounts)} hisob · {num(negative)} manfiy balans · {ago(entry.created_at, now)}",
         "href": mismatch_link if mismatches else change("core_auditentry", entry.pk),
         "state": state(tile_state),
-        "checks": [{"name": str(name), "count": num(int(count or 0))} for name, count in checks.items()],
+        "checks": [
+            {
+                "name": str(name),
+                "label": RECONCILE_CHECK_LABELS.get(str(name), str(name)),
+                "count": num(int(count or 0)),
+                "raw": int(count or 0),
+            }
+            for name, count in checks.items()
+        ],
     }
 
 
@@ -289,9 +289,10 @@ def build(now: datetime) -> dict[str, Any]:
             "title": "Osilib qolgan to‘lovlar",
             "icon": "hourglass_top",
             "value": num(stuck.count) if stuck else "—",
-            "unit": "pending",
+            "unit": "ta to‘lov",
             "hint": "Band muddati o‘tgan, tranzaksiyasi ochiq",
             "href": ids_link("payments_payment", stuck.ids) if stuck and stuck.count else None,
+            "note": capped(stuck.count, stuck.ids) if stuck else None,
             "state": state(CRITICAL if stuck and stuck.count else OK if stuck else CRITICAL),
         },
         policy["tile"],
@@ -314,6 +315,9 @@ def build(now: datetime) -> dict[str, Any]:
         "policy_tiers": policy["tiers"],
         "reconcile_checks": reconcile["checks"],
         "ops_url": reverse("admin:index"),
+        # the «Hisobotni hozir ishga tushirish» action of the audit log (its confirm step; managers only)
+        "run_report_url": f"{reverse('admin:core_auditentry_run_consistency_report')}?"
+        + urlencode({"next": reverse("admin:reporting_money")}),
     }
 
 

@@ -18,6 +18,7 @@ from django import forms
 from django.contrib import admin
 from django.contrib.admin.utils import unquote
 from django.core.cache import cache
+from django.core.paginator import Paginator
 from django.db import models, transaction
 from django.db.models import Count
 from django.http import HttpRequest
@@ -40,6 +41,7 @@ from glowderma.core.admin_actions import (
     ActionVariant,
     ConfirmForm,
     OpsActionsMixin,
+    WarningNote,
     done,
     enqueue_task,
     failed,
@@ -196,6 +198,56 @@ def customer_column(path: str = "customer", description: str = "Mijoz") -> Colum
     return column
 
 
+def _change_link(model: type[models.Model], pk: Any, text: str) -> SafeString:
+    url = reverse(f"admin:{model._meta.app_label}_{model._meta.model_name}_change", args=[pk])
+    rendered: SafeString = format_html('<a href="{}" class="gd-cell-link">{}</a>', url, text)
+    return rendered
+
+
+def number_link_column(path: str, description: str, prefix: str = "№") -> Column:
+    """A short link to the related row of the foreign key ``path`` (``№10253``) instead of its long
+    ``__str__``; reads only ``<path>_id`` (no query)."""
+
+    @display(description=description, ordering=path)
+    def column(obj: models.Model) -> SafeString | str:
+        pk = getattr(obj, f"{path}_id", None)
+        if pk is None:
+            return "-"
+        related = obj._meta.get_field(path).related_model
+        return _change_link(cast(type[models.Model], related), pk, f"{prefix}{pk}")
+
+    column.__name__ = f"{path}_link"
+    column.source_field = path  # type: ignore[attr-defined]
+    return column
+
+
+def customer_link_column(path: str, description: str = "Mijoz", customer_path: str = "customer") -> Column:
+    """A link to the row at ``path`` named by its customer's short name (``Malika K.``, else ``Mijoz #12``):
+    for a loyalty account, say. Pair it with ``list_select_related = ("<path>__<customer_path>",)``."""
+
+    @display(description=description, ordering=path)
+    def column(obj: models.Model) -> SafeString | str:
+        target = _resolve(obj, path)
+        if target is None:
+            return "-"
+        customer = getattr(target, customer_path, None)
+        return _change_link(type(target), target.pk, short_customer_name(customer))
+
+    column.__name__ = f"{path}_customer_link"
+    column.source_field = path  # type: ignore[attr-defined]
+    return column
+
+
+def short_customer_name(customer: Any) -> str:
+    """``Malika K.`` (first name and the initial of the last), ``Mijoz #12`` without a name."""
+    if customer is None:
+        return "-"
+    parts = str(getattr(customer, "name", "") or "").split()
+    if not parts:
+        return f"Mijoz #{customer.pk}"
+    return parts[0] if len(parts) == 1 else f"{parts[0]} {parts[1][0]}."
+
+
 def column_field(entry: Any) -> str:
     """The model field behind a ``list_display`` / ``list_filter`` entry: a plain name, a column built by the
     helpers above (``source_field``), a ``(field, FilterClass)`` pair or another callable's name."""
@@ -236,6 +288,55 @@ def _json_renderer(field: models.Field[Any, Any]) -> Column:
     render.__name__ = f"{field.name}_pretty"
     render.short_description = field.verbose_name  # type: ignore[attr-defined]
     return render
+
+
+# Integer so‘m columns (AGENTS.md "Money: integer so'm"): a read-only change page shows them as «185 000 so‘m»
+# (:class:`ReadOnlyAdmin`), never the raw integer. A model whose money column has another name lists it in its
+# admin's ``money_fields``.
+MONEY_FIELD_NAMES = frozenset(
+    {
+        "amount",
+        "balance",
+        "balance_after",
+        "base",
+        "billz_price",
+        "cashback_amount",
+        "cashback_paid",
+        "cashback_used",
+        "default_price",
+        "delivery_fee",
+        "from_amount",
+        "items_subtotal",
+        "last_change_new_price",
+        "last_change_old_price",
+        "lifetime_before",
+        "line_total",
+        "min_lifetime_amount",
+        "price",
+        "price_at_add",
+        "promo_amount",
+        "promo_subtotal",
+        "tariff",
+        "to_amount",
+        "total",
+        "unit_price",
+    }
+)
+
+
+def _money_renderer(field: models.Field[Any, Any]) -> Column:
+    def render(obj: models.Model) -> str:
+        return som(getattr(obj, field.name))
+
+    render.__name__ = f"{field.name}_som"
+    render.short_description = field.verbose_name  # type: ignore[attr-defined]
+    return render
+
+
+class OpsPaginator(Paginator):  # type: ignore[type-arg]
+    """The console's changelist paginator: Unfold renders ``template_name`` (Uzbek «jami N ta …»)."""
+
+    template_name = "admin/ops/pagination.html"
 
 
 class TitledObject:
@@ -312,10 +413,13 @@ class ReadOnlyAdmin(_ModelAdmin):
 
     actions = None
     list_per_page = 50
+    paginator = OpsPaginator
     show_full_result_count = False
     # Unfold: filters apply on "Apply" (one query, not one per click); no "add" link even for a view grant.
     list_filter_submit = True
     show_add_link = False
+    # Above the list: every field lookup it is filtered by (drill-downs pass lookups no sidebar filter shows).
+    list_before_template = "admin/ops/applied_filters.html"
     # Optional change-page tabs: ``(("Tab name", ("field", "json_field_pretty", …)), …)``. Every readonly
     # field not named lands on a last "Boshqa" tab, so a new column is never silently hidden.
     tab_groups: tuple[tuple[str, tuple[str, ...]], ...] = ()
@@ -323,12 +427,33 @@ class ReadOnlyAdmin(_ModelAdmin):
     # pattern over ``obj`` (``"Buyurtma №{obj.pk}"``); ``None`` = "<Verbose name> #<pk>". The model's
     # ``__str__`` (English, asserted by tests, used in logs) is never shown as the page title.
     title_format: str | None = None
+    # Help texts shown under the change page's fields (``{field: text}``; ``""`` hides the field's own): for
+    # third-party models whose texts are English and untranslatable (django_otp's devices).
+    field_help_texts: Mapping[str, str] = {}
+    # Integer so‘m columns shown as «185 000 so‘m» on the change page (default: :data:`MONEY_FIELD_NAMES`).
+    money_fields: frozenset[str] = MONEY_FIELD_NAMES
 
     def __init__(self, model: type[models.Model], admin_site: admin.AdminSite) -> None:
         super().__init__(model, admin_site)
         for field in model._meta.concrete_fields:
             if isinstance(field, models.JSONField):
                 setattr(self, f"{field.name}_pretty", _json_renderer(field))
+        for field in self._money_model_fields():
+            setattr(self, f"{field.name}_som", _money_renderer(field))
+
+    def _money_model_fields(self) -> list[models.Field[Any, Any]]:
+        return [
+            field
+            for field in self.model._meta.concrete_fields
+            if field.name in self.money_fields
+            and isinstance(field, models.IntegerField)
+            and not field.is_relation
+            and not field.choices
+        ]
+
+    def _display_name(self, name: str) -> str:
+        """The read-only entry that shows field ``name`` (a so‘m renderer for a money column)."""
+        return f"{name}_som" if name in {field.name for field in self._money_model_fields()} else name
 
     def has_add_permission(self, request: HttpRequest) -> bool:
         return False
@@ -341,6 +466,13 @@ class ReadOnlyAdmin(_ModelAdmin):
 
     def has_view_permission(self, request: HttpRequest, obj: models.Model | None = None) -> bool:
         return _is_active_staff(request)
+
+    def get_form(
+        self, request: HttpRequest, obj: models.Model | None = None, change: bool = False, **kwargs: Any
+    ) -> Any:
+        if self.field_help_texts:
+            kwargs.setdefault("help_texts", dict(self.field_help_texts))
+        return super().get_form(request, obj, change, **kwargs)
 
     def object_title(self, obj: models.Model) -> str:
         """A readable Uzbek title of ``obj`` for its change page (``title_format``)."""
@@ -356,10 +488,12 @@ class ReadOnlyAdmin(_ModelAdmin):
         extra_context: dict[str, Any] | None = None,
     ) -> Any:
         obj = self.get_object(request, unquote(object_id)) if object_id else None
+        # No «Tarix» header button: the change history lists what this admin wrote, and it writes nothing.
+        extra_context = {**(extra_context or {}), "show_history": False}
         if obj is not None:
             title = self.object_title(obj)
             extra_context = {
-                **(extra_context or {}),
+                **extra_context,
                 # Unfold's header breadcrumb renders ``original``; the proxy keeps pk/_meta for its links.
                 "original": TitledObject(obj, title),
                 "title": capfirst(str(self.model._meta.verbose_name)),
@@ -384,8 +518,10 @@ class ReadOnlyAdmin(_ModelAdmin):
         return [f.name for f in self.model._meta.concrete_fields if isinstance(f, models.JSONField)]
 
     def get_exclude(self, request: HttpRequest, obj: models.Model | None = None) -> list[str]:
-        # JSON fields leave the form entirely: they appear once, through their ``<name>_pretty`` renderer.
-        return [*(self.exclude or ()), *self._json_field_names()]
+        # JSON and money fields leave the form entirely: they appear once, through their ``<name>_pretty`` /
+        # ``<name>_som`` renderer.
+        money = [field.name for field in self._money_model_fields()]
+        return [*(self.exclude or ()), *self._json_field_names(), *money]
 
     def get_readonly_fields(self, request: HttpRequest, obj: models.Model | None = None) -> list[str]:
         excluded = set(self.exclude or ())
@@ -393,7 +529,10 @@ class ReadOnlyAdmin(_ModelAdmin):
         for field in self.model._meta.concrete_fields:
             if field.name in excluded:
                 continue
-            names.append(f"{field.name}_pretty" if isinstance(field, models.JSONField) else field.name)
+            if isinstance(field, models.JSONField):
+                names.append(f"{field.name}_pretty")
+            else:
+                names.append(self._display_name(field.name))
         names.extend(name for name in self.readonly_fields if name not in names)
         return names
 
@@ -404,7 +543,9 @@ class ReadOnlyAdmin(_ModelAdmin):
         listed: set[str] = set()
         fieldsets: list[tuple[str, dict[str, Any]]] = []
         for name, fields in self.tab_groups:
-            present = [field for field in fields if field in available]
+            present = [
+                self._display_name(field) for field in fields if self._display_name(field) in available
+            ]
             listed.update(present)
             if present:
                 fieldsets.append((name, {"fields": present, "classes": ["tab"]}))
@@ -443,6 +584,31 @@ CONSISTENCY_COOLDOWN_KEY = "ops:consistency_report"
 CONSISTENCY_TASK = "reporting.consistency_report"
 
 
+# The console's cached counts (glowderma.reporting: sidebar badges ``ops:nav:<name>``, dashboards
+# ``ops:dash:<name>``), named here so a write of the console clears what it changed instead of leaving a badge
+# stale for a minute.
+NAV_CACHE_PREFIX = "ops:nav:"
+DASHBOARD_CACHE_PREFIX = "ops:dash:"
+
+
+def forget_cached_counts(*names: str) -> None:
+    """After the action's transaction commits, drop the cached badge counts and dashboards ``names``
+    (``"nav:dead_outbox"``, ``"dash:ops"``); a cache outage is only logged."""
+
+    def forget() -> None:
+        prefixes = {"nav": NAV_CACHE_PREFIX, "dash": DASHBOARD_CACHE_PREFIX}
+        keys = [f"{prefixes[kind]}{key}" for kind, _, key in (name.partition(":") for name in names)]
+        try:
+            cache.delete_many(keys)
+        except Exception:
+            logger.warning("ops console cache unavailable", exc_info=True)
+
+    transaction.on_commit(forget)
+
+
+OUTBOX_CACHED_COUNTS = ("nav:dead_outbox", "dash:ops", "dash:money")
+
+
 def _requeue_refusal(model_admin: Any, request: HttpRequest, message: OutboxMessage) -> str:
     if message.status == "dead" or consistency.is_overdue(message, timeutils.now()):
         return ""
@@ -453,13 +619,13 @@ def _requeue_refusal(model_admin: Any, request: HttpRequest, message: OutboxMess
 
 def _requeue_notes(model_admin: Any, request: HttpRequest, message: OutboxMessage) -> list[str]:
     hooks = outbox.requeue_hooks(message.topic)
-    notes = [f"Topic: {message.topic} · urinishlar: {message.attempts}"]
+    notes: list[str] = [f"Mavzu: {message.topic} · urinishlar: {message.attempts}"]
     about = (hooks.describe_uz or hooks.describe)(message) if hooks is not None else ""
     if about:
         notes.append(f"Tafsilot: {about}")
     warning = (hooks.warning_uz or hooks.warning) if hooks is not None else ""
     if message.status == "dead" and warning:
-        notes.append(f"Ogohlantirish: {warning}")
+        notes.append(WarningNote(f"Ogohlantirish: {warning}"))
     return notes
 
 
@@ -478,17 +644,17 @@ def _no_dead_messages(model_admin: Any, request: HttpRequest, obj: None) -> str:
 
 
 def _topic_warnings(model_admin: Any, request: HttpRequest, obj: None) -> list[str]:
-    notes = []
+    notes: list[str] = []
     for topic, _total in _dead_topics():
         hooks = outbox.requeue_hooks(topic)
         warning = (hooks.warning_uz or hooks.warning) if hooks is not None else ""
         if warning:
-            notes.append(f"Ogohlantirish ({topic}): {warning}")
+            notes.append(WarningNote(f"Ogohlantirish ({topic}): {warning}"))
     return notes
 
 
 class DeadTopicForm(ConfirmForm):
-    topic = forms.ChoiceField(label="Topic")
+    topic = forms.ChoiceField(label="Mavzu")
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
@@ -496,32 +662,76 @@ class DeadTopicForm(ConfirmForm):
         field.choices = [(topic, f"{topic} — {total} ta o‘lik") for topic, total in _dead_topics()]
 
 
-def row_action_link(url: str, label: str, icon: str) -> SafeString:
+def row_action_link(url: str, label: str, icon: str, title: str = "") -> SafeString:
     """A changelist cell button that opens an ops action's confirm step in Unfold's modal (only rendered for
-    the rows the action makes sense for; the URL is the action's change-page route)."""
+    the rows the action makes sense for; the URL is the action's change-page route). ``label`` is the short
+    visible text, ``title`` the full action name (tooltip and accessible name)."""
     rendered: SafeString = format_html(
         '<a href="{0}" hx-get="{0}" hx-target="#modal-content" hx-select="#dialog" '
-        'x-on:htmx:after-on-load="openModal = true" class="gd-row-action">'
-        '<span class="material-symbols-outlined">{2}</span>{1}</a>',
+        'x-on:htmx:after-on-load="openModal = true" class="gd-row-action" title="{3}" aria-label="{3}">'
+        '<span class="material-symbols-outlined" aria-hidden="true">{2}</span>{1}</a>',
         url,
         label,
         icon,
+        title or label,
     )
     return rendered
 
 
+class DeferredFilter(admin.SimpleListFilter):
+    """«Kechiktirilgan»: messages a handler deferred (``deferred_since``); the parameter is the lookup the
+    dashboards link with, so their drill-down shows as this filter's choice."""
+
+    title = "kechiktirilgan"
+    parameter_name = "deferred_since__isnull"
+
+    def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
+        return [("False", "Kechiktirilgan"), ("True", "Kechiktirilmagan")]
+
+    def queryset(self, request: HttpRequest, queryset: Any) -> Any:
+        if self.value() in ("True", "False"):
+            return queryset.filter(deferred_since__isnull=self.value() == "True")
+        return queryset
+
+
+class PayloadOrderFilter(admin.SimpleListFilter):
+    """``?order=10253``: the messages whose payload names that order (``payload.order_id``) — the link of an
+    order page's «Diagnostika» block. Shown in the sidebar only while it is applied."""
+
+    title = "buyurtma"
+    parameter_name = "order"
+
+    def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
+        value = self.value()
+        return [(value, f"№{value}")] if value and value.isdigit() else []
+
+    def queryset(self, request: HttpRequest, queryset: Any) -> Any:
+        value = self.value()
+        if value is None:
+            return queryset
+        return queryset.filter(payload__order_id=int(value)) if value.isdigit() else queryset.none()
+
+
 class OutboxMessageAdmin(OpsActionsMixin, ReadOnlyAdmin):
+    # The dedupe key stays searchable and on the change page; as a column it pushed «Amal» off a 1440 px
+    # screen.
     list_display = (
         "id",
         "topic",
-        "dedupe_key",
         status_column("status", "Holat", OUTBOX_STATUS_VARIANTS),
         "attempts",
         "available_at",
         "updated_at",
         "requeue_button",
     )
-    list_filter = (dropdown("status"), "topic", date_range("updated_at"))
+    list_filter = (
+        dropdown("status"),
+        "topic",
+        PayloadOrderFilter,
+        DeferredFilter,
+        date_range("available_at"),
+        date_range("updated_at"),
+    )
     search_fields = ("topic", "dedupe_key", "last_error")
     ordering = ("-id",)
     actions_detail = ("requeue",)
@@ -533,7 +743,7 @@ class OutboxMessageAdmin(OpsActionsMixin, ReadOnlyAdmin):
             return ""
         url = reverse("admin:core_outboxmessage_requeue", args=[message.pk])
         back = reverse("admin:core_outboxmessage_changelist")
-        return row_action_link(f"{url}?next={back}", "Qayta navbatga", "replay")
+        return row_action_link(f"{url}?next={back}", "Qayta", "replay", title="Qayta navbatga qo‘yish")
 
     @ops_action(
         description="Qayta navbatga qo‘yish",
@@ -559,6 +769,7 @@ class OutboxMessageAdmin(OpsActionsMixin, ReadOnlyAdmin):
                 return refused(f"Xabar #{message.pk} qayta navbatga qo‘yilmadi: {why or result.reason}")
             if result.outcome != "requeued":
                 return refused(f"Xabar #{message.pk} endi o‘lik emas: hech narsa o‘zgarmadi.")
+            forget_cached_counts(*OUTBOX_CACHED_COUNTS)
             return done(
                 f"Xabar #{message.pk} qayta navbatga qo‘yildi.",
                 audit_action="ops.outbox_requeued",
@@ -580,10 +791,10 @@ class OutboxMessageAdmin(OpsActionsMixin, ReadOnlyAdmin):
         )
 
     @ops_action(
-        description="Topic bo‘yicha o‘liklarni qayta navbatga",
-        title="Topicning barcha o‘lik xabarlarini qayta navbatga qo‘yish",
+        description="Mavzu bo‘yicha o‘liklarni qayta navbatga",
+        title="Mavzuning barcha o‘lik xabarlarini qayta navbatga qo‘yish",
         body=(
-            f"Tanlangan topicning o‘lik xabarlari (bir bosishda {TOPIC_REQUEUE_LIMIT} tagacha) qayta "
+            f"Tanlangan mavzuning o‘lik xabarlari (bir bosishda {TOPIC_REQUEUE_LIMIT} tagacha) qayta "
             "navbatga qo‘yiladi. Ishi boshqa yo‘l bilan bajarilgan xabarlar o‘tkazib yuboriladi."
         ),
         submit="Hammasini qayta navbatga",
@@ -618,6 +829,7 @@ class OutboxMessageAdmin(OpsActionsMixin, ReadOnlyAdmin):
                 f"{topic}: qayta navbatga qo‘yiladigan xabar topilmadi ({len(skipped)} ta o‘tkazildi)."
             )
         tail = " Yana o‘lik xabarlar qoldi — amalni takrorlang." if more else ""
+        forget_cached_counts(*OUTBOX_CACHED_COUNTS)
         return done(
             f"{topic}: {len(requeued)} ta xabar qayta navbatga qo‘yildi, {len(skipped)} ta o‘tkazib "
             f"yuborildi.{tail}",

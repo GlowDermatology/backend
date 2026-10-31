@@ -13,17 +13,21 @@ class SiteSettings(models.Model):
 
     id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
     # contract §2.11
-    reservation_minutes = models.PositiveSmallIntegerField(default=15)  # O3; 5..60
-    support_phone = models.CharField(max_length=13, blank=True)  # "" ↔ null in the API
+    reservation_minutes = models.PositiveSmallIntegerField(
+        default=15, verbose_name="zaxira muddati (daqiqa)"
+    )  # O3; 5..60
+    support_phone = models.CharField(
+        max_length=13, blank=True, verbose_name="qo‘llab-quvvatlash telefoni"
+    )  # "" ↔ null in the API
     pickup_address_uz = models.CharField(max_length=200, blank=True, verbose_name="olib ketish manzili (uz)")
     pickup_address_ru = models.CharField(max_length=200, blank=True, verbose_name="olib ketish manzili (ru)")
     pickup_address_en = models.CharField(max_length=200, blank=True, verbose_name="olib ketish manzili (en)")
     # Admin-panel settings screen (A1), M2 /settings/public
-    cosmetologist_phone = models.CharField(max_length=13, blank=True)
-    store_phone = models.CharField(max_length=13, blank=True)
-    telegram_url = models.URLField(max_length=200, blank=True)
-    instagram_url = models.URLField(max_length=200, blank=True)
-    website_url = models.URLField(max_length=200, blank=True)
+    cosmetologist_phone = models.CharField(max_length=13, blank=True, verbose_name="kosmetolog telefoni")
+    store_phone = models.CharField(max_length=13, blank=True, verbose_name="do‘kon telefoni")
+    telegram_url = models.URLField(max_length=200, blank=True, verbose_name="Telegram havolasi")
+    instagram_url = models.URLField(max_length=200, blank=True, verbose_name="Instagram havolasi")
+    website_url = models.URLField(max_length=200, blank=True, verbose_name="veb-sayt havolasi")
     # The PUBLISHED terms and privacy texts (GS-2): written only by ``services.publish_terms``, served by
     # ``settings/public/`` under ``terms_version`` and the copy a customer's consent refers to.
     privacy_policy_uz = models.TextField(blank=True, verbose_name="maxfiylik siyosati (uz)")
@@ -41,7 +45,7 @@ class SiteSettings(models.Model):
     privacy_policy_draft_en = models.TextField(blank=True, verbose_name="maxfiylik siyosati (qoralama) (en)")
     # C3: stamped on Customer.consent
     terms_version = models.CharField(max_length=32, blank=True, verbose_name="shartlar versiyasi")
-    terms_updated_at = models.DateTimeField(null=True)
+    terms_updated_at = models.DateTimeField(null=True, verbose_name="shartlar yangilangan")
     # P3 free-text cancellation/reschedule terms
     booking_policy_uz = models.TextField(blank=True, verbose_name="yozilish qoidalari (uz)")
     booking_policy_ru = models.TextField(blank=True, verbose_name="yozilish qoidalari (ru)")
@@ -49,7 +53,11 @@ class SiteSettings(models.Model):
     # bookkeeping
     updated_at = models.DateTimeField(default=timestamp_default, verbose_name="yangilangan")
     updated_by = models.ForeignKey(
-        "accounts.StaffUser", null=True, on_delete=models.SET_NULL, related_name="+"
+        "accounts.StaffUser",
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name="yangilagan",
     )
 
     class Meta:

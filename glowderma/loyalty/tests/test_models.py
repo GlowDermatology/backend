@@ -82,7 +82,7 @@ def test_policy_factory_defaults_str_ordering_and_checks() -> None:
     second = CashbackPolicyFactory.create(created_at=at(8, 1, 10), effective_from=at(8, 15))
     assert (first.version, second.version) == (1, 2)
     assert first.author is None and first.basis == "before_purchase" and first.earn_on_cashback_paid is False
-    assert str(first) == "Keshbek siyosati v1 (Xariddan oldingi summa, 2026-06-01 dan)"
+    assert str(first) == "Cashback siyosati v1 (Xariddan oldingi summa, 2026-06-01 dan)"
     assert list(CashbackPolicy.objects.all()) == [second, first]  # ordering -version
     assert [(t.from_amount, t.to_amount, t.percent) for t in first.tiers.all()] == [
         (0, 20_000_000, Decimal("1.00"))
@@ -237,7 +237,7 @@ def test_policy_supersession_rule_t4() -> None:
 
 def test_account_one_per_customer_str_negative_allowed_and_protect() -> None:
     account = LoyaltyAccountFactory.create(balance=-5_000)  # L5: negative balances are allowed
-    assert str(account) == f"Mijoz #{account.customer_id} keshbek hisobi: −5\u00a0000 so‘m"
+    assert str(account) == f"Mijoz #{account.customer_id} cashback hisobi: −5\u00a0000 so‘m"
     assert Customer.objects.get(pk=account.customer_id).loyalty_account == account
     violates(
         "loyalty_loyaltyaccount_customer_id_key", LoyaltyAccount.objects.create, customer=account.customer

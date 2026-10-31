@@ -4,10 +4,20 @@
     {% with d=dashboard %}
         <div class="gd-banner gd-banner--{{ d.overall.key }}">
             <div class="gd-banner__icon"><span class="material-symbols-outlined" aria-hidden="true">{{ d.overall.icon }}</span></div>
-            <div>
+            <div class="gd-banner__body">
                 <div class="gd-banner__title">{{ d.headline }}</div>
-                <div class="gd-banner__text">Navbatlar, integratsiyalar va tungi tekshiruvlar · {{ d.live_count }} ta provayder live rejimda</div>
+                <div class="gd-banner__text">
+                    {% for problem in d.problems %}<span class="gd-problem gd-problem--{{ problem.state.key }}">{{ problem.label }}</span>{% if not forloop.last %} · {% endif %}{% empty %}Navbatlar, integratsiyalar va tungi tekshiruvlar{% endfor %}
+                    · {{ d.live_count }} ta provayder live rejimda
+                </div>
             </div>
+            <form class="gd-lookup" method="get" action="{% url 'admin:commerce_order_lookup' %}" role="search">
+                <label for="gd-order-number">Buyurtma №</label>
+                <div class="gd-lookup__row">
+                    <input id="gd-order-number" name="number" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="10253" required>
+                    <button type="submit" aria-label="Buyurtmani ochish"><span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>
+                </div>
+            </form>
         </div>
 
         <div class="gd-grid gd-grid--3">

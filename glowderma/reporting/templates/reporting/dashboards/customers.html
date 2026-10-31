@@ -85,7 +85,7 @@
             <section class="gd-panel" id="sessions">
                 <header class="gd-panel__head">
                     <h2 class="gd-panel__title">Ochiq sessiyalar platforma bo‘yicha</h2>
-                    <p class="gd-panel__note">{{ d.session_total }} ta mijoz sessiyasi · platforma havolasi qurilmalar ro‘yxatiga</p>
+                    <p class="gd-panel__note">{{ d.session_total }} ta ochiq mijoz sessiyasi · har bir qator o‘sha sessiyalar ro‘yxatiga olib boradi</p>
                 </header>
                 <div class="gd-panel__body">
                     {% if d.platforms %}
@@ -94,7 +94,7 @@
                                 <a class="gd-barrow" href="{{ row.href }}">
                                     <span class="gd-barrow__label">{{ row.label }}</span>
                                     <span class="gd-barrow__value">{{ row.count }}<small>{{ row.percent }}%</small></span>
-                                    <span class="gd-track"><span class="gd-fill gd-fill--blue" style="display:block;width: {{ row.percent }}%"></span></span>
+                                    <span class="gd-track"><span class="gd-fill{% if row.slot %} gd-fill--slot-{{ row.slot }}{% else %} gd-fill--muted{% endif %}" style="display:block;width: {{ row.percent }}%"></span></span>
                                 </a>
                             {% endfor %}
                         </div>
@@ -121,7 +121,7 @@
                         <a class="gd-barrow" href="{{ d.cashback.redeemed_href }}">
                             <span class="gd-barrow__label">Sarflandi</span>
                             <span class="gd-barrow__value">{{ d.cashback.redeemed }}</span>
-                            <span class="gd-track"><span class="gd-fill gd-fill--blue" style="display:block;width: {{ d.cashback.redeemed_pct }}%"></span></span>
+                            <span class="gd-track"><span class="gd-fill gd-fill--muted" style="display:block;width: {{ d.cashback.redeemed_pct }}%"></span></span>
                         </a>
                     </div>
                     <dl class="gd-kv" style="margin-top:16px">

@@ -29,7 +29,11 @@ class StatusTemplate(models.Model):
     created_at = models.DateTimeField(default=timestamp_default, editable=False, verbose_name="yaratilgan")
     updated_at = models.DateTimeField(default=timestamp_default, verbose_name="yangilangan")
     updated_by = models.ForeignKey(
-        "accounts.StaffUser", null=True, on_delete=models.SET_NULL, related_name="+"
+        "accounts.StaffUser",
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name="yangilagan",
     )
 
     class Meta:
@@ -148,7 +152,9 @@ class Campaign(TimeStampedModel):
         related_name="+",
         verbose_name="havola mahsuloti",
     )
-    link_product_label = models.CharField(max_length=120, blank=True)  # uz display name at creation
+    link_product_label = models.CharField(
+        max_length=120, blank=True, verbose_name="havola mahsuloti nomi"
+    )  # uz display name at creation
     # gap ADM-10.1: the https link the app opens (kind "url" only; "" otherwise; decision GC-3)
     link_url = models.CharField(max_length=500, blank=True, default="", verbose_name="havola URL")
     # all|segment|customer
@@ -156,13 +162,25 @@ class Campaign(TimeStampedModel):
         max_length=8, choices=enums.AudienceType.choices, verbose_name="auditoriya turi"
     )
     audience_segment = models.ForeignKey(
-        "notifications.CustomerSegment", null=True, on_delete=models.SET_NULL, related_name="campaigns"
+        "notifications.CustomerSegment",
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="campaigns",
+        verbose_name="auditoriya segmenti",
     )
-    audience_segment_name = models.CharField(max_length=60, blank=True)  # snapshot
+    audience_segment_name = models.CharField(
+        max_length=60, blank=True, verbose_name="segment nomi"
+    )  # snapshot
     audience_customer = models.ForeignKey(
-        "accounts.Customer", null=True, on_delete=models.PROTECT, related_name="+"
+        "accounts.Customer",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+        verbose_name="auditoriya mijozi",
     )
-    audience_phone = models.CharField(max_length=13, blank=True)  # snapshot
+    audience_phone = models.CharField(
+        max_length=13, blank=True, verbose_name="auditoriya telefoni"
+    )  # snapshot
     # pushable devices at creation; recomputed at send
     recipient_count = models.PositiveIntegerField(default=0, verbose_name="qabul qiluvchilar soni")
     state = models.CharField(max_length=16, choices=State.choices, default=State.QUEUED, verbose_name="holat")
@@ -175,11 +193,17 @@ class Campaign(TimeStampedModel):
     failed = models.PositiveIntegerField(null=True, verbose_name="xato")  # FCM rejected / no token
     # M2 acknowledgements; null in M1
     delivered = models.PositiveIntegerField(null=True, verbose_name="yetkazildi")
-    send_cursor = models.BigIntegerField(default=0)  # last CampaignRecipient.id handed to the adapter
-    batches_dispatched = models.PositiveIntegerField(default=0)
+    send_cursor = models.BigIntegerField(
+        default=0, verbose_name="yuborish kursori"
+    )  # last CampaignRecipient.id handed to the adapter
+    batches_dispatched = models.PositiveIntegerField(default=0, verbose_name="yuborilgan to‘plamlar")
     last_error = models.TextField(blank=True, verbose_name="oxirgi xato")
     author = models.ForeignKey(
-        "accounts.StaffUser", null=True, on_delete=models.PROTECT, related_name="campaigns"
+        "accounts.StaffUser",
+        null=True,
+        on_delete=models.PROTECT,
+        related_name="campaigns",
+        verbose_name="muallif",
     )
 
     class Meta:
@@ -311,9 +335,13 @@ class CampaignRecipient(models.Model):
     )
     state = models.CharField(max_length=8, choices=State.choices, default=State.PENDING, verbose_name="holat")
     error = models.CharField(max_length=254, blank=True, verbose_name="xato")
-    provider_message_id = models.CharField(max_length=128, blank=True)  # FCM message id
+    provider_message_id = models.CharField(
+        max_length=128, blank=True, verbose_name="provayder xabar ID"
+    )  # FCM message id
     # FCM error / batch
-    provider_state = models.JSONField(default=dict, blank=True, encoder=DjangoJSONEncoder)
+    provider_state = models.JSONField(
+        default=dict, blank=True, encoder=DjangoJSONEncoder, verbose_name="provayder holati"
+    )
     sent_at = models.DateTimeField(null=True, verbose_name="yuborilgan")
     delivered_at = models.DateTimeField(null=True, verbose_name="yetkazilgan")  # M2 acknowledgement
     inbox = models.OneToOneField(
@@ -386,9 +414,11 @@ class InboxNotification(TimeStampedModel):
     # {"kind":"none"} | {"kind":"product","product_id":4} | {"kind":"order","order_id":10248} |
     link = models.JSONField(default=dict, encoder=DjangoJSONEncoder, verbose_name="havola")
     # {"kind":"url","url":"https://…"} | …
-    image_url = models.CharField(max_length=500, blank=True)
+    image_url = models.CharField(max_length=500, blank=True, verbose_name="rasm havolasi")
     source_type = models.CharField(max_length=16, choices=SourceType.choices, verbose_name="manba turi")
-    source_id = models.BigIntegerField()  # campaign / order / appointment / customer (account) id
+    source_id = models.BigIntegerField(
+        verbose_name="manba ID"
+    )  # campaign / order / appointment / customer (account) id
     # order_status only
     template_status = models.CharField(
         max_length=24, blank=True, choices=enums.TemplateStatus.choices, verbose_name="shablon holati"

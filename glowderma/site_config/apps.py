@@ -21,7 +21,7 @@ def ensure_singleton(sender: AppConfig, *, using: str, apps: Any = global_apps, 
 
 class SiteConfigConfig(AppConfig):
     name = "glowderma.site_config"
-    verbose_name = "Sayt sozlamalari"
+    verbose_name = "Sayt"
 
     def ready(self) -> None:
         post_migrate.connect(ensure_singleton, sender=self, dispatch_uid="site_config.ensure_singleton")

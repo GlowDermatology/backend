@@ -15,14 +15,14 @@ from django.core.cache import cache
 from django.http import HttpRequest
 
 from glowderma.core import consistency, timeutils
-from glowderma.core.admin import is_active_staff
+from glowderma.core.admin import NAV_CACHE_PREFIX, is_active_staff
 from glowderma.integrations import selectors as integration_selectors
 from glowderma.payments import selectors as payment_selectors
 
 logger = logging.getLogger(__name__)
 
 CACHE_SECONDS = 60
-CACHE_PREFIX = "ops:nav:"
+CACHE_PREFIX = NAV_CACHE_PREFIX  # a console action clears its badge (core.admin.forget_cached_counts)
 
 
 def cached_count(name: str, compute: Callable[[], int]) -> int:

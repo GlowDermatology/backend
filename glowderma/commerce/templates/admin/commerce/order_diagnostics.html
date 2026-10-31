@@ -1,0 +1,27 @@
+{% comment %}The «Diagnostika» block of an order's console page (glowderma.commerce.diagnostics).{% endcomment %}
+<dl class="gd-diag">
+    <dt>Buyurtma holati</dt>
+    <dd>{{ status.badge }} <span class="gd-diag__muted">{{ status.text }}</span></dd>
+
+    <dt>To‘lov</dt>
+    <dd>{% if payment.badge %}{{ payment.badge }} {% endif %}{% if payment.href %}<a href="{{ payment.href }}">{{ payment.text }}</a>{% else %}<span class="gd-diag__muted">{{ payment.text }}</span>{% endif %}</dd>
+
+    <dt>Yetkazish (BTS)</dt>
+    <dd>
+        {% if shipment.badge %}{{ shipment.badge }} {% endif %}{% if shipment.href %}<a href="{{ shipment.href }}">{{ shipment.text }}</a>{% else %}<span class="gd-diag__muted">{{ shipment.text }}</span>{% endif %}
+        {% if shipment.error %}<div class="gd-diag__error"><span class="material-symbols-outlined" aria-hidden="true">error</span> Oxirgi xato: {{ shipment.error }}</div>{% endif %}
+    </dd>
+
+    <dt>Billz sotuvi</dt>
+    <dd class="{% if billz.problem %}gd-diag__warn{% endif %}">{% if billz.href %}<a href="{{ billz.href }}">{{ billz.text }}</a>{% else %}<span class="gd-diag__muted">{{ billz.text }}</span>{% endif %}</dd>
+
+    <dt>Outbox xabarlari</dt>
+    <dd>
+        {% if outbox.total %}
+            <a href="{{ outbox.href }}">{{ outbox.total }} ta xabar</a>{% if outbox.open %} · {{ outbox.open }} ta navbatda{% endif %}{% if outbox.dead %} · <a class="gd-diag__danger" href="{{ outbox.dead_href }}">{{ outbox.dead }} ta o‘lik</a>{% endif %}
+        {% else %}<span class="gd-diag__muted">Bu buyurtma bo‘yicha xabar yo‘q</span>{% endif %}
+    </dd>
+
+    <dt>Webhooklar</dt>
+    <dd>{% if webhooks.total %}<a href="{{ webhooks.href }}">{{ webhooks.total }} ta provayder chaqiruvi</a>{% else %}<span class="gd-diag__muted">Provayder chaqiruvi yo‘q</span>{% endif %}</dd>
+</dl>

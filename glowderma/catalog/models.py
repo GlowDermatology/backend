@@ -43,7 +43,9 @@ class JoinText(Func):
 class Category(TimeStampedModel):
     """A product grouping addressed by its immutable slug."""
 
-    slug = models.SlugField(max_length=40, unique=True)  # ^[a-z0-9-]{2,40}$, never "order"
+    slug = models.SlugField(
+        max_length=40, unique=True, verbose_name="slug (URL)"
+    )  # ^[a-z0-9-]{2,40}$, never "order"
     name_uz = models.CharField(max_length=60, verbose_name="nomi (uz)")
     name_ru = models.CharField(max_length=60, blank=True, verbose_name="nomi (ru)")
     name_en = models.CharField(max_length=60, blank=True, verbose_name="nomi (en)")
@@ -134,7 +136,9 @@ class Product(TimeStampedModel):
     usage_en = models.TextField(blank=True, verbose_name="qo‘llash (en)")
     # B-W1 SEO (admin contract §2.3): the website's URL segment — set once from the Uzbek name (else the Billz
     # name) when the row is created, unique, never only digits, edited only by staff (stable URLs).
-    slug = models.CharField(max_length=SLUG_MAX_LENGTH, blank=True, default="", db_default="")
+    slug = models.CharField(
+        max_length=SLUG_MAX_LENGTH, blank=True, default="", db_default="", verbose_name="slug (URL)"
+    )
     seo_title_uz = models.CharField(
         max_length=120, blank=True, default="", db_default="", verbose_name="SEO sarlavha (uz)"
     )
@@ -172,14 +176,24 @@ class Product(TimeStampedModel):
         ),
         output_field=models.TextField(),
         db_persist=True,
+        verbose_name="qidiruv matni",
     )
     # last admin change (contract last_change; null when never edited through the API)
     last_change_at = models.DateTimeField(null=True, verbose_name="oxirgi o‘zgarish")
-    last_change_kind = models.CharField(max_length=16, choices=enums.ProductChangeKind.choices, blank=True)
-    last_change_old_price = models.BigIntegerField(null=True)
-    last_change_new_price = models.BigIntegerField(null=True)
+    last_change_kind = models.CharField(
+        max_length=16,
+        choices=enums.ProductChangeKind.choices,
+        blank=True,
+        verbose_name="oxirgi o‘zgarish turi",
+    )
+    last_change_old_price = models.BigIntegerField(null=True, verbose_name="oxirgi o‘zgarishgacha narx")
+    last_change_new_price = models.BigIntegerField(null=True, verbose_name="oxirgi o‘zgarishdagi narx")
     last_change_actor = models.ForeignKey(
-        "accounts.StaffUser", null=True, on_delete=models.SET_NULL, related_name="+"
+        "accounts.StaffUser",
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name="oxirgi o‘zgartirgan",
     )
 
     class Meta:
@@ -274,7 +288,9 @@ class ProductStock(models.Model):
     quantity = models.IntegerField(default=0, verbose_name="miqdor")
     # when quantity was last read from Billz
     synced_at = models.DateTimeField(null=True, verbose_name="sinxronlangan")
-    billz_updated_at = models.DateTimeField(null=True)  # Billz's own timestamp when provided
+    billz_updated_at = models.DateTimeField(
+        null=True, verbose_name="Billz’da yangilangan"
+    )  # Billz's own timestamp when provided
 
     class Meta:
         verbose_name = "qoldiq"
@@ -304,7 +320,9 @@ class ProductImage(TimeStampedModel):
     # image/jpeg | image/png | image/webp (after re-encode)
     content_type = models.CharField(max_length=32, verbose_name="fayl turi")
     size_bytes = models.PositiveIntegerField(verbose_name="hajmi (bayt)")
-    sha256 = models.CharField(max_length=64)  # of the stored (re-encoded) bytes; also the file stem
+    sha256 = models.CharField(
+        max_length=64, verbose_name="SHA-256"
+    )  # of the stored (re-encoded) bytes; also the file stem
     uploaded_by = models.ForeignKey(
         "accounts.StaffUser", null=True, on_delete=models.SET_NULL, related_name="+", verbose_name="yuklagan"
     )
@@ -343,8 +361,8 @@ class Banner(TimeStampedModel):
         height_field="image_height",
         verbose_name="rasm",
     )
-    image_width = models.PositiveIntegerField()
-    image_height = models.PositiveIntegerField()
+    image_width = models.PositiveIntegerField(verbose_name="rasm eni")
+    image_height = models.PositiveIntegerField(verbose_name="rasm bo‘yi")
     link_kind = models.CharField(
         max_length=8,
         choices=enums.BannerLinkKind.choices,

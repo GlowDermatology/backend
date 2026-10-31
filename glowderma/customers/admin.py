@@ -4,7 +4,7 @@
 account, appointments) as inline tabs, so it is registered here, in the top layer. Secrets stay out:
 ``Customer.password`` is excluded, and the device/session inlines list no token or hash column.
 
-Safe audited action (glowderma.core.admin_actions): «Barcha seanslarni tugatish» signs the customer out
+Safe audited action (glowderma.core.admin_actions): «Barcha sessiyalarni tugatish» signs the customer out
 everywhere through ``accounts.sessions.revoke_all_sessions`` (reason ``admin_revoked``).
 """
 
@@ -26,6 +26,7 @@ from glowderma.core.admin import (
     ReadOnlyTabularInline,
     date_range,
     dropdown,
+    forget_cached_counts,
     masked_email_column,
     masked_phone_column,
     money_column,
@@ -116,11 +117,16 @@ class CustomerSocialInline(ReadOnlyTabularInline):
 
 
 def _no_open_session(model_admin: Any, request: HttpRequest, customer: Customer) -> str:
-    return "" if sessions.open_sessions(customer.pk).exists() else "Mijozning ochiq seansi yo‘q."
+    return "" if sessions.open_sessions(customer.pk).exists() else "Mijozning ochiq sessiyasi yo‘q."
 
 
 class CustomerAdmin(OpsActionsMixin, ReadOnlyAdmin):
-    exclude = ("password",)
+    # The phone and e-mail are masked here as on every list (customer contract §1.4, the page title too): the
+    # console is an inspection window; a full contact is the admin panel's (role-checked, audited).
+    exclude = ("password", "phone", "email")
+    readonly_fields = ("phone_masked", "email_masked")
+    phone_masked = staticmethod(masked_phone_column("phone"))
+    email_masked = staticmethod(masked_email_column("email"))
     list_display = (
         "id",
         "name",
@@ -149,8 +155,8 @@ class CustomerAdmin(OpsActionsMixin, ReadOnlyAdmin):
             (
                 "id",
                 "name",
-                "phone",
-                "email",
+                "phone_masked",
+                "email_masked",
                 "email_verified_at",
                 "status",
                 "language",
@@ -174,8 +180,8 @@ class CustomerAdmin(OpsActionsMixin, ReadOnlyAdmin):
     actions_detail = ("revoke_all_sessions",)
 
     def object_title(self, obj: models.Model) -> str:
-        """``Mijoz #12 · Malika Karimova · +998 90 *** ** 67``: the title never carries the full phone or
-        e-mail (the fields below still show them; this page is the customer's record)."""
+        """``Mijoz #12 · Malika Karimova · +998 90 *** ** 67``: like the fields below, the title never carries
+        the full phone or e-mail."""
         customer = cast(Customer, obj)
         contact = mask_phone(customer.phone) if customer.phone else ""
         if not contact and customer.email:
@@ -183,10 +189,10 @@ class CustomerAdmin(OpsActionsMixin, ReadOnlyAdmin):
         return " · ".join(part for part in (f"Mijoz #{customer.pk}", customer.name, contact) if part)
 
     @ops_action(
-        description="Barcha seanslarni tugatish",
-        title="Mijozning barcha seanslarini tugatish",
+        description="Barcha sessiyalarni tugatish",
+        title="Mijozning barcha sessiyalarini tugatish",
         body=(
-            "Mijoz barcha telefon va brauzerlardan chiqariladi (sabab: admin_revoked), seanssiz qolgan "
+            "Mijoz barcha telefon va brauzerlardan chiqariladi (sabab: «Admin tugatdi»), sessiyasiz qolgan "
             "qurilmalarga push yuborilmaydi. Yo‘qolgan telefon yoki begona kirish gumon qilinganda ishlating."
         ),
         submit="Hammasini tugatish",
@@ -200,9 +206,10 @@ class CustomerAdmin(OpsActionsMixin, ReadOnlyAdmin):
     ) -> ActionResult:
         count = sessions.revoke_all_sessions(customer.pk, actor=request.user, request=request)
         if not count:
-            return refused("Mijozning ochiq seansi yo‘q: hech narsa o‘zgarmadi.")
+            return refused("Mijozning ochiq sessiyasi yo‘q: hech narsa o‘zgarmadi.")
+        forget_cached_counts("dash:customers")
         return done(
-            f"{count} ta seans tugatildi.",
+            f"{count} ta sessiya tugatildi.",
             audit_action="ops.customer_sessions_revoked",
             entity_type="customer",
             entity_id=customer.pk,

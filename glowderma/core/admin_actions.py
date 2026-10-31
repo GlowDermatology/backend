@@ -63,6 +63,7 @@ __all__ = [
     "ActionVariant",
     "ConfirmForm",
     "OpsActionsMixin",
+    "WarningNote",
     "done",
     "enqueue_task",
     "failed",
@@ -158,6 +159,13 @@ class ConfirmForm(forms.Form):
         super().__init__(*args, **kwargs)
 
 
+class WarningNote(str):
+    """A note of the confirm step that is a real warning (shown in the warning colour); a plain ``str`` note
+    is neutral information (what the row is about, who may run the action)."""
+
+    __slots__ = ()
+
+
 Availability = Callable[[Any, HttpRequest, Any], str]
 Notes = Callable[[Any, HttpRequest, Any], list[str]]
 ActionFunc = Callable[..., ActionResult]
@@ -241,8 +249,11 @@ def ops_action(
                 "action_title": title,
                 "action_body": body,
                 "action_notes": [
-                    *(notes(model_admin, request, obj) if notes is not None else []),
-                    *([MANAGER_ONLY_NOTE] if manager_only else []),
+                    {"text": str(note), "warning": isinstance(note, WarningNote)}
+                    for note in [
+                        *(notes(model_admin, request, obj) if notes is not None else []),
+                        *([MANAGER_ONLY_NOTE] if manager_only else []),
+                    ]
                 ],
                 "action_submit": submit,
                 "action_variant": variant.value,

@@ -3,6 +3,8 @@
 The only secret column of the module is ``PosDevice.key_hash`` (review minor 20): excluded.
 """
 
+from typing import Any
+
 from django.contrib import admin
 
 from glowderma.core.admin import (
@@ -13,9 +15,12 @@ from glowderma.core.admin import (
     ReadOnlyAdmin,
     ReadOnlyTabularInline,
     customer_column,
+    customer_link_column,
     date_range,
+    display,
     dropdown,
     money_column,
+    number_link_column,
     register_read_only,
     status_column,
 )
@@ -31,20 +36,31 @@ from glowderma.loyalty.models import (
     PurchaseItem,
 )
 
+POLICY_STATE_LABELS = {
+    "active": "Amalda",
+    "scheduled": "Rejalashtirilgan",
+    "expired": "Muddati tugagan",
+    "superseded": "Almashtirilgan",
+}
+POLICY_STATE_VARIANTS = {"active": SUCCESS, "scheduled": INFO, "expired": WARNING, "superseded": WARNING}
 LEDGER_KIND_VARIANTS = {"credit": SUCCESS, "debit": INFO, "adjustment": WARNING, "reversal": DANGER}
 HOLD_STATE_VARIANTS = {"active": INFO, "captured": SUCCESS, "released": WARNING}
 
 
 class CashbackTierInline(ReadOnlyTabularInline):
     model = CashbackTier
-    fields = ("from_amount", "to_amount", "percent", "created_at")
+    fields = ("from_amount_som", "to_amount_som", "percent", "created_at")
     ordering = ("from_amount",)
+    from_amount_som = staticmethod(money_column("from_amount", "Summadan"))
+    to_amount_som = staticmethod(money_column("to_amount", "Summagacha"))
 
 
 class PurchaseItemInline(ReadOnlyTabularInline):
     model = PurchaseItem
-    fields = ("position", "name", "billz_product_id", "quantity", "unit_price", "promo", "line_total")
+    fields = ("position", "name", "billz_product_id", "quantity", "unit_price_som", "promo", "line_total_som")
     ordering = ("position",)
+    unit_price_som = staticmethod(money_column("unit_price", "Narx"))
+    line_total_som = staticmethod(money_column("line_total", "Jami"))
 
 
 class CashbackPolicyAdmin(ReadOnlyAdmin):
@@ -54,7 +70,20 @@ class CashbackPolicyAdmin(ReadOnlyAdmin):
     ordering = ("-version",)
     autocomplete_fields = ("author",)
     inlines = (CashbackTierInline,)
-    readonly_fields = ("state", "effective_to", "superseded_by")  # derived (design 02 §1.1), change page only
+    # derived (design 02 §1.1), change page only
+    readonly_fields = ("policy_state", "policy_effective_to", "policy_superseded_by")
+
+    @display(description="Holat", label=POLICY_STATE_VARIANTS)
+    def policy_state(self, policy: CashbackPolicy) -> tuple[str, str]:
+        return (policy.state, POLICY_STATE_LABELS.get(policy.state, policy.state))
+
+    @display(description="Amal qilish tugashi", empty_value="-")
+    def policy_effective_to(self, policy: CashbackPolicy) -> Any:
+        return policy.effective_to
+
+    @display(description="O‘rnini olgan versiya", empty_value="-")
+    def policy_superseded_by(self, policy: CashbackPolicy) -> str | None:
+        return None if policy.superseded_by is None else f"v{policy.superseded_by}"
 
 
 class PurchaseAdmin(ReadOnlyAdmin):
@@ -87,6 +116,18 @@ register_read_only(
     ordering=("-policy_id", "from_amount"),
     autocomplete_fields=("policy",),
 )
+
+
+@display(description="Manba", ordering="source_type")
+def ledger_source(entry: LedgerEntry) -> str:
+    """The entry's source; an order's reference repeats the «Buyurtma» column, so only other sources
+    (a Billz sale number, an admin note) show their reference."""
+    label = str(entry.get_source_type_display())
+    if entry.source_type == "order" or not entry.source_ref:
+        return label
+    return f"{label} · {entry.source_ref}"
+
+
 register_read_only(
     LoyaltyAccount,
     list_display=("id", customer_column(), money_column("balance", "Balans"), "updated_at"),
@@ -100,15 +141,15 @@ register_read_only(
     list_display=(
         "id",
         "at",
-        "account",
+        customer_link_column("account", "Hisob"),
         status_column("kind", "Turi", LEDGER_KIND_VARIANTS, LEDGER_KIND),
         money_column("amount", "Summa"),
         money_column("balance_after", "Balans"),
-        "source_type",
-        "source_ref",
-        "order",
+        ledger_source,
+        number_link_column("order", "Buyurtma"),
         "actor",
     ),
+    list_select_related=("account__customer", "actor"),
     list_filter=(dropdown("kind"), dropdown("source_type"), date_range("at")),
     search_fields=("source_ref", "=order__id", "account__customer__phone"),
     ordering=("-at", "-id"),
@@ -119,8 +160,8 @@ register_read_only(
     CashbackHold,
     list_display=(
         "id",
-        "order",
-        "account",
+        number_link_column("order", "Buyurtma"),
+        customer_link_column("account", "Hisob"),
         money_column("amount", "Summa"),
         status_column("state", "Holat", HOLD_STATE_VARIANTS),
         "expires_at",
@@ -130,6 +171,7 @@ register_read_only(
     list_filter=(dropdown("state"), dropdown("release_reason")),
     search_fields=("=order__id",),
     ordering=("-id",),
+    list_select_related=("account__customer",),
     autocomplete_fields=("account", "order", "captured_entry"),
 )
 register_read_only(

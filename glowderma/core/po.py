@@ -6,7 +6,9 @@ the English strings of Unfold and of Django's admin. GNU gettext (``msgfmt``, wh
 uses this module and the compiled ``.mo`` is committed; a test fails when it no longer matches the ``.po``.
 
 Supported: comments, the ``fuzzy`` flag (fuzzy entries are skipped, the header excepted), ``msgctxt``,
-``msgid_plural`` / ``msgstr[n]``, multi-line strings and the C escapes ``\\n \\t \\" \\\\``.
+``msgid_plural`` / ``msgstr[n]``, multi-line strings and the C escapes ``\\n \\t \\" \\\\``. Like
+``msgfmt``, a message defined twice (the same ``msgctxt`` and ``msgid``, with or without a plural) is an
+error.
 """
 
 from __future__ import annotations
@@ -104,10 +106,28 @@ def parse(text: str) -> list[Entry]:
     return entries
 
 
+def duplicates(entries: list[Entry]) -> list[str]:
+    """The messages defined more than once: ``msgfmt`` identifies a message by its context and ``msgid`` alone
+    (a plural form does not make it another message)."""
+    seen: set[tuple[str | None, str]] = set()
+    found: list[str] = []
+    for entry in entries:
+        identity = (entry.msgctxt, entry.msgid)
+        if identity in seen:
+            found.append(entry.msgid if entry.msgctxt is None else f"{entry.msgctxt}|{entry.msgid}")
+        seen.add(identity)
+    return found
+
+
 def compile_po(text: str) -> bytes:
-    """The ``.mo`` bytes of ``text`` (untranslated and fuzzy entries left out, like ``msgfmt``)."""
+    """The ``.mo`` bytes of ``text`` (untranslated and fuzzy entries left out, like ``msgfmt``); a message
+    defined twice raises ``ValueError``."""
     catalog: dict[bytes, bytes] = {}
-    for entry in parse(text):
+    entries = parse(text)
+    repeated = duplicates(entries)
+    if repeated:
+        raise ValueError(f"duplicate message definition: {', '.join(repr(msgid) for msgid in repeated)}")
+    for entry in entries:
         if entry.fuzzy and entry.msgid:
             continue
         if not any(entry.msgstr.values()):

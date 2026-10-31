@@ -20,7 +20,7 @@ from django.utils.translation import gettext as _
 from django.utils.translation import ngettext
 
 from glowderma.core.models import AuditEntry, OutboxMessage
-from glowderma.core.po import compile_po, parse
+from glowderma.core.po import compile_po, duplicates, parse
 from glowderma.core.tests.console import console_client
 
 CATALOG = Path(settings.BASE_DIR) / "locale" / "uz" / "LC_MESSAGES" / "django.po"
@@ -232,7 +232,7 @@ def test_project_apps_have_uzbek_labels() -> None:
     assert labels["commerce"] == "Savdo"
     assert labels["catalog"] == "Katalog"
     assert labels["accounts"] == "Hisoblar"
-    assert labels["payments"] == "To‘lovlar"
+    assert labels["payments"] == "To‘lov va qaytarishlar"  # never the same as its model list (breadcrumbs)
     # django_otp's device apps (no verbose_name of their own: the index showed "Otp_Totp")
     assert labels["otp_totp"] == "Ikki bosqichli kirish (TOTP)"
     from glowderma.core.otp_apps import OtpStaticConfig
@@ -257,7 +257,9 @@ def test_the_compiled_catalog_reads_back_with_gettext() -> None:
     for entry in parse(CATALOG.read_text(encoding="utf-8")):
         if not entry.msgid:
             continue
-        if entry.msgid_plural is None:
+        if entry.msgctxt is not None:
+            assert translations.pgettext(entry.msgctxt, entry.msgid) == entry.msgstr[0], entry.msgid
+        elif entry.msgid_plural is None:
             assert translations.gettext(entry.msgid) == entry.msgstr[0], entry.msgid
         else:
             assert translations.ngettext(entry.msgid, entry.msgid_plural, 2) == entry.msgstr[0]
@@ -273,7 +275,7 @@ def test_catalog_uses_the_uzbek_apostrophes() -> None:
 def test_django_uses_the_project_catalog() -> None:
     assert _("Log in") == "Kirish"
     assert _("Change") == "O‘zgartirish"  # overrides Django's own "O'zgartirish"
-    assert ngettext("%(counter)s result", "%(counter)s results", 5) == "%(counter)s ta natija"
+    assert ngettext("%(counter)s result", "%(counter)s results", 5) == "%(counter)s ta yozuv"
 
 
 def test_po_parser_handles_context_plurals_fuzzy_and_continuations() -> None:
@@ -293,6 +295,20 @@ def test_po_parser_handles_context_plurals_fuzzy_and_continuations() -> None:
     assert translations.ngettext("one", "many", 1) == "bitta"
     assert translations.ngettext("one", "many", 3) == "ko‘p"
     assert translations.gettext("untranslated") == "untranslated"
+
+
+def test_a_message_defined_twice_is_refused_like_msgfmt() -> None:
+    header = 'msgid ""\nmsgstr ""\n"Content-Type: text/plain; charset=UTF-8\\n"\n\n'
+    twice = header + 'msgid "Save"\nmsgstr "Saqlash"\n\nmsgid "Save"\nmsgid_plural "Saves"\nmsgstr[0] "x"\n'
+    with pytest.raises(ValueError, match="duplicate message definition: 'Save'"):
+        compile_po(twice)
+    in_contexts = header + 'msgctxt "a"\nmsgid "Save"\nmsgstr "A"\n\nmsgctxt "b"\nmsgid "Save"\nmsgstr "B"\n'
+    assert compile_po(in_contexts)  # another context is another message
+
+
+@pytest.mark.parametrize("name", ["django.po", "djangojs.po"])
+def test_the_committed_catalogs_define_every_message_once(name: str) -> None:
+    assert duplicates(parse((CATALOG.parent / name).read_text(encoding="utf-8"))) == []
 
 
 # --- gaps found by the browser suite (e2e_admin/tests/uzbek.spec.ts, mutating/professionals.spec.ts) --------

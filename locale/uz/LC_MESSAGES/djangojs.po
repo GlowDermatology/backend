@@ -1,5 +1,6 @@
-# Uzbek (Latin) strings of the Django admin's JavaScript (date/time shortcuts, calendar, select filters) that
-# Django's own uz djangojs catalog leaves untranslated; JavaScriptCatalog merges LOCALE_PATHS over it.
+# Uzbek (Latin) strings of the Django admin's JavaScript in the ops console (date/time shortcuts, calendar, select
+# filters, the time widgets' time-zone note) that Django's own uz djangojs catalog leaves untranslated;
+# JavaScriptCatalog (the jsi18n catalog) merges LOCALE_PATHS over it.
 # Compile with `manage.py compile_locale` (stdlib, no GNU gettext); commit the .mo with it.
 msgid ""
 msgstr ""
@@ -37,8 +38,17 @@ msgstr "%s (bugun, tanlangan)"
 msgid "(click to clear)"
 msgstr "(tozalash uchun bosing)"
 
+# The time widgets' note when the browser's clock zone differs from the server's (Asia/Tashkent).
 msgid "server"
 msgstr "server"
+
+msgid "Note: Enter times in the %(timezone)s timezone. (You are %(offset)s hour ahead.)"
+msgid_plural "Note: Enter times in the %(timezone)s timezone. (You are %(offset)s hours ahead.)"
+msgstr[0] "Vaqtni %(timezone)s vaqt mintaqasida kiriting (siz %(offset)s soat oldindasiz)."
+
+msgid "Note: Enter times in the %(timezone)s timezone. (You are %(offset)s hour behind.)"
+msgid_plural "Note: Enter times in the %(timezone)s timezone. (You are %(offset)s hours behind.)"
+msgstr[0] "Vaqtni %(timezone)s vaqt mintaqasida kiriting (siz %(offset)s soat orqadasiz)."
 
 msgid "Monday"
 msgstr "Dushanba"

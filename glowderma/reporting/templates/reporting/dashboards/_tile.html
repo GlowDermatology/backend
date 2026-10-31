@@ -1,9 +1,10 @@
-<{% if tile.href %}a href="{{ tile.href }}"{% else %}div{% endif %} class="gd-tile gd-tile--{{ tile.state.key }}">
+<{% if tile.href %}a href="{{ tile.href }}"{% else %}div{% endif %} class="gd-tile gd-tile--{{ tile.state.key }}{% if tile.muted %} gd-tile--muted{% endif %}">
     <div class="gd-tile__head">
         <span class="material-symbols-outlined gd-tile__icon" aria-hidden="true">{{ tile.icon }}</span>
         <span class="gd-tile__title">{{ tile.title }}</span>
         {% if tile.state.key != "neutral" or tile.state.label != "Ma’lumot" %}{% include "reporting/dashboards/_state.html" with s=tile.state %}{% endif %}
     </div>
-    <div class="gd-tile__value">{{ tile.value }}{% if tile.unit %} <span class="gd-tile__unit">{{ tile.unit }}</span>{% endif %}{% if tile.delta %}<span class="gd-delta" title="Oldingi davrga nisbatan"><span class="material-symbols-outlined" aria-hidden="true">{% if tile.delta.up %}trending_up{% else %}trending_down{% endif %}</span>{{ tile.delta.text }}</span>{% endif %}</div>
+    <div class="gd-tile__value">{{ tile.value }}{% if tile.unit %} <span class="gd-tile__unit">{{ tile.unit }}</span>{% endif %}{% if tile.delta %} <span class="gd-delta" title="Oldingi davrga nisbatan"><span class="material-symbols-outlined" aria-hidden="true">{% if tile.delta.up %}trending_up{% else %}trending_down{% endif %}</span>{{ tile.delta.text }}</span>{% endif %}</div>
     {% if tile.hint %}<div class="gd-tile__hint">{{ tile.hint }}</div>{% endif %}
+    {% if tile.note %}<div class="gd-tile__note">{{ tile.note }}</div>{% endif %}
 </{% if tile.href %}a{% else %}div{% endif %}>
