@@ -6,10 +6,19 @@
  */
 import type { Browser, Page } from "@playwright/test";
 
+import { passwordStep } from "../../lib/console";
 import { django } from "../../lib/django";
 import { addSession, expect, MAIN_URL, test, type StaffMember } from "../../lib/fixtures";
+import { base32ToHex, freshCode } from "../../lib/totp";
 
-type AuditRow = { id: number; action: string; entity_type: string; entity_id: string; after: Record<string, unknown> | null };
+type AuditRow = {
+  id: number;
+  action: string;
+  entity_type: string;
+  entity_id: string;
+  reason: string;
+  after: Record<string, unknown> | null;
+};
 
 const auditMax = async () => (await django<{ id: number }>("audit-max")).id;
 const audit = (after_id: number, action: string) => django<AuditRow[]>("audit", { after_id, action });
@@ -46,7 +55,7 @@ test.describe("outbox: requeue one message", () => {
     await page.goto(`/django-admin/core/outboxmessage/${id}/change/`);
     await openAction(page, "Qayta navbatga qo‘yish");
     await expect(page.locator("#dialog h1")).toHaveText("Xabarni qayta navbatga qo‘yish");
-    await expect(page.locator("#dialog")).toContainText("Topic: push.order_status");
+    await expect(page.locator("#dialog")).toContainText("Mavzu: push.order_status");
     await cancelModal(page);
     expect(await django<{ status: string }>("outbox", { id })).toMatchObject({ status: "dead", attempts: 10 });
     expect(await audit(since, "ops.")).toEqual([]);
@@ -78,7 +87,10 @@ test.describe("outbox: requeue one message", () => {
     const { id } = await django<{ id: number }>("dead-outbox");
     await page.goto(`/django-admin/core/outboxmessage/?status__exact=dead`);
     const row = page.locator("#result_list tbody tr", { has: page.locator(`a[href^="/django-admin/core/outboxmessage/${id}/change/"]`) });
-    await row.getByRole("link", { name: /Qayta navbatga/ }).click();
+    // the short «Qayta» row button carries its full name as the tooltip
+    const button = row.getByRole("link", { name: /Qayta/ });
+    await expect(button).toHaveAttribute("title", "Qayta navbatga qo‘yish");
+    await button.click();
     await expect(page.locator("#modal-content #dialog form")).toBeVisible();
     await confirm(page);
     await expect(page).toHaveURL(/\/core\/outboxmessage\/$/);
@@ -128,7 +140,7 @@ test.describe("outbox: requeue every dead message of a topic (managers only)", (
     const second = await django<{ id: number }>("dead-outbox", { topic: "push.order_status" });
     const since = await auditMax();
     await page.goto("/django-admin/core/outboxmessage/");
-    await openAction(page, "Topic bo‘yicha o‘liklarni qayta navbatga");
+    await openAction(page, "Mavzu bo‘yicha o‘liklarni qayta navbatga");
     await expect(page.locator("#dialog")).toContainText("Faqat menejerlar uchun.");
     await page.locator("#dialog select[name=topic]").selectOption("push.order_status");
     await confirm(page);
@@ -145,7 +157,7 @@ test.describe("outbox: requeue every dead message of a topic (managers only)", (
     await django("dead-outbox");
     const page = await asStaff(browser, await newStaff({ manager: false }));
     await page.goto("/django-admin/core/outboxmessage/");
-    await expect(page.getByRole("link", { name: "Topic bo‘yicha o‘liklarni qayta navbatga" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Mavzu bo‘yicha o‘liklarni qayta navbatga" })).toHaveCount(0);
     const response = await page.goto("/django-admin/core/outboxmessage/requeue-dead-topic/");
     expect(response?.status()).toBe(403);
     await page.context().close();
@@ -172,6 +184,33 @@ test.describe("consistency report now (managers only)", () => {
     await expect(page.getByText(/Hisobot yaqinda ishga tushirilgan/)).toBeVisible();
     expect(await audit(since, "ops.consistency_report_requested")).toHaveLength(1);
     await django("cache-delete", { keys: ["ops:consistency_report"] });
+  });
+
+  test("manager: «Hisobotni hozir ishga tushirish» on the Money dashboard runs it and comes back", async ({ page, staff }) => {
+    void staff;
+    await django("cache-delete", { keys: ["ops:consistency_report"] });
+    const since = await auditMax();
+    await page.goto("/django-admin/dashboards/money/");
+    const button = page.locator(".gd-dash").getByRole("link", { name: "Hisobotni hozir ishga tushirish" });
+    await expect(button).toBeVisible();
+    await button.click();
+    // the audit log action's own confirm step (not a second action), returning to the dashboard
+    await expect(page).toHaveURL(/\/core\/auditentry\/run-consistency-report\/\?next=/);
+    await page.locator("button[name=_ops_confirm]").first().click();
+    await page.waitForLoadState("domcontentloaded");
+    await expect(page).toHaveURL(/\/django-admin\/dashboards\/money\/$/);
+    await expect(page.getByText(/Muvofiqlik hisoboti navbatga qo‘yildi/)).toBeVisible();
+    expect(await audit(since, "ops.consistency_report_requested")).toHaveLength(1);
+    expect((await audit(since, "report.consistency")).length).toBeGreaterThanOrEqual(1);
+    await django("cache-delete", { keys: ["ops:consistency_report"] });
+  });
+
+  test("non-manager: the Money dashboard offers no report button", async ({ browser, newStaff }) => {
+    const page = await asStaff(browser, await newStaff({ manager: false }));
+    await page.goto("/django-admin/dashboards/money/");
+    await expect(page.locator(".gd-dash")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Hisobotni hozir ishga tushirish" })).toHaveCount(0);
+    await page.context().close();
   });
 
   test("non-manager: refused", async ({ browser, newStaff, expected }) => {
@@ -232,12 +271,12 @@ test.describe("customer sessions", () => {
     const { customer_id, session_ids } = await django<{ customer_id: number; session_ids: string[] }>("customer-sessions", { count: 2 });
     const since = await auditMax();
     await page.goto(`/django-admin/accounts/authsession/${session_ids[0]}/change/`);
-    await openAction(page, "Seansni tugatish");
+    await openAction(page, "Sessiyani tugatish");
     await cancelModal(page);
     expect((await django<{ revoked_at: string | null }[]>("auth-sessions", { ids: session_ids })).every((row) => row.revoked_at === null)).toBe(true);
-    await openAction(page, "Seansni tugatish");
+    await openAction(page, "Sessiyani tugatish");
     await confirm(page);
-    await expect(page.getByText("Seans tugatildi.")).toBeVisible();
+    await expect(page.getByText("Sessiya tugatildi.")).toBeVisible();
     const rows = await django<{ id: string; revoked_at: string | null; revoke_reason: string }[]>("auth-sessions", { ids: session_ids });
     const revoked = rows.find((row) => row.id === session_ids[0])!;
     const other = rows.find((row) => row.id === session_ids[1])!;
@@ -248,7 +287,7 @@ test.describe("customer sessions", () => {
     expect(audits).toHaveLength(1);
     expect(audits[0]).toMatchObject({ entity_type: "customer", entity_id: String(customer_id) });
     await page.reload();
-    await expect(page.getByRole("link", { name: "Seansni tugatish" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Sessiyani tugatish" })).toHaveCount(0);
   });
 
   test("revoke one session from the list row button", async ({ page, staff }) => {
@@ -258,7 +297,7 @@ test.describe("customer sessions", () => {
     await page.locator("#result_list tbody tr").first().getByRole("link", { name: /Tugatish/ }).click();
     await expect(page.locator("#modal-content #dialog form")).toBeVisible();
     await confirm(page);
-    await expect(page.getByText("Seans tugatildi.")).toBeVisible();
+    await expect(page.getByText("Sessiya tugatildi.")).toBeVisible();
     const [row] = await django<{ revoked_at: string | null }[]>("auth-sessions", { ids: session_ids });
     expect(row.revoked_at).not.toBeNull();
   });
@@ -268,9 +307,9 @@ test.describe("customer sessions", () => {
     const user = await newStaff();
     const { id } = await django<{ id: string }>("panel-session", { email: user.email });
     await page.goto(`/django-admin/accounts/authsession/${id}/change/`);
-    await expect(page.getByRole("link", { name: "Seansni tugatish" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Sessiyani tugatish" })).toHaveCount(0);
     await page.goto(`/django-admin/accounts/authsession/${id}/revoke/`);
-    await expect(page.locator(".gd-ops-refusal")).toHaveText("Xodim seanslari bu yerda tugatilmaydi.");
+    await expect(page.locator(".gd-ops-refusal")).toHaveText("Xodim sessiyalari bu yerda tugatilmaydi.");
   });
 
   test("revoke every session of a customer: cancel, then confirm", async ({ page, staff }) => {
@@ -278,19 +317,19 @@ test.describe("customer sessions", () => {
     const { customer_id, session_ids } = await django<{ customer_id: number; session_ids: string[] }>("customer-sessions", { count: 3 });
     const since = await auditMax();
     await page.goto(`/django-admin/accounts/customer/${customer_id}/change/`);
-    await openAction(page, "Barcha seanslarni tugatish");
+    await openAction(page, "Barcha sessiyalarni tugatish");
     await cancelModal(page);
     expect((await django<{ revoked_at: string | null }[]>("auth-sessions", { ids: session_ids })).every((row) => row.revoked_at === null)).toBe(true);
-    await openAction(page, "Barcha seanslarni tugatish");
+    await openAction(page, "Barcha sessiyalarni tugatish");
     await confirm(page);
-    await expect(page.getByText("3 ta seans tugatildi.")).toBeVisible();
+    await expect(page.getByText("3 ta sessiya tugatildi.")).toBeVisible();
     const rows = await django<{ revoked_at: string | null; revoke_reason: string }[]>("auth-sessions", { ids: session_ids });
     expect(rows.every((row) => row.revoked_at !== null && row.revoke_reason === "admin_revoked")).toBe(true);
     const audits = await audit(since, "ops.customer_sessions_revoked");
     expect(audits).toHaveLength(1);
     expect(audits[0].after).toMatchObject({ count: 3 });
     await page.reload();
-    await expect(page.getByRole("link", { name: "Barcha seanslarni tugatish" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "Barcha sessiyalarni tugatish" })).toHaveCount(0);
   });
 });
 
@@ -323,15 +362,65 @@ test.describe("staff 2FA reset (managers only)", () => {
     await selectAndRun(page, target.email);
     await page.getByRole("button", { name: "Ha, 2FA ni qayta o‘rnatish" }).click();
     await page.waitForLoadState("domcontentloaded");
-    await expect(page.getByText(/1 ta xodimning 2FA qurilmasi o‘chirildi/)).toBeVisible();
+    await expect(page.getByText(/1 ta xodimning 2FA qurilmasi o‘chirildi va konsol sessiyalari tugatildi/)).toBeVisible();
     expect(await django("two-factor", { email: target.email })).toEqual({ confirmed: 0, unconfirmed: 0, recovery_codes: 0 });
     const rows = await audit(since, "ops_access.2fa_reset");
     expect(rows).toHaveLength(1);
     expect(rows[0].entity_id).toBe(String(target.id));
-    // Their open console session stops being verified at once.
+    expect(rows[0].after).toMatchObject({ via: "console", sessions: 1 });
+    // Their open console session is ended at once.
+    expect(await django<{ count: number }>("user-sessions", { email: target.email })).toEqual({ count: 0 });
     await otherPage.goto("/django-admin/core/outboxmessage/");
     await expect(otherPage).toHaveURL(/\/django-admin\/login\//);
     await other.close();
+  });
+
+  test("four eyes: the manager who reset a person's password cannot also open their enrolment; another manager can", async ({
+    page,
+    staff,
+    newStaff,
+    browser,
+  }) => {
+    const target = await newStaff();
+    // the same manager resets the password in the Next admin panel …
+    const { password } = await django<{ password: string }>("reset-password", { email: target.email, actor: staff.email });
+    // … and the 2FA from the console
+    await selectAndRun(page, target.email);
+    await expect(page.locator("#reset-2fa-targets")).toContainText(target.email);
+    await expect(page.locator("#content")).toContainText("2FA ni boshqa menejer qayta o‘rnatishi kerak");
+    await page.getByRole("button", { name: "Ha, 2FA ni qayta o‘rnatish" }).click();
+    await page.waitForLoadState("domcontentloaded");
+    await expect(page.getByText(/1 ta xodimning 2FA qurilmasi o‘chirildi/)).toBeVisible();
+
+    // the person (or whoever holds the temporary password) cannot enrol a phone
+    const since = await auditMax();
+    const person = await browser.newContext({ baseURL: MAIN_URL });
+    const personPage = await person.newPage();
+    await passwordStep(personPage, target.email, password);
+    await expect(personPage).toHaveURL(/\/django-admin\/login\/$/);
+    await expect(personPage.getByText(/Parolingiz va 2FA bir menejer tomonidan tiklangan/)).toBeVisible();
+    expect(await django("two-factor", { email: target.email })).toEqual({ confirmed: 0, unconfirmed: 0, recovery_codes: 0 });
+    const refused = await audit(since, "console.enrol_refused");
+    expect(refused.map((row) => [row.entity_id, row.reason])).toEqual([[String(target.id), "same_manager"]]);
+
+    // another manager opens the window: the person enrols
+    const other = await newStaff({ manager: true, full_name: "E2E Ikkinchi Menejer" });
+    const otherPage = await asStaff(browser, other);
+    await selectAndRun(otherPage, target.email);
+    await otherPage.getByRole("button", { name: "Ha, 2FA ni qayta o‘rnatish" }).click();
+    await otherPage.waitForLoadState("domcontentloaded");
+    await passwordStep(personPage, target.email, password);
+    await expect(personPage).toHaveURL(/\/django-admin\/2fa\/enrol\/$/);
+    await personPage.locator(".ops-manual-key summary").click();
+    const keyHex = base32ToHex((await personPage.locator("#manual-key").innerText()).trim());
+    await personPage.locator("#enrol-form input[name=code]").fill(await freshCode(keyHex));
+    await personPage.locator("#enrol-form button[type=submit]").click();
+    await expect(personPage).toHaveURL(/\/django-admin\/2fa\/recovery-codes\/$/);
+    const enrolled = await audit(since, "console.2fa_enrolled");
+    expect(enrolled).toHaveLength(1);
+    expect(enrolled[0].after).toMatchObject({ window_opened_by: "E2E Ikkinchi Menejer", window_via: "console" });
+    await person.close();
+    await otherPage.context().close();
   });
 
   test("manager: one's own 2FA cannot be reset here", async ({ page, staff }) => {

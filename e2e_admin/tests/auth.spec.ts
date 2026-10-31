@@ -1,8 +1,12 @@
 /**
- * The console sign-in, one feature per test: password step, TOTP enrolment, recovery codes, TOTP and
- * recovery sign-in, the two lockouts, pending sign-in expiry and cancel, the verified-session rule, non-staff
+ * The console sign-in, one feature per test: password step, TOTP enrolment inside its window, the recovery
+ * codes page (shown once, copy, download), the Uzbek CSRF page, TOTP and recovery sign-in, the two lockouts, pending sign-in expiry and cancel, the verified-session rule, non-staff
  * refusal, POST-only logout, and the idle / absolute session limits.
  */
+import { readFileSync } from "node:fs";
+
+import type { Page } from "@playwright/test";
+
 import { django } from "../lib/django";
 import {
   codeStep,
@@ -15,7 +19,7 @@ import {
   signInThroughForms,
   TEXT,
 } from "../lib/console";
-import { addSession, expect, test } from "../lib/fixtures";
+import { addSession, expect, test, type StaffMember } from "../lib/fixtures";
 import { base32ToHex, freshCode, hotp, currentStep } from "../lib/totp";
 
 type AuditRow = {
@@ -25,6 +29,8 @@ type AuditRow = {
   reason: string;
   after: Record<string, unknown> | null;
 };
+
+const RECOVERY_CODES = /\/django-admin\/2fa\/recovery-codes\/$/;
 
 const auditMax = async () => (await django<{ id: number }>("audit-max")).id;
 const audit = (after_id: number, action: string, entity_id?: number) =>
@@ -64,11 +70,23 @@ test("wrong password is refused on the login page and audited", async ({ page, n
   expect(rows.some((row) => row.after?.email === user.email)).toBe(true);
 });
 
+/** Password step and the enrolment form of a fresh staff member; returns the key read off the page. */
+async function enrolThroughForms(page: Page, user: StaffMember): Promise<string> {
+  await passwordStep(page, user.email, user.password);
+  await expect(page).toHaveURL(/\/django-admin\/2fa\/enrol\/$/);
+  await page.locator(".ops-manual-key summary").click();
+  const keyHex = base32ToHex((await page.locator("#manual-key").innerText()).trim());
+  await codeStep(page, await freshCode(keyHex), "#enrol-form");
+  await expect(page).toHaveURL(RECOVERY_CODES);
+  return keyHex;
+}
+
 test("first sign-in enrols TOTP: QR and manual key, wrong code refused, right code accepted, recovery codes shown once", async ({
   page,
   newStaff,
 }) => {
-  const user = await newStaff({ totp: false });
+  // ops_access grant opened the enrolment window (OPS_ENROL_WINDOW_SECONDS)
+  const user = await newStaff({ totp: false, enrol_window: true });
   const since = await auditMax();
   await passwordStep(page, user.email, user.password);
   await expect(page).toHaveURL(/\/django-admin\/2fa\/enrol\/$/);
@@ -82,12 +100,18 @@ test("first sign-in enrols TOTP: QR and manual key, wrong code refused, right co
   await codeStep(page, wrongCode(keyHex), "#enrol-form");
   await expect(page).toHaveURL(/\/2fa\/enrol\/$/);
   await expect(page.getByText(TEXT.wrongCode)).toBeVisible();
+  // The wrong code is not kept in the field.
+  await expect(page.locator("#enrol-form input[name=code]")).toHaveValue("");
   // The same pending secret is shown again (one enrolment at a time).
   await page.locator(".ops-manual-key summary").click();
   await expect(page.locator("#manual-key")).toHaveText(manual);
   expect(await django("two-factor", { email: user.email })).toEqual({ confirmed: 0, unconfirmed: 1, recovery_codes: 0 });
 
+  // The confirmation answers with a redirect to a GET page (a reload never re-posts the form).
+  const confirmed = page.waitForResponse((response) => response.url().endsWith("/2fa/enrol/") && response.request().method() === "POST");
   await codeStep(page, await freshCode(keyHex), "#enrol-form");
+  expect((await confirmed).status()).toBe(302);
+  await expect(page).toHaveURL(RECOVERY_CODES);
   await expect(page.getByText("Ikki bosqichli himoya yoqildi.")).toBeVisible();
   const codes = await page.locator("#recovery-codes code").allInnerTexts();
   expect(codes).toHaveLength(10);
@@ -97,6 +121,8 @@ test("first sign-in enrols TOTP: QR and manual key, wrong code refused, right co
   const actions = (await audit(since, "console.", user.id)).map((row) => row.action);
   expect(actions).toEqual(expect.arrayContaining(["console.password_verified", "console.otp_failed", "console.2fa_enrolled"]));
   expect(actions).toContain("console.login_succeeded");
+  const [enrolled] = await audit(since, "console.2fa_enrolled", user.id);
+  expect(enrolled.after).toMatchObject({ window_action: "ops_access.enrolment_opened", window_opened_by: "system", window_via: "cli" });
 
   await page.getByRole("link", { name: /Kodlarni saqladim/ }).click();
   await expect(page).toHaveURL(new RegExp(`${INDEX}$`));
@@ -105,8 +131,95 @@ test("first sign-in enrols TOTP: QR and manual key, wrong code refused, right co
   // Shown once: the enrolment step is gone, and no page shows the codes again.
   await page.goto("/django-admin/2fa/enrol/");
   await expect(page).toHaveURL(new RegExp(`${INDEX}$`));
+  for (const path of [INDEX, "/django-admin/2fa/recovery-codes/"]) {
+    await page.goto(path);
+    const html = await page.content();
+    for (const code of codes) expect(html, path).not.toContain(code);
+  }
+});
+
+test("the recovery codes page: copy button, .txt download, and a reload shows only the «shown once» notice", async ({
+  page,
+  newStaff,
+}) => {
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+  const user = await newStaff({ totp: false, enrol_window: true });
+  await enrolThroughForms(page, user);
+  const codes = await page.locator("#recovery-codes code").allInnerTexts();
+  expect(codes).toHaveLength(10);
+
+  // «Nusxa olish»: a static script (no inline JavaScript under the CSP) copies every code.
+  const copy = page.getByRole("button", { name: /Nusxa olish/ });
+  await expect(copy).toBeVisible();
+  await copy.click();
+  await expect(page.getByRole("button", { name: /Nusxa olindi/ })).toBeVisible();
+  const copied = await page.evaluate(() => navigator.clipboard.readText());
+  expect(copied.startsWith("Glow Derma Ops — zaxira kodlar\n")).toBe(true);
+  for (const code of codes) expect(copied).toContain(code);
+
+  // «.txt faylga yuklab olish»: a plain data: link that works without JavaScript.
+  const link = page.getByRole("link", { name: /\.txt faylga yuklab olish/ });
+  await expect(link).toHaveAttribute("download", "glowderma-ops-zaxira-kodlar.txt");
+  const [download] = await Promise.all([page.waitForEvent("download"), link.click()]);
+  expect(download.suggestedFilename()).toBe("glowderma-ops-zaxira-kodlar.txt");
+  const text = readFileSync((await download.path())!, "utf8");
+  expect(text.split("\n").filter(Boolean)).toEqual(["Glow Derma Ops — zaxira kodlar", ...codes]);
+
+  // A reload: never the codes again, the «shown once» notice and a way on.
+  await page.reload();
+  await expect(page).toHaveURL(RECOVERY_CODES);
+  await expect(page.getByText(/faqat bir marta ko‘rsatiladi/)).toBeVisible();
+  await expect(page.locator("#recovery-codes")).toHaveCount(0);
   const html = await page.content();
   for (const code of codes) expect(html).not.toContain(code);
+  await page.getByRole("link", { name: /Konsolga o‘tish/ }).click();
+  await expect(page).toHaveURL(new RegExp(`${INDEX}$`));
+});
+
+test("the recovery codes page needs a verified session", async ({ page }) => {
+  await page.goto("/django-admin/2fa/recovery-codes/");
+  await expectLoginPage(page);
+});
+
+test("without an enrolment window the password alone cannot enrol a device", async ({ page, newStaff }) => {
+  // console access but no grant / reset in the audit log: no window (trust-on-first-use is closed)
+  const user = await newStaff({ totp: false });
+  const since = await auditMax();
+  await passwordStep(page, user.email, user.password);
+  await expectLoginPage(page);
+  await expect(page.getByText(/Ikki bosqichli himoyani sozlash muddati tugagan yoki ochilmagan/)).toBeVisible();
+  expect(await django("two-factor", { email: user.email })).toEqual({ confirmed: 0, unconfirmed: 0, recovery_codes: 0 });
+  const refused = await audit(since, "console.enrol_refused", user.id);
+  expect(refused).toHaveLength(1);
+  expect(refused[0].reason).toBe("no_window");
+  // The pending sign-in ended with it.
+  await page.goto("/django-admin/2fa/enrol/");
+  await expectLoginPage(page);
+  // A window opened afterwards (ops_access grant) lets the same person enrol.
+  await django("open-enrolment", { email: user.email });
+  await enrolThroughForms(page, user);
+  await expect(page.locator("#recovery-codes code")).toHaveCount(10);
+});
+
+test("a form posted with a stale CSRF token answers the console's Uzbek page", async ({ page, newStaff, expected }) => {
+  expected.status(403, /\/django-admin\/login\/$/);
+  const user = await newStaff();
+  await page.goto(LOGIN);
+  await page.context().clearCookies({ name: "csrftoken" });
+  await page.locator("#id_username").fill(user.email);
+  await page.locator("#id_password").fill(user.password);
+  const answer = page.waitForResponse((response) => response.url().endsWith(LOGIN) && response.request().method() === "POST");
+  await page.locator("#login-form button[type=submit]").click();
+  expect((await answer).status()).toBe(403);
+  await expect(page.getByText(/Sahifa eskirgan yoki sessiya yangilangan/)).toBeVisible();
+  await expect(page).toHaveTitle(/So‘rov qabul qilinmadi/);
+  const body = await page.locator("body").innerText();
+  expect(body).not.toMatch(/CSRF|Forbidden/);
+  await page.getByRole("link", { name: /Davom etish/ }).click();
+  await expectLoginPage(page);
+  // and the form works again
+  await passwordStep(page, user.email, user.password);
+  await expect(page).toHaveURL(/\/2fa\/$/);
 });
 
 test("sign out, then sign back in with a TOTP code", async ({ page, newStaff }) => {

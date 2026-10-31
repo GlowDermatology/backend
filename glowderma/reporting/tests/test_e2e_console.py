@@ -107,3 +107,81 @@ def test_secret_fields_cover_the_excluded_columns() -> None:
         "refresh_hash",
     ]
     assert e2e_console._secret_fields(Device, admin.site._registry[Device]) == ["fcm_token", "key_hash"]
+
+
+def test_a_column_excluded_only_for_its_labelled_display_is_no_secret() -> None:
+    from django.contrib import admin
+
+    from glowderma.delivery.models import Shipment
+
+    # bts_status is shown as «code — Uzbek label» (bts_status_label), not hidden
+    assert "bts_status" not in e2e_console._secret_fields(Shipment, admin.site._registry[Shipment])
+
+
+@pytest.mark.django_db
+@override_settings(E2E_CONSOLE_ENABLED=True)
+def test_enrolment_window_and_password_reset_actions() -> None:
+    from glowderma.accounts.console import access
+    from glowderma.core.models import AuditEntry
+
+    without = run("staff", {"totp": False})
+    assert "enrol_until" not in without
+    assert access.enrolment_window(StaffUser.objects.get(pk=without["id"])) is None
+    opened = run("staff", {"totp": False, "enrol_window": True})
+    assert opened["enrol_until"]
+    window = access.enrolment_window(StaffUser.objects.get(pk=opened["id"]))
+    assert window is not None and window.via == access.VIA_CLI
+    manager = run("staff", {"manager": True})
+    assert run("open-enrolment", {"email": without["email"], "actor": manager["email"]})["until"]
+    window = access.enrolment_window(StaffUser.objects.get(pk=without["id"]))
+    assert window is not None and window.via == access.VIA_CONSOLE and window.opened_by_id == manager["id"]
+    reset = run("reset-password", {"email": without["email"], "actor": manager["email"]})
+    assert StaffUser.objects.get(pk=without["id"]).check_password(reset["password"])
+    entry = AuditEntry.objects.get(action="staff.password_reset")
+    rows = run("audit", {"action": "staff.password_reset"})
+    assert rows[-1]["id"] == entry.pk and "ip" in rows[-1]
+
+
+@pytest.mark.django_db
+@override_settings(E2E_CONSOLE_ENABLED=True)
+def test_outbox_secrets_and_english_labels_actions() -> None:
+    from glowderma.core.models import OutboxMessage
+
+    created = run("outbox-secrets")
+    topics = sorted(message["topic"] for message in created["messages"])
+    assert topics == ["apple.revoke", "push.account_security"]
+    assert set(OutboxMessage.objects.values_list("status", flat=True)) == {"dead"}
+    payloads = " ".join(str(row.payload) for row in OutboxMessage.objects.all())
+    assert all(secret in payloads for secret in created["secrets"])  # stored as produced, masked on the page
+    labels = run("english-labels")
+    assert "delivery.shipment" in labels and "commerce.order" in labels
+    # every field of every console model (and of its inlines) has an explicit Uzbek label
+    assert {label: found for label, found in labels.items() if found} == {}
+
+
+def test_derived_labels_find_a_field_without_a_label_and_ignore_relabelled_ones() -> None:
+    from types import SimpleNamespace
+
+    from django.db import models
+
+    bare = models.DateTimeField()
+    bare.set_attributes_from_name("last_attempt_at")
+    named = models.CharField(verbose_name="email")
+    named.set_attributes_from_name("email")
+    relabelled = models.BooleanField()  # a third-party field given an Uzbek label at start-up (otp_apps)
+    relabelled.set_attributes_from_name("confirmed")
+    relabelled.verbose_name = "tasdiqlangan"
+    fake = SimpleNamespace(_meta=SimpleNamespace(get_fields=lambda: [bare, named, relabelled]))
+    assert e2e_console._derived_labels(fake) == ["Last attempt at"]  # type: ignore[arg-type]
+
+
+def test_filters_place_a_filter_shown_only_when_applied() -> None:
+    from django.contrib import admin
+
+    from glowderma.core.models import OutboxMessage
+
+    filters = e2e_console._filters(OutboxMessage, admin.site._registry[OutboxMessage])
+    by_field = {entry["field"]: entry for entry in filters}
+    assert by_field["order"]["shown"] is False  # the ?order= drill-down of an order's Diagnostika block
+    deferred = by_field["deferred_since__isnull"]
+    assert (deferred["shown"], deferred["index"], deferred["block"]) == (True, 3, 2)

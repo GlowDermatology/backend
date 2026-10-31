@@ -121,7 +121,10 @@ test("weekly hours inline: an invalid row is refused on the form, a valid one is
   await page.goto(`/django-admin/professionals/professional/${id}/change/`);
   await page.locator("a.add-row").click();
   const field = (name: string) => page.locator(`input[name^="working_hours-"][name$="-${name}"]:not([name*="__prefix__"])`).last();
-  await field("weekday").fill("0");
+  // the weekday is a select of Uzbek day names (the value stays 0–6)
+  const weekday = page.locator('select[name^="working_hours-"][name$="-weekday"]:not([name*="__prefix__"])').last();
+  await expect(weekday.locator("option", { hasText: "Dushanba" })).toHaveAttribute("value", "0");
+  await weekday.selectOption("0");
   await field("start").fill("18:00");
   await field("end").fill("09:00");
   const since = await auditMax();

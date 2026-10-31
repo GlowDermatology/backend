@@ -68,3 +68,19 @@ test("the command palette (Ctrl+K) finds a model and opens it", async ({ page, s
   await result.click();
   await expect(page).toHaveURL(/\/django-admin\/core\/outboxmessage\/$/);
 });
+
+test("app names never repeat a model list: the «all applications» headings and the breadcrumb", async ({ page, staff }) => {
+  void staff;
+  await page.goto("/django-admin/");
+  const headings = await page.locator("div.mb-6 > h2").allInnerTexts();
+  for (const name of ["To‘lov va qaytarishlar", "Klinika jadvali", "Klinika qabullari", "Sayt"]) {
+    expect(headings.map((heading) => heading.trim()), name).toContain(name);
+  }
+  for (const old of ["To‘lovlar", "Mutaxassislar", "Qabullar", "Sayt sozlamalari"]) {
+    expect(headings.map((heading) => heading.trim()), old).not.toContain(old);
+  }
+  await page.goto("/django-admin/payments/payment/");
+  const crumbs = page.locator("h1").filter({ has: page.locator('a[href="/django-admin/payments/"]') }).first();
+  await expect(crumbs.locator('a[href="/django-admin/payments/"]')).toHaveText("To‘lov va qaytarishlar");
+  await expect(crumbs.locator('a[href="/django-admin/payments/payment/"]')).toHaveText("To‘lovlar");
+});

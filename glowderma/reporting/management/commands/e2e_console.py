@@ -29,13 +29,15 @@ from django.contrib.sessions.models import Session
 from django.core.cache import cache
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.db import connection, models
+from django.test import RequestFactory
 from django.urls import reverse
+from django.utils.text import capfirst
 from django_otp import DEVICE_ID_SESSION_KEY
 from django_otp.plugins.otp_static.models import StaticToken
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
 from glowderma.accounts.api.guard import email_hash
-from glowderma.accounts.console import state, twofactor
+from glowderma.accounts.console import access, state, twofactor
 from glowderma.accounts.models import AuthSession, Customer, StaffUser
 from glowderma.core import integration_modes, timeutils
 from glowderma.core.admin import ReadOnlyAdmin, column_field
@@ -102,12 +104,19 @@ def _audit_row(entry: AuditEntry) -> dict[str, Any]:
         "before": entry.before,
         "after": entry.after,
         "reason": entry.reason,
+        "ip": entry.ip,
     }
 
 
 def _secret_fields(model: type[models.Model], model_admin: Any) -> list[str]:
     names = {field.name for field in model._meta.concrete_fields}
-    declared = {name for name in (model_admin.exclude or ()) if isinstance(name, str)}
+    # A column the admin excludes is treated as secret, unless it is excluded only to be shown another way:
+    # ``<name>_label`` (a code with its Uzbek label, e.g. ``bts_status``) shows the value itself.
+    declared = {
+        name
+        for name in (model_admin.exclude or ())
+        if isinstance(name, str) and not hasattr(model_admin, f"{name}_label")
+    }
     wanted = (SECRET_FIELDS | declared | SECRET_FIELDS_BY_MODEL.get(model._meta.label_lower, set())) & names
     json_fields = {f.name for f in model._meta.concrete_fields if isinstance(f, models.JSONField)}
     return sorted(wanted - (json_fields - SECRET_FIELDS))
@@ -130,18 +139,36 @@ def _secret_values(model: type[models.Model], fields: list[str], rows: list[Any]
     return sorted(values)
 
 
-def _filters(model_admin: Any) -> list[dict[str, Any]]:
+def _filters(model: type[models.Model], model_admin: Any) -> list[dict[str, Any]]:
+    """The list filters in ``list_filter`` order: the lookup field, the filter class, and where the sidebar
+    shows it (``block``: its position among the shown filters; ``shown`` false for a custom filter that offers
+    a choice only once applied, such as the dashboards' SEO or ``?order=`` drill-downs)."""
+    request = RequestFactory().get("/django-admin/")
+    request.user = StaffUser(is_staff=True, is_active=True)
     entries = []
+    block = 0
     for index, entry in enumerate(model_admin.list_filter or ()):
         if isinstance(entry, type) and issubclass(entry, SimpleListFilter):
             # a custom filter: its own query parameter, not a field lookup the database can be asked about
+            shown = entry(request, {}, model, model_admin).has_output()
             entries.append(
-                {"index": index, "field": entry.parameter_name, "kind": entry.__name__, "simple": True}
+                {
+                    "index": index,
+                    "block": block,
+                    "shown": shown,
+                    "field": entry.parameter_name,
+                    "kind": entry.__name__,
+                    "simple": True,
+                }
             )
+            block += 1 if shown else 0
             continue
         field = column_field(entry)
         kind = entry[1].__name__ if isinstance(entry, tuple) else "default"
-        entries.append({"index": index, "field": field, "kind": kind, "simple": False})
+        entries.append(
+            {"index": index, "block": block, "shown": True, "field": field, "kind": kind, "simple": False}
+        )
+        block += 1
     return entries
 
 
@@ -165,12 +192,45 @@ def registry(data: dict[str, Any]) -> Any:
                 "add": reverse(f"{prefix}_add"),
                 "read_only": isinstance(model_admin, ReadOnlyAdmin),
                 "search_fields": list(model_admin.search_fields or ()),
-                "filters": _filters(model_admin),
+                "filters": _filters(model, model_admin),
                 "list_per_page": model_admin.list_per_page,
                 "date_hierarchy": model_admin.date_hierarchy,
             }
         )
     return rows
+
+
+def _derived_labels(model: type[models.Model]) -> list[str]:
+    """The labels of ``model``'s fields that are still the English one Django derives from the field name
+    (``last_attempt_at`` → "Last attempt at"): declared without a ``verbose_name`` and not relabelled at
+    start-up (django_otp's devices, glowderma.core.otp_apps). An explicit label that happens to read like
+    English ("Email", "Segment") is a choice, not a leftover."""
+    labels = []
+    for field in model._meta.get_fields():
+        if field.auto_created and not field.concrete:
+            continue
+        name = getattr(field, "name", "")
+        if not name or name == "id" or getattr(field, "_verbose_name", None) is not None:
+            continue
+        if str(getattr(field, "verbose_name", "")) != name.replace("_", " "):
+            continue
+        labels.append(capfirst(name.replace("_", " ")))
+    return sorted(set(labels))
+
+
+def english_labels(data: dict[str, Any]) -> Any:
+    """Per registered model: the English labels derived from the field names of the model and of the models
+    of its inlines (the browser suite asserts none of them is shown on its change page)."""
+    request = RequestFactory().get("/django-admin/")
+    request.user = StaffUser(is_staff=True, is_active=True, is_superuser=True)
+    result = {}
+    for model, model_admin in admin.site._registry.items():
+        inline_models = [inline.model for inline in model_admin.get_inline_instances(request, None)]
+        labels = set(_derived_labels(model))
+        for inline_model in inline_models:
+            labels.update(_derived_labels(inline_model))
+        result[model._meta.label_lower] = sorted(labels)
+    return result
 
 
 def _search_q(model_admin: Any, word: str) -> models.Q:
@@ -249,7 +309,9 @@ def _new_device(user: StaffUser) -> TOTPDevice:
 
 def staff(data: dict[str, Any]) -> Any:
     """A new staff member (``password`` E2E_PASSWORD unless given); ``totp`` adds a confirmed device on a
-    random key the suite computes codes from."""
+    random key the suite computes codes from; ``enrol_window`` (without ``totp``) opens the enrolment
+    window the way ``manage.py ops_access grant`` does (``access.open_enrolment``): the first sign-in may
+    enrol."""
     email = str(data.get("email") or f"e2e-{secrets.token_hex(5)}@e2e.uz").lower()
     user = StaffUser.objects.create(
         email=email,
@@ -272,7 +334,31 @@ def staff(data: dict[str, Any]) -> Any:
         out["key_base32"] = base64.b32encode(device.bin_key).decode().rstrip("=")
         if data.get("recovery"):
             out["recovery_codes"] = twofactor.issue_recovery_codes(user)
+    elif data.get("enrol_window"):
+        until = access.open_enrolment(user, actor=None, reason="e2e")
+        out["enrol_until"] = _plain(until)
     return out
+
+
+def open_enrolment(data: dict[str, Any]) -> Any:
+    """Open the enrolment window of ``email`` (``ops_access grant`` on an account with access and no device),
+    as the operator's command (``via`` cli) or, with ``actor``, as that manager from the console."""
+    user = StaffUser.objects.get(email=str(data["email"]).lower())
+    actor = StaffUser.objects.get(email=str(data["actor"]).lower()) if data.get("actor") else None
+    via = access.VIA_CONSOLE if actor is not None else access.VIA_CLI
+    until = access.open_enrolment(user, actor=actor, reason="e2e", via=via)
+    return {"until": _plain(until)}
+
+
+def reset_password(data: dict[str, Any]) -> Any:
+    """A manager's password reset of ``email`` in the Next admin panel (``accounts.services
+    .reset_staff_password``, audited ``staff.password_reset``): the generated temporary password."""
+    from glowderma.accounts import services
+
+    user = StaffUser.objects.get(email=str(data["email"]).lower())
+    actor = StaffUser.objects.get(email=str(data["actor"]).lower())
+    password, revoked = services.reset_staff_password(user, actor=actor)
+    return {"password": password, "revoked": revoked}
 
 
 def session(data: dict[str, Any]) -> Any:
@@ -417,6 +503,44 @@ def outbox_row(data: dict[str, Any]) -> Any:
     return {"id": message.pk, "status": message.status, "attempts": message.attempts, "topic": message.topic}
 
 
+def outbox_secrets(data: dict[str, Any]) -> Any:
+    """Dead outbox messages that carry credentials on purpose, their payloads built as their producers build
+    them: ``apple.revoke`` (a sealed Apple refresh token, ``accounts.services.enqueue_apple_token_revoke``)
+    and ``push.account_security`` (farewell FCM tokens, ``accounts.topics.account_security_payload``). Dead,
+    so no handler delivers them and blanks the token first: the change page must mask what is there. Returns
+    their ids and the secret values no page may show."""
+    from glowderma.accounts import services, topics
+
+    customer = Customer.objects.create(
+        phone=f"+99899{secrets.randbelow(10**7):07d}", name=f"E2E Mijoz {secrets.token_hex(3)}"
+    )
+    sealed = f"E2E-SEALED-{secrets.token_hex(12)}"
+    fcm = [f"E2E-FCM-{secrets.token_hex(12)}", f"E2E-FCM-{secrets.token_hex(12)}"]
+    apple = {
+        "identity_id": None,
+        **services.apple_grant_reference(customer.pk, f"e2e-{secrets.token_hex(6)}"),
+        "client_id": "uz.glowderma.app",
+        "sealed_token": sealed,
+    }
+    push = topics.account_security_payload(customer.pk, "password_reset", farewell_tokens=fcm)
+    rows = [
+        OutboxMessage.objects.create(
+            topic=topic,
+            payload=payload,
+            dedupe_key=f"e2e:{secrets.token_hex(8)}",
+            status="dead",
+            attempts=10,
+            last_error="e2e: dead on purpose",
+        )
+        for topic, payload in ((topics.APPLE_REVOKE, apple), (topics.PUSH_ACCOUNT_SECURITY, push))
+    ]
+    return {
+        "customer_id": customer.pk,
+        "messages": [{"id": row.pk, "topic": row.topic} for row in rows],
+        "secrets": [sealed, *fcm],
+    }
+
+
 def outbox_done(data: dict[str, Any]) -> Any:
     """A delivered outbox message (nothing to requeue)."""
     message = OutboxMessage.objects.create(
@@ -550,6 +674,7 @@ def seed_coverage(data: dict[str, Any]) -> Any:
 
 ACTIONS: dict[str, Callable[[dict[str, Any]], Any]] = {
     "registry": registry,
+    "english-labels": english_labels,
     "facts": facts,
     "staff": staff,
     "session": session,
@@ -566,6 +691,9 @@ ACTIONS: dict[str, Callable[[dict[str, Any]], Any]] = {
     "dead-outbox": dead_outbox,
     "outbox": outbox_row,
     "outbox-done": outbox_done,
+    "outbox-secrets": outbox_secrets,
+    "open-enrolment": open_enrolment,
+    "reset-password": reset_password,
     "customer-sessions": customer_sessions,
     "auth-sessions": auth_sessions,
     "two-factor": two_factor,

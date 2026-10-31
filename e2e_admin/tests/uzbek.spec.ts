@@ -1,12 +1,20 @@
 /**
  * The console speaks Uzbek: on the main pages no visible English UI string remains where the project (or
  * Django/Unfold) has an Uzbek translation. Product and provider names (Billz, Click, Payme, BTS, Outbox,
- * Google…) are names, not UI words.
+ * Google…) are names, not UI words. Every registered model's change page (its tabs and inlines included) is
+ * scanned for a label Django derives from an English field name ("Last attempt at"): every console field has
+ * an explicit Uzbek label.
  */
 import type { Page } from "@playwright/test";
 
 import { passwordStep } from "../lib/console";
-import { expect, test } from "../lib/fixtures";
+import { django, djangoSync } from "../lib/django";
+import { expect, test as base } from "../lib/fixtures";
+
+const test = base.extend<object, { changePages: Record<string, { change_url: string | null }> }>({
+  changePages: [async ({}, use) => use(await django("facts")), { scope: "worker" }],
+});
+const DERIVED_LABELS = djangoSync<Record<string, string[]>>("english-labels");
 
 // Whole words of the stock Django/Unfold English UI (case-sensitive: they are capitalised as labels).
 const ENGLISH = [
@@ -67,6 +75,17 @@ const ENGLISH = [
   "Verify",
   "Required",
   "Users",
+  "Topic",
+  "Superuser status",
+  "Click to cancel",
+  "This item will be deleted",
+  "Add another",
+  "Created at",
+  "Updated at",
+  "Last used at",
+  "Last login",
+  "October",
+  "Note: Enter times",
 ];
 
 async function englishWords(page: Page): Promise<string[]> {
@@ -140,3 +159,33 @@ test("no English UI on the sign-in steps", async ({ page, newStaff }) => {
   await page.goto("/django-admin/2fa/recovery/");
   expect(await englishWords(page)).toEqual([]);
 });
+
+/** Every text node of the page's main column, hidden tabs and inlines included (JSON payloads are data). */
+async function textLines(page: Page): Promise<Set<string>> {
+  const lines = await page.evaluate(() => {
+    const root = document.querySelector("#content") ?? document.body;
+    const found: string[] = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const parent = node.parentElement;
+      if (!parent || parent.closest(".material-symbols-outlined, script, style, noscript, template, pre.gd-json")) continue;
+      const text = (node.textContent ?? "").replace(/\s+/g, " ").trim().replace(/:$/, "");
+      if (text) found.push(text);
+    }
+    return found;
+  });
+  return new Set(lines);
+}
+
+for (const [label, derived] of Object.entries(DERIVED_LABELS)) {
+  test(`no English field label on the change page of ${label}`, async ({ page, staff, changePages }) => {
+    void staff;
+    const url = changePages[label]?.change_url;
+    test.skip(!url, `${label} has no row`);
+    const response = await page.goto(url!);
+    expect(response?.status()).toBe(200);
+    const lines = await textLines(page);
+    expect(derived.filter((english) => lines.has(english)), `English labels on ${url}`).toEqual([]);
+    expect(await englishWords(page)).toEqual([]);
+  });
+}

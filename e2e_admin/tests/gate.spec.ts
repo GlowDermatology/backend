@@ -1,14 +1,24 @@
 /**
- * The `gate` server: OPS_ADMIN_ALLOWED_NETS=10.0.0.0/8 behind the trusted proxy 127.0.0.1, on a freshly
+ * The `gate` server: OPS_ADMIN_ALLOWED_NETS=10.0.0.0/8 behind the trusted proxy 127.0.0.1, the console bound
+ * to the host 127.0.0.1 (OPS_DOMAIN) and a per-address failure budget of 5 (OPS_IP_FAILURE_LIMIT), on a freshly
  * migrated database without demo data.
  *
  * - The network gate: a browser outside the allowed networks gets an empty 404 for every console path (login,
  *   2FA steps, pages, static is not gated), whatever X-Forwarded-For it sends itself when no trusted proxy
  *   forwarded it; inside the allowed networks (as the trusted edge reports it) the console works.
+ * - OPS_DOMAIN: another host name of the same server gets an empty 404 for the console, even from an allowed
+ *   address; the API still answers there.
+ * - The per-address budget: one address (as the edge forwards it) with too many failed passwords gets 429 and
+ *   a `console.ip_locked` audit row, even for the right password; another address is not affected.
  * - An empty database: every dashboard renders, and the sidebar badges are absent at zero.
  */
+import { passwordStep, TEXT } from "../lib/console";
 import { django } from "../lib/django";
 import { addSession, expect, GATE_URL, SIDEBAR_BADGES, sidebarItem, test } from "../lib/fixtures";
+
+/** The same gate server under another host name (OPS_DOMAIN is 127.0.0.1 there). */
+const OTHER_HOST_URL = GATE_URL.replace("127.0.0.1", "localhost");
+const randomByte = () => 1 + Math.floor(Math.random() * 250);
 
 const CONSOLE_PATHS = [
   "/django-admin/",
@@ -107,4 +117,61 @@ test.describe("inside OPS_ADMIN_ALLOWED_NETS (forwarded by the trusted edge)", (
       await expect(item.locator(".sidebar-badge")).toHaveCount(0);
     }
   });
+});
+
+test.describe("OPS_DOMAIN: the console answers only on its own host", () => {
+  test.use({ extraHTTPHeaders: { "X-Forwarded-For": "10.20.30.41" } });
+
+  test("another host name gets an empty 404 for every console path, from an allowed address", async ({ page, expected }) => {
+    expected.console(/status of 404 .*@ http:\/\/localhost:8771\/django-admin\//);
+    for (const path of ["/django-admin/", "/django-admin/login/", "/django-admin/2fa/", "/django-admin/core/outboxmessage/"]) {
+      const other = await page.goto(`${OTHER_HOST_URL}${path}`);
+      expect(other?.status(), `${OTHER_HOST_URL}${path}`).toBe(404);
+      expect(await other?.text(), path).toBe("");
+      const own = await page.goto(`${GATE_URL}${path}`);
+      expect(own?.status(), `${GATE_URL}${path}`).toBe(200);
+    }
+    // the rest of the server (the API's health check) still answers on that host
+    const health = await page.goto(`${OTHER_HOST_URL}/api/v1/health/`);
+    expect(health?.status()).toBe(200);
+  });
+});
+
+test("one address over its failure budget gets 429 and is audited; another address is not affected", async ({ browser, newStaff }) => {
+  const user = await newStaff({}, "gate");
+  const address = `10.${randomByte()}.${randomByte()}.${randomByte()}`;
+  const since = (await django<{ id: number }>("audit-max", {}, "gate")).id;
+  const context = await browser.newContext({ baseURL: GATE_URL, extraHTTPHeaders: { "X-Forwarded-For": address } });
+  const page = await context.newPage();
+  // five failures, each on another account: no account reaches its own lockout ladder
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    await passwordStep(page, `nobody-${attempt}-${address}@e2e.uz`, "wrong-password");
+    await expect(page.locator("#login-form")).toBeVisible();
+    await expect(page.getByText(TEXT.lockout)).toHaveCount(0);
+  }
+  const answer = page.waitForResponse((response) => response.url().endsWith("/django-admin/login/") && response.request().method() === "POST");
+  await passwordStep(page, user.email, user.password); // even the right password, from this address
+  const refused = await answer;
+  expect(refused.status()).toBe(429);
+  expect(Number(refused.headers()["retry-after"])).toBeGreaterThan(0);
+  await expect(page.getByText(TEXT.lockout)).toBeVisible();
+  await expect(page).toHaveURL(/\/django-admin\/login\/$/);
+  const rows = await django<{ action: string; ip: string | null; after: Record<string, unknown> | null }[]>(
+    "audit",
+    { after_id: since, action: "console.ip_locked" },
+    "gate",
+  );
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ ip: address, after: { step: "password" } });
+  await context.close();
+
+  // another address signs in with the same password at once
+  const other = await browser.newContext({
+    baseURL: GATE_URL,
+    extraHTTPHeaders: { "X-Forwarded-For": `10.${randomByte()}.${randomByte()}.${randomByte()}` },
+  });
+  const otherPage = await other.newPage();
+  await passwordStep(otherPage, user.email, user.password);
+  await expect(otherPage).toHaveURL(/\/django-admin\/2fa\/$/);
+  await other.close();
 });

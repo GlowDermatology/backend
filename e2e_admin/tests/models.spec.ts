@@ -12,6 +12,9 @@ import { expect, resultCount, test as base } from "../lib/fixtures";
 
 interface FilterInfo {
   index: number;
+  /** Its position among the filters the sidebar shows (a filter shown only once applied takes none). */
+  block: number;
+  shown: boolean;
   field: string;
   kind: string;
   simple: boolean;
@@ -133,13 +136,13 @@ for (const model of REGISTRY) {
         await test.step(`filter ${filter.field} (${filter.kind})`, async () => {
           await page.goto(model.changelist);
           await openFilters(page);
-          if (filter.simple && (await filterBlocks(page).count()) <= filter.index) {
-            // A custom filter offered only once applied (the SEO backlog filter: reached from the dashboard,
-            // dashboards.spec.ts follows those links).
+          if (!filter.shown) {
+            // A custom filter offered only once applied (the SEO backlog and the order's outbox messages:
+            // reached from the dashboard or the order page; dashboards.spec.ts and orders.spec.ts follow them).
             test.info().annotations.push({ type: "note", description: `${filter.field}: shown only when applied` });
             return;
           }
-          const block = filterBlocks(page).nth(filter.index);
+          const block = filterBlocks(page).nth(filter.block);
           await expect(block).toBeVisible();
           const select = block.locator("select");
           const dates = block.locator("input.vDateField");

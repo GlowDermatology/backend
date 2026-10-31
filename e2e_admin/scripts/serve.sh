@@ -4,8 +4,9 @@
 #   serve.sh main  — drop and recreate glowderma_e2e (+ glowderma_e2e_empty), migrate, collectstatic, seed the
 #                    demo data, then serve on E2E_PORT (default 8770);
 #   serve.sh gate  — wait for main's empty database, then serve it on E2E_GATE_PORT (default 8771) with
-#                    OPS_ADMIN_ALLOWED_NETS=10.0.0.0/8 behind a trusted proxy 127.0.0.1 (the network-gate and
-#                    empty-database tests).
+#                    OPS_ADMIN_ALLOWED_NETS=10.0.0.0/8 behind a trusted proxy 127.0.0.1, the console bound to the
+#                    host 127.0.0.1 (OPS_DOMAIN) and a per-address failure budget of 5 (the network-gate,
+#                    host-binding, address-budget and empty-database tests).
 #
 # Both use config.settings.e2e (DEBUG off, production static storage, e2e_console enabled).
 set -euo pipefail
@@ -38,6 +39,7 @@ case "${1:-}" in
   gate)
     export DATABASE_URL="$PG/glowderma_e2e_empty" REDIS_URL="$REDIS/11" CELERY_BROKER_URL="$REDIS/12"
     export OPS_ADMIN_ALLOWED_NETS=10.0.0.0/8 TRUSTED_PROXIES=127.0.0.1/32
+    export E2E_OPS_DOMAIN=127.0.0.1 E2E_OPS_IP_FAILURE_LIMIT=5
     for _ in $(seq 1 600); do [ -f "$STATE/empty-ready" ] && break; sleep 0.5; done
     [ -f "$STATE/empty-ready" ] || { echo "main server never prepared the empty database" >&2; exit 1; }
     # collectstatic of the main server may still run: wait for its manifest.

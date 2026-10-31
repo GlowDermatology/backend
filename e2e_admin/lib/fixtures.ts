@@ -150,10 +150,13 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
   },
 });
 
-/** Read the "N ta natija" count of a changelist header. */
+/** The changelist header's result count: «N ta yozuv» (Django's "%(counter)s result", locale/uz). */
+export const RESULT_COUNT = "ta yozuv";
+
+/** Read the "N ta yozuv" count of a changelist header. */
 export async function resultCount(page: Page): Promise<number> {
-  const text = await page.locator("h1").filter({ hasText: "natija" }).first().innerText();
-  const match = /([\d\s\u00a0\u202f]+)\s*ta natija/.exec(text);
+  const text = await page.locator("h1").filter({ hasText: RESULT_COUNT }).first().innerText();
+  const match = /([\d\s\u00a0\u202f]+)\s*ta yozuv/.exec(text);
   if (!match) throw new Error(`no result count in: ${text}`);
   return Number(match[1].replace(/[\s\u00a0\u202f]/g, ""));
 }

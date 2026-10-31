@@ -25,8 +25,16 @@ production static storage, `/media/` like the edge):
   `seed_demo`, `seed_ops_demo` and `e2e_console seed-coverage` (a row in every registered model), Redis
   databases 9/10;
 - **gate** on `127.0.0.1:8771`: a copy of the freshly migrated database without demo data
-  (`glowderma_e2e_empty`), `OPS_ADMIN_ALLOWED_NETS=10.0.0.0/8` behind the trusted proxy `127.0.0.1`:
-  the network-gate and empty-database tests. Redis databases 11/12.
+  (`glowderma_e2e_empty`), `OPS_ADMIN_ALLOWED_NETS=10.0.0.0/8` behind the trusted proxy `127.0.0.1`, the
+  console bound to the host `127.0.0.1` (`OPS_DOMAIN`, so `localhost:8771` gets the empty 404) and a
+  per-address failure budget of 5 (`OPS_IP_FAILURE_LIMIT`): the network-gate, host-binding, address-budget
+  and empty-database tests. Redis databases 11/12.
+
+The main server raises the per-address failure budget to its maximum (`E2E_OPS_IP_FAILURE_LIMIT`, default
+1000): every test signs in from 127.0.0.1, and the suite's wrong passwords and codes would use up the
+production default (20 per 15 minutes). A fresh staff member without a device enrols only inside an
+enrolment window, which tests open with `newStaff({ totp: false, enrol_window: true })` or
+`e2e_console open-enrolment` (as `ops_access grant` does).
 
 Only `glowderma_e2e*` databases are ever dropped. Locally a server already listening on those ports is
 reused; `E2E_FRESH=1` (or `CI`) always starts fresh ones. Ports: `E2E_PORT`, `E2E_GATE_PORT`.

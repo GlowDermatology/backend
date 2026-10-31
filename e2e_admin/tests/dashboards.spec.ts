@@ -6,7 +6,7 @@
  */
 import type { Page } from "@playwright/test";
 
-import { expect, resultCount, test } from "../lib/fixtures";
+import { expect, RESULT_COUNT, resultCount, test } from "../lib/fixtures";
 
 const DASHBOARDS = [
   { path: "/django-admin/", title: "Ops holati" },
@@ -43,7 +43,7 @@ function absolute(page: Page, href: string): string {
 }
 
 async function listCount(page: Page): Promise<number> {
-  const header = page.locator("h1").filter({ hasText: "natija" });
+  const header = page.locator("h1").filter({ hasText: RESULT_COUNT });
   if ((await header.count()) > 0) return resultCount(page);
   return page.locator("#result_list tbody tr").count();
 }

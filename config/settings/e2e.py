@@ -9,6 +9,11 @@ browser run:
 * ``E2E_CONSOLE_ENABLED``: the only settings module that switches on ``manage.py e2e_console`` (per-test data
   and database assertions of the suite); the production settings never set it;
 * ``/media/`` served like the edge serves it on the console's host (``config.urls_e2e``);
+* the console on any allowed host unless ``E2E_OPS_DOMAIN`` binds it (the ``gate`` server binds it to
+  ``127.0.0.1`` for the host-binding test; a developer's ``OPS_DOMAIN`` never leaks into the suite);
+* a per-address sign-in failure budget of ``E2E_OPS_IP_FAILURE_LIMIT`` (default the maximum, 1000): every
+  browser test signs in from 127.0.0.1, and the suite's many wrong passwords and codes must not use up the
+  production default of 20 per 15 minutes; the ``gate`` server sets 5 for the budget's own test;
 * a dedicated database and Redis database from the environment (``e2e_admin/scripts/serve.sh`` passes
   ``DATABASE_URL`` = ``…/glowderma_e2e`` and ``REDIS_URL`` = ``…/9``), shared by the server and the
   ``e2e_console`` calls (lockouts, cached badges and dashboards live in Redis).
@@ -16,7 +21,7 @@ browser run:
 
 from pathlib import Path
 
-from config.env import env_str
+from config.env import env_int, env_str
 
 from .local import *  # noqa: F403
 from .local import BASE_DIR, logging_config
@@ -25,6 +30,8 @@ DEBUG = False
 E2E_CONSOLE_ENABLED = True
 ROOT_URLCONF = "config.urls_e2e"
 ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
+OPS_DOMAIN = env_str("E2E_OPS_DOMAIN", "").strip().lower()
+OPS_IP_FAILURE_LIMIT = env_int("E2E_OPS_IP_FAILURE_LIMIT", 1000)
 STATIC_ROOT = Path(env_str("E2E_STATIC_ROOT", str(BASE_DIR / "e2e_admin" / ".static")))
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
