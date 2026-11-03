@@ -25,6 +25,22 @@ def current_request_id() -> str:
     return request_id_var.get()
 
 
+# Celery tasks that run every few seconds: their INFO lines (beat "Sending due task", worker "received" and
+# "succeeded") say nothing; the task logs its own summary when it did work, failures are ERROR and stay.
+QUIET_CELERY_TASKS = ("core.dispatch_outbox",)
+QUIET_CELERY_LOGGERS = ("celery.beat", "celery.worker.strategy", "celery.app.trace")
+
+
+class QuietCeleryTaskFilter(logging.Filter):
+    """Drop the INFO-or-lower Celery bookkeeping lines of :data:`QUIET_CELERY_TASKS`."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.levelno > logging.INFO or record.name not in QUIET_CELERY_LOGGERS:
+            return True
+        message = record.getMessage()
+        return not any(task in message for task in QUIET_CELERY_TASKS)
+
+
 class RequestIdFilter(logging.Filter):
     """Inject ``request_id`` into every record (never drops a record).
 

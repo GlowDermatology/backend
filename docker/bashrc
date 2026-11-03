@@ -1,0 +1,36 @@
+
+# ~/.bashrc — GlowDerma interactive shell
+
+# Only configure interactive shells
+case $- in
+    *i*) ;;
+      *) return ;;
+esac
+
+# History
+export HISTSIZE=10000
+export HISTFILESIZE=20000
+export HISTCONTROL=ignoreboth
+shopt -s histappend
+shopt -s checkwinsize
+
+# Save history after every command
+PROMPT_COMMAND='history -a'
+
+# Arrow-key history search
+bind '"\e[A": history-search-backward'
+bind '"\e[B": history-search-forward'
+
+# Bash completion
+if [ -f /usr/share/bash-completion/bash_completion ]; then
+    . /usr/share/bash-completion/bash_completion
+fi
+
+# Aliases
+alias ll='ls -lah'
+alias la='ls -A'
+alias ..='cd ..'
+alias ...='cd ../..'
+
+# Colored prompt
+PS1='\[\033[1;32m\]\u@\h\[\033[0m\]:\[\033[1;34m\]\w\[\033[0m\]\$ '

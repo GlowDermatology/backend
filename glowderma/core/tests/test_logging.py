@@ -103,7 +103,7 @@ def test_logging_config_levels() -> None:
     assert config["loggers"]["celery"]["level"] == "INFO"
     assert config["loggers"]["glowderma"]["level"] == "INFO"
     assert logging_config("DEBUG")["loggers"]["glowderma"]["level"] == "DEBUG"
-    assert config["handlers"]["console"]["filters"] == ["request_id"]
+    assert config["handlers"]["console"]["filters"] == ["quiet_celery_tasks", "request_id"]
     assert config["filters"]["request_id"]["()"] == "glowderma.core.logging.RequestIdFilter"
     # local settings default the application loggers to DEBUG
     assert settings.LOGGING["loggers"]["glowderma"]["level"] == "DEBUG"

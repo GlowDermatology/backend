@@ -140,45 +140,57 @@ def dispatch_outbox(batch: int = 50) -> None:
     soft time limit inside a handler fails that message (retried with backoff, its handler decides what the
     interruption means) and ends the run."""
     started = _clock()
-    for _ in range(batch):
-        if _clock() - started >= DISPATCH_BUDGET_SECONDS:
-            logger.info("dispatch_outbox stops claiming: %s s budget used", DISPATCH_BUDGET_SECONDS)
-            break
-        message = _claim_outbox_message()
-        if message is None:
-            break
-        claim_token = message.claim_token
-        attempts = message.attempts
-        try:
-            outbox.deliver(message)
-        except outbox.RetryLater as exc:
-            _defer(message, claim_token, exc)
-        except Exception as exc:
-            attempts += 1
-            # a provider's text may carry NUL or a lone surrogate, which the UPDATE below could not store: the
-            # message would then stay in_flight and re-run at every lease expiry instead of failing
-            last_error = clean_text(str(exc), LAST_ERROR_LIMIT) or type(exc).__name__
-            available_at = timeutils.now() + timedelta(seconds=min(2**attempts, 3600))
-            permanent = isinstance(exc, outbox.PermanentFailure)
-            if permanent or attempts >= outbox.MAX_ATTEMPTS:
-                if permanent:
-                    logger.error(
-                        "Outbox message dead on a permanent failure topic=%s id=%s", message.topic, message.pk
-                    )
-                if _bury(message, claim_token, attempts, last_error):
-                    outbox.notify_dead(message)
-                continue
-            _complete_outbox_message(
-                message,
-                claim_token,
-                attempts=attempts,
-                last_error=last_error,
-                available_at=available_at,
-                status="failed",
-                lease_expires_at=None,
-            )
-            if isinstance(exc, SoftTimeLimitExceeded):
-                logger.warning("dispatch_outbox ran out of time in topic=%s id=%s", message.topic, message.pk)
+    claimed = 0
+    try:
+        for _ in range(batch):
+            if _clock() - started >= DISPATCH_BUDGET_SECONDS:
+                logger.info("dispatch_outbox stops claiming: %s s budget used", DISPATCH_BUDGET_SECONDS)
                 break
-        else:
-            _complete_outbox_message(message, claim_token, status="done", lease_expires_at=None)
+            message = _claim_outbox_message()
+            if message is None:
+                break
+            claimed += 1
+            claim_token = message.claim_token
+            attempts = message.attempts
+            try:
+                outbox.deliver(message)
+            except outbox.RetryLater as exc:
+                _defer(message, claim_token, exc)
+            except Exception as exc:
+                attempts += 1
+                # a provider's text may carry NUL or a lone surrogate, which the UPDATE below could not store:
+                # the message would then stay in_flight and re-run at every lease expiry instead of failing
+                last_error = clean_text(str(exc), LAST_ERROR_LIMIT) or type(exc).__name__
+                available_at = timeutils.now() + timedelta(seconds=min(2**attempts, 3600))
+                permanent = isinstance(exc, outbox.PermanentFailure)
+                if permanent or attempts >= outbox.MAX_ATTEMPTS:
+                    if permanent:
+                        logger.error(
+                            "Outbox message dead on a permanent failure topic=%s id=%s",
+                            message.topic,
+                            message.pk,
+                        )
+                    if _bury(message, claim_token, attempts, last_error):
+                        outbox.notify_dead(message)
+                    continue
+                _complete_outbox_message(
+                    message,
+                    claim_token,
+                    attempts=attempts,
+                    last_error=last_error,
+                    available_at=available_at,
+                    status="failed",
+                    lease_expires_at=None,
+                )
+                if isinstance(exc, SoftTimeLimitExceeded):
+                    logger.warning(
+                        "dispatch_outbox ran out of time in topic=%s id=%s", message.topic, message.pk
+                    )
+                    break
+            else:
+                _complete_outbox_message(message, claim_token, status="done", lease_expires_at=None)
+    finally:
+        # Celery's received/succeeded lines for this task are dropped (core.logging.QuietCeleryTaskFilter),
+        # so a run that did work says so here; an idle run stays silent.
+        if claimed:
+            logger.info("dispatch_outbox processed %s message(s)", claimed)

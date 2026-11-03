@@ -8,6 +8,8 @@ timeout = 60
 graceful_timeout = 30
 keepalive = 5
 accesslog = "-"
+# Successful healthcheck polls stay out of the access log (config/gunicorn_logging.py).
+logger_class = "config.gunicorn_logging.HealthCheckQuietLogger"
 # Common log format plus latency and the X-Request-ID response header set by RequestIdMiddleware. The request
 # line is method, path and protocol only: the query string never reaches the log, because the BTS webhook
 # authenticates with ?token=<BTS_WEBHOOK_SECRET> and admin searches can carry a phone number.

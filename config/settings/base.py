@@ -244,7 +244,10 @@ def logging_config(app_level: str) -> dict[str, Any]:
     return {
         "version": 1,
         "disable_existing_loggers": False,
-        "filters": {"request_id": {"()": "glowderma.core.logging.RequestIdFilter"}},
+        "filters": {
+            "request_id": {"()": "glowderma.core.logging.RequestIdFilter"},
+            "quiet_celery_tasks": {"()": "glowderma.core.logging.QuietCeleryTaskFilter"},
+        },
         "formatters": {
             "keyvalue": {
                 "format": (
@@ -258,7 +261,7 @@ def logging_config(app_level: str) -> dict[str, Any]:
             "console": {
                 "class": "logging.StreamHandler",
                 "stream": "ext://sys.stdout",
-                "filters": ["request_id"],
+                "filters": ["quiet_celery_tasks", "request_id"],
                 "formatter": "keyvalue",
             }
         },
