@@ -64,8 +64,8 @@ RUN sed -i 's/\r$//' /app/docker/entrypoint.sh
 # ============================================================
 # Django Static Files
 # ============================================================
-RUN DJANGO_SETTINGS_MODULE=config.settings.build \
-    python manage.py collectstatic --noinput
+# One line: glowderma/core/tests/test_ci_production_check.py runs this exact RUN command.
+RUN DJANGO_SETTINGS_MODULE=config.settings.build python manage.py collectstatic --noinput
 
 # ============================================================
 # Non-root Application User
