@@ -235,7 +235,7 @@ def settings_reads() -> tuple[list[Read], set[str]]:
 def code_environ_reads() -> set[str]:
     names: set[str] = set()
     for path in sorted((ROOT / "glowderma").rglob("*.py")):
-        rel = str(path.relative_to(ROOT))
+        rel = path.relative_to(ROOT).as_posix()
         if "/tests/" not in rel and "/migrations/" not in rel:
             text = path.read_text(encoding="utf-8")
             names.update(re.findall(r"os\.(?:environ\.get|getenv)\(\s*\"([A-Z][A-Z0-9_]*)\"", text))
@@ -278,7 +278,6 @@ def test_the_analysis_finds_the_known_reads() -> None:
     assert {
         "SECRET_KEY",
         "INTERNAL_API_SECRET",
-        "DATABASE_URL",
         "SMS_CODE_HMAC_KEY",
         "SECRETBOX_KEY",
     } <= required
@@ -294,14 +293,16 @@ def test_every_variable_production_reads_is_in_the_example() -> None:
 
 
 def test_variables_compose_sets_are_documented_as_such_and_never_set() -> None:
-    for name in sorted(SET_BY_COMPOSE):
+    # Superuser input; Compose substitutes the application password in backend containers.
+    assert EXAMPLE["POSTGRES_PASSWORD"] == "active"  # noqa: S105 - template state, not a password
+    for name in sorted(SET_BY_COMPOSE - {"POSTGRES_PASSWORD"}):
         state = EXAMPLE.get(name, "missing")
         assert state.startswith("documented:") and "set by compose" in state, f"{name}: {state}"
 
 
 def test_blanked_passwords_are_set_in_the_example() -> None:
     """Compose blanks them in the backend containers; the operator sets them in .env."""
-    assert BLANKED == {"POSTGRES_PASSWORD", "POSTGRES_APP_PASSWORD", "REDIS_PASSWORD"}
+    assert BLANKED == {"POSTGRES_APP_PASSWORD", "REDIS_PASSWORD"}
     assert all(EXAMPLE.get(name) == "active" for name in BLANKED)
 
 

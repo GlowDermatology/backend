@@ -25,8 +25,8 @@ ADMIN_API_ALLOWED_NETS = env_networks("ADMIN_API_ALLOWED_NETS", ["0.0.0.0/0", ":
 ADMIN_API_REQUIRE_INTERNAL_SECRET = False
 TRUSTED_PROXIES = env_networks("TRUSTED_PROXIES", [])
 OPS_ADMIN_ALLOWED_NETS = env_networks("OPS_ADMIN_ALLOWED_NETS", ["0.0.0.0/0", "::/0"])
-DATABASE_URL = env_str("DATABASE_URL", "postgres://glowderma:glowderma@localhost:5433/glowderma")
-DATABASES = {"default": database_config(DATABASE_URL, pool=env_bool("DB_POOL", False))}
+DATABASE_URL = env_str("DATABASE_URL", "")
+DATABASES = {"default": database_config(DATABASE_URL, pool=env_bool("DB_POOL", False), local=True)}
 REDIS_URL = env_str("REDIS_URL", "redis://localhost:6380/0")
 CELERY_BROKER_URL = env_str("CELERY_BROKER_URL", redis_db_url(REDIS_URL, 1))
 # A local runserver has no worker by default: run tasks inline (outbox dispatch on commit, Billz import

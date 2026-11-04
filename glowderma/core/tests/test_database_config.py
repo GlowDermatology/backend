@@ -36,3 +36,51 @@ def test_test_settings_do_not_pool() -> None:
 def test_database_url_rejects_invalid_values(url: str) -> None:
     with pytest.raises(ImproperlyConfigured, match="DATABASE_URL"):
         database_config(url)
+
+
+@pytest.fixture
+def postgres_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in ("POSTGRES_NAME", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_HOST", "POSTGRES_PORT"):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.mark.usefixtures("postgres_env")
+def test_separate_database_variables(monkeypatch: pytest.MonkeyPatch) -> None:
+    values = {
+        "POSTGRES_NAME": "custom_db",
+        "POSTGRES_USER": "custom_user",
+        "POSTGRES_PASSWORD": "raw:@/#%password",
+        "POSTGRES_HOST": "db.internal",
+        "POSTGRES_PORT": "5440",
+    }
+    for name, value in values.items():
+        monkeypatch.setenv(name, value)
+    config = database_config("postgres://old:old@localhost/old", pool=True)
+    assert config["NAME"] == "custom_db"
+    assert config["USER"] == "custom_user"
+    assert config["PASSWORD"] == values["POSTGRES_PASSWORD"]
+    assert config["HOST"] == "db.internal"
+    assert config["PORT"] == 5440
+    assert config["OPTIONS"]["pool"]["max_size"] == 4
+
+
+@pytest.mark.usefixtures("postgres_env")
+def test_separate_database_requires_production_credentials() -> None:
+    with pytest.raises(ImproperlyConfigured, match="POSTGRES_NAME is required"):
+        database_config()
+
+
+@pytest.mark.usefixtures("postgres_env")
+@pytest.mark.parametrize("port", ["oops", "0", "65536"])
+def test_separate_database_rejects_invalid_port(monkeypatch: pytest.MonkeyPatch, port: str) -> None:
+    monkeypatch.setenv("POSTGRES_PORT", port)
+    with pytest.raises(ImproperlyConfigured, match="POSTGRES_PORT"):
+        database_config(local=True)
+
+
+@pytest.mark.usefixtures("postgres_env")
+def test_separate_database_local_defaults() -> None:
+    config = database_config(local=True)
+    assert config["NAME"] == "glowderma"
+    assert config["HOST"] == "localhost"
+    assert config["PORT"] == 5433

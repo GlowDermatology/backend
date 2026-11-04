@@ -170,8 +170,8 @@ def test_each_placeholder_is_refused_on_its_own(
 def test_a_typed_placeholder_application_password_is_refused(
     boot: Callable[[dict[str, str]], ModuleType],
 ) -> None:
-    """POSTGRES_APP_PASSWORD reaches Django inside the DATABASE_URL compose builds from it."""
-    with pytest.raises(ImproperlyConfigured, match="DATABASE_URL"):
+    """Compose maps POSTGRES_APP_PASSWORD to the application POSTGRES_PASSWORD."""
+    with pytest.raises(ImproperlyConfigured, match="POSTGRES_PASSWORD"):
         boot({**filled(), "POSTGRES_APP_PASSWORD": "change-me"})
 
 
@@ -180,8 +180,9 @@ def test_the_backend_containers_never_see_the_infrastructure_passwords() -> None
     Django)."""
     dotenv = filled()
     environment = container_environment(dotenv)
-    for name in EMPTY_PASSWORDS:
+    for name in ("POSTGRES_APP_PASSWORD", "REDIS_PASSWORD"):
         assert environment[name] == ""
+    assert environment["POSTGRES_PASSWORD"] == dotenv["POSTGRES_APP_PASSWORD"]
     assert dotenv["POSTGRES_PASSWORD"] not in "".join(environment.values())
 
 

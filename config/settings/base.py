@@ -6,7 +6,7 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 
 from django.core.exceptions import ImproperlyConfigured
 
-from config.env import Network, env_bool, env_int, env_json, env_list, env_networks, env_str
+from config.env import MISSING, Network, env_bool, env_int, env_json, env_list, env_networks, env_str
 from config.settings.ops_admin import UNFOLD as UNFOLD
 from glowderma.core.enums import enum_name_overrides
 from glowderma.core.throttling import validate_throttle_rates
@@ -291,13 +291,45 @@ def redis_db_url(url: str, db: int) -> str:
     return urlunsplit(parsed._replace(path=f"/{db}"))
 
 
-def database_config(url: str, *, pool: bool = False) -> dict[str, Any]:
+def database_config(url: str | None = None, *, pool: bool = False, local: bool = False) -> dict[str, Any]:
+    """Prefer separate connection variables; accept legacy URLs when none are set."""
+    separate = any(
+        (
+            env_str("POSTGRES_NAME", ""),
+            env_str("POSTGRES_USER", ""),
+            env_str("POSTGRES_PASSWORD", ""),
+            env_str("POSTGRES_HOST", ""),
+            env_str("POSTGRES_PORT", ""),
+        )
+    )
+    if separate or not url:
+        name = env_str("POSTGRES_NAME", "glowderma" if local else MISSING)
+        user = env_str("POSTGRES_USER", "glowderma" if local else MISSING)
+        password = env_str("POSTGRES_PASSWORD", "glowderma" if local else MISSING)
+        host = env_str("POSTGRES_HOST", "localhost" if local else MISSING)
+        port = env_int("POSTGRES_PORT", 5433 if local else 5432)
+        if not 1 <= port <= 65535:
+            raise ImproperlyConfigured("POSTGRES_PORT must be between 1 and 65535")
+        options: dict[str, Any] = {"connect_timeout": 3}
+        if pool:
+            options["pool"] = {"min_size": 1, "max_size": 4, "timeout": 10}
+        return {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": name,
+            "USER": user,
+            "PASSWORD": password,
+            "HOST": host,
+            "PORT": port,
+            "CONN_MAX_AGE": 0,
+            "CONN_HEALTH_CHECKS": True,
+            "OPTIONS": options,
+        }
     try:
         parsed = urlsplit(url)
         name = unquote(parsed.path.lstrip("/"))
         if parsed.scheme not in {"postgres", "postgresql"} or not name:
             raise ValueError("Expected a PostgreSQL URL with a database name")
-        options: dict[str, Any] = {"connect_timeout": 3}
+        options = {"connect_timeout": 3}
         if pool:
             # psycopg_pool.ConnectionPool kwargs; Django forbids persistent connections with the pool.
             options["pool"] = {"min_size": 1, "max_size": 4, "timeout": 10}

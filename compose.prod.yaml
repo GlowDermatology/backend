@@ -33,7 +33,11 @@ x-backend: &backend
   environment: &backend-environment
     DJANGO_SETTINGS_MODULE: config.settings.production
     # glowderma_app owns the database but is not a superuser (deploy/postgres/app-role.psql).
-    DATABASE_URL: postgres://glowderma_app:${POSTGRES_APP_PASSWORD:?set POSTGRES_APP_PASSWORD in .env}@postgres:5432/glowderma
+    POSTGRES_NAME: glowderma
+    POSTGRES_USER: glowderma_app
+    POSTGRES_PASSWORD: ${POSTGRES_APP_PASSWORD:?set POSTGRES_APP_PASSWORD in .env}
+    POSTGRES_HOST: postgres
+    POSTGRES_PORT: "5432"
     REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}@redis:6379/0
     CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/1
     # The public API host for the mobile app and webhooks, and "api" for the Next server's private calls.
@@ -49,8 +53,7 @@ x-backend: &backend
     FACEBOOK_OAUTH_REDIRECT_URI: https://${ADMIN_DOMAIN}/admin/auth/oauth/facebook/callback
     GIT_SHA: ${GIT_SHA}
     # env_file hands every .env line to these containers; the infrastructure passwords are blanked here: the
-    # superuser's never reaches the application, the other two only inside the URLs above.
-    POSTGRES_PASSWORD: ""
+    # superuser's never reaches the application; POSTGRES_PASSWORD above contains only the app password.
     POSTGRES_APP_PASSWORD: ""
     REDIS_PASSWORD: ""
   volumes:

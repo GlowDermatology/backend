@@ -89,9 +89,9 @@ def test_redis_requires_a_password_that_never_appears_in_a_process_list() -> Non
 
 
 def test_the_application_connects_as_the_non_superuser_role() -> None:
-    assert SERVICES["api"]["environment"]["DATABASE_URL"].startswith(
-        "postgres://glowderma_app:${POSTGRES_APP_PASSWORD:?"
-    )
+    backend = SERVICES["api"]["environment"]
+    assert backend["POSTGRES_USER"] == "glowderma_app"
+    assert backend["POSTGRES_PASSWORD"].startswith("${POSTGRES_APP_PASSWORD:?")
     postgres = SERVICES["postgres"]
     assert "./deploy/postgres:/docker-entrypoint-initdb.d:ro" in postgres["volumes"]
     assert postgres["environment"]["POSTGRES_PASSWORD"].startswith("${POSTGRES_PASSWORD:?")
@@ -129,8 +129,9 @@ def test_the_edge_sees_a_pulled_caddyfile_and_publishes_ipv4_only() -> None:
 
 def test_the_backend_containers_get_no_infrastructure_password() -> None:
     environment = SERVICES["worker"]["environment"]
-    for name in ("POSTGRES_PASSWORD", "POSTGRES_APP_PASSWORD", "REDIS_PASSWORD"):
+    for name in ("POSTGRES_APP_PASSWORD", "REDIS_PASSWORD"):
         assert environment[name] == ""
+    assert environment["POSTGRES_PASSWORD"].startswith("${POSTGRES_APP_PASSWORD:?")
 
 
 def docker_compose() -> list[str] | None:
