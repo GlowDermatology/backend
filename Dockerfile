@@ -1,96 +1,64 @@
-# syntax=docker/dockerfile:1
-FROM python:3.14-slim-trixie AS builder
+# syntax=docker/dockerfile:1.7
+#
+# Glow Derma backend image: one image for every Django process (api, worker, beat, migrate), selected by the
+# entrypoint's first argument (entrypoint.sh). Built and pushed by .github/workflows/ci.yml as
+# ghcr.io/glowdermatology/backend:backend-<sha7>; deployed by digest from the infra repository.
+#
+#   builder  uv installs the locked runtime dependencies (no dev group) into /app/.venv, bytecode-compiled
+#   runtime  python slim, no compiler, no package manager cache, no shell tools; source owned by root and
+#            read-only for the app user; static files (Django admin, Unfold, DRF) collected at build time
+#
+# No secret is ever baked in: collectstatic runs with config.settings.build, whose values are throwaway.
 
-COPY --from=docker.io/astral/uv:0.13.5 \
-    /uv /uvx /bin/
+FROM python:3.14.10-slim-trixie@sha256:930e1abba7c4e8f96ed93e8012c35d174d7732752731bbd5e8e757d7ec6f3966 AS builder
+
+COPY --from=astral/uv:0.13.7@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 /uv /bin/uv
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=0 \
-    UV_CACHE_DIR=/root/.cache/uv
+    UV_PROJECT_ENVIRONMENT=/app/.venv
 
 WORKDIR /app
 
+# Dependencies first (cached until pyproject.toml or uv.lock changes), then the project itself.
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --locked --no-dev --no-editable --no-install-project
-
-COPY . /app
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-dev --no-editable
-
+    uv sync --locked --no-dev --no-install-project --no-editable
 
 # ============================================================
-# Stage 2: Production Runtime
-# ============================================================
-FROM python:3.14-slim-trixie
-
-# Install interactive shell utilities
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        bash \
-        bash-completion \
-        less \
-    && rm -rf /var/lib/apt/lists/*
+FROM python:3.14.10-slim-trixie@sha256:930e1abba7c4e8f96ed93e8012c35d174d7732752731bbd5e8e757d7ec6f3966 AS runtime
 
 ENV DJANGO_SETTINGS_MODULE=config.settings.production \
     PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
-    HOME=/home/app \
-    HISTFILE=/home/app/.bash_history \
-    HISTSIZE=10000 \
-    HISTFILESIZE=20000
+    PYTHONDONTWRITEBYTECODE=1 \
+    HOME=/tmp
 
 WORKDIR /app
 
-# Copy Python virtual environment
 COPY --from=builder /app/.venv /app/.venv
-
-# Copy application source
 COPY . /app
+RUN chmod 0755 /app/entrypoint.sh && python -m compileall -q -j 0 /app/config /app/glowderma
 
-# Copy entrypoint and normalize line endings
-COPY --chmod=0755 docker/entrypoint.sh \
-    /app/docker/entrypoint.sh
-
-RUN sed -i 's/\r$//' /app/docker/entrypoint.sh
-
-# ============================================================
-# Django Static Files
-# ============================================================
-# Build-only placeholders, NOT production credentials
-# ============================================================
-# Django Static Files
-# ============================================================
+# Django admin, Unfold and DRF static files, served by WhiteNoise from /app/staticfiles (build-only settings).
 # One line: glowderma/core/tests/test_ci_production_check.py runs this exact RUN command.
 RUN DJANGO_SETTINGS_MODULE=config.settings.build python manage.py collectstatic --noinput
 
-# ============================================================
-# Non-root Application User
-# ============================================================
-RUN useradd \
-        --uid 10001 \
-        --create-home \
-        --shell /bin/bash \
-        app \
+# Unprivileged runtime user. /app/media is the only application directory it may write (mounted from the host
+# in production); /tmp is a tmpfs in production (read-only root filesystem).
+RUN groupadd --system --gid 10001 app \
+    && useradd --system --uid 10001 --gid app --no-create-home --home-dir /tmp --shell /usr/sbin/nologin app \
     && mkdir -p /app/media \
-    && chown -R app:app /app/media
+    && chown app:app /app/media
 
-# ============================================================
-# Bash Configuration
-# ============================================================
-COPY --chown=app:app docker/bashrc /home/app/.bashrc
+USER 10001:10001
+EXPOSE 8000
 
-RUN touch /home/app/.bash_history \
-    && chown app:app /home/app/.bash_history \
-    && chmod 600 /home/app/.bash_history
+# Liveness of gunicorn (plain health/ answers 200 while it serves). Host "localhost" is always allowed.
+HEALTHCHECK --interval=15s --timeout=6s --start-period=30s --retries=6 \
+    CMD ["python", "-c", "import urllib.request as u; u.urlopen(u.Request('http://127.0.0.1:8000/api/v1/health/', headers={'Host': 'localhost'}), timeout=5)"]
 
-# ============================================================
-# Runtime
-# ============================================================
-USER app
-
-ENTRYPOINT ["/app/docker/entrypoint.sh"]
+ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["api"]

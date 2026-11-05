@@ -1,0 +1,24 @@
+# gitleaks (CI job security-gitleaks): the default rules, minus places that only ever hold fake or public values.
+# Every path below is reviewed: test fixtures (sample idempotency keys, fake passwords, redaction samples), API
+# documentation examples, the local/test settings' development keys (refused by the production settings,
+# KNOWN_PLACEHOLDER_SECRETS), and the removed old deploy template (placeholders only, still in git history).
+# Real code, settings for deployed environments and workflows stay fully scanned.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "test fixtures, documentation examples, development-only settings"
+paths = [
+  '''(^|/)tests/''',
+  '''(^|/)conftest\.py$''',
+  '''^docs/''',
+  '''^config/settings/(local|test|e2e|build)\.py$''',
+  '''^e2e_admin/''',
+  '''^deploy/env\.production\.example$''',
+  '''^\.env\.example$''',
+]
+
+[[allowlists]]
+description = "not secrets: an alphabet constant and a cryptography curve name"
+regexTarget = "line"
+regexes = ['''TEMPORARY_PASSWORD_ALPHABET''', '''_apple_key\.curve, ec\.SECP''']

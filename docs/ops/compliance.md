@@ -6,8 +6,8 @@ logs hosted in Uzbekistan; database registration; no personal data to foreign Sa
 and audit). Everything here describes what the code does today; the open questions at the end need an answer
 from the product owner (and, where marked, from legal counsel) before go-live.
 
-`docs/ops/deploy.md` and `compose.prod.yaml` are the deployment runbook and stack; `deploy/env.production.example`
-lists every production variable.
+The deployment runbook and stack live in the infra repository (GlowDermatology/infra); `.env.example` lists every
+application variable, and secrets are held in Vault on each environment's own server.
 
 > This document is not legal advice. It names the obligations the project brief and the design spec record and
 > what the system does about each. Confirm the current legal requirements, the competent authority and its
@@ -135,7 +135,7 @@ retention), raw provider callbacks (purged after 180 days), Billz's own client r
 | Revoked/expired customer sessions | 90 days | `accounts.cleanup_auth` |
 | Idempotency records | 24 h | `core.purge_idempotency_records`, 03:00 |
 | Sealed OTP, QR tokens, refresh grace entries (Redis) | 120 s / 60 s / 120 s | key TTL |
-| Container logs | 5 × 20 MB per container | Docker json-file rotation (`compose.prod.yaml`) |
+| Container logs | 5 × 20 MB per container | Docker json-file rotation (infra `compose/app.yaml`) |
 | Backups | 14 days on the host | `deploy/backup.sh` from cron (`docs/ops/deploy.md` §11); the off-host copy's rule is a placeholder until Q6 |
 | Audit log (`AuditEntry`) | kept indefinitely | **not purged** — legal retention unknown (Q1). The purge window allows `core_auditentry`, but no job uses it |
 | Orders, payments, refunds, ledger, purchases, appointments | kept indefinitely | accounting and loyalty history (Q2) |

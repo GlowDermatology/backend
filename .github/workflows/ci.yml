@@ -1,18 +1,162 @@
+# Backend pipeline. Pull requests: security scans, tests, an image build without push.
+# main: the same, then publish the image to GHCR, scan the pushed digest, write it to the infra repo's staging
+# folder (which deploys staging; production is promoted from the infra repo) and clean old images.
+#
+#   security-gitleaks ┐
+#   security-semgrep  │
+#   security-codeql   ├─► tests ─────┐
+#   security-deps     │  e2e-console ┴─► build-publish ─► image-scan ─► deploy ─► cleanup-ghcr
+#   security-iac      ┘
+#
+# This job never touches a server and never sees a runtime secret.
 name: Backend CI
 
 on:
   push:
+    branches: [main]
   pull_request:
 
-permissions:
-  contents: read
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # Never cancel main: a cancelled run could leave a pushed image without its staging update.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  IMAGE: ghcr.io/glowdermatology/backend
+  UV_VERSION: "0.13.7"
 
 jobs:
-  checks:
-    runs-on: ubuntu-latest
+  # ------------------------------------------------------------------ stage 1: security
+  security-gitleaks:
+    name: security-gitleaks
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Secrets in the whole git history
+        run: >-
+          docker run --rm -v "$PWD:/repo" -w /repo
+          zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+          git --redact --verbose --exit-code 1 /repo
+
+  security-semgrep:
+    name: security-semgrep
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: SAST (Python, Django, secrets, Dockerfile, workflows)
+        run: >-
+          docker run --rm -v "$PWD:/src" -w /src
+          semgrep/semgrep:1.183.0@sha256:2e45517a85e13a9cca14a2a00df6bb48affd66b8ebfae1b0991cd57578362fb0
+          semgrep scan --metrics=off --error --severity ERROR
+          --config p/python --config p/django --config p/secrets --config p/dockerfile --config p/github-actions
+          --exclude docs --exclude openapi
+          --sarif --sarif-output=semgrep.sarif
+      - if: always() && hashFiles('semgrep.sarif') != ''
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
+
+  security-codeql:
+    name: security-codeql
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: python
+          build-mode: none
+          queries: security-extended
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: codeql-python
+
+  security-deps:
+    name: security-deps
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
+      - name: pip-audit (PyPI advisory database) on the locked runtime dependencies
+        run: |
+          uv export --locked --no-dev --no-emit-project --format requirements-txt -o "$RUNNER_TEMP/requirements.txt"
+          uvx pip-audit==2.10.1 -r "$RUNNER_TEMP/requirements.txt" --disable-pip --no-deps --strict --progress-spinner off
+      - name: trivy (lock file CVEs, embedded secrets)
+        run: >-
+          docker run --rm -v "$PWD:/src" -w /src
+          -e TRIVY_DB_REPOSITORY=public.ecr.aws/aquasecurity/trivy-db:2,ghcr.io/aquasecurity/trivy-db:2,mirror.gcr.io/aquasec/trivy-db:2
+          aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
+          fs --scanners vuln,secret --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress
+          --skip-dirs .venv --format sarif --output trivy-fs.sarif .
+      - if: always() && hashFiles('trivy-fs.sarif') != ''
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
+
+  security-iac:
+    name: security-iac
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: hadolint (Dockerfile)
+        run: >-
+          docker run --rm -i
+          hadolint/hadolint:v2.15.1@sha256:32dac94127fd60b7b7e3fbfc65e1383b9b5e25c9bfd7b8536de7a539fe68a12d
+          hadolint --failure-threshold warning - < Dockerfile
+      - name: trivy config (Dockerfile, compose)
+        run: >-
+          docker run --rm -v "$PWD:/src" -w /src
+          aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
+          config --severity HIGH,CRITICAL --exit-code 1 .
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
+      - name: zizmor (GitHub workflow security)
+        run: uvx zizmor@1.32.0 --offline --min-severity medium .github/workflows
+      - name: entrypoint.sh (shellcheck)
+        run: shellcheck -s sh entrypoint.sh
+
+  # ------------------------------------------------------------------ stage 2: tests
+  tests:
+    name: tests
+    needs: [security-gitleaks, security-semgrep, security-codeql, security-deps, security-iac]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     services:
       postgres:
-        image: postgres:18.6-trixie  # the version compose.prod.yaml pins
+        image: postgres:18.6-trixie@sha256:3a4264520e121176619f54ff867d12774bc81e95e7b84db58d63bccdb6144b81  # = production
         env:
           POSTGRES_USER: glowderma
           POSTGRES_PASSWORD: glowderma
@@ -22,16 +166,18 @@ jobs:
           --health-cmd "pg_isready -U glowderma -d glowderma"
           --health-interval 5s --health-timeout 5s --health-retries 10
       redis:
-        image: redis:8.10-alpine
+        image: redis:8.10.3-alpine3.23@sha256:21090af93f8324db2f0f0f4f38a7c60369d47d917e000c3423d89d2ae2883537
         ports: ["6380:6379"]
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          version: "0.13.5"
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
           python-version: "3.14"
           enable-cache: true
       - run: uv sync --locked
@@ -44,22 +190,28 @@ jobs:
         # locale/uz/LC_MESSAGES/django.mo is committed (stdlib compiler, no GNU gettext); it must match the .po.
         run: uv run python manage.py compile_locale --check
       - name: Migrations run as the non-superuser application role
-        # Production connects as glowderma_app (deploy/postgres/app-role.psql): database owner, not a superuser.
-        # Every migration (extensions, collation, triggers, concurrent indexes) must work under it on PostgreSQL 18.
+        # Production connects as glowderma_app (infra repo postgres/initdb/app-role.psql): owner of the database,
+        # not a superuser. Every migration (extensions, ICU collation, triggers, concurrent indexes) must work
+        # under it. Ownership of the database is what makes that possible; the role is created exactly so here.
         env:
           PGHOST: localhost
           PGPORT: "5433"
           PGUSER: glowderma
           PGPASSWORD: glowderma
-          POSTGRES_USER: glowderma
-          POSTGRES_DB: gd_app_role
         run: |
+          set -euo pipefail
           psql -v ON_ERROR_STOP=1 -d glowderma -c "DROP DATABASE IF EXISTS gd_app_role" -c "CREATE DATABASE gd_app_role"
-          export POSTGRES_APP_PASSWORD="$(openssl rand -hex 24)"
-          deploy/postgres/10-app-role.sh
+          app_password="$(openssl rand -hex 24)"
+          psql -v ON_ERROR_STOP=1 -q -d gd_app_role --set app_password="$app_password" <<'SQL'
+          SELECT 'CREATE ROLE glowderma_app' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'glowderma_app')
+          \gexec
+          ALTER ROLE glowderma_app WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD :'app_password';
+          ALTER DATABASE gd_app_role OWNER TO glowderma_app;
+          SQL
           test "$(psql -At -d gd_app_role -c "SELECT rolsuper FROM pg_roles WHERE rolname = 'glowderma_app'")" = f
-          DATABASE_URL="postgres://glowderma_app:${POSTGRES_APP_PASSWORD}@localhost:5433/gd_app_role" \
-            uv run python manage.py migrate --noinput -v 1
+          POSTGRES_NAME=gd_app_role POSTGRES_USER=glowderma_app POSTGRES_PASSWORD="$app_password" \
+            POSTGRES_HOST=localhost POSTGRES_PORT=5433 uv run python manage.py migrate --noinput -v 1
+          test "$(psql -At -d gd_app_role -c "SELECT count(*) FROM django_migrations")" -gt 0
           psql -v ON_ERROR_STOP=1 -d glowderma -c "DROP DATABASE gd_app_role"
       - run: uv run coverage run -m pytest
       - run: uv run coverage report --fail-under=85
@@ -70,8 +222,8 @@ jobs:
         # are non-secret placeholders that satisfy production settings validation. Every provider runs fake
         # here (INTEGRATIONS_MODE defaults to fake): M3's live-only variables (Billz, Click ids, Payme merchant,
         # BTS, Eskiz, FCM, Apple) are required only when their *_MODE is live; the list below is what
-        # config/settings/production.py requires in every mode (the secrets of deploy/env.production.example
-        # plus what compose.prod.yaml sets).
+        # config/settings/production.py requires in every mode (in production the secrets come from Vault,
+        # the topology from the infra repo's compose/app.yaml).
         env:
           DJANGO_SETTINGS_MODULE: config.settings.production
           JWT_ACTIVE_KID: ci
@@ -94,14 +246,19 @@ jobs:
           export CLICK_SECRET_KEY="$(openssl rand -hex 16)" PAYME_KEY="$(openssl rand -hex 16)"
           export SECRETBOX_KEY="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')"
           uv run python manage.py check --deploy --fail-level WARNING
+
   e2e-console:
     # The ops console in a real Chromium (e2e_admin/README.md): Playwright starts two Django servers
     # (config.settings.e2e) on fresh glowderma_e2e databases and runs every feature's test.
-    runs-on: ubuntu-latest
+    name: e2e-console
+    needs: [security-gitleaks, security-semgrep, security-codeql, security-deps, security-iac]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     timeout-minutes: 60
     services:
       postgres:
-        image: postgres:18.6-trixie
+        image: postgres:18.6-trixie@sha256:3a4264520e121176619f54ff867d12774bc81e95e7b84db58d63bccdb6144b81
         env:
           POSTGRES_USER: glowderma
           POSTGRES_PASSWORD: glowderma
@@ -111,20 +268,22 @@ jobs:
           --health-cmd "pg_isready -U glowderma -d glowderma"
           --health-interval 5s --health-timeout 5s --health-retries 10
       redis:
-        image: redis:8.10-alpine
+        image: redis:8.10.3-alpine3.23@sha256:21090af93f8324db2f0f0f4f38a7c60369d47d917e000c3423d89d2ae2883537
         ports: ["6380:6379"]
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          version: "0.13.5"
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
           python-version: "3.14"
           enable-cache: true
       - run: uv sync --locked
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
           cache: npm
@@ -137,46 +296,210 @@ jobs:
         run: npm --prefix e2e_admin test
       - name: Report and failure screenshots
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-console-report
           path: |
             e2e_admin/playwright-report/
             e2e_admin/test-results/
           retention-days: 14
-  docker:
-    runs-on: ubuntu-latest
+
+  # ------------------------------------------------------------------ stage 3: image
+  build-publish:
+    name: build-publish
+    needs: [tests, e2e-console]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      digest: ${{ steps.build.outputs.digest }}
+      created: ${{ steps.meta.outputs.created }}
     steps:
-      - uses: actions/checkout@v4
-      - run: docker build -t glowderma-backend:ci .
-      - name: Production compose file resolves
-        # An unedited copy of the template must be refused (empty passwords, no release tags); filled with
-        # generated passwords and the tags deploy/pin-release.sh writes, it must resolve.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: meta
+        env:
+          SHA: ${{ github.sha }}
         run: |
-          cp deploy/env.production.example .env
-          if docker compose -f compose.prod.yaml config --quiet 2>/dev/null; then
-            echo "an unedited copy of deploy/env.production.example was accepted" >&2
-            exit 1
-          fi
-          for name in POSTGRES_PASSWORD POSTGRES_APP_PASSWORD REDIS_PASSWORD; do
-            sed -i "s/^${name}=\$/${name}=$(openssl rand -hex 24)/" .env
+          echo "tag=backend-${SHA::7}" >> "$GITHUB_OUTPUT"
+          echo "created=$(git log -1 --format=%cI)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - if: github.ref == 'refs/heads/main'
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: ${{ github.ref == 'refs/heads/main' }}
+          tags: ${{ env.IMAGE }}:${{ steps.meta.outputs.tag }}
+          labels: |
+            org.opencontainers.image.title=glowderma-backend
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ steps.meta.outputs.created }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - if: github.ref == 'refs/heads/main'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+  image-scan:
+    name: image-scan
+    needs: build-publish
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+    env:
+      REF: ghcr.io/glowdermatology/backend@${{ needs.build-publish.outputs.digest }}
+    steps:
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: trivy (OS and Python CVEs, secrets) on the pushed digest
+        run: |
+          mkdir -p sarif
+          for format in "--format sarif --output /out/trivy.sarif --exit-code 0" "--format table --exit-code 1 --skip-db-update"; do
+            # shellcheck disable=SC2086 # the format options are intentionally split
+            docker run --rm -v "$HOME/.docker/config.json:/root/.docker/config.json:ro" -v "$PWD/sarif:/out" \
+              -v "$RUNNER_TEMP/trivy:/root/.cache/trivy" \
+              -e TRIVY_DB_REPOSITORY=public.ecr.aws/aquasecurity/trivy-db:2,ghcr.io/aquasecurity/trivy-db:2,mirror.gcr.io/aquasec/trivy-db:2 \
+              aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c \
+              image --scanners vuln,secret --severity HIGH,CRITICAL --ignore-unfixed --no-progress $format "$REF"
           done
-          deploy/pin-release.sh "ci-${GITHUB_SHA::7}" ci
-          docker compose -f compose.prod.yaml config --quiet
-          rm .env
-      - name: Edge Caddyfile is valid
+      - name: grype (second vulnerability database)
+        if: ${{ !cancelled() }}
         run: >-
-          docker run --rm -v "$PWD/deploy:/etc/caddy:ro"
-          -e ACME_EMAIL=ci@example.com -e SITE_DOMAIN=example.com -e ADMIN_DOMAIN=admin.example.com
-          -e API_DOMAIN=api.example.com -e OPS_DOMAIN=ops.example.com
-          -e "OPS_ALLOWED_IPS=192.0.2.10/32 198.51.100.0/24" caddy:2.10.2-alpine
-          caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
-      - name: Edge behaviour probe
-        # The Caddyfile in the pinned Caddy, in front of a stub: callbacks forwarded with their query string,
-        # private paths 404, body limits and buffering, headers, the ops console host (allow-list, CSP, 404s),
-        # and no query string, Referer query or token header in the access or error logs (a 502 included).
+          docker run --rm -v "$HOME/.docker/config.json:/docker/config.json:ro" -e DOCKER_CONFIG=/docker
+          -v "$PWD/sarif:/out"
+          anchore/grype:v0.121.1@sha256:6b06708b036f74b2cd70e94b706b4586af96d1932e6ac46255940b2e39dd44a9
+          "registry:$REF" --only-fixed --fail-on high -o table -o sarif=/out/grype.sarif
+      - name: dockle (CIS Docker image checks)
+        if: ${{ !cancelled() }}
+        env:
+          DOCKLE_USERNAME: ${{ github.actor }}
+          DOCKLE_PASSWORD: ${{ github.token }}
+        run: >-
+          docker run --rm -e DOCKLE_USERNAME -e DOCKLE_PASSWORD -v "$PWD/sarif:/out"
+          goodwithtech/dockle:v0.4.15@sha256:eade932f793742de0aa8755406c7677cd7696f8675b6180926f7eeffa7abe6b9
+          --exit-code 1 --exit-level warn --format sarif --output /out/dockle.sarif "$REF"
+      - if: always() && hashFiles('sarif/trivy.sarif') != ''
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          sarif_file: sarif/trivy.sarif
+          category: trivy-image
+      - if: always() && hashFiles('sarif/grype.sarif') != ''
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          sarif_file: sarif/grype.sarif
+          category: grype-image
+      - if: always() && hashFiles('sarif/dockle.sarif') != ''
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          sarif_file: sarif/dockle.sarif
+          category: dockle-image
+
+  # ------------------------------------------------------------------ stage 4: GitOps
+  deploy:
+    name: deploy
+    needs: [build-publish, image-scan]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    environment:
+      name: staging
+    # Serialised and never cancelled: an older run must not overwrite a newer digest (see the ancestor check).
+    concurrency:
+      group: gitops-backend-staging
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: app
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Write environments/staging/backend/image.env in the infra repo
+        env:
+          TOKEN: ${{ secrets.INFRA_REPO_TOKEN }}
+          TAG: ${{ needs.build-publish.outputs.tag }}
+          DIGEST: ${{ needs.build-publish.outputs.digest }}
+          CREATED: ${{ needs.build-publish.outputs.created }}
+          SHA: ${{ github.sha }}
+          ACTOR: ${{ github.actor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          docker create --name caddy-bin caddy:2.10.2-alpine >/dev/null
-          docker cp caddy-bin:/usr/bin/caddy "$RUNNER_TEMP/caddy"
-          docker rm caddy-bin >/dev/null
-          python3 deploy/edge_probe.py --caddy "$RUNNER_TEMP/caddy"
+          set -euo pipefail
+          [ -n "$TOKEN" ] || { echo "::error::secret INFRA_REPO_TOKEN is missing (infra docs/deployment.md)"; exit 1; }
+          remote="https://x-access-token:${TOKEN}@github.com/GlowDermatology/infra.git"
+          git clone --quiet --depth 50 "$remote" infra
+          cd infra
+          git config user.name "glowderma-gitops"
+          git config user.email "gitops@users.noreply.github.com"
+          file=environments/staging/backend/image.env
+          for attempt in 1 2 3 4 5; do
+            git fetch --quiet origin main && git reset --quiet --hard origin/main
+            current="$(sed -n 's/^BACKEND_SOURCE_SHA=//p' "$file")"
+            if [ -n "$current" ] && ! git -C ../app merge-base --is-ancestor "$current" "$SHA" 2>/dev/null; then
+              echo "::notice::staging already runs $current, which is not an ancestor of $SHA: not overwriting"
+              exit 0
+            fi
+            printf '%s\n' \
+              "# Written ONLY by automation: the backend pipeline (staging) or the promote workflow (production)." \
+              "# The digest is what runs; the tag is for humans. Empty digest = nothing published yet (deploy waits)." \
+              "BACKEND_IMAGE=$IMAGE" "BACKEND_TAG=$TAG" "BACKEND_DIGEST=$DIGEST" \
+              "BACKEND_SOURCE_SHA=$SHA" "BACKEND_BUILT_AT=$CREATED" > "$file"
+            if git diff --quiet; then echo "::notice::staging already runs $TAG"; exit 0; fi
+            git commit --quiet -am "deploy(staging): backend $TAG" -m "From $RUN_URL (by @$ACTOR)."
+            if git push --quiet origin HEAD:main; then echo "::notice::staging will deploy $TAG"; exit 0; fi
+            sleep $((attempt * 5))
+          done
+          echo "::error::could not push to the infra repository"; exit 1
+
+  cleanup-ghcr:
+    name: cleanup-ghcr
+    needs: deploy
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+    steps:
+      - name: Images that must survive (deployed anywhere, or one of the last 3 production releases)
+        id: keep
+        run: |
+          set -euo pipefail
+          git clone --quiet https://github.com/GlowDermatology/infra.git infra
+          cd infra
+          keep="$( { cat environments/*/backend/image.env
+                     git log -3 --format= -p -- environments/production/backend/image.env | sed -n 's/^[-+]//p'; } |
+                   sed -n -E 's/^BACKEND_(TAG|DIGEST)=(.+)$/\2/p' | sort -u | paste -sd, -)"
+          echo "exclude=$keep" >> "$GITHUB_OUTPUT"
+          echo "kept: $keep"
+      - uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
+        with:
+          package: backend
+          keep-n-tagged: 3
+          exclude-tags: ${{ steps.keep.outputs.exclude }}
+          delete-untagged: true
+          delete-orphaned-images: true
+          validate: true

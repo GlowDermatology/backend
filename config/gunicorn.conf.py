@@ -1,6 +1,10 @@
 from config.env import env_int
 
 bind = "0.0.0.0:8000"
+# Heartbeat files in memory: the root filesystem is read-only in production.
+worker_tmp_dir = "/dev/shm"  # noqa: S108 - per-container memory filesystem, not a shared /tmp
+# X-Forwarded-Proto is trusted only from FORWARDED_ALLOW_IPS (the edge's address, set by the deployment),
+# which gunicorn reads from the environment itself; request.is_secure() is then true behind TLS.
 worker_class = "gthread"
 workers = env_int("GUNICORN_WORKERS", 3)
 threads = env_int("GUNICORN_THREADS", 4)
