@@ -7,7 +7,7 @@ Day to day a **manager** manages staff from the admin panel (Xodimlar screen, ad
 below run the same audited services from the server shell, for when no manager can sign in or the panel is not
 at hand. Every command takes `--actor <email>` (the active staff member who asked for the change; default: the
 system) and writes an audit entry with reason `manage.py <command>`. In the Compose stack prefix each with
-`docker compose exec api python manage.py`.
+`scripts/manage.sh <env> django` (infra repository, on the server).
 
 ## First account of an install
 

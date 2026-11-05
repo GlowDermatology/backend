@@ -9,7 +9,7 @@ the variables are listed in `deploy/env.production.example` and §15 of [`deploy
 ## Before the upgrade
 - **Image.** The backend image adds one Python dependency, `maxminddb` 2.8.2 (pure Python reader of the GeoIP file);
   it comes with the rebuilt image (`uv.lock`), nothing to install on the host.
-- **`.env` additions** — all optional with production defaults; `docker compose -f compose.prod.yaml config --quiet`
+- **`.env` additions** — all optional with production defaults; `scripts/manage.sh <env> config --quiet`
   and the production settings refuse an incomplete combination:
   - website: `PAYMENT_WEB_RETURN_URL` (https, `{order_id}` required), `GOOGLE_WEB_CLIENT_IDS`, `APPLE_SERVICES_IDS`
     (+ `APPLE_WEB_REDIRECT_URI` https, and `APPLE_TEAM_ID` / `APPLE_KEY_ID` / `APPLE_PRIVATE_KEY_FILE`, when

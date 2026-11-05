@@ -34,6 +34,8 @@ dev = [
 
 [tool.uv]
 cache-dir = ".uv-cache"
+# The Dockerfile and CI use this uv; older ones may write a different uv.lock.
+required-version = ">=0.13.7"
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "config.settings.test"

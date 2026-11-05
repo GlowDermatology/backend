@@ -427,7 +427,7 @@ if OPS_ENVIRONMENT_LABEL not in {"PRODUCTION", "STAGING"}:
 # The console answers on its own host (OPS_DOMAIN, the edge's site block) and only to browsers in
 # OPS_ADMIN_ALLOWED_NETS (the edge allows OPS_ALLOWED_IPS first; Django checks again behind it). Its client
 # address is the one the edge forwards, so the edge must be the trusted proxy and never be allowed itself.
-# RFC 5737 / RFC 3849 example ranges (deploy/env.production.example uses one as its placeholder).
+# RFC 5737 / RFC 3849 example ranges (placeholders in documentation and tests use them).
 DOCUMENTATION_NETS = tuple(
     ipaddress.ip_network(network)
     for network in ("192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24", "2001:db8::/32")

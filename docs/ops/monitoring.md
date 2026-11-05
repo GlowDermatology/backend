@@ -91,7 +91,7 @@ the logs. Ids in the lines are order, payment, refund, purchase, message or acco
 | `billz.sale_dead {order_id, purchase_id, message_id}` | yes (scope: order) | a paid online order's Billz sale was refused for good or failed ten times | The reason is in the ERROR line and the `outbox.dead` audit row. Fix the cause (a configuration error, a product missing in Billz, a closed shift that outlived `BILLZ_SHIFT_RETRY_MAX_HOURS`), then replay (`requeue_outbox --topic billz.push_sale --dead`, dry run first: never replay a sale someone entered in Billz by hand meanwhile) — or complete the draft / enter the sale in Billz by hand |
 | `billz.configuration_error {case, http_status[, error_code]}` (`case`: `key_refused` — the login refused the integration key; `refused` — a route or setting) | yes | Billz refused the integration key, a route or a setting (redirect, 403, unknown route, cash box of another shop, seller without access) | Check `BILLZ_SECRET_KEY`, `BILLZ_SHOP_ID`, `BILLZ_CASHBOX_ID`, `BILLZ_PAYMENT_TYPE_ID`, `BILLZ_BASE_URL` and the key's permissions in Billz. Sales keep retrying meanwhile; replay the dead ones after the fix |
 | `billz.circuit_open {failures, open_seconds}` | yes | five Billz failures in a row: calls fail fast for 90 s | Usually transient. If it repeats, check Billz's status and the network from the host; sales and syncs resume on their own |
-| `billz.cache_unavailable {operation, error}` | yes (one per window however many calls fail) | Redis (the shared cache) is down: nothing is sent to Billz | Check the redis container (`docker compose … ps`, memory, disk for AOF); `health/?ready=1` shows `cache: error` |
+| `billz.cache_unavailable {operation, error}` | yes (one per window however many calls fail) | Redis (the shared cache) is down: nothing is sent to Billz | Check the redis container (`scripts/manage.sh <env> ps`, memory, disk for AOF); `health/?ready=1` shows `cache: error` |
 | `billz.sale_state_unclear {order_id}` | yes (scope: order) | a Billz sale reads both paid and open: nothing is paid | Open the sale in Billz (`billz_order_id` in the ERROR line) and make it consistent; the push retries and dies after ten attempts if it stays unclear (then `billz.sale_dead`) |
 | `billz.sale_total_differs {order_id}` | yes (scope: order) | Billz bills another amount than the customer paid (a Billz price or client discount): nothing is paid | Fix the draft in Billz (price, discount) and replay, or complete it by hand (decision D1) |
 | `billz.refund_by_hand {order_id, purchase_id, pushed}` | yes (scope: order) | an order whose Billz sale exists was cancelled; Billz has no refund API | Refund the sale in Billz (`pushed=True`) or delete its draft (`pushed=False`) by hand |
@@ -115,8 +115,8 @@ the logs. Ids in the lines are order, payment, refund, purchase, message or acco
 `reporting.consistency_report` runs at **03:40 Tashkent** (beat `reporting-consistency-report`) and on demand:
 
 ```bash
-docker compose -f compose.prod.yaml exec api python manage.py consistency_report          # one line per check
-docker compose -f compose.prod.yaml exec api python manage.py consistency_report --json   # the whole report
+scripts/manage.sh <env> django consistency_report          # one line per check
+scripts/manage.sh <env> django consistency_report --json   # the whole report
 ```
 
 Both write the audit row `report.consistency {checks, mismatches}` (actor system); on any non-zero count (or a
@@ -168,7 +168,7 @@ first due row (no sort, no done row visited), and the outbox checks filter its f
 | `k4_parcel_untracked` | Check the parcel in the BTS cabinet; the dashboard's `bts_polling_failing` and the BTS webhook settings |
 | `k5_late_capture_unrefunded` | Follow the refund of that payment (K3 actions) |
 | `k6_outbox_dead` | as `outbox.dead` (§2) |
-| `k6_outbox_overdue` | The worker or the beat is down or stuck: `docker compose … ps`, `exec worker celery -A config inspect ping`, worker logs; `health/?ready=1` for the broker |
+| `k6_outbox_overdue` | The worker or the beat is down or stuck: `scripts/manage.sh <env> ps`, `scripts/manage.sh <env> exec backend-worker celery -A config inspect ping`, worker logs; `health/?ready=1` for the broker |
 | `k6_outbox_deferred_past_window` | The handler should have given up; check the worker logs for that topic |
 | `loyalty_reconciliation` | as `loyalty.reconciliation_mismatch` (§2) |
 
@@ -196,7 +196,7 @@ A live provider that is not configured makes `?ready=1` answer **503 for every c
 has no reason (`status: error` with every check `ok`). To see which provider, ask from inside:
 
 ```bash
-docker compose -f compose.prod.yaml exec api python manage.py shell -c \
+scripts/manage.sh <env> django shell -c \
   "from glowderma.core import readiness; print(readiness.live_configured(), readiness.last_syncs())"
 ```
 
@@ -237,15 +237,15 @@ record the migration; re-running `migrate` then fails with `relation "…" alrea
 ```bash
 # 1. which of the three is INVALID, and that no CREATE INDEX is still running (a second migrate, a killed client
 #    whose backend still builds): an index being built is INVALID until it finishes
-docker compose -f compose.prod.yaml exec postgres psql -U glowderma -d glowderma -c \
+scripts/manage.sh <env> exec postgres psql -U glowderma -d glowderma -c \
   "SELECT indexrelid::regclass AS index FROM pg_index WHERE NOT indisvalid AND indexrelid::regclass::text IN ('outbox_unfinished_idx', 'purchase_unpushed_online_idx', 'payment_late_capture_open_idx');" \
   -c "SELECT pid, state, query FROM pg_stat_activity WHERE query ILIKE 'CREATE INDEX%' AND pid <> pg_backend_pid();"
 # 2. only when step 1 lists it and no build runs: drop it (never inside a transaction block)
-docker compose -f compose.prod.yaml exec postgres psql -U glowderma -d glowderma -c \
+scripts/manage.sh <env> exec postgres psql -U glowderma -d glowderma -c \
   "DROP INDEX CONCURRENTLY IF EXISTS outbox_unfinished_idx;"
 # 3. re-run the migrations with the NEW release's image: `run` starts a container of the image .env names
 #    (deploy/pin-release.sh); `exec api` would run the previous release, which has no such migration
-docker compose -f compose.prod.yaml run --rm api migrate
+scripts/deploy.sh <env>  # migrations run once per release
 ```
 
 Check afterwards that the first query of step 1 returns no row. Never drop another INVALID index this way: find out

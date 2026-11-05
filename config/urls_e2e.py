@@ -1,6 +1,7 @@
 """The URLconf of the browser e2e server (config.settings.e2e): the project's routes plus ``/media/`` from
 MEDIA_ROOT, standing in for the edge, which serves the console's image previews from the media volume
-(deploy/Caddyfile, OPS_DOMAIN). ``DEBUG`` is off there, so ``config.urls`` adds no media route itself."""
+(infra repo caddy/Caddyfile, OPS_DOMAIN). ``DEBUG`` is off there, so ``config.urls`` adds no media route
+itself."""
 
 from django.conf import settings
 from django.urls import URLPattern, URLResolver, re_path

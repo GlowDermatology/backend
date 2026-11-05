@@ -273,7 +273,7 @@ def test_production_pools_by_default(production_env: None, monkeypatch: pytest.M
 def test_production_refuses_a_placeholder_database_password(
     production_env: None, monkeypatch: pytest.MonkeyPatch, password: str
 ) -> None:
-    """compose.prod.yaml builds DATABASE_URL from POSTGRES_APP_PASSWORD; a typed placeholder is refused."""
+    """The deployment passes the app role password as POSTGRES_PASSWORD; a typed placeholder is refused."""
     monkeypatch.setenv("DATABASE_URL", f"postgres://glowderma_app:{password}@postgres:5432/glowderma")
     with pytest.raises(ImproperlyConfigured, match="DATABASE_URL has a placeholder password"):
         load_production()

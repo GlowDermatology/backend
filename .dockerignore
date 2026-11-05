@@ -1,8 +1,10 @@
+# Build context: the application code, its lock file and the entrypoint. Nothing else.
 .git
 .github
 .venv
 .uv-cache
 **/__pycache__
+**/*.pyc
 .mypy_cache
 .pytest_cache
 .ruff_cache
@@ -10,9 +12,19 @@
 htmlcov
 .env
 .env.*
-!.env.example
 media
 staticfiles
-docs
 dump.rdb
+# Not needed at runtime
+docs
 e2e_admin
+openapi
+compose.yaml
+Dockerfile
+.dockerignore
+.importlinter
+AGENTS.md
+README.md
+conftest.py
+glowderma/*/tests
+locale/**/*.po
