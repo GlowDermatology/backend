@@ -22,3 +22,10 @@ paths = [
 description = "not secrets: an alphabet constant and a cryptography curve name"
 regexTarget = "line"
 regexes = ['''TEMPORARY_PASSWORD_ALPHABET''', '''_apple_key\.curve, ec\.SECP''']
+
+[[allowlists]]
+description = """
+History only: commit 32eee9b put CI placeholder values (SECRET_KEY, INTERNAL_API_SECRET) in ci.yml. They were
+never used anywhere else, are public since, and config/settings/production.py refuses both
+(KNOWN_PLACEHOLDER_SECRETS), so no deployment can boot with them."""
+commits = ["32eee9ba415403ada57b34a9a9d5dc9ed269cf48"]
