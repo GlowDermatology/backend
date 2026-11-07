@@ -180,10 +180,12 @@ class TestDeviceCreateSerializer(serializers.Serializer[dict[str, Any]]):
     """``POST notifications/test-devices/``: the customer's phone and a label for the registry."""
 
     phone = PhoneField()
+    # ``allow_blank``: DRF trims first and would answer ``blank``; the contract wants ``min_length`` with
+    # its own copy for an empty or whitespace-only label.
     label = serializers.CharField(  # type: ignore[assignment]  # a field, not Field.label
-        min_length=1,
         max_length=60,
-        error_messages={"min_length": MESSAGES["label_min"], "max_length": MESSAGES["label_max"]},
+        allow_blank=True,
+        error_messages={"max_length": MESSAGES["label_max"]},
     )
 
     def validate_label(self, value: str) -> str:
@@ -274,6 +276,9 @@ class NotificationMetaSerializer(serializers.Serializer[dict[str, Any]]):
     segments = MetaSegmentSerializer(many=True)
     templates = StatusTemplateSerializer(many=True)
     link_options = LinkOptionSerializer(many=True)
+    approval_delay_minutes = serializers.IntegerField(
+        help_text="CAMPAIGN_APPROVAL_DELAY_MINUTES: the cancel window between an approval and the dispatch."
+    )
 
 
 # --- POST notifications/ (multipart) ------------------------------------------------------------------------

@@ -356,7 +356,11 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="campaigntest",
             constraint=models.CheckConstraint(
-                condition=models.Q(("confirmed_at__isnull", True), ("fcm_ok", True), _connector="OR"),
+                condition=models.Q(
+                    ("confirmed_at__isnull", True),
+                    models.Q(("fcm_ok", True), ("fcm_ok__isnull", False)),
+                    _connector="OR",
+                ),
                 name="campaigntest_confirmed_delivered",
             ),
         ),

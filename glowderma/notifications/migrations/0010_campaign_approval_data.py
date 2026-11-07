@@ -8,9 +8,10 @@ approval** (deployment note: superusers re-approve the converted drafts).
 
 Reverse (development only): the rows are shaped so that the old ``campaign_state_fields`` CHECK re-added
 by the reverse of ``0009`` holds — ``sending`` / ``stopping`` lose their live tallies, ``partially_sent`` /
-``failed`` read as ``sent`` with their counters, ``draft`` / ``tested`` become ``scheduled`` (a draft without
-a requested time gets a far-future ``scheduled_at`` so the old beat never dispatches it) and a ``cancelled``
-row without ``scheduled_at`` takes its ``cancelled_at``.
+``failed`` read as ``sent`` with their counters, ``draft`` / ``tested`` become ``scheduled`` (a campaign
+without a requested time gets a far-future ``scheduled_at`` so the old beat never dispatches it) and a
+``cancelled`` row takes ``cancelled_at`` as its ``scheduled_at`` when it has none and loses the traces of a
+stopped send.
 """
 
 from django.db import migrations
@@ -37,15 +38,17 @@ REVERSE = (
            failed = COALESCE(failed, 0)
      WHERE state IN ('partially_sent', 'failed')
     """,
-    # a draft without a requested time gets one the old beat never reaches
+    # a draft (or an approved campaign) without a requested time gets one the old beat never reaches
     """
     UPDATE notifications_campaign
        SET state = 'scheduled', scheduled_at = COALESCE(scheduled_at, TIMESTAMPTZ '9999-12-31 00:00:00+00')
-     WHERE state IN ('draft', 'tested')
+     WHERE state IN ('draft', 'tested', 'scheduled')
     """,
+    # a campaign cancelled by an emergency stop had started: the old CHECK knows no such thing
     """
     UPDATE notifications_campaign
-       SET scheduled_at = COALESCE(scheduled_at, cancelled_at, updated_at)
+       SET scheduled_at = COALESCE(scheduled_at, cancelled_at, updated_at),
+           started_at = NULL, sent = NULL, failed = NULL
      WHERE state = 'cancelled'
     """,
 )

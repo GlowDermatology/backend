@@ -476,6 +476,8 @@ class TestDevice(TimeStampedModel):
     """A real customer-app device a superuser registered (by the customer's phone) as a test target for
     campaigns; the registry is global and soft-deleted (``is_active``)."""
 
+    __test__ = False  # the name starts with "Test": not a pytest collection target
+
     device = models.ForeignKey(
         "accounts.Device", on_delete=models.CASCADE, related_name="+", verbose_name="qurilma"
     )
@@ -559,7 +561,8 @@ class CampaignTest(models.Model):
         ordering = ["campaign_id", "id"]
         constraints = [
             models.CheckConstraint(
-                condition=Q(confirmed_at__isnull=True) | Q(fcm_ok=True),
+                # ``fcm_ok`` null (in flight) must not pass: a NULL comparison would satisfy the CHECK
+                condition=Q(confirmed_at__isnull=True) | Q(fcm_ok=True, fcm_ok__isnull=False),
                 name="campaigntest_confirmed_delivered",
             ),
         ]
