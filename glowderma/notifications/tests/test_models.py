@@ -16,19 +16,26 @@ from glowderma.notifications import media
 from glowderma.notifications.models import (
     Campaign,
     CampaignRecipient,
+    CampaignTest,
     CustomerSegment,
     InboxNotification,
     SegmentMember,
     StatusTemplate,
+    TestDevice,
 )
 from glowderma.notifications.tests.factories import (
     CampaignFactory,
     CampaignRecipientFactory,
+    CampaignTestFactory,
     CustomerSegmentFactory,
     InboxNotificationFactory,
+    ScheduledCampaignFactory,
     SegmentMemberFactory,
+    SendingCampaignFactory,
     SentCampaignFactory,
     StatusTemplateFactory,
+    TestDeviceFactory,
+    TestedCampaignFactory,
 )
 
 pytestmark = pytest.mark.django_db
@@ -194,10 +201,10 @@ def test_segment_member_unique_str_ordering_and_cascades() -> None:
 
 def test_campaign_defaults_str_and_ordering() -> None:
     older = CampaignFactory.create(title="Birinchi", created_at=NOW - timedelta(days=2))
-    scheduled = CampaignFactory.create(
+    scheduled = ScheduledCampaignFactory.create(
         title="Rejali",
-        state="scheduled",
         scheduled_at=NOW + timedelta(days=1),
+        dispatch_after=NOW + timedelta(days=1),
         created_at=NOW - timedelta(days=3),
     )
     newer = CampaignFactory.create(title="Ikkinchi", created_at=NOW - timedelta(days=1))
@@ -206,11 +213,15 @@ def test_campaign_defaults_str_and_ordering() -> None:
         newer,
         older,
     ]  # coalesce(scheduled_at, created_at) desc
-    assert older.state == "queued" and older.link_kind == "none" and older.recipient_count == 0
+    assert older.state == "draft" and older.link_kind == "none" and older.recipient_count == 0
     assert older.sent is None and older.failed is None and older.delivered is None
     assert older.send_cursor == 0 and older.batches_dispatched == 0 and older.last_error == ""
     assert older.image.name == "" and older.author is None
-    assert str(older) == f"Kampaniya #{older.pk} [Umumiy] Birinchi (Navbatda)"
+    assert older.content_revision == 1 and older.tested_revision is None and older.approved_at is None
+    assert older.dispatch_after is None and older.stop_requested_at is None and older.failed_at is None
+    assert str(older) == f"Kampaniya #{older.pk} [Umumiy] Birinchi (Qoralama)"
+    assert Campaign.TERMINAL_STATES == {"sent", "partially_sent", "cancelled", "failed"}
+    assert Campaign.EDITABLE_STATES == {"draft", "tested"}
 
 
 def test_campaign_text_lengths() -> None:
@@ -289,26 +300,74 @@ def test_campaign_audience_fields() -> None:
 
 def test_campaign_state_fields() -> None:
     create = CampaignFactory.create
-    violates("campaign_state_fields", create, state="scheduled")  # needs scheduled_at
-    violates("campaign_state_fields", create, state="scheduled", scheduled_at=NOW, started_at=NOW)
-    violates("campaign_state_fields", create, state="queued", started_at=NOW)
-    violates("campaign_state_fields", create, state="queued", sent=0)
+    tested = TestedCampaignFactory.create
+    approved = ScheduledCampaignFactory.create
+    sending = SendingCampaignFactory.create
+    # draft / tested: nothing started, approved or stopped; tested binds the confirmation to the revision
+    violates("campaign_state_fields", create, state="draft", started_at=NOW)
+    violates("campaign_state_fields", create, state="draft", sent=0)
+    violates("campaign_state_fields", create, state="draft", approved_at=NOW)
+    violates("campaign_state_fields", create, state="draft", dispatch_after=NOW)
+    violates("campaign_state_fields", create, state="draft", stop_requested_at=NOW)
+    violates("campaign_state_fields", create, state="tested")  # no confirmation
+    violates("campaign_state_fields", tested, content_revision=2)  # stale confirmation
+    violates("campaign_state_fields", tested, test_confirmed_at=None)
+    violates("campaign_state_fields", tested, approved_at=NOW)
+    assert tested(content_revision=2, tested_revision=2).state == "tested"
+    assert create(state="draft", scheduled_at=NOW, tested_revision=1).scheduled_at == NOW  # a draft again
+    # scheduled = approved: the approval triple, nothing started
+    violates("campaign_state_fields", create, state="scheduled", scheduled_at=NOW)
+    violates("campaign_state_fields", approved, dispatch_after=None)
+    violates("campaign_state_fields", approved, approved_revision=None)
+    violates("campaign_state_fields", approved, started_at=NOW)
+    assert approved(scheduled_at=None).dispatch_after == NOW  # no requested time needed
+    # sending / stopping
     violates("campaign_state_fields", create, state="sending")
-    violates("campaign_state_fields", create, state="sending", started_at=NOW, sent_at=NOW)
+    violates("campaign_state_fields", sending, sent_at=NOW)
+    violates("campaign_state_fields", sending, stop_requested_at=NOW)
+    violates("campaign_state_fields", sending, state="stopping")  # needs the request
+    violates("campaign_state_fields", sending, state="stopping", stop_requested_at=NOW, stopped_at=NOW)
+    assert sending(sent=None, failed=None).state == "sending"  # a converted queued row
+    assert sending(state="stopping", stop_requested_at=NOW).state == "stopping"
+    # sent
     violates("campaign_state_fields", create, state="sent", started_at=NOW, sent_at=NOW, sent=1)  # failed
     violates("campaign_state_fields", create, state="sent", started_at=NOW, sent_at=NOW, failed=0)
     violates("campaign_state_fields", create, state="sent", sent_at=NOW, sent=1, failed=0)
-    assert create(state="scheduled", scheduled_at=NOW).scheduled_at == NOW
-    assert create(state="sending", started_at=NOW).started_at == NOW
+    violates("campaign_state_fields", SentCampaignFactory.create, stopped_at=NOW)
     sent = SentCampaignFactory.create()
     assert (sent.state, sent.sent, sent.failed, sent.delivered) == ("sent", 10, 0, None)
-    violates("campaign_state_fields", create, state="scheduled", scheduled_at=NOW, sent_at=NOW)
+    # partially_sent needs a stop or a failure; failed needs failed_at; neither carries sent_at
+    violates("campaign_state_fields", sending, state="partially_sent", sent=2)
+    violates("campaign_state_fields", sending, state="partially_sent", sent=2, stopped_at=NOW, sent_at=NOW)
+    assert sending(state="partially_sent", sent=2, stopped_at=NOW).state == "partially_sent"
+    assert sending(state="partially_sent", sent=2, failed_at=NOW).state == "partially_sent"
+    violates("campaign_state_fields", sending, state="failed")
+    assert sending(state="failed", failed_at=NOW).state == "failed"
+    # cancelled: never sent or failed; a legacy row (scheduled_at, no approval) passes, a stopped one too
+    violates("campaign_state_fields", create, state="cancelled", cancelled_at=NOW, sent_at=NOW)
+    assert create(state="cancelled", cancelled_at=NOW, scheduled_at=NOW).state == "cancelled"
+    assert (
+        sending(state="cancelled", cancelled_at=NOW, stop_requested_at=NOW, stopped_at=NOW).state
+        == "cancelled"
+    )
+    # the legacy shape of a sent row (no approval fields) still passes
+    assert create(state="sent", started_at=NOW, sent_at=NOW, sent=5, failed=1).state == "sent"
     assert constraint_names("notifications_campaign", "c") >= {
         "campaign_text_lengths",
         "campaign_link_fields",
         "campaign_audience_fields",
         "campaign_state_fields",
+        "campaign_cancelled_at",
     }
+
+
+def test_campaign_actor_links_are_set_null() -> None:
+    owner = StaffUserFactory.create()
+    campaign = ScheduledCampaignFactory.create(approved_by=owner, test_confirmed_by=owner)
+    owner.delete()
+    campaign.refresh_from_db()
+    assert campaign.approved_by is None and campaign.test_confirmed_by is None
+    assert campaign.state == "scheduled"
 
 
 def test_campaign_author_is_protected() -> None:
@@ -322,7 +381,10 @@ def test_campaign_author_is_protected() -> None:
 def test_campaign_indexes_in_pg_catalog() -> None:
     indexes = index_definitions("notifications_campaign")
     assert indexes["campaign_at_idx"].endswith("(COALESCE(scheduled_at, created_at) DESC, id DESC)")
-    assert indexes["campaign_due_idx"].endswith("(scheduled_at) WHERE ((state)::text = 'scheduled'::text)")
+    assert "campaign_due_idx" not in indexes  # replaced by the dispatch clock
+    assert indexes["campaign_dispatch_idx"].endswith(
+        "(dispatch_after) WHERE ((state)::text = 'scheduled'::text)"
+    )
     assert indexes["campaign_state_kind_idx"].endswith("USING btree (state, kind)")
     assert indexes["campaign_sched_segment_idx"].endswith(
         "(audience_segment_id) WHERE ((state)::text = 'scheduled'::text)"
@@ -394,6 +456,55 @@ def test_recipient_indexes_in_pg_catalog() -> None:
     assert indexes["recipient_campaign_device_unique"].startswith("CREATE UNIQUE INDEX")
     assert "WHERE (device_id IS NOT NULL)" in indexes["recipient_campaign_device_unique"]
     assert "recipient_campaign_customer_unique" in constraint_names("notifications_campaignrecipient", "u")
+
+
+# --- TestDevice / CampaignTest ------------------------------------------------------------------------------
+
+
+def test_test_device_str_defaults_unique_while_active_and_label_required() -> None:
+    staff = StaffUserFactory.create()
+    test_device = TestDeviceFactory.create(label="Dilnoza — iPhone", registered_by=staff)
+    assert test_device.is_active and test_device.phone == test_device.device.customer.phone
+    assert str(test_device) == f"Test qurilmasi «Dilnoza — iPhone» ({test_device.phone})"
+    violates("testdevice_active_device_unique", TestDeviceFactory.create, device=test_device.device)
+    violates("testdevice_label_required", TestDeviceFactory.create, label="")
+    test_device.is_active = False
+    test_device.save()
+    again = TestDeviceFactory.create(device=test_device.device)  # a removed registration frees the device
+    assert list(TestDevice.objects.all()) == [test_device, again]
+    staff.delete()
+    test_device.refresh_from_db()
+    assert test_device.registered_by is None
+    test_device.device.delete()
+    assert not TestDevice.objects.filter(pk=test_device.pk).exists()  # CASCADE
+    unique = index_definitions("notifications_testdevice")["testdevice_active_device_unique"]
+    assert unique.startswith("CREATE UNIQUE INDEX") and "WHERE is_active" in unique
+
+
+def test_campaign_test_str_ordering_confirmation_check_and_on_delete() -> None:
+    campaign = CampaignFactory.create(content_revision=2)
+    first = CampaignTestFactory.create(campaign=campaign, device_label="Birinchi")
+    second = CampaignTestFactory.create(campaign=campaign, fcm_ok=None)
+    assert list(campaign.tests.all()) == [first, second]
+    assert str(first) == f"Kampaniya #{campaign.pk} testi → Birinchi (v2)"
+    assert first.revision == 2 and first.inbox is None and first.confirmed_at is None
+    violates("campaigntest_confirmed_delivered", CampaignTestFactory.create, fcm_ok=False, confirmed_at=NOW)
+    violates("campaigntest_confirmed_delivered", CampaignTestFactory.create, fcm_ok=None, confirmed_at=NOW)
+    assert CampaignTestFactory.create(confirmed_at=NOW).confirmed_at == NOW
+    inbox = InboxNotificationFactory.create(dedupe_key=f"campaign-test:{campaign.pk}:{first.pk}")
+    first.inbox = inbox
+    first.save()
+    assert inbox.campaign_test == first
+    first.test_device.delete()  # type: ignore[union-attr]
+    first.refresh_from_db()
+    assert first.test_device is None and first.device is not None
+    inbox.delete()
+    first.refresh_from_db()
+    assert first.inbox is None
+    indexes = index_definitions("notifications_campaigntest")
+    assert indexes["campaigntest_campaign_rev_idx"].endswith("USING btree (campaign_id, revision)")
+    campaign.delete()
+    assert not CampaignTest.objects.filter(campaign_id=campaign.pk).exists()
 
 
 # --- InboxNotification --------------------------------------------------------------------------------------

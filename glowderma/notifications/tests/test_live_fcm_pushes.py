@@ -27,7 +27,7 @@ from glowderma.integrations.tests.live_fixtures import Script, reply
 from glowderma.notifications import services
 from glowderma.notifications.models import CampaignRecipient, InboxNotification
 from glowderma.notifications.tests.conftest import ANCHOR
-from glowderma.notifications.tests.factories import CampaignFactory
+from glowderma.notifications.tests.factories import SendingCampaignFactory
 
 pytestmark = pytest.mark.django_db
 SEND_PATH = "/v1/projects/glow-derma/messages:send"
@@ -127,7 +127,7 @@ def test_a_campaign_batch_records_one_result_per_recipient(clock: Any, live_fcm:
             }
         ),
     )
-    campaign = CampaignFactory.create()
+    campaign = SendingCampaignFactory.create()
     services.materialise(campaign)
     campaign.save()
     services.send_batch(campaign.pk, 0)
@@ -153,7 +153,7 @@ def test_a_campaign_batch_gives_back_what_fcm_did_not_take(clock: Any, live_fcm:
         "q-last": reply("fcm", "send_ok"),
     }
     live_fcm.on("POST", SEND_PATH, by_token(answers))
-    campaign = CampaignFactory.create()
+    campaign = SendingCampaignFactory.create()
     services.materialise(campaign)
     campaign.save()
     with pytest.raises(outbox.RetryLater) as deferred:

@@ -13,13 +13,16 @@ from glowderma.notifications.admin import segment_rules
 from glowderma.notifications.models import (
     Campaign,
     CampaignRecipient,
+    CampaignTest,
     CustomerSegment,
     InboxNotification,
     SegmentMember,
     StatusTemplate,
+    TestDevice,
 )
 from glowderma.notifications.tests.factories import (
     CampaignRecipientFactory,
+    CampaignTestFactory,
     CustomerSegmentFactory,
     InboxNotificationFactory,
     SegmentMemberFactory,
@@ -28,7 +31,16 @@ from glowderma.notifications.tests.factories import (
 
 pytestmark = pytest.mark.django_db
 
-MODELS = [StatusTemplate, CustomerSegment, SegmentMember, Campaign, CampaignRecipient, InboxNotification]
+MODELS = [
+    StatusTemplate,
+    CustomerSegment,
+    SegmentMember,
+    Campaign,
+    CampaignRecipient,
+    InboxNotification,
+    TestDevice,
+    CampaignTest,
+]
 
 
 @pytest.mark.parametrize("model", MODELS)
@@ -53,6 +65,8 @@ def test_design_columns() -> None:
         "audience_type",
         "state",
         "scheduled_at",
+        "approved_at",
+        "dispatch_after",
         "sent_at",
         "sent",
         "failed",
@@ -86,6 +100,7 @@ def test_changelists_change_pages_and_search_render() -> None:
     ops_login(client, StaffUserFactory.create(is_staff=True, is_superuser=True))
     member = SegmentMemberFactory.create()
     recipient = CampaignRecipientFactory.create(campaign=SentCampaignFactory.create(title="Kuzgi namlik"))
+    test = CampaignTestFactory.create()
     rows = [
         StatusTemplate.objects.get(status="processing"),
         member.segment,
@@ -93,6 +108,8 @@ def test_changelists_change_pages_and_search_render() -> None:
         recipient.campaign,
         recipient,
         InboxNotificationFactory.create(),
+        test.test_device,
+        test,
     ]
     for row in rows:
         meta = row._meta

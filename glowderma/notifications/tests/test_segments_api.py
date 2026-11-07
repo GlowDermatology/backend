@@ -15,8 +15,8 @@ from glowderma.notifications import selectors, services
 from glowderma.notifications.models import CustomerSegment, SegmentMember
 from glowderma.notifications.tests.conftest import ANCHOR
 from glowderma.notifications.tests.factories import (
-    CampaignFactory,
     CustomerSegmentFactory,
+    ScheduledCampaignFactory,
     SegmentMemberFactory,
 )
 
@@ -189,9 +189,9 @@ def test_delete_409_while_a_scheduled_campaign_targets_the_segment(
     staff_client: APIClient, clock: Any
 ) -> None:
     segment = CustomerSegmentFactory.create()
-    campaign = CampaignFactory.create(
-        state="scheduled",
+    campaign = ScheduledCampaignFactory.create(
         scheduled_at=datetime(2026, 10, 26, 10, tzinfo=TASHKENT),
+        dispatch_after=datetime(2026, 10, 26, 10, tzinfo=TASHKENT),
         audience_type="segment",
         audience_segment=segment,
         audience_segment_name=segment.name,
@@ -202,8 +202,8 @@ def test_delete_409_while_a_scheduled_campaign_targets_the_segment(
         response.data["code"] == "conflict"
         and response.data["message"] == "Rejalashtirilgan xabar bu guruhga yuboriladi."
     )
-    campaign.state = "queued"
-    campaign.scheduled_at = None
+    campaign.state = "sending"  # the beat started it: the segment is no longer held
+    campaign.started_at = campaign.dispatch_after
     campaign.save()
     assert staff_client.delete(f"{URL}{segment.pk}/").status_code == 204
     campaign.refresh_from_db()

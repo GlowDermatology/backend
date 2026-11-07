@@ -72,6 +72,9 @@ def test_0003_reverse_refuses_while_account_rows_exist() -> None:
     with pytest.raises(IrreversibleError, match="source_type='account'"):
         call_command("migrate", "notifications", "0002", verbosity=0)
     assert "'account'" in check_definition() and InboxNotification.objects.filter(pk=row.pk).exists()
+    # 0004–0011 were unapplied before 0003 refused: re-apply them before the ORM cascades the delete to the
+    # later tables (``CampaignTest.inbox`` is SET_NULL), then the reverse goes through without the row
+    call_command("migrate", verbosity=0)
     InboxNotification.objects.filter(pk=row.pk).delete()
     call_command("migrate", "notifications", "0002", verbosity=0)
     call_command("migrate", verbosity=0)
