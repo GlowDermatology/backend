@@ -2873,17 +2873,27 @@ paths:
         name: state
         schema:
           enum:
+          - draft
+          - tested
           - scheduled
-          - queued
+          - sending
+          - stopping
           - sent
+          - partially_sent
           - cancelled
+          - failed
           type: string
           minLength: 1
         description: |-
+          * `draft` - draft
+          * `tested` - tested
           * `scheduled` - scheduled
-          * `queued` - queued
+          * `sending` - sending
+          * `stopping` - stopping
           * `sent` - sent
+          * `partially_sent` - partially_sent
           * `cancelled` - cancelled
+          * `failed` - failed
       tags:
       - admin
       security:
@@ -2939,11 +2949,10 @@ paths:
           description: ''
     post:
       operationId: admin_notifications_create
-      description: Multipart with dotted keys (`link.kind`, `audience.type`, …) and
-        an optional `image` (JPEG, PNG or WebP, ≤ 5 MiB). Without `scheduled_at` the
-        send starts at once; the 201 body is the campaign as stored after the commit
-        (`queued`, or `sent` when the send already ran inside the request). With it
-        the campaign waits for its time (state `scheduled`).
+      description: 'Multipart with dotted keys (`link.kind`, `audience.type`, …) and
+        an optional `image` (JPEG, PNG or WebP, ≤ 5 MiB). Creates a `draft` (revision
+        1): nothing is sent until a superuser tested, confirmed and approved it. `scheduled_at`
+        is the requested send time the dispatch waits for.'
       parameters:
       - in: header
         name: Idempotency-Key
@@ -3012,16 +3021,626 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
-  /api/v1/admin/notifications/{id}/cancel/:
-    post:
-      operationId: admin_notifications_cancel
-      description: 'Cancel a `scheduled` campaign before its send starts (state `cancelled`,
-        audited `notification.cancelled`). Idempotent: an already cancelled campaign
-        answers 200 unchanged. 409 `conflict` once the send started (`queued` / `sent`);
-        404 for an unknown id.'
+  /api/v1/admin/notifications/{id}/:
+    get:
+      operationId: admin_notifications_retrieve
       parameters:
       - in: path
         name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationRecord'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    patch:
+      operationId: admin_notifications_partial_update
+      description: Author or superuser; `draft` / `tested` only (409 `invalid_transition`).
+        Multipart like the create form with every content key optional, `expected_revision`
+        (409 `conflict` when the campaign changed meanwhile) and `remove_image`. A
+        content change bumps `revision`, clears the test confirmation and puts a `tested`
+        campaign back to `draft`; a `scheduled_at` change alone keeps the state.
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedNotificationPatchFormRequest'
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationRecord'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    delete:
+      operationId: admin_notifications_destroy
+      description: Author or superuser; `draft` / `tested` only (409 `invalid_transition`).
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '204':
+          description: No response body
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/notifications/{id}/approve/:
+    post:
+      operationId: admin_notifications_approve
+      description: Superuser. A `tested` campaign becomes `scheduled` with `dispatch_after
+        = max(now + approval_delay_minutes, scheduled_at)`; nothing is sent by this
+        call — the beat starts the send after `dispatch_after`, and `cancel/` works
+        until then. `expected_revision` stale → 409 `conflict`; `draft` → 409 `invalid_transition`;
+        a repeat on the approved revision answers 200 unchanged.
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApproveInputRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationRecord'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/notifications/{id}/cancel/:
+    post:
+      operationId: admin_notifications_cancel
+      description: 'Superuser. Cancel an approved `scheduled` campaign before the
+        beat starts it (state `cancelled`, audited `notification.cancelled`). Idempotent:
+        an already cancelled campaign answers 200 unchanged. A `draft` / `tested`
+        campaign → 409 `invalid_transition` (delete or edit it instead); once the
+        send started → 409 `conflict` (use `stop/`); 404 for an unknown id.'
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationRecord'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/notifications/{id}/return-to-draft/:
+    post:
+      operationId: admin_notifications_return_to_draft
+      description: 'Superuser. A `scheduled` (not yet started) or `cancelled` (never
+        started) campaign goes back to `draft`: approval and test confirmation cleared,
+        `revision` bumped, so it must be tested again.'
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationRecord'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/notifications/{id}/stop/:
+    post:
+      operationId: admin_notifications_stop
+      description: Superuser; emergency stop of a `sending` campaign → `stopping`.
+        The running batch finalises it (`partially_sent` when a push went out, else
+        `cancelled`; remaining recipients `stopped`); pushes FCM already accepted
+        cannot be recalled. Idempotent on `stopping` and on a campaign that ended
+        by a stop; otherwise 409 `invalid_transition`.
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationRecord'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/notifications/{id}/test/:
+    post:
+      operationId: admin_notifications_test
+      description: Superuser. Pushes the current revision of a `draft` / `tested`
+        campaign to the chosen test devices (`device_ids`, 1..10 active registry ids);
+        each push is a real inbox item of the tester and is recorded in `tests[]`
+        with its FCM outcome. 503 `provider_unavailable` when FCM took nothing (the
+        tests are recorded as undelivered).
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendTestInputRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationRecord'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/notifications/{id}/tests/{test_id}/confirm/:
+    post:
+      operationId: admin_notifications_test_confirm
+      description: 'Superuser: the test looked right on the device. The test must
+        be the current revision''s and delivered (409 `conflict` otherwise); the campaign
+        becomes `tested`. Idempotent.'
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: test_id
         schema:
           type: integer
         required: true
@@ -3092,6 +3711,208 @@ paths:
               schema:
                 $ref: '#/components/schemas/NotificationMeta'
           description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/notifications/test-devices/:
+    get:
+      operationId: admin_notification_test_devices_list
+      description: |-
+        ``notifications/test-devices/`` (superuser): the global registry of real staff devices test pushes
+        go to.
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TestDevice'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    post:
+      operationId: admin_notification_test_devices_create
+      description: 'Superuser. Registers the most recently active pushable device
+        of the active customer with `phone` under `label`. Field errors `phone`: `customer_not_found`,
+        `device_not_pushable`, `unique` (already registered).'
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TestDeviceCreateRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestDevice'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/notifications/test-devices/{id}/:
+    delete:
+      operationId: admin_notification_test_devices_destroy
+      description: Superuser. Removes the device from the registry (soft, idempotent);
+        unknown id → 404.
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '204':
+          description: No response body
         '400':
           content:
             application/json:
@@ -14888,6 +15709,16 @@ components:
       required:
       - slot_step_min
       - specialists
+    ApproveInputRequest:
+      type: object
+      description: '``POST notifications/{id}/approve/``: the revision the superuser
+        is looking at.'
+      properties:
+        expected_revision:
+          type: integer
+          minimum: 1
+      required:
+      - expected_revision
     AudienceTypeEnum:
       enum:
       - all
@@ -15323,6 +16154,55 @@ components:
       - name
       - role
       - services
+    CampaignTest:
+      type: object
+      description: '``NotificationRecord.tests[]``: one test push of a revision to
+        one test device.'
+      properties:
+        id:
+          type: integer
+        revision:
+          type: integer
+        test_device_id:
+          type: integer
+          nullable: true
+        device_label:
+          type: string
+        phone:
+          type: string
+        sent_at:
+          type: string
+          format: date-time
+        sent_by:
+          allOf:
+          - $ref: '#/components/schemas/Actor'
+          nullable: true
+        fcm_ok:
+          type: boolean
+          nullable: true
+          description: null while the push is in flight; true = FCM accepted it.
+        fcm_error:
+          type: string
+        confirmed_at:
+          type: string
+          format: date-time
+          nullable: true
+        confirmed_by:
+          allOf:
+          - $ref: '#/components/schemas/Actor'
+          nullable: true
+      required:
+      - confirmed_at
+      - confirmed_by
+      - device_label
+      - fcm_error
+      - fcm_ok
+      - id
+      - phone
+      - revision
+      - sent_at
+      - sent_by
+      - test_device_id
     CancelOrderRequest:
       type: object
       properties:
@@ -18871,16 +19751,52 @@ components:
         recipient_count:
           type: integer
         state:
-          allOf:
-          - $ref: '#/components/schemas/NotificationStateEnum'
-          readOnly: true
+          $ref: '#/components/schemas/NotificationStateEnum'
         scheduled_at:
           type: string
           format: date-time
           nullable: true
+          description: The author's requested send time; the dispatch waits for it.
         created_at:
           type: string
           format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        revision:
+          type: integer
+          description: Bumps on every content change; tests and approvals name it.
+        tested_revision:
+          type: integer
+          nullable: true
+        test_confirmed_at:
+          type: string
+          format: date-time
+          nullable: true
+        test_confirmed_by:
+          allOf:
+          - $ref: '#/components/schemas/Actor'
+          nullable: true
+        approved_at:
+          type: string
+          format: date-time
+          nullable: true
+        approved_by:
+          allOf:
+          - $ref: '#/components/schemas/Actor'
+          nullable: true
+        approved_revision:
+          type: integer
+          nullable: true
+        dispatch_after:
+          type: string
+          format: date-time
+          nullable: true
+          description: 'State `scheduled`: the beat starts the send after this instant.'
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
         sent_at:
           type: string
           format: date-time
@@ -18889,13 +19805,42 @@ components:
           type: string
           format: date-time
           nullable: true
-          description: 'M3: when staff cancelled the scheduled campaign (state `cancelled`).'
+          description: When a superuser cancelled the approved campaign, or a stop
+            sent nothing.
+        cancelled_by:
+          allOf:
+          - $ref: '#/components/schemas/Actor'
+          nullable: true
+        stop_requested_at:
+          type: string
+          format: date-time
+          nullable: true
+        stop_requested_by:
+          allOf:
+          - $ref: '#/components/schemas/Actor'
+          nullable: true
+        stopped_at:
+          type: string
+          format: date-time
+          nullable: true
+        failed_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_error:
+          type: string
         sent:
           type: integer
           nullable: true
+          description: FCM accepted; a live tally while sending.
         failed:
           type: integer
           nullable: true
+          description: FCM rejected / no token; a live tally while sending.
+        attempted:
+          type: integer
+          nullable: true
+          readOnly: true
         delivered:
           type: integer
           nullable: true
@@ -18903,36 +19848,68 @@ components:
           allOf:
           - $ref: '#/components/schemas/Actor'
           nullable: true
+        tests:
+          type: array
+          items:
+            $ref: '#/components/schemas/CampaignTest'
       required:
+      - approved_at
+      - approved_by
+      - approved_revision
+      - attempted
       - audience
       - author
       - body
       - cancelled_at
+      - cancelled_by
       - created_at
       - delivered
+      - dispatch_after
       - failed
+      - failed_at
       - id
       - image_url
       - kind
+      - last_error
       - link
       - recipient_count
+      - revision
       - scheduled_at
       - sent
       - sent_at
+      - started_at
       - state
+      - stop_requested_at
+      - stop_requested_by
+      - stopped_at
+      - test_confirmed_at
+      - test_confirmed_by
+      - tested_revision
+      - tests
       - title
+      - updated_at
     NotificationStateEnum:
       enum:
+      - draft
+      - tested
       - scheduled
-      - queued
+      - sending
+      - stopping
       - sent
+      - partially_sent
       - cancelled
+      - failed
       type: string
       description: |-
+        * `draft` - draft
+        * `tested` - tested
         * `scheduled` - scheduled
-        * `queued` - queued
+        * `sending` - sending
+        * `stopping` - stopping
         * `sent` - sent
+        * `partially_sent` - partially_sent
         * `cancelled` - cancelled
+        * `failed` - failed
     NullEnum:
       enum:
       - null
@@ -20123,6 +21100,46 @@ components:
           $ref: '#/components/schemas/ContentLanguageEnum'
         push_enabled:
           type: boolean
+    PatchedNotificationPatchFormRequest:
+      type: object
+      properties:
+        expected_revision:
+          type: integer
+          minimum: 1
+        kind:
+          $ref: '#/components/schemas/NotificationKindEnum'
+        title:
+          type: string
+          minLength: 3
+          maxLength: 60
+        body:
+          type: string
+          minLength: 5
+          maxLength: 180
+        image:
+          type: string
+          format: binary
+        remove_image:
+          type: boolean
+        link.kind:
+          $ref: '#/components/schemas/LinkKindEnum'
+        link.product_id:
+          type: integer
+        link.url:
+          type: string
+          minLength: 1
+          maxLength: 500
+        audience.type:
+          $ref: '#/components/schemas/AudienceTypeEnum'
+        audience.segment_id:
+          type: integer
+        audience.phone:
+          type: string
+          minLength: 1
+        scheduled_at:
+          type: string
+          format: date-time
+          nullable: true
     PatchedProductPatchRequest:
       type: object
       description: |-
@@ -21538,6 +22555,19 @@ components:
           maxLength: 2048
       required:
       - purpose
+    SendTestInputRequest:
+      type: object
+      description: '``POST notifications/{id}/test/``: the active test devices to
+        push the current revision to.'
+      properties:
+        device_ids:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+          maxItems: 10
+      required:
+      - device_ids
     SeoIssue:
       type: object
       properties:
@@ -22478,6 +23508,58 @@ components:
           $ref: '#/components/schemas/TemplateTextsRequest'
       required:
       - texts
+    TestDevice:
+      type: object
+      description: '``GET notifications/test-devices/`` rows (``selectors.test_devices``
+        annotates ``is_pushable``).'
+      properties:
+        id:
+          type: integer
+        phone:
+          type: string
+        label:
+          type: string
+        device_id:
+          type: integer
+        platform:
+          type: string
+        model:
+          type: string
+        is_pushable:
+          type: boolean
+        registered_by:
+          allOf:
+          - $ref: '#/components/schemas/Actor'
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+      required:
+      - created_at
+      - device_id
+      - id
+      - is_pushable
+      - label
+      - model
+      - phone
+      - platform
+      - registered_by
+    TestDeviceCreateRequest:
+      type: object
+      description: '``POST notifications/test-devices/``: the customer''s phone and
+        a label for the registry.'
+      properties:
+        phone:
+          type: string
+          minLength: 1
+          pattern: ^\+998\d{9}$
+        label:
+          type: string
+          minLength: 1
+          maxLength: 60
+      required:
+      - label
+      - phone
     TierWarning:
       type: object
       description: '``warnings[]``: ``gap`` = ``[from, to)`` uncovered; ``uncovered_above``:
