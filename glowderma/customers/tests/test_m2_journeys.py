@@ -39,7 +39,7 @@ from django.test import override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from glowderma.accounts.models import Address, Customer, Device
+from glowderma.accounts.models import Address, Customer, Device, StaffUser
 from glowderma.appointments import services as appointment_services
 from glowderma.appointments.models import Appointment, AppointmentEvent
 from glowderma.catalog.models import Product
@@ -60,6 +60,7 @@ from glowderma.integrations.fcm.fake import FakeFcm
 from glowderma.integrations.fcm.ports import PushMessage
 from glowderma.loyalty.models import Purchase
 from glowderma.loyalty.tests.support import seed_policies
+from glowderma.notifications import services as notification_services
 from glowderma.notifications.models import Campaign
 from glowderma.payments.models import Payment, Refund
 from glowderma.professionals.models import ProfessionalService
@@ -1269,11 +1270,13 @@ def test_journey_5_qr_is_single_use_and_dies_with_the_session(world: World, pos_
 
 @pytest.mark.django_db(transaction=True)
 def test_journey_6_booking_race_confirm_push_ack_and_delivered_counter(
-    monkeypatch: pytest.MonkeyPatch, fcm: FakeFcm, staff_client: APIClient, clock: Clock
+    monkeypatch: pytest.MonkeyPatch, fcm: FakeFcm, staff: StaffUser, staff_client: APIClient, clock: Clock
 ) -> None:
     """C§2.11, §2.12, §2.14.2: two customers book the same slot concurrently → one 201, one 409
     ``slot_taken``; staff confirm → ``push.appointment`` inbox row whose push carries ``inbox_id`` → ack; a
-    campaign to the same customer → ack → the admin ``delivered`` counter counts it once."""
+    campaign to the same customer (a draft until a superuser tests it on the other customer's device,
+    confirms and approves; the beat sends it after the approval delay) → ack → the admin ``delivered``
+    counter counts it once."""
     publish_terms(TERMS_V1)
     world = World(nullcontext, fcm, Staff(staff_client, nullcontext), clock)
     day = booking_day()
@@ -1366,16 +1369,33 @@ def test_journey_6_booking_race_confirm_push_ack_and_delivered_counter(
     }
     created = world.staff.post("notifications/", form, multipart=True)
     assert created.status_code == 201, created.content
+    campaign_id = int(created.json()["id"])
+    # A draft sends nothing: the superuser tests it on the other customer's device, confirms, approves.
+    assert pushes(world, "campaign") == []
+    assert [r["title"] for r in inbox(app)["results"]] == ["Qabul tasdiqlandi"]
+    tester = notification_services.register_test_device(phone=phones[loser], label="Journey 6", actor=staff)
+    [test] = notification_services.send_test(campaign_id, [tester.pk], actor=staff).tests.all()
+    assert test.fcm_ok is True and [m.token for m in pushes(world, "campaign")] == [f"fcm-{apps[loser].fid}"]
+    assert [r["title"] for r in inbox(apps[loser])["results"]] == ["Yangi xizmat"]
+    notification_services.confirm_test(campaign_id, test.pk, actor=staff)
+    approved = notification_services.approve_campaign(campaign_id, expected_revision=1, actor=staff)
+    assert approved.state == "scheduled" and approved.dispatch_after is not None
+    assert inbox(app)["results"][0]["title"] != "Yangi xizmat"
+    # The beat before the delay leaves it waiting; after it the send runs (eager Celery, one batch).
+    assert notification_services.start_due_campaigns() == []
+    assert notification_services.start_due_campaigns(now=approved.dispatch_after + timedelta(seconds=1)) == [
+        campaign_id
+    ]
     campaign_row = next(r for r in inbox(app)["results"] if r["title"] == "Yangi xizmat")
-    [campaign_push] = pushes(world, "campaign")
+    [campaign_push] = [m for m in pushes(world, "campaign") if m.token == f"fcm-{app.fid}"]
     assert campaign_push.data["inbox_id"] == str(campaign_row["id"])
-    assert Campaign.objects.get(pk=created.json()["id"]).delivered is None
+    assert Campaign.objects.get(pk=campaign_id).delivered is None
     for _ in range(2):  # the app retries its batch: never counted twice
         assert app.post("me/notifications/ack/", {"inbox_ids": [campaign_row["id"], row["id"]]}).json() == {
             "acknowledged": 2
         }
     listed = world.staff.get("notifications/").json()["results"]
-    assert [(c["id"], c["delivered"]) for c in listed] == [(created.json()["id"], 1)]
+    assert [(c["id"], c["state"], c["delivered"]) for c in listed] == [(campaign_id, "sent", 1)]
     outbox_clean()
 
 
