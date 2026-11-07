@@ -59,8 +59,11 @@ for _topic in (
 
 
 def on_push_dead(message: OutboxMessage) -> None:
-    """A notification that could not be delivered in ten attempts: record it for the operators."""
+    """A notification that could not be delivered in ten attempts: record it for the operators. A dead
+    ``campaign.send_batch`` also closes its campaign (``partially_sent`` / ``failed``; see M3-N1)."""
     payload: dict[str, Any] = message.payload if isinstance(message.payload, dict) else {}
+    if message.topic == topics.CAMPAIGN_SEND_BATCH:
+        services.fail_campaign_from_dead_batch(message)
     audit.record(
         action="notification.push_dead",
         entity_type="outbox",
@@ -92,3 +95,8 @@ for _topic in topics.HANDLED_TOPICS:
 @shared_task(name="notifications.start_due_campaigns")  # type: ignore[untyped-decorator]
 def start_due_campaigns() -> list[int]:
     return services.start_due_campaigns()
+
+
+@shared_task(name="notifications.finalise_stopping_campaigns")  # type: ignore[untyped-decorator]
+def finalise_stopping_campaigns() -> list[int]:
+    return services.finalise_stopping_campaigns()

@@ -18,6 +18,11 @@ app.conf.beat_schedule = {
     "reap-stale-jobs": {"task": "integrations.reap_stale_jobs", "schedule": 300.0},
     # Scheduled campaigns start when due (design 03 §3.4 / §5: every minute).
     "start-due-campaigns": {"task": "notifications.start_due_campaigns", "schedule": 60.0},
+    # Campaign approval workflow: a stopped campaign with no open batch left is finalised (every minute).
+    "notifications-finalise-stopping": {
+        "task": "notifications.finalise_stopping_campaigns",
+        "schedule": 60.0,
+    },
     # Unpaid orders whose reservation ran out are cancelled (design 03 §4.1 row 3 / §5: every minute).
     "commerce-expire-reservations": {"task": "commerce.expire_reservations", "schedule": 60.0},
     # M2 (plan §8): SmsCode rows, done sms.send outbox rows and old customer sessions.

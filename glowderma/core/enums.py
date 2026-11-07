@@ -250,10 +250,19 @@ class NotificationKind(TextChoices):
 
 
 class NotificationState(TextChoices):
-    SCHEDULED = "scheduled"
-    QUEUED = "queued"
-    SENT = "sent"
-    CANCELLED = "cancelled"  # M3: POST notifications/{id}/cancel/ of a scheduled campaign
+    """Campaign approval workflow (admin contract §2.8): ``draft`` → ``tested`` → ``scheduled`` (approved,
+    waiting for ``dispatch_after``) → ``sending`` → ``sent``; ``stopping`` (emergency stop) ends in
+    ``partially_sent`` or ``cancelled``; a dead batch ends in ``partially_sent`` or ``failed``."""
+
+    DRAFT = "draft", "Qoralama"
+    TESTED = "tested", "Test tasdiqlangan"
+    SCHEDULED = "scheduled", "Rejalashtirilgan"
+    SENDING = "sending", "Yuborilmoqda"
+    STOPPING = "stopping", "To‘xtatilmoqda"
+    SENT = "sent", "Yuborildi"
+    PARTIALLY_SENT = "partially_sent", "Qisman yuborildi"
+    CANCELLED = "cancelled", "Bekor qilindi"
+    FAILED = "failed", "Yuborilmadi"
 
 
 class AudienceType(TextChoices):

@@ -30,6 +30,7 @@ from .base import (
     BTS_MODE,
     BTS_PICKUP_TYPE,
     BTS_SENDER_PHONE,
+    CAMPAIGN_APPROVAL_DELAY_MINUTES,
     CLICK_MERCHANT_API_URL,
     CLICK_MODE,
     CLICK_PAY_URL,
@@ -340,6 +341,11 @@ if ESKIZ_MODE == "live":
     _https_url("ESKIZ_BASE_URL", ESKIZ_BASE_URL)
     if ESKIZ_CALLBACK_URL:
         _https_url("ESKIZ_CALLBACK_URL", ESKIZ_CALLBACK_URL)
+# Campaign approval workflow (admin contract §2.8): the cancel window after an approval is at least 5 minutes
+# in production; 0 exists for local e2e runs only.
+if CAMPAIGN_APPROVAL_DELAY_MINUTES < 5:
+    raise ImproperlyConfigured("CAMPAIGN_APPROVAL_DELAY_MINUTES must be at least 5 in production")
+
 if FCM_MODE == "live":
     if not re.fullmatch(r"[a-z][a-z0-9-]{4,29}", _required("FCM_PROJECT_ID")):
         raise ImproperlyConfigured("FCM_PROJECT_ID must be the Firebase project id")

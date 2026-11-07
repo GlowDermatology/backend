@@ -1,5 +1,5 @@
-"""Writes of `notifications` (design 03 §3): campaigns and their batched send, status-push deliveries,
-templates, segments and manual members.
+"""Writes of `notifications` (design 03 §3): campaign drafts, test pushes, approval, cancel / stop and the
+batched send, status-push deliveries, templates, segments and manual members.
 
 Delivery is at-least-once: every handler body here is idempotent at the provider boundary through the
 ``InboxNotification.dedupe_key`` claim protocol (§3.6) and the ``CampaignRecipient`` states (§3.5).
@@ -16,9 +16,9 @@ from typing import Any
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.db import transaction
-from django.db.models import F, Value
+from django.db.models import Count, F, Q, Value
 from django.db.models.functions import Coalesce
-from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 
 from glowderma.accounts import services as account_services
 from glowderma.accounts import topics as account_topics
@@ -27,9 +27,10 @@ from glowderma.appointments import selectors as appointment_selectors
 from glowderma.appointments.models import OPEN_STATUSES
 from glowderma.catalog.models import Product
 from glowderma.core import audit, enums, i18n, outbox, timeutils
-from glowderma.core.api.exceptions import Conflict, field_error
+from glowderma.core.api.exceptions import Conflict, InvalidTransition, ProviderUnavailable, field_error
 from glowderma.core.images import ImageError, process_image
 from glowderma.core.media import absolute_media_url, media_name
+from glowderma.core.models import OutboxMessage
 from glowderma.integrations.fcm.ports import (
     NOT_SENT,
     PAYLOAD_INVALID,
@@ -39,15 +40,17 @@ from glowderma.integrations.fcm.ports import (
     PushResult,
 )
 from glowderma.integrations.fcm.registry import get_fcm_port
-from glowderma.notifications import selectors, texts, topics
+from glowderma.notifications import selectors, state, texts, topics
 from glowderma.notifications.media import CAMPAIGN_IMAGE_KIND
 from glowderma.notifications.models import (
     Campaign,
     CampaignRecipient,
+    CampaignTest,
     CustomerSegment,
     InboxNotification,
     SegmentMember,
     StatusTemplate,
+    TestDevice,
 )
 
 logger = logging.getLogger(__name__)
@@ -115,7 +118,51 @@ def batch_size() -> int:
     return int(settings.CAMPAIGN_BATCH_SIZE)
 
 
-# --- campaigns ----------------------------------------------------------------------------------------------
+# --- campaigns: drafts, test pushes, approval (admin contract §2.8) --------------------------------------
+
+# Uzbek messages of the approval workflow (409 ``conflict`` unless noted).
+MESSAGE_STALE_REVISION = "Xabar o‘zgartirilgan: sahifani yangilab, qayta urinib ko‘ring."
+MESSAGE_NOT_TESTED = state.MESSAGE_NOT_TESTED
+MESSAGE_TEST_STALE = "Bu test eski matn uchun yuborilgan: qayta test yuboring."
+MESSAGE_TEST_UNDELIVERED = "Bu test qurilmaga yetib bormagan: tasdiqlab bo‘lmaydi."
+MESSAGE_NO_TEST_DEVICES = "Push qabul qila oladigan test qurilmasi tanlanmadi."
+MESSAGE_SEGMENT_GONE = "Tanlangan segment o‘chirilgan: auditoriyani qayta tanlang."
+MESSAGE_FCM_DOWN = "Push xizmati javob bermadi: birozdan so‘ng qayta urinib ko‘ring."
+MESSAGE_CANCEL_STARTED = state.MESSAGE_CANCEL_STARTED
+MESSAGE_CANCEL_DRAFT = state.MESSAGE_CANCEL_DRAFT
+MESSAGE_NOT_SENDING = state.MESSAGE_NOT_SENDING
+TEST_DEVICE_MESSAGES = {
+    "customer_not_found": "Bu raqam bilan mijoz topilmadi.",
+    "device_not_pushable": "Bu mijozning push qabul qiladigan qurilmasi yo‘q.",
+    "unique": "Bu qurilma allaqachon ro‘yxatda.",
+    "does_not_exist": "Test qurilmasi topilmadi.",
+}
+STOPPED = "stopped"  # recipient / inbox error of a push never attempted because the campaign was stopped
+UNAVAILABLE_TEST = "unavailable"  # a test push FCM did not take at all (the provider was down)
+# The content fields whose change bumps ``content_revision`` and clears the test confirmation.
+CONTENT_FIELDS = (
+    "kind",
+    "title",
+    "body",
+    "link_kind",
+    "link_product_id",
+    "link_product_label",
+    "link_url",
+    "audience_type",
+    "audience_segment_id",
+    "audience_segment_name",
+    "audience_customer_id",
+    "audience_phone",
+)
+
+
+def _iso(value: Any) -> str | None:
+    return timeutils.isoformat(value) if value is not None else None
+
+
+def approval_delay() -> timedelta:
+    """The minimum wait between an approval and the dispatch (``CAMPAIGN_APPROVAL_DELAY_MINUTES``)."""
+    return timedelta(minutes=int(settings.CAMPAIGN_APPROVAL_DELAY_MINUTES))
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,7 +176,7 @@ class CampaignInput:
     audience_type: str = enums.AudienceType.ALL
     audience_segment: CustomerSegment | None = None
     audience_customer: Customer | None = None
-    scheduled_at: Any = None
+    scheduled_at: Any = None  # the author's requested send time (optional)
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -143,20 +190,65 @@ def _store_image(campaign: Campaign, upload: Any) -> None:
     campaign.save(update_fields=["image"])
 
 
+def _remove_image(campaign: Campaign) -> None:
+    if campaign.image:
+        campaign.image.delete(save=False)  # leaves the field empty on the instance
+        campaign.save(update_fields=["image"])
+
+
 def _campaign_audit_image(campaign: Campaign) -> dict[str, Any]:
     return {
         "kind": campaign.kind,
         "title": campaign.title,
+        "body": campaign.body,
         "audience_type": campaign.audience_type,
         "audience_segment_id": campaign.audience_segment_id,
         "audience_phone": campaign.audience_phone or None,
         "link_kind": campaign.link_kind,
         "link_product_id": campaign.link_product_id,
         "link_url": campaign.link_url or None,
+        "image": (campaign.image.name or None) if campaign.image else None,
         "scheduled_at": timeutils.isoformat(campaign.scheduled_at) if campaign.scheduled_at else None,
         "state": campaign.state,
+        "revision": campaign.content_revision,
         "recipient_count": campaign.recipient_count,
     }
+
+
+def _content_snapshot(campaign: Campaign) -> dict[str, Any]:
+    snapshot = {name: getattr(campaign, name) for name in CONTENT_FIELDS}
+    snapshot["image"] = campaign.image.name if campaign.image else ""
+    return snapshot
+
+
+def _lock_campaign(campaign_id: int) -> Campaign:
+    campaign = Campaign.objects.select_for_update().filter(pk=campaign_id).first()
+    if campaign is None:
+        raise NotFound
+    return campaign
+
+
+def ensure_can_edit(campaign: Campaign, actor: Any) -> None:
+    """Drafts are edited and deleted by their author or by a superuser (admin contract §2.8); anyone else
+    gets 403 ``permission_denied``."""
+    if getattr(actor, "is_superuser", False):
+        return
+    if campaign.author_id is None or campaign.author_id != getattr(actor, "pk", None):
+        raise PermissionDenied
+
+
+def _audit(
+    campaign: Campaign, action: str, *, actor: Any, request: Any, before: Any = None, after: Any = None
+) -> None:
+    audit.record(
+        action=action,
+        entity_type="campaign",
+        entity_id=str(campaign.pk),
+        actor=actor,
+        request=request,
+        before=before,
+        after=after,
+    )
 
 
 def _finish_empty(campaign: Campaign, now: Any) -> None:
@@ -182,17 +274,34 @@ def materialise(campaign: Campaign) -> int:
     return campaign.recipient_count
 
 
-def _queue(campaign: Campaign) -> None:
-    """``queued`` + batch 0 (or ``sent`` when nobody can be reached). The caller saves the row."""
+def _start(campaign: Campaign) -> None:
+    """``scheduled`` → ``sending`` (recipients materialised, live tallies at 0, batch 0 enqueued) or ``sent``
+    at once when nobody can be reached; audited ``notification.send_started`` by the system. The caller
+    (``start_due_campaigns``) saves the row inside the same transaction."""
     now = timeutils.now()
+    before = {"state": campaign.state, "dispatch_after": _iso(campaign.dispatch_after)}
     if materialise(campaign) == 0:
         _finish_empty(campaign, now)
-        return
-    campaign.state = Campaign.State.QUEUED
-    outbox.enqueue(
-        topics.CAMPAIGN_SEND_BATCH,
-        {"campaign_id": campaign.pk, "batch_no": 0},
-        dedupe_key=topics.campaign_send_batch_key(campaign.pk, 0),
+    else:
+        campaign.state = Campaign.State.SENDING
+        campaign.started_at = now
+        campaign.sent = campaign.failed = 0
+        outbox.enqueue(
+            topics.CAMPAIGN_SEND_BATCH,
+            {"campaign_id": campaign.pk, "batch_no": 0},
+            dedupe_key=topics.campaign_send_batch_key(campaign.pk, 0),
+        )
+    _audit(
+        campaign,
+        state.transition("start").audit_action,
+        actor=None,
+        request=None,
+        before=before,
+        after={
+            "state": campaign.state,
+            "started_at": timeutils.isoformat(now),
+            "recipient_count": campaign.recipient_count,
+        },
     )
 
 
@@ -204,40 +313,38 @@ def _label_snapshot(product: Product | None) -> str:
     return product.display_name[:limit]
 
 
-@transaction.atomic
-def create_campaign(data: CampaignInput, image: Any = None, *, actor: Any, request: Any = None) -> Campaign:
-    """``POST notifications/``: without ``scheduled_at`` the send starts now (recipients materialised, batch 0
-    enqueued); with it the campaign waits for ``start_due_campaigns``. Audit ``notification.created``."""
-    scheduled = data.scheduled_at is not None
-    campaign = Campaign(
-        kind=data.kind,
-        title=data.title,
-        body=data.body,
-        link_kind=data.link_kind,
-        link_product=data.link_product,
-        link_product_label=_label_snapshot(data.link_product),
-        link_url=data.link_url if data.link_kind == enums.LinkKind.URL else "",
-        audience_type=data.audience_type,
-        audience_segment=data.audience_segment,
-        audience_segment_name=data.audience_segment.name if data.audience_segment is not None else "",
-        audience_customer=data.audience_customer,
-        audience_phone=(data.audience_customer.phone or "") if data.audience_customer is not None else "",
-        state=Campaign.State.SCHEDULED if scheduled else Campaign.State.QUEUED,
-        scheduled_at=data.scheduled_at,
-        author=actor,
+def _apply_input(campaign: Campaign, data: CampaignInput) -> None:
+    campaign.kind = data.kind
+    campaign.title = data.title
+    campaign.body = data.body
+    campaign.link_kind = data.link_kind
+    campaign.link_product = data.link_product
+    campaign.link_product_label = _label_snapshot(data.link_product)
+    campaign.link_url = data.link_url if data.link_kind == enums.LinkKind.URL else ""
+    campaign.audience_type = data.audience_type
+    campaign.audience_segment = data.audience_segment
+    campaign.audience_segment_name = data.audience_segment.name if data.audience_segment is not None else ""
+    campaign.audience_customer = data.audience_customer
+    campaign.audience_phone = (
+        (data.audience_customer.phone or "") if data.audience_customer is not None else ""
     )
+    campaign.scheduled_at = data.scheduled_at
+
+
+@transaction.atomic
+def create_draft(data: CampaignInput, image: Any = None, *, actor: Any, request: Any = None) -> Campaign:
+    """``POST notifications/``: a ``draft`` (revision 1) with an estimated ``recipient_count``; nothing is
+    materialised, enqueued or pushed. Audit ``notification.created``."""
+    campaign = Campaign(state=Campaign.State.DRAFT, author=actor)
+    _apply_input(campaign, data)
     campaign.save()
     if image is not None:
         _store_image(campaign, image)
-    if scheduled:
-        campaign.recipient_count = len(selectors.audience_recipients(campaign))
-    else:
-        _queue(campaign)
+    campaign.recipient_count = len(selectors.audience_recipients(campaign))
     campaign.save()
-    audit.record(
-        action="notification.created",
-        entity_type="campaign",
-        entity_id=str(campaign.pk),
+    _audit(
+        campaign,
+        state.transition("create").audit_action,
         actor=actor,
         request=request,
         after=_campaign_audit_image(campaign),
@@ -245,75 +352,154 @@ def create_campaign(data: CampaignInput, image: Any = None, *, actor: Any, reque
     return campaign
 
 
-MESSAGE_CANCEL_STARTED = "Yuborish boshlangan: xabarni bekor qilib bo‘lmaydi."
+def _clear_test_confirmation(campaign: Campaign) -> None:
+    campaign.tested_revision = None
+    campaign.test_confirmed_at = None
+    campaign.test_confirmed_by = None
 
 
-def cancel_campaign(campaign_id: int, *, actor: Any, request: Any = None) -> Campaign:
-    """``POST notifications/{id}/cancel/`` (admin contract §2.8, M3): a ``scheduled`` campaign becomes
-    ``cancelled`` (``cancelled_at`` = now; nothing was materialised or sent), audited
-    ``notification.cancelled``.
-    Idempotent: an already cancelled campaign is returned unchanged (no second audit row). Once the send
-    started (``queued`` / ``sending`` / ``sent``) → 409 ``conflict`` :data:`MESSAGE_CANCEL_STARTED`. The row
-    lock orders it against ``start_due_campaigns`` (which skips a locked row and re-reads the state)."""
-    with transaction.atomic():
-        campaign = Campaign.objects.select_for_update().filter(pk=campaign_id).first()
-        if campaign is None:
-            raise NotFound
-        if campaign.state == Campaign.State.CANCELLED:
-            return campaign
-        if campaign.state != Campaign.State.SCHEDULED:
-            raise Conflict(MESSAGE_CANCEL_STARTED)
-        scheduled_at = campaign.scheduled_at
-        before = {
-            "state": campaign.state,
-            "scheduled_at": timeutils.isoformat(scheduled_at) if scheduled_at else None,
-        }
-        cancelled_at = timeutils.now()
-        campaign.state = Campaign.State.CANCELLED
-        campaign.cancelled_at = cancelled_at
-        campaign.save(update_fields=["state", "cancelled_at", "updated_at"])
-        audit.record(
-            action="notification.cancelled",
-            entity_type="campaign",
-            entity_id=str(campaign.pk),
-            actor=actor,
-            request=request,
-            before=before,
-            after={"state": campaign.state, "cancelled_at": timeutils.isoformat(cancelled_at)},
-        )
-        return campaign
-
-
-def start_due_campaigns(now: Any = None) -> list[int]:
-    """Beat ``notifications.start_due_campaigns`` (1 min): queue every ``scheduled`` campaign that is due,
-    one transaction each (``select_for_update(skip_locked=True)`` keeps two beats apart)."""
-    instant = timeutils.now() if now is None else now
-    started: list[int] = []
-    due = list(
-        Campaign.objects.filter(state=Campaign.State.SCHEDULED, scheduled_at__lte=instant)
-        .order_by("scheduled_at", "id")
-        .values_list("pk", flat=True)
+@transaction.atomic
+def update_draft(
+    campaign_id: int,
+    data: CampaignInput,
+    image: Any = None,
+    *,
+    remove_image: bool = False,
+    expected_revision: int,
+    actor: Any,
+    request: Any = None,
+) -> Campaign:
+    """``PATCH notifications/{id}/`` (author or superuser): a ``draft`` / ``tested`` campaign takes the merged
+    form. A content change (kind, title, body, image, link, audience) bumps ``content_revision``, clears the
+    test confirmation and puts a ``tested`` campaign back to ``draft``; a change of the requested time alone
+    keeps the state. ``expected_revision`` must be the current revision (409 ``conflict``). Audit
+    ``notification.draft_updated`` with the changed fields."""
+    campaign = _lock_campaign(campaign_id)
+    ensure_can_edit(campaign, actor)
+    state.check("update", campaign.state)
+    if expected_revision != campaign.content_revision:
+        raise Conflict(MESSAGE_STALE_REVISION)
+    before_image = _campaign_audit_image(campaign)
+    before_content = _content_snapshot(campaign)
+    _apply_input(campaign, data)
+    campaign.save()
+    if remove_image:
+        _remove_image(campaign)
+    if image is not None:
+        _remove_image(campaign)
+        _store_image(campaign, image)
+    content_changed = _content_snapshot(campaign) != before_content
+    if content_changed:
+        campaign.content_revision += 1
+        campaign.state = Campaign.State.DRAFT
+        _clear_test_confirmation(campaign)
+    campaign.recipient_count = len(selectors.audience_recipients(campaign))
+    campaign.save()
+    after_image = _campaign_audit_image(campaign)
+    _audit(
+        campaign,
+        state.transition("update").audit_action,
+        actor=actor,
+        request=request,
+        before={key: value for key, value in before_image.items() if after_image[key] != value},
+        after={key: value for key, value in after_image.items() if before_image[key] != value},
     )
-    for pk in due:
-        with transaction.atomic():
-            campaign = (
-                Campaign.objects.select_for_update(skip_locked=True)
-                .filter(pk=pk, state=Campaign.State.SCHEDULED, scheduled_at__lte=instant)
-                .first()
-            )
-            if campaign is None:
-                continue
-            _queue(campaign)
-            campaign.save()
-            started.append(pk)
-    return started
+    return campaign
 
 
-@dataclass(slots=True)
-class _Claim:
-    recipient: CampaignRecipient
-    inbox: InboxNotification
-    token: str
+@transaction.atomic
+def delete_draft(campaign_id: int, *, actor: Any, request: Any = None) -> None:
+    """``DELETE notifications/{id}/`` (author or superuser): a ``draft`` / ``tested`` campaign and its image
+    file go; its tests cascade. Audit ``notification.draft_deleted``."""
+    campaign = _lock_campaign(campaign_id)
+    ensure_can_edit(campaign, actor)
+    state.check("delete", campaign.state)
+    before = _campaign_audit_image(campaign)
+    pk = campaign.pk
+    if campaign.image:
+        campaign.image.delete(save=False)
+    campaign.delete()
+    audit.record(
+        action=state.transition("delete").audit_action,
+        entity_type="campaign",
+        entity_id=str(pk),
+        actor=actor,
+        request=request,
+        before=before,
+    )
+
+
+# --- test devices -------------------------------------------------------------------------------------------
+
+
+def _test_device_image(test_device: TestDevice) -> dict[str, Any]:
+    return {
+        "device_id": test_device.device_id,
+        "phone": test_device.phone,
+        "label": test_device.label,
+        "is_active": test_device.is_active,
+    }
+
+
+@transaction.atomic
+def register_test_device(*, phone: str, label: str, actor: Any, request: Any = None) -> TestDevice:
+    """``POST notifications/test-devices/`` (superuser): the active customer with ``phone`` must have a
+    pushable device (its most recently active one is registered). Field errors ``phone``
+    ``customer_not_found`` / ``device_not_pushable`` / ``unique``. Audit ``test_device.registered``."""
+    customer = Customer.objects.filter(phone=phone, status=enums.CustomerStatus.ACTIVE).first()
+    if customer is None:
+        raise ValidationError(
+            {"phone": [field_error("customer_not_found", TEST_DEVICE_MESSAGES["customer_not_found"])]}
+        )
+    device = (
+        Device.objects.filter(selectors.PUSHABLE_DEVICE, customer=customer)
+        .order_by("-last_active_at", "-id")
+        .first()
+    )
+    if device is None:
+        raise ValidationError(
+            {"phone": [field_error("device_not_pushable", TEST_DEVICE_MESSAGES["device_not_pushable"])]}
+        )
+    if TestDevice.objects.filter(device=device, is_active=True).exists():
+        raise ValidationError({"phone": [field_error("unique", TEST_DEVICE_MESSAGES["unique"])]})
+    test_device = TestDevice.objects.create(
+        device=device, phone=phone, label=label.strip(), registered_by=actor
+    )
+    audit.record(
+        action=state.AUDIT_TEST_DEVICE_REGISTERED,
+        entity_type="test_device",
+        entity_id=str(test_device.pk),
+        actor=actor,
+        request=request,
+        after=_test_device_image(test_device),
+    )
+    return test_device
+
+
+@transaction.atomic
+def remove_test_device(test_device_id: int, *, actor: Any, request: Any = None) -> TestDevice:
+    """``DELETE notifications/test-devices/{id}/`` (superuser): soft (``is_active = False``), idempotent
+    (an inactive row answers unchanged, no second audit); 404 for an unknown id."""
+    test_device = TestDevice.objects.select_for_update().filter(pk=test_device_id).first()
+    if test_device is None:
+        raise NotFound
+    if not test_device.is_active:
+        return test_device
+    test_device.is_active = False
+    test_device.save(update_fields=["is_active"])
+    audit.record(
+        action=state.AUDIT_TEST_DEVICE_REMOVED,
+        entity_type="test_device",
+        entity_id=str(test_device.pk),
+        actor=actor,
+        request=request,
+        before={"is_active": True},
+        after=_test_device_image(test_device),
+    )
+    return test_device
+
+
+# --- test pushes and approval -------------------------------------------------------------------------------
 
 
 def _inbox_defaults(campaign: Campaign, push_state: str) -> dict[str, Any]:
@@ -339,6 +525,368 @@ def _usable_token(device: Device | None) -> str:
     if device is None or not device.is_active or not device.push_enabled or not device.fcm_token:
         return ""
     return device.fcm_token
+
+
+def campaign_messages(campaign: Campaign, targets: Iterable[tuple[str, int]]) -> list[PushMessage]:
+    """Campaign pushes (C§2.14.2) for ``(token, inbox_id)`` pairs — the one message builder of the batched
+    send and of the test pushes: ``data`` ``{type, inbox_id, campaign_id, product_id | "", link_url | ""}``,
+    channel ``promo`` / ``general``, normal priority, the campaign image as ``notification.image``.
+    ``link_url`` is the campaign's https destination (kind ``url``, gap ADM-10.1)."""
+    product_id = (
+        str(campaign.link_product_id)
+        if campaign.link_kind == enums.LinkKind.PRODUCT and campaign.link_product_id is not None
+        else ""
+    )
+    link_url = campaign.link_url if campaign.link_kind == enums.LinkKind.URL else ""
+    image_url = absolute_media_url(campaign.image.name or "") if campaign.image else ""
+    channel = "promo" if campaign.kind == enums.NotificationKind.PROMO else "general"
+    return [
+        push_message(
+            token,
+            campaign.title,
+            campaign.body,
+            {
+                "type": enums.PushDataType.CAMPAIGN,
+                "inbox_id": str(inbox_id),
+                "campaign_id": str(campaign.pk),
+                "product_id": product_id,
+                "link_url": link_url,
+            },
+            channel=channel,
+            priority=CAMPAIGN_PRIORITY,
+            image_url=image_url,
+        )
+        for token, inbox_id in targets
+    ]
+
+
+def _test_image(test: CampaignTest) -> dict[str, Any]:
+    return {
+        "test_id": test.pk,
+        "test_device_id": test.test_device_id,
+        "device_id": test.device_id,
+        "revision": test.revision,
+        "fcm_ok": test.fcm_ok,
+        "fcm_error": test.fcm_error or None,
+    }
+
+
+def send_test(
+    campaign_id: int, test_device_ids: Sequence[int], *, actor: Any, request: Any = None
+) -> Campaign:
+    """``POST notifications/{id}/test/`` (superuser): push the current revision of a ``draft`` / ``tested``
+    campaign to the chosen active test devices.
+
+    Transaction 1 locks the campaign, checks the state and writes one ``CampaignTest`` (``fcm_ok`` null) per
+    device with a real ``InboxNotification`` for the tester (dedupe ``campaign-test:{campaign}:{test}``), so
+    the deep link opens in the app; a device that lost its token gets ``fcm_ok = False`` ``no_device`` at
+    once. The FCM call runs **outside** the transaction through :func:`campaign_messages`; transaction 2
+    records ``fcm_ok`` / ``fcm_error`` / ``provider_message_id`` and the inbox outcome, and prunes a dead
+    token (``unregistered``). ``FcmUnavailable`` → every test ``fcm_ok = False`` ``unavailable`` and 503
+    ``provider_unavailable``. Audit ``notification.test_sent``.
+    """
+    wanted = sorted({int(pk) for pk in test_device_ids})
+    with transaction.atomic():
+        campaign = _lock_campaign(campaign_id)
+        state.check("test", campaign.state)
+        devices = {
+            row.pk: row
+            for row in TestDevice.objects.select_related("device").filter(pk__in=wanted, is_active=True)
+        }
+        if len(devices) != len(wanted):
+            raise ValidationError(
+                {"device_ids": [field_error("does_not_exist", TEST_DEVICE_MESSAGES["does_not_exist"])]}
+            )
+        now = timeutils.now()
+        tests: list[CampaignTest] = []
+        targets: list[tuple[CampaignTest, InboxNotification, str]] = []
+        for pk in wanted:
+            test_device = devices[pk]
+            token = _usable_token(test_device.device)
+            test = CampaignTest.objects.create(
+                campaign=campaign,
+                revision=campaign.content_revision,
+                test_device=test_device,
+                device=test_device.device,
+                device_label=test_device.label,
+                phone=test_device.phone,
+                sent_by=actor,
+                sent_at=now,
+                fcm_ok=None if token else False,
+                fcm_error="" if token else NO_DEVICE,
+            )
+            tests.append(test)
+            if not token:
+                continue
+            inbox = InboxNotification.objects.create(
+                customer_id=test_device.device.customer_id,
+                dedupe_key=topics.campaign_test_inbox_key(campaign.pk, test.pk),
+                **_inbox_defaults(campaign, InboxNotification.PushState.SENDING),
+            )
+            test.inbox = inbox
+            test.save(update_fields=["inbox"])
+            targets.append((test, inbox, token))
+        if not targets:
+            raise Conflict(MESSAGE_NO_TEST_DEVICES)
+    messages = campaign_messages(campaign, [(token, inbox.pk) for _test, inbox, token in targets])
+    try:
+        results = get_fcm_port().send(messages)
+    except FcmUnavailable:
+        with transaction.atomic():
+            for test, inbox, _token in targets:
+                CampaignTest.objects.filter(pk=test.pk).update(fcm_ok=False, fcm_error=UNAVAILABLE_TEST)
+                InboxNotification.objects.filter(pk=inbox.pk).update(
+                    push_state=InboxNotification.PushState.FAILED, push_error=UNAVAILABLE_TEST
+                )
+        raise ProviderUnavailable(MESSAGE_FCM_DOWN) from None
+    with transaction.atomic():
+        campaign = _lock_campaign(campaign_id)
+        now = timeutils.now()
+        for (test, inbox, token), result in zip(targets, results, strict=True):
+            if result.ok:
+                test.fcm_ok, test.provider_message_id = True, result.message_id
+                inbox.push_state, inbox.pushed_at = InboxNotification.PushState.SENT, now
+            else:
+                test.fcm_ok, test.fcm_error = False, result.error
+                inbox.push_state, inbox.push_error = InboxNotification.PushState.FAILED, result.error
+                _after_failure(result, token, test.device_id, topics.CAMPAIGN_SEND_BATCH, inbox.pk)
+            test.save(update_fields=["fcm_ok", "fcm_error", "provider_message_id"])
+            inbox.save(update_fields=["push_state", "pushed_at", "push_error"])
+        _audit(
+            campaign,
+            state.transition("test").audit_action,
+            actor=actor,
+            request=request,
+            after={"revision": campaign.content_revision, "tests": [_test_image(test) for test in tests]},
+        )
+        return campaign
+
+
+@transaction.atomic
+def confirm_test(campaign_id: int, test_id: int, *, actor: Any, request: Any = None) -> Campaign:
+    """``POST notifications/{id}/tests/{test_id}/confirm/`` (superuser): the superuser saw the test on the
+    device. The test must be the current revision's (409 ``conflict`` :data:`MESSAGE_TEST_STALE`) and
+    delivered (:data:`MESSAGE_TEST_UNDELIVERED`); the campaign becomes ``tested`` for that revision. A
+    confirmed test answers unchanged. Audit ``notification.test_confirmed``."""
+    campaign = _lock_campaign(campaign_id)
+    test = CampaignTest.objects.filter(pk=test_id, campaign=campaign).first()
+    if test is None:
+        raise NotFound
+    if test.confirmed_at is not None and campaign.tested_revision == campaign.content_revision:
+        return campaign
+    state.check("confirm", campaign.state)
+    if test.revision != campaign.content_revision:
+        raise Conflict(MESSAGE_TEST_STALE)
+    if test.fcm_ok is not True:
+        raise Conflict(MESSAGE_TEST_UNDELIVERED)
+    now = timeutils.now()
+    before = {"state": campaign.state, "tested_revision": campaign.tested_revision}
+    if test.confirmed_at is None:
+        test.confirmed_at, test.confirmed_by = now, actor
+        test.save(update_fields=["confirmed_at", "confirmed_by"])
+    campaign.state = Campaign.State.TESTED
+    campaign.tested_revision = campaign.content_revision
+    campaign.test_confirmed_at, campaign.test_confirmed_by = now, actor
+    campaign.save(update_fields=["state", "tested_revision", "test_confirmed_at", "test_confirmed_by"])
+    _audit(
+        campaign,
+        state.transition("confirm").audit_action,
+        actor=actor,
+        request=request,
+        before=before,
+        after={"state": campaign.state, "tested_revision": campaign.tested_revision, "test_id": test.pk},
+    )
+    return campaign
+
+
+@transaction.atomic
+def approve_campaign(
+    campaign_id: int, *, expected_revision: int, actor: Any, request: Any = None
+) -> Campaign:
+    """``POST notifications/{id}/approve/`` (superuser): a ``tested`` campaign whose confirmed test is the
+    current revision becomes ``scheduled`` with ``dispatch_after = max(now + approval delay, scheduled_at)``.
+    **Nothing is dispatched here** — no outbox row, no on-commit hook, no FCM call: the beat
+    (``start_due_campaigns``) claims it once ``dispatch_after`` has passed. ``expected_revision`` stale → 409
+    ``conflict``; a repeat on the approved revision answers unchanged. Audit ``notification.approved``."""
+    campaign = _lock_campaign(campaign_id)
+    if expected_revision != campaign.content_revision:
+        raise Conflict(MESSAGE_STALE_REVISION)
+    if not state.check("approve", campaign.state):
+        if campaign.approved_revision == campaign.content_revision:
+            return campaign
+        raise Conflict(MESSAGE_STALE_REVISION)  # approved for another revision: never happens, never ignored
+    if campaign.tested_revision != campaign.content_revision:
+        raise Conflict(MESSAGE_NOT_TESTED)
+    if campaign.audience_type == enums.AudienceType.SEGMENT and campaign.audience_segment_id is None:
+        raise Conflict(MESSAGE_SEGMENT_GONE)
+    now = timeutils.now()
+    earliest = now + approval_delay()
+    dispatch_after = max(earliest, campaign.scheduled_at) if campaign.scheduled_at else earliest
+    before = {"state": campaign.state}
+    campaign.state = Campaign.State.SCHEDULED
+    campaign.approved_at, campaign.approved_by = now, actor
+    campaign.approved_revision = campaign.content_revision
+    campaign.dispatch_after = dispatch_after
+    campaign.recipient_count = len(selectors.audience_recipients(campaign))
+    campaign.save(
+        update_fields=[
+            "state",
+            "approved_at",
+            "approved_by",
+            "approved_revision",
+            "dispatch_after",
+            "recipient_count",
+        ]
+    )
+    _audit(
+        campaign,
+        state.transition("approve").audit_action,
+        actor=actor,
+        request=request,
+        before=before,
+        after={
+            "state": campaign.state,
+            "approved_revision": campaign.approved_revision,
+            "dispatch_after": timeutils.isoformat(dispatch_after),
+            "scheduled_at": timeutils.isoformat(campaign.scheduled_at) if campaign.scheduled_at else None,
+            "recipient_count": campaign.recipient_count,
+        },
+    )
+    return campaign
+
+
+@transaction.atomic
+def return_to_draft(campaign_id: int, *, actor: Any, request: Any = None) -> Campaign:
+    """``POST notifications/{id}/return-to-draft/`` (superuser): a ``scheduled`` (not yet claimed) or
+    ``cancelled`` (never started) campaign goes back to ``draft`` — approval, cancellation and test
+    confirmation cleared, revision bumped so it must be tested again. Audit
+    ``notification.returned_to_draft``."""
+    campaign = _lock_campaign(campaign_id)
+    if not state.check("return_to_draft", campaign.state):
+        return campaign
+    if campaign.started_at is not None:  # a cancelled-by-stop campaign: pushes went out, nothing to redo
+        raise InvalidTransition(state.MESSAGE_NOT_RETURNABLE)
+    before = {"state": campaign.state, "revision": campaign.content_revision}
+    campaign.state = Campaign.State.DRAFT
+    campaign.content_revision += 1
+    campaign.approved_at = campaign.approved_by = campaign.approved_revision = None
+    campaign.dispatch_after = None
+    campaign.cancelled_at = campaign.cancelled_by = None
+    _clear_test_confirmation(campaign)
+    campaign.save()
+    _audit(
+        campaign,
+        state.transition("return_to_draft").audit_action,
+        actor=actor,
+        request=request,
+        before=before,
+        after={"state": campaign.state, "revision": campaign.content_revision},
+    )
+    return campaign
+
+
+def cancel_campaign(campaign_id: int, *, actor: Any, request: Any = None) -> Campaign:
+    """``POST notifications/{id}/cancel/`` (superuser; admin contract §2.8): an approved ``scheduled``
+    campaign the beat has not claimed becomes ``cancelled`` (``cancelled_at`` / ``cancelled_by``; nothing was
+    materialised or sent), audited ``notification.cancelled``. Idempotent on ``cancelled``. A ``draft`` /
+    ``tested`` campaign → 409 ``invalid_transition`` :data:`MESSAGE_CANCEL_DRAFT`; once the send started →
+    409 ``conflict`` :data:`MESSAGE_CANCEL_STARTED` (the emergency stop is ``stop/``). The row lock orders it
+    against ``start_due_campaigns`` (which skips a locked row and re-reads the state)."""
+    with transaction.atomic():
+        campaign = _lock_campaign(campaign_id)
+        if campaign.state in Campaign.EDITABLE_STATES:
+            raise InvalidTransition(MESSAGE_CANCEL_DRAFT)
+        if campaign.state == Campaign.State.CANCELLED:
+            return campaign
+        if campaign.state != Campaign.State.SCHEDULED:
+            raise Conflict(MESSAGE_CANCEL_STARTED)
+        before = {
+            "state": campaign.state,
+            "scheduled_at": _iso(campaign.scheduled_at),
+            "dispatch_after": _iso(campaign.dispatch_after),
+        }
+        cancelled_at = timeutils.now()
+        campaign.state = Campaign.State.CANCELLED
+        campaign.cancelled_at, campaign.cancelled_by = cancelled_at, actor
+        campaign.save(update_fields=["state", "cancelled_at", "cancelled_by"])
+        _audit(
+            campaign,
+            state.transition("cancel").audit_action,
+            actor=actor,
+            request=request,
+            before=before,
+            after={"state": campaign.state, "cancelled_at": timeutils.isoformat(cancelled_at)},
+        )
+        return campaign
+
+
+@transaction.atomic
+def request_stop(campaign_id: int, *, actor: Any, request: Any = None) -> Campaign:
+    """``POST notifications/{id}/stop/`` (superuser; emergency stop): ``sending`` → ``stopping``. The running
+    batch checks the state before claiming and before enqueueing the next batch and finalises the campaign
+    (``partially_sent`` / ``cancelled``, pending recipients ``stopped``); pushes FCM already accepted are
+    never recalled. Idempotent on ``stopping`` and on a campaign that ended by a stop; anything else → 409
+    ``invalid_transition`` :data:`MESSAGE_NOT_SENDING`. Audit ``notification.stop_requested``."""
+    campaign = _lock_campaign(campaign_id)
+    if campaign.stop_requested_at is not None:
+        return campaign
+    state.check("stop", campaign.state)
+    now = timeutils.now()
+    campaign.state = Campaign.State.STOPPING
+    campaign.stop_requested_at, campaign.stop_requested_by = now, actor
+    campaign.save(update_fields=["state", "stop_requested_at", "stop_requested_by"])
+    _audit(
+        campaign,
+        state.transition("stop").audit_action,
+        actor=actor,
+        request=request,
+        before={"state": Campaign.State.SENDING, "sent": campaign.sent, "failed": campaign.failed},
+        after={"state": campaign.state, "stop_requested_at": timeutils.isoformat(now)},
+    )
+    return campaign
+
+
+def start_due_campaigns(now: Any = None) -> list[int]:
+    """Beat ``notifications.start_due_campaigns`` (1 min): start every approved ``scheduled`` campaign whose
+    ``dispatch_after`` has passed, one transaction each (``select_for_update(skip_locked=True)`` keeps two
+    beats apart; the state is re-read under the lock, so a cancel that won the lock is honoured)."""
+    instant = timeutils.now() if now is None else now
+    started: list[int] = []
+    due = list(
+        Campaign.objects.filter(
+            state=Campaign.State.SCHEDULED, approved_at__isnull=False, dispatch_after__lte=instant
+        )
+        .order_by("dispatch_after", "id")
+        .values_list("pk", flat=True)
+    )
+    for pk in due:
+        with transaction.atomic():
+            campaign = (
+                Campaign.objects.select_for_update(skip_locked=True)
+                .filter(
+                    pk=pk,
+                    state=Campaign.State.SCHEDULED,
+                    approved_at__isnull=False,
+                    dispatch_after__lte=instant,
+                )
+                .first()
+            )
+            if campaign is None:
+                continue
+            _start(campaign)
+            campaign.save()
+            started.append(pk)
+    return started
+
+
+# --- the batched send ---------------------------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class _Claim:
+    recipient: CampaignRecipient
+    inbox: InboxNotification
+    token: str
 
 
 def _claim_batch(campaign: Campaign, recipients: Sequence[CampaignRecipient]) -> list[_Claim]:
@@ -379,35 +927,7 @@ def _claim_batch(campaign: Campaign, recipients: Sequence[CampaignRecipient]) ->
 
 
 def _push_messages(campaign: Campaign, claims: Iterable[_Claim]) -> list[PushMessage]:
-    """Campaign pushes (C§2.14.2): ``data`` ``{type, inbox_id, campaign_id, product_id | "", link_url | ""}``,
-    channel ``promo`` / ``general``, normal priority, the campaign image as ``notification.image``.
-    ``link_url`` is the campaign's https destination (kind ``url``, gap ADM-10.1)."""
-    product_id = (
-        str(campaign.link_product_id)
-        if campaign.link_kind == enums.LinkKind.PRODUCT and campaign.link_product_id is not None
-        else ""
-    )
-    link_url = campaign.link_url if campaign.link_kind == enums.LinkKind.URL else ""
-    image_url = absolute_media_url(campaign.image.name or "") if campaign.image else ""
-    channel = "promo" if campaign.kind == enums.NotificationKind.PROMO else "general"
-    return [
-        push_message(
-            claim.token,
-            campaign.title,
-            campaign.body,
-            {
-                "type": enums.PushDataType.CAMPAIGN,
-                "inbox_id": str(claim.inbox.pk),
-                "campaign_id": str(campaign.pk),
-                "product_id": product_id,
-                "link_url": link_url,
-            },
-            channel=channel,
-            priority=CAMPAIGN_PRIORITY,
-            image_url=image_url,
-        )
-        for claim in claims
-    ]
+    return campaign_messages(campaign, [(claim.token, claim.inbox.pk) for claim in claims])
 
 
 def _release(claims: Iterable[_Claim]) -> None:
@@ -438,6 +958,16 @@ def _settle(claim: _Claim, result: PushResult, now: Any) -> None:
     inbox.save(update_fields=["push_state", "pushed_at", "push_error"])
 
 
+def _stop_claim(claim: _Claim) -> None:
+    """A claim FCM did not take while the campaign is stopping: never attempted again (recipient
+    ``stopped``, inbox ``failed`` / ``stopped``) — the claim is not given back."""
+    recipient, inbox = claim.recipient, claim.inbox
+    recipient.state, recipient.error = CampaignRecipient.State.STOPPED, STOPPED
+    recipient.save(update_fields=["state", "error"])
+    inbox.push_state, inbox.push_error = InboxNotification.PushState.FAILED, STOPPED
+    inbox.save(update_fields=["push_state", "push_error"])
+
+
 def _after_failure(result: PushResult, token: str, device_id: int | None, topic: str, inbox_id: int) -> None:
     """Token pruning only when FCM says the token is dead (``unregistered``); a malformed message
     (``payload_invalid``) is alerted and never touches a device (C§2.14.2)."""
@@ -448,19 +978,124 @@ def _after_failure(result: PushResult, token: str, device_id: int | None, topic:
 
 
 def _refresh_tally(campaign: Campaign) -> None:
-    """``sent`` / ``failed`` from the recipient states (``skipped`` counts as failed)."""
-    states = CampaignRecipient.objects.filter(campaign=campaign).values_list("state", flat=True)
-    tally = {"sent": 0, "failed": 0}
-    for state in states:
-        tally["sent" if state == CampaignRecipient.State.SENT else "failed"] += 1
-    campaign.sent, campaign.failed = tally["sent"], tally["failed"]
+    """``sent`` / ``failed`` from the recipient states in one aggregate (``skipped`` counts as failed;
+    ``pending`` and ``stopped`` count in neither, so ``attempted = sent + failed`` holds at every moment)."""
+    tally = CampaignRecipient.objects.filter(campaign=campaign).aggregate(
+        sent=Count("id", filter=Q(state=CampaignRecipient.State.SENT)),
+        failed=Count(
+            "id",
+            filter=Q(state__in=[CampaignRecipient.State.FAILED, CampaignRecipient.State.SKIPPED]),
+        ),
+    )
+    campaign.sent, campaign.failed = int(tally["sent"] or 0), int(tally["failed"] or 0)
+
+
+def _finalise_stopped(campaign: Campaign) -> None:
+    """``stopping`` → ``partially_sent`` when at least one push went out, else ``cancelled`` (by the staff
+    member who asked for the stop): pending recipients become ``stopped``, their queued inbox rows ``failed``
+    / ``stopped``, the tallies are final, ``stopped_at`` is set. Audited ``notification.stopped``. The caller
+    holds the row lock and saves."""
+    now = timeutils.now()
+    pending = CampaignRecipient.objects.filter(campaign=campaign, state=CampaignRecipient.State.PENDING)
+    inbox_ids = list(pending.exclude(inbox__isnull=True).values_list("inbox_id", flat=True))
+    pending.update(state=CampaignRecipient.State.STOPPED, error=STOPPED)
+    if inbox_ids:
+        InboxNotification.objects.filter(
+            pk__in=inbox_ids, push_state=InboxNotification.PushState.QUEUED
+        ).update(push_state=InboxNotification.PushState.FAILED, push_error=STOPPED, updated_at=now)
+    _refresh_tally(campaign)
+    campaign.stopped_at = now
+    if campaign.sent:
+        campaign.state = Campaign.State.PARTIALLY_SENT
+    else:
+        campaign.state = Campaign.State.CANCELLED
+        campaign.cancelled_at = now
+        campaign.cancelled_by = campaign.stop_requested_by
+    _audit(
+        campaign,
+        state.transition("stopped").audit_action,
+        actor=None,
+        request=None,
+        before={"state": Campaign.State.STOPPING},
+        after={
+            "state": campaign.state,
+            "sent": campaign.sent,
+            "failed": campaign.failed,
+            "stopped_at": timeutils.isoformat(now),
+        },
+    )
+
+
+def finalise_stopping_campaigns() -> list[int]:
+    """Beat ``notifications.finalise_stopping_campaigns`` (1 min): a ``stopping`` campaign with no open
+    ``campaign.send_batch`` message left (the worker died, or the stop came after the last batch) is
+    finalised here, so it never stays "To‘xtatilmoqda" for ever."""
+    finalised: list[int] = []
+    for pk in list(
+        Campaign.objects.filter(state=Campaign.State.STOPPING).order_by("id").values_list("pk", flat=True)
+    ):
+        with transaction.atomic():
+            campaign = (
+                Campaign.objects.select_for_update(skip_locked=True)
+                .filter(pk=pk, state=Campaign.State.STOPPING)
+                .first()
+            )
+            if campaign is None or selectors.has_open_batch(pk):
+                continue
+            _finalise_stopped(campaign)
+            campaign.save()
+            finalised.append(pk)
+    return finalised
+
+
+def fail_campaign_from_dead_batch(message: OutboxMessage) -> None:
+    """``on_push_dead`` of a ``campaign.send_batch`` message (open question M3-N1, decided): the campaign
+    ends ``partially_sent`` when a push went out, else ``failed`` — ``failed_at`` now, ``last_error`` the
+    message's, pending recipients ``stopped``. Audited ``notification.failed``. Idempotent: a campaign no
+    longer sending is left alone."""
+    payload: dict[str, Any] = message.payload if isinstance(message.payload, dict) else {}
+    campaign_id = payload.get("campaign_id")
+    if campaign_id is None:
+        return
+    with transaction.atomic():
+        campaign = Campaign.objects.select_for_update().filter(pk=int(campaign_id)).first()
+        if campaign is None or campaign.state not in state.transition("failed").sources:
+            return
+        now = timeutils.now()
+        before = {"state": campaign.state}
+        CampaignRecipient.objects.filter(campaign=campaign, state=CampaignRecipient.State.PENDING).update(
+            state=CampaignRecipient.State.STOPPED, error=STOPPED
+        )
+        _refresh_tally(campaign)
+        campaign.failed_at = now
+        campaign.last_error = (message.last_error or "")[:2000]
+        campaign.state = Campaign.State.PARTIALLY_SENT if campaign.sent else Campaign.State.FAILED
+        campaign.save()
+        _audit(
+            campaign,
+            state.transition("failed").audit_action,
+            actor=None,
+            request=None,
+            before=before,
+            after={
+                "state": campaign.state,
+                "sent": campaign.sent,
+                "failed": campaign.failed,
+                "outbox_message_id": message.pk,
+                "last_error": campaign.last_error,
+            },
+        )
 
 
 def send_batch(campaign_id: int, batch_no: int) -> None:
     """Handler body of ``campaign.send_batch`` (design 03 §3.4): claim → provider → settle → cursor → next.
 
-    A redelivered batch (``batch_no < batches_dispatched``) is a no-op; an out-of-order one raises so the
-    dispatcher retries it after the previous batch committed.
+    A redelivered batch (``batch_no < batches_dispatched``) or a finished campaign is a no-op; an
+    out-of-order one raises so the dispatcher retries it after the previous batch committed.
+
+    Emergency stop: a ``stopping`` campaign is finalised **before claiming** (transaction 1: nothing more
+    goes out) and **before enqueueing the next batch** (transaction 2: the results of the pushes already in
+    flight are settled, claims FCM did not take become ``stopped``, no next batch, no deferral).
 
     Single-flight under an overlapping redelivery (the outbox lease expired while this worker was inside the
     provider call and another worker re-ran the same batch): the claims are exclusive (``push_state`` queued →
@@ -472,18 +1107,19 @@ def send_batch(campaign_id: int, batch_no: int) -> None:
     Pushes FCM did not take (``not_sent``: a 429/5xx answer, a batch that stopped or ran out of time) are
     given back (``queued``, recipient still ``pending``) while the others are settled; the cursor stays and
     ``outbox.RetryLater`` delivers this same batch again after :data:`NOT_SENT_RETRY`, which claims only the
-    given-back recipients (no attempt spent; dead after :data:`NOT_SENT_GIVE_UP`).
+    given-back recipients (no attempt spent; dead after :data:`NOT_SENT_GIVE_UP`). The live tallies
+    (``sent`` / ``failed``) are refreshed after every batch.
     """
     with transaction.atomic():
         campaign = Campaign.objects.select_for_update().get(pk=campaign_id)
-        if campaign.state == Campaign.State.SENT or batch_no < campaign.batches_dispatched:
+        if campaign.state in Campaign.TERMINAL_STATES or batch_no < campaign.batches_dispatched:
             return
-        if campaign.state == Campaign.State.SCHEDULED or batch_no > campaign.batches_dispatched:
+        if campaign.state == Campaign.State.STOPPING:
+            _finalise_stopped(campaign)
+            campaign.save()
+            return
+        if campaign.state != Campaign.State.SENDING or batch_no > campaign.batches_dispatched:
             raise RuntimeError(f"campaign {campaign_id} is not ready for batch {batch_no}")
-        if campaign.state == Campaign.State.QUEUED:
-            campaign.state = Campaign.State.SENDING
-            campaign.started_at = timeutils.now()
-            campaign.save(update_fields=["state", "started_at"])
         recipients = list(
             CampaignRecipient.objects.filter(campaign=campaign, id__gt=campaign.send_cursor)
             .select_related("device")
@@ -499,19 +1135,33 @@ def send_batch(campaign_id: int, batch_no: int) -> None:
     with transaction.atomic():
         campaign = Campaign.objects.select_for_update().get(pk=campaign_id)
         now = timeutils.now()
-        lost = campaign.state != Campaign.State.SENDING or campaign.batches_dispatched != batch_no
+        stopping = campaign.state == Campaign.State.STOPPING
+        lost = (
+            campaign.state not in (Campaign.State.SENDING, Campaign.State.STOPPING)
+            or campaign.batches_dispatched != batch_no
+        )
         for claim, result in zip(claims, results, strict=True):
             if result.error != NOT_SENT or lost:
                 _settle(claim, result, now)
+            elif stopping:
+                _stop_claim(claim)
         if lost:
             # Another delivery of this batch already advanced it (compare-and-set lost).
-            if campaign.state == Campaign.State.SENT:
+            if campaign.state in Campaign.TERMINAL_STATES:
                 _refresh_tally(campaign)
                 campaign.save(update_fields=["sent", "failed"])
+            return
+        if stopping:
+            if recipients:
+                campaign.send_cursor = recipients[-1].pk
+            campaign.batches_dispatched += 1
+            _finalise_stopped(campaign)
+            campaign.save()
             return
         if not_sent:
             # FCM did not take these: give them back and deliver this batch again later (the cursor stays)
             _release(not_sent)
+            _refresh_tally(campaign)
         else:
             if recipients:
                 campaign.send_cursor = recipients[-1].pk
@@ -519,6 +1169,7 @@ def send_batch(campaign_id: int, batch_no: int) -> None:
             remaining = CampaignRecipient.objects.filter(
                 campaign=campaign, id__gt=campaign.send_cursor
             ).exists()
+            _refresh_tally(campaign)
             if remaining:
                 outbox.enqueue(
                     topics.CAMPAIGN_SEND_BATCH,
@@ -528,8 +1179,7 @@ def send_batch(campaign_id: int, batch_no: int) -> None:
             else:
                 campaign.state = Campaign.State.SENT
                 campaign.sent_at = now
-                _refresh_tally(campaign)
-            campaign.save()
+        campaign.save()
     if not_sent:
         raise outbox.RetryLater(
             NOT_SENT_RETRY,
