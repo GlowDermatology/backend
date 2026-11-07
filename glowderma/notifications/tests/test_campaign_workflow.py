@@ -361,7 +361,7 @@ def test_patch_merges_the_form_replaces_the_image_and_validates(
     assert response.data["recipient_count"] == 0 and response.data["image_url"].endswith(".png")
     assert response.data["revision"] == 2
     campaign.refresh_from_db()
-    stored = campaign.image.name
+    stored = campaign.image.name or ""
     # an invalid merged form is a 400 and changes nothing
     bad = patch(staff_client, campaign.pk, {"expected_revision": "2", "audience.type": "segment"})
     assert errors(bad) == [("audience.segment_id", "required", "Majburiy maydon.")]

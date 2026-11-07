@@ -153,8 +153,8 @@ def test_a_stop_during_the_fcm_call_settles_the_batch_and_finalises(
     rows = {r.customer_id: r for r in CampaignRecipient.objects.filter(campaign=campaign)}
     assert all(rows[c.pk].state == "sent" for c in customers)
     assert (rows[busy.pk].state, rows[busy.pk].error) == ("stopped", "stopped")
-    assert rows[busy.pk].inbox is not None and rows[busy.pk].inbox.push_state == "failed"
-    assert rows[busy.pk].inbox.push_error == "stopped"
+    busy_inbox = rows[busy.pk].inbox
+    assert busy_inbox is not None and (busy_inbox.push_state, busy_inbox.push_error) == ("failed", "stopped")
     assert states(campaign) == {"sent": 2, "stopped": 3}
     assert not OutboxMessage.objects.filter(topic="campaign.send_batch").exists()  # no next batch
     assert len(fake.sent) == 2

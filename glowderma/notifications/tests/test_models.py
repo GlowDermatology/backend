@@ -500,7 +500,7 @@ def test_campaign_test_str_ordering_confirmation_check_and_on_delete() -> None:
     assert first.test_device is None and first.device is not None
     inbox.delete()
     first.refresh_from_db()
-    assert first.inbox is None
+    assert first.inbox_id is None
     indexes = index_definitions("notifications_campaigntest")
     assert indexes["campaigntest_campaign_rev_idx"].endswith("USING btree (campaign_id, revision)")
     campaign.delete()

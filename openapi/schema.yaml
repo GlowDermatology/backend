@@ -19720,7 +19720,12 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/LinkOption'
+        approval_delay_minutes:
+          type: integer
+          description: 'CAMPAIGN_APPROVAL_DELAY_MINUTES: the cancel window between
+            an approval and the dispatch.'
       required:
+      - approval_delay_minutes
       - link_options
       - segments
       - templates
@@ -23555,7 +23560,6 @@ components:
           pattern: ^\+998\d{9}$
         label:
           type: string
-          minLength: 1
           maxLength: 60
       required:
       - label

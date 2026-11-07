@@ -101,7 +101,8 @@ def test_changelists_change_pages_and_search_render() -> None:
     member = SegmentMemberFactory.create()
     recipient = CampaignRecipientFactory.create(campaign=SentCampaignFactory.create(title="Kuzgi namlik"))
     test = CampaignTestFactory.create()
-    rows = [
+    assert test.test_device is not None
+    rows: list[models.Model] = [
         StatusTemplate.objects.get(status="processing"),
         member.segment,
         member,
@@ -110,7 +111,7 @@ def test_changelists_change_pages_and_search_render() -> None:
         InboxNotificationFactory.create(),
         test.test_device,
         test,
-    ]
+    ]  # fmt: skip
     for row in rows:
         meta = row._meta
         assert client.get(reverse(f"admin:{meta.app_label}_{meta.model_name}_changelist")).status_code == 200
