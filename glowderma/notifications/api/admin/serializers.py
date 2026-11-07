@@ -83,8 +83,9 @@ class CampaignTestSerializer(serializers.Serializer[CampaignTest]):
     id = serializers.IntegerField()
     revision = serializers.IntegerField()
     test_device_id = serializers.IntegerField(allow_null=True)
-    device_label = serializers.CharField()
-    phone = serializers.CharField()
+    device_label = serializers.CharField(
+        help_text="The registry label; the tester's phone stays in the superuser-only registry."
+    )
     sent_at = serializers.DateTimeField()
     sent_by = ActorSerializer(allow_null=True)
     fcm_ok = serializers.BooleanField(
@@ -344,7 +345,9 @@ class NotificationCreateSerializer(serializers.Serializer[dict[str, Any]]):
         return value
 
     def validate_scheduled_at(self, value: Any) -> Any:
-        if value is not None and value <= timeutils.now():
+        # ``in_past`` is for a time the client chose: a PATCH that leaves the stored requested time alone
+        # passes ``context["check_scheduled_at"] = False`` (the dispatch waits for ``max(now + delay, it)``).
+        if value is not None and self.context.get("check_scheduled_at", True) and value <= timeutils.now():
             raise serializers.ValidationError([field_error("in_past", MESSAGES["in_past"])])
         return value
 

@@ -187,7 +187,8 @@ def test_send_test_pushes_to_the_registered_devices_and_records_the_outcome(
     assert set(tests) == {good.pk, dead.pk, silent.pk}
     assert tests[good.pk]["fcm_ok"] is True and tests[good.pk]["fcm_error"] == ""
     assert tests[good.pk]["sent_by"] == {"id": superuser.pk, "display_name": "Egasi"}
-    assert (tests[good.pk]["device_label"], tests[good.pk]["phone"]) == (good.label, good.phone)
+    assert tests[good.pk]["device_label"] == good.label
+    assert "phone" not in tests[good.pk]  # the tester's number stays in the superuser-only registry
     assert (tests[dead.pk]["fcm_ok"], tests[dead.pk]["fcm_error"]) == (False, "unregistered")
     assert (tests[silent.pk]["fcm_ok"], tests[silent.pk]["fcm_error"]) == (False, "no_device")
     assert all(t["revision"] == 1 and t["confirmed_at"] is None for t in tests.values())
@@ -337,6 +338,50 @@ def test_a_stale_revision_is_refused_on_patch_and_approve(superuser_client: APIC
     assert errors(patch(superuser_client, campaign.pk, {"title": "Yangi"})) == [
         ("expected_revision", "required", "Majburiy maydon.")
     ]
+
+
+def test_patch_keeps_a_requested_time_that_passed_unless_it_is_resubmitted(
+    superuser_client: APIClient, clock: Any
+) -> None:
+    """``in_past`` applies to a submitted ``scheduled_at`` only: a draft whose requested time went by is still
+    editable on another field (the dispatch uses ``max(now + delay, scheduled_at)`` anyway)."""
+    campaign = CampaignFactory.create(scheduled_at=ANCHOR + timedelta(hours=1))
+    clock(ANCHOR + timedelta(hours=2))
+    response = patch(
+        superuser_client, campaign.pk, {"expected_revision": "1", "title": "Tuzatilgan sarlavha"}
+    )
+    assert response.status_code == 200, response.data
+    assert response.data["title"] == "Tuzatilgan sarlavha" and response.data["revision"] == 2
+    assert response.data["scheduled_at"] == (ANCHOR + timedelta(hours=1)).isoformat()
+    # resubmitting the stale time itself is still refused; clearing it is fine
+    stale = patch(
+        superuser_client,
+        campaign.pk,
+        {"expected_revision": "2", "scheduled_at": (ANCHOR + timedelta(hours=1)).isoformat()},
+    )
+    assert errors(stale) == [("scheduled_at", "in_past", "Kelajakdagi vaqtni tanlang.")]
+    cleared = patch(superuser_client, campaign.pk, {"expected_revision": "2", "scheduled_at": ""})
+    assert cleared.status_code == 200 and cleared.data["scheduled_at"] is None
+
+
+def test_approve_outside_tested_names_the_reason(superuser_client: APIClient, clock: Any) -> None:
+    draft = CampaignFactory.create()
+    response = approve(superuser_client, draft)
+    assert response.status_code == 409
+    assert (response.data["code"], response.data["message"]) == (
+        "invalid_transition",
+        services.MESSAGE_NOT_TESTED,
+    )
+    for finished in (
+        SendingCampaignFactory.create(),
+        SendingCampaignFactory.create(state="sent", sent_at=ANCHOR, sent=1, failed=0),
+    ):
+        response = approve(superuser_client, finished)
+        assert response.status_code == 409, response.data
+        assert (response.data["code"], response.data["message"]) == (
+            "invalid_transition",
+            state.MESSAGE_NOT_APPROVABLE,
+        )
 
 
 def test_patch_merges_the_form_replaces_the_image_and_validates(

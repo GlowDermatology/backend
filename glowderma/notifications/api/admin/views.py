@@ -282,7 +282,8 @@ class NotificationViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSe
             "create form with every content key optional, `expected_revision` (409 `conflict` when the "
             "campaign changed meanwhile) and `remove_image`. A content change bumps `revision`, clears the "
             "test confirmation and puts a `tested` campaign back to `draft`; a `scheduled_at` change alone "
-            "keeps the state."
+            "keeps the state (`in_past` applies to a submitted `scheduled_at` only: a kept requested time "
+            "that went by does not block the edit)."
         ),
         parameters=[IDEMPOTENCY_KEY_HEADER],
         request={"multipart/form-data": NotificationPatchFormSerializer},
@@ -296,7 +297,10 @@ class NotificationViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSe
         submitted = form_to_nested(request.data)
         meta = NotificationPatchMetaSerializer(data=submitted)
         meta.is_valid(raise_exception=True)
-        serializer = NotificationCreateSerializer(data=merged_form(campaign, submitted))
+        serializer = NotificationCreateSerializer(
+            data=merged_form(campaign, submitted),
+            context={"check_scheduled_at": "scheduled_at" in submitted},  # a kept time may have passed
+        )
         serializer.is_valid(raise_exception=True)
         services.update_draft(
             campaign.pk,
@@ -603,6 +607,10 @@ class SegmentViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
 
     @extend_schema(
         operation_id="admin_segments_partial_update",
+        description=(
+            "A rule change answers 409 `conflict` while an approved `scheduled` notification targets the "
+            "segment (its audience must not grow before the dispatch); renaming is always allowed."
+        ),
         request=SegmentWriteSerializer,
         responses={200: SegmentSerializer, **ADMIN_ERRORS},
     )
@@ -670,6 +678,10 @@ class SegmentMembersViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericView
 
     @extend_schema(
         operation_id="admin_segment_members_add",
+        description=(
+            "409 `conflict` while an approved `scheduled` notification targets the segment (its audience "
+            "must not grow before the dispatch)."
+        ),
         request=SegmentMembersInputSerializer,
         responses={200: SegmentSerializer, **ADMIN_ERRORS},
     )

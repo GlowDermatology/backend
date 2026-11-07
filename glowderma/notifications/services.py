@@ -26,7 +26,7 @@ from glowderma.accounts.models import Customer, Device
 from glowderma.appointments import selectors as appointment_selectors
 from glowderma.appointments.models import OPEN_STATUSES
 from glowderma.catalog.models import Product
-from glowderma.core import audit, enums, i18n, outbox, timeutils
+from glowderma.core import audit, enums, i18n, outbox, pii, timeutils
 from glowderma.core.api.exceptions import Conflict, InvalidTransition, ProviderUnavailable, field_error
 from glowderma.core.images import ImageError, process_image
 from glowderma.core.media import absolute_media_url, media_name
@@ -433,9 +433,11 @@ def delete_draft(campaign_id: int, *, actor: Any, request: Any = None) -> None:
 
 
 def _test_device_image(test_device: TestDevice) -> dict[str, Any]:
+    """The audit image: the audit log is readable by every staff member, the registry (and the full number of
+    the superuser's personal phone) by superusers only, so the number is masked here."""
     return {
         "device_id": test_device.device_id,
-        "phone": test_device.phone,
+        "phone": pii.mask_phone(test_device.phone),
         "label": test_device.label,
         "is_active": test_device.is_active,
     }
@@ -452,7 +454,10 @@ def register_test_device(*, phone: str, label: str, actor: Any, request: Any = N
             {"phone": [field_error("customer_not_found", TEST_DEVICE_MESSAGES["customer_not_found"])]}
         )
     device = (
-        Device.objects.filter(selectors.PUSHABLE_DEVICE, customer=customer)
+        # The row lock orders two registrations of one device: the second waits and sees the duplicate
+        # instead of hitting the partial unique index (``testdevice_active_device_unique``).
+        Device.objects.select_for_update()
+        .filter(selectors.PUSHABLE_DEVICE, customer=customer)
         .order_by("-last_active_at", "-id")
         .first()
     )
@@ -527,6 +532,15 @@ def _usable_token(device: Device | None) -> str:
     return device.fcm_token
 
 
+def _test_token(test_device: TestDevice) -> str:
+    """A test push goes only where the registry says ``is_pushable`` (:func:`selectors.test_devices`): the
+    device still takes pushes **and** its customer is active (``device__customer`` is loaded)."""
+    device = test_device.device
+    if device.customer.status != enums.CustomerStatus.ACTIVE:
+        return ""
+    return _usable_token(device)
+
+
 def campaign_messages(campaign: Campaign, targets: Iterable[tuple[str, int]]) -> list[PushMessage]:
     """Campaign pushes (C§2.14.2) for ``(token, inbox_id)`` pairs — the one message builder of the batched
     send and of the test pushes: ``data`` ``{type, inbox_id, campaign_id, product_id | "", link_url | ""}``,
@@ -579,8 +593,9 @@ def send_test(
 
     Transaction 1 locks the campaign, checks the state and writes one ``CampaignTest`` (``fcm_ok`` null) per
     device with a real ``InboxNotification`` for the tester (dedupe ``campaign-test:{campaign}:{test}``), so
-    the deep link opens in the app; a device that lost its token gets ``fcm_ok = False`` ``no_device`` at
-    once. The FCM call runs **outside** the transaction through :func:`campaign_messages`; transaction 2
+    the deep link opens in the app; a device that lost its token, or whose customer is no longer active, gets
+    ``fcm_ok = False`` ``no_device`` at once (the registry shows it ``is_pushable = false``). The FCM call
+    runs **outside** the transaction through :func:`campaign_messages`; transaction 2
     records ``fcm_ok`` / ``fcm_error`` / ``provider_message_id`` and the inbox outcome, and prunes a dead
     token (``unregistered``). ``FcmUnavailable`` → every test ``fcm_ok = False`` ``unavailable`` and 503
     ``provider_unavailable``. Audit ``notification.test_sent``.
@@ -591,7 +606,9 @@ def send_test(
         state.check("test", campaign.state)
         devices = {
             row.pk: row
-            for row in TestDevice.objects.select_related("device").filter(pk__in=wanted, is_active=True)
+            for row in TestDevice.objects.select_related("device", "device__customer").filter(
+                pk__in=wanted, is_active=True
+            )
         }
         if len(devices) != len(wanted):
             raise ValidationError(
@@ -602,7 +619,7 @@ def send_test(
         targets: list[tuple[CampaignTest, InboxNotification, str]] = []
         for pk in wanted:
             test_device = devices[pk]
-            token = _usable_token(test_device.device)
+            token = _test_token(test_device)
             test = CampaignTest.objects.create(
                 campaign=campaign,
                 revision=campaign.content_revision,
@@ -707,10 +724,14 @@ def approve_campaign(
     current revision becomes ``scheduled`` with ``dispatch_after = max(now + approval delay, scheduled_at)``.
     **Nothing is dispatched here** — no outbox row, no on-commit hook, no FCM call: the beat
     (``start_due_campaigns``) claims it once ``dispatch_after`` has passed. ``expected_revision`` stale → 409
-    ``conflict``; a repeat on the approved revision answers unchanged. Audit ``notification.approved``."""
+    ``conflict``; a ``draft`` → 409 ``invalid_transition`` :data:`MESSAGE_NOT_TESTED`, any other state
+    :data:`state.MESSAGE_NOT_APPROVABLE`; a repeat on the approved revision answers unchanged. Audit
+    ``notification.approved``."""
     campaign = _lock_campaign(campaign_id)
     if expected_revision != campaign.content_revision:
         raise Conflict(MESSAGE_STALE_REVISION)
+    if campaign.state == Campaign.State.DRAFT:  # the one wrong state with a remedy: test and confirm first
+        raise InvalidTransition(MESSAGE_NOT_TESTED)
     if not state.check("approve", campaign.state):
         if campaign.approved_revision == campaign.content_revision:
             return campaign
@@ -955,17 +976,39 @@ def _settle(claim: _Claim, result: PushResult, now: Any) -> None:
         inbox.push_error = result.error
         _after_failure(result, claim.token, recipient.device_id, topics.CAMPAIGN_SEND_BATCH, inbox.pk)
     recipient.save(update_fields=["state", "sent_at", "error", "provider_message_id", "provider_state"])
-    inbox.save(update_fields=["push_state", "pushed_at", "push_error"])
+    # a filtered update: a finalisation that overlapped this delivery may have withdrawn the row already
+    InboxNotification.objects.filter(pk=inbox.pk).update(
+        push_state=inbox.push_state, pushed_at=inbox.pushed_at, push_error=inbox.push_error
+    )
 
 
 def _stop_claim(claim: _Claim) -> None:
     """A claim FCM did not take while the campaign is stopping: never attempted again (recipient
-    ``stopped``, inbox ``failed`` / ``stopped``) — the claim is not given back."""
-    recipient, inbox = claim.recipient, claim.inbox
+    ``stopped``, its in-app row withdrawn) — the claim is not given back."""
+    recipient = claim.recipient
     recipient.state, recipient.error = CampaignRecipient.State.STOPPED, STOPPED
     recipient.save(update_fields=["state", "error"])
-    inbox.push_state, inbox.push_error = InboxNotification.PushState.FAILED, STOPPED
-    inbox.save(update_fields=["push_state", "push_error"])
+    _withdraw_inbox([claim.inbox.pk])
+
+
+def _withdraw_inbox(inbox_ids: Sequence[int]) -> None:
+    """Delete the in-app rows of recipients a stop or a dead batch leaves ``stopped`` before any push went
+    out (``queued``: given back by FCM, ``sending``: claimed when the worker died). The customer never got
+    the push, so the withdrawn campaign must not sit in the app's feed either (``inbox_queryset`` shows every
+    row); ``CampaignRecipient.inbox`` is ``SET_NULL``. A row FCM accepted (``sent``) is never touched."""
+    if inbox_ids:
+        InboxNotification.objects.filter(
+            pk__in=inbox_ids,
+            push_state__in=[InboxNotification.PushState.QUEUED, InboxNotification.PushState.SENDING],
+        ).delete()
+
+
+def _stop_pending(campaign: Campaign) -> None:
+    """Pending recipients become ``stopped`` and their never-pushed in-app rows are withdrawn."""
+    pending = CampaignRecipient.objects.filter(campaign=campaign, state=CampaignRecipient.State.PENDING)
+    inbox_ids = list(pending.exclude(inbox__isnull=True).values_list("inbox_id", flat=True))
+    pending.update(state=CampaignRecipient.State.STOPPED, error=STOPPED)
+    _withdraw_inbox(inbox_ids)
 
 
 def _after_failure(result: PushResult, token: str, device_id: int | None, topic: str, inbox_id: int) -> None:
@@ -992,17 +1035,11 @@ def _refresh_tally(campaign: Campaign) -> None:
 
 def _finalise_stopped(campaign: Campaign) -> None:
     """``stopping`` → ``partially_sent`` when at least one push went out, else ``cancelled`` (by the staff
-    member who asked for the stop): pending recipients become ``stopped``, their queued inbox rows ``failed``
-    / ``stopped``, the tallies are final, ``stopped_at`` is set. Audited ``notification.stopped``. The caller
+    member who asked for the stop): pending recipients become ``stopped`` and their never-pushed in-app rows
+    are withdrawn, the tallies are final, ``stopped_at`` is set. Audited ``notification.stopped``. The caller
     holds the row lock and saves."""
     now = timeutils.now()
-    pending = CampaignRecipient.objects.filter(campaign=campaign, state=CampaignRecipient.State.PENDING)
-    inbox_ids = list(pending.exclude(inbox__isnull=True).values_list("inbox_id", flat=True))
-    pending.update(state=CampaignRecipient.State.STOPPED, error=STOPPED)
-    if inbox_ids:
-        InboxNotification.objects.filter(
-            pk__in=inbox_ids, push_state=InboxNotification.PushState.QUEUED
-        ).update(push_state=InboxNotification.PushState.FAILED, push_error=STOPPED, updated_at=now)
+    _stop_pending(campaign)
     _refresh_tally(campaign)
     campaign.stopped_at = now
     if campaign.sent:
@@ -1051,8 +1088,8 @@ def finalise_stopping_campaigns() -> list[int]:
 def fail_campaign_from_dead_batch(message: OutboxMessage) -> None:
     """``on_push_dead`` of a ``campaign.send_batch`` message (open question M3-N1, decided): the campaign
     ends ``partially_sent`` when a push went out, else ``failed`` — ``failed_at`` now, ``last_error`` the
-    message's, pending recipients ``stopped``. Audited ``notification.failed``. Idempotent: a campaign no
-    longer sending is left alone."""
+    message's, pending recipients ``stopped`` (their never-pushed in-app rows withdrawn). Audited
+    ``notification.failed``. Idempotent: a campaign no longer sending is left alone."""
     payload: dict[str, Any] = message.payload if isinstance(message.payload, dict) else {}
     campaign_id = payload.get("campaign_id")
     if campaign_id is None:
@@ -1063,9 +1100,7 @@ def fail_campaign_from_dead_batch(message: OutboxMessage) -> None:
             return
         now = timeutils.now()
         before = {"state": campaign.state}
-        CampaignRecipient.objects.filter(campaign=campaign, state=CampaignRecipient.State.PENDING).update(
-            state=CampaignRecipient.State.STOPPED, error=STOPPED
-        )
+        _stop_pending(campaign)
         _refresh_tally(campaign)
         campaign.failed_at = now
         campaign.last_error = (message.last_error or "")[:2000]
@@ -1633,12 +1668,24 @@ def create_segment(
     return segment
 
 
+def _ensure_segment_free(segment: CustomerSegment) -> None:
+    """409 ``conflict`` while an approved ``scheduled`` campaign targets the segment: its recipients are
+    materialised at dispatch, so the audience the superuser approved must not grow meanwhile (through a rule
+    change or new members — contract §2.8; the delete is refused for the same reason). Narrowing (removing
+    a member) and renaming stay allowed; once the beat started the campaign the segment is free again."""
+    if Campaign.objects.filter(audience_segment=segment, state=Campaign.State.SCHEDULED).exists():
+        raise Conflict(MESSAGES["segment_in_use"])
+
+
 @transaction.atomic
 def update_segment(
     segment: CustomerSegment, changes: dict[str, Any], *, actor: Any, request: Any = None
 ) -> CustomerSegment:
+    """``PATCH segments/{id}/``: a rule change while a scheduled campaign targets the segment → 409."""
     segment = CustomerSegment.objects.select_for_update().get(pk=segment.pk)
     before = _segment_image(segment)
+    if any(before.get(key) != value for key, value in changes.items() if key != "name"):
+        _ensure_segment_free(segment)
     for key, value in changes.items():
         setattr(segment, key, value)
     segment.save()
@@ -1660,8 +1707,7 @@ def update_segment(
 def delete_segment(segment: CustomerSegment, *, actor: Any, request: Any = None) -> None:
     """409 ``conflict`` while a scheduled campaign targets the segment (contract §2.8)."""
     segment = CustomerSegment.objects.select_for_update().get(pk=segment.pk)
-    if Campaign.objects.filter(audience_segment=segment, state=Campaign.State.SCHEDULED).exists():
-        raise Conflict(MESSAGES["segment_in_use"])
+    _ensure_segment_free(segment)
     before = _segment_image(segment)
     pk = segment.pk
     segment.delete()
@@ -1679,7 +1725,10 @@ def delete_segment(segment: CustomerSegment, *, actor: Any, request: Any = None)
 def add_members(
     segment: CustomerSegment, customer_ids: Sequence[int], *, actor: Any, request: Any = None
 ) -> CustomerSegment:
-    """``POST segments/{id}/members/``: ``bulk_create(ignore_conflicts=True)``; a known member is a no-op."""
+    """``POST segments/{id}/members/``: ``bulk_create(ignore_conflicts=True)``; a known member is a no-op;
+    409 ``conflict`` while a scheduled campaign targets the segment (the audience must not grow)."""
+    segment = CustomerSegment.objects.select_for_update().get(pk=segment.pk)
+    _ensure_segment_free(segment)
     existing = set(
         SegmentMember.objects.filter(segment=segment, customer_id__in=customer_ids).values_list(
             "customer_id", flat=True

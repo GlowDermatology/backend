@@ -153,11 +153,56 @@ def test_a_stop_during_the_fcm_call_settles_the_batch_and_finalises(
     rows = {r.customer_id: r for r in CampaignRecipient.objects.filter(campaign=campaign)}
     assert all(rows[c.pk].state == "sent" for c in customers)
     assert (rows[busy.pk].state, rows[busy.pk].error) == ("stopped", "stopped")
-    busy_inbox = rows[busy.pk].inbox
-    assert busy_inbox is not None and (busy_inbox.push_state, busy_inbox.push_error) == ("failed", "stopped")
+    # the untaken push never reached the device: its in-app row is withdrawn with the campaign
+    assert rows[busy.pk].inbox is None and not InboxNotification.objects.filter(customer=busy).exists()
     assert states(campaign) == {"sent": 2, "stopped": 3}
     assert not OutboxMessage.objects.filter(topic="campaign.send_batch").exists()  # no next batch
     assert len(fake.sent) == 2
+
+
+@override_settings(CAMPAIGN_BATCH_SIZE=2)
+def test_a_stop_withdraws_the_in_app_rows_of_recipients_never_pushed(
+    superuser_client: APIClient, clock: Any, fcm: FakeFcm
+) -> None:
+    """A recipient FCM gave back (``not_sent``: inbox ``queued``, recipient ``pending``) must not keep the
+    stopped campaign in the in-app feed («qolgan qurilmalarga xabar bormaydi»); the pushed one keeps it."""
+    [pushed] = reachable(1)
+    [given_back] = reachable(1, fcm_token="tok-busy")  # noqa: S106
+    reachable(1)  # the second batch, never claimed
+    campaign = sending_campaign()
+    with pytest.raises(outbox.RetryLater):
+        services.send_batch(campaign.pk, 0)
+    assert InboxNotification.objects.get(customer=given_back).push_state == "queued"
+    assert stop(superuser_client, campaign.pk).status_code == 200
+    services.send_batch(campaign.pk, 0)  # the redelivery finds ``stopping`` and finalises
+    campaign.refresh_from_db()
+    assert campaign.state == "partially_sent" and (campaign.sent, campaign.failed) == (1, 0)
+    rows = {r.customer_id: r for r in CampaignRecipient.objects.filter(campaign=campaign)}
+    assert rows[given_back.pk].state == "stopped" and rows[given_back.pk].inbox is None
+    assert not InboxNotification.objects.filter(customer=given_back).exists()
+    assert InboxNotification.objects.get(customer=pushed).push_state == "sent"
+    assert InboxNotification.objects.filter(source_id=campaign.pk).count() == 1
+
+
+def test_a_dead_batch_withdraws_the_in_app_rows_of_recipients_never_pushed(clock: Any, fcm: FakeFcm) -> None:
+    [pushed] = reachable(1)
+    [given_back] = reachable(1, fcm_token="tok-busy")  # noqa: S106
+    campaign = sending_campaign()
+    with pytest.raises(outbox.RetryLater):
+        services.send_batch(campaign.pk, 0)
+    message = OutboxMessage.objects.create(  # the deferred batch 0 the dispatcher gave up on
+        topic=topics.CAMPAIGN_SEND_BATCH,
+        payload={"campaign_id": campaign.pk, "batch_no": 0},
+        dedupe_key=topics.campaign_send_batch_key(campaign.pk, 0),
+        status="dead",
+        last_error="fake provider busy",
+    )
+    tasks.on_push_dead(message)
+    campaign.refresh_from_db()
+    assert (campaign.state, campaign.sent, campaign.failed) == ("partially_sent", 1, 0)
+    assert states(campaign) == {"sent": 1, "stopped": 1}
+    assert not InboxNotification.objects.filter(customer=given_back).exists()
+    assert InboxNotification.objects.get(customer=pushed).push_state == "sent"
 
 
 def test_request_stop_is_refused_outside_sending(superuser_client: APIClient, clock: Any) -> None:

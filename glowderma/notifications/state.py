@@ -41,6 +41,7 @@ class Transition:
 MESSAGE_NOT_EDITABLE = "Faqat qoralamani o‘zgartirish mumkin."
 MESSAGE_NOT_DRAFT = "Xabar qoralama holatida emas."
 MESSAGE_NOT_TESTED = "Avval test yuboring va qurilmada ko‘rganingizni tasdiqlang."
+MESSAGE_NOT_APPROVABLE = "Faqat test tasdiqlangan xabarni yuborishga tasdiqlash mumkin."
 MESSAGE_NOT_RETURNABLE = "Faqat rejalashtirilgan yoki bekor qilingan xabarni qoralamaga qaytarish mumkin."
 MESSAGE_CANCEL_DRAFT = "Qoralamani bekor qilish shart emas: uni o‘chiring yoki o‘zgartiring."
 MESSAGE_CANCEL_STARTED = "Yuborish boshlangan: xabarni bekor qilib bo‘lmaydi."
@@ -89,7 +90,7 @@ TRANSITIONS: dict[str, Transition] = {
             _S.SCHEDULED,
             Actor.SUPERUSER,
             "notification.approved",
-            MESSAGE_NOT_TESTED,
+            MESSAGE_NOT_APPROVABLE,  # a ``draft`` gets MESSAGE_NOT_TESTED from the service
             idempotent_in=frozenset({_S.SCHEDULED}),
         ),
         Transition(

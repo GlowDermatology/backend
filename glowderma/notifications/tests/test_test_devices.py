@@ -1,17 +1,21 @@
 """The test-device registry (admin contract §2.8 ``notifications/test-devices/``, superuser): register by the
 customer's phone, the refusals, the soft removal and a dead token pruning the device."""
 
+import threading
 from typing import Any
 
 import pytest
+from django.db import connection
+from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIClient
 
 from glowderma.accounts.models import Device, StaffUser
-from glowderma.accounts.tests.factories import CustomerFactory, DeviceFactory
+from glowderma.accounts.tests.factories import CustomerFactory, DeviceFactory, StaffUserFactory
+from glowderma.core.api.exceptions import Conflict
 from glowderma.core.models import AuditEntry
 from glowderma.integrations.fcm.fake import FakeFcm
-from glowderma.notifications import services
-from glowderma.notifications.models import TestDevice
+from glowderma.notifications import selectors, services
+from glowderma.notifications.models import InboxNotification, TestDevice
 from glowderma.notifications.tests.conftest import ANCHOR
 from glowderma.notifications.tests.factories import CampaignFactory, TestDeviceFactory
 
@@ -50,9 +54,9 @@ def test_register_by_phone_lists_and_audits(
     }
     entry = AuditEntry.objects.get(action="test_device.registered")
     assert entry.actor_id == superuser.pk and entry.entity_id == str(response.data["id"])
-    assert entry.after == {
+    assert entry.after == {  # the audit log is readable by every staff member: the number is masked
         "device_id": latest.pk,
-        "phone": "+998901234567",
+        "phone": "+998 90 *** ** 67",
         "label": "Dilnoza — iPhone",
         "is_active": True,
     }
@@ -126,6 +130,63 @@ def test_remove_is_soft_and_idempotent(superuser_client: APIClient, superuser: S
     # the device can be registered again (the unique constraint is partial on is_active)
     again = register(superuser_client, test_device.phone, "Qayta")
     assert again.status_code == 201 and again.data["device_id"] == test_device.device_id
+
+
+def test_a_test_push_skips_the_device_of_a_customer_no_longer_active(
+    superuser: StaffUser, clock: Any, fcm: FakeFcm
+) -> None:
+    """The registry marks such a device ``is_pushable = false``; the sender agrees (``no_device``, no FCM
+    call, no inbox row on the deleted account)."""
+    gone = TestDeviceFactory.create(device=DeviceFactory.create(fcm_token="tok-gone"))  # noqa: S106
+    gone.device.customer.status, gone.device.customer.deleted_at = "deleted", ANCHOR
+    gone.device.customer.save()
+    good = TestDeviceFactory.create(device=DeviceFactory.create(fcm_token="tok-good"))  # noqa: S106
+    assert [getattr(row, "is_pushable") for row in selectors.test_devices()] == [False, True]  # noqa: B009
+    campaign = CampaignFactory.create()
+    services.send_test(campaign.pk, [gone.pk, good.pk], actor=superuser)
+    outcomes = {
+        test.test_device_id: (test.fcm_ok, test.fcm_error, test.inbox_id) for test in campaign.tests.all()
+    }
+    assert outcomes[gone.pk] == (False, "no_device", None)
+    assert outcomes[good.pk][:2] == (True, "")
+    assert [message.token for message in fcm.sent] == ["tok-good"]
+    assert not InboxNotification.objects.filter(customer_id=gone.device.customer_id).exists()
+    with pytest.raises(Conflict):  # the deleted customer's device alone: nothing to push to
+        services.send_test(campaign.pk, [gone.pk], actor=superuser)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_two_concurrent_registrations_of_one_device_refuse_one_as_a_duplicate() -> None:
+    owner = StaffUserFactory.create(is_superuser=True)
+    device = DeviceFactory.create()
+    gate = threading.Event()
+    results: list[Any] = [None, None]
+
+    def register_once(index: int) -> None:
+        gate.wait(10)
+        try:
+            results[index] = services.register_test_device(
+                phone=device.customer.phone or "", label=f"Telefon {index}", actor=owner
+            )
+        except Exception as exc:  # noqa: BLE001 - surfaced through the results
+            results[index] = exc
+        finally:
+            connection.close()
+
+    threads = [threading.Thread(target=register_once, args=(index,)) for index in range(2)]
+    for thread in threads:
+        thread.start()
+    gate.set()
+    for thread in threads:
+        thread.join(10)
+        assert not thread.is_alive()
+    kinds = sorted(type(result).__name__ for result in results)
+    assert kinds == ["TestDevice", "ValidationError"], results
+    refused = next(result for result in results if isinstance(result, ValidationError))
+    detail: Any = refused.detail
+    assert detail["phone"][0].code == "unique"
+    assert TestDevice.objects.filter(device=device, is_active=True).count() == 1
+    assert AuditEntry.objects.filter(action="test_device.registered").count() == 1
 
 
 def test_a_dead_token_on_a_test_push_prunes_the_device_and_the_registry_shows_it(

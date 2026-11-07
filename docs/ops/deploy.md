@@ -35,6 +35,7 @@ The sections that follow are application knowledge that does not depend on how t
 | `dispatch-outbox` | `core.dispatch_outbox` | every 10 s (and after every commit that enqueues) |
 | `commerce-expire-reservations` | `commerce.expire_reservations` | every minute |
 | `start-due-campaigns` | `notifications.start_due_campaigns` | every minute |
+| `notifications-finalise-stopping` | `notifications.finalise_stopping_campaigns` | every minute (a `stopping` campaign with no open batch) |
 | `reap-stale-jobs` | `integrations.reap_stale_jobs` | every 5 minutes |
 | `commerce-poll-bts` | `commerce.poll_bts` | every 10 minutes (no-op while BTS is fake) |
 | `accounts-cleanup-auth` | `accounts.cleanup_auth` | hourly |

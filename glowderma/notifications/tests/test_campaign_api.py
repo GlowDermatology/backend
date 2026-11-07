@@ -161,7 +161,6 @@ def test_list_shape_ordering_and_filters(staff_client: APIClient, staff: StaffUs
                 "revision": 1,
                 "test_device_id": first["tests"][0]["test_device_id"],
                 "device_label": first["tests"][0]["device_label"],
-                "phone": first["tests"][0]["phone"],
                 "sent_at": first["tests"][0]["sent_at"],
                 "sent_by": None,
                 "fcm_ok": True,

@@ -212,6 +212,48 @@ def test_delete_409_while_a_scheduled_campaign_targets_the_segment(
     )  # snapshot survives
 
 
+def test_widening_a_segment_is_refused_while_a_scheduled_campaign_targets_it(
+    staff_client: APIClient, clock: Any
+) -> None:
+    """A plain staff member cannot grow the audience of an approved campaign through its segment: new
+    members and rule changes answer 409 ``conflict`` like the delete; renaming and narrowing stay allowed."""
+    segment = CustomerSegmentFactory.create(name="Doimiy mijozlar", min_online_orders=None)
+    member = CustomerFactory.create()
+    SegmentMemberFactory.create(segment=segment, customer=member)
+    campaign = ScheduledCampaignFactory.create(
+        audience_type="segment", audience_segment=segment, audience_segment_name=segment.name
+    )
+    newcomer = CustomerFactory.create()
+    refused = [
+        staff_client.post(f"{URL}{segment.pk}/members/", {"customer_ids": [newcomer.pk]}, format="json"),
+        staff_client.patch(f"{URL}{segment.pk}/", {"rules": {"min_online_orders": 1}}, format="json"),
+        staff_client.patch(f"{URL}{segment.pk}/", {"rules": {"min_lifetime_amount": 1}}, format="json"),
+    ]
+    for response in refused:
+        assert response.status_code == 409, response.data
+        assert (response.data["code"], response.data["message"]) == (
+            "conflict",
+            "Rejalashtirilgan xabar bu guruhga yuboriladi.",
+        )
+    assert not SegmentMember.objects.filter(customer=newcomer).exists()
+    segment.refresh_from_db()
+    assert segment.min_online_orders is None and segment.min_lifetime_amount is None
+    assert not AuditEntry.objects.filter(action__in=["segment.updated", "segment.members_added"]).exists()
+    # a rename and a removal (narrowing) are not a widening
+    renamed = staff_client.patch(f"{URL}{segment.pk}/", {"name": "Sodiq mijozlar"}, format="json")
+    assert renamed.status_code == 200 and renamed.data["name"] == "Sodiq mijozlar"
+    assert staff_client.delete(f"{URL}{segment.pk}/members/{member.pk}/").status_code == 204
+    # once the beat started the campaign the segment is free again
+    campaign.state, campaign.started_at = "sending", campaign.dispatch_after
+    campaign.save()
+    assert (
+        staff_client.post(f"{URL}{segment.pk}/members/", {"customer_ids": [newcomer.pk]}, format="json")
+    ).status_code == 200
+    assert (
+        staff_client.patch(f"{URL}{segment.pk}/", {"rules": {"min_online_orders": 1}}, format="json")
+    ).status_code == 200
+
+
 def test_export_segments(staff_client: APIClient, clock: Any) -> None:
     segment = CustomerSegmentFactory.create(name="Doimiy mijozlar", min_online_orders=None)
     member = CustomerFactory.create()

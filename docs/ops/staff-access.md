@@ -17,6 +17,20 @@ manage.py createstaff admin@glowderma.uz --manager --full-name "Administrator"
 
 The first account of an install becomes a manager even without `--manager`; a superuser always is one.
 
+## Who approves push campaigns
+
+Test devices, test pushes, approval, cancel and the emergency stop of a campaign (`notifications/…`, admin
+contract §2.8) are **superuser** actions (`StaffUser.is_superuser`); ordinary staff only prepare drafts. The
+flag is not editable from the panel or the staff API: a new superuser account is `createstaff <email>
+--superuser`, an existing account is promoted from the shell —
+
+```bash
+manage.py shell -c "from glowderma.accounts.models import StaffUser; StaffUser.objects.filter(email='owner@glowderma.uz').update(is_superuser=True, is_manager=True)"
+```
+
+An install whose demo admin predates the approval workflow has **no** superuser until one is promoted this
+way; nothing can be approved before that.
+
 ## A staff member leaves
 
 ```bash
