@@ -242,8 +242,16 @@ The FE creates one key per form/dialog instance (`crypto.randomUUID()`), reuses 
 | POST | `cashback/policy-versions/` | I | 201 |
 | GET | `notifications/` | P E | 200 |
 | GET | `notifications/meta/` | | 200 |
-| POST | `notifications/` | I, multipart | 201 |
-| POST | `notifications/{id}/cancel/` (M3) | | 200 |
+| POST | `notifications/` | I, multipart | 201 (`draft`) |
+| GET / PATCH / DELETE | `notifications/{id}/` | – / multipart, author or superuser / author or superuser | 200 / 200 / 204 |
+| POST | `notifications/{id}/test/` | superuser | 200 |
+| POST | `notifications/{id}/tests/{test_id}/confirm/` | superuser | 200 |
+| POST | `notifications/{id}/approve/` | superuser | 200 |
+| POST | `notifications/{id}/return-to-draft/` | superuser | 200 |
+| POST | `notifications/{id}/cancel/` (M3) | superuser | 200 |
+| POST | `notifications/{id}/stop/` | superuser | 200 |
+| GET / POST | `notifications/test-devices/` | superuser | 200 / 201 |
+| DELETE | `notifications/test-devices/{id}/` | superuser | 204 |
 | GET / PUT | `notification-templates/{status}/` | | 200 |
 | GET / POST | `segments/` | P E / – | 200 / 201 |
 | GET / PATCH / DELETE | `segments/{id}/` | | 200 / 200 / 204 |
@@ -747,6 +755,16 @@ e-mail (the phone stays, A1).
 ```
 
 ### 2.8 Notifications, templates, segments
+
+**Approval workflow.** Ordinary staff (`is_staff`) only prepare drafts; superusers (`StaffUser.is_superuser`)
+test a draft on a registered real device, confirm the test, approve the send (dispatched no earlier than
+`approval_delay_minutes` later, cancellable until then), return it to draft and emergency-stop a running send.
+The backend enforces every rule; the UI hides the privileged controls from non-superusers. All staff see all
+campaigns. States: `draft` → `tested` → `scheduled` (approved, waiting for `dispatch_after`) → `sending` →
+`sent`; `sending` → `stopping` → `partially_sent` | `cancelled` (emergency stop); a dead `campaign.send_batch`
+→ `partially_sent` | `failed`. Tests and approvals are bound to `revision`, which bumps on every change of
+kind, title, body, image, link or audience: a stale approval is impossible.
+
 ```jsonc
 // NotificationRecord
 {"id": 4, "kind": "general", "title": "Yangi dermatolog qabuli ochildi", "body": "…",
@@ -754,15 +772,28 @@ e-mail (the phone stays, A1).
  "link": {"kind": "none", "product_id": null, "label": null, "url": null},   // product: {"kind":"product","product_id":4,"label":"Seramidli namlantiruvchi krem","url":null}
                                                                        // url (gap ADM-10.1): {"kind":"url","product_id":null,"label":null,"url":"https://glowderma.uz/aksiya"}
  "audience": {"type": "segment", "segment_id": 1, "segment_name": "Doimiy mijozlar", "phone": null},  // name snapshot; phone for type customer
- "recipient_count": 612,          // devices with push on, snapshot at creation; recomputed when the send starts
- "state": "scheduled",            // scheduled|queued|sent
- "scheduled_at": "2026-10-26T10:00:00+05:00", "created_at": "2026-10-24T11:30:00+05:00", "sent_at": null,
- "cancelled_at": null,            // M3: set when a scheduled campaign was cancelled (state "cancelled")
- "sent": null, "failed": null,    // FCM accepted / failed counts, null until sent
+ "recipient_count": 612,          // customers with a pushable device, estimated at creation / approval; recomputed when the send starts
+ "state": "scheduled",            // draft|tested|scheduled|sending|stopping|sent|partially_sent|cancelled|failed
+ "scheduled_at": "2026-10-26T10:00:00+05:00",   // the author's requested send time (optional); the dispatch waits for it
+ "created_at": "2026-10-24T11:30:00+05:00", "updated_at": "2026-10-24T11:45:00+05:00",
+ "revision": 1,                   // bumps on every content change
+ "tested_revision": 1, "test_confirmed_at": "2026-10-24T11:40:00+05:00", "test_confirmed_by": {"id": 1, "display_name": "Administrator"},
+ "approved_at": "2026-10-24T11:45:00+05:00", "approved_by": {"id": 1, "display_name": "Administrator"}, "approved_revision": 1,
+ "dispatch_after": "2026-10-26T10:00:00+05:00",   // state scheduled: the beat starts the send after this instant = max(approved_at + delay, scheduled_at)
+ "started_at": null, "sent_at": null,
+ "cancelled_at": null, "cancelled_by": null,      // set when a superuser cancelled the approved campaign, or a stop sent nothing
+ "stop_requested_at": null, "stop_requested_by": null, "stopped_at": null, "failed_at": null, "last_error": "",
+ "sent": null, "failed": null,    // FCM accepted / failed counts: live tallies from the first batch on (null before the send started)
+ "attempted": null,               // sent + failed (stopped recipients count in neither) | null
  "delivered": null,               // null until M2 app acknowledgements
- "author": {"id": 1, "display_name": "Administrator"}}
+ "author": {"id": 1, "display_name": "Administrator"},
+ "tests": [{"id": 7, "revision": 1, "test_device_id": 1, "device_label": "Malika — iPhone 14", "phone": "+998901234567",
+            "sent_at": "2026-10-24T11:38:00+05:00", "sent_by": {"id": 1, "display_name": "Administrator"},
+            "fcm_ok": true, "fcm_error": "",       // fcm_ok null while in flight; false with fcm_error unregistered|no_device|unavailable|…
+            "confirmed_at": "2026-10-24T11:40:00+05:00", "confirmed_by": {"id": 1, "display_name": "Administrator"}}]}
 ```
 **`GET notifications/`** (P E). Filters `state`, `kind`; ordered by `coalesce(scheduled_at, created_at)` desc.
+**`GET notifications/{id}/`** → the record (with `tests`).
 
 **`GET notifications/meta/`**
 ```jsonc
@@ -771,7 +802,8 @@ e-mail (the phone stays, A1).
  "templates": [{"status": "processing",
                 "texts": {"uz": "To‘lov qabul qilindi. Buyurtma №{raqam} tayyorlanmoqda.", "ru": "…", "en": "…"},
                 "updated_at": "…", "updated_by": null}],   // all 4 statuses
- "link_options": [{"product_id": 4, "label": "Seramidli namlantiruvchi krem"}]}   // active products, uz display name, sorted by label
+ "link_options": [{"product_id": 4, "label": "Seramidli namlantiruvchi krem"}],   // active products, uz display name, sorted by label
+ "approval_delay_minutes": 5}                                // CAMPAIGN_APPROVAL_DELAY_MINUTES: the cancel window after an approval
 ```
 
 **`POST notifications/`** (I, multipart). Top-level message "Maydonlarni tekshiring.".
@@ -790,13 +822,31 @@ e-mail (the phone stays, A1).
 | `audience.phone` | required for `customer`; `^\+998\d{9}$`; must belong to an active customer | `invalid` "Telefon raqamini to‘g‘ri kiriting." / `customer_not_found` "Bu raqam bilan mijoz topilmadi." |
 | `scheduled_at` | optional datetime, must be > now | `in_past` "Kelajakdagi vaqtni tanlang." |
 
-- Without `scheduled_at` → state `queued`; recipients are materialised and a Celery batched send runs (fake FCM in M1). Each recipient also gets an inbox item.
+- Always → state `draft`, `revision` 1; **nothing is materialised, enqueued or pushed** until a superuser tested, confirmed and approved the campaign. `scheduled_at` is the author's *requested* send time: the dispatch waits for it (`dispatch_after = max(approved_at + delay, scheduled_at)`).
 - A `url` campaign (gap ADM-10.1) gives every inbox item `link {"kind": "url", "url": …}` and every push the FCM data key `link_url` (customer contract §2.12, §2.14.2); `link_url` is `""` for the other kinds. The audit row `notification.created` carries `link_url`. The database check `campaign_link_fields` admits a URL only with kind `url` and only when it starts with `https://` (`notifications.0005`). The UI's "Bosilganda ochiladigan sahifa" offers a URL next to the products (`link_options` stays the product list).
-- With `scheduled_at` → state `scheduled`; beat starts the send when due.
-- Audit `notification.created`.
-- 201 `NotificationRecord`. **The 201 body is the campaign as stored when the response is built**: it is read after the request's transaction committed and its on-commit dispatch ran. With an eager Celery (local settings) the send already finished inside the request, so the body says `state: "sent"` with `sent`, `failed` and `sent_at`; with a real worker it normally still says `queued` (a fast worker may already have advanced it). The key stays held until that body is stored: a retry racing the first response gets 409 `request_in_progress` (§1.7), and a replay afterwards returns that same body.
+- Audit `notification.created`. 201 `NotificationRecord`.
 
-**`POST notifications/{id}/cancel/`** (M3; empty body; `Idempotency-Key` optional, §1.7) → 200 `NotificationRecord`. Cancels a **`scheduled`** campaign before its send starts: state `cancelled`, `cancelled_at` = now, nothing is materialised or sent (no recipients, no inbox items) and the beat never starts it; audit `notification.cancelled`. Idempotent: an already `cancelled` campaign answers 200 with the same record and no new audit row. Once the send started (`queued`, including the internal sending phase, or `sent`) → 409 `conflict` "Yuborish boshlangan: xabarni bekor qilib bo‘lmaydi."; an unknown id → 404. The row lock orders it against the beat: a campaign the beat is starting at that moment is answered after it, with the 409. `GET notifications/?state=cancelled` lists cancelled campaigns; a cancelled campaign no longer holds its segment (`DELETE segments/{id}/` checks `scheduled` ones only). The UI offers "Bekor qilish" on `scheduled` rows only.
+**`PATCH notifications/{id}/`** (multipart; `Idempotency-Key` optional; the campaign's author or a superuser, else 403 `permission_denied`) → 200 `NotificationRecord`. `draft` / `tested` only (else 409 `invalid_transition` "Faqat qoralamani o‘zgartirish mumkin."). The same keys as the create form, every content key optional (a missing key keeps the stored value; a submitted `link.*` / `audience.*` replaces the stored link / audience as a whole; `scheduled_at` `""` clears the requested time), plus `expected_revision` (required; ≠ the current `revision` → 409 `conflict` "Xabar o‘zgartirilgan: sahifani yangilab, qayta urinib ko‘ring.") and `remove_image` (`true` drops the image). A change of kind, title, body, image, link or audience bumps `revision`, clears the test confirmation and puts a `tested` campaign back to `draft`; a change of `scheduled_at` alone keeps the state. Audit `notification.draft_updated` (changed fields before/after).
+
+**`DELETE notifications/{id}/`** (author or superuser; `draft` / `tested` only, else 409 `invalid_transition`) → 204; the image file and the tests go with it. Audit `notification.draft_deleted`.
+
+**`POST notifications/{id}/test/`** (superuser) `{"device_ids": [int] 1..10}` → 200 `NotificationRecord`. Pushes the current revision of a `draft` / `tested` campaign to the chosen active test devices (`device_ids` must be active registry ids, else `does_not_exist`). Each test is a real inbox item of the tester (dedupe `campaign-test:{campaign}:{test}`), so the deep link works on the device, and is recorded in `tests[]` with the FCM outcome (`fcm_ok`, `fcm_error`); a dead token (`unregistered`) prunes the device like a campaign push does; a device without a token records `fcm_ok: false` `no_device`. No chosen device pushable → 409 `conflict` "Push qabul qila oladigan test qurilmasi tanlanmadi.". FCM unreachable → every test `fcm_ok: false` `unavailable` and 503 `provider_unavailable`. Audit `notification.test_sent`.
+
+**`POST notifications/{id}/tests/{test_id}/confirm/`** (superuser; empty body) → 200 `NotificationRecord`. The superuser saw the test on the device: the campaign becomes `tested` with `tested_revision = revision`, `test_confirmed_at/by`. The test must be the current revision's (409 `conflict` "Bu test eski matn uchun yuborilgan: qayta test yuboring.") and delivered (`fcm_ok` true; 409 `conflict` "Bu test qurilmaga yetib bormagan: tasdiqlab bo‘lmaydi."); a test of another campaign → 404. Idempotent. Audit `notification.test_confirmed`.
+
+**`POST notifications/{id}/approve/`** (superuser) `{"expected_revision": int}` → 200 `NotificationRecord`. A `tested` campaign whose confirmed test is the current revision becomes `scheduled`: `approved_at/by/revision`, `dispatch_after = max(now + approval_delay_minutes, scheduled_at)`, `recipient_count` re-estimated. **The approval dispatches nothing** (no outbox row, no FCM call): the beat `notifications.start_due_campaigns` (every minute) claims the campaign once `dispatch_after` has passed; `cancel/` works until then. `expected_revision` ≠ `revision` → 409 `conflict` (stale page); `draft` → 409 `invalid_transition` "Avval test yuboring va qurilmada ko‘rganingizni tasdiqlang."; a segment audience whose segment was deleted → 409 `conflict`. A repeat on the approved revision answers 200 unchanged (no second audit). Audit `notification.approved`.
+
+**`POST notifications/{id}/return-to-draft/`** (superuser; empty body) → 200 `NotificationRecord`. A `scheduled` campaign the beat has not claimed, or a `cancelled` one that never started, goes back to `draft`: approval, cancellation and test confirmation cleared, `revision` bumped, so it must be tested and approved again. A `draft` answers unchanged; anything else → 409 `invalid_transition`. Audit `notification.returned_to_draft`.
+
+**`POST notifications/{id}/cancel/`** (M3, now **superuser**; empty body; `Idempotency-Key` optional, §1.7) → 200 `NotificationRecord`. Cancels an approved **`scheduled`** campaign before the beat starts it: state `cancelled`, `cancelled_at` = now, `cancelled_by`, nothing is materialised or sent (no recipients, no inbox items) and the beat never starts it; audit `notification.cancelled`. Idempotent: an already `cancelled` campaign answers 200 with the same record and no new audit row. A `draft` / `tested` campaign → 409 `invalid_transition` "Qoralamani bekor qilish shart emas: uni o‘chiring yoki o‘zgartiring." (delete or edit it instead); once the send started (`sending`, `stopping`, `sent`, …) → 409 `conflict` "Yuborish boshlangan: xabarni bekor qilib bo‘lmaydi." (use `stop/`); an unknown id → 404. The row lock orders it against the beat: a campaign the beat is starting at that moment is answered after it, with the 409. `GET notifications/?state=cancelled` lists cancelled campaigns; a cancelled campaign no longer holds its segment (`DELETE segments/{id}/` checks `scheduled` ones only). The UI offers «Yuborishni bekor qilish» on `scheduled` rows only, with the countdown to `dispatch_after`.
+
+**`POST notifications/{id}/stop/`** (superuser; empty body; emergency stop) → 200 `NotificationRecord`. `sending` → `stopping` (`stop_requested_at/by`; audit `notification.stop_requested`). The running `campaign.send_batch` checks the state **before claiming** its batch (nothing more goes out) and **before enqueueing the next batch** (the pushes already in flight are settled, claims FCM did not take become `stopped`); it then finalises the campaign: pending recipients `stopped`, their queued inbox items `failed`/`stopped`, `stopped_at`, state `partially_sent` when at least one push went out, else `cancelled` (`cancelled_by` = who asked for the stop); audit `notification.stopped` (system). A `stopping` campaign with no open batch left (a dead worker) is finalised by the beat `notifications.finalise_stopping_campaigns` (every minute). **A push FCM already accepted is never recalled.** Idempotent on `stopping` and on a campaign that ended by a stop; anything else → 409 `invalid_transition` "Xabar hozir yuborilmayapti: to‘xtatadigan narsa yo‘q.".
+
+**Dead batch** (open question M3-N1, decided): a `campaign.send_batch` message that dies (ten failures, or deferred past the 6 h window) closes its campaign — `partially_sent` when a push went out, else `failed`; `failed_at`, `last_error` = the message's, pending recipients `stopped`; audit `notification.failed` (system) next to `notification.push_dead` / `outbox.dead`.
+
+**Test devices** (superuser; the registry is global). `GET notifications/test-devices/` → `[{"id", "phone", "label", "device_id", "platform", "model", "is_pushable", "registered_by", "created_at"}]` (active rows; `is_pushable` = the device still takes pushes and its customer is active). `POST notifications/test-devices/` `{"phone": "+998…", "label": str 1..60}` → 201: registers the most recently active pushable device of the active customer with that phone (a real customer-app install of a staff member). Field errors `phone`: `invalid`, `customer_not_found` "Bu raqam bilan mijoz topilmadi.", `device_not_pushable` "Bu mijozning push qabul qiladigan qurilmasi yo‘q.", `unique` "Bu qurilma allaqachon ro‘yxatda."; `label` `min_length` "Qurilma nomini kiriting." / `max_length` "60 belgidan oshmasin.". `DELETE notifications/test-devices/{id}/` → 204 (soft, idempotent; unknown id → 404). Audit `test_device.registered` / `test_device.removed`.
+
+Settings: `CAMPAIGN_APPROVAL_DELAY_MINUTES` (default 5; 0 allowed locally for e2e; **production refuses < 5**) is the minimum wait between an approval and the dispatch, shown as `approval_delay_minutes` in `meta`. Deployment: `notifications.0010` turns every pre-existing `scheduled` campaign into a `draft` (it needs a test and an approval again) and lets a `queued` one continue as `sending`.
 
 Templates are editable in the admin UI through `GET` / `PUT` below.
 
@@ -1307,7 +1357,7 @@ Audit `schedule.hours_updated` (entity `professional`) with the week before and 
 | RequestedVia | `app`, `admin` | |
 | BlockKind | `busy`, `off` | |
 | NotificationKind | `promo`, `general` | |
-| NotificationState | `scheduled`, `queued`, `sent`, `cancelled` (M3) | |
+| NotificationState | `draft`, `tested`, `scheduled`, `sending`, `stopping`, `sent`, `partially_sent`, `cancelled`, `failed` | approval workflow (§2.8); `queued` was dropped |
 | AudienceType | `all`, `segment`, `customer` | |
 | LinkKind | `none`, `product`, `url` (gap ADM-10.1) | notifications |
 | BannerLinkKind | `none`, `product`, `category`, `url` (gap X-BANNER-URL) | banners |
@@ -1332,7 +1382,7 @@ Audit `schedule.hours_updated` (entity `professional`) with the week before and 
 | Orders | `order.cancelled`, `order.status_changed`, `order.shipment_retry_requested`, `refund.requested`, `refund.state_changed` (system) |
 | Catalog | `product.created`, `product.updated`, `product.image_added`, `product.image_deleted`, `product.images_reordered`, `billz.import_started`, `billz.import_finished`, `category.created`, `category.updated`, `category.deleted`, `category.reordered`, `banner.created`, `banner.updated`, `banner.deleted`, `banner.reordered`. Gap closure (catalog): the `category.*` snapshot carries `image` (file name or `null`), the `banner.*` snapshot `link.url`, `notification.created` `link_url`; no new action |
 | Loyalty | `cashback.adjusted`, `cashback.policy_version_created`, `cashback.policy_version_superseded`. Gap CB-9.2.4: migration `loyalty.0006` writes one `cashback.policy_version_created` (actor `system`, reason "migration loyalty.0006: first cashback policy with the L1–L3 defaults", the service's data shape) when it creates the install's first policy. That v1's `created_at` (2026-05-20 10:00) and `effective_from` (2026-06-01 00:00, Tashkent) are fixed placeholder instants, not the deploy time (GS-6) |
-| Notifications | `notification.created`, `notification.cancelled` (M3; before `{state: "scheduled", scheduled_at}`, after `{state: "cancelled", cancelled_at}`), `notification_template.updated`, `segment.created`, `segment.updated`, `segment.deleted`, `segment.members_added`, `segment.member_removed`, `notification.push_dead` (system; a dead `push.order_status` / `push.appointment` / `campaign.send_batch` message: `{topic, dedupe_key, attempts, last_error, customer_id, campaign_id}`) |
+| Notifications | `notification.created`, `notification.draft_updated`, `notification.draft_deleted`, `notification.test_sent` (`{revision, tests[]}`), `notification.test_confirmed`, `notification.approved` (`{approved_revision, dispatch_after, …}`), `notification.returned_to_draft`, `notification.cancelled` (M3; before `{state: "scheduled", scheduled_at, dispatch_after}`, after `{state: "cancelled", cancelled_at}`), `notification.send_started` (system), `notification.stop_requested`, `notification.stopped` (system), `notification.failed` (system; a dead `campaign.send_batch`), `test_device.registered`, `test_device.removed`, `notification_template.updated`, `segment.created`, `segment.updated`, `segment.deleted`, `segment.members_added`, `segment.member_removed`, `notification.push_dead` (system; a dead `push.order_status` / `push.appointment` / `campaign.send_batch` message: `{topic, dedupe_key, attempts, last_error, customer_id, campaign_id}`) |
 | Appointments | `appointment.confirmed`, `appointment.rejected`, `appointment.attended`, `appointment.created`, `appointment.rescheduled` (`{…, from_start, from_end, reschedule_no}`), `appointment.cancelled` (`{…, reason}`) |
 | Shell | `settings.updated` (changed leaves only, each `{from, to}`; legal-text leaves as `{changed, old_len, new_len, sha256}`, §2.11), `settings.terms_published` (`{from, to, sha256}`, §2.11), `export.downloaded` |
 | M2 (customer API) | The customer, payment and POS actions listed in `docs/api/customer-api-v1.md` §3 ("Audit actions added in M2"): `customer.*` (B-W1 adds `customer.session_revoked`, also by staff from §2.6, and `customer.sessions_revoked`), `auth.device_mismatch`, `appointment.requested`, `appointment.cancelled` (`by: "customer"`), `payment.late_capture`, `pos.*`. The `audit-log/` filters accept them unchanged. |
@@ -1487,7 +1537,9 @@ Generic mapping applies throughout: snake_case → camelCase; integer ids → `S
 |---|---|---|
 | `NotificationRecord.at` | `scheduled_at`, `created_at` | `scheduled_at ?? created_at` |
 | `NotificationRecord.audienceLabel` | `audience`, `recipient_count` | all → `` `Barcha · ${N(recipient_count)}` `` ("Barcha · 4 751"); segment → `` `${segment_name} · ${N(recipient_count)}` `` ("Doimiy mijozlar · 612"); customer → `` `Bitta mijoz · ${formatPhone(phone)}` `` |
-| `sent` / `delivered` / `state` | same | As is (`delivered` stays null in M1) |
+| `sent` / `failed` / `attempted` / `delivered` / `state` | same | As is; `sent` / `failed` are live tallies while `sending` (`attempted = sent + failed`); `delivered` stays null in M1 |
+| `revision`, `testedRevision`, `approvedRevision`, `dispatchAfter`, `approvedAt/By`, `testConfirmedAt`, `stopRequestedAt`, `stoppedAt`, `failedAt`, `lastError`, `tests[]`, `authorId` | same | As is; the UI derives the allowed actions from the state and `me.is_superuser` / `author.id` (approve needs `testedRevision === revision`); `dispatchAfter` drives the cancel countdown |
+| `approvalDelayMinutes`, `testDevices` | meta `approval_delay_minutes`, `notifications/test-devices/` | the latter superuser only |
 | `totalDevices`, `segments` | meta `total_devices`, `segments` | `{id: String(id), name, size}` |
 | `linkOptions` | meta `link_options` | `[{kind: "none"}, ...map(o => ({kind: "product", productId: String(o.product_id), label: o.label}))]` |
 | `StatusTemplate` | meta `templates[]` | `text = texts.uz`; `translations[l] = texts[l].trim() !== ""` |
@@ -1534,7 +1586,7 @@ Generic mapping applies throughout: snake_case → camelCase; integer ids → `S
 | CancellationReason | reservation_expired "Band muddati tugadi" · admin "Admin bekor qildi" · customer_request "Mijoz bekor qildi" |
 | ProductStatus / CustomerStatus | active "Faol" · hidden "Yashirin" / active "Faol" · deleted "O‘chirilgan" |
 | LedgerKind | credit "Hisoblandi" · debit "Ishlatildi" · adjustment "Tuzatish" · reversal "Qaytarildi" |
-| NotificationState / Kind | scheduled "Rejalashtirilgan" · queued "Navbatda" · sent "Yuborildi" · cancelled "Bekor qilindi" (M3) / promo "Aksiya" · general "Umumiy" |
+| NotificationState / Kind | draft "Qoralama" · tested "Test tasdiqlangan" · scheduled "Rejalashtirilgan" · sending "Yuborilmoqda" · stopping "To‘xtatilmoqda" · sent "Yuborildi" · partially_sent "Qisman yuborildi" · cancelled "Bekor qilindi" · failed "Yuborilmadi" / promo "Aksiya" · general "Umumiy" |
 | SpecialistRole / ServiceCategory (§2.17) | dermatologist "Dermatolog" · cosmetologist "Kosmetolog" / dermatology "Dermatologiya" · cosmetology "Kosmetologiya" |
 | `is_active` of specialists and services (§2.17) | true "Faol" · false "Nofaol" |
 | Booleans in exports | "Ha" / "Yo‘q" |
@@ -1609,6 +1661,7 @@ Provisional, configurable rules that shape payloads:
     - The view keeps the picked `File` and posts FormData.
     - `defaultSchedule` and `draft: null` are mapper-side. `history` is the first page.
     - Templates are editable in the UI through `GET` / `PUT notification-templates/{status}/` (as built by the frontend).
+    - Approval workflow (§2.8): the composer saves a **draft** («Qoralama saqlash»; the "send now" dialog is gone, the schedule is the requested time) and edits with `expected_revision`; history rows show the title **and body** and one of nine state badges; the campaign panel shows the superuser controls by state («Test yuborish» with the device picker, «Testni tasdiqlash» per delivered test, «Yuborishni tasdiqlash», «Yuborishni bekor qilish» with the countdown to `dispatch_after`, «Qoralamaga qaytarish», «Favqulodda to‘xtatish»); a test-devices card registers devices by phone + label. Non-superusers see none of the privileged controls; 403 / 409 answers refresh the row.
 13. **Appointments.**
     - Map `requested_via`, `role`, and null `working_hours` (§5.6).
     - `DEFAULT_APPOINTMENT_DAY` → today (`parseDay`/`dayHref` take `today`).
