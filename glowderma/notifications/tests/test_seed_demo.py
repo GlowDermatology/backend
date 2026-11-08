@@ -36,7 +36,7 @@ def test_seed_demo_runs_both_seeders_after_the_lower_layers_and_is_idempotent(
     assert ran.index("professionals") < ran.index("appointments") < ran.index("notifications")
     assert ran[-2:] == ["appointments", "notifications"]
     first = counts()
-    assert first == (45, 98, 2, 2, 4)
+    assert first == (45, 98, 2, 2, 5)
     assert Campaign.objects.get(pk=3).link_product is not None  # catalog's product 4 was there
     assert Campaign.objects.get(pk=3).link_product.name_uz == "Seramidli namlantiruvchi krem"  # type: ignore[union-attr]
     assert Appointment.objects.get(pk=3).created_by_id == 1
@@ -59,5 +59,5 @@ def test_seed_demo_runs_both_seeders_after_the_lower_layers_and_is_idempotent(
     assert CustomerSegment.objects.create(name="Yangi guruh").pk == 3
     assert (
         Campaign.objects.create(kind="general", title="Keyingi", body="Keyingi xabar", audience_type="all").pk
-        == 5
+        == 6
     )

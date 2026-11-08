@@ -141,8 +141,14 @@ def ensure_admin() -> StaffUser:
         if problem is not None:
             raise ImproperlyConfigured(problem)
         password = os.environ.get("SEED_ADMIN_PASSWORD", DEFAULT_ADMIN_PASSWORD)
-        # The demo administrator manages staff (admin contract §2.16, decision GST-1).
-        extra: dict[str, object] = {"full_name": ADMIN_FULL_NAME, "is_staff": True, "is_manager": True}
+        # The demo administrator manages staff (admin contract §2.16, decision GST-1) and, as a superuser,
+        # tests, approves and stops campaigns (§2.8 approval workflow).
+        extra: dict[str, object] = {
+            "full_name": ADMIN_FULL_NAME,
+            "is_staff": True,
+            "is_manager": True,
+            "is_superuser": True,
+        }
         if not StaffUser.objects.filter(pk=1).exists():
             extra["id"] = 1  # every "Administrator" actor of the design dataset is staff id 1
         admin = StaffUser.objects.create_user(ADMIN_EMAIL, password, **extra)

@@ -2,7 +2,11 @@ from collections.abc import Callable, Iterator
 from datetime import datetime
 
 import pytest
+from rest_framework.test import APIClient
 
+from glowderma.accounts.models import StaffUser
+from glowderma.accounts.tests.conftest import bearer_client
+from glowderma.accounts.tests.factories import StaffUserFactory
 from glowderma.core import seeding, timeutils
 from glowderma.integrations.fcm import registry
 from glowderma.integrations.fcm.fake import FakeFcm
@@ -28,3 +32,15 @@ def fcm(monkeypatch: pytest.MonkeyPatch) -> Iterator[FakeFcm]:
     fake = FakeFcm()
     monkeypatch.setattr(registry, "_fake", fake)
     yield fake
+
+
+@pytest.fixture
+def superuser(db: None) -> StaffUser:
+    """A superuser (``StaffUser.is_superuser``): the role that tests, approves, cancels and stops
+    campaigns."""
+    return StaffUserFactory.create(email="owner@glowderma.uz", full_name="Egasi", is_superuser=True)
+
+
+@pytest.fixture
+def superuser_client(superuser: StaffUser) -> APIClient:
+    return bearer_client(superuser)

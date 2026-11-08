@@ -1,4 +1,5 @@
-"""The batched campaign send (design 03 §3.4–§3.6): cursor, idempotent redelivery, failures, beat start."""
+"""The batched campaign send (design 03 §3.4–§3.6): cursor, idempotent redelivery, failures, live tallies and
+the beat start of an approved campaign."""
 
 from datetime import datetime, timedelta
 from typing import Any
@@ -19,7 +20,9 @@ from glowderma.notifications.tests.conftest import ANCHOR
 from glowderma.notifications.tests.factories import (
     CampaignFactory,
     CustomerSegmentFactory,
+    ScheduledCampaignFactory,
     SegmentMemberFactory,
+    SendingCampaignFactory,
 )
 
 pytestmark = pytest.mark.django_db
@@ -32,10 +35,10 @@ def reachable(count: int, **device: Any) -> list[Any]:
     return customers
 
 
-def queued_campaign(**kwargs: Any) -> Campaign:
-    campaign = CampaignFactory.create(**kwargs)
-    with override_settings(CAMPAIGN_BATCH_SIZE=2):
-        services.materialise(campaign)
+def sending_campaign(**kwargs: Any) -> Campaign:
+    """A campaign the beat just started (``_start``): recipients materialised, tallies at 0, batch 0 due."""
+    campaign = SendingCampaignFactory.create(**kwargs)
+    services.materialise(campaign)
     campaign.save()
     return campaign
 
@@ -43,11 +46,12 @@ def queued_campaign(**kwargs: Any) -> Campaign:
 @override_settings(CAMPAIGN_BATCH_SIZE=2)
 def test_batches_follow_the_cursor_and_chain_through_the_outbox(clock: Any, fcm: FakeFcm) -> None:
     customers = reachable(5)
-    campaign = queued_campaign()
+    campaign = sending_campaign()
     assert campaign.recipient_count == 5
     services.send_batch(campaign.pk, 0)
     campaign.refresh_from_db()
     assert (campaign.state, campaign.batches_dispatched, campaign.started_at) == ("sending", 1, ANCHOR)
+    assert (campaign.sent, campaign.failed) == (2, 0)  # live tallies after every batch
     assert CampaignRecipient.objects.filter(campaign=campaign, state="sent").count() == 2
     assert campaign.send_cursor == CampaignRecipient.objects.filter(campaign=campaign).order_by("id")[1].pk
     next_message = OutboxMessage.objects.get(dedupe_key=topics.campaign_send_batch_key(campaign.pk, 1))
@@ -65,7 +69,7 @@ def test_batches_follow_the_cursor_and_chain_through_the_outbox(clock: Any, fcm:
 @override_settings(CAMPAIGN_BATCH_SIZE=2)
 def test_redelivered_batch_is_a_no_op_and_out_of_order_batches_wait(clock: Any, fcm: FakeFcm) -> None:
     reachable(3)
-    campaign = queued_campaign()
+    campaign = sending_campaign()
     services.send_batch(campaign.pk, 0)
     sent_before = len(fcm.sent)
     services.send_batch(campaign.pk, 0)  # redelivery: nothing resent, nothing duplicated
@@ -88,7 +92,7 @@ def test_pending_recipient_with_a_claimed_or_settled_inbox_row_is_reconciled(
 ) -> None:
     """A crash between the claim and the settle leaves ``sending``: never resent; a settled row is adopted."""
     customers = reachable(3)
-    campaign = queued_campaign()
+    campaign = sending_campaign()
     crashed = InboxNotification.objects.create(
         customer=customers[0],
         kind="general",
@@ -131,7 +135,7 @@ def test_pending_recipient_with_a_claimed_or_settled_inbox_row_is_reconciled(
 
 def test_devices_gone_between_materialise_and_send_are_skipped(clock: Any, fcm: FakeFcm) -> None:
     customers = reachable(2)
-    campaign = queued_campaign()
+    campaign = sending_campaign()
     device = customers[0].devices.get()
     device.push_enabled = False
     device.fcm_token = ""
@@ -149,7 +153,7 @@ def test_provider_outage_releases_the_claims_and_retries(clock: Any, fcm: FakeFc
     customers = reachable(1)
     down = CustomerFactory.create()
     DeviceFactory.create(customer=down, fcm_token="tok-down")  # noqa: S106
-    campaign = queued_campaign()
+    campaign = sending_campaign()
     with override_settings(CAMPAIGN_BATCH_SIZE=10), pytest.raises(FcmUnavailable):
         services.send_batch(campaign.pk, 0)
     campaign.refresh_from_db()
@@ -170,14 +174,16 @@ def test_provider_outage_releases_the_claims_and_retries(clock: Any, fcm: FakeFc
 
 def test_start_due_campaigns_only_when_due_and_recomputes_recipients(clock: Any, fcm: FakeFcm) -> None:
     segment = CustomerSegmentFactory.create(min_online_orders=None)
-    campaign = CampaignFactory.create(
-        state=Campaign.State.SCHEDULED,
-        scheduled_at=datetime(2026, 10, 26, 10, tzinfo=TASHKENT),
+    due_at = datetime(2026, 10, 26, 10, tzinfo=TASHKENT)
+    campaign = ScheduledCampaignFactory.create(
+        scheduled_at=due_at,
+        dispatch_after=due_at,
         audience_type="segment",
         audience_segment=segment,
         audience_segment_name=segment.name,
         recipient_count=612,
     )
+    unapproved = CampaignFactory.create(scheduled_at=ANCHOR - timedelta(days=1))  # a draft: never started
     assert services.start_due_campaigns() == []
     clock(datetime(2026, 10, 26, 9, 59, tzinfo=TASHKENT))
     assert tasks.start_due_campaigns() == []
@@ -189,18 +195,27 @@ def test_start_due_campaigns_only_when_due_and_recomputes_recipients(clock: Any,
     clock(datetime(2026, 10, 26, 10, 0, tzinfo=TASHKENT))
     assert services.start_due_campaigns() == [campaign.pk]
     campaign.refresh_from_db()
-    assert campaign.state == "queued" and campaign.recipient_count == 2  # recomputed from 612
+    assert campaign.state == "sending" and campaign.recipient_count == 2  # recomputed from 612
+    assert (campaign.sent, campaign.failed, campaign.started_at) == (
+        0,
+        0,
+        datetime(2026, 10, 26, 10, tzinfo=TASHKENT),
+    )
     message = OutboxMessage.objects.get(topic="campaign.send_batch")
     assert message.payload == {"campaign_id": campaign.pk, "batch_no": 0}
     assert services.start_due_campaigns() == []  # no longer scheduled
     dispatch_outbox(batch=5)
     campaign.refresh_from_db()
     assert (campaign.state, campaign.sent) == ("sent", 2)
+    unapproved.refresh_from_db()
+    assert unapproved.state == "draft" and not OutboxMessage.objects.filter(
+        payload__campaign_id=unapproved.pk
+    )
 
 
 def test_due_campaign_without_recipients_is_sent_immediately(clock: Any) -> None:
-    campaign = CampaignFactory.create(
-        state=Campaign.State.SCHEDULED, scheduled_at=ANCHOR - timedelta(minutes=1), recipient_count=5
+    campaign = ScheduledCampaignFactory.create(
+        dispatch_after=ANCHOR - timedelta(minutes=1), recipient_count=5
     )
     assert services.start_due_campaigns() == [campaign.pk]
     campaign.refresh_from_db()
@@ -237,7 +252,7 @@ def test_handler_registration_and_dead_letter_audit(clock: Any) -> None:
 
 def test_send_batch_handler_reads_the_payload(clock: Any, fcm: FakeFcm) -> None:
     reachable(1)
-    campaign = queued_campaign()
+    campaign = sending_campaign()
     message = OutboxMessage.objects.create(
         topic="campaign.send_batch",
         payload={"campaign_id": campaign.pk, "batch_no": 0},
@@ -249,12 +264,13 @@ def test_send_batch_handler_reads_the_payload(clock: Any, fcm: FakeFcm) -> None:
     assert campaign.state == "sent" and campaign.sent == 1
 
 
-def test_send_batch_on_a_scheduled_campaign_is_refused(clock: Any) -> None:
-    campaign = CampaignFactory.create(
-        state=Campaign.State.SCHEDULED, scheduled_at=ANCHOR + timedelta(hours=1)
-    )
-    with pytest.raises(RuntimeError):
-        services.send_batch(campaign.pk, 0)
+def test_send_batch_on_an_unstarted_campaign_is_refused(clock: Any) -> None:
+    for campaign in (
+        ScheduledCampaignFactory.create(dispatch_after=ANCHOR + timedelta(hours=1)),
+        CampaignFactory.create(),
+    ):
+        with pytest.raises(RuntimeError):
+            services.send_batch(campaign.pk, 0)
 
 
 class ReenteringFcm(FakeFcm):
@@ -279,7 +295,7 @@ def test_an_overlapping_redelivery_of_a_middle_batch_does_not_strand_the_campaig
     from glowderma.integrations.fcm import registry
 
     reachable(3)
-    campaign = queued_campaign()
+    campaign = sending_campaign()
     fake = ReenteringFcm(campaign.pk, 0)
     monkeypatch.setattr(registry, "_fake", fake)
     services.send_batch(campaign.pk, 0)  # worker A
@@ -308,7 +324,7 @@ def test_an_overlapping_redelivery_of_the_last_batch_refreshes_the_final_tally(
     from glowderma.integrations.fcm import registry
 
     reachable(3)
-    campaign = queued_campaign()
+    campaign = sending_campaign()
     fake = ReenteringFcm(campaign.pk, 0)
     monkeypatch.setattr(registry, "_fake", fake)
     with override_settings(CAMPAIGN_BATCH_SIZE=10):

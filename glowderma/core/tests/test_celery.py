@@ -17,6 +17,20 @@ def test_idempotency_cleanup_is_registered_and_scheduled() -> None:
     assert str(app.timezone) == "Asia/Tashkent"
 
 
+def test_campaign_beats_are_registered_and_run_every_minute() -> None:
+    """Campaign approval workflow: the beat claims approved campaigns past ``dispatch_after`` and finalises
+    stopped ones whose batch died, both every minute (admin contract §2.8)."""
+    from config.celery import app
+
+    app.autodiscover_tasks(force=True)
+    for key, task in (
+        ("start-due-campaigns", "notifications.start_due_campaigns"),
+        ("notifications-finalise-stopping", "notifications.finalise_stopping_campaigns"),
+    ):
+        assert task in app.tasks
+        assert app.conf.beat_schedule[key] == {"task": task, "schedule": 60.0}
+
+
 def test_celery_hardening_settings() -> None:
     from django.conf import settings
 

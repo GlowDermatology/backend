@@ -1,5 +1,6 @@
-"""notifications.seed (design 03 §7.12): segments, Malika's memberships, the four campaigns; idempotent,
-standalone-safe, every timestamp pinned."""
+"""notifications.seed (design 03 §7.12): segments, Malika's memberships, the five campaigns (campaign 4
+approved with its confirmed test on Malika's device, campaign 5 a draft); idempotent, standalone-safe, every
+timestamp pinned."""
 
 import importlib
 from datetime import datetime, timedelta
@@ -18,10 +19,12 @@ from glowderma.notifications import seeds
 from glowderma.notifications.models import (
     Campaign,
     CampaignRecipient,
+    CampaignTest,
     CustomerSegment,
     InboxNotification,
     SegmentMember,
     StatusTemplate,
+    TestDevice,
 )
 from glowderma.notifications.seeds import seed_notifications
 
@@ -43,6 +46,8 @@ def counts() -> tuple[int, ...]:
         CampaignRecipient.objects.count(),
         InboxNotification.objects.count(),
         StatusTemplate.objects.count(),
+        TestDevice.objects.count(),
+        CampaignTest.objects.count(),
     )
 
 
@@ -59,10 +64,11 @@ def test_seed_reproduces_the_design_and_is_idempotent(monkeypatch: pytest.Monkey
         billz_id=seeds.LINK_PRODUCT_BILLZ_ID, name_uz="Seramidli namlantiruvchi krem"
     )
     admin = StaffUser.objects.get(email=seeds.SEED_ADMIN_EMAIL)
+    assert admin.is_superuser  # the demo administrator tests, approves and stops campaigns
     seed_notifications(CONTEXT)
-    assert counts() == (2, 2, 4, 0, 0, 4)
+    assert counts() == (2, 2, 5, 0, 0, 4, 1, 1)
     seed_notifications(CONTEXT)
-    assert counts() == (2, 2, 4, 0, 0, 4)
+    assert counts() == (2, 2, 5, 0, 0, 4, 1, 1)
 
     regular = CustomerSegment.objects.get(pk=1)
     big = CustomerSegment.objects.get(pk=2)
@@ -79,9 +85,10 @@ def test_seed_reproduces_the_design_and_is_idempotent(monkeypatch: pytest.Monkey
     assert member.customer == malika and member.added_by == admin and member.added_at == dt(10, 10, 10, 0)
 
     rows = {row.pk: row for row in Campaign.objects.all()}
-    assert sorted(rows) == [1, 2, 3, 4]
+    assert sorted(rows) == [1, 2, 3, 4, 5]
     assert list(Campaign.objects.values_list("pk", flat=True)) == [
         4,
+        5,
         3,
         2,
         1,
@@ -119,7 +126,33 @@ def test_seed_reproduces_the_design_and_is_idempotent(monkeypatch: pytest.Monkey
         "scheduled", dt(10, 24, 11, 30), dt(10, 26, 10, 0), None, None,
     )  # fmt: skip
     assert (four.recipient_count, four.sent, four.failed, four.delivered) == (612, None, None, None)
-    assert four.updated_at == four.created_at
+    # approved by the demo superuser for revision 1, dispatched at the requested time, test confirmed
+    assert (four.content_revision, four.approved_revision, four.tested_revision) == (1, 1, 1)
+    assert (four.approved_at, four.approved_by, four.dispatch_after) == (
+        seeds.APPROVED_AT, admin, four.scheduled_at,
+    )  # fmt: skip
+    assert (four.test_confirmed_at, four.test_confirmed_by) == (seeds.TEST_CONFIRMED_AT, admin)
+    assert four.updated_at == seeds.APPROVED_AT
+    test_device = TestDevice.objects.get()
+    assert (test_device.phone, test_device.label, test_device.registered_by) == (
+        seeds.MALIKA_PHONE, seeds.TEST_DEVICE_LABEL, admin,
+    )  # fmt: skip
+    assert test_device.device.customer == malika and test_device.is_active
+    test = CampaignTest.objects.get()
+    assert (test.campaign, test.revision, test.test_device, test.device) == (
+        four, 1, test_device, test_device.device,
+    )  # fmt: skip
+    assert (test.fcm_ok, test.sent_at, test.confirmed_at, test.confirmed_by, test.sent_by) == (
+        True, seeds.TEST_SENT_AT, seeds.TEST_CONFIRMED_AT, admin, admin,
+    )  # fmt: skip
+    five = rows[5]
+    assert (five.state, five.kind, five.title, five.audience_type) == (
+        "draft", "general", "Qish parvarishi bo‘yicha maslahatlar", "all",
+    )  # fmt: skip
+    assert (five.created_at, five.scheduled_at, five.recipient_count, five.approved_at) == (
+        dt(10, 24, 12, 0), None, 4751, None,
+    )  # fmt: skip
+    assert five.updated_at == five.created_at and five.author == admin
     for row in rows.values():
         assert 3 <= len(row.title) <= 60 and 5 <= len(row.body) <= 180
     # every bookkeeping timestamp is pinned (design 03 §7.1): nothing carries the real clock
@@ -129,17 +162,20 @@ def test_seed_reproduces_the_design_and_is_idempotent(monkeypatch: pytest.Monkey
 
 
 def test_seed_runs_standalone_without_lower_layers() -> None:
-    """No admin, customers or products: segments and campaigns still load with NULL actors/links."""
+    """No admin, customers or products: segments and campaigns still load with NULL actors/links; without
+    Malika's device there is no test device and campaign 4 is approved without a recorded test."""
     seed_notifications(CONTEXT)
-    assert counts() == (2, 0, 4, 0, 0, 4)
+    assert counts() == (2, 0, 5, 0, 0, 4, 0, 0)
     assert set(CustomerSegment.objects.values_list("created_by", flat=True)) == {None}
     assert set(Campaign.objects.values_list("author", flat=True)) == {None}
+    four = Campaign.objects.get(pk=4)
+    assert four.state == "scheduled" and four.approved_by is None and four.tested_revision is None
     three = Campaign.objects.get(pk=3)
     assert three.link_kind == "product" and three.link_product is None
     assert three.link_product_label == "Seramidli namlantiruvchi krem"  # the snapshot keeps the link valid
     assert not Product.objects.exists()
     seed_notifications(CONTEXT)
-    assert counts() == (2, 0, 4, 0, 0, 4)
+    assert counts() == (2, 0, 5, 0, 0, 4, 0, 0)
 
 
 def test_later_seeds_do_not_rewrite_existing_rows(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -148,7 +184,8 @@ def test_later_seeds_do_not_rewrite_existing_rows(monkeypatch: pytest.MonkeyPatc
     monkeypatch.delenv("SEED_ADMIN_PASSWORD", raising=False)
     accounts_seeds.seed_accounts(CONTEXT)
     seed_notifications(CONTEXT)
-    assert counts() == (2, 2, 4, 0, 0, 4)
+    # the test device now exists; campaign 4 was approved without a confirmation and stays so (no rewrite)
+    assert counts() == (2, 2, 5, 0, 0, 4, 1, 0)
     assert Campaign.objects.get(pk=1).author is None  # inserted earlier without an admin
     assert SegmentMember.objects.filter(customer_id=5).count() == 2
     assert all(m.added_by is not None for m in SegmentMember.objects.all())

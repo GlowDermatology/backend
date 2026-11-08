@@ -24,7 +24,7 @@ from glowderma.core.api.fields import (
 from glowderma.core.api.serializers import ActorSerializer
 from glowderma.core.media import absolute_media_url
 from glowderma.notifications import selectors, services
-from glowderma.notifications.models import Campaign, CustomerSegment, StatusTemplate
+from glowderma.notifications.models import Campaign, CampaignTest, CustomerSegment, StatusTemplate, TestDevice
 
 # A ``{`` that does not open ``{raqam}`` (the DB CHECK uses the same pattern).
 UNKNOWN_PLACEHOLDER = re.compile(r"\{(?!raqam\})")
@@ -37,7 +37,10 @@ MESSAGES = {
     "customer_not_found": "Bu raqam bilan mijoz topilmadi.",
     "in_past": "Kelajakdagi vaqtni tanlang.",
     "unknown_placeholder": "Faqat {raqam} o‘rinbosari ishlatiladi.",
+    "label_min": "Qurilma nomini kiriting.",
+    "label_max": "60 belgidan oshmasin.",
 }
+TEST_DEVICES_MAX = 10
 
 # --- NotificationRecord -------------------------------------------------------------------------------------
 
@@ -74,9 +77,23 @@ def record_audience(campaign: Campaign) -> dict[str, Any]:
     }
 
 
-def record_state(campaign: Campaign) -> str:
-    """The internal ``sending`` renders as the contract's ``queued``."""
-    return enums.NotificationState.QUEUED if campaign.state == Campaign.State.SENDING else campaign.state
+class CampaignTestSerializer(serializers.Serializer[CampaignTest]):
+    """``NotificationRecord.tests[]``: one test push of a revision to one test device."""
+
+    id = serializers.IntegerField()
+    revision = serializers.IntegerField()
+    test_device_id = serializers.IntegerField(allow_null=True)
+    device_label = serializers.CharField(
+        help_text="The registry label; the tester's phone stays in the superuser-only registry."
+    )
+    sent_at = serializers.DateTimeField()
+    sent_by = ActorSerializer(allow_null=True)
+    fcm_ok = serializers.BooleanField(
+        allow_null=True, help_text="null while the push is in flight; true = FCM accepted it."
+    )
+    fcm_error = serializers.CharField(allow_blank=True)
+    confirmed_at = serializers.DateTimeField(allow_null=True)
+    confirmed_by = ActorSerializer(allow_null=True)
 
 
 class NotificationRecordSerializer(serializers.Serializer[Campaign]):
@@ -88,17 +105,43 @@ class NotificationRecordSerializer(serializers.Serializer[Campaign]):
     link = serializers.SerializerMethodField()
     audience = serializers.SerializerMethodField()
     recipient_count = serializers.IntegerField()
-    state = serializers.SerializerMethodField()
-    scheduled_at = serializers.DateTimeField(allow_null=True)
+    state = serializers.ChoiceField(choices=enums.NotificationState.values)
+    scheduled_at = serializers.DateTimeField(
+        allow_null=True, help_text="The author's requested send time; the dispatch waits for it."
+    )
     created_at = serializers.DateTimeField()
+    updated_at = serializers.DateTimeField()
+    revision = serializers.IntegerField(
+        source="content_revision", help_text="Bumps on every content change; tests and approvals name it."
+    )
+    tested_revision = serializers.IntegerField(allow_null=True)
+    test_confirmed_at = serializers.DateTimeField(allow_null=True)
+    test_confirmed_by = ActorSerializer(allow_null=True)
+    approved_at = serializers.DateTimeField(allow_null=True)
+    approved_by = ActorSerializer(allow_null=True)
+    approved_revision = serializers.IntegerField(allow_null=True)
+    dispatch_after = serializers.DateTimeField(
+        allow_null=True, help_text="State `scheduled`: the beat starts the send after this instant."
+    )
+    started_at = serializers.DateTimeField(allow_null=True)
     sent_at = serializers.DateTimeField(allow_null=True)
     cancelled_at = serializers.DateTimeField(
-        allow_null=True, help_text="M3: when staff cancelled the scheduled campaign (state `cancelled`)."
+        allow_null=True, help_text="When a superuser cancelled the approved campaign, or a stop sent nothing."
     )
-    sent = serializers.IntegerField(allow_null=True)
-    failed = serializers.IntegerField(allow_null=True)
+    cancelled_by = ActorSerializer(allow_null=True)
+    stop_requested_at = serializers.DateTimeField(allow_null=True)
+    stop_requested_by = ActorSerializer(allow_null=True)
+    stopped_at = serializers.DateTimeField(allow_null=True)
+    failed_at = serializers.DateTimeField(allow_null=True)
+    last_error = serializers.CharField(allow_blank=True)
+    sent = serializers.IntegerField(allow_null=True, help_text="FCM accepted; a live tally while sending.")
+    failed = serializers.IntegerField(
+        allow_null=True, help_text="FCM rejected / no token; a live tally while sending."
+    )
+    attempted = serializers.SerializerMethodField()
     delivered = serializers.IntegerField(allow_null=True)
     author = ActorSerializer(allow_null=True)
+    tests = CampaignTestSerializer(many=True)
 
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_image_url(self, obj: Campaign) -> str | None:
@@ -112,9 +155,65 @@ class NotificationRecordSerializer(serializers.Serializer[Campaign]):
     def get_audience(self, obj: Campaign) -> dict[str, Any]:
         return record_audience(obj)
 
-    @extend_schema_field(serializers.ChoiceField(choices=enums.NotificationState.values))
-    def get_state(self, obj: Campaign) -> str:
-        return record_state(obj)
+    @extend_schema_field(serializers.IntegerField(allow_null=True))
+    def get_attempted(self, obj: Campaign) -> int | None:
+        """``sent + failed`` once the send started (stopped recipients count in neither), else null."""
+        if obj.sent is None or obj.failed is None:
+            return None
+        return obj.sent + obj.failed
+
+
+class TestDeviceSerializer(serializers.Serializer[TestDevice]):
+    """``GET notifications/test-devices/`` rows (``selectors.test_devices`` annotates ``is_pushable``)."""
+
+    id = serializers.IntegerField()
+    phone = serializers.CharField()
+    label = serializers.CharField()  # type: ignore[assignment]  # a field, not Field.label
+    device_id = serializers.IntegerField()
+    platform = serializers.CharField(source="device.platform")
+    model = serializers.CharField(source="device.model", allow_blank=True)
+    is_pushable = serializers.BooleanField()
+    registered_by = ActorSerializer(allow_null=True)
+    created_at = serializers.DateTimeField()
+
+
+class TestDeviceCreateSerializer(serializers.Serializer[dict[str, Any]]):
+    """``POST notifications/test-devices/``: the customer's phone and a label for the registry."""
+
+    phone = PhoneField()
+    # ``allow_blank``: DRF trims first and would answer ``blank``; the contract wants ``min_length`` with
+    # its own copy for an empty or whitespace-only label.
+    label = serializers.CharField(  # type: ignore[assignment]  # a field, not Field.label
+        max_length=60,
+        allow_blank=True,
+        error_messages={"max_length": MESSAGES["label_max"]},
+    )
+
+    def validate_label(self, value: str) -> str:
+        if not value.strip():
+            raise serializers.ValidationError([field_error("min_length", MESSAGES["label_min"])])
+        return value.strip()
+
+
+class SendTestInputSerializer(serializers.Serializer[dict[str, Any]]):
+    """``POST notifications/{id}/test/``: the active test devices to push the current revision to."""
+
+    device_ids = BoundedListField(
+        child=serializers.IntegerField(min_value=1), max_items=TEST_DEVICES_MAX, allow_empty=False
+    )
+
+
+class ApproveInputSerializer(serializers.Serializer[dict[str, Any]]):
+    """``POST notifications/{id}/approve/``: the revision the superuser is looking at."""
+
+    expected_revision = serializers.IntegerField(min_value=1)
+
+
+class NotificationPatchMetaSerializer(serializers.Serializer[dict[str, Any]]):
+    """The non-content keys of the multipart ``PATCH notifications/{id}/`` body."""
+
+    expected_revision = serializers.IntegerField(min_value=1)
+    remove_image = serializers.BooleanField(required=False, default=False)
 
 
 class NotificationListQuerySerializer(serializers.Serializer[dict[str, Any]]):
@@ -178,6 +277,9 @@ class NotificationMetaSerializer(serializers.Serializer[dict[str, Any]]):
     segments = MetaSegmentSerializer(many=True)
     templates = StatusTemplateSerializer(many=True)
     link_options = LinkOptionSerializer(many=True)
+    approval_delay_minutes = serializers.IntegerField(
+        help_text="CAMPAIGN_APPROVAL_DELAY_MINUTES: the cancel window between an approval and the dispatch."
+    )
 
 
 # --- POST notifications/ (multipart) ------------------------------------------------------------------------
@@ -203,7 +305,9 @@ class NotificationAudienceInputSerializer(serializers.Serializer[dict[str, Any]]
 
 
 class NotificationCreateSerializer(serializers.Serializer[dict[str, Any]]):
-    """The multipart body of ``POST notifications/`` after :func:`form_to_nested` (dotted keys un-dotted)."""
+    """The multipart body of ``POST notifications/`` after :func:`form_to_nested` (dotted keys un-dotted);
+    ``PATCH notifications/{id}/`` validates the stored form merged with the submitted keys through it too
+    (:func:`glowderma.notifications.api.admin.views.merged_form`)."""
 
     kind = serializers.ChoiceField(choices=enums.NotificationKind.values)
     # ``allow_blank``: DRF trims first and would answer ``blank`` for "" / "   "; the contract wants the
@@ -241,7 +345,9 @@ class NotificationCreateSerializer(serializers.Serializer[dict[str, Any]]):
         return value
 
     def validate_scheduled_at(self, value: Any) -> Any:
-        if value is not None and value <= timeutils.now():
+        # ``in_past`` is for a time the client chose: a PATCH that leaves the stored requested time alone
+        # passes ``context["check_scheduled_at"] = False`` (the dispatch waits for ``max(now + delay, it)``).
+        if value is not None and self.context.get("check_scheduled_at", True) and value <= timeutils.now():
             raise serializers.ValidationError([field_error("in_past", MESSAGES["in_past"])])
         return value
 

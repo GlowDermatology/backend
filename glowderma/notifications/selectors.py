@@ -11,6 +11,7 @@ from collections.abc import Iterable
 from datetime import datetime
 from typing import Any, TypedDict
 
+from django.conf import settings
 from django.db.models import (
     BigIntegerField,
     Count,
@@ -18,6 +19,7 @@ from django.db.models import (
     Expression,
     IntegerField,
     OuterRef,
+    Prefetch,
     Q,
     QuerySet,
     Subquery,
@@ -31,14 +33,18 @@ from glowderma.catalog.models import Product
 from glowderma.catalog.selectors import DISPLAY_NAME
 from glowderma.commerce.models import Order
 from glowderma.core import enums, timeutils
+from glowderma.core.models import OutboxMessage
 from glowderma.loyalty.models import Purchase
 from glowderma.notifications.models import (
     Campaign,
+    CampaignTest,
     CustomerSegment,
     InboxNotification,
     SegmentMember,
     StatusTemplate,
+    TestDevice,
 )
+from glowderma.notifications.topics import CAMPAIGN_SEND_BATCH
 
 PUSHABLE_DEVICE = Q(is_active=True, push_enabled=True) & ~Q(fcm_token="")
 
@@ -275,19 +281,54 @@ def audience_recipients(campaign: Campaign) -> list[tuple[int, int]]:
 # --- campaigns, templates, meta -----------------------------------------------------------------------------
 
 
+CAMPAIGN_ACTORS = ("author", "test_confirmed_by", "approved_by", "cancelled_by", "stop_requested_by")
+
+
+def campaign_tests() -> QuerySet[CampaignTest]:
+    return CampaignTest.objects.select_related("sent_by", "confirmed_by").order_by("id")
+
+
 def campaign_queryset() -> QuerySet[Campaign]:
-    return Campaign.objects.select_related("author", "audience_segment", "link_product")
+    """The record's rows with every actor and the tests (``NotificationRecord.tests``) fetched alongside."""
+    return Campaign.objects.select_related(
+        *CAMPAIGN_ACTORS, "audience_segment", "link_product"
+    ).prefetch_related(Prefetch("tests", queryset=campaign_tests()))
 
 
 def filter_campaigns(qs: QuerySet[Campaign], *, state: str | None, kind: str | None) -> QuerySet[Campaign]:
-    """Contract §2.8 filters; the API ``queued`` covers the internal ``queued`` and ``sending``."""
-    if state == enums.NotificationState.QUEUED:
-        qs = qs.filter(state__in=[Campaign.State.QUEUED, Campaign.State.SENDING])
-    elif state is not None:
+    """Contract §2.8 filters (the state literals are the stored ones)."""
+    if state is not None:
         qs = qs.filter(state=state)
     if kind is not None:
         qs = qs.filter(kind=kind)
     return qs
+
+
+def has_open_batch(campaign_id: int) -> bool:
+    """A ``campaign.send_batch`` message of the campaign is still pending, in flight or awaiting a retry."""
+    return (
+        OutboxMessage.objects.filter(topic=CAMPAIGN_SEND_BATCH, payload__campaign_id=campaign_id)
+        .exclude(status__in=["done", "dead"])
+        .exists()
+    )
+
+
+def test_devices() -> QuerySet[TestDevice]:
+    """The active test-device registry (superuser), each row annotated ``is_pushable`` (the device still
+    takes pushes and its customer is active)."""
+    pushable = Device.objects.filter(
+        PUSHABLE_DEVICE, pk=OuterRef("device_id"), customer__status=enums.CustomerStatus.ACTIVE
+    )
+    return (
+        TestDevice.objects.filter(is_active=True)
+        .select_related("device", "device__customer", "registered_by")
+        .annotate(is_pushable=Exists(pushable))
+        .order_by("id")
+    )
+
+
+def get_test_device(pk: int) -> TestDevice | None:
+    return test_devices().filter(pk=pk).first()
 
 
 def get_campaign(pk: int) -> Campaign | None:
@@ -329,6 +370,7 @@ def meta() -> dict[str, Any]:
         "segments": segments,
         "templates": templates(),
         "link_options": link_options(),
+        "approval_delay_minutes": int(settings.CAMPAIGN_APPROVAL_DELAY_MINUTES),
     }
 
 

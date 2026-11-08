@@ -9,7 +9,7 @@ Field error codes come in two groups:
 * **Endpoint-specific codes** (``ENDPOINT_FIELD_CODES``: ``customer_not_found``, ``in_past``,
   ``empty_range``, ``overlap``, ``out_of_range``, ``effective_from_in_past``, ``insufficient_balance``,
   ``billz_not_found``, ``required_for_active``, ``export_too_large``, ``unknown_placeholder``,
-  ``slot_unavailable``, ``outside_working_hours``) have no default: the view raises
+  ``device_not_pushable``, ``slot_unavailable``, ``outside_working_hours``) have no default: the view raises
   them with the explicit message its contract table lists, e.g.
   ``ValidationError({"amount": [field_error("insufficient_balance", "Balansdan ko‘p ayirib bo‘lmaydi.")]})``.
 
@@ -88,6 +88,7 @@ ENDPOINT_FIELD_CODES = frozenset(
         "export_too_large",
         # notifications (§2.8) and the admin appointment slots (T10 / §7 item 18)
         "unknown_placeholder",
+        "device_not_pushable",
         "slot_unavailable",
         "outside_working_hours",
         # cashback policy versions (§2.7): "no tiers"
