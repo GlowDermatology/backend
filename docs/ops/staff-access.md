@@ -62,6 +62,13 @@ session. Passwords are never recorded.
 The console is separate from the admin panel: access is `is_staff`, granted per person from the server shell,
 and every sign-in needs the password **and** a TOTP code (or a one-time recovery code).
 
+Besides inspection, the dashboards and the professionals forms, the console is the **only** place to edit the
+store settings, contacts and legal texts and to publish the terms: «Katalog» → «Sozlamalar»
+(`/django-admin/settings/`; since 2026-11-07, the admin panel and its API no longer can). Every save is audited
+(`settings.updated`, `settings.terms_published`; texts as digests). Staging and production ship with
+`DJANGO_ADMIN_ENABLED=false` (`infra/environments/*/backend.env`): until ops sets it to `true` with `OPS_DOMAIN`
+and `OPS_ALLOWED_IPS`, nobody can change the settings there.
+
 ```bash
 manage.py ops_access grant --email person@glowderma.uz --actor manager@glowderma.uz     # access + enrolment window
 manage.py ops_access reset-2fa --email person@glowderma.uz --actor manager@glowderma.uz # lost phone

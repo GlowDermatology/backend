@@ -1,10 +1,11 @@
-"""Journey (gap X-SET-LEGAL): a fresh install cannot register customers until staff publish the terms through
-the admin API; a later publication asks an existing customer to accept again before checkout.
+"""Journey (gap X-SET-LEGAL): a fresh install cannot register customers until staff publish the terms in the
+ops console; a later publication asks an existing customer to accept again before checkout.
 
-Admin contract §2.11 (``PATCH settings/``, ``POST settings/terms/publish/``) × customer contract §2.1.3
-(``auth/set-password/``), §2.2.4 (``me/consent/``, 409 ``terms_update_required`` at checkout) and §2.4
-(``settings/public/``). Every step goes through the HTTP routes with the app's device headers and the staff
-token; on-commit effects (the public-settings cache generation, the outbox) run as on a real commit.
+Admin contract §2.11 (the console page ``/django-admin/settings/``: a saved card, «E’lon qilish») ×
+customer contract §2.1.3 (``auth/set-password/``), §2.2.4 (``me/consent/``, 409 ``terms_update_required`` at
+checkout) and §2.4 (``settings/public/``). The app steps go through the HTTP routes with its device headers,
+the staff steps through the console page as a browser posts it; on-commit effects (the public-settings cache
+generation, the outbox) run as on a real commit.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from typing import Any
 
 import pytest
 from django.conf import settings
+from django.test import Client
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -24,6 +26,9 @@ from glowderma.accounts.models import Customer
 from glowderma.catalog.tests.factories import ProductFactory, ProductStockFactory
 from glowderma.core.models import AuditEntry
 from glowderma.integrations.eskiz.registry import fake_eskiz
+from glowderma.site_config.models import SiteSettings
+from glowderma.site_config.tests.console_page import URL as CONSOLE
+from glowderma.site_config.tests.console_page import page_forms
 
 pytestmark = pytest.mark.django_db
 
@@ -64,21 +69,23 @@ class App:
 
 
 class Staff:
-    def __init__(self, client: APIClient, capture: Any) -> None:
+    """A console user: posts a card of the settings page with the typed fields, or «E’lon qilish»."""
+
+    def __init__(self, client: Client, capture: Any) -> None:
         self.client = client
         self.capture = capture
 
-    def patch(self, body: dict[str, Any]) -> Any:
+    def save(self, section: str, **typed: str) -> Any:
+        body = {**page_forms(self.client)[section], **typed}
         with self.capture(execute=True):
-            return self.client.patch(f"{API}admin/settings/", body, format="json")
+            return self.client.post(CONSOLE, body)
 
-    def publish(self) -> Any:
+    def publish(self) -> str:
+        body = page_forms(self.client)["publish"]
         with self.capture(execute=True):
-            return self.client.post(
-                f"{API}admin/settings/terms/publish/",
-                format="json",
-                HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
-            )
+            response = self.client.post(CONSOLE, body)
+        assert response.status_code == 302, response.content
+        return SiteSettings.objects.get(pk=1).terms_version
 
 
 def verification_token(app: App) -> str:
@@ -123,10 +130,10 @@ def checkout(app: App) -> Any:
 
 
 def test_registration_waits_for_published_terms_and_a_new_version_asks_for_consent_again(
-    staff_client: APIClient, django_capture_on_commit_callbacks: Any
+    ops_client: Client, django_capture_on_commit_callbacks: Any
 ) -> None:
     app = App(django_capture_on_commit_callbacks)
-    staff = Staff(staff_client, django_capture_on_commit_callbacks)
+    staff = Staff(ops_client, django_capture_on_commit_callbacks)
 
     # 1. a fresh install: nothing published, registration is closed
     public = app.call("get", "settings/public/").json()
@@ -137,22 +144,20 @@ def test_registration_waits_for_published_terms_and_a_new_version_asks_for_conse
     assert not Customer.objects.filter(phone=PHONE).exists()
 
     # 2. staff save the texts: still not published (saving never publishes)
-    saved = staff.patch(
-        {
-            "terms": {"uz": "Foydalanish shartlari (1-tahrir).", "ru": "Условия использования."},
-            "privacy_policy": {"uz": "Maxfiylik siyosati."},
-            "store_phone": "+998712000001",
-            "telegram_url": "https://t.me/glowderma",
-        }
+    saved = staff.save(
+        "legal",
+        terms_uz="Foydalanish shartlari (1-tahrir).",
+        terms_ru="Условия использования.",
+        privacy_policy_uz="Maxfiylik siyosati.",
     )
-    assert saved.status_code == 200, saved.content
-    assert saved.json()["terms_version"] is None
+    assert saved.status_code == 302, saved.content
+    contacts = staff.save("contacts", store_phone="+998 71 200 00 01", telegram_url="https://t.me/glowderma")
+    assert contacts.status_code == 302, contacts.content
+    assert SiteSettings.objects.get(pk=1).terms_version == ""
     assert register(app, token, "1").json()["code"] == "terms_not_published"
 
     # 3. staff publish: the app sees the version, registration accepts exactly it
-    published = staff.publish()
-    assert published.status_code == 200, published.content
-    first = published.json()["terms_version"]
+    first = staff.publish()
     assert VERSION.match(first) and first.endswith("-1")
     public = app.call("get", "settings/public/").json()
     assert public["terms_version"] == first
@@ -176,8 +181,8 @@ def test_registration_waits_for_published_terms_and_a_new_version_asks_for_conse
     assert added.status_code == 200, added.content
 
     # 4. staff change the terms and publish again: the existing customer must accept before checkout
-    assert staff.patch({"terms": {"uz": "Foydalanish shartlari (2-tahrir)."}}).status_code == 200
-    second = staff.publish().json()["terms_version"]
+    assert staff.save("legal", terms_uz="Foydalanish shartlari (2-tahrir).").status_code == 302
+    second = staff.publish()
     assert VERSION.match(second) and second != first
     me = app.call("get", "me/").json()
     assert me["consent"] == {

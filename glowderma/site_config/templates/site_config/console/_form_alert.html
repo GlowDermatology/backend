@@ -1,0 +1,6 @@
+{% if form.errors %}
+    <p class="gd-alert" role="alert">
+        <span class="material-symbols-outlined" aria-hidden="true">error</span>
+        {% if form.non_field_errors %}{{ form.non_field_errors|join:" " }}{% else %}Maydonlarni tekshiring.{% endif %}
+    </p>
+{% endif %}

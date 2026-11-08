@@ -90,7 +90,8 @@ SIDEBAR_NAVIGATION: list[dict[str, Any]] = [
             _item("Qoldiqlar", "warehouse", "catalog", "productstock"),
             _item("Rasmlar", "image", "catalog", "productimage"),
             _item("Bannerlar", "view_carousel", "catalog", "banner"),
-            _item("Sozlamalar", "tune", "site_config", "sitesettings"),
+            # The settings page (glowderma.site_config.admin_views): store settings, contacts, legal texts.
+            _dashboard("Sozlamalar", "tune", "admin:site_config_settings"),
         ],
     },
     {
@@ -231,5 +232,7 @@ UNFOLD: dict[str, Any] = {
         ("dashboards/money/", "reporting_money", f"{DASHBOARD_VIEWS}.MoneyDashboardView"),
         ("dashboards/sales/", "reporting_sales", f"{DASHBOARD_VIEWS}.SalesDashboardView"),
         ("dashboards/customers/", "reporting_customers", f"{DASHBOARD_VIEWS}.CustomersDashboardView"),
+        # The store settings, contacts and legal texts (moved here from the Next.js admin: 2FA-protected).
+        ("settings/", "site_config_settings", "glowderma.site_config.admin_views.SettingsConsoleView"),
     ],
 }

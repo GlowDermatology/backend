@@ -1,12 +1,15 @@
 """Writes of `site_config`: the typed settings singleton (contract §2.11).
 
-* :func:`update_settings` — ``PATCH settings/``: the editable columns, audited as ``settings.updated``
-  with the changed leaves only (the long legal texts as digests, never the texts themselves).
-* :func:`publish_terms` — ``POST settings/terms/publish/``: copies the terms and privacy drafts into the
-  published columns and stamps a new ``terms_version`` (the customer consent unit, customer contract §2.1.3 /
-  §2.2.4), audited as ``settings.terms_published``.
+Staff edit the settings in the ops console only (``/django-admin/settings/``, :mod:`.admin_views`: 2FA); the
+admin API routes ``settings/`` and ``settings/terms/publish/`` were retired with the Next.js settings page.
 
-The terms and the privacy policy have a draft and a published copy (GS-2): ``PATCH`` edits the drafts only,
+* :func:`update_settings` — a saved card of the console page: the editable columns, audited as
+  ``settings.updated`` with the changed leaves only (the long legal texts as digests, never the texts).
+* :func:`publish_terms` — «E’lon qilish»: copies the terms and privacy drafts into the published columns and
+  stamps a new ``terms_version`` (the customer consent unit, customer contract §2.1.3 / §2.2.4), audited as
+  ``settings.terms_published``; :func:`publish_fingerprint` makes a stale page or a second click a no-op.
+
+The terms and the privacy policy have a draft and a published copy (GS-2): a save edits the drafts only,
 ``settings/public/`` and registration use the published copies only, so a ``terms_version`` always names one
 text. The booking policy is not versioned: a saved booking policy is served at once.
 """
@@ -14,6 +17,7 @@ text. The booking policy is not versioned: a saved booking policy is served at o
 from __future__ import annotations
 
 import hashlib
+import hmac
 from datetime import date, datetime
 from typing import Any
 
@@ -57,6 +61,10 @@ SHA256_PREFIX = 16  # hex characters of a text digest in the audit log
 
 TERMS_INCOMPLETE = (
     "Foydalanish shartlari va maxfiylik siyosatining o‘zbekcha matnini kiriting, so‘ng e’lon qiling."
+)
+PUBLISH_STALE = (
+    "Matnlar yoki versiya siz sahifani ochganingizdan keyin o‘zgargan. Sahifani yangilang, matnlarni "
+    "tekshiring va qayta e’lon qiling."
 )
 
 
@@ -172,11 +180,29 @@ def next_terms_version(current: str, today: date) -> str:
     return f"{today:%Y%m%d}-1"
 
 
+def publish_fingerprint(row: SiteSettings) -> str:
+    """What a publication confirms: the current ``terms_version`` and every terms and privacy draft (SHA-256
+    hex). The console renders it with «E’lon qilish» and :func:`publish_terms` compares it under the row lock,
+    so a second click (the version moved on) or a page opened before a colleague's draft save publishes
+    nothing."""
+    parts = [row.terms_version]
+    parts.extend(
+        getattr(row, f"{document}_draft_{language}")
+        for document in VERSIONED_DOCUMENTS
+        for language in LANGUAGES
+    )
+    return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()
+
+
 @transaction.atomic
-def publish_terms(*, actor: Any, request: Any = None) -> SiteSettings:
+def publish_terms(
+    *, actor: Any, request: Any = None, expected_fingerprint: str | None = None
+) -> SiteSettings:
     """Publish the terms and privacy drafts as a new ``terms_version`` (contract §2.11).
 
-    Refused with 409 ``conflict`` while the uz terms or the uz privacy draft has no visible character
+    With ``expected_fingerprint`` (the ops console), refused with 409 ``conflict`` :data:`PUBLISH_STALE`
+    unless it is still :func:`publish_fingerprint` of the locked row. Refused with 409 ``conflict`` while the
+    uz terms or the uz privacy draft has no visible character
     (:func:`selectors.has_visible_text`: whitespace and invisible format characters do not count). Every
     draft (uz/ru/en) is copied into its published column. The new version is :func:`next_terms_version` of
     the Tashkent day; ``terms_updated_at`` = now; ``updated_at`` / ``updated_by`` follow. Every customer
@@ -186,6 +212,10 @@ def publish_terms(*, actor: Any, request: Any = None) -> SiteSettings:
     ``{from, to, sha256}`` (``sha256``: the digest of every published text).
     """
     row = SiteSettings.objects.select_for_update().get(pk=1)
+    if expected_fingerprint is not None and not hmac.compare_digest(
+        expected_fingerprint, publish_fingerprint(row)
+    ):
+        raise Conflict(PUBLISH_STALE)
     if not all(selectors.has_visible_text(getattr(row, f"{doc}_draft_uz")) for doc in VERSIONED_DOCUMENTS):
         raise Conflict(TERMS_INCOMPLETE)
     published_columns = [f"{doc}_{language}" for doc in VERSIONED_DOCUMENTS for language in LANGUAGES]

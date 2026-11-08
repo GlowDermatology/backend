@@ -118,6 +118,12 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
   validation fails. `LOG_LEVEL` sets the `glowderma.*` logger level; every log line carries `request_id`.
 - The Django admin is read-only: register models through `glowderma.core.admin.register_read_only` (`ReadOnlyAdmin`);
   never expose `password` or `refresh_hash`. Only the professionals models become editable, through services.
+  One exception that is not a ModelAdmin: the settings page `/django-admin/settings/` (`admin:site_config_settings`,
+  `glowderma/site_config/admin_views.py` + `forms.py`, mounted by `UNFOLD["SITE_VIEWS"]` in
+  `config/settings/ops_admin.py`) edits the store settings, contacts and legal texts and publishes the terms, writing
+  only through `site_config.services` (`update_settings`, `publish_terms(expected_fingerprint=…)`); `SiteSettings`
+  itself stays a `ReadOnlyAdmin` registration. `site_config` has no `api/admin/`: the admin API's `settings/` and
+  `settings/terms/publish/` were retired (contract §2.11), so it is not in `config.urls.ADMIN_API_MODULES`.
 - Provider adapters live in `glowderma/integrations/<provider>/` behind a port (Protocol) with a fake and a live
   implementation chosen by `*_MODE` settings (default `INTEGRATIONS_MODE=fake`); views and services obtain them
   through the module's `registry`. `integrations` cannot host admin views (`AdminAPIView` lives in `accounts`,

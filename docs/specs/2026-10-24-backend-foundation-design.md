@@ -169,6 +169,7 @@ backend/  pyproject.toml uv.lock .python-version Dockerfile .dockerignore compos
   - Same internal-network gate as the admin API; login throttled.
   - Every ModelAdmin is **read-only by default**.
   - Editable: Location, Professional, Service, ProfessionalService, WorkingHours, BlockedPeriod. Their `save_model` and `delete_model` call services, which write AuditEntry.
+  - Settings page `/django-admin/settings/` (2026-11-07; a custom page, not a ModelAdmin): the only place staff edit the store settings, contacts and legal texts and publish the terms (TOTP 2FA, staff only), through `site_config.services` (audited). It replaced the admin API's `settings/` routes; `SiteSettings` itself stays read-only there.
   - Money, auth and integration models are never editable there.
 
 ### Financial integrity and the "settle now" foundations
@@ -279,7 +280,7 @@ backend/  pyproject.toml uv.lock .python-version Dockerfile .dockerignore compos
 | Cashback | `GET cashback/policy/` (active, structured version history with tiers, author, created_at, `effective_from/to`, next allowed date) · `POST cashback/policy-versions/`. It rejects: no tiers, overlaps, empty ranges, percent ∉ (0,100] or >2 decimals, `effective_from` ≤ now. Gaps are warnings. At most one future version; a new one supersedes it (audited). A purchase uses the version active at its confirmation time. |
 | Notifications | `GET notifications/` (history; `delivered` is null until M2 acknowledgments) · `GET notifications/meta/` (segments + sizes, push-device total, templates, `link_options` = active products' id + uz name) · `POST notifications/` (multipart: kind, title ≤60, body ≤180, image?, link none\|product, audience all\|segment\|`customer{phone}`, scheduled_at?) · `GET/PUT notification-templates/{status}/` · `segments/` (typed rules `min_online_orders` / `min_lifetime_amount` + manual members) |
 | Appointments | `GET appointments/?date=` (specialists with the day's hours and typed blocks; appointments with `service_short_name`, `requested_via=app\|admin`) · `GET appointments/pending-summary/` · `POST appointments/{id}/{confirm\|reject\|attend}/` |
-| Shell | `GET dashboard/?range=today\|week\|month\|custom&from=&to=` (buckets with ISO start, revenue, orders; previous-period orders; stats; attention) · `GET nav-counts/` · `GET/PATCH settings/` · `GET payments/` · `GET audit-log/` |
+| Shell | `GET dashboard/?range=today\|week\|month\|custom&from=&to=` (buckets with ISO start, revenue, orders; previous-period orders; stats; attention) · `GET nav-counts/` · settings on the ops console page (`GET/PATCH settings/` retired 2026-11-07) · `GET payments/` · `GET audit-log/` |
 
 - Fields owned by slices that have not landed yet return `0` or `[]`.
 

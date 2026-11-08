@@ -26,7 +26,7 @@ schema_access = {
 # Layer order (lowest first); a module's admin routes live in glowderma/<module>/api/admin/urls.py.
 ADMIN_API_MODULES = (
     "integrations",
-    "site_config",
+    # site_config has no admin routes: its settings are edited in the ops console (/django-admin/settings/).
     "catalog",
     "loyalty",
     "payments",

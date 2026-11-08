@@ -475,7 +475,7 @@ Body `{"verification_token": str (purpose register), "password": str, "name": st
 
 | Field / check | Code | Message (uz) · key |
 |---|---|---|
-| Terms published: `SiteSettings.terms_version` non-empty **and** the published uz texts of `terms` and `privacy_policy` hold a visible character (`terms_version` versions both documents; staff publish through admin §2.11 `POST settings/terms/publish/`) | 503 `terms_not_published` | "Ro‘yxatdan o‘tish vaqtincha mavjud emas. Keyinroq urinib ko‘ring." · `error.terms_not_published` |
+| Terms published: `SiteSettings.terms_version` non-empty **and** the published uz texts of `terms` and `privacy_policy` hold a visible character (`terms_version` versions both documents; staff publish with «E’lon qilish» on the ops console settings page `/django-admin/settings/`, admin §2.11) | 503 `terms_not_published` | "Ro‘yxatdan o‘tish vaqtincha mavjud emas. Keyinroq urinib ko‘ring." · `error.terms_not_published` |
 | `verification_token` | 400 `verification_invalid` | `error.verification_invalid` |
 | `name` trimmed 2..150 | `min_length` / `max_length` | "Ismingizni kiriting (kamida 2 belgi)." · `field.name_min` / generic |
 | `password` 8..128; Django validators with `CUSTOMER_PASSWORD_MIN_LENGTH` (8), common, numeric, similarity to the phone | `password_too_short` · `password_too_common` · `password_entirely_numeric` · `password_too_similar` · `max_length` | "Parol kamida 8 ta belgidan iborat bo‘lsin." · "Bu parol juda oddiy." · "Parol faqat raqamlardan iborat bo‘lmasin." · "Parol telefon raqamingizga juda o‘xshash." (`field.password_*`) |
@@ -932,7 +932,9 @@ Service: `accounts.services.register_device` (P0, lock order P1).
 password (social-only) → `verification_token`
 of purpose `reset_password` for the customer's **own** phone required (`required` / 400 `verification_invalid`),
 consumed under the customer-level lock — the app asks for an SMS code first (`send-code` `reset_password` →
-`verify-code`). Otherwise a stolen session (even a 15-minute access token) could attach the thief's own Google,
+`verify-code`). A customer who has a password but forgot it may send that same token **instead of** the password
+(hybrid identity: of its own phone or e-mail; it is the proof `auth/reset-password/` accepts anyway, so it adds no way
+in); a given password is always the one checked. Otherwise a stolen session (even a 15-minute access token) could attach the thief's own Google,
 Facebook or Apple identity, which then signs in on any device without SMS (`M2-A10`).
 
 - **`POST me/social/`** (**C**, **I**). Body `{"provider": CustomerSocialProvider, "token": str, "token_type": SocialTokenType |
@@ -961,7 +963,7 @@ Body `{"current_password": str | null, "verification_token": str | null, "passwo
 | Field / check | Code · message (uz) · key |
 |---|---|
 | `has_password` → `current_password` required and correct (LoginGuard scope `customer_reauth`, each failure also counted in `customer_login`, §1.8) | `required`; `password_incorrect` "Parol noto‘g‘ri." · `field.password_incorrect`; 429 `throttled` |
-| no password (social-only) → `verification_token` of purpose `reset_password` for the customer's own phone, consumed under the customer-level lock | `required`; 400 `verification_invalid` · `error.verification_invalid` |
+| no password (social-only) — or a forgotten one, sent without `current_password` — → `verification_token` of purpose `reset_password` for the customer's own phone (or e-mail), consumed under the customer-level lock | `required`; 400 `verification_invalid` · `error.verification_invalid` |
 | `password` rules as §2.1.3, plus not equal to the current password | `password_too_short` · `password_too_common` · `password_entirely_numeric` · `password_too_similar` · `max_length` · `password_unchanged` "Yangi parol eskisidan farq qilsin." · `field.password_unchanged` |
 
 → **200 `Me`** (`has_password: true`). Side effects (`customers.services.change_password`, P1):
@@ -993,8 +995,9 @@ numbers have an account — `phone_taken` comes only after a correct code (below
 1. 409 `conflict` — the account already has a phone;
 2. **re-authentication**, however fresh the session (review B-W2: a social sign-in has no new-device step, M2-A10, so
    a session alone must never add a way in): `password` when `has_password` (`required` / `password_incorrect`, guard
-   `customer_reauth`; each failure also counts in the account's `customer_login` budget), else a `reset_password`
-   `verification_token` of the account's own phone or e-mail; only an account with **no password, phone or e-mail**
+   `customer_reauth`; each failure also counts in the account's `customer_login` budget) — or, when the customer forgot
+   it, a `reset_password` `verification_token` of the account's own phone or e-mail sent without a password — else a
+   `reset_password` `verification_token` of the account's own phone or e-mail; only an account with **no password, phone or e-mail**
    (a phoneless social sign-up) has nothing to prove with — its session passes when it signed in within
    `CUSTOMER_REAUTH_FRESH_SECONDS` (600; `AuthSession.created_at`, a refresh keeps it), else 409 **`reauth_required`**
    "Xavfsizlik uchun hisobingizga qaytadan kiring." (`error.reauth_required`: the app signs in with the provider
@@ -1180,8 +1183,9 @@ stable URL; it 301-redirects id URLs to the slug.
  "min_app_version": {"ios": "1.0.0", "android": "1.0.0"},
  "store_urls": {"ios": "https://apps.apple.com/…", "android": "https://play.google.com/…"}}
 ```
-Staff set the phones, links and texts in admin §2.11 (`PATCH settings/`) and publish the terms there
-(`POST settings/terms/publish/`, gap closure 2026-10-27). `terms` and `privacy_policy` are the **published** copies:
+Staff set the phones, links and texts on the ops console settings page `/django-admin/settings/` (2FA; admin §2.11,
+since 2026-11-07 — the admin API routes `settings/` and `settings/terms/publish/` are retired) and publish the terms
+there with «E’lon qilish» (gap closure 2026-10-27). `terms` and `privacy_policy` are the **published** copies:
 staff edit drafts, and the served texts change only together with `terms_version` (`YYYYMMDD-n`, the Tashkent day of
 the publication and its count that day), so the text shown under a version is exactly the text a customer accepts
 with it. `booking_policy` is not versioned and is served once saved (after the ≤60 s cache). A new version asks
@@ -2285,7 +2289,7 @@ Payme id is `Payment.provider_txn_id`.
   `config.settings.production` — which staging also runs — refuses the variable at boot, so no internet-facing
   deployment accepts a known code.
 - **Fake Eskiz in production (demo/staging posture, product-owner decision 2026-10-26).** The production settings
-  accept `ESKIZ_MODE=fake` (startup WARNING, mode reported by `health/?ready=1` and admin `settings/`, §6.14), but
+  accept `ESKIZ_MODE=fake` (startup WARNING, mode reported by `health/?ready=1` and the ops console settings page, §6.14), but
   **no SMS is delivered**: `send-code` and the `verify_device` step answer as usual and the code never arrives. Nobody
   can register, sign in with a password on a device without a device key, reset a password, complete a social link,
   set a first password on a social-only account or delete a social-only account; signed-in sessions, known-device
@@ -2873,7 +2877,7 @@ code a customer view can raise to an existing key.
       (staging included) runs. Each process logs one startup WARNING listing every fake provider (logger
       `glowderma.integrations`, built in M1), and the effective mode of every provider (`billz`, `click`, `payme`, `bts`,
       `eskiz`, `fcm`, `oauth`) is reported by `GET /api/v1/health/?ready=1` (`integrations`, shown only to callers that
-      pass the admin network gate) and by admin `GET settings/` (`integrations.providers`, admin §2.11, §2.15). Fake and live providers may be **mixed** (live adapters arrive one at a time in M3), so the
+      pass the admin network gate) and on the ops console settings page (`/django-admin/settings/`, admin §2.11, §2.15). Fake and live providers may be **mixed** (live adapters arrive one at a time in M3), so the
       rule is per provider: in that posture a fake adapter never reports a real-money or real-world effect that did not
       happen and never accepts a made-up credential. Fake Click/Payme/BTS start no transaction and honour no capture
       (§2.13.0: a Click Complete of a transaction attached while Click was live is accepted and reversed by hand; what a

@@ -3,7 +3,9 @@
 Every feature of the Glow Derma ops console (`/django-admin/`, django-unfold) exercised in Chromium against
 real Django servers: sign-in with TOTP 2FA and its lockouts and session limits, the network gate, every
 registered model (list, search, each filter, sorting, pagination, change page, read-only guarantees, secret
-columns), the editable professionals forms, every audited action, the four dashboards and their drill-downs,
+columns), the editable professionals forms, the settings page (`/django-admin/settings/`: store settings,
+contacts, legal texts and «E’lon qilish»; loaded with every sidebar link, its saves and publication are tested
+by the Django suite in `glowderma/site_config/tests/`), every audited action, the four dashboards and their drill-downs,
 the sidebar and its badges, theme and layouts, accessibility (axe) and the Uzbek UI.
 
 ## Run

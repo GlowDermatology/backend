@@ -5465,199 +5465,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
-  /api/v1/admin/settings/:
-    get:
-      operationId: admin_settings_retrieve
-      tags:
-      - admin
-      security:
-      - StaffJWT: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Settings'
-          description: ''
-        '400':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '401':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '403':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '404':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '409':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '429':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-    patch:
-      operationId: admin_settings_partial_update
-      description: 'Changes the sent fields only (each language of an i18n object
-        separately; keys other than `uz`, `ru`, `en` answer `invalid`). `terms` and
-        `privacy_policy` are drafts: customers keep seeing the published copy until
-        `POST settings/terms/publish/` (`terms_unpublished_changes` tells whether
-        a draft differs from it). The booking policy is not versioned and is served
-        as soon as it is saved.'
-      tags:
-      - admin
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PatchedSettingsPatchRequest'
-      security:
-      - StaffJWT: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Settings'
-          description: ''
-        '400':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '401':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '403':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '404':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '409':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '429':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-  /api/v1/admin/settings/terms/publish/:
-    post:
-      operationId: admin_settings_terms_publish
-      description: Publishes the terms and privacy drafts (copied into the published
-        texts) as a new `terms_version` (`YYYYMMDD-n`, the Tashkent day and its publication
-        count) and sets `terms_updated_at`. Registration then accepts only the new
-        version and every customer is asked to accept it again at checkout and booking
-        (409 `terms_update_required`). 409 `conflict` while the uz terms or the uz
-        privacy draft has no visible character. Empty body.
-      parameters:
-      - in: header
-        name: Idempotency-Key
-        schema:
-          type: string
-          format: uuid
-        description: 'Client-generated UUID; replays return the stored response with
-          `Idempotent-Replayed: true`.'
-        required: true
-      tags:
-      - admin
-      security:
-      - StaffJWT: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Settings'
-          description: ''
-        '400':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '401':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '403':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '404':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '409':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '429':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
   /api/v1/admin/specialists/:
     get:
       operationId: admin_specialists_list
@@ -12603,11 +12410,11 @@ paths:
   /api/v1/me/phone/:
     post:
       operationId: customer_me_phone_attach
-      description: Attach the phone with its SMS code. Re-authentication (`password`,
-        or a `reset_password` `verification_token` of the account's own e-mail without
-        a password) unless the session signed in within 10 minutes; an account with
-        neither answers `reauth_required` once that window is over. → 200 `Me` with
-        the phone set (checkout, pay, booking and the QR open up).
+      description: 'Attach the phone with its SMS code. Re-authentication first: the
+        `password`, or instead (none, or a forgotten one) a `reset_password` `verification_token`
+        of the account''s own phone or e-mail; only an account with no password, phone
+        or e-mail passes on a session signed in within 10 minutes, else `reauth_required`.
+        → 200 `Me` with the phone set (checkout, pay, booking and the QR open up).'
       parameters:
       - in: header
         name: Accept-Language
@@ -15248,20 +15055,6 @@ components:
       - end
       - kind
       - start
-    BookingPolicyPatchRequest:
-      type: object
-      description: '``booking_policy`` of a PATCH: each language optional, ≤ 5 000
-        characters, trimmed.'
-      properties:
-        uz:
-          type: string
-          maxLength: 5000
-        ru:
-          type: string
-          maxLength: 5000
-        en:
-          type: string
-          maxLength: 5000
     BookingRequest:
       type: object
       properties:
@@ -17863,42 +17656,6 @@ components:
       - en
       - ru
       - uz
-    I18nText5000:
-      type: object
-      description: 'Contract 1.4: i18n text is {"uz", "ru", "en"}; "" means not filled,
-        never null.'
-      properties:
-        uz:
-          type: string
-          maxLength: 5000
-        ru:
-          type: string
-          maxLength: 5000
-        en:
-          type: string
-          maxLength: 5000
-      required:
-      - en
-      - ru
-      - uz
-    I18nText50000:
-      type: object
-      description: 'Contract 1.4: i18n text is {"uz", "ru", "en"}; "" means not filled,
-        never null.'
-      properties:
-        uz:
-          type: string
-          maxLength: 50000
-        ru:
-          type: string
-          maxLength: 50000
-        en:
-          type: string
-          maxLength: 50000
-      required:
-      - en
-      - ru
-      - uz
     I18nText60:
       type: object
       description: 'Contract 1.4: i18n text is {"uz", "ru", "en"}; "" means not filled,
@@ -18073,19 +17830,6 @@ components:
       description: |-
         * `fake` - fake
         * `live` - live
-    Integrations:
-      type: object
-      description: |-
-        Read-only: ``mode`` = ``INTEGRATIONS_MODE`` (the default of every provider), ``providers`` = the
-        effective mode of each provider.
-      properties:
-        mode:
-          $ref: '#/components/schemas/IntegrationModeEnum'
-        providers:
-          $ref: '#/components/schemas/ProviderModes'
-      required:
-      - mode
-      - providers
     Job:
       type: object
       description: Contract §2.14 ``Job``.
@@ -18301,20 +18045,6 @@ components:
         * `order` - order
         * `billz_sale` - billz_sale
         * `admin` - admin
-    LegalTextPatchRequest:
-      type: object
-      description: '``terms`` / ``privacy_policy`` of a PATCH: each language optional,
-        ≤ 50 000 characters, trimmed.'
-      properties:
-        uz:
-          type: string
-          maxLength: 50000
-        ru:
-          type: string
-          maxLength: 50000
-        en:
-          type: string
-          maxLength: 50000
     LinkKindEnum:
       enum:
       - none
@@ -20171,54 +19901,6 @@ components:
           maxLength: 60
         rules:
           $ref: '#/components/schemas/SegmentRulesRequest'
-    PatchedSettingsPatchRequest:
-      type: object
-      description: |-
-        ``PATCH settings/`` (contract §2.11): ``reservation_minutes`` 5..60; the phones E.164 | null; the links
-        https | null (Telegram ``t.me`` / ``telegram.me``, Instagram ``instagram.com``); ``pickup_address.*``
-        ≤ 200; ``terms.*`` / ``privacy_policy.*`` ≤ 50 000 and ``booking_policy.*`` ≤ 5 000, trimmed (each
-        language optional); ``integrations``, ``terms_version`` and ``terms_updated_at`` are read-only
-        (``read_only`` field error).
-      properties:
-        reservation_minutes:
-          type: integer
-          maximum: 60
-          minimum: 5
-        support_phone:
-          type: string
-          nullable: true
-          minLength: 1
-          pattern: ^\+998\d{9}$
-        store_phone:
-          type: string
-          nullable: true
-          minLength: 1
-          pattern: ^\+998\d{9}$
-        cosmetologist_phone:
-          type: string
-          nullable: true
-          minLength: 1
-          pattern: ^\+998\d{9}$
-        telegram_url:
-          type: string
-          nullable: true
-          maxLength: 200
-        instagram_url:
-          type: string
-          nullable: true
-          maxLength: 200
-        website_url:
-          type: string
-          nullable: true
-          maxLength: 200
-        pickup_address:
-          $ref: '#/components/schemas/PickupAddressRequest'
-        terms:
-          $ref: '#/components/schemas/LegalTextPatchRequest'
-        privacy_policy:
-          $ref: '#/components/schemas/LegalTextPatchRequest'
-        booking_policy:
-          $ref: '#/components/schemas/BookingPolicyPatchRequest'
     PatchedStaffUpdateRequest:
       type: object
       description: |-
@@ -20317,38 +19999,6 @@ components:
       required:
       - count
       - next_at
-    PickupAddress:
-      type: object
-      description: |-
-        An i18n object of a PATCH: a JSON object whose keys are ``uz`` / ``ru`` / ``en`` only (each optional).
-        Any other value answers ``invalid`` on the object's own field; an unknown key (``"UZ"``, ``"xx"``)
-        answers ``invalid`` on that key, never a silent no-op.
-      properties:
-        uz:
-          type: string
-          maxLength: 200
-        ru:
-          type: string
-          maxLength: 200
-        en:
-          type: string
-          maxLength: 200
-    PickupAddressRequest:
-      type: object
-      description: |-
-        An i18n object of a PATCH: a JSON object whose keys are ``uz`` / ``ru`` / ``en`` only (each optional).
-        Any other value answers ``invalid`` on the object's own field; an unknown key (``"UZ"``, ``"xx"``)
-        answers ``invalid`` on that key, never a silent no-op.
-      properties:
-        uz:
-          type: string
-          maxLength: 200
-        ru:
-          type: string
-          maxLength: 200
-        en:
-          type: string
-          maxLength: 200
     PlatformValues:
       type: object
       properties:
@@ -21806,95 +21456,6 @@ components:
       - password
       - terms_version
       - verification_token
-    Settings:
-      type: object
-      description: '``GET settings/`` (contract §2.11).'
-      properties:
-        reservation_minutes:
-          type: integer
-        support_phone:
-          type: string
-          nullable: true
-          readOnly: true
-        store_phone:
-          type: string
-          nullable: true
-          readOnly: true
-        cosmetologist_phone:
-          type: string
-          nullable: true
-          readOnly: true
-        telegram_url:
-          type: string
-          format: uri
-          nullable: true
-          readOnly: true
-        instagram_url:
-          type: string
-          format: uri
-          nullable: true
-          readOnly: true
-        website_url:
-          type: string
-          format: uri
-          nullable: true
-          readOnly: true
-        pickup_address:
-          allOf:
-          - $ref: '#/components/schemas/PickupAddress'
-          readOnly: true
-        terms:
-          allOf:
-          - $ref: '#/components/schemas/I18nText50000'
-          readOnly: true
-        privacy_policy:
-          allOf:
-          - $ref: '#/components/schemas/I18nText50000'
-          readOnly: true
-        booking_policy:
-          allOf:
-          - $ref: '#/components/schemas/I18nText5000'
-          readOnly: true
-        terms_version:
-          type: string
-          nullable: true
-          readOnly: true
-        terms_updated_at:
-          type: string
-          format: date-time
-          nullable: true
-        terms_unpublished_changes:
-          type: boolean
-          readOnly: true
-        integrations:
-          allOf:
-          - $ref: '#/components/schemas/Integrations'
-          readOnly: true
-        updated_at:
-          type: string
-          format: date-time
-        updated_by:
-          allOf:
-          - $ref: '#/components/schemas/Actor'
-          nullable: true
-      required:
-      - booking_policy
-      - cosmetologist_phone
-      - instagram_url
-      - integrations
-      - pickup_address
-      - privacy_policy
-      - reservation_minutes
-      - store_phone
-      - support_phone
-      - telegram_url
-      - terms
-      - terms_unpublished_changes
-      - terms_updated_at
-      - terms_version
-      - updated_at
-      - updated_by
-      - website_url
     Shipment:
       oneOf:
       - $ref: '#/components/schemas/ShipmentNotRequired'
