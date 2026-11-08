@@ -302,6 +302,66 @@ def test_attach_always_reauthenticates_an_account_that_has_a_way_in(world: World
     assert no_way["message"] == "Parol o‘rnatish uchun avval telefon raqami yoki emailni qo‘shing."
 
 
+def test_a_password_account_that_forgot_it_attaches_a_phone_with_an_email_code(world: World) -> None:
+    """The phone gate's "forgot the password" path: an e-mail account that has a password proves itself with
+    a ``reset_password`` code of its own address instead (the same proof ``auth/reset-password/`` accepts to
+    replace the password outright), so the attach goes through instead of answering ``password required``
+    forever."""
+    app = world.app("fid-hybrid-forgot")
+    email = "shahlo@example.uz"
+    signed = email_sign_up(app, email)
+    assert signed["customer"]["has_password"] is True
+    phone = "+998901240070"
+    refused = attach_phone(app, phone)  # no proof yet: the dialog asks for the password
+    assert error(refused, 400, "validation_error")["errors"][0]["field"] == "password"
+    wrong = app.post("me/phone/", {"phone": phone, "code": CODE, "password": "Wrong-pass-123"})
+    assert error(wrong, 400, "validation_error")["errors"][0]["code"] == "password_incorrect"
+    # "I forgot my password": a reset_password code to the account's own e-mail
+    sent = app.post("auth/send-code/", {"email": email, "purpose": "reset_password"}, auth=False)
+    assert sent.status_code == 200, sent.content
+    token = verify_email(app, email, "reset_password")
+    # a token of somebody else's address is no proof for this account
+    other = world.app("fid-hybrid-forgot-other")
+    email_sign_up(other, "begoyim@example.uz")
+    other.post("auth/send-code/", {"email": "begoyim@example.uz", "purpose": "reset_password"}, auth=False)
+    foreign = verify_email(other, "begoyim@example.uz", "reset_password")
+    error(
+        app.post("me/phone/", {"phone": phone, "code": CODE, "verification_token": foreign}),
+        400,
+        "verification_invalid",
+    )
+    done = app.post("me/phone/", {"phone": phone, "code": CODE, "verification_token": token})
+    assert done.status_code == 200, done.content
+    assert (done.json()["phone"], done.json()["email"]) == (phone, email)
+    assert Customer.objects.get(email=email).phone == phone
+    used = SmsCode.objects.get(email=email, purpose="reset")
+    assert used.verification_used_at is not None  # single use, consumed under the customer lock
+    # the password still works and is unchanged; the token cannot be replayed
+    assert app.post("me/email/code/", {"email": "shahlo2@example.uz"}).status_code == 200
+    replay = app.post("me/email/", {"email": "shahlo2@example.uz", "code": CODE, "verification_token": token})
+    error(replay, 400, "verification_invalid")
+    again = app.post("me/email/", {"email": "shahlo2@example.uz", "code": CODE, "password": PASSWORD})
+    assert again.status_code == 200, again.content
+
+
+def test_a_password_account_changes_its_forgotten_password_with_a_code_while_signed_in(world: World) -> None:
+    """``me/password/`` takes the same proof: the current password, or a ``reset_password`` code of the
+    account's own e-mail when the customer forgot it."""
+    app = world.app("fid-hybrid-forgot-change")
+    email = "ozoda@example.uz"
+    email_sign_up(app, email)
+    missing = app.post("me/password/", {"password": "Amber!Lantern-Deep55"}, idem=True)
+    assert error(missing, 400, "validation_error")["errors"][0]["field"] == "current_password"
+    app.post("auth/send-code/", {"email": email, "purpose": "reset_password"}, auth=False)
+    token = verify_email(app, email, "reset_password")
+    changed = app.post(
+        "me/password/", {"verification_token": token, "password": "Amber!Lantern-Deep55"}, idem=True
+    )
+    assert changed.status_code == 200 and changed.json()["has_password"] is True, changed.content
+    login = app.post("auth/login/", {"email": email, "password": "Amber!Lantern-Deep55"}, auth=False)
+    assert login.status_code == 200, login.content
+
+
 def test_a_social_sign_in_alone_cannot_add_a_way_in_to_a_password_account(world: World) -> None:
     """Review B-W2 #1: someone holding only the victim's linked Google identity signs in (no new-device
     step, M2-A10) and must not attach their own e-mail, then reset the password by it."""

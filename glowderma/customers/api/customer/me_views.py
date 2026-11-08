@@ -336,10 +336,10 @@ class PhoneView(MeBase):
     @extend_schema(
         operation_id="customer_me_phone_attach",
         description=(
-            "Attach the phone with its SMS code. Re-authentication (`password`, or a `reset_password` "
-            "`verification_token` of the account's own e-mail without a password) unless the session signed "
-            "in within 10 minutes; an account with neither answers `reauth_required` once that window is "
-            "over. "
+            "Attach the phone with its SMS code. Re-authentication first: the `password`, or instead (none, "
+            "or a forgotten one) a `reset_password` `verification_token` of the account's own phone "
+            "or e-mail; only an account with no password, phone or e-mail passes on a session signed in "
+            "within 10 minutes, else `reauth_required`. "
             "→ 200 `Me` with the phone set (checkout, pay, booking and the QR open up)."
         ),
         parameters=PARAMETERS,

@@ -1048,6 +1048,10 @@ def reauthenticate(
     which is only checked here and consumed by the caller under the customer-level lock. Returns whether a
     verification token must be consumed.
 
+    An account with a password may give that same token instead of the password ("forgot the password",
+    C§2.2.10): a code of its own phone or e-mail is exactly the proof ``auth/reset-password/`` accepts to
+    replace the password, so it adds no way in. A given password is always the one checked.
+
     Hybrid identity (C§2.2.10): only an account with no password, phone or e-mail (a phoneless social
     sign-up) has nothing to re-authenticate with — a session signed in within
     ``CUSTOMER_REAUTH_FRESH_SECONDS`` passes, anything else answers 409 ``reauth_required`` (the app signs in
@@ -1055,6 +1059,9 @@ def reauthenticate(
     or e-mail, however fresh the session: a social sign-in alone (no new-device step, M2-A10) must never add
     a way in to a password account. Every failure also counts against the account in ``customer_login``."""
     if customer.password:
+        if not password and verification_token and customer_identifier(customer):
+            _own_verification_kwargs(customer, verification_token)
+            return True
         if not password:
             raise _field(secret_field, "required")
         guard = LoginGuard()
@@ -1106,6 +1113,8 @@ def _lock_reauthenticated(
     if customer.password != snapshot.password:
         if not snapshot.password:
             raise _field(secret_field, "required")
+        if needed:  # proved by a code, not the password: a password change meanwhile wins, ask anew
+            raise VerificationInvalid()
         raise _field(secret_field, "password_incorrect", "field.password_incorrect")
     _consume_reauth(customer, verification_token, needed)
     return customer
