@@ -2,7 +2,9 @@
 and the ``post_migrate`` receiver that re-ensures them after a flush."""
 
 import importlib
+from datetime import datetime, timedelta
 from importlib import import_module
+from typing import Any
 
 import pytest
 from django.apps import apps as django_apps
@@ -10,6 +12,7 @@ from django.core.management import call_command
 from django.db import connection
 from django.db.migrations.recorder import MigrationRecorder
 
+from glowderma.core.timeutils import TASHKENT
 from glowderma.notifications.apps import STATUS_TEMPLATES, ensure_status_templates
 from glowderma.notifications.models import StatusTemplate
 
@@ -20,6 +23,8 @@ TABLES = {
     "notifications_campaign",
     "notifications_campaignrecipient",
     "notifications_inboxnotification",
+    "notifications_testdevice",
+    "notifications_campaigntest",
 }
 STATUSES = ["processing", "handed_to_courier", "delivered", "cancelled"]
 
@@ -118,6 +123,9 @@ def test_migrate_zero_and_forward_again() -> None:
         "0006_uz_verbose_names",
         "0007_uz_choice_labels",
         "0008_uz_field_labels",
+        "0009_campaign_approval_schema",
+        "0010_campaign_approval_data",
+        "0011_campaign_approval_constraints",
     }
     with connection.cursor() as cursor:
         cursor.execute("SELECT indexdef FROM pg_indexes WHERE indexname = 'segment_name_ci_unique'")
@@ -156,3 +164,66 @@ def test_campaign_url_migration_reverses_url_links_to_none() -> None:
     finally:
         call_command("migrate", verbosity=0)
     assert Campaign.objects.get(pk=campaign.pk).link_url == ""
+
+
+def _state_of(pk: int) -> tuple[Any, ...]:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT state, scheduled_at, started_at, sent, failed, sent_at FROM notifications_campaign"
+            " WHERE id = %s",
+            [pk],
+        )
+        return tuple(cursor.fetchone())
+
+
+@pytest.mark.django_db(transaction=True)
+def test_campaign_approval_migrations_round_trip_the_old_states() -> None:
+    """0009–0011: a pre-existing ``scheduled`` campaign becomes a ``draft`` that keeps its requested time
+    (nothing is dispatched without an approval), a ``queued`` one continues as ``sending``; the reverse shapes
+    every new state so the old CHECK holds; the forward run restores the new schema."""
+    from glowderma.notifications.models import Campaign
+    from glowderma.notifications.tests.factories import (
+        CampaignFactory,
+        ScheduledCampaignFactory,
+        SendingCampaignFactory,
+        SentCampaignFactory,
+    )
+
+    call_command("migrate", verbosity=0)
+    now = datetime(2026, 10, 24, 12, 5, tzinfo=TASHKENT)
+    draft = CampaignFactory.create()
+    requested = CampaignFactory.create(scheduled_at=now + timedelta(days=1))
+    approved = ScheduledCampaignFactory.create(dispatch_after=now)
+    sending = SendingCampaignFactory.create(sent=3, failed=1)
+    stopped = SendingCampaignFactory.create(state="partially_sent", sent=2, failed=0, stopped_at=now)
+    failed = SendingCampaignFactory.create(state="failed", failed_at=now)
+    cancelled = SendingCampaignFactory.create(
+        state="cancelled", cancelled_at=now, stop_requested_at=now, stopped_at=now
+    )
+    legacy_sent = SentCampaignFactory.create()
+    try:
+        call_command("migrate", "notifications", "0008", verbosity=0)
+        assert _state_of(draft.pk)[0] == "scheduled" and _state_of(draft.pk)[1].year == 9999
+        assert _state_of(requested.pk)[:2] == ("scheduled", now + timedelta(days=1))
+        assert _state_of(approved.pk)[0] == "scheduled" and _state_of(approved.pk)[1].year == 9999
+        assert _state_of(sending.pk) == ("sending", None, now, None, None, None)
+        assert _state_of(stopped.pk)[0] == "sent" and _state_of(stopped.pk)[3:] == (2, 0, now)
+        assert _state_of(failed.pk)[0] == "sent" and _state_of(failed.pk)[5] == now
+        assert _state_of(cancelled.pk) == ("cancelled", now, None, None, None, None)
+        assert _state_of(legacy_sent.pk)[0] == "sent"
+        with connection.cursor() as cursor:  # an old-flow queued campaign, as 0010's forward step meets it
+            cursor.execute(
+                "UPDATE notifications_campaign SET state = 'queued', started_at = NULL WHERE id = %s",
+                [sending.pk],
+            )
+    finally:
+        call_command("migrate", verbosity=0)
+    rows = {row.pk: row for row in Campaign.objects.all()}
+    # the forward step never dispatches anything: scheduled rows are drafts again, with their requested time
+    assert rows[draft.pk].state == "draft" and rows[draft.pk].scheduled_at is not None
+    assert (rows[requested.pk].state, rows[requested.pk].scheduled_at) == ("draft", now + timedelta(days=1))
+    assert rows[approved.pk].state == "draft" and rows[approved.pk].approved_at is None
+    assert rows[sending.pk].state == "sending" and rows[sending.pk].started_at == rows[sending.pk].updated_at
+    assert rows[stopped.pk].state == "sent" and rows[legacy_sent.pk].state == "sent"
+    assert rows[cancelled.pk].state == "cancelled"
+    assert Campaign.objects.filter(state="draft").count() == 3

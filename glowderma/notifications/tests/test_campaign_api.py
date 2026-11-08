@@ -1,4 +1,5 @@
-"""Contract §2.8: ``GET notifications/``, ``GET notifications/meta/``, multipart ``POST notifications/``."""
+"""Contract §2.8: ``GET notifications/``, ``GET notifications/{id}/``, ``GET notifications/meta/`` and the
+multipart ``POST notifications/`` that creates a draft (the workflow itself: test_campaign_workflow)."""
 
 from datetime import datetime, timedelta
 from io import BytesIO
@@ -6,7 +7,6 @@ from typing import Any
 
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import override_settings
 from PIL import Image
 from rest_framework.test import APIClient
 
@@ -16,13 +16,18 @@ from glowderma.catalog.tests.factories import ProductFactory
 from glowderma.core.models import AuditEntry, OutboxMessage
 from glowderma.core.timeutils import TASHKENT
 from glowderma.integrations.fcm.fake import FakeFcm
+from glowderma.notifications import services
 from glowderma.notifications.models import Campaign, CampaignRecipient, InboxNotification
 from glowderma.notifications.tests.conftest import ANCHOR
 from glowderma.notifications.tests.factories import (
     CampaignFactory,
+    CampaignTestFactory,
     CustomerSegmentFactory,
+    ScheduledCampaignFactory,
     SegmentMemberFactory,
+    SendingCampaignFactory,
     SentCampaignFactory,
+    TestedCampaignFactory,
 )
 
 pytestmark = pytest.mark.django_db
@@ -62,10 +67,12 @@ def post(client: APIClient, data: dict[str, Any], key: str = KEY) -> Any:
 def test_list_shape_ordering_and_filters(staff_client: APIClient, staff: StaffUser, clock: Any) -> None:
     segment = CustomerSegmentFactory.create(name="Doimiy mijozlar")
     product = ProductFactory.create(name_uz="Seramidli namlantiruvchi krem")
-    scheduled = CampaignFactory.create(
+    scheduled = ScheduledCampaignFactory.create(
         title="Rejalashtirilgan",
-        state=Campaign.State.SCHEDULED,
         scheduled_at=datetime(2026, 10, 26, 10, tzinfo=TASHKENT),
+        dispatch_after=datetime(2026, 10, 26, 10, tzinfo=TASHKENT),
+        approved_by=staff,
+        test_confirmed_by=staff,
         audience_type="segment",
         audience_segment=segment,
         audience_segment_name=segment.name,
@@ -73,10 +80,11 @@ def test_list_shape_ordering_and_filters(staff_client: APIClient, staff: StaffUs
         author=staff,
         created_at=datetime(2026, 10, 24, 11, 30, tzinfo=TASHKENT),
     )
-    sending = CampaignFactory.create(
+    CampaignTestFactory.create(campaign=scheduled, confirmed_at=ANCHOR - timedelta(minutes=10))
+    sending = SendingCampaignFactory.create(
         title="Yuborilmoqda",
-        state=Campaign.State.SENDING,
-        started_at=ANCHOR,
+        sent=3,
+        failed=1,
         kind="promo",
         link_kind="product",
         link_product=product,
@@ -89,19 +97,24 @@ def test_list_shape_ordering_and_filters(staff_client: APIClient, staff: StaffUs
         delivered=7,
         kind="promo",
     )
-    queued = CampaignFactory.create(title="Navbatda", created_at=datetime(2026, 10, 20, 9, tzinfo=TASHKENT))
+    draft = CampaignFactory.create(title="Qoralama", created_at=datetime(2026, 10, 20, 9, tzinfo=TASHKENT))
+    tested = TestedCampaignFactory.create(
+        title="Test tasdiqlangan", created_at=datetime(2026, 10, 19, 9, tzinfo=TASHKENT)
+    )
     response = staff_client.get(URL)
     assert response.status_code == 200
     body = response.data
-    assert (body["count"], body["page"], body["page_size"], body["page_count"]) == (4, 1, 20, 1)
-    # coalesce(scheduled_at, created_at) desc: 26 Oct 10:00, 24 Oct 12:00, 20 Oct, 18 Oct
+    assert (body["count"], body["page"], body["page_size"], body["page_count"]) == (5, 1, 20, 1)
+    # coalesce(scheduled_at, created_at) desc: 26 Oct 10:00, 24 Oct 12:00, 20 Oct, 19 Oct, 18 Oct
     assert [r["title"] for r in body["results"]] == [
         "Rejalashtirilgan",
         "Yuborilmoqda",
-        "Navbatda",
+        "Qoralama",
+        "Test tasdiqlangan",
         "Yuborildi",
     ]
     first = body["results"][0]
+    actor = {"id": staff.pk, "display_name": staff.full_name}
     assert first == {
         "id": scheduled.pk,
         "kind": "general",
@@ -119,28 +132,65 @@ def test_list_shape_ordering_and_filters(staff_client: APIClient, staff: StaffUs
         "state": "scheduled",
         "scheduled_at": "2026-10-26T10:00:00+05:00",
         "created_at": "2026-10-24T11:30:00+05:00",
+        "updated_at": first["updated_at"],
+        "revision": 1,
+        "tested_revision": 1,
+        "test_confirmed_at": "2026-10-24T11:55:00+05:00",
+        "test_confirmed_by": actor,
+        "approved_at": "2026-10-24T12:00:00+05:00",
+        "approved_by": actor,
+        "approved_revision": 1,
+        "dispatch_after": "2026-10-26T10:00:00+05:00",
+        "started_at": None,
         "sent_at": None,
         "cancelled_at": None,
+        "cancelled_by": None,
+        "stop_requested_at": None,
+        "stop_requested_by": None,
+        "stopped_at": None,
+        "failed_at": None,
+        "last_error": "",
         "sent": None,
         "failed": None,
+        "attempted": None,
         "delivered": None,
-        "author": {"id": staff.pk, "display_name": staff.full_name},
+        "author": actor,
+        "tests": [
+            {
+                "id": first["tests"][0]["id"],
+                "revision": 1,
+                "test_device_id": first["tests"][0]["test_device_id"],
+                "device_label": first["tests"][0]["device_label"],
+                "sent_at": first["tests"][0]["sent_at"],
+                "sent_by": None,
+                "fcm_ok": True,
+                "fcm_error": "",
+                "confirmed_at": "2026-10-24T11:55:00+05:00",
+                "confirmed_by": None,
+            }
+        ],
     }
     promo = body["results"][1]
-    assert promo["state"] == "queued" and promo["author"] is None  # sending renders as queued
+    assert (promo["state"], promo["author"], promo["attempted"]) == ("sending", None, 4)  # live tallies
     assert promo["link"] == {
         "kind": "product",
         "product_id": product.pk,
         "label": "Seramidli namlantiruvchi krem",
         "url": None,
     }
-    done = body["results"][3]
+    done = body["results"][4]
     assert (done["state"], done["sent"], done["failed"], done["delivered"]) == ("sent", 10, 0, 7)
-    assert done["sent_at"] == "2026-10-24T12:02:00+05:00"
+    assert done["sent_at"] == "2026-10-24T12:02:00+05:00" and done["tests"] == []
 
-    queued_ids = {r["id"] for r in staff_client.get(URL, {"state": "queued"}).data["results"]}
-    assert queued_ids == {sending.pk, queued.pk}
-    assert [r["id"] for r in staff_client.get(URL, {"state": "sent"}).data["results"]] == [sent.pk]
+    for state, expected in (
+        ("sending", {sending.pk}),
+        ("sent", {sent.pk}),
+        ("draft", {draft.pk}),
+        ("tested", {tested.pk}),
+        ("scheduled", {scheduled.pk}),
+        ("stopping", set()),
+    ):
+        assert {r["id"] for r in staff_client.get(URL, {"state": state}).data["results"]} == expected, state
     assert {r["id"] for r in staff_client.get(URL, {"kind": "promo"}).data["results"]} == {
         sending.pk,
         sent.pk,
@@ -148,10 +198,17 @@ def test_list_shape_ordering_and_filters(staff_client: APIClient, staff: StaffUs
     assert [
         r["id"] for r in staff_client.get(URL, {"kind": "promo", "state": "scheduled"}).data["results"]
     ] == []
-    bad = staff_client.get(URL, {"state": "done"})
-    assert bad.status_code == 400 and errors(bad) == [("state", "invalid_choice", "Ruxsat etilmagan qiymat.")]
+    for bad_state in ("done", "queued"):  # ``queued`` is no longer a state
+        bad = staff_client.get(URL, {"state": bad_state})
+        assert bad.status_code == 400 and errors(bad) == [
+            ("state", "invalid_choice", "Ruxsat etilmagan qiymat.")
+        ]
     assert staff_client.get(URL, {"page_size": 7}).status_code == 400
     assert staff_client.get(URL, {"page_size": 50, "page": 9}).data["page"] == 1
+    # the detail route: every staff member reads every campaign
+    detail = staff_client.get(f"{URL}{scheduled.pk}/")
+    assert detail.status_code == 200 and detail.data == first
+    assert staff_client.get(f"{URL}999999/").status_code == 404
 
 
 def test_export_csv_and_xlsx(staff_client: APIClient, clock: Any) -> None:
@@ -182,8 +239,8 @@ def test_export_csv_and_xlsx(staff_client: APIClient, clock: Any) -> None:
     assert response["Content-Disposition"] == 'attachment; filename="bildirishnomalar-20261024-1205.csv"'
     lines = response.content.decode("utf-8-sig").split("\r\n")
     assert lines[0] == '"ID";"Sana";"Turi";"Sarlavha";"Auditoriya";"Holat";"Yuborildi";"Yetkazildi";"Havola"'
-    assert '"2026-10-20 09:00";"Umumiy";"Hammaga";"Barcha · 4 751";"Navbatda";"";"";""' in lines[1]
-    assert '"\'=Bitta";"Bitta mijoz · +998 90 123 45 67";"Navbatda"' in lines[2]
+    assert '"2026-10-20 09:00";"Umumiy";"Hammaga";"Barcha · 4 751";"Qoralama";"";"";""' in lines[1]
+    assert '"\'=Bitta";"Bitta mijoz · +998 90 123 45 67";"Qoralama"' in lines[2]
     full = staff_client.get(URL, {"export": "xlsx"})
     assert full.status_code == 200 and full["Content-Type"].startswith("application/vnd.openxmlformats")
     audit = AuditEntry.objects.filter(action="export.downloaded").order_by("-id").first()
@@ -233,6 +290,7 @@ def test_meta(staff_client: APIClient, staff: StaffUser) -> None:
     assert body["templates"][2]["texts"]["en"] == "" and body["templates"][0]["updated_by"] is None
     assert [o["label"] for o in body["link_options"]] == ["aloe gel", "BILLZ TONER", "Yuz uchun krem"]
     assert all(set(o) == {"product_id", "label"} for o in body["link_options"])
+    assert body["approval_delay_minutes"] == 5  # CAMPAIGN_APPROVAL_DELAY_MINUTES (test settings: the default)
 
 
 # --- create -------------------------------------------------------------------------------------------------
@@ -245,8 +303,7 @@ def test_create_requires_multipart_and_an_idempotency_key(staff_client: APIClien
     assert no_key.status_code == 400 and no_key.data["code"] == "idempotency_key_required"
 
 
-@override_settings(CAMPAIGN_BATCH_SIZE=500)
-def test_create_queued_sends_end_to_end(
+def test_create_makes_a_draft_and_sends_nothing(
     staff_client: APIClient,
     staff: StaffUser,
     clock: Any,
@@ -257,8 +314,6 @@ def test_create_queued_sends_end_to_end(
     reachable = [CustomerFactory.create(language="ru") for _ in range(3)]
     for customer in reachable:
         DeviceFactory.create(customer=customer)
-    dead_token = CustomerFactory.create()
-    DeviceFactory.create(customer=dead_token, fcm_token="tok-bad")  # noqa: S106
     silent = CustomerFactory.create()
     DeviceFactory.create(customer=silent, push_enabled=False, fcm_token="")
     deleted = CustomerFactory.create(status="deleted", deleted_at=ANCHOR)
@@ -282,7 +337,8 @@ def test_create_queued_sends_end_to_end(
         "url": None,
     }
     assert record["audience"] == {"type": "all", "segment_id": None, "segment_name": None, "phone": None}
-    assert record["recipient_count"] == 4 and record["state"] == "queued" and record["scheduled_at"] is None
+    assert (record["recipient_count"], record["state"], record["revision"]) == (3, "draft", 1)
+    assert record["scheduled_at"] is None and record["dispatch_after"] is None and record["tests"] == []
     assert record["created_at"] == "2026-10-24T12:05:00+05:00" and record["author"]["id"] == staff.pk
     assert record["image_url"] is not None and record["image_url"].startswith(
         "http://127.0.0.1:8000/media/campaigns/"
@@ -290,102 +346,30 @@ def test_create_queued_sends_end_to_end(
     campaign = Campaign.objects.get(pk=record["id"])
     stored = campaign.image.name or ""
     assert stored.endswith(".png") and stored.startswith(f"campaigns/{campaign.pk}/")
-
-    # the outbox dispatched eagerly on commit: recipients, inbox rows, counters, state sent
-    campaign.refresh_from_db()
-    assert (campaign.state, campaign.sent, campaign.failed) == ("sent", 3, 1)
-    assert campaign.started_at == campaign.sent_at == ANCHOR and campaign.batches_dispatched == 1
-    recipients = {r.customer_id: r for r in CampaignRecipient.objects.filter(campaign=campaign)}
-    assert set(recipients) == {c.pk for c in reachable} | {dead_token.pk}
-    assert all(recipients[c.pk].state == "sent" and recipients[c.pk].provider_message_id for c in reachable)
-    assert recipients[dead_token.pk].state == "failed" and recipients[dead_token.pk].error == "unregistered"
-    assert campaign.send_cursor == max(r.pk for r in recipients.values())
-    inbox = {i.customer_id: i for i in InboxNotification.objects.filter(source_type="campaign")}
-    assert set(inbox) == set(recipients)
-    row = inbox[reachable[0].pk]
-    assert (row.kind, row.title, row.push_state, row.language) == (
-        "promo",
-        "Kuzgi namlik to‘plami",
-        "sent",
-        "uz",
+    # a draft: no recipients, no inbox rows, no outbox row, no push, no counters
+    assert (campaign.state, campaign.sent, campaign.failed, campaign.started_at) == (
+        "draft",
+        None,
+        None,
+        None,
     )
-    assert row.link == {"kind": "product", "product_id": product.pk} and row.image_url == record["image_url"]
-    assert row.dedupe_key == f"campaign:{campaign.pk}:{reachable[0].pk}" and row.pushed_at == ANCHOR
-    assert inbox[dead_token.pk].push_state == "failed" and inbox[dead_token.pk].push_error == "unregistered"
-    assert recipients[reachable[0].pk].inbox == row
-    assert len(fcm.sent) == 3
-    first = fcm.sent[0]
-    assert first.data == {
-        "type": "campaign",
-        "inbox_id": first.data["inbox_id"],
-        "campaign_id": str(campaign.pk),
-        "product_id": str(product.pk),
-        "link_url": "",
-    }
-    assert InboxNotification.objects.get(pk=int(first.data["inbox_id"])).source_id == campaign.pk
-    assert (first.android_channel, first.android_priority, first.image_url) == (
-        "promo",
-        "normal",
-        record["image_url"],
-    )
-    assert OutboxMessage.objects.get(topic="campaign.send_batch").status == "done"
+    assert not CampaignRecipient.objects.exists() and not InboxNotification.objects.exists()
+    assert OutboxMessage.objects.count() == 0 and fcm.sent == []
     audit = AuditEntry.objects.get(action="notification.created")
-    assert (
-        audit.entity_id == str(campaign.pk) and audit.after is not None and audit.after["state"] == "queued"
-    )
+    assert audit.entity_id == str(campaign.pk) and audit.after is not None
+    assert (audit.after["state"], audit.after["revision"], audit.after["body"]) == ("draft", 1, campaign.body)
+    assert audit.after["image"] == stored
     listed = staff_client.get(URL).data["results"][0]
-    assert listed["state"] == "sent" and listed["sent"] == 3 and listed["failed"] == 1
+    assert listed["state"] == "draft" and listed["body"] == campaign.body
 
     # the same form again (a fresh upload object with the same bytes: the first one was consumed)
     data["image"] = SimpleUploadedFile("promo.png", image_bytes(), content_type="image/png")
     replay = post(staff_client, data)
     assert replay.status_code == 201 and replay["Idempotent-Replayed"] == "true"
-    assert Campaign.objects.count() == 1
+    assert replay.data == record and Campaign.objects.count() == 1
 
 
-@pytest.mark.django_db(transaction=True)
-def test_create_body_is_the_campaign_after_the_eager_send(
-    staff_client: APIClient, clock: Any, fcm: FakeFcm
-) -> None:
-    """Contract §2.8: the 201 body is the campaign as stored when the response is built — after the commit,
-    once the eager on-commit send ran (with a real worker it would still read ``queued``)."""
-    for _ in range(2):
-        DeviceFactory.create(customer=CustomerFactory.create())
-    response = post(staff_client, form())
-    assert response.status_code == 201, response.data
-    body = response.data
-    assert (body["state"], body["sent"], body["failed"]) == ("sent", 2, 0)
-    assert body["sent_at"] == "2026-10-24T12:05:00+05:00" and body["recipient_count"] == 2
-    replay = post(staff_client, form())
-    assert replay.status_code == 201 and replay["Idempotent-Replayed"] == "true"
-    assert replay.data == body
-    assert Campaign.objects.count() == 1
-
-
-@pytest.mark.django_db(transaction=True)
-def test_create_body_still_says_queued_with_a_real_worker(
-    staff_client: APIClient, clock: Any, fcm: FakeFcm, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Contract §2.8, the other branch: with a real worker the on-commit dispatch only enqueues, so the
-    rebuilt 201 body (and the stored replay body) still says ``queued``; the rebuild never dispatches."""
-    from glowderma.core import tasks as core_tasks
-
-    enqueued: list[tuple[Any, ...]] = []
-    monkeypatch.setattr(core_tasks.dispatch_outbox, "delay", lambda *args, **kwargs: enqueued.append(args))
-    for _ in range(2):
-        DeviceFactory.create(customer=CustomerFactory.create())
-    response = post(staff_client, form())
-    assert response.status_code == 201, response.data
-    body = response.data
-    assert (body["state"], body["sent"], body["sent_at"]) == ("queued", None, None)
-    assert len(enqueued) == 1 and fcm.sent == []
-    replay = post(staff_client, form())
-    assert replay.status_code == 201 and replay["Idempotent-Replayed"] == "true"
-    assert replay.data == body
-    assert len(enqueued) == 1 and Campaign.objects.get().state == "queued"
-
-
-def test_create_scheduled_waits_for_beat(staff_client: APIClient, clock: Any) -> None:
+def test_create_with_a_requested_time_is_still_a_draft(staff_client: APIClient, clock: Any) -> None:
     segment = CustomerSegmentFactory.create(name="Doimiy mijozlar", min_online_orders=None)
     member = CustomerFactory.create()
     DeviceFactory.create(customer=member)
@@ -397,23 +381,31 @@ def test_create_scheduled_waits_for_beat(staff_client: APIClient, clock: Any) ->
     )
     response = post(staff_client, data)
     assert response.status_code == 201, response.data
-    assert (
-        response.data["state"] == "scheduled" and response.data["scheduled_at"] == "2026-10-26T10:00:00+05:00"
-    )
+    assert response.data["state"] == "draft" and response.data["scheduled_at"] == "2026-10-26T10:00:00+05:00"
     assert (
         response.data["audience"]["segment_name"] == "Doimiy mijozlar"
         and response.data["recipient_count"] == 1
     )
     assert OutboxMessage.objects.count() == 0 and CampaignRecipient.objects.count() == 0
-    # a segment with a scheduled campaign cannot be deleted
-    conflict = staff_client.delete(f"/api/v1/admin/segments/{segment.pk}/")
+    assert (
+        services.start_due_campaigns(datetime(2026, 10, 27, tzinfo=TASHKENT)) == []
+    )  # never without approval
+    # a draft does not hold its segment; an approved campaign does
+    assert staff_client.delete(f"/api/v1/admin/segments/{segment.pk}/").status_code == 204
+    held = CustomerSegmentFactory.create(name="Band segment")
+    ScheduledCampaignFactory.create(
+        audience_type="segment", audience_segment=held, audience_segment_name=held.name
+    )
+    conflict = staff_client.delete(f"/api/v1/admin/segments/{held.pk}/")
     assert (
         conflict.status_code == 409
         and conflict.data["message"] == "Rejalashtirilgan xabar bu guruhga yuboriladi."
     )
 
 
-def test_create_for_one_customer_without_devices_is_sent_at_once(staff_client: APIClient, clock: Any) -> None:
+def test_create_for_one_customer_without_devices_is_a_draft_with_no_reach(
+    staff_client: APIClient, clock: Any
+) -> None:
     customer = CustomerFactory.create(phone="+998901234567")
     data = form(**{"audience.type": "customer", "audience.phone": customer.phone})
     response = post(staff_client, data)
@@ -424,13 +416,12 @@ def test_create_for_one_customer_without_devices_is_sent_at_once(staff_client: A
         "segment_name": None,
         "phone": customer.phone,
     }
-    assert (
-        response.data["state"],
-        response.data["recipient_count"],
-        response.data["sent"],
-        response.data["failed"],
-    ) == ("sent", 0, 0, 0)
-    assert response.data["sent_at"] == "2026-10-24T12:05:00+05:00" and OutboxMessage.objects.count() == 0
+    assert (response.data["state"], response.data["recipient_count"], response.data["sent"]) == (
+        "draft",
+        0,
+        None,
+    )
+    assert response.data["sent_at"] is None and OutboxMessage.objects.count() == 0
 
 
 @pytest.mark.parametrize(
@@ -535,7 +526,7 @@ def test_create_image_is_reencoded_and_a_different_body_reuses_no_key(
 
 def test_scheduled_at_far_future_and_timezones(staff_client: APIClient, clock: Any) -> None:
     response = post(staff_client, form(scheduled_at=(ANCHOR + timedelta(minutes=1)).isoformat()))
-    assert response.status_code == 201 and response.data["state"] == "scheduled"
+    assert response.status_code == 201 and response.data["state"] == "draft"
     assert response.data["scheduled_at"] == "2026-10-24T12:06:00+05:00"
     zulu = post(staff_client, form(scheduled_at="2026-10-26T05:00:00Z"), key=KEY.replace("a", "b"))
     assert zulu.status_code == 201 and zulu.data["scheduled_at"] == "2026-10-26T10:00:00+05:00"
@@ -577,40 +568,44 @@ def test_meta_sizes_agree_with_the_recipient_count_for_customers_with_two_device
     assert [(s["member_count"], s["size"]) for s in listed if s["id"] == segment.pk] == [(3, 2)]
 
     audience = {"audience.type": "segment", "audience.segment_id": str(segment.pk)}
-    immediate = post(staff_client, form(**audience))
-    scheduled = post(
+    to_segment = post(staff_client, form(**audience))
+    requested = post(
         staff_client, form(scheduled_at="2026-10-26T10:00:00+05:00", **audience), key=KEY.replace("6f", "7f")
     )
     everyone = post(staff_client, form(), key=KEY.replace("6f", "8f"))
-    assert immediate.status_code == scheduled.status_code == everyone.status_code == 201
-    assert immediate.data["recipient_count"] == scheduled.data["recipient_count"] == 2
+    assert to_segment.status_code == requested.status_code == everyone.status_code == 201
+    assert to_segment.data["recipient_count"] == requested.data["recipient_count"] == 2
     assert everyone.data["recipient_count"] == meta["total_devices"]
-    devices = CampaignRecipient.objects.filter(campaign_id=immediate.data["id"], customer=two_devices)
-    assert list(devices.values_list("device_id", flat=True)) == [latest.pk]  # the most recently active one
+    # the send itself (once approved and started) materialises the most recently active device per customer
+    campaign = Campaign.objects.get(pk=to_segment.data["id"])
+    assert services.materialise(campaign) == 2
+    devices = CampaignRecipient.objects.filter(campaign=campaign, customer=two_devices)
+    assert list(devices.values_list("device_id", flat=True)) == [latest.pk]
 
 
 # --- gap ADM-10.1: a campaign that opens an https link (decision GC-3) -------------------------------------
 
 
 def test_create_with_a_url_link_reaches_the_inbox_and_the_push(
-    staff_client: APIClient,
-    staff: StaffUser,
-    clock: Any,
-    fcm: FakeFcm,
-    django_capture_on_commit_callbacks: Any,
+    staff_client: APIClient, staff: StaffUser, clock: Any, fcm: FakeFcm
 ) -> None:
     customer = CustomerFactory.create()
     DeviceFactory.create(customer=customer)
     link = "https://glowderma.uz/aksiya?utm_source=push"
     data = form(**{"link.kind": "url", "link.url": f" {link} "})
-    with django_capture_on_commit_callbacks(execute=True):
-        response = post(staff_client, data)
+    response = post(staff_client, data)
     assert response.status_code == 201, response.data
     assert response.data["link"] == {"kind": "url", "product_id": None, "label": None, "url": link}
     campaign = Campaign.objects.get(pk=response.data["id"])
     assert (campaign.link_kind, campaign.link_url, campaign.link_product_id) == ("url", link, None)
     after = AuditEntry.objects.get(action="notification.created").after or {}
     assert (after["link_kind"], after["link_url"]) == ("url", link)
+    # once approved and started, the send carries the link to the inbox and the push
+    Campaign.objects.filter(pk=campaign.pk).update(state="sending", started_at=ANCHOR, sent=0, failed=0)
+    campaign.refresh_from_db()
+    services.materialise(campaign)
+    campaign.save()
+    services.send_batch(campaign.pk, 0)
     inbox = InboxNotification.objects.get(source_type="campaign", customer=customer)
     assert inbox.link == {"kind": "url", "url": link}
     [message] = fcm.sent

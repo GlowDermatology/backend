@@ -54,10 +54,15 @@ LEDGER_KIND: dict[str, str] = {
     enums.LedgerKind.REVERSAL: "Qaytarildi",
 }
 NOTIFICATION_STATE: dict[str, str] = {
+    enums.NotificationState.DRAFT: "Qoralama",
+    enums.NotificationState.TESTED: "Test tasdiqlangan",
     enums.NotificationState.SCHEDULED: "Rejalashtirilgan",
-    enums.NotificationState.QUEUED: "Navbatda",
+    enums.NotificationState.SENDING: "Yuborilmoqda",
+    enums.NotificationState.STOPPING: "To‘xtatilmoqda",
     enums.NotificationState.SENT: "Yuborildi",
+    enums.NotificationState.PARTIALLY_SENT: "Qisman yuborildi",
     enums.NotificationState.CANCELLED: "Bekor qilindi",
+    enums.NotificationState.FAILED: "Yuborilmadi",
 }
 NOTIFICATION_KIND: dict[str, str] = {
     enums.NotificationKind.PROMO: "Aksiya",

@@ -45,3 +45,13 @@ class IsManager(IsActiveStaff):
         return super().has_permission(request, view) and bool(
             getattr(user, "is_manager", False) or getattr(user, "is_superuser", False)
         )
+
+
+class IsSuperuser(IsActiveStaff):
+    """An active staff member signed in with a staff token whose account is a superuser
+    (``StaffUser.is_superuser``): the campaign approval routes of admin contract §2.8 (test, confirm,
+    approve, return to draft, cancel, stop, test devices). Anyone else gets 403 ``permission_denied``
+    before the handler runs; the flag is re-read from the database on every request."""
+
+    def has_permission(self, request: Request, view: APIView) -> bool:
+        return super().has_permission(request, view) and bool(getattr(request.user, "is_superuser", False))

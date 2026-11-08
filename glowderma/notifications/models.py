@@ -2,13 +2,14 @@
 
 ``StatusTemplate`` (four rows from ``0002_seed_status_templates``, re-ensured by ``post_migrate``),
 ``CustomerSegment`` + ``SegmentMember`` (rule-based audiences with manual members), ``Campaign`` +
-``CampaignRecipient`` (admin pushes and their per-device outcome) and ``InboxNotification`` (the customer's
-in-app feed, de-duplicated by ``dedupe_key``).
+``CampaignRecipient`` (admin pushes and their per-device outcome), ``TestDevice`` + ``CampaignTest`` (the
+approval workflow's test pushes to real staff devices) and ``InboxNotification`` (the customer's in-app feed,
+de-duplicated by ``dedupe_key``).
 """
 
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
-from django.db.models import Q
+from django.db.models import F, Q
 from django.db.models.functions import Coalesce, Lower
 
 from glowderma.core import enums
@@ -119,19 +120,45 @@ class SegmentMember(models.Model):
         return f"Mijoz #{self.customer_id} · segment #{self.segment_id}"
 
 
-class Campaign(TimeStampedModel):
-    """One admin-authored push (promo or general) to an audience, with its schedule, send progress and
-    result counters; the contract's ``NotificationRecord``."""
+# Field groups of ``campaign_state_fields`` (legacy rows: an old ``cancelled`` row carries ``scheduled_at``
+# and no approval fields, an old ``sent`` row no approval fields either — both still pass).
+_NOT_STARTED = Q(
+    started_at__isnull=True,
+    sent_at__isnull=True,
+    sent__isnull=True,
+    failed__isnull=True,
+    failed_at__isnull=True,
+)
+_NOT_APPROVED = Q(approved_at__isnull=True, approved_revision__isnull=True, dispatch_after__isnull=True)
+_NOT_STOPPED = Q(stop_requested_at__isnull=True, stopped_at__isnull=True)
 
-    class State(models.TextChoices):  # internal; API renders sending as "queued"
-        SCHEDULED = "scheduled", "Rejalashtirilgan"
-        QUEUED = "queued", "Navbatda"
+
+class Campaign(TimeStampedModel):
+    """One admin-authored push (promo or general) to an audience, with its approval trail, schedule, send
+    progress and result counters; the contract's ``NotificationRecord``.
+
+    Approval workflow (docs/api/admin-api-v1.md §2.8): staff write a ``draft``; a superuser test-pushes it
+    to a registered :class:`TestDevice`, confirms the test (``tested``), approves it (``scheduled`` — nothing
+    is dispatched before ``dispatch_after``) and may cancel it, return it to draft or, once ``sending``, stop
+    it (``stopping`` → ``partially_sent`` / ``cancelled``). Approvals and tests are bound to
+    ``content_revision``.
+    """
+
+    class State(models.TextChoices):  # the API literals (core.enums.NotificationState)
+        DRAFT = "draft", "Qoralama"
+        TESTED = "tested", "Test tasdiqlangan"
+        SCHEDULED = "scheduled", "Rejalashtirilgan"  # approved; waits for ``dispatch_after``
         SENDING = "sending", "Yuborilmoqda"
+        STOPPING = "stopping", "To‘xtatilmoqda"  # emergency stop requested; the next batch finalises it
         SENT = "sent", "Yuborildi"
-        CANCELLED = (
-            "cancelled",
-            "Bekor qilindi",
-        )  # M3: a scheduled campaign staff cancelled before its send started
+        PARTIALLY_SENT = "partially_sent", "Qisman yuborildi"  # stopped / failed after some pushes went out
+        CANCELLED = "cancelled", "Bekor qilindi"  # cancelled before the start, or stopped before any push
+        FAILED = "failed", "Yuborilmadi"  # a dead ``campaign.send_batch`` before any push went out
+
+    # The states nothing changes any more.
+    TERMINAL_STATES = frozenset({"sent", "partially_sent", "cancelled", "failed"})
+    # The states an author may still edit or delete.
+    EDITABLE_STATES = frozenset({"draft", "tested"})
 
     # promo|general
     kind = models.CharField(max_length=8, choices=enums.NotificationKind.choices, verbose_name="turi")
@@ -183,12 +210,54 @@ class Campaign(TimeStampedModel):
     )  # snapshot
     # pushable devices at creation; recomputed at send
     recipient_count = models.PositiveIntegerField(default=0, verbose_name="qabul qiluvchilar soni")
-    state = models.CharField(max_length=16, choices=State.choices, default=State.QUEUED, verbose_name="holat")
-    scheduled_at = models.DateTimeField(null=True, verbose_name="rejalashtirilgan")
+    state = models.CharField(max_length=16, choices=State.choices, default=State.DRAFT, verbose_name="holat")
+    # the author's requested send time (optional); the beat's only clock is ``dispatch_after``
+    scheduled_at = models.DateTimeField(null=True, verbose_name="so‘ralgan vaqt")
+    # Approval workflow: bumps on any change of kind/title/body/image/link/audience; a test or an approval
+    # is valid for one revision only.
+    content_revision = models.PositiveIntegerField(default=1, verbose_name="matn versiyasi")
+    tested_revision = models.PositiveIntegerField(null=True, verbose_name="test tasdiqlangan versiya")
+    test_confirmed_at = models.DateTimeField(null=True, verbose_name="test tasdiqlangan")
+    test_confirmed_by = models.ForeignKey(
+        "accounts.StaffUser",
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name="testni tasdiqlagan",
+    )
+    approved_at = models.DateTimeField(null=True, verbose_name="tasdiqlangan")
+    approved_by = models.ForeignKey(
+        "accounts.StaffUser",
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name="tasdiqlagan",
+    )
+    approved_revision = models.PositiveIntegerField(null=True, verbose_name="tasdiqlangan versiya")
+    # max(approved_at + CAMPAIGN_APPROVAL_DELAY_MINUTES, scheduled_at): the beat starts the send after it
+    dispatch_after = models.DateTimeField(null=True, verbose_name="yuborish vaqti")
     started_at = models.DateTimeField(null=True, verbose_name="boshlangan")
     sent_at = models.DateTimeField(null=True, verbose_name="yuborilgan")
     # M3: set with state cancelled only
     cancelled_at = models.DateTimeField(null=True, verbose_name="bekor qilingan")
+    cancelled_by = models.ForeignKey(
+        "accounts.StaffUser",
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name="bekor qilgan",
+    )
+    stop_requested_at = models.DateTimeField(null=True, verbose_name="to‘xtatish so‘ralgan")
+    stop_requested_by = models.ForeignKey(
+        "accounts.StaffUser",
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name="to‘xtatishni so‘ragan",
+    )
+    stopped_at = models.DateTimeField(null=True, verbose_name="to‘xtatilgan")
+    failed_at = models.DateTimeField(null=True, verbose_name="yuborilmagan")
+    # live tallies from the first batch on (``skipped`` counts as failed; ``stopped`` counts in neither)
     sent = models.PositiveIntegerField(null=True, verbose_name="yuborildi")  # FCM accepted
     failed = models.PositiveIntegerField(null=True, verbose_name="xato")  # FCM rejected / no token
     # M2 acknowledgements; null in M1
@@ -251,27 +320,35 @@ class Campaign(TimeStampedModel):
             ),
             models.CheckConstraint(
                 condition=(
-                    Q(
-                        state="scheduled",
-                        scheduled_at__isnull=False,
-                        started_at__isnull=True,
-                        sent_at__isnull=True,
-                        sent__isnull=True,
-                        failed__isnull=True,
-                    )
+                    Q(state="draft") & _NOT_STARTED & _NOT_APPROVED & _NOT_STOPPED
                     | Q(
-                        state="queued",
-                        started_at__isnull=True,
-                        sent_at__isnull=True,
-                        sent__isnull=True,
-                        failed__isnull=True,
+                        state="tested", tested_revision=F("content_revision"), test_confirmed_at__isnull=False
                     )
+                    & _NOT_STARTED
+                    & _NOT_APPROVED
+                    & _NOT_STOPPED
+                    | Q(
+                        state="scheduled",
+                        approved_at__isnull=False,
+                        approved_revision__isnull=False,
+                        dispatch_after__isnull=False,
+                    )
+                    & _NOT_STARTED
+                    & _NOT_STOPPED
                     | Q(
                         state="sending",
                         started_at__isnull=False,
                         sent_at__isnull=True,
-                        sent__isnull=True,
-                        failed__isnull=True,
+                        failed_at__isnull=True,
+                    )
+                    & _NOT_STOPPED
+                    | Q(
+                        state="stopping",
+                        started_at__isnull=False,
+                        stop_requested_at__isnull=False,
+                        sent_at__isnull=True,
+                        stopped_at__isnull=True,
+                        failed_at__isnull=True,
                     )
                     | Q(
                         state="sent",
@@ -279,15 +356,26 @@ class Campaign(TimeStampedModel):
                         sent_at__isnull=False,
                         sent__isnull=False,
                         failed__isnull=False,
+                        stopped_at__isnull=True,
+                        failed_at__isnull=True,
                     )
                     | Q(
-                        state="cancelled",
-                        scheduled_at__isnull=False,
-                        started_at__isnull=True,
+                        state="partially_sent",
+                        started_at__isnull=False,
+                        sent__isnull=False,
+                        failed__isnull=False,
                         sent_at__isnull=True,
-                        sent__isnull=True,
-                        failed__isnull=True,
                     )
+                    & (Q(stopped_at__isnull=False) | Q(failed_at__isnull=False))
+                    | Q(
+                        state="failed",
+                        started_at__isnull=False,
+                        failed_at__isnull=False,
+                        sent__isnull=False,
+                        failed__isnull=False,
+                        sent_at__isnull=True,
+                    )
+                    | Q(state="cancelled", sent_at__isnull=True, failed_at__isnull=True)
                 ),
                 name="campaign_state_fields",
             ),
@@ -301,7 +389,9 @@ class Campaign(TimeStampedModel):
             models.Index(
                 Coalesce("scheduled_at", "created_at").desc(), models.F("id").desc(), name="campaign_at_idx"
             ),
-            models.Index(fields=["scheduled_at"], condition=Q(state="scheduled"), name="campaign_due_idx"),
+            models.Index(
+                fields=["dispatch_after"], condition=Q(state="scheduled"), name="campaign_dispatch_idx"
+            ),
             models.Index(fields=["state", "kind"], name="campaign_state_kind_idx"),
             models.Index(
                 fields=["audience_segment"], condition=Q(state="scheduled"), name="campaign_sched_segment_idx"
@@ -320,6 +410,7 @@ class CampaignRecipient(models.Model):
         SENT = "sent", "Yuborildi"
         FAILED = "failed", "Xato"
         SKIPPED = "skipped", "O‘tkazib yuborildi"  # device gone / push disabled between materialise and send
+        STOPPED = "stopped", "To‘xtatildi"  # never attempted: the campaign stopped / failed before its batch
 
     campaign = models.ForeignKey(
         "notifications.Campaign",
@@ -379,6 +470,106 @@ class CampaignRecipient(models.Model):
 
     def __str__(self) -> str:
         return f"Kampaniya #{self.campaign_id} → mijoz #{self.customer_id} ({self.get_state_display()})"
+
+
+class TestDevice(TimeStampedModel):
+    """A real customer-app device a superuser registered (by the customer's phone) as a test target for
+    campaigns; the registry is global and soft-deleted (``is_active``)."""
+
+    __test__ = False  # the name starts with "Test": not a pytest collection target
+
+    device = models.ForeignKey(
+        "accounts.Device", on_delete=models.CASCADE, related_name="+", verbose_name="qurilma"
+    )
+    phone = models.CharField(max_length=13, verbose_name="telefon")  # snapshot of the customer's phone
+    label = models.CharField(max_length=60, verbose_name="nomi")  # "Dilnoza — iPhone"
+    registered_by = models.ForeignKey(
+        "accounts.StaffUser",
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name="ro‘yxatga olgan",
+    )
+    is_active = models.BooleanField(default=True, verbose_name="faol")
+
+    class Meta:
+        verbose_name = "test qurilmasi"
+        verbose_name_plural = "test qurilmalari"
+        ordering = ["id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["device"], condition=Q(is_active=True), name="testdevice_active_device_unique"
+            ),
+            models.CheckConstraint(condition=~Q(label=""), name="testdevice_label_required"),
+        ]
+
+    def __str__(self) -> str:
+        return f"Test qurilmasi «{self.label}» ({self.phone})"
+
+
+class CampaignTest(models.Model):
+    """One test push of a campaign revision to one test device, with the FCM outcome and the superuser's
+    confirmation that it looked right on the device."""
+
+    campaign = models.ForeignKey(
+        "notifications.Campaign", on_delete=models.CASCADE, related_name="tests", verbose_name="kampaniya"
+    )
+    revision = models.PositiveIntegerField(verbose_name="matn versiyasi")
+    test_device = models.ForeignKey(
+        "notifications.TestDevice",
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="tests",
+        verbose_name="test qurilmasi",
+    )
+    device = models.ForeignKey(
+        "accounts.Device", null=True, on_delete=models.SET_NULL, related_name="+", verbose_name="qurilma"
+    )
+    device_label = models.CharField(max_length=60, verbose_name="qurilma nomi")  # snapshot
+    phone = models.CharField(max_length=13, verbose_name="telefon")  # snapshot
+    inbox = models.OneToOneField(
+        "notifications.InboxNotification",
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="campaign_test",
+        verbose_name="inbox xabari",
+    )
+    sent_by = models.ForeignKey(
+        "accounts.StaffUser",
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name="yuborgan",
+    )
+    sent_at = models.DateTimeField(default=timestamp_default, editable=False, verbose_name="yuborilgan")
+    # null while the FCM call is in flight; True = accepted; False = rejected / provider down / no token
+    fcm_ok = models.BooleanField(null=True, verbose_name="FCM qabul qildi")
+    fcm_error = models.CharField(max_length=254, blank=True, verbose_name="FCM xatosi")
+    provider_message_id = models.CharField(max_length=128, blank=True, verbose_name="provayder xabar ID")
+    confirmed_by = models.ForeignKey(
+        "accounts.StaffUser",
+        null=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name="tasdiqlagan",
+    )
+    confirmed_at = models.DateTimeField(null=True, verbose_name="tasdiqlangan")
+
+    class Meta:
+        verbose_name = "kampaniya testi"
+        verbose_name_plural = "kampaniya testlari"
+        ordering = ["campaign_id", "id"]
+        constraints = [
+            models.CheckConstraint(
+                # ``fcm_ok`` null (in flight) must not pass: a NULL comparison would satisfy the CHECK
+                condition=Q(confirmed_at__isnull=True) | Q(fcm_ok=True, fcm_ok__isnull=False),
+                name="campaigntest_confirmed_delivered",
+            ),
+        ]
+        indexes = [models.Index(fields=["campaign", "revision"], name="campaigntest_campaign_rev_idx")]
+
+    def __str__(self) -> str:
+        return f"Kampaniya #{self.campaign_id} testi → {self.device_label} (v{self.revision})"
 
 
 class InboxNotification(TimeStampedModel):

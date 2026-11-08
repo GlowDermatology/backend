@@ -21,7 +21,7 @@ from glowderma.integrations.fcm.ports import PushMessage
 from glowderma.notifications import services, tasks, topics
 from glowderma.notifications.models import Campaign, CampaignRecipient, InboxNotification
 from glowderma.notifications.tests.conftest import ANCHOR
-from glowderma.notifications.tests.factories import CampaignFactory
+from glowderma.notifications.tests.factories import SendingCampaignFactory
 
 pytestmark = pytest.mark.django_db
 
@@ -302,7 +302,7 @@ def test_appointment_push_channel(clock: Any, fcm: FakeFcm) -> None:
 def test_campaign_push_channel_and_payload(clock: Any, fcm: FakeFcm, kind: str, channel: str) -> None:
     customer = CustomerFactory.create()
     SignedInDeviceFactory.create(customer=customer)
-    campaign = CampaignFactory.create(kind=kind)
+    campaign = SendingCampaignFactory.create(kind=kind)
     services.materialise(campaign)
     campaign.save()
     services.send_batch(campaign.pk, 0)
@@ -355,7 +355,7 @@ def test_unregistered_prunes_the_device(clock: Any, fcm: FakeFcm) -> None:
 def test_unregistered_campaign_recipient_prunes_its_device(clock: Any, fcm: FakeFcm) -> None:
     customer = CustomerFactory.create()
     device = SignedInDeviceFactory.create(customer=customer, fcm_token="campaign-bad")  # noqa: S106
-    campaign = CampaignFactory.create()
+    campaign = SendingCampaignFactory.create()
     services.materialise(campaign)
     campaign.save()
     services.send_batch(campaign.pk, 0)
@@ -393,7 +393,7 @@ def test_campaign_payload_invalid_keeps_the_device(
 ) -> None:
     customer = CustomerFactory.create()
     device = SignedInDeviceFactory.create(customer=customer, fcm_token="c-payload")  # noqa: S106
-    campaign = CampaignFactory.create()
+    campaign = SendingCampaignFactory.create()
     services.materialise(campaign)
     campaign.save()
     with caplog.at_level(logging.ERROR, logger="glowderma.notifications.services"):

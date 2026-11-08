@@ -194,6 +194,7 @@ def test_choice_labels_repeat_the_export_labels() -> None:
         (labels.CUSTOMER_STATUS, enums.CustomerStatus),
         (labels.LEDGER_KIND, enums.LedgerKind),
         (labels.NOTIFICATION_KIND, enums.NotificationKind),
+        (labels.NOTIFICATION_STATE, enums.NotificationState),
         (labels.SPECIALIST_ROLE, enums.SpecialistRole),
         (labels.SERVICE_CATEGORY, enums.ServiceCategory),
         (labels.REFUND_STATE, enums.RefundState),

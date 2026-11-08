@@ -5,6 +5,7 @@ from glowderma.core.admin import (
     INFO,
     PRIMARY,
     SUCCESS,
+    WARNING,
     customer_column,
     date_range,
     display,
@@ -16,14 +17,26 @@ from glowderma.core.admin import (
 from glowderma.notifications.models import (
     Campaign,
     CampaignRecipient,
+    CampaignTest,
     CustomerSegment,
     InboxNotification,
     SegmentMember,
     StatusTemplate,
+    TestDevice,
 )
 
-CAMPAIGN_STATE_VARIANTS = {"scheduled": INFO, "queued": PRIMARY, "sending": PRIMARY, "sent": SUCCESS}
-RECIPIENT_STATE_VARIANTS = {"pending": INFO, "sent": SUCCESS, "failed": DANGER}
+CAMPAIGN_STATE_VARIANTS = {
+    "draft": INFO,
+    "tested": INFO,
+    "scheduled": PRIMARY,
+    "sending": PRIMARY,
+    "stopping": WARNING,
+    "sent": SUCCESS,
+    "partially_sent": WARNING,
+    "cancelled": DANGER,
+    "failed": DANGER,
+}
+RECIPIENT_STATE_VARIANTS = {"pending": INFO, "sent": SUCCESS, "failed": DANGER, "stopped": WARNING}
 PUSH_STATE_VARIANTS = {"queued": INFO, "sending": PRIMARY, "sent": SUCCESS, "failed": DANGER}
 
 
@@ -69,6 +82,8 @@ register_read_only(
         "audience_type",
         status_column("state", "Holat", CAMPAIGN_STATE_VARIANTS),
         "scheduled_at",
+        "approved_at",
+        "dispatch_after",
         "sent_at",
         "sent",
         "failed",
@@ -76,7 +91,44 @@ register_read_only(
     list_filter=(dropdown("kind"), dropdown("state"), dropdown("audience_type"), date_range("sent_at")),
     search_fields=("title",),
     ordering=("-id",),
-    autocomplete_fields=("link_product", "audience_segment", "audience_customer", "author"),
+    autocomplete_fields=(
+        "link_product",
+        "audience_segment",
+        "audience_customer",
+        "author",
+        "test_confirmed_by",
+        "approved_by",
+        "cancelled_by",
+        "stop_requested_by",
+    ),
+)
+register_read_only(
+    TestDevice,
+    title_format="Test qurilmasi: {obj.label}",
+    list_display=("id", "label", "phone", "device", "is_active", "registered_by", "created_at"),
+    list_filter=("is_active",),
+    list_select_related=("device", "registered_by"),
+    search_fields=("label", "phone"),
+    ordering=("id",),
+    autocomplete_fields=("device", "registered_by"),
+)
+register_read_only(
+    CampaignTest,
+    list_display=(
+        "id",
+        "campaign",
+        "revision",
+        "device_label",
+        "phone",
+        "fcm_ok",
+        "sent_at",
+        "confirmed_at",
+    ),
+    list_filter=("fcm_ok",),
+    list_select_related=("campaign", "test_device", "sent_by", "confirmed_by"),
+    search_fields=("campaign__id", "device_label", "phone"),
+    ordering=("campaign_id", "id"),
+    autocomplete_fields=("campaign", "test_device", "device", "inbox", "sent_by", "confirmed_by"),
 )
 register_read_only(
     CampaignRecipient,

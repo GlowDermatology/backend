@@ -458,6 +458,11 @@ if FCM_MODE not in {"fake", "live"}:
 CAMPAIGN_BATCH_SIZE = env_int("CAMPAIGN_BATCH_SIZE", 500)
 if CAMPAIGN_BATCH_SIZE < 1:
     raise ImproperlyConfigured("CAMPAIGN_BATCH_SIZE must be a positive integer")
+# Campaign approval workflow (admin contract §2.8): an approved campaign is dispatched no earlier than this
+# many minutes after the approval (the cancel window). 0 is allowed locally (e2e); production refuses < 5.
+CAMPAIGN_APPROVAL_DELAY_MINUTES = env_bounded_int(
+    "CAMPAIGN_APPROVAL_DELAY_MINUTES", 5, minimum=0, maximum=1440
+)
 # --- Orders, payments and delivery adapters (contract 2.2 / 2.12, M1c) ---
 # CLICK_MODE / PAYME_MODE / BTS_MODE: "fake" (deterministic in-process providers driven by Order.metadata
 # ["fake"], see integrations.{click,payme,bts}.fake) or "live" (M3); each defaults to INTEGRATIONS_MODE.

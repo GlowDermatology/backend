@@ -37,6 +37,7 @@ __all__ = [
     "appointment_inbox_key",
     "campaign_inbox_key",
     "campaign_send_batch_key",
+    "campaign_test_inbox_key",
     "order_status_inbox_key",
 ]
 
@@ -48,3 +49,8 @@ def campaign_send_batch_key(campaign_id: int, batch_no: int) -> str:
 def campaign_inbox_key(campaign_id: int, customer_id: int) -> str:
     """``InboxNotification.dedupe_key`` of a campaign delivery: one per customer per campaign."""
     return f"campaign:{campaign_id}:{customer_id}"
+
+
+def campaign_test_inbox_key(campaign_id: int, test_id: int) -> str:
+    """``InboxNotification.dedupe_key`` of a test push (the tester's real inbox row): one per test."""
+    return f"campaign-test:{campaign_id}:{test_id}"
