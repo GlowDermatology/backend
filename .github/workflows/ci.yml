@@ -394,6 +394,10 @@ jobs:
           -v "$PWD/sarif:/out"
           anchore/grype:v0.121.1@sha256:6b06708b036f74b2cd70e94b706b4586af96d1932e6ac46255940b2e39dd44a9
           "registry:$REF" --only-fixed --fail-on high -o table -o sarif=/out/grype.sarif
+      # Two reviewed false positives are accepted: CIS-DI-0010 flags any file named settings.py (here the config
+      # modules of Unfold, DRF and drf-spectacular, no credentials), and DKL-DI-0005 flags the official python base
+      # image's layer, which clears apt with `apt-get dist-clean` (Dockle 0.4.15 knows only `rm -rf
+      # /var/lib/apt/lists`); our own apt layer in the Dockerfile removes the lists.
       - name: dockle (CIS Docker image checks)
         if: ${{ !cancelled() }}
         env:
@@ -402,7 +406,8 @@ jobs:
         run: >-
           docker run --rm -e DOCKLE_USERNAME -e DOCKLE_PASSWORD -v "$PWD/sarif:/out"
           goodwithtech/dockle:v0.4.15@sha256:eade932f793742de0aa8755406c7677cd7696f8675b6180926f7eeffa7abe6b9
-          --exit-code 1 --exit-level warn --format sarif --output /out/dockle.sarif "$REF"
+          --exit-code 1 --exit-level warn --accept-file settings.py --ignore DKL-DI-0005
+          --format sarif --output /out/dockle.sarif "$REF"
       - if: always() && hashFiles('sarif/trivy.sarif') != ''
         uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
