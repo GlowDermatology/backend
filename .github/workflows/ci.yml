@@ -15,6 +15,13 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        # TEMPORARY: manual runs only; push and pull_request always run every test.
+        description: Skip the slow test suites (unit/integration tests and Playwright e2e)
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -213,8 +220,10 @@ jobs:
             POSTGRES_HOST=localhost POSTGRES_PORT=5433 uv run python manage.py migrate --noinput -v 1
           test "$(psql -At -d gd_app_role -c "SELECT count(*) FROM django_migrations")" -gt 0
           psql -v ON_ERROR_STOP=1 -d glowderma -c "DROP DATABASE gd_app_role"
-      - run: uv run coverage run -m pytest
-      - run: uv run coverage report --fail-under=85
+      - if: ${{ !inputs.skip_tests }}
+        run: uv run coverage run -m pytest
+      - if: ${{ !inputs.skip_tests }}
+        run: uv run coverage report --fail-under=85
       - run: uv run python manage.py spectacular --validate --fail-on-warn --file /tmp/schema.yaml
       - run: diff -u openapi/schema.yaml /tmp/schema.yaml
       - name: Production deploy checks
@@ -288,14 +297,17 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: e2e_admin/package-lock.json
-      - run: npm ci --prefix e2e_admin
+      - if: ${{ !inputs.skip_tests }}
+        run: npm ci --prefix e2e_admin
       - name: Chromium for Playwright
+        if: ${{ !inputs.skip_tests }}
         working-directory: e2e_admin
         run: npx playwright install --with-deps chromium
       - name: Playwright suite
+        if: ${{ !inputs.skip_tests }}
         run: npm --prefix e2e_admin test
       - name: Report and failure screenshots
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && !inputs.skip_tests }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-console-report
