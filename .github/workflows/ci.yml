@@ -444,9 +444,19 @@ jobs:
           path: app
           fetch-depth: 0
           persist-credentials: false
+      # Short-lived (1 h, revoked when the job ends) installation token scoped to the infra repo's contents.
+      # A push made with it starts the infra deploy workflow, which a GITHUB_TOKEN push would not.
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: infra-token
+        with:
+          client-id: ${{ vars.INFRA_APP_CLIENT_ID }}
+          private-key: ${{ secrets.INFRA_APP_PRIVATE_KEY }}
+          owner: GlowDermatology
+          repositories: infra
+          permission-contents: write
       - name: Write environments/staging/backend/image.env in the infra repo
         env:
-          TOKEN: ${{ secrets.INFRA_REPO_TOKEN }}
+          TOKEN: ${{ steps.infra-token.outputs.token }}
           TAG: ${{ needs.build-publish.outputs.tag }}
           DIGEST: ${{ needs.build-publish.outputs.digest }}
           CREATED: ${{ needs.build-publish.outputs.created }}
@@ -455,7 +465,6 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          [ -n "$TOKEN" ] || { echo "::error::secret INFRA_REPO_TOKEN is missing (infra docs/deployment.md)"; exit 1; }
           remote="https://x-access-token:${TOKEN}@github.com/GlowDermatology/infra.git"
           git clone --quiet --depth 50 "$remote" infra
           cd infra
