@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import ast
 import re
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 from django.apps import apps
 from django.conf import settings
 from django.contrib import admin
+from django.core.cache import cache
 from django.core.management import call_command
 from django.test import Client, override_settings
 from django.urls import reverse
@@ -33,6 +35,7 @@ UZBEK = re.compile(
 )
 CYRILLIC = re.compile(r"[А-Яа-яЁё]{3,}")
 TAGS = re.compile(r"<(script|style)\b.*?</\1>|<[^>]+>", re.DOTALL)
+JSON_BLOCK = re.compile(r'<pre class="gd-json">.*?</pre>', re.DOTALL)
 
 
 def with_language(client: Client, code: str) -> Client:
@@ -41,9 +44,10 @@ def with_language(client: Client, code: str) -> Client:
 
 
 def text_of(response: object) -> str:
-    """The page's visible text, without the switcher's own entry (the Uzbek language is named in Uzbek)."""
-    text = TAGS.sub(" ", response.content.decode())  # type: ignore[attr-defined]
-    return text.replace(dict(console_i18n.LANGUAGES)["uz"], "")
+    """The page's visible text, without its JSON documents (data) and the switcher's own entry (the Uzbek
+    language is named in Uzbek)."""
+    html = JSON_BLOCK.sub(" ", response.content.decode())  # type: ignore[attr-defined]
+    return TAGS.sub(" ", html).replace(dict(console_i18n.LANGUAGES)["uz"], "")
 
 
 # --- the default and the cookie ---------------------------------------------------------------------------
@@ -263,7 +267,8 @@ def test_a_marked_text_is_itself_under_uzbek() -> None:
 
 
 def test_model_metadata_is_verbatim_under_uzbek_even_when_django_translates_the_word() -> None:
-    lazy_none = console_i18n._lazy("None")  # Django's uz catalog translates the admin's "None"
+    # Django's uz catalog translates the admin's "None"; the lazy text of a model label never asks it
+    lazy_none = console_i18n._in_language_lazy("None")
     with translation.override("uz"):
         assert translation.gettext("None") != "None"
         assert str(lazy_none) == "None"
@@ -304,7 +309,7 @@ def test_the_extractor_reads_python_and_template_markers() -> None:
     template = (
         '{% load i18n %}<h2>{% translate "Navbat bo‘sh" %}</h2>'
         "<p title=\"{% translate 'Ochish' %}\">{% blocktranslate trimmed with n=count %}\n"
-        "  {{ n }} ta provayder, 100% tayyor\n{% endblocktranslate %}</p>"
+        "  {{ n }} ta provayder, 100% tayyor\n{% endblocktranslate %}</p>{% translate '50% chegirma' %}"
         "{% blocktranslate trimmed count n=total %}{{ n }} ta yozuv{% plural %}{{ n }} ta yozuv"
         "{% endblocktranslate %}"
         '{% include "x.html" with icon="sms" text=_("Kod yuborilmagan") %}{{ _("Bo‘sh")|upper }}'
@@ -313,7 +318,9 @@ def test_the_extractor_reads_python_and_template_markers() -> None:
         [
             console_catalog.Message("Navbat bo‘sh"),
             console_catalog.Message("Ochish"),
-            console_catalog.Message("%(n)s ta provayder, 100% tayyor"),
+            # a literal per cent sign is doubled: the msgid the template tags look up
+            console_catalog.Message("%(n)s ta provayder, 100%% tayyor"),
+            console_catalog.Message("50%% chegirma"),
             console_catalog.Message("%(n)s ta yozuv", "%(n)s ta yozuv"),
             console_catalog.Message("Kod yuborilmagan"),
             console_catalog.Message("Bo‘sh"),
@@ -329,38 +336,132 @@ def test_the_check_command_passes_on_the_committed_catalogs() -> None:
 # --- the pages --------------------------------------------------------------------------------------------
 
 
-# Their rows are stored texts (the order-status templates a migration seeds), shown as they were written.
-STORED_TEXT_PAGES = {"notifications_statustemplate"}
-
-
 def console_pages() -> list[str]:
+    """The dashboards, the settings page, every registered model's list and the change page of its first
+    row (the admins of the test's database decide which change pages exist)."""
     pages = [reverse("admin:index"), reverse("admin:site_config_settings")]
     pages += [reverse(f"admin:reporting_{name}") for name in ("money", "sales", "customers")]
     for model in admin.site._registry:
         name = f"{model._meta.app_label}_{model._meta.model_name}"
-        if name not in STORED_TEXT_PAGES:
-            pages.append(reverse(f"admin:{name}_changelist"))
+        pages.append(reverse(f"admin:{name}_changelist"))
+        first = model._default_manager.order_by("pk").first()
+        if first is not None:
+            pages.append(reverse(f"admin:{name}_change", args=[first.pk]))
     return pages
+
+
+def stored_text() -> str:
+    """Every text value the database holds (names, notes, templates, JSON documents): a page shows such a
+    value as it was written, in whatever language that was."""
+    values: list[str] = []
+    for model in apps.get_models():
+        columns = [
+            field.name
+            for field in model._meta.concrete_fields
+            if field.get_internal_type() in {"CharField", "TextField", "JSONField", "SlugField", "EmailField"}
+        ]
+        if columns:
+            for row in model._default_manager.values_list(*columns):
+                values.extend(str(value) for value in row if value)
+    return "\n".join(values)
+
+
+@pytest.fixture
+def demo_shop() -> Iterator[None]:
+    """The reporting tests' demo shop: rows on most lists, so their change pages are checked too."""
+    from glowderma.core import seeding
+    from glowderma.reporting.tests.test_ops_dashboards import NOW, populate
+
+    cache.clear()
+    with seeding.pinned_clock(NOW):
+        populate()
+        yield
 
 
 @pytest.mark.django_db
 @pytest.mark.parametrize("language", ["en", "ru"])
-def test_no_console_page_keeps_uzbek_text_in_another_language(language: str) -> None:
-    """Every changelist and dashboard, empty database: nothing on the page is spelled the Uzbek way, so no
-    text bypasses the catalogs (the labels of the models, the columns, the filters, the tiles)."""
+def test_no_console_page_keeps_uzbek_text_in_another_language(language: str, demo_shop: None) -> None:
+    """Every dashboard, list and change page: nothing the code writes is spelled the Uzbek way, so no text
+    bypasses the catalogs (model and field labels, columns, filters, tiles, tabs, the money and JSON
+    fields' headers). What the database holds is data and is set aside."""
     client = with_language(console_client("manager"), language)
+    pages = console_pages()
+    assert len(pages) > 80
+    data = stored_text()
     leftovers: dict[str, list[str]] = {}
-    for url in console_pages():
+    for url in pages:
         page = client.get(url)
         assert page.status_code == 200, url
         assert f'<html lang="{language}"' in page.content.decode()
         text = text_of(page)
-        found = sorted({text[max(0, m.start() - 25) : m.end() + 25].strip() for m in UZBEK.finditer(text)})
+        found = sorted(
+            {
+                text[max(0, match.start() - 25) : match.end() + 25].strip()
+                for match in UZBEK.finditer(text)
+                if line_of(text, match.start()) not in data and match.group(0) not in data
+            }
+        )
         if found:
             leftovers[url] = found[:5]
         if language == "ru":
             assert CYRILLIC.search(text), url
     assert leftovers == {}
+
+
+def line_of(text: str, position: int) -> str:
+    start = text.rfind("\n", 0, position) + 1
+    end = text.find("\n", position)
+    return text[start : end if end != -1 else len(text)].strip()
+
+
+@pytest.mark.django_db
+def test_money_and_json_columns_take_their_header_from_the_lazy_field_label() -> None:
+    """``ReadOnlyAdmin`` copies a field's label when the admin is registered: it must be the lazy one."""
+    from django.utils.functional import Promise
+
+    order_admin = admin.site._registry[Order]
+    label = order_admin.total_som.short_description  # type: ignore[attr-defined]
+    assert isinstance(label, Promise)
+    with translation.override("en"):
+        assert str(label) == "total"
+    with translation.override("uz"):
+        assert str(label) == "jami"
+
+
+@pytest.mark.django_db
+def test_the_admin_history_names_changed_fields_in_the_viewers_language() -> None:
+    """Django stores the changed fields' form labels (Uzbek, capitalised) and shows them through gettext."""
+    from django.contrib.admin.models import CHANGE, LogEntry
+
+    from glowderma.professionals.models import Service
+
+    labels = console_catalog.history_texts()
+    assert "Standart davomiylik (daq.)" in labels
+    entry = LogEntry(
+        action_flag=CHANGE, change_message='[{"changed": {"fields": ["Standart davomiylik (daq.)"]}}]'
+    )
+    with translation.override("uz"):
+        assert "Standart davomiylik (daq.)" in entry.get_change_message()
+    with translation.override("ru"):
+        assert "Standart davomiylik" not in entry.get_change_message()
+        assert CYRILLIC.search(entry.get_change_message())
+    with translation.override("en"):
+        assert "Default duration (min.)" in entry.get_change_message()
+    assert str(Service._meta.get_field("default_duration_min").verbose_name) != ""
+
+
+@pytest.mark.django_db
+def test_the_command_palette_follows_a_language_switch() -> None:
+    """Unfold caches a user's results per term; a copy made in another language is not served."""
+    cache.clear()
+    client = console_client("staff")
+    url = reverse("admin:search") + "?s=buyurtma"
+    uzbek = with_language(client, "uz").get(url).content.decode()
+    assert "Buyurtmalar" in uzbek
+    english = with_language(client, "en").get(reverse("admin:search") + "?s=order").content.decode()
+    assert "Orders" in english
+    russian = with_language(client, "ru").get(reverse("admin:search") + "?s=order").content.decode()
+    assert "Orders" not in russian
 
 
 @pytest.mark.django_db
@@ -379,7 +480,7 @@ def _runtime_imports(tree: ast.Module) -> list[tuple[str, str]]:
     found: list[tuple[str, str]] = []
 
     def visit(node: ast.AST) -> None:
-        if isinstance(node, ast.If) and "TYPE_CHECKING" in ast.unparse(node.test):
+        if isinstance(node, ast.If) and ast.unparse(node.test) in {"TYPE_CHECKING", "typing.TYPE_CHECKING"}:
             for other in node.orelse:
                 visit(other)
             return
@@ -406,3 +507,19 @@ def test_lazy_string_types_are_imported_for_type_checking_only() -> None:
             if module.split(".")[0] == "django_stubs_ext" or name in {"_StrPromise", "_StrOrPromise"}:
                 offenders.append(f"{path.relative_to(root)}: {module}.{name}")
     assert offenders == []
+
+
+def test_the_type_checking_guard_sees_through_lookalikes() -> None:
+    source = (
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n    from django_stubs_ext import StrOrPromise\n"
+        "else:\n    from django.utils.functional import Promise\n"
+        "if not TYPE_CHECKING:\n    import django_stubs_ext\n"
+        "def late():\n    from django.utils.functional import _StrPromise\n"
+    )
+    assert _runtime_imports(ast.parse(source)) == [
+        ("typing", "TYPE_CHECKING"),
+        ("django.utils.functional", "Promise"),
+        ("django_stubs_ext", ""),
+        ("django.utils.functional", "_StrPromise"),
+    ]

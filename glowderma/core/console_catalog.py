@@ -11,8 +11,8 @@ A console message is an **Uzbek** msgid from one of four places:
 * a ``{% translate %}`` / ``{% blocktranslate %}`` or a ``_("…")`` argument of a template
   (:func:`template_messages`, through Django's own ``templatize``);
 * model metadata made lazy at start-up (``console_i18n.metadata_texts``);
-* a label the console translates when it renders it: the members of the project's ``Choices`` enums and the
-  mappings of :mod:`glowderma.core.labels` (:func:`dynamic_texts`).
+* a label the console translates when it renders it: the mappings of :mod:`glowderma.core.labels`
+  (:func:`dynamic_texts`) and the field names Django's admin history stores (:func:`history_texts`).
 
 ``locale/en`` translates exactly these. ``locale/ru`` translates these **and** every English string of Unfold
 and the Django admin that ``locale/uz`` translates (:func:`foreign_messages`): Django falls back from Russian
@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import ast
 import re
-import sys
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -32,6 +31,8 @@ from typing import Final
 
 from django.conf import settings
 from django.db import models
+from django.utils import translation
+from django.utils.text import capfirst
 from django.utils.translation.template import templatize
 
 from glowderma.core import console_i18n, labels
@@ -149,10 +150,11 @@ def python_messages(source: str) -> Iterator[Message]:
 
 def template_messages(source: str) -> Iterator[Message]:
     """The ``translate`` / ``blocktranslate`` messages of a template (``templatize`` turns them into the
-    ``gettext('…')`` calls ``xgettext`` reads; ``%%`` is how it writes a literal per cent sign)."""
+    ``gettext('…')`` calls ``xgettext`` reads). A literal per cent sign stays doubled (``%%``): that is the
+    msgid the template tags look up."""
     for match in _TEMPLATE_CALL.finditer(templatize(source)):
         arguments: list[str | None] = [
-            str(ast.literal_eval(token)).replace("%%", "%") for token in _STRING.findall(match["args"])
+            str(ast.literal_eval(token)) for token in _STRING.findall(match["args"])
         ]
         message = _message(match["name"], arguments)
         if message is not None:
@@ -175,16 +177,11 @@ def template_files() -> Iterator[Path]:
 
 
 def dynamic_texts() -> dict[str, str]:
-    """Labels the console translates at render time, each with where it is defined: the members of every
-    ``Choices`` enum of the project and the string values of :mod:`glowderma.core.labels`."""
+    """Labels the console translates at render time (``gettext(value)``), each with where it is defined:
+    the string values of :mod:`glowderma.core.labels`. An enum's labels are not swept up: the ones a model
+    field uses arrive as its choices (``metadata_texts``), and the rest are API vocabulary no page shows —
+    some spell like an interface string ("All", "Order") and would take its catalog entry."""
     found: dict[str, str] = {}
-    for name, module in sorted(sys.modules.items()):
-        if not name.startswith(console_i18n.PROJECT_PACKAGE) or ".tests" in name or module is None:
-            continue
-        for value in vars(module).values():
-            if isinstance(value, type) and issubclass(value, models.Choices) and value.__module__ == name:
-                for label in value.labels:
-                    found.setdefault(str(label), f"{name}.{value.__qualname__}")
     for name, value in vars(labels).items():
         if name.startswith("_") or UNTRANSLATED_LABELS.search(name):
             continue
@@ -203,6 +200,30 @@ def dynamic_texts() -> dict[str, str]:
     return found
 
 
+def history_texts() -> dict[str, str]:
+    """Field names as Django's admin history stores them. A change of an editable page is logged with the
+    form labels of the changed fields (the capitalised verbose names, in the source language) and shown
+    through ``gettext``: the catalogs carry those spellings for the models an editable admin writes."""
+    from django.contrib import admin
+
+    from glowderma.core.admin import ReadOnlyAdmin
+
+    found: dict[str, str] = {}
+    for model, model_admin in admin.site._registry.items():
+        if not model.__module__.startswith(console_i18n.PROJECT_PACKAGE) or isinstance(
+            model_admin, ReadOnlyAdmin
+        ):
+            continue
+        for edited in (model, *(inline.model for inline in model_admin.inlines)):
+            for column in edited._meta.get_fields():
+                if isinstance(column, models.Field) and column.editable and not column.auto_created:
+                    with translation.override(None):
+                        label = capfirst(str(column.verbose_name))
+                    if label:
+                        found.setdefault(label, f"admin history ({edited._meta.label})")
+    return found
+
+
 def collect() -> Catalog:
     """Every message the console needs in English and Russian."""
     catalog = Catalog()
@@ -216,6 +237,8 @@ def collect() -> Catalog:
     for text in sorted(console_i18n.metadata_texts()):
         catalog.add(Message(text), "model metadata")
     for text, source in dynamic_texts().items():
+        catalog.add(Message(text), source)
+    for text, source in history_texts().items():
         catalog.add(Message(text), source)
     return catalog
 

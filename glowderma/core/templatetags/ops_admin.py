@@ -155,10 +155,10 @@ def ops_applied_filters(cl: Any) -> list[dict[str, str]]:
 @register.simple_tag
 def ops_result_count(cl: Any) -> str:
     """``{% ops_result_count cl %}``: the changelist's total, «jami 287 ta buyurtma» (in Uzbek a noun after
-    a number stays singular). A translation may use ``%(names)s``, the model's plural name, as well."""
+    a number stays singular). English and Russian give the total alone ("total: 287"): a model name
+    cannot be declined after a number from a catalog entry."""
     count = cl.result_count
     return ngettext("jami %(count)s ta %(name)s", "jami %(count)s ta %(name)s", count) % {
         "count": count,
         "name": cl.opts.verbose_name,
-        "names": cl.opts.verbose_name_plural,
     }

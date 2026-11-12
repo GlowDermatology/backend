@@ -365,55 +365,31 @@ msgstr "7 days"
 msgid "7 kun ichida kod yuborilmagan"
 msgstr "No codes sent in the last 7 days"
 
-#: glowderma.core.enums.SocialTokenType
-msgid "Access Token"
-msgstr "Access token"
-
-#: glowderma.core.enums.PushDataType
-msgid "Account Security"
-msgstr "Account security"
-
-#: glowderma.core.enums.PolicyVersionState
-msgid "Active"
-msgstr "Active"
-
-#: glowderma.core.enums.AdjustmentDirection
-msgid "Add"
-msgstr "Add"
-
-#: glowderma.core.enums.EventSource
 #: model metadata
 msgid "Admin"
 msgstr "Admin"
 
-#: glowderma.core.enums.CancellationReason
+#: glowderma.core.labels.CANCELLATION_REASON
 #: model metadata
 msgid "Admin bekor qildi"
 msgstr "Cancelled by admin"
 
-#: glowderma.core.enums.SessionRevokeReason
 #: model metadata
 msgid "Admin tugatdi"
 msgstr "Ended by admin"
 
-#: glowderma.core.enums.NotificationKind
+#: glowderma.core.labels.NOTIFICATION_KIND
 #: model metadata
 msgid "Aksiya"
 msgstr "Promotion"
 
-#: glowderma.core.enums.ProductChangeKind
 #: model metadata
 msgid "Aksiya olib tashlandi"
 msgstr "Promotion removed"
 
-#: glowderma.core.enums.ProductChangeKind
 #: model metadata
 msgid "Aksiya qo‘shildi"
 msgstr "Promotion added"
-
-#: glowderma.core.enums.OrderPeriod
-msgid "All"
-msgstr "All"
 
 #: glowderma/loyalty/admin.py
 msgid "Almashtirilgan"
@@ -426,10 +402,6 @@ msgstr "Contact details"
 #: glowderma/site_config/forms.py
 msgid "Aloqa ma’lumotlari saqlandi"
 msgstr "Contact details saved"
-
-#: glowderma.core.enums.SeoIssueCode
-msgid "Alt Text Fallback"
-msgstr "Alt text fallback"
 
 #: glowderma/reporting/dashboards/sales.py
 msgid "Alt matni nomdan olinadi"
@@ -472,27 +444,13 @@ msgstr "No policy in effect — purchases earn no cashback"
 msgid "Amaldagi siyosat yo‘q: xaridlar cashback olmaydi. Siyosatni admin panelda e’lon qiling."
 msgstr "No policy in effect: purchases earn no cashback. Publish a policy in the admin panel."
 
-#: glowderma.core.enums.OrderChannel
 #: model metadata
 msgid "Android"
 msgstr "Android"
 
-#: glowderma.core.enums.CustomerSocialProvider
 #: model metadata
 msgid "Apple"
 msgstr "Apple"
-
-#: glowderma.core.enums.InboxKind
-msgid "Appointment"
-msgstr "Appointment"
-
-#: glowderma.core.enums.OtpPurpose
-msgid "Attach Phone"
-msgstr "Attach phone"
-
-#: glowderma.core.enums.AppointmentAction
-msgid "Attend"
-msgstr "Attend"
 
 #: config/settings/ops_admin.py
 msgid "Audit jurnali"
@@ -506,7 +464,6 @@ msgstr "6-digit code from the authenticator app"
 msgid "Autentifikator ilovasini (Google Authenticator, Microsoft Authenticator, 1Password …) oching va «Glow Derma Ops» uchun ko‘rsatilgan kodni kiriting."
 msgstr "Open your authenticator app (Google Authenticator, Microsoft Authenticator, 1Password …) and enter the code shown for “Glow Derma Ops”."
 
-#: glowderma.core.enums.EventSource
 #: model metadata
 msgid "BTS"
 msgstr "BTS"
@@ -553,7 +510,6 @@ msgstr "Created in BTS"
 msgid "Bajarildi"
 msgstr "Done"
 
-#: glowderma.core.enums.JobState
 #: model metadata
 msgid "Bajarilmoqda"
 msgstr "Running"
@@ -571,7 +527,6 @@ msgstr "Balance = sum of ledger entries"
 msgid "Balans = oxirgi yozuvdan keyingi balans"
 msgstr "Balance = balance after the last entry"
 
-#: glowderma.core.enums.BlockKind
 #: model metadata
 msgid "Band"
 msgstr "Busy"
@@ -580,7 +535,7 @@ msgstr "Busy"
 msgid "Band muddati o‘tgan, tranzaksiyasi ochiq"
 msgstr "Reservation expired, transaction still open"
 
-#: glowderma.core.enums.OrderEventType
+#: glowderma.core.labels.CANCELLATION_REASON
 #: model metadata
 msgid "Band muddati tugadi"
 msgstr "Reservation expired"
@@ -621,12 +576,11 @@ msgstr "All new customers"
 msgid "Beat vazifasi %(task)s har kuni 03:40 da ishlashi kerak."
 msgstr "Beat job %(task)s should run every day at 03:40."
 
-#: glowderma.core.enums.OrderStatus
+#: glowderma.core.labels.ORDER_STATUS
 #: model metadata
 msgid "Bekor qilindi"
 msgstr "Cancelled"
 
-#: glowderma.core.enums.AppointmentStatus
 #: glowderma/reporting/dashboards/customers.py
 #: model metadata
 msgid "Bekor qilingan"
@@ -683,7 +637,6 @@ msgstr "Billz import"
 msgid "Billz import (fon vazifasi)"
 msgstr "Billz import (background job)"
 
-#: glowderma.core.enums.JobKind
 #: model metadata
 msgid "Billz importi"
 msgstr "Billz import"
@@ -716,12 +669,10 @@ msgstr "Billz draft %(draft)s"
 msgid "Billz qoralamasi hali yaratilmagan"
 msgstr "Billz draft not created yet"
 
-#: glowderma.core.enums.LedgerSourceType
 #: model metadata
 msgid "Billz savdosi"
 msgstr "Billz sale"
 
-#: glowderma.core.enums.OrderEventType
 #: model metadata
 msgid "Billz savdosi yozildi"
 msgstr "Billz sale recorded"
@@ -807,6 +758,18 @@ msgstr "Recorded in Billz: %(at)s"
 msgid "Billz’ga yuborilgan"
 msgstr "Sent to Billz"
 
+#: admin history (professionals.Professional)
+msgid "Bio (en)"
+msgstr "Bio (en)"
+
+#: admin history (professionals.Professional)
+msgid "Bio (ru)"
+msgstr "Bio (ru)"
+
+#: admin history (professionals.Professional)
+msgid "Bio (uz)"
+msgstr "Bio (uz)"
+
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "Bir martalik kodlar (OTP)"
 msgstr "One-time codes (OTP)"
@@ -817,7 +780,6 @@ msgid_plural "Birinchi %(count)s tasi ko‘rildi."
 msgstr[0] "Only the first %(count)s message was examined."
 msgstr[1] "Only the first %(count)s messages were examined."
 
-#: glowderma.core.enums.AudienceType
 #: model metadata
 msgid "Bitta mijoz"
 msgstr "Single customer"
@@ -838,6 +800,10 @@ msgstr "In stock"
 msgid "Boshlangan"
 msgstr "Started"
 
+#: admin history (professionals.WorkingHours)
+msgid "Boshlanishi"
+msgstr "Start"
+
 #: glowderma/core/admin.py
 msgid "Boshqa"
 msgstr "Other"
@@ -855,7 +821,6 @@ msgstr "Sign in with a different account"
 msgid "Boshqaruv"
 msgstr "Dashboards"
 
-#: glowderma.core.enums.CashbackHoldState
 #: model metadata
 msgid "Bo‘shatildi"
 msgstr "Released"
@@ -890,7 +855,6 @@ msgstr[1] "%(count)s appointments today"
 msgid "Bugungi qabullar"
 msgstr "Today’s appointments"
 
-#: glowderma.core.enums.LedgerSourceType
 #: glowderma/commerce/admin.py
 #: glowderma/delivery/admin.py
 #: glowderma/loyalty/admin.py
@@ -921,7 +885,6 @@ msgstr "Enter the order number (digits only, for example 10253)."
 msgid "Buyurtma tarixi"
 msgstr "Order history"
 
-#: glowderma.core.enums.OrderEventType
 #: model metadata
 msgid "Buyurtma yaratildi"
 msgstr "Order created"
@@ -959,14 +922,6 @@ msgstr "Order statuses"
 msgid "Buyurtmani ochish"
 msgstr "Open order"
 
-#: glowderma.core.enums.PushDataType
-msgid "Campaign"
-msgstr "Campaign"
-
-#: glowderma.core.enums.OrderScope
-msgid "Cancelled"
-msgstr "Cancelled"
-
 #: glowderma/customers/admin.py
 #: glowderma/loyalty/admin.py
 #: glowderma/reporting/templates/reporting/dashboards/money.html
@@ -991,7 +946,6 @@ msgstr "Cashback ledger reconciliation"
 msgid "Cashback darajalari"
 msgstr "Cashback tiers"
 
-#: glowderma.core.enums.OrderEventType
 #: model metadata
 msgid "Cashback hisoblandi"
 msgstr "Cashback earned"
@@ -1013,15 +967,10 @@ msgstr "Cashback policy v%(version)s (%(basis)s, from %(date)s)"
 msgid "Cashback · 30 kun"
 msgstr "Cashback · 30 days"
 
-#: glowderma.core.enums.SeoIssueCode
-msgid "Category Missing"
-msgstr "Category missing"
-
 #: model metadata
 msgid "Celery vazifa ID"
 msgstr "Celery task ID"
 
-#: glowderma.core.enums.SessionRevokeReason
 #: model metadata
 msgid "Chiqish"
 msgstr "Sign-out"
@@ -1031,7 +980,7 @@ msgstr "Sign-out"
 msgid "Chorshanba"
 msgstr "Wednesday"
 
-#: glowderma.core.enums.PaymentProvider
+#: glowderma.core.labels.PROVIDER
 #: model metadata
 msgid "Click"
 msgstr "Click"
@@ -1040,12 +989,10 @@ msgstr "Click"
 msgid "Click kabinetida to‘lovning fiskal cheki (paydoc) chiqqanini tekshiring; chiqmagan bo‘lsa, texnik guruhga to‘lov raqamini yuboring — chek bo‘lmasa, qaytarishni avtomatik yuborib bo‘lmaydi."
 msgstr "In the Click dashboard, check that the payment’s fiscal receipt (paydoc) has been issued; if it has not, send the payment number to the technical team — without the receipt the refund cannot be sent automatically."
 
-#: glowderma.core.enums.RefundManualReason
 #: model metadata
 msgid "Click paydoc yo‘q"
 msgstr "No Click paydoc"
 
-#: glowderma.core.enums.RefundManualReason
 #: model metadata
 msgid "Click sinov rejimida"
 msgstr "Click in test mode"
@@ -1057,50 +1004,6 @@ msgstr "Click: paid payments without a paydoc"
 #: glowderma/professionals/templates/admin/professionals/submit_line.html
 msgid "Close"
 msgstr "Close"
-
-#: glowderma.core.enums.OrderScope
-msgid "Completed"
-msgstr "Completed"
-
-#: glowderma.core.enums.AppointmentAction
-msgid "Confirm"
-msgstr "Confirm"
-
-#: glowderma.core.enums.ShipmentState
-msgid "Created"
-msgstr "Created"
-
-#: glowderma.core.enums.DirectoryOrdering
-msgid "Created At"
-msgstr "Created at"
-
-#: glowderma.core.enums.DirectoryOrdering
-msgid "Created At Desc"
-msgstr "Created at desc"
-
-#: glowderma.core.enums.OrderCashbackKind
-msgid "Credit"
-msgstr "Credit"
-
-#: glowderma.core.enums.CashbackEarnedState
-msgid "Credited"
-msgstr "Credited"
-
-#: glowderma.core.enums.ExportFormat
-msgid "Csv"
-msgstr "CSV"
-
-#: glowderma.core.enums.LogoutScope
-msgid "Current"
-msgstr "Current"
-
-#: glowderma.core.enums.DashboardRange
-msgid "Custom"
-msgstr "Custom"
-
-#: glowderma.core.enums.AppointmentCancelledBy
-msgid "Customer"
-msgstr "Customer"
 
 #: glowderma/reporting/dashboards/money.py
 msgid "Daftar solishtiruvi"
@@ -1114,7 +1017,6 @@ msgstr "Ledger reconciliation checks"
 msgid "Daftar yozuvlari bo‘yicha (so‘m)"
 msgstr "By ledger entries (UZS)"
 
-#: glowderma.core.enums.BlockKind
 #: model metadata
 msgid "Dam olish"
 msgstr "Time off"
@@ -1139,6 +1041,10 @@ msgstr "Continue"
 msgid "Davomiyligi"
 msgstr "Duration"
 
+#: admin history (professionals.ProfessionalService)
+msgid "Davomiyligi (daq.)"
+msgstr "Duration (min.)"
+
 #: glowderma/reporting/templates/reporting/dashboards/sales.html
 msgid "Davrda yaratilgan %(total)s ta buyurtma hozir qayerda"
 msgstr "Where the orders created in the period are now (%(total)s in total)"
@@ -1147,43 +1053,15 @@ msgstr "Where the orders created in the period are now (%(total)s in total)"
 msgid "Davriy vazifalar (Celery beat)"
 msgstr "Scheduled jobs (Celery beat)"
 
-#: glowderma.core.enums.DashboardBucket
-msgid "Day"
-msgstr "Day"
-
-#: glowderma.core.enums.OrderCashbackKind
-msgid "Debit"
-msgstr "Debit"
-
-#: glowderma.core.enums.ProductOrdering
-msgid "Default"
-msgstr "Default"
-
-#: glowderma.core.enums.TimelineType
-msgid "Delivered"
-msgstr "Delivered"
-
-#: glowderma.core.enums.BillzImportMode
-msgid "Delta"
-msgstr "Delta"
-
-#: glowderma.core.enums.SpecialistRole
+#: glowderma.core.labels.SPECIALIST_ROLE
 #: model metadata
 msgid "Dermatolog"
 msgstr "Dermatologist"
 
-#: glowderma.core.enums.ServiceCategory
+#: glowderma.core.labels.SERVICE_CATEGORY
 #: model metadata
 msgid "Dermatologiya"
 msgstr "Dermatology"
-
-#: glowderma.core.enums.SeoIssueCode
-msgid "Description Missing"
-msgstr "Description missing"
-
-#: glowderma.core.enums.SeoIssueCode
-msgid "Description Short"
-msgstr "Description short"
 
 #: glowderma/commerce/admin.py
 msgid "Diagnostika"
@@ -1197,10 +1075,6 @@ msgstr "Attention"
 msgid "Dona"
 msgstr "Units"
 
-#: glowderma.core.enums.ProgressState
-msgid "Done"
-msgstr "Done"
-
 #: glowderma/site_config/templates/site_config/console/settings.html
 msgid "Do‘kon"
 msgstr "Store"
@@ -1209,7 +1083,6 @@ msgstr "Store"
 msgid "Do‘kon (POS)"
 msgstr "Store (POS)"
 
-#: glowderma.core.enums.PurchaseSource
 #: model metadata
 msgid "Do‘kon (QR)"
 msgstr "Store (QR)"
@@ -1239,10 +1112,6 @@ msgstr "Monday"
 msgid "E-pochtani tasdiqlash"
 msgstr "Email confirmation"
 
-#: glowderma.core.enums.AccountSecurityEvent
-msgid "Email Attached"
-msgstr "Email attached"
-
 #: glowderma/reporting/dashboards/customers.py
 msgid "Emailni tasdiqlash"
 msgstr "Email confirmation"
@@ -1259,11 +1128,6 @@ msgstr "Oldest message queued %(ago)s"
 msgid "Eng ko‘p sotilgan mahsulotlar"
 msgstr "Best-selling products"
 
-#: glowderma.core.enums.SeoSeverity
-msgid "Error"
-msgstr "Error"
-
-#: glowderma.core.enums.SessionRevokeReason
 #: model metadata
 msgid "Eski token qayta ishlatildi"
 msgstr "Old token reused"
@@ -1283,10 +1147,6 @@ msgstr "Stale: %(ago)s"
 #: model metadata
 msgid "Eskiz"
 msgstr "Eskiz"
-
-#: glowderma.core.enums.PolicyVersionState
-msgid "Expired"
-msgstr "Expired"
 
 #: glowderma/site_config/templates/site_config/console/settings.html
 msgid "E’lon qilinmagan"
@@ -1332,20 +1192,12 @@ msgstr "FCM error"
 msgid "FID"
 msgstr "FID"
 
-#: glowderma.core.enums.CustomerSocialProvider
 #: model metadata
 msgid "Facebook"
 msgstr "Facebook"
 
-#: glowderma.core.enums.ShipmentState
-msgid "Failed"
-msgstr "Failed"
-
-#: glowderma.core.enums.IntegrationMode
-msgid "Fake"
-msgstr "Fake"
-
-#: glowderma.core.enums.CashbackHoldState
+#: admin history (professionals.Location)
+#: glowderma.core.labels.PRODUCT_STATUS
 #: model metadata
 msgid "Faol"
 msgstr "Active"
@@ -1362,7 +1214,6 @@ msgstr "No active products"
 msgid "Faol, lekin qoldig‘i 0 yoki Billz’da yozuvi yo‘q"
 msgstr "Active, but stock is 0 or there is no Billz record"
 
-#: glowderma.core.enums.ProductChangeKind
 #: model metadata
 msgid "Faollashtirildi"
 msgstr "Activated"
@@ -1378,6 +1229,10 @@ msgstr "Managers only."
 #: glowderma/reporting/dashboards/money.py
 msgid "Faqat tunda"
 msgstr "Nightly only"
+
+#: admin history (professionals.Professional)
+msgid "Filial"
+msgstr "Branch"
 
 #: config/settings/ops_admin.py
 msgid "Filiallar"
@@ -1404,23 +1259,10 @@ msgstr "Terms of use"
 msgid "Foydalanish shartlari va maxfiylik siyosatining o‘zbekcha matnini kiriting, so‘ng e’lon qiling."
 msgstr "Enter the Uzbek text of the terms of use and the privacy policy, then publish."
 
-#: glowderma.core.enums.BillzImportMode
-msgid "Full"
-msgstr "Full"
-
-#: glowderma.core.enums.TierWarning
-msgid "Gap"
-msgstr "Gap"
-
-#: glowderma.core.enums.InboxKind
-msgid "General"
-msgstr "General"
-
 #: glowderma/accounts/console/views.py
 msgid "Glow Derma Ops — zaxira kodlar"
 msgstr "Glow Derma Ops — recovery codes"
 
-#: glowderma.core.enums.CustomerSocialProvider
 #: model metadata
 msgid "Google"
 msgstr "Google"
@@ -1442,6 +1284,10 @@ msgstr "Yes"
 msgid "Ha, 2FA ni qayta o‘rnatish"
 msgstr "Yes, reset 2FA"
 
+#: admin history (professionals.WorkingHours)
+msgid "Hafta kuni"
+msgstr "Day of week"
+
 #: glowderma/reporting/dashboards/ops.py
 msgid "Hali ishlamagan"
 msgstr "Not run yet"
@@ -1450,7 +1296,6 @@ msgstr "Not run yet"
 msgid "Hali ishlamagan (tungi hisobot bilan ishlaydi)"
 msgstr "Not run yet (runs with the nightly report)"
 
-#: glowderma.core.enums.AudienceType
 #: model metadata
 msgid "Hamma"
 msgstr "Everyone"
@@ -1467,10 +1312,6 @@ msgstr "Requeue all"
 msgid "Hammasini tugatish"
 msgstr "End all"
 
-#: glowderma.core.enums.TimelineType
-msgid "Handed To Courier"
-msgstr "Handed to courier"
-
 #: glowderma/reporting/templates/reporting/dashboards/money.html
 msgid "Har bir son o‘sha qatorlarning ro‘yxatiga olib boradi; ro‘yxat ko‘pi bilan 100 qatorni ochadi — undan ko‘p bo‘lsa, son ostida «Ro‘yxatda 100 / N» yoziladi."
 msgstr "Each number links to the list of those rows; the list opens at most 100 rows — if there are more, “Listed 100 / N” is shown under the number."
@@ -1483,7 +1324,6 @@ msgstr "Open each payment and check its status by transaction ID in the provider
 msgid "Har bir turning oxirgi ishga tushishi; 15 daqiqadan beri yurak urishi yo‘q — osilgan"
 msgstr "Latest run of each type; no heartbeat for 15 minutes — stuck"
 
-#: glowderma.core.enums.LinkKind
 #: model metadata
 msgid "Havola (URL)"
 msgstr "Link (URL)"
@@ -1492,7 +1332,6 @@ msgstr "Link (URL)"
 msgid "Havolani https:// bilan to‘liq kiriting."
 msgstr "Enter the full link, starting with https://."
 
-#: glowderma.core.enums.LinkKind
 #: model metadata
 msgid "Havolasiz"
 msgstr "No link"
@@ -1514,7 +1353,6 @@ msgctxt "cashback"
 msgid "Hisob"
 msgstr "Account"
 
-#: glowderma.core.enums.SessionRevokeReason
 #: model metadata
 msgid "Hisob faolsizlantirildi"
 msgstr "Account deactivated"
@@ -1523,7 +1361,7 @@ msgstr "Account deactivated"
 msgid "Hisob: %(account)s · turi: vaqtga asoslangan (TOTP), 6 raqam, 30 soniya."
 msgstr "Account: %(account)s · type: time-based (TOTP), 6 digits, 30 seconds."
 
-#: glowderma.core.enums.LedgerKind
+#: glowderma.core.labels.LEDGER_KIND
 #: model metadata
 msgid "Hisoblandi"
 msgstr "Earned"
@@ -1590,12 +1428,11 @@ msgstr "Status"
 msgid "Holat keldi"
 msgstr "Status received"
 
-#: glowderma.core.enums.RefundState
+#: glowderma.core.labels.REFUND_STATE
 #: model metadata
 msgid "Holat noma’lum · tekshiring"
 msgstr "Status unknown · check"
 
-#: glowderma.core.enums.OrderEventType
 #: model metadata
 msgid "Holat o‘zgardi"
 msgstr "Status changed"
@@ -1607,10 +1444,6 @@ msgstr "Status templates"
 #: glowderma/commerce/admin.py
 msgid "Holat xulosasi"
 msgstr "Status summary"
-
-#: glowderma.core.enums.DashboardBucket
-msgid "Hour"
-msgstr "Hour"
 
 #: glowderma/reporting/templates/reporting/dashboards/money.html
 msgid "Hozir"
@@ -1635,10 +1468,6 @@ msgstr "ID"
 #: model metadata
 msgid "IP manzil"
 msgstr "IP address"
-
-#: glowderma.core.enums.SocialTokenType
-msgid "Id Token"
-msgstr "ID token"
 
 #: config/settings/ops_admin.py
 msgid "Idempotentlik"
@@ -1681,7 +1510,6 @@ msgstr "Two-factor sign-in (TOTP)"
 msgid "Ikki bosqichli tekshiruv"
 msgstr "Two-factor verification"
 
-#: glowderma.core.enums.RequestedVia
 #: model metadata
 msgid "Ilova"
 msgstr "App"
@@ -1710,25 +1538,9 @@ msgstr "Shown in the AI section of the app (phase 2)."
 msgid "Ilovaning «Sozlamalar» bo‘limida ko‘rinadi. Bo‘sh qoldirilgan maydon ko‘rsatilmaydi."
 msgstr "Shown in the “Settings” section of the app. A field left empty is not shown."
 
-#: glowderma.core.enums.SeoIssueCode
-msgid "Image Missing"
-msgstr "Image missing"
-
-#: glowderma.core.enums.SeoIssueCode
-msgid "Images Missing"
-msgstr "Images missing"
-
 #: glowderma/reporting/dashboards/sales.py
 msgid "Import qilingan, hali tekshirilmagan"
 msgstr "Imported, not yet checked"
-
-#: glowderma.core.enums.CustomerRefundState
-msgid "In Progress"
-msgstr "In progress"
-
-#: glowderma.core.enums.StockStatus
-msgid "In Stock"
-msgstr "In stock"
 
 #: config/settings/ops_admin.py
 msgid "Inbox"
@@ -1738,11 +1550,6 @@ msgstr "Inbox"
 msgid "Inbox «%(kind)s» → mijoz #%(customer_id)s: %(title)s"
 msgstr "Inbox “%(kind)s” → customer #%(customer_id)s: %(title)s"
 
-#: glowderma.core.enums.SeoSeverity
-msgid "Info"
-msgstr "Info"
-
-#: glowderma.core.enums.ContentLanguage
 #: model metadata
 msgid "Inglizcha"
 msgstr "English"
@@ -1754,10 +1561,6 @@ msgstr "Instagram link"
 #: glowderma/site_config/forms.py
 msgid "Instagram havolasi https://instagram.com/… ko‘rinishida bo‘lsin."
 msgstr "Use the format https://instagram.com/… for the Instagram link."
-
-#: glowderma.core.enums.CartLineStatus
-msgid "Insufficient"
-msgstr "Insufficient"
 
 #: model metadata
 msgid "Integratsiya"
@@ -1796,7 +1599,7 @@ msgstr "Run"
 msgid "Ishlamoqda"
 msgstr "Running"
 
-#: glowderma.core.enums.LedgerKind
+#: glowderma.core.labels.LEDGER_KIND
 #: model metadata
 msgid "Ishlatildi"
 msgstr "Spent"
@@ -1804,6 +1607,10 @@ msgstr "Spent"
 #: glowderma/integrations/admin.py
 msgid "Ishlov xatosi"
 msgstr "Processing error"
+
+#: admin history (professionals.WorkingHoursOverride)
+msgid "Izoh"
+msgstr "Note"
 
 #: glowderma/reporting/templates/reporting/dashboards/ops.html
 msgid "Jadval"
@@ -1820,7 +1627,7 @@ msgstr "Open appointments that no longer fit the working hours after a schedule 
 msgid "Jami"
 msgstr "Total"
 
-#: glowderma.core.enums.OrderStatus
+#: glowderma.core.labels.ORDER_STATUS
 #: model metadata
 msgid "Jarayonda"
 msgstr "Processing"
@@ -1845,12 +1652,10 @@ msgstr "Shipment #%(shipment)s: %(event)s · %(at)s"
 msgid "Jo‘natma hali yaratilmagan"
 msgstr "Shipment not created yet"
 
-#: glowderma.core.enums.OrderEventType
 #: model metadata
 msgid "Jo‘natma yaratildi"
 msgstr "Shipment created"
 
-#: glowderma.core.enums.OrderEventType
 #: model metadata
 msgid "Jo‘natma yaratilmadi"
 msgstr "Shipment not created"
@@ -1921,7 +1726,7 @@ msgstr "Channels"
 msgid "Katalog"
 msgstr "Catalog"
 
-#: glowderma.core.enums.BannerLinkKind
+#: admin history (professionals.Service)
 #: glowderma/reporting/dashboards/sales.py
 #: model metadata
 msgid "Kategoriya"
@@ -1978,11 +1783,14 @@ msgstr "Not deferred"
 msgid "Keldi"
 msgstr "Attended"
 
-#: glowderma.core.enums.AppointmentStatus
 #: glowderma/reporting/dashboards/customers.py
 #: model metadata
 msgid "Kelgan"
 msgstr "Attended"
+
+#: admin history (professionals.Location)
+msgid "Kenglik"
+msgstr "Latitude"
 
 #: glowderma/core/admin.py
 msgid "Kesh ishlamayapti: hisobotni hozir ishga tushirib bo‘lmaydi."
@@ -2062,7 +1870,7 @@ msgstr "Two-factor authentication is required to sign in to the console. You set
 msgid "Konsolga o‘tish"
 msgstr "Go to the console"
 
-#: glowderma.core.enums.SpecialistRole
+#: glowderma.core.labels.SPECIALIST_ROLE
 #: model metadata
 msgid "Kosmetolog"
 msgstr "Cosmetologist"
@@ -2071,7 +1879,7 @@ msgstr "Cosmetologist"
 msgid "Kosmetolog telefoni"
 msgstr "Cosmetologist phone"
 
-#: glowderma.core.enums.ServiceCategory
+#: glowderma.core.labels.SERVICE_CATEGORY
 #: model metadata
 msgid "Kosmetologiya"
 msgstr "Cosmetology"
@@ -2092,12 +1900,12 @@ msgstr "Daily and hourly limits (Redis counters) leave no records — only the c
 msgid "Kuryerda / yo‘lda"
 msgstr "With courier / in transit"
 
-#: glowderma.core.enums.OrderStatus
+#: glowderma.core.labels.ORDER_STATUS
 #: model metadata
 msgid "Kuryerga topshirildi"
 msgstr "Handed to courier"
 
-#: glowderma.core.enums.PaymentStatus
+#: glowderma.core.labels.PAYMENT_STATUS
 #: model metadata
 msgid "Kutilmoqda"
 msgstr "Pending"
@@ -2105,14 +1913,6 @@ msgstr "Pending"
 #: glowderma/reporting/dashboards/report.py
 msgid "Kuzatilmayotgan posilkalar"
 msgstr "Untracked parcels"
-
-#: glowderma.core.enums.OtpPurpose
-msgid "Link Social"
-msgstr "Link social"
-
-#: glowderma.core.enums.IntegrationMode
-msgid "Live"
-msgstr "Live"
 
 #: glowderma/reporting/templates/reporting/dashboards/ops.html
 msgid "Live — haqiqiy adapter; Sinov — soxta (fake) adapter."
@@ -2122,11 +1922,6 @@ msgstr "Live — the real adapter; Test — a stub (fake) adapter."
 msgid "Live, lekin sozlanmagan — jiddiy."
 msgstr "Live but not configured — critical."
 
-#: glowderma.core.enums.OtpPurpose
-msgid "Login New Device"
-msgstr "Login new device"
-
-#: glowderma.core.enums.LinkKind
 #: glowderma/reporting/dashboards/sales.py
 #: glowderma/reporting/templates/reporting/dashboards/sales.html
 #: model metadata
@@ -2141,7 +1936,6 @@ msgstr "Product #%(product_id)s stock: %(quantity)s pcs"
 msgid "Mahsulot #%(product_id)s rasmi %(position)s"
 msgstr "Product #%(product_id)s image %(position)s"
 
-#: glowderma.core.enums.OrderEventType
 #: model metadata
 msgid "Mahsulot band qilindi"
 msgstr "Product reserved"
@@ -2155,6 +1949,18 @@ msgstr "Product: {obj}"
 msgid "Mahsulotlar"
 msgstr "Products"
 
+#: admin history (professionals.Professional)
+msgid "Malaka (en)"
+msgstr "Qualifications (en)"
+
+#: admin history (professionals.Professional)
+msgid "Malaka (ru)"
+msgstr "Qualifications (ru)"
+
+#: admin history (professionals.Professional)
+msgid "Malaka (uz)"
+msgstr "Qualifications (uz)"
+
 #: glowderma/loyalty/admin.py
 msgid "Manba"
 msgstr "Source"
@@ -2163,6 +1969,18 @@ msgstr "Source"
 #: glowderma/commerce/admin.py
 msgid "Manzil"
 msgstr "Address"
+
+#: admin history (professionals.Location)
+msgid "Manzil (en)"
+msgstr "Address (en)"
+
+#: admin history (professionals.Location)
+msgid "Manzil (ru)"
+msgstr "Address (ru)"
+
+#: admin history (professionals.Location)
+msgid "Manzil (uz)"
+msgstr "Address (uz)"
 
 #: config/settings/ops_admin.py
 #: glowderma/customers/admin.py
@@ -2243,7 +2061,7 @@ msgstr "Customer #%(id)s"
 msgid "Mijoz barcha telefon va brauzerlardan chiqariladi (sabab: «Admin tugatdi»), sessiyasiz qolgan qurilmalarga push yuborilmaydi. Yo‘qolgan telefon yoki begona kirish gumon qilinganda ishlating."
 msgstr "The customer will be signed out on all phones and browsers (reason: “Ended by admin”), and no push is sent to devices left without a session. Use it when a phone is lost or unauthorised access is suspected."
 
-#: glowderma.core.enums.CancellationReason
+#: glowderma.core.labels.CANCELLATION_REASON
 #: model metadata
 msgid "Mijoz bekor qildi"
 msgstr "Cancelled by customer"
@@ -2302,10 +2120,6 @@ msgstr "The customer has no open sessions: nothing changed."
 msgid "Moliyaviy muvofiqlik hisobotini hozir ishga tushirish"
 msgstr "Run the financial consistency report now"
 
-#: glowderma.core.enums.OrderPeriod
-msgid "Month"
-msgstr "Month"
-
 #: glowderma/delivery/admin.py
 msgid "Muddati o‘tgan"
 msgstr "Expired"
@@ -2314,7 +2128,6 @@ msgstr "Expired"
 msgid "Muddati o‘tgan kechiktirilgan xabarlar"
 msgstr "Deferred messages past their window"
 
-#: glowderma.core.enums.SessionRevokeReason
 #: model metadata
 msgid "Muddati tugadi"
 msgstr "Expired"
@@ -2323,6 +2136,7 @@ msgstr "Expired"
 msgid "Muddati tugagan"
 msgstr "Expired"
 
+#: admin history (professionals.WorkingHours)
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "Mutaxassis"
 msgstr "Specialist"
@@ -2353,12 +2167,11 @@ msgstr[1] "The specialist has %(n)s upcoming appointments (pending or confirmed)
 msgid "Mutaxassislar"
 msgstr "Specialists"
 
-#: glowderma.core.enums.JobState
 #: model metadata
 msgid "Muvaffaqiyatli"
 msgstr "Succeeded"
 
-#: glowderma.core.enums.PaymentStatus
+#: glowderma.core.labels.PAYMENT_STATUS
 #: model metadata
 msgid "Muvaffaqiyatsiz"
 msgstr "Failed"
@@ -2371,26 +2184,11 @@ msgstr "Failed refunds (action required)"
 msgid "Muvofiqlik hisoboti navbatga qo‘yildi. Natija audit jurnalida «report.consistency» bo‘lib chiqadi."
 msgstr "The consistency report has been queued. The result will appear in the audit log as “report.consistency”."
 
-#: glowderma.core.enums.ProductOrdering
-msgid "Name"
-msgstr "Name"
-
-#: glowderma.core.enums.ProductOrdering
-msgid "Name Desc"
-msgstr "Name desc"
-
-#: glowderma.core.enums.SeoIssueCode
-msgid "Name Missing"
-msgstr "Name missing"
-
-#: glowderma.core.enums.SeoIssueCode
-msgid "Name Translation Missing"
-msgstr "Name translation missing"
-
 #: glowderma/reporting/templates/reporting/dashboards/money.html
 msgid "Namuna"
 msgstr "Samples"
 
+#: admin history (professionals.ProfessionalService)
 #: glowderma/appointments/admin.py
 #: glowderma/catalog/admin.py
 #: glowderma/commerce/admin.py
@@ -2399,7 +2197,6 @@ msgstr "Samples"
 msgid "Narx"
 msgstr "Price"
 
-#: glowderma.core.enums.ProductChangeKind
 #: model metadata
 msgid "Narx o‘zgardi"
 msgstr "Price changed"
@@ -2416,7 +2213,6 @@ msgstr "Queue is empty"
 msgid "Navbat bo‘sh: barcha xabarlar yetkazilgan"
 msgstr "Queue is empty: all messages delivered"
 
-#: glowderma.core.enums.JobState
 #: glowderma/reporting/dashboards/ops.py
 #: glowderma/reporting/templates/reporting/dashboards/ops.html
 #: model metadata
@@ -2427,10 +2223,6 @@ msgstr "Queued"
 msgid "Navbatlar, integratsiyalar va tungi tekshiruvlar"
 msgstr "Queues, integrations and nightly checks"
 
-#: glowderma.core.enums.SeoIssueCode
-msgid "No Active Products"
-msgstr "No active products"
-
 #: glowderma/reporting/dashboards/sales.py
 msgid "Nom tarjimasi yo‘q"
 msgstr "No name translation"
@@ -2439,21 +2231,25 @@ msgstr "No name translation"
 msgid "Noma’lum holat"
 msgstr "Unknown status"
 
+#: admin history (professionals.Professional)
+msgid "Nomi"
+msgstr "Name"
+
+#: admin history (professionals.Location)
+msgid "Nomi (en)"
+msgstr "Name (en)"
+
+#: admin history (professionals.Location)
+msgid "Nomi (ru)"
+msgstr "Name (ru)"
+
+#: admin history (professionals.Location)
+msgid "Nomi (uz)"
+msgstr "Name (uz)"
+
 #: glowderma/reporting/templates/reporting/dashboards/money.html
 msgid "Nomuvofiqlik"
 msgstr "Discrepancies"
-
-#: glowderma.core.enums.CashbackEarnedState
-msgid "None"
-msgstr "None"
-
-#: glowderma.core.enums.ShipmentState
-msgid "Not Created"
-msgstr "Not created"
-
-#: glowderma.core.enums.ShipmentState
-msgid "Not Required"
-msgstr "Not required"
 
 #: glowderma/reporting/dashboards/customers.py
 msgid "Noto‘g‘ri parol yoki kod, bloklangan urinishlar (API va konsol)"
@@ -2499,10 +2295,6 @@ msgstr "Warning (%(topic)s): %(text)s"
 msgid "Ogohlantirish: %(text)s"
 msgstr "Warning: %(text)s"
 
-#: glowderma.core.enums.CartLineStatus
-msgid "Ok"
-msgstr "OK"
-
 #: glowderma/reporting/dashboards/sales.py
 msgid "Oldingi %(days)s kun: %(count)s"
 msgid_plural "Oldingi %(days)s kun: %(count)s"
@@ -2513,7 +2305,7 @@ msgstr[1] "Previous %(days)s days: %(count)s"
 msgid "Oldingi davrga nisbatan"
 msgstr "Compared with the previous period"
 
-#: glowderma.core.enums.FulfilmentMethod
+#: glowderma.core.labels.FULFILMENT
 #: model metadata
 msgid "Olib ketish"
 msgstr "Pickup"
@@ -2522,7 +2314,6 @@ msgstr "Pickup"
 msgid "Olib ketish manzili"
 msgstr "Pickup address"
 
-#: glowderma.core.enums.PurchaseSource
 #: model metadata
 msgid "Onlayn"
 msgstr "Online"
@@ -2530,10 +2321,6 @@ msgstr "Online"
 #: glowderma/reporting/dashboards/sales.py
 msgid "Onlayn tushum"
 msgstr "Online revenue"
-
-#: glowderma.core.enums.LedgerSource
-msgid "Online"
-msgstr "Online"
 
 #: config/settings/ops_admin.py
 msgid "Operatsion konsol"
@@ -2544,18 +2331,6 @@ msgstr "Operations console"
 msgid "Ops holati"
 msgstr "Ops status"
 
-#: glowderma.core.enums.InboxLinkKind
-msgid "Order"
-msgstr "Order"
-
-#: glowderma.core.enums.TimelineType
-msgid "Order Created"
-msgstr "Order created"
-
-#: glowderma.core.enums.InboxKind
-msgid "Order Status"
-msgstr "Order status"
-
 #: glowderma/reporting/dashboards/money.py
 msgid "Osilib qolgan to‘lovlar"
 msgstr "Stuck payments"
@@ -2563,14 +2338,6 @@ msgstr "Stuck payments"
 #: glowderma/reporting/dashboards/report.py
 msgid "Osilib qolgan to‘lovlar (pending)"
 msgstr "Stuck payments (pending)"
-
-#: glowderma.core.enums.LogoutScope
-msgid "Others"
-msgstr "Others"
-
-#: glowderma.core.enums.StockStatus
-msgid "Out Of Stock"
-msgstr "Out of stock"
 
 #: glowderma/reporting/dashboards/ops.py
 msgid "Outbox dispetcheri"
@@ -2636,7 +2403,7 @@ msgstr "Last error"
 msgid "Oxirgi xato: %(error)s"
 msgstr "Last error: %(error)s"
 
-#: glowderma.core.enums.CustomerStatus
+#: glowderma.core.labels.CUSTOMER_STATUS
 #: model metadata
 msgid "O‘chirilgan"
 msgstr "Deleted"
@@ -2678,7 +2445,6 @@ msgstr "Skipped"
 msgid "O‘z 2FA ingizni bu yerdan qayta o‘rnatib bo‘lmaydi."
 msgstr "You cannot reset your own 2FA here."
 
-#: glowderma.core.enums.ContentLanguage
 #: model metadata
 msgid "O‘zbekcha"
 msgstr "Uzbek"
@@ -2700,15 +2466,10 @@ msgstr "POS device"
 msgid "POS qurilmalar"
 msgstr "POS devices"
 
-#: glowderma.core.enums.ProgressStep
-msgid "Paid"
-msgstr "Paid"
-
 #: model metadata
 msgid "Parol"
 msgstr "Password"
 
-#: glowderma.core.enums.SessionRevokeReason
 #: model metadata
 msgid "Parol o‘zgartirildi"
 msgstr "Password changed"
@@ -2722,24 +2483,11 @@ msgstr "Your password and 2FA were reset by the same manager: for security, 2FA 
 msgid "Parolni tiklash"
 msgstr "Password reset"
 
-#: glowderma.core.enums.AccountSecurityEvent
-msgid "Password Changed"
-msgstr "Password changed"
-
-#: glowderma.core.enums.AccountSecurityEvent
-msgid "Password Reset"
-msgstr "Password reset"
-
-#: glowderma.core.enums.AppointmentScope
-msgid "Past"
-msgstr "Past"
-
-#: glowderma.core.enums.PaymentProvider
+#: glowderma.core.labels.PROVIDER
 #: model metadata
 msgid "Payme"
 msgstr "Payme"
 
-#: glowderma.core.enums.RefundManualReason
 #: model metadata
 msgid "Payme kabinetida"
 msgstr "In the Payme dashboard"
@@ -2748,50 +2496,10 @@ msgstr "In the Payme dashboard"
 msgid "Payme kabinetida qaytarish kerak"
 msgstr "Refund required in the Payme dashboard"
 
-#: glowderma.core.enums.TimelineType
-msgid "Payment Confirmed"
-msgstr "Payment confirmed"
-
-#: glowderma.core.enums.TimelineType
-msgid "Payment Failed"
-msgstr "Payment failed"
-
 #: glowderma.core.labels.WEEKDAYS
 #: model metadata
 msgid "Payshanba"
 msgstr "Thursday"
-
-#: glowderma.core.enums.AccountSecurityEvent
-msgid "Phone Attached"
-msgstr "Phone attached"
-
-#: glowderma.core.enums.ProgressStep
-msgid "Picked Up"
-msgstr "Picked up"
-
-#: glowderma.core.enums.ProgressStep
-msgid "Placed"
-msgstr "Placed"
-
-#: glowderma.core.enums.DirectoryOrdering
-msgid "Position"
-msgstr "Position"
-
-#: glowderma.core.enums.CustomerProductOrdering
-msgid "Price"
-msgstr "Price"
-
-#: glowderma.core.enums.CustomerProductOrdering
-msgid "Price Desc"
-msgstr "Price desc"
-
-#: glowderma.core.enums.InboxLinkKind
-msgid "Product"
-msgstr "Product"
-
-#: glowderma.core.enums.InboxKind
-msgid "Promo"
-msgstr "Promo"
 
 #: glowderma/reporting/templates/reporting/dashboards/ops.html
 msgid "Provayder"
@@ -2805,7 +2513,6 @@ msgstr "No provider callbacks"
 msgid "Provayderlar tayyorligi"
 msgstr "Provider readiness"
 
-#: glowderma.core.enums.OrderEventType
 #: model metadata
 msgid "Pul qaytarildi"
 msgstr "Refund completed"
@@ -2878,22 +2585,22 @@ msgstr "Requeue"
 msgid "Qayta navbatga qo‘yish"
 msgstr "Requeue"
 
-#: glowderma.core.enums.OrderEventType
+#: glowderma.core.labels.REFUND_STATE
 #: model metadata
 msgid "Qaytarib bo‘lmadi"
 msgstr "Refund failed"
 
-#: glowderma.core.enums.RefundState
+#: glowderma.core.labels.LEDGER_KIND
 #: model metadata
 msgid "Qaytarildi"
 msgstr "Refunded"
 
-#: glowderma.core.enums.PaymentStatus
+#: glowderma.core.labels.PAYMENT_STATUS
 #: model metadata
 msgid "Qaytarilgan"
 msgstr "Refunded"
 
-#: glowderma.core.enums.RefundState
+#: glowderma.core.labels.REFUND_STATE
 #: model metadata
 msgid "Qaytarilmoqda"
 msgstr "Refunding"
@@ -2906,7 +2613,7 @@ msgstr "Refund #%(id)s · %(state)s · %(amount)s (payment #%(payment)s)"
 msgid "Qaytarish provayderda rad etilgan: «xato kodi»ni ko‘ring, so‘ng boshqaruv panelida (To‘lovlar → Qaytarishlar) qayta yuboring yoki pulni qo‘lda qaytarib, «qo‘lda qaytarildi» deb belgilang."
 msgstr "The provider rejected the refund: check the “error code”, then resend it in the admin panel (Payments → Refunds) or return the money manually and mark it as “refunded manually”."
 
-#: glowderma.core.enums.OrderEventType
+#: glowderma.core.labels.REFUND_STATE
 #: model metadata
 msgid "Qaytarish so‘raldi"
 msgstr "Refund requested"
@@ -2920,10 +2627,22 @@ msgstr "The refund has been open for a long time: open it and check its status a
 msgid "Qaytarishlar"
 msgstr "Refunds"
 
-#: glowderma.core.enums.NotificationState
+#: glowderma.core.labels.NOTIFICATION_STATE
 #: model metadata
 msgid "Qisman yuborildi"
 msgstr "Partially sent"
+
+#: admin history (professionals.Service)
+msgid "Qisqa nom (en)"
+msgstr "Short name (en)"
+
+#: admin history (professionals.Service)
+msgid "Qisqa nom (ru)"
+msgstr "Short name (ru)"
+
+#: admin history (professionals.Service)
+msgid "Qisqa nom (uz)"
+msgstr "Short name (uz)"
 
 #: glowderma/site_config/forms.py
 msgid "Qiymat 5 dan kam bo‘lmasin."
@@ -2945,7 +2664,7 @@ msgstr "Stock"
 msgid "Qolgan kodlar"
 msgstr "Codes left"
 
-#: glowderma.core.enums.NotificationState
+#: glowderma.core.labels.NOTIFICATION_STATE
 #: model metadata
 msgid "Qoralama"
 msgstr "Draft"
@@ -2954,7 +2673,6 @@ msgstr "Draft"
 msgid "Qo‘lda"
 msgstr "Manual"
 
-#: glowderma.core.enums.RefundState
 #: model metadata
 msgid "Qo‘lda qaytarish kerak"
 msgstr "Manual refund required"
@@ -2997,7 +2715,6 @@ msgstr "The “Now” column below recalculates the checks right now."
 msgid "Rad etildi"
 msgstr "Rejected"
 
-#: glowderma.core.enums.AppointmentStatus
 #: glowderma/reporting/dashboards/customers.py
 #: model metadata
 msgid "Rad etilgan"
@@ -3015,43 +2732,19 @@ msgstr "No images"
 msgid "Rasmlar"
 msgstr "Images"
 
-#: glowderma.core.enums.TimelineType
-msgid "Refund In Progress"
-msgstr "Refund in progress"
-
-#: glowderma.core.enums.TimelineType
-msgid "Refund Succeeded"
-msgstr "Refund succeeded"
-
-#: glowderma.core.enums.OtpPurpose
-msgid "Register"
-msgstr "Register"
-
-#: glowderma.core.enums.NotificationState
+#: glowderma.core.labels.NOTIFICATION_STATE
 #: glowderma/loyalty/admin.py
 #: model metadata
 msgid "Rejalashtirilgan"
 msgstr "Scheduled"
 
-#: glowderma.core.enums.AppointmentAction
-msgid "Reject"
-msgstr "Reject"
-
 #: glowderma/reporting/templates/reporting/dashboards/ops.html
 msgid "Rejim"
 msgstr "Mode"
 
-#: glowderma.core.enums.OtpPurpose
-msgid "Reset Password"
-msgstr "Reset password"
-
-#: glowderma.core.enums.OrderCashbackKind
-msgid "Reversal"
-msgstr "Reversal"
-
-#: glowderma.core.enums.CashbackEarnedState
-msgid "Reversed"
-msgstr "Reversed"
+#: admin history (professionals.Professional)
+msgid "Rol"
+msgstr "Role"
 
 #: glowderma/customers/admin.py
 msgid "Rozilik"
@@ -3070,7 +2763,6 @@ msgstr "Sign-up"
 msgid "Ro‘yxatdan o‘tish usuli bo‘yicha · 30 kun"
 msgstr "By sign-up method · 30 days"
 
-#: glowderma.core.enums.ContentLanguage
 #: model metadata
 msgid "Ruscha"
 msgstr "Russian"
@@ -3148,6 +2840,10 @@ msgstr "SMS codes"
 msgid "Sahifa eskirgan yoki sessiya yangilangan, shuning uchun so‘rov qabul qilinmadi. Sahifani qaytadan oching va yana urinib ko‘ring."
 msgstr "The page is out of date or the session was renewed, so the request was not accepted. Open the page again and retry."
 
+#: admin history (professionals.WorkingHoursOverride)
+msgid "Sana"
+msgstr "Date"
+
 #: glowderma/site_config/admin_views.py
 msgid "Saqlangan foydalanish shartlari va maxfiylik siyosati (barcha tillarda) yangi versiya sifatida e’lon qilinadi. Mijozlar yangi versiyani qabul qilmaguncha buyurtma bera olmaydi va qabulga yozila olmaydi. Bu amalni qaytarib bo‘lmaydi."
 msgstr "The saved terms of use and privacy policy (in all languages) will be published as a new version. Customers will not be able to place orders or book appointments until they accept the new version. This action cannot be undone."
@@ -3219,11 +2915,6 @@ msgstr "Site"
 msgid "Sayt sozlamalari"
 msgstr "Site settings"
 
-#: glowderma.core.enums.PolicyVersionState
-msgid "Scheduled"
-msgstr "Scheduled"
-
-#: glowderma.core.enums.AudienceType
 #: model metadata
 msgid "Segment"
 msgstr "Segment"
@@ -3240,38 +2931,10 @@ msgstr "Segment: {obj.name}"
 msgid "Segmentlar"
 msgstr "Segments"
 
-#: glowderma.core.enums.SeoIssueCode
-msgid "Seo Description Long"
-msgstr "SEO description long"
-
-#: glowderma.core.enums.SeoIssueCode
-msgid "Seo Description Missing"
-msgstr "SEO description missing"
-
-#: glowderma.core.enums.SeoIssueCode
-msgid "Seo Description Short"
-msgstr "SEO description short"
-
-#: glowderma.core.enums.SeoIssueCode
-msgid "Seo Title Long"
-msgstr "SEO title long"
-
-#: glowderma.core.enums.SeoIssueCode
-msgid "Seo Title Missing"
-msgstr "SEO title missing"
-
-#: glowderma.core.enums.SeoIssueCode
-msgid "Seo Title Short"
-msgstr "SEO title short"
-
 #: glowderma.core.labels.WEEKDAYS
 #: model metadata
 msgid "Seshanba"
 msgstr "Tuesday"
-
-#: glowderma.core.enums.PushDataType
-msgid "Session Replaced"
-msgstr "Session replaced"
 
 #: glowderma/accounts/admin.py
 msgid "Sessiya allaqachon tugagan."
@@ -3319,10 +2982,6 @@ msgstr "Terms published: %(version)s."
 msgid "Shartlarning yangi versiyasini e’lon qilasizmi?"
 msgstr "Publish a new version of the terms?"
 
-#: glowderma.core.enums.TimelineType
-msgid "Shipment Created"
-msgstr "Shipment created"
-
 #: glowderma/reporting/dashboards/ops.py
 msgid "Sinov"
 msgstr "Test"
@@ -3348,17 +3007,9 @@ msgstr "Policy v%(version)s"
 msgid "Siz konsoldan chiqdingiz."
 msgstr "You have signed out of the console."
 
-#: glowderma.core.enums.ProgressState
-msgid "Skipped"
-msgstr "Skipped"
-
-#: glowderma.core.enums.AccountSecurityEvent
-msgid "Social Linked"
-msgstr "Social linked"
-
-#: glowderma.core.enums.AccountSecurityEvent
-msgid "Social Unlinked"
-msgstr "Social unlinked"
+#: admin history (professionals.Professional)
+msgid "Slot qadami (daq.)"
+msgstr "Slot step (min.)"
 
 #: model metadata
 msgid "Sodiqlik"
@@ -3402,7 +3053,6 @@ msgstr "Not configured"
 msgid "So‘raldi"
 msgstr "Requested"
 
-#: glowderma.core.enums.AppointmentStatus
 #: model metadata
 msgid "So‘ralgan"
 msgstr "Requested"
@@ -3415,7 +3065,6 @@ msgstr "Poll"
 msgid "So‘rov"
 msgstr "Requested"
 
-#: glowderma.core.enums.ShipmentVia
 #: model metadata
 msgid "So‘rov (polling)"
 msgstr "Request (polling)"
@@ -3428,13 +3077,13 @@ msgstr "Request not accepted"
 msgid "So‘rov tushunarsiz. Sahifani yangilang va qayta urinib ko‘ring."
 msgstr "The request was not understood. Refresh the page and try again."
 
-#: glowderma.core.enums.LedgerSource
-msgid "Store"
-msgstr "Store"
+#: admin history (professionals.Service)
+msgid "Standart davomiylik (daq.)"
+msgstr "Default duration (min.)"
 
-#: glowderma.core.enums.AdjustmentDirection
-msgid "Subtract"
-msgstr "Subtract"
+#: admin history (professionals.Service)
+msgid "Standart narx"
+msgstr "Default price"
 
 #: glowderma/commerce/admin.py
 #: glowderma/loyalty/admin.py
@@ -3454,9 +3103,9 @@ msgstr "To amount"
 msgid "Summalar"
 msgstr "Amounts"
 
-#: glowderma.core.enums.PolicyVersionState
-msgid "Superseded"
-msgstr "Superseded"
+#: admin history (professionals.Professional)
+msgid "Surat"
+msgstr "Photo"
 
 #: glowderma/accounts/console/twofactor.py
 msgid "TOTP QR kod"
@@ -3466,6 +3115,10 @@ msgstr "TOTP QR code"
 msgid "Tafsilot: %(text)s"
 msgstr "Details: %(text)s"
 
+#: admin history (professionals.Professional)
+msgid "Tajriba (yil)"
+msgstr "Experience (years)"
+
 #: glowderma/integrations/admin.py
 msgid "Takroriy"
 msgstr "Duplicate"
@@ -3473,6 +3126,14 @@ msgstr "Duplicate"
 #: glowderma/commerce/diagnostics.py
 msgid "Talab qilinmaydi (olib ketish)"
 msgstr "Not required (pickup)"
+
+#: admin history (professionals.WorkingHours)
+msgid "Tanaffus boshlanishi"
+msgstr "Break start"
+
+#: admin history (professionals.WorkingHours)
+msgid "Tanaffus tugashi"
+msgstr "Break end"
 
 #: glowderma/core/admin.py
 msgid "Tanlangan mavzuning o‘lik xabarlari (bir bosishda {limit} tagacha) qayta navbatga qo‘yiladi. Ishi boshqa yo‘l bilan bajarilgan xabarlar o‘tkazib yuboriladi."
@@ -3487,11 +3148,14 @@ msgstr "Tariff"
 msgid "Tarix: %(title)s"
 msgstr "History: %(title)s"
 
+#: admin history (professionals.Location)
+msgid "Tartib"
+msgstr "Position"
+
 #: model metadata
 msgid "Tasdiqlandi"
 msgstr "Confirmed"
 
-#: glowderma.core.enums.AppointmentStatus
 #: glowderma/reporting/dashboards/customers.py
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 #: model metadata
@@ -3505,6 +3169,18 @@ msgstr "Confirm"
 #: glowderma/accounts/templates/accounts/console/enrol.html
 msgid "Tasdiqlash va yoqish"
 msgstr "Confirm and enable"
+
+#: admin history (professionals.Service)
+msgid "Tavsif (en)"
+msgstr "Description (en)"
+
+#: admin history (professionals.Service)
+msgid "Tavsif (ru)"
+msgstr "Description (ru)"
+
+#: admin history (professionals.Service)
+msgid "Tavsif (uz)"
+msgstr "Description (uz)"
 
 #: glowderma/reporting/dashboards/sales.py
 msgid "Tavsif juda qisqa"
@@ -3522,6 +3198,7 @@ msgstr "Check"
 msgid "Tekshiruvlarni bajarib bo‘lmadi (xato yoki vaqt tugadi) — sahifani yangilang"
 msgstr "The checks could not be run (error or timeout) — refresh the page"
 
+#: admin history (professionals.Location)
 #: glowderma/core/admin.py
 #: glowderma/reporting/dashboards/customers.py
 msgid "Telefon"
@@ -3575,7 +3252,7 @@ msgstr "Test device “%(label)s” (%(phone)s)"
 msgid "Test qurilmasi: {obj.label}"
 msgstr "Test device: {obj.label}"
 
-#: glowderma.core.enums.NotificationState
+#: glowderma.core.labels.NOTIFICATION_STATE
 #: model metadata
 msgid "Test tasdiqlangan"
 msgstr "Test confirmed"
@@ -3590,15 +3267,10 @@ msgstr "Recovery codes"
 msgid "Til"
 msgstr "Language"
 
-#: glowderma.core.enums.EventSource
 #: glowderma/site_config/admin_views.py
 #: model metadata
 msgid "Tizim"
 msgstr "System"
-
-#: glowderma.core.enums.OrderPeriod
-msgid "Today"
-msgstr "Today"
 
 #: glowderma/reporting/templates/reporting/dashboards/sales.html
 msgid "Top %(count)s mahsulot"
@@ -3610,7 +3282,7 @@ msgstr[1] "Top %(count)s products"
 msgid "Toshkent vaqti"
 msgstr "Tashkent time"
 
-#: glowderma.core.enums.PaymentStatus
+#: glowderma.core.labels.PAYMENT_STATUS
 #: model metadata
 msgid "To‘langan"
 msgstr "Paid"
@@ -3640,7 +3312,6 @@ msgstr "Payment"
 msgid "To‘lov #%(id)s %(provider)s · %(status)s · %(amount)s (buyurtma №%(order)s)"
 msgstr "Payment #%(id)s %(provider)s · %(status)s · %(amount)s (order №%(order)s)"
 
-#: glowderma.core.enums.OrderEventType
 #: model metadata
 msgid "To‘lov amalga oshmadi"
 msgstr "Payment failed"
@@ -3649,12 +3320,11 @@ msgstr "Payment failed"
 msgid "To‘lov hali boshlanmagan"
 msgstr "Payment not started yet"
 
-#: glowderma.core.enums.OrderStatus
+#: glowderma.core.labels.ORDER_STATUS
 #: model metadata
 msgid "To‘lov kutilmoqda"
 msgstr "Awaiting payment"
 
-#: glowderma.core.enums.OrderEventType
 #: model metadata
 msgid "To‘lov tasdiqlandi"
 msgstr "Payment confirmed"
@@ -3676,7 +3346,7 @@ msgstr "Payments"
 msgid "To‘xtatildi"
 msgstr "Stopped"
 
-#: glowderma.core.enums.NotificationState
+#: glowderma.core.labels.NOTIFICATION_STATE
 #: model metadata
 msgid "To‘xtatilmoqda"
 msgstr "Stopping"
@@ -3688,6 +3358,10 @@ msgstr "Out of stock (0 or no record in Billz)"
 #: glowderma/reporting/dashboards/sales.py
 msgid "Tugagan mahsulotlar"
 msgstr "Out-of-stock products"
+
+#: admin history (professionals.WorkingHours)
+msgid "Tugashi"
+msgstr "End"
 
 #: glowderma/accounts/admin.py
 msgid "Tugatish"
@@ -3706,6 +3380,7 @@ msgstr "The nightly report has never run yet"
 msgid "Tur"
 msgstr "Type"
 
+#: admin history (professionals.BlockedPeriod)
 #: glowderma/loyalty/admin.py
 msgid "Turi"
 msgstr "Type"
@@ -3718,11 +3393,12 @@ msgstr "Revenue"
 msgid "Tushum bo‘yicha · bekor qilinganlarsiz"
 msgstr "By revenue · excluding cancelled"
 
-#: glowderma.core.enums.LedgerKind
+#: glowderma.core.labels.LEDGER_KIND
 #: model metadata
 msgid "Tuzatish"
 msgstr "Adjustment"
 
+#: admin history (professionals.Professional)
 #: model metadata
 msgid "URL nomi (slug)"
 msgstr "URL name (slug)"
@@ -3736,26 +3412,10 @@ msgstr "Share"
 msgid "Umrbod xarid"
 msgstr "Lifetime purchases"
 
-#: glowderma.core.enums.NotificationKind
+#: glowderma.core.labels.NOTIFICATION_KIND
 #: model metadata
 msgid "Umumiy"
 msgstr "General"
-
-#: glowderma.core.enums.CartLineStatus
-msgid "Unavailable"
-msgstr "Unavailable"
-
-#: glowderma.core.enums.TierWarning
-msgid "Uncovered Above"
-msgstr "Uncovered above"
-
-#: glowderma.core.enums.ProgressState
-msgid "Upcoming"
-msgstr "Upcoming"
-
-#: glowderma.core.enums.InboxLinkKind
-msgid "Url"
-msgstr "URL"
 
 #: glowderma/loyalty/models.py
 msgid "Ushlab turish %(amount)s · buyurtma №%(order)s (%(state)s)"
@@ -3781,6 +3441,10 @@ msgstr "Refunds open for too long"
 msgid "Uzoq vaqt yangilanmagan BTS jo‘natmalarining holati hozir so‘raladi (odatda har 10 daqiqada avtomatik bajariladi). So‘rov allaqachon ishlayotgan bo‘lsa, ikkinchisi boshlanmaydi."
 msgstr "The status of BTS shipments that have not been updated for a long time is polled now (normally this runs automatically every 10 minutes). If a poll is already running, a second one is not started."
 
+#: admin history (professionals.Location)
+msgid "Uzunlik"
+msgstr "Longitude"
+
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "Vaqt"
 msgstr "Time"
@@ -3797,7 +3461,6 @@ msgstr "Timestamps"
 msgid "Vazifa"
 msgstr "Job"
 
-#: glowderma.core.enums.OrderChannel
 #: glowderma/reporting/dashboards/customers.py
 #: glowderma/reporting/dashboards/sales.py
 #: glowderma/site_config/forms.py
@@ -3805,23 +3468,6 @@ msgstr "Job"
 msgid "Veb-sayt"
 msgstr "Website"
 
-#: glowderma.core.enums.NextStep
-msgid "Verify Device"
-msgstr "Verify device"
-
-#: glowderma.core.enums.OtpPurpose
-msgid "Verify Email"
-msgstr "Verify email"
-
-#: glowderma.core.enums.NextStep
-msgid "Verify Phone"
-msgstr "Verify phone"
-
-#: glowderma.core.enums.SeoSeverity
-msgid "Warning"
-msgstr "Warning"
-
-#: glowderma.core.enums.ShipmentVia
 #: model metadata
 msgid "Webhook"
 msgstr "Webhook"
@@ -3836,14 +3482,6 @@ msgstr "Webhooks"
 #: glowderma/reporting/templates/reporting/dashboards/ops.html
 msgid "Webhooklar · 24 soat"
 msgstr "Webhooks · 24 hours"
-
-#: glowderma.core.enums.OrderPeriod
-msgid "Week"
-msgstr "Week"
-
-#: glowderma.core.enums.ProgressStep
-msgid "With Courier"
-msgstr "With courier"
 
 #: glowderma/core/admin.py
 msgid "Xabar #%(id)s endi o‘lik emas: hech narsa o‘zgarmadi."
@@ -3886,7 +3524,6 @@ msgstr "Purchase #%(id)s %(source)s %(amount)s (Billz %(sale)s)"
 msgid "Xarid #%(id)s %(source)s %(amount)s (buyurtma №%(order)s)"
 msgstr "Purchase #%(id)s %(source)s %(amount)s (order №%(order)s)"
 
-#: glowderma.core.enums.RateBasis
 #: model metadata
 msgid "Xarid bilan birga"
 msgstr "Including the purchase"
@@ -3903,7 +3540,6 @@ msgstr "No purchase record (created after payment)"
 msgid "Xarid ↔ hisoblangan cashback yozuvi"
 msgstr "Purchase ↔ cashback earning entry"
 
-#: glowderma.core.enums.RateBasis
 #: model metadata
 msgid "Xariddan oldingi summa"
 msgstr "Amount before the purchase"
@@ -3928,7 +3564,6 @@ msgstr "Error (rejected or processing error)"
 msgid "Xato = rad etilgan yoki ishlov xatosi; %(n)s+ — jiddiy"
 msgstr "Error = rejected or processing error; %(n)s+ — critical"
 
-#: glowderma.core.enums.JobState
 #: model metadata
 msgid "Xato bilan tugadi"
 msgstr "Failed"
@@ -3945,6 +3580,7 @@ msgstr "Errors"
 msgid "Xavfsizlik"
 msgstr "Security"
 
+#: admin history (professionals.ProfessionalService)
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "Xizmat"
 msgstr "Service"
@@ -3953,13 +3589,13 @@ msgstr "Service"
 msgid "Xizmatlar"
 msgstr "Services"
 
-#: glowderma.core.enums.ExportFormat
-msgid "Xlsx"
-msgstr "XLSX"
-
 #: model metadata
 msgid "Xodim"
 msgstr "Staff member"
+
+#: admin history (professionals.Professional)
+msgid "Xodim hisobi"
+msgstr "Staff account"
 
 #: config/settings/ops_admin.py
 msgid "Xodim ijtimoiy kirishlari"
@@ -4001,15 +3637,17 @@ msgstr[1] "New customers · %(days)s days"
 msgid "Yangi qurilma"
 msgstr "New device"
 
-#: glowderma.core.enums.SessionRevokeReason
 #: model metadata
 msgid "Yangi sessiya bilan almashtirildi"
 msgstr "Replaced by a new session"
 
-#: glowderma.core.enums.ProductChangeKind
 #: model metadata
 msgid "Yangilandi"
 msgstr "Updated"
+
+#: admin history (professionals.Location)
+msgid "Yangilangan"
+msgstr "Updated at"
 
 #: glowderma/reporting/templates/reporting/dashboards/base.html
 msgid "Yangilangan:"
@@ -4019,11 +3657,14 @@ msgstr "Updated:"
 msgid "Yangilash"
 msgstr "Refresh"
 
+#: admin history (professionals.BlockedPeriod)
+msgid "Yaratgan"
+msgstr "Created by"
+
 #: model metadata
 msgid "Yaratib bo‘lmadi"
 msgstr "Creation failed"
 
-#: glowderma.core.enums.ProductChangeKind
 #: model metadata
 msgid "Yaratildi"
 msgstr "Created"
@@ -4036,12 +3677,11 @@ msgstr "Created"
 msgid "Yaratilmagan"
 msgstr "Not created"
 
-#: glowderma.core.enums.ProductChangeKind
 #: model metadata
 msgid "Yashirildi"
 msgstr "Hidden"
 
-#: glowderma.core.enums.ProductStatus
+#: glowderma.core.labels.PRODUCT_STATUS
 #: model metadata
 msgid "Yashirin"
 msgstr "Hidden"
@@ -4050,7 +3690,6 @@ msgstr "Hidden"
 msgid "Yaxshi"
 msgstr "OK"
 
-#: glowderma.core.enums.CashbackHoldState
 #: model metadata
 msgid "Yechildi"
 msgstr "Captured"
@@ -4060,12 +3699,12 @@ msgid "Yechilgan band ↔ sarflash yozuvi"
 msgstr "Captured reservation ↔ spend entry"
 
 #: config/settings/ops_admin.py
-#: glowderma.core.enums.FulfilmentMethod
+#: glowderma.core.labels.FULFILMENT
 #: model metadata
 msgid "Yetkazib berish"
 msgstr "Delivery"
 
-#: glowderma.core.enums.OrderStatus
+#: glowderma.core.labels.ORDER_STATUS
 #: glowderma/delivery/admin.py
 #: model metadata
 msgid "Yetkazildi"
@@ -4083,6 +3722,10 @@ msgstr "Delivery (BTS)"
 msgid "Yetkazish tarixi"
 msgstr "Delivery history"
 
+#: admin history (professionals.BlockedPeriod)
+msgid "Yorliq"
+msgstr "Label"
+
 #: glowderma/loyalty/models.py
 msgid "Yozuv #%(id)s %(kind)s %(amount)s → %(balance)s (hisob #%(account)s)"
 msgstr "Entry #%(id)s %(kind)s %(amount)s → %(balance)s (account #%(account)s)"
@@ -4097,17 +3740,17 @@ msgstr "Entry chain (balance after each entry)"
 msgid "Yo‘q"
 msgstr "No"
 
-#: glowderma.core.enums.NotificationState
+#: glowderma.core.labels.NOTIFICATION_STATE
 #: model metadata
 msgid "Yuborildi"
 msgstr "Sent"
 
-#: glowderma.core.enums.NotificationState
+#: glowderma.core.labels.NOTIFICATION_STATE
 #: model metadata
 msgid "Yuborilmadi"
 msgstr "Not sent"
 
-#: glowderma.core.enums.NotificationState
+#: glowderma.core.labels.NOTIFICATION_STATE
 #: model metadata
 msgid "Yuborilmoqda"
 msgstr "Sending"
@@ -4643,7 +4286,6 @@ msgstr "status templates"
 msgid "hozirgina"
 msgstr "just now"
 
-#: glowderma.core.enums.OrderChannel
 #: model metadata
 msgid "iOS"
 msgstr "iOS"

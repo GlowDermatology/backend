@@ -15,6 +15,8 @@ the same warm taupe). ``primary-600`` (Unfold's text colour of links and the act
 darker than the gold ink so that it reads at WCAG AA 4.5:1 on ``base-100`` (the active entry's background).
 """
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING, Any
 
 from django.templatetags.static import static

@@ -20,12 +20,16 @@ Seams for the later console work:
 
 from __future__ import annotations
 
+import hashlib
 from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.http import Http404, HttpRequest
 from django.urls import reverse
+from django.utils.encoding import force_bytes
+from django.utils.translation import get_language
 from django.utils.translation import gettext_lazy as _
 from unfold.sites import UnfoldAdminSite
 
@@ -35,6 +39,14 @@ else:
     _BaseSite = UnfoldAdminSite
 
 SITE_NAME = "Glow Derma Ops"
+
+# Unfold's cache of a user's command-palette results (``UnfoldAdminSite.search``: key and lifetime).
+SEARCH_CACHE_SECONDS = 5 * 60
+
+
+def unfold_search_key(user_pk: Any, term: str) -> str:
+    return f"unfold_search_{hashlib.sha256(force_bytes(f'{user_pk}_{term.lower()}')).hexdigest()}"
+
 
 # Label shown in the header badge and its Unfold colour variant.
 ENVIRONMENT_VARIANTS = {"PRODUCTION": "danger", "STAGING": "warning", "LOCAL": "info", "TEST": "info"}
@@ -67,6 +79,20 @@ class OpsAdminSite(_BaseSite):
 
     def password_change_done(self, request: HttpRequest, extra_context: dict[str, Any] | None = None) -> Any:
         raise Http404
+
+    def search(self, request: HttpRequest, extra_context: dict[str, Any] | None = None) -> Any:
+        """The command palette. Unfold keeps a user's results per search term for five minutes with the
+        model names already rendered, so after a language switch the same term would answer in the old
+        language: the language a copy was made in is remembered beside it, and a copy made in another
+        language is dropped before Unfold looks."""
+        term = request.GET.get("s")
+        if term and request.user.pk is not None:
+            key = unfold_search_key(request.user.pk, term)
+            language = get_language()
+            if cache.get(f"{key}:language") != language:
+                cache.delete(key)
+                cache.set(f"{key}:language", language, timeout=SEARCH_CACHE_SECONDS)
+        return super().search(request, extra_context)  # type: ignore[misc]
 
 
 ACCOUNT_LINK_TITLE = _("Mening hisobim")

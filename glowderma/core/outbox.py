@@ -9,6 +9,8 @@ A handler signals its outcome to ``core.tasks.dispatch_outbox`` by returning (``
 * anything else — a transient failure: retried with backoff, ``dead`` after :data:`MAX_ATTEMPTS`.
 """
 
+from __future__ import annotations
+
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass

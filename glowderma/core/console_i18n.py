@@ -11,12 +11,13 @@ console requests and nothing else: the REST API, the Celery workers and the mana
 depend on anybody's cookie.
 
 **Model metadata is translated without touching the models.** :func:`localize_model_metadata` (called from
-``CoreConfig.ready``) makes the verbose names, help texts and choice labels of the project's models lazy, so
-the admin's column headers, form labels and filters follow the active language while the models keep their
-plain Uzbek literals (and their migrations: a lazy string compares equal to its Uzbek text). Such a text is
-returned **verbatim** while the language is Uzbek (:func:`in_language`): no catalog is consulted, so a label
-that happens to be an English interface string too ("Email", "None") is never re-translated by Django's own
-Uzbek catalog, and what the API and the OpenAPI schema read from the models cannot change.
+``OpsAdminConfig.ready``, before the admins are registered) makes the verbose names, help texts and choice
+labels of the project's models lazy, so the admin's column headers, form labels and filters follow the active
+language while the models keep their plain Uzbek literals (and their migrations: a lazy string compares equal
+to its Uzbek text). Such a text is returned **verbatim** while the language is Uzbek (:func:`in_language`): no
+catalog is consulted, so a label that happens to be an English interface string too ("Email", "None") is
+never re-translated by Django's own Uzbek catalog, and what the API and the OpenAPI schema read from the
+models cannot change.
 
 The viewer's choice lives in a cookie scoped to the console (:data:`COOKIE_NAME`); without one the console
 opens in ``OPS_DEFAULT_LANGUAGE``.
