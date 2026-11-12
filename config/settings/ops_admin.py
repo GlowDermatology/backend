@@ -233,6 +233,13 @@ UNFOLD: dict[str, Any] = {
     # The user menu: the user's own staff record instead of Unfold's stock "Change password" link (the
     # console has no password change; glowderma.core.admin_site).
     "ACCOUNT": {"navigation": "glowderma.core.admin_site.account_links"},
+    # The user menu's language switcher (English, Russian, Uzbek): glowderma.core.console_i18n keeps the
+    # choice in a console cookie; the sign-in pages have their own (admin/ops/language_switch.html).
+    "SHOW_LANGUAGES": True,
+    "LANGUAGES": {
+        "navigation": "glowderma.core.console_i18n.switcher_languages",
+        "action": reverse_lazy("ops_set_language"),
+    },
     "DASHBOARD_CALLBACK": f"{DASHBOARD_VIEWS}.dashboard_callback",
     # (url under /django-admin/, url name in the admin namespace, view class): Unfold wraps each in
     # ``admin_site.admin_view`` and passes ``admin_site`` to ``as_view``.

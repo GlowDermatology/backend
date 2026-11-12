@@ -65,7 +65,7 @@
                 {% if d.policy_tiers %}
                     <div class="gd-scroll">
                         <table class="gd-table">
-                            <thead><tr><th>{% translate "Umrbod xarid" %}</th><th class="num">Cashback</th></tr></thead>
+                            <thead><tr><th>{% translate "Umrbod xarid" %}</th><th class="num">{% translate "Cashback" %}</th></tr></thead>
                             <tbody>{% for tier in d.policy_tiers %}<tr><td>{{ tier.range }}</td><td class="num strong">{{ tier.percent }}</td></tr>{% endfor %}</tbody>
                         </table>
                     </div>
