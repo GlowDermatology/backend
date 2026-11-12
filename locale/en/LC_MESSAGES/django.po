@@ -876,6 +876,10 @@ msgstr "No paid orders in this period"
 msgid "Bu kalitni hech kimga bermang va skrinshot qilib saqlamang."
 msgstr "Do not share this key with anyone and do not keep it as a screenshot."
 
+#: glowderma/professionals/services.py
+msgid "Bu yozuvga boshqa yozuvlar bog‘langan; avval ularni o‘chiring yoki nofaol qiling."
+msgstr "Other records are linked to this one; delete or deactivate them first."
+
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "Bugun %(count)s ta qabul"
 msgid_plural "Bugun %(count)s ta qabul"
@@ -1363,6 +1367,10 @@ msgstr "Active, but stock is 0 or there is no Billz record"
 msgid "Faollashtirildi"
 msgstr "Activated"
 
+#: glowderma/professionals/services.py
+msgid "Faqat JPEG, PNG yoki WebP rasm."
+msgstr "JPEG, PNG or WebP images only."
+
 #: glowderma/core/admin_actions.py
 msgid "Faqat menejerlar uchun."
 msgstr "Managers only."
@@ -1391,6 +1399,10 @@ msgstr "Background jobs (Job)"
 #: glowderma/site_config/forms.py
 msgid "Foydalanish shartlari"
 msgstr "Terms of use"
+
+#: glowderma/site_config/services.py
+msgid "Foydalanish shartlari va maxfiylik siyosatining o‘zbekcha matnini kiriting, so‘ng e’lon qiling."
+msgstr "Enter the Uzbek text of the terms of use and the privacy policy, then publish."
 
 #: glowderma.core.enums.BillzImportMode
 msgid "Full"
@@ -2161,6 +2173,10 @@ msgstr "Purpose"
 msgid "Matnlar saqlandi"
 msgstr "Texts saved"
 
+#: glowderma/site_config/services.py
+msgid "Matnlar yoki versiya siz sahifani ochganingizdan keyin o‘zgargan. Sahifani yangilang, matnlarni tekshiring va qayta e’lon qiling."
+msgstr "The texts or the version have changed since you opened the page. Refresh the page, check the texts and publish again."
+
 #: glowderma/core/admin.py
 #: glowderma/reporting/templates/reporting/dashboards/ops.html
 msgid "Mavzu"
@@ -2322,6 +2338,12 @@ msgstr "Specialist #%(professional_id)s · service #%(service_id)s: %(price)s, %
 #: config/settings/ops_admin.py
 msgid "Mutaxassis xizmatlari"
 msgstr "Specialist services"
+
+#: glowderma/professionals/services.py
+msgid "Mutaxassisda %(n)s ta kelgusi qabul bor (kutilayotgan yoki tasdiqlangan). Avval ularni boshqa vaqtga yoki mutaxassisga ko‘chiring yoki bekor qiling."
+msgid_plural "Mutaxassisda %(n)s ta kelgusi qabul bor (kutilayotgan yoki tasdiqlangan). Avval ularni boshqa vaqtga yoki mutaxassisga ko‘chiring yoki bekor qiling."
+msgstr[0] "The specialist has %(n)s upcoming appointment (pending or confirmed). Reschedule it to another time or specialist, or cancel it, first."
+msgstr[1] "The specialist has %(n)s upcoming appointments (pending or confirmed). Reschedule them to another time or specialist, or cancel them, first."
 
 #: config/settings/ops_admin.py
 msgid "Mutaxassislar"
@@ -2972,6 +2994,10 @@ msgstr "Rejected"
 #: model metadata
 msgid "Rad etilgan"
 msgstr "Rejected"
+
+#: glowderma/professionals/services.py
+msgid "Rasm 5 MB dan oshmasin."
+msgstr "The image must not exceed 5 MB."
 
 #: glowderma/reporting/dashboards/sales.py
 msgid "Rasm yo‘q"

@@ -944,6 +944,10 @@ msgstr "За этот период оплаченных заказов нет"
 msgid "Bu kalitni hech kimga bermang va skrinshot qilib saqlamang."
 msgstr "Никому не передавайте этот ключ и не сохраняйте его в виде снимка экрана."
 
+#: glowderma/professionals/services.py
+msgid "Bu yozuvga boshqa yozuvlar bog‘langan; avval ularni o‘chiring yoki nofaol qiling."
+msgstr "С этой записью связаны другие записи; сначала удалите их или сделайте неактивными."
+
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "Bugun %(count)s ta qabul"
 msgid_plural "Bugun %(count)s ta qabul"
@@ -1433,6 +1437,10 @@ msgstr "Активные, но остаток 0 или нет записи в Bi
 msgid "Faollashtirildi"
 msgstr "Активирован"
 
+#: glowderma/professionals/services.py
+msgid "Faqat JPEG, PNG yoki WebP rasm."
+msgstr "Только изображения JPEG, PNG или WebP."
+
 #: glowderma/core/admin_actions.py
 msgid "Faqat menejerlar uchun."
 msgstr "Только для менеджеров."
@@ -1461,6 +1469,10 @@ msgstr "Фоновые задачи (Job)"
 #: glowderma/site_config/forms.py
 msgid "Foydalanish shartlari"
 msgstr "Условия использования"
+
+#: glowderma/site_config/services.py
+msgid "Foydalanish shartlari va maxfiylik siyosatining o‘zbekcha matnini kiriting, so‘ng e’lon qiling."
+msgstr "Введите узбекский текст условий использования и политики конфиденциальности, затем опубликуйте."
 
 #: glowderma.core.enums.BillzImportMode
 msgid "Full"
@@ -2235,6 +2247,10 @@ msgstr "Назначение"
 msgid "Matnlar saqlandi"
 msgstr "Тексты сохранены"
 
+#: glowderma/site_config/services.py
+msgid "Matnlar yoki versiya siz sahifani ochganingizdan keyin o‘zgargan. Sahifani yangilang, matnlarni tekshiring va qayta e’lon qiling."
+msgstr "Тексты или версия изменились после того, как вы открыли страницу. Обновите страницу, проверьте тексты и опубликуйте снова."
+
 #: glowderma/core/admin.py
 #: glowderma/reporting/templates/reporting/dashboards/ops.html
 msgid "Mavzu"
@@ -2396,6 +2412,14 @@ msgstr "Специалист #%(professional_id)s · услуга #%(service_id)
 #: config/settings/ops_admin.py
 msgid "Mutaxassis xizmatlari"
 msgstr "Услуги специалистов"
+
+#: glowderma/professionals/services.py
+msgid "Mutaxassisda %(n)s ta kelgusi qabul bor (kutilayotgan yoki tasdiqlangan). Avval ularni boshqa vaqtga yoki mutaxassisga ko‘chiring yoki bekor qiling."
+msgid_plural "Mutaxassisda %(n)s ta kelgusi qabul bor (kutilayotgan yoki tasdiqlangan). Avval ularni boshqa vaqtga yoki mutaxassisga ko‘chiring yoki bekor qiling."
+msgstr[0] "У специалиста %(n)s предстоящая запись на приём (ожидающая или подтверждённая). Сначала перенесите её на другое время или к другому специалисту либо отмените."
+msgstr[1] "У специалиста %(n)s предстоящие записи на приём (ожидающие или подтверждённые). Сначала перенесите их на другое время или к другому специалисту либо отмените."
+msgstr[2] "У специалиста %(n)s предстоящих записей на приём (ожидающих или подтверждённых). Сначала перенесите их на другое время или к другому специалисту либо отмените."
+msgstr[3] "У специалиста %(n)s предстоящих записей на приём (ожидающих или подтверждённых). Сначала перенесите их на другое время или к другому специалисту либо отмените."
 
 #: config/settings/ops_admin.py
 msgid "Mutaxassislar"
@@ -3048,6 +3072,10 @@ msgstr "Отклонено"
 #: model metadata
 msgid "Rad etilgan"
 msgstr "Отклонено"
+
+#: glowderma/professionals/services.py
+msgid "Rasm 5 MB dan oshmasin."
+msgstr "Изображение не должно превышать 5 МБ."
 
 #: glowderma/reporting/dashboards/sales.py
 msgid "Rasm yo‘q"

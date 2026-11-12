@@ -22,6 +22,7 @@ from datetime import date, datetime
 from typing import Any
 
 from django.db import transaction
+from django.utils.translation import gettext_noop
 
 from glowderma.core import audit, timeutils
 from glowderma.core.api.exceptions import Conflict
@@ -59,10 +60,12 @@ EDITABLE_FIELDS: tuple[str, ...] = (
 )
 SHA256_PREFIX = 16  # hex characters of a text digest in the audit log
 
-TERMS_INCOMPLETE = (
+# Plain Uzbek (the refusal's text); ``gettext_noop`` only lists them in the console's catalogs, because the
+# settings page shows them in the viewer's language (``admin_views``: ``gettext(str(exc.detail))``).
+TERMS_INCOMPLETE = gettext_noop(
     "Foydalanish shartlari va maxfiylik siyosatining o‘zbekcha matnini kiriting, so‘ng e’lon qiling."
 )
-PUBLISH_STALE = (
+PUBLISH_STALE = gettext_noop(
     "Matnlar yoki versiya siz sahifani ochganingizdan keyin o‘zgargan. Sahifani yangilang, matnlarni "
     "tekshiring va qayta e’lon qiling."
 )
