@@ -399,13 +399,23 @@ jobs:
               aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c \
               image --scanners vuln,secret --severity HIGH,CRITICAL --ignore-unfixed --no-progress $format "$REF"
           done
+      # Temporarily accepted (2026-11-13): CVE-2026-119170 in the python 3.14.10 binary is "fixed in 3.14.11",
+      # but neither python.org nor Docker Hub has released 3.14.11 yet. Bump the base image in the Dockerfile and
+      # delete this ignore as soon as python:3.14.11-slim-trixie is published.
       - name: grype (second vulnerability database)
         if: ${{ !cancelled() }}
-        run: >-
-          docker run --rm -v "$HOME/.docker/config.json:/docker/config.json:ro" -e DOCKER_CONFIG=/docker
-          -v "$PWD/sarif:/out"
-          anchore/grype:v0.121.1@sha256:6b06708b036f74b2cd70e94b706b4586af96d1932e6ac46255940b2e39dd44a9
-          "registry:$REF" --only-fixed --fail-on high -o table -o sarif=/out/grype.sarif
+        run: |
+          cat > "$RUNNER_TEMP/grype.yaml" <<'YAML'
+          ignore:
+            - vulnerability: CVE-2026-119170
+              package:
+                name: python
+                version: 3.14.10
+          YAML
+          docker run --rm -v "$HOME/.docker/config.json:/docker/config.json:ro" -e DOCKER_CONFIG=/docker \
+            -v "$PWD/sarif:/out" -v "$RUNNER_TEMP/grype.yaml:/grype.yaml:ro" \
+            anchore/grype:v0.121.1@sha256:6b06708b036f74b2cd70e94b706b4586af96d1932e6ac46255940b2e39dd44a9 \
+            "registry:$REF" -c /grype.yaml --only-fixed --fail-on high -o table -o sarif=/out/grype.sarif
       # Two reviewed false positives are accepted: CIS-DI-0010 flags any file named settings.py (here the config
       # modules of Unfold, DRF and drf-spectacular, no credentials), and DKL-DI-0005 flags the official python base
       # image's layer, which clears apt with `apt-get dist-clean` (Dockle 0.4.15 knows only `rm -rf
