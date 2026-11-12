@@ -991,6 +991,7 @@ msgstr "Отменённые"
 
 #: glowderma/customers/admin.py
 #: glowderma/loyalty/admin.py
+#: glowderma/reporting/templates/reporting/dashboards/money.html
 msgid "Cashback"
 msgstr ""
 

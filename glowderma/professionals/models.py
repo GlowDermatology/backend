@@ -8,6 +8,7 @@ from typing import Any
 
 from django.db import models
 from django.db.models import F, Q
+from django.utils.translation import gettext
 
 from glowderma.core import enums, slugs
 from glowderma.core.labels import WEEKDAYS, som_text, stamp
@@ -231,10 +232,14 @@ class ProfessionalService(models.Model):
         ordering = ["professional_id", "service_id"]
 
     def __str__(self) -> str:
-        return (
-            f"Mutaxassis #{self.professional_id} · xizmat #{self.service_id}: {som_text(self.price)}, "
-            f"{self.duration_min} daqiqa"
-        )
+        return gettext(
+            "Mutaxassis #%(professional_id)s · xizmat #%(service_id)s: %(price)s, %(duration)s daqiqa"
+        ) % {
+            "professional_id": self.professional_id,
+            "service_id": self.service_id,
+            "price": som_text(self.price),
+            "duration": self.duration_min,
+        }
 
 
 class WorkingHours(models.Model):
@@ -277,8 +282,16 @@ class WorkingHours(models.Model):
         ordering = ["professional_id", "weekday"]
 
     def __str__(self) -> str:
-        day = WEEKDAYS[self.weekday] if 0 <= self.weekday < len(WEEKDAYS) else f"kun {self.weekday}"
-        return f"Mutaxassis #{self.professional_id} · {day} {self.start:%H:%M}–{self.end:%H:%M}"
+        if 0 <= self.weekday < len(WEEKDAYS):
+            day = gettext(WEEKDAYS[self.weekday])
+        else:
+            day = gettext("kun %(weekday)s") % {"weekday": self.weekday}
+        return gettext("Mutaxassis #%(professional_id)s · %(day)s %(start)s–%(end)s") % {
+            "professional_id": self.professional_id,
+            "day": day,
+            "start": f"{self.start:%H:%M}",
+            "end": f"{self.end:%H:%M}",
+        }
 
 
 class WorkingHoursOverride(models.Model):
@@ -315,10 +328,15 @@ class WorkingHoursOverride(models.Model):
         ordering = ["date"]
 
     def __str__(self) -> str:
-        hours = (
-            "dam olish" if self.start is None or self.end is None else f"{self.start:%H:%M}–{self.end:%H:%M}"
-        )
-        return f"Mutaxassis #{self.professional_id} · {self.date}: {hours}"
+        if self.start is None or self.end is None:
+            hours = gettext("dam olish")
+        else:
+            hours = f"{self.start:%H:%M}–{self.end:%H:%M}"
+        return gettext("Mutaxassis #%(professional_id)s · %(date)s: %(hours)s") % {
+            "professional_id": self.professional_id,
+            "date": self.date,
+            "hours": hours,
+        }
 
 
 class BlockedPeriod(models.Model):
@@ -350,4 +368,9 @@ class BlockedPeriod(models.Model):
 
     def __str__(self) -> str:
         end = stamp(self.end)[-5:]
-        return f"{self.get_kind_display()} {stamp(self.start)}–{end} (mutaxassis #{self.professional_id})"
+        return gettext("%(kind)s %(start)s–%(end)s (mutaxassis #%(professional_id)s)") % {
+            "kind": self.get_kind_display(),
+            "start": stamp(self.start),
+            "end": end,
+            "professional_id": self.professional_id,
+        }

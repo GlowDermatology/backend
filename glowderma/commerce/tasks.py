@@ -56,6 +56,7 @@ from celery.signals import worker_ready  # type: ignore[import-untyped]
 from django.conf import settings
 from django.core.cache import cache
 from django.db import connection, transaction
+from django.utils.translation import gettext, gettext_lazy
 
 from glowderma.catalog import topics as catalog_topics
 from glowderma.commerce import selectors, services, topics
@@ -551,7 +552,7 @@ REQUEUE_WARNING = (
 
 # The console's owner never runs a command: the next step is said in plain words (the technical team records a
 # hand-entered sale with ``billz_mark_recorded``).
-REQUEUE_WARNING_UZ = (
+REQUEUE_WARNING_UZ = gettext_lazy(
     "avval Billz’da shu buyurtmaning sotuvi qo‘lda kiritilmaganini tekshiring. Kiritilgan bo‘lsa, qayta "
     "navbatga qo‘ymang — sotuv Billz’da ikki marta yoziladi; texnik guruhga buyurtma raqamini yuboring, "
     "ular sotuvni «qo‘lda yozilgan» deb belgilaydi."
@@ -578,12 +579,17 @@ def describe_push(message: OutboxMessage) -> str:
 def describe_push_uz(message: OutboxMessage) -> str:
     """:func:`describe_push` for the ops console."""
     order_id, info = _push_info(message)
-    text = f"buyurtma №{order_id if order_id is not None else '-'}, "
+    parts = [gettext("buyurtma №%(number)s") % {"number": order_id if order_id is not None else "-"}]
     draft = info.billz_sale_id if info is not None else ""
-    text += f"Billz qoralamasi {draft}" if draft else "Billz qoralamasi hali yaratilmagan"
+    if draft:
+        parts.append(gettext("Billz qoralamasi %(draft)s") % {"draft": draft})
+    else:
+        parts.append(gettext("Billz qoralamasi hali yaratilmagan"))
     if info is not None and info.billz_payment_attempted_at is not None:
-        text += f", to‘lovga urinilgan: {stamp(info.billz_payment_attempted_at)}"
-    return text
+        parts.append(
+            gettext("to‘lovga urinilgan: %(when)s") % {"when": stamp(info.billz_payment_attempted_at)}
+        )
+    return ", ".join(parts)
 
 
 def push_already_recorded_uz(message: OutboxMessage) -> str:
@@ -591,7 +597,9 @@ def push_already_recorded_uz(message: OutboxMessage) -> str:
     _, info = _push_info(message)
     if info is None or info.billz_pushed_at is None:
         return ""
-    return f"Billz’da allaqachon yozilgan: {stamp(info.billz_pushed_at)} (qo‘lda yoki oldingi yuborishda)"
+    return gettext("Billz’da allaqachon yozilgan: %(when)s (qo‘lda yoki oldingi yuborishda)") % {
+        "when": stamp(info.billz_pushed_at)
+    }
 
 
 def push_already_recorded(message: OutboxMessage) -> str:
