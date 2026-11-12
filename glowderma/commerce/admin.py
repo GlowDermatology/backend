@@ -9,7 +9,7 @@ from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.urls import URLPattern, path, reverse
 from django.utils.safestring import SafeString
-from django.utils.translation import gettext
+from django.utils.translation import gettext, pgettext_lazy
 from django.utils.translation import gettext_lazy as _
 
 from glowderma.commerce import diagnostics as order_diagnostics
@@ -196,7 +196,11 @@ class OrderAdmin(ReadOnlyAdmin):
                 "delivered_at",
             ),
         ),
-        (_("Bekor qilish"), ("cancelled_at", "cancellation_reason", "cancellation_note", "cancelled_by")),
+        (
+            # A section heading, not the button of the same Uzbek wording: its own catalog entry.
+            pgettext_lazy("bo‘lim", "Bekor qilish"),
+            ("cancelled_at", "cancellation_reason", "cancellation_note", "cancelled_by"),
+        ),
     )
 
 

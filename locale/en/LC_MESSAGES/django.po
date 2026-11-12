@@ -637,11 +637,15 @@ msgid "Bekor qilingan (reversal)"
 msgstr "Cancelled (reversal)"
 
 #: glowderma/accounts/templates/accounts/console/reset_2fa_confirmation.html
-#: glowderma/commerce/admin.py
 #: glowderma/core/templates/admin/ops/confirm_action.html
 #: glowderma/site_config/templates/site_config/console/settings.html
 msgid "Bekor qilish"
 msgstr "Cancel"
+
+#: glowderma/commerce/admin.py
+msgctxt "bo‘lim"
+msgid "Bekor qilish"
+msgstr "Cancellation"
 
 #: model metadata
 msgid "Bekor qilish rad etildi"
@@ -1836,7 +1840,6 @@ msgid "Jo‘natma yaratilmadi"
 msgstr "Shipment not created"
 
 #: glowderma/accounts/api/guard.py
-#: glowderma/accounts/console/views.py
 msgid "Juda ko‘p urinish. %(wait)s soniyadan so‘ng qayta urinib ko‘ring."
 msgid_plural "Juda ko‘p urinish. %(wait)s soniyadan so‘ng qayta urinib ko‘ring."
 msgstr[0] "Too many attempts. Try again in %(wait)s second."

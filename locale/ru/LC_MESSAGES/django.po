@@ -703,9 +703,13 @@ msgid "Bekor qilingan (reversal)"
 msgstr "Отменено (reversal)"
 
 #: glowderma/accounts/templates/accounts/console/reset_2fa_confirmation.html
-#: glowderma/commerce/admin.py
 #: glowderma/core/templates/admin/ops/confirm_action.html
 #: glowderma/site_config/templates/site_config/console/settings.html
+msgid "Bekor qilish"
+msgstr "Отмена"
+
+#: glowderma/commerce/admin.py
+msgctxt "bo‘lim"
 msgid "Bekor qilish"
 msgstr "Отмена"
 
@@ -1906,7 +1910,6 @@ msgid "Jo‘natma yaratilmadi"
 msgstr "Отправление не создано"
 
 #: glowderma/accounts/api/guard.py
-#: glowderma/accounts/console/views.py
 msgid "Juda ko‘p urinish. %(wait)s soniyadan so‘ng qayta urinib ko‘ring."
 msgid_plural "Juda ko‘p urinish. %(wait)s soniyadan so‘ng qayta urinib ko‘ring."
 msgstr[0] "Слишком много попыток. Повторите через %(wait)s секунду."
@@ -6443,7 +6446,7 @@ msgstr "Тёмная"
 
 #: unfold / django.contrib.admin
 msgid "System"
-msgstr "Системная"
+msgstr "Авто"
 
 #: unfold / django.contrib.admin
 msgid "Toggle dark/light mode"

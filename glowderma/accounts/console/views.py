@@ -81,15 +81,6 @@ CODES_FILENAME = "glowderma-ops-zaxira-kodlar.txt"  # a file name: the same in e
 type StepView = Callable[[HttpRequest, state.Pending], HttpResponse]
 
 
-def lockout_notice(wait: int) -> str:
-    """The notice of a running lockout in the console's language (the text of ``guard.lockout_message``)."""
-    return ngettext(
-        "Juda ko‘p urinish. %(wait)s soniyadan so‘ng qayta urinib ko‘ring.",
-        "Juda ko‘p urinish. %(wait)s soniyadan so‘ng qayta urinib ko‘ring.",
-        wait,
-    ) % {"wait": wait}
-
-
 def few_recovery_codes(left: int) -> str:
     return ngettext(
         "Zaxira kodlardan %(left)s tasi qoldi. Menejerdan 2FA ni qayta o‘rnatishni so‘rang (yangi kodlar "
@@ -135,7 +126,7 @@ def signin_step(view: StepView) -> Callable[[HttpRequest], HttpResponse]:
 def _locked(
     request: HttpRequest, user: StaffUser, exc: Throttled, template: str, context: dict[str, Any]
 ) -> HttpResponse:
-    _plain, wait = lockout_message(exc)
+    message, wait = lockout_message(exc)
     if isinstance(exc, IpThrottled):
         record_ip_locked(request, CODE_STEP, wait, email=user.email)
     else:
@@ -145,7 +136,7 @@ def _locked(
         logger.warning("console.otp_locked staff_id=%s wait=%s", user.pk, wait)
         alerts.alert("console.otp_locked", {"staff_id": user.pk, "wait": wait}, scope=str(user.pk))
     _clear_code(context.get("form"))
-    response = _render(request, template, {**context, "lockout_message": lockout_notice(wait)}, status=429)
+    response = _render(request, template, {**context, "lockout_message": message}, status=429)
     response["Retry-After"] = str(wait)
     return response
 
