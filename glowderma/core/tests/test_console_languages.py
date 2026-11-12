@@ -23,8 +23,14 @@ from glowderma.core.tests.console import console_client
 
 LOGIN = "/django-admin/login/"
 SWITCH = "/django-admin/language/"
-# Uzbek (Latin) spells o‘ and g‘ with U+2018 (or U+02BB): a page in another language has neither.
-UZBEK = re.compile(r"[OoGg][‘ʻ]")
+# Uzbek (Latin) spells o‘ and g‘ with U+2018 (or U+02BB): a page in another language has neither. The frequent
+# console words catch a text that has no such letter.
+UZBEK = re.compile(
+    r"[OoGg][‘ʻ]|\b(holat|buyurtma|mijoz|mahsulot|yaratilgan|yangilangan|navbat|xato|sana|turi|nomi|qaytarish"
+    r"|xodim|sozlama|bildirishnoma|hisobot|tasdiq|bekor|yuboril|qidir|saqlash|kirish|chiqish|jami|barcha|yangi"
+    r"|oxirgi|kategoriya|xizmat|mutaxassis|qabul|manzil|izoh|sabab|narx|qoldiq)\w*",
+    re.IGNORECASE,
+)
 CYRILLIC = re.compile(r"[А-Яа-яЁё]{3,}")
 TAGS = re.compile(r"<(script|style)\b.*?</\1>|<[^>]+>", re.DOTALL)
 
@@ -35,7 +41,9 @@ def with_language(client: Client, code: str) -> Client:
 
 
 def text_of(response: object) -> str:
-    return TAGS.sub(" ", response.content.decode())  # type: ignore[attr-defined]
+    """The page's visible text, without the switcher's own entry (the Uzbek language is named in Uzbek)."""
+    text = TAGS.sub(" ", response.content.decode())  # type: ignore[attr-defined]
+    return text.replace(dict(console_i18n.LANGUAGES)["uz"], "")
 
 
 # --- the default and the cookie ---------------------------------------------------------------------------
@@ -299,6 +307,7 @@ def test_the_extractor_reads_python_and_template_markers() -> None:
         "  {{ n }} ta provayder, 100% tayyor\n{% endblocktranslate %}</p>"
         "{% blocktranslate trimmed count n=total %}{{ n }} ta yozuv{% plural %}{{ n }} ta yozuv"
         "{% endblocktranslate %}"
+        '{% include "x.html" with icon="sms" text=_("Kod yuborilmagan") %}{{ _("Bo‘sh")|upper }}'
     )
     assert set(console_catalog.template_messages(template)) == set(
         [
@@ -306,6 +315,8 @@ def test_the_extractor_reads_python_and_template_markers() -> None:
             console_catalog.Message("Ochish"),
             console_catalog.Message("%(n)s ta provayder, 100% tayyor"),
             console_catalog.Message("%(n)s ta yozuv", "%(n)s ta yozuv"),
+            console_catalog.Message("Kod yuborilmagan"),
+            console_catalog.Message("Bo‘sh"),
         ]
     )
 
@@ -318,11 +329,17 @@ def test_the_check_command_passes_on_the_committed_catalogs() -> None:
 # --- the pages --------------------------------------------------------------------------------------------
 
 
+# Their rows are stored texts (the order-status templates a migration seeds), shown as they were written.
+STORED_TEXT_PAGES = {"notifications_statustemplate"}
+
+
 def console_pages() -> list[str]:
-    pages = [reverse("admin:index")]
+    pages = [reverse("admin:index"), reverse("admin:site_config_settings")]
     pages += [reverse(f"admin:reporting_{name}") for name in ("money", "sales", "customers")]
     for model in admin.site._registry:
-        pages.append(reverse(f"admin:{model._meta.app_label}_{model._meta.model_name}_changelist"))
+        name = f"{model._meta.app_label}_{model._meta.model_name}"
+        if name not in STORED_TEXT_PAGES:
+            pages.append(reverse(f"admin:{name}_changelist"))
     return pages
 
 

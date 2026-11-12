@@ -82,7 +82,7 @@ type StepView = Callable[[HttpRequest, state.Pending], HttpResponse]
 
 
 def lockout_notice(wait: int) -> str:
-    """The notice of a running lockout in the console's language (``guard.LOCKOUT_MESSAGE``'s Uzbek text)."""
+    """The notice of a running lockout in the console's language (the text of ``guard.lockout_message``)."""
     return ngettext(
         "Juda ko‘p urinish. %(wait)s soniyadan so‘ng qayta urinib ko‘ring.",
         "Juda ko‘p urinish. %(wait)s soniyadan so‘ng qayta urinib ko‘ring.",

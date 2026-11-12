@@ -8,8 +8,8 @@ A console message is an **Uzbek** msgid from one of four places:
 
 * a marked literal in Python — the first argument of ``_`` / ``gettext`` / ``gettext_lazy`` /
   ``gettext_noop`` / ``ngettext`` / ``pgettext`` … (:func:`python_messages`, by ``ast``);
-* a ``{% translate %}`` / ``{% blocktranslate %}`` of a template (:func:`template_messages`, through Django's
-  own ``templatize``);
+* a ``{% translate %}`` / ``{% blocktranslate %}`` or a ``_("…")`` argument of a template
+  (:func:`template_messages`, through Django's own ``templatize``);
 * model metadata made lazy at start-up (``console_i18n.metadata_texts``);
 * a label the console translates when it renders it: the members of the project's ``Choices`` enums and the
   mappings of :mod:`glowderma.core.labels` (:func:`dynamic_texts`).
@@ -60,7 +60,7 @@ EXTRA_PYTHON: Final[tuple[str, ...]] = ("config/settings/ops_admin.py",)
 # ``core.labels`` names that never reach a console page (the exports' column headers stay Uzbek).
 UNTRANSLATED_LABELS: Final = re.compile(r"_EXPORT_HEADERS$")
 _TEMPLATE_CALL: Final = re.compile(
-    r"\b(?P<name>n?p?gettext)\(\s*(?P<args>(?:u?(?:'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\")\s*,?\s*)+)"
+    r"(?<![\w.])(?P<name>n?p?gettext|_)\(\s*(?P<args>(?:u?(?:'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\")\s*,?\s*)+)"
 )
 _STRING: Final = re.compile(r"u?('(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\")")
 
