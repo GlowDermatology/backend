@@ -10,6 +10,7 @@ import { openUserMenu } from "../lib/console";
 import { expect, MAIN_URL, sidebarItem, test } from "../lib/fixtures";
 
 const COOKIE = "gd_ops_language";
+const CONSOLE_URL = `${MAIN_URL}/django-admin/`;
 const LANGUAGES = [
   { code: "en", name: "English", signIn: "Log in", dashboard: "Ops status", orders: "Orders" },
   { code: "ru", name: "Русский", signIn: "Войти", dashboard: "Состояние системы", orders: "Заказы" },
@@ -32,7 +33,7 @@ test("the sign-in page switches between the three languages", async ({ page }) =
       await expect(switcher.locator("[aria-current=true]")).toHaveText(language.name);
     });
   }
-  const cookie = (await page.context().cookies(MAIN_URL)).find((entry) => entry.name === COOKIE);
+  const cookie = (await page.context().cookies(CONSOLE_URL)).find((entry) => entry.name === COOKIE);
   expect(cookie?.value).toBe("uz");
   expect(cookie?.path).toBe("/django-admin/");
   expect(cookie?.httpOnly).toBe(true);
@@ -63,9 +64,14 @@ test("the user menu switches the console and the choice stays", async ({ page, s
 });
 
 test("a console language never reaches the API", async ({ page, context }) => {
-  await context.addCookies([{ name: COOKIE, value: "ru", url: `${MAIN_URL}/django-admin/` }]);
+  await context.addCookies([
+    { name: COOKIE, value: "ru", domain: new URL(MAIN_URL).hostname, path: "/django-admin/" },
+  ]);
   await page.goto("/django-admin/login/");
   await expect(page.locator("html")).toHaveAttribute("lang", "ru");
+  // the API answers in its own language (Uzbek), whatever the console's cookie says
   const health = await context.request.get("/api/v1/health/");
-  expect(health.headers()["content-language"]).toBeUndefined();
+  expect(health.headers()["content-language"]).toBe("uz");
+  // and the cookie is not even sent outside the console
+  expect((await context.cookies(`${MAIN_URL}/api/v1/health/`)).map((entry) => entry.name)).not.toContain(COOKIE);
 });
