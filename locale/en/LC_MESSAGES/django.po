@@ -31,8 +31,8 @@ msgstr "%(audience)s session %(id)s"
 #: glowderma/reporting/dashboards/customers.py
 msgid "%(count)s bloklangan"
 msgid_plural "%(count)s bloklangan"
-msgstr[0] "%(count)s blocked"
-msgstr[1] "%(count)s blocked"
+msgstr[0] "%(count)s locked"
+msgstr[1] "%(count)s locked"
 
 #: glowderma/accounts/admin.py
 msgid "%(count)s daqiqa"
@@ -299,7 +299,7 @@ msgstr[1] "%(topic)s — %(count)s dead"
 
 #: glowderma/core/admin.py
 msgid "%(topic)s: %(requeued)s ta xabar qayta navbatga qo‘yildi, %(skipped)s ta o‘tkazib yuborildi."
-msgstr "%(topic)s: messages requeued: %(requeued)s, skipped: %(skipped)s."
+msgstr "%(topic)s: %(requeued)s requeued, %(skipped)s skipped."
 
 #: glowderma/core/admin.py
 msgid "%(topic)s: qayta navbatga qo‘yiladigan xabar topilmadi (%(count)s ta o‘tkazildi)."
@@ -649,7 +649,7 @@ msgstr "Cancellation"
 
 #: model metadata
 msgid "Bekor qilish rad etildi"
-msgstr "Cancellation refused"
+msgstr "Cancellation rejected"
 
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "Berildi"
@@ -780,7 +780,7 @@ msgstr "Billz payment attempted"
 
 #: glowderma/commerce/tasks.py
 msgid "Billz’da allaqachon yozilgan: %(when)s (qo‘lda yoki oldingi yuborishda)"
-msgstr "Already recorded in Billz: %(when)s (by hand or by an earlier push)"
+msgstr "Already recorded in Billz: %(when)s (manually or by an earlier send)"
 
 #: model metadata
 msgid "Billz’da hisoblangan"
@@ -1505,8 +1505,12 @@ msgstr "Not covered by any tier:"
 msgid "Hech qachon ishlamagan"
 msgstr "Never run"
 
-#: glowderma/loyalty/admin.py
 #: model metadata
+msgid "Hisob"
+msgstr "Account"
+
+#: glowderma/loyalty/admin.py
+msgctxt "cashback"
 msgid "Hisob"
 msgstr "Account"
 
@@ -2833,9 +2837,13 @@ msgid "Qabul #%(id)s · %(status)s: mutaxassis #%(professional_id)s %(start)s (%
 msgstr "Appointment #%(id)s · %(status)s: specialist #%(professional_id)s %(start)s (%(duration)s min)"
 
 #: glowderma/integrations/admin.py
-#: glowderma/reporting/templates/reporting/dashboards/ops.html
 msgid "Qabul qilindi"
 msgstr "Accepted"
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgctxt "ustun"
+msgid "Qabul qilindi"
+msgstr "Received"
 
 #: glowderma/delivery/admin.py
 msgid "Qabul qilindi (bekor qilish mumkin)"
@@ -3541,7 +3549,7 @@ msgstr "Install an authenticator app on your phone (Google Authenticator, Micros
 
 #: model metadata
 msgid "Telefonni bog‘lash"
-msgstr "Attach phone"
+msgstr "Phone linking"
 
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "Telefonsiz (faol)"
@@ -3918,7 +3926,7 @@ msgstr "Error (rejected or processing error)"
 
 #: glowderma/reporting/templates/reporting/dashboards/ops.html
 msgid "Xato = rad etilgan yoki ishlov xatosi; %(n)s+ — jiddiy"
-msgstr "Error = rejected or failed processing; %(n)s+ — critical"
+msgstr "Error = rejected or processing error; %(n)s+ — critical"
 
 #: glowderma.core.enums.JobState
 #: model metadata
@@ -4212,7 +4220,7 @@ msgstr "audience type"
 
 #: glowderma/commerce/tasks.py
 msgid "avval Billz’da shu buyurtmaning sotuvi qo‘lda kiritilmaganini tekshiring. Kiritilgan bo‘lsa, qayta navbatga qo‘ymang — sotuv Billz’da ikki marta yoziladi; texnik guruhga buyurtma raqamini yuboring, ular sotuvni «qo‘lda yozilgan» deb belgilaydi."
-msgstr "first check in Billz that this order’s sale has not been entered by hand. If it has, do not requeue — the sale would be recorded in Billz twice; send the order number to the technical team and they will mark the sale as “recorded by hand”."
+msgstr "first check in Billz that this order’s sale has not been entered manually. If it has, do not requeue — the sale would be recorded in Billz twice; send the order number to the technical team and they will mark the sale as “recorded manually”."
 
 #: model metadata
 msgid "bajaruvchi"
@@ -4264,7 +4272,7 @@ msgstr "cancelled"
 
 #: model metadata
 msgid "bekor qilingan vaqt"
-msgstr "reversed at"
+msgstr "cancelled at"
 
 #: model metadata
 msgid "bekor qilish izohi"
@@ -4617,7 +4625,7 @@ msgstr "status"
 
 #: model metadata
 msgid "holat o‘zgargan"
-msgstr "status changed"
+msgstr "status changed at"
 
 #: glowderma/commerce/diagnostics.py
 msgid "holat o‘zgargan: %(at)s"
@@ -4698,7 +4706,7 @@ msgstr "working hours"
 
 #: model metadata
 msgid "ishlatilgan"
-msgstr "used"
+msgstr "used at"
 
 #: model metadata
 msgid "ishlatilgan cashback"
@@ -4797,7 +4805,7 @@ msgstr "deferred"
 
 #: model metadata
 msgid "kelgan"
-msgstr "attended"
+msgstr "attended at"
 
 #: model metadata
 msgid "kenglik"
@@ -4859,11 +4867,11 @@ msgstr "day %(weekday)s"
 
 #: model metadata
 msgid "kun ish vaqti"
-msgstr "day-specific working hours"
+msgstr "working hours for a date"
 
 #: model metadata
 msgid "kun ish vaqtlari"
-msgstr "day-specific working hours"
+msgstr "working hours by date"
 
 #: model metadata
 msgid "kuryerga berilgan"
@@ -5038,7 +5046,7 @@ msgstr "min. online orders"
 
 #: model metadata
 msgid "min. umumiy xarid"
-msgstr "min. lifetime spend"
+msgstr "min. lifetime purchases"
 
 #: glowderma/reporting/templates/reporting/dashboards/base.html
 msgid "ming"
@@ -5117,8 +5125,8 @@ msgstr "name (uz)"
 #: glowderma/reporting/dashboards/money.py
 msgid "nomuvofiqlik"
 msgid_plural "nomuvofiqlik"
-msgstr[0] "mismatch"
-msgstr[1] "mismatches"
+msgstr[0] "discrepancy"
+msgstr[1] "discrepancies"
 
 #: model metadata
 msgid "obyekt ID"
@@ -5158,7 +5166,7 @@ msgstr "fulfilment method"
 
 #: glowderma/notifications/admin.py
 msgid "onlayn buyurtmalar %(orders)s · umrbod xarid %(amount)s"
-msgstr "online orders: %(orders)s · lifetime spend: %(amount)s"
+msgstr "online orders: %(orders)s · lifetime purchases: %(amount)s"
 
 #: model metadata
 msgid "outbox xabari"
@@ -5260,7 +5268,7 @@ msgstr "last error time"
 
 #: model metadata
 msgid "o‘chirilgan"
-msgstr "deleted"
+msgstr "deleted at"
 
 #: glowderma/reporting/dashboards/ops.py
 msgid "o‘lik xabar"
@@ -5270,7 +5278,7 @@ msgstr[1] "dead messages"
 
 #: model metadata
 msgid "o‘qilgan"
-msgstr "read"
+msgstr "read at"
 
 #: glowderma/core/templatetags/ops_admin.py
 msgid "o‘z ichiga oladi:"
@@ -5290,7 +5298,7 @@ msgstr "password"
 
 #: model metadata
 msgid "parol o‘zgargan"
-msgstr "password changed"
+msgstr "password changed at"
 
 #: model metadata
 msgid "platforma"
@@ -5793,10 +5801,14 @@ msgstr "verification token hash"
 msgid "tasdiqlagan"
 msgstr "confirmed by"
 
-#: glowderma/core/otp_apps.py
 #: model metadata
 msgid "tasdiqlangan"
 msgstr "confirmed at"
+
+#: glowderma/core/otp_apps.py
+msgctxt "belgi"
+msgid "tasdiqlangan"
+msgstr "confirmed"
 
 #: model metadata
 msgid "tasdiqlangan versiya"
@@ -5926,11 +5938,11 @@ msgstr "end"
 
 #: model metadata
 msgid "tugatilgan"
-msgstr "revoked at"
+msgstr "ended at"
 
 #: model metadata
 msgid "tugatish sababi"
-msgstr "revocation reason"
+msgstr "end reason"
 
 #: model metadata
 msgid "turi"
@@ -6116,15 +6128,15 @@ msgstr "label"
 
 #: model metadata
 msgid "yozilish qoidalari (en)"
-msgstr "booking policy (en)"
+msgstr "appointment policy (en)"
 
 #: model metadata
 msgid "yozilish qoidalari (ru)"
-msgstr "booking policy (ru)"
+msgstr "appointment policy (ru)"
 
 #: model metadata
 msgid "yozilish qoidalari (uz)"
-msgstr "booking policy (uz)"
+msgstr "appointment policy (uz)"
 
 #: model metadata
 msgid "yo‘l"

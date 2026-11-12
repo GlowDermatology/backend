@@ -657,7 +657,7 @@ msgstr "Срок резерва"
 
 #: config/settings/ops_admin.py
 msgid "Band vaqtlar"
-msgstr "Заблокированное время"
+msgstr "Занятые периоды"
 
 #: glowderma/commerce/models.py
 msgid "Band: %(quantity)s × mahsulot #%(product)s · buyurtma №%(order)s (%(state)s)"
@@ -739,15 +739,15 @@ msgstr "UUID заказа в Billz"
 
 #: glowderma/reporting/dashboards/ops.py
 msgid "Billz delta sinxroni"
-msgstr "Дельта-синхронизация Billz"
+msgstr "Дельта-синхронизация с Billz"
 
 #: glowderma/reporting/dashboards/ops.py
 msgid "Billz import"
-msgstr "Импорт Billz"
+msgstr "Импорт из Billz"
 
 #: glowderma/reporting/dashboards/ops.py
 msgid "Billz import (fon vazifasi)"
-msgstr "Импорт Billz (фоновая задача)"
+msgstr "Импорт из Billz (фоновая задача)"
 
 #: glowderma.core.enums.JobKind
 #: model metadata
@@ -802,7 +802,7 @@ msgstr "Billz в тестовом режиме: остаток не обновл
 
 #: glowderma/reporting/dashboards/ops.py
 msgid "Billz sinxroni"
-msgstr "Синхронизация Billz"
+msgstr "Синхронизация с Billz"
 
 #: glowderma/integrations/admin.py
 msgid "Billz sinxronlash navbatga qo‘yildi (vazifa #%(id)s)."
@@ -826,15 +826,15 @@ msgstr "Продажа в Billz"
 
 #: glowderma/reporting/dashboards/report.py
 msgid "Billz sotuvi yozilmagan (eski)"
-msgstr "Продажа в Billz не записана (старые)"
+msgstr "Продажа в Billz не зарегистрирована (старые)"
 
 #: glowderma/reporting/dashboards/report.py
 msgid "Billz sotuvi yozilmagan (oxirgi kunlar)"
-msgstr "Продажа в Billz не записана (последние дни)"
+msgstr "Продажа в Billz не зарегистрирована (последние дни)"
 
 #: glowderma/reporting/dashboards/report.py
 msgid "Billz sotuvi: o‘lik xabar"
-msgstr "Продажа в Billz: мёртвое сообщение"
+msgstr "Продажа в Billz: «мёртвое» сообщение"
 
 #: glowderma/integrations/admin.py
 msgid "Billz soxta rejimda ishlayapti: sinxronlash o‘chirilgan."
@@ -880,7 +880,7 @@ msgstr "Одноразовые коды (OTP)"
 #: glowderma/core/admin.py
 msgid "Birinchi %(count)s tasi ko‘rildi."
 msgid_plural "Birinchi %(count)s tasi ko‘rildi."
-msgstr[0] "Просмотрено только первое %(count)s сообщение."
+msgstr[0] "Просмотрены только первые %(count)s сообщение."
 msgstr[1] "Просмотрены только первые %(count)s сообщения."
 msgstr[2] "Просмотрены только первые %(count)s сообщений."
 msgstr[3] "Просмотрены только первые %(count)s сообщений."
@@ -926,7 +926,7 @@ msgstr "Панели управления"
 #: glowderma.core.enums.CashbackHoldState
 #: model metadata
 msgid "Bo‘shatildi"
-msgstr "Освобождено"
+msgstr "Освобождён"
 
 #: glowderma/commerce/templates/admin/commerce/order_diagnostics.html
 msgid "Bu buyurtma bo‘yicha xabar yo‘q"
@@ -1253,7 +1253,7 @@ msgstr "Нет описания"
 
 #: glowderma.core.enums.SeoIssueCode
 msgid "Description Short"
-msgstr "Короткое описание"
+msgstr "Описание слишком короткое"
 
 #: glowderma/commerce/admin.py
 msgid "Diagnostika"
@@ -1435,7 +1435,7 @@ msgstr "Активные, но остаток 0 или нет записи в Bi
 #: glowderma.core.enums.ProductChangeKind
 #: model metadata
 msgid "Faollashtirildi"
-msgstr "Активирован"
+msgstr "Активировано"
 
 #: glowderma/professionals/services.py
 msgid "Faqat JPEG, PNG yoki WebP rasm."
@@ -1575,10 +1575,14 @@ msgstr "Не охвачено ни одним уровнем:"
 msgid "Hech qachon ishlamagan"
 msgstr "Ни одного запуска"
 
-#: glowderma/loyalty/admin.py
 #: model metadata
 msgid "Hisob"
 msgstr "Учётная запись"
+
+#: glowderma/loyalty/admin.py
+msgctxt "cashback"
+msgid "Hisob"
+msgstr "Счёт"
 
 #: glowderma.core.enums.SessionRevokeReason
 #: model metadata
@@ -2046,7 +2050,7 @@ msgstr "Не отложено"
 
 #: model metadata
 msgid "Keldi"
-msgstr "Клиент пришёл"
+msgstr "Приём состоялся"
 
 #: glowderma.core.enums.AppointmentStatus
 #: glowderma/reporting/dashboards/customers.py
@@ -2311,7 +2315,7 @@ msgstr "Клиент #%(id)s"
 
 #: glowderma/customers/admin.py
 msgid "Mijoz barcha telefon va brauzerlardan chiqariladi (sabab: «Admin tugatdi»), sessiyasiz qolgan qurilmalarga push yuborilmaydi. Yo‘qolgan telefon yoki begona kirish gumon qilinganda ishlating."
-msgstr "Клиент выйдет из системы на всех телефонах и во всех браузерах (причина: «Завершён администратором»), на устройства, оставшиеся без сеанса, push-уведомления отправляться не будут. Используйте при утере телефона или подозрении на посторонний вход."
+msgstr "Клиент будет выведен из системы на всех телефонах и во всех браузерах (причина: «Завершён администратором»), на устройства, оставшиеся без сеанса, push-сообщения отправляться не будут. Используйте при утере телефона или подозрении на посторонний вход."
 
 #: glowderma.core.enums.CancellationReason
 #: model metadata
@@ -2722,7 +2726,7 @@ msgstr "Мёртвое"
 
 #: glowderma/reporting/dashboards/report.py
 msgid "O‘lik outbox xabarlari (24 soat)"
-msgstr "Мёртвые сообщения Outbox (24 часа)"
+msgstr "«Мёртвые» сообщения Outbox (24 часа)"
 
 #: glowderma/core/admin.py
 msgid "O‘lik xabar yana «pending» holatiga qaytadi (urinishlar 0 dan boshlanadi) va dispetcher uni darhol yetkazishga urinadi. Muddati o‘tgan xabar uchun dispetcher qayta ishga tushiriladi. Ishlovchilar idempotent: muvaffaqiyatli bajarilgan amal takrorlanmaydi."
@@ -2841,23 +2845,23 @@ msgstr "Телефон привязан"
 
 #: glowderma.core.enums.ProgressStep
 msgid "Picked Up"
-msgstr "Получен"
+msgstr "Получено"
 
 #: glowderma.core.enums.ProgressStep
 msgid "Placed"
-msgstr "Оформлен"
+msgstr "Оформлено"
 
 #: glowderma.core.enums.DirectoryOrdering
 msgid "Position"
-msgstr "Позиция"
+msgstr "По позиции"
 
 #: glowderma.core.enums.CustomerProductOrdering
 msgid "Price"
-msgstr "Цена"
+msgstr "По цене"
 
 #: glowderma.core.enums.CustomerProductOrdering
 msgid "Price Desc"
-msgstr "Цена (по убыванию)"
+msgstr "По цене, по убыванию"
 
 #: glowderma.core.enums.InboxLinkKind
 msgid "Product"
@@ -2911,9 +2915,13 @@ msgid "Qabul #%(id)s · %(status)s: mutaxassis #%(professional_id)s %(start)s (%
 msgstr "Запись на приём #%(id)s · %(status)s: специалист #%(professional_id)s %(start)s (%(duration)s мин)"
 
 #: glowderma/integrations/admin.py
-#: glowderma/reporting/templates/reporting/dashboards/ops.html
 msgid "Qabul qilindi"
 msgstr "Принято"
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgctxt "ustun"
+msgid "Qabul qilindi"
+msgstr "Получено"
 
 #: glowderma/delivery/admin.py
 msgid "Qabul qilindi (bekor qilish mumkin)"
@@ -3312,27 +3320,27 @@ msgstr "Сегменты"
 
 #: glowderma.core.enums.SeoIssueCode
 msgid "Seo Description Long"
-msgstr "SEO-описание слишком длинное"
+msgstr "SEO-описание длинное"
 
 #: glowderma.core.enums.SeoIssueCode
 msgid "Seo Description Missing"
-msgstr "SEO-описание отсутствует"
+msgstr "Нет SEO-описания"
 
 #: glowderma.core.enums.SeoIssueCode
 msgid "Seo Description Short"
-msgstr "SEO-описание слишком короткое"
+msgstr "SEO-описание короткое"
 
 #: glowderma.core.enums.SeoIssueCode
 msgid "Seo Title Long"
-msgstr "SEO-заголовок слишком длинный"
+msgstr "SEO-заголовок длинный"
 
 #: glowderma.core.enums.SeoIssueCode
 msgid "Seo Title Missing"
-msgstr "SEO-заголовок отсутствует"
+msgstr "Нет SEO-заголовка"
 
 #: glowderma.core.enums.SeoIssueCode
 msgid "Seo Title Short"
-msgstr "SEO-заголовок слишком короткий"
+msgstr "SEO-заголовок короткий"
 
 #: glowderma.core.labels.WEEKDAYS
 #: model metadata
@@ -3466,7 +3474,7 @@ msgstr "Настроен"
 
 #: glowderma/reporting/dashboards/ops.py
 msgid "Sozlanmagan"
-msgstr "Не настроено"
+msgstr "Не настроен"
 
 #: model metadata
 msgid "So‘raldi"
@@ -3883,7 +3891,7 @@ msgstr "Подтвердить устройство"
 
 #: glowderma.core.enums.OtpPurpose
 msgid "Verify Email"
-msgstr "Подтверждение email"
+msgstr "Подтверждение электронной почты"
 
 #: glowderma.core.enums.NextStep
 msgid "Verify Phone"
@@ -3998,7 +4006,7 @@ msgstr "Ошибка (отклонено или ошибка обработки)
 
 #: glowderma/reporting/templates/reporting/dashboards/ops.html
 msgid "Xato = rad etilgan yoki ishlov xatosi; %(n)s+ — jiddiy"
-msgstr "Ошибка = отклонён или сбой обработки; %(n)s+ — критично"
+msgstr "Ошибка = отклонено или ошибка обработки; %(n)s+ — критично"
 
 #: glowderma.core.enums.JobState
 #: model metadata
@@ -4127,7 +4135,7 @@ msgstr "В норме"
 #: glowderma.core.enums.CashbackHoldState
 #: model metadata
 msgid "Yechildi"
-msgstr "Списано"
+msgstr "Списан"
 
 #: glowderma/reporting/dashboards/money.py
 msgid "Yechilgan band ↔ sarflash yozuvi"
@@ -4188,7 +4196,7 @@ msgstr "Отправляется"
 
 #: config/settings/ops_admin.py
 msgid "Zaxira bandlari"
-msgstr "Резервы остатков"
+msgstr "Резервы товара"
 
 #: glowderma/accounts/console/forms.py
 msgid "Zaxira kod"
@@ -4296,7 +4304,7 @@ msgstr "тип аудитории"
 
 #: glowderma/commerce/tasks.py
 msgid "avval Billz’da shu buyurtmaning sotuvi qo‘lda kiritilmaganini tekshiring. Kiritilgan bo‘lsa, qayta navbatga qo‘ymang — sotuv Billz’da ikki marta yoziladi; texnik guruhga buyurtma raqamini yuboring, ular sotuvni «qo‘lda yozilgan» deb belgilaydi."
-msgstr "сначала проверьте в Billz, не внесена ли продажа по этому заказу вручную. Если внесена, не возвращайте сообщение в очередь — продажа будет записана в Billz дважды; отправьте номер заказа технической команде, и она отметит продажу как «внесённую вручную»."
+msgstr "сначала проверьте в Billz, не внесена ли продажа по этому заказу вручную. Если внесена, не возвращайте сообщение в очередь — продажа будет зарегистрирована в Billz дважды; отправьте номер заказа технической группе, и она отметит продажу как «зарегистрированную вручную»."
 
 #: model metadata
 msgid "bajaruvchi"
@@ -4304,7 +4312,7 @@ msgstr "исполнитель"
 
 #: model metadata
 msgid "bajaruvchi ID"
-msgstr "исполнитель (ID)"
+msgstr "ID исполнителя"
 
 #: model metadata
 msgid "bajaruvchi turi"
@@ -4380,7 +4388,7 @@ msgstr "цена за единицу"
 
 #: model metadata
 msgid "bog‘langandagi email"
-msgstr "email на момент привязки"
+msgstr "эл. почта на момент привязки"
 
 #: model metadata
 msgid "bog‘liq obyekt"
@@ -4951,11 +4959,11 @@ msgstr "день %(weekday)s"
 
 #: model metadata
 msgid "kun ish vaqti"
-msgstr "рабочее время на день"
+msgstr "рабочее время на дату"
 
 #: model metadata
 msgid "kun ish vaqtlari"
-msgstr "рабочее время по дням"
+msgstr "рабочее время по датам"
 
 #: model metadata
 msgid "kuryerga berilgan"
@@ -5132,7 +5140,7 @@ msgstr "мин. онлайн-заказов"
 
 #: model metadata
 msgid "min. umumiy xarid"
-msgstr "мин. общая сумма покупок"
+msgstr "мин. сумма покупок за всё время"
 
 #: glowderma/reporting/templates/reporting/dashboards/base.html
 msgid "ming"
@@ -5363,10 +5371,10 @@ msgstr "удалено"
 #: glowderma/reporting/dashboards/ops.py
 msgid "o‘lik xabar"
 msgid_plural "o‘lik xabar"
-msgstr[0] "мёртвое сообщение"
-msgstr[1] "мёртвых сообщения"
-msgstr[2] "мёртвых сообщений"
-msgstr[3] "мёртвых сообщений"
+msgstr[0] "«мёртвое» сообщение"
+msgstr[1] "«мёртвых» сообщения"
+msgstr[2] "«мёртвых» сообщений"
+msgstr[3] "«мёртвых» сообщений"
 
 #: model metadata
 msgid "o‘qilgan"
@@ -5903,8 +5911,12 @@ msgstr "хеш токена подтверждения"
 msgid "tasdiqlagan"
 msgstr "кем подтверждено"
 
-#: glowderma/core/otp_apps.py
 #: model metadata
+msgid "tasdiqlangan"
+msgstr "подтверждено"
+
+#: glowderma/core/otp_apps.py
+msgctxt "belgi"
 msgid "tasdiqlangan"
 msgstr "подтверждено"
 
@@ -6153,7 +6165,7 @@ msgstr "вход сотрудника через соцсеть"
 
 #: model metadata
 msgid "xodim ijtimoiy kirishlari"
-msgstr "входы сотрудников через соцсеть"
+msgstr "входы сотрудников через соцсети"
 
 #: model metadata
 msgid "xodim izohi"
@@ -6230,15 +6242,15 @@ msgstr "метка"
 
 #: model metadata
 msgid "yozilish qoidalari (en)"
-msgstr "правила записи (en)"
+msgstr "правила записи на приём (en)"
 
 #: model metadata
 msgid "yozilish qoidalari (ru)"
-msgstr "правила записи (ru)"
+msgstr "правила записи на приём (ru)"
 
 #: model metadata
 msgid "yozilish qoidalari (uz)"
-msgstr "правила записи (uz)"
+msgstr "правила записи на приём (uz)"
 
 #: model metadata
 msgid "yo‘l"
@@ -6366,11 +6378,11 @@ msgstr "Вы успешно вышли из консоли"
 
 #: unfold / django.contrib.admin
 msgid "Thanks for spending some quality time with the web site today."
-msgstr "Благодарим вас за время, проведенное на этом сайте."
+msgstr "Благодарим вас за время, проведённое на этом сайте."
 
 #: unfold / django.contrib.admin
 msgid "Logged out"
-msgstr "Не авторизован"
+msgstr "Выход выполнен"
 
 #: unfold / django.contrib.admin
 msgid "Change password"
@@ -6378,7 +6390,7 @@ msgstr "Изменить пароль"
 
 #: unfold / django.contrib.admin
 msgid "Your password was changed."
-msgstr "Ваш пароль был изменен."
+msgstr "Ваш пароль был изменён."
 
 #: unfold / django.contrib.admin
 msgid "Please enter the correct %(username)s and password for a staff account. Note that both fields may be case-sensitive."
@@ -6386,7 +6398,7 @@ msgstr "Пожалуйста, введите корректные %(username)s �
 
 #: unfold / django.contrib.admin
 msgid "This account is inactive."
-msgstr "Эта учетная запись отключена."
+msgstr "Эта учётная запись отключена."
 
 #: unfold / django.contrib.admin
 msgid "You are authenticated as %(username)s, but are not authorized to access this page. Would you like to login to a different account?"
@@ -6458,7 +6470,7 @@ msgstr "Неизвестный тип"
 
 #: unfold / django.contrib.admin
 msgid "You don’t have permission to view or edit anything."
-msgstr "У вас недостаточно полномочий для просмотра или изменения чего либо."
+msgstr "У вас недостаточно полномочий для просмотра или изменения чего-либо."
 
 #: unfold / django.contrib.admin
 msgid "Toggle sidebar"
@@ -6702,15 +6714,15 @@ msgstr "Приоритет сортировки: %(priority_number)s"
 
 #: unfold / django.contrib.admin
 msgid "Select %s"
-msgstr "Выберите %s"
+msgstr "Выберите: %s"
 
 #: unfold / django.contrib.admin
 msgid "Select %s to change"
-msgstr "Выберите %s для изменения"
+msgstr "Выберите объект для изменения: %s"
 
 #: unfold / django.contrib.admin
 msgid "Select %s to view"
-msgstr "Выберите %s для просмотра"
+msgstr "Выберите объект для просмотра: %s"
 
 #: unfold / django.contrib.admin
 msgid "Select action"
@@ -6750,11 +6762,11 @@ msgstr "Изображение записи"
 
 #: unfold / django.contrib.admin
 msgid "Add %(name)s"
-msgstr "Добавить %(name)s"
+msgstr "Добавить: %(name)s"
 
 #: unfold / django.contrib.admin
 msgid "Add %s"
-msgstr "Добавить %s"
+msgstr "Добавить: %s"
 
 #: unfold / django.contrib.admin
 msgid "Change"
@@ -6762,7 +6774,7 @@ msgstr "Изменить"
 
 #: unfold / django.contrib.admin
 msgid "Change %s"
-msgstr "Изменить %s"
+msgstr "Изменить: %s"
 
 #: unfold / django.contrib.admin
 msgid "View"
@@ -6770,7 +6782,7 @@ msgstr "Просмотреть"
 
 #: unfold / django.contrib.admin
 msgid "View %s"
-msgstr "Просмотреть %s"
+msgstr "Просмотреть: %s"
 
 #: unfold / django.contrib.admin
 msgid "Delete"
@@ -6834,7 +6846,7 @@ msgstr "Да, я уверен"
 
 #: unfold / django.contrib.admin
 msgid "No, take me back"
-msgstr "Нет, отменить и вернуться к выбору"
+msgstr "Нет, вернуться назад"
 
 #: unfold / django.contrib.admin
 msgid "Objects"
@@ -6850,67 +6862,67 @@ msgstr "Пожалуйста, исправьте ошибки ниже."
 
 #: unfold / django.contrib.admin
 msgid "The {name} “{obj}” was changed successfully."
-msgstr "{name} “{obj}“ был успешно изменен."
+msgstr "Успешно изменено: {name} «{obj}»."
 
 #: unfold / django.contrib.admin
 msgid "The {name} “{obj}” was added successfully."
-msgstr "{name} \"{obj}\" был успешно добавлен."
+msgstr "Успешно добавлено: {name} «{obj}»."
 
 #: unfold / django.contrib.admin
 msgid "The %(name)s “%(obj)s” was deleted successfully."
-msgstr "%(name)s “%(obj)s“ был успешно удален."
+msgstr "Успешно удалено: %(name)s «%(obj)s»."
 
 #: unfold / django.contrib.admin
 msgid "The {name} “{obj}” was added successfully. You may edit it again below."
-msgstr "{name} “{obj}” был успешно добавлен. Вы можете отредактировать его снова ниже."
+msgstr "Успешно добавлено: {name} «{obj}». Ниже можно продолжить редактирование."
 
 #: unfold / django.contrib.admin
 msgid "The {name} “{obj}” was added successfully. You may add another {name} below."
-msgstr "{name} “{obj}“ был успешно добавлен. Вы можете добавить еще один {name} ниже."
+msgstr "Успешно добавлено: {name} «{obj}». Ниже можно добавить ещё один объект."
 
 #: unfold / django.contrib.admin
 msgid "The {name} “{obj}” was changed successfully. You may edit it again below."
-msgstr "{name} “{obj}“ был изменен успешно. Вы можете отредактировать его снова ниже."
+msgstr "Успешно изменено: {name} «{obj}». Ниже можно продолжить редактирование."
 
 #: unfold / django.contrib.admin
 msgid "The {name} “{obj}” was changed successfully. You may add another {name} below."
-msgstr "{name} “{obj}“ был изменен. Вы можете добавить еще один {name} ниже."
+msgstr "Успешно изменено: {name} «{obj}». Ниже можно добавить ещё один объект."
 
 #: unfold / django.contrib.admin
 msgid "Are you sure you want to delete the %(object_name)s \"%(escaped_object)s\"? All of the following related items will be deleted:"
-msgstr "Вы уверены, что хотите удалить объект типа %(object_name)s \"%(escaped_object)s\"? Указанные ниже связанные объекты при этом будут также удалены:"
+msgstr "Вы уверены, что хотите удалить объект «%(escaped_object)s» (%(object_name)s)? Указанные ниже связанные объекты также будут удалены:"
 
 #: unfold / django.contrib.admin
 msgid "Deleting the %(object_name)s '%(escaped_object)s' would result in deleting related objects, but your account doesn't have permission to delete the following types of objects:"
-msgstr "Удаление объекта типа %(object_name)s \"%(escaped_object)s\" потребовало бы удаления связанных с ним объектов, но у вашей учётной записи нет прав на удаление объектов следующих типов:"
+msgstr "Удаление объекта «%(escaped_object)s» (%(object_name)s) потребовало бы удаления связанных с ним объектов, но у вашей учётной записи нет прав на удаление объектов следующих типов:"
 
 #: unfold / django.contrib.admin
 msgid "Deleting the %(object_name)s '%(escaped_object)s' would require deleting the following protected related objects:"
-msgstr "Удаление объекта типа %(object_name)s \"%(escaped_object)s\" потребовало бы удаления следующих защищённых объектов, связанных с ним:"
+msgstr "Удаление объекта «%(escaped_object)s» (%(object_name)s) потребовало бы удаления следующих защищённых объектов, связанных с ним:"
 
 #: unfold / django.contrib.admin
 msgid "Cannot delete %(name)s"
-msgstr "Не удается удалить %(name)s"
+msgstr "Не удаётся удалить: %(name)s"
 
 #: unfold / django.contrib.admin
 msgid "%(name)s with ID “%(key)s” doesn’t exist. Perhaps it was deleted?"
-msgstr "%(name)s с ID “%(key)s“ не существует. Возможно оно было удалено?"
+msgstr "Объект «%(name)s» с ID «%(key)s» не существует. Возможно, он был удалён?"
 
 #: unfold / django.contrib.admin
 msgid "Add another %(model)s"
-msgstr "Добавить ещё один объект типа \"%(model)s\""
+msgstr "Добавить ещё один объект типа «%(model)s»"
 
 #: unfold / django.contrib.admin
 msgid "Change selected %(model)s"
-msgstr "Изменить выбранный объект типа \"%(model)s\""
+msgstr "Изменить выбранный объект типа «%(model)s»"
 
 #: unfold / django.contrib.admin
 msgid "View selected %(model)s"
-msgstr "Просмотреть выбранный объект типа \"%(model)s\""
+msgstr "Просмотреть выбранный объект типа «%(model)s»"
 
 #: unfold / django.contrib.admin
 msgid "Delete selected %(model)s"
-msgstr "Удалить выбранный объект типа \"%(model)s\""
+msgstr "Удалить выбранный объект типа «%(model)s»"
 
 #: unfold / django.contrib.admin
 msgid "Currently:"
@@ -6967,15 +6979,15 @@ msgstr[3] "Пожалуйста, исправьте ошибки ниже."
 #: unfold / django.contrib.admin
 msgid "%(count)s %(name)s was changed successfully."
 msgid_plural "%(count)s %(name)s were changed successfully."
-msgstr[0] "%(count)s %(name)s был успешно изменен."
-msgstr[1] "%(count)s %(name)s были успешно изменены."
-msgstr[2] "%(count)s %(name)s были успешно изменены."
-msgstr[3] "%(count)s %(name)s были успешно изменены."
+msgstr[0] "Успешно изменено объектов: %(count)s (%(name)s)."
+msgstr[1] "Успешно изменено объектов: %(count)s (%(name)s)."
+msgstr[2] "Успешно изменено объектов: %(count)s (%(name)s)."
+msgstr[3] "Успешно изменено объектов: %(count)s (%(name)s)."
 
 #: unfold / django.contrib.admin
 msgid "%(total_count)s selected"
 msgid_plural "All %(total_count)s selected"
-msgstr[0] "Выбран %(total_count)s"
+msgstr[0] "Выбрано: %(total_count)s"
 msgstr[1] "Выбраны все %(total_count)s"
 msgstr[2] "Выбраны все %(total_count)s"
 msgstr[3] "Выбраны все %(total_count)s"
@@ -7050,7 +7062,7 @@ msgstr "декабря"
 
 #: unfold / django.contrib.admin
 msgid "Add another %(verbose_name)s"
-msgstr "Добавить еще один %(verbose_name)s"
+msgstr "Добавить ещё: %(verbose_name)s"
 
 #: unfold / django.contrib.admin
 msgid "Click to cancel"

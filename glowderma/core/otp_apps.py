@@ -24,6 +24,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from django.utils.translation import gettext_lazy as _
+from django.utils.translation import pgettext_lazy
 from django_otp.plugins.otp_static.apps import DefaultConfig as StaticDefaultConfig
 from django_otp.plugins.otp_totp.apps import DefaultConfig as TotpDefaultConfig
 
@@ -33,7 +34,7 @@ if TYPE_CHECKING:
 DEVICE_FIELD_LABELS: dict[str, _StrPromise] = {
     "user": _("xodim"),
     "name": _("nomi"),
-    "confirmed": _("tasdiqlangan"),
+    "confirmed": pgettext_lazy("belgi", "tasdiqlangan"),
     "throttling_failure_timestamp": _("oxirgi xato urinish"),
     "throttling_failure_count": _("ketma-ket xato urinishlar"),
     "created_at": _("yaratilgan"),

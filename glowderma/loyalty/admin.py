@@ -7,6 +7,7 @@ from typing import Any
 
 from django.contrib import admin
 from django.utils.translation import gettext_lazy as _
+from django.utils.translation import pgettext_lazy
 
 from glowderma.core.admin import (
     DANGER,
@@ -142,7 +143,7 @@ register_read_only(
     list_display=(
         "id",
         "at",
-        customer_link_column("account", _("Hisob")),
+        customer_link_column("account", pgettext_lazy("cashback", "Hisob")),
         status_column("kind", _("Turi"), LEDGER_KIND_VARIANTS, LEDGER_KIND),
         money_column("amount", _("Summa")),
         money_column("balance_after", _("Balans")),
@@ -162,7 +163,7 @@ register_read_only(
     list_display=(
         "id",
         number_link_column("order", _("Buyurtma")),
-        customer_link_column("account", _("Hisob")),
+        customer_link_column("account", pgettext_lazy("cashback", "Hisob")),
         money_column("amount", _("Summa")),
         status_column("state", _("Holat"), HOLD_STATE_VARIANTS),
         "expires_at",
