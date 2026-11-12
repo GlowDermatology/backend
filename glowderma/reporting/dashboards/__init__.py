@@ -3,9 +3,12 @@
 Each builder (:mod:`.ops`, :mod:`.money`, :mod:`.sales`, :mod:`.customers`) reads the owning modules'
 selectors — a handful of aggregate statements, never a per-row query — and returns a plain, picklable
 ``dict`` of preformatted view data: numbers as text (thousands groups, so‘m), traffic-light states with
-their Uzbek label, and for every number the admin changelist (with real query parameters) that lists the
+their label, and for every number the admin changelist (with real query parameters) that lists the
 rows behind it. :mod:`glowderma.reporting.admin_views` caches each dict for :data:`CACHE_SECONDS` and renders
 it with Unfold's layout.
+
+The texts are written in Uzbek (the gettext source language) and translated when a dashboard is built, into
+the language of the console request that builds it; :func:`cached` therefore keeps one copy per language.
 
 This module holds what the builders share: the states and their thresholds' vocabulary, link and number
 formatting, and the cache.
@@ -14,28 +17,41 @@ formatting, and the cache.
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Callable, Iterable, Mapping
 from datetime import datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode
 
 from django.core.cache import cache
 from django.urls import reverse
+from django.utils.translation import get_language, gettext, ngettext
+from django.utils.translation import gettext_lazy as _
 
 from glowderma.core.i18n import format_number
 from glowderma.core.timeutils import TASHKENT
+
+if TYPE_CHECKING:
+    from django_stubs_ext import StrOrPromise  # a development dependency: never imported at runtime
 
 logger = logging.getLogger(__name__)
 
 CACHE_SECONDS = 60
 CACHE_PREFIX = "ops:dash:"  # = core.admin.DASHBOARD_CACHE_PREFIX (a console action clears its dashboards)
+# How long the epoch of a translated dashboard (:func:`cached`) is kept: it only has to outlive the copies.
+EPOCH_SECONDS = 24 * 60 * 60
 # The most ids a "show these rows" link carries (``?id__in=…``); a longer list links its first ids.
 LINK_IDS = 100
 
 # Traffic-light states of a tile or a row, worst last.
 NEUTRAL, OK, WARN, CRITICAL = "neutral", "ok", "warn", "critical"
 STATE_RANK = {NEUTRAL: 0, OK: 1, WARN: 2, CRITICAL: 3}
-STATE_LABELS = {NEUTRAL: "Ma’lumot", OK: "Yaxshi", WARN: "Diqqat", CRITICAL: "Jiddiy"}
+STATE_LABELS: dict[str, StrOrPromise] = {
+    NEUTRAL: _("Ma’lumot"),
+    OK: _("Yaxshi"),
+    WARN: _("Diqqat"),
+    CRITICAL: _("Jiddiy"),
+}
 STATE_ICONS = {NEUTRAL: "info", OK: "check_circle", WARN: "warning", CRITICAL: "error"}
 
 
@@ -59,8 +75,9 @@ def by_age(age: timedelta | None, *, warn: timedelta, critical: timedelta) -> st
 
 
 def state(value: str, text: str | None = None) -> dict[str, str]:
-    """A state as the templates render it: key, Uzbek label (or ``text``), Material icon."""
-    return {"key": value, "label": text or STATE_LABELS[value], "icon": STATE_ICONS[value]}
+    """A state as the templates render it: key, label in the active language (or ``text``), Material
+    icon."""
+    return {"key": value, "label": text or str(STATE_LABELS[value]), "icon": STATE_ICONS[value]}
 
 
 # --- links --------------------------------------------------------------------------------------------------
@@ -88,7 +105,9 @@ def capped(count: int, ids: Iterable[int]) -> str | None:
     """``Ro‘yxatda 100 / 234`` when a ``?id__in=`` link (:func:`ids_link`) lists fewer rows than the number it
     stands for (``None`` when it lists them all): the number is never silently larger than the list."""
     shown = min(len(list(ids)), LINK_IDS)
-    return f"Ro‘yxatda {num(shown)} / {num(count)}" if shown and count > shown else None
+    if not shown or count <= shown:
+        return None
+    return gettext("Ro‘yxatda %(shown)s / %(count)s") % {"shown": num(shown), "count": num(count)}
 
 
 def iso(instant: datetime) -> str:
@@ -106,16 +125,23 @@ def num(value: int | None) -> str:
 
 def som(value: int | None) -> str:
     """``1 250 000 so‘m``; ``—`` for ``None``."""
-    return "—" if value is None else f"{format_number(int(value), 'uz')} so‘m"
+    return "—" if value is None else gettext("%(amount)s so‘m") % {"amount": format_number(int(value), "uz")}
+
+
+SOM_SHORT_UNITS: tuple[tuple[int, StrOrPromise], ...] = (
+    (1_000_000_000, _("%(amount)s mlrd so‘m")),
+    (1_000_000, _("%(amount)s mln so‘m")),
+    (1_000, _("%(amount)s ming so‘m")),
+)
 
 
 def som_short(value: int) -> str:
     """Compact so‘m for tiles: ``12,4 mln so‘m``, ``1,2 mlrd so‘m``, ``850 ming so‘m``."""
     amount = int(value)
-    for size, unit in ((1_000_000_000, "mlrd"), (1_000_000, "mln"), (1_000, "ming")):
+    for size, text in SOM_SHORT_UNITS:
         if abs(amount) >= size:
             scaled = f"{amount / size:.1f}".replace(".", ",").removesuffix(",0")
-            return f"{scaled} {unit} so‘m"
+            return str(text) % {"amount": scaled}
     return som(amount)
 
 
@@ -138,15 +164,18 @@ def ago(instant: datetime | None, now: datetime) -> str:
     """``hozirgina`` · ``12 daqiqa oldin`` · ``3 soat oldin`` · ``2 kun oldin``; ``hech qachon`` for
     ``None``."""
     if instant is None:
-        return "hech qachon"
+        return gettext("hech qachon")
     seconds = int((now - instant).total_seconds())
     if seconds < 60:
-        return "hozirgina"
+        return gettext("hozirgina")
     if seconds < 3600:
-        return f"{seconds // 60} daqiqa oldin"
+        minutes = seconds // 60
+        return ngettext("%(count)s daqiqa oldin", "%(count)s daqiqa oldin", minutes) % {"count": minutes}
     if seconds < 86400:
-        return f"{seconds // 3600} soat oldin"
-    return f"{seconds // 86400} kun oldin"
+        hours = seconds // 3600
+        return ngettext("%(count)s soat oldin", "%(count)s soat oldin", hours) % {"count": hours}
+    days = seconds // 86400
+    return ngettext("%(count)s kun oldin", "%(count)s kun oldin", days) % {"count": days}
 
 
 def duration(seconds: float | None) -> str:
@@ -155,21 +184,69 @@ def duration(seconds: float | None) -> str:
         return "—"
     total = int(seconds)
     if total < 60:
-        return f"{total} s"
+        return gettext("%(seconds)s s") % {"seconds": total}
     if total < 3600:
-        return f"{total // 60} daq {total % 60:02d} s"
-    return f"{total // 3600} soat {total % 3600 // 60:02d} daq"
+        return gettext("%(minutes)s daq %(seconds)s s") % {
+            "minutes": total // 60,
+            "seconds": f"{total % 60:02d}",
+        }
+    return gettext("%(hours)s soat %(minutes)s daq") % {
+        "hours": total // 3600,
+        "minutes": f"{total % 3600 // 60:02d}",
+    }
 
 
 # --- cache --------------------------------------------------------------------------------------------------
 
 
 def cached(
-    name: str, build: Callable[[], dict[str, Any]], *, refresh: bool = False, seconds: int = CACHE_SECONDS
+    name: str,
+    build: Callable[[], dict[str, Any]],
+    *,
+    refresh: bool = False,
+    seconds: int = CACHE_SECONDS,
+    translated: bool = True,
 ) -> dict[str, Any]:
     """``build()`` cached under ``name`` for ``seconds``; ``refresh`` rebuilds and stores. A cache outage
-    never takes a dashboard down: it is built directly (logged)."""
+    never takes a dashboard down: it is built directly (logged).
+
+    A dashboard holds text in the language of the request that built it, so a ``translated`` payload (the
+    default) is kept once per active language under ``<key>:<language>`` and never shown to a viewer of
+    another language. ``<key>`` itself — the key a console action deletes
+    (``core.admin.forget_cached_counts``) — then holds the *epoch* of those copies: a copy counts only while
+    the key still holds the epoch it was built in, so deleting the key drops the dashboard in every language
+    and ``refresh`` (a new epoch) renews it for every language. ``translated=False`` is for plain data
+    without text: one copy under ``<key>``."""
     key = f"{CACHE_PREFIX}{name}"
+    if not translated:
+        return _cached_plain(key, build, refresh=refresh, seconds=seconds)
+    copy = f"{key}:{get_language() or ''}"
+    epoch: Any = None
+    if not refresh:
+        try:
+            found = cache.get_many([key, copy])
+        except Exception:
+            logger.warning("ops dashboard cache unavailable", exc_info=True)
+            return build()
+        epoch, entry = found.get(key), found.get(copy)
+        if isinstance(epoch, str) and isinstance(entry, Mapping) and entry.get("epoch") == epoch:
+            data = entry.get("data")
+            if isinstance(data, Mapping):
+                return dict(data)
+    value = build()
+    try:
+        if not isinstance(epoch, str):
+            epoch = uuid.uuid4().hex
+            cache.set(key, epoch, timeout=max(EPOCH_SECONDS, seconds))
+        cache.set(copy, {"epoch": epoch, "data": value}, timeout=seconds)
+    except Exception:
+        logger.warning("ops dashboard cache unavailable", exc_info=True)
+    return value
+
+
+def _cached_plain(
+    key: str, build: Callable[[], dict[str, Any]], *, refresh: bool, seconds: int
+) -> dict[str, Any]:
     if not refresh:
         try:
             value = cache.get(key)

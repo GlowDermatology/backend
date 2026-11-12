@@ -31,15 +31,9 @@ from glowderma.core.models import AuditEntry
 from glowderma.core.tests.console import ROLES, console_client, denied, messages_of, user_of
 from glowderma.core.timeutils import TASHKENT
 from glowderma.site_config import admin_views, services
+from glowderma.site_config import forms as settings_forms
 from glowderma.site_config.forms import (
-    INSTAGRAM_INVALID,
-    PHONE_INVALID,
-    RESERVATION_INVALID,
-    RESERVATION_TOO_HIGH,
-    RESERVATION_TOO_LOW,
     SECTION_FORMS,
-    TELEGRAM_INVALID,
-    URL_INVALID,
     ContactsForm,
     LegalTextsForm,
     SectionForm,
@@ -62,6 +56,15 @@ from glowderma.site_config.tests.console_page import (
 )
 from glowderma.site_config.tests.factories import SiteSettingsFactory
 
+# The forms' messages are lazy translations of their Uzbek text (the console's languages); the suite reads
+# the console in Uzbek and compares that text.
+INSTAGRAM_INVALID = str(settings_forms.INSTAGRAM_INVALID)
+PHONE_INVALID = str(settings_forms.PHONE_INVALID)
+RESERVATION_INVALID = str(settings_forms.RESERVATION_INVALID)
+RESERVATION_TOO_HIGH = str(settings_forms.RESERVATION_TOO_HIGH)
+RESERVATION_TOO_LOW = str(settings_forms.RESERVATION_TOO_LOW)
+TELEGRAM_INVALID = str(settings_forms.TELEGRAM_INVALID)
+URL_INVALID = str(settings_forms.URL_INVALID)
 PUBLIC = "/api/v1/settings/public/"
 TERMS_UZ = "1. Umumiy qoidalar.\nGlow Derma ilovasidan foydalanish shartlari."
 PRIVACY_UZ = "Shaxsiy ma’lumotlar O‘zbekiston Respublikasi hududida saqlanadi."

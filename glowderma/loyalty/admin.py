@@ -6,6 +6,7 @@ The only secret column of the module is ``PosDevice.key_hash`` (review minor 20)
 from typing import Any
 
 from django.contrib import admin
+from django.utils.translation import gettext_lazy as _
 
 from glowderma.core.admin import (
     DANGER,
@@ -37,10 +38,10 @@ from glowderma.loyalty.models import (
 )
 
 POLICY_STATE_LABELS = {
-    "active": "Amalda",
-    "scheduled": "Rejalashtirilgan",
-    "expired": "Muddati tugagan",
-    "superseded": "Almashtirilgan",
+    "active": _("Amalda"),
+    "scheduled": _("Rejalashtirilgan"),
+    "expired": _("Muddati tugagan"),
+    "superseded": _("Almashtirilgan"),
 }
 POLICY_STATE_VARIANTS = {"active": SUCCESS, "scheduled": INFO, "expired": WARNING, "superseded": WARNING}
 LEDGER_KIND_VARIANTS = {"credit": SUCCESS, "debit": INFO, "adjustment": WARNING, "reversal": DANGER}
@@ -51,16 +52,16 @@ class CashbackTierInline(ReadOnlyTabularInline):
     model = CashbackTier
     fields = ("from_amount_som", "to_amount_som", "percent", "created_at")
     ordering = ("from_amount",)
-    from_amount_som = staticmethod(money_column("from_amount", "Summadan"))
-    to_amount_som = staticmethod(money_column("to_amount", "Summagacha"))
+    from_amount_som = staticmethod(money_column("from_amount", _("Summadan")))
+    to_amount_som = staticmethod(money_column("to_amount", _("Summagacha")))
 
 
 class PurchaseItemInline(ReadOnlyTabularInline):
     model = PurchaseItem
     fields = ("position", "name", "billz_product_id", "quantity", "unit_price_som", "promo", "line_total_som")
     ordering = ("position",)
-    unit_price_som = staticmethod(money_column("unit_price", "Narx"))
-    line_total_som = staticmethod(money_column("line_total", "Jami"))
+    unit_price_som = staticmethod(money_column("unit_price", _("Narx")))
+    line_total_som = staticmethod(money_column("line_total", _("Jami")))
 
 
 class CashbackPolicyAdmin(ReadOnlyAdmin):
@@ -73,15 +74,15 @@ class CashbackPolicyAdmin(ReadOnlyAdmin):
     # derived (design 02 §1.1), change page only
     readonly_fields = ("policy_state", "policy_effective_to", "policy_superseded_by")
 
-    @display(description="Holat", label=POLICY_STATE_VARIANTS)
+    @display(description=_("Holat"), label=POLICY_STATE_VARIANTS)
     def policy_state(self, policy: CashbackPolicy) -> tuple[str, str]:
-        return (policy.state, POLICY_STATE_LABELS.get(policy.state, policy.state))
+        return (policy.state, str(POLICY_STATE_LABELS.get(policy.state, policy.state)))
 
-    @display(description="Amal qilish tugashi", empty_value="-")
+    @display(description=_("Amal qilish tugashi"), empty_value="-")
     def policy_effective_to(self, policy: CashbackPolicy) -> Any:
         return policy.effective_to
 
-    @display(description="O‘rnini olgan versiya", empty_value="-")
+    @display(description=_("O‘rnini olgan versiya"), empty_value="-")
     def policy_superseded_by(self, policy: CashbackPolicy) -> str | None:
         return None if policy.superseded_by is None else f"v{policy.superseded_by}"
 
@@ -92,8 +93,8 @@ class PurchaseAdmin(ReadOnlyAdmin):
         customer_column(),
         "source",
         "at",
-        money_column("amount", "Summa"),
-        money_column("cashback_amount", "Cashback"),
+        money_column("amount", _("Summa")),
+        money_column("cashback_amount", _("Cashback")),
         "order",
         "billz_sale_ref",
         "reversed",
@@ -118,7 +119,7 @@ register_read_only(
 )
 
 
-@display(description="Manba", ordering="source_type")
+@display(description=_("Manba"), ordering="source_type")
 def ledger_source(entry: LedgerEntry) -> str:
     """The entry's source; an order's reference repeats the «Buyurtma» column, so only other sources
     (a Billz sale number, an admin note) show their reference."""
@@ -130,7 +131,7 @@ def ledger_source(entry: LedgerEntry) -> str:
 
 register_read_only(
     LoyaltyAccount,
-    list_display=("id", customer_column(), money_column("balance", "Balans"), "updated_at"),
+    list_display=("id", customer_column(), money_column("balance", _("Balans")), "updated_at"),
     list_select_related=("customer",),
     search_fields=("customer__phone", "customer__name"),
     ordering=("-updated_at", "-id"),
@@ -141,12 +142,12 @@ register_read_only(
     list_display=(
         "id",
         "at",
-        customer_link_column("account", "Hisob"),
-        status_column("kind", "Turi", LEDGER_KIND_VARIANTS, LEDGER_KIND),
-        money_column("amount", "Summa"),
-        money_column("balance_after", "Balans"),
+        customer_link_column("account", _("Hisob")),
+        status_column("kind", _("Turi"), LEDGER_KIND_VARIANTS, LEDGER_KIND),
+        money_column("amount", _("Summa")),
+        money_column("balance_after", _("Balans")),
         ledger_source,
-        number_link_column("order", "Buyurtma"),
+        number_link_column("order", _("Buyurtma")),
         "actor",
     ),
     list_select_related=("account__customer", "actor"),
@@ -160,10 +161,10 @@ register_read_only(
     CashbackHold,
     list_display=(
         "id",
-        number_link_column("order", "Buyurtma"),
-        customer_link_column("account", "Hisob"),
-        money_column("amount", "Summa"),
-        status_column("state", "Holat", HOLD_STATE_VARIANTS),
+        number_link_column("order", _("Buyurtma")),
+        customer_link_column("account", _("Hisob")),
+        money_column("amount", _("Summa")),
+        status_column("state", _("Holat"), HOLD_STATE_VARIANTS),
         "expires_at",
         "captured_at",
         "released_at",
@@ -183,7 +184,7 @@ register_read_only(
         "name",
         "billz_product_id",
         "quantity",
-        money_column("unit_price", "Narx"),
+        money_column("unit_price", _("Narx")),
         "promo",
     ),
     search_fields=("=purchase__id", "billz_product_id", "name"),

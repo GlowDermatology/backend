@@ -1,5 +1,8 @@
 """Read-only Django admin for the notifications models (design 03 §8). Writes go through the services only."""
 
+from django.utils.translation import gettext
+from django.utils.translation import gettext_lazy as _
+
 from glowderma.core.admin import (
     DANGER,
     INFO,
@@ -40,12 +43,17 @@ RECIPIENT_STATE_VARIANTS = {"pending": INFO, "sent": SUCCESS, "failed": DANGER, 
 PUSH_STATE_VARIANTS = {"queued": INFO, "sending": PRIMARY, "sent": SUCCESS, "failed": DANGER}
 
 
-@display(description="Qoidalar")
+@display(description=_("Qoidalar"))
 def segment_rules(segment: CustomerSegment) -> str:
     """``onlayn buyurtmalar ≥ 3 · umrbod xarid ≥ 1 000 000 so‘m``; a rule that is off reads «yo‘q»."""
-    orders = "yo‘q" if segment.min_online_orders is None else f"≥ {segment.min_online_orders}"
-    amount = "yo‘q" if segment.min_lifetime_amount is None else f"≥ {som(segment.min_lifetime_amount)}"
-    return f"onlayn buyurtmalar {orders} · umrbod xarid {amount}"
+    orders = gettext("yo‘q") if segment.min_online_orders is None else f"≥ {segment.min_online_orders}"
+    amount = (
+        gettext("yo‘q") if segment.min_lifetime_amount is None else f"≥ {som(segment.min_lifetime_amount)}"
+    )
+    return gettext("onlayn buyurtmalar %(orders)s · umrbod xarid %(amount)s") % {
+        "orders": orders,
+        "amount": amount,
+    }
 
 
 register_read_only(
@@ -57,7 +65,7 @@ register_read_only(
 )
 register_read_only(
     CustomerSegment,
-    title_format="Segment: {obj.name}",
+    title_format=_("Segment: {obj.name}"),
     list_display=("id", "name", segment_rules, "created_at"),
     search_fields=("name",),
     ordering=("id",),
@@ -74,13 +82,13 @@ register_read_only(
 )
 register_read_only(
     Campaign,
-    title_format="Kampaniya #{obj.pk}: {obj.title}",
+    title_format=_("Kampaniya #{obj.pk}: {obj.title}"),
     list_display=(
         "id",
         "kind",
         "title",
         "audience_type",
-        status_column("state", "Holat", CAMPAIGN_STATE_VARIANTS),
+        status_column("state", _("Holat"), CAMPAIGN_STATE_VARIANTS),
         "scheduled_at",
         "approved_at",
         "dispatch_after",
@@ -104,7 +112,7 @@ register_read_only(
 )
 register_read_only(
     TestDevice,
-    title_format="Test qurilmasi: {obj.label}",
+    title_format=_("Test qurilmasi: {obj.label}"),
     list_display=("id", "label", "phone", "device", "is_active", "registered_by", "created_at"),
     list_filter=("is_active",),
     list_select_related=("device", "registered_by"),
@@ -137,7 +145,7 @@ register_read_only(
         "campaign",
         customer_column(),
         "device",
-        status_column("state", "Holat", RECIPIENT_STATE_VARIANTS),
+        status_column("state", _("Holat"), RECIPIENT_STATE_VARIANTS),
         "sent_at",
     ),
     list_filter=(dropdown("state"),),
@@ -153,7 +161,7 @@ register_read_only(
         customer_column(),
         "kind",
         "title",
-        status_column("push_state", "Push", PUSH_STATE_VARIANTS),
+        status_column("push_state", _("Push"), PUSH_STATE_VARIANTS),
         "created_at",
         "read_at",
     ),

@@ -8,6 +8,7 @@ amounts in so‘m, local timestamps and masked customer contacts.
 from datetime import datetime
 
 from django.utils import timezone
+from django.utils.translation import gettext
 
 from glowderma.core import enums
 from glowderma.core.i18n import format_number
@@ -230,8 +231,11 @@ WEEKDAYS: tuple[str, ...] = ("Dushanba", "Seshanba", "Chorshanba", "Payshanba", 
 
 
 def som_text(amount: int | None) -> str:
-    """``1 250 000 so‘m`` (NBSP groups, the admin ``N()`` rule)."""
-    return "-" if amount is None else f"{format_number(int(amount), 'uz')} so‘m"
+    """``1 250 000 so‘m`` (NBSP groups, the admin ``N()`` rule). A real ``str``, built in the language
+    active at the call: the console's on its pages, Uzbek everywhere else."""
+    if amount is None:
+        return "-"
+    return gettext("%(amount)s so‘m") % {"amount": format_number(int(amount), "uz")}
 
 
 def stamp(value: datetime | None) -> str:

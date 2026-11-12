@@ -1,14 +1,15 @@
-/* Glow Derma Ops: "Nusxa olish" on the recovery codes page (accounts/console/recovery_codes.html).
+/* Glow Derma Ops: the copy button of the recovery codes page (accounts/console/recovery_codes.html).
    A static file because the edge's CSP runs no inline script. Without JavaScript or the Clipboard API the
-   button stays hidden; the .txt download link works on its own. */
+   button stays hidden; the .txt download link works on its own. The texts come from the template, in the
+   console's language: data-copy-header (the first line of the copied text) and data-copied-label. */
 (function () {
   "use strict";
 
-  function codesText(list) {
+  function codesText(list, header) {
     var codes = Array.prototype.map.call(list.querySelectorAll("code"), function (node) {
       return node.textContent.trim();
     });
-    return "Glow Derma Ops — zaxira kodlar\n" + codes.join("\n") + "\n";
+    return header + "\n" + codes.join("\n") + "\n";
   }
 
   document.addEventListener("DOMContentLoaded", function () {
@@ -22,7 +23,7 @@
     }
     button.hidden = false;
     button.addEventListener("click", function () {
-      navigator.clipboard.writeText(codesText(list)).then(function () {
+      navigator.clipboard.writeText(codesText(list, button.getAttribute("data-copy-header"))).then(function () {
         button.textContent = button.getAttribute("data-copied-label");
       });
     });

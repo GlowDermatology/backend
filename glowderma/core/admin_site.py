@@ -26,6 +26,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.http import Http404, HttpRequest
 from django.urls import reverse
+from django.utils.translation import gettext_lazy as _
 from unfold.sites import UnfoldAdminSite
 
 if TYPE_CHECKING:
@@ -42,7 +43,7 @@ ENVIRONMENT_VARIANTS = {"PRODUCTION": "danger", "STAGING": "warning", "LOCAL": "
 class OpsAdminSite(_BaseSite):
     site_header = SITE_NAME
     site_title = SITE_NAME
-    index_title = "Boshqaruv"
+    index_title = _("Boshqaruv")
     # The index is the «Ops holati» dashboard (glowderma.reporting; ``UNFOLD["DASHBOARD_CALLBACK"]`` fills its
     # context). Named, not imported, so ``core`` stays below ``reporting``: Unfold's own ``admin/index.html``
     # comes first in the template search, hence the explicit name.
@@ -68,7 +69,7 @@ class OpsAdminSite(_BaseSite):
         raise Http404
 
 
-ACCOUNT_LINK_TITLE = "Mening hisobim"
+ACCOUNT_LINK_TITLE = _("Mening hisobim")
 
 
 def account_links(request: HttpRequest) -> list[dict[str, str]]:
@@ -79,7 +80,7 @@ def account_links(request: HttpRequest) -> list[dict[str, str]]:
         return []
     opts = get_user_model()._meta
     link = reverse(f"admin:{opts.app_label}_{opts.model_name}_change", args=[user.pk])
-    return [{"title": ACCOUNT_LINK_TITLE, "link": link}]
+    return [{"title": str(ACCOUNT_LINK_TITLE), "link": link}]
 
 
 def environment_callback(request: HttpRequest) -> list[str]:

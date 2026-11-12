@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import json
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from django.utils.translation import gettext, ngettext
+from django.utils.translation import gettext_lazy as _
 
 from glowderma.accounts import selectors as account_selectors
 from glowderma.appointments import selectors as appointment_selectors
@@ -35,6 +38,9 @@ from glowderma.reporting.dashboards import (
     state,
 )
 
+if TYPE_CHECKING:
+    from django_stubs_ext import StrOrPromise  # a development dependency: never imported at runtime
+
 SIGNUP_DAYS = 30
 CASHBACK_DAYS = 30
 CONFLICT_DAYS = 14
@@ -53,34 +59,35 @@ STAFF_LOGIN_FAILURES: tuple[str, ...] = (
 )
 STAFF_FAILURES_WARN = 5
 SOCIAL = "social"
-SIGNUP_SERIES: tuple[tuple[str, str], ...] = (
-    (account_selectors.SIGNUP_PHONE, "Telefon"),
+SIGNUP_SERIES: tuple[tuple[str, StrOrPromise], ...] = (
+    (account_selectors.SIGNUP_PHONE, _("Telefon")),
+    # plain: the same word in every language (and Django's own catalogs translate the msgid "Email")
     (account_selectors.SIGNUP_EMAIL, "Email"),
-    (SOCIAL, "Ijtimoiy tarmoq"),
+    (SOCIAL, _("Ijtimoiy tarmoq")),
 )
 SOCIAL_LABELS = {"google": "Google", "facebook": "Facebook", "apple": "Apple"}
-PLATFORMS: tuple[tuple[str, str], ...] = (
-    ("web", "Veb-sayt"),
+PLATFORMS: tuple[tuple[str, StrOrPromise], ...] = (
+    ("web", _("Veb-sayt")),
     ("ios", "iOS"),
     ("android", "Android"),
-    (account_selectors.NO_DEVICE, "Qurilmasiz"),
+    (account_selectors.NO_DEVICE, _("Qurilmasiz")),
 )
 CHANNEL_SLOTS = {"web": 1, "ios": 2, "android": 3}
-OTP_PURPOSES = {
-    "signup": "Ro‘yxatdan o‘tish",
-    "reset": "Parolni tiklash",
-    "new_device": "Yangi qurilma",
-    "social_link": "Ijtimoiy bog‘lash",
-    "verify_email": "Emailni tasdiqlash",
-    "attach_phone": "Telefon qo‘shish",
+OTP_PURPOSES: dict[str, StrOrPromise] = {
+    "signup": _("Ro‘yxatdan o‘tish"),
+    "reset": _("Parolni tiklash"),
+    "new_device": _("Yangi qurilma"),
+    "social_link": _("Ijtimoiy bog‘lash"),
+    "verify_email": _("Emailni tasdiqlash"),
+    "attach_phone": _("Telefon qo‘shish"),
 }
 OTP_CHANNELS = {account_selectors.OTP_SMS: "SMS", account_selectors.OTP_EMAIL: "Email"}
-APPOINTMENT_STATUS = {
-    "requested": "So‘rov",
-    "confirmed": "Tasdiqlangan",
-    "attended": "Kelgan",
-    "rejected": "Rad etilgan",
-    "cancelled": "Bekor qilingan",
+APPOINTMENT_STATUS: dict[str, StrOrPromise] = {
+    "requested": _("So‘rov"),
+    "confirmed": _("Tasdiqlangan"),
+    "attended": _("Kelgan"),
+    "rejected": _("Rad etilgan"),
+    "cancelled": _("Bekor qilingan"),
 }
 
 
@@ -103,7 +110,7 @@ def _signups(now: datetime) -> dict[str, Any]:
     for key, label in SIGNUP_SERIES:
         count = sum(series[key])
         by_method.append(
-            {"label": label, "count": num(count), "raw": count, "percent": percent(count, total)}
+            {"label": str(label), "count": num(count), "raw": count, "percent": percent(count, total)}
         )
     providers = [
         {
@@ -117,7 +124,7 @@ def _signups(now: datetime) -> dict[str, Any]:
     ]
     datasets = [
         {
-            "label": label,
+            "label": str(label),
             "data": series[key],
             "backgroundColor": f"var(--gd-method-{index})",
             "gdColor": f"--gd-method-{index}",
@@ -195,7 +202,7 @@ def _otp(now: datetime) -> dict[str, Any]:
     table = [
         {
             "channel": OTP_CHANNELS.get(row.channel, row.channel),
-            "purpose": OTP_PURPOSES.get(row.purpose, row.purpose),
+            "purpose": str(OTP_PURPOSES.get(row.purpose, row.purpose)),
             "day": num(row.last_day),
             "week": num(row.last_week),
             "verified": f"{percent(row.verified_week, row.last_week)}%",
@@ -282,7 +289,7 @@ def _clinic(now: datetime) -> dict[str, Any]:
         "href": changelist("appointments_appointment", start__gte=iso(start), start__lt=iso(end)),
         "statuses": [
             {
-                "label": APPOINTMENT_STATUS.get(status, status),
+                "label": str(APPOINTMENT_STATUS.get(status, status)),
                 "count": num(count),
                 "href": changelist(
                     "appointments_appointment",
@@ -300,7 +307,7 @@ def _clinic(now: datetime) -> dict[str, Any]:
                 "when": f"{stamp(appointment.start)}–{clock(appointment.end)}",
                 "professional": str(appointment.professional.name),
                 "service": str(appointment.service.name_uz) if appointment.service_id else "—",
-                "status": APPOINTMENT_STATUS.get(appointment.status, appointment.status),
+                "status": str(APPOINTMENT_STATUS.get(appointment.status, appointment.status)),
                 "href": change("appointments_appointment", appointment.pk),
             }
             for appointment in conflicts
@@ -327,7 +334,7 @@ def build(now: datetime) -> dict[str, Any]:
     )
     platform_rows = [
         {
-            "label": label,
+            "label": str(label),
             # the channel colour slot of dashboards.css (web 1, iOS 2, Android 3; none for «Qurilmasiz»)
             "slot": CHANNEL_SLOTS.get(key),
             "count": num(sessions.get(key, 0)),
@@ -342,59 +349,77 @@ def build(now: datetime) -> dict[str, Any]:
         if key != account_selectors.NO_DEVICE or sessions.get(key)
     ]
     conflict_count = len(clinic["conflicts"])
+    emails_day = otp["totals"][account_selectors.OTP_EMAIL]["day"]
     tiles = [
         {
-            "title": f"Yangi mijozlar · {SIGNUP_DAYS} kun",
+            "title": ngettext("Yangi mijozlar · %(days)s kun", "Yangi mijozlar · %(days)s kun", SIGNUP_DAYS)
+            % {"days": SIGNUP_DAYS},
             "icon": "person_add",
             "value": num(signups["total"]),
-            "unit": "ta",
+            "unit": ngettext("ta", "ta", signups["total"]),
             "hint": " · ".join(f"{row['label']} {row['count']}" for row in signups["methods"]),
             "href": signups["href"],
             "state": state(NEUTRAL),
         },
         {
-            "title": "Telefonsiz akkauntlar",
+            "title": gettext("Telefonsiz akkauntlar"),
             "icon": "phone_disabled",
             "value": num(coverage.phoneless),
-            "unit": "faol akkaunt",
-            "hint": f"{num(coverage.attached_later)} tasi keyin telefon qo‘shgan",
+            "unit": ngettext("faol akkaunt", "faol akkaunt", coverage.phoneless),
+            "hint": ngettext(
+                "%(count)s tasi keyin telefon qo‘shgan",
+                "%(count)s tasi keyin telefon qo‘shgan",
+                coverage.attached_later,
+            )
+            % {"count": num(coverage.attached_later)},
             "href": changelist("accounts_customer", phone__isnull="True", status__exact="active"),
             "state": state(NEUTRAL),
         },
         {
-            "title": "Ochiq sessiyalar",
+            "title": gettext("Ochiq sessiyalar"),
             "icon": "devices",
             "value": num(session_total),
-            "unit": "sessiya",
-            "hint": " · ".join(f"{row['label']} {row['count']}" for row in platform_rows) or "Sessiya yo‘q",
+            "unit": ngettext("sessiya", "sessiya", session_total),
+            "hint": " · ".join(f"{row['label']} {row['count']}" for row in platform_rows)
+            or gettext("Sessiya yo‘q"),
             "href": open_sessions,
             "state": state(NEUTRAL),
         },
         {
-            "title": "OTP · 24 soat",
+            "title": gettext("OTP · 24 soat"),
             "icon": "sms",
             "value": num(otp["totals"][account_selectors.OTP_SMS]["day"]),
             "unit": "SMS",
-            "hint": f"{num(otp['totals'][account_selectors.OTP_EMAIL]['day'])} email · "
-            f"{num(otp['locked_day'])} bloklangan",
+            "hint": " · ".join(
+                (
+                    ngettext("%(count)s email", "%(count)s email", emails_day) % {"count": num(emails_day)},
+                    ngettext("%(count)s bloklangan", "%(count)s bloklangan", otp["locked_day"])
+                    % {"count": num(otp["locked_day"])},
+                )
+            ),
             "href": otp["sms_href"],
             "state": state(by_count(otp["locked_day"], warn=LOCKOUTS_WARN, critical=LOCKOUTS_CRITICAL)),
         },
         {
-            "title": "Bugungi qabullar",
+            "title": gettext("Bugungi qabullar"),
             "icon": "event_available",
             "value": num(clinic["total"]),
-            "unit": "ta",
-            "hint": f"{num(conflict_count)} ta jadval ziddiyati ({CONFLICT_DAYS} kun)",
+            "unit": ngettext("ta", "ta", clinic["total"]),
+            "hint": ngettext(
+                "%(count)s ta jadval ziddiyati (%(days)s kun)",
+                "%(count)s ta jadval ziddiyati (%(days)s kun)",
+                conflict_count,
+            )
+            % {"count": num(conflict_count), "days": CONFLICT_DAYS},
             "href": clinic["href"],
             "state": state(WARN if conflict_count else OK),
         },
         {
-            "title": "Xodim kirish xatolari",
+            "title": gettext("Xodim kirish xatolari"),
             "icon": "gpp_maybe",
             "value": num(staff_failures),
-            "unit": "24 soat",
-            "hint": "Noto‘g‘ri parol yoki kod, bloklangan urinishlar (API va konsol)",
+            "unit": gettext("24 soat"),
+            "hint": gettext("Noto‘g‘ri parol yoki kod, bloklangan urinishlar (API va konsol)"),
             "href": changelist(
                 "core_auditentry",
                 action__in=",".join(STAFF_LOGIN_FAILURES),

@@ -2,7 +2,9 @@
 {% load static %}
 {% comment %}
   Shared frame of the console's sign-in steps: Unfold's unauthenticated layout (the login page's), the console
-  title, messages, the lockout notice and the step's form errors. Steps fill "step".
+  title, messages, the lockout notice and the step's form errors. Steps fill "step"; the language switcher
+  follows it (block "language_switch": the page that shows the recovery codes once leaves it out, because
+  switching reloads the page).
 {% endcomment %}
 
 {% block extrastyle %}
@@ -30,4 +32,6 @@
     {% endif %}
 
     {% block step %}{% endblock %}
+
+    {% block language_switch %}{% include "admin/ops/language_switch.html" %}{% endblock %}
 {% endblock %}

@@ -1,5 +1,7 @@
 """Read-only Django admin for the appointments models (design 03 §8). Writes go through the services only."""
 
+from django.utils.translation import gettext_lazy as _
+
 from glowderma.appointments.models import Appointment, AppointmentEvent
 from glowderma.core.admin import (
     DANGER,
@@ -28,9 +30,9 @@ register_read_only(
         "professional",
         customer_column(),
         "start",
-        status_column("status", "Holat", APPOINTMENT_STATUS_VARIANTS),
+        status_column("status", _("Holat"), APPOINTMENT_STATUS_VARIANTS),
         "requested_via",
-        money_column("price", "Narx"),
+        money_column("price", _("Narx")),
     ),
     list_filter=(dropdown("status"), "professional", dropdown("requested_via"), date_range("start")),
     list_select_related=("professional", "customer"),

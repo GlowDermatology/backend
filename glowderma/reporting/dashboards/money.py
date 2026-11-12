@@ -10,10 +10,12 @@ timeout) + 1 audit + 2 policy.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode
 
 from django.urls import reverse
+from django.utils.translation import gettext, ngettext
+from django.utils.translation import gettext_lazy as _
 
 from glowderma.core.consistency import Finding
 from glowderma.loyalty import selectors as loyalty_selectors
@@ -39,6 +41,9 @@ from glowderma.reporting.dashboards import (
 )
 from glowderma.reporting.dashboards import report as report_module
 
+if TYPE_CHECKING:
+    from django_stubs_ext import StrOrPromise  # a development dependency: never imported at runtime
+
 # A live check statement is cut off after this long (the nightly run allows 60 s; a page must stay quick).
 LIVE_TIMEOUT_MS = 5_000
 # How many sample ids a row shows inline (the row's link lists up to LINK_IDS).
@@ -47,36 +52,36 @@ LOYALTY_CHECK = report_module.LOYALTY_CHECK
 
 
 CHECKS = report_module.CHECKS
-SKIPPED_LABELS = {tasks.BILLZ_NOT_LIVE: "Billz sinov rejimida — tekshirilmadi"}
+SKIPPED_LABELS: dict[str, StrOrPromise] = {tasks.BILLZ_NOT_LIVE: _("Billz sinov rejimida — tekshirilmadi")}
 # What to do about a row that found something (the rows that need a person, in plain words).
-GUIDANCE: dict[str, str] = {
-    "k2_payment_pending_stuck": (
+GUIDANCE: dict[str, StrOrPromise] = {
+    "k2_payment_pending_stuck": _(
         "Har bir to‘lovni oching va provayder kabinetida (Click / Payme) tranzaksiya ID bo‘yicha holatini "
         "tekshiring. Pul yechilgan bo‘lsa — buyurtma raqamini texnik guruhga yuboring; yechilmagan bo‘lsa, "
         "mijoz bilan bog‘lanib, qayta to‘lashni so‘rang."
     ),
-    "k2_click_paid_without_paydoc": (
+    "k2_click_paid_without_paydoc": _(
         "Click kabinetida to‘lovning fiskal cheki (paydoc) chiqqanini tekshiring; chiqmagan bo‘lsa, texnik "
         "guruhga to‘lov raqamini yuboring — chek bo‘lmasa, qaytarishni avtomatik yuborib bo‘lmaydi."
     ),
-    "k3_refund_open": (
+    "k3_refund_open": _(
         "Qaytarish uzoq ochiq turibdi: uni oching, holati va «oxirgi xato»ni ko‘ring. Holati noma’lum yoki "
         "qo‘lda kiritish kerak bo‘lsa, provayder kabinetida pul qaytganini tekshiring va boshqaruv panelida "
         "(To‘lovlar → Qaytarishlar) uni hal qilingan deb belgilang."
     ),
-    "k3_refund_failed": (
+    "k3_refund_failed": _(
         "Qaytarish provayderda rad etilgan: «xato kodi»ni ko‘ring, so‘ng boshqaruv panelida (To‘lovlar → "
         "Qaytarishlar) qayta yuboring yoki pulni qo‘lda qaytarib, «qo‘lda qaytarildi» deb belgilang."
     ),
 }
 # The checks of the ledger reconciliation (glowderma.loyalty.tasks.CHECKS) in Uzbek; an unknown name is shown
 # as it is.
-RECONCILE_CHECK_LABELS = {
-    "ledger_sum": "Balans = daftar yozuvlari yig‘indisi",
-    "last_balance_after": "Balans = oxirgi yozuvdan keyingi balans",
-    "chain": "Yozuvlar zanjiri (har bir yozuvdan keyingi balans)",
-    "purchase_links": "Xarid ↔ hisoblangan cashback yozuvi",
-    "captured_holds": "Yechilgan band ↔ sarflash yozuvi",
+RECONCILE_CHECK_LABELS: dict[str, StrOrPromise] = {
+    "ledger_sum": _("Balans = daftar yozuvlari yig‘indisi"),
+    "last_balance_after": _("Balans = oxirgi yozuvdan keyingi balans"),
+    "chain": _("Yozuvlar zanjiri (har bir yozuvdan keyingi balans)"),
+    "purchase_links": _("Xarid ↔ hisoblangan cashback yozuvi"),
+    "captured_holds": _("Yechilgan band ↔ sarflash yozuvi"),
 }
 
 
@@ -93,6 +98,11 @@ def _live(now: datetime) -> dict[str, Finding | None]:
     return dict(results)
 
 
+def _skipped_note(reason: str) -> str | None:
+    label = SKIPPED_LABELS.get(reason)
+    return None if label is None else str(label)
+
+
 def _samples(model: str, ids: list[int]) -> list[dict[str, str]]:
     if not model:
         return []
@@ -106,12 +116,15 @@ def _rows(
     for name, info in CHECKS.items():
         reported = summary.checks.get(name) if summary else None
         finding = live.get(name)
+        # Judged by what happened, never by a cell's text (the text is translated).
+        live_failed = name != LOYALTY_CHECK and finding is None
+        report_failed = reported is not None and bool(reported.error)
         if name == LOYALTY_CHECK:
-            live_cell: dict[str, Any] = {"text": "Faqat tunda", "href": None, "count": None}
+            live_cell: dict[str, Any] = {"text": gettext("Faqat tunda"), "href": None, "count": None}
         elif finding is None:
-            live_cell = {"text": "Xato", "href": None, "count": None}
+            live_cell = {"text": gettext("Xato"), "href": None, "count": None}
         elif finding.skipped:
-            live_cell = {"text": "—", "href": None, "count": 0, "note": SKIPPED_LABELS.get(finding.skipped)}
+            live_cell = {"text": "—", "href": None, "count": 0, "note": _skipped_note(finding.skipped)}
         else:
             live_cell = {
                 "text": num(finding.count),
@@ -122,7 +135,13 @@ def _rows(
         if reported is None:
             report_cell: dict[str, Any] = {"text": "—", "href": None, "count": None, "samples": []}
         elif reported.error:
-            report_cell = {"text": "Xato", "href": None, "count": None, "samples": [], "note": reported.error}
+            report_cell = {
+                "text": gettext("Xato"),
+                "href": None,
+                "count": None,
+                "samples": [],
+                "note": reported.error,
+            }
         else:
             report_cell = {
                 "text": num(reported.count),
@@ -131,21 +150,21 @@ def _rows(
                 "samples": _samples(info.model, reported.ids),
                 "capped": capped(reported.count, reported.ids) if info.model else None,
                 "more": max(reported.count - min(len(reported.ids), SAMPLE_IDS), 0),
-                "note": SKIPPED_LABELS.get(reported.skipped) if reported.skipped else None,
+                "note": _skipped_note(reported.skipped) if reported.skipped else None,
             }
         current = live_cell["count"] if live_cell["count"] is not None else report_cell["count"]
-        if live_cell["text"] == "Xato":
+        if live_failed:
             row_state = CRITICAL
         elif current is None:
-            row_state = CRITICAL if report_cell["text"] == "Xato" else NEUTRAL
+            row_state = CRITICAL if report_failed else NEUTRAL
         else:
             row_state = info.severity if current else OK
         rows.append(
             {
                 "name": name,
                 "code": info.code,
-                "label": info.label,
-                "guidance": GUIDANCE.get(name, "") if row_state in (WARN, CRITICAL) else "",
+                "label": str(info.label),
+                "guidance": str(GUIDANCE.get(name, "")) if row_state in (WARN, CRITICAL) else "",
                 "report": report_cell,
                 "live": live_cell,
                 "state": state(row_state),
@@ -157,23 +176,29 @@ def _rows(
 def _report_tile(now: datetime, summary: report_module.ReportSummary | None) -> dict[str, Any]:
     if summary is None:
         return {
-            "title": "Oxirgi tungi hisobot",
+            "title": gettext("Oxirgi tungi hisobot"),
             "icon": "fact_check",
-            "value": "Yo‘q",
+            "value": gettext("Yo‘q"),
             "unit": "",
-            "hint": "Hisobot hali hech qachon ishlamagan (har kuni 03:40)",
+            "hint": gettext("Hisobot hali hech qachon ishlamagan (har kuni 03:40)"),
             "href": changelist("core_auditentry", action__exact=report_module.REPORT_ACTION),
             "state": state(report_module.age_state(None, now)),
         }
     stale = summary.stale(now)
     tile_state = worst([report_module.findings_state(summary), report_module.age_state(summary.ran_at, now)])
+    when = ago(summary.ran_at, now)
     return {
-        "title": "Oxirgi tungi hisobot",
+        "title": gettext("Oxirgi tungi hisobot"),
         "icon": "fact_check",
         "value": stamp(summary.ran_at),
         "unit": "",
-        "hint": (f"Eskirgan: {ago(summary.ran_at, now)} · " if stale else f"{ago(summary.ran_at, now)} · ")
-        + f"{num(summary.findings)} topilma",
+        "hint": " · ".join(
+            (
+                gettext("Eskirgan: %(ago)s") % {"ago": when} if stale else when,
+                ngettext("%(count)s topilma", "%(count)s topilma", summary.findings)
+                % {"count": num(summary.findings)},
+            )
+        ),
         "href": change("core_auditentry", summary.entry_id),
         "state": state(tile_state),
     }
@@ -184,11 +209,11 @@ def _policy(now: datetime) -> dict[str, Any]:
     if policy is None:
         return {
             "tile": {
-                "title": "Cashback siyosati",
+                "title": gettext("Cashback siyosati"),
                 "icon": "policy",
-                "value": "Yo‘q",
+                "value": gettext("Yo‘q"),
                 "unit": "",
-                "hint": "Amaldagi siyosat yo‘q — xaridlar cashback olmaydi",
+                "hint": gettext("Amaldagi siyosat yo‘q — xaridlar cashback olmaydi"),
                 "href": changelist("loyalty_cashbackpolicy"),
                 "state": state(CRITICAL),
             },
@@ -197,11 +222,16 @@ def _policy(now: datetime) -> dict[str, Any]:
     tiers = sorted(policy.tiers.all(), key=lambda tier: tier.from_amount)
     return {
         "tile": {
-            "title": "Cashback siyosati",
+            "title": gettext("Cashback siyosati"),
             "icon": "policy",
             "value": f"v{policy.version}",
-            "unit": "amalda",
-            "hint": f"{stamp(policy.effective_from)} dan · {len(tiers)} daraja",
+            "unit": gettext("amalda"),
+            "hint": " · ".join(
+                (
+                    gettext("%(when)s dan") % {"when": stamp(policy.effective_from)},
+                    ngettext("%(count)s daraja", "%(count)s daraja", len(tiers)) % {"count": len(tiers)},
+                )
+            ),
             "href": change("loyalty_cashbackpolicy", policy.pk),
             "state": state(OK),
         },
@@ -219,11 +249,11 @@ def _reconcile(now: datetime, entry: Any) -> dict[str, Any]:
     mismatch_link = changelist("core_auditentry", action__exact=report_module.RECONCILE_MISMATCH_ACTION)
     if entry is None:
         return {
-            "title": "Daftar solishtiruvi",
+            "title": gettext("Daftar solishtiruvi"),
             "icon": "balance",
             "value": "—",
             "unit": "",
-            "hint": "Hali ishlamagan (tungi hisobot bilan ishlaydi)",
+            "hint": gettext("Hali ishlamagan (tungi hisobot bilan ishlaydi)"),
             "href": changelist("core_auditentry", action__exact=report_module.RECONCILE_ACTION),
             "state": state(report_module.age_state(None, now)),
             "checks": [],
@@ -243,17 +273,24 @@ def _reconcile(now: datetime, entry: Any) -> dict[str, Any]:
         ]
     )
     return {
-        "title": "Daftar solishtiruvi",
+        "title": gettext("Daftar solishtiruvi"),
         "icon": "balance",
         "value": num(mismatches),
-        "unit": "nomuvofiqlik",
-        "hint": f"{num(accounts)} hisob · {num(negative)} manfiy balans · {ago(entry.created_at, now)}",
+        "unit": ngettext("nomuvofiqlik", "nomuvofiqlik", mismatches),
+        "hint": " · ".join(
+            (
+                ngettext("%(count)s hisob", "%(count)s hisob", accounts) % {"count": num(accounts)},
+                ngettext("%(count)s manfiy balans", "%(count)s manfiy balans", negative)
+                % {"count": num(negative)},
+                ago(entry.created_at, now),
+            )
+        ),
         "href": mismatch_link if mismatches else change("core_auditentry", entry.pk),
         "state": state(tile_state),
         "checks": [
             {
                 "name": str(name),
-                "label": RECONCILE_CHECK_LABELS.get(str(name), str(name)),
+                "label": str(RECONCILE_CHECK_LABELS.get(str(name), str(name))),
                 "count": num(int(count or 0)),
                 "raw": int(count or 0),
             }
@@ -266,18 +303,18 @@ def _live_tile(live: dict[str, Finding | None], total: int, worst_state: str) ->
     """The «Hozirgi topilmalar» tile. A live check that failed or timed out (``None``) is not «0 found»:
     the tile then says the checks could not run and stays critical, so a broken reconciliation never
     reads green."""
-    tile: dict[str, Any] = {"title": "Hozirgi topilmalar", "icon": "radar", "href": "#checks"}
+    tile: dict[str, Any] = {"title": gettext("Hozirgi topilmalar"), "icon": "radar", "href": "#checks"}
     if any(finding is None for name, finding in live.items() if name != LOYALTY_CHECK):
         return tile | {
             "value": "—",
             "unit": "",
-            "hint": "Tekshiruvlarni bajarib bo‘lmadi (xato yoki vaqt tugadi) — sahifani yangilang",
+            "hint": gettext("Tekshiruvlarni bajarib bo‘lmadi (xato yoki vaqt tugadi) — sahifani yangilang"),
             "state": state(CRITICAL),
         }
     return tile | {
         "value": num(total),
-        "unit": "qator",
-        "hint": "K1–K6 hozir qayta tekshirildi",
+        "unit": ngettext("qator", "qator", total),
+        "hint": gettext("K1–K6 hozir qayta tekshirildi"),
         "state": state(worst_state if total else OK),
     }
 
@@ -298,11 +335,11 @@ def build(now: datetime) -> dict[str, Any]:
         _report_tile(now, summary),
         _live_tile(live, live_total, live_state),
         {
-            "title": "Osilib qolgan to‘lovlar",
+            "title": gettext("Osilib qolgan to‘lovlar"),
             "icon": "hourglass_top",
             "value": num(stuck.count) if stuck else "—",
-            "unit": "ta to‘lov",
-            "hint": "Band muddati o‘tgan, tranzaksiyasi ochiq",
+            "unit": ngettext("ta to‘lov", "ta to‘lov", stuck.count if stuck else 0),
+            "hint": gettext("Band muddati o‘tgan, tranzaksiyasi ochiq"),
             "href": ids_link("payments_payment", stuck.ids) if stuck and stuck.count else None,
             "note": capped(stuck.count, stuck.ids) if stuck else None,
             "state": state(CRITICAL if stuck and stuck.count else OK if stuck else CRITICAL),

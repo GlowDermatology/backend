@@ -27,7 +27,7 @@ import.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import wraps
 from typing import TYPE_CHECKING, Any, cast
@@ -41,12 +41,14 @@ from django.http import Http404, HttpRequest, HttpResponse, HttpResponseNotAllow
 from django.template.response import TemplateResponse
 from django.urls import reverse
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.utils.translation import gettext_lazy as _
 from unfold.enums import ActionVariant
 
 from glowderma.core import audit
 
 if TYPE_CHECKING:
     from django.contrib.admin import ModelAdmin
+    from django_stubs_ext import StrOrPromise
 
     _MixinBase = ModelAdmin[models.Model]
 else:
@@ -55,8 +57,8 @@ else:
 logger = logging.getLogger(__name__)
 
 CONFIRM_TEMPLATE = "admin/ops/confirm_action.html"
-FAILED_MESSAGE = "Amal bajarilmadi: kutilmagan xato. Tafsilotlar server jurnalida."
-MANAGER_ONLY_NOTE = "Faqat menejerlar uchun."
+FAILED_MESSAGE = _("Amal bajarilmadi: kutilmagan xato. Tafsilotlar server jurnalida.")
+MANAGER_ONLY_NOTE = _("Faqat menejerlar uchun.")
 
 __all__ = [
     "ActionResult",
@@ -99,15 +101,16 @@ class AuditFacts:
 
 @dataclass(frozen=True, slots=True)
 class ActionResult:
-    """What an action did: the message staff see and, when something changed, the ``ops.*`` audit row."""
+    """What an action did: the message staff see (a ``str``, or a lazy string translated when the message
+    is queued) and, when something changed, the ``ops.*`` audit row."""
 
     level: int
-    message: str
+    message: StrOrPromise
     audit: AuditFacts | None = None
 
 
 def done(
-    message: str,
+    message: StrOrPromise,
     *,
     audit_action: str,
     entity_type: str,
@@ -121,12 +124,12 @@ def done(
     )
 
 
-def refused(message: str) -> ActionResult:
+def refused(message: StrOrPromise) -> ActionResult:
     """Nothing was done (already done, a guard said no): a warning, no audit row."""
     return ActionResult(messages.WARNING, message)
 
 
-def failed(message: str) -> ActionResult:
+def failed(message: StrOrPromise) -> ActionResult:
     """The action could not run (a provider is fake in production, a service refused): an error, no audit."""
     return ActionResult(messages.ERROR, message)
 
@@ -166,8 +169,9 @@ class WarningNote(str):
     __slots__ = ()
 
 
-Availability = Callable[[Any, HttpRequest, Any], str]
-Notes = Callable[[Any, HttpRequest, Any], list[str]]
+# Console texts may be lazy strings (``gettext_lazy``): they are translated when the page is rendered.
+Availability = Callable[[Any, HttpRequest, Any], "StrOrPromise"]
+Notes = Callable[[Any, HttpRequest, Any], Sequence["StrOrPromise"]]
 ActionFunc = Callable[..., ActionResult]
 
 
@@ -189,10 +193,10 @@ def _default_back(model_admin: Any, obj: models.Model | None) -> str:
 
 def ops_action(
     *,
-    description: str,
-    title: str,
-    body: str,
-    submit: str,
+    description: StrOrPromise,
+    title: StrOrPromise,
+    body: StrOrPromise,
+    submit: StrOrPromise,
     icon: str,
     variant: ActionVariant = ActionVariant.PRIMARY,
     manager_only: bool = False,
@@ -222,7 +226,7 @@ def ops_action(
                 obj = model_admin.get_object(request, unquote(object_id))
                 if obj is None:
                     raise Http404
-            refusal = available(model_admin, request, obj) if available is not None else ""
+            refusal = str(available(model_admin, request, obj)) if available is not None else ""
             requested_next = request.POST.get("next", "") if request.method == "POST" else ""
             back = _safe_next(request, requested_next or request.GET.get("next", "")) or _default_back(
                 model_admin, obj
@@ -319,8 +323,8 @@ def _run(
                 )
     except Exception:
         logger.exception("ops.action_failed action=%s", func.__name__)
-        return messages.ERROR, FAILED_MESSAGE
-    return result.level, result.message
+        return messages.ERROR, str(FAILED_MESSAGE)
+    return result.level, str(result.message)
 
 
 class OpsActionsMixin(_MixinBase):
@@ -345,5 +349,5 @@ class OpsActionsMixin(_MixinBase):
             action
             for action in actions
             if getattr(action.method, "ops_available", None) is None
-            or not action.method.ops_available(self, request, obj)
+            or not str(action.method.ops_available(self, request, obj))
         ]

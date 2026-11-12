@@ -3,6 +3,7 @@
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
 from django.db.models import Q
+from django.utils.translation import gettext
 
 from glowderma.core import enums
 from glowderma.core.labels import stamp
@@ -159,5 +160,8 @@ class IntegrationState(models.Model):
         verbose_name_plural = "integratsiya holatlari"
 
     def __str__(self) -> str:
-        synced = stamp(self.last_sync_at) if self.last_sync_at else "hali yo‘q"
-        return f"{self.get_provider_display()}: oxirgi sinxronlash {synced}"
+        synced = stamp(self.last_sync_at) if self.last_sync_at else gettext("hali yo‘q")
+        return gettext("%(provider)s: oxirgi sinxronlash %(synced)s") % {
+            "provider": self.get_provider_display(),
+            "synced": synced,
+        }

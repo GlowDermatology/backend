@@ -1,4 +1,5 @@
 {% extends "reporting/dashboards/base.html" %}
+{% load i18n %}
 
 {% block dashboard %}
     {% with d=dashboard %}
@@ -7,15 +8,15 @@
             <div class="gd-banner__body">
                 <div class="gd-banner__title">{{ d.headline }}</div>
                 <div class="gd-banner__text">
-                    {% for problem in d.problems %}<span class="gd-problem gd-problem--{{ problem.state.key }}">{{ problem.label }}</span>{% if not forloop.last %} · {% endif %}{% empty %}Navbatlar, integratsiyalar va tungi tekshiruvlar{% endfor %}
-                    · {{ d.live_count }} ta provayder live rejimda
+                    {% for problem in d.problems %}<span class="gd-problem gd-problem--{{ problem.state.key }}">{{ problem.label }}</span>{% if not forloop.last %} · {% endif %}{% empty %}{% translate "Navbatlar, integratsiyalar va tungi tekshiruvlar" %}{% endfor %}
+                    · {% blocktranslate count count=d.live_count %}{{ count }} ta provayder live rejimda{% plural %}{{ count }} ta provayder live rejimda{% endblocktranslate %}
                 </div>
             </div>
             <form class="gd-lookup" method="get" action="{% url 'admin:commerce_order_lookup' %}" role="search">
-                <label for="gd-order-number">Buyurtma №</label>
+                <label for="gd-order-number">{% translate "Buyurtma №" %}</label>
                 <div class="gd-lookup__row">
                     <input id="gd-order-number" name="number" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="10253" required>
-                    <button type="submit" aria-label="Buyurtmani ochish"><span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>
+                    <button type="submit" aria-label="{% translate 'Buyurtmani ochish' %}"><span class="material-symbols-outlined" aria-hidden="true">arrow_forward</span></button>
                 </div>
             </form>
         </div>
@@ -26,13 +27,13 @@
 
         <section class="gd-panel" id="outbox">
             <header class="gd-panel__head">
-                <h2 class="gd-panel__title">Outbox navbati mavzular bo‘yicha</h2>
-                <p class="gd-panel__note">Kechikkan = {{ d.thresholds.overdue_minutes }} daqiqadan ko‘p kutayotgan ochiq xabar (K6)</p>
+                <h2 class="gd-panel__title">{% translate "Outbox navbati mavzular bo‘yicha" %}</h2>
+                <p class="gd-panel__note">{% blocktranslate count count=d.thresholds.overdue_minutes %}Kechikkan = {{ count }} daqiqadan ko‘p kutayotgan ochiq xabar (K6){% plural %}Kechikkan = {{ count }} daqiqadan ko‘p kutayotgan ochiq xabar (K6){% endblocktranslate %}</p>
             </header>
             {% if d.outbox %}
                 <div class="gd-scroll">
                     <table class="gd-table">
-                        <thead><tr><th>Mavzu</th><th class="num">Navbatda</th><th class="num">Kechikkan</th><th class="num">O‘lik</th><th class="num gd-hide-sm">Kechiktirilgan</th><th class="gd-hide-sm">Eng eski</th><th>Holat</th></tr></thead>
+                        <thead><tr><th>{% translate "Mavzu" %}</th><th class="num">{% translate "Navbatda" %}</th><th class="num">{% translate "Kechikkan" %}</th><th class="num">{% translate "O‘lik" %}</th><th class="num gd-hide-sm">{% translate "Kechiktirilgan" %}</th><th class="gd-hide-sm">{% translate "Eng eski" %}</th><th>{% translate "Holat" %}</th></tr></thead>
                         <tbody>
                             {% for row in d.outbox %}
                                 <tr>
@@ -49,7 +50,7 @@
                     </table>
                 </div>
             {% else %}
-                {% include "reporting/dashboards/_empty.html" with text="Navbat bo‘sh: barcha xabarlar yetkazilgan" %}
+                {% include "reporting/dashboards/_empty.html" with text=_("Navbat bo‘sh: barcha xabarlar yetkazilgan") %}
             {% endif %}
         </section>
 
@@ -57,12 +58,12 @@
             <div class="gd-stack">
                 <section class="gd-panel" id="webhooks">
                     <header class="gd-panel__head">
-                        <h2 class="gd-panel__title">Webhooklar · 24 soat</h2>
-                        <p class="gd-panel__note">Xato = rad etilgan yoki ishlov xatosi; {{ d.thresholds.webhook_critical }}+ — jiddiy</p>
+                        <h2 class="gd-panel__title">{% translate "Webhooklar · 24 soat" %}</h2>
+                        <p class="gd-panel__note">{% blocktranslate with n=d.thresholds.webhook_critical %}Xato = rad etilgan yoki ishlov xatosi; {{ n }}+ — jiddiy{% endblocktranslate %}</p>
                     </header>
                     <div class="gd-scroll">
                         <table class="gd-table">
-                            <thead><tr><th>Provayder</th><th class="num">Qabul qilindi</th><th class="num">Xato</th><th>Holat</th></tr></thead>
+                            <thead><tr><th>{% translate "Provayder" %}</th><th class="num">{% translate "Qabul qilindi" %}</th><th class="num">{% translate "Xato" %}</th><th>{% translate "Holat" %}</th></tr></thead>
                             <tbody>
                                 {% for row in d.webhooks %}
                                     <tr>
@@ -78,12 +79,12 @@
                 </section>
                 <section class="gd-panel" id="jobs">
                     <header class="gd-panel__head">
-                        <h2 class="gd-panel__title">Fon vazifalari (Job)</h2>
-                        <p class="gd-panel__note">Har bir turning oxirgi ishga tushishi; 15 daqiqadan beri yurak urishi yo‘q — osilgan</p>
+                        <h2 class="gd-panel__title">{% translate "Fon vazifalari (Job)" %}</h2>
+                        <p class="gd-panel__note">{% translate "Har bir turning oxirgi ishga tushishi; 15 daqiqadan beri yurak urishi yo‘q — osilgan" %}</p>
                     </header>
                     <div class="gd-scroll">
                         <table class="gd-table">
-                            <thead><tr><th>Tur</th><th>Holat</th><th>Boshlangan</th><th class="num">Davomiyligi</th><th></th></tr></thead>
+                            <thead><tr><th>{% translate "Tur" %}</th><th>{% translate "Holat" %}</th><th>{% translate "Boshlangan" %}</th><th class="num">{% translate "Davomiyligi" %}</th><th></th></tr></thead>
                             <tbody>
                                 {% for row in d.jobs %}
                                     <tr>
@@ -102,12 +103,12 @@
 
             <section class="gd-panel" id="beat">
                 <header class="gd-panel__head">
-                    <h2 class="gd-panel__title">Davriy vazifalar (Celery beat)</h2>
-                    <p class="gd-panel__note">Oxirgi iz — vazifa qoldirgan yozuv bo‘yicha</p>
+                    <h2 class="gd-panel__title">{% translate "Davriy vazifalar (Celery beat)" %}</h2>
+                    <p class="gd-panel__note">{% translate "Oxirgi iz — vazifa qoldirgan yozuv bo‘yicha" %}</p>
                 </header>
                 <div class="gd-scroll">
                     <table class="gd-table">
-                        <thead><tr><th>Vazifa</th><th class="gd-hide-sm">Jadval</th><th>Oxirgi iz</th><th>Holat</th></tr></thead>
+                        <thead><tr><th>{% translate "Vazifa" %}</th><th class="gd-hide-sm">{% translate "Jadval" %}</th><th>{% translate "Oxirgi iz" %}</th><th>{% translate "Holat" %}</th></tr></thead>
                         <tbody>
                             {% for row in d.beat %}
                                 <tr>
@@ -125,12 +126,12 @@
 
         <section class="gd-panel" id="readiness">
             <header class="gd-panel__head">
-                <h2 class="gd-panel__title">Provayderlar tayyorligi</h2>
-                <p class="gd-panel__note">Live — haqiqiy adapter; Sinov — soxta (fake) adapter. Live, lekin sozlanmagan — jiddiy.</p>
+                <h2 class="gd-panel__title">{% translate "Provayderlar tayyorligi" %}</h2>
+                <p class="gd-panel__note">{% translate "Live — haqiqiy adapter; Sinov — soxta (fake) adapter." %} {% translate "Live, lekin sozlanmagan — jiddiy." %}</p>
             </header>
             <div class="gd-scroll">
                 <table class="gd-table">
-                    <thead><tr><th>Provayder</th><th>Rejim</th><th class="gd-hide-sm">Sozlangan</th><th class="gd-hide-sm">Oxirgi muvaffaqiyat</th><th class="num">Xatolar</th><th class="gd-hide-sm">Oxirgi xato</th><th>Holat</th></tr></thead>
+                    <thead><tr><th>{% translate "Provayder" %}</th><th>{% translate "Rejim" %}</th><th class="gd-hide-sm">{% translate "Sozlangan" %}</th><th class="gd-hide-sm">{% translate "Oxirgi muvaffaqiyat" %}</th><th class="num">{% translate "Xatolar" %}</th><th class="gd-hide-sm">{% translate "Oxirgi xato" %}</th><th>{% translate "Holat" %}</th></tr></thead>
                     <tbody>
                         {% for row in d.readiness %}
                             <tr>

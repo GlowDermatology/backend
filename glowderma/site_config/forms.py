@@ -4,7 +4,8 @@ The three cards of the former Next.js admin page, one form each, each saved on i
 «Do‘kon sozlamalari» (:class:`StoreForm`), «Aloqa ma’lumotlari» (:class:`ContactsForm`) and
 «Huquqiy matnlar» (:class:`LegalTextsForm`), plus the «E’lon qilish» confirmation (:class:`PublishForm`).
 The rules and their Uzbek messages are the ones the admin API enforced (contract §2.11) before the
-settings left it for the 2FA console:
+settings left it for the 2FA console; the messages, labels and help texts are lazy translations of that
+Uzbek text (the console's language, ``glowderma.core.console_i18n``):
 
 * ``reservation_minutes`` 5..60;
 * phones ``+998`` and nine digits, or empty (typed as ``+998 71 200 00 00``, or nine local digits);
@@ -33,6 +34,9 @@ from urllib.parse import urlsplit, urlunsplit
 from django import forms
 from django.core.exceptions import ValidationError
 from django.core.validators import ProhibitNullCharactersValidator, RegexValidator, URLValidator
+from django.utils.functional import lazy
+from django.utils.translation import gettext_lazy as _
+from django.utils.translation import ngettext
 from unfold.widgets import UnfoldAdminTextareaWidget, UnfoldAdminTextInputWidget
 
 from glowderma.site_config import services
@@ -40,6 +44,8 @@ from glowderma.site_config.models import SiteSettings
 from glowderma.site_config.selectors import has_visible_text
 
 if TYPE_CHECKING:
+    from django_stubs_ext import StrOrPromise
+
     _TextInput = forms.TextInput
     _Textarea = forms.Textarea
 else:
@@ -47,7 +53,8 @@ else:
     _Textarea = UnfoldAdminTextareaWidget
 
 LANGUAGES = services.LANGUAGES
-LANGUAGE_LABELS: dict[str, str] = {"uz": "o‘zbekcha", "ru": "ruscha", "en": "inglizcha"}
+LANGUAGE_LABELS: dict[str, StrOrPromise] = {"uz": _("o‘zbekcha"), "ru": _("ruscha"), "en": _("inglizcha")}
+# Each language under its own name: the same in every console language.
 LANGUAGE_TABS: dict[str, str] = {"uz": "O‘zbekcha", "ru": "Русский", "en": "English"}
 
 RESERVATION_MIN = 5
@@ -61,21 +68,21 @@ TEXT_MAX_LENGTHS: dict[str, int] = {
     "privacy_policy": LEGAL_TEXT_MAX_LENGTH,
     "booking_policy": BOOKING_POLICY_MAX_LENGTH,
 }
-DOCUMENT_LABELS: dict[str, str] = {
-    "terms": "Foydalanish shartlari",
-    "privacy_policy": "Maxfiylik siyosati",
-    "booking_policy": "Qabul qoidalari",
+DOCUMENT_LABELS: dict[str, StrOrPromise] = {
+    "terms": _("Foydalanish shartlari"),
+    "privacy_policy": _("Maxfiylik siyosati"),
+    "booking_policy": _("Qabul qoidalari"),
 }
 
-RESERVATION_INVALID = "5 dan 60 gacha daqiqa kiriting."
-RESERVATION_TOO_LOW = "Qiymat 5 dan kam bo‘lmasin."
-RESERVATION_TOO_HIGH = "Qiymat 60 dan oshmasin."
-PHONE_INVALID = "Telefon raqamini to‘g‘ri kiriting."
-URL_INVALID = "Havolani https:// bilan to‘liq kiriting."
+RESERVATION_INVALID = _("5 dan 60 gacha daqiqa kiriting.")
+RESERVATION_TOO_LOW = _("Qiymat 5 dan kam bo‘lmasin.")
+RESERVATION_TOO_HIGH = _("Qiymat 60 dan oshmasin.")
+PHONE_INVALID = _("Telefon raqamini to‘g‘ri kiriting.")
+URL_INVALID = _("Havolani https:// bilan to‘liq kiriting.")
 TELEGRAM_HOSTS = frozenset({"t.me", "telegram.me", "www.telegram.me"})
-TELEGRAM_INVALID = "Telegram havolasi https://t.me/… ko‘rinishida bo‘lsin."
+TELEGRAM_INVALID = _("Telegram havolasi https://t.me/… ko‘rinishida bo‘lsin.")
 INSTAGRAM_HOSTS = frozenset({"instagram.com", "www.instagram.com"})
-INSTAGRAM_INVALID = "Instagram havolasi https://instagram.com/… ko‘rinishida bo‘lsin."
+INSTAGRAM_INVALID = _("Instagram havolasi https://instagram.com/… ko‘rinishida bo‘lsin.")
 # The account path of a Telegram / Instagram link: one handle segment (Telegram invite links start with "+").
 ACCOUNT_PATH = re.compile(r"^/\+?(?=[A-Za-z0-9_.]*[A-Za-z0-9_])[A-Za-z0-9_.]{1,64}/?$")
 # Never stored in a link the apps render as an href: quotes, angle brackets, backticks, backslashes.
@@ -86,9 +93,18 @@ PHONE_SEPARATORS = re.compile(r"[\s\-().]")
 DIGEST_LENGTH = 16
 
 
-def too_long(limit: int) -> str:
-    """The API's ``max_length`` message (no digit grouping): ``"200 belgidan oshmasin."``."""
-    return f"{limit} belgidan oshmasin."
+def _too_long(limit: int) -> str:
+    return ngettext("%(limit)s belgidan oshmasin.", "%(limit)s belgidan oshmasin.", limit) % {"limit": limit}
+
+
+def _interpolated(message: StrOrPromise, **values: Any) -> str:
+    return str(message) % values
+
+
+# The API's ``max_length`` message (no digit grouping): ``"200 belgidan oshmasin."``. Lazy, like
+# ``interpolated`` (``message % values``): both also build texts of class-level fields, at import time.
+too_long = lazy(_too_long, str)
+interpolated = lazy(_interpolated, str)
 
 
 # --- value rules --------------------------------------------------------------------------------------------
@@ -136,7 +152,9 @@ def _public_host(hostname: str) -> bool:
     return False
 
 
-def clean_https_url(raw: str, *, hosts: frozenset[str] | None = None, host_message: str = URL_INVALID) -> str:
+def clean_https_url(
+    raw: str, *, hosts: frozenset[str] | None = None, host_message: StrOrPromise = URL_INVALID
+) -> str:
     """A contact link as stored (``""`` clears it); the rules of the module docstring, in the API's order."""
     value = raw.strip()
     if not value:
@@ -211,7 +229,7 @@ class LinkInput(forms.CharField):
         *,
         placeholder: str,
         hosts: frozenset[str] | None = None,
-        host_message: str = URL_INVALID,
+        host_message: StrOrPromise = URL_INVALID,
         **kwargs: Any,
     ) -> None:
         attrs = {
@@ -254,7 +272,7 @@ class ReservationMinutesInput(forms.CharField):
             "inputmode": "numeric",
             "autocomplete": "off",
             "maxlength": "3",
-            "suffix": "daqiqa",
+            "suffix": _("daqiqa"),
             "class": "tabular-nums",
         }
         super().__init__(
@@ -283,8 +301,8 @@ class SectionForm(forms.Form):
     stored values and their digests, bound to the posted values; :meth:`changes` is what the user changed."""
 
     section: ClassVar[str] = ""
-    title: ClassVar[str] = ""
-    saved_message: ClassVar[str] = ""
+    title: ClassVar[StrOrPromise] = ""
+    saved_message: ClassVar[StrOrPromise] = ""
     # form field → SiteSettings column (services.EDITABLE_FIELDS)
     COLUMNS: ClassVar[dict[str, str]] = {}
 
@@ -327,8 +345,8 @@ class StoreForm(SectionForm):
     """«Do‘kon sozlamalari»: the reservation length, the support phone and the pickup address per language."""
 
     section = "store"
-    title = "Do‘kon sozlamalari"
-    saved_message = "Sozlamalar saqlandi"
+    title = _("Do‘kon sozlamalari")
+    saved_message = _("Sozlamalar saqlandi")
     COLUMNS = {
         "reservation_minutes": "reservation_minutes",
         "support_phone": "support_phone",
@@ -336,16 +354,17 @@ class StoreForm(SectionForm):
     }
 
     reservation_minutes = ReservationMinutesInput(
-        label="Band qilish muddati",
-        help_text=(
-            "To‘lanmagan buyurtma mahsulotlarni shuncha vaqt ushlab turadi "
-            f"({RESERVATION_MIN}–{RESERVATION_MAX})."
+        label=_("Band qilish muddati"),
+        help_text=interpolated(
+            _("To‘lanmagan buyurtma mahsulotlarni shuncha vaqt ushlab turadi (%(min)s–%(max)s)."),
+            min=RESERVATION_MIN,
+            max=RESERVATION_MAX,
         ),
     )
     support_phone = PhoneInput(
-        label="Qo‘llab-quvvatlash telefoni",
+        label=_("Qo‘llab-quvvatlash telefoni"),
         placeholder="+998 71 200 00 00",
-        help_text="Ilovada ko‘rsatiladi. Bo‘sh qoldirilsa, ko‘rsatilmaydi.",
+        help_text=_("Ilovada ko‘rsatiladi. Bo‘sh qoldirilsa, ko‘rsatilmaydi."),
     )
     pickup_address_uz = forms.CharField(
         label=LANGUAGE_LABELS["uz"],
@@ -383,15 +402,15 @@ class ContactsForm(SectionForm):
     """«Aloqa ma’lumotlari»: the store and cosmetologist phones; Telegram, Instagram, website links."""
 
     section = "contacts"
-    title = "Aloqa ma’lumotlari"
-    saved_message = "Aloqa ma’lumotlari saqlandi"
+    title = _("Aloqa ma’lumotlari")
+    saved_message = _("Aloqa ma’lumotlari saqlandi")
     COLUMNS = {name: name for name in services.CONTACT_FIELDS if name != "support_phone"}
 
-    store_phone = PhoneInput(label="Do‘kon telefoni", placeholder="+998 71 200 00 01")
+    store_phone = PhoneInput(label=_("Do‘kon telefoni"), placeholder="+998 71 200 00 01")
     cosmetologist_phone = PhoneInput(
-        label="Kosmetolog telefoni",
+        label=_("Kosmetolog telefoni"),
         placeholder="+998 71 200 00 02",
-        help_text="Ilovaning AI bo‘limida (2-bosqich) ko‘rsatiladi.",
+        help_text=_("Ilovaning AI bo‘limida (2-bosqich) ko‘rsatiladi."),
     )
     telegram_url = LinkInput(
         label="Telegram",
@@ -405,7 +424,7 @@ class ContactsForm(SectionForm):
         hosts=INSTAGRAM_HOSTS,
         host_message=INSTAGRAM_INVALID,
     )
-    website_url = LinkInput(label="Veb-sayt", placeholder="https://glowderma.uz")
+    website_url = LinkInput(label=_("Veb-sayt"), placeholder="https://glowderma.uz")
 
     def display_values(self) -> dict[str, Any]:
         values = dict(self.stored)
@@ -428,8 +447,8 @@ class LegalTextsForm(SectionForm):
     booking policy is not versioned and is served once saved."""
 
     section = "legal"
-    title = "Huquqiy matnlar"
-    saved_message = "Matnlar saqlandi"
+    title = _("Huquqiy matnlar")
+    saved_message = _("Matnlar saqlandi")
     COLUMNS = {
         f"{document}_{language}": services.text_column(document, language)
         for document in services.TEXT_DOCUMENTS

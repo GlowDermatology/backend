@@ -1,5 +1,5 @@
 {% extends "admin/base_site.html" %}
-{% load static unfold %}
+{% load i18n static unfold %}
 
 {% block title %}{{ title }} | {{ site_title|default:"Glow Derma Ops" }}{% endblock %}
 
@@ -14,13 +14,13 @@
 {% endblock %}
 
 {% block content %}
-    <div class="gd-dash">
+    <div class="gd-dash" data-gd-total="{% translate 'Jami' %}" data-gd-som="{% translate 'so‘m' %}" data-gd-mlrd="{% translate 'mlrd' %}" data-gd-mln="{% translate 'mln' %}" data-gd-ming="{% translate 'ming' %}">
         <div class="gd-bar">
             {% component "unfold/components/navigation.html" with items=dashboard_nav %}{% endcomponent %}
             <div class="gd-stamp">
-                <span>Yangilangan: <strong data-gd-generated="{{ dashboard.generated.iso }}">{{ dashboard.generated.clock }}</strong></span>
-                <a href="{{ dashboard_links.refresh }}" title="Keshni chetlab o‘tib qayta hisoblash">
-                    <span class="material-symbols-outlined">refresh</span>Yangilash
+                <span>{% translate "Yangilangan:" %} <strong data-gd-generated="{{ dashboard.generated.iso }}">{{ dashboard.generated.clock }}</strong></span>
+                <a href="{{ dashboard_links.refresh }}" title="{% translate 'Keshni chetlab o‘tib qayta hisoblash' %}">
+                    <span class="material-symbols-outlined">refresh</span>{% translate "Yangilash" %}
                 </a>
             </div>
         </div>

@@ -1,0 +1,6967 @@
+# Glow Derma ops console, ru: kept by `manage.py console_messages`, translated by hand.
+# Compile with `manage.py compile_locale` (stdlib, no GNU gettext); commit the .mo with it.
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: ru\n"
+"Plural-Forms: nplurals=4; plural=(n % 10 == 1 && n % 100 != 11 ? 0 : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? 1 : n % 10 == 0 || (n % 10 >= 5 && n % 10 <= 9) || (n % 100 >= 11 && n % 100 <= 14) ? 2 : 3);\n"
+
+#: glowderma/reporting/dashboards/__init__.py
+msgid "%(amount)s ming so‘m"
+msgstr ""
+
+#: glowderma/reporting/dashboards/__init__.py
+msgid "%(amount)s mln so‘m"
+msgstr ""
+
+#: glowderma/reporting/dashboards/__init__.py
+msgid "%(amount)s mlrd so‘m"
+msgstr ""
+
+#: glowderma/core/admin.py
+#: glowderma/core/labels.py
+#: glowderma/reporting/dashboards/__init__.py
+msgid "%(amount)s so‘m"
+msgstr ""
+
+#: glowderma/accounts/models.py
+msgid "%(audience)s sessiyasi %(id)s"
+msgstr ""
+
+#: glowderma/reporting/dashboards/customers.py
+msgid "%(count)s bloklangan"
+msgid_plural "%(count)s bloklangan"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/accounts/admin.py
+msgid "%(count)s daqiqa"
+msgid_plural "%(count)s daqiqa"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/dashboards/__init__.py
+msgid "%(count)s daqiqa oldin"
+msgid_plural "%(count)s daqiqa oldin"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/dashboards/money.py
+msgid "%(count)s daraja"
+msgid_plural "%(count)s daraja"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/dashboards/customers.py
+msgid "%(count)s email"
+msgid_plural "%(count)s email"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/dashboards/money.py
+msgid "%(count)s hisob"
+msgid_plural "%(count)s hisob"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "%(count)s kategoriya"
+msgid_plural "%(count)s kategoriya"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "%(count)s kechikkan"
+msgid_plural "%(count)s kechikkan"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "%(count)s ketma-ket xato"
+msgid_plural "%(count)s ketma-ket xato"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/dashboards/sales.py
+#: glowderma/reporting/templates/reporting/dashboards/sales.html
+msgid "%(count)s kun"
+msgid_plural "%(count)s kun"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/dashboards/__init__.py
+msgid "%(count)s kun oldin"
+msgid_plural "%(count)s kun oldin"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/dashboards/money.py
+msgid "%(count)s manfiy balans"
+msgid_plural "%(count)s manfiy balans"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "%(count)s navbatda"
+msgid_plural "%(count)s navbatda"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "%(count)s ogohlantirishli"
+msgid_plural "%(count)s ogohlantirishli"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/accounts/admin.py
+msgid "%(count)s soat"
+msgid_plural "%(count)s soat"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/dashboards/__init__.py
+msgid "%(count)s soat oldin"
+msgid_plural "%(count)s soat oldin"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/dashboards/customers.py
+msgid "%(count)s ta jadval ziddiyati (%(days)s kun)"
+msgid_plural "%(count)s ta jadval ziddiyati (%(days)s kun)"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "%(count)s ta jiddiy muammo"
+msgid_plural "%(count)s ta jiddiy muammo"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "%(count)s ta ogohlantirish"
+msgid_plural "%(count)s ta ogohlantirish"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "%(count)s ta provayder live rejimda"
+msgid_plural "%(count)s ta provayder live rejimda"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "%(count)s ta qabul qilindi"
+msgid_plural "%(count)s ta qabul qilindi"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/customers/admin.py
+msgid "%(count)s ta sessiya tugatildi."
+msgid_plural "%(count)s ta sessiya tugatildi."
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/accounts/admin.py
+msgid "%(count)s ta xodimning 2FA qurilmasi o‘chirildi va konsol sessiyalari tugatildi: ular %(window)s ichida keyingi kirishda 2FA ni qayta sozlashadi."
+msgid_plural "%(count)s ta xodimning 2FA qurilmasi o‘chirildi va konsol sessiyalari tugatildi: ular %(window)s ichida keyingi kirishda 2FA ni qayta sozlashadi."
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/dashboards/customers.py
+msgid "%(count)s tasi keyin telefon qo‘shgan"
+msgid_plural "%(count)s tasi keyin telefon qo‘shgan"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/dashboards/money.py
+msgid "%(count)s topilma"
+msgid_plural "%(count)s topilma"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "%(count)s xato"
+msgid_plural "%(count)s xato"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/loyalty/models.py
+msgid "%(device)s · nofaol"
+msgstr ""
+
+#: glowderma/reporting/dashboards/__init__.py
+msgid "%(hours)s soat %(minutes)s daq"
+msgstr ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "%(job)s hali ishga tushirilmagan"
+msgstr ""
+
+#: glowderma/accounts/models.py
+msgid "%(label)s #%(id)s · mijoz #%(customer)s"
+msgstr ""
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "%(label)s (o‘zbekcha)"
+msgstr ""
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "%(label)s (ruscha / inglizcha)"
+msgstr ""
+
+#: glowderma/site_config/forms.py
+msgid "%(limit)s belgidan oshmasin."
+msgid_plural "%(limit)s belgidan oshmasin."
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/dashboards/__init__.py
+msgid "%(minutes)s daq %(seconds)s s"
+msgstr ""
+
+#: glowderma/commerce/templates/admin/commerce/order_diagnostics.html
+msgid "%(n)s ta navbatda"
+msgid_plural "%(n)s ta navbatda"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/commerce/templates/admin/commerce/order_diagnostics.html
+msgid "%(n)s ta o‘lik"
+msgid_plural "%(n)s ta o‘lik"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/commerce/templates/admin/commerce/order_diagnostics.html
+msgid "%(n)s ta provayder chaqiruvi"
+msgid_plural "%(n)s ta provayder chaqiruvi"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/commerce/templates/admin/commerce/order_diagnostics.html
+msgid "%(n)s ta xabar"
+msgid_plural "%(n)s ta xabar"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/commerce/models.py
+msgid "%(name)s × %(quantity)s @ %(price)s (buyurtma №%(order)s)"
+msgstr ""
+
+#: glowderma/loyalty/models.py
+msgid "%(name)s × %(quantity)s @ %(price)s (xarid #%(purchase)s)"
+msgstr ""
+
+#: glowderma/professionals/templates/admin/professionals/submit_line.html
+msgid "%(name)sni o‘chirish"
+msgstr ""
+
+#: glowderma/accounts/models.py
+msgid "%(platform)s %(model)s · mijoz #%(customer)s"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/sales.html
+msgid "%(products)s faol mahsulot va %(categories)s kategoriya tekshirildi"
+msgstr ""
+
+#: glowderma/accounts/models.py
+msgid "%(provider)s: %(subject)s → mijoz #%(customer)s"
+msgstr ""
+
+#: glowderma/integrations/models.py
+msgid "%(provider)s: oxirgi sinxronlash %(synced)s"
+msgstr ""
+
+#: glowderma/loyalty/models.py
+msgid "%(purchase)s · bekor qilingan"
+msgstr ""
+
+#: glowderma/accounts/models.py
+msgid "%(purpose)s kodi · %(contact)s · %(created)s"
+msgstr ""
+
+#: glowderma/commerce/models.py
+msgid "%(quantity)s × mahsulot #%(product)s (savatcha #%(cart)s)"
+msgstr ""
+
+#: glowderma/reporting/dashboards/__init__.py
+msgid "%(seconds)s s"
+msgstr ""
+
+#: glowderma/core/admin.py
+msgid "%(topic)s — %(count)s ta o‘lik"
+msgid_plural "%(topic)s — %(count)s ta o‘lik"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/core/admin.py
+msgid "%(topic)s: %(requeued)s ta xabar qayta navbatga qo‘yildi, %(skipped)s ta o‘tkazib yuborildi."
+msgstr ""
+
+#: glowderma/core/admin.py
+msgid "%(topic)s: qayta navbatga qo‘yiladigan xabar topilmadi (%(count)s ta o‘tkazildi)."
+msgid_plural "%(topic)s: qayta navbatga qo‘yiladigan xabar topilmadi (%(count)s ta o‘tkazildi)."
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "%(total)s ta ochiq mijoz sessiyasi"
+msgstr ""
+
+#: glowderma/reporting/dashboards/money.py
+msgid "%(when)s dan"
+msgstr ""
+
+#: glowderma/accounts/templates/accounts/console/recovery_codes.html
+msgid ".txt faylga yuklab olish"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/sales.html
+msgid "10 daqiqada bir qayta hisoblanadi"
+msgstr ""
+
+#: glowderma/reporting/dashboards/customers.py
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "24 soat"
+msgstr ""
+
+#: glowderma/accounts/admin.py
+msgid "2FA ni qayta o‘rnatish"
+msgstr ""
+
+#: glowderma/core/otp_apps.py
+msgid "2FA qurilma"
+msgstr ""
+
+#: config/settings/ops_admin.py
+#: glowderma/core/otp_apps.py
+msgid "2FA qurilmalar"
+msgstr ""
+
+#: glowderma/accounts/templates/accounts/console/recovery.html
+msgid "2FA yoqilganda berilgan 10 ta zaxira koddan birini kiriting. Har bir kod faqat bir marta ishlaydi."
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/money.html
+msgid "36 soatdan ko‘p o‘tdi — beat yoki worker ishlamayotgan bo‘lishi mumkin."
+msgstr ""
+
+#: glowderma/site_config/forms.py
+msgid "5 dan 60 gacha daqiqa kiriting."
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "7 kun"
+msgstr ""
+
+#: glowderma.core.enums.SocialTokenType
+msgid "Access Token"
+msgstr "Токен доступа"
+
+#: glowderma.core.enums.PushDataType
+msgid "Account Security"
+msgstr "Безопасность учётной записи"
+
+#: glowderma.core.enums.PolicyVersionState
+msgid "Active"
+msgstr "Действует"
+
+#: glowderma.core.enums.AdjustmentDirection
+msgid "Add"
+msgstr "Добавить"
+
+#: glowderma.core.enums.EventSource
+#: model metadata
+msgid "Admin"
+msgstr "Администратор"
+
+#: glowderma.core.enums.CancellationReason
+#: model metadata
+msgid "Admin bekor qildi"
+msgstr "Отменено администратором"
+
+#: glowderma.core.enums.SessionRevokeReason
+#: model metadata
+msgid "Admin tugatdi"
+msgstr "Завершён администратором"
+
+#: glowderma.core.enums.NotificationKind
+#: model metadata
+msgid "Aksiya"
+msgstr "Акция"
+
+#: glowderma.core.enums.ProductChangeKind
+#: model metadata
+msgid "Aksiya olib tashlandi"
+msgstr "Акция снята"
+
+#: glowderma.core.enums.ProductChangeKind
+#: model metadata
+msgid "Aksiya qo‘shildi"
+msgstr "Акция добавлена"
+
+#: glowderma.core.enums.OrderPeriod
+msgid "All"
+msgstr "Всё время"
+
+#: glowderma/loyalty/admin.py
+msgid "Almashtirilgan"
+msgstr ""
+
+#: glowderma/site_config/forms.py
+msgid "Aloqa ma’lumotlari"
+msgstr ""
+
+#: glowderma/site_config/forms.py
+msgid "Aloqa ma’lumotlari saqlandi"
+msgstr ""
+
+#: glowderma.core.enums.SeoIssueCode
+msgid "Alt Text Fallback"
+msgstr "Резервный alt-текст"
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "Alt matni nomdan olinadi"
+msgstr ""
+
+#: glowderma/accounts/admin.py
+#: glowderma/core/admin.py
+msgid "Amal"
+msgstr ""
+
+#: glowderma/core/admin_actions.py
+msgid "Amal bajarilmadi: kutilmagan xato. Tafsilotlar server jurnalida."
+msgstr ""
+
+#: glowderma/loyalty/admin.py
+msgid "Amal qilish tugashi"
+msgstr ""
+
+#: glowderma/loyalty/admin.py
+msgid "Amalda"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/money.html
+msgid "Amaldagi cashback siyosati"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Amaldagi siyosat yo‘q"
+msgstr ""
+
+#: glowderma/reporting/dashboards/money.py
+msgid "Amaldagi siyosat yo‘q — xaridlar cashback olmaydi"
+msgstr ""
+
+#: glowderma.core.enums.OrderChannel
+#: model metadata
+msgid "Android"
+msgstr "Android"
+
+#: glowderma.core.enums.CustomerSocialProvider
+#: model metadata
+msgid "Apple"
+msgstr "Apple"
+
+#: glowderma.core.enums.InboxKind
+msgid "Appointment"
+msgstr "Запись на приём"
+
+#: glowderma.core.enums.OtpPurpose
+msgid "Attach Phone"
+msgstr "Привязка телефона"
+
+#: glowderma.core.enums.AppointmentAction
+msgid "Attend"
+msgstr "Отметить приход"
+
+#: config/settings/ops_admin.py
+msgid "Audit jurnali"
+msgstr ""
+
+#: glowderma/accounts/console/forms.py
+msgid "Autentifikator ilovasidagi 6 xonali kod"
+msgstr ""
+
+#: glowderma/accounts/templates/accounts/console/verify.html
+msgid "Autentifikator ilovasini (Google Authenticator, Microsoft Authenticator, 1Password …) oching va «Glow Derma Ops» uchun ko‘rsatilgan kodni kiriting."
+msgstr ""
+
+#: glowderma.core.enums.EventSource
+#: model metadata
+msgid "BTS"
+msgstr "BTS"
+
+#: model metadata
+msgid "BTS buyurtma ID"
+msgstr "ID заказа в BTS"
+
+#: glowderma/integrations/admin.py
+msgid "BTS holat so‘rovi navbatga qo‘yildi."
+msgstr ""
+
+#: glowderma/delivery/admin.py
+#: model metadata
+msgid "BTS holati"
+msgstr "Статус в BTS"
+
+#: glowderma/integrations/admin.py
+msgid "BTS holati yaqinda so‘ralgan: ikki daqiqadan keyin qayta urinib ko‘ring."
+msgstr ""
+
+#: glowderma/integrations/admin.py
+msgid "BTS holatini so‘rash"
+msgstr ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "BTS kuzatuvi"
+msgstr ""
+
+#: glowderma/integrations/admin.py
+msgid "BTS soxta rejimda ishlayapti: holat so‘rovi o‘chirilgan."
+msgstr ""
+
+#: glowderma/delivery/admin.py
+msgid "BTS’da o‘chirilgan"
+msgstr ""
+
+#: model metadata
+msgid "BTS’da yaratilgan"
+msgstr "Создано в BTS"
+
+#: glowderma/reporting/dashboards/ops.py
+#: model metadata
+msgid "Bajarildi"
+msgstr "Выполнено"
+
+#: glowderma.core.enums.JobState
+#: model metadata
+msgid "Bajarilmoqda"
+msgstr "Выполняется"
+
+#: glowderma/customers/admin.py
+#: glowderma/loyalty/admin.py
+msgid "Balans"
+msgstr ""
+
+#: glowderma/reporting/dashboards/money.py
+msgid "Balans = daftar yozuvlari yig‘indisi"
+msgstr ""
+
+#: glowderma/reporting/dashboards/money.py
+msgid "Balans = oxirgi yozuvdan keyingi balans"
+msgstr ""
+
+#: glowderma.core.enums.BlockKind
+#: model metadata
+msgid "Band"
+msgstr "Занято"
+
+#: glowderma/reporting/dashboards/money.py
+msgid "Band muddati o‘tgan, tranzaksiyasi ochiq"
+msgstr ""
+
+#: glowderma.core.enums.OrderEventType
+#: model metadata
+msgid "Band muddati tugadi"
+msgstr "Срок резерва истёк"
+
+#: glowderma/site_config/forms.py
+msgid "Band qilish muddati"
+msgstr ""
+
+#: config/settings/ops_admin.py
+msgid "Band vaqtlar"
+msgstr ""
+
+#: glowderma/commerce/models.py
+msgid "Band: %(quantity)s × mahsulot #%(product)s · buyurtma №%(order)s (%(state)s)"
+msgstr ""
+
+#: glowderma/catalog/admin.py
+msgid "Banner: {obj.title_uz}"
+msgstr ""
+
+#: config/settings/ops_admin.py
+msgid "Bannerlar"
+msgstr ""
+
+#: glowderma/site_config/admin_views.py
+msgid "Barcha mijozlardan shartlarni qayta qabul qilish so‘raladi."
+msgstr ""
+
+#: glowderma/customers/admin.py
+msgid "Barcha sessiyalarni tugatish"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Barcha yangi mijozlar"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/money.html
+msgid "Beat vazifasi %(task)s har kuni 03:40 da ishlashi kerak."
+msgstr ""
+
+#: glowderma.core.enums.OrderStatus
+#: model metadata
+msgid "Bekor qilindi"
+msgstr "Отменено"
+
+#: glowderma.core.enums.AppointmentStatus
+#: glowderma/reporting/dashboards/customers.py
+#: model metadata
+msgid "Bekor qilingan"
+msgstr "Отменено"
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Bekor qilingan (reversal)"
+msgstr ""
+
+#: glowderma/accounts/templates/accounts/console/reset_2fa_confirmation.html
+#: glowderma/commerce/admin.py
+#: glowderma/core/templates/admin/ops/confirm_action.html
+#: glowderma/site_config/templates/site_config/console/settings.html
+msgid "Bekor qilish"
+msgstr ""
+
+#: model metadata
+msgid "Bekor qilish rad etildi"
+msgstr "Отмена отклонена"
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Berildi"
+msgstr ""
+
+#: model metadata
+msgid "Billz"
+msgstr "Billz"
+
+#: model metadata
+msgid "Billz ID"
+msgstr "Billz ID"
+
+#: model metadata
+msgid "Billz bilan sinxronlangan"
+msgstr "Синхронизировано с Billz"
+
+#: model metadata
+msgid "Billz buyurtma UUID"
+msgstr "UUID заказа в Billz"
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "Billz delta sinxroni"
+msgstr ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "Billz import"
+msgstr ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "Billz import (fon vazifasi)"
+msgstr ""
+
+#: glowderma.core.enums.JobKind
+#: model metadata
+msgid "Billz importi"
+msgstr "Импорт из Billz"
+
+#: glowderma/integrations/admin.py
+msgid "Billz importi allaqachon navbatda yoki ishlayapti (vazifa #%(id)s)."
+msgstr ""
+
+#: model metadata
+msgid "Billz mahsulot ID"
+msgstr "ID товара в Billz"
+
+#: model metadata
+msgid "Billz narxi"
+msgstr "Цена в Billz"
+
+#: model metadata
+msgid "Billz nomi"
+msgstr "Название в Billz"
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "Billz qoldig‘i 24 soatdan beri yangilanmagan (faol mahsulotlar)"
+msgstr ""
+
+#: glowderma.core.enums.LedgerSourceType
+#: model metadata
+msgid "Billz savdosi"
+msgstr "Продажа в Billz"
+
+#: glowderma.core.enums.OrderEventType
+#: model metadata
+msgid "Billz savdosi yozildi"
+msgstr "Продажа в Billz зарегистрирована"
+
+#: glowderma/reporting/dashboards/money.py
+msgid "Billz sinov rejimida — tekshirilmadi"
+msgstr ""
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "Billz sinov rejimida: qoldiq yangilanmaydi"
+msgstr ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "Billz sinxroni"
+msgstr ""
+
+#: glowderma/integrations/admin.py
+msgid "Billz sinxronlash navbatga qo‘yildi (vazifa #%(id)s)."
+msgstr ""
+
+#: glowderma/integrations/admin.py
+msgid "Billz sinxronlashni ishga tushirish"
+msgstr ""
+
+#: model metadata
+msgid "Billz sotuv ID"
+msgstr "ID продажи в Billz"
+
+#: model metadata
+msgid "Billz sotuv raqami"
+msgstr "Номер продажи в Billz"
+
+#: glowderma/commerce/templates/admin/commerce/order_diagnostics.html
+msgid "Billz sotuvi"
+msgstr ""
+
+#: glowderma/reporting/dashboards/report.py
+msgid "Billz sotuvi yozilmagan (eski)"
+msgstr ""
+
+#: glowderma/reporting/dashboards/report.py
+msgid "Billz sotuvi yozilmagan (oxirgi kunlar)"
+msgstr ""
+
+#: glowderma/reporting/dashboards/report.py
+msgid "Billz sotuvi: o‘lik xabar"
+msgstr ""
+
+#: glowderma/integrations/admin.py
+msgid "Billz soxta rejimda ishlayapti: sinxronlash o‘chirilgan."
+msgstr ""
+
+#: model metadata
+msgid "Billz to‘lovi urinilgan"
+msgstr "Попытка платежа в Billz"
+
+#: model metadata
+msgid "Billz’da hisoblangan"
+msgstr "Учтено в Billz"
+
+#: model metadata
+msgid "Billz’da yangilangan"
+msgstr "Обновлено в Billz"
+
+#: glowderma/reporting/dashboards/sales.py
+#: model metadata
+msgid "Billz’dan yangi"
+msgstr "Новый из Billz"
+
+#: glowderma/commerce/diagnostics.py
+msgid "Billz’ga hali yozilmagan"
+msgstr ""
+
+#: glowderma/commerce/diagnostics.py
+msgid "Billz’ga yozilgan: %(at)s"
+msgstr ""
+
+#: model metadata
+msgid "Billz’ga yuborilgan"
+msgstr "Отправлено в Billz"
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Bir martalik kodlar (OTP)"
+msgstr ""
+
+#: glowderma/core/admin.py
+msgid "Birinchi %(count)s tasi ko‘rildi."
+msgid_plural "Birinchi %(count)s tasi ko‘rildi."
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma.core.enums.AudienceType
+#: model metadata
+msgid "Bitta mijoz"
+msgstr "Один клиент"
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Bloklangan"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Bloklangan = noto‘g‘ri urinishlar chegarasiga yetgan kod · 7 kun"
+msgstr ""
+
+#: glowderma/catalog/admin.py
+msgid "Bor"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Boshlangan"
+msgstr ""
+
+#: glowderma/core/admin.py
+msgid "Boshqa"
+msgstr ""
+
+#: glowderma/site_config/templates/site_config/console/settings.html
+msgid "Boshqa bo‘limda saqlanmagan o‘zgarishlar bor: sahifa yangilanganda ular yo‘qoladi. Davom etasizmi?"
+msgstr ""
+
+#: glowderma/accounts/templates/accounts/console/_cancel.html
+msgid "Boshqa hisob bilan kirish"
+msgstr ""
+
+#: config/settings/ops_admin.py
+#: glowderma/core/admin_site.py
+msgid "Boshqaruv"
+msgstr ""
+
+#: glowderma.core.enums.CashbackHoldState
+#: model metadata
+msgid "Bo‘shatildi"
+msgstr "Освобождено"
+
+#: glowderma/commerce/templates/admin/commerce/order_diagnostics.html
+msgid "Bu buyurtma bo‘yicha xabar yo‘q"
+msgstr ""
+
+#: glowderma/accounts/templates/accounts/console/enrol.html
+msgid "Bu kalitni hech kimga bermang va skrinshot qilib saqlamang."
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Bugun %(count)s ta qabul"
+msgid_plural "Bugun %(count)s ta qabul"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/dashboards/customers.py
+msgid "Bugungi qabullar"
+msgstr ""
+
+#: glowderma.core.enums.LedgerSourceType
+#: glowderma/commerce/admin.py
+#: glowderma/delivery/admin.py
+#: glowderma/loyalty/admin.py
+#: glowderma/payments/admin.py
+#: glowderma/reporting/templates/reporting/dashboards/sales.html
+#: model metadata
+msgid "Buyurtma"
+msgstr "Заказ"
+
+#: model metadata
+msgid "Buyurtma bekor qilindi"
+msgstr "Заказ отменён"
+
+#: glowderma/commerce/templates/admin/commerce/order_diagnostics.html
+#: model metadata
+msgid "Buyurtma holati"
+msgstr "Статус заказа"
+
+#: config/settings/ops_admin.py
+msgid "Buyurtma qatorlari"
+msgstr ""
+
+#: glowderma/commerce/admin.py
+msgid "Buyurtma raqamini kiriting (faqat raqamlar, masalan 10253)."
+msgstr ""
+
+#: config/settings/ops_admin.py
+msgid "Buyurtma tarixi"
+msgstr ""
+
+#: glowderma.core.enums.OrderEventType
+#: model metadata
+msgid "Buyurtma yaratildi"
+msgstr "Заказ создан"
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Buyurtma №"
+msgstr ""
+
+#: glowderma/commerce/models.py
+msgid "Buyurtma №%(number)s (%(status)s, %(total)s, mijoz #%(customer)s)"
+msgstr ""
+
+#: glowderma/delivery/models.py
+msgid "Buyurtma №%(order)s jo‘natmasi: %(state)s"
+msgstr ""
+
+#: glowderma/commerce/models.py
+msgid "Buyurtma №%(order)s: %(kind)s (%(source)s) · %(at)s"
+msgstr ""
+
+#: glowderma/commerce/admin.py
+msgid "Buyurtma №{obj.pk}"
+msgstr ""
+
+#: config/settings/ops_admin.py
+#: glowderma/customers/admin.py
+msgid "Buyurtmalar"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/sales.html
+msgid "Buyurtmalar holati"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Buyurtmani ochish"
+msgstr ""
+
+#: glowderma.core.enums.PushDataType
+msgid "Campaign"
+msgstr "Рассылка"
+
+#: glowderma.core.enums.OrderScope
+msgid "Cancelled"
+msgstr "Отменённые"
+
+#: glowderma/customers/admin.py
+#: glowderma/loyalty/admin.py
+msgid "Cashback"
+msgstr ""
+
+#: config/settings/ops_admin.py
+#: glowderma/commerce/admin.py
+msgid "Cashback bandlari"
+msgstr ""
+
+#: config/settings/ops_admin.py
+msgid "Cashback daftari"
+msgstr ""
+
+#: glowderma/reporting/dashboards/ops.py
+#: glowderma/reporting/dashboards/report.py
+msgid "Cashback daftari solishtiruvi"
+msgstr ""
+
+#: config/settings/ops_admin.py
+msgid "Cashback darajalari"
+msgstr ""
+
+#: glowderma.core.enums.OrderEventType
+#: model metadata
+msgid "Cashback hisoblandi"
+msgstr "Кешбэк начислен"
+
+#: config/settings/ops_admin.py
+msgid "Cashback hisoblari"
+msgstr ""
+
+#: config/settings/ops_admin.py
+#: glowderma/reporting/dashboards/money.py
+msgid "Cashback siyosati"
+msgstr ""
+
+#: glowderma/loyalty/models.py
+msgid "Cashback siyosati v%(version)s (%(basis)s, %(date)s dan)"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Cashback · 30 kun"
+msgstr ""
+
+#: glowderma.core.enums.SeoIssueCode
+msgid "Category Missing"
+msgstr "Нет категории"
+
+#: model metadata
+msgid "Celery vazifa ID"
+msgstr "ID задачи Celery"
+
+#: glowderma.core.enums.SessionRevokeReason
+#: model metadata
+msgid "Chiqish"
+msgstr "Выход"
+
+#: glowderma.core.labels.WEEKDAYS
+#: model metadata
+msgid "Chorshanba"
+msgstr "Среда"
+
+#: glowderma.core.enums.PaymentProvider
+#: model metadata
+msgid "Click"
+msgstr "Click"
+
+#: glowderma/reporting/dashboards/money.py
+msgid "Click kabinetida to‘lovning fiskal cheki (paydoc) chiqqanini tekshiring; chiqmagan bo‘lsa, texnik guruhga to‘lov raqamini yuboring — chek bo‘lmasa, qaytarishni avtomatik yuborib bo‘lmaydi."
+msgstr ""
+
+#: glowderma.core.enums.RefundManualReason
+#: model metadata
+msgid "Click paydoc yo‘q"
+msgstr "Нет paydoc Click"
+
+#: glowderma.core.enums.RefundManualReason
+#: model metadata
+msgid "Click sinov rejimida"
+msgstr "Click в тестовом режиме"
+
+#: glowderma/reporting/dashboards/report.py
+msgid "Click: paydoc’siz to‘langan to‘lovlar"
+msgstr ""
+
+#: glowderma/professionals/templates/admin/professionals/submit_line.html
+msgid "Close"
+msgstr "Закрыть"
+
+#: glowderma.core.enums.OrderScope
+msgid "Completed"
+msgstr "Завершённые"
+
+#: glowderma.core.enums.AppointmentAction
+msgid "Confirm"
+msgstr "Подтвердить"
+
+#: glowderma.core.enums.ShipmentState
+msgid "Created"
+msgstr "Создано"
+
+#: glowderma.core.enums.DirectoryOrdering
+msgid "Created At"
+msgstr "По дате создания"
+
+#: glowderma.core.enums.DirectoryOrdering
+msgid "Created At Desc"
+msgstr "По дате создания, по убыванию"
+
+#: glowderma.core.enums.OrderCashbackKind
+msgid "Credit"
+msgstr "Начисление"
+
+#: glowderma.core.enums.CashbackEarnedState
+msgid "Credited"
+msgstr "Начислено"
+
+#: glowderma.core.enums.ExportFormat
+msgid "Csv"
+msgstr "CSV"
+
+#: glowderma.core.enums.LogoutScope
+msgid "Current"
+msgstr "Текущий"
+
+#: glowderma.core.enums.DashboardRange
+msgid "Custom"
+msgstr "Произвольный"
+
+#: glowderma.core.enums.AppointmentCancelledBy
+msgid "Customer"
+msgstr "Клиент"
+
+#: glowderma/reporting/dashboards/money.py
+msgid "Daftar solishtiruvi"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/money.html
+msgid "Daftar solishtiruvi tekshiruvlari"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Daftar yozuvlari bo‘yicha (so‘m)"
+msgstr ""
+
+#: glowderma.core.enums.BlockKind
+#: model metadata
+msgid "Dam olish"
+msgstr "Выходной"
+
+#: glowderma/reporting/templates/reporting/dashboards/sales.html
+msgid "Daraja"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/money.html
+msgid "Daraja — mijozning umrbod xaridlari bo‘yicha"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Darajalar bo‘yicha mijozlar"
+msgstr ""
+
+#: glowderma/accounts/templates/accounts/console/csrf_failure.html
+msgid "Davom etish"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Davomiyligi"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/sales.html
+msgid "Davrda yaratilgan %(total)s ta buyurtma hozir qayerda"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Davriy vazifalar (Celery beat)"
+msgstr ""
+
+#: glowderma.core.enums.DashboardBucket
+msgid "Day"
+msgstr "День"
+
+#: glowderma.core.enums.OrderCashbackKind
+msgid "Debit"
+msgstr "Списание"
+
+#: glowderma.core.enums.ProductOrdering
+msgid "Default"
+msgstr "По умолчанию"
+
+#: glowderma.core.enums.TimelineType
+msgid "Delivered"
+msgstr "Доставлено"
+
+#: glowderma.core.enums.BillzImportMode
+msgid "Delta"
+msgstr "Только изменения"
+
+#: glowderma.core.enums.SpecialistRole
+#: model metadata
+msgid "Dermatolog"
+msgstr "Дерматолог"
+
+#: glowderma.core.enums.ServiceCategory
+#: model metadata
+msgid "Dermatologiya"
+msgstr "Дерматология"
+
+#: glowderma.core.enums.SeoIssueCode
+msgid "Description Missing"
+msgstr "Нет описания"
+
+#: glowderma.core.enums.SeoIssueCode
+msgid "Description Short"
+msgstr "Короткое описание"
+
+#: glowderma/commerce/admin.py
+msgid "Diagnostika"
+msgstr ""
+
+#: glowderma/reporting/dashboards/__init__.py
+msgid "Diqqat"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/sales.html
+msgid "Dona"
+msgstr ""
+
+#: glowderma.core.enums.ProgressState
+msgid "Done"
+msgstr "Выполнено"
+
+#: glowderma/site_config/templates/site_config/console/settings.html
+msgid "Do‘kon"
+msgstr ""
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "Do‘kon (POS)"
+msgstr ""
+
+#: glowderma.core.enums.PurchaseSource
+#: model metadata
+msgid "Do‘kon (QR)"
+msgstr "Магазин (QR)"
+
+#: glowderma/site_config/forms.py
+msgid "Do‘kon sozlamalari"
+msgstr ""
+
+#: glowderma/site_config/templates/site_config/console/settings.html
+msgid "Do‘kon sozlamalari, aloqa ma’lumotlari va huquqiy matnlar. Har bir bo‘lim alohida saqlanadi; har bir o‘zgarish audit jurnaliga yoziladi."
+msgstr ""
+
+#: glowderma/site_config/forms.py
+msgid "Do‘kon telefoni"
+msgstr ""
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "Do‘kon xaridlari (POS)"
+msgstr ""
+
+#: glowderma.core.labels.WEEKDAYS
+#: model metadata
+msgid "Dushanba"
+msgstr "Понедельник"
+
+#: model metadata
+msgid "E-pochtani tasdiqlash"
+msgstr "Подтверждение электронной почты"
+
+#: glowderma.core.enums.AccountSecurityEvent
+msgid "Email Attached"
+msgstr "Электронная почта привязана"
+
+#: glowderma/reporting/dashboards/customers.py
+msgid "Emailni tasdiqlash"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Eng eski"
+msgstr ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "Eng eski xabar %(ago)s kutmoqda"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/sales.html
+msgid "Eng ko‘p sotilgan mahsulotlar"
+msgstr ""
+
+#: glowderma.core.enums.SeoSeverity
+msgid "Error"
+msgstr "Ошибка"
+
+#: glowderma.core.enums.SessionRevokeReason
+#: model metadata
+msgid "Eski token qayta ishlatildi"
+msgstr "Повторное использование старого токена"
+
+#: glowderma/catalog/admin.py
+msgid "Eskirgan (24 soatdan beri yangilanmagan)"
+msgstr ""
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "Eskirgan qoldiq"
+msgstr ""
+
+#: glowderma/reporting/dashboards/money.py
+msgid "Eskirgan: %(ago)s"
+msgstr ""
+
+#: model metadata
+msgid "Eskiz"
+msgstr "Eskiz"
+
+#: glowderma.core.enums.PolicyVersionState
+msgid "Expired"
+msgstr "Срок истёк"
+
+#: glowderma/site_config/templates/site_config/console/settings.html
+msgid "E’lon qilinmagan"
+msgstr ""
+
+#: glowderma/site_config/templates/site_config/console/settings.html
+msgid "E’lon qilinmagan o‘zgarishlar bor"
+msgstr ""
+
+#: glowderma/site_config/templates/site_config/console/settings.html
+msgid "E’lon qilinmoqda…"
+msgstr ""
+
+#: glowderma/site_config/templates/site_config/console/settings.html
+msgid "E’lon qilish"
+msgstr ""
+
+#: glowderma/site_config/templates/site_config/console/settings.html
+msgid "E’lon qilishdan oldin o‘zgarishlarni saqlang."
+msgstr ""
+
+#: model metadata
+msgid "FCM"
+msgstr "FCM"
+
+#: model metadata
+msgid "FCM qabul qildi"
+msgstr "Принято FCM"
+
+#: model metadata
+msgid "FCM token"
+msgstr "Токен FCM"
+
+#: model metadata
+msgid "FCM token bekor qilingan"
+msgstr "Токен FCM аннулирован"
+
+#: model metadata
+msgid "FCM xatosi"
+msgstr "Ошибка FCM"
+
+#: model metadata
+msgid "FID"
+msgstr "FID"
+
+#: glowderma.core.enums.CustomerSocialProvider
+#: model metadata
+msgid "Facebook"
+msgstr "Facebook"
+
+#: glowderma.core.enums.ShipmentState
+msgid "Failed"
+msgstr "Сбой"
+
+#: glowderma.core.enums.IntegrationMode
+msgid "Fake"
+msgstr "Тестовый"
+
+#: glowderma.core.enums.CashbackHoldState
+#: model metadata
+msgid "Faol"
+msgstr "Активный"
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Faol akkauntlar"
+msgstr ""
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "Faol mahsuloti yo‘q"
+msgstr ""
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "Faol, lekin qoldig‘i 0 yoki Billz’da yozuvi yo‘q"
+msgstr ""
+
+#: glowderma.core.enums.ProductChangeKind
+#: model metadata
+msgid "Faollashtirildi"
+msgstr "Активирован"
+
+#: glowderma/core/admin_actions.py
+msgid "Faqat menejerlar uchun."
+msgstr ""
+
+#: glowderma/reporting/dashboards/money.py
+msgid "Faqat tunda"
+msgstr ""
+
+#: config/settings/ops_admin.py
+msgid "Filiallar"
+msgstr ""
+
+#: glowderma/core/templates/admin/ops/applied_filters.html
+msgid "Filtrlarni tozalash"
+msgstr ""
+
+#: config/settings/ops_admin.py
+#: glowderma/reporting/dashboards/ops.py
+msgid "Fon vazifalari"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Fon vazifalari (Job)"
+msgstr ""
+
+#: glowderma/site_config/forms.py
+msgid "Foydalanish shartlari"
+msgstr ""
+
+#: glowderma.core.enums.BillzImportMode
+msgid "Full"
+msgstr "Полный"
+
+#: glowderma.core.enums.TierWarning
+msgid "Gap"
+msgstr "Разрыв"
+
+#: glowderma.core.enums.InboxKind
+msgid "General"
+msgstr "Общее"
+
+#: glowderma/accounts/console/views.py
+msgid "Glow Derma Ops — zaxira kodlar"
+msgstr ""
+
+#: glowderma.core.enums.CustomerSocialProvider
+#: model metadata
+msgid "Google"
+msgstr "Google"
+
+#: glowderma/integrations/admin.py
+msgid "HTTP javob"
+msgstr ""
+
+#: model metadata
+msgid "HTTP sarlavhalari"
+msgstr "HTTP-заголовки"
+
+#: glowderma/core/templatetags/ops_admin.py
+#: glowderma/reporting/dashboards/ops.py
+msgid "Ha"
+msgstr ""
+
+#: glowderma/accounts/templates/accounts/console/reset_2fa_confirmation.html
+msgid "Ha, 2FA ni qayta o‘rnatish"
+msgstr ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "Hali ishlamagan"
+msgstr ""
+
+#: glowderma/reporting/dashboards/money.py
+msgid "Hali ishlamagan (tungi hisobot bilan ishlaydi)"
+msgstr ""
+
+#: glowderma.core.enums.AudienceType
+#: model metadata
+msgid "Hamma"
+msgstr "Все"
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "Hammasi joyida"
+msgstr ""
+
+#: glowderma/core/admin.py
+msgid "Hammasini qayta navbatga"
+msgstr ""
+
+#: glowderma/customers/admin.py
+msgid "Hammasini tugatish"
+msgstr ""
+
+#: glowderma.core.enums.TimelineType
+msgid "Handed To Courier"
+msgstr "Передано курьеру"
+
+#: glowderma/reporting/templates/reporting/dashboards/money.html
+msgid "Har bir son o‘sha qatorlarning ro‘yxatiga olib boradi; ro‘yxat ko‘pi bilan 100 qatorni ochadi — undan ko‘p bo‘lsa, son ostida «Ro‘yxatda 100 / N» yoziladi."
+msgstr ""
+
+#: glowderma/reporting/dashboards/money.py
+msgid "Har bir to‘lovni oching va provayder kabinetida (Click / Payme) tranzaksiya ID bo‘yicha holatini tekshiring. Pul yechilgan bo‘lsa — buyurtma raqamini texnik guruhga yuboring; yechilmagan bo‘lsa, mijoz bilan bog‘lanib, qayta to‘lashni so‘rang."
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Har bir turning oxirgi ishga tushishi; 15 daqiqadan beri yurak urishi yo‘q — osilgan"
+msgstr ""
+
+#: glowderma.core.enums.LinkKind
+#: model metadata
+msgid "Havola (URL)"
+msgstr "Ссылка (URL)"
+
+#: glowderma/site_config/forms.py
+msgid "Havolani https:// bilan to‘liq kiriting."
+msgstr ""
+
+#: glowderma.core.enums.LinkKind
+#: model metadata
+msgid "Havolasiz"
+msgstr "Без ссылки"
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Hech bir daraja qamramagan:"
+msgstr ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "Hech qachon ishlamagan"
+msgstr ""
+
+#: glowderma/loyalty/admin.py
+#: model metadata
+msgid "Hisob"
+msgstr "Учётная запись"
+
+#: glowderma.core.enums.SessionRevokeReason
+#: model metadata
+msgid "Hisob faolsizlantirildi"
+msgstr "Учётная запись деактивирована"
+
+#: glowderma/accounts/templates/accounts/console/enrol.html
+msgid "Hisob: %(account)s · turi: vaqtga asoslangan (TOTP), 6 raqam, 30 soniya."
+msgstr ""
+
+#: glowderma.core.enums.LedgerKind
+#: model metadata
+msgid "Hisoblandi"
+msgstr "Начислено"
+
+#: model metadata
+msgid "Hisoblar"
+msgstr "Учётные записи"
+
+#: glowderma/reporting/templates/reporting/dashboards/money.html
+msgid "Hisobot"
+msgstr ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "Hisobot hali hech qachon ishlamagan"
+msgstr ""
+
+#: glowderma/reporting/dashboards/money.py
+msgid "Hisobot hali hech qachon ishlamagan (har kuni 03:40)"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/money.html
+msgid "Hisobot hech narsani tuzatmaydi — har bir qator xodim harakatini talab qiladi."
+msgstr ""
+
+#: glowderma/core/admin.py
+msgid "Hisobot yaqinda ishga tushirilgan: 10 daqiqadan keyin qayta urinib ko‘ring."
+msgstr ""
+
+#: model metadata
+msgid "Hisobotlar"
+msgstr "Отчёты"
+
+#: glowderma/core/admin.py
+#: glowderma/reporting/templates/reporting/dashboards/money.html
+msgid "Hisobotni hozir ishga tushirish"
+msgstr ""
+
+#: glowderma/delivery/admin.py
+msgid "Hodisa"
+msgstr ""
+
+#: glowderma/commerce/admin.py
+#: glowderma/delivery/admin.py
+msgid "Hodisalar"
+msgstr ""
+
+#: glowderma/appointments/admin.py
+#: glowderma/catalog/admin.py
+#: glowderma/commerce/admin.py
+#: glowderma/core/admin.py
+#: glowderma/customers/admin.py
+#: glowderma/delivery/admin.py
+#: glowderma/integrations/admin.py
+#: glowderma/loyalty/admin.py
+#: glowderma/notifications/admin.py
+#: glowderma/payments/admin.py
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+#: glowderma/reporting/templates/reporting/dashboards/money.html
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Holat"
+msgstr ""
+
+#: model metadata
+msgid "Holat keldi"
+msgstr "Получен статус"
+
+#: glowderma.core.enums.RefundState
+#: model metadata
+msgid "Holat noma’lum · tekshiring"
+msgstr "Статус неизвестен · проверьте"
+
+#: glowderma.core.enums.OrderEventType
+#: model metadata
+msgid "Holat o‘zgardi"
+msgstr "Статус изменён"
+
+#: config/settings/ops_admin.py
+msgid "Holat shablonlari"
+msgstr ""
+
+#: glowderma/commerce/admin.py
+msgid "Holat xulosasi"
+msgstr ""
+
+#: glowderma.core.enums.DashboardBucket
+msgid "Hour"
+msgstr "Час"
+
+#: glowderma/reporting/templates/reporting/dashboards/money.html
+msgid "Hozir"
+msgstr ""
+
+#: glowderma/reporting/dashboards/money.py
+msgid "Hozirgi topilmalar"
+msgstr ""
+
+#: glowderma/site_config/templates/site_config/console/settings.html
+msgid "Hujjat"
+msgstr ""
+
+#: glowderma/site_config/forms.py
+msgid "Huquqiy matnlar"
+msgstr ""
+
+#: model metadata
+msgid "ID"
+msgstr "ID"
+
+#: model metadata
+msgid "IP manzil"
+msgstr "IP-адрес"
+
+#: glowderma.core.enums.SocialTokenType
+msgid "Id Token"
+msgstr "ID-токен"
+
+#: config/settings/ops_admin.py
+msgid "Idempotentlik"
+msgstr ""
+
+#: glowderma/reporting/dashboards/customers.py
+msgid "Ijtimoiy bog‘lash"
+msgstr ""
+
+#: config/settings/ops_admin.py
+#: glowderma/customers/admin.py
+msgid "Ijtimoiy kirishlar"
+msgstr ""
+
+#: glowderma/reporting/dashboards/customers.py
+msgid "Ijtimoiy tarmoq"
+msgstr ""
+
+#: model metadata
+msgid "Ijtimoiy tarmoqni bog‘lash"
+msgstr "Привязка соцсети"
+
+#: glowderma/accounts/templates/accounts/console/recovery_codes.html
+msgid "Ikki bosqichli himoya yoqildi."
+msgstr ""
+
+#: glowderma/accounts/console/views.py
+msgid "Ikki bosqichli himoyani sozlash muddati tugagan yoki ochilmagan. Menejerdan 2FA ni qayta o‘rnatishni so‘rang, so‘ng qaytadan kiring."
+msgstr ""
+
+#: glowderma/accounts/console/views.py
+msgid "Ikki bosqichli himoyani yoqish"
+msgstr ""
+
+#: glowderma/core/otp_apps.py
+msgid "Ikki bosqichli kirish (TOTP)"
+msgstr ""
+
+#: glowderma/accounts/console/views.py
+msgid "Ikki bosqichli tekshiruv"
+msgstr ""
+
+#: glowderma.core.enums.RequestedVia
+#: model metadata
+msgid "Ilova"
+msgstr "Приложение"
+
+#: glowderma/accounts/templates/accounts/console/enrol.html
+msgid "Ilova ko‘rsatgan 6 xonali kodni kiriting."
+msgstr ""
+
+#: glowderma/site_config/forms.py
+msgid "Ilovada ko‘rsatiladi. Bo‘sh qoldirilsa, ko‘rsatilmaydi."
+msgstr ""
+
+#: glowderma/accounts/templates/accounts/console/enrol.html
+msgid "Ilovada «QR kodni skanerlash»ni tanlang va quyidagi kodni skanerlang."
+msgstr ""
+
+#: glowderma/accounts/templates/accounts/console/recovery.html
+msgid "Ilovadagi kod bilan kirish"
+msgstr ""
+
+#: glowderma/site_config/forms.py
+msgid "Ilovaning AI bo‘limida (2-bosqich) ko‘rsatiladi."
+msgstr ""
+
+#: glowderma/site_config/templates/site_config/console/settings.html
+msgid "Ilovaning «Sozlamalar» bo‘limida ko‘rinadi. Bo‘sh qoldirilgan maydon ko‘rsatilmaydi."
+msgstr ""
+
+#: glowderma.core.enums.SeoIssueCode
+msgid "Image Missing"
+msgstr "Нет изображения"
+
+#: glowderma.core.enums.SeoIssueCode
+msgid "Images Missing"
+msgstr "Нет изображений"
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "Import qilingan, hali tekshirilmagan"
+msgstr ""
+
+#: glowderma.core.enums.CustomerRefundState
+msgid "In Progress"
+msgstr "В процессе"
+
+#: glowderma.core.enums.StockStatus
+msgid "In Stock"
+msgstr "В наличии"
+
+#: config/settings/ops_admin.py
+msgid "Inbox"
+msgstr ""
+
+#: glowderma/notifications/models.py
+msgid "Inbox «%(kind)s» → mijoz #%(customer_id)s: %(title)s"
+msgstr ""
+
+#: glowderma.core.enums.SeoSeverity
+msgid "Info"
+msgstr "Информация"
+
+#: glowderma.core.enums.ContentLanguage
+#: model metadata
+msgid "Inglizcha"
+msgstr "Английский"
+
+#: model metadata
+msgid "Instagram havolasi"
+msgstr "Ссылка на Instagram"
+
+#: glowderma/site_config/forms.py
+msgid "Instagram havolasi https://instagram.com/… ko‘rinishida bo‘lsin."
+msgstr ""
+
+#: glowderma.core.enums.CartLineStatus
+msgid "Insufficient"
+msgstr "Недостаточно"
+
+#: model metadata
+msgid "Integratsiya"
+msgstr "Интеграция"
+
+#: config/settings/ops_admin.py
+msgid "Integratsiya holati"
+msgstr ""
+
+#: model metadata
+msgid "Integratsiyalar"
+msgstr "Интеграции"
+
+#: config/settings/ops_admin.py
+msgid "Integratsiyalar va navbatlar"
+msgstr ""
+
+#: glowderma/site_config/templates/site_config/console/settings.html
+msgid "Integratsiyalar: jonli"
+msgstr ""
+
+#: glowderma/site_config/templates/site_config/console/settings.html
+msgid "Integratsiyalar: sinov (fake)"
+msgstr ""
+
+#: config/settings/ops_admin.py
+msgid "Ish vaqti"
+msgstr ""
+
+#: glowderma/core/admin.py
+#: glowderma/integrations/admin.py
+msgid "Ishga tushirish"
+msgstr ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "Ishlamoqda"
+msgstr ""
+
+#: glowderma.core.enums.LedgerKind
+#: model metadata
+msgid "Ishlatildi"
+msgstr "Списано"
+
+#: glowderma/integrations/admin.py
+msgid "Ishlov xatosi"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Jadval"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Jadval o‘zgargani uchun ish vaqtiga to‘g‘ri kelmay qolgan ochiq qabullar (keyingi 14 kun) — ko‘chirish yoki bekor qilish kerak."
+msgstr ""
+
+#: glowderma/commerce/admin.py
+#: glowderma/customers/admin.py
+#: glowderma/loyalty/admin.py
+#: glowderma/reporting/templates/reporting/dashboards/base.html
+msgid "Jami"
+msgstr ""
+
+#: glowderma.core.enums.OrderStatus
+#: model metadata
+msgid "Jarayonda"
+msgstr "В обработке"
+
+#: glowderma/reporting/dashboards/__init__.py
+msgid "Jiddiy"
+msgstr ""
+
+#: glowderma/site_config/templates/site_config/console/settings.html
+msgid "Joriy versiya:"
+msgstr ""
+
+#: glowderma/delivery/admin.py
+msgid "Jo‘natma"
+msgstr ""
+
+#: glowderma/delivery/models.py
+msgid "Jo‘natma #%(shipment)s: %(event)s · %(at)s"
+msgstr ""
+
+#: glowderma/commerce/diagnostics.py
+msgid "Jo‘natma hali yaratilmagan"
+msgstr ""
+
+#: glowderma.core.enums.OrderEventType
+#: model metadata
+msgid "Jo‘natma yaratildi"
+msgstr "Отправление создано"
+
+#: glowderma.core.enums.OrderEventType
+#: model metadata
+msgid "Jo‘natma yaratilmadi"
+msgstr "Отправление не создано"
+
+#: glowderma/accounts/console/views.py
+msgid "Juda ko‘p urinish. %(wait)s soniyadan so‘ng qayta urinib ko‘ring."
+msgid_plural "Juda ko‘p urinish. %(wait)s soniyadan so‘ng qayta urinib ko‘ring."
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma.core.labels.WEEKDAYS
+#: model metadata
+msgid "Juma"
+msgstr "Пятница"
+
+#: glowderma/reporting/dashboards/money.py
+msgid "K1–K6 hozir qayta tekshirildi"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/money.html
+msgid "K1–K6 tekshiruvlari"
+msgstr ""
+
+#: glowderma/core/admin.py
+msgid "K1–K6 tekshiruvlari va cashback daftari solishtiruvi navbatga qo‘yiladi. Natija audit jurnaliga «report.consistency» yozuvi bo‘lib tushadi; nomuvofiqlik bo‘lsa, ogohlantirish yuboriladi. Hisobot 10 daqiqada bir martadan ko‘p ishga tushirilmaydi."
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/sales.html
+msgid "Kamchilik"
+msgstr ""
+
+#: model metadata
+msgid "Kampaniya"
+msgstr "Рассылка"
+
+#: glowderma/notifications/models.py
+msgid "Kampaniya #%(campaign_id)s testi → %(device)s (v%(revision)s)"
+msgstr ""
+
+#: glowderma/notifications/models.py
+msgid "Kampaniya #%(campaign_id)s → mijoz #%(customer_id)s (%(state)s)"
+msgstr ""
+
+#: glowderma/notifications/models.py
+msgid "Kampaniya #%(id)s [%(kind)s] %(title)s (%(state)s)"
+msgstr ""
+
+#: glowderma/notifications/admin.py
+msgid "Kampaniya #{obj.pk}: {obj.title}"
+msgstr ""
+
+#: config/settings/ops_admin.py
+msgid "Kampaniyalar"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+#: glowderma/reporting/templates/reporting/dashboards/sales.html
+msgid "Kanal"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/sales.html
+msgid "Kanallar"
+msgstr ""
+
+#: config/settings/ops_admin.py
+#: glowderma/reporting/templates/reporting/dashboards/sales.html
+#: model metadata
+msgid "Katalog"
+msgstr "Каталог"
+
+#: glowderma.core.enums.BannerLinkKind
+#: glowderma/reporting/dashboards/sales.py
+#: model metadata
+msgid "Kategoriya"
+msgstr "Категория"
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "Kategoriya rasmi yo‘q"
+msgstr ""
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "Kategoriya tanlanmagan"
+msgstr ""
+
+#: glowderma/catalog/admin.py
+msgid "Kategoriya: {obj.name_uz}"
+msgstr ""
+
+#: config/settings/ops_admin.py
+msgid "Kategoriyalar"
+msgstr ""
+
+#: model metadata
+msgid "Kech kelgan to‘lov"
+msgstr "Запоздавший платёж"
+
+#: glowderma/reporting/dashboards/report.py
+msgid "Kech yechilgan, qaytarilmagan pullar"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Kechikkan"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Kechikkan = %(count)s daqiqadan ko‘p kutayotgan ochiq xabar (K6)"
+msgid_plural "Kechikkan = %(count)s daqiqadan ko‘p kutayotgan ochiq xabar (K6)"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/dashboards/report.py
+msgid "Kechikkan outbox xabarlari"
+msgstr ""
+
+#: glowderma/core/admin.py
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Kechiktirilgan"
+msgstr ""
+
+#: glowderma/core/admin.py
+msgid "Kechiktirilmagan"
+msgstr ""
+
+#: model metadata
+msgid "Keldi"
+msgstr "Клиент пришёл"
+
+#: glowderma.core.enums.AppointmentStatus
+#: glowderma/reporting/dashboards/customers.py
+#: model metadata
+msgid "Kelgan"
+msgstr "Приём состоялся"
+
+#: glowderma/core/admin.py
+msgid "Kesh ishlamayapti: hisobotni hozir ishga tushirib bo‘lmaydi."
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/base.html
+msgid "Keshni chetlab o‘tib qayta hisoblash"
+msgstr ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "Ketma-ket xato yo‘q"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Keyin telefon qo‘shgan"
+msgstr ""
+
+#: glowderma/accounts/templates/accounts/console/login.html
+msgid "Keyingi qadam: autentifikator ilovasidagi kod (ikki bosqichli himoya)."
+msgstr ""
+
+#: glowderma/accounts/templates/accounts/console/recovery.html
+#: glowderma/customers/admin.py
+msgid "Kirish"
+msgstr ""
+
+#: glowderma/accounts/console/views.py
+msgid "Kirish muddati tugadi. Email va parolni qaytadan kiriting."
+msgstr ""
+
+#: config/settings/ops_admin.py
+msgid "Klinika"
+msgstr ""
+
+#: model metadata
+msgid "Klinika jadvali"
+msgstr "Расписание клиники"
+
+#: model metadata
+msgid "Klinika qabullari"
+msgstr "Записи на приём в клинику"
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Klinika: bugun va jadval ziddiyatlari"
+msgstr ""
+
+#: glowderma/accounts/console/forms.py
+msgid "Kod 6 ta raqamdan iborat."
+msgstr ""
+
+#: glowderma/accounts/console/views.py
+msgid "Kod noto‘g‘ri yoki allaqachon ishlatilgan. Ilovadagi yangi kodni kiriting."
+msgstr ""
+
+#: glowderma/accounts/templates/accounts/console/recovery_codes.html
+msgid "Kodlarni saqladim, davom etish"
+msgstr ""
+
+#: glowderma/accounts/console/forms.py
+msgid "Kodni kiriting."
+msgstr ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "Konsistentlik hisoboti"
+msgstr ""
+
+#: glowderma/accounts/templates/accounts/console/enrol.html
+msgid "Konsolga kirish uchun ikki bosqichli himoya majburiy. Uni bir marta sozlaysiz:"
+msgstr ""
+
+#: glowderma/accounts/templates/accounts/console/recovery_codes.html
+msgid "Konsolga o‘tish"
+msgstr ""
+
+#: glowderma.core.enums.SpecialistRole
+#: model metadata
+msgid "Kosmetolog"
+msgstr "Косметолог"
+
+#: glowderma/site_config/forms.py
+msgid "Kosmetolog telefoni"
+msgstr ""
+
+#: glowderma.core.enums.ServiceCategory
+#: model metadata
+msgid "Kosmetologiya"
+msgstr "Косметология"
+
+#: config/settings/ops_admin.py
+msgid "Kun ish vaqti"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/sales.html
+msgid "Kunlik tushum kanallar bo‘yicha"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Kunlik va soatlik limitlar (Redis hisoblagichlari) yozuv qoldirmaydi — bu yerda faqat bazadagi kodlar."
+msgstr ""
+
+#: glowderma/delivery/admin.py
+msgid "Kuryerda / yo‘lda"
+msgstr ""
+
+#: glowderma.core.enums.OrderStatus
+#: model metadata
+msgid "Kuryerga topshirildi"
+msgstr "Передано курьеру"
+
+#: glowderma.core.enums.PaymentStatus
+#: model metadata
+msgid "Kutilmoqda"
+msgstr "Ожидается"
+
+#: glowderma/reporting/dashboards/report.py
+msgid "Kuzatilmayotgan posilkalar"
+msgstr ""
+
+#: glowderma.core.enums.OtpPurpose
+msgid "Link Social"
+msgstr "Привязка соцсети"
+
+#: glowderma.core.enums.IntegrationMode
+msgid "Live"
+msgstr "Live"
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Live — haqiqiy adapter; Sinov — soxta (fake) adapter."
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Live, lekin sozlanmagan — jiddiy."
+msgstr ""
+
+#: glowderma.core.enums.OtpPurpose
+msgid "Login New Device"
+msgstr "Вход с нового устройства"
+
+#: glowderma.core.enums.LinkKind
+#: glowderma/reporting/dashboards/sales.py
+#: glowderma/reporting/templates/reporting/dashboards/sales.html
+#: model metadata
+msgid "Mahsulot"
+msgstr "Товар"
+
+#: glowderma/catalog/models.py
+msgid "Mahsulot #%(product_id)s qoldig‘i: %(quantity)s dona"
+msgstr ""
+
+#: glowderma/catalog/models.py
+msgid "Mahsulot #%(product_id)s rasmi %(position)s"
+msgstr ""
+
+#: glowderma.core.enums.OrderEventType
+#: model metadata
+msgid "Mahsulot band qilindi"
+msgstr "Товар зарезервирован"
+
+#: glowderma/catalog/admin.py
+msgid "Mahsulot: {obj}"
+msgstr ""
+
+#: config/settings/ops_admin.py
+#: glowderma/commerce/admin.py
+msgid "Mahsulotlar"
+msgstr ""
+
+#: glowderma/loyalty/admin.py
+msgid "Manba"
+msgstr ""
+
+#: glowderma/accounts/models.py
+#: glowderma/commerce/admin.py
+msgid "Manzil"
+msgstr ""
+
+#: config/settings/ops_admin.py
+#: glowderma/customers/admin.py
+msgid "Manzillar"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Maqsad"
+msgstr ""
+
+#: glowderma/site_config/forms.py
+msgid "Matnlar saqlandi"
+msgstr ""
+
+#: glowderma/core/admin.py
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Mavzu"
+msgstr ""
+
+#: glowderma/core/admin.py
+msgid "Mavzu bo‘yicha o‘liklarni qayta navbatga"
+msgstr ""
+
+#: glowderma/core/admin.py
+msgid "Mavzu: %(topic)s · urinishlar: %(attempts)s"
+msgstr ""
+
+#: glowderma/core/admin.py
+msgid "Mavzuning barcha o‘lik xabarlarini qayta navbatga qo‘yish"
+msgstr ""
+
+#: glowderma/site_config/forms.py
+msgid "Maxfiylik siyosati"
+msgstr ""
+
+#: glowderma/site_config/templates/site_config/console/_form_alert.html
+msgid "Maydonlarni tekshiring."
+msgstr ""
+
+#: glowderma/reporting/dashboards/__init__.py
+#: glowderma/reporting/templates/reporting/dashboards/_tile.html
+msgid "Ma’lumot"
+msgstr ""
+
+#: glowderma/core/admin_site.py
+msgid "Mening hisobim"
+msgstr ""
+
+#: glowderma/core/admin.py
+#: glowderma/customers/admin.py
+#: model metadata
+msgid "Mijoz"
+msgstr "Клиент"
+
+#: glowderma/loyalty/models.py
+msgid "Mijoz #%(customer)s cashback hisobi: %(balance)s"
+msgstr ""
+
+#: glowderma/commerce/models.py
+msgid "Mijoz #%(customer)s savatchasi"
+msgstr ""
+
+#: glowderma/notifications/models.py
+msgid "Mijoz #%(customer_id)s · segment #%(segment_id)s"
+msgstr ""
+
+#: glowderma/accounts/models.py
+#: glowderma/core/admin.py
+#: glowderma/customers/admin.py
+msgid "Mijoz #%(id)s"
+msgstr ""
+
+#: glowderma/customers/admin.py
+msgid "Mijoz barcha telefon va brauzerlardan chiqariladi (sabab: «Admin tugatdi»), sessiyasiz qolgan qurilmalarga push yuborilmaydi. Yo‘qolgan telefon yoki begona kirish gumon qilinganda ishlating."
+msgstr ""
+
+#: glowderma.core.enums.CancellationReason
+#: model metadata
+msgid "Mijoz bekor qildi"
+msgstr "Отменено клиентом"
+
+#: glowderma/accounts/admin.py
+msgid "Mijoz sessiyasini tugatish"
+msgstr ""
+
+#: glowderma/accounts/admin.py
+msgid "Mijoz shu qurilmada tizimdan chiqariladi (sabab: «Admin tugatdi»). Qurilmada boshqa ochiq sessiya qolmasa, unga push xabarlar yuborilmaydi. Mijoz qaytadan kirishi mumkin."
+msgstr ""
+
+#: glowderma.core.labels.REFUND_MANUAL_CLICK
+msgid "Mijozga qo‘lda to‘lang, so‘ng «Qaytarildi» deb belgilang"
+msgstr "Выплатите клиенту вручную, затем отметьте как «Возвращено»"
+
+#: config/settings/ops_admin.py
+#: model metadata
+msgid "Mijozlar"
+msgstr "Клиенты"
+
+#: glowderma/site_config/admin_views.py
+msgid "Mijozlar ilovada yangi versiyani qabul qiladi."
+msgstr ""
+
+#: config/settings/ops_admin.py
+#: glowderma/reporting/admin_views.py
+msgid "Mijozlar va kirish"
+msgstr ""
+
+#: config/settings/ops_admin.py
+msgid "Mijozlar va sodiqlik"
+msgstr ""
+
+#: glowderma/site_config/admin_views.py
+msgid "Mijozlar yangi shartlarni e’lon qilganingizdan keyin ko‘radi."
+msgstr ""
+
+#: glowderma/reporting/admin_views.py
+msgid "Mijozlar, kirish va sodiqlik"
+msgstr ""
+
+#: glowderma/customers/admin.py
+msgid "Mijozning barcha sessiyalarini tugatish"
+msgstr ""
+
+#: glowderma/customers/admin.py
+msgid "Mijozning ochiq sessiyasi yo‘q."
+msgstr ""
+
+#: glowderma/customers/admin.py
+msgid "Mijozning ochiq sessiyasi yo‘q: hech narsa o‘zgarmadi."
+msgstr ""
+
+#: glowderma/core/admin.py
+msgid "Moliyaviy muvofiqlik hisobotini hozir ishga tushirish"
+msgstr ""
+
+#: glowderma.core.enums.OrderPeriod
+msgid "Month"
+msgstr "Месяц"
+
+#: glowderma/delivery/admin.py
+msgid "Muddati o‘tgan"
+msgstr ""
+
+#: glowderma/reporting/dashboards/report.py
+msgid "Muddati o‘tgan kechiktirilgan xabarlar"
+msgstr ""
+
+#: glowderma.core.enums.SessionRevokeReason
+#: model metadata
+msgid "Muddati tugadi"
+msgstr "Срок истёк"
+
+#: glowderma/loyalty/admin.py
+msgid "Muddati tugagan"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Mutaxassis"
+msgstr ""
+
+#: config/settings/ops_admin.py
+msgid "Mutaxassis xizmatlari"
+msgstr ""
+
+#: config/settings/ops_admin.py
+msgid "Mutaxassislar"
+msgstr ""
+
+#: glowderma.core.enums.JobState
+#: model metadata
+msgid "Muvaffaqiyatli"
+msgstr "Успешно"
+
+#: glowderma.core.enums.PaymentStatus
+#: model metadata
+msgid "Muvaffaqiyatsiz"
+msgstr "Неуспешно"
+
+#: glowderma/reporting/dashboards/report.py
+msgid "Muvaffaqiyatsiz qaytarishlar (harakat kerak)"
+msgstr ""
+
+#: glowderma/core/admin.py
+msgid "Muvofiqlik hisoboti navbatga qo‘yildi. Natija audit jurnalida «report.consistency» bo‘lib chiqadi."
+msgstr ""
+
+#: glowderma.core.enums.ProductOrdering
+msgid "Name"
+msgstr "По названию"
+
+#: glowderma.core.enums.ProductOrdering
+msgid "Name Desc"
+msgstr "По названию, по убыванию"
+
+#: glowderma.core.enums.SeoIssueCode
+msgid "Name Missing"
+msgstr "Нет названия"
+
+#: glowderma.core.enums.SeoIssueCode
+msgid "Name Translation Missing"
+msgstr "Нет перевода названия"
+
+#: glowderma/reporting/templates/reporting/dashboards/money.html
+msgid "Namuna"
+msgstr ""
+
+#: glowderma/appointments/admin.py
+#: glowderma/catalog/admin.py
+#: glowderma/commerce/admin.py
+#: glowderma/customers/admin.py
+#: glowderma/loyalty/admin.py
+msgid "Narx"
+msgstr ""
+
+#: glowderma.core.enums.ProductChangeKind
+#: model metadata
+msgid "Narx o‘zgardi"
+msgstr "Цена изменена"
+
+#: glowderma/integrations/admin.py
+msgid "Natija"
+msgstr ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "Navbat bo‘sh"
+msgstr ""
+
+#: glowderma.core.enums.JobState
+#: glowderma/reporting/dashboards/ops.py
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+#: model metadata
+msgid "Navbatda"
+msgstr "В очереди"
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Navbatlar, integratsiyalar va tungi tekshiruvlar"
+msgstr ""
+
+#: glowderma.core.enums.SeoIssueCode
+msgid "No Active Products"
+msgstr "Нет активных товаров"
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "Nom tarjimasi yo‘q"
+msgstr ""
+
+#: glowderma/delivery/admin.py
+msgid "Noma’lum holat"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/money.html
+msgid "Nomuvofiqlik"
+msgstr ""
+
+#: glowderma.core.enums.CashbackEarnedState
+msgid "None"
+msgstr "Нет"
+
+#: glowderma.core.enums.ShipmentState
+msgid "Not Created"
+msgstr "Не создано"
+
+#: glowderma.core.enums.ShipmentState
+msgid "Not Required"
+msgstr "Не требуется"
+
+#: glowderma/reporting/dashboards/customers.py
+msgid "Noto‘g‘ri parol yoki kod, bloklangan urinishlar (API va konsol)"
+msgstr ""
+
+#: glowderma/accounts/templates/accounts/console/recovery_codes.html
+msgid "Nusxa olindi"
+msgstr ""
+
+#: glowderma/accounts/templates/accounts/console/recovery_codes.html
+msgid "Nusxa olish"
+msgstr ""
+
+#: model metadata
+msgid "OT"
+msgstr "ОС"
+
+#: glowderma/reporting/dashboards/customers.py
+msgid "OTP · 24 soat"
+msgstr ""
+
+#: glowderma/reporting/dashboards/customers.py
+msgid "Ochiq sessiyalar"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Ochiq sessiyalar platforma bo‘yicha"
+msgstr ""
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "Ogohlantirish"
+msgstr ""
+
+#: glowderma/core/admin.py
+msgid "Ogohlantirish (%(topic)s): %(text)s"
+msgstr ""
+
+#: glowderma/core/admin.py
+msgid "Ogohlantirish: %(text)s"
+msgstr ""
+
+#: glowderma.core.enums.CartLineStatus
+msgid "Ok"
+msgstr "В норме"
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "Oldingi %(days)s kun: %(count)s"
+msgid_plural "Oldingi %(days)s kun: %(count)s"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/templates/reporting/dashboards/_tile.html
+msgid "Oldingi davrga nisbatan"
+msgstr ""
+
+#: glowderma.core.enums.FulfilmentMethod
+#: model metadata
+msgid "Olib ketish"
+msgstr "Самовывоз"
+
+#: glowderma/site_config/templates/site_config/console/settings.html
+msgid "Olib ketish manzili"
+msgstr ""
+
+#: glowderma.core.enums.PurchaseSource
+#: model metadata
+msgid "Onlayn"
+msgstr "Онлайн"
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "Onlayn tushum"
+msgstr ""
+
+#: glowderma.core.enums.LedgerSource
+msgid "Online"
+msgstr "Онлайн"
+
+#: config/settings/ops_admin.py
+msgid "Operatsion konsol"
+msgstr ""
+
+#: config/settings/ops_admin.py
+#: glowderma/reporting/admin_views.py
+msgid "Ops holati"
+msgstr ""
+
+#: glowderma.core.enums.InboxLinkKind
+msgid "Order"
+msgstr "Заказ"
+
+#: glowderma.core.enums.TimelineType
+msgid "Order Created"
+msgstr "Заказ создан"
+
+#: glowderma.core.enums.InboxKind
+msgid "Order Status"
+msgstr "Статус заказа"
+
+#: glowderma/reporting/dashboards/money.py
+msgid "Osilib qolgan to‘lovlar"
+msgstr ""
+
+#: glowderma/reporting/dashboards/report.py
+msgid "Osilib qolgan to‘lovlar (pending)"
+msgstr ""
+
+#: glowderma.core.enums.LogoutScope
+msgid "Others"
+msgstr "Остальные"
+
+#: glowderma.core.enums.StockStatus
+msgid "Out Of Stock"
+msgstr "Нет в наличии"
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "Outbox dispetcheri"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Outbox navbati mavzular bo‘yicha"
+msgstr ""
+
+#: glowderma/commerce/templates/admin/commerce/order_diagnostics.html
+msgid "Outbox xabarlari"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/money.html
+msgid "Oxirgi hisobot yozuvi"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Oxirgi iz"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Oxirgi iz — vazifa qoldirgan yozuv bo‘yicha"
+msgstr ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "Oxirgi kuzatilgan posilka %(ago)s"
+msgstr ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "Oxirgi kuzatuv: %(when)s"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Oxirgi muvaffaqiyat"
+msgstr ""
+
+#: glowderma/integrations/admin.py
+msgid "Oxirgi muvaffaqiyatli sinxronlashdan keyingi o‘zgarishlar (delta) Billz’dan olinadi: narxlar va qoldiqlar yangilanadi. Import allaqachon ishlayotgan bo‘lsa, yangisi boshlanmaydi."
+msgstr ""
+
+#: glowderma/site_config/templates/site_config/console/settings.html
+msgid "Oxirgi o‘zgarish: %(at)s · %(author)s"
+msgstr ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "Oxirgi sinxron %(ago)s"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/money.html
+msgid "Oxirgi solishtiruv natijasi (audit jurnali)"
+msgstr ""
+
+#: glowderma/reporting/dashboards/money.py
+msgid "Oxirgi tungi hisobot"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Oxirgi xato"
+msgstr ""
+
+#: glowderma/commerce/templates/admin/commerce/order_diagnostics.html
+msgid "Oxirgi xato: %(error)s"
+msgstr ""
+
+#: glowderma.core.enums.CustomerStatus
+#: model metadata
+msgid "O‘chirilgan"
+msgstr "Удалён"
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+#: model metadata
+msgid "O‘lik"
+msgstr "Мёртвое"
+
+#: glowderma/reporting/dashboards/report.py
+msgid "O‘lik outbox xabarlari (24 soat)"
+msgstr ""
+
+#: glowderma/core/admin.py
+msgid "O‘lik xabar yana «pending» holatiga qaytadi (urinishlar 0 dan boshlanadi) va dispetcher uni darhol yetkazishga urinadi. Muddati o‘tgan xabar uchun dispetcher qayta ishga tushiriladi. Ishlovchilar idempotent: muvaffaqiyatli bajarilgan amal takrorlanmaydi."
+msgstr ""
+
+#: glowderma/core/admin.py
+msgid "O‘lik xabarlar yo‘q."
+msgstr ""
+
+#: glowderma/loyalty/admin.py
+msgid "O‘rnini olgan versiya"
+msgstr ""
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "O‘rtacha chek"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/sales.html
+msgid "O‘rtacha chek:"
+msgstr ""
+
+#: model metadata
+msgid "O‘tkazib yuborildi"
+msgstr "Пропущено"
+
+#: glowderma/accounts/admin.py
+msgid "O‘z 2FA ingizni bu yerdan qayta o‘rnatib bo‘lmaydi."
+msgstr ""
+
+#: glowderma.core.enums.ContentLanguage
+#: model metadata
+msgid "O‘zbekcha"
+msgstr "Узбекский"
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "O‘zbekcha nom yo‘q"
+msgstr ""
+
+#: glowderma/site_config/admin_views.py
+msgid "O‘zgarish yo‘q: saqlanadigan narsa topilmadi."
+msgstr ""
+
+#: model metadata
+msgid "POS qurilma"
+msgstr "POS-устройство"
+
+#: config/settings/ops_admin.py
+#: model metadata
+msgid "POS qurilmalar"
+msgstr "POS-устройства"
+
+#: glowderma.core.enums.ProgressStep
+msgid "Paid"
+msgstr "Оплачено"
+
+#: model metadata
+msgid "Parol"
+msgstr "Пароль"
+
+#: glowderma.core.enums.SessionRevokeReason
+#: model metadata
+msgid "Parol o‘zgartirildi"
+msgstr "Пароль изменён"
+
+#: glowderma/accounts/console/views.py
+msgid "Parolingiz va 2FA bir menejer tomonidan tiklangan: xavfsizlik uchun 2FA ni boshqa menejer (yoki server buyrug‘i) qayta o‘rnatishi kerak."
+msgstr ""
+
+#: glowderma/reporting/dashboards/customers.py
+#: model metadata
+msgid "Parolni tiklash"
+msgstr "Сброс пароля"
+
+#: glowderma.core.enums.AccountSecurityEvent
+msgid "Password Changed"
+msgstr "Пароль изменён"
+
+#: glowderma.core.enums.AccountSecurityEvent
+msgid "Password Reset"
+msgstr "Пароль сброшен"
+
+#: glowderma.core.enums.AppointmentScope
+msgid "Past"
+msgstr "Прошедшие"
+
+#: glowderma.core.enums.PaymentProvider
+#: model metadata
+msgid "Payme"
+msgstr "Payme"
+
+#: glowderma.core.enums.RefundManualReason
+#: model metadata
+msgid "Payme kabinetida"
+msgstr "В кабинете Payme"
+
+#: glowderma.core.labels.REFUND_MANUAL_PAYME
+msgid "Payme kabinetida qaytarish kerak"
+msgstr "Требуется возврат в кабинете Payme"
+
+#: glowderma.core.enums.TimelineType
+msgid "Payment Confirmed"
+msgstr "Платёж подтверждён"
+
+#: glowderma.core.enums.TimelineType
+msgid "Payment Failed"
+msgstr "Платёж не прошёл"
+
+#: glowderma.core.labels.WEEKDAYS
+#: model metadata
+msgid "Payshanba"
+msgstr "Четверг"
+
+#: glowderma.core.enums.AccountSecurityEvent
+msgid "Phone Attached"
+msgstr "Телефон привязан"
+
+#: glowderma.core.enums.ProgressStep
+msgid "Picked Up"
+msgstr "Получен"
+
+#: glowderma.core.enums.ProgressStep
+msgid "Placed"
+msgstr "Оформлен"
+
+#: glowderma.core.enums.DirectoryOrdering
+msgid "Position"
+msgstr "Позиция"
+
+#: glowderma.core.enums.CustomerProductOrdering
+msgid "Price"
+msgstr "Цена"
+
+#: glowderma.core.enums.CustomerProductOrdering
+msgid "Price Desc"
+msgstr "Цена (по убыванию)"
+
+#: glowderma.core.enums.InboxLinkKind
+msgid "Product"
+msgstr "Товар"
+
+#: glowderma.core.enums.InboxKind
+msgid "Promo"
+msgstr "Акция"
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Provayder"
+msgstr ""
+
+#: glowderma/commerce/templates/admin/commerce/order_diagnostics.html
+msgid "Provayder chaqiruvi yo‘q"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Provayderlar tayyorligi"
+msgstr ""
+
+#: glowderma.core.enums.OrderEventType
+#: model metadata
+msgid "Pul qaytarildi"
+msgstr "Возврат выполнен"
+
+#: config/settings/ops_admin.py
+#: glowderma/reporting/admin_views.py
+msgid "Pul solishtirish"
+msgstr ""
+
+#: glowderma/notifications/admin.py
+msgid "Push"
+msgstr ""
+
+#: glowderma/accounts/templates/accounts/console/enrol.html
+msgid "QR kodni skanerlay olmayapsizmi? Kalitni qo‘lda kiriting"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+#: model metadata
+msgid "Qabul"
+msgstr "Запись на приём"
+
+#: glowderma/appointments/models.py
+msgid "Qabul #%(appointment_id)s: %(type)s (%(source)s) · %(at)s"
+msgstr ""
+
+#: glowderma/appointments/models.py
+msgid "Qabul #%(id)s · %(status)s: mutaxassis #%(professional_id)s %(start)s (%(duration)s daqiqa)"
+msgstr ""
+
+#: glowderma/integrations/admin.py
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Qabul qilindi"
+msgstr ""
+
+#: glowderma/delivery/admin.py
+msgid "Qabul qilindi (bekor qilish mumkin)"
+msgstr ""
+
+#: config/settings/ops_admin.py
+msgid "Qabul qiluvchilar"
+msgstr ""
+
+#: glowderma/site_config/forms.py
+msgid "Qabul qoidalari"
+msgstr ""
+
+#: glowderma/site_config/templates/site_config/console/settings.html
+msgid "Qabul qoidalari saqlangach ilovada darhol ko‘rinadi (versiyalanmaydi)."
+msgstr ""
+
+#: config/settings/ops_admin.py
+msgid "Qabul tarixi"
+msgstr ""
+
+#: config/settings/ops_admin.py
+#: glowderma/customers/admin.py
+msgid "Qabullar"
+msgstr ""
+
+#: glowderma/core/admin.py
+msgid "Qayta"
+msgstr ""
+
+#: glowderma/core/admin.py
+msgid "Qayta navbatga qo‘yish"
+msgstr ""
+
+#: glowderma.core.enums.OrderEventType
+#: model metadata
+msgid "Qaytarib bo‘lmadi"
+msgstr "Возврат не удался"
+
+#: glowderma.core.enums.RefundState
+#: model metadata
+msgid "Qaytarildi"
+msgstr "Возвращено"
+
+#: glowderma.core.enums.PaymentStatus
+#: model metadata
+msgid "Qaytarilgan"
+msgstr "Возвращено"
+
+#: glowderma.core.enums.RefundState
+#: model metadata
+msgid "Qaytarilmoqda"
+msgstr "Выполняется возврат"
+
+#: glowderma/payments/models.py
+msgid "Qaytarish #%(id)s · %(state)s · %(amount)s (to‘lov #%(payment)s)"
+msgstr ""
+
+#: glowderma/reporting/dashboards/money.py
+msgid "Qaytarish provayderda rad etilgan: «xato kodi»ni ko‘ring, so‘ng boshqaruv panelida (To‘lovlar → Qaytarishlar) qayta yuboring yoki pulni qo‘lda qaytarib, «qo‘lda qaytarildi» deb belgilang."
+msgstr ""
+
+#: glowderma.core.enums.OrderEventType
+#: model metadata
+msgid "Qaytarish so‘raldi"
+msgstr "Запрошен возврат"
+
+#: glowderma/reporting/dashboards/money.py
+msgid "Qaytarish uzoq ochiq turibdi: uni oching, holati va «oxirgi xato»ni ko‘ring. Holati noma’lum yoki qo‘lda kiritish kerak bo‘lsa, provayder kabinetida pul qaytganini tekshiring va boshqaruv panelida (To‘lovlar → Qaytarishlar) uni hal qilingan deb belgilang."
+msgstr ""
+
+#: config/settings/ops_admin.py
+#: glowderma/payments/admin.py
+msgid "Qaytarishlar"
+msgstr ""
+
+#: glowderma.core.enums.NotificationState
+#: model metadata
+msgid "Qisman yuborildi"
+msgstr "Отправлено частично"
+
+#: glowderma/site_config/forms.py
+msgid "Qiymat 5 dan kam bo‘lmasin."
+msgstr ""
+
+#: glowderma/site_config/forms.py
+msgid "Qiymat 60 dan oshmasin."
+msgstr ""
+
+#: glowderma/notifications/admin.py
+msgid "Qoidalar"
+msgstr ""
+
+#: config/settings/ops_admin.py
+msgid "Qoldiqlar"
+msgstr ""
+
+#: glowderma/accounts/admin.py
+msgid "Qolgan kodlar"
+msgstr ""
+
+#: glowderma.core.enums.NotificationState
+#: model metadata
+msgid "Qoralama"
+msgstr "Черновик"
+
+#: model metadata
+msgid "Qo‘lda"
+msgstr "Вручную"
+
+#: glowderma.core.enums.RefundState
+#: model metadata
+msgid "Qo‘lda qaytarish kerak"
+msgstr "Требуется возврат вручную"
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Qo‘lda tuzatish"
+msgstr ""
+
+#: glowderma/site_config/forms.py
+msgid "Qo‘llab-quvvatlash telefoni"
+msgstr ""
+
+#: glowderma/core/templates/admin/ops/applied_filters.html
+msgid "Qo‘llangan filtrlar:"
+msgstr ""
+
+#: model metadata
+msgid "Qurilma yo‘q"
+msgstr "Нет устройства"
+
+#: config/settings/ops_admin.py
+#: glowderma/customers/admin.py
+msgid "Qurilmalar"
+msgstr ""
+
+#: glowderma/reporting/dashboards/customers.py
+msgid "Qurilmasiz"
+msgstr ""
+
+#: glowderma/accounts/templates/accounts/console/reset_2fa_confirmation.html
+msgid "Quyidagi xodimlarning TOTP qurilmasi va zaxira kodlari o‘chiriladi, ochiq konsol sessiyalari tugatiladi. Ular %(window)s ichida konsolga keyingi kirishda ikki bosqichli himoyani qaytadan sozlaydi. Xodimning parolini ham siz tiklagan bo‘lsangiz, 2FA ni boshqa menejer qayta o‘rnatishi kerak."
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/money.html
+msgid "Quyidagi «Hozir» ustuni tekshiruvlarni hozir qayta hisoblaydi."
+msgstr ""
+
+#: glowderma/integrations/admin.py
+#: model metadata
+msgid "Rad etildi"
+msgstr "Отклонено"
+
+#: glowderma.core.enums.AppointmentStatus
+#: glowderma/reporting/dashboards/customers.py
+#: model metadata
+msgid "Rad etilgan"
+msgstr "Отклонено"
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "Rasm yo‘q"
+msgstr ""
+
+#: config/settings/ops_admin.py
+msgid "Rasmlar"
+msgstr ""
+
+#: glowderma.core.enums.TimelineType
+msgid "Refund In Progress"
+msgstr "Возврат выполняется"
+
+#: glowderma.core.enums.TimelineType
+msgid "Refund Succeeded"
+msgstr "Возврат выполнен"
+
+#: glowderma.core.enums.OtpPurpose
+msgid "Register"
+msgstr "Регистрация"
+
+#: glowderma.core.enums.NotificationState
+#: glowderma/loyalty/admin.py
+#: model metadata
+msgid "Rejalashtirilgan"
+msgstr "Запланировано"
+
+#: glowderma.core.enums.AppointmentAction
+msgid "Reject"
+msgstr "Отклонить"
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Rejim"
+msgstr ""
+
+#: glowderma.core.enums.OtpPurpose
+msgid "Reset Password"
+msgstr "Сброс пароля"
+
+#: glowderma.core.enums.OrderCashbackKind
+msgid "Reversal"
+msgstr "Отмена"
+
+#: glowderma.core.enums.CashbackEarnedState
+msgid "Reversed"
+msgstr "Отменено"
+
+#: glowderma/customers/admin.py
+msgid "Rozilik"
+msgstr ""
+
+#: glowderma/reporting/dashboards/__init__.py
+msgid "Ro‘yxatda %(shown)s / %(count)s"
+msgstr ""
+
+#: glowderma/reporting/dashboards/customers.py
+#: model metadata
+msgid "Ro‘yxatdan o‘tish"
+msgstr "Регистрация"
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Ro‘yxatdan o‘tish usuli bo‘yicha · 30 kun"
+msgstr ""
+
+#: glowderma.core.enums.ContentLanguage
+#: model metadata
+msgid "Ruscha"
+msgstr "Русский"
+
+#: glowderma/reporting/templates/reporting/dashboards/sales.html
+msgid "SEO kamchiliklari"
+msgstr ""
+
+#: glowderma/catalog/admin.py
+msgid "SEO muammosi"
+msgstr ""
+
+#: model metadata
+msgid "SEO sarlavha (en)"
+msgstr "SEO-заголовок (en)"
+
+#: model metadata
+msgid "SEO sarlavha (ru)"
+msgstr "SEO-заголовок (ru)"
+
+#: model metadata
+msgid "SEO sarlavha (uz)"
+msgstr "SEO-заголовок (uz)"
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "SEO sarlavha qisqa"
+msgstr ""
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "SEO sarlavha uzun"
+msgstr ""
+
+#: model metadata
+msgid "SEO tavsif (en)"
+msgstr "SEO-описание (en)"
+
+#: model metadata
+msgid "SEO tavsif (ru)"
+msgstr "SEO-описание (ru)"
+
+#: model metadata
+msgid "SEO tavsif (uz)"
+msgstr "SEO-описание (uz)"
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "SEO tavsif qisqa"
+msgstr ""
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "SEO tavsif uzun"
+msgstr ""
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "SEO xatolari"
+msgstr ""
+
+#: model metadata
+msgid "SHA-256"
+msgstr "SHA-256"
+
+#: model metadata
+msgid "SMS kod"
+msgstr "SMS-код"
+
+#: config/settings/ops_admin.py
+#: model metadata
+msgid "SMS kodlar"
+msgstr "SMS-коды"
+
+#: glowderma/accounts/console/views.py
+msgid "Sahifa eskirgan yoki sessiya yangilangan, shuning uchun so‘rov qabul qilinmadi. Sahifani qaytadan oching va yana urinib ko‘ring."
+msgstr ""
+
+#: glowderma/site_config/admin_views.py
+msgid "Saqlangan foydalanish shartlari va maxfiylik siyosati (barcha tillarda) yangi versiya sifatida e’lon qilinadi. Mijozlar yangi versiyani qabul qilmaguncha buyurtma bera olmaydi va qabulga yozila olmaydi. Bu amalni qaytarib bo‘lmaydi."
+msgstr ""
+
+#: glowderma/site_config/templates/site_config/console/settings.html
+msgid "Saqlangan matn mijozlarga faqat «E’lon qilish»dan keyin ko‘rinadi. O‘zbekcha matn majburiy."
+msgstr ""
+
+#: glowderma/site_config/templates/site_config/console/settings.html
+msgid "Saqlanmagan o‘zgarishlar bor"
+msgstr ""
+
+#: glowderma/site_config/templates/site_config/console/_save_button.html
+msgid "Saqlanmoqda…"
+msgstr ""
+
+#: glowderma/site_config/templates/site_config/console/_save_button.html
+msgid "Saqlash"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Sarflandi"
+msgstr ""
+
+#: config/settings/ops_admin.py
+msgid "Savat qatorlari"
+msgstr ""
+
+#: config/settings/ops_admin.py
+msgid "Savatlar"
+msgstr ""
+
+#: config/settings/ops_admin.py
+#: model metadata
+msgid "Savdo"
+msgstr "Продажи"
+
+#: config/settings/ops_admin.py
+#: glowderma/reporting/admin_views.py
+msgid "Savdo va katalog"
+msgstr ""
+
+#: glowderma/professionals/templates/admin/professionals/submit_line.html
+msgid "Save"
+msgstr "Сохранить"
+
+#: glowderma/professionals/templates/admin/professionals/submit_line.html
+msgid "Save and add another"
+msgstr "Сохранить и добавить другой объект"
+
+#: glowderma/professionals/templates/admin/professionals/submit_line.html
+msgid "Save and continue editing"
+msgstr "Сохранить и продолжить редактирование"
+
+#: glowderma/professionals/templates/admin/professionals/submit_line.html
+msgid "Save and view"
+msgstr "Сохранить и просмотреть"
+
+#: glowderma/professionals/templates/admin/professionals/submit_line.html
+msgid "Save as new"
+msgstr "Сохранить как новый объект"
+
+#: model metadata
+msgid "Sayt"
+msgstr "Сайт"
+
+#: glowderma/site_config/admin.py
+#: glowderma/site_config/models.py
+msgid "Sayt sozlamalari"
+msgstr ""
+
+#: glowderma.core.enums.PolicyVersionState
+msgid "Scheduled"
+msgstr "Запланировано"
+
+#: glowderma.core.enums.AudienceType
+#: model metadata
+msgid "Segment"
+msgstr "Сегмент"
+
+#: config/settings/ops_admin.py
+msgid "Segment a’zolari"
+msgstr ""
+
+#: glowderma/notifications/admin.py
+msgid "Segment: {obj.name}"
+msgstr ""
+
+#: config/settings/ops_admin.py
+msgid "Segmentlar"
+msgstr ""
+
+#: glowderma.core.enums.SeoIssueCode
+msgid "Seo Description Long"
+msgstr "SEO-описание слишком длинное"
+
+#: glowderma.core.enums.SeoIssueCode
+msgid "Seo Description Missing"
+msgstr "SEO-описание отсутствует"
+
+#: glowderma.core.enums.SeoIssueCode
+msgid "Seo Description Short"
+msgstr "SEO-описание слишком короткое"
+
+#: glowderma.core.enums.SeoIssueCode
+msgid "Seo Title Long"
+msgstr "SEO-заголовок слишком длинный"
+
+#: glowderma.core.enums.SeoIssueCode
+msgid "Seo Title Missing"
+msgstr "SEO-заголовок отсутствует"
+
+#: glowderma.core.enums.SeoIssueCode
+msgid "Seo Title Short"
+msgstr "SEO-заголовок слишком короткий"
+
+#: glowderma.core.labels.WEEKDAYS
+#: model metadata
+msgid "Seshanba"
+msgstr "Вторник"
+
+#: glowderma.core.enums.PushDataType
+msgid "Session Replaced"
+msgstr "Сеанс заменён"
+
+#: glowderma/accounts/admin.py
+msgid "Sessiya allaqachon tugagan."
+msgstr ""
+
+#: glowderma/accounts/admin.py
+msgid "Sessiya allaqachon tugagan: hech narsa o‘zgarmadi."
+msgstr ""
+
+#: glowderma/accounts/console/middleware.py
+msgid "Sessiya muddati tugadi. Qaytadan kiring."
+msgstr ""
+
+#: glowderma/accounts/admin.py
+msgid "Sessiya tugatildi."
+msgstr ""
+
+#: glowderma/reporting/dashboards/customers.py
+msgid "Sessiya yo‘q"
+msgstr ""
+
+#: config/settings/ops_admin.py
+#: glowderma/customers/admin.py
+msgid "Sessiyalar"
+msgstr ""
+
+#: glowderma/accounts/admin.py
+msgid "Sessiyani tugatish"
+msgstr ""
+
+#: glowderma/notifications/models.py
+msgid "Shablon «%(status)s»: %(text)s"
+msgstr ""
+
+#: glowderma.core.labels.WEEKDAYS
+#: model metadata
+msgid "Shanba"
+msgstr "Суббота"
+
+#: glowderma/site_config/admin_views.py
+msgid "Shartlar e’lon qilindi: %(version)s."
+msgstr ""
+
+#: glowderma/site_config/admin_views.py
+msgid "Shartlarning yangi versiyasini e’lon qilasizmi?"
+msgstr ""
+
+#: glowderma.core.enums.TimelineType
+msgid "Shipment Created"
+msgstr "Отправление создано"
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "Sinov"
+msgstr ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "Sinov (prod)"
+msgstr ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "Sinov adapteri"
+msgstr ""
+
+#: glowderma/reporting/dashboards/ops.py
+#: glowderma/reporting/dashboards/sales.py
+msgid "Sinov rejimi"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Siyosat v%(version)s"
+msgstr ""
+
+#: glowderma/accounts/console/views.py
+msgid "Siz konsoldan chiqdingiz."
+msgstr ""
+
+#: glowderma.core.enums.ProgressState
+msgid "Skipped"
+msgstr "Пропущено"
+
+#: glowderma.core.enums.AccountSecurityEvent
+msgid "Social Linked"
+msgstr "Соцсеть привязана"
+
+#: glowderma.core.enums.AccountSecurityEvent
+msgid "Social Unlinked"
+msgstr "Соцсеть отвязана"
+
+#: model metadata
+msgid "Sodiqlik"
+msgstr "Лояльность"
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Sof o‘zgarish"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+#: glowderma/reporting/templates/reporting/dashboards/sales.html
+msgid "Soni"
+msgstr ""
+
+#: model metadata
+msgid "Sotuvga aylandi"
+msgstr "Переведено в продажу"
+
+#: config/settings/ops_admin.py
+#: glowderma/site_config/admin_views.py
+msgid "Sozlamalar"
+msgstr ""
+
+#: glowderma/site_config/forms.py
+msgid "Sozlamalar saqlandi"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Sozlangan"
+msgstr ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "Sozlanmagan"
+msgstr ""
+
+#: model metadata
+msgid "So‘raldi"
+msgstr "Запрошено"
+
+#: glowderma.core.enums.AppointmentStatus
+#: model metadata
+msgid "So‘ralgan"
+msgstr "Запрошено"
+
+#: glowderma/integrations/admin.py
+msgid "So‘rash"
+msgstr ""
+
+#: glowderma/reporting/dashboards/customers.py
+msgid "So‘rov"
+msgstr ""
+
+#: glowderma.core.enums.ShipmentVia
+#: model metadata
+msgid "So‘rov (polling)"
+msgstr "Опрос (polling)"
+
+#: glowderma/accounts/console/views.py
+msgid "So‘rov qabul qilinmadi"
+msgstr ""
+
+#: glowderma/site_config/admin_views.py
+msgid "So‘rov tushunarsiz. Sahifani yangilang va qayta urinib ko‘ring."
+msgstr ""
+
+#: glowderma.core.enums.LedgerSource
+msgid "Store"
+msgstr "Магазин"
+
+#: glowderma.core.enums.AdjustmentDirection
+msgid "Subtract"
+msgstr "Списать"
+
+#: glowderma/commerce/admin.py
+#: glowderma/loyalty/admin.py
+#: glowderma/payments/admin.py
+msgid "Summa"
+msgstr ""
+
+#: glowderma/loyalty/admin.py
+msgid "Summadan"
+msgstr ""
+
+#: glowderma/loyalty/admin.py
+msgid "Summagacha"
+msgstr ""
+
+#: glowderma/commerce/admin.py
+msgid "Summalar"
+msgstr ""
+
+#: glowderma.core.enums.PolicyVersionState
+msgid "Superseded"
+msgstr "Заменено"
+
+#: glowderma/accounts/console/twofactor.py
+msgid "TOTP QR kod"
+msgstr ""
+
+#: glowderma/core/admin.py
+msgid "Tafsilot: %(text)s"
+msgstr ""
+
+#: glowderma/integrations/admin.py
+msgid "Takroriy"
+msgstr ""
+
+#: glowderma/commerce/diagnostics.py
+msgid "Talab qilinmaydi (olib ketish)"
+msgstr ""
+
+#: glowderma/core/admin.py
+msgid "Tanlangan mavzuning o‘lik xabarlari (bir bosishda {limit} tagacha) qayta navbatga qo‘yiladi. Ishi boshqa yo‘l bilan bajarilgan xabarlar o‘tkazib yuboriladi."
+msgstr ""
+
+#: glowderma/commerce/admin.py
+#: glowderma/delivery/admin.py
+msgid "Tarif"
+msgstr ""
+
+#: glowderma/core/admin.py
+msgid "Tarix: %(title)s"
+msgstr ""
+
+#: model metadata
+msgid "Tasdiqlandi"
+msgstr "Подтверждено"
+
+#: glowderma.core.enums.AppointmentStatus
+#: glowderma/reporting/dashboards/customers.py
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+#: model metadata
+msgid "Tasdiqlangan"
+msgstr "Подтверждено"
+
+#: glowderma/accounts/templates/accounts/console/verify.html
+msgid "Tasdiqlash"
+msgstr ""
+
+#: glowderma/accounts/templates/accounts/console/enrol.html
+msgid "Tasdiqlash va yoqish"
+msgstr ""
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "Tavsif juda qisqa"
+msgstr ""
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "Tavsif yo‘q"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/money.html
+msgid "Tekshiruv"
+msgstr ""
+
+#: glowderma/reporting/dashboards/money.py
+msgid "Tekshiruvlarni bajarib bo‘lmadi (xato yoki vaqt tugadi) — sahifani yangilang"
+msgstr ""
+
+#: glowderma/core/admin.py
+#: glowderma/reporting/dashboards/customers.py
+msgid "Telefon"
+msgstr ""
+
+#: glowderma/reporting/dashboards/customers.py
+msgid "Telefon qo‘shish"
+msgstr ""
+
+#: glowderma/site_config/forms.py
+msgid "Telefon raqamini to‘g‘ri kiriting."
+msgstr ""
+
+#: glowderma/accounts/templates/accounts/console/verify.html
+msgid "Telefon yo‘qmi? Zaxira kod bilan kirish"
+msgstr ""
+
+#: glowderma/accounts/templates/accounts/console/recovery_codes.html
+msgid "Telefoningiz yo‘qolsa, quyidagi zaxira kodlar bilan kirasiz. Ular <strong>faqat hozir</strong> ko‘rsatiladi: yozib oling yoki parol menejeriga saqlang. Har bir kod bir marta ishlaydi."
+msgstr ""
+
+#: glowderma/accounts/templates/accounts/console/enrol.html
+msgid "Telefoningizga autentifikator ilovasini o‘rnating (Google Authenticator, Microsoft Authenticator, 1Password …)."
+msgstr ""
+
+#: model metadata
+msgid "Telefonni bog‘lash"
+msgstr "Привязка телефона"
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Telefonsiz (faol)"
+msgstr ""
+
+#: glowderma/reporting/dashboards/customers.py
+msgid "Telefonsiz akkauntlar"
+msgstr ""
+
+#: model metadata
+msgid "Telegram havolasi"
+msgstr "Ссылка на Telegram"
+
+#: glowderma/site_config/forms.py
+msgid "Telegram havolasi https://t.me/… ko‘rinishida bo‘lsin."
+msgstr ""
+
+#: glowderma/notifications/models.py
+msgid "Test qurilmasi «%(label)s» (%(phone)s)"
+msgstr ""
+
+#: glowderma/notifications/admin.py
+msgid "Test qurilmasi: {obj.label}"
+msgstr ""
+
+#: glowderma.core.enums.NotificationState
+#: model metadata
+msgid "Test tasdiqlangan"
+msgstr "Тест подтверждён"
+
+#: config/settings/ops_admin.py
+#: glowderma/core/otp_apps.py
+msgid "Tiklash kodlari"
+msgstr ""
+
+#: glowderma/core/templates/admin/ops/language_switch.html
+#: glowderma/site_config/templates/site_config/console/settings.html
+msgid "Til"
+msgstr ""
+
+#: glowderma.core.enums.EventSource
+#: glowderma/site_config/admin_views.py
+#: model metadata
+msgid "Tizim"
+msgstr "Система"
+
+#: glowderma.core.enums.OrderPeriod
+msgid "Today"
+msgstr "Сегодня"
+
+#: glowderma/reporting/templates/reporting/dashboards/sales.html
+msgid "Top %(count)s mahsulot"
+msgid_plural "Top %(count)s mahsulot"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/templates/reporting/dashboards/sales.html
+msgid "Toshkent vaqti"
+msgstr ""
+
+#: glowderma.core.enums.PaymentStatus
+#: model metadata
+msgid "To‘langan"
+msgstr "Оплачено"
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "To‘langan buyurtma yo‘q"
+msgstr ""
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "To‘langan buyurtmalar"
+msgstr ""
+
+#: glowderma/reporting/dashboards/report.py
+msgid "To‘langan, lekin jo‘natilmagan buyurtmalar"
+msgstr ""
+
+#: glowderma/site_config/forms.py
+msgid "To‘lanmagan buyurtma mahsulotlarni shuncha vaqt ushlab turadi (%(min)s–%(max)s)."
+msgstr ""
+
+#: glowderma/commerce/templates/admin/commerce/order_diagnostics.html
+#: glowderma/payments/admin.py
+msgid "To‘lov"
+msgstr ""
+
+#: glowderma/payments/models.py
+msgid "To‘lov #%(id)s %(provider)s · %(status)s · %(amount)s (buyurtma №%(order)s)"
+msgstr ""
+
+#: glowderma.core.enums.OrderEventType
+#: model metadata
+msgid "To‘lov amalga oshmadi"
+msgstr "Платёж не прошёл"
+
+#: glowderma/commerce/diagnostics.py
+msgid "To‘lov hali boshlanmagan"
+msgstr ""
+
+#: glowderma.core.enums.OrderStatus
+#: model metadata
+msgid "To‘lov kutilmoqda"
+msgstr "Ожидает оплаты"
+
+#: glowderma.core.enums.OrderEventType
+#: model metadata
+msgid "To‘lov tasdiqlandi"
+msgstr "Платёж подтверждён"
+
+#: glowderma/reporting/templates/reporting/dashboards/sales.html
+msgid "To‘lov tasdiqlangan kun · qaytarilganlar ayirilgan · POS — do‘kondagi QR xaridlar"
+msgstr ""
+
+#: model metadata
+msgid "To‘lov va qaytarishlar"
+msgstr "Платежи и возвраты"
+
+#: config/settings/ops_admin.py
+#: glowderma/commerce/admin.py
+msgid "To‘lovlar"
+msgstr ""
+
+#: model metadata
+msgid "To‘xtatildi"
+msgstr "Остановлено"
+
+#: glowderma.core.enums.NotificationState
+#: model metadata
+msgid "To‘xtatilmoqda"
+msgstr "Останавливается"
+
+#: glowderma/catalog/admin.py
+msgid "Tugagan (0 yoki Billz’da yozuvi yo‘q)"
+msgstr ""
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "Tugagan mahsulotlar"
+msgstr ""
+
+#: glowderma/accounts/admin.py
+msgid "Tugatish"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/money.html
+msgid "Tungi hisobot eskirgan: oxirgisi %(ago)s"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/money.html
+msgid "Tungi hisobot hali hech qachon ishlamagan"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+#: glowderma/reporting/templates/reporting/dashboards/sales.html
+msgid "Tur"
+msgstr ""
+
+#: glowderma/loyalty/admin.py
+msgid "Turi"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/sales.html
+msgid "Tushum"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/sales.html
+msgid "Tushum bo‘yicha · bekor qilinganlarsiz"
+msgstr ""
+
+#: glowderma.core.enums.LedgerKind
+#: model metadata
+msgid "Tuzatish"
+msgstr "Корректировка"
+
+#: model metadata
+msgid "URL nomi (slug)"
+msgstr "Имя в URL (slug)"
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+#: glowderma/reporting/templates/reporting/dashboards/sales.html
+msgid "Ulush"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/money.html
+msgid "Umrbod xarid"
+msgstr ""
+
+#: glowderma.core.enums.NotificationKind
+#: model metadata
+msgid "Umumiy"
+msgstr "Общее"
+
+#: glowderma.core.enums.CartLineStatus
+msgid "Unavailable"
+msgstr "Недоступно"
+
+#: glowderma.core.enums.TierWarning
+msgid "Uncovered Above"
+msgstr "Суммы выше не охвачены"
+
+#: glowderma.core.enums.ProgressState
+msgid "Upcoming"
+msgstr "Предстоит"
+
+#: glowderma.core.enums.InboxLinkKind
+msgid "Url"
+msgstr "URL"
+
+#: glowderma/loyalty/models.py
+msgid "Ushlab turish %(amount)s · buyurtma №%(order)s (%(state)s)"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Usul"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Usul akkaunt yaratilgan paytdagi identifikator bo‘yicha aniqlanadi"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Usullar"
+msgstr ""
+
+#: glowderma/reporting/dashboards/report.py
+msgid "Uzoq ochiq turgan qaytarishlar"
+msgstr ""
+
+#: glowderma/integrations/admin.py
+msgid "Uzoq vaqt yangilanmagan BTS jo‘natmalarining holati hozir so‘raladi (odatda har 10 daqiqada avtomatik bajariladi). So‘rov allaqachon ishlayotgan bo‘lsa, ikkinchisi boshlanmaydi."
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Vaqt"
+msgstr ""
+
+#: model metadata
+msgid "Vaqti ko‘chirildi"
+msgstr "Перенесено"
+
+#: glowderma/commerce/admin.py
+msgid "Vaqtlar"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Vazifa"
+msgstr ""
+
+#: glowderma.core.enums.OrderChannel
+#: glowderma/reporting/dashboards/customers.py
+#: glowderma/reporting/dashboards/sales.py
+#: glowderma/site_config/forms.py
+#: model metadata
+msgid "Veb-sayt"
+msgstr "Веб-сайт"
+
+#: glowderma.core.enums.NextStep
+msgid "Verify Device"
+msgstr "Подтвердить устройство"
+
+#: glowderma.core.enums.OtpPurpose
+msgid "Verify Email"
+msgstr "Подтверждение email"
+
+#: glowderma.core.enums.NextStep
+msgid "Verify Phone"
+msgstr "Подтвердить телефон"
+
+#: glowderma.core.enums.SeoSeverity
+msgid "Warning"
+msgstr "Предупреждение"
+
+#: glowderma.core.enums.ShipmentVia
+#: model metadata
+msgid "Webhook"
+msgstr "Вебхук"
+
+#: config/settings/ops_admin.py
+#: glowderma/commerce/templates/admin/commerce/order_diagnostics.html
+#: glowderma/reporting/dashboards/ops.py
+msgid "Webhooklar"
+msgstr ""
+
+#: glowderma/reporting/dashboards/ops.py
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Webhooklar · 24 soat"
+msgstr ""
+
+#: glowderma.core.enums.OrderPeriod
+msgid "Week"
+msgstr "Неделя"
+
+#: glowderma.core.enums.ProgressStep
+msgid "With Courier"
+msgstr "У курьера"
+
+#: glowderma/core/admin.py
+msgid "Xabar #%(id)s endi o‘lik emas: hech narsa o‘zgarmadi."
+msgstr ""
+
+#: glowderma/core/admin.py
+msgid "Xabar #%(id)s navbatda turibdi; dispetcher qayta ishga tushirildi."
+msgstr ""
+
+#: glowderma/core/admin.py
+msgid "Xabar #%(id)s qayta navbatga qo‘yildi."
+msgstr ""
+
+#: glowderma/core/admin.py
+msgid "Xabar #%(id)s qayta navbatga qo‘yilmadi: %(reason)s"
+msgstr ""
+
+#: glowderma/core/admin.py
+msgid "Xabar allaqachon yetkazilgan: qayta navbatga qo‘yish kerak emas."
+msgstr ""
+
+#: glowderma/core/admin.py
+msgid "Xabar navbatda va muddati o‘tmagan: dispetcher uni o‘zi yetkazadi."
+msgstr ""
+
+#: glowderma/core/admin.py
+msgid "Xabarni qayta navbatga qo‘yish"
+msgstr ""
+
+#: config/settings/ops_admin.py
+#: model metadata
+msgid "Xabarnomalar"
+msgstr "Уведомления"
+
+#: glowderma/loyalty/models.py
+msgid "Xarid #%(id)s %(source)s %(amount)s (Billz %(sale)s)"
+msgstr ""
+
+#: glowderma/loyalty/models.py
+msgid "Xarid #%(id)s %(source)s %(amount)s (buyurtma №%(order)s)"
+msgstr ""
+
+#: glowderma.core.enums.RateBasis
+#: model metadata
+msgid "Xarid bilan birga"
+msgstr "С учётом покупки"
+
+#: config/settings/ops_admin.py
+msgid "Xarid qatorlari"
+msgstr ""
+
+#: glowderma/commerce/diagnostics.py
+msgid "Xarid yozuvi yo‘q (to‘lovdan keyin yaratiladi)"
+msgstr ""
+
+#: glowderma/reporting/dashboards/money.py
+msgid "Xarid ↔ hisoblangan cashback yozuvi"
+msgstr ""
+
+#: glowderma.core.enums.RateBasis
+#: model metadata
+msgid "Xariddan oldingi summa"
+msgstr "Сумма до покупки"
+
+#: config/settings/ops_admin.py
+msgid "Xaridlar"
+msgstr ""
+
+#: glowderma/reporting/dashboards/money.py
+#: glowderma/reporting/dashboards/ops.py
+#: glowderma/reporting/dashboards/sales.py
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+#: model metadata
+msgid "Xato"
+msgstr "Ошибка"
+
+#: glowderma/integrations/admin.py
+msgid "Xato (rad etilgan yoki ishlov xatosi)"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Xato = rad etilgan yoki ishlov xatosi; %(n)s+ — jiddiy"
+msgstr ""
+
+#: glowderma.core.enums.JobState
+#: model metadata
+msgid "Xato bilan tugadi"
+msgstr "Завершено с ошибкой"
+
+#: model metadata
+msgid "Xato · qayta uriniladi"
+msgstr "Ошибка · будет повтор"
+
+#: glowderma/reporting/templates/reporting/dashboards/ops.html
+msgid "Xatolar"
+msgstr ""
+
+#: config/settings/ops_admin.py
+msgid "Xavfsizlik"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "Xizmat"
+msgstr ""
+
+#: config/settings/ops_admin.py
+msgid "Xizmatlar"
+msgstr ""
+
+#: glowderma.core.enums.ExportFormat
+msgid "Xlsx"
+msgstr "XLSX"
+
+#: model metadata
+msgid "Xodim"
+msgstr "Сотрудник"
+
+#: config/settings/ops_admin.py
+msgid "Xodim ijtimoiy kirishlari"
+msgstr ""
+
+#: glowderma/reporting/dashboards/customers.py
+msgid "Xodim kirish xatolari"
+msgstr ""
+
+#: glowderma/accounts/admin.py
+msgid "Xodim sessiyalari bu yerda tugatilmaydi."
+msgstr ""
+
+#: glowderma/accounts/admin.py
+msgid "Xodim: {obj.email}"
+msgstr ""
+
+#: config/settings/ops_admin.py
+msgid "Xodimlar"
+msgstr ""
+
+#: glowderma.core.labels.WEEKDAYS
+#: model metadata
+msgid "Yakshanba"
+msgstr "Воскресенье"
+
+#: glowderma/core/admin.py
+msgid "Yana o‘lik xabarlar qoldi — amalni takrorlang."
+msgstr ""
+
+#: glowderma/reporting/dashboards/customers.py
+msgid "Yangi mijozlar · %(days)s kun"
+msgid_plural "Yangi mijozlar · %(days)s kun"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/dashboards/customers.py
+#: model metadata
+msgid "Yangi qurilma"
+msgstr "Новое устройство"
+
+#: glowderma.core.enums.SessionRevokeReason
+#: model metadata
+msgid "Yangi sessiya bilan almashtirildi"
+msgstr "Заменён новым сеансом"
+
+#: glowderma.core.enums.ProductChangeKind
+#: model metadata
+msgid "Yangilandi"
+msgstr "Обновлено"
+
+#: glowderma/reporting/templates/reporting/dashboards/base.html
+msgid "Yangilangan:"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/base.html
+msgid "Yangilash"
+msgstr ""
+
+#: model metadata
+msgid "Yaratib bo‘lmadi"
+msgstr "Не удалось создать"
+
+#: glowderma.core.enums.ProductChangeKind
+#: model metadata
+msgid "Yaratildi"
+msgstr "Создано"
+
+#: model metadata
+msgid "Yaratilgan"
+msgstr "Создано"
+
+#: model metadata
+msgid "Yaratilmagan"
+msgstr "Не создано"
+
+#: glowderma.core.enums.ProductChangeKind
+#: model metadata
+msgid "Yashirildi"
+msgstr "Скрыто"
+
+#: glowderma.core.enums.ProductStatus
+#: model metadata
+msgid "Yashirin"
+msgstr "Скрытый"
+
+#: glowderma/reporting/dashboards/__init__.py
+msgid "Yaxshi"
+msgstr ""
+
+#: glowderma.core.enums.CashbackHoldState
+#: model metadata
+msgid "Yechildi"
+msgstr "Списано"
+
+#: glowderma/reporting/dashboards/money.py
+msgid "Yechilgan band ↔ sarflash yozuvi"
+msgstr ""
+
+#: config/settings/ops_admin.py
+#: glowderma.core.enums.FulfilmentMethod
+#: model metadata
+msgid "Yetkazib berish"
+msgstr "Доставка"
+
+#: glowderma.core.enums.OrderStatus
+#: glowderma/delivery/admin.py
+#: model metadata
+msgid "Yetkazildi"
+msgstr "Доставлено"
+
+#: glowderma/commerce/admin.py
+msgid "Yetkazish"
+msgstr ""
+
+#: glowderma/commerce/templates/admin/commerce/order_diagnostics.html
+msgid "Yetkazish (BTS)"
+msgstr ""
+
+#: config/settings/ops_admin.py
+msgid "Yetkazish tarixi"
+msgstr ""
+
+#: glowderma/loyalty/models.py
+msgid "Yozuv #%(id)s %(kind)s %(amount)s → %(balance)s (hisob #%(account)s)"
+msgstr ""
+
+#: glowderma/reporting/dashboards/money.py
+msgid "Yozuvlar zanjiri (har bir yozuvdan keyingi balans)"
+msgstr ""
+
+#: glowderma/core/templatetags/ops_admin.py
+#: glowderma/reporting/dashboards/money.py
+#: glowderma/reporting/dashboards/ops.py
+msgid "Yo‘q"
+msgstr ""
+
+#: glowderma.core.enums.NotificationState
+#: model metadata
+msgid "Yuborildi"
+msgstr "Отправлено"
+
+#: glowderma.core.enums.NotificationState
+#: model metadata
+msgid "Yuborilmadi"
+msgstr "Не отправлено"
+
+#: glowderma.core.enums.NotificationState
+#: model metadata
+msgid "Yuborilmoqda"
+msgstr "Отправляется"
+
+#: config/settings/ops_admin.py
+msgid "Zaxira bandlari"
+msgstr ""
+
+#: glowderma/accounts/console/forms.py
+msgid "Zaxira kod"
+msgstr ""
+
+#: glowderma/accounts/console/views.py
+msgid "Zaxira kod bilan kirish"
+msgstr ""
+
+#: glowderma/accounts/console/views.py
+msgid "Zaxira kod noto‘g‘ri yoki allaqachon ishlatilgan."
+msgstr ""
+
+#: glowderma/accounts/console/views.py
+msgid "Zaxira kodlar"
+msgstr ""
+
+#: glowderma/accounts/console/views.py
+msgid "Zaxira kodlar faqat bir marta ko‘rsatiladi va ular endi ko‘rsatilmaydi. Kodlarni saqlamagan bo‘lsangiz, menejerdan 2FA ni qayta o‘rnatishni so‘rang."
+msgstr ""
+
+#: glowderma/accounts/templates/accounts/console/recovery.html
+msgid "Zaxira kodlar ham yo‘qolgan bo‘lsa, menejerdan 2FA ni qayta o‘rnatishni so‘rang."
+msgstr ""
+
+#: glowderma/accounts/console/views.py
+msgid "Zaxira kodlardan %(left)s tasi qoldi. Menejerdan 2FA ni qayta o‘rnatishni so‘rang (yangi kodlar beriladi)."
+msgid_plural "Zaxira kodlardan %(left)s tasi qoldi. Menejerdan 2FA ni qayta o‘rnatishni so‘rang (yangi kodlar beriladi)."
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/accounts/console/forms.py
+msgid "Zaxira kodni kiriting."
+msgstr ""
+
+#: model metadata
+msgid "aksiya"
+msgstr "акция"
+
+#: model metadata
+msgid "aksiya chegirmasi"
+msgstr "скидка по акции"
+
+#: model metadata
+msgid "aksiya mahsulotlari chiqarilgan"
+msgstr "товары по акции исключены"
+
+#: model metadata
+msgid "aksiya summasi"
+msgstr "сумма по акции"
+
+#: model metadata
+msgid "amal"
+msgstr "действие"
+
+#: model metadata
+msgid "amal qilish boshlanishi"
+msgstr "начало действия"
+
+#: model metadata
+msgid "amal qilish muddati"
+msgstr "срок действия"
+
+#: glowderma/reporting/dashboards/money.py
+msgid "amalda"
+msgstr ""
+
+#: model metadata
+msgid "asos"
+msgstr "база расчёта"
+
+#: model metadata
+msgid "asosiy"
+msgstr "основной"
+
+#: model metadata
+msgid "audit jurnali"
+msgstr "журнал действий"
+
+#: model metadata
+msgid "audit yozuvi"
+msgstr "запись журнала действий"
+
+#: model metadata
+msgid "auditoriya"
+msgstr "аудитория"
+
+#: model metadata
+msgid "auditoriya mijozi"
+msgstr "клиент аудитории"
+
+#: model metadata
+msgid "auditoriya segmenti"
+msgstr "сегмент аудитории"
+
+#: model metadata
+msgid "auditoriya telefoni"
+msgstr "телефон аудитории"
+
+#: model metadata
+msgid "auditoriya turi"
+msgstr "тип аудитории"
+
+#: model metadata
+msgid "bajaruvchi"
+msgstr "исполнитель"
+
+#: model metadata
+msgid "bajaruvchi ID"
+msgstr "исполнитель (ID)"
+
+#: model metadata
+msgid "bajaruvchi turi"
+msgstr "тип исполнителя"
+
+#: model metadata
+msgid "balans"
+msgstr "баланс"
+
+#: model metadata
+msgid "band muddati"
+msgstr "срок резерва"
+
+#: model metadata
+msgid "band vaqt"
+msgstr "занятый период"
+
+#: model metadata
+msgid "band vaqtlar"
+msgstr "занятые периоды"
+
+#: model metadata
+msgid "banner"
+msgstr "баннер"
+
+#: model metadata
+msgid "bannerlar"
+msgstr "баннеры"
+
+#: model metadata
+msgid "bekor qilgan"
+msgstr "кем отменено"
+
+#: model metadata
+msgid "bekor qilinadigan yozuv"
+msgstr "отменяемая запись"
+
+#: model metadata
+msgid "bekor qilingan"
+msgstr "отменено"
+
+#: model metadata
+msgid "bekor qilingan vaqt"
+msgstr "время отмены"
+
+#: model metadata
+msgid "bekor qilish izohi"
+msgstr "примечание к отмене"
+
+#: model metadata
+msgid "bekor qilish sababi"
+msgstr "причина отмены"
+
+#: model metadata
+msgid "bekor qilish yozuvi"
+msgstr "запись отмены"
+
+#: model metadata
+msgid "bio (en)"
+msgstr "биография (en)"
+
+#: model metadata
+msgid "bio (ru)"
+msgstr "биография (ru)"
+
+#: model metadata
+msgid "bio (uz)"
+msgstr "биография (uz)"
+
+#: model metadata
+msgid "birlik narxi"
+msgstr "цена за единицу"
+
+#: model metadata
+msgid "bog‘langandagi email"
+msgstr "email на момент привязки"
+
+#: model metadata
+msgid "bog‘liq obyekt"
+msgstr "связанный объект"
+
+#: model metadata
+msgid "boshlangan"
+msgstr "начато"
+
+#: glowderma/core/otp_apps.py
+msgid "boshlang‘ich vaqt (t0)"
+msgstr ""
+
+#: model metadata
+msgid "boshlanishi"
+msgstr "начало"
+
+#: glowderma/core/templatetags/ops_admin.py
+msgid "boshlanishi:"
+msgstr ""
+
+#: glowderma/core/templatetags/ops_admin.py
+msgid "bo‘sh"
+msgstr ""
+
+#: glowderma/core/templatetags/ops_admin.py
+msgid "bo‘sh emas"
+msgstr ""
+
+#: model metadata
+msgid "bo‘shatilgan"
+msgstr "освобождено"
+
+#: model metadata
+msgid "bo‘shatish sababi"
+msgstr "причина освобождения"
+
+#: model metadata
+msgid "bo‘yi"
+msgstr "высота"
+
+#: glowderma/core/admin.py
+#: model metadata
+msgid "buyurtma"
+msgstr "заказ"
+
+#: model metadata
+msgid "buyurtma hodisasi"
+msgstr "событие заказа"
+
+#: model metadata
+msgid "buyurtma qatori"
+msgstr "позиция заказа"
+
+#: model metadata
+msgid "buyurtma qatorlari"
+msgstr "позиции заказа"
+
+#: model metadata
+msgid "buyurtma tarixi"
+msgstr "история заказа"
+
+#: model metadata
+msgid "buyurtmalar"
+msgstr "заказы"
+
+#: model metadata
+msgid "cashback bandi"
+msgstr "резерв кешбэка"
+
+#: model metadata
+msgid "cashback bandlari"
+msgstr "резервы кешбэка"
+
+#: model metadata
+msgid "cashback bilan to‘langan"
+msgstr "оплачено кешбэком"
+
+#: model metadata
+msgid "cashback bilan to‘langan qismga ham cashback"
+msgstr "кешбэк также на часть, оплаченную кешбэком"
+
+#: model metadata
+msgid "cashback daftari"
+msgstr "журнал кешбэка"
+
+#: model metadata
+msgid "cashback daftari yozuvi"
+msgstr "запись журнала кешбэка"
+
+#: model metadata
+msgid "cashback darajalari"
+msgstr "уровни кешбэка"
+
+#: model metadata
+msgid "cashback darajasi"
+msgstr "уровень кешбэка"
+
+#: model metadata
+msgid "cashback hisobi"
+msgstr "счёт кешбэка"
+
+#: model metadata
+msgid "cashback hisoblari"
+msgstr "счета кешбэка"
+
+#: model metadata
+msgid "cashback siyosati"
+msgstr "политика кешбэка"
+
+#: model metadata
+msgid "cashback siyosatlari"
+msgstr "политики кешбэка"
+
+#: model metadata
+msgid "cashback summasi"
+msgstr "сумма кешбэка"
+
+#: glowderma/site_config/forms.py
+msgid "daqiqa"
+msgstr ""
+
+#: model metadata
+msgid "davomiyligi (daq.)"
+msgstr "длительность (мин.)"
+
+#: model metadata
+msgid "do‘kon telefoni"
+msgstr "телефон магазина"
+
+#: model metadata
+msgid "egallash tokeni"
+msgstr "токен захвата"
+
+#: model metadata
+msgid "email"
+msgstr "эл. почта"
+
+#: model metadata
+msgid "email tasdiqlangan"
+msgstr "эл. почта подтверждена"
+
+#: model metadata
+msgid "eni"
+msgstr "ширина"
+
+#: glowderma/site_config/templates/site_config/console/settings.html
+msgid "e’lon qilingan <time datetime=\"%(iso)s\">%(at)s</time>"
+msgstr ""
+
+#: model metadata
+msgid "faol"
+msgstr "активный"
+
+#: glowderma/reporting/dashboards/customers.py
+msgid "faol akkaunt"
+msgid_plural "faol akkaunt"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "faol mijozlar, umrbod xarid bo‘yicha"
+msgstr ""
+
+#: model metadata
+msgid "fayl"
+msgstr "файл"
+
+#: model metadata
+msgid "fayl turi"
+msgstr "тип файла"
+
+#: model metadata
+msgid "filial"
+msgstr "филиал"
+
+#: model metadata
+msgid "filiallar"
+msgstr "филиалы"
+
+#: model metadata
+msgid "foiz"
+msgstr "процент"
+
+#: model metadata
+msgid "fon vazifalari"
+msgstr "фоновые задачи"
+
+#: model metadata
+msgid "fon vazifasi"
+msgstr "фоновая задача"
+
+#: model metadata
+msgid "foydalanish shartlari (en)"
+msgstr "условия использования (en)"
+
+#: model metadata
+msgid "foydalanish shartlari (qoralama) (en)"
+msgstr "условия использования (черновик) (en)"
+
+#: model metadata
+msgid "foydalanish shartlari (qoralama) (ru)"
+msgstr "условия использования (черновик) (ru)"
+
+#: model metadata
+msgid "foydalanish shartlari (qoralama) (uz)"
+msgstr "условия использования (черновик) (uz)"
+
+#: model metadata
+msgid "foydalanish shartlari (ru)"
+msgstr "условия использования (ru)"
+
+#: model metadata
+msgid "foydalanish shartlari (uz)"
+msgstr "условия использования (uz)"
+
+#: model metadata
+msgid "hafta kuni"
+msgstr "день недели"
+
+#: model metadata
+msgid "hajm"
+msgstr "объём"
+
+#: model metadata
+msgid "hajmi (bayt)"
+msgstr "размер (байт)"
+
+#: glowderma/integrations/models.py
+msgid "hali yo‘q"
+msgstr ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "har %(count)s daqiqada"
+msgid_plural "har %(count)s daqiqada"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "har 10 daqiqada"
+msgstr ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "har 10 soniyada"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/customers.html
+msgid "har bir qator o‘sha sessiyalar ro‘yxatiga olib boradi"
+msgstr ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "har kuni 03:40"
+msgstr ""
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "har kuni 04:23 + qo‘lda"
+msgstr ""
+
+#: model metadata
+msgid "havola"
+msgstr "ссылка"
+
+#: model metadata
+msgid "havola URL"
+msgstr "URL ссылки"
+
+#: model metadata
+msgid "havola kategoriyasi"
+msgstr "категория по ссылке"
+
+#: model metadata
+msgid "havola mahsuloti"
+msgstr "товар по ссылке"
+
+#: model metadata
+msgid "havola mahsuloti nomi"
+msgstr "название товара по ссылке"
+
+#: model metadata
+msgid "havola turi"
+msgstr "тип ссылки"
+
+#: glowderma/reporting/dashboards/__init__.py
+msgid "hech qachon"
+msgstr ""
+
+#: model metadata
+msgid "hisob"
+msgstr "счёт"
+
+#: model metadata
+msgid "hisob asosi"
+msgstr "база расчёта"
+
+#: model metadata
+msgid "hisoblangan yozuv"
+msgstr "запись начисления"
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "hisobot bilan"
+msgstr ""
+
+#: model metadata
+msgid "hodisa kaliti"
+msgstr "ключ события"
+
+#: model metadata
+msgid "holat"
+msgstr "статус"
+
+#: model metadata
+msgid "holat o‘zgargan"
+msgstr "статус изменён"
+
+#: glowderma/commerce/diagnostics.py
+msgid "holat o‘zgargan: %(at)s"
+msgstr ""
+
+#: model metadata
+msgid "holat shabloni"
+msgstr "шаблон статуса"
+
+#: model metadata
+msgid "holat shablonlari"
+msgstr "шаблоны статусов"
+
+#: glowderma/reporting/dashboards/__init__.py
+msgid "hozirgina"
+msgstr ""
+
+#: glowderma.core.enums.OrderChannel
+#: model metadata
+msgid "iOS"
+msgstr "iOS"
+
+#: model metadata
+msgid "id"
+msgstr "id"
+
+#: model metadata
+msgid "idempotentlik yozuvi"
+msgstr "запись идемпотентности"
+
+#: model metadata
+msgid "idempotentlik yozuvlari"
+msgstr "записи идемпотентности"
+
+#: model metadata
+msgid "ijara muddati"
+msgstr "срок аренды"
+
+#: model metadata
+msgid "ijtimoiy kirish"
+msgstr "вход через соцсеть"
+
+#: model metadata
+msgid "ijtimoiy kirishlar"
+msgstr "входы через соцсети"
+
+#: model metadata
+msgid "ilova versiyasi"
+msgstr "версия приложения"
+
+#: model metadata
+msgid "inbox xabari"
+msgstr "сообщение во входящих"
+
+#: model metadata
+msgid "inbox xabarlari"
+msgstr "сообщения во входящих"
+
+#: glowderma/site_config/forms.py
+msgid "inglizcha"
+msgstr ""
+
+#: model metadata
+msgid "integratsiya holati"
+msgstr "статус интеграции"
+
+#: model metadata
+msgid "integratsiya holatlari"
+msgstr "статусы интеграций"
+
+#: model metadata
+msgid "ish vaqti"
+msgstr "рабочее время"
+
+#: model metadata
+msgid "ish vaqtlari"
+msgstr "рабочее время"
+
+#: model metadata
+msgid "ishlatilgan"
+msgstr "использовано"
+
+#: model metadata
+msgid "ishlatilgan cashback"
+msgstr "списанный кешбэк"
+
+#: model metadata
+msgid "ishlov vaqti (ms)"
+msgstr "время обработки (мс)"
+
+#: model metadata
+msgid "izoh"
+msgstr "примечание"
+
+#: model metadata
+msgid "jami"
+msgstr "итого"
+
+#: glowderma/core/templatetags/ops_admin.py
+msgid "jami %(count)s ta %(name)s"
+msgid_plural "jami %(count)s ta %(name)s"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: model metadata
+msgid "jarayon"
+msgstr "ход выполнения"
+
+#: model metadata
+msgid "javob kodi"
+msgstr "код ответа"
+
+#: model metadata
+msgid "javob tanasi"
+msgstr "тело ответа"
+
+#: model metadata
+msgid "joy nomi"
+msgstr "название места"
+
+#: model metadata
+msgid "joylashuv"
+msgstr "местоположение"
+
+#: model metadata
+msgid "jo‘natma"
+msgstr "отправление"
+
+#: model metadata
+msgid "jo‘natmalar"
+msgstr "отправления"
+
+#: model metadata
+msgid "kalit"
+msgstr "ключ"
+
+#: model metadata
+msgid "kalit prefiksi"
+msgstr "префикс ключа"
+
+#: model metadata
+msgid "kalit xeshi"
+msgstr "хеш ключа"
+
+#: model metadata
+msgid "kampaniya"
+msgstr "рассылка"
+
+#: model metadata
+msgid "kampaniya testi"
+msgstr "тест рассылки"
+
+#: model metadata
+msgid "kampaniya testlari"
+msgstr "тесты рассылки"
+
+#: model metadata
+msgid "kampaniyalar"
+msgstr "рассылки"
+
+#: model metadata
+msgid "kanal"
+msgstr "канал"
+
+#: model metadata
+msgid "kategoriya"
+msgstr "категория"
+
+#: model metadata
+msgid "kategoriyalar"
+msgstr "категории"
+
+#: glowderma/core/admin.py
+#: model metadata
+msgid "kechiktirilgan"
+msgstr "отложено"
+
+#: model metadata
+msgid "kelgan"
+msgstr "явка"
+
+#: model metadata
+msgid "kenglik"
+msgstr "широта"
+
+#: glowderma/core/otp_apps.py
+msgid "ketma-ket xato urinishlar"
+msgstr ""
+
+#: model metadata
+msgid "ketma-ket xatolar"
+msgstr "ошибок подряд"
+
+#: model metadata
+msgid "keyin"
+msgstr "после"
+
+#: model metadata
+msgid "keyingi balans"
+msgstr "баланс после"
+
+#: model metadata
+msgid "keyingi holat"
+msgstr "статус после"
+
+#: model metadata
+msgid "kirish usuli"
+msgstr "способ входа"
+
+#: model metadata
+msgid "kod HMAC"
+msgstr "HMAC кода"
+
+#: glowderma/core/otp_apps.py
+msgid "kod uzunligi"
+msgstr ""
+
+#: model metadata
+msgid "konsolga kirish"
+msgstr "доступ к консоли"
+
+#: model metadata
+msgid "kosmetolog telefoni"
+msgstr "телефон косметолога"
+
+#: model metadata
+msgid "ko‘chirishlar soni"
+msgstr "число переносов"
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "ko‘rib chiqilmagan"
+msgid_plural "ko‘rib chiqilmagan"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: model metadata
+msgid "kun ish vaqti"
+msgstr "рабочее время на день"
+
+#: model metadata
+msgid "kun ish vaqtlari"
+msgstr "рабочее время по дням"
+
+#: model metadata
+msgid "kuryerga berilgan"
+msgstr "передано курьеру"
+
+#: glowderma/reporting/dashboards/sales.py
+#: model metadata
+msgid "mahsulot"
+msgid_plural "mahsulot"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: model metadata
+msgid "mahsulot rasmi"
+msgstr "изображение товара"
+
+#: model metadata
+msgid "mahsulot rasmlari"
+msgstr "изображения товаров"
+
+#: model metadata
+msgid "mahsulotlar"
+msgstr "товары"
+
+#: model metadata
+msgid "mahsulotlar summasi"
+msgstr "сумма товаров"
+
+#: model metadata
+msgid "maks. urinishlar"
+msgstr "макс. попыток"
+
+#: model metadata
+msgid "malaka (en)"
+msgstr "квалификация (en)"
+
+#: model metadata
+msgid "malaka (ru)"
+msgstr "квалификация (ru)"
+
+#: model metadata
+msgid "malaka (uz)"
+msgstr "квалификация (uz)"
+
+#: model metadata
+msgid "manba"
+msgstr "источник"
+
+#: model metadata
+msgid "manba ID"
+msgstr "ID источника"
+
+#: model metadata
+msgid "manba havolasi"
+msgstr "ссылка на источник"
+
+#: model metadata
+msgid "manba turi"
+msgstr "тип источника"
+
+#: model metadata
+msgid "manzil"
+msgstr "адрес"
+
+#: model metadata
+msgid "manzil (en)"
+msgstr "адрес (en)"
+
+#: model metadata
+msgid "manzil (ru)"
+msgstr "адрес (ru)"
+
+#: model metadata
+msgid "manzil (uz)"
+msgstr "адрес (uz)"
+
+#: model metadata
+msgid "manzil izohi"
+msgstr "примечание к адресу"
+
+#: model metadata
+msgid "manzillar"
+msgstr "адреса"
+
+#: model metadata
+msgid "maqsad"
+msgstr "назначение"
+
+#: model metadata
+msgid "matn"
+msgstr "текст"
+
+#: model metadata
+msgid "matn (en)"
+msgstr "текст (en)"
+
+#: model metadata
+msgid "matn (ru)"
+msgstr "текст (ru)"
+
+#: model metadata
+msgid "matn (uz)"
+msgstr "текст (uz)"
+
+#: model metadata
+msgid "matn versiyasi"
+msgstr "версия текста"
+
+#: model metadata
+msgid "mavzu"
+msgstr "тема"
+
+#: glowderma/core/otp_apps.py
+msgid "maxfiy kalit"
+msgstr ""
+
+#: model metadata
+msgid "maxfiylik siyosati (en)"
+msgstr "политика конфиденциальности (en)"
+
+#: model metadata
+msgid "maxfiylik siyosati (qoralama) (en)"
+msgstr "политика конфиденциальности (черновик) (en)"
+
+#: model metadata
+msgid "maxfiylik siyosati (qoralama) (ru)"
+msgstr "политика конфиденциальности (черновик) (ru)"
+
+#: model metadata
+msgid "maxfiylik siyosati (qoralama) (uz)"
+msgstr "политика конфиденциальности (черновик) (uz)"
+
+#: model metadata
+msgid "maxfiylik siyosati (ru)"
+msgstr "политика конфиденциальности (ru)"
+
+#: model metadata
+msgid "maxfiylik siyosati (uz)"
+msgstr "политика конфиденциальности (uz)"
+
+#: model metadata
+msgid "ma’lumot"
+msgstr "содержимое"
+
+#: model metadata
+msgid "ma’lumotlar"
+msgstr "данные"
+
+#: model metadata
+msgid "menejer"
+msgstr "менеджер"
+
+#: model metadata
+msgid "metama’lumot"
+msgstr "метаданные"
+
+#: model metadata
+msgid "mijoz"
+msgstr "клиент"
+
+#: model metadata
+msgid "mijoz izohi"
+msgstr "примечание клиента"
+
+#: model metadata
+msgid "mijozlar"
+msgstr "клиенты"
+
+#: model metadata
+msgid "min. onlayn buyurtmalar"
+msgstr "мин. онлайн-заказов"
+
+#: model metadata
+msgid "min. umumiy xarid"
+msgstr "мин. общая сумма покупок"
+
+#: glowderma/reporting/templates/reporting/dashboards/base.html
+msgid "ming"
+msgstr ""
+
+#: model metadata
+msgid "miqdor"
+msgstr "количество"
+
+#: glowderma/reporting/templates/reporting/dashboards/base.html
+msgid "mln"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/base.html
+msgid "mlrd"
+msgstr ""
+
+#: model metadata
+msgid "model"
+msgstr "модель"
+
+#: model metadata
+msgid "muallif"
+msgstr "автор"
+
+#: model metadata
+msgid "mutaxassis"
+msgstr "специалист"
+
+#: model metadata
+msgid "mutaxassis xizmati"
+msgstr "услуга специалиста"
+
+#: model metadata
+msgid "mutaxassis xizmatlari"
+msgstr "услуги специалистов"
+
+#: model metadata
+msgid "mutaxassislar"
+msgstr "специалисты"
+
+#: model metadata
+msgid "mutlaq muddat"
+msgstr "абсолютный срок действия"
+
+#: model metadata
+msgid "narx"
+msgstr "цена"
+
+#: glowderma/integrations/admin.py
+#: model metadata
+msgid "natija"
+msgstr "результат"
+
+#: model metadata
+msgid "navbatdagi urinish"
+msgstr "следующая попытка"
+
+#: glowderma/core/otp_apps.py
+#: model metadata
+msgid "nomi"
+msgstr "имя"
+
+#: model metadata
+msgid "nomi (en)"
+msgstr "название (en)"
+
+#: model metadata
+msgid "nomi (ru)"
+msgstr "название (ru)"
+
+#: model metadata
+msgid "nomi (uz)"
+msgstr "название (uz)"
+
+#: glowderma/reporting/dashboards/money.py
+msgid "nomuvofiqlik"
+msgid_plural "nomuvofiqlik"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: model metadata
+msgid "obyekt ID"
+msgstr "ID объекта"
+
+#: model metadata
+msgid "obyekt turi"
+msgstr "тип объекта"
+
+#: model metadata
+msgid "oldin"
+msgstr "до"
+
+#: model metadata
+msgid "oldingi refresh token xeshi"
+msgstr "хеш предыдущего refresh-токена"
+
+#: model metadata
+msgid "oldingi umrbod xaridlar"
+msgstr "сумма покупок за всё время до"
+
+#: model metadata
+msgid "olib ketish manzili (en)"
+msgstr "адрес самовывоза (en)"
+
+#: model metadata
+msgid "olib ketish manzili (ru)"
+msgstr "адрес самовывоза (ru)"
+
+#: model metadata
+msgid "olib ketish manzili (uz)"
+msgstr "адрес самовывоза (uz)"
+
+#: model metadata
+msgid "olish usuli"
+msgstr "способ получения"
+
+#: glowderma/notifications/admin.py
+msgid "onlayn buyurtmalar %(orders)s · umrbod xarid %(amount)s"
+msgstr ""
+
+#: model metadata
+msgid "outbox xabari"
+msgstr "сообщение Outbox"
+
+#: model metadata
+msgid "outbox xabarlari"
+msgstr "сообщения Outbox"
+
+#: model metadata
+msgid "oxirgi IP"
+msgstr "последний IP"
+
+#: model metadata
+msgid "oxirgi faollik"
+msgstr "последняя активность"
+
+#: model metadata
+msgid "oxirgi foydalanish"
+msgstr "последнее использование"
+
+#: model metadata
+msgid "oxirgi holat vaqti"
+msgstr "время последнего статуса"
+
+#: glowderma/core/otp_apps.py
+msgid "oxirgi ishlatilgan"
+msgstr ""
+
+#: model metadata
+msgid "oxirgi kirish"
+msgstr "последний вход"
+
+#: model metadata
+msgid "oxirgi muvaffaqiyat"
+msgstr "последний успех"
+
+#: model metadata
+msgid "oxirgi o‘zgarish"
+msgstr "последнее изменение"
+
+#: model metadata
+msgid "oxirgi o‘zgarish turi"
+msgstr "тип последнего изменения"
+
+#: model metadata
+msgid "oxirgi o‘zgarishdagi narx"
+msgstr "цена после последнего изменения"
+
+#: model metadata
+msgid "oxirgi o‘zgarishgacha narx"
+msgstr "цена до последнего изменения"
+
+#: model metadata
+msgid "oxirgi o‘zgartirgan"
+msgstr "автор последнего изменения"
+
+#: model metadata
+msgid "oxirgi rasmiylashtirilgan buyurtma"
+msgstr "последний оформленный заказ"
+
+#: model metadata
+msgid "oxirgi signal"
+msgstr "последний сигнал"
+
+#: model metadata
+msgid "oxirgi sinxronlash"
+msgstr "последняя синхронизация"
+
+#: glowderma/core/otp_apps.py
+msgid "oxirgi tasdiqlangan qadam"
+msgstr ""
+
+#: model metadata
+msgid "oxirgi urinish"
+msgstr "последняя попытка"
+
+#: glowderma/commerce/diagnostics.py
+msgid "oxirgi urinish: %(at)s (%(count)s ta urinish)"
+msgid_plural "oxirgi urinish: %(at)s (%(count)s ta urinish)"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: model metadata
+msgid "oxirgi xato"
+msgstr "последняя ошибка"
+
+#: model metadata
+msgid "oxirgi xato kodi"
+msgstr "код последней ошибки"
+
+#: glowderma/core/otp_apps.py
+msgid "oxirgi xato urinish"
+msgstr ""
+
+#: model metadata
+msgid "oxirgi xato vaqti"
+msgstr "время последней ошибки"
+
+#: model metadata
+msgid "o‘chirilgan"
+msgstr "удалено"
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "o‘lik xabar"
+msgid_plural "o‘lik xabar"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: model metadata
+msgid "o‘qilgan"
+msgstr "прочитано"
+
+#: glowderma/core/templatetags/ops_admin.py
+msgid "o‘z ichiga oladi:"
+msgstr ""
+
+#: glowderma/site_config/forms.py
+msgid "o‘zbekcha"
+msgstr ""
+
+#: model metadata
+msgid "parametrlar"
+msgstr "параметры"
+
+#: model metadata
+msgid "parol"
+msgstr "пароль"
+
+#: model metadata
+msgid "parol o‘zgargan"
+msgstr "пароль изменён"
+
+#: model metadata
+msgid "platforma"
+msgstr "платформа"
+
+#: model metadata
+msgid "provayder"
+msgstr "провайдер"
+
+#: model metadata
+msgid "provayder holati"
+msgstr "статус у провайдера"
+
+#: model metadata
+msgid "provayder ilova ID"
+msgstr "ID приложения у провайдера"
+
+#: model metadata
+msgid "provayder qaytarish ID"
+msgstr "ID возврата у провайдера"
+
+#: model metadata
+msgid "provayder refresh tokeni"
+msgstr "refresh-токен провайдера"
+
+#: model metadata
+msgid "provayder tranzaksiya ID"
+msgstr "ID транзакции у провайдера"
+
+#: model metadata
+msgid "provayder xabar ID"
+msgstr "ID сообщения у провайдера"
+
+#: model metadata
+msgid "push holati"
+msgstr "статус push-уведомления"
+
+#: model metadata
+msgid "push xatosi"
+msgstr "ошибка push"
+
+#: model metadata
+msgid "push yoqilgan"
+msgstr "push-уведомления включены"
+
+#: model metadata
+msgid "push yuborilgan"
+msgstr "push отправлен"
+
+#: model metadata
+msgid "qabul"
+msgstr "запись на приём"
+
+#: model metadata
+msgid "qabul hodisasi"
+msgstr "событие записи на приём"
+
+#: model metadata
+msgid "qabul qilingan"
+msgstr "получено"
+
+#: model metadata
+msgid "qabul qiluvchi"
+msgstr "получатель"
+
+#: model metadata
+msgid "qabul qiluvchi telefoni"
+msgstr "телефон получателя"
+
+#: model metadata
+msgid "qabul qiluvchilar"
+msgstr "получатели"
+
+#: model metadata
+msgid "qabul qiluvchilar soni"
+msgstr "количество получателей"
+
+#: model metadata
+msgid "qabul tarixi"
+msgstr "история записей на приём"
+
+#: model metadata
+msgid "qabullar"
+msgstr "записи на приём"
+
+#: glowderma/core/otp_apps.py
+msgid "qadam (soniya)"
+msgstr ""
+
+#: glowderma/reporting/dashboards/money.py
+msgid "qator"
+msgid_plural "qator"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: model metadata
+msgid "qator summasi"
+msgstr "сумма позиции"
+
+#: model metadata
+msgid "qayta faollashgan"
+msgstr "повторно активирован"
+
+#: model metadata
+msgid "qaytarilgan"
+msgstr "возвращено"
+
+#: model metadata
+msgid "qaytarish"
+msgstr "возврат"
+
+#: model metadata
+msgid "qaytarishlar"
+msgstr "возвраты"
+
+#: model metadata
+msgid "qidiruv matni"
+msgstr "текст для поиска"
+
+#: model metadata
+msgid "qisqa nom (en)"
+msgstr "краткое название (en)"
+
+#: model metadata
+msgid "qisqa nom (ru)"
+msgstr "краткое название (ru)"
+
+#: model metadata
+msgid "qisqa nom (uz)"
+msgstr "краткое название (uz)"
+
+#: glowderma/catalog/admin.py
+#: model metadata
+msgid "qoldiq"
+msgstr "остаток"
+
+#: model metadata
+msgid "qoldiqlar"
+msgstr "остатки"
+
+#: glowderma/commerce/diagnostics.py
+msgid "qoralama %(sale)s"
+msgstr ""
+
+#: model metadata
+msgid "qo‘lda"
+msgstr "вручную"
+
+#: model metadata
+msgid "qo‘lda kiritish sababi"
+msgstr "причина ручного ввода"
+
+#: model metadata
+msgid "qo‘llab-quvvatlash telefoni"
+msgstr "телефон поддержки"
+
+#: model metadata
+msgid "qo‘llash (en)"
+msgstr "применение (en)"
+
+#: model metadata
+msgid "qo‘llash (ru)"
+msgstr "применение (ru)"
+
+#: model metadata
+msgid "qo‘llash (uz)"
+msgstr "применение (uz)"
+
+#: model metadata
+msgid "qo‘shgan"
+msgstr "кем добавлено"
+
+#: model metadata
+msgid "qo‘shilgan"
+msgstr "добавлено"
+
+#: model metadata
+msgid "qo‘shilgandagi narx"
+msgstr "цена на момент добавления"
+
+#: model metadata
+msgid "qurilma"
+msgstr "устройство"
+
+#: model metadata
+msgid "qurilma nomi"
+msgstr "название устройства"
+
+#: model metadata
+msgid "qurilmalar"
+msgstr "устройства"
+
+#: model metadata
+msgid "rad etilgan"
+msgstr "отклонено"
+
+#: model metadata
+msgid "rasm"
+msgstr "изображение"
+
+#: model metadata
+msgid "rasm bo‘yi"
+msgstr "высота изображения"
+
+#: model metadata
+msgid "rasm eni"
+msgstr "ширина изображения"
+
+#: model metadata
+msgid "rasm havolasi"
+msgstr "ссылка на изображение"
+
+#: model metadata
+msgid "refresh token xeshi"
+msgstr "хеш refresh-токена"
+
+#: model metadata
+msgid "rol"
+msgstr "роль"
+
+#: model metadata
+msgid "rozilik IP manzili"
+msgstr "IP-адрес при согласии"
+
+#: model metadata
+msgid "rozilik vaqti"
+msgstr "время согласия"
+
+#: model metadata
+msgid "ro‘yxatdan o‘tgan"
+msgstr "зарегистрирован"
+
+#: model metadata
+msgid "ro‘yxatga olgan"
+msgstr "кем зарегистрировано"
+
+#: glowderma/site_config/forms.py
+msgid "ruscha"
+msgstr ""
+
+#: glowderma/core/otp_apps.py
+msgid "ruxsat etilgan qadamlar"
+msgstr ""
+
+#: model metadata
+msgid "sabab"
+msgstr "причина"
+
+#: model metadata
+msgid "sana"
+msgstr "дата"
+
+#: model metadata
+msgid "sarlavha"
+msgstr "заголовок"
+
+#: model metadata
+msgid "sarlavha (en)"
+msgstr "заголовок (en)"
+
+#: model metadata
+msgid "sarlavha (ru)"
+msgstr "заголовок (ru)"
+
+#: model metadata
+msgid "sarlavha (uz)"
+msgstr "заголовок (uz)"
+
+#: model metadata
+msgid "savat"
+msgstr "корзина"
+
+#: model metadata
+msgid "savat qatori"
+msgstr "позиция корзины"
+
+#: model metadata
+msgid "savat qatorlari"
+msgstr "позиции корзины"
+
+#: model metadata
+msgid "savatlar"
+msgstr "корзины"
+
+#: model metadata
+msgid "sayt sozlamalari"
+msgstr "настройки сайта"
+
+#: model metadata
+msgid "segment"
+msgstr "сегмент"
+
+#: model metadata
+msgid "segment a’zolari"
+msgstr "участники сегмента"
+
+#: model metadata
+msgid "segment a’zosi"
+msgstr "участник сегмента"
+
+#: model metadata
+msgid "segment nomi"
+msgstr "название сегмента"
+
+#: model metadata
+msgid "segmentlar"
+msgstr "сегменты"
+
+#: glowderma/reporting/dashboards/customers.py
+#: model metadata
+msgid "sessiya"
+msgid_plural "sessiya"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: model metadata
+msgid "sessiyalar"
+msgstr "сеансы"
+
+#: model metadata
+msgid "shablon holati"
+msgstr "статус шаблона"
+
+#: model metadata
+msgid "shahar kodi"
+msgstr "код города"
+
+#: model metadata
+msgid "shartlar versiyasi"
+msgstr "версия условий"
+
+#: model metadata
+msgid "shartlar yangilangan"
+msgstr "условия обновлены"
+
+#: model metadata
+msgid "sinxronlangan"
+msgstr "синхронизировано"
+
+#: model metadata
+msgid "siyosat"
+msgstr "политика"
+
+#: model metadata
+msgid "slot qadami (daq.)"
+msgstr "шаг слота (мин.)"
+
+#: model metadata
+msgid "slug (URL)"
+msgstr "slug (URL)"
+
+#: glowderma/core/otp_apps.py
+msgid "soat og‘ishi (qadam)"
+msgstr ""
+
+#: glowderma/commerce/diagnostics.py
+msgid "sotuv %(sale)s"
+msgstr ""
+
+#: model metadata
+msgid "sotuvga aylangan"
+msgstr "переведено в продажу"
+
+#: glowderma/reporting/templates/reporting/dashboards/base.html
+msgid "so‘m"
+msgstr ""
+
+#: model metadata
+msgid "so‘ragan"
+msgstr "кем запрошено"
+
+#: model metadata
+msgid "so‘ralgan"
+msgstr "запрошено"
+
+#: model metadata
+msgid "so‘ralgan vaqt"
+msgstr "запрошенное время"
+
+#: model metadata
+msgid "so‘rov ID"
+msgstr "ID запроса"
+
+#: model metadata
+msgid "so‘rov IP manzili"
+msgstr "IP-адрес запроса"
+
+#: model metadata
+msgid "so‘rov manbasi"
+msgstr "источник запроса"
+
+#: model metadata
+msgid "so‘rov tanasi"
+msgstr "тело запроса"
+
+#: model metadata
+msgid "so‘rov xeshi"
+msgstr "хеш запроса"
+
+#: model metadata
+msgid "standart davomiylik (daq.)"
+msgstr "длительность по умолчанию (мин.)"
+
+#: model metadata
+msgid "standart narx"
+msgstr "цена по умолчанию"
+
+#: model metadata
+msgid "subyekt"
+msgstr "субъект"
+
+#: model metadata
+msgid "summa"
+msgstr "сумма"
+
+#: model metadata
+msgid "summadan"
+msgstr "от суммы"
+
+#: model metadata
+msgid "summagacha"
+msgstr "до суммы"
+
+#: model metadata
+msgid "surat"
+msgstr "фотография"
+
+#: glowderma/reporting/dashboards/customers.py
+#: glowderma/reporting/dashboards/sales.py
+msgid "ta"
+msgid_plural "ta"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/dashboards/sales.py
+msgid "ta mahsulot"
+msgid_plural "ta mahsulot"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/reporting/dashboards/money.py
+msgid "ta to‘lov"
+msgid_plural "ta to‘lov"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: model metadata
+msgid "tajriba (yil)"
+msgstr "опыт (лет)"
+
+#: model metadata
+msgid "takrorlanmaslik kaliti"
+msgstr "ключ дедупликации"
+
+#: model metadata
+msgid "tanaffus boshlanishi"
+msgstr "начало перерыва"
+
+#: model metadata
+msgid "tanaffus tugashi"
+msgstr "конец перерыва"
+
+#: model metadata
+msgid "tarif"
+msgstr "тариф"
+
+#: model metadata
+msgid "tarix boshlanishi"
+msgstr "начало истории"
+
+#: model metadata
+msgid "tarkib (en)"
+msgstr "состав (en)"
+
+#: model metadata
+msgid "tarkib (ru)"
+msgstr "состав (ru)"
+
+#: model metadata
+msgid "tarkib (uz)"
+msgstr "состав (uz)"
+
+#: model metadata
+msgid "tartib"
+msgstr "порядок"
+
+#: model metadata
+msgid "tasdiq ishlatilgan"
+msgstr "подтверждение использовано"
+
+#: model metadata
+msgid "tasdiq muddati"
+msgstr "срок действия подтверждения"
+
+#: model metadata
+msgid "tasdiq tokeni xeshi"
+msgstr "хеш токена подтверждения"
+
+#: model metadata
+msgid "tasdiqlagan"
+msgstr "кем подтверждено"
+
+#: glowderma/core/otp_apps.py
+#: model metadata
+msgid "tasdiqlangan"
+msgstr "подтверждено"
+
+#: model metadata
+msgid "tasdiqlangan versiya"
+msgstr "утверждённая версия"
+
+#: glowderma/commerce/diagnostics.py
+msgid "tasdiqlangan: %(at)s"
+msgstr ""
+
+#: model metadata
+msgid "tavsif (en)"
+msgstr "описание (en)"
+
+#: model metadata
+msgid "tavsif (ru)"
+msgstr "описание (ru)"
+
+#: model metadata
+msgid "tavsif (uz)"
+msgstr "описание (uz)"
+
+#: model metadata
+msgid "telefon"
+msgstr "телефон"
+
+#: model metadata
+msgid "test qurilmalari"
+msgstr "тестовые устройства"
+
+#: model metadata
+msgid "test qurilmasi"
+msgstr "тестовое устройство"
+
+#: model metadata
+msgid "test tasdiqlangan"
+msgstr "тест подтверждён"
+
+#: model metadata
+msgid "test tasdiqlangan versiya"
+msgstr "версия с подтверждённым тестом"
+
+#: model metadata
+msgid "testni tasdiqlagan"
+msgstr "кем подтверждён тест"
+
+#: glowderma/core/otp_apps.py
+msgid "tiklash kodlari to‘plami"
+msgstr ""
+
+#: glowderma/core/otp_apps.py
+msgid "tiklash kodlari to‘plamlari"
+msgstr ""
+
+#: model metadata
+msgid "til"
+msgstr "язык"
+
+#: model metadata
+msgid "token yangilangan"
+msgstr "токен обновлён"
+
+#: model metadata
+msgid "token yangilanishlari soni"
+msgstr "количество обновлений токена"
+
+#: glowderma/reporting/dashboards/ops.py
+msgid "topilma"
+msgid_plural "topilma"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: model metadata
+msgid "to‘langan"
+msgstr "оплачено"
+
+#: model metadata
+msgid "to‘liq ism"
+msgstr "полное имя"
+
+#: model metadata
+msgid "to‘lov"
+msgstr "платёж"
+
+#: model metadata
+msgid "to‘lov provayderi"
+msgstr "платёжный провайдер"
+
+#: model metadata
+msgid "to‘lovlar"
+msgstr "платежи"
+
+#: model metadata
+msgid "to‘xtatilgan"
+msgstr "остановлено"
+
+#: model metadata
+msgid "to‘xtatish so‘ralgan"
+msgstr "остановка запрошена"
+
+#: model metadata
+msgid "to‘xtatishni so‘ragan"
+msgstr "кем запрошена остановка"
+
+#: model metadata
+msgid "trek raqami"
+msgstr "трек-номер"
+
+#: glowderma/commerce/diagnostics.py
+msgid "trek: %(number)s"
+msgstr ""
+
+#: model metadata
+msgid "tugagan"
+msgstr "завершено"
+
+#: model metadata
+msgid "tugagan urinishlar vaqti"
+msgstr "время исчерпания попыток"
+
+#: model metadata
+msgid "tugashi"
+msgstr "окончание"
+
+#: model metadata
+msgid "tugatilgan"
+msgstr "завершён"
+
+#: model metadata
+msgid "tugatish sababi"
+msgstr "причина завершения"
+
+#: model metadata
+msgid "turi"
+msgstr "тип"
+
+#: model metadata
+msgid "urinishlar"
+msgstr "попытки"
+
+#: model metadata
+msgid "user-agent"
+msgstr "user-agent"
+
+#: model metadata
+msgid "usul"
+msgstr "метод"
+
+#: model metadata
+msgid "uzunlik"
+msgstr "долгота"
+
+#: model metadata
+msgid "vaqt"
+msgstr "время"
+
+#: model metadata
+msgid "veb-sayt havolasi"
+msgstr "ссылка на сайт"
+
+#: model metadata
+msgid "versiya"
+msgstr "версия"
+
+#: model metadata
+msgid "viloyat kodi"
+msgstr "код региона"
+
+#: model metadata
+msgid "webhook yozuvi"
+msgstr "запись вебхука"
+
+#: model metadata
+msgid "webhooklar"
+msgstr "вебхуки"
+
+#: model metadata
+msgid "xarid"
+msgstr "покупка"
+
+#: model metadata
+msgid "xarid qatori"
+msgstr "позиция покупки"
+
+#: model metadata
+msgid "xarid qatorlari"
+msgstr "позиции покупки"
+
+#: model metadata
+msgid "xaridlar"
+msgstr "покупки"
+
+#: glowderma/reporting/dashboards/ops.py
+#: glowderma/site_config/templates/site_config/console/settings.html
+#: model metadata
+msgid "xato"
+msgid_plural "xato"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: model metadata
+msgid "xato kodi"
+msgstr "код ошибки"
+
+#: glowderma/commerce/diagnostics.py
+msgid "xato kodi: %(code)s"
+msgstr ""
+
+#: model metadata
+msgid "xato matni"
+msgstr "текст ошибки"
+
+#: model metadata
+msgid "xato vaqti"
+msgstr "время ошибки"
+
+#: model metadata
+msgid "xizmat"
+msgstr "услуга"
+
+#: model metadata
+msgid "xizmatlar"
+msgstr "услуги"
+
+#: glowderma/core/otp_apps.py
+#: model metadata
+msgid "xodim"
+msgstr "сотрудник"
+
+#: model metadata
+msgid "xodim hisobi"
+msgstr "учётная запись сотрудника"
+
+#: model metadata
+msgid "xodim ijtimoiy kirishi"
+msgstr "вход сотрудника через соцсеть"
+
+#: model metadata
+msgid "xodim ijtimoiy kirishlari"
+msgstr "входы сотрудников через соцсеть"
+
+#: model metadata
+msgid "xodim izohi"
+msgstr "примечание сотрудника"
+
+#: model metadata
+msgid "xodimlar"
+msgstr "сотрудники"
+
+#: model metadata
+msgid "yakunlangan"
+msgstr "завершено"
+
+#: model metadata
+msgid "yangilagan"
+msgstr "кем обновлено"
+
+#: model metadata
+msgid "yangilangan"
+msgstr "обновлено"
+
+#: model metadata
+msgid "yangilanish tasdiqlangan"
+msgstr "обновление подтверждено"
+
+#: model metadata
+msgid "yaratgan"
+msgstr "кем создано"
+
+#: glowderma/core/otp_apps.py
+#: model metadata
+msgid "yaratilgan"
+msgstr "создано"
+
+#: model metadata
+msgid "yaratish so‘rovlari"
+msgstr "запросы на создание"
+
+#: model metadata
+msgid "yaratish xabari (outbox)"
+msgstr "сообщение на создание (outbox)"
+
+#: model metadata
+msgid "yechib olingan"
+msgstr "списано"
+
+#: model metadata
+msgid "yechish yozuvi"
+msgstr "запись списания"
+
+#: model metadata
+msgid "yetkazildi"
+msgstr "доставлено"
+
+#: model metadata
+msgid "yetkazilgan"
+msgstr "доставлено"
+
+#: model metadata
+msgid "yetkazish hodisasi"
+msgstr "событие доставки"
+
+#: model metadata
+msgid "yetkazish narxi"
+msgstr "стоимость доставки"
+
+#: model metadata
+msgid "yetkazish tarixi"
+msgstr "история доставки"
+
+#: model metadata
+msgid "yorliq"
+msgstr "метка"
+
+#: model metadata
+msgid "yozilish qoidalari (en)"
+msgstr "правила записи (en)"
+
+#: model metadata
+msgid "yozilish qoidalari (ru)"
+msgstr "правила записи (ru)"
+
+#: model metadata
+msgid "yozilish qoidalari (uz)"
+msgstr "правила записи (uz)"
+
+#: model metadata
+msgid "yo‘l"
+msgstr "путь"
+
+#: glowderma/notifications/admin.py
+msgid "yo‘q"
+msgstr ""
+
+#: model metadata
+msgid "yuborgan"
+msgstr "кем отправлено"
+
+#: model metadata
+msgid "yuborildi"
+msgstr "отправлено"
+
+#: model metadata
+msgid "yuborilgan"
+msgstr "отправлено"
+
+#: model metadata
+msgid "yuborilgan to‘plamlar"
+msgstr "отправлено пакетов"
+
+#: model metadata
+msgid "yuborilmagan"
+msgstr "не отправлено"
+
+#: model metadata
+msgid "yuborish kursori"
+msgstr "курсор отправки"
+
+#: glowderma/commerce/diagnostics.py
+msgid "yuborish o‘lik xabarda to‘xtagan"
+msgstr ""
+
+#: model metadata
+msgid "yuborish vaqti"
+msgstr "время отправки"
+
+#: model metadata
+msgid "yuklagan"
+msgstr "кем загружено"
+
+#: model metadata
+msgid "zaxira bandi"
+msgstr "резерв товара"
+
+#: model metadata
+msgid "zaxira bandlari"
+msgstr "резервы товара"
+
+#: model metadata
+msgid "zaxira muddati (daqiqa)"
+msgstr "срок резерва (минуты)"
+
+#: glowderma/reporting/templates/reporting/dashboards/money.html
+msgid "«Hisobot» — %(when)s dagi tungi natija"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/money.html
+msgid "«Hisobot» — hisobot yo‘q"
+msgstr ""
+
+#: glowderma/reporting/templates/reporting/dashboards/money.html
+msgid "«Hozir» — xuddi shu tekshiruv hozir"
+msgstr ""
+
+#: glowderma/core/templatetags/ops_admin.py
+msgid "… (jami %(count)s ta)"
+msgid_plural "… (jami %(count)s ta)"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+
+#: glowderma/commerce/admin.py
+msgid "№%(number)s raqamli buyurtma topilmadi."
+msgstr ""
+
+#: unfold / django.contrib.admin
+msgid "Welcome back to"
+msgstr "Добро пожаловать в"
+
+#: unfold / django.contrib.admin
+msgid "Log in"
+msgstr "Войти"
+
+#: unfold / django.contrib.admin
+msgid "Log out"
+msgstr "Выйти"
+
+#: unfold / django.contrib.admin
+msgid "Log in again"
+msgstr "Войти снова"
+
+#: unfold / django.contrib.admin
+msgid "Forgotten your password or username?"
+msgstr "Забыли пароль или имя пользователя?"
+
+#: unfold / django.contrib.admin
+msgid "Return to site"
+msgstr "Вернуться на сайт"
+
+#: unfold / django.contrib.admin
+msgid "Password:"
+msgstr "Пароль:"
+
+#: unfold / django.contrib.admin
+msgid "Password"
+msgstr "Пароль"
+
+#: unfold / django.contrib.admin
+msgid "Username:"
+msgstr "Имя пользователя:"
+
+#: unfold / django.contrib.admin
+msgid "Toggle password visibility"
+msgstr "Показать или скрыть пароль"
+
+#: unfold / django.contrib.admin
+msgid "You have been successfully logged out from the administration"
+msgstr "Вы успешно вышли из консоли"
+
+#: unfold / django.contrib.admin
+msgid "Thanks for spending some quality time with the web site today."
+msgstr "Благодарим вас за время, проведенное на этом сайте."
+
+#: unfold / django.contrib.admin
+msgid "Logged out"
+msgstr "Не авторизован"
+
+#: unfold / django.contrib.admin
+msgid "Change password"
+msgstr "Изменить пароль"
+
+#: unfold / django.contrib.admin
+msgid "Your password was changed."
+msgstr "Ваш пароль был изменен."
+
+#: unfold / django.contrib.admin
+msgid "Please enter the correct %(username)s and password for a staff account. Note that both fields may be case-sensitive."
+msgstr "Пожалуйста, введите корректные %(username)s и пароль учётной записи. Оба поля могут быть чувствительны к регистру."
+
+#: unfold / django.contrib.admin
+msgid "This account is inactive."
+msgstr "Эта учетная запись отключена."
+
+#: unfold / django.contrib.admin
+msgid "You are authenticated as %(username)s, but are not authorized to access this page. Would you like to login to a different account?"
+msgstr "Вы вошли в систему как %(username)s, однако у вас недостаточно прав для просмотра данной страницы. Возможно, вы хотели бы войти в систему, используя другую учётную запись?"
+
+#: unfold / django.contrib.admin
+msgid "Welcome,"
+msgstr "Добро пожаловать,"
+
+#: unfold / django.contrib.admin
+msgid "View site"
+msgstr "Открыть сайт"
+
+#: unfold / django.contrib.admin
+msgid "Documentation"
+msgstr "Документация"
+
+#: unfold / django.contrib.admin
+msgid "Django site admin"
+msgstr "Glow Derma Ops"
+
+#: unfold / django.contrib.admin
+msgid "Django administration"
+msgstr "Glow Derma Ops"
+
+#: unfold / django.contrib.admin
+msgid "Site administration"
+msgstr "Администрирование сайта"
+
+#: unfold / django.contrib.admin
+msgid "%(app)s administration"
+msgstr "Администрирование приложения «%(app)s»"
+
+#: unfold / django.contrib.admin
+msgid "Home"
+msgstr "Начало"
+
+#: unfold / django.contrib.admin
+msgid "Go back"
+msgstr "Назад"
+
+#: unfold / django.contrib.admin
+msgid "All applications"
+msgstr "Все приложения"
+
+#: unfold / django.contrib.admin
+msgid "Search apps and models..."
+msgstr "Поиск приложений и моделей..."
+
+#: unfold / django.contrib.admin
+msgid "Models in the %(name)s application"
+msgstr "Модели в приложении %(name)s"
+
+#: unfold / django.contrib.admin
+msgid "Recent actions"
+msgstr "Последние действия"
+
+#: unfold / django.contrib.admin
+msgid "My actions"
+msgstr "Мои действия"
+
+#: unfold / django.contrib.admin
+msgid "None available"
+msgstr "Недоступно"
+
+#: unfold / django.contrib.admin
+msgid "Unknown content"
+msgstr "Неизвестный тип"
+
+#: unfold / django.contrib.admin
+msgid "You don’t have permission to view or edit anything."
+msgstr "У вас недостаточно полномочий для просмотра или изменения чего либо."
+
+#: unfold / django.contrib.admin
+msgid "Toggle sidebar"
+msgstr "Показать или скрыть боковую панель"
+
+#: unfold / django.contrib.admin
+msgid "Light"
+msgstr "Светлая"
+
+#: unfold / django.contrib.admin
+msgid "Dark"
+msgstr "Тёмная"
+
+#: unfold / django.contrib.admin
+msgid "System"
+msgstr "Системная"
+
+#: unfold / django.contrib.admin
+msgid "Toggle dark/light mode"
+msgstr "Переключить тёмную/светлую тему"
+
+#: unfold / django.contrib.admin
+msgid "Type to search"
+msgstr "Введите текст для поиска"
+
+#: unfold / django.contrib.admin
+msgid "Recent searches"
+msgstr "Недавние запросы"
+
+#: unfold / django.contrib.admin
+msgid "Nothing matched your search"
+msgstr "По вашему запросу ничего не найдено"
+
+#: unfold / django.contrib.admin
+msgid "Navigate"
+msgstr "Навигация"
+
+#: unfold / django.contrib.admin
+msgid "Select"
+msgstr "Выбрать"
+
+#: unfold / django.contrib.admin
+msgid "Clear"
+msgstr "Очистить"
+
+#: unfold / django.contrib.admin
+msgid "Available shortcuts"
+msgstr "Доступные сочетания клавиш"
+
+#: unfold / django.contrib.admin
+msgid "Global shortcuts"
+msgstr "Общие сочетания клавиш"
+
+#: unfold / django.contrib.admin
+msgid "Changelist shortcuts"
+msgstr "Сочетания клавиш в списке записей"
+
+#: unfold / django.contrib.admin
+msgid "Command tool shortcuts"
+msgstr "Сочетания клавиш в окне команд"
+
+#: unfold / django.contrib.admin
+msgid "Open command tool"
+msgstr "Открыть окно команд"
+
+#: unfold / django.contrib.admin
+msgid "Open shortcuts list"
+msgstr "Открыть список сочетаний клавиш"
+
+#: unfold / django.contrib.admin
+msgid "Open selection"
+msgstr "Открыть выбранное"
+
+#: unfold / django.contrib.admin
+msgid "Open selection in new tab"
+msgstr "Открыть выбранное в новой вкладке"
+
+#: unfold / django.contrib.admin
+msgid "Create new record"
+msgstr "Создать новую запись"
+
+#: unfold / django.contrib.admin
+msgid "Toggle filter"
+msgstr "Показать или скрыть фильтр"
+
+#: unfold / django.contrib.admin
+msgid "Filters"
+msgstr "Фильтры"
+
+#: unfold / django.contrib.admin
+msgid "Filter"
+msgstr "Фильтр"
+
+#: unfold / django.contrib.admin
+msgid "Apply Filters"
+msgstr "Применить фильтры"
+
+#: unfold / django.contrib.admin
+msgid "Clear all filters"
+msgstr "Сбросить все фильтры"
+
+#: unfold / django.contrib.admin
+msgid "Reset filters"
+msgstr "Сбросить фильтры"
+
+#: unfold / django.contrib.admin
+msgid "Hide counts"
+msgstr "Скрыть счётчики"
+
+#: unfold / django.contrib.admin
+msgid "Show counts"
+msgstr "Показать счётчики"
+
+#: unfold / django.contrib.admin
+msgid " By %(filter_title)s "
+msgstr " %(filter_title)s "
+
+#: unfold / django.contrib.admin
+msgid "By %(filter_title)s"
+msgstr "%(filter_title)s"
+
+#: unfold / django.contrib.admin
+msgid "Yes"
+msgstr "Да"
+
+#: unfold / django.contrib.admin
+msgid "No"
+msgstr "Нет"
+
+#: unfold / django.contrib.admin
+msgid "Unknown"
+msgstr "Неизвестно"
+
+#: unfold / django.contrib.admin
+msgid "True"
+msgstr "Да"
+
+#: unfold / django.contrib.admin
+msgid "False"
+msgstr "Нет"
+
+#: unfold / django.contrib.admin
+msgid "Any date"
+msgstr "Любая дата"
+
+#: unfold / django.contrib.admin
+msgid "Past 7 days"
+msgstr "Последние 7 дней"
+
+#: unfold / django.contrib.admin
+msgid "This month"
+msgstr "Этот месяц"
+
+#: unfold / django.contrib.admin
+msgid "This year"
+msgstr "Этот год"
+
+#: unfold / django.contrib.admin
+msgid "No date"
+msgstr "Дата не указана"
+
+#: unfold / django.contrib.admin
+msgid "Has date"
+msgstr "Дата указана"
+
+#: unfold / django.contrib.admin
+msgid "Empty"
+msgstr "Пусто"
+
+#: unfold / django.contrib.admin
+msgid "Not empty"
+msgstr "Не пусто"
+
+#: unfold / django.contrib.admin
+msgid "Date from"
+msgstr "Дата с"
+
+#: unfold / django.contrib.admin
+msgid "Date to"
+msgstr "Дата по"
+
+#: unfold / django.contrib.admin
+msgid "From"
+msgstr "От"
+
+#: unfold / django.contrib.admin
+msgid "To"
+msgstr "До"
+
+#: unfold / django.contrib.admin
+msgid "Date"
+msgstr "Дата"
+
+#: unfold / django.contrib.admin
+msgid "Time"
+msgstr "Время"
+
+#: unfold / django.contrib.admin
+msgid "Search"
+msgstr "Найти"
+
+#: unfold / django.contrib.admin
+msgid "Show all"
+msgstr "Показать все"
+
+#: unfold / django.contrib.admin
+msgid "%(full_result_count)s total"
+msgstr "%(full_result_count)s всего"
+
+#: unfold / django.contrib.admin
+msgid "No results found"
+msgstr "Ничего не найдено"
+
+#: unfold / django.contrib.admin
+msgid "This page yielded into no results."
+msgstr "На этой странице нет результатов."
+
+#: unfold / django.contrib.admin
+msgid "No data"
+msgstr "Нет данных"
+
+#: unfold / django.contrib.admin
+msgid "Next"
+msgstr "Следующая"
+
+#: unfold / django.contrib.admin
+msgid "Previous"
+msgstr "Предыдущая"
+
+#: unfold / django.contrib.admin
+msgid "Toggle sorting"
+msgstr "Сортировать в другом направлении"
+
+#: unfold / django.contrib.admin
+msgid "Remove from sorting"
+msgstr "Удалить из сортировки"
+
+#: unfold / django.contrib.admin
+msgid "Sorting priority: %(priority_number)s"
+msgstr "Приоритет сортировки: %(priority_number)s"
+
+#: unfold / django.contrib.admin
+msgid "Select %s"
+msgstr "Выберите %s"
+
+#: unfold / django.contrib.admin
+msgid "Select %s to change"
+msgstr "Выберите %s для изменения"
+
+#: unfold / django.contrib.admin
+msgid "Select %s to view"
+msgstr "Выберите %s для просмотра"
+
+#: unfold / django.contrib.admin
+msgid "Select action"
+msgstr "Выберите действие"
+
+#: unfold / django.contrib.admin
+msgid "Select action to run"
+msgstr "Выберите действие для запуска"
+
+#: unfold / django.contrib.admin
+msgid "Select all objects on this page for an action"
+msgstr "Выбрать все объекты на этой странице, чтобы применить к ним действие"
+
+#: unfold / django.contrib.admin
+msgid "Select record"
+msgstr "Выбрать запись"
+
+#: unfold / django.contrib.admin
+msgid "Select value"
+msgstr "Выберите значение"
+
+#: unfold / django.contrib.admin
+msgid "Run"
+msgstr "Запустить"
+
+#: unfold / django.contrib.admin
+msgid "Run the selected action"
+msgstr "Запустить выбранное действие"
+
+#: unfold / django.contrib.admin
+msgid "Clear selection"
+msgstr "Снять выделение"
+
+#: unfold / django.contrib.admin
+msgid "Record picture"
+msgstr "Изображение записи"
+
+#: unfold / django.contrib.admin
+msgid "Add %(name)s"
+msgstr "Добавить %(name)s"
+
+#: unfold / django.contrib.admin
+msgid "Add %s"
+msgstr "Добавить %s"
+
+#: unfold / django.contrib.admin
+msgid "Change"
+msgstr "Изменить"
+
+#: unfold / django.contrib.admin
+msgid "Change %s"
+msgstr "Изменить %s"
+
+#: unfold / django.contrib.admin
+msgid "View"
+msgstr "Просмотреть"
+
+#: unfold / django.contrib.admin
+msgid "View %s"
+msgstr "Просмотреть %s"
+
+#: unfold / django.contrib.admin
+msgid "Delete"
+msgstr "Удалить"
+
+#: unfold / django.contrib.admin
+msgid "Edit"
+msgstr "Редактировать"
+
+#: unfold / django.contrib.admin
+msgid "Cancel"
+msgstr "Отмена"
+
+#: unfold / django.contrib.admin
+msgid "Submit"
+msgstr "Отправить"
+
+#: unfold / django.contrib.admin
+msgid "History"
+msgstr "История"
+
+#: unfold / django.contrib.admin
+msgid "Change history: %s"
+msgstr "История изменений: %s"
+
+#: unfold / django.contrib.admin
+msgid "Date/time"
+msgstr "Дата и время"
+
+#: unfold / django.contrib.admin
+msgid "User"
+msgstr "Пользователь"
+
+#: unfold / django.contrib.admin
+msgid "Action"
+msgstr "Действие"
+
+#: unfold / django.contrib.admin
+msgid "This object doesn’t have a change history. It probably wasn’t added via this admin site."
+msgstr "Данный объект не имеет истории изменений. Возможно, он был добавлен не через данный административный сайт."
+
+#: unfold / django.contrib.admin
+msgid "Click to download"
+msgstr "Нажмите, чтобы скачать"
+
+#: unfold / django.contrib.admin
+msgid "Image preview"
+msgstr "Предпросмотр изображения"
+
+#: unfold / django.contrib.admin
+msgid "Choose file to upload"
+msgstr "Выберите файл для загрузки"
+
+#: unfold / django.contrib.admin
+msgid "Delete?"
+msgstr "Удалить?"
+
+#: unfold / django.contrib.admin
+msgid "Yes, I’m sure"
+msgstr "Да, я уверен"
+
+#: unfold / django.contrib.admin
+msgid "No, take me back"
+msgstr "Нет, отменить и вернуться к выбору"
+
+#: unfold / django.contrib.admin
+msgid "Objects"
+msgstr "Объекты"
+
+#: unfold / django.contrib.admin
+msgid "Summary"
+msgstr "Краткая статистика"
+
+#: unfold / django.contrib.admin
+msgid "Please correct the errors below."
+msgstr "Пожалуйста, исправьте ошибки ниже."
+
+#: unfold / django.contrib.admin
+msgid "The {name} “{obj}” was changed successfully."
+msgstr "{name} “{obj}“ был успешно изменен."
+
+#: unfold / django.contrib.admin
+msgid "The {name} “{obj}” was added successfully."
+msgstr "{name} \"{obj}\" был успешно добавлен."
+
+#: unfold / django.contrib.admin
+msgid "The %(name)s “%(obj)s” was deleted successfully."
+msgstr "%(name)s “%(obj)s“ был успешно удален."
+
+#: unfold / django.contrib.admin
+msgid "The {name} “{obj}” was added successfully. You may edit it again below."
+msgstr "{name} “{obj}” был успешно добавлен. Вы можете отредактировать его снова ниже."
+
+#: unfold / django.contrib.admin
+msgid "The {name} “{obj}” was added successfully. You may add another {name} below."
+msgstr "{name} “{obj}“ был успешно добавлен. Вы можете добавить еще один {name} ниже."
+
+#: unfold / django.contrib.admin
+msgid "The {name} “{obj}” was changed successfully. You may edit it again below."
+msgstr "{name} “{obj}“ был изменен успешно. Вы можете отредактировать его снова ниже."
+
+#: unfold / django.contrib.admin
+msgid "The {name} “{obj}” was changed successfully. You may add another {name} below."
+msgstr "{name} “{obj}“ был изменен. Вы можете добавить еще один {name} ниже."
+
+#: unfold / django.contrib.admin
+msgid "Are you sure you want to delete the %(object_name)s \"%(escaped_object)s\"? All of the following related items will be deleted:"
+msgstr "Вы уверены, что хотите удалить объект типа %(object_name)s \"%(escaped_object)s\"? Указанные ниже связанные объекты при этом будут также удалены:"
+
+#: unfold / django.contrib.admin
+msgid "Deleting the %(object_name)s '%(escaped_object)s' would result in deleting related objects, but your account doesn't have permission to delete the following types of objects:"
+msgstr "Удаление объекта типа %(object_name)s \"%(escaped_object)s\" потребовало бы удаления связанных с ним объектов, но у вашей учётной записи нет прав на удаление объектов следующих типов:"
+
+#: unfold / django.contrib.admin
+msgid "Deleting the %(object_name)s '%(escaped_object)s' would require deleting the following protected related objects:"
+msgstr "Удаление объекта типа %(object_name)s \"%(escaped_object)s\" потребовало бы удаления следующих защищённых объектов, связанных с ним:"
+
+#: unfold / django.contrib.admin
+msgid "Cannot delete %(name)s"
+msgstr "Не удается удалить %(name)s"
+
+#: unfold / django.contrib.admin
+msgid "%(name)s with ID “%(key)s” doesn’t exist. Perhaps it was deleted?"
+msgstr "%(name)s с ID “%(key)s“ не существует. Возможно оно было удалено?"
+
+#: unfold / django.contrib.admin
+msgid "Add another %(model)s"
+msgstr "Добавить ещё один объект типа \"%(model)s\""
+
+#: unfold / django.contrib.admin
+msgid "Change selected %(model)s"
+msgstr "Изменить выбранный объект типа \"%(model)s\""
+
+#: unfold / django.contrib.admin
+msgid "View selected %(model)s"
+msgstr "Просмотреть выбранный объект типа \"%(model)s\""
+
+#: unfold / django.contrib.admin
+msgid "Delete selected %(model)s"
+msgstr "Удалить выбранный объект типа \"%(model)s\""
+
+#: unfold / django.contrib.admin
+msgid "Currently:"
+msgstr "Сейчас:"
+
+#: unfold / django.contrib.admin
+msgid "Change:"
+msgstr "Изменить:"
+
+#: unfold / django.contrib.admin
+msgid "Page not found"
+msgstr "Страница не найдена"
+
+#: unfold / django.contrib.admin
+msgid "We’re sorry, but the requested page could not be found."
+msgstr "К сожалению, запрашиваемая вами страница не найдена."
+
+#: unfold / django.contrib.admin
+msgid "Server error"
+msgstr "Ошибка сервера"
+
+#: unfold / django.contrib.admin
+msgid "Server Error <em>(500)</em>"
+msgstr "Ошибка сервера <em>(500)</em>"
+
+#: unfold / django.contrib.admin
+msgid "Popup closing…"
+msgstr "Всплывающее окно закрывается…"
+
+#: unfold / django.contrib.admin
+msgid "%(counter)s result"
+msgid_plural "%(counter)s results"
+msgstr[0] "%(counter)s результат"
+msgstr[1] "%(counter)s результата"
+msgstr[2] "%(counter)s результатов"
+msgstr[3] "%(counter)s результатов"
+
+#: unfold / django.contrib.admin
+msgid "entry"
+msgid_plural "entries"
+msgstr[0] "запись"
+msgstr[1] "записи"
+msgstr[2] "записей"
+msgstr[3] "записей"
+
+#: unfold / django.contrib.admin
+msgid "Please correct the error below."
+msgid_plural "Please correct the errors below."
+msgstr[0] "Пожалуйста, исправьте ошибку ниже."
+msgstr[1] "Пожалуйста, исправьте ошибки ниже."
+msgstr[2] "Пожалуйста, исправьте ошибки ниже."
+msgstr[3] "Пожалуйста, исправьте ошибки ниже."
+
+#: unfold / django.contrib.admin
+msgid "%(count)s %(name)s was changed successfully."
+msgid_plural "%(count)s %(name)s were changed successfully."
+msgstr[0] "%(count)s %(name)s был успешно изменен."
+msgstr[1] "%(count)s %(name)s были успешно изменены."
+msgstr[2] "%(count)s %(name)s были успешно изменены."
+msgstr[3] "%(count)s %(name)s были успешно изменены."
+
+#: unfold / django.contrib.admin
+msgid "%(total_count)s selected"
+msgid_plural "All %(total_count)s selected"
+msgstr[0] "Выбран %(total_count)s"
+msgstr[1] "Выбраны все %(total_count)s"
+msgstr[2] "Выбраны все %(total_count)s"
+msgstr[3] "Выбраны все %(total_count)s"
+
+#: unfold / django.contrib.admin
+msgid "0 of %(cnt)s selected"
+msgid_plural "0 of %(cnt)s selected"
+msgstr[0] "Выбрано 0 объектов из %(cnt)s"
+msgstr[1] "Выбрано 0 объектов из %(cnt)s"
+msgstr[2] "Выбрано 0 объектов из %(cnt)s"
+msgstr[3] "Выбрано 0 объектов из %(cnt)s"
+
+#: unfold / django.contrib.admin
+msgctxt "alt. month"
+msgid "January"
+msgstr "января"
+
+#: unfold / django.contrib.admin
+msgctxt "alt. month"
+msgid "February"
+msgstr "февраля"
+
+#: unfold / django.contrib.admin
+msgctxt "alt. month"
+msgid "March"
+msgstr "марта"
+
+#: unfold / django.contrib.admin
+msgctxt "alt. month"
+msgid "April"
+msgstr "апреля"
+
+#: unfold / django.contrib.admin
+msgctxt "alt. month"
+msgid "May"
+msgstr "мая"
+
+#: unfold / django.contrib.admin
+msgctxt "alt. month"
+msgid "June"
+msgstr "июня"
+
+#: unfold / django.contrib.admin
+msgctxt "alt. month"
+msgid "July"
+msgstr "июля"
+
+#: unfold / django.contrib.admin
+msgctxt "alt. month"
+msgid "August"
+msgstr "августа"
+
+#: unfold / django.contrib.admin
+msgctxt "alt. month"
+msgid "September"
+msgstr "сентября"
+
+#: unfold / django.contrib.admin
+msgctxt "alt. month"
+msgid "October"
+msgstr "октября"
+
+#: unfold / django.contrib.admin
+msgctxt "alt. month"
+msgid "November"
+msgstr "ноября"
+
+#: unfold / django.contrib.admin
+msgctxt "alt. month"
+msgid "December"
+msgstr "декабря"
+
+#: unfold / django.contrib.admin
+msgid "Add another %(verbose_name)s"
+msgstr "Добавить еще один %(verbose_name)s"
+
+#: unfold / django.contrib.admin
+msgid "Click to cancel"
+msgstr "Нажмите, чтобы отменить"
+
+#: unfold / django.contrib.admin
+msgid "This item will be deleted."
+msgstr "Этот элемент будет удалён."
+
+#: unfold / django.contrib.admin
+msgid "superuser status"
+msgstr "статус суперпользователя"
+
+#: unfold / django.contrib.admin
+msgid "Designates that this user has all permissions without explicitly assigning them."
+msgstr "Указывает, что пользователь имеет все права без явного их назначения."
+
+#: unfold / django.contrib.admin
+msgid "last login"
+msgstr "последний вход"
+
+#: unfold / django.contrib.admin
+msgid "password"
+msgstr "пароль"
+
+#: unfold / django.contrib.admin
+msgid "groups"
+msgstr "группы"
+
+#: unfold / django.contrib.admin
+msgid "user permissions"
+msgstr "права пользователя"
+
+#: unfold / django.contrib.admin
+msgid "The groups this user belongs to. A user will get all permissions granted to each of their groups."
+msgstr "Группы, в которые входит этот пользователь. Пользователь получает все права, предоставленные каждой из его групп."
+
+#: unfold / django.contrib.admin
+msgid "Specific permissions for this user."
+msgstr "Индивидуальные права этого пользователя."

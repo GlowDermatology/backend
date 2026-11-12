@@ -1,5 +1,5 @@
 {% extends "admin/base_site.html" %}
-{% load static %}
+{% load i18n static %}
 
 {% block title %}{{ title }} | {{ site_title|default:"Glow Derma Ops" }}{% endblock %}
 
@@ -15,12 +15,20 @@
 {% endblock %}
 
 {% block content %}
-<div class="gd-set" data-gd-focus="{% if focus_field %}id_{{ bound_section }}_{{ focus_field }}{% endif %}">
+{# Texts of the Alpine expressions below (escapejs: a translation may hold a quote) and of settings.js (data-gd-others-dirty). #}
+{% translate "Saqlanmagan o‘zgarishlar bor" as unsaved_label %}
+{% translate "E’lon qilish" as publish_label %}
+{% translate "E’lon qilinmoqda…" as publishing_label %}
+{% translate "Boshqa bo‘limda saqlanmagan o‘zgarishlar bor: sahifa yangilanganda ular yo‘qoladi. Davom etasizmi?" as others_dirty %}
+<div class="gd-set" data-gd-focus="{% if focus_field %}id_{{ bound_section }}_{{ focus_field }}{% endif %}"
+     data-gd-others-dirty="{{ others_dirty|force_escape }}">
     <header class="gd-set__intro">
-        <p class="gd-set__eyebrow">Do‘kon</p>
+        <p class="gd-set__eyebrow">{% translate "Do‘kon" %}</p>
         <p class="gd-set__lead">
-            Do‘kon sozlamalari, aloqa ma’lumotlari va huquqiy matnlar. Har bir bo‘lim alohida saqlanadi; har bir
-            o‘zgarish audit jurnaliga yoziladi.
+            {% blocktranslate trimmed %}
+                Do‘kon sozlamalari, aloqa ma’lumotlari va huquqiy matnlar. Har bir bo‘lim alohida saqlanadi; har bir
+                o‘zgarish audit jurnaliga yoziladi.
+            {% endblocktranslate %}
         </p>
     </header>
 
@@ -32,7 +40,7 @@
                 <h2 id="store-title" class="gd-card__title">{{ store.title }}</h2>
                 <span class="gd-badge gd-badge--{% if integrations_live %}success{% else %}warning{% endif %}"
                       title="{% for name, mode in integrations.items %}{{ name }}: {{ mode }}{% if not forloop.last %} · {% endif %}{% endfor %}">
-                    Integratsiyalar: {% if integrations_live %}jonli{% else %}sinov (fake){% endif %}
+                    {% if integrations_live %}{% translate "Integratsiyalar: jonli" %}{% else %}{% translate "Integratsiyalar: sinov (fake)" %}{% endif %}
                 </span>
             </div>
             <form method="post" novalidate class="gd-form" data-gd-form x-ref="form"
@@ -46,14 +54,14 @@
                     {% include "unfold/helpers/field.html" with field=store.support_phone %}
                 </div>
                 <fieldset class="gd-fieldset">
-                    <legend class="gd-fieldset__legend">Olib ketish manzili</legend>
+                    <legend class="gd-fieldset__legend">{% translate "Olib ketish manzili" %}</legend>
                     {% for field in store.pickup_fields %}
                         {% include "unfold/helpers/field.html" with field=field %}
                     {% endfor %}
                 </fieldset>
                 <div class="gd-card__foot">
                     <span class="gd-muted" data-testid="settings-updated">
-                        Oxirgi o‘zgarish: {{ row.updated_at|date:"d.m.Y H:i" }} · {{ updated_by }}
+                        {% blocktranslate trimmed with at=row.updated_at|date:"d.m.Y H:i" author=updated_by %}Oxirgi o‘zgarish: {{ at }} · {{ author }}{% endblocktranslate %}
                     </span>
                     {% include "site_config/console/_save_button.html" %}
                 </div>
@@ -65,7 +73,7 @@
                  x-data="gdCard('{{ bound_section }}' === 'contacts')">
             <div class="gd-card__head gd-card__head--stack">
                 <h2 id="contacts-title" class="gd-card__title">{{ contacts.title }}</h2>
-                <p class="gd-muted">Ilovaning «Sozlamalar» bo‘limida ko‘rinadi. Bo‘sh qoldirilgan maydon ko‘rsatilmaydi.</p>
+                <p class="gd-muted">{% translate "Ilovaning «Sozlamalar» bo‘limida ko‘rinadi. Bo‘sh qoldirilgan maydon ko‘rsatilmaydi." %}</p>
             </div>
             <form method="post" novalidate class="gd-form" data-gd-form x-ref="form"
                   @input="refresh()" @submit="submitting($event)">
@@ -96,14 +104,14 @@
                 <h2 id="legal-title" class="gd-card__title">{{ legal.title }}</h2>
                 <p class="gd-muted" data-testid="terms-version">
                     {% if row.terms_version %}
-                        Joriy versiya: <strong class="gd-strong">{{ row.terms_version }}</strong>
-                        {% if row.terms_updated_at %} · e’lon qilingan <time datetime="{{ row.terms_updated_at|date:'c' }}">{{ row.terms_updated_at|date:"d.m.Y H:i" }}</time>{% endif %}
+                        {% translate "Joriy versiya:" %} <strong class="gd-strong">{{ row.terms_version }}</strong>
+                        {% if row.terms_updated_at %} · {% blocktranslate trimmed with iso=row.terms_updated_at|date:'c' at=row.terms_updated_at|date:"d.m.Y H:i" %}e’lon qilingan <time datetime="{{ iso }}">{{ at }}</time>{% endblocktranslate %}{% endif %}
                     {% else %}
-                        E’lon qilinmagan
+                        {% translate "E’lon qilinmagan" %}
                     {% endif %}
                 </p>
             </div>
-            {% if unpublished %}<span class="gd-badge gd-badge--warning">E’lon qilinmagan o‘zgarishlar bor</span>{% endif %}
+            {% if unpublished %}<span class="gd-badge gd-badge--warning">{% translate "E’lon qilinmagan o‘zgarishlar bor" %}</span>{% endif %}
         </div>
 
         <form method="post" novalidate enctype="multipart/form-data" class="gd-form" data-gd-form x-ref="form"
@@ -112,19 +120,19 @@
             <input type="hidden" name="section" value="{{ legal.section }}">
             {% for name, value in legal.was %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
 
-            <div class="gd-segmented" role="tablist" aria-label="Hujjat">
+            <div class="gd-segmented" role="tablist" aria-label="{% translate 'Hujjat' %}">
                 {% for doc in legal.documents %}
                     <button type="button" role="tab" class="gd-segmented__item" id="legal-doc-{{ doc.key }}"
                             :aria-selected="document === '{{ doc.key }}'" :class="{ 'is-active': document === '{{ doc.key }}' }"
                             @click="open('{{ doc.key }}', language)">
                         {{ doc.label }}
-                        {% if doc.error %}<span class="material-symbols-outlined gd-tab-error" aria-label="xato">error</span>{% endif %}
+                        {% if doc.error %}<span class="material-symbols-outlined gd-tab-error" aria-label="{% translate 'xato' %}">error</span>{% endif %}
                     </button>
                 {% endfor %}
             </div>
 
             {% for doc in legal.documents %}
-                <div class="gd-langtabs" role="tablist" aria-label="Til" x-show="document === '{{ doc.key }}'" x-cloak>
+                <div class="gd-langtabs" role="tablist" aria-label="{% translate 'Til' %}" x-show="document === '{{ doc.key }}'" x-cloak>
                     {% for panel in doc.panels %}
                         <button type="button" role="tab" class="gd-langtabs__item" id="legal-tab-{{ doc.key }}-{{ panel.language }}"
                                 :aria-selected="language === '{{ panel.language }}'" :class="{ 'is-active': language === '{{ panel.language }}' }"
@@ -132,7 +140,7 @@
                             <span class="gd-dot" :class="complete('{{ doc.key }}_{{ panel.language }}') ? 'gd-dot--ok' : 'gd-dot--todo'"
                                   aria-hidden="true"></span>
                             {{ panel.tab }}
-                            {% if panel.error %}<span class="material-symbols-outlined gd-tab-error" aria-label="xato">error</span>{% endif %}
+                            {% if panel.error %}<span class="material-symbols-outlined gd-tab-error" aria-label="{% translate 'xato' %}">error</span>{% endif %}
                         </button>
                     {% endfor %}
                 </div>
@@ -154,9 +162,9 @@
                         {% include "unfold/helpers/form_errors.html" with errors=panel.field.errors %}
                         <p class="gd-muted gd-small">
                             {% if doc.versioned %}
-                                Saqlangan matn mijozlarga faqat «E’lon qilish»dan keyin ko‘rinadi. O‘zbekcha matn majburiy.
+                                {% translate "Saqlangan matn mijozlarga faqat «E’lon qilish»dan keyin ko‘rinadi. O‘zbekcha matn majburiy." %}
                             {% else %}
-                                Qabul qoidalari saqlangach ilovada darhol ko‘rinadi (versiyalanmaydi).
+                                {% translate "Qabul qoidalari saqlangach ilovada darhol ko‘rinadi (versiyalanmaydi)." %}
                             {% endif %}
                         </p>
                     </div>
@@ -166,17 +174,17 @@
             {% include "site_config/console/_form_alert.html" with form=legal %}
 
             <div class="gd-card__foot">
-                <span class="gd-muted" role="status" x-text="dirty ? 'Saqlanmagan o‘zgarishlar bor' : ''"></span>
+                <span class="gd-muted" role="status" x-text="dirty ? '{{ unsaved_label|escapejs }}' : ''"></span>
                 <div class="gd-actions">
                     <button type="button" class="gd-btn gd-btn--secondary" :disabled="dirty || busy" x-ref="publishButton"
                             :aria-describedby="dirty ? 'legal-publish-hint' : null" @click="openPublish()">
-                        <span class="material-symbols-outlined" aria-hidden="true">send</span>E’lon qilish
+                        <span class="material-symbols-outlined" aria-hidden="true">send</span>{{ publish_label }}
                     </button>
                     {% include "site_config/console/_save_button.html" %}
                 </div>
             </div>
             <p id="legal-publish-hint" class="gd-muted gd-small" x-show="dirty" x-cloak>
-                E’lon qilishdan oldin o‘zgarishlarni saqlang.
+                {% translate "E’lon qilishdan oldin o‘zgarishlarni saqlang." %}
             </p>
         </form>
 
@@ -201,9 +209,9 @@
                     <input type="hidden" name="section" value="publish">
                     {{ publish_form.fingerprint }}
                     <button type="button" class="gd-btn gd-btn--outline" :disabled="publishing" data-gd-cancel
-                            @click="closePublish()">Bekor qilish</button>
+                            @click="closePublish()">{% translate "Bekor qilish" %}</button>
                     <button type="submit" class="gd-btn gd-btn--primary" :disabled="publishing" :aria-busy="publishing"
-                            x-text="publishing ? 'E’lon qilinmoqda…' : 'E’lon qilish'">E’lon qilish</button>
+                            x-text="publishing ? '{{ publishing_label|escapejs }}' : '{{ publish_label|escapejs }}'">{{ publish_label }}</button>
                 </form>
             </div>
         </div>

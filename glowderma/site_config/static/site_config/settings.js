@@ -10,6 +10,8 @@
  * Plus: phone inputs ([data-gd-phone]) are masked as "+998 71 200 00 00"; leaving the page with unsaved
  * changes asks first; after a refused save the first invalid field gets the focus.
  * The server checks everything again: none of this is a security boundary.
+ * The script holds no text of its own: the confirmation below is the page's `data-gd-others-dirty`, in the
+ * console's language.
  */
 (function () {
   "use strict";
@@ -25,8 +27,11 @@
     return false;
   }
 
-  var OTHERS_DIRTY =
-    "Boshqa bo‘limda saqlanmagan o‘zgarishlar bor: sahifa yangilanganda ular yo‘qoladi. Davom etasizmi?";
+  /* "Another card has unsaved changes: they are lost when the page reloads. Continue?" */
+  function othersDirtyText() {
+    var root = document.querySelector("[data-gd-others-dirty]");
+    return root ? root.getAttribute("data-gd-others-dirty") : "";
+  }
 
   /* Each card saves on its own, by a full page POST: unsaved edits of another card would be lost. */
   function confirmOthers(form, event) {
@@ -36,7 +41,7 @@
         return other !== form;
       },
     );
-    if (others.length && !window.confirm(OTHERS_DIRTY)) {
+    if (others.length && !window.confirm(othersDirtyText())) {
       event.preventDefault();
       return false;
     }

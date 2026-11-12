@@ -32,6 +32,8 @@ from django.http import HttpRequest
 from django.template.response import TemplateResponse
 from django.urls import reverse
 from django.utils.safestring import SafeString
+from django.utils.translation import gettext, ngettext
+from django.utils.translation import gettext_lazy as _
 from django_otp.plugins.otp_static.models import StaticDevice
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
@@ -67,7 +69,7 @@ for _model in (Group, TOTPDevice, StaticDevice):
     if admin.site.is_registered(_model):
         admin.site.unregister(_model)
 
-RESET_2FA_REASON = "ops console: 2FA ni qayta o‘rnatish"
+RESET_2FA_REASON = "ops console: 2FA ni qayta o‘rnatish"  # the audit row's reason: stored, never translated
 
 
 def _is_manager(request: HttpRequest) -> bool:
@@ -76,12 +78,16 @@ def _is_manager(request: HttpRequest) -> bool:
 
 
 def _enrol_window_text() -> str:
-    """``OPS_ENROL_WINDOW_SECONDS`` in Uzbek: ``24 soat``, ``90 daqiqa``."""
+    """``OPS_ENROL_WINDOW_SECONDS`` in the console's language (Uzbek: ``24 soat``, ``90 daqiqa``)."""
     seconds = int(settings.OPS_ENROL_WINDOW_SECONDS)
-    return f"{seconds // 3600} soat" if seconds % 3600 == 0 else f"{seconds // 60} daqiqa"
+    if seconds % 3600 == 0:
+        hours = seconds // 3600
+        return ngettext("%(count)s soat", "%(count)s soat", hours) % {"count": hours}
+    minutes = seconds // 60
+    return ngettext("%(count)s daqiqa", "%(count)s daqiqa", minutes) % {"count": minutes}
 
 
-@admin.action(description="2FA ni qayta o‘rnatish", permissions=["manager"])
+@admin.action(description=_("2FA ni qayta o‘rnatish"), permissions=["manager"])
 def reset_two_factor(
     modeladmin: admin.ModelAdmin[StaffUser], request: HttpRequest, queryset: QuerySet[StaffUser]
 ) -> TemplateResponse | None:
@@ -93,13 +99,13 @@ def reset_two_factor(
     own = [user for user in targets if user.pk == request.user.pk]
     if own:
         modeladmin.message_user(
-            request, "O‘z 2FA ingizni bu yerdan qayta o‘rnatib bo‘lmaydi.", level=messages.ERROR
+            request, gettext("O‘z 2FA ingizni bu yerdan qayta o‘rnatib bo‘lmaydi."), level=messages.ERROR
         )
         return None
     if request.POST.get("post") != "yes":
         context = {
             **modeladmin.admin_site.each_context(request),
-            "title": "2FA ni qayta o‘rnatish",
+            "title": gettext("2FA ni qayta o‘rnatish"),
             "opts": modeladmin.model._meta,
             "targets": targets,
             "action_checkbox_name": ACTION_CHECKBOX_NAME,
@@ -114,8 +120,14 @@ def reset_two_factor(
         )
     modeladmin.message_user(
         request,
-        f"{len(targets)} ta xodimning 2FA qurilmasi o‘chirildi va konsol sessiyalari tugatildi: ular "
-        f"{_enrol_window_text()} ichida keyingi kirishda 2FA ni qayta sozlashadi.",
+        ngettext(
+            "%(count)s ta xodimning 2FA qurilmasi o‘chirildi va konsol sessiyalari tugatildi: ular "
+            "%(window)s ichida keyingi kirishda 2FA ni qayta sozlashadi.",
+            "%(count)s ta xodimning 2FA qurilmasi o‘chirildi va konsol sessiyalari tugatildi: ular "
+            "%(window)s ichida keyingi kirishda 2FA ni qayta sozlashadi.",
+            len(targets),
+        )
+        % {"count": len(targets), "window": _enrol_window_text()},
         level=messages.SUCCESS,
     )
     return None
@@ -127,7 +139,7 @@ def _has_manager_permission(self: admin.ModelAdmin[StaffUser], request: HttpRequ
 
 register_read_only(
     StaffUser,
-    title_format="Xodim: {obj.email}",
+    title_format=_("Xodim: {obj.email}"),
     # groups and permissions are never used (GST-1): one staff role, managers flagged by is_manager
     exclude=("password", "groups", "user_permissions"),
     list_display=(
@@ -151,9 +163,9 @@ register_read_only(
 
 def _session_refusal(model_admin: Any, request: HttpRequest | None, session: AuthSession) -> str:
     if session.audience != "customer" or session.customer_id is None:
-        return "Xodim sessiyalari bu yerda tugatilmaydi."
+        return gettext("Xodim sessiyalari bu yerda tugatilmaydi.")
     if session.revoked_at is not None or session.absolute_expires_at <= timeutils.now():
-        return "Sessiya allaqachon tugagan."
+        return gettext("Sessiya allaqachon tugagan.")
     return ""
 
 
@@ -184,22 +196,22 @@ class AuthSessionAdmin(OpsActionsMixin, ReadOnlyAdmin):
     autocomplete_fields = ("staff", "customer", "device")
     actions_detail = ("revoke",)
 
-    @display(description="Amal")
+    @display(description=_("Amal"))
     def revoke_button(self, session: AuthSession) -> SafeString | str:
         if _session_refusal(self, None, session):
             return ""
         url = reverse("admin:accounts_authsession_revoke", args=[session.pk])
         back = reverse("admin:accounts_authsession_changelist")
-        return row_action_link(f"{url}?next={back}", "Tugatish", "logout")
+        return row_action_link(f"{url}?next={back}", gettext("Tugatish"), "logout")
 
     @ops_action(
-        description="Sessiyani tugatish",
-        title="Mijoz sessiyasini tugatish",
-        body=(
+        description=_("Sessiyani tugatish"),
+        title=_("Mijoz sessiyasini tugatish"),
+        body=_(
             "Mijoz shu qurilmada tizimdan chiqariladi (sabab: «Admin tugatdi»). Qurilmada boshqa ochiq "
             "sessiya qolmasa, unga push xabarlar yuborilmaydi. Mijoz qaytadan kirishi mumkin."
         ),
-        submit="Sessiyani tugatish",
+        submit=_("Sessiyani tugatish"),
         icon="logout",
         available=_session_refusal,
     )
@@ -210,10 +222,10 @@ class AuthSessionAdmin(OpsActionsMixin, ReadOnlyAdmin):
                 customer_id, str(session.pk), actor=request.user, actor_type="staff", request=request
             )
         except sessions.SessionNotFound:
-            return refused("Sessiya allaqachon tugagan: hech narsa o‘zgarmadi.")
+            return refused(gettext("Sessiya allaqachon tugagan: hech narsa o‘zgarmadi."))
         forget_cached_counts("dash:customers")
         return done(
-            "Sessiya tugatildi.",
+            gettext("Sessiya tugatildi."),
             audit_action="ops.customer_session_revoked",
             entity_type="customer",
             entity_id=customer_id,
@@ -314,7 +326,7 @@ def _recovery_codes_left(device: StaticDevice) -> int:
     return int(device.token_set.count())
 
 
-_recovery_codes_left.short_description = "Qolgan kodlar"  # type: ignore[attr-defined]
+_recovery_codes_left.short_description = _("Qolgan kodlar")  # type: ignore[attr-defined]
 
 register_read_only(
     StaticDevice,

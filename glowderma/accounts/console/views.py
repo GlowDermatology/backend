@@ -11,7 +11,8 @@ same manager did not also reset the password); otherwise the pending sign-in end
 manager. Its recovery codes are shown by a separate GET page (``recovery_codes``: POST → redirect → GET),
 exactly once from the session, so a reload never re-posts the enrolment form.
 
-``csrf_failure`` is ``CSRF_FAILURE_VIEW``: the console's Uzbek 403 page instead of Django's English one.
+``csrf_failure`` is ``CSRF_FAILURE_VIEW``: the console's own 403 page (in the console's language) instead
+of Django's English one.
 """
 
 from __future__ import annotations
@@ -26,6 +27,8 @@ from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.template.response import TemplateResponse
 from django.urls import reverse
 from django.utils.cache import add_never_cache_headers
+from django.utils.translation import gettext, ngettext
+from django.utils.translation import gettext_lazy as _
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.debug import sensitive_post_parameters
@@ -53,32 +56,48 @@ logger = logging.getLogger(__name__)
 SCOPE = "django_admin_otp"
 CODE_STEP = "code"  # the per-address budget of the code steps (TOTP, recovery code, enrolment)
 LOGIN_PATH = "/django-admin/login/"
-WRONG_CODE = "Kod noto‘g‘ri yoki allaqachon ishlatilgan. Ilovadagi yangi kodni kiriting."
-WRONG_RECOVERY = "Zaxira kod noto‘g‘ri yoki allaqachon ishlatilgan."
-SIGNIN_EXPIRED = "Kirish muddati tugadi. Email va parolni qaytadan kiriting."
-FEW_RECOVERY_CODES = (
-    "Zaxira kodlardan {left} tasi qoldi. Menejerdan 2FA ni qayta o‘rnatishni so‘rang (yangi kodlar beriladi)."
-)
-LOGGED_OUT = "Siz konsoldan chiqdingiz."
-ENROL_CLOSED = (
+WRONG_CODE = _("Kod noto‘g‘ri yoki allaqachon ishlatilgan. Ilovadagi yangi kodni kiriting.")
+WRONG_RECOVERY = _("Zaxira kod noto‘g‘ri yoki allaqachon ishlatilgan.")
+SIGNIN_EXPIRED = _("Kirish muddati tugadi. Email va parolni qaytadan kiriting.")
+LOGGED_OUT = _("Siz konsoldan chiqdingiz.")
+ENROL_CLOSED = _(
     "Ikki bosqichli himoyani sozlash muddati tugagan yoki ochilmagan. Menejerdan 2FA ni qayta o‘rnatishni "
     "so‘rang, so‘ng qaytadan kiring."
 )
-ENROL_SAME_MANAGER = (
+ENROL_SAME_MANAGER = _(
     "Parolingiz va 2FA bir menejer tomonidan tiklangan: xavfsizlik uchun 2FA ni boshqa menejer (yoki server "
     "buyrug‘i) qayta o‘rnatishi kerak."
 )
-CODES_SHOWN_ONCE = (
+CODES_SHOWN_ONCE = _(
     "Zaxira kodlar faqat bir marta ko‘rsatiladi va ular endi ko‘rsatilmaydi. Kodlarni saqlamagan bo‘lsangiz, "
     "menejerdan 2FA ni qayta o‘rnatishni so‘rang."
 )
-CSRF_FAILED = (
+CSRF_FAILED = _(
     "Sahifa eskirgan yoki sessiya yangilangan, shuning uchun so‘rov qabul qilinmadi. Sahifani qaytadan "
     "oching va yana urinib ko‘ring."
 )
-CODES_FILENAME = "glowderma-ops-zaxira-kodlar.txt"
+CODES_FILENAME = "glowderma-ops-zaxira-kodlar.txt"  # a file name: the same in every language
 
 type StepView = Callable[[HttpRequest, state.Pending], HttpResponse]
+
+
+def lockout_notice(wait: int) -> str:
+    """The notice of a running lockout in the console's language (``guard.LOCKOUT_MESSAGE``'s Uzbek text)."""
+    return ngettext(
+        "Juda ko‘p urinish. %(wait)s soniyadan so‘ng qayta urinib ko‘ring.",
+        "Juda ko‘p urinish. %(wait)s soniyadan so‘ng qayta urinib ko‘ring.",
+        wait,
+    ) % {"wait": wait}
+
+
+def few_recovery_codes(left: int) -> str:
+    return ngettext(
+        "Zaxira kodlardan %(left)s tasi qoldi. Menejerdan 2FA ni qayta o‘rnatishni so‘rang (yangi kodlar "
+        "beriladi).",
+        "Zaxira kodlardan %(left)s tasi qoldi. Menejerdan 2FA ni qayta o‘rnatishni so‘rang (yangi kodlar "
+        "beriladi).",
+        left,
+    ) % {"left": left}
 
 
 def _context(request: HttpRequest, title: str, **extra: Any) -> dict[str, Any]:
@@ -116,7 +135,7 @@ def signin_step(view: StepView) -> Callable[[HttpRequest], HttpResponse]:
 def _locked(
     request: HttpRequest, user: StaffUser, exc: Throttled, template: str, context: dict[str, Any]
 ) -> HttpResponse:
-    message, wait = lockout_message(exc)
+    _plain, wait = lockout_message(exc)
     if isinstance(exc, IpThrottled):
         record_ip_locked(request, CODE_STEP, wait, email=user.email)
     else:
@@ -126,7 +145,7 @@ def _locked(
         logger.warning("console.otp_locked staff_id=%s wait=%s", user.pk, wait)
         alerts.alert("console.otp_locked", {"staff_id": user.pk, "wait": wait}, scope=str(user.pk))
     _clear_code(context.get("form"))
-    response = _render(request, template, {**context, "lockout_message": message}, status=429)
+    response = _render(request, template, {**context, "lockout_message": lockout_notice(wait)}, status=429)
     response["Retry-After"] = str(wait)
     return response
 
@@ -169,7 +188,7 @@ def verify(request: HttpRequest, current: state.Pending) -> HttpResponse:
         return HttpResponseRedirect(reverse("ops_2fa_enrol"))
     form = TotpCodeForm(request.POST if request.method == "POST" else None)
     template = "accounts/console/verify.html"
-    context = _context(request, "Ikki bosqichli tekshiruv", form=form, email=user.email)
+    context = _context(request, gettext("Ikki bosqichli tekshiruv"), form=form, email=user.email)
     if request.method == "POST":
         if (locked := _attempt(request, user)) is not None:
             return _locked(request, user, locked, template, context)
@@ -193,7 +212,7 @@ def recovery(request: HttpRequest, current: state.Pending) -> HttpResponse:
         return HttpResponseRedirect(reverse("ops_2fa_enrol"))
     form = RecoveryCodeForm(request.POST if request.method == "POST" else None)
     template = "accounts/console/recovery.html"
-    context = _context(request, "Zaxira kod bilan kirish", form=form, email=user.email)
+    context = _context(request, gettext("Zaxira kod bilan kirish"), form=form, email=user.email)
     if request.method == "POST":
         if (locked := _attempt(request, user)) is not None:
             return _locked(request, user, locked, template, context)
@@ -204,7 +223,7 @@ def recovery(request: HttpRequest, current: state.Pending) -> HttpResponse:
             events.record("console.recovery_code_used", request, user, remaining=used.remaining)
             events.record("console.login_succeeded", request, user, method="recovery")
             if used.remaining <= 3:
-                messages.warning(request, FEW_RECOVERY_CODES.format(left=used.remaining))
+                messages.warning(request, few_recovery_codes(used.remaining))
             return HttpResponseRedirect(state.safe_next(request, current.next_url))
         _failed(request, user, "recovery", form)
         if form.is_valid():
@@ -239,7 +258,7 @@ def enrol(request: HttpRequest, current: state.Pending) -> HttpResponse:
     template = "accounts/console/enrol.html"
     context = _context(
         request,
-        "Ikki bosqichli himoyani yoqish",
+        gettext("Ikki bosqichli himoyani yoqish"),
         form=form,
         email=user.email,
         qr_svg=twofactor.qr_svg(device),
@@ -294,15 +313,18 @@ def recovery_codes(request: HttpRequest) -> HttpResponse:
     kept = state.take_recovery_codes(request)
     if kept is None:
         context = _context(
-            request, "Zaxira kodlar", shown_once=CODES_SHOWN_ONCE, next_url=state.CONSOLE_INDEX
+            request, gettext("Zaxira kodlar"), shown_once=CODES_SHOWN_ONCE, next_url=state.CONSOLE_INDEX
         )
         return _render(request, "accounts/console/recovery_codes.html", context)
     codes, next_url = kept
-    text = "Glow Derma Ops — zaxira kodlar\n" + "\n".join(codes) + "\n"
+    # The first line of the saved codes (the .txt download and what "copy" puts on the clipboard).
+    header = gettext("Glow Derma Ops — zaxira kodlar")
+    text = header + "\n" + "\n".join(codes) + "\n"
     context = _context(
         request,
-        "Zaxira kodlar",
+        gettext("Zaxira kodlar"),
         recovery_codes=codes,
+        codes_header=header,
         next_url=next_url,
         email=getattr(request.user, "email", ""),
         codes_download=f"data:text/plain;charset=utf-8,{quote(text)}",
@@ -334,12 +356,12 @@ def logout(request: HttpRequest) -> HttpResponse:
 
 
 def csrf_failure(request: HttpRequest, reason: str = "") -> HttpResponse:
-    """``CSRF_FAILURE_VIEW``: a console page in Uzbek (403) for a console path; Django's own page elsewhere
-    (no other part of the project uses session forms)."""
+    """``CSRF_FAILURE_VIEW``: a console page in the console's language (403) for a console path; Django's own
+    page elsewhere (no other part of the project uses session forms)."""
     if not request.path_info.startswith(CONSOLE_PREFIX):
         from django.views.csrf import csrf_failure as django_csrf_failure
 
         return django_csrf_failure(request, reason)
     target = LOGIN_PATH if not admin.site.has_permission(request) else state.CONSOLE_INDEX
-    context = _context(request, "So‘rov qabul qilinmadi", csrf_message=CSRF_FAILED, next_url=target)
+    context = _context(request, gettext("So‘rov qabul qilinmadi"), csrf_message=CSRF_FAILED, next_url=target)
     return _render(request, "accounts/console/csrf_failure.html", context, status=403)

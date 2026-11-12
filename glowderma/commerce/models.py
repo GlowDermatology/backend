@@ -10,6 +10,7 @@ is read-only. The order state machine is data in :mod:`glowderma.commerce.state`
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
 from django.db.models import F, Q
+from django.utils.translation import gettext
 
 from glowderma.core import enums
 from glowderma.core.labels import som_text, stamp
@@ -95,7 +96,7 @@ class Cart(TimeStampedModel):
         ordering = ["id"]
 
     def __str__(self) -> str:
-        return f"Mijoz #{self.customer_id} savatchasi"
+        return gettext("Mijoz #%(customer)s savatchasi") % {"customer": self.customer_id}
 
 
 class CartItem(models.Model):
@@ -126,7 +127,11 @@ class CartItem(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.quantity} × mahsulot #{self.product_id} (savatcha #{self.cart_id})"
+        return gettext("%(quantity)s × mahsulot #%(product)s (savatcha #%(cart)s)") % {
+            "quantity": self.quantity,
+            "product": self.product_id,
+            "cart": self.cart_id,
+        }
 
 
 class Order(TimeStampedModel):
@@ -315,8 +320,12 @@ class Order(TimeStampedModel):
         ]
 
     def __str__(self) -> str:
-        status = self.get_status_display()
-        return f"Buyurtma №{self.pk} ({status}, {som_text(self.total)}, mijoz #{self.customer_id})"
+        return gettext("Buyurtma №%(number)s (%(status)s, %(total)s, mijoz #%(customer)s)") % {
+            "number": self.pk,
+            "status": self.get_status_display(),
+            "total": som_text(self.total),
+            "customer": self.customer_id,
+        }
 
 
 class OrderItem(models.Model):
@@ -355,7 +364,12 @@ class OrderItem(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.name} × {self.quantity} @ {som_text(self.unit_price)} (buyurtma №{self.order_id})"
+        return gettext("%(name)s × %(quantity)s @ %(price)s (buyurtma №%(order)s)") % {
+            "name": self.name,
+            "quantity": self.quantity,
+            "price": som_text(self.unit_price),
+            "order": self.order_id,
+        }
 
 
 class OrderEvent(AppendOnlyModel):
@@ -397,8 +411,12 @@ class OrderEvent(AppendOnlyModel):
         ]
 
     def __str__(self) -> str:
-        kind, source = self.get_type_display(), self.get_source_display()
-        return f"Buyurtma №{self.order_id}: {kind} ({source}) · {stamp(self.at)}"
+        return gettext("Buyurtma №%(order)s: %(kind)s (%(source)s) · %(at)s") % {
+            "order": self.order_id,
+            "kind": self.get_type_display(),
+            "source": self.get_source_display(),
+            "at": stamp(self.at),
+        }
 
 
 class StockReservation(TimeStampedModel):
@@ -481,7 +499,9 @@ class StockReservation(TimeStampedModel):
         ]
 
     def __str__(self) -> str:
-        return (
-            f"Band: {self.quantity} × mahsulot #{self.product_id} · buyurtma №{self.order_id} "
-            f"({self.get_state_display()})"
-        )
+        return gettext("Band: %(quantity)s × mahsulot #%(product)s · buyurtma №%(order)s (%(state)s)") % {
+            "quantity": self.quantity,
+            "product": self.product_id,
+            "order": self.order_id,
+            "state": self.get_state_display(),
+        }

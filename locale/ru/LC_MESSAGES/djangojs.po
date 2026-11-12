@@ -1,0 +1,188 @@
+# Glow Derma ops console, ru: the admin's JavaScript strings (the msgids of locale/uz djangojs.po).
+# Compile with `manage.py compile_locale` (stdlib, no GNU gettext); commit the .mo with it.
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: ru\n"
+"Plural-Forms: nplurals=4; plural=(n % 10 == 1 && n % 100 != 11 ? 0 : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? 1 : n % 10 == 0 || (n % 10 >= 5 && n % 10 <= 9) || (n % 100 >= 11 && n % 100 <= 14) ? 2 : 3);\n"
+
+msgid "Today (%(date)s)"
+msgstr "Сегодня (%(date)s)"
+
+msgid "Yesterday (%(date)s)"
+msgstr "Вчера (%(date)s)"
+
+msgid "Tomorrow (%(date)s)"
+msgstr "Завтра (%(date)s)"
+
+msgid "Previous (%(month)s %(year)s)"
+msgstr "Предыдущий месяц (%(month)s %(year)s)"
+
+msgid "Next (%(month)s %(year)s)"
+msgstr "Следующий месяц (%(month)s %(year)s)"
+
+msgid "%(month)s %(day)s, %(year)s"
+msgstr "%(day)s %(month)s %(year)s"
+
+msgid "%s (today)"
+msgstr "%s (сегодня)"
+
+msgid "%s (current selection)"
+msgstr "%s (выбрано)"
+
+msgid "%s (today, current selection)"
+msgstr "%s (сегодня, выбрано)"
+
+msgid "(click to clear)"
+msgstr "(нажмите, чтобы очистить)"
+
+msgid "server"
+msgstr "сервера"
+
+msgid "Note: Enter times in the %(timezone)s timezone. (You are %(offset)s hour ahead.)"
+msgid_plural "Note: Enter times in the %(timezone)s timezone. (You are %(offset)s hours ahead.)"
+msgstr[0] "Внимание: вводите время в часовом поясе %(timezone)s. (Ваше время опережает его на %(offset)s час.)"
+msgstr[1] "Внимание: вводите время в часовом поясе %(timezone)s. (Ваше время опережает его на %(offset)s часа.)"
+msgstr[2] "Внимание: вводите время в часовом поясе %(timezone)s. (Ваше время опережает его на %(offset)s часов.)"
+msgstr[3] "Внимание: вводите время в часовом поясе %(timezone)s. (Ваше время опережает его на %(offset)s часов.)"
+
+msgid "Note: Enter times in the %(timezone)s timezone. (You are %(offset)s hour behind.)"
+msgid_plural "Note: Enter times in the %(timezone)s timezone. (You are %(offset)s hours behind.)"
+msgstr[0] "Внимание: вводите время в часовом поясе %(timezone)s. (Ваше время отстаёт от него на %(offset)s час.)"
+msgstr[1] "Внимание: вводите время в часовом поясе %(timezone)s. (Ваше время отстаёт от него на %(offset)s часа.)"
+msgstr[2] "Внимание: вводите время в часовом поясе %(timezone)s. (Ваше время отстаёт от него на %(offset)s часов.)"
+msgstr[3] "Внимание: вводите время в часовом поясе %(timezone)s. (Ваше время отстаёт от него на %(offset)s часов.)"
+
+msgid "Monday"
+msgstr "Понедельник"
+
+msgid "Tuesday"
+msgstr "Вторник"
+
+msgid "Wednesday"
+msgstr "Среда"
+
+msgid "Thursday"
+msgstr "Четверг"
+
+msgid "Friday"
+msgstr "Пятница"
+
+msgid "Saturday"
+msgstr "Суббота"
+
+msgid "Sunday"
+msgstr "Воскресенье"
+
+msgid "May"
+msgstr "Май"
+
+msgctxt "abbrev. day Monday"
+msgid "Mon"
+msgstr "Пн"
+
+msgctxt "abbrev. day Tuesday"
+msgid "Tue"
+msgstr "Вт"
+
+msgctxt "abbrev. day Wednesday"
+msgid "Wed"
+msgstr "Ср"
+
+msgctxt "abbrev. day Thursday"
+msgid "Thur"
+msgstr "Чт"
+
+msgctxt "abbrev. day Friday"
+msgid "Fri"
+msgstr "Пт"
+
+msgctxt "abbrev. day Saturday"
+msgid "Sat"
+msgstr "Сб"
+
+msgctxt "abbrev. day Sunday"
+msgid "Sun"
+msgstr "Вс"
+
+msgctxt "abbrev. month January"
+msgid "Jan"
+msgstr "Янв"
+
+msgctxt "abbrev. month February"
+msgid "Feb"
+msgstr "Фев"
+
+msgctxt "abbrev. month March"
+msgid "Mar"
+msgstr "Мар"
+
+msgctxt "abbrev. month April"
+msgid "Apr"
+msgstr "Апр"
+
+msgctxt "abbrev. month May"
+msgid "May"
+msgstr "Май"
+
+msgctxt "abbrev. month June"
+msgid "Jun"
+msgstr "Июн"
+
+msgctxt "abbrev. month July"
+msgid "Jul"
+msgstr "Июл"
+
+msgctxt "abbrev. month August"
+msgid "Aug"
+msgstr "Авг"
+
+msgctxt "abbrev. month September"
+msgid "Sep"
+msgstr "Сен"
+
+msgctxt "abbrev. month October"
+msgid "Oct"
+msgstr "Окт"
+
+msgctxt "abbrev. month November"
+msgid "Nov"
+msgstr "Ноя"
+
+msgctxt "abbrev. month December"
+msgid "Dec"
+msgstr "Дек"
+
+msgid "Choose all %s"
+msgstr "Выбрать все %s"
+
+msgid "Choose selected %s"
+msgstr "Выбрать отмеченные %s"
+
+msgid "Remove all %s"
+msgstr "Удалить все %s"
+
+msgid "Remove selected %s"
+msgstr "Удалить отмеченные %s"
+
+msgid "Choose %s by selecting them and then select the \"Choose\" arrow button."
+msgstr "Выделите элементы в списке \"%s\" и нажмите кнопку со стрелкой вправо, чтобы добавить их к выбранным."
+
+msgid "Remove %s by selecting them and then select the \"Remove\" arrow button."
+msgstr "Выделите элементы в списке \"%s\" и и нажмите стрелку влево, чтобы убрать их из выбранных."
+
+msgid "Type into this box to filter down the list of selected %s."
+msgstr "Набирайте символы в этом поле, чтобы отфильтровать список выбранных %s."
+
+msgid "%s selected option not visible"
+msgid_plural "%s selected options not visible"
+msgstr[0] "%s выбранный объект не виден"
+msgstr[1] "%s выбранных объекта не видны"
+msgstr[2] "%s выбранных объектов не видны"
+msgstr[3] "%s выбранных объектов не видны"
+
+msgid "You have selected an action, but you haven’t saved your changes to individual fields yet. Please click OK to save. You’ll need to re-run the action."
+msgstr "Вы выбрали действие, но еще не сохранили изменения, внесенные в некоторых полях для редактирования. Нажмите OK, чтобы сохранить изменения. После сохранения вам придется запустить действие еще раз."
+
+msgid "You have selected an action, and you haven’t made any changes on individual fields. You’re probably looking for the Run button rather than the Save button."
+msgstr "Вы выбрали действие, но вы не внесли изменений в данные. Возможно, вы хотели нажать кнопку \"Запустить\", а не кнопку \"Сохранить\"."

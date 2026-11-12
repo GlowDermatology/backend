@@ -11,6 +11,7 @@ from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
 from django.db.models import F, Q
 from django.db.models.functions import Coalesce, Lower
+from django.utils.translation import gettext
 
 from glowderma.core import enums
 from glowderma.core.models import TimeStampedModel, timestamp_default
@@ -52,7 +53,10 @@ class StatusTemplate(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"Shablon «{self.get_status_display()}»: {self.text_uz[:40]}"
+        return gettext("Shablon «%(status)s»: %(text)s") % {
+            "status": self.get_status_display(),
+            "text": self.text_uz[:40],
+        }
 
 
 class CustomerSegment(TimeStampedModel):
@@ -117,7 +121,10 @@ class SegmentMember(models.Model):
         indexes = [models.Index(fields=["customer"], name="segmentmember_customer_idx")]
 
     def __str__(self) -> str:
-        return f"Mijoz #{self.customer_id} · segment #{self.segment_id}"
+        return gettext("Mijoz #%(customer_id)s · segment #%(segment_id)s") % {
+            "customer_id": self.customer_id,
+            "segment_id": self.segment_id,
+        }
 
 
 # Field groups of ``campaign_state_fields`` (legacy rows: an old ``cancelled`` row carries ``scheduled_at``
@@ -399,7 +406,12 @@ class Campaign(TimeStampedModel):
         ]
 
     def __str__(self) -> str:
-        return f"Kampaniya #{self.pk} [{self.get_kind_display()}] {self.title} ({self.get_state_display()})"
+        return gettext("Kampaniya #%(id)s [%(kind)s] %(title)s (%(state)s)") % {
+            "id": self.pk,
+            "kind": self.get_kind_display(),
+            "title": self.title,
+            "state": self.get_state_display(),
+        }
 
 
 class CampaignRecipient(models.Model):
@@ -469,7 +481,11 @@ class CampaignRecipient(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"Kampaniya #{self.campaign_id} → mijoz #{self.customer_id} ({self.get_state_display()})"
+        return gettext("Kampaniya #%(campaign_id)s → mijoz #%(customer_id)s (%(state)s)") % {
+            "campaign_id": self.campaign_id,
+            "customer_id": self.customer_id,
+            "state": self.get_state_display(),
+        }
 
 
 class TestDevice(TimeStampedModel):
@@ -504,7 +520,7 @@ class TestDevice(TimeStampedModel):
         ]
 
     def __str__(self) -> str:
-        return f"Test qurilmasi «{self.label}» ({self.phone})"
+        return gettext("Test qurilmasi «%(label)s» (%(phone)s)") % {"label": self.label, "phone": self.phone}
 
 
 class CampaignTest(models.Model):
@@ -569,7 +585,11 @@ class CampaignTest(models.Model):
         indexes = [models.Index(fields=["campaign", "revision"], name="campaigntest_campaign_rev_idx")]
 
     def __str__(self) -> str:
-        return f"Kampaniya #{self.campaign_id} testi → {self.device_label} (v{self.revision})"
+        return gettext("Kampaniya #%(campaign_id)s testi → %(device)s (v%(revision)s)") % {
+            "campaign_id": self.campaign_id,
+            "device": self.device_label,
+            "revision": self.revision,
+        }
 
 
 class InboxNotification(TimeStampedModel):
@@ -650,4 +670,8 @@ class InboxNotification(TimeStampedModel):
         ]
 
     def __str__(self) -> str:
-        return f"Inbox «{self.get_kind_display()}» → mijoz #{self.customer_id}: {self.title[:40]}"
+        return gettext("Inbox «%(kind)s» → mijoz #%(customer_id)s: %(title)s") % {
+            "kind": self.get_kind_display(),
+            "customer_id": self.customer_id,
+            "title": self.title[:40],
+        }

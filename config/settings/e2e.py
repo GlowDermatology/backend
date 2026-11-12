@@ -32,6 +32,8 @@ ROOT_URLCONF = "config.urls_e2e"
 ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
 OPS_DOMAIN = env_str("E2E_OPS_DOMAIN", "").strip().lower()
 OPS_IP_FAILURE_LIMIT = env_int("E2E_OPS_IP_FAILURE_LIMIT", 1000)
+# The suite reads the console in its source language; tests/languages.spec.ts switches it.
+OPS_DEFAULT_LANGUAGE = "uz"
 STATIC_ROOT = Path(env_str("E2E_STATIC_ROOT", str(BASE_DIR / "e2e_admin" / ".static")))
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},

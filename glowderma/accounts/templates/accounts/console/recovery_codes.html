@@ -1,9 +1,10 @@
 {% extends 'accounts/console/base_step.html' %}
-{% load static unfold %}
+{% load i18n static unfold %}
 {% comment %}
   The recovery codes of a finished enrolment, shown once (GET after the enrolment POST: a reload never re-posts
-  the form). Copy uses ops/recovery-codes.js (a static file: the edge's CSP runs no inline script); the
-  download link is a plain data: URL and works without JavaScript.
+  the form). Copy uses ops/recovery-codes.js (a static file: the edge's CSP runs no inline script; its texts
+  are the button's data-* attributes); the download link is a plain data: URL and works without JavaScript.
+  No language switcher while the codes are on the page: switching reloads it, and the codes are shown once.
 {% endcomment %}
 
 {% block extrahead %}
@@ -15,9 +16,10 @@
 
 {% block step %}
     {% if recovery_codes %}
-        {% include "unfold/helpers/messages/success.html" with message="Ikki bosqichli himoya yoqildi." %}
+        {% translate "Ikki bosqichli himoya yoqildi." as enabled_message %}
+        {% include "unfold/helpers/messages/success.html" with message=enabled_message %}
 
-        <p class="ops-signin-lead">Telefoningiz yo‘qolsa, quyidagi zaxira kodlar bilan kirasiz. Ular <strong>faqat hozir</strong> ko‘rsatiladi: yozib oling yoki parol menejeriga saqlang. Har bir kod bir marta ishlaydi.</p>
+        <p class="ops-signin-lead">{% blocktranslate trimmed %}Telefoningiz yo‘qolsa, quyidagi zaxira kodlar bilan kirasiz. Ular <strong>faqat hozir</strong> ko‘rsatiladi: yozib oling yoki parol menejeriga saqlang. Har bir kod bir marta ishlaydi.{% endblocktranslate %}</p>
 
         <ul class="ops-recovery-codes" id="recovery-codes">
             {% for code in recovery_codes %}
@@ -26,11 +28,11 @@
         </ul>
 
         <div class="ops-recovery-tools">
-            <button type="button" class="ops-recovery-copy" data-copy-target="recovery-codes" data-copied-label="Nusxa olindi" hidden>
-                <span class="material-symbols-outlined">content_copy</span> Nusxa olish
+            <button type="button" class="ops-recovery-copy" data-copy-target="recovery-codes" data-copy-header="{{ codes_header }}" data-copied-label="{% translate 'Nusxa olindi' %}" hidden>
+                <span class="material-symbols-outlined">content_copy</span> {% translate "Nusxa olish" %}
             </button>
             <a class="ops-recovery-download" href="{{ codes_download }}" download="{{ codes_filename }}">
-                <span class="material-symbols-outlined">download</span> .txt faylga yuklab olish
+                <span class="material-symbols-outlined">download</span> {% translate ".txt faylga yuklab olish" %}
             </a>
         </div>
     {% else %}
@@ -39,7 +41,9 @@
 
     <div class="flex flex-col gap-3 mt-6">
         {% component "unfold/components/button.html" with href=next_url variant="primary" class="w-full" %}
-            {% if recovery_codes %}Kodlarni saqladim, davom etish{% else %}Konsolga o‘tish{% endif %} <span class="material-symbols-outlined relative right-0 transition-all group-hover:-right-1 text-sm">arrow_forward</span>
+            {% if recovery_codes %}{% translate "Kodlarni saqladim, davom etish" %}{% else %}{% translate "Konsolga o‘tish" %}{% endif %} <span class="material-symbols-outlined relative right-0 transition-all group-hover:-right-1 text-sm">arrow_forward</span>
         {% endcomponent %}
     </div>
 {% endblock %}
+
+{% block language_switch %}{% if not recovery_codes %}{{ block.super }}{% endif %}{% endblock %}

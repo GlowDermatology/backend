@@ -13,6 +13,8 @@ from typing import Any, cast
 from django.contrib import admin
 from django.db import models
 from django.http import HttpRequest
+from django.utils.translation import gettext, ngettext
+from django.utils.translation import gettext_lazy as _
 
 from glowderma.accounts import sessions
 from glowderma.accounts.models import Address, AuthSession, Customer, CustomerSocialIdentity, Device
@@ -52,36 +54,36 @@ class CustomerOrderInline(ReadOnlyTabularInline):
     fk_name = "customer"
     fields = ("id", "status_label", "fulfilment", "total_som", "payment_provider", "channel", "created_at")
     ordering = ("-created_at", "-id")
-    status_label = staticmethod(status_badge("status", "Holat", ORDER_STATUS_VARIANTS, ORDER_STATUS))
-    total_som = staticmethod(money_column("total", "Jami"))
+    status_label = staticmethod(status_badge("status", _("Holat"), ORDER_STATUS_VARIANTS, ORDER_STATUS))
+    total_som = staticmethod(money_column("total", _("Jami")))
     per_page = 10
     tab = True
-    verbose_name_plural = "Buyurtmalar"
+    verbose_name_plural = _("Buyurtmalar")
 
 
 class CustomerLoyaltyInline(ReadOnlyTabularInline):
     model = LoyaltyAccount
     fields = ("balance_som", "updated_at")
-    balance_som = staticmethod(money_column("balance", "Balans"))
+    balance_som = staticmethod(money_column("balance", _("Balans")))
     tab = True
-    verbose_name_plural = "Cashback"
+    verbose_name_plural = _("Cashback")
 
 
 class CustomerAppointmentInline(ReadOnlyTabularInline):
     model = Appointment
     fields = ("start", "professional", "service", "status", "requested_via", "price_som")
-    price_som = staticmethod(money_column("price", "Narx"))
+    price_som = staticmethod(money_column("price", _("Narx")))
     ordering = ("-start", "-id")
     per_page = 10
     tab = True
-    verbose_name_plural = "Qabullar"
+    verbose_name_plural = _("Qabullar")
 
 
 class CustomerAddressInline(ReadOnlyTabularInline):
     model = Address
     fields = ("label", "text", "is_default")
     tab = True
-    verbose_name_plural = "Manzillar"
+    verbose_name_plural = _("Manzillar")
 
 
 class CustomerDeviceInline(ReadOnlyTabularInline):
@@ -89,7 +91,7 @@ class CustomerDeviceInline(ReadOnlyTabularInline):
     fields = ("platform", "model", "app_version", "push_enabled", "is_active", "last_active_at")
     ordering = ("-last_active_at",)
     tab = True
-    verbose_name_plural = "Qurilmalar"
+    verbose_name_plural = _("Qurilmalar")
 
 
 class CustomerSessionInline(ReadOnlyTabularInline):
@@ -106,18 +108,18 @@ class CustomerSessionInline(ReadOnlyTabularInline):
     ordering = ("-created_at",)
     per_page = 10
     tab = True
-    verbose_name_plural = "Sessiyalar"
+    verbose_name_plural = _("Sessiyalar")
 
 
 class CustomerSocialInline(ReadOnlyTabularInline):
     model = CustomerSocialIdentity
     fields = ("provider", "email_at_link", "created_at")
     tab = True
-    verbose_name_plural = "Ijtimoiy kirishlar"
+    verbose_name_plural = _("Ijtimoiy kirishlar")
 
 
 def _no_open_session(model_admin: Any, request: HttpRequest, customer: Customer) -> str:
-    return "" if sessions.open_sessions(customer.pk).exists() else "Mijozning ochiq sessiyasi yo‘q."
+    return "" if sessions.open_sessions(customer.pk).exists() else gettext("Mijozning ochiq sessiyasi yo‘q.")
 
 
 class CustomerAdmin(OpsActionsMixin, ReadOnlyAdmin):
@@ -132,7 +134,7 @@ class CustomerAdmin(OpsActionsMixin, ReadOnlyAdmin):
         "name",
         masked_phone_column("phone"),
         masked_email_column("email"),
-        status_column("status", "Holat", {"active": SUCCESS, "deleted": DANGER}, CUSTOMER_STATUS),
+        status_column("status", _("Holat"), {"active": SUCCESS, "deleted": DANGER}, CUSTOMER_STATUS),
         "language",
         "registered_at",
     )
@@ -151,7 +153,7 @@ class CustomerAdmin(OpsActionsMixin, ReadOnlyAdmin):
     )
     tab_groups = (
         (
-            "Mijoz",
+            _("Mijoz"),
             (
                 "id",
                 "name",
@@ -165,7 +167,7 @@ class CustomerAdmin(OpsActionsMixin, ReadOnlyAdmin):
             ),
         ),
         (
-            "Kirish",
+            _("Kirish"),
             (
                 "registered_at",
                 "last_login_at",
@@ -175,7 +177,7 @@ class CustomerAdmin(OpsActionsMixin, ReadOnlyAdmin):
                 "history_from",
             ),
         ),
-        ("Rozilik", ("terms_version", "consent_at", "consent_ip")),
+        (_("Rozilik"), ("terms_version", "consent_at", "consent_ip")),
     )
     actions_detail = ("revoke_all_sessions",)
 
@@ -186,16 +188,17 @@ class CustomerAdmin(OpsActionsMixin, ReadOnlyAdmin):
         contact = mask_phone(customer.phone) if customer.phone else ""
         if not contact and customer.email:
             contact = mask_email(customer.email)
-        return " · ".join(part for part in (f"Mijoz #{customer.pk}", customer.name, contact) if part)
+        number = gettext("Mijoz #%(id)s") % {"id": customer.pk}
+        return " · ".join(part for part in (number, customer.name, contact) if part)
 
     @ops_action(
-        description="Barcha sessiyalarni tugatish",
-        title="Mijozning barcha sessiyalarini tugatish",
-        body=(
+        description=_("Barcha sessiyalarni tugatish"),
+        title=_("Mijozning barcha sessiyalarini tugatish"),
+        body=_(
             "Mijoz barcha telefon va brauzerlardan chiqariladi (sabab: «Admin tugatdi»), sessiyasiz qolgan "
             "qurilmalarga push yuborilmaydi. Yo‘qolgan telefon yoki begona kirish gumon qilinganda ishlating."
         ),
-        submit="Hammasini tugatish",
+        submit=_("Hammasini tugatish"),
         icon="logout",
         variant=ActionVariant.DANGER,
         url_path="revoke-all-sessions",
@@ -206,10 +209,11 @@ class CustomerAdmin(OpsActionsMixin, ReadOnlyAdmin):
     ) -> ActionResult:
         count = sessions.revoke_all_sessions(customer.pk, actor=request.user, request=request)
         if not count:
-            return refused("Mijozning ochiq sessiyasi yo‘q: hech narsa o‘zgarmadi.")
+            return refused(gettext("Mijozning ochiq sessiyasi yo‘q: hech narsa o‘zgarmadi."))
         forget_cached_counts("dash:customers")
         return done(
-            f"{count} ta sessiya tugatildi.",
+            ngettext("%(count)s ta sessiya tugatildi.", "%(count)s ta sessiya tugatildi.", count)
+            % {"count": count},
             audit_action="ops.customer_sessions_revoked",
             entity_type="customer",
             entity_id=customer.pk,

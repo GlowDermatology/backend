@@ -9,10 +9,12 @@ latest audit rows 1 — plus the readiness probe's own sync read when a syncing 
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 from django.urls import reverse
+from django.utils.translation import gettext, ngettext
+from django.utils.translation import gettext_lazy as _
 
 from glowderma.core import consistency, enums, integration_modes, readiness
 from glowderma.integrations import selectors as integration_selectors
@@ -38,6 +40,9 @@ from glowderma.reporting.dashboards import (
 )
 from glowderma.reporting.dashboards import report as report_module
 
+if TYPE_CHECKING:
+    from django_stubs_ext import StrOrPromise  # a development dependency: never imported at runtime
+
 # --- thresholds ---------------------------------------------------------------------------------------------
 # Outbox: any dead message is an action item; open messages overdue (K6 rule) warn, many of them mean the
 # dispatcher is down; a long queue warns even when nothing is overdue yet. The dispatcher runs every 10 s: a
@@ -61,6 +66,7 @@ JOB_STUCK_AFTER = timedelta(minutes=15)
 # The nightly report: stale after 36 h, critical after three nights (report_module.age_state).
 REPORT_CRITICAL_AFTER = report_module.REPORT_CRITICAL_AFTER
 
+# Brand and protocol names: the same in every language of the console.
 PROVIDER_LABELS: dict[str, str] = {
     "click": "Click",
     "payme": "Payme",
@@ -73,8 +79,13 @@ PROVIDER_LABELS: dict[str, str] = {
 }
 PROVIDER_ORDER = ("click", "payme", "bts", "eskiz", "email", "fcm", "oauth", "billz")
 WEBHOOK_PROVIDERS: tuple[str, ...] = tuple(WebhookInbox.Provider.values)
-JOB_LABELS: dict[str, str] = {enums.JobKind.BILLZ_IMPORT.value: "Billz import"}
-JOB_STATE_LABELS = {"queued": "Navbatda", "running": "Ishlamoqda", "succeeded": "Bajarildi", "failed": "Xato"}
+JOB_LABELS: dict[str, StrOrPromise] = {enums.JobKind.BILLZ_IMPORT.value: _("Billz import")}
+JOB_STATE_LABELS: dict[str, StrOrPromise] = {
+    "queued": _("Navbatda"),
+    "running": _("Ishlamoqda"),
+    "succeeded": _("Bajarildi"),
+    "failed": _("Xato"),
+}
 
 
 def _state_link(provider: str) -> str:
@@ -153,8 +164,13 @@ def _outbox(now: datetime, overdue: timedelta, topics: list[consistency.TopicBac
             "title": "Outbox",
             "icon": "outbox",
             "value": num(dead),
-            "unit": "o‘lik xabar",
-            "hint": f"{num(late)} kechikkan · {num(queued)} navbatda",
+            "unit": ngettext("o‘lik xabar", "o‘lik xabar", dead),
+            "hint": " · ".join(
+                (
+                    ngettext("%(count)s kechikkan", "%(count)s kechikkan", late) % {"count": num(late)},
+                    ngettext("%(count)s navbatda", "%(count)s navbatda", queued) % {"count": num(queued)},
+                )
+            ),
             "href": href,
             "state": state(tile_state),
         },
@@ -194,11 +210,12 @@ def _webhooks(now: datetime) -> dict[str, Any]:
     return {
         "rows": rows,
         "tile": {
-            "title": "Webhooklar · 24 soat",
+            "title": gettext("Webhooklar · 24 soat"),
             "icon": "webhook",
             "value": num(failed),
-            "unit": "xato",
-            "hint": f"{num(total)} ta qabul qilindi",
+            "unit": ngettext("xato", "xato", failed),
+            "hint": ngettext("%(count)s ta qabul qilindi", "%(count)s ta qabul qilindi", total)
+            % {"count": num(total)},
             "href": changelist(
                 "integrations_webhookinbox", received_at__gte=iso(since), result__outcome__in=failed_filter
             ),
@@ -211,6 +228,12 @@ def _webhooks(now: datetime) -> dict[str, Any]:
 def _failures_state(row: IntegrationState | None) -> str:
     failures = row.consecutive_failures if row is not None else 0
     return by_count(failures, warn=FAILURES_WARN, critical=FAILURES_CRITICAL)
+
+
+def _consecutive_failures(failures: int) -> str:
+    return ngettext("%(count)s ketma-ket xato", "%(count)s ketma-ket xato", failures) % {
+        "count": num(failures)
+    }
 
 
 def _billz_tile(now: datetime, row: IntegrationState | None, live: bool) -> dict[str, Any]:
@@ -230,14 +253,14 @@ def _billz_tile(now: datetime, row: IntegrationState | None, live: bool) -> dict
         )
         shown = state(tile_state)
     else:
-        shown = state(NEUTRAL, "Sinov rejimi")
-    hint = f"{num(failures)} ketma-ket xato" if failures else "Ketma-ket xato yo‘q"
+        shown = state(NEUTRAL, gettext("Sinov rejimi"))
+    hint = _consecutive_failures(failures) if failures else gettext("Ketma-ket xato yo‘q")
     return {
-        "title": "Billz sinxroni",
+        "title": gettext("Billz sinxroni"),
         "icon": "sync",
         "value": ago(last, now),
         "unit": "",
-        "hint": hint if live else f"Sinov adapteri · {hint.lower()}",
+        "hint": hint if live else " · ".join((gettext("Sinov adapteri"), hint.lower())),
         "href": _state_link("billz"),
         "state": shown,
         # fake mode: the numbers are the fake adapter's, never an alarm
@@ -251,23 +274,25 @@ def _bts_tile(now: datetime, row: IntegrationState | None, live: bool) -> dict[s
     # Polling writes a sync only when it tracked a parcel: an old stamp with no failure is a quiet day.
     if live:
         return {
-            "title": "BTS kuzatuvi",
+            "title": gettext("BTS kuzatuvi"),
             "icon": "local_shipping",
-            "value": f"{num(failures)} xato" if failures else ago(last, now),
+            "value": ngettext("%(count)s xato", "%(count)s xato", failures) % {"count": num(failures)}
+            if failures
+            else ago(last, now),
             "unit": "",
-            "hint": f"Oxirgi kuzatuv: {stamp(last)}",
+            "hint": gettext("Oxirgi kuzatuv: %(when)s") % {"when": stamp(last)},
             "href": _state_link("bts"),
             "state": state(_failures_state(row)),
         }
     # Fake mode: the fake adapter's failures are no alarm, so they never become the big number.
     return {
-        "title": "BTS kuzatuvi",
+        "title": gettext("BTS kuzatuvi"),
         "icon": "local_shipping",
         "value": ago(last, now),
         "unit": "",
-        "hint": "Sinov adapteri" + (f" · {num(failures)} ketma-ket xato" if failures else ""),
+        "hint": gettext("Sinov adapteri") + (f" · {_consecutive_failures(failures)}" if failures else ""),
         "href": _state_link("bts"),
-        "state": state(NEUTRAL, "Sinov rejimi"),
+        "state": state(NEUTRAL, gettext("Sinov rejimi")),
         "muted": True,
     }
 
@@ -275,8 +300,8 @@ def _bts_tile(now: datetime, row: IntegrationState | None, live: bool) -> dict[s
 def _job_row(now: datetime, kind: str, job: Job | None) -> dict[str, Any]:
     if job is None:
         return {
-            "kind": JOB_LABELS.get(kind, kind),
-            "state_text": "Hali ishlamagan",
+            "kind": str(JOB_LABELS.get(kind, kind)),
+            "state_text": gettext("Hali ishlamagan"),
             "when": "—",
             "duration": "—",
             "href": changelist("integrations_job", kind__exact=kind),
@@ -293,8 +318,8 @@ def _job_row(now: datetime, kind: str, job: Job | None) -> dict[str, Any]:
     end = job.finished_at or (now if job.state == enums.JobState.RUNNING else None)
     took = (end - job.started_at).total_seconds() if end and job.started_at else None
     return {
-        "kind": JOB_LABELS.get(kind, kind),
-        "state_text": JOB_STATE_LABELS.get(job.state, job.state),
+        "kind": str(JOB_LABELS.get(kind, kind)),
+        "state_text": str(JOB_STATE_LABELS.get(job.state, job.state)),
         "when": ago(job.created_at, now),
         "duration": duration(took),
         "href": change("integrations_job", job.pk),
@@ -314,20 +339,22 @@ def _readiness(
         live = modes[provider] == enums.IntegrationMode.LIVE
         row = rows.get(provider)
         if live and not configured.get(provider, False):
-            shown = state(CRITICAL, "Sozlanmagan")
+            shown = state(CRITICAL, gettext("Sozlanmagan"))
         elif live:
             shown = state(_failures_state(row))
         elif production:
-            shown = state(WARN, "Sinov (prod)")
+            shown = state(WARN, gettext("Sinov (prod)"))
         else:
-            shown = state(NEUTRAL, "Sinov rejimi")
+            shown = state(NEUTRAL, gettext("Sinov rejimi"))
         result.append(
             {
                 "topic": provider,
                 "provider": PROVIDER_LABELS[provider],
-                "mode": "Live" if live else "Sinov",
+                "mode": "Live" if live else gettext("Sinov"),
                 "live": live,
-                "configured": ("Ha" if configured.get(provider) else "Yo‘q") if live else "—",
+                "configured": (gettext("Ha") if configured.get(provider) else gettext("Yo‘q"))
+                if live
+                else "—",
                 "last_success": ago(row.last_success_at, now) if row is not None else "—",
                 "failures": num(row.consecutive_failures) if row is not None else "—",
                 "last_error": stamp(row.last_error_at) if row is not None else "—",
@@ -364,18 +391,23 @@ def _beat(
     def audit_age_state(entry: Any) -> str:
         return report_module.age_state(None if entry is None else entry.created_at, now)
 
+    never_ran = gettext("Hech qachon ishlamagan")
+    minutes = interval.seconds // 60
     return [
         {
-            "task": "Outbox dispetcheri",
-            "schedule": "har 10 soniyada",
-            "trace": "Navbat bo‘sh" if lag is None else f"Eng eski xabar {ago(oldest, now)} kutmoqda",
+            "task": gettext("Outbox dispetcheri"),
+            "schedule": gettext("har 10 soniyada"),
+            "trace": gettext("Navbat bo‘sh")
+            if lag is None
+            else gettext("Eng eski xabar %(ago)s kutmoqda") % {"ago": ago(oldest, now)},
             "href": changelist("core_outboxmessage", status__in=",".join(consistency.OPEN_OUTBOX_STATUSES)),
             "state": state(dispatcher),
         },
         {
-            "task": "Billz delta sinxroni",
-            "schedule": f"har {interval.seconds // 60} daqiqada",
-            "trace": f"Oxirgi sinxron {ago(billz_last, now)}",
+            "task": gettext("Billz delta sinxroni"),
+            "schedule": ngettext("har %(count)s daqiqada", "har %(count)s daqiqada", minutes)
+            % {"count": minutes},
+            "trace": gettext("Oxirgi sinxron %(ago)s") % {"ago": ago(billz_last, now)},
             "href": _state_link("billz"),
             "state": state(
                 worst(
@@ -390,28 +422,29 @@ def _beat(
                 )
             )
             if billz_live
-            else state(NEUTRAL, "Sinov rejimi"),
+            else state(NEUTRAL, gettext("Sinov rejimi")),
         },
         {
-            "task": "Billz import (fon vazifasi)",
-            "schedule": "har kuni 04:23 + qo‘lda",
-            "trace": "Hali ishlamagan"
+            "task": gettext("Billz import (fon vazifasi)"),
+            "schedule": gettext("har kuni 04:23 + qo‘lda"),
+            "trace": gettext("Hali ishlamagan")
             if job is None
             else f"{JOB_STATE_LABELS.get(job.state, job.state)}, {ago(job.created_at, now)}",
             "href": change("integrations_job", job.pk) if job else changelist("integrations_job"),
             "state": _job_row(now, enums.JobKind.BILLZ_IMPORT, job)["state"],
         },
         {
-            "task": "BTS kuzatuvi",
-            "schedule": "har 10 daqiqada",
-            "trace": f"Oxirgi kuzatilgan posilka {ago(bts.last_sync_at if bts else None, now)}",
+            "task": gettext("BTS kuzatuvi"),
+            "schedule": gettext("har 10 daqiqada"),
+            "trace": gettext("Oxirgi kuzatilgan posilka %(ago)s")
+            % {"ago": ago(bts.last_sync_at if bts else None, now)},
             "href": _state_link("bts"),
-            "state": state(_failures_state(bts)) if bts_live else state(NEUTRAL, "Sinov rejimi"),
+            "state": state(_failures_state(bts)) if bts_live else state(NEUTRAL, gettext("Sinov rejimi")),
         },
         {
-            "task": "Konsistentlik hisoboti",
-            "schedule": "har kuni 03:40",
-            "trace": "Hech qachon ishlamagan"
+            "task": gettext("Konsistentlik hisoboti"),
+            "schedule": gettext("har kuni 03:40"),
+            "trace": never_ran
             if report_entry is None
             else f"{stamp(report_entry.created_at)} ({ago(report_entry.created_at, now)})",
             "href": change("core_auditentry", report_entry.pk)
@@ -420,9 +453,9 @@ def _beat(
             "state": state(audit_age_state(report_entry)),
         },
         {
-            "task": "Cashback daftari solishtiruvi",
-            "schedule": "hisobot bilan",
-            "trace": "Hech qachon ishlamagan"
+            "task": gettext("Cashback daftari solishtiruvi"),
+            "schedule": gettext("hisobot bilan"),
+            "trace": never_ran
             if reconcile_entry is None
             else f"{stamp(reconcile_entry.created_at)} ({ago(reconcile_entry.created_at, now)})",
             "href": change("core_auditentry", reconcile_entry.pk)
@@ -437,20 +470,20 @@ def _report_tile(now: datetime, summary: report_module.ReportSummary | None) -> 
     money_url = reverse("admin:reporting_money")
     if summary is None:
         return {
-            "title": "Konsistentlik hisoboti",
+            "title": gettext("Konsistentlik hisoboti"),
             "icon": "fact_check",
             "value": "—",
             "unit": "",
-            "hint": "Hisobot hali hech qachon ishlamagan",
+            "hint": gettext("Hisobot hali hech qachon ishlamagan"),
             "href": money_url,
             "state": state(report_module.age_state(None, now)),
         }
     tile_state = worst([report_module.findings_state(summary), report_module.age_state(summary.ran_at, now)])
     return {
-        "title": "Konsistentlik hisoboti",
+        "title": gettext("Konsistentlik hisoboti"),
         "icon": "fact_check",
         "value": num(summary.findings),
-        "unit": "topilma",
+        "unit": ngettext("topilma", "topilma", summary.findings),
         "hint": f"{stamp(summary.ran_at)} · {ago(summary.ran_at, now)}",
         "href": money_url,
         "state": state(tile_state),
@@ -461,15 +494,15 @@ def _report_tile(now: datetime, summary: report_module.ReportSummary | None) -> 
 # its provider row, its delta-sync task) count as one problem in the headline.
 TILE_TOPICS = ("outbox", "webhooks", "billz", "bts", "report", "jobs")
 BEAT_TOPICS = ("outbox", "billz", "jobs", "bts", "report", "reconcile")
-TOPIC_LABELS: dict[str, str] = {
+TOPIC_LABELS: dict[str, StrOrPromise] = {
     **PROVIDER_LABELS,
     "outbox": "Outbox",
-    "webhooks": "Webhooklar",
+    "webhooks": _("Webhooklar"),
     "billz": "Billz",
     "bts": "BTS",
-    "report": "Konsistentlik hisoboti",
-    "jobs": "Fon vazifalari",
-    "reconcile": "Cashback daftari solishtiruvi",
+    "report": _("Konsistentlik hisoboti"),
+    "jobs": _("Fon vazifalari"),
+    "reconcile": _("Cashback daftari solishtiruvi"),
 }
 
 
@@ -481,7 +514,7 @@ def _problems(signals: list[dict[str, Any]]) -> list[dict[str, Any]]:
         by_topic[topic] = worst([by_topic.get(topic, NEUTRAL), item["state"]["key"]])
     ranked = sorted((key != CRITICAL, topic) for topic, key in by_topic.items() if key in (WARN, CRITICAL))
     return [
-        {"topic": topic, "label": TOPIC_LABELS.get(topic, topic), "state": state(by_topic[topic])}
+        {"topic": topic, "label": str(TOPIC_LABELS.get(topic, topic)), "state": state(by_topic[topic])}
         for _rank, topic in ranked
     ]
 
@@ -491,10 +524,18 @@ def _headline(problems: list[dict[str, Any]]) -> str:
     left out): the same signals as the banner's colour, so the two never disagree."""
     critical = sum(1 for problem in problems if problem["state"]["key"] == CRITICAL)
     warnings = len(problems) - critical
-    parts = [f"{critical} ta jiddiy muammo"] if critical else []
+    parts = []
+    if critical:
+        parts.append(
+            ngettext("%(count)s ta jiddiy muammo", "%(count)s ta jiddiy muammo", critical)
+            % {"count": critical}
+        )
     if warnings:
-        parts.append(f"{warnings} ta ogohlantirish")
-    return ", ".join(parts) or "Hammasi joyida"
+        parts.append(
+            ngettext("%(count)s ta ogohlantirish", "%(count)s ta ogohlantirish", warnings)
+            % {"count": warnings}
+        )
+    return ", ".join(parts) or gettext("Hammasi joyida")
 
 
 def build(now: datetime) -> dict[str, Any]:
@@ -518,13 +559,13 @@ def build(now: datetime) -> dict[str, Any]:
         _bts_tile(now, rows.get("bts"), modes.get("bts") == enums.IntegrationMode.LIVE),
         _report_tile(now, summary),
         {
-            "title": "Fon vazifalari",
+            "title": gettext("Fon vazifalari"),
             "icon": "work_history",
             "value": first_job["state_text"],
             "unit": "",
             "hint": f"{first_job['kind']} · {first_job['when']} · {first_job['duration']}"
             if first_job["ran"]
-            else f"{first_job['kind']} hali ishga tushirilmagan",
+            else gettext("%(job)s hali ishga tushirilmagan") % {"job": first_job["kind"]},
             "href": first_job["href"],
             "state": state(job_tile_state),
         },

@@ -1,4 +1,5 @@
 {% extends "reporting/dashboards/base.html" %}
+{% load i18n %}
 
 {% block dashboard %}
     {% with d=dashboard %}
@@ -6,16 +7,16 @@
             <div class="gd-banner gd-banner--critical">
                 <div class="gd-banner__icon"><span class="material-symbols-outlined" aria-hidden="true">error</span></div>
                 <div>
-                    <div class="gd-banner__title">Tungi hisobot hali hech qachon ishlamagan</div>
-                    <div class="gd-banner__text">Beat vazifasi <span class="gd-mono">reporting-consistency-report</span> har kuni 03:40 da ishlashi kerak. Quyidagi «Hozir» ustuni tekshiruvlarni hozir qayta hisoblaydi.</div>
+                    <div class="gd-banner__title">{% translate "Tungi hisobot hali hech qachon ishlamagan" %}</div>
+                    <div class="gd-banner__text">{% blocktranslate with task='<span class="gd-mono">reporting-consistency-report</span>' %}Beat vazifasi {{ task }} har kuni 03:40 da ishlashi kerak.{% endblocktranslate %} {% translate "Quyidagi «Hozir» ustuni tekshiruvlarni hozir qayta hisoblaydi." %}</div>
                 </div>
             </div>
         {% elif d.report.stale %}
             <div class="gd-banner gd-banner--warn">
                 <div class="gd-banner__icon"><span class="material-symbols-outlined" aria-hidden="true">warning</span></div>
                 <div>
-                    <div class="gd-banner__title">Tungi hisobot eskirgan: oxirgisi {{ d.report.ago }}</div>
-                    <div class="gd-banner__text">36 soatdan ko‘p o‘tdi — beat yoki worker ishlamayotgan bo‘lishi mumkin. <a class="gd-link" href="{{ d.report.href }}">Oxirgi hisobot yozuvi</a></div>
+                    <div class="gd-banner__title">{% blocktranslate with ago=d.report.ago %}Tungi hisobot eskirgan: oxirgisi {{ ago }}{% endblocktranslate %}</div>
+                    <div class="gd-banner__text">{% translate "36 soatdan ko‘p o‘tdi — beat yoki worker ishlamayotgan bo‘lishi mumkin." %} <a class="gd-link" href="{{ d.report.href }}">{% translate "Oxirgi hisobot yozuvi" %}</a></div>
                 </div>
             </div>
         {% endif %}
@@ -26,13 +27,13 @@
 
         <section class="gd-panel" id="checks">
             <header class="gd-panel__head">
-                <h2 class="gd-panel__title">K1–K6 tekshiruvlari</h2>
-                <p class="gd-panel__note">«Hisobot» — {% if d.report %}{{ d.report.ran_at }} dagi tungi natija{% else %}hisobot yo‘q{% endif %} · «Hozir» — xuddi shu tekshiruv hozir</p>
-                {% if can_run_report %}<a class="gd-button" href="{{ d.run_report_url }}"><span class="material-symbols-outlined" aria-hidden="true">fact_check</span>Hisobotni hozir ishga tushirish</a>{% endif %}
+                <h2 class="gd-panel__title">{% translate "K1–K6 tekshiruvlari" %}</h2>
+                <p class="gd-panel__note">{% if d.report %}{% blocktranslate with when=d.report.ran_at %}«Hisobot» — {{ when }} dagi tungi natija{% endblocktranslate %}{% else %}{% translate "«Hisobot» — hisobot yo‘q" %}{% endif %} · {% translate "«Hozir» — xuddi shu tekshiruv hozir" %}</p>
+                {% if can_run_report %}<a class="gd-button" href="{{ d.run_report_url }}"><span class="material-symbols-outlined" aria-hidden="true">fact_check</span>{% translate "Hisobotni hozir ishga tushirish" %}</a>{% endif %}
             </header>
             <div class="gd-scroll">
                 <table class="gd-table">
-                    <thead><tr><th>Tekshiruv</th><th class="num">Hisobot</th><th class="gd-hide-sm">Namuna</th><th class="num">Hozir</th><th>Holat</th></tr></thead>
+                    <thead><tr><th>{% translate "Tekshiruv" %}</th><th class="num">{% translate "Hisobot" %}</th><th class="gd-hide-sm">{% translate "Namuna" %}</th><th class="num">{% translate "Hozir" %}</th><th>{% translate "Holat" %}</th></tr></thead>
                     <tbody>
                         {% for row in d.rows %}
                             <tr>
@@ -52,41 +53,41 @@
                     </tbody>
                 </table>
             </div>
-            <div class="gd-panel__foot">Har bir son o‘sha qatorlarning ro‘yxatiga olib boradi; ro‘yxat ko‘pi bilan 100 qatorni ochadi — undan ko‘p bo‘lsa, son ostida «Ro‘yxatda 100 / N» yoziladi. Hisobot hech narsani tuzatmaydi — har bir qator xodim harakatini talab qiladi.</div>
+            <div class="gd-panel__foot">{% translate "Har bir son o‘sha qatorlarning ro‘yxatiga olib boradi; ro‘yxat ko‘pi bilan 100 qatorni ochadi — undan ko‘p bo‘lsa, son ostida «Ro‘yxatda 100 / N» yoziladi." %} {% translate "Hisobot hech narsani tuzatmaydi — har bir qator xodim harakatini talab qiladi." %}</div>
         </section>
 
         <div class="gd-cols">
             <section class="gd-panel" id="policy">
                 <header class="gd-panel__head">
-                    <h2 class="gd-panel__title">Amaldagi cashback siyosati</h2>
-                    <p class="gd-panel__note">Daraja — mijozning umrbod xaridlari bo‘yicha</p>
+                    <h2 class="gd-panel__title">{% translate "Amaldagi cashback siyosati" %}</h2>
+                    <p class="gd-panel__note">{% translate "Daraja — mijozning umrbod xaridlari bo‘yicha" %}</p>
                 </header>
                 {% if d.policy_tiers %}
                     <div class="gd-scroll">
                         <table class="gd-table">
-                            <thead><tr><th>Umrbod xarid</th><th class="num">Cashback</th></tr></thead>
+                            <thead><tr><th>{% translate "Umrbod xarid" %}</th><th class="num">Cashback</th></tr></thead>
                             <tbody>{% for tier in d.policy_tiers %}<tr><td>{{ tier.range }}</td><td class="num strong">{{ tier.percent }}</td></tr>{% endfor %}</tbody>
                         </table>
                     </div>
                 {% else %}
-                    {% include "reporting/dashboards/_empty.html" with icon="policy" text="Amaldagi siyosat yo‘q: xaridlar cashback olmaydi. Siyosatni admin panelda e’lon qiling." %}
+                    {% include "reporting/dashboards/_empty.html" with icon="policy" text=_("Amaldagi siyosat yo‘q: xaridlar cashback olmaydi. Siyosatni admin panelda e’lon qiling.") %}
                 {% endif %}
             </section>
 
             <section class="gd-panel" id="reconcile">
                 <header class="gd-panel__head">
-                    <h2 class="gd-panel__title">Daftar solishtiruvi tekshiruvlari</h2>
-                    <p class="gd-panel__note">Oxirgi solishtiruv natijasi (audit jurnali)</p>
+                    <h2 class="gd-panel__title">{% translate "Daftar solishtiruvi tekshiruvlari" %}</h2>
+                    <p class="gd-panel__note">{% translate "Oxirgi solishtiruv natijasi (audit jurnali)" %}</p>
                 </header>
                 {% if d.reconcile_checks %}
                     <div class="gd-scroll">
                         <table class="gd-table">
-                            <thead><tr><th>Tekshiruv</th><th class="num">Nomuvofiqlik</th></tr></thead>
+                            <thead><tr><th>{% translate "Tekshiruv" %}</th><th class="num">{% translate "Nomuvofiqlik" %}</th></tr></thead>
                             <tbody>{% for check in d.reconcile_checks %}<tr><td title="{{ check.name }}">{{ check.label }}</td><td class="num">{% if check.raw %}<strong>{{ check.count }}</strong>{% else %}<span class="zero">0</span>{% endif %}</td></tr>{% endfor %}</tbody>
                         </table>
                     </div>
                 {% else %}
-                    {% include "reporting/dashboards/_empty.html" with icon="balance" text="Solishtiruv hali ishlamagan" %}
+                    {% include "reporting/dashboards/_empty.html" with icon="balance" text=_("Solishtiruv hali ishlamagan") %}
                 {% endif %}
             </section>
         </div>

@@ -15,10 +15,14 @@ the same warm taupe). ``primary-600`` (Unfold's text colour of links and the act
 darker than the gold ink so that it reads at WCAG AA 4.5:1 on ``base-100`` (the active entry's background).
 """
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django.templatetags.static import static
 from django.urls import reverse_lazy
+from django.utils.translation import gettext_lazy as _
+
+if TYPE_CHECKING:
+    from django_stubs_ext import StrOrPromise
 
 STAFF_ONLY = "glowderma.core.admin.is_active_staff"
 NAV_BADGES = "glowderma.reporting.admin_nav"
@@ -28,7 +32,9 @@ def _changelist(app_label: str, model_name: str) -> Any:
     return reverse_lazy(f"admin:{app_label}_{model_name}_changelist")
 
 
-def _item(title: str, icon: str, app_label: str, model_name: str, badge: str | None = None) -> dict[str, Any]:
+def _item(
+    title: StrOrPromise, icon: str, app_label: str, model_name: str, badge: str | None = None
+) -> dict[str, Any]:
     item: dict[str, Any] = {
         "title": title,
         "icon": icon,
@@ -44,128 +50,130 @@ def _item(title: str, icon: str, app_label: str, model_name: str, badge: str | N
 DASHBOARD_VIEWS = "glowderma.reporting.admin_views"
 
 
-def _dashboard(title: str, icon: str, url_name: str) -> dict[str, Any]:
+def _dashboard(title: StrOrPromise, icon: str, url_name: str) -> dict[str, Any]:
     return {"title": title, "icon": icon, "link": reverse_lazy(url_name), "permission": STAFF_ONLY}
 
 
 # The four dashboards of the console (glowderma.reporting.dashboards): the index is «Ops holati».
 DASHBOARD_GROUP: dict[str, Any] = {
-    "title": "Boshqaruv",
+    "title": _("Boshqaruv"),
     "separator": False,
     "collapsible": False,
     "items": [
-        _dashboard("Ops holati", "monitor_heart", "admin:index"),
-        _dashboard("Pul solishtirish", "account_balance", "admin:reporting_money"),
-        _dashboard("Savdo va katalog", "query_stats", "admin:reporting_sales"),
-        _dashboard("Mijozlar va kirish", "diversity_3", "admin:reporting_customers"),
+        _dashboard(_("Ops holati"), "monitor_heart", "admin:index"),
+        _dashboard(_("Pul solishtirish"), "account_balance", "admin:reporting_money"),
+        _dashboard(_("Savdo va katalog"), "query_stats", "admin:reporting_sales"),
+        _dashboard(_("Mijozlar va kirish"), "diversity_3", "admin:reporting_customers"),
     ],
 }
 
 SIDEBAR_NAVIGATION: list[dict[str, Any]] = [
     DASHBOARD_GROUP,
     {
-        "title": "Savdo",
+        "title": _("Savdo"),
         "separator": True,
         "collapsible": False,
         "items": [
-            _item("Buyurtmalar", "shopping_bag", "commerce", "order"),
-            _item("To‘lovlar", "payments", "payments", "payment"),
-            _item("Qaytarishlar", "currency_exchange", "payments", "refund", badge="refunds_needing_action"),
-            _item("Yetkazib berish", "local_shipping", "delivery", "shipment"),
-            _item("Savatlar", "shopping_cart", "commerce", "cart"),
-            _item("Buyurtma qatorlari", "list_alt", "commerce", "orderitem"),
-            _item("Buyurtma tarixi", "history", "commerce", "orderevent"),
-            _item("Zaxira bandlari", "inventory", "commerce", "stockreservation"),
-            _item("Savat qatorlari", "add_shopping_cart", "commerce", "cartitem"),
-            _item("Yetkazish tarixi", "route", "delivery", "shipmentevent"),
+            _item(_("Buyurtmalar"), "shopping_bag", "commerce", "order"),
+            _item(_("To‘lovlar"), "payments", "payments", "payment"),
+            _item(
+                _("Qaytarishlar"), "currency_exchange", "payments", "refund", badge="refunds_needing_action"
+            ),
+            _item(_("Yetkazib berish"), "local_shipping", "delivery", "shipment"),
+            _item(_("Savatlar"), "shopping_cart", "commerce", "cart"),
+            _item(_("Buyurtma qatorlari"), "list_alt", "commerce", "orderitem"),
+            _item(_("Buyurtma tarixi"), "history", "commerce", "orderevent"),
+            _item(_("Zaxira bandlari"), "inventory", "commerce", "stockreservation"),
+            _item(_("Savat qatorlari"), "add_shopping_cart", "commerce", "cartitem"),
+            _item(_("Yetkazish tarixi"), "route", "delivery", "shipmentevent"),
         ],
     },
     {
-        "title": "Katalog",
+        "title": _("Katalog"),
         "separator": True,
         "collapsible": True,
         "items": [
-            _item("Mahsulotlar", "inventory_2", "catalog", "product"),
-            _item("Kategoriyalar", "category", "catalog", "category"),
-            _item("Qoldiqlar", "warehouse", "catalog", "productstock"),
-            _item("Rasmlar", "image", "catalog", "productimage"),
-            _item("Bannerlar", "view_carousel", "catalog", "banner"),
+            _item(_("Mahsulotlar"), "inventory_2", "catalog", "product"),
+            _item(_("Kategoriyalar"), "category", "catalog", "category"),
+            _item(_("Qoldiqlar"), "warehouse", "catalog", "productstock"),
+            _item(_("Rasmlar"), "image", "catalog", "productimage"),
+            _item(_("Bannerlar"), "view_carousel", "catalog", "banner"),
             # The settings page (glowderma.site_config.admin_views): store settings, contacts, legal texts.
-            _dashboard("Sozlamalar", "tune", "admin:site_config_settings"),
+            _dashboard(_("Sozlamalar"), "tune", "admin:site_config_settings"),
         ],
     },
     {
-        "title": "Mijozlar va sodiqlik",
+        "title": _("Mijozlar va sodiqlik"),
         "separator": True,
         "collapsible": True,
         "items": [
-            _item("Mijozlar", "group", "accounts", "customer"),
-            _item("Manzillar", "home_pin", "accounts", "address"),
-            _item("Ijtimoiy kirishlar", "account_circle", "accounts", "customersocialidentity"),
-            _item("Cashback hisoblari", "account_balance_wallet", "loyalty", "loyaltyaccount"),
-            _item("Cashback daftari", "receipt_long", "loyalty", "ledgerentry"),
-            _item("Cashback bandlari", "lock_clock", "loyalty", "cashbackhold"),
-            _item("Xaridlar", "storefront", "loyalty", "purchase"),
-            _item("Xarid qatorlari", "format_list_bulleted", "loyalty", "purchaseitem"),
-            _item("Cashback siyosati", "policy", "loyalty", "cashbackpolicy"),
-            _item("Cashback darajalari", "stairs", "loyalty", "cashbacktier"),
-            _item("POS qurilmalar", "point_of_sale", "loyalty", "posdevice"),
+            _item(_("Mijozlar"), "group", "accounts", "customer"),
+            _item(_("Manzillar"), "home_pin", "accounts", "address"),
+            _item(_("Ijtimoiy kirishlar"), "account_circle", "accounts", "customersocialidentity"),
+            _item(_("Cashback hisoblari"), "account_balance_wallet", "loyalty", "loyaltyaccount"),
+            _item(_("Cashback daftari"), "receipt_long", "loyalty", "ledgerentry"),
+            _item(_("Cashback bandlari"), "lock_clock", "loyalty", "cashbackhold"),
+            _item(_("Xaridlar"), "storefront", "loyalty", "purchase"),
+            _item(_("Xarid qatorlari"), "format_list_bulleted", "loyalty", "purchaseitem"),
+            _item(_("Cashback siyosati"), "policy", "loyalty", "cashbackpolicy"),
+            _item(_("Cashback darajalari"), "stairs", "loyalty", "cashbacktier"),
+            _item(_("POS qurilmalar"), "point_of_sale", "loyalty", "posdevice"),
         ],
     },
     {
-        "title": "Klinika",
+        "title": _("Klinika"),
         "separator": True,
         "collapsible": True,
         "items": [
-            _item("Qabullar", "event", "appointments", "appointment"),
-            _item("Qabul tarixi", "event_note", "appointments", "appointmentevent"),
-            _item("Mutaxassislar", "medical_services", "professionals", "professional"),
-            _item("Xizmatlar", "spa", "professionals", "service"),
-            _item("Mutaxassis xizmatlari", "assignment_ind", "professionals", "professionalservice"),
-            _item("Ish vaqti", "schedule", "professionals", "workinghours"),
-            _item("Kun ish vaqti", "calendar_month", "professionals", "workinghoursoverride"),
-            _item("Band vaqtlar", "block", "professionals", "blockedperiod"),
-            _item("Filiallar", "location_on", "professionals", "location"),
+            _item(_("Qabullar"), "event", "appointments", "appointment"),
+            _item(_("Qabul tarixi"), "event_note", "appointments", "appointmentevent"),
+            _item(_("Mutaxassislar"), "medical_services", "professionals", "professional"),
+            _item(_("Xizmatlar"), "spa", "professionals", "service"),
+            _item(_("Mutaxassis xizmatlari"), "assignment_ind", "professionals", "professionalservice"),
+            _item(_("Ish vaqti"), "schedule", "professionals", "workinghours"),
+            _item(_("Kun ish vaqti"), "calendar_month", "professionals", "workinghoursoverride"),
+            _item(_("Band vaqtlar"), "block", "professionals", "blockedperiod"),
+            _item(_("Filiallar"), "location_on", "professionals", "location"),
         ],
     },
     {
-        "title": "Xabarnomalar",
+        "title": _("Xabarnomalar"),
         "separator": True,
         "collapsible": True,
         "items": [
-            _item("Kampaniyalar", "campaign", "notifications", "campaign"),
-            _item("Qabul qiluvchilar", "group_add", "notifications", "campaignrecipient"),
-            _item("Inbox", "inbox", "notifications", "inboxnotification"),
-            _item("Segmentlar", "groups", "notifications", "customersegment"),
-            _item("Segment a’zolari", "person_add", "notifications", "segmentmember"),
-            _item("Holat shablonlari", "sms", "notifications", "statustemplate"),
+            _item(_("Kampaniyalar"), "campaign", "notifications", "campaign"),
+            _item(_("Qabul qiluvchilar"), "group_add", "notifications", "campaignrecipient"),
+            _item(_("Inbox"), "inbox", "notifications", "inboxnotification"),
+            _item(_("Segmentlar"), "groups", "notifications", "customersegment"),
+            _item(_("Segment a’zolari"), "person_add", "notifications", "segmentmember"),
+            _item(_("Holat shablonlari"), "sms", "notifications", "statustemplate"),
         ],
     },
     {
-        "title": "Integratsiyalar va navbatlar",
+        "title": _("Integratsiyalar va navbatlar"),
         "separator": True,
         "collapsible": False,
         "items": [
             _item("Outbox", "outbox", "core", "outboxmessage", badge="dead_outbox"),
-            _item("Webhooklar", "webhook", "integrations", "webhookinbox", badge="failed_webhooks"),
-            _item("Fon vazifalari", "sync", "integrations", "job"),
-            _item("Integratsiya holati", "hub", "integrations", "integrationstate"),
-            _item("Idempotentlik", "fingerprint", "core", "idempotencyrecord"),
+            _item(_("Webhooklar"), "webhook", "integrations", "webhookinbox", badge="failed_webhooks"),
+            _item(_("Fon vazifalari"), "sync", "integrations", "job"),
+            _item(_("Integratsiya holati"), "hub", "integrations", "integrationstate"),
+            _item(_("Idempotentlik"), "fingerprint", "core", "idempotencyrecord"),
         ],
     },
     {
-        "title": "Xavfsizlik",
+        "title": _("Xavfsizlik"),
         "separator": True,
         "collapsible": True,
         "items": [
-            _item("Xodimlar", "badge", "accounts", "staffuser"),
-            _item("Sessiyalar", "devices", "accounts", "authsession"),
-            _item("Qurilmalar", "smartphone", "accounts", "device"),
-            _item("SMS kodlar", "pin", "accounts", "smscode"),
-            _item("2FA qurilmalar", "phonelink_lock", "otp_totp", "totpdevice"),
-            _item("Tiklash kodlari", "key", "otp_static", "staticdevice"),
-            _item("Xodim ijtimoiy kirishlari", "link", "accounts", "socialidentity"),
-            _item("Audit jurnali", "manage_search", "core", "auditentry"),
+            _item(_("Xodimlar"), "badge", "accounts", "staffuser"),
+            _item(_("Sessiyalar"), "devices", "accounts", "authsession"),
+            _item(_("Qurilmalar"), "smartphone", "accounts", "device"),
+            _item(_("SMS kodlar"), "pin", "accounts", "smscode"),
+            _item(_("2FA qurilmalar"), "phonelink_lock", "otp_totp", "totpdevice"),
+            _item(_("Tiklash kodlari"), "key", "otp_static", "staticdevice"),
+            _item(_("Xodim ijtimoiy kirishlari"), "link", "accounts", "socialidentity"),
+            _item(_("Audit jurnali"), "manage_search", "core", "auditentry"),
         ],
     },
 ]
@@ -173,7 +181,7 @@ SIDEBAR_NAVIGATION: list[dict[str, Any]] = [
 UNFOLD: dict[str, Any] = {
     "SITE_TITLE": "Glow Derma Ops",
     "SITE_HEADER": "Glow Derma Ops",
-    "SITE_SUBHEADER": "Operatsion konsol",
+    "SITE_SUBHEADER": _("Operatsion konsol"),
     "SITE_URL": None,
     "SITE_ICON": lambda request: static("ops/logo.svg"),
     "SITE_FAVICONS": [

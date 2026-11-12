@@ -12,6 +12,7 @@ from typing import Self
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
 from django.db.models import BooleanField, Case, Q, Value, When
+from django.utils.translation import gettext
 
 from glowderma.core import enums
 from glowderma.core.labels import stamp
@@ -131,7 +132,11 @@ class Shipment(TimeStampedModel):
 
     def __str__(self) -> str:
         suffix = f" {self.tracking_number}" if self.tracking_number else ""
-        return f"Buyurtma №{self.order_id} jo‘natmasi: {self.get_state_display()}{suffix}"
+        text = gettext("Buyurtma №%(order)s jo‘natmasi: %(state)s") % {
+            "order": self.order_id,
+            "state": self.get_state_display(),
+        }
+        return f"{text}{suffix}"
 
     @staticmethod
     def pending_q(prefix: str = "") -> Q:
@@ -185,4 +190,8 @@ class ShipmentEvent(AppendOnlyModel):
 
     def __str__(self) -> str:
         status = f" {self.bts_status}" if self.bts_status else ""
-        return f"Jo‘natma #{self.shipment_id}: {self.get_kind_display()}{status} · {stamp(self.at)}"
+        return gettext("Jo‘natma #%(shipment)s: %(event)s · %(at)s") % {
+            "shipment": self.shipment_id,
+            "event": f"{self.get_kind_display()}{status}",
+            "at": stamp(self.at),
+        }

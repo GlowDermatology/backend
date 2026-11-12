@@ -13,7 +13,10 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from django.utils.translation import gettext, ngettext
+from django.utils.translation import gettext_lazy as _
 
 from glowderma.catalog import selectors as catalog_selectors
 from glowderma.commerce import selectors as commerce_selectors
@@ -40,6 +43,9 @@ from glowderma.reporting.dashboards import (
     state,
 )
 
+if TYPE_CHECKING:
+    from django_stubs_ext import StrOrPromise  # a development dependency: never imported at runtime
+
 WINDOWS = (7, 30, 90)
 DEFAULT_WINDOW = 30
 TOP_PRODUCTS = 10
@@ -47,31 +53,31 @@ STALE_STOCK_AFTER = catalog_selectors.STALE_STOCK_AFTER
 SEO_CACHE_SECONDS = 600
 POS = "pos"
 # Channel order of the stacked chart (bottom → top) and its validated palette slots (dashboards.css).
-CHANNELS: tuple[tuple[str, str], ...] = (
-    (enums.OrderChannel.WEB, "Veb-sayt"),
+CHANNELS: tuple[tuple[str, StrOrPromise], ...] = (
+    (enums.OrderChannel.WEB, _("Veb-sayt")),
     (enums.OrderChannel.IOS, "iOS"),
     (enums.OrderChannel.ANDROID, "Android"),
-    (POS, "Do‘kon (POS)"),
+    (POS, _("Do‘kon (POS)")),
 )
-SEO_CODE_LABELS: dict[str, str] = {
-    enums.SeoIssueCode.NAME_MISSING: "O‘zbekcha nom yo‘q",
-    enums.SeoIssueCode.NAME_TRANSLATION_MISSING: "Nom tarjimasi yo‘q",
-    enums.SeoIssueCode.DESCRIPTION_MISSING: "Tavsif yo‘q",
-    enums.SeoIssueCode.DESCRIPTION_SHORT: "Tavsif juda qisqa",
-    enums.SeoIssueCode.IMAGES_MISSING: "Rasm yo‘q",
-    enums.SeoIssueCode.ALT_TEXT_FALLBACK: "Alt matni nomdan olinadi",
-    enums.SeoIssueCode.CATEGORY_MISSING: "Kategoriya tanlanmagan",
-    enums.SeoIssueCode.SEO_TITLE_SHORT: "SEO sarlavha qisqa",
-    enums.SeoIssueCode.SEO_TITLE_LONG: "SEO sarlavha uzun",
-    enums.SeoIssueCode.SEO_DESCRIPTION_SHORT: "SEO tavsif qisqa",
-    enums.SeoIssueCode.SEO_DESCRIPTION_LONG: "SEO tavsif uzun",
-    enums.SeoIssueCode.IMAGE_MISSING: "Kategoriya rasmi yo‘q",
-    enums.SeoIssueCode.NO_ACTIVE_PRODUCTS: "Faol mahsuloti yo‘q",
+SEO_CODE_LABELS: dict[str, StrOrPromise] = {
+    enums.SeoIssueCode.NAME_MISSING: _("O‘zbekcha nom yo‘q"),
+    enums.SeoIssueCode.NAME_TRANSLATION_MISSING: _("Nom tarjimasi yo‘q"),
+    enums.SeoIssueCode.DESCRIPTION_MISSING: _("Tavsif yo‘q"),
+    enums.SeoIssueCode.DESCRIPTION_SHORT: _("Tavsif juda qisqa"),
+    enums.SeoIssueCode.IMAGES_MISSING: _("Rasm yo‘q"),
+    enums.SeoIssueCode.ALT_TEXT_FALLBACK: _("Alt matni nomdan olinadi"),
+    enums.SeoIssueCode.CATEGORY_MISSING: _("Kategoriya tanlanmagan"),
+    enums.SeoIssueCode.SEO_TITLE_SHORT: _("SEO sarlavha qisqa"),
+    enums.SeoIssueCode.SEO_TITLE_LONG: _("SEO sarlavha uzun"),
+    enums.SeoIssueCode.SEO_DESCRIPTION_SHORT: _("SEO tavsif qisqa"),
+    enums.SeoIssueCode.SEO_DESCRIPTION_LONG: _("SEO tavsif uzun"),
+    enums.SeoIssueCode.IMAGE_MISSING: _("Kategoriya rasmi yo‘q"),
+    enums.SeoIssueCode.NO_ACTIVE_PRODUCTS: _("Faol mahsuloti yo‘q"),
 }
-# A code whose severity depends on the language: say which texts the row counts.
-SEO_SEVERITY_HINTS: dict[tuple[str, str], str] = {
-    (enums.SeoIssueCode.DESCRIPTION_MISSING, enums.SeoSeverity.ERROR): " (o‘zbekcha)",
-    (enums.SeoIssueCode.DESCRIPTION_MISSING, enums.SeoSeverity.WARNING): " (ruscha / inglizcha)",
+# A code whose severity depends on the language: say which texts the row counts (``label`` = the code's).
+SEO_SEVERITY_HINTS: dict[tuple[str, str], StrOrPromise] = {
+    (enums.SeoIssueCode.DESCRIPTION_MISSING, enums.SeoSeverity.ERROR): _("%(label)s (o‘zbekcha)"),
+    (enums.SeoIssueCode.DESCRIPTION_MISSING, enums.SeoSeverity.WARNING): _("%(label)s (ruscha / inglizcha)"),
 }
 STATUS_ORDER = (
     enums.OrderStatus.AWAITING_PAYMENT,
@@ -103,10 +109,16 @@ def seo_backlog() -> dict[str, Any]:
     return data
 
 
+def _seo_label(code: str, severity: str) -> str:
+    label = str(SEO_CODE_LABELS.get(code, code))
+    hint = SEO_SEVERITY_HINTS.get((code, severity))
+    return label if hint is None else str(hint) % {"label": label}
+
+
 def _chart(days: list[date], series: dict[str, list[int]]) -> dict[str, str]:
     datasets = [
         {
-            "label": label,
+            "label": str(label),
             "data": series[key],
             "backgroundColor": f"var(--gd-series-{index})",
             "gdColor": f"--gd-series-{index}",
@@ -175,7 +187,8 @@ def build(now: datetime, days: int) -> dict[str, Any]:
     funnel = commerce_selectors.status_breakdown(start, end)
     top = commerce_selectors.top_products(start, end, limit=TOP_PRODUCTS)
     stock = catalog_selectors.stock_health(now - STALE_STOCK_AFTER, limit=LINK_IDS)
-    seo = cached("seo", seo_backlog, seconds=SEO_CACHE_SECONDS)
+    # plain numbers and codes (no text), so one copy serves every language
+    seo = cached("seo", seo_backlog, seconds=SEO_CACHE_SECONDS, translated=False)
 
     calendar = _days(first, days)
     series: dict[str, list[int]] = {key: [] for key, _label in CHANNELS}
@@ -208,7 +221,7 @@ def build(now: datetime, days: int) -> dict[str, Any]:
         channel_rows.append(
             {
                 "key": key,
-                "label": label,
+                "label": str(label),
                 "slot": index,
                 "orders": num(count),
                 "revenue": som(amount),
@@ -222,7 +235,7 @@ def build(now: datetime, days: int) -> dict[str, Any]:
     funnel_rows = [
         {
             "status": status,
-            "label": ORDER_STATUS[status],
+            "label": gettext(ORDER_STATUS[status]),
             "count": num(funnel[status]),
             "raw": funnel[status],
             "percent": percent(funnel[status], created_total),
@@ -244,7 +257,7 @@ def build(now: datetime, days: int) -> dict[str, Any]:
     orders_window = changelist("commerce_order", paid_at__gte=iso(start), paid_at__lt=iso(end))
     tiles = [
         {
-            "title": "Onlayn tushum",
+            "title": gettext("Onlayn tushum"),
             "icon": "payments",
             "value": som_short(online_revenue),
             "unit": "",
@@ -259,30 +272,31 @@ def build(now: datetime, days: int) -> dict[str, Any]:
             "state": state(NEUTRAL),
         },
         {
-            "title": "To‘langan buyurtmalar",
+            "title": gettext("To‘langan buyurtmalar"),
             "icon": "shopping_bag",
             "value": num(online_orders),
-            "unit": "ta",
-            "hint": f"Oldingi {days} kun: {num(previous_orders)}",
+            "unit": ngettext("ta", "ta", online_orders),
+            "hint": ngettext("Oldingi %(days)s kun: %(count)s", "Oldingi %(days)s kun: %(count)s", days)
+            % {"days": days, "count": num(previous_orders)},
             "delta": delta(online_orders, previous_orders),
             "href": orders_window,
             "state": state(NEUTRAL),
         },
         {
-            "title": "O‘rtacha chek",
+            "title": gettext("O‘rtacha chek"),
             "icon": "receipt_long",
             "value": som_short(aov) if aov else "—",
             "unit": "",
-            "hint": som(aov) if aov else "To‘langan buyurtma yo‘q",
+            "hint": som(aov) if aov else gettext("To‘langan buyurtma yo‘q"),
             "delta": delta(aov, previous_aov),
             "href": orders_window,
             "state": state(NEUTRAL),
         },
         {
-            "title": "Do‘kon xaridlari (POS)",
+            "title": gettext("Do‘kon xaridlari (POS)"),
             "icon": "storefront",
             "value": num(pos_count),
-            "unit": "ta",
+            "unit": ngettext("ta", "ta", pos_count),
             "hint": som(pos_amount),
             "delta": None,
             "href": channel_rows[-1]["href"],
@@ -291,9 +305,8 @@ def build(now: datetime, days: int) -> dict[str, Any]:
     ]
     seo_rows = [
         {
-            "kind": "Mahsulot" if issue["kind"] == "product" else "Kategoriya",
-            "label": SEO_CODE_LABELS.get(issue["code"], issue["code"])
-            + SEO_SEVERITY_HINTS.get((issue["code"], issue["severity"]), ""),
+            "kind": gettext("Mahsulot") if issue["kind"] == "product" else gettext("Kategoriya"),
+            "label": _seo_label(issue["code"], issue["severity"]),
             "code": issue["code"],
             "count": num(issue["count"]),
             "raw": issue["count"],
@@ -304,18 +317,18 @@ def build(now: datetime, days: int) -> dict[str, Any]:
             ),
             "state": state(
                 CRITICAL if issue["severity"] == "error" else WARN,
-                "Xato" if issue["severity"] == "error" else "Ogohlantirish",
+                gettext("Xato") if issue["severity"] == "error" else gettext("Ogohlantirish"),
             ),
         }
         for issue in seo["issues"]
     ]
     billz_live = integration_modes.provider_mode("billz") == enums.IntegrationMode.LIVE
     stale_tile: dict[str, Any] = {
-        "title": "Eskirgan qoldiq",
+        "title": gettext("Eskirgan qoldiq"),
         "icon": "update",
         "value": num(stock.stale.count),
-        "unit": "ta mahsulot",
-        "hint": "Billz qoldig‘i 24 soatdan beri yangilanmagan (faol mahsulotlar)",
+        "unit": ngettext("ta mahsulot", "ta mahsulot", stock.stale.count),
+        "hint": gettext("Billz qoldig‘i 24 soatdan beri yangilanmagan (faol mahsulotlar)"),
         # the product list's «Qoldiq» filter selects the same rows (an id list would stop at LINK_IDS)
         "href": changelist("catalog_product", status__exact=enums.ProductStatus.ACTIVE, stock="stale"),
         "state": state(by_count(stock.stale.count)),
@@ -324,38 +337,45 @@ def build(now: datetime, days: int) -> dict[str, Any]:
         # Billz is the fake adapter: nothing refreshes the quantities, so «stale» is no alarm (as on Ops).
         stale_tile.update(
             {
-                "state": state(NEUTRAL, "Sinov rejimi"),
+                "state": state(NEUTRAL, gettext("Sinov rejimi")),
                 "muted": True,
-                "hint": "Billz sinov rejimida: qoldiq yangilanmaydi",
+                "hint": gettext("Billz sinov rejimida: qoldiq yangilanmaydi"),
             }
         )
+    warned, flawed_categories = seo["products_with_warnings"], seo["categories_with_issues"]
     catalog_tiles = [
         {
-            "title": "Tugagan mahsulotlar",
+            "title": gettext("Tugagan mahsulotlar"),
             "icon": "remove_shopping_cart",
             "value": num(stock.out_of_stock.count),
-            "unit": "ta mahsulot",
-            "hint": "Faol, lekin qoldig‘i 0 yoki Billz’da yozuvi yo‘q",
+            "unit": ngettext("ta mahsulot", "ta mahsulot", stock.out_of_stock.count),
+            "hint": gettext("Faol, lekin qoldig‘i 0 yoki Billz’da yozuvi yo‘q"),
             "href": changelist("catalog_product", status__exact=enums.ProductStatus.ACTIVE, stock="out"),
             "state": state(by_count(stock.out_of_stock.count)),
         },
         stale_tile,
         {
-            "title": "Billz’dan yangi",
+            "title": gettext("Billz’dan yangi"),
             "icon": "new_releases",
             "value": num(stock.new_from_billz),
-            "unit": "ko‘rib chiqilmagan",
-            "hint": "Import qilingan, hali tekshirilmagan",
+            "unit": ngettext("ko‘rib chiqilmagan", "ko‘rib chiqilmagan", stock.new_from_billz),
+            "hint": gettext("Import qilingan, hali tekshirilmagan"),
             "href": changelist("catalog_product", is_new_from_billz__exact="1"),
             "state": state(WARN if stock.new_from_billz else OK),
         },
         {
-            "title": "SEO xatolari",
+            "title": gettext("SEO xatolari"),
             "icon": "travel_explore",
             "value": num(seo["products_with_errors"]),
-            "unit": "mahsulot",
-            "hint": f"{num(seo['products_with_warnings'])} ogohlantirishli · "
-            f"{num(seo['categories_with_issues'])} kategoriya",
+            "unit": ngettext("mahsulot", "mahsulot", seo["products_with_errors"]),
+            "hint": " · ".join(
+                (
+                    ngettext("%(count)s ogohlantirishli", "%(count)s ogohlantirishli", warned)
+                    % {"count": num(warned)},
+                    ngettext("%(count)s kategoriya", "%(count)s kategoriya", flawed_categories)
+                    % {"count": num(flawed_categories)},
+                )
+            ),
             "href": "#seo",
             "state": state(by_count(seo["products_with_errors"])),
         },
@@ -364,7 +384,12 @@ def build(now: datetime, days: int) -> dict[str, Any]:
         "generated": generated(now),
         "days": days,
         "windows": [
-            {"days": option, "title": f"{option} kun", "link": f"?days={option}", "active": option == days}
+            {
+                "days": option,
+                "title": ngettext("%(count)s kun", "%(count)s kun", option) % {"count": option},
+                "link": f"?days={option}",
+                "active": option == days,
+            }
             for option in WINDOWS
         ],
         "period": f"{first.strftime('%d.%m.%Y')} – {today.strftime('%d.%m.%Y')}",

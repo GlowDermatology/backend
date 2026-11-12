@@ -116,6 +116,30 @@ manage.py ops_access status --email person@glowderma.uz
   before/after) show secret-like keys (tokens, signatures, sealed values, `Authorization`, keys and hashes) as
   `«yashirilgan»` (`glowderma/core/jsonmask.py`).
 
+### Languages (English, Russian, Uzbek)
+
+The console has a language switcher: three buttons under every sign-in step and the same three entries in the
+user menu (bottom of the sidebar) after sign-in. The choice is kept in the browser (cookie `gd_ops_language`,
+scoped to `/django-admin/`, one year); a browser that has not chosen opens in `OPS_DEFAULT_LANGUAGE` (`en` unless
+the environment sets `ru` or `uz`). Only the console switches: the REST API, the exports, the audit texts and
+everything a worker writes stay Uzbek whatever a browser chose, and records already stored (audit entries,
+notification texts, customer data) are shown as they were written.
+
+For developers — Uzbek is the source language (`glowderma/core/console_i18n.py`):
+
+- Write a console text in Uzbek and mark it: `gettext_lazy` / `gettext` / `ngettext` in Python, `{% translate %}`
+  / `{% blocktranslate %}` in templates. Model `verbose_name`, `help_text` and `choices` need no marking (they
+  are made lazy at start-up); an enum label or a `core.labels` value shown by the console goes through
+  `gettext(value)` where it is rendered.
+- `python manage.py console_messages` rewrites `locale/en` and `locale/ru` (`django.po`): new messages appear
+  with an empty `msgstr`, obsolete ones are dropped. Translate the empty ones, then
+  `python manage.py compile_locale` and commit the `.po` and `.mo` together.
+- `python manage.py console_messages --check` (also a test, `test_console_languages.py`) fails while a message
+  has no English or Russian translation, a placeholder differs, or an entry is obsolete; another test opens
+  every console page in English and Russian and fails on any text still spelled the Uzbek way.
+- `locale/uz` and `locale/ru` also translate the English strings of Unfold and of Django's admin; a string
+  added to `locale/uz` must be added to `locale/ru` (Django falls back from Russian to Uzbek).
+
 ### Accepted risks
 
 - **TOTP seeds are stored in plain text** (`otp_totp_totpdevice.key`). django-otp reads `key` directly to compute

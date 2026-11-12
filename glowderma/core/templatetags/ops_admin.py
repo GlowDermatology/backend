@@ -9,7 +9,7 @@ user could not tell why the list is short. Used by ``admin/ops/applied_filters.h
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django import template
 from django.contrib.admin import SimpleListFilter
@@ -19,14 +19,19 @@ from django.db import models
 from django.db.models.constants import LOOKUP_SEP
 from django.utils.dateparse import parse_datetime
 from django.utils.text import capfirst
+from django.utils.translation import gettext, ngettext
+from django.utils.translation import gettext_lazy as _
 
 from glowderma.core.timeutils import TASHKENT
+
+if TYPE_CHECKING:
+    from django_stubs_ext import StrOrPromise
 
 register = template.Library()
 
 # Changelist parameters that are not field lookups (search, ordering, page, popup, facets, …).
 NOT_LOOKUPS = frozenset({"q", "o", "p", "e", "all", "_to_field", "_popup", "_changelist_filters", "_facets"})
-OPERATORS = {
+OPERATORS: dict[str, StrOrPromise] = {
     "exact": ":",
     "iexact": ":",
     "in": ":",
@@ -34,10 +39,10 @@ OPERATORS = {
     "gte": "≥",
     "lt": "<",
     "lte": "≤",
-    "contains": "o‘z ichiga oladi:",
-    "icontains": "o‘z ichiga oladi:",
-    "startswith": "boshlanishi:",
-    "istartswith": "boshlanishi:",
+    "contains": _("o‘z ichiga oladi:"),
+    "icontains": _("o‘z ichiga oladi:"),
+    "startswith": _("boshlanishi:"),
+    "istartswith": _("boshlanishi:"),
 }
 SHOWN_VALUES = 5
 TRUE_VALUES = ("1", "true", "True", "yes")
@@ -75,7 +80,7 @@ def _text(field: models.Field[Any, Any], raw: str) -> str:
     if raw in choices:
         return str(choices[raw])
     if isinstance(field, models.BooleanField):
-        return "Ha" if raw in TRUE_VALUES else "Yo‘q"
+        return gettext("Ha") if raw in TRUE_VALUES else gettext("Yo‘q")
     if isinstance(field, models.DateTimeField):
         parsed = parse_datetime(raw)
         if isinstance(parsed, datetime):
@@ -87,13 +92,15 @@ def _text(field: models.Field[Any, Any], raw: str) -> str:
 
 def _value(field: models.Field[Any, Any], lookup: str, raw: str) -> str:
     if lookup == "isnull":
-        return "bo‘sh" if raw in TRUE_VALUES else "bo‘sh emas"
+        return gettext("bo‘sh") if raw in TRUE_VALUES else gettext("bo‘sh emas")
     if lookup != "in":
         return _text(field, raw)
     values = [value for value in raw.split(",") if value]
     shown = ", ".join(_text(field, value) for value in values[:SHOWN_VALUES])
     if len(values) > SHOWN_VALUES:
-        shown += f" … (jami {len(values)} ta)"
+        shown += " " + ngettext("… (jami %(count)s ta)", "… (jami %(count)s ta)", len(values)) % {
+            "count": len(values)
+        }
     return shown
 
 
@@ -132,7 +139,7 @@ def applied_filters(
         rows.append(
             {
                 "label": label,
-                "op": "" if lookup == "isnull" else OPERATORS.get(lookup, lookup),
+                "op": "" if lookup == "isnull" else str(OPERATORS.get(lookup, lookup)),
                 "value": _value(fields[-1], lookup, raw),
             }
         )
@@ -143,3 +150,15 @@ def applied_filters(
 def ops_applied_filters(cl: Any) -> list[dict[str, str]]:
     """``{% ops_applied_filters cl as applied %}``: the changelist's field lookups (see the module doc)."""
     return applied_filters(cl.model, dict(cl.params), list(getattr(cl, "filter_specs", [])))
+
+
+@register.simple_tag
+def ops_result_count(cl: Any) -> str:
+    """``{% ops_result_count cl %}``: the changelist's total, «jami 287 ta buyurtma» (in Uzbek a noun after
+    a number stays singular). A translation may use ``%(names)s``, the model's plural name, as well."""
+    count = cl.result_count
+    return ngettext("jami %(count)s ta %(name)s", "jami %(count)s ta %(name)s", count) % {
+        "count": count,
+        "name": cl.opts.verbose_name,
+        "names": cl.opts.verbose_name_plural,
+    }
