@@ -10,11 +10,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from django.utils.translation import gettext_lazy as _
 
 from glowderma.core.models import AuditEntry
 from glowderma.reporting import tasks
 from glowderma.reporting.dashboards import CRITICAL, OK, WARN, by_age, worst
+
+if TYPE_CHECKING:
+    from django_stubs_ext import StrOrPromise  # a development dependency: never imported at runtime
 
 REPORT_ACTION = "report.consistency"
 RECONCILE_ACTION = "loyalty.reconciliation_completed"
@@ -29,7 +34,7 @@ LOYALTY_CHECK = tasks.LOYALTY_CHECK
 @dataclass(frozen=True, slots=True)
 class CheckInfo:
     code: str
-    label: str
+    label: StrOrPromise  # translated where a dashboard prints it (``str(info.label)``)
     model: str  # the admin model its ids name ("" = no ids)
     severity: str  # the state of a non-zero count
 
@@ -37,35 +42,35 @@ class CheckInfo:
 # The nightly checks (glowderma.reporting.tasks) as the dashboards name and judge them.
 CHECKS: dict[str, CheckInfo] = {
     "k1_billz_sale_unrecorded": CheckInfo(
-        "K1", "Billz sotuvi yozilmagan (oxirgi kunlar)", "commerce_order", WARN
+        "K1", _("Billz sotuvi yozilmagan (oxirgi kunlar)"), "commerce_order", WARN
     ),
     "k1_billz_sale_unrecorded_backlog": CheckInfo(
-        "K1", "Billz sotuvi yozilmagan (eski)", "commerce_order", WARN
+        "K1", _("Billz sotuvi yozilmagan (eski)"), "commerce_order", WARN
     ),
-    "k1_billz_sale_dead": CheckInfo("K1", "Billz sotuvi: o‘lik xabar", "commerce_order", CRITICAL),
+    "k1_billz_sale_dead": CheckInfo("K1", _("Billz sotuvi: o‘lik xabar"), "commerce_order", CRITICAL),
     "k2_payment_pending_stuck": CheckInfo(
-        "K2", "Osilib qolgan to‘lovlar (pending)", "payments_payment", CRITICAL
+        "K2", _("Osilib qolgan to‘lovlar (pending)"), "payments_payment", CRITICAL
     ),
     "k2_click_paid_without_paydoc": CheckInfo(
-        "K2", "Click: paydoc’siz to‘langan to‘lovlar", "payments_payment", CRITICAL
+        "K2", _("Click: paydoc’siz to‘langan to‘lovlar"), "payments_payment", CRITICAL
     ),
-    "k3_refund_open": CheckInfo("K3", "Uzoq ochiq turgan qaytarishlar", "payments_refund", WARN),
+    "k3_refund_open": CheckInfo("K3", _("Uzoq ochiq turgan qaytarishlar"), "payments_refund", WARN),
     "k3_refund_failed": CheckInfo(
-        "K3", "Muvaffaqiyatsiz qaytarishlar (harakat kerak)", "payments_refund", CRITICAL
+        "K3", _("Muvaffaqiyatsiz qaytarishlar (harakat kerak)"), "payments_refund", CRITICAL
     ),
     "k4_shipment_missing": CheckInfo(
-        "K4", "To‘langan, lekin jo‘natilmagan buyurtmalar", "commerce_order", WARN
+        "K4", _("To‘langan, lekin jo‘natilmagan buyurtmalar"), "commerce_order", WARN
     ),
-    "k4_parcel_untracked": CheckInfo("K4", "Kuzatilmayotgan posilkalar", "commerce_order", WARN),
+    "k4_parcel_untracked": CheckInfo("K4", _("Kuzatilmayotgan posilkalar"), "commerce_order", WARN),
     "k5_late_capture_unrefunded": CheckInfo(
-        "K5", "Kech yechilgan, qaytarilmagan pullar", "payments_payment", CRITICAL
+        "K5", _("Kech yechilgan, qaytarilmagan pullar"), "payments_payment", CRITICAL
     ),
-    "k6_outbox_dead": CheckInfo("K6", "O‘lik outbox xabarlari (24 soat)", "core_outboxmessage", WARN),
-    "k6_outbox_overdue": CheckInfo("K6", "Kechikkan outbox xabarlari", "core_outboxmessage", WARN),
+    "k6_outbox_dead": CheckInfo("K6", _("O‘lik outbox xabarlari (24 soat)"), "core_outboxmessage", WARN),
+    "k6_outbox_overdue": CheckInfo("K6", _("Kechikkan outbox xabarlari"), "core_outboxmessage", WARN),
     "k6_outbox_deferred_past_window": CheckInfo(
-        "K6", "Muddati o‘tgan kechiktirilgan xabarlar", "core_outboxmessage", WARN
+        "K6", _("Muddati o‘tgan kechiktirilgan xabarlar"), "core_outboxmessage", WARN
     ),
-    LOYALTY_CHECK: CheckInfo("L", "Cashback daftari solishtiruvi", "", CRITICAL),
+    LOYALTY_CHECK: CheckInfo("L", _("Cashback daftari solishtiruvi"), "", CRITICAL),
 }
 
 

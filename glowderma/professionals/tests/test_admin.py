@@ -398,7 +398,7 @@ def test_a_refused_delete_redirects_to_the_change_page_with_the_error(
     )
     assert response.status_code == 302
     assert response["Location"] == reverse("admin:professionals_service_change", args=[service.pk])
-    assert flashed(response) == [("error", services.PROTECTED_MESSAGE)]
+    assert flashed(response) == [("error", str(services.PROTECTED_MESSAGE))]
     assert Service.objects.filter(pk=service.pk).exists()
 
 

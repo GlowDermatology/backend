@@ -2,6 +2,7 @@
 
 from django.contrib import admin
 from django.db import models
+from django.utils.translation import gettext_lazy as _
 
 from glowderma.core.admin import (
     DANGER,
@@ -24,24 +25,25 @@ SHIPMENT_STATE_VARIANTS = {"not_created": WARNING, "failed": DANGER, "created": 
 # (glowderma.integrations.bts.protocol.port_status) — BTS's own codes are translated to these three, anything
 # else is recorded as BTS sent it.
 BTS_STATUS_LABELS = {
-    "100": "Qabul qilindi (bekor qilish mumkin)",
-    "200": "Kuryerda / yo‘lda",
-    "300": "Yetkazildi",
-    "1300": "BTS’da o‘chirilgan",
-    "1400": "Muddati o‘tgan",
-    "unknown": "Noma’lum holat",
+    "100": _("Qabul qilindi (bekor qilish mumkin)"),
+    "200": _("Kuryerda / yo‘lda"),
+    "300": _("Yetkazildi"),
+    "1300": _("BTS’da o‘chirilgan"),
+    "1400": _("Muddati o‘tgan"),
+    "unknown": _("Noma’lum holat"),
 }
 
 
 def bts_status_text(value: str) -> str:
-    """``Yetkazildi (300)``: the Uzbek meaning with the code BTS sent; ``-`` for none."""
+    """``Yetkazildi (300)``: the meaning in the console's language with the code BTS sent; ``-`` for none."""
     if not value:
         return "-"
-    label = BTS_STATUS_LABELS.get(value)
+    lazy_label = BTS_STATUS_LABELS.get(value)
+    label = "" if lazy_label is None else str(lazy_label)
     return f"{label} ({value})" if label and value != "unknown" else (label or value)
 
 
-@display(description="BTS holati", ordering="bts_status")
+@display(description=_("BTS holati"), ordering="bts_status")
 def bts_status(obj: models.Model) -> str:
     return bts_status_text(str(getattr(obj, "bts_status", "")))
 
@@ -59,16 +61,16 @@ class ShipmentEventInline(ReadOnlyTabularInline):
     bts_status_label = staticmethod(bts_status)
     ordering = ("at", "id")
     tab = True
-    verbose_name_plural = "Hodisalar"
+    verbose_name_plural = _("Hodisalar")
 
 
 class ShipmentAdmin(ReadOnlyAdmin):
     list_display = (
         "id",
-        number_link_column("order", "Buyurtma"),
-        status_column("state", "Holat", SHIPMENT_STATE_VARIANTS),
+        number_link_column("order", _("Buyurtma")),
+        status_column("state", _("Holat"), SHIPMENT_STATE_VARIANTS),
         "tracking_number",
-        money_column("tariff", "Tarif"),
+        money_column("tariff", _("Tarif")),
         bts_status,
         "via",
         "attempts",
@@ -90,8 +92,8 @@ register_read_only(
     ShipmentEvent,
     list_display=(
         "at",
-        number_link_column("shipment", "Jo‘natma", prefix="#"),
-        status_column("kind", "Hodisa", SHIPMENT_EVENT_VARIANTS),
+        number_link_column("shipment", _("Jo‘natma"), prefix="#"),
+        status_column("kind", _("Hodisa"), SHIPMENT_EVENT_VARIANTS),
         bts_status,
         "via",
         "error_code",

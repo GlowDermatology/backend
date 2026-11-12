@@ -1,6 +1,7 @@
 """Read-only Django admin for the payments models (design 02 §6). Writes go through ``payments.services``."""
 
 from django.contrib import admin
+from django.utils.translation import gettext_lazy as _
 
 from glowderma.core.admin import (
     DANGER,
@@ -45,19 +46,19 @@ class RefundInline(ReadOnlyTabularInline):
         "requested_by",
     )
     ordering = ("-requested_at", "-id")
-    state_label = staticmethod(status_badge("state", "Holat", REFUND_STATE_VARIANTS, REFUND_STATE))
-    amount_som = staticmethod(money_column("amount", "Summa"))
+    state_label = staticmethod(status_badge("state", _("Holat"), REFUND_STATE_VARIANTS, REFUND_STATE))
+    amount_som = staticmethod(money_column("amount", _("Summa")))
     tab = True
-    verbose_name_plural = "Qaytarishlar"
+    verbose_name_plural = _("Qaytarishlar")
 
 
 class PaymentAdmin(ReadOnlyAdmin):
     list_display = (
         "id",
-        number_link_column("order", "Buyurtma"),
+        number_link_column("order", _("Buyurtma")),
         "provider",
-        status_column("status", "Holat", PAYMENT_STATUS_VARIANTS, PAYMENT_STATUS),
-        money_column("amount", "Summa"),
+        status_column("status", _("Holat"), PAYMENT_STATUS_VARIANTS, PAYMENT_STATUS),
+        money_column("amount", _("Summa")),
         "provider_txn_id",
         "confirmed_at",
         "created_at",
@@ -80,10 +81,10 @@ register_read_only(
     Refund,
     list_display=(
         "id",
-        number_link_column("payment", "To‘lov", prefix="#"),
-        status_column("state", "Holat", REFUND_STATE_VARIANTS, REFUND_STATE),
+        number_link_column("payment", _("To‘lov"), prefix="#"),
+        status_column("state", _("Holat"), REFUND_STATE_VARIANTS, REFUND_STATE),
         "origin",
-        money_column("amount", "Summa"),
+        money_column("amount", _("Summa")),
         "requested_at",
         "completed_at",
         "error_code",

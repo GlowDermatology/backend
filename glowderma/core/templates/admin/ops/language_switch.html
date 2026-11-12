@@ -1,0 +1,15 @@
+{% load i18n ops_i18n %}{% comment %}
+  The language switcher of the console's sign-in pages (after sign-in Unfold's user menu has it): one POST
+  form per language. Include it as it is; it needs only the request. Styles in ops/signin.css.
+{% endcomment %}
+{% ops_language_switch as switch %}
+<nav class="ops-language" aria-label="{% translate 'Til' %}">
+    {% for language in switch.languages %}
+        <form method="post" action="{{ switch.action }}">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ switch.next }}">
+            <input type="hidden" name="language" value="{{ language.code }}">
+            <button type="submit" lang="{{ language.code }}" class="ops-language__option{% if language.code == switch.current %} ops-language__option--current{% endif %}"{% if language.code == switch.current %} aria-current="true"{% endif %}>{{ language.name }}</button>
+        </form>
+    {% endfor %}
+</nav>

@@ -21,6 +21,7 @@ from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.db import IntegrityError, connection, models, transaction
 from django.db.models.deletion import ProtectedError
+from django.utils.translation import gettext_lazy, ngettext
 from rest_framework.exceptions import NotFound
 from rest_framework.exceptions import ValidationError as ApiValidationError
 
@@ -52,11 +53,14 @@ ENTITY_NAMES: dict[type[models.Model], str] = {
     WorkingHoursOverride: "working_hours_override",
 }
 EDITABLE_MODELS: tuple[type[models.Model], ...] = tuple(ENTITY_NAMES)
+# Refusals of the ops console's editable pages (the Django-admin path below): shown in the viewer's language.
 IMAGE_MESSAGES = {
-    "file_too_large": "Rasm 5 MB dan oshmasin.",
-    "unsupported_image": "Faqat JPEG, PNG yoki WebP rasm.",
+    "file_too_large": gettext_lazy("Rasm 5 MB dan oshmasin."),
+    "unsupported_image": gettext_lazy("Faqat JPEG, PNG yoki WebP rasm."),
 }
-PROTECTED_MESSAGE = "Bu yozuvga boshqa yozuvlar bog‘langan; avval ularni o‘chiring yoki nofaol qiling."
+PROTECTED_MESSAGE = gettext_lazy(
+    "Bu yozuvga boshqa yozuvlar bog‘langan; avval ularni o‘chiring yoki nofaol qiling."
+)
 
 
 def entity_name(model: type[models.Model]) -> str:
@@ -125,10 +129,14 @@ def _store_photo(professional: Professional, upload: Any) -> None:
     professional.save(update_fields=["photo"])
 
 
-ADMIN_UPCOMING_MESSAGE = (
-    "Mutaxassisda {n} ta kelgusi qabul bor (kutilayotgan yoki tasdiqlangan). Avval ularni boshqa vaqtga yoki "
-    "mutaxassisga ko‘chiring yoki bekor qiling."
-)
+def admin_upcoming_message(upcoming: int) -> str:
+    return ngettext(
+        "Mutaxassisda %(n)s ta kelgusi qabul bor (kutilayotgan yoki tasdiqlangan). Avval ularni boshqa "
+        "vaqtga yoki mutaxassisga ko‘chiring yoki bekor qiling.",
+        "Mutaxassisda %(n)s ta kelgusi qabul bor (kutilayotgan yoki tasdiqlangan). Avval ularni boshqa "
+        "vaqtga yoki mutaxassisga ko‘chiring yoki bekor qiling.",
+        upcoming,
+    ) % {"n": upcoming}
 
 
 def _refuse_deactivation_with_upcoming(professional: Professional) -> None:
@@ -137,7 +145,7 @@ def _refuse_deactivation_with_upcoming(professional: Professional) -> None:
     REST API (``PATCH specialists/{id}/`` with ``force: true``)."""
     upcoming = bookings.upcoming_counts([professional.pk], timeutils.now())[professional.pk]
     if upcoming:
-        raise ValidationError({"is_active": ADMIN_UPCOMING_MESSAGE.format(n=upcoming)})
+        raise ValidationError({"is_active": admin_upcoming_message(upcoming)})
 
 
 @transaction.atomic

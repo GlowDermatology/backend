@@ -9,6 +9,8 @@ from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.urls import URLPattern, path, reverse
 from django.utils.safestring import SafeString
+from django.utils.translation import gettext, pgettext_lazy
+from django.utils.translation import gettext_lazy as _
 
 from glowderma.commerce import diagnostics as order_diagnostics
 from glowderma.commerce.models import Cart, CartItem, Order, OrderEvent, OrderItem, StockReservation
@@ -50,10 +52,10 @@ class OrderItemInline(ReadOnlyTabularInline):
     model = OrderItem
     fields = ("position", "name", "billz_id", "quantity", "unit_price_som", "promo", "line_total_som")
     ordering = ("position",)
-    unit_price_som = staticmethod(money_column("unit_price", "Narx"))
-    line_total_som = staticmethod(money_column("line_total", "Jami"))
+    unit_price_som = staticmethod(money_column("unit_price", _("Narx")))
+    line_total_som = staticmethod(money_column("line_total", _("Jami")))
     tab = True
-    verbose_name_plural = "Mahsulotlar"
+    verbose_name_plural = _("Mahsulotlar")
 
 
 class OrderEventInline(ReadOnlyTabularInline):
@@ -61,17 +63,17 @@ class OrderEventInline(ReadOnlyTabularInline):
     fields = ("at", "type", "source", "status_after", "actor")
     ordering = ("-at", "-id")
     tab = True
-    verbose_name_plural = "Hodisalar"
+    verbose_name_plural = _("Hodisalar")
 
 
 class OrderPaymentInline(ReadOnlyTabularInline):
     model = Payment
     fields = ("id", "provider", "status_label", "amount_som", "provider_txn_id", "confirmed_at", "created_at")
     ordering = ("-created_at", "-id")
-    status_label = staticmethod(status_badge("status", "Holat", PAYMENT_STATUS_VARIANTS, PAYMENT_STATUS))
-    amount_som = staticmethod(money_column("amount", "Summa"))
+    status_label = staticmethod(status_badge("status", _("Holat"), PAYMENT_STATUS_VARIANTS, PAYMENT_STATUS))
+    amount_som = staticmethod(money_column("amount", _("Summa")))
     tab = True
-    verbose_name_plural = "To‘lovlar"
+    verbose_name_plural = _("To‘lovlar")
 
 
 class OrderShipmentInline(ReadOnlyTabularInline):
@@ -86,10 +88,10 @@ class OrderShipmentInline(ReadOnlyTabularInline):
         "last_error_code",
         "last_attempt_at",
     )
-    tariff_som = staticmethod(money_column("tariff", "Tarif"))
+    tariff_som = staticmethod(money_column("tariff", _("Tarif")))
     bts_status_label = staticmethod(bts_status)
     tab = True
-    verbose_name_plural = "Yetkazish"
+    verbose_name_plural = _("Yetkazish")
 
 
 class OrderCashbackHoldInline(ReadOnlyTabularInline):
@@ -97,15 +99,15 @@ class OrderCashbackHoldInline(ReadOnlyTabularInline):
     fk_name = "order"
     fields = ("amount_som", "state", "expires_at", "captured_at", "released_at", "release_reason")
     ordering = ("-id",)
-    amount_som = staticmethod(money_column("amount", "Summa"))
+    amount_som = staticmethod(money_column("amount", _("Summa")))
     tab = True
-    verbose_name_plural = "Cashback bandlari"
+    verbose_name_plural = _("Cashback bandlari")
 
 
 class OrderAdmin(ReadOnlyAdmin):
-    title_format = "Buyurtma №{obj.pk}"
+    title_format = _("Buyurtma №{obj.pk}")
 
-    @display(description="Holat xulosasi")
+    @display(description=_("Holat xulosasi"))
     def diagnostics(self, order: Order) -> SafeString:
         """Status, payment, shipment, Billz and the related outbox / webhook rows (commerce.diagnostics)."""
         return order_diagnostics.render(order)
@@ -122,19 +124,19 @@ class OrderAdmin(ReadOnlyAdmin):
         raw = request.GET.get("number", "").strip().lstrip("№#").strip()
         changelist = reverse("admin:commerce_order_changelist")
         if not raw.isdigit() or len(raw) > 18:
-            messages.warning(request, "Buyurtma raqamini kiriting (faqat raqamlar, masalan 10253).")
+            messages.warning(request, gettext("Buyurtma raqamini kiriting (faqat raqamlar, masalan 10253)."))
             return HttpResponseRedirect(changelist)
         if not Order.objects.filter(pk=int(raw)).exists():
-            messages.warning(request, f"№{raw} raqamli buyurtma topilmadi.")
+            messages.warning(request, gettext("№%(number)s raqamli buyurtma topilmadi.") % {"number": raw})
             return HttpResponseRedirect(changelist)
         return HttpResponseRedirect(reverse("admin:commerce_order_change", args=[int(raw)]))
 
     list_display = (
         "id",
         customer_column(),
-        status_column("status", "Holat", ORDER_STATUS_VARIANTS, ORDER_STATUS),
+        status_column("status", _("Holat"), ORDER_STATUS_VARIANTS, ORDER_STATUS),
         "fulfilment",
-        money_column("total", "Jami"),
+        money_column("total", _("Jami")),
         "payment_provider",
         "channel",
         "created_at",
@@ -161,17 +163,17 @@ class OrderAdmin(ReadOnlyAdmin):
     # No date_hierarchy: its 30 day links took three lines; the «yaratilgan» / «to‘langan» ranges cover it.
     readonly_fields = ("diagnostics",)
     tab_groups = (
-        ("Diagnostika", ("diagnostics",)),
+        (_("Diagnostika"), ("diagnostics",)),
         (
-            "Buyurtma",
+            _("Buyurtma"),
             ("id", "customer", "channel", "fulfilment", "status", "payment_provider", "customer_note"),
         ),
         (
-            "Summalar",
+            _("Summalar"),
             ("items_subtotal", "promo_subtotal", "delivery_fee", "cashback_used", "total"),
         ),
         (
-            "Manzil",
+            _("Manzil"),
             (
                 "recipient_name",
                 "recipient_phone",
@@ -182,7 +184,7 @@ class OrderAdmin(ReadOnlyAdmin):
             ),
         ),
         (
-            "Vaqtlar",
+            _("Vaqtlar"),
             (
                 "created_at",
                 "updated_at",
@@ -194,7 +196,11 @@ class OrderAdmin(ReadOnlyAdmin):
                 "delivered_at",
             ),
         ),
-        ("Bekor qilish", ("cancelled_at", "cancellation_reason", "cancellation_note", "cancelled_by")),
+        (
+            # A section heading, not the button of the same Uzbek wording: its own catalog entry.
+            pgettext_lazy("bo‘lim", "Bekor qilish"),
+            ("cancelled_at", "cancellation_reason", "cancellation_note", "cancelled_by"),
+        ),
     )
 
 
@@ -207,7 +213,7 @@ register_read_only(
         "name",
         "billz_id",
         "quantity",
-        money_column("unit_price", "Narx"),
+        money_column("unit_price", _("Narx")),
         "promo",
     ),
     search_fields=("=order__id", "billz_id", "name"),
@@ -230,7 +236,7 @@ register_read_only(
         "order",
         "product",
         "quantity",
-        status_column("state", "Holat", RESERVATION_STATE_VARIANTS),
+        status_column("state", _("Holat"), RESERVATION_STATE_VARIANTS),
         "expires_at",
     ),
     list_filter=(dropdown("state"), dropdown("release_reason")),

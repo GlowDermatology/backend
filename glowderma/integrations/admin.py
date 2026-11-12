@@ -20,6 +20,8 @@ from django.contrib import admin
 from django.core.cache import cache
 from django.db.models import QuerySet
 from django.http import HttpRequest
+from django.utils.translation import gettext
+from django.utils.translation import gettext_lazy as _
 
 from glowderma.core import enums, integration_modes
 from glowderma.core.admin import (
@@ -50,10 +52,10 @@ from glowderma.integrations.models import IntegrationState, Job, WebhookInbox
 # ``WebhookInbox.result["outcome"]`` (commerce.api.webhooks.inbox).
 WEBHOOK_OUTCOME_VARIANTS = {"accepted": SUCCESS, "duplicate": INFO, "rejected": WARNING, "error": DANGER}
 WEBHOOK_OUTCOME_LABELS = {
-    "accepted": "Qabul qilindi",
-    "duplicate": "Takroriy",
-    "rejected": "Rad etildi",
-    "error": "Ishlov xatosi",
+    "accepted": _("Qabul qilindi"),
+    "duplicate": _("Takroriy"),
+    "rejected": _("Rad etildi"),
+    "error": _("Ishlov xatosi"),
 }
 # The dashboards' "failed" drill-down (integrations.selectors.FAILED_WEBHOOK_OUTCOMES) is one choice.
 FAILED_OUTCOMES = ",".join(selectors.FAILED_WEBHOOK_OUTCOMES)
@@ -68,13 +70,13 @@ class WebhookOutcomeFilter(admin.SimpleListFilter):
     """``result.outcome`` as a sidebar filter; its parameter is the lookup the dashboards link with
     (``?result__outcome__in=rejected,error``), so a drill-down shows up as this filter's choice."""
 
-    title = "natija"
+    title = _("natija")
     parameter_name = "result__outcome__in"
 
     def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
         return [
-            (FAILED_OUTCOMES, "Xato (rad etilgan yoki ishlov xatosi)"),
-            *WEBHOOK_OUTCOME_LABELS.items(),
+            (FAILED_OUTCOMES, gettext("Xato (rad etilgan yoki ishlov xatosi)")),
+            *((outcome, str(label)) for outcome, label in WEBHOOK_OUTCOME_LABELS.items()),
         ]
 
     def queryset(self, request: HttpRequest, queryset: QuerySet[WebhookInbox]) -> QuerySet[WebhookInbox]:
@@ -92,18 +94,18 @@ class WebhookInboxAdmin(ReadOnlyAdmin):
     ordering = ("-received_at", "-id")
     date_hierarchy = "received_at"
 
-    @display(description="HTTP javob")
+    @display(description=_("HTTP javob"))
     def result_status(self, obj: WebhookInbox) -> str:
         status = _result(obj).get("status")
         return "-" if status is None else str(status)
 
-    @display(description="Natija", label=WEBHOOK_OUTCOME_VARIANTS)
+    @display(description=_("Natija"), label=WEBHOOK_OUTCOME_VARIANTS)
     def outcome(self, obj: WebhookInbox) -> tuple[str, str]:
         outcome = _result(obj).get("outcome")
         code = _result(obj).get("error_code")
         if not outcome:
             return ("", "-")
-        text = WEBHOOK_OUTCOME_LABELS.get(str(outcome), str(outcome))
+        text = str(WEBHOOK_OUTCOME_LABELS.get(str(outcome), str(outcome)))
         return (str(outcome), f"{text} · {code}" if code else text)
 
 
@@ -111,21 +113,23 @@ admin.site.register(WebhookInbox, WebhookInboxAdmin)
 BTS_POLL_TASK = "commerce.poll_bts"
 BTS_POLL_COOLDOWN = 120
 BTS_POLL_COOLDOWN_KEY = "ops:bts_poll"
-BILLZ_FAKE = "Billz soxta rejimda ishlayapti: sinxronlash o‘chirilgan."
-BTS_FAKE = "BTS soxta rejimda ishlayapti: holat so‘rovi o‘chirilgan."
+BILLZ_FAKE = _("Billz soxta rejimda ishlayapti: sinxronlash o‘chirilgan.")
+BTS_FAKE = _("BTS soxta rejimda ishlayapti: holat so‘rovi o‘chirilgan.")
 
 
 def _billz_refusal(model_admin: Any, request: HttpRequest, obj: None) -> str:
     if integration_modes.fake_in_production("billz"):
-        return BILLZ_FAKE
+        return str(BILLZ_FAKE)
     active = Job.objects.filter(kind=enums.JobKind.BILLZ_IMPORT, state__in=services.ACTIVE_STATES).first()
     if active is not None:
-        return f"Billz importi allaqachon navbatda yoki ishlayapti (vazifa #{active.pk})."
+        return gettext("Billz importi allaqachon navbatda yoki ishlayapti (vazifa #%(id)s).") % {
+            "id": active.pk
+        }
     return ""
 
 
 def _bts_refusal(model_admin: Any, request: HttpRequest, obj: None) -> str:
-    return BTS_FAKE if integration_modes.fake_in_production("bts") else ""
+    return str(BTS_FAKE) if integration_modes.fake_in_production("bts") else ""
 
 
 class ProviderSyncActions(OpsActionsMixin):
@@ -134,13 +138,13 @@ class ProviderSyncActions(OpsActionsMixin):
     actions_list = ("billz_sync", "bts_poll")
 
     @ops_action(
-        description="Billz sinxronlashni ishga tushirish",
-        title="Billz sinxronlashni ishga tushirish",
-        body=(
+        description=_("Billz sinxronlashni ishga tushirish"),
+        title=_("Billz sinxronlashni ishga tushirish"),
+        body=_(
             "Oxirgi muvaffaqiyatli sinxronlashdan keyingi o‘zgarishlar (delta) Billz’dan olinadi: narxlar va "
             "qoldiqlar yangilanadi. Import allaqachon ishlayotgan bo‘lsa, yangisi boshlanmaydi."
         ),
-        submit="Ishga tushirish",
+        submit=_("Ishga tushirish"),
         icon="sync",
         url_path="billz-sync",
         available=_billz_refusal,
@@ -155,9 +159,12 @@ class ProviderSyncActions(OpsActionsMixin):
             request=request,
         )
         if not created:
-            return refused(f"Billz importi allaqachon navbatda yoki ishlayapti (vazifa #{job.pk}).")
+            return refused(
+                gettext("Billz importi allaqachon navbatda yoki ishlayapti (vazifa #%(id)s).")
+                % {"id": job.pk}
+            )
         return done(
-            f"Billz sinxronlash navbatga qo‘yildi (vazifa #{job.pk}).",
+            gettext("Billz sinxronlash navbatga qo‘yildi (vazifa #%(id)s).") % {"id": job.pk},
             audit_action="ops.billz_sync_requested",
             entity_type="job",
             entity_id=job.pk,
@@ -165,13 +172,13 @@ class ProviderSyncActions(OpsActionsMixin):
         )
 
     @ops_action(
-        description="BTS holatini so‘rash",
-        title="BTS holatini so‘rash",
-        body=(
+        description=_("BTS holatini so‘rash"),
+        title=_("BTS holatini so‘rash"),
+        body=_(
             "Uzoq vaqt yangilanmagan BTS jo‘natmalarining holati hozir so‘raladi (odatda har 10 daqiqada "
             "avtomatik bajariladi). So‘rov allaqachon ishlayotgan bo‘lsa, ikkinchisi boshlanmaydi."
         ),
-        submit="So‘rash",
+        submit=_("So‘rash"),
         icon="local_shipping",
         url_path="bts-poll",
         available=_bts_refusal,
@@ -180,14 +187,16 @@ class ProviderSyncActions(OpsActionsMixin):
         if integration_modes.fake_in_production("bts"):
             return failed(BTS_FAKE)
         if not cache.add(BTS_POLL_COOLDOWN_KEY, 1, timeout=BTS_POLL_COOLDOWN):
-            return refused("BTS holati yaqinda so‘ralgan: ikki daqiqadan keyin qayta urinib ko‘ring.")
+            return refused(
+                gettext("BTS holati yaqinda so‘ralgan: ikki daqiqadan keyin qayta urinib ko‘ring.")
+            )
         try:
             enqueue_task(BTS_POLL_TASK)
         except Exception:
             cache.delete(BTS_POLL_COOLDOWN_KEY)
             raise
         return done(
-            "BTS holat so‘rovi navbatga qo‘yildi.",
+            gettext("BTS holat so‘rovi navbatga qo‘yildi."),
             audit_action="ops.bts_poll_requested",
             entity_type="integration",
             entity_id="bts",
@@ -198,7 +207,7 @@ class JobAdmin(ProviderSyncActions, ReadOnlyAdmin):
     list_display = (
         "id",
         "kind",
-        status_column("state", "Holat", JOB_STATE_VARIANTS),
+        status_column("state", _("Holat"), JOB_STATE_VARIANTS),
         "created_at",
         "started_at",
         "finished_at",

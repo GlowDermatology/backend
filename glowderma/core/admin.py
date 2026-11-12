@@ -23,9 +23,12 @@ from django.db import models, transaction
 from django.db.models import Count
 from django.http import HttpRequest
 from django.urls import reverse
+from django.utils.functional import Promise
 from django.utils.html import format_html
 from django.utils.safestring import SafeString
-from django.utils.text import capfirst
+from django.utils.text import capfirst, format_lazy
+from django.utils.translation import gettext, ngettext
+from django.utils.translation import gettext_lazy as _
 from unfold.admin import ModelAdmin as UnfoldModelAdmin
 from unfold.admin import TabularInline as UnfoldTabularInline
 from unfold.contrib.filters.admin import (
@@ -56,11 +59,15 @@ from glowderma.core.pii import mask_email, mask_phone
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from django_stubs_ext import StrOrPromise
+
     _ModelAdmin = admin.ModelAdmin[models.Model]
     _TabularInline = admin.TabularInline[models.Model, models.Model]
 else:  # the runtime classes are Unfold's (not generic, untyped)
     _ModelAdmin = UnfoldModelAdmin
     _TabularInline = UnfoldTabularInline
+    # ``django_stubs_ext`` is a development dependency (django-stubs): the same alias for the runtime.
+    StrOrPromise = str | Promise
 
 # Public bases for the few editable admins (professionals): Unfold at runtime, Django's types for mypy.
 OpsModelAdmin = _ModelAdmin
@@ -73,6 +80,10 @@ Column = Callable[[models.Model], Any]
 # Unfold label variants (``unfold/helpers/label.html``).
 SUCCESS, WARNING, DANGER, INFO, PRIMARY = "success", "warning", "danger", "info", "primary"
 
+# Default headers of the contact columns below (lazy: shown in the console's language).
+PHONE_HEADER = _("Telefon")
+CUSTOMER_HEADER = _("Mijoz")
+
 
 def display(**options: Any) -> Callable[[_F], _F]:
     """Typed wrapper of :func:`unfold.decorators.display` (``label=``, ``header=``, ``ordering=``, …)."""
@@ -81,7 +92,9 @@ def display(**options: Any) -> Callable[[_F], _F]:
 
 def som(value: int | None) -> str:
     """An integer so‘m amount as the admin panel shows it: ``1 250 000 so‘m`` (NBSP groups)."""
-    return "-" if value is None else f"{format_number(int(value), 'uz')} so‘m"
+    if value is None:
+        return "-"
+    return gettext("%(amount)s so‘m") % {"amount": format_number(int(value), "uz")}
 
 
 def _resolve(obj: Any, path: str) -> Any:
@@ -92,7 +105,7 @@ def _resolve(obj: Any, path: str) -> Any:
     return obj
 
 
-def money_column(path: str, description: str) -> Column:
+def money_column(path: str, description: StrOrPromise) -> Column:
     """A ``list_display`` column rendering the so‘m amount at ``path`` (``total``, ``payment__amount``)."""
 
     @display(description=description, ordering=path)
@@ -106,22 +119,26 @@ def money_column(path: str, description: str) -> Column:
 
 def status_column(
     path: str,
-    description: str,
+    description: StrOrPromise,
     variants: Mapping[str, str],
-    labels: Mapping[str, str] | None = None,
+    labels: Mapping[str, StrOrPromise] | None = None,
 ) -> Column:
     """A coloured status label: ``variants`` maps a value to an Unfold variant (``success``, ``danger``, …),
-    ``labels`` to its Uzbek text (default: the ``choices`` label, else the raw value)."""
+    ``labels`` to its Uzbek text (default: the ``choices`` label, else the raw value). The label is shown
+    in the console's language: a plain Uzbek ``labels`` text is translated when the cell is rendered."""
 
     @display(description=description, ordering=path, label=dict(variants))
     def column(obj: models.Model) -> tuple[str, str]:
         value = _resolve(obj, path)
         if value in (None, ""):
             return ("", "-")
-        text = (labels or {}).get(value)
-        if text is None:
+        label = (labels or {}).get(value)
+        if label is None:
             getter = getattr(obj, f"get_{path}_display", None) if "__" not in path else None
             text = str(getter()) if callable(getter) else str(value)
+        else:
+            # A ``core.labels`` text is plain Uzbek (the msgid); a lazy one translates itself.
+            text = gettext(label) if isinstance(label, str) else str(label)
         return (str(value), text)
 
     column.__name__ = f"{path}_label"
@@ -131,9 +148,9 @@ def status_column(
 
 def status_badge(
     path: str,
-    description: str,
+    description: StrOrPromise,
     variants: Mapping[str, str],
-    labels: Mapping[str, str] | None = None,
+    labels: Mapping[str, StrOrPromise] | None = None,
 ) -> Column:
     """:func:`status_column` rendered as ready HTML, for read-only rows (inlines, change pages) where Unfold
     does not apply ``display(label=…)``. Use it as ``name = staticmethod(status_badge(...))``."""
@@ -152,7 +169,7 @@ def status_badge(
     return column
 
 
-def masked_phone_column(path: str, description: str = "Telefon") -> Column:
+def masked_phone_column(path: str, description: StrOrPromise = PHONE_HEADER) -> Column:
     """``+998 90 *** ** 67``: phones never appear in full on a list page (customer contract §1.4)."""
 
     @display(description=description, empty_value="-")
@@ -165,8 +182,10 @@ def masked_phone_column(path: str, description: str = "Telefon") -> Column:
     return column
 
 
-def masked_email_column(path: str, description: str = "Email") -> Column:
-    """``m***@gmail.com`` on list pages."""
+def masked_email_column(path: str, description: StrOrPromise = "Email") -> Column:
+    """``m***@gmail.com`` on list pages. The default header is not a message: «Email» is the same in the
+    console's languages, and as a msgid it would collide with Django's own Uzbek catalog («Elektron
+    pochta»)."""
 
     @display(description=description, empty_value="-")
     def column(obj: models.Model) -> str | None:
@@ -178,7 +197,7 @@ def masked_email_column(path: str, description: str = "Email") -> Column:
     return column
 
 
-def customer_column(path: str = "customer", description: str = "Mijoz") -> Column:
+def customer_column(path: str = "customer", description: StrOrPromise = CUSTOMER_HEADER) -> Column:
     """Two-line customer cell: name (or ``#id``) over the masked phone, else the masked email — the full
     contact stays on the change page. Pair it with ``list_select_related``."""
 
@@ -204,7 +223,7 @@ def _change_link(model: type[models.Model], pk: Any, text: str) -> SafeString:
     return rendered
 
 
-def number_link_column(path: str, description: str, prefix: str = "№") -> Column:
+def number_link_column(path: str, description: StrOrPromise, prefix: StrOrPromise = "№") -> Column:
     """A short link to the related row of the foreign key ``path`` (``№10253``) instead of its long
     ``__str__``; reads only ``<path>_id`` (no query)."""
 
@@ -221,7 +240,9 @@ def number_link_column(path: str, description: str, prefix: str = "№") -> Colu
     return column
 
 
-def customer_link_column(path: str, description: str = "Mijoz", customer_path: str = "customer") -> Column:
+def customer_link_column(
+    path: str, description: StrOrPromise = CUSTOMER_HEADER, customer_path: str = "customer"
+) -> Column:
     """A link to the row at ``path`` named by its customer's short name (``Malika K.``, else ``Mijoz #12``):
     for a loyalty account, say. Pair it with ``list_select_related = ("<path>__<customer_path>",)``."""
 
@@ -244,7 +265,7 @@ def short_customer_name(customer: Any) -> str:
         return "-"
     parts = str(getattr(customer, "name", "") or "").split()
     if not parts:
-        return f"Mijoz #{customer.pk}"
+        return gettext("Mijoz #%(id)s") % {"id": customer.pk}
     return parts[0] if len(parts) == 1 else f"{parts[0]} {parts[1][0]}."
 
 
@@ -342,7 +363,7 @@ class OpsPaginator(Paginator):  # type: ignore[type-arg]
 class TitledObject:
     """``obj`` with a readable ``str()``: the change page's ``original`` (every attribute is ``obj``'s)."""
 
-    def __init__(self, obj: models.Model, title: str) -> None:
+    def __init__(self, obj: models.Model, title: StrOrPromise) -> None:
         self._obj = obj
         self._title = title
 
@@ -350,7 +371,7 @@ class TitledObject:
         return getattr(self._obj, name)
 
     def __str__(self) -> str:
-        return self._title
+        return str(self._title)
 
 
 def is_active_staff(request: HttpRequest) -> bool:
@@ -422,14 +443,14 @@ class ReadOnlyAdmin(_ModelAdmin):
     list_before_template = "admin/ops/applied_filters.html"
     # Optional change-page tabs: ``(("Tab name", ("field", "json_field_pretty", …)), …)``. Every readonly
     # field not named lands on a last "Boshqa" tab, so a new column is never silently hidden.
-    tab_groups: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    tab_groups: tuple[tuple[StrOrPromise, tuple[str, ...]], ...] = ()
     # The change page's heading, breadcrumb and browser title (:meth:`object_title`): a ``str.format``
     # pattern over ``obj`` (``"Buyurtma №{obj.pk}"``); ``None`` = "<Verbose name> #<pk>". The model's
     # ``__str__`` (English, asserted by tests, used in logs) is never shown as the page title.
-    title_format: str | None = None
+    title_format: StrOrPromise | None = None
     # Help texts shown under the change page's fields (``{field: text}``; ``""`` hides the field's own): for
     # third-party models whose texts are English and untranslatable (django_otp's devices).
-    field_help_texts: Mapping[str, str] = {}
+    field_help_texts: Mapping[str, StrOrPromise] = {}
     # Integer so‘m columns shown as «185 000 so‘m» on the change page (default: :data:`MONEY_FIELD_NAMES`).
     money_fields: frozenset[str] = MONEY_FIELD_NAMES
 
@@ -477,7 +498,7 @@ class ReadOnlyAdmin(_ModelAdmin):
     def object_title(self, obj: models.Model) -> str:
         """A readable Uzbek title of ``obj`` for its change page (``title_format``)."""
         if self.title_format is not None:
-            return self.title_format.format(obj=obj)
+            return str(self.title_format).format(obj=obj)
         return f"{capfirst(str(self.model._meta.verbose_name))} #{obj.pk}"
 
     def changeform_view(
@@ -506,7 +527,8 @@ class ReadOnlyAdmin(_ModelAdmin):
     ) -> Any:
         obj = self.get_object(request, unquote(object_id))
         if obj is not None:
-            extra_context = {**(extra_context or {}), "title": f"Tarix: {self.object_title(obj)}"}
+            title = gettext("Tarix: %(title)s") % {"title": self.object_title(obj)}
+            extra_context = {**(extra_context or {}), "title": title}
         return super().history_view(request, object_id, extra_context)
 
     def has_module_permission(self, request: HttpRequest) -> bool:
@@ -541,7 +563,7 @@ class ReadOnlyAdmin(_ModelAdmin):
             return super().get_fieldsets(request, obj)
         available = self.get_readonly_fields(request, obj)
         listed: set[str] = set()
-        fieldsets: list[tuple[str, dict[str, Any]]] = []
+        fieldsets: list[tuple[StrOrPromise, dict[str, Any]]] = []
         for name, fields in self.tab_groups:
             present = [
                 self._display_name(field) for field in fields if self._display_name(field) in available
@@ -551,7 +573,7 @@ class ReadOnlyAdmin(_ModelAdmin):
                 fieldsets.append((name, {"fields": present, "classes": ["tab"]}))
         rest = [field for field in available if field not in listed]
         if rest:
-            fieldsets.append(("Boshqa", {"fields": rest, "classes": ["tab"]}))
+            fieldsets.append((gettext("Boshqa"), {"fields": rest, "classes": ["tab"]}))
         return fieldsets
 
 
@@ -598,7 +620,7 @@ def forget_cached_counts(*names: str) -> None:
 
     def forget() -> None:
         prefixes = {"nav": NAV_CACHE_PREFIX, "dash": DASHBOARD_CACHE_PREFIX}
-        keys = [f"{prefixes[kind]}{key}" for kind, _, key in (name.partition(":") for name in names)]
+        keys = [f"{prefixes[kind]}{key}" for kind, _sep, key in (name.partition(":") for name in names)]
         try:
             cache.delete_many(keys)
         except Exception:
@@ -614,19 +636,22 @@ def _requeue_refusal(model_admin: Any, request: HttpRequest, message: OutboxMess
     if message.status == "dead" or consistency.is_overdue(message, timeutils.now()):
         return ""
     if message.status == "done":
-        return "Xabar allaqachon yetkazilgan: qayta navbatga qo‘yish kerak emas."
-    return "Xabar navbatda va muddati o‘tmagan: dispetcher uni o‘zi yetkazadi."
+        return gettext("Xabar allaqachon yetkazilgan: qayta navbatga qo‘yish kerak emas.")
+    return gettext("Xabar navbatda va muddati o‘tmagan: dispetcher uni o‘zi yetkazadi.")
 
 
 def _requeue_notes(model_admin: Any, request: HttpRequest, message: OutboxMessage) -> list[str]:
     hooks = outbox.requeue_hooks(message.topic)
-    notes: list[str] = [f"Mavzu: {message.topic} · urinishlar: {message.attempts}"]
+    notes: list[str] = [
+        gettext("Mavzu: %(topic)s · urinishlar: %(attempts)s")
+        % {"topic": message.topic, "attempts": message.attempts}
+    ]
     about = (hooks.describe_uz or hooks.describe)(message) if hooks is not None else ""
     if about:
-        notes.append(f"Tafsilot: {about}")
-    warning = (hooks.warning_uz or hooks.warning) if hooks is not None else ""
+        notes.append(gettext("Tafsilot: %(text)s") % {"text": about})
+    warning = (str(hooks.warning_uz) or hooks.warning) if hooks is not None else ""
     if message.status == "dead" and warning:
-        notes.append(WarningNote(f"Ogohlantirish: {warning}"))
+        notes.append(WarningNote(gettext("Ogohlantirish: %(text)s") % {"text": warning}))
     return notes
 
 
@@ -641,29 +666,40 @@ def _dead_topics() -> list[tuple[str, int]]:
 
 
 def _no_dead_messages(model_admin: Any, request: HttpRequest, obj: None) -> str:
-    return "" if OutboxMessage.objects.filter(status="dead").exists() else "O‘lik xabarlar yo‘q."
+    return "" if OutboxMessage.objects.filter(status="dead").exists() else gettext("O‘lik xabarlar yo‘q.")
 
 
 def _topic_warnings(model_admin: Any, request: HttpRequest, obj: None) -> list[str]:
     notes: list[str] = []
     for topic, _total in _dead_topics():
         hooks = outbox.requeue_hooks(topic)
-        warning = (hooks.warning_uz or hooks.warning) if hooks is not None else ""
+        warning = (str(hooks.warning_uz) or hooks.warning) if hooks is not None else ""
         if warning:
-            notes.append(WarningNote(f"Ogohlantirish ({topic}): {warning}"))
+            notes.append(
+                WarningNote(
+                    gettext("Ogohlantirish (%(topic)s): %(text)s") % {"topic": topic, "text": warning}
+                )
+            )
     return notes
 
 
 class DeadTopicForm(ConfirmForm):
-    topic = forms.ChoiceField(label="Mavzu")
+    topic = forms.ChoiceField(label=_("Mavzu"))
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         field = cast(forms.ChoiceField, self.fields["topic"])
-        field.choices = [(topic, f"{topic} — {total} ta o‘lik") for topic, total in _dead_topics()]
+        field.choices = [
+            (
+                topic,
+                ngettext("%(topic)s — %(count)s ta o‘lik", "%(topic)s — %(count)s ta o‘lik", total)
+                % {"topic": topic, "count": total},
+            )
+            for topic, total in _dead_topics()
+        ]
 
 
-def row_action_link(url: str, label: str, icon: str, title: str = "") -> SafeString:
+def row_action_link(url: str, label: StrOrPromise, icon: str, title: StrOrPromise = "") -> SafeString:
     """A changelist cell button that opens an ops action's confirm step in Unfold's modal (only rendered for
     the rows the action makes sense for; the URL is the action's change-page route). ``label`` is the short
     visible text, ``title`` the full action name (tooltip and accessible name)."""
@@ -683,11 +719,11 @@ class DeferredFilter(admin.SimpleListFilter):
     """«Kechiktirilgan»: messages a handler deferred (``deferred_since``); the parameter is the lookup the
     dashboards link with, so their drill-down shows as this filter's choice."""
 
-    title = "kechiktirilgan"
+    title = _("kechiktirilgan")
     parameter_name = "deferred_since__isnull"
 
     def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
-        return [("False", "Kechiktirilgan"), ("True", "Kechiktirilmagan")]
+        return [("False", gettext("Kechiktirilgan")), ("True", gettext("Kechiktirilmagan"))]
 
     def queryset(self, request: HttpRequest, queryset: Any) -> Any:
         if self.value() in ("True", "False"):
@@ -699,7 +735,7 @@ class PayloadOrderFilter(admin.SimpleListFilter):
     """``?order=10253``: the messages whose payload names that order (``payload.order_id``) — the link of an
     order page's «Diagnostika» block. Shown in the sidebar only while it is applied."""
 
-    title = "buyurtma"
+    title = _("buyurtma")
     parameter_name = "order"
 
     def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
@@ -719,7 +755,7 @@ class OutboxMessageAdmin(OpsActionsMixin, ReadOnlyAdmin):
     list_display = (
         "id",
         "topic",
-        status_column("status", "Holat", OUTBOX_STATUS_VARIANTS),
+        status_column("status", _("Holat"), OUTBOX_STATUS_VARIANTS),
         "attempts",
         "available_at",
         "updated_at",
@@ -738,23 +774,25 @@ class OutboxMessageAdmin(OpsActionsMixin, ReadOnlyAdmin):
     actions_detail = ("requeue",)
     actions_list = ("requeue_dead_topic",)
 
-    @display(description="Amal")
+    @display(description=_("Amal"))
     def requeue_button(self, message: OutboxMessage) -> SafeString | str:
         if _requeue_refusal(self, cast(HttpRequest, None), message):
             return ""
         url = reverse("admin:core_outboxmessage_requeue", args=[message.pk])
         back = reverse("admin:core_outboxmessage_changelist")
-        return row_action_link(f"{url}?next={back}", "Qayta", "replay", title="Qayta navbatga qo‘yish")
+        return row_action_link(
+            f"{url}?next={back}", gettext("Qayta"), "replay", title=gettext("Qayta navbatga qo‘yish")
+        )
 
     @ops_action(
-        description="Qayta navbatga qo‘yish",
-        title="Xabarni qayta navbatga qo‘yish",
-        body=(
+        description=_("Qayta navbatga qo‘yish"),
+        title=_("Xabarni qayta navbatga qo‘yish"),
+        body=_(
             "O‘lik xabar yana «pending» holatiga qaytadi (urinishlar 0 dan boshlanadi) va dispetcher uni "
             "darhol yetkazishga urinadi. Muddati o‘tgan xabar uchun dispetcher qayta ishga tushiriladi. "
             "Ishlovchilar idempotent: muvaffaqiyatli bajarilgan amal takrorlanmaydi."
         ),
-        submit="Qayta navbatga qo‘yish",
+        submit=_("Qayta navbatga qo‘yish"),
         icon="replay",
         available=_requeue_refusal,
         notes=_requeue_notes,
@@ -767,12 +805,17 @@ class OutboxMessageAdmin(OpsActionsMixin, ReadOnlyAdmin):
             if result.outcome == "skipped":
                 hooks = outbox.requeue_hooks(message.topic)
                 why = hooks.skip_reason_uz(message) if hooks is not None and hooks.skip_reason_uz else ""
-                return refused(f"Xabar #{message.pk} qayta navbatga qo‘yilmadi: {why or result.reason}")
+                return refused(
+                    gettext("Xabar #%(id)s qayta navbatga qo‘yilmadi: %(reason)s")
+                    % {"id": message.pk, "reason": why or result.reason}
+                )
             if result.outcome != "requeued":
-                return refused(f"Xabar #{message.pk} endi o‘lik emas: hech narsa o‘zgarmadi.")
+                return refused(
+                    gettext("Xabar #%(id)s endi o‘lik emas: hech narsa o‘zgarmadi.") % {"id": message.pk}
+                )
             forget_cached_counts(*OUTBOX_CACHED_COUNTS)
             return done(
-                f"Xabar #{message.pk} qayta navbatga qo‘yildi.",
+                gettext("Xabar #%(id)s qayta navbatga qo‘yildi.") % {"id": message.pk},
                 audit_action="ops.outbox_requeued",
                 entity_type="outbox",
                 entity_id=message.pk,
@@ -783,7 +826,8 @@ class OutboxMessageAdmin(OpsActionsMixin, ReadOnlyAdmin):
 
         transaction.on_commit(dispatch_outbox.delay, robust=True)
         return done(
-            f"Xabar #{message.pk} navbatda turibdi; dispetcher qayta ishga tushirildi.",
+            gettext("Xabar #%(id)s navbatda turibdi; dispetcher qayta ishga tushirildi.")
+            % {"id": message.pk},
             audit_action="ops.outbox_dispatch_kicked",
             entity_type="outbox",
             entity_id=message.pk,
@@ -792,13 +836,16 @@ class OutboxMessageAdmin(OpsActionsMixin, ReadOnlyAdmin):
         )
 
     @ops_action(
-        description="Mavzu bo‘yicha o‘liklarni qayta navbatga",
-        title="Mavzuning barcha o‘lik xabarlarini qayta navbatga qo‘yish",
-        body=(
-            f"Tanlangan mavzuning o‘lik xabarlari (bir bosishda {TOPIC_REQUEUE_LIMIT} tagacha) qayta "
-            "navbatga qo‘yiladi. Ishi boshqa yo‘l bilan bajarilgan xabarlar o‘tkazib yuboriladi."
+        description=_("Mavzu bo‘yicha o‘liklarni qayta navbatga"),
+        title=_("Mavzuning barcha o‘lik xabarlarini qayta navbatga qo‘yish"),
+        body=format_lazy(
+            _(
+                "Tanlangan mavzuning o‘lik xabarlari (bir bosishda {limit} tagacha) qayta "
+                "navbatga qo‘yiladi. Ishi boshqa yo‘l bilan bajarilgan xabarlar o‘tkazib yuboriladi."
+            ),
+            limit=TOPIC_REQUEUE_LIMIT,
         ),
-        submit="Hammasini qayta navbatga",
+        submit=_("Hammasini qayta navbatga"),
         icon="restart_alt",
         variant=ActionVariant.DANGER,
         manager_only=True,
@@ -839,16 +886,24 @@ class OutboxMessageAdmin(OpsActionsMixin, ReadOnlyAdmin):
         if not more:
             more = OutboxMessage.objects.filter(topic=topic, status="dead", pk__gt=cursor).exists()
         if not requeued:
-            scanned = f" Birinchi {examined} tasi ko‘rildi." if more else ""
-            return refused(
-                f"{topic}: qayta navbatga qo‘yiladigan xabar topilmadi "
-                f"({len(skipped)} ta o‘tkazildi).{scanned}"
-            )
-        tail = " Yana o‘lik xabarlar qoldi — amalni takrorlang." if more else ""
+            text = ngettext(
+                "%(topic)s: qayta navbatga qo‘yiladigan xabar topilmadi (%(count)s ta o‘tkazildi).",
+                "%(topic)s: qayta navbatga qo‘yiladigan xabar topilmadi (%(count)s ta o‘tkazildi).",
+                len(skipped),
+            ) % {"topic": topic, "count": len(skipped)}
+            if more:
+                text += " " + ngettext(
+                    "Birinchi %(count)s tasi ko‘rildi.", "Birinchi %(count)s tasi ko‘rildi.", examined
+                ) % {"count": examined}
+            return refused(text)
         forget_cached_counts(*OUTBOX_CACHED_COUNTS)
+        text = gettext(
+            "%(topic)s: %(requeued)s ta xabar qayta navbatga qo‘yildi, %(skipped)s ta o‘tkazib yuborildi."
+        ) % {"topic": topic, "requeued": len(requeued), "skipped": len(skipped)}
+        if more:
+            text += " " + gettext("Yana o‘lik xabarlar qoldi — amalni takrorlang.")
         return done(
-            f"{topic}: {len(requeued)} ta xabar qayta navbatga qo‘yildi, {len(skipped)} ta o‘tkazib "
-            f"yuborildi.{tail}",
+            text,
             audit_action="ops.outbox_topic_requeued",
             entity_type="outbox_topic",
             entity_id=topic,
@@ -874,14 +929,14 @@ class AuditEntryAdmin(OpsActionsMixin, ReadOnlyAdmin):
     actions_list = ("run_consistency_report",)
 
     @ops_action(
-        description="Hisobotni hozir ishga tushirish",
-        title="Moliyaviy muvofiqlik hisobotini hozir ishga tushirish",
-        body=(
+        description=_("Hisobotni hozir ishga tushirish"),
+        title=_("Moliyaviy muvofiqlik hisobotini hozir ishga tushirish"),
+        body=_(
             "K1–K6 tekshiruvlari va cashback daftari solishtiruvi navbatga qo‘yiladi. Natija audit "
             "jurnaliga «report.consistency» yozuvi bo‘lib tushadi; nomuvofiqlik bo‘lsa, ogohlantirish "
             "yuboriladi. Hisobot 10 daqiqada bir martadan ko‘p ishga tushirilmaydi."
         ),
-        submit="Ishga tushirish",
+        submit=_("Ishga tushirish"),
         icon="fact_check",
         manager_only=True,
         url_path="run-consistency-report",
@@ -891,17 +946,21 @@ class AuditEntryAdmin(OpsActionsMixin, ReadOnlyAdmin):
             claimed = cache.add(CONSISTENCY_COOLDOWN_KEY, 1, timeout=CONSISTENCY_REPORT_COOLDOWN)
         except Exception:
             logger.exception("ops.consistency_report cooldown unavailable")
-            return failed("Kesh ishlamayapti: hisobotni hozir ishga tushirib bo‘lmaydi.")
+            return failed(gettext("Kesh ishlamayapti: hisobotni hozir ishga tushirib bo‘lmaydi."))
         if not claimed:
-            return refused("Hisobot yaqinda ishga tushirilgan: 10 daqiqadan keyin qayta urinib ko‘ring.")
+            return refused(
+                gettext("Hisobot yaqinda ishga tushirilgan: 10 daqiqadan keyin qayta urinib ko‘ring.")
+            )
         try:
             enqueue_task(CONSISTENCY_TASK)
         except Exception:
             cache.delete(CONSISTENCY_COOLDOWN_KEY)
             raise
         return done(
-            "Muvofiqlik hisoboti navbatga qo‘yildi. Natija audit jurnalida «report.consistency» bo‘lib "
-            "chiqadi.",
+            gettext(
+                "Muvofiqlik hisoboti navbatga qo‘yildi. Natija audit jurnalida «report.consistency» bo‘lib "
+                "chiqadi."
+            ),
             audit_action="ops.consistency_report_requested",
             entity_type="report",
             entity_id="consistency",

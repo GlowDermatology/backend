@@ -1,5 +1,5 @@
-{% load unfold_list %}
-{% comment %}Unfold's pagination_default.html with Uzbek numeral grammar: «jami 287 ta buyurtma» (a noun after a number stays singular), never «287 buyurtmalar». Used through ReadOnlyAdmin.paginator (glowderma.core.admin.OpsPaginator).{% endcomment %}
+{% load unfold_list ops_admin %}
+{% comment %}Unfold's pagination_default.html with Uzbek numeral grammar: «jami 287 ta buyurtma» (a noun after a number stays singular), never «287 buyurtmalar». Used through ReadOnlyAdmin.paginator (glowderma.core.admin.OpsPaginator); the text is ops_result_count's (glowderma.core.templatetags.ops_admin), so a translation can use the plural name.{% endcomment %}
 {% if pagination_required %}
     {% for i in page_range %}
         <div class="{% if forloop.last %}pe-2{% else %}pe-4{% endif %}">
@@ -9,5 +9,5 @@
 {% endif %}
 
 <div class="py-4">
-    {% if pagination_required %}- {% endif %}jami {{ cl.result_count }} ta {{ cl.opts.verbose_name }}
+    {% if pagination_required %}- {% endif %}{% ops_result_count cl %}
 </div>

@@ -8,6 +8,7 @@ from django.contrib.postgres.indexes import GinIndex, OpClass
 from django.db import models
 from django.db.models import Q
 from django.db.models.functions import Lower
+from django.utils.translation import gettext
 
 from glowderma.accounts import media
 from glowderma.core import enums, timeutils
@@ -143,7 +144,8 @@ class Customer(TimeStampedModel):
     def __str__(self) -> str:
         # «Malika · +998 90 *** ** 67»: the contact masked (customer contract §1.4); in full on its page only
         contact = masked_contact(self.phone, self.email)
-        return " · ".join(part for part in (self.name, contact) if part) or f"Mijoz #{self.pk}"
+        named = " · ".join(part for part in (self.name, contact) if part)
+        return named or gettext("Mijoz #%(id)s") % {"id": self.pk}
 
     # DRF and core.idempotency treat request.user as a user object: a customer signed in through
     # CustomerJWTAuthentication is authenticated (no SQL behind either property).
@@ -211,7 +213,11 @@ class Device(TimeStampedModel):
         ]
 
     def __str__(self) -> str:
-        return f"{self.get_platform_display()} {self.model or self.fid} · mijoz #{self.customer_id}"
+        return gettext("%(platform)s %(model)s · mijoz #%(customer)s") % {
+            "platform": self.get_platform_display(),
+            "model": self.model or self.fid,
+            "customer": self.customer_id,
+        }
 
 
 class Address(TimeStampedModel):
@@ -246,7 +252,11 @@ class Address(TimeStampedModel):
         ordering = ["-is_default", "-updated_at"]
 
     def __str__(self) -> str:
-        return f"{self.label or 'Manzil'} #{self.pk} · mijoz #{self.customer_id}"
+        return gettext("%(label)s #%(id)s · mijoz #%(customer)s") % {
+            "label": self.label or gettext("Manzil"),
+            "id": self.pk,
+            "customer": self.customer_id,
+        }
 
 
 class SmsCode(models.Model):
@@ -327,7 +337,11 @@ class SmsCode(models.Model):
 
     def __str__(self) -> str:
         contact = masked_contact(self.phone, self.email)
-        return f"{self.get_purpose_display()} kodi · {contact} · {stamp(self.created_at)}"
+        return gettext("%(purpose)s kodi · %(contact)s · %(created)s") % {
+            "purpose": self.get_purpose_display(),
+            "contact": contact,
+            "created": stamp(self.created_at),
+        }
 
 
 class CustomerSocialIdentity(models.Model):
@@ -364,7 +378,11 @@ class CustomerSocialIdentity(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.get_provider_display()}: {self.subject} → mijoz #{self.customer_id}"
+        return gettext("%(provider)s: %(subject)s → mijoz #%(customer)s") % {
+            "provider": self.get_provider_display(),
+            "subject": self.subject,
+            "customer": self.customer_id,
+        }
 
 
 class AuthSession(models.Model):
@@ -469,7 +487,10 @@ class AuthSession(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.get_audience_display()} sessiyasi {self.pk}"
+        return gettext("%(audience)s sessiyasi %(id)s") % {
+            "audience": self.get_audience_display(),
+            "id": self.pk,
+        }
 
 
 class SocialIdentity(models.Model):

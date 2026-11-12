@@ -11,11 +11,13 @@ from __future__ import annotations
 from contextvars import ContextVar
 from typing import Any
 
+from django.conf import settings
 from django.contrib import admin, messages
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.urls import reverse
+from django.utils import translation
 from unfold.widgets import UnfoldAdminTimeWidget
 
 from glowderma.core.admin import OpsModelAdmin, OpsPaginator, OpsTabularInline, is_active_staff
@@ -87,6 +89,21 @@ class ServiceBackedAdmin(OpsModelAdmin):
         if getattr(db_field, "null", False) and not db_field.blank:
             kwargs.setdefault("required", False)
         return super().formfield_for_dbfield(db_field, request, **kwargs)
+
+    # Django's admin history stores the object's title (``LogEntry.object_repr``). A title follows the
+    # viewer's language (glowderma.core.console_i18n); what is stored is written in the source language,
+    # like every other record.
+    def log_addition(self, request: HttpRequest, obj: models.Model, message: Any) -> Any:
+        with translation.override(settings.LANGUAGE_CODE):
+            return super().log_addition(request, obj, message)
+
+    def log_change(self, request: HttpRequest, obj: models.Model, message: Any) -> Any:
+        with translation.override(settings.LANGUAGE_CODE):
+            return super().log_change(request, obj, message)
+
+    def log_deletions(self, request: HttpRequest, queryset: Any) -> Any:
+        with translation.override(settings.LANGUAGE_CODE):
+            return super().log_deletions(request, queryset)
 
     def has_module_permission(self, request: HttpRequest) -> bool:
         return is_active_staff(request)

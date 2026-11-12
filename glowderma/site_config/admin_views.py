@@ -10,7 +10,8 @@ and «E’lon qilish», which publishes the saved terms and privacy drafts as a 
 confirmation.
 Every write goes through :mod:`glowderma.site_config.services` (row lock, audit ``settings.updated`` /
 ``settings.terms_published``, public-settings cache dropped on commit). A save answers with a redirect back to
-the page (POST/redirect/GET) and an Uzbek message; a refused form is rendered again with the input kept.
+the page (POST/redirect/GET) and a message in the console's language; a refused form is rendered again with
+the input kept.
 
 Mounted by ``UNFOLD["SITE_VIEWS"]`` (``config/settings/ops_admin.py``), so ``admin_site.admin_view`` wraps it
 (staff, 2FA, ``csrf_protect``, ``never_cache``); :meth:`SettingsConsoleView.has_permission` checks the grant
@@ -19,11 +20,15 @@ again (``core.admin.is_active_staff``, as every console page).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from django.conf import settings
 from django.contrib import messages
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.shortcuts import render
 from django.urls import reverse
+from django.utils.translation import gettext
+from django.utils.translation import gettext_lazy as _
 from django.views import View
 from unfold.views import UnfoldSiteViewMixin
 
@@ -42,18 +47,23 @@ from glowderma.site_config.forms import (
 )
 from glowderma.site_config.models import SiteSettings
 
+if TYPE_CHECKING:
+    from django_stubs_ext import StrOrPromise
+
 TEMPLATE = "site_config/console/settings.html"
 URL_NAME = "admin:site_config_settings"
-TITLE = "Sozlamalar"
+# The page's texts: lazy translations of the Uzbek text (annotated as str-or-lazy, what the messages API and
+# the templates take).
+TITLE: StrOrPromise = _("Sozlamalar")
 
-NOTHING_CHANGED = "O‘zgarish yo‘q: saqlanadigan narsa topilmadi."
-UNKNOWN_SECTION = "So‘rov tushunarsiz. Sahifani yangilang va qayta urinib ko‘ring."
-LEGAL_UNPUBLISHED_NOTE = "Mijozlar yangi shartlarni e’lon qilganingizdan keyin ko‘radi."
-PUBLISHED_NOTE = "Mijozlar ilovada yangi versiyani qabul qiladi."
+NOTHING_CHANGED: StrOrPromise = _("O‘zgarish yo‘q: saqlanadigan narsa topilmadi.")
+UNKNOWN_SECTION: StrOrPromise = _("So‘rov tushunarsiz. Sahifani yangilang va qayta urinib ko‘ring.")
+LEGAL_UNPUBLISHED_NOTE: StrOrPromise = _("Mijozlar yangi shartlarni e’lon qilganingizdan keyin ko‘radi.")
+PUBLISHED_NOTE: StrOrPromise = _("Mijozlar ilovada yangi versiyani qabul qiladi.")
 # The publication's confirmation, word for word as on the Next.js page (and in the e2e suites).
-PUBLISH_TITLE = "Shartlarning yangi versiyasini e’lon qilasizmi?"
-PUBLISH_WARNING = "Barcha mijozlardan shartlarni qayta qabul qilish so‘raladi."
-PUBLISH_BODY = (
+PUBLISH_TITLE: StrOrPromise = _("Shartlarning yangi versiyasini e’lon qilasizmi?")
+PUBLISH_WARNING: StrOrPromise = _("Barcha mijozlardan shartlarni qayta qabul qilish so‘raladi.")
+PUBLISH_BODY: StrOrPromise = _(
     "Saqlangan foydalanish shartlari va maxfiylik siyosati (barcha tillarda) yangi versiya sifatida e’lon "
     "qilinadi. Mijozlar yangi versiyani qabul qilmaguncha buyurtma bera olmaydi va qabulga yozila olmaydi. "
     "Bu amalni qaytarib bo‘lmaydi."
@@ -68,7 +78,7 @@ def _row() -> SiteSettings:
 def _actor_name(row: SiteSettings) -> str:
     user = row.updated_by
     if user is None:
-        return "Tizim"
+        return gettext("Tizim")
     return str(getattr(user, "full_name", "") or getattr(user, "email", "") or user)
 
 
@@ -106,7 +116,7 @@ class SettingsConsoleView(UnfoldSiteViewMixin, View):  # type: ignore[misc]  # U
             messages.info(request, NOTHING_CHANGED)
             return self._redirect(section)
         saved = services.update_settings(changes, actor=request.user, request=request)
-        message = form.saved_message
+        message = str(form.saved_message)
         if section == LegalTextsForm.section and services.unpublished_changes(saved):
             message = f"{message}. {LEGAL_UNPUBLISHED_NOTE}"
         messages.success(request, message)
@@ -124,9 +134,11 @@ class SettingsConsoleView(UnfoldSiteViewMixin, View):  # type: ignore[misc]  # U
                 expected_fingerprint=form.cleaned_data["fingerprint"],
             )
         except Conflict as exc:
-            # Shown inside the reopened confirmation (the Next.js dialog showed it there too).
-            return self._render(request, _row(), publish_error=str(exc.detail))
-        messages.success(request, f"Shartlar e’lon qilindi: {row.terms_version}. {PUBLISHED_NOTE}")
+            # Shown inside the reopened confirmation (the Next.js dialog showed it there too). The service's
+            # message is plain Uzbek (``services.PUBLISH_STALE`` / ``TERMS_INCOMPLETE``): translated here.
+            return self._render(request, _row(), publish_error=gettext(str(exc.detail)))
+        published = gettext("Shartlar e’lon qilindi: %(version)s.") % {"version": row.terms_version}
+        messages.success(request, f"{published} {PUBLISHED_NOTE}")
         return self._redirect(LegalTextsForm.section)
 
     # --- rendering ------------------------------------------------------------------------------------------

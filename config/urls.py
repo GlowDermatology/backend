@@ -8,6 +8,7 @@ from django.utils.module_loading import import_string
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 from glowderma.accounts.console import urls as console_urls
+from glowderma.core import console_i18n
 from glowderma.core.api.health import HealthView
 
 handler404 = "glowderma.core.api.exceptions.not_found_view"
@@ -88,6 +89,8 @@ if dev_routes_enabled():
 if settings.DJANGO_ADMIN_ENABLED:
     # The console's sign-in (password, TOTP 2FA, enrolment, logout) ahead of the site's own routes.
     urlpatterns.extend(console_urls.urlpatterns)
+    # The console's language switcher (before and after sign-in).
+    urlpatterns.append(path("django-admin/language/", console_i18n.set_language, name="ops_set_language"))
     urlpatterns.append(path("django-admin/", admin.site.urls))
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

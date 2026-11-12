@@ -10,6 +10,7 @@ protocol fields the design lists.
 
 from django.db import models
 from django.db.models import Q
+from django.utils.translation import gettext
 
 from glowderma.core import enums
 from glowderma.core.labels import som_text
@@ -140,10 +141,13 @@ class Payment(TimeStampedModel):
         ]
 
     def __str__(self) -> str:
-        return (
-            f"To‘lov #{self.pk} {self.get_provider_display()} · {self.get_status_display()} · "
-            f"{som_text(self.amount)} (buyurtma №{self.order_id})"
-        )
+        return gettext("To‘lov #%(id)s %(provider)s · %(status)s · %(amount)s (buyurtma №%(order)s)") % {
+            "id": self.pk,
+            "provider": self.get_provider_display(),
+            "status": self.get_status_display(),
+            "amount": som_text(self.amount),
+            "order": self.order_id,
+        }
 
 
 class Refund(TimeStampedModel):
@@ -248,7 +252,9 @@ class Refund(TimeStampedModel):
         ]
 
     def __str__(self) -> str:
-        return (
-            f"Qaytarish #{self.pk} · {self.get_state_display()} · {som_text(self.amount)} "
-            f"(to‘lov #{self.payment_id})"
-        )
+        return gettext("Qaytarish #%(id)s · %(state)s · %(amount)s (to‘lov #%(payment)s)") % {
+            "id": self.pk,
+            "state": self.get_state_display(),
+            "amount": som_text(self.amount),
+            "payment": self.payment_id,
+        }

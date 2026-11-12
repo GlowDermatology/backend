@@ -54,6 +54,9 @@ MIDDLEWARE = [
     "glowderma.core.middleware.RequestIdMiddleware",
     "glowderma.core.clientip.ClientIPMiddleware",
     "glowderma.core.network.AdminNetworkMiddleware",
+    # The ops console's language (English, Russian or Uzbek) for /django-admin/ requests only; everything
+    # else keeps LANGUAGE_CODE (glowderma.core.console_i18n).
+    "glowderma.core.console_i18n.ConsoleLocaleMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -73,9 +76,13 @@ AUTHENTICATION_BACKENDS = ["django.contrib.auth.backends.ModelBackend"]
 TIME_ZONE = "Asia/Tashkent"
 CELERY_TIMEZONE = TIME_ZONE
 USE_TZ = True
+# The language of everything but the ops console: API messages, exports, audit texts, the OpenAPI schema.
 LANGUAGE_CODE = "uz"
-# The project's own catalogs come first: the Uzbek strings of the ops console (Unfold and the Django admin;
-# compiled with ``manage.py compile_locale``, the .mo is committed).
+# The ops console's languages (glowderma.core.console_i18n); Uzbek is the source language of its texts.
+LANGUAGES = [("en", "English"), ("ru", "Русский"), ("uz", "O‘zbekcha")]
+# The project's own catalogs come first (compiled with ``manage.py compile_locale``, the .mo is committed):
+# ``uz`` and ``ru`` translate the English strings of Unfold and the Django admin, ``en`` and ``ru`` translate
+# the console's own Uzbek texts.
 LOCALE_PATHS = [BASE_DIR / "locale"]
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 DATA_UPLOAD_MAX_MEMORY_SIZE = 6 * 1024 * 1024
@@ -84,6 +91,10 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = 6 * 1024 * 1024
 LOGIN_REDIRECT_URL = "/django-admin/"
 # The ops console's environment badge (glowderma.core.admin_site); production sets PRODUCTION or STAGING.
 OPS_ENVIRONMENT_LABEL = "LOCAL"
+# The language the console opens in for a browser that has not chosen one with the switcher (en | ru | uz).
+OPS_DEFAULT_LANGUAGE = env_str("OPS_DEFAULT_LANGUAGE", "en").strip().lower()
+if OPS_DEFAULT_LANGUAGE not in {code for code, _name in LANGUAGES}:
+    raise ImproperlyConfigured("OPS_DEFAULT_LANGUAGE must be one of en, ru, uz")
 # --- Ops console access (glowderma.accounts.console, glowderma.core.network; docs/ops/deploy.md) ---
 # Every console login needs a TOTP second factor (django-otp; recovery codes from otp_static). Production
 # refuses false; tests switch it off only with override_settings.

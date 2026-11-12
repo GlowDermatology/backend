@@ -10,6 +10,7 @@ from django.contrib.postgres.fields import DateTimeRangeField, RangeBoundary, Ra
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import models
 from django.db.models import F, Q
+from django.utils.translation import gettext
 
 from glowderma.core import enums
 from glowderma.core.labels import stamp
@@ -163,10 +164,15 @@ class Appointment(TimeStampedModel):
         ]
 
     def __str__(self) -> str:
-        return (
-            f"Qabul #{self.pk} · {self.get_status_display()}: mutaxassis #{self.professional_id} "
-            f"{stamp(self.start)} ({self.duration_min} daqiqa)"
-        )
+        return gettext(
+            "Qabul #%(id)s · %(status)s: mutaxassis #%(professional_id)s %(start)s (%(duration)s daqiqa)"
+        ) % {
+            "id": self.pk,
+            "status": self.get_status_display(),
+            "professional_id": self.professional_id,
+            "start": stamp(self.start),
+            "duration": self.duration_min,
+        }
 
 
 class AppointmentEvent(AppendOnlyModel):
@@ -219,7 +225,9 @@ class AppointmentEvent(AppendOnlyModel):
         ]
 
     def __str__(self) -> str:
-        return (
-            f"Qabul #{self.appointment_id}: {self.get_type_display()} ({self.get_source_display()}) · "
-            f"{stamp(self.at)}"
-        )
+        return gettext("Qabul #%(appointment_id)s: %(type)s (%(source)s) · %(at)s") % {
+            "appointment_id": self.appointment_id,
+            "type": self.get_type_display(),
+            "source": self.get_source_display(),
+            "at": stamp(self.at),
+        }

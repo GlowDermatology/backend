@@ -11,6 +11,7 @@ from django.contrib.postgres.indexes import GinIndex
 from django.db import models
 from django.db.models import Deferrable, F, Func, Q, TextField, Value
 from django.db.models.functions import Coalesce
+from django.utils.translation import gettext
 
 from glowderma.catalog import media
 from glowderma.core import enums, slugs
@@ -298,7 +299,10 @@ class ProductStock(models.Model):
         indexes = [models.Index(fields=["quantity"], condition=Q(quantity__lte=0), name="catalog_stock_out")]
 
     def __str__(self) -> str:
-        return f"Mahsulot #{self.product_id} qoldig‘i: {self.quantity} dona"
+        return gettext("Mahsulot #%(product_id)s qoldig‘i: %(quantity)s dona") % {
+            "product_id": self.product_id,
+            "quantity": self.quantity,
+        }
 
 
 class ProductImage(TimeStampedModel):
@@ -345,7 +349,10 @@ class ProductImage(TimeStampedModel):
         ordering = ["position", "id"]
 
     def __str__(self) -> str:
-        return f"Mahsulot #{self.product_id} rasmi {self.position}"
+        return gettext("Mahsulot #%(product_id)s rasmi %(position)s") % {
+            "product_id": self.product_id,
+            "position": self.position,
+        }
 
 
 class Banner(TimeStampedModel):

@@ -11,3 +11,12 @@ from django.contrib.admin.apps import AdminConfig
 
 class OpsAdminConfig(AdminConfig):
     default_site = "glowderma.core.admin_site.OpsAdminSite"
+
+    def ready(self) -> None:
+        # The console's three languages (glowderma.core.console_i18n): the models' names, labels and choices
+        # become lazy *before* the admins are discovered, because an admin copies them when it is registered
+        # (``ReadOnlyAdmin``'s money and JSON columns take their header from the field's label).
+        from glowderma.core.console_i18n import localize_model_metadata
+
+        localize_model_metadata()
+        super().ready()

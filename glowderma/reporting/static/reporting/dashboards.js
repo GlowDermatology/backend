@@ -1,5 +1,7 @@
 /* Glow Derma Ops dashboards: number formats and theme-aware series colours for Unfold's Chart.js charts.
-   Unfold builds the charts on window "load" (resolving var(--…) colours once); this runs after it. */
+   Unfold builds the charts on window "load" (resolving var(--…) colours once); this runs after it.
+   The words it prints (the currency, the scale units, the tooltip total) come translated from the page:
+   the data-gd-* attributes of .gd-dash (reporting/dashboards/base.html). */
 (function () {
   "use strict";
 
@@ -9,12 +11,17 @@
     return Math.round(value).toString().replace(/\B(?=(\d{3})+(?!\d))/g, NBSP);
   }
 
-  function compact(value) {
+  function words() {
+    var root = document.querySelector(".gd-dash");
+    return root ? root.dataset : {};
+  }
+
+  function compact(value, text) {
     var abs = Math.abs(value);
-    var units = [[1e9, " mlrd"], [1e6, " mln"], [1e3, " ming"]];
+    var units = [[1e9, text.gdMlrd], [1e6, text.gdMln], [1e3, text.gdMing]];
     for (var i = 0; i < units.length; i++) {
       if (abs >= units[i][0]) {
-        return (value / units[i][0]).toFixed(1).replace(/\.0$/, "").replace(".", ",") + units[i][1];
+        return (value / units[i][0]).toFixed(1).replace(/\.0$/, "").replace(".", ",") + " " + (units[i][1] || "");
       }
     }
     return grouped(value);
@@ -39,6 +46,8 @@
   }
 
   function setup() {
+    var text = words();
+    var som = " " + (text.gdSom || "");
     charts().forEach(function (chart) {
       var unit = chart.canvas.closest("[data-gd-chart]").getAttribute("data-gd-chart");
       var money = unit === "som";
@@ -49,15 +58,15 @@
       options.plugins.tooltip.callbacks = {
         label: function (context) {
           var value = context.parsed.y || 0;
-          return " " + context.dataset.label + ": " + grouped(value) + (money ? " so\u2018m" : "");
+          return " " + context.dataset.label + ": " + grouped(value) + (money ? som : "");
         },
         footer: function (items) {
           var total = items.reduce(function (sum, item) { return sum + (item.parsed.y || 0); }, 0);
-          return "Jami: " + grouped(total) + (money ? " so\u2018m" : "");
+          return (text.gdTotal || "") + ": " + grouped(total) + (money ? som : "");
         },
       };
       options.scales.y.ticks.callback = function (value) {
-        return money ? compact(value) : grouped(value);
+        return money ? compact(value, text) : grouped(value);
       };
       recolour(chart);
       chart.update();

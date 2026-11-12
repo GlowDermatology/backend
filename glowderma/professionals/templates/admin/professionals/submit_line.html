@@ -61,7 +61,7 @@
                         {% add_preserved_filters delete_url as link %}
 
                         {% component "unfold/components/button.html" with href=link variant="danger" class="mr-auto w-full lg:w-auto" %}
-                            {{ opts.verbose_name|capfirst }}ni o‘chirish
+                            {% blocktranslate trimmed with name=opts.verbose_name|capfirst %}{{ name }}ni o‘chirish{% endblocktranslate %}
                         {% endcomponent %}
                     {% endif %}
                 </div>

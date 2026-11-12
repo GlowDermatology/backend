@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from django import forms
+from django.utils.translation import gettext_lazy as _
 from unfold.widgets import UnfoldAdminTextInputWidget
 
 if TYPE_CHECKING:
@@ -15,7 +16,7 @@ else:
 
 class TotpCodeForm(forms.Form):
     code = forms.CharField(
-        label="Autentifikator ilovasidagi 6 xonali kod",
+        label=_("Autentifikator ilovasidagi 6 xonali kod"),
         min_length=6,
         max_length=6,
         strip=True,
@@ -29,16 +30,16 @@ class TotpCodeForm(forms.Form):
             }
         ),
         error_messages={
-            "required": "Kodni kiriting.",
-            "min_length": "Kod 6 ta raqamdan iborat.",
-            "max_length": "Kod 6 ta raqamdan iborat.",
+            "required": _("Kodni kiriting."),
+            "min_length": _("Kod 6 ta raqamdan iborat."),
+            "max_length": _("Kod 6 ta raqamdan iborat."),
         },
     )
 
 
 class RecoveryCodeForm(forms.Form):
     code = forms.CharField(
-        label="Zaxira kod",
+        label=_("Zaxira kod"),
         max_length=32,
         strip=True,
         widget=_TextInput(
@@ -50,5 +51,5 @@ class RecoveryCodeForm(forms.Form):
                 "placeholder": "xxxxx-xxxxx",
             }
         ),
-        error_messages={"required": "Zaxira kodni kiriting."},
+        error_messages={"required": _("Zaxira kodni kiriting.")},
     )

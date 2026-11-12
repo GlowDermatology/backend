@@ -17,6 +17,7 @@ from typing import ClassVar, Self
 
 from django.db import models
 from django.db.models import Exists, F, OuterRef, Q, Subquery
+from django.utils.translation import gettext
 
 from glowderma.core import enums, timeutils
 from glowderma.core.labels import som_text
@@ -94,8 +95,11 @@ class CashbackPolicy(AppendOnlyModel):
         indexes = [models.Index(fields=["effective_from"], name="policy_effective_from_idx")]
 
     def __str__(self) -> str:
-        basis = self.get_basis_display()
-        return f"Cashback siyosati v{self.version} ({basis}, {self.effective_from:%Y-%m-%d} dan)"
+        return gettext("Cashback siyosati v%(version)s (%(basis)s, %(date)s dan)") % {
+            "version": self.version,
+            "basis": self.get_basis_display(),
+            "date": f"{self.effective_from:%Y-%m-%d}",
+        }
 
     # Derived columns: ``with_derived()`` attaches them as annotations (Django assigns them through the
     # setters below); a plain instance loads both lazily with one query. They depend on *other* rows (a
@@ -200,7 +204,10 @@ class LoyaltyAccount(TimeStampedModel):
         verbose_name_plural = "cashback hisoblari"
 
     def __str__(self) -> str:
-        return f"Mijoz #{self.customer_id} cashback hisobi: {som_text(self.balance)}"
+        return gettext("Mijoz #%(customer)s cashback hisobi: %(balance)s") % {
+            "customer": self.customer_id,
+            "balance": som_text(self.balance),
+        }
 
 
 class LedgerEntry(AppendOnlyModel):
@@ -345,10 +352,13 @@ class LedgerEntry(AppendOnlyModel):
         ]
 
     def __str__(self) -> str:
-        return (
-            f"Yozuv #{self.pk} {self.get_kind_display()} {self.amount:+} → {self.balance_after} "
-            f"(hisob #{self.account_id})"
-        )
+        return gettext("Yozuv #%(id)s %(kind)s %(amount)s → %(balance)s (hisob #%(account)s)") % {
+            "id": self.pk,
+            "kind": self.get_kind_display(),
+            "amount": f"{self.amount:+}",
+            "balance": self.balance_after,
+            "account": self.account_id,
+        }
 
 
 class CashbackHold(TimeStampedModel):
@@ -438,9 +448,11 @@ class CashbackHold(TimeStampedModel):
         ]
 
     def __str__(self) -> str:
-        return (
-            f"Ushlab turish {som_text(self.amount)} · buyurtma №{self.order_id} ({self.get_state_display()})"
-        )
+        return gettext("Ushlab turish %(amount)s · buyurtma №%(order)s (%(state)s)") % {
+            "amount": som_text(self.amount),
+            "order": self.order_id,
+            "state": self.get_state_display(),
+        }
 
 
 # An online purchase whose Billz sale is not recorded: not pushed, or pushed without Billz's sale id
@@ -586,13 +598,18 @@ class Purchase(TimeStampedModel):
         ]
 
     def __str__(self) -> str:
-        ref = (
-            f"buyurtma №{self.order_id}"
-            if self.source == enums.PurchaseSource.ONLINE
-            else f"Billz {self.billz_sale_ref or self.billz_sale_id}"
-        )
-        suffix = " · bekor qilingan" if self.reversed else ""
-        return f"Xarid #{self.pk} {self.get_source_display()} {som_text(self.amount)} ({ref}){suffix}"
+        if self.source == enums.PurchaseSource.ONLINE:
+            pattern = gettext("Xarid #%(id)s %(source)s %(amount)s (buyurtma №%(order)s)")
+        else:
+            pattern = gettext("Xarid #%(id)s %(source)s %(amount)s (Billz %(sale)s)")
+        text = pattern % {
+            "id": self.pk,
+            "source": self.get_source_display(),
+            "amount": som_text(self.amount),
+            "order": self.order_id,
+            "sale": self.billz_sale_ref or self.billz_sale_id,
+        }
+        return gettext("%(purchase)s · bekor qilingan") % {"purchase": text} if self.reversed else text
 
 
 class PurchaseItem(models.Model):
@@ -630,7 +647,12 @@ class PurchaseItem(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.name} × {self.quantity} @ {som_text(self.unit_price)} (xarid #{self.purchase_id})"
+        return gettext("%(name)s × %(quantity)s @ %(price)s (xarid #%(purchase)s)") % {
+            "name": self.name,
+            "quantity": self.quantity,
+            "price": som_text(self.unit_price),
+            "purchase": self.purchase_id,
+        }
 
 
 class PosDevice(TimeStampedModel):
@@ -660,4 +682,5 @@ class PosDevice(TimeStampedModel):
         ordering = ["name"]
 
     def __str__(self) -> str:
-        return f"POS {self.name} ({self.key_prefix}…){'' if self.is_active else ' · nofaol'}"
+        text = f"POS {self.name} ({self.key_prefix}…)"
+        return text if self.is_active else gettext("%(device)s · nofaol") % {"device": text}

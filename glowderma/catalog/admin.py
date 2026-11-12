@@ -10,6 +10,8 @@ from typing import Any
 from django.contrib import admin
 from django.db.models import Model, QuerySet
 from django.http import HttpRequest
+from django.utils.translation import gettext
+from django.utils.translation import gettext_lazy as _
 
 from glowderma.catalog import selectors
 from glowderma.catalog.models import Banner, Category, Product, ProductImage, ProductStock
@@ -29,14 +31,14 @@ class StockStateFilter(admin.SimpleListFilter):
     """«Qoldiq»: the stock problems the «Savdo va katalog» dashboard counts (catalog.selectors.stock_health),
     so its tiles link to exactly the rows behind their numbers (an id list stops at the first hundred)."""
 
-    title = "qoldiq"
+    title = _("qoldiq")
     parameter_name = "stock"
 
     def lookups(self, request: HttpRequest, model_admin: Any) -> list[tuple[str, str]]:
         return [
-            ("out", "Tugagan (0 yoki Billz’da yozuvi yo‘q)"),
-            ("stale", "Eskirgan (24 soatdan beri yangilanmagan)"),
-            ("in", "Bor"),
+            ("out", gettext("Tugagan (0 yoki Billz’da yozuvi yo‘q)")),
+            ("stale", gettext("Eskirgan (24 soatdan beri yangilanmagan)")),
+            ("in", gettext("Bor")),
         ]
 
     def queryset(self, request: HttpRequest, queryset: QuerySet[Model]) -> QuerySet[Model]:
@@ -54,7 +56,7 @@ class SeoIssueFilter(admin.SimpleListFilter):
     the sales dashboard's backlog rows. The checklist is Python over the whole active catalog, so the filter
     offers only the applied value (it is reached from the dashboard, never built on a plain list load)."""
 
-    title = "SEO muammosi"
+    title = _("SEO muammosi")
     parameter_name = "seo"
     kind = "product"
 
@@ -76,7 +78,7 @@ class CategorySeoIssueFilter(SeoIssueFilter):
 
 register_read_only(
     Category,
-    title_format="Kategoriya: {obj.name_uz}",
+    title_format=_("Kategoriya: {obj.name_uz}"),
     list_display=("slug", "name_uz", "position", "is_active"),
     list_filter=("is_active", CategorySeoIssueFilter),
     search_fields=("slug", "name_uz"),
@@ -84,15 +86,15 @@ register_read_only(
 )
 register_read_only(
     Product,
-    title_format="Mahsulot: {obj}",
+    title_format=_("Mahsulot: {obj}"),
     list_display=(
         "id",
         "billz_id",
         "name_uz",
         "billz_name",
         "category",
-        money_column("price", "Narx"),
-        status_column("status", "Holat", {"active": SUCCESS, "hidden": WARNING}, PRODUCT_STATUS),
+        money_column("price", _("Narx")),
+        status_column("status", _("Holat"), {"active": SUCCESS, "hidden": WARNING}, PRODUCT_STATUS),
         "promo",
         "is_new_from_billz",
     ),
@@ -125,7 +127,7 @@ register_read_only(
 )
 register_read_only(
     Banner,
-    title_format="Banner: {obj.title_uz}",
+    title_format=_("Banner: {obj.title_uz}"),
     list_display=("id", "title_uz", "link_kind", "is_active", "starts_at", "ends_at", "position"),
     list_filter=("link_kind", "is_active"),
     search_fields=("title_uz",),

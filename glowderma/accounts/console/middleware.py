@@ -15,6 +15,7 @@ from django.contrib import auth, messages
 from django.contrib.auth import SESSION_KEY
 from django.contrib.sessions.backends.base import SessionBase
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
+from django.utils.translation import gettext_lazy as _
 
 from glowderma.accounts.console import events, state
 from glowderma.accounts.models import StaffUser
@@ -23,7 +24,7 @@ from glowderma.core.network import CONSOLE_PREFIX
 
 TOUCH_SECONDS = 15
 LOGIN_PATH = "/django-admin/login/"
-EXPIRED_MESSAGE = "Sessiya muddati tugadi. Qaytadan kiring."
+EXPIRED_MESSAGE = _("Sessiya muddati tugadi. Qaytadan kiring.")
 
 
 def expiry_reason(session: SessionBase, now: float) -> str | None:

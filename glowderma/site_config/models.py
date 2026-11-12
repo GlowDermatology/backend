@@ -2,6 +2,7 @@
 
 from django.db import models
 from django.db.models import Q
+from django.utils.translation import gettext
 
 from glowderma.core.models import timestamp_default
 
@@ -84,7 +85,7 @@ class SiteSettings(models.Model):
         ]
 
     def __str__(self) -> str:
-        return "Sayt sozlamalari"
+        return gettext("Sayt sozlamalari")
 
     @classmethod
     def load(cls) -> SiteSettings:

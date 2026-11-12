@@ -9,16 +9,21 @@ A handler signals its outcome to ``core.tasks.dispatch_outbox`` by returning (``
 * anything else — a transient failure: retried with backoff, ``dead`` after :data:`MAX_ATTEMPTS`.
 """
 
+from __future__ import annotations
+
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django.db import transaction
 
 from glowderma.core import audit, timeutils
 from glowderma.core.models import OutboxMessage
+
+if TYPE_CHECKING:
+    from django_stubs_ext import StrOrPromise
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +120,7 @@ class RequeueHooks:
     resolve_refusal: Callable[[OutboxMessage], str] | None = None
     describe_uz: Callable[[OutboxMessage], str] | None = None
     skip_reason_uz: Callable[[OutboxMessage], str] | None = None
-    warning_uz: str = ""
+    warning_uz: StrOrPromise = ""
 
 
 _requeue_hooks: dict[str, RequeueHooks] = {}

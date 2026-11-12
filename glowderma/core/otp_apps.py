@@ -1,4 +1,4 @@
-"""Uzbek names for django_otp's device apps in the ops console's index, breadcrumbs and device pages.
+"""Names for django_otp's device apps in the ops console's index, breadcrumbs and device pages.
 
 django_otp's own ``DefaultConfig`` classes carry no ``verbose_name`` (the index would show "Otp_Totp"), so
 ``INSTALLED_APPS`` lists these subclasses instead. The app label (and so the migrations and tables) stays
@@ -6,7 +6,8 @@ django_otp's own ``DefaultConfig`` classes carry no ``verbose_name`` (the index 
 
 The device models' names and their fields' labels are plain English strings in django_otp ("TOTP device",
 "static device" derived from the class name, "Last used at", …) with no translation hook. ``ready()`` gives
-them Uzbek ones in one place (:func:`uzbek_labels`), display only:
+them the console's own in one place (:func:`uzbek_labels`), display only — written in Uzbek and lazy, like
+every console text (``glowderma.core.console_i18n``), so they follow the viewer's language:
 
 * the model names on ``Options.verbose_name`` / ``verbose_name_plural`` — ``Options.original_attrs`` (what the
   migration autodetector reads) keeps django_otp's values;
@@ -18,48 +19,55 @@ Their English help texts are hidden on the console pages instead (``ReadOnlyAdmi
 glowderma.accounts.admin).
 """
 
-from typing import Any
+from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any
+
+from django.utils.translation import gettext_lazy as _
+from django.utils.translation import pgettext_lazy
 from django_otp.plugins.otp_static.apps import DefaultConfig as StaticDefaultConfig
 from django_otp.plugins.otp_totp.apps import DefaultConfig as TotpDefaultConfig
 
-DEVICE_FIELD_LABELS = {
-    "user": "xodim",
-    "name": "nomi",
-    "confirmed": "tasdiqlangan",
-    "throttling_failure_timestamp": "oxirgi xato urinish",
-    "throttling_failure_count": "ketma-ket xato urinishlar",
-    "created_at": "yaratilgan",
-    "last_used_at": "oxirgi ishlatilgan",
+if TYPE_CHECKING:
+    from django.utils.functional import _StrPromise
+
+DEVICE_FIELD_LABELS: dict[str, _StrPromise] = {
+    "user": _("xodim"),
+    "name": _("nomi"),
+    "confirmed": pgettext_lazy("belgi", "tasdiqlangan"),
+    "throttling_failure_timestamp": _("oxirgi xato urinish"),
+    "throttling_failure_count": _("ketma-ket xato urinishlar"),
+    "created_at": _("yaratilgan"),
+    "last_used_at": _("oxirgi ishlatilgan"),
 }
-TOTP_FIELD_LABELS = {
+TOTP_FIELD_LABELS: dict[str, _StrPromise] = {
     **DEVICE_FIELD_LABELS,
-    "key": "maxfiy kalit",
-    "step": "qadam (soniya)",
-    "t0": "boshlang‘ich vaqt (t0)",
-    "digits": "kod uzunligi",
-    "tolerance": "ruxsat etilgan qadamlar",
-    "drift": "soat og‘ishi (qadam)",
-    "last_t": "oxirgi tasdiqlangan qadam",
+    "key": _("maxfiy kalit"),
+    "step": _("qadam (soniya)"),
+    "t0": _("boshlang‘ich vaqt (t0)"),
+    "digits": _("kod uzunligi"),
+    "tolerance": _("ruxsat etilgan qadamlar"),
+    "drift": _("soat og‘ishi (qadam)"),
+    "last_t": _("oxirgi tasdiqlangan qadam"),
 }
 
 
-def label_fields(model: Any, labels: dict[str, str]) -> None:
+def label_fields(model: Any, labels: dict[str, _StrPromise]) -> None:
     """Show ``model``'s fields with the Uzbek ``labels`` (display only; see the module doc)."""
     for field in model._meta.get_fields():
         if field.name in labels and hasattr(field, "verbose_name"):
             field.verbose_name = labels[field.name]
 
 
-def uzbek_labels(model: Any, names: tuple[str, str], fields: dict[str, str]) -> None:
+def uzbek_labels(model: Any, names: tuple[_StrPromise, _StrPromise], fields: dict[str, _StrPromise]) -> None:
     """The model's Uzbek singular/plural names and field labels (display only; see the module doc)."""
     model._meta.verbose_name, model._meta.verbose_name_plural = names
     label_fields(model, fields)
 
 
 class OtpTotpConfig(TotpDefaultConfig):  # type: ignore[misc]
-    verbose_name = "Ikki bosqichli kirish (TOTP)"
-    device_names = ("2FA qurilma", "2FA qurilmalar")
+    verbose_name = _("Ikki bosqichli kirish (TOTP)")
+    device_names = (_("2FA qurilma"), _("2FA qurilmalar"))
 
     def ready(self) -> None:
         super().ready()
@@ -67,8 +75,8 @@ class OtpTotpConfig(TotpDefaultConfig):  # type: ignore[misc]
 
 
 class OtpStaticConfig(StaticDefaultConfig):  # type: ignore[misc]
-    verbose_name = "Tiklash kodlari"
-    device_names = ("tiklash kodlari to‘plami", "tiklash kodlari to‘plamlari")
+    verbose_name = _("Tiklash kodlari")
+    device_names = (_("tiklash kodlari to‘plami"), _("tiklash kodlari to‘plamlari"))
 
     def ready(self) -> None:
         super().ready()

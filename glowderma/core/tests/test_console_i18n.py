@@ -238,7 +238,7 @@ def test_project_apps_have_uzbek_labels() -> None:
     assert labels["otp_totp"] == "Ikki bosqichli kirish (TOTP)"
     from glowderma.core.otp_apps import OtpStaticConfig
 
-    assert OtpStaticConfig.verbose_name == "Tiklash kodlari"
+    assert str(OtpStaticConfig.verbose_name) == "Tiklash kodlari"
     assert OtpStaticConfig.name == "django_otp.plugins.otp_static"
     for config in apps.get_app_configs():
         if config.name.startswith("glowderma."):

@@ -26,6 +26,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseBase, HttpRespons
 from django.template.response import TemplateResponse
 from django.urls import reverse
 from django.utils.cache import add_never_cache_headers
+from django.utils.translation import gettext, ngettext
 from rest_framework.exceptions import Throttled
 from unfold.forms import AuthenticationForm as UnfoldAuthenticationForm
 
@@ -184,12 +185,17 @@ class GuardedAdminAuthenticationForm(_AdminAuthenticationForm):
 admin.site.login_form = GuardedAdminAuthenticationForm
 
 LOGIN_TEMPLATE = "accounts/console/login.html"
-LOCKOUT_MESSAGE = "Juda ko‘p urinish. {wait} soniyadan so‘ng qayta urinib ko‘ring."
 
 
 def lockout_message(exc: Throttled) -> tuple[str, int]:
+    """The lockout notice in the console's language, and the wait in seconds."""
     wait = int(math.ceil(float(getattr(exc, "wait", None) or 0)))
-    return LOCKOUT_MESSAGE.format(wait=wait), wait
+    notice = ngettext(
+        "Juda ko‘p urinish. %(wait)s soniyadan so‘ng qayta urinib ko‘ring.",
+        "Juda ko‘p urinish. %(wait)s soniyadan so‘ng qayta urinib ko‘ring.",
+        wait,
+    ) % {"wait": wait}
+    return notice, wait
 
 
 class ConsolePasswordView(LoginView):
@@ -219,7 +225,7 @@ def _login_context(request: HttpRequest, extra_context: dict[str, Any] | None) -
     """What ``AdminSite.login`` hands the template, so Unfold's login page renders unchanged."""
     context: dict[str, Any] = {
         **admin.site.each_context(request),
-        "title": "Kirish",
+        "title": gettext("Kirish"),
         "subtitle": None,
         "app_path": request.get_full_path(),
         "username": "",

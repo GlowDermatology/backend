@@ -124,6 +124,16 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
   only through `site_config.services` (`update_settings`, `publish_terms(expected_fingerprint=…)`); `SiteSettings`
   itself stays a `ReadOnlyAdmin` registration. `site_config` has no `api/admin/`: the admin API's `settings/` and
   `settings/terms/publish/` were retired (contract §2.11), so it is not in `config.urls.ADMIN_API_MODULES`.
+- The ops console speaks English, Russian and Uzbek (`glowderma/core/console_i18n.py`, switcher cookie
+  `gd_ops_language`, default `OPS_DEFAULT_LANGUAGE`); only `/django-admin/` switches, everything else stays
+  `LANGUAGE_CODE = "uz"`. **Uzbek is the source language**: write a console text in Uzbek and mark it
+  (`gettext_lazy` at import time, `gettext` / `ngettext` with `%(name)s` placeholders in functions,
+  `{% translate %}` / `{% blocktranslate %}` in templates); model `verbose_name` / `help_text` / `choices` need no
+  marking; an enum label or `core.labels` value goes through `gettext(value)` where the console renders it. Never
+  mark what is stored or sent (audit texts, notifications, API messages, exports). After changing a console text
+  run `manage.py console_messages`, translate the new entries of `locale/en` and `locale/ru`, then
+  `manage.py compile_locale`; `console_messages --check` and `test_console_languages.py` fail otherwise. Import
+  `StrOrPromise` / `_StrPromise` only under `TYPE_CHECKING` (django-stubs is a dev dependency).
 - Provider adapters live in `glowderma/integrations/<provider>/` behind a port (Protocol) with a fake and a live
   implementation chosen by `*_MODE` settings (default `INTEGRATIONS_MODE=fake`); views and services obtain them
   through the module's `registry`. `integrations` cannot host admin views (`AdminAPIView` lives in `accounts`,
