@@ -216,6 +216,11 @@
   color: var(--color-primary-600);
 }
 
+/* base-500 on the dark panel is 3.6:1; base-400 (the sign-in hint's dark colour) passes WCAG AA. */
+.dark .ops-language__option {
+  color: var(--color-base-400);
+}
+
 .dark .ops-language__option:hover,
 .dark .ops-language__option:focus-visible {
   background: var(--color-base-800);
