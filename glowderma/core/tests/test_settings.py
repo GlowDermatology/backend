@@ -433,6 +433,39 @@ def test_gunicorn_config_logs_request_id() -> None:
     assert module.worker_class == "gthread"
 
 
+def test_gunicorn_config_reads_workers_from_the_secrets_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """gunicorn loads its config before Django: the Vault-rendered file must still set GUNICORN_*."""
+    import importlib.util
+    import json
+
+    secrets_file = tmp_path / "django.json"
+    secrets_file.write_text(json.dumps({"GUNICORN_WORKERS": "7", "GUNICORN_THREADS": "2"}), encoding="utf-8")
+    # setenv first so monkeypatch restores both after the loader overwrote them in os.environ
+    monkeypatch.setenv("GUNICORN_WORKERS", "3")
+    monkeypatch.setenv("GUNICORN_THREADS", "4")
+    monkeypatch.setenv("DJANGO_SECRETS_FILE", str(secrets_file))
+    path = Path(__file__).resolve().parents[3] / "config" / "gunicorn.conf.py"
+    spec = importlib.util.spec_from_file_location("gunicorn_conf_vault", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert (module.workers, module.threads) == (7, 2)
+
+
+def test_celery_concurrency_is_a_setting(
+    production_env: None,
+    monkeypatch: pytest.MonkeyPatch,
+    load_fresh_production: Callable[[], ModuleType],
+) -> None:
+    """Not an entrypoint flag: the worker reads it after config/secrets.py loaded the Vault file."""
+    monkeypatch.delenv("CELERY_CONCURRENCY", raising=False)
+    assert load_fresh_production().CELERY_WORKER_CONCURRENCY == 2
+    monkeypatch.setenv("CELERY_CONCURRENCY", "5")
+    assert load_fresh_production().CELERY_WORKER_CONCURRENCY == 5
+
+
 def test_production_requires_public_media_base_url(
     production_env: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:

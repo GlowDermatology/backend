@@ -200,6 +200,9 @@ GEOIP_CITY_DB = env_str("GEOIP_CITY_DB", "")
 CELERY_TASK_ACKS_LATE = True
 CELERY_TASK_REJECT_ON_WORKER_LOST = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+# Worker processes. A setting, not an entrypoint flag, so a value from the Vault-rendered file applies (the
+# entrypoint's shell runs before config/secrets.py loads that file).
+CELERY_WORKER_CONCURRENCY = env_int("CELERY_CONCURRENCY", 2)
 CELERY_TASK_TIME_LIMIT = 600
 CELERY_TASK_SOFT_TIME_LIMIT = 540
 CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True

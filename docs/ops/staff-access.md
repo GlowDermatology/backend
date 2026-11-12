@@ -80,7 +80,8 @@ Besides inspection, the dashboards and the professionals forms, the console is t
 store settings, contacts and legal texts and to publish the terms: «Katalog» → «Sozlamalar»
 (`/django-admin/settings/`; since 2026-11-07, the admin panel and its API no longer can). Every save is audited
 (`settings.updated`, `settings.terms_published`; texts as digests). Staging and production ship with
-`DJANGO_ADMIN_ENABLED=false` (`infra/environments/*/backend.env`): until ops sets it to `true` with `OPS_DOMAIN`
+`DJANGO_ADMIN_ENABLED=false` (the production default; overrides live in Vault at `secret/<env>/django`): until
+ops sets it to `true` with `OPS_DOMAIN`
 and `OPS_ALLOWED_IPS`, nobody can change the settings there.
 
 ```bash

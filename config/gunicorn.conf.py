@@ -1,4 +1,9 @@
 from config.env import env_int
+from config.secrets import load_secrets_file
+
+# gunicorn reads this file before it imports Django, so the Vault-rendered file (DJANGO_SECRETS_FILE) is
+# loaded here too: GUNICORN_WORKERS / GUNICORN_THREADS set in Vault apply. A no-op when the variable is unset.
+load_secrets_file()
 
 bind = "0.0.0.0:8000"
 # Heartbeat files in memory: the root filesystem is read-only in production.

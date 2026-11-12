@@ -71,7 +71,8 @@ api)
 worker)
 	wait_for_secrets
 	wait_for_database
-	exec celery -A config worker --loglevel INFO --concurrency "${CELERY_CONCURRENCY:-2}" "$@"
+	# Concurrency comes from the settings (CELERY_WORKER_CONCURRENCY <- CELERY_CONCURRENCY), so Vault applies.
+	exec celery -A config worker --loglevel INFO "$@"
 	;;
 beat)
 	wait_for_secrets
