@@ -52,6 +52,8 @@ if TYPE_CHECKING:
 
 TEMPLATE = "site_config/console/settings.html"
 URL_NAME = "admin:site_config_settings"
+# The page's texts: lazy translations of the Uzbek text (annotated as str-or-lazy, what the messages API and
+# the templates take).
 TITLE: StrOrPromise = _("Sozlamalar")
 
 NOTHING_CHANGED: StrOrPromise = _("O‘zgarish yo‘q: saqlanadigan narsa topilmadi.")
