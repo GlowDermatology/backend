@@ -14,6 +14,7 @@ from glowderma.core.seeding import (
     reset_sequences,
     run_seeders,
 )
+from glowderma.core.variants import backfill
 
 
 class Command(BaseCommand):
@@ -82,5 +83,7 @@ class Command(BaseCommand):
                 )
                 for note in context.notes:
                     self.stdout.write(self.style.WARNING(note))
+                variants = backfill()  # seeders store originals only; demo data gets its variants here
+                self.stdout.write(f"Image variants: {variants.created} written, {variants.checked} checked")
             touched = reset_sequences()
         self.stdout.write(self.style.SUCCESS(f"Sequences re-synced: {touched}"))
