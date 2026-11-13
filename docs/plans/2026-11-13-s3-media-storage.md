@@ -25,9 +25,15 @@ Two git repos: `backend/` (tasks 1-3) and `infra/` (tasks 4-7). Both are on `mai
 - No signed URLs: `querystring_auth=False`, `default_acl=None`, `file_overwrite=False`.
 - S3 defaults: `S3_REGION_NAME=us-east-1`, `S3_ADDRESSING_STYLE=path`, `S3_LOCATION=media`, `S3_VERIFY=true`.
 - Stored names keep `<kind>/<owner>/<sha256-prefix>.<ext>`.
-- No secret in `stack.env` (public repo). Credentials come only from Vault: `secret/<env>/minio` (`root_user`,
-  `root_password`, datastores only) and `secret/<env>/s3-app` (`access_key_id`, `secret_access_key`, backend +
-  datastores).
+- Provider settings live in Vault so a provider or bucket change needs no PR: `secret/<env>/s3` keys are env var
+  names: `S3_ENDPOINT_URL`, `S3_BUCKET_NAME`, `S3_REGION_NAME`, `S3_ADDRESSING_STYLE`, `S3_ACCESS_KEY_ID`,
+  `S3_SECRET_ACCESS_KEY`, plus optional `S3_VERIFY` and `PUBLIC_MEDIA_BASE_URL` (backend + datastores). Changing it
+  = `vault kv patch` + `scripts/restart.sh <env> backend`. `secret/<env>/minio` (`root_user`, `root_password`) is
+  datastores only.
+- `stack.env` holds only `MINIO_ENABLED`, `USE_S3`, `S3_LOCATION` (they change what runs and how Caddy serves).
+  Topology keys (Vault may not set): `USE_S3`, `S3_LOCATION`. `PUBLIC_MEDIA_BASE_URL` is no longer a topology key.
+- The stack's own MinIO bucket is fixed: `glowderma-media` (Caddy and `minio-init` use the literal; Vault's
+  `S3_BUCKET_NAME` is seeded with the same value).
 - Error messages name keys, never values.
 - MinIO and mc images are pinned by tag and digest. MinIO runs as `999:999` (the datastores agent's UID, so it
   can read the 0400 secret files) with the `x-hardened` anchor, and publishes no ports.
@@ -36,7 +42,7 @@ Two git repos: `backend/` (tasks 1-3) and `infra/` (tasks 4-7). Both are on `mai
 
 ## Review Focus
 
-1. **An existing environment deploys before `secret/<env>/s3-app` exists.** The backend agent's template would
+1. **An existing environment deploys before `secret/<env>/s3` exists.** The backend agent's template would
    block and the API would never start. Expected: `generate-app-secrets.sh` creates both paths idempotently, and
    `deploy.sh` refuses early with the exact command to run (Task 4, Task 7).
 2. **`USE_S3=true` is turned on before existing files are copied.** Every old image would 404. Expected:
@@ -46,8 +52,9 @@ Two git repos: `backend/` (tasks 1-3) and `infra/` (tasks 4-7). Both are on `mai
    or reach another bucket or prefix. Expected: 404 or the object only (Task 6).
 4. **The same image uploaded twice.** S3 must behave like disk: same resulting name and URL behavior as
    `FileSystemStorage`, no orphan objects after replace or delete (Task 2).
-5. **`USE_S3=true` with the endpoint at `172.30.0.40` while `MINIO_ENABLED=false`.** Expected: `validate.sh`
-   refuses it with a clear message (Task 5).
+5. **`USE_S3=true` with Vault's endpoint at `172.30.0.40` while `MINIO_ENABLED=false`, or an external endpoint
+   without a `PUBLIC_MEDIA_BASE_URL` override.** Expected: `deploy.sh` refuses it with a clear message before
+   touching containers (Task 7; `validate.sh` can't see Vault).
 
 ---
 
@@ -108,11 +115,15 @@ def test_production_keeps_switch(load_fresh_production, s3_env, required_product
     assert prod.STORAGES["default"]["BACKEND"] == "storages.backends.s3.S3Storage"
     assert prod.STORAGES["staticfiles"]["BACKEND"] == "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
-@pytest.mark.parametrize("key", ["USE_S3", "S3_ENDPOINT_URL", "S3_BUCKET_NAME", "S3_REGION_NAME",
-                                 "S3_ADDRESSING_STYLE", "S3_LOCATION", "S3_VERIFY"])
+@pytest.mark.parametrize("key", ["USE_S3", "S3_LOCATION"])
 def test_secrets_file_cannot_set_s3_topology(key):
     with pytest.raises(ImproperlyConfigured, match=key):
         parse_secrets(json.dumps({key: "x"}), source="f")
+
+def test_secrets_file_may_set_provider_settings():
+    keys = ["S3_ENDPOINT_URL", "S3_BUCKET_NAME", "S3_REGION_NAME", "S3_ADDRESSING_STYLE", "S3_VERIFY",
+            "PUBLIC_MEDIA_BASE_URL"]
+    assert set(parse_secrets(json.dumps({k: "x" for k in keys}), source="f")) == set(keys)
 ```
 
 Reuse `load_fresh_production` and the required-env setup from `glowderma/core/tests/test_settings.py` (move
@@ -128,8 +139,9 @@ Expected: FAIL, `ModuleNotFoundError: config.storage`.
 In `config/storage.py`, `USE_S3` is read with `env_bool`, and the required keys are checked all at once (one
 error listing every missing key). In `base.py`, set
 `STORAGES = {"default": media_storage(), "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"}}`.
-In `production.py`, use `STORAGES = {**STORAGES, "staticfiles": {...whitenoise...}}` and keep the comment. Add the
-7 keys to `TOPOLOGY_KEYS` and mention them in the module docstring.
+In `production.py`, use `STORAGES = {**STORAGES, "staticfiles": {...whitenoise...}}` and keep the comment. Add
+`USE_S3` and `S3_LOCATION` to `TOPOLOGY_KEYS`, remove `PUBLIC_MEDIA_BASE_URL` from it, and update the module
+docstring and any existing test that asserted it was refused.
 
 - [ ] **Step 5: Run the new tests and the full suite**
 
@@ -275,18 +287,21 @@ git commit -m "chore(storage): optional local MinIO profile; record I1 resolved 
 
 **Interfaces:**
 - Produces:
-  - Vault paths `secret/<env>/minio` `{root_user, root_password}` and `secret/<env>/s3-app`
-    `{access_key_id, secret_access_key}`.
-  - `django.json` gains `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY`.
+  - Vault paths `secret/<env>/minio` `{root_user, root_password}` and `secret/<env>/s3`, whose keys are env var
+    names (seeded: `S3_ENDPOINT_URL=http://172.30.0.40:9000`, `S3_BUCKET_NAME=glowderma-media`,
+    `S3_REGION_NAME=us-east-1`, `S3_ADDRESSING_STYLE=path`, random `S3_ACCESS_KEY_ID`, random
+    `S3_SECRET_ACCESS_KEY`).
+  - `django.json` gains every key of `secret/<env>/s3` (ranged like `secret/<env>/django`).
   - Files in the datastores volume: `/run/secrets/minio_root_user`, `minio_root_password`, `s3_app_access_key`,
-    `s3_app_secret_key` (0400, uid 999).
+    `s3_app_secret_key` (0400, uid 999), from `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY`.
 
 - [ ] **Step 1: Write the failing checks in `test-vault.sh`**
 
-- The backend agent's `django.json` has both `S3_*` keys equal to `secret/<env>/s3-app`.
+- The backend agent's `django.json` contains every key of `secret/<env>/s3` with its value, and a key added later
+  with `vault kv patch` (e.g. `PUBLIC_MEDIA_BASE_URL`) appears after re-render.
 - The datastores agent renders all 4 files.
 - The backend token reading `secret/data/<env>/minio` gets 403.
-- The frontend token reading `s3-app` gets 403.
+- The frontend token reading `secret/data/<env>/s3` gets 403.
 - A second `generate-app-secrets.sh` run keeps existing values.
 
 - [ ] **Step 2: Run it to verify it fails**
@@ -297,15 +312,18 @@ Expected: `FAIL` lines for the new checks.
 - [ ] **Step 3: Implement**
 
 - `put_new minio` uses `root_user` `glowderma-root` and a random 32-hex `root_password`.
-- `put_new s3-app` uses a random 20-char `access_key_id` and a random 40-char `secret_access_key`.
+- `put_new s3` with the seeded values above (access key: random 20 alphanumeric chars, secret: random 40).
 - Update the layout comment.
 - Policies:
-  - backend reads `s3-app`
-  - datastores reads `minio` and `s3-app`
-- In `django.json.ctmpl`, insert the `s3-app` block before the `redis` block, with a trailing comma.
+  - backend reads `s3`
+  - datastores reads `minio` and `s3`
+- In `django.json.ctmpl`, range over `secret/<env>/s3` the same way as `secret/<env>/django`, placed before the
+  `redis` block so the JSON stays valid.
 - The 4 templates go in `datastores.hcl` with `error_on_missing_key = true`.
-- `secrets-management.md`: for an external provider, overwrite `s3-app` with `put-secret.sh`. For existing
-  environments, rerun `generate-app-secrets.sh` before deploying this release.
+- `secrets-management.md`: changing provider or bucket = `vault kv patch secret/<env>/s3 ...` then
+  `scripts/restart.sh <env> backend` (no PR). For an external provider, also set `PUBLIC_MEDIA_BASE_URL` there.
+  The frontend's `GLOWDERMA_MEDIA_HOSTS` is build-time, so a new image host still needs a frontend rebuild. For
+  existing environments, rerun `generate-app-secrets.sh` before deploying this release.
 
 - [ ] **Step 4: Run it to verify it passes**
 
@@ -329,21 +347,21 @@ git commit -m "feat(vault): MinIO root and S3 app credentials"
 - Produces:
   - Services `minio` (profile `minio`) and `minio-init` (profile `minio-tools`; run with `run --rm`, never `up`).
   - `app_compose` exports `MEDIA_BACKEND=minio|disk` and adds `--profile minio` when `MINIO_ENABLED=true`.
-  - Backend env keys `USE_S3`, `S3_ENDPOINT_URL`, `S3_BUCKET_NAME`, `S3_REGION_NAME`, `S3_ADDRESSING_STYLE`,
-    `S3_LOCATION`.
-  - `PUBLIC_MEDIA_BASE_URL: ${PUBLIC_MEDIA_BASE_URL:-https://${SITE_DOMAIN}/media/}`.
-  - Edge env `MEDIA_BACKEND`, `MINIO_UPSTREAM: 172.30.0.40:9000`, `S3_BUCKET_NAME`, `S3_LOCATION`.
+  - Backend env keys from the stack: `USE_S3`, `S3_LOCATION` only (the other `S3_*` come from Vault via
+    `django.json`). `PUBLIC_MEDIA_BASE_URL` stays `https://${SITE_DOMAIN}/media/` in compose; Vault may override
+    it.
+  - Edge env `MEDIA_BACKEND`, `MINIO_UPSTREAM: 172.30.0.40:9000`, `MINIO_BUCKET: glowderma-media`, `S3_LOCATION`.
+    `minio-init` gets `MINIO_BUCKET: glowderma-media` and `S3_LOCATION` too.
 
 - [ ] **Step 1: Write the failing validations in `validate.sh`**
 
 For each env, render `docker compose config` both without and with `--profile minio`, and assert:
-- `MINIO_ENABLED` and `USE_S3` are `true` or `false`.
-- `USE_S3=true` requires `S3_BUCKET_NAME`.
-- `USE_S3=true` with `MINIO_ENABLED=false` and an endpoint containing `172.30.0.40` is refused with
-  `USE_S3 points at the stack's MinIO but MINIO_ENABLED=false`.
-- `USE_S3=true` with `MINIO_ENABLED=false` requires `PUBLIC_MEDIA_BASE_URL` to be set.
-- `172.30.0.40` is the same in `minio`'s `ipv4_address`, the default endpoint and the edge's `MINIO_UPSTREAM`.
+- `MINIO_ENABLED` and `USE_S3` are `true` or `false`; `S3_LOCATION` is non-empty.
+- `172.30.0.40` is the same in `minio`'s `ipv4_address`, the edge's `MINIO_UPSTREAM` and the seeded
+  `S3_ENDPOINT_URL` in `scripts/vault/generate-app-secrets.sh`.
+- `glowderma-media` is the same in the edge env, `minio-init` env and the seeded `S3_BUCKET_NAME`.
 - Without the profile, the rendered config has no `minio` service.
+(Vault-dependent consistency rules live in `deploy.sh`, Task 7.)
 
 - [ ] **Step 2: Run it to verify it fails**
 
@@ -356,14 +374,10 @@ Expected: fails because the keys are missing from `stack.env` and there's no `mi
 
 ```
 # Media storage. MINIO_ENABLED pulls/runs MinIO; USE_S3 makes Django store media in S3 (either can be off).
+# Provider, bucket, endpoint and keys are in Vault: secret/<env>/s3 (change + scripts/restart.sh <env> backend).
 MINIO_ENABLED=false
 USE_S3=false
-S3_ENDPOINT_URL=http://172.30.0.40:9000
-S3_BUCKET_NAME=glowderma-media
-S3_REGION_NAME=us-east-1
-S3_ADDRESSING_STYLE=path
 S3_LOCATION=media
-# External provider only: PUBLIC_MEDIA_BASE_URL=https://<bucket or CDN>/media/
 ```
 
 - `minio`:
@@ -406,7 +420,7 @@ git commit -m "feat(stack): optional MinIO behind MINIO_ENABLED, S3 settings pas
 - Modify: `infra/caddy/Caddyfile` (site block around line 79 and ops block around line 153), `infra/caddy/edge_probe.py`
 
 **Interfaces:**
-- Consumes: edge env `MEDIA_BACKEND`, `MINIO_UPSTREAM`, `S3_BUCKET_NAME`, `S3_LOCATION` (Task 5).
+- Consumes: edge env `MEDIA_BACKEND`, `MINIO_UPSTREAM`, `MINIO_BUCKET`, `S3_LOCATION` (Task 5).
 - Produces: snippets `(media_disk)` and `(media_minio)`, used as `import media_{$MEDIA_BACKEND:disk}` inside both
   `handle_path /media/*` blocks. The headers (Cache-Control, nosniff, the site's CSP) stay in the shared block.
 
@@ -430,7 +444,7 @@ Expected: FAIL on the minio checks.
 - [ ] **Step 3: Implement the snippets**
 
 - `(media_disk)`: today's `root` + `file_server`.
-- `(media_minio)`: `rewrite * /{$S3_BUCKET_NAME}/{$S3_LOCATION:media}{path}`, then `reverse_proxy {$MINIO_UPSTREAM}`
+- `(media_minio)`: `rewrite * /{$MINIO_BUCKET}/{$S3_LOCATION:media}{path}`, then `reverse_proxy {$MINIO_UPSTREAM}`
   with `header_up Host {upstream_hostport}` and `header_down -Server -X-Amz-* -X-Minio-*`.
 - If the env-placeholder `import` doesn't parse in Caddy 2.11, switch to a matcher on `{env.MEDIA_BACKEND}` and
   say so in the commit.
@@ -457,9 +471,14 @@ git commit -m "feat(edge): serve /media from disk or proxy to MinIO"
 
 - [ ] **Step 1: Change `deploy.sh`**
 
-- Preflight, after the Vault status: if `MINIO_ENABLED` or `USE_S3` is `true`, `vault kv get` `secret/<env>/s3-app`
+- Preflight, after the Vault status: if `MINIO_ENABLED` or `USE_S3` is `true`, `vault kv get` `secret/<env>/s3`
   and, with MinIO, `secret/<env>/minio`. If either is missing, die with
-  `run scripts/vault/generate-app-secrets.sh $ENV first`.
+  `run scripts/vault/generate-app-secrets.sh $ENV first`. With `USE_S3=true` and `MINIO_ENABLED=false`, read
+  `S3_ENDPOINT_URL` and `PUBLIC_MEDIA_BASE_URL` from `secret/<env>/s3` (never print other values) and die if the
+  endpoint contains `172.30.0.40` (`USE_S3 points at the stack's MinIO but MINIO_ENABLED=false`) or if
+  `PUBLIC_MEDIA_BASE_URL` is unset (`an external provider needs PUBLIC_MEDIA_BASE_URL in secret/$ENV/s3`).
+  Put these rules in a function in `lib.sh` and cover each with a case in a small `scripts/ci/test-media-preflight.sh`
+  that stubs the Vault read.
 - Pull: when MinIO is enabled, also `app_compose --profile minio-tools pull --quiet minio-init`.
 - After the datastores start: with MinIO, `app_compose up -d --wait minio`, then
   `app_compose --profile minio-tools run --rm --no-deps minio-init`, and die on failure.
@@ -485,10 +504,10 @@ Switch-on order in `deployment.md`:
 2. Run `scripts/manage.sh <env> sync-media` (dry run), then with `--apply`.
 3. Set `USE_S3=true` and deploy. `media_storage_check` gates this deploy.
 
-For an external provider, `deployment.md` also covers:
-- setting `S3_ENDPOINT_URL` and `PUBLIC_MEDIA_BASE_URL`
-- putting the keys in `s3-app`
-- adding the bucket host to the frontend's `GLOWDERMA_MEDIA_HOSTS` (a frontend rebuild)
+For an external provider (or a bucket change), `deployment.md` also covers, with no PR:
+- `vault kv patch secret/<env>/s3` with `S3_ENDPOINT_URL`, `S3_BUCKET_NAME`, region, addressing style, keys and
+  `PUBLIC_MEDIA_BASE_URL`, then `scripts/restart.sh <env> backend`
+- if the image host changes, adding it to the frontend's `GLOWDERMA_MEDIA_HOSTS` (a frontend rebuild)
 
 Rollback in `deployment.md`: set `USE_S3=false`, but first `mc mirror` the bucket back into `runtime/media`.
 Otherwise uploads made while on S3 404.

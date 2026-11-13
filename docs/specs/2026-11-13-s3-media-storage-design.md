@@ -68,13 +68,15 @@ Decision log: this resolves I1 ("S3-compatible storage later"). C1 (data residen
 | Value | Place | Why |
 |---|---|---|
 | `MINIO_ENABLED` | `environments/<env>/stack.env` | public, deploy-time topology |
-| `USE_S3`, `S3_ENDPOINT_URL`, `S3_BUCKET_NAME`, `S3_REGION_NAME`, `S3_ADDRESSING_STYLE` | `stack.env`, passed to backend services by `compose/app.yaml` | public, must agree with Caddy and MinIO |
-| `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | Vault `secret/<env>/s3-app` → `django.json` (MinIO's app user is created from the same pair; for an external provider the operator overwrites it) | secret |
+| `USE_S3`, `S3_LOCATION` | `stack.env`, passed to backend services by `compose/app.yaml` | they change what runs and how Caddy serves; topology keys |
+| `S3_ENDPOINT_URL`, `S3_BUCKET_NAME`, `S3_REGION_NAME`, `S3_ADDRESSING_STYLE`, `S3_VERIFY`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | Vault `secret/<env>/s3` (keys = env var names) → `django.json` | owner decision (2026-11-13): switching provider or bucket must need no PR, only `vault kv patch` + `scripts/restart.sh <env> backend`. Seeded for the stack's MinIO; MinIO's app user is created from the same key pair |
 | MinIO root user/password | Vault `secret/<env>/minio` → rendered by `vault-agent-datastores` | secret, only MinIO and its init job see it |
-| `PUBLIC_MEDIA_BASE_URL` | `compose/app.yaml`, now `${PUBLIC_MEDIA_BASE_URL:-https://${SITE_DOMAIN}/media/}` | override only for an external provider |
+| `PUBLIC_MEDIA_BASE_URL` | compose default `https://${SITE_DOMAIN}/media/`; Vault `secret/<env>/s3` may override (external provider) | no longer a topology key |
 
-`USE_S3` and the `S3_*` non-secret keys become topology keys in `config/secrets.py`, so Vault can't silently
-override them.
+The stack's own MinIO bucket is the fixed literal `glowderma-media` (Caddy and `minio-init` can't read Vault).
+Consistency rules that need Vault values (MinIO endpoint while MinIO is off, external provider without
+`PUBLIC_MEDIA_BASE_URL`) are checked by `deploy.sh`. The frontend's `GLOWDERMA_MEDIA_HOSTS` is build-time, so a new
+image host still needs a frontend rebuild.
 
 ### Infra (`infra/`)
 
