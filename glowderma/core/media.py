@@ -25,7 +25,7 @@ def media_name(kind: str, owner_id: int | str, content: bytes, extension: str) -
 
 
 def variant_name(name: str, variant: Variant) -> str:
-    """``products/1/ab.jpg`` → ``products/1/ab_400.webp``: the variant of a stored name (or of a full URL to it).
+    """``products/1/ab.jpg`` → ``products/1/ab_400.webp``: the variant of a stored name (or of its URL).
 
     Derived from the name the field holds (which may carry a storage collision suffix), never from the bytes;
     only the last path segment changes.
