@@ -31,6 +31,7 @@ from glowderma.core.api.exceptions import Conflict, InvalidTransition, ProviderU
 from glowderma.core.images import ImageError, process_image
 from glowderma.core.media import absolute_media_url, media_name
 from glowderma.core.models import OutboxMessage
+from glowderma.core.variants import delete_with_variants, store_variants
 from glowderma.integrations.fcm.ports import (
     NOT_SENT,
     PAYLOAD_INVALID,
@@ -187,13 +188,24 @@ def _store_image(campaign: Campaign, upload: Any) -> None:
         raise ValidationError({"image": [field_error(exc.code)]}) from exc
     name = media_name(CAMPAIGN_IMAGE_KIND, campaign.pk, processed.content, processed.extension)
     campaign.image.save(name.rsplit("/", 1)[-1], ContentFile(processed.content), save=False)
+    try:
+        store_variants(campaign.image.storage, campaign.image.name or "", processed.content)
+    except BaseException:
+        campaign.image.storage.delete(campaign.image.name or "")  # the row rolls back: no orphan original
+        raise
     campaign.save(update_fields=["image"])
 
 
 def _remove_image(campaign: Campaign) -> None:
     if campaign.image:
-        campaign.image.delete(save=False)  # leaves the field empty on the instance
+        _delete_image_files(campaign)
         campaign.save(update_fields=["image"])
+
+
+def _delete_image_files(campaign: Campaign) -> None:
+    """Delete the stored image and its variants now and leave the field empty on the instance."""
+    delete_with_variants(campaign.image.storage, campaign.image.name or "")
+    campaign.image = ""
 
 
 def _campaign_audit_image(campaign: Campaign) -> dict[str, Any]:
@@ -417,7 +429,7 @@ def delete_draft(campaign_id: int, *, actor: Any, request: Any = None) -> None:
     before = _campaign_audit_image(campaign)
     pk = campaign.pk
     if campaign.image:
-        campaign.image.delete(save=False)
+        _delete_image_files(campaign)
     campaign.delete()
     audit.record(
         action=state.transition("delete").audit_action,

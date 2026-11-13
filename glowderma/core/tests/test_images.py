@@ -197,7 +197,8 @@ def test_make_variants_never_upscales() -> None:
 def test_make_variants_keeps_transparency() -> None:
     variants = make_variants(encode(Image.new("RGBA", (800, 800), (10, 20, 30, 0)), "PNG"))
     thumb = _variant(variants["thumbnail"]).convert("RGBA")
-    assert thumb.getpixel((10, 10))[3] == 0
+    pixel = thumb.getpixel((10, 10))
+    assert isinstance(pixel, tuple) and pixel[3] == 0
 
 
 def test_make_variants_drops_metadata() -> None:
