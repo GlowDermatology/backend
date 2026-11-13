@@ -114,6 +114,8 @@ def _item(
         "name": name,
         "billz_id": billz_id,
         "image_url": "<media>",
+        "image_thumbnail_url": "<media>",
+        "image_medium_url": "<media>",
         "quantity": quantity,
         "unit_price": price,
         "promo": promo,
@@ -226,7 +228,9 @@ def test_seed_demo_reproduces_the_design_vectors(staff_client: APIClient) -> Non
     base = str(settings.PUBLIC_MEDIA_BASE_URL)
     for item in detail["items"]:
         assert item["image_url"].startswith(f"{base}products/{item['product_id']}/")
-        item["image_url"] = "<media>"
+        assert item["image_thumbnail_url"].endswith("_400.webp")
+        for key in ("image_url", "image_thumbnail_url", "image_medium_url"):
+            item[key] = "<media>"
     assert detail == DETAIL_10248
 
     # --- Malika (5): the drawn chain 100–112 + 120/121, totals and balance (03 §7.7) ---
@@ -432,6 +436,7 @@ def test_seed_demo_over_the_install_policy_keeps_the_design_vectors(staff_client
     assert [(row.id, row.kind, row.amount, row.balance_after) for row in reversed(ledger)] == MALIKA_LEDGER
     detail = staff_client.get("/api/v1/admin/orders/10248/").json()
     for item in detail["items"]:
-        item["image_url"] = "<media>"
+        for key in ("image_url", "image_thumbnail_url", "image_medium_url"):
+            item[key] = "<media>"
     assert detail == DETAIL_10248
     assert list(LoyaltyAccount.objects.filter(balance__lt=0).values_list("customer_id", flat=True)) == [13]

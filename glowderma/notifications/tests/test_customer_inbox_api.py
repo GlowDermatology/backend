@@ -83,6 +83,8 @@ def test_feed_newest_first_with_unread_count_and_link_shape(
         "title": "Kuryerga topshirildi",
         "body": "Buyurtma №10248 kuryerga topshirildi.",
         "image_url": None,
+        "image_thumbnail_url": None,
+        "image_medium_url": None,
         "link": {"kind": "order", "product_id": None, "order_id": 10248, "appointment_id": None, "url": None},
         "created_at": item["created_at"],
         "read_at": None,

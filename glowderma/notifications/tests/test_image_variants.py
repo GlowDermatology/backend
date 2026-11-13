@@ -46,13 +46,16 @@ def stored(campaign: Campaign) -> str:
     return campaign.image.name or ""
 
 
-def test_replace_remove_and_delete_draft(staff_client: APIClient, staff: StaffUser) -> None:
+def test_replace_remove_and_delete_draft(
+    staff_client: APIClient, staff: StaffUser, django_capture_on_commit_callbacks: Any
+) -> None:
     campaign = CampaignFactory.create(author=staff)
     response = patch(staff_client, campaign.pk, {"expected_revision": "1", "image": image("red")})
     assert response.status_code == 200, response.data
     first = stored(campaign)
     assert all_exist(first)
-    response = patch(staff_client, campaign.pk, {"expected_revision": "2", "image": image("blue")})
+    with django_capture_on_commit_callbacks(execute=True):  # the previous file goes after the commit
+        response = patch(staff_client, campaign.pk, {"expected_revision": "2", "image": image("blue")})
     assert response.status_code == 200, response.data
     second = stored(campaign)
     assert all_exist(second) and none_exist(first)
@@ -76,3 +79,28 @@ def test_admin_api_variant_urls(staff_client: APIClient, staff: StaffUser) -> No
     name = stored(campaign)
     assert body["image_thumbnail_url"] == variant_url(name, "thumbnail")
     assert body["image_medium_url"] == variant_url(name, "medium")
+
+
+def test_a_rejected_replacement_keeps_the_current_image(staff_client: APIClient, staff: StaffUser) -> None:
+    campaign = CampaignFactory.create(author=staff)
+    patch(staff_client, campaign.pk, {"expected_revision": "1", "image": image("red")})
+    current = stored(campaign)
+    bad = SimpleUploadedFile("promo.png", b"not an image", content_type="image/png")
+    response = patch(staff_client, campaign.pk, {"expected_revision": "2", "image": bad})
+    assert response.status_code == 400
+    assert stored(campaign) == current
+    assert all_exist(current)
+
+
+def test_a_replacement_removes_the_previous_files_only_after_commit(
+    staff_client: APIClient, staff: StaffUser, django_capture_on_commit_callbacks: Any
+) -> None:
+    campaign = CampaignFactory.create(author=staff)
+    patch(staff_client, campaign.pk, {"expected_revision": "1", "image": image("red")})
+    first = stored(campaign)
+    with django_capture_on_commit_callbacks(execute=False) as callbacks:
+        patch(staff_client, campaign.pk, {"expected_revision": "2", "image": image("blue")})
+        assert all_exist(first)  # not before the commit
+    for callback in callbacks:
+        callback()
+    assert none_exist(first) and all_exist(stored(campaign))

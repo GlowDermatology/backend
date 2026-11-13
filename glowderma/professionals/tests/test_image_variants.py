@@ -68,3 +68,17 @@ def test_admin_api_variant_urls(staff_client: APIClient) -> None:
     body = staff_client.get(url).json()
     assert body["photo_thumbnail_url"] == variant_url(name, "thumbnail")
     assert body["photo_medium_url"] == variant_url(name, "medium")
+
+
+def test_reuploading_the_same_photo_repairs_a_missing_variant(staff_client: APIClient) -> None:
+    professional = ProfessionalFactory.create()
+    url = f"{SPECIALISTS}{professional.pk}/photo/"
+    content = upload("PNG", size=(500, 500)).read()
+    staff_client.put(url, {"file": upload("PNG", content=content)}, format="multipart")
+    name = Professional.objects.get().photo.name or ""
+    default_storage.delete(variant_name(name, "medium"))
+    assert (
+        staff_client.put(url, {"file": upload("PNG", content=content)}, format="multipart").status_code == 200
+    )
+    assert (Professional.objects.get().photo.name or "") == name
+    assert all_exist(name)

@@ -485,6 +485,8 @@ def _store_category_image(category: Category, processed: ProcessedImage, stored:
     previous = category.image.name or ""
     name = media_name("categories", category.pk, processed.content, processed.extension)
     if previous == name:
+        # nothing replaced; a variant that went missing (or predates the variants) is written again
+        store_variants(category.image.storage, previous, processed.content)
         return
     category.image.save(_basename(name), ContentFile(processed.content, name=_basename(name)), save=False)
     stored.append(str(category.image.name))

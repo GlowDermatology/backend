@@ -196,6 +196,15 @@ def _store_image(campaign: Campaign, upload: Any) -> None:
     campaign.save(update_fields=["image"])
 
 
+def _replace_image(campaign: Campaign, upload: Any) -> None:
+    """Store ``upload`` (validated first) as the campaign image; the previous file and its variants are
+    removed after the commit, so a rejected upload or a rollback leaves the current image whole."""
+    storage, previous = campaign.image.storage, (campaign.image.name or "") if campaign.image else ""
+    _store_image(campaign, upload)
+    if previous and previous != campaign.image.name:
+        transaction.on_commit(lambda: delete_with_variants(storage, previous))
+
+
 def _remove_image(campaign: Campaign) -> None:
     if campaign.image:
         _delete_image_files(campaign)
@@ -398,8 +407,7 @@ def update_draft(
     if remove_image:
         _remove_image(campaign)
     if image is not None:
-        _remove_image(campaign)
-        _store_image(campaign, image)
+        _replace_image(campaign, image)
     content_changed = _content_snapshot(campaign) != before_content
     if content_changed:
         campaign.content_revision += 1

@@ -51,7 +51,8 @@ def delete_with_variants(storage: Storage, name: str) -> None:
     """Delete the original stored as ``name`` and its variants; a missing file is not an error."""
     if not name:
         return
-    for path in (name, *(variant_name(name, variant) for variant in VARIANT_SIDES)):
+    # variants first: a same-bytes upload that takes the freed name never finds stale variants beside it
+    for path in (*(variant_name(name, variant) for variant in VARIANT_SIDES), name):
         storage.delete(path)
 
 

@@ -145,3 +145,22 @@ def test_banner_create_replace_and_delete(
     with django_capture_on_commit_callbacks(execute=True):
         assert staff_client.delete(f"{BANNERS}{banner.pk}/").status_code == 204
     assert none_exist(second)
+
+
+def test_reuploading_the_same_category_image_repairs_a_missing_variant(
+    staff_client: APIClient,
+) -> None:
+    content = upload("PNG", size=(800, 600)).read()
+    staff_client.post(
+        CATEGORIES,
+        {"slug": "repair", "name.uz": "Tuzatish", "image": upload("PNG", content=content)},
+        format="multipart",
+    )
+    name = str(Category.objects.get(slug="repair").image.name)
+    default_storage.delete(variant_name(name, "thumbnail"))  # lost, or stored before the variants existed
+    response = staff_client.patch(
+        f"{CATEGORIES}repair/", {"image": upload("PNG", content=content)}, format="multipart"
+    )
+    assert response.status_code == 200, response.json()
+    assert str(Category.objects.get(slug="repair").image.name) == name  # the same bytes: nothing replaced
+    assert all_exist(name)

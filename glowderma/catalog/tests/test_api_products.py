@@ -25,6 +25,7 @@ from glowderma.catalog.tests.factories import (
 )
 from glowderma.catalog.tests.helpers import errors_of
 from glowderma.core import enums, timeutils
+from glowderma.core.media import variant_url
 from glowderma.core.models import AuditEntry
 from glowderma.core.timeutils import TASHKENT
 
@@ -110,7 +111,17 @@ def test_list_item_shape(staff_client: APIClient, staff: StaffUser) -> None:
             "en": {"name": "", "description": "", "ingredients": "", "usage": ""},
         },
         "main_image_url": url,
-        "images": [{"id": image.pk, "url": url, "position": 0}],
+        "main_image_thumbnail_url": variant_url(str(image.file.name), "thumbnail"),
+        "main_image_medium_url": variant_url(str(image.file.name), "medium"),
+        "images": [
+            {
+                "id": image.pk,
+                "url": url,
+                "thumbnail_url": variant_url(str(image.file.name), "thumbnail"),
+                "medium_url": variant_url(str(image.file.name), "medium"),
+                "position": 0,
+            }
+        ],
         "last_change": {
             "at": "2026-10-22T18:04:00+05:00",
             "actor": {"id": staff.pk, "display_name": staff.full_name},
@@ -434,6 +445,8 @@ def test_create_happy_path_full_shape(staff_client: APIClient, staff: StaffUser)
             "en": {"name": "", "description": "", "ingredients": "", "usage": ""},
         },
         "main_image_url": None,
+        "main_image_thumbnail_url": None,
+        "main_image_medium_url": None,
         "images": [],
         "last_change": {
             "at": timeutils.isoformat(product.last_change_at),  # type: ignore[arg-type]
