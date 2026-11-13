@@ -112,7 +112,12 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
   `IDEMPOTENCY_KEY_HEADER`, `EXPORT_PARAM`. Uzbek export labels live in `glowderma/core/labels.py`; datetimes in
   exports go through `core.exports.format_export_datetime`.
 - Uploads go through `core.images.process_image()` (re-encode, EXIF strip, ≤2400 px, 5 MiB) and are named by
-  `core.media.media_name()`; URLs come from `core.media.absolute_media_url()` (`PUBLIC_MEDIA_BASE_URL`).
+  `core.media.media_name()`; URLs come from `core.media.absolute_media_url()` (`PUBLIC_MEDIA_BASE_URL`). Right
+  after saving the original, call `core.variants.store_variants(field.storage, field.name, content)` (400 px and
+  1000 px WebP copies); delete or replace a file only through `core.variants.delete_with_variants()`. API image
+  fields come with `<prefix>_thumbnail_url` / `<prefix>_medium_url` siblings built by `core.media.url_fields()` /
+  `optional_variant_url()`; `manage.py backfill_image_variants` writes missing variants
+  (`docs/specs/2026-11-13-image-variants-design.md`).
 - Throttle scopes and their default rates live in `glowderma/core/throttling.py` (`DEFAULT_THROTTLE_RATES`,
   overridable by the `THROTTLE_RATES` env JSON); a new throttle class must add its scope there or settings
   validation fails. `LOG_LEVEL` sets the `glowderma.*` logger level; every log line carries `request_id`.
