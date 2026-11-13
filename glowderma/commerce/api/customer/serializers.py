@@ -69,6 +69,8 @@ class CustomerCartLineSerializer(serializers.Serializer[dict[str, Any]]):
     name = serializers.CharField()
     volume = serializers.CharField()
     main_image_url = serializers.CharField(allow_null=True)
+    main_image_thumbnail_url = serializers.CharField(allow_null=True, help_text="400 px WebP variant.")
+    main_image_medium_url = serializers.CharField(allow_null=True, help_text="1000 px WebP variant.")
     unit_price = serializers.IntegerField()
     promo = serializers.BooleanField()
     quantity = serializers.IntegerField()
@@ -147,6 +149,9 @@ class CustomerOrderSummarySerializer(serializers.Serializer[dict[str, Any]]):
     total = serializers.IntegerField()
     item_count = serializers.IntegerField()
     preview_images = serializers.ListField(child=serializers.CharField())
+    preview_thumbnail_images = serializers.ListField(
+        child=serializers.CharField(), help_text="`preview_images` as their 400 px WebP variants, same order."
+    )
     payment = CustomerSummaryPaymentSerializer()
     pay_by = serializers.DateTimeField(allow_null=True)
     tracking_number = serializers.CharField(allow_null=True)
@@ -156,6 +161,8 @@ class CustomerDetailItemSerializer(serializers.Serializer[dict[str, Any]]):
     product_id = serializers.IntegerField()
     name = serializers.CharField()
     image_url = serializers.CharField(allow_null=True)
+    image_thumbnail_url = serializers.CharField(allow_null=True, help_text="400 px WebP variant.")
+    image_medium_url = serializers.CharField(allow_null=True, help_text="1000 px WebP variant.")
     quantity = serializers.IntegerField()
     unit_price = serializers.IntegerField()
     promo = serializers.BooleanField()

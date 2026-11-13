@@ -10,6 +10,7 @@ from rest_framework import serializers
 from glowderma.core import enums
 from glowderma.core.api.exceptions import field_error
 from glowderma.core.api.fields import BoundedListField
+from glowderma.core.media import variant_name
 from glowderma.notifications.models import InboxNotification
 
 LINK_IDS = ("product_id", "order_id", "appointment_id")
@@ -46,6 +47,8 @@ class InboxItemSerializer(serializers.Serializer[InboxNotification]):
     title = serializers.CharField()
     body = serializers.CharField()
     image_url = serializers.SerializerMethodField()
+    image_thumbnail_url = serializers.SerializerMethodField(help_text="400 px WebP variant.")
+    image_medium_url = serializers.SerializerMethodField(help_text="1000 px WebP variant.")
     link = serializers.SerializerMethodField()
     created_at = serializers.DateTimeField()
     read_at = serializers.DateTimeField(allow_null=True)
@@ -53,6 +56,13 @@ class InboxItemSerializer(serializers.Serializer[InboxNotification]):
 
     def get_image_url(self, obj: InboxNotification) -> str | None:
         return obj.image_url or None
+
+    def get_image_thumbnail_url(self, obj: InboxNotification) -> str | None:
+        # the row holds the absolute URL rendered at creation: the variant URL is derived from it
+        return variant_name(obj.image_url, "thumbnail") if obj.image_url else None
+
+    def get_image_medium_url(self, obj: InboxNotification) -> str | None:
+        return variant_name(obj.image_url, "medium") if obj.image_url else None
 
     @extend_schema_field(InboxLinkSerializer)
     def get_link(self, obj: InboxNotification) -> dict[str, Any]:

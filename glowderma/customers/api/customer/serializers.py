@@ -401,6 +401,8 @@ class CustomerMeSerializer(serializers.Serializer[dict[str, Any]]):
     name = serializers.CharField()
     language = serializers.ChoiceField(choices=enums.ContentLanguage.values)
     image_url = serializers.URLField(allow_null=True)
+    image_thumbnail_url = serializers.URLField(allow_null=True, help_text="400 px WebP variant.")
+    image_medium_url = serializers.URLField(allow_null=True, help_text="1000 px WebP variant.")
     registered_at = serializers.DateTimeField()
     has_password = serializers.BooleanField()
     linked_providers = serializers.ListField(
@@ -469,6 +471,8 @@ class NonceSerializer(serializers.Serializer[dict[str, Any]]):
 
 class ImageUrlSerializer(serializers.Serializer[dict[str, Any]]):
     image_url = serializers.URLField()
+    image_thumbnail_url = serializers.URLField(help_text="400 px WebP variant.")
+    image_medium_url = serializers.URLField(help_text="1000 px WebP variant.")
 
 
 class DeviceStateSerializer(serializers.Serializer[dict[str, Any]]):
@@ -506,6 +510,8 @@ class ProductCardSerializer(serializers.Serializer[dict[str, Any]]):
     promo = serializers.BooleanField()
     category = ProductCategorySerializer(allow_null=True)
     main_image_url = serializers.URLField(allow_null=True)
+    main_image_thumbnail_url = serializers.URLField(allow_null=True, help_text="400 px WebP variant.")
+    main_image_medium_url = serializers.URLField(allow_null=True, help_text="1000 px WebP variant.")
     available = serializers.IntegerField()
     stock_status = serializers.ChoiceField(choices=enums.StockStatus.values)
     in_cart_quantity = serializers.IntegerField()
@@ -515,6 +521,8 @@ class ProductCardSerializer(serializers.Serializer[dict[str, Any]]):
 class CustomerProductImageSerializer(serializers.Serializer[dict[str, Any]]):
     id = serializers.IntegerField()
     url = serializers.URLField()
+    thumbnail_url = serializers.URLField(help_text="400 px WebP variant.")
+    medium_url = serializers.URLField(help_text="1000 px WebP variant.")
     position = serializers.IntegerField()
 
 
@@ -541,6 +549,8 @@ class CustomerBannerSerializer(serializers.Serializer[dict[str, Any]]):
     id = serializers.IntegerField()
     title = serializers.CharField()
     image_url = serializers.URLField(allow_null=True)
+    image_thumbnail_url = serializers.URLField(allow_null=True, help_text="400 px WebP variant.")
+    image_medium_url = serializers.URLField(allow_null=True, help_text="1000 px WebP variant.")
     image_width = serializers.IntegerField()
     image_height = serializers.IntegerField()
     link = CustomerBannerLinkSerializer()
@@ -558,6 +568,8 @@ class CustomerCategorySerializer(serializers.Serializer[dict[str, Any]]):
         help_text="Language of `name`: the requested language, or `uz` when it fell back to Uzbek.",
     )
     image_url = serializers.URLField(allow_null=True)
+    image_thumbnail_url = serializers.URLField(allow_null=True, help_text="400 px WebP variant.")
+    image_medium_url = serializers.URLField(allow_null=True, help_text="1000 px WebP variant.")
     product_count = serializers.IntegerField()
     updated_at = AwareDateTimeField()
     seo_title = serializers.CharField()

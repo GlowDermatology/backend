@@ -3,7 +3,15 @@ from hashlib import sha256
 import pytest
 from django.test import override_settings
 
-from glowderma.core.media import VARIANT_SIDES, absolute_media_url, media_name, variant_name, variant_url
+from glowderma.core.media import (
+    VARIANT_SIDES,
+    absolute_media_url,
+    media_name,
+    optional_variant_url,
+    url_fields,
+    variant_name,
+    variant_url,
+)
 
 
 @pytest.mark.parametrize("base", ["https://media.example.uz/", "https://media.example.uz"])
@@ -62,3 +70,27 @@ def test_variant_url() -> None:
             variant_url("categories/3/aa.png", "thumbnail")
             == "https://glow.example/media/categories/3/aa_400.webp"
         )
+
+
+def test_optional_variant_url() -> None:
+    assert optional_variant_url("", "medium") is None
+    assert optional_variant_url(None, "thumbnail") is None
+    assert optional_variant_url("a/1/b.png", "medium") == variant_url("a/1/b.png", "medium")
+
+
+def test_url_fields_names_the_siblings_by_the_spec_rule() -> None:
+    assert url_fields("image", "a/1/b.png") == {
+        "image_url": absolute_media_url("a/1/b.png"),
+        "image_thumbnail_url": variant_url("a/1/b.png", "thumbnail"),
+        "image_medium_url": variant_url("a/1/b.png", "medium"),
+    }
+    assert url_fields("", "a/1/b.png") == {
+        "url": absolute_media_url("a/1/b.png"),
+        "thumbnail_url": variant_url("a/1/b.png", "thumbnail"),
+        "medium_url": variant_url("a/1/b.png", "medium"),
+    }
+    assert url_fields("photo", "") == {
+        "photo_url": None,
+        "photo_thumbnail_url": None,
+        "photo_medium_url": None,
+    }

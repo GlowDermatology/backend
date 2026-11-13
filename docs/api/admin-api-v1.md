@@ -62,6 +62,7 @@ Examples use `jsonc`: `//` comments give types and nullability and are not part 
 | Absent value | Key always present with `null`; lists are `[]`; keys are never omitted | |
 | Query booleans | `true` / `false` (also `1` / `0`) | `?promo=true` |
 | Media URLs | Absolute, built from `PUBLIC_MEDIA_BASE_URL`, never from the request Host | `"https://media.example.uz/products/1/9f2c.webp"` |
+| Image variants | Every image URL field has two siblings with the same nullability: `thumbnail_` / `medium_` inserted before `url` (`image_url` → `image_thumbnail_url`, `image_medium_url`; `main_image_url` → `main_image_thumbnail_url`, `main_image_medium_url`; `photo_url` → `photo_thumbnail_url`, `photo_medium_url`; a gallery item's `url` → `thumbnail_url`, `medium_url`). They are WebP copies whose longest side is 400 px (thumbnail) and 1000 px (medium), never upscaled, written at upload; the name is the original's with the extension replaced by `_400.webp` / `_1000.webp` (`docs/specs/2026-11-13-image-variants-design.md`). Lists and cards should use them; the original stays for a single large image. | `"https://media.example.uz/products/1/9f2c_400.webp"` |
 | Link URLs (banner / campaign destinations) | Absolute `https` URL ≤500, trimmed, no credentials, port 443 only, no Unicode control/format characters; the scheme is matched case-insensitively and stored lower-cased (`HTTPS://x.uz/A` → `https://x.uz/A`); else `invalid` "Havolani https:// bilan to‘liq kiriting." (open questions GC-3, GC-9) | `"https://glowderma.uz/aksiya"` |
 | Name search folding | Every name `search` compares case-insensitively **and folded** on both sides: the Uzbek o‘/g‘ mark in any of its six encodings (U+0027 `'`, U+0060 `` ` ``, U+2018 `‘`, U+2019 `’`, U+02BB `ʻ`, U+02BC `ʼ`) is one character, and `ё` = `е` (`core.search.SearchFold`, GC-1) | `ko'pik` finds "Yumshoq tozalovchi ko‘pik" |
 
@@ -400,6 +401,8 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
  "items": [                                          // snapshots taken at checkout
    {"product_id": 4, "name": "Seramidli namlantiruvchi krem", "billz_id": "4607012345",
     "image_url": "https://media.example.uz/products/4/a1b2.webp",          // null if the product had no photo
+    "image_thumbnail_url": "https://media.example.uz/products/4/a1b2_400.webp",  // §1.4 image variants
+    "image_medium_url": "https://media.example.uz/products/4/a1b2_1000.webp",
     "quantity": 1, "unit_price": 312000, "promo": false},
    {"product_id": 2, "name": "Quyoshdan himoya kremi SPF 50", "billz_id": "4607012401",
     "image_url": null, "quantity": 1, "unit_price": 240000, "promo": true}],  // + foam 2×128000
@@ -482,7 +485,11 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
            "ru": {"name": "…", "description": "…", "ingredients": "…", "usage": "…"},
            "en": {"name": "", "description": "", "ingredients": "", "usage": ""}},
  "main_image_url": "https://media.example.uz/products/1/9f2c.webp",   // = images[0].url | null
- "images": [{"id": 31, "url": "https://media.example.uz/products/1/9f2c.webp", "position": 0}],
+ "main_image_thumbnail_url": "https://media.example.uz/products/1/9f2c_400.webp",   // §1.4 image variants
+ "main_image_medium_url": "https://media.example.uz/products/1/9f2c_1000.webp",
+ "images": [{"id": 31, "url": "https://media.example.uz/products/1/9f2c.webp",
+             "thumbnail_url": "https://media.example.uz/products/1/9f2c_400.webp",
+             "medium_url": "https://media.example.uz/products/1/9f2c_1000.webp", "position": 0}],
  "last_change": {"at": "2026-10-22T18:04:00+05:00", "actor": {"id": 1, "display_name": "Administrator"},
                  "kind": "price_changed", "old_price": 175000, "new_price": 185000},   // null if never edited
  "slug": "gialuron-kislotali-serum",          // B-W1: the website URL segment (unique, never only digits)
@@ -538,7 +545,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 
 **`GET products/{id}/`** → `Product`; 404.
 
-**`POST products/{id}/images/`** (multipart, one part `file`) → 201 `{"id": 32, "url": "…", "position": 1}`.
+**`POST products/{id}/images/`** (multipart, one part `file`) → 201 `{"id": 32, "url": "…", "thumbnail_url": "…", "medium_url": "…", "position": 1}`; the two variants (§1.4) are written with the file, and a failure to write them fails the upload.
 - Limits: ≤5 MiB (field `file`, `file_too_large`); must decode in Pillow as JPEG, PNG or WebP (field `file`, `unsupported_image`; a missing part → `file` `required`); ≤8 images per product (field `images`, `max_items` "Ko‘pi bilan 8 ta rasm.").
 - The file is re-encoded in the same format, EXIF stripped, longest side ≤2400 px, and appended last.
 - Audit `product.image_added`.
@@ -564,6 +571,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 // Category
 {"slug": "serums", "name": {"uz": "Serumlar", "ru": "Сыворотки", "en": "Serums"},
  "image_url": "https://media.example.uz/categories/2/77aa1b2c3d4e5f60.webp",   // gap ADM-5.1 | null
+ "image_thumbnail_url": "…", "image_medium_url": "…",                          // §1.4 image variants | null
  "position": 0, "is_active": true, "product_count": 42,
  "seo": {"uz": {"title": "", "description": ""}, "ru": {…}, "en": {…}},   // B-W1, as products
  "seo_status": {"ok": false, "issues": […]},   // B-W1: name_translation_missing, image_missing, no_active_products, seo_* bounds/hints
@@ -589,6 +597,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 // Banner
 {"id": 3, "title": {"uz": "Kuzgi chegirmalar", "ru": "", "en": ""},
  "image_url": "https://media.example.uz/banners/3/77aa.webp",
+ "image_thumbnail_url": "https://media.example.uz/banners/3/77aa_400.webp", "image_medium_url": "…",   // §1.4
  "link": {"kind": "product", "product_id": 4, "category": null, "url": null},   // kind none|product|category|url
  // gap X-BANNER-URL: {"kind": "url", "product_id": null, "category": null, "url": "https://glowderma.uz/aksiya"}
  "is_active": true, "starts_at": null, "ends_at": null, "position": 0, "created_at": "…", "updated_at": "…"}
@@ -765,7 +774,7 @@ kind, title, body, image, link or audience: a stale approval is impossible.
 ```jsonc
 // NotificationRecord
 {"id": 4, "kind": "general", "title": "Yangi dermatolog qabuli ochildi", "body": "…",
- "image_url": null,
+ "image_url": null, "image_thumbnail_url": null, "image_medium_url": null,   // §1.4 image variants
  "link": {"kind": "none", "product_id": null, "label": null, "url": null},   // product: {"kind":"product","product_id":4,"label":"Seramidli namlantiruvchi krem","url":null}
                                                                        // url (gap ADM-10.1): {"kind":"url","product_id":null,"label":null,"url":"https://glowderma.uz/aksiya"}
  "audience": {"type": "segment", "segment_id": 1, "segment_name": "Doimiy mijozlar", "phone": null},  // name snapshot; phone for type customer
@@ -1163,6 +1172,7 @@ Staff manage the bookable side of the clinic here (until now only the disabled D
  "bio": {"uz": "…", "ru": "", "en": ""},                                       // i18n, ≤2000 each
  "experience_years": 6,                                                        // int | null
  "photo_url": "https://media.example.uz/professionals/3/9f2c1b7a0d4e8c61.webp", // | null
+ "photo_thumbnail_url": "…", "photo_medium_url": "…",                           // §1.4 image variants | null
  "location_id": 1,
  "staff_user": {"id": 4, "display_name": "Dilnoza Yusupova"},                  // Actor | null: the linked staff account (informational)
  "slot_step_min": 30, "position": 2, "is_active": true,

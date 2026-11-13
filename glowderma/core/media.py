@@ -37,3 +37,19 @@ def variant_name(name: str, variant: Variant) -> str:
 
 def variant_url(name: str, variant: Variant) -> str:
     return absolute_media_url(variant_name(name, variant))
+
+
+def optional_variant_url(name: str | None, variant: Variant) -> str | None:
+    """``variant_url`` of a stored name, ``None`` when there is none (a field with no image)."""
+    return variant_url(name, variant) if name else None
+
+
+def url_fields(prefix: str, name: str | None) -> dict[str, str | None]:
+    """``{<prefix>_url, <prefix>_thumbnail_url, <prefix>_medium_url}`` of a stored name (``None`` when empty);
+    an empty ``prefix`` gives ``{url, thumbnail_url, medium_url}``. The API's naming rule for variants."""
+    key = f"{prefix}_" if prefix else ""
+    return {
+        f"{key}url": absolute_media_url(name) if name else None,
+        f"{key}thumbnail_url": optional_variant_url(name, "thumbnail"),
+        f"{key}medium_url": optional_variant_url(name, "medium"),
+    }
