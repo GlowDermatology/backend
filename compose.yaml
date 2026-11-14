@@ -70,6 +70,41 @@ services:
       timeout: 5s
       retries: 10
 
+  # Optional local S3 (SeaweedFS): docker compose --profile object-storage up -d object-storage object-storage-init
+  # docker/object-storage/s3.json holds DEV-ONLY dummy keys, not for production.
+  object-storage:
+    profiles: ["object-storage"]
+    image: chrislusf/seaweedfs:4.53@sha256:ccad23e18639c8b98cee17e7100b95830a06077b56d8e5b006d6dcf8ec5e94a0
+    command: server -dir=/data -s3 -s3.config=/etc/seaweedfs/s3.json -ip.bind=0.0.0.0
+    ports: ["127.0.0.1:8333:8333"]
+    volumes:
+      - objectdata:/data
+      - ./docker/object-storage/s3.json:/etc/seaweedfs/s3.json:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8333/status"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  object-storage-init:
+    profiles: ["object-storage"]
+    image: amazon/aws-cli:2.40.3@sha256:33a16c53ea442e918b58df67301ad76a8fb57082c39f7e78753b898c3f3e87c2
+    depends_on:
+      object-storage:
+        condition: service_healthy
+    restart: "no"
+    environment:
+      AWS_ACCESS_KEY_ID: glowderma-admin
+      AWS_SECRET_ACCESS_KEY: glowderma-admin-dev-secret
+      AWS_DEFAULT_REGION: us-east-1
+    entrypoint: ["/bin/sh", "-c"]
+    # Creates the bucket; an existing bucket (HTTP 409: BucketAlreadyOwnedByYou / BucketAlreadyExists) is success.
+    command:
+      - |
+        out=$$(aws --endpoint-url http://object-storage:8333 s3api create-bucket --bucket glowderma-media 2>&1) && { echo "bucket created"; exit 0; }
+        case "$$out" in *BucketAlreadyOwnedByYou*|*BucketAlreadyExists*|*"(409)"*) echo "bucket exists"; exit 0;; esac
+        echo "$$out" >&2; exit 1
+
 volumes:
   pgdata:
   media:
+  objectdata:

@@ -8,6 +8,7 @@ from django.core.exceptions import ImproperlyConfigured
 
 from config.env import MISSING, Network, env_bool, env_int, env_json, env_list, env_networks, env_str
 from config.settings.ops_admin import UNFOLD as UNFOLD
+from config.storage import media_storage
 from glowderma.core.enums import enum_name_overrides
 from glowderma.core.throttling import validate_throttle_rates
 
@@ -144,6 +145,12 @@ STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+# Media: local disk by default, an S3-compatible bucket when USE_S3 is true (config/storage.py). Production
+# swaps only the staticfiles backend.
+STORAGES = {
+    "default": media_storage(),
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+}
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",

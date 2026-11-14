@@ -481,6 +481,6 @@ CSRF_COOKIE_NAME = "__Host-gd_csrftoken"
 # Hashed, pre-compressed static files (the console's Unfold assets are cache-busted by name); collectstatic in
 # the Dockerfile writes the manifest. Local and test settings keep the plain storage.
 STORAGES = {
-    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    **STORAGES,  # noqa: F405 - the default (media) entry comes from base
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
 }

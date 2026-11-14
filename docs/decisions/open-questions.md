@@ -234,7 +234,7 @@ the product owner or the client may still revise it.
 ## Compliance (gates M3 / production)
 | # | Requirement | Plan |
 |---|---|---|
-| C1 | Personal data of Uzbek citizens hosted in Uzbekistan | Postgres, Redis, media, backups and logs on Uzbek hosting; no PII to foreign SaaS (scrub error tracking, no names/phones in FCM payloads) |
+| C1 | Personal data of Uzbek citizens hosted in Uzbekistan | **Obsolete (owner, 2026-11-13):** the Uzbek-hosting constraint no longer applies; foreign hosting and object storage (AWS etc.) are allowed. Previously: Postgres, Redis, media, backups and logs on Uzbek hosting; no PII to foreign SaaS (scrub error tracking, no names/phones in FCM payloads) |
 | C2 | Personal-data database registration | Client action before production |
 | C3 | Consent records | Terms version, time and IP stored at sign-up (M2); separate biometric consent for the Phase 2 AI feature |
 | C4 | Retention | Raw provider payloads and audit log retention periods to be defined |
@@ -242,7 +242,7 @@ the product owner or the client may still revise it.
 ## Infrastructure
 | # | Question | Provisional default |
 |---|---|---|
-| I1 | Production media storage | Named volume behind the reverse proxy; S3-compatible storage later |
+| I1 | Production media storage | **Resolved (2026-11-13):** disk or S3-compatible storage, chosen by `USE_S3`; SeaweedFS is the self-hosted option (optional `object-storage` compose profile for local development). See `docs/specs/2026-11-13-s3-media-storage-design.md`. |
 | I2 | Deployment | `infra` repo / GitOps — owned by the user, out of scope here |
 
 ## Technical decisions (lead, 2026-10-25) — taken while planning M0b–M3
@@ -255,7 +255,7 @@ the product owner or the client may still revise it.
 | T5 | `WebhookInbox` rows are inserted after the synchronous processing of the callback, in the same transaction, with the outcome in `result`. | Keeps the inbox append-only while still recording what happened. |
 | T6 | Retention deletes on append-only tables (`WebhookInbox`, `AuditEntry`) are allowed only inside a transaction that sets the local GUC `glowderma.allow_purge = on`; the trigger function checks it. Only the purge task sets it. | Compliance item C4 needs retention; everything else keeps the hard guarantee. |
 | T7 | Django cache uses Redis DB 0 with `KEY_PREFIX=gd`; the Celery broker uses DB 1 (`CELERY_BROKER_URL`, default derived from `REDIS_URL`). | A cache flush must never drop queued tasks. |
-| T8 | Media URLs are built from `PUBLIC_MEDIA_BASE_URL` (required in production); uploads are re-encoded by `core.images` (EXIF stripped, ≤2400 px) and stored under `MEDIA_ROOT/<kind>/<owner>/<sha256-prefix>.<ext>` on the shared media volume, served by the edge proxy. | Spec "Media"; production storage stays an open question (I1). |
+| T8 | Media URLs are built from `PUBLIC_MEDIA_BASE_URL` (required in production); uploads are re-encoded by `core.images` (EXIF stripped, ≤2400 px) and stored under `<kind>/<owner>/<sha256-prefix>.<ext>` in the media storage, which is disk (`MEDIA_ROOT` on the shared media volume, served by the edge proxy) or an S3 bucket, chosen by `USE_S3`. | Spec "Media"; storage choice resolved in I1. |
 | T9 | Throttle rates are configurable through `THROTTLE_RATES` (JSON) with the contract §1.9 values as defaults. | Contract says "defaults, configurable". |
 | T10 | Admin appointment creation and rescheduling (`requested_via=admin`) are added to M1d so the three "not designed" buttons in the admin schedule can be wired. | User decision 2026-10-25 to build undesigned admin UI now. |
 | T11 | All six integrations default to fake adapters (`INTEGRATIONS_MODE=fake`, per-provider overrides in M3); live adapters are written against the documented protocols with recorded-fixture tests only. | No provider credentials are available (A7 and the M3 gate). |

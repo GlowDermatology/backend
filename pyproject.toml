@@ -23,6 +23,7 @@ dependencies = [
  "django-unfold==0.110.0",
  "django-otp==1.7.5",
  "segno==1.6.6",
+ "django-storages[s3]==1.14.6",
 ]
 
 [dependency-groups]
@@ -30,6 +31,7 @@ dev = [
  "ruff==0.17.2", "mypy==2.3.1", "django-stubs[compatible-mypy]==6.1.2",
  "djangorestframework-stubs[compatible-mypy]==3.18.1", "pytest==9.1.1",
  "pytest-django==4.14.0", "factory-boy==3.3.3", "coverage", "import-linter",
+ "moto[s3]==5.2.5",
 ]
 
 [tool.uv]

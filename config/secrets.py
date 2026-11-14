@@ -11,8 +11,9 @@ Contract of the file:
 - a JSON object whose keys are environment variable names (``[A-Z_][A-Z0-9_]*``) and whose values are strings;
   a JSON object or array value (for example ``JWT_SIGNING_KEYS``) is accepted and re-serialised to JSON text;
 - quotes, backslashes, Unicode and newlines are preserved exactly (it is JSON, never parsed by a shell);
-- keys owned by the Compose topology (hosts, networks, database location) are refused, so a typo in Vault can
-  never re-route the application;
+- keys owned by the Compose topology (hosts, networks, database location, the ``USE_S3`` media switch and
+  ``S3_LOCATION``) are refused, so a typo in Vault can never re-route the application; the S3 provider
+  settings and ``PUBLIC_MEDIA_BASE_URL`` may come from the file;
 - the file wins over a variable of the same name already in the environment (Vault is the source of truth).
 
 Errors name the file and the offending key, never a value. Nothing here logs.
@@ -44,7 +45,8 @@ TOPOLOGY_KEYS = frozenset(
         "TRUSTED_PROXIES",
         "ADMIN_API_ALLOWED_NETS",
         "FORWARDED_ALLOW_IPS",
-        "PUBLIC_MEDIA_BASE_URL",
+        "USE_S3",
+        "S3_LOCATION",
     }
 )
 # Key files rendered next to the secrets file by the same agent; any other *_FILE path is the deployment's.
