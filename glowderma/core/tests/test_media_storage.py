@@ -24,16 +24,28 @@ def test_sync_dry_run_uploads_nothing(s3_storage: Any, media_file: str) -> None:
     out = StringIO()
     call_command("sync_media_to_s3", stdout=out)
     assert not s3_storage.exists(NAME)
-    assert f"would upload {NAME}" in out.getvalue() and "scanned=1 uploaded=0 already=0" in out.getvalue()
+    # every image has two variant files: the default output is the summary, one line per file only with -v 2
+    assert out.getvalue() == "scanned=1 uploaded=0 already=0 missing=1\n"
+    verbose = StringIO()
+    call_command("sync_media_to_s3", verbosity=2, stdout=verbose)
+    assert f"would upload {NAME}\n" in verbose.getvalue()
 
 
 def test_sync_apply_uploads_missing_and_is_idempotent(s3_storage: Any, media_file: str) -> None:
-    call_command("sync_media_to_s3", "--apply")
+    first = StringIO()
+    call_command("sync_media_to_s3", "--apply", stdout=first)
+    assert first.getvalue() == "scanned=1 uploaded=1 already=0 missing=1\n"
     out = StringIO()
-    call_command("sync_media_to_s3", "--apply", stdout=out)
+    call_command("sync_media_to_s3", "--apply", verbosity=2, stdout=out)
     assert s3_storage.exists(NAME)
     assert s3_storage.listdir("categories/1")[1] == ["abc.webp"]  # no abc_xyz.webp duplicate
-    assert "scanned=1 uploaded=0 already=1" in out.getvalue()
+    assert out.getvalue() == "scanned=1 uploaded=0 already=1 missing=0\n"
+
+
+def test_sync_apply_lists_each_upload_at_verbosity_2(s3_storage: Any, media_file: str) -> None:
+    out = StringIO()
+    call_command("sync_media_to_s3", "--apply", verbosity=2, stdout=out)
+    assert f"uploaded {NAME}\n" in out.getvalue()
 
 
 def test_sync_refuses_when_default_storage_is_disk(media_file: str) -> None:

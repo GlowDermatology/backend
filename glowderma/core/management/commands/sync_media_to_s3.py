@@ -1,4 +1,4 @@
-"""Copy the files of the local ``MEDIA_ROOT`` that the S3 bucket lacks (dry run unless ``--apply``)."""
+"""Copy the MEDIA_ROOT files the S3 bucket lacks (dry run unless ``--apply``; ``-v 2`` lists each file)."""
 
 from typing import Any
 
@@ -32,19 +32,24 @@ class Command(BaseCommand):
                 "The default storage is the local disk: run this command with USE_S3=true and the S3_* keys."
             )
         source = FileSystemStorage(location=settings.MEDIA_ROOT)
-        scanned = uploaded = already = 0
+        # every image has two variant files beside it: one line per file only when asked for (-v 2)
+        listing = options["verbosity"] >= 2
+        scanned = uploaded = already = missing = 0
         for name in walk(source):
             scanned += 1
             if default_storage.exists(name):
                 already += 1
                 continue
+            missing += 1
             if not options["apply"]:
-                self.stdout.write(f"would upload {name}")
+                if listing:
+                    self.stdout.write(f"would upload {name}")
                 continue
             with source.open(name, "rb") as handle:
                 saved = default_storage.save(name, File(handle))
             if saved != name:
                 raise CommandError(f"{name} was stored as {saved}")
             uploaded += 1
-            self.stdout.write(f"uploaded {name}")
-        self.stdout.write(f"scanned={scanned} uploaded={uploaded} already={already}")
+            if listing:
+                self.stdout.write(f"uploaded {name}")
+        self.stdout.write(f"scanned={scanned} uploaded={uploaded} already={already} missing={missing}")

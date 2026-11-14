@@ -13,11 +13,18 @@ from rest_framework.test import APIClient
 from glowderma.catalog.models import Category, ProductImage
 from glowderma.catalog.tests.factories import CategoryFactory, ProductFactory
 from glowderma.catalog.tests.helpers import upload
+from glowderma.core.media import VARIANT_SIDES, variant_name
 
 pytestmark = pytest.mark.django_db
 
 # the repeated upload is not overwritten: Django adds a ``_<random>`` suffix, on disk and on S3 alike
 NAME_PATTERN = re.compile(r"^products/\d+/[0-9a-f]{16}(_\w+)?\.webp$")
+
+
+def with_variants(*names: str) -> list[str]:
+    """The file names an upload leaves in its folder: the original and its 400 px and 1000 px variants."""
+    paths = [path for name in names for path in (name, *(variant_name(name, v) for v in VARIANT_SIDES))]
+    return sorted(PurePosixPath(path).name for path in paths)
 
 
 @pytest.fixture(params=["disk", "s3"])
@@ -37,8 +44,8 @@ def test_same_image_twice_gives_the_same_name_pattern(storage: Any, staff_client
     assert NAME_PATTERN.match(str(first.file.name)) and NAME_PATTERN.match(str(second.file.name))
     assert str(first.file.name) != str(second.file.name)
     assert storage.exists(first.file.name) and storage.exists(second.file.name)
-    assert sorted(storage.listdir(f"products/{product.pk}")[1]) == sorted(
-        [PurePosixPath(str(first.file.name)).name, PurePosixPath(str(second.file.name)).name]
+    assert sorted(storage.listdir(f"products/{product.pk}")[1]) == with_variants(
+        str(first.file.name), str(second.file.name)
     )
 
 
@@ -57,7 +64,8 @@ def test_replacing_a_category_image_deletes_the_previous_object(
     assert second.status_code == 200
     new = str(Category.objects.get(slug="serums").image.name)
     assert new != old and storage.exists(new) and not storage.exists(old)
-    assert storage.listdir(f"categories/{category.pk}")[1] == [PurePosixPath(new).name]
+    # the previous image's variants go with it
+    assert sorted(storage.listdir(f"categories/{category.pk}")[1]) == with_variants(new)
 
 
 def test_deleting_a_product_image_removes_the_object(
