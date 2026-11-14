@@ -5,7 +5,7 @@ import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 from PIL import Image
 
-from glowderma.core.images import MAX_BYTES, ImageError, ProcessedImage, process_image
+from glowderma.core.images import MAX_BYTES, ImageError, ProcessedImage, make_variants, process_image
 
 
 def encode(image: Image.Image, fmt: str, **options: object) -> bytes:
@@ -173,3 +173,39 @@ def test_modes_are_normalised_per_format(mode: str, fmt: str, expected_mode: str
     source = Image.new(mode, (8, 8))
     result = process_image(encode(source, fmt))
     assert decode(result).mode == expected_mode
+
+
+def _variant(data: bytes) -> Image.Image:
+    image = Image.open(BytesIO(data))
+    image.load()
+    return image
+
+
+def test_make_variants_sizes_and_format() -> None:
+    variants = make_variants(encode(gradient(2400, 1200), "JPEG"))
+    thumb, medium = _variant(variants["thumbnail"]), _variant(variants["medium"])
+    assert (thumb.format, thumb.size) == ("WEBP", (400, 200))
+    assert (medium.format, medium.size) == ("WEBP", (1000, 500))
+
+
+def test_make_variants_never_upscales() -> None:
+    variants = make_variants(encode(gradient(300, 150), "PNG"))
+    assert _variant(variants["thumbnail"]).size == (300, 150)
+    assert _variant(variants["medium"]).size == (300, 150)
+
+
+def test_make_variants_keeps_transparency() -> None:
+    variants = make_variants(encode(Image.new("RGBA", (800, 800), (10, 20, 30, 0)), "PNG"))
+    thumb = _variant(variants["thumbnail"]).convert("RGBA")
+    pixel = thumb.getpixel((10, 10))
+    assert isinstance(pixel, tuple) and pixel[3] == 0
+
+
+def test_make_variants_drops_metadata() -> None:
+    source = encode(gradient(1200, 1200), "JPEG", exif=exif_bytes(1))
+    assert "exif" not in _variant(make_variants(source)["medium"]).info
+
+
+def test_make_variants_of_a_palette_png() -> None:
+    variants = make_variants(encode(gradient(600, 600).convert("P"), "PNG"))
+    assert _variant(variants["thumbnail"]).mode in ("RGB", "RGBA")

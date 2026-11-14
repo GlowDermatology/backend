@@ -17,6 +17,7 @@ from glowderma.catalog.models import Product, ProductImage
 from glowderma.catalog.tests.factories import ProductFactory, ProductImageFactory
 from glowderma.catalog.tests.helpers import errors_of, jpeg_with_exif, upload
 from glowderma.core.images import MAX_BYTES
+from glowderma.core.media import url_fields
 from glowderma.core.models import AuditEntry
 
 pytestmark = pytest.mark.django_db
@@ -46,7 +47,7 @@ def test_upload_stores_reencoded_file_under_media_root(
     response = staff_client.post(images_url(product), {"file": upload(fmt)}, format="multipart")
     assert response.status_code == 201, response.json()
     image = ProductImage.objects.get(product=product)
-    assert response.json() == {"id": image.pk, "url": media_url(image.file.name), "position": 0}
+    assert response.json() == {"id": image.pk, **url_fields("", image.file.name), "position": 0}
     assert image.file.name == f"products/{product.pk}/{image.sha256[:16]}.{extension}"
     assert image.content_type == content_type and (image.width, image.height) == (24, 16)
     assert image.uploaded_by_id == staff.pk and image.size_bytes == Path(image.file.path).stat().st_size
@@ -187,9 +188,9 @@ def test_reorder_exact_set(staff_client: APIClient) -> None:
     assert response.status_code == 200, response.json()
     assert response.json() == {
         "images": [
-            {"id": c.pk, "url": media_url(c.file.name), "position": 0},
-            {"id": a.pk, "url": media_url(a.file.name), "position": 1},
-            {"id": b.pk, "url": media_url(b.file.name), "position": 2},
+            {"id": c.pk, **url_fields("", c.file.name), "position": 0},
+            {"id": a.pk, **url_fields("", a.file.name), "position": 1},
+            {"id": b.pk, **url_fields("", b.file.name), "position": 2},
         ]
     }
     entry = AuditEntry.objects.get(action="product.images_reordered")

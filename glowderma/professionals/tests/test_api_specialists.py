@@ -88,6 +88,8 @@ def test_create_defaults_to_the_clinic_and_inactive(staff_client: APIClient, sta
         "bio": EMPTY,
         "experience_years": None,
         "photo_url": None,
+        "photo_thumbnail_url": None,
+        "photo_medium_url": None,
         "location_id": location.pk,
         "staff_user": None,
         "slot_step_min": 30,

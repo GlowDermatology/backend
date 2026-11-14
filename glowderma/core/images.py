@@ -12,6 +12,8 @@ from typing import Any, Literal
 
 from PIL import Image, ImageOps
 
+from glowderma.core.media import VARIANT_SIDES, Variant
+
 type ImageFormat = Literal["jpeg", "png", "webp"]
 
 MAX_BYTES = 5 * 1024 * 1024
@@ -121,3 +123,24 @@ def process_image(uploaded: Any, *, max_bytes: int = MAX_BYTES, max_side: int = 
         width=image.width,
         height=image.height,
     )
+
+
+def make_variants(content: bytes) -> dict[Variant, bytes]:
+    """The WebP copies of an image ``process_image()`` already accepted, one per ``VARIANT_SIDES`` entry.
+
+    Never upscaled: a source smaller than a side is encoded at its own size, so every stored image has every
+    variant. Transparency is kept; no metadata is written.
+    """
+    with Image.open(BytesIO(content)) as source:
+        source.load()
+        has_alpha = source.mode in ("RGBA", "LA", "PA") or "transparency" in source.info
+        image = source.convert("RGBA" if has_alpha else "RGB")
+    variants: dict[Variant, bytes] = {}
+    for variant, side in VARIANT_SIDES.items():
+        copy = image.copy()
+        if max(copy.size) > side:
+            copy.thumbnail((side, side), Image.Resampling.LANCZOS)
+        output = BytesIO()
+        copy.save(output, format="WEBP", quality=80, method=4)
+        variants[variant] = output.getvalue()
+    return variants

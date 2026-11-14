@@ -19,7 +19,7 @@ from glowderma.appointments.services import ACCOUNT_DELETED_REASON
 from glowderma.core import enums, i18n, timeutils
 from glowderma.core.api.exceptions import field_error
 from glowderma.core.api.fields import AwareDateTimeField
-from glowderma.core.media import absolute_media_url
+from glowderma.core.media import absolute_media_url, optional_variant_url
 from glowderma.professionals.models import Location, Professional, ProfessionalService
 
 
@@ -91,6 +91,8 @@ class SpecialistSerializer(serializers.Serializer[Professional]):
     role = serializers.ChoiceField(choices=enums.SpecialistRole.values)
     role_label = serializers.SerializerMethodField()
     photo_url = serializers.SerializerMethodField()
+    photo_thumbnail_url = serializers.SerializerMethodField(help_text="400 px WebP variant.")
+    photo_medium_url = serializers.SerializerMethodField(help_text="1000 px WebP variant.")
     bio = serializers.SerializerMethodField()
     qualifications = serializers.SerializerMethodField()
     experience_years = serializers.IntegerField(allow_null=True)
@@ -109,6 +111,14 @@ class SpecialistSerializer(serializers.Serializer[Professional]):
 
     def get_photo_url(self, obj: Professional) -> str | None:
         return _photo_url(obj)
+
+    @extend_schema_field(serializers.URLField(allow_null=True))
+    def get_photo_thumbnail_url(self, obj: Professional) -> str | None:
+        return optional_variant_url(obj.photo.name, "thumbnail") if obj.photo else None
+
+    @extend_schema_field(serializers.URLField(allow_null=True))
+    def get_photo_medium_url(self, obj: Professional) -> str | None:
+        return optional_variant_url(obj.photo.name, "medium") if obj.photo else None
 
     def get_bio(self, obj: Professional) -> str:
         return pick(obj, "bio", _lang(self))
@@ -217,12 +227,22 @@ class AppointmentSpecialistSerializer(serializers.Serializer[Professional]):
     role = serializers.ChoiceField(choices=enums.SpecialistRole.values)
     role_label = serializers.SerializerMethodField()
     photo_url = serializers.SerializerMethodField()
+    photo_thumbnail_url = serializers.SerializerMethodField(help_text="400 px WebP variant.")
+    photo_medium_url = serializers.SerializerMethodField(help_text="1000 px WebP variant.")
 
     def get_role_label(self, obj: Professional) -> str:
         return i18n.t(f"label.role.{obj.role}", _lang(self))
 
     def get_photo_url(self, obj: Professional) -> str | None:
         return _photo_url(obj)
+
+    @extend_schema_field(serializers.URLField(allow_null=True))
+    def get_photo_thumbnail_url(self, obj: Professional) -> str | None:
+        return optional_variant_url(obj.photo.name, "thumbnail") if obj.photo else None
+
+    @extend_schema_field(serializers.URLField(allow_null=True))
+    def get_photo_medium_url(self, obj: Professional) -> str | None:
+        return optional_variant_url(obj.photo.name, "medium") if obj.photo else None
 
 
 class AppointmentServiceSerializer(serializers.Serializer[Any]):

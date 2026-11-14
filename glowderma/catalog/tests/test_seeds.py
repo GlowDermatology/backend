@@ -145,3 +145,18 @@ def test_seed_demo_command_runs_the_catalog_seeder() -> None:
     # Sequences were re-synced after the explicit ids: the next product continues after 248.
     product = Product.objects.create(billz_id="4607019999")
     assert product.pk == 249
+
+
+@pytest.mark.django_db
+def test_seed_demo_writes_the_image_variants() -> None:
+    """Spec 2026-11-13-image-variants: demo data always has the variants (seed_demo runs the backfill)."""
+    from django.core.files.storage import default_storage
+
+    from glowderma.core.media import variant_name
+
+    call_command("seed_demo", force=True, verbosity=0)
+    image = ProductImage.objects.order_by("id").first()
+    assert image is not None
+    name = str(image.file.name)
+    assert default_storage.exists(variant_name(name, "thumbnail"))
+    assert default_storage.exists(variant_name(name, "medium"))

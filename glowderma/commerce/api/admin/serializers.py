@@ -118,6 +118,8 @@ class OrderItemSerializer(serializers.Serializer[Any]):
     name = serializers.CharField()
     billz_id = serializers.CharField()
     image_url = serializers.CharField(allow_null=True)
+    image_thumbnail_url = serializers.CharField(allow_null=True, help_text="400 px WebP variant.")
+    image_medium_url = serializers.CharField(allow_null=True, help_text="1000 px WebP variant.")
     quantity = serializers.IntegerField()
     unit_price = serializers.IntegerField()
     promo = serializers.BooleanField()

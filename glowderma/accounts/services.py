@@ -58,6 +58,7 @@ from glowderma.core.api.exceptions import (
 from glowderma.core.models import IdempotencyRecord
 from glowderma.core.pii import normalize_email as pii_normalize_email
 from glowderma.core.pii import pii_ref
+from glowderma.core.variants import delete_with_variants, store_variants
 from glowderma.integrations.email import registry as email_registry
 from glowderma.integrations.eskiz import registry as eskiz_registry
 from glowderma.integrations.oauth.ports import SocialClaims
@@ -857,7 +858,7 @@ def _delete_image_on_commit(customer: Customer) -> None:
     if not customer.image:
         return
     storage, name = customer.image.storage, str(customer.image.name)
-    transaction.on_commit(lambda: storage.delete(name), robust=True)
+    transaction.on_commit(lambda: delete_with_variants(storage, name), robust=True)
 
 
 def _refreshed(customer: Customer | int, stored: Customer) -> Customer:
@@ -2478,8 +2479,13 @@ def set_customer_image(customer: Customer, filename: str, content: bytes) -> str
     storage = customer.image.storage
     customer.image.save(filename, ContentFile(content), save=True)
     new_name = str(customer.image.name)
+    try:
+        store_variants(storage, new_name, content)
+    except BaseException:
+        storage.delete(new_name)  # the row rolls back: no orphan original
+        raise
     if previous and previous != new_name:
-        transaction.on_commit(lambda: storage.delete(previous), robust=True)
+        transaction.on_commit(lambda: delete_with_variants(storage, previous), robust=True)
     return new_name
 
 

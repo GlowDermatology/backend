@@ -128,6 +128,8 @@ def test_specialists_list_and_detail(public_client: APIClient) -> None:
         "role": "dermatologist",
         "role_label": "Dermatolog",
         "photo_url": None,
+        "photo_thumbnail_url": None,
+        "photo_medium_url": None,
         "bio": "Tajribali dermatolog",
         "qualifications": "",
         "experience_years": 8,
@@ -346,6 +348,8 @@ def test_booking_happy_path(clock: None, customer: Customer, customer_client: AP
             "role": "dermatologist",
             "role_label": "Dermatolog",
             "photo_url": None,
+            "photo_thumbnail_url": None,
+            "photo_medium_url": None,
         },
         "service": {
             "id": link.service_id,

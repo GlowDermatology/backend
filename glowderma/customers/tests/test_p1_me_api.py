@@ -83,6 +83,8 @@ def test_me_shape(signed: Signed) -> None:
         "name",
         "language",
         "image_url",
+        "image_thumbnail_url",
+        "image_medium_url",
         "registered_at",
         "has_password",
         "linked_providers",

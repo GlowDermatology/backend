@@ -22,7 +22,7 @@ from glowderma.core.api.fields import (
     PhoneField,
 )
 from glowderma.core.api.serializers import ActorSerializer
-from glowderma.core.media import absolute_media_url
+from glowderma.core.media import absolute_media_url, optional_variant_url
 from glowderma.notifications import selectors, services
 from glowderma.notifications.models import Campaign, CampaignTest, CustomerSegment, StatusTemplate, TestDevice
 
@@ -102,6 +102,8 @@ class NotificationRecordSerializer(serializers.Serializer[Campaign]):
     title = serializers.CharField()
     body = serializers.CharField()
     image_url = serializers.SerializerMethodField()
+    image_thumbnail_url = serializers.SerializerMethodField(help_text="400 px WebP variant.")
+    image_medium_url = serializers.SerializerMethodField(help_text="1000 px WebP variant.")
     link = serializers.SerializerMethodField()
     audience = serializers.SerializerMethodField()
     recipient_count = serializers.IntegerField()
@@ -146,6 +148,14 @@ class NotificationRecordSerializer(serializers.Serializer[Campaign]):
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_image_url(self, obj: Campaign) -> str | None:
         return absolute_media_url(obj.image.name or "") if obj.image else None
+
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_image_thumbnail_url(self, obj: Campaign) -> str | None:
+        return optional_variant_url(obj.image.name, "thumbnail") if obj.image else None
+
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_image_medium_url(self, obj: Campaign) -> str | None:
+        return optional_variant_url(obj.image.name, "medium") if obj.image else None
 
     @extend_schema_field(NotificationLinkSerializer())
     def get_link(self, obj: Campaign) -> dict[str, Any]:

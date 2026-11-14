@@ -18,6 +18,7 @@ from glowderma.catalog.models import Banner
 from glowderma.catalog.tests.factories import BannerFactory, CategoryFactory, ProductFactory
 from glowderma.catalog.tests.helpers import errors_of, upload
 from glowderma.core import timeutils
+from glowderma.core.media import variant_url
 from glowderma.core.models import AuditEntry
 from glowderma.core.timeutils import TASHKENT
 
@@ -87,6 +88,8 @@ def test_create_multipart_full_shape(staff_client: APIClient, staff: StaffUser) 
         "id": banner.pk,
         "title": {"uz": "Kuzgi chegirmalar", "ru": "Осенние скидки", "en": ""},
         "image_url": media_url(banner.image.name),
+        "image_thumbnail_url": variant_url(str(banner.image.name), "thumbnail"),
+        "image_medium_url": variant_url(str(banner.image.name), "medium"),
         "link": {"kind": "product", "product_id": product.pk, "category": None, "url": None},
         "is_active": True,
         "starts_at": "2026-11-01T00:00:00+05:00",
@@ -403,6 +406,8 @@ def test_reorder(staff_client: APIClient) -> None:
         "id",
         "title",
         "image_url",
+        "image_thumbnail_url",
+        "image_medium_url",
         "link",
         "is_active",
         "starts_at",
