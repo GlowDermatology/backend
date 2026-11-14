@@ -519,22 +519,30 @@ git commit -m "feat(edge): serve /media from disk or proxy to the object storage
 - [ ] **Step 3: Add `sync-media` to `manage.sh`**
 
 `scripts/manage.sh <env> sync-media [--apply]` is the same as
-`app_compose exec backend-api python manage.py sync_media_to_s3 "$@"`. Add it to the usage line.
+`app_compose exec -e USE_S3=true backend-api python manage.py sync_media_to_s3 "$@"`. Add it to the usage line.
+It runs before the switch (stack.env `USE_S3=false`, the command refuses a disk default storage): `USE_S3` is a
+topology key read at settings import, so `-e USE_S3=true` gives only this process the bucket of `secret/<env>/s3`
+(its `S3_*` keys are in `django.json` in every mode) while the source stays `runtime/media`. (Final-review fix C1.)
 
 - [ ] **Step 4: Write the runbook and docs**
 
 Switch-on order in `deployment.md`:
 1. Set `OBJECT_STORAGE_ENABLED=true` and deploy.
-2. Run `scripts/manage.sh <env> sync-media` (dry run), then with `--apply`.
+2. Run `scripts/manage.sh <env> sync-media` (dry run), then with `--apply` (it sets `USE_S3=true` for that one
+   process, see Step 3).
 3. Set `USE_S3=true` and deploy. `media_storage_check` gates this deploy.
+4. Right after that deploy, `sync-media --apply` again (uploads made between step 2 and the switch went to the
+   disk), then `media_storage_check`.
 
 For an external provider (or a bucket change), `deployment.md` also covers, with no PR:
 - `vault kv patch secret/<env>/s3` with `S3_ENDPOINT_URL`, `S3_BUCKET_NAME`, region, addressing style, keys and
   `PUBLIC_MEDIA_BASE_URL`, then `scripts/restart.sh <env> backend`
 - if the image host changes, adding it to the frontend's `GLOWDERMA_MEDIA_HOSTS` (a frontend rebuild)
 
-Rollback in `deployment.md`: set `USE_S3=false`, but first `aws s3 sync` the bucket back into `runtime/media`.
-Otherwise uploads made while on S3 404.
+Rollback in `deployment.md`: `aws s3 sync` the bucket back into `runtime/media` (otherwise uploads made while on
+S3 404), set `USE_S3=false` and deploy, then copy back once more for the uploads made in between (both copies only
+add files). Leaving the stack's own storage for a provider needs `OBJECT_STORAGE_ENABLED=false` (a PR):
+`/media`, the backup and the deploy checks follow `stack.env`, and deploy, `restart.sh` and backup refuse the mix.
 
 `disaster-recovery.md`: restore per mode (untar into `media-mirror`, then `aws s3 sync` back into the bucket).
 `architecture.md`: the `/media/*` row and the object-storage service.
