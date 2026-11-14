@@ -1699,7 +1699,7 @@ def clear_cart(customer_id: int) -> int:
         return deleted
 
 
-def reorder_into_cart(order_id: int, customer_id: int) -> None:
+def reorder_into_cart(order_id: int, customer_id: int, *, preserve_all: bool = False) -> None:
     """``POST orders/{id}/reorder/``: the order's lines back into the cart (the caller checked ownership and
     the history horizon). An existing line keeps the larger of both quantities, clamped to ``max_quantity``;
     unavailable or out-of-stock products are added anyway (shown with their status), except when the cart
@@ -1727,6 +1727,10 @@ def reorder_into_cart(order_id: int, customer_id: int) -> None:
             plan.append((line, quantity, sellable))
         new_lines = [entry for entry in plan if entry[0].product_id not in existing]
         if len(existing) + len(new_lines) > settings.CART_MAX_LINES:
+            if preserve_all:
+                raise CartFull(
+                    details={"max_lines": settings.CART_MAX_LINES}, params={"limit": settings.CART_MAX_LINES}
+                )
             plan = [entry for entry in plan if entry[2] or entry[0].product_id in existing]
             if (
                 len(existing) + sum(1 for e in plan if e[0].product_id not in existing)
@@ -1752,7 +1756,36 @@ def reorder_into_cart(order_id: int, customer_id: int) -> None:
                 item.price_at_add = line.product.price
                 item.updated_at = now
                 item.save(update_fields=["quantity", "price_at_add", "updated_at"])
-        _touch(cart)
+        if cart.last_checkout_order_id == order_id:
+            cart.last_checkout_order_id = None
+            cart.updated_at = now
+            cart.save(update_fields=["last_checkout_order", "updated_at"])
+        else:
+            _touch(cart)
+
+
+def restore_checkout_to_cart(order_id: int, customer_id: int) -> None:
+    """Cancel an unpaid checkout and merge its items atomically, without losing a newer cart.
+
+    Serialize against checkout, then use the existing Order → Payment → Loyalty locks and the existing
+    Click-in-flight guard. A cart_full or other failure rolls the cancellation and released holds back.
+    A previously expired/customer-cancelled checkout can be restored too; paid orders are never edited.
+    """
+    with transaction.atomic():
+        customer = lock_customer(customer_id)
+        if customer is None or customer.status != enums.CustomerStatus.ACTIVE:
+            raise AuthFailed("SESSION_EXPIRED")
+        order = lock_order(order_id)
+        if order.customer_id != customer_id:
+            raise OrderNotFound(f"Order {order_id} does not exist")
+        if order.status == _S.AWAITING_PAYMENT:
+            cancel_by_customer(order_id, customer_id)
+        elif order.status != _S.CANCELLED or order.cancellation_reason not in (
+            enums.CancellationReason.RESERVATION_EXPIRED,
+            enums.CancellationReason.CUSTOMER_REQUEST,
+        ):
+            raise not_cancellable("order")
+        reorder_into_cart(order_id, customer_id, preserve_all=True)
 
 
 def delete_cart_lines(customer_id: int) -> int:

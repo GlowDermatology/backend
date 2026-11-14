@@ -115,6 +115,27 @@ def test_two_checkouts_of_one_customer() -> None:
     assert Order.objects.count() == 1
 
 
+def test_restore_racing_checkout_keeps_one_pending_order_and_never_doubles_quantity() -> None:
+    customer = shopper()
+    item = product(stock=10)
+    _cart(customer, (item, 1))
+    old_id = services.checkout(customer.pk, _input(item.price))
+    _cart(customer, (item, 1))  # the customer added the same product again after abandoning payment
+    edited, checked_out = _race(
+        lambda: services.restore_checkout_to_cart(old_id, customer.pk),
+        lambda: services.checkout(customer.pk, _input(item.price)),
+    )
+    assert edited is None, edited
+    assert isinstance(checked_out, (int, OpenOrderExists)), checked_out
+    assert Order.objects.get(pk=old_id).status == "cancelled"
+    assert Order.objects.filter(customer=customer, status="awaiting_payment").count() <= 1
+    if isinstance(checked_out, int):
+        assert Order.objects.get(pk=checked_out).items.get().quantity == 1
+        assert not CartItem.objects.filter(cart__customer=customer).exists()
+    else:
+        assert CartItem.objects.get(cart__customer=customer).quantity == 1
+
+
 def test_checkout_waits_for_a_delete_holding_the_customer_lock() -> None:
     customer = shopper()
     _cart(customer, (product(stock=5), 1))

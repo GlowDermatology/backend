@@ -14366,6 +14366,11 @@ paths:
         required: true
       tags:
       - orders
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomerReorderRequest'
       security:
       - CustomerJWT: []
       responses:
@@ -17152,6 +17157,10 @@ components:
           allOf:
           - $ref: '#/components/schemas/CustomerCartChange'
           nullable: true
+        checkout_order:
+          allOf:
+          - $ref: '#/components/schemas/CustomerOrderDetail'
+          nullable: true
       required:
       - cashback
       - has_problems
@@ -18061,6 +18070,12 @@ components:
       description: |-
         * `in_progress` - in_progress
         * `completed` - completed
+    CustomerReorderRequest:
+      type: object
+      properties:
+        cancel_unpaid:
+          type: boolean
+          default: false
     CustomerSession:
       type: object
       description: One signed-in device of the customer (``CustomerSession``).

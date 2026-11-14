@@ -34,6 +34,7 @@ from glowderma.commerce.api.customer.serializers import (
     CustomerOrderSummarySerializer,
     CustomerPayLinkSerializer,
     CustomerPaySerializer,
+    CustomerReorderSerializer,
 )
 from glowderma.commerce.models import Order
 from glowderma.core import enums, integration_modes, timeutils
@@ -545,14 +546,19 @@ class ReorderView(CustomerAPIView):
     @extend_schema(
         operation_id="customer_orders_reorder",
         parameters=[*DEVICE_HEADERS, IDEMPOTENCY_KEY_HEADER],
-        request=None,
+        request=CustomerReorderSerializer,
         responses={200: CustomerCartSerializer, **CUSTOMER_ERRORS},
     )
     @idempotent()
     def post(self, request: Request, pk: int) -> Response:
         customer = _customer(request)
         _own_order(customer, pk)
-        services.reorder_into_cart(pk, customer.pk)
+        body = CustomerReorderSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        if body.validated_data["cancel_unpaid"]:
+            services.restore_checkout_to_cart(pk, customer.pk)
+        else:
+            services.reorder_into_cart(pk, customer.pk)
         return _cart_response(self)
 
 

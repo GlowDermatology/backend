@@ -54,6 +54,10 @@ class CustomerPaySerializer(serializers.Serializer[dict[str, Any]]):
     )
 
 
+class CustomerReorderSerializer(serializers.Serializer[dict[str, Any]]):
+    cancel_unpaid = serializers.BooleanField(required=False, default=False)
+
+
 class CustomerOrderScopeQuerySerializer(serializers.Serializer[dict[str, Any]]):
     scope = serializers.ChoiceField(
         choices=enums.OrderScope.values, required=False, default=enums.OrderScope.ALL
@@ -93,18 +97,6 @@ class CustomerCartChangeSerializer(serializers.Serializer[dict[str, Any]]):
     requested_quantity = serializers.IntegerField()
     quantity = serializers.IntegerField()
     max_reached = serializers.BooleanField()
-
-
-class CustomerCartSerializer(serializers.Serializer[dict[str, Any]]):
-    items = CustomerCartLineSerializer(many=True)
-    item_count = serializers.IntegerField()
-    quantity_total = serializers.IntegerField()
-    items_subtotal = serializers.IntegerField()
-    promo_subtotal = serializers.IntegerField()
-    has_problems = serializers.BooleanField()
-    cashback = CustomerCartCashbackSerializer()
-    updated_at = serializers.DateTimeField(allow_null=True)
-    last_change = CustomerCartChangeSerializer(allow_null=True)
 
 
 class CustomerDeliveryQuoteSerializer(serializers.Serializer[dict[str, Any]]):
@@ -239,3 +231,16 @@ class CustomerOrderDetailSerializer(CustomerOrderSummarySerializer):
     progress = CustomerProgressStepSerializer(many=True)
     timeline = CustomerTimelineEntrySerializer(many=True)
     actions = CustomerOrderActionsSerializer()
+
+
+class CustomerCartSerializer(serializers.Serializer[dict[str, Any]]):
+    items = CustomerCartLineSerializer(many=True)
+    item_count = serializers.IntegerField()
+    quantity_total = serializers.IntegerField()
+    items_subtotal = serializers.IntegerField()
+    promo_subtotal = serializers.IntegerField()
+    has_problems = serializers.BooleanField()
+    cashback = CustomerCartCashbackSerializer()
+    updated_at = serializers.DateTimeField(allow_null=True)
+    last_change = CustomerCartChangeSerializer(allow_null=True)
+    checkout_order = CustomerOrderDetailSerializer(allow_null=True, required=False)

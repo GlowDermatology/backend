@@ -43,6 +43,7 @@ def test_empty_cart(customer_client: APIClient) -> None:
         "cashback": {"available": 0, "max_usable_pickup": 0},
         "updated_at": None,
         "last_change": None,
+        "checkout_order": None,
     }
 
 

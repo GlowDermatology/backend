@@ -827,7 +827,28 @@ def cart_view(customer_id: int, lang: str, *, last_change: dict[str, Any] | None
         "cashback": {"available": balance, "max_usable_pickup": cashback_max(subtotal, 0, balance)},
         "updated_at": cart.updated_at if cart is not None else None,
         "last_change": last_change,
+        "checkout_order": cart_checkout_order(customer_id, cart, lang),
     }
+
+
+def cart_checkout_order(customer_id: int, cart: Cart | None, lang: str) -> dict[str, Any] | None:
+    """Keep an unpaid purchase discoverable even after checkout emptied the cart.
+
+    Active orders take priority. After expiry/cancellation, only the last checkout is offered for
+    recovery, until its lines are restored. Ownership and the history horizon apply to both reads.
+    """
+    orders = customer_orders(customer_id)
+    order = orders.filter(status=_S.AWAITING_PAYMENT).first()
+    if order is None and cart is not None and cart.last_checkout_order_id is not None:
+        order = orders.filter(
+            pk=cart.last_checkout_order_id,
+            status=_S.CANCELLED,
+            cancellation_reason__in=[
+                enums.CancellationReason.RESERVATION_EXPIRED,
+                enums.CancellationReason.CUSTOMER_REQUEST,
+            ],
+        ).first()
+    return customer_order_detail(order, lang) if order is not None else None
 
 
 # --- customer orders (customer contract §2.8)
