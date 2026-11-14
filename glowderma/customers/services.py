@@ -74,7 +74,7 @@ from glowderma.core.api.exceptions import (
     field_error,
 )
 from glowderma.core.images import ImageError, process_image
-from glowderma.core.media import absolute_media_url, media_name
+from glowderma.core.media import media_name, url_fields
 from glowderma.core.pii import pii_ref
 from glowderma.customers import selectors
 from glowderma.integrations.oauth import registry as oauth_registry
@@ -1431,8 +1431,11 @@ def update_profile(
     logger.info("customer.profile_updated customer_id=%s fields=%s", customer_id, sorted(changes))
 
 
-def set_image(customer_id: int, upload: Any, *, sid: str | account_services.NoSession) -> str:
-    """``PUT me/image/``: re-encoded and EXIF-stripped (``core.images``), the previous file deleted."""
+def set_image(
+    customer_id: int, upload: Any, *, sid: str | account_services.NoSession
+) -> dict[str, str | None]:
+    """``PUT me/image/``: re-encoded and EXIF-stripped (``core.images``), the previous file deleted. Returns
+    ``{image_url, image_thumbnail_url, image_medium_url}``."""
     try:
         processed = process_image(upload)
     except ImageError as exc:
@@ -1441,7 +1444,7 @@ def set_image(customer_id: int, upload: Any, *, sid: str | account_services.NoSe
         customer = account_services.lock_signed_in_customer(customer_id, sid)
         name = media_name("customers", customer_id, processed.content, processed.extension)
         new_name = account_services.set_customer_image(customer, PurePosixPath(name).name, processed.content)
-    return absolute_media_url(new_name)
+    return url_fields("image", new_name)
 
 
 def delete_image(customer_id: int, *, sid: str | account_services.NoSession) -> None:

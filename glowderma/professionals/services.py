@@ -29,6 +29,7 @@ from glowderma.core import audit, timeutils
 from glowderma.core.api.exceptions import Conflict, field_error
 from glowderma.core.images import ImageError, process_image
 from glowderma.core.media import media_name
+from glowderma.core.variants import delete_with_variants, store_variants
 from glowderma.professionals import bookings, selectors
 from glowderma.professionals.models import (
     PROFESSIONAL_SLUG_CONSTRAINT,
@@ -126,6 +127,11 @@ def _store_photo(professional: Professional, upload: Any) -> None:
         raise ValidationError({"photo": IMAGE_MESSAGES[exc.code]}) from exc
     name = media_name(PHOTO_KIND, professional.pk, processed.content, processed.extension)
     professional.photo.save(name.rsplit("/", 1)[-1], ContentFile(processed.content), save=False)
+    try:
+        store_variants(professional.photo.storage, professional.photo.name or "", processed.content)
+    except BaseException:
+        professional.photo.storage.delete(professional.photo.name or "")  # the row rolls back
+        raise
     professional.save(update_fields=["photo"])
 
 
@@ -529,9 +535,12 @@ def set_specialist_photo(
             previous = professional.photo.name or ""
             name = media_name(PHOTO_KIND, professional.pk, processed.content, processed.extension)
             if previous == name:
+                # nothing replaced; a variant that went missing (or predates the variants) is written again
+                store_variants(professional.photo.storage, previous, processed.content)
                 return professional
             professional.photo.save(name.rsplit("/", 1)[-1], ContentFile(processed.content), save=False)
             written, storage = professional.photo.name or "", professional.photo.storage
+            store_variants(storage, written, processed.content)
             professional.save(update_fields=["photo"])
             if previous:
                 _remove_file_on_commit(professional.photo.storage, previous)
@@ -546,7 +555,7 @@ def set_specialist_photo(
             )
     except BaseException:
         if written and storage is not None:
-            storage.delete(written)
+            delete_with_variants(storage, written)
         raise
     return professional
 
@@ -573,7 +582,7 @@ def delete_specialist_photo(professional_id: int, *, actor: Any, request: Any = 
 
 
 def _remove_file_on_commit(storage: Any, name: str) -> None:
-    transaction.on_commit(lambda: storage.delete(name))
+    transaction.on_commit(lambda: delete_with_variants(storage, name))
 
 
 def _links_state(professional: Professional) -> list[dict[str, Any]]:

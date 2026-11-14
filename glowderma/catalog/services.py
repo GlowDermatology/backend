@@ -36,6 +36,7 @@ from glowderma.core import audit, enums, integration_modes, timeutils
 from glowderma.core.api.exceptions import Conflict, field_error
 from glowderma.core.images import ImageError, ProcessedImage, process_image
 from glowderma.core.media import media_name
+from glowderma.core.variants import delete_with_variants, store_variants
 from glowderma.integrations.billz.ports import BillzListingIncomplete, BillzProduct
 
 logger = logging.getLogger(__name__)
@@ -74,10 +75,13 @@ def _basename(name: str) -> str:
 
 
 def _delete_file_on_commit(field: Any) -> None:
-    name = field.name
-    storage = field.storage
+    """Remove the stored file and its variants once the transaction commits."""
+    _delete_name_on_commit(field.storage, field.name or "")
+
+
+def _delete_name_on_commit(storage: Any, name: str) -> None:
     if name:
-        transaction.on_commit(lambda: storage.delete(name))
+        transaction.on_commit(lambda: delete_with_variants(storage, name))
 
 
 def _diff(before: dict[str, Any], after: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -388,6 +392,11 @@ def add_image(product_id: int, uploaded: Any, *, actor: Any, request: Any = None
         )
         image.file = ContentFile(processed.content, name=_basename(name))
         image.save()
+        try:
+            store_variants(image.file.storage, image.file.name, processed.content)
+        except BaseException:
+            image.file.storage.delete(image.file.name)  # the row rolls back: no orphan original
+            raise
         _touch_product(product.pk)
         audit.record(
             action="product.image_added",
@@ -476,26 +485,28 @@ def _store_category_image(category: Category, processed: ProcessedImage, stored:
     previous = category.image.name or ""
     name = media_name("categories", category.pk, processed.content, processed.extension)
     if previous == name:
+        # nothing replaced; a variant that went missing (or predates the variants) is written again
+        store_variants(category.image.storage, previous, processed.content)
         return
     category.image.save(_basename(name), ContentFile(processed.content, name=_basename(name)), save=False)
     stored.append(str(category.image.name))
+    store_variants(category.image.storage, str(category.image.name), processed.content)
     category.save(update_fields=["image"])
-    if previous:
-        storage = category.image.storage
-        transaction.on_commit(lambda: storage.delete(previous))
+    _delete_name_on_commit(category.image.storage, previous)
 
 
 @contextmanager
 def _discard_on_error(storage: Any) -> Iterator[list[str]]:
     """Yield a list the block appends the files it wrote to; if the block raises (its transaction rolls back,
-    e.g. the audit write failed), those files are removed so no orphan stays in storage (review nit)."""
+    e.g. the audit write failed), those files and their variants are removed so no orphan stays in storage
+    (review nit)."""
     stored: list[str] = []
     try:
         yield stored
     except BaseException:
         for name in stored:
             try:
-                storage.delete(name)
+                delete_with_variants(storage, name)
             except Exception:  # best effort: the original error matters more
                 logger.warning("category image cleanup failed for %s", name, exc_info=True)
         raise
@@ -710,9 +721,13 @@ def _store_banner_image(banner: Banner, processed: ProcessedImage) -> None:
     banner.image_height = processed.height
     # Django 6.1 derives the dimension fields from the *content* object: it needs a name to count as a file.
     banner.image.save(_basename(name), ContentFile(processed.content, name=_basename(name)), save=True)
+    try:
+        store_variants(banner.image.storage, str(banner.image.name), processed.content)
+    except BaseException:
+        banner.image.storage.delete(str(banner.image.name))  # the row rolls back: no orphan original
+        raise
     if previous and previous != banner.image.name:
-        storage = banner.image.storage
-        transaction.on_commit(lambda: storage.delete(previous))
+        _delete_name_on_commit(banner.image.storage, previous)
 
 
 def create_banner(data: BannerInput, image: Any, *, actor: Any, request: Any = None) -> Banner:

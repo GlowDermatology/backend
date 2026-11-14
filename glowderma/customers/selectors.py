@@ -33,7 +33,7 @@ from glowderma.catalog.models import Banner, Category, Product, ProductImage
 from glowderma.commerce import selectors as commerce_selectors
 from glowderma.commerce.models import CartItem, Order
 from glowderma.core import enums, i18n, timeutils
-from glowderma.core.media import absolute_media_url
+from glowderma.core.media import absolute_media_url, url_fields
 from glowderma.core.search import SearchFold
 from glowderma.loyalty import selectors as loyalty_selectors
 from glowderma.loyalty.models import Purchase
@@ -390,6 +390,12 @@ def media_url(file: Any) -> str | None:
     return absolute_media_url(str(name)) if name else None
 
 
+def media_urls(prefix: str, file: Any) -> dict[str, str | None]:
+    """``media_url`` and its variant URLs under the API's names (``core.media.url_fields``)."""
+    name = getattr(file, "name", None)
+    return url_fields(prefix, str(name) if name else None)
+
+
 def localized_field(obj: object, field: str, lang: str) -> str:
     """``<field>_<lang>`` → ``<field>_uz`` → ``""`` (customer contract §1.4)."""
     return str(getattr(obj, f"{field}_{lang}", "") or getattr(obj, f"{field}_uz", "") or "")
@@ -436,7 +442,7 @@ def me_payload(customer: Customer, *, fid: str | None) -> dict[str, Any]:
         "email": customer.email or None,
         "name": customer.name,
         "language": customer.language,
-        "image_url": media_url(customer.image),
+        **media_urls("image", customer.image),
         "registered_at": timeutils.isoformat(customer.history_from or customer.registered_at),
         "has_password": bool(customer.password),
         "linked_providers": providers,
@@ -509,7 +515,7 @@ def banner_payload(banner: Banner, lang: str, visible_ids: set[int]) -> dict[str
     return {
         "id": banner.pk,
         "title": localized_field(banner, "title", lang),
-        "image_url": media_url(banner.image),
+        **media_urls("image", banner.image),
         "image_width": banner.image_width,
         "image_height": banner.image_height,
         "link": link,
@@ -596,7 +602,7 @@ def product_cards(products: list[Product], lang: str, customer_id: int | None = 
                 "category": {"slug": category.slug, "name": localized_field(category, "name", lang)}
                 if category is not None
                 else None,
-                "main_image_url": media_url(image.file) if image is not None else None,
+                **media_urls("main_image", image.file if image is not None else None),
                 "available": quantity,
                 "stock_status": (
                     enums.StockStatus.IN_STOCK if quantity > 0 else enums.StockStatus.OUT_OF_STOCK
@@ -617,7 +623,7 @@ def product_detail(product: Product, lang: str, customer_id: int | None = None) 
         "ingredients": localized_field(product, "ingredients", lang),
         "usage": localized_field(product, "usage", lang),
         "images": [
-            {"id": image.pk, "url": media_url(image.file), "position": image.position} for image in images
+            {"id": image.pk, **media_urls("", image.file), "position": image.position} for image in images
         ],
         "max_quantity": min(card["available"], int(settings.CART_MAX_QTY_PER_LINE)),
         **seo_payload(product, lang),
@@ -639,7 +645,7 @@ def category_payload(category: Category, lang: str) -> dict[str, Any]:
         "slug": category.slug,
         "name": localized_field(category, "name", lang),
         "content_language": i18n.content_language(category, "name", lang),
-        "image_url": media_url(category.image),
+        **media_urls("image", category.image),
         "product_count": int(getattr(category, "product_count", 0)),
         "updated_at": category.updated_at,
         **seo_payload(category, lang),

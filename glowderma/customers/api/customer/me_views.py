@@ -164,7 +164,7 @@ class ImageView(MeBase):
         upload = request.FILES.get("file")
         if upload is None:
             raise ValidationError({"file": [field_error("required")]})
-        return Response({"image_url": services.set_image(self.customer.pk, upload, sid=self.sid)})
+        return Response(services.set_image(self.customer.pk, upload, sid=self.sid))
 
     @extend_schema(
         operation_id="customer_me_image_destroy",

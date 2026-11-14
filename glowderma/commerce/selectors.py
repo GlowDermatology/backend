@@ -41,7 +41,7 @@ from glowderma.commerce import state, topics
 from glowderma.commerce.models import Cart, CartItem, Order, OrderEvent, OrderItem, StockReservation
 from glowderma.core import enums, i18n, integration_modes, timeutils
 from glowderma.core.consistency import Finding, finding
-from glowderma.core.media import absolute_media_url
+from glowderma.core.media import absolute_media_url, optional_variant_url, url_fields
 from glowderma.core.models import OutboxMessage
 from glowderma.core.search import SearchFold
 from glowderma.core.timeutils import TASHKENT
@@ -319,6 +319,11 @@ def image_url(path: str) -> str | None:
     return absolute_media_url(path) if path else None
 
 
+def image_urls(path: str) -> dict[str, str | None]:
+    """``image_url`` and its two variant URLs, keyed as the API names them (``core.media.url_fields``)."""
+    return url_fields("image", path)
+
+
 def order_detail(order_id: int) -> OrderDetail | None:
     """Everything ``GET orders/{id}/`` renders, in a handful of queries; ``None`` → 404."""
     order = order_queryset().filter(pk=order_id).first()
@@ -330,7 +335,7 @@ def order_detail(order_id: int) -> OrderDetail | None:
             "product_id": item.product_id,
             "name": item.name,
             "billz_id": item.billz_id,
-            "image_url": image_url(item.image_url),
+            **image_urls(item.image_url),
             "quantity": item.quantity,
             "unit_price": item.unit_price,
             "promo": item.promo,
@@ -698,9 +703,15 @@ def product_name(product: Product, lang: str) -> str:
     return str(getattr(product, f"name_{lang}", "") or product.name_uz or product.billz_name or "")
 
 
-def product_image(product: Product) -> str | None:
+def product_image_name(product: Product) -> str:
+    """The stored name of the product's first image, ``""`` when it has none."""
     images = sorted(product.images.all(), key=lambda image: (image.position, image.pk))
-    return absolute_media_url(images[0].file.name or "") if images and images[0].file else None
+    return (images[0].file.name or "") if images and images[0].file else ""
+
+
+def product_image(product: Product) -> str | None:
+    name = product_image_name(product)
+    return absolute_media_url(name) if name else None
 
 
 def provider_brand(provider: str) -> str:
@@ -792,7 +803,7 @@ def cart_view(customer_id: int, lang: str, *, last_change: dict[str, Any] | None
                 "product_id": product.pk,
                 "name": product_name(product, lang),
                 "volume": product.volume,
-                "main_image_url": product_image(product),
+                **url_fields("main_image", product_image_name(product)),
                 "unit_price": product.price,
                 "promo": product.promo,
                 "quantity": item.quantity,
@@ -891,6 +902,9 @@ def order_summary(order: Order, lang: str, now: datetime) -> dict[str, Any]:
         "total": order.total,
         "item_count": len(items),
         "preview_images": [url for url in (image_url(item.image_url) for item in items) if url][:3],
+        "preview_thumbnail_images": [
+            url for url in (optional_variant_url(item.image_url, "thumbnail") for item in items) if url
+        ][:3],
         "payment": {
             "status": pay_status,
             "status_label": i18n.t(f"label.payment_status.{pay_status}", lang),
@@ -944,7 +958,7 @@ def customer_order_detail(order: Order, lang: str, now: datetime | None = None) 
             {
                 "product_id": item.product_id,
                 "name": name or item.name,
-                "image_url": image_url(item.image_url),
+                **image_urls(item.image_url),
                 "quantity": item.quantity,
                 "unit_price": item.unit_price,
                 "promo": item.promo,

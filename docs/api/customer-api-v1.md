@@ -89,7 +89,7 @@ catalog/settings GETs:
 
 ### 1.4 Values
 Admin §1.4 applies (snake_case, integer ids, money as integer so'm, ISO 8601 `+05:00`, percent decimal strings with
-2 dp, phone E.164 `^\+998\d{9}$`, nulls never omitted, absolute media URLs). Differences:
+2 dp, phone E.164 `^\+998\d{9}$`, nulls never omitted, absolute media URLs, image variants: admin contract §1.4). Differences:
 
 | Kind | Customer rule | Example |
 |---|---|---|
@@ -761,6 +761,7 @@ the push to every signed-in device of the customer (B-W1: the other devices stay
  "name": "Malika Karimova",
  "language": "uz",                                  // ContentLanguage: push texts and the default Accept-Language
  "image_url": null,                                  // absolute URL | null
+ "image_thumbnail_url": null, "image_medium_url": null,   // image variants (admin contract §1.4)
  "registered_at": "2025-03-12T10:20:00+05:00",      // Customer.history_from when set (reactivated or dormant-reset account, §2.2.3), else registered_at
  "has_password": true, "linked_providers": ["google"],   // CustomerSocialProvider[]
  "push_enabled": true,                               // of the CURRENT device
@@ -876,7 +877,7 @@ the consent screen.
 
 #### 2.2.5 `PUT me/image/` · `DELETE me/image/`
 Multipart part `file` (≤5 MiB, JPEG/PNG/WebP, re-encoded and EXIF-stripped by `core.images.process_image`;
-`file_too_large`, `unsupported_image`, `required`) → 200 `{"image_url": str}`; the previous file is deleted.
+`file_too_large`, `unsupported_image`, `required`) → 200 `{"image_url": str, "image_thumbnail_url": str, "image_medium_url": str}`; the previous file and its variants are deleted.
 `DELETE` → 204 (idempotent).
 
 #### 2.2.6 `PUT me/device/`
@@ -1116,13 +1117,16 @@ the fake Billz serves stock normally.
  "volume": "30 ml", "price": 185000, "promo": false,
  "category": {"slug": "serums", "name": "Serumlar"},
  "main_image_url": "https://media.example.uz/products/1/9f2c.webp",   // | null
+ "main_image_thumbnail_url": "https://media.example.uz/products/1/9f2c_400.webp",   // image variants | null
+ "main_image_medium_url": "https://media.example.uz/products/1/9f2c_1000.webp",
  "available": 12, "stock_status": "in_stock",       // StockStatus: in_stock (available > 0) | out_of_stock
  "in_cart_quantity": 0,                              // 0 when anonymous
  "updated_at": "2026-10-22T18:04:00+05:00"}         // B-W1: last change of the product page (texts, price, status,
                                                     // gallery) — the sitemap lastmod
 // ProductDetail = ProductCard + 
 {"description": "…", "ingredients": "…", "usage": "…",             // resolved language, "" when empty
- "images": [{"id": 31, "url": "https://…/9f2c.webp", "position": 0}],
+ "images": [{"id": 31, "url": "https://…/9f2c.webp", "thumbnail_url": "https://…/9f2c_400.webp",
+             "medium_url": "https://…/9f2c_1000.webp", "position": 0}],
  "max_quantity": 10,                                 // min(available, CART_MAX_QTY_PER_LINE); 0 = cannot be added
  "seo_title": "",                                    // B-W1: staff-written page title in the resolved language ONLY
  "seo_description": ""}                              // (never another language's text); "" = the website builds one
@@ -1135,14 +1139,15 @@ compare-at price (`billz_price` is Billz's reference price for staff comparison,
 **`GET catalog/banners/`** → `{"results": [Banner…]}` (not paginated, ≤20): `is_active` ∧ (`starts_at` null or ≤ now) ∧
 (`ends_at` null or > now), ordered by `position`, id.
 ```jsonc
-{"id": 3, "title": "Kuzgi chegirmalar", "image_url": "https://…/77aa.webp", "image_width": 1200, "image_height": 600,
+{"id": 3, "title": "Kuzgi chegirmalar", "image_url": "https://…/77aa.webp", "image_thumbnail_url": "https://…/77aa_400.webp",
+ "image_medium_url": "https://…/77aa_1000.webp", "image_width": 1200, "image_height": 600,
  "link": {"kind": "product", "product_id": 4, "category": null, "url": null}}   // a link to an invisible product/inactive category renders kind "none"
 // gap X-BANNER-URL: "link": {"kind": "url", "product_id": null, "category": null, "url": "https://glowderma.uz/aksiya"}
 ```
 `link.kind` `url` (BannerLinkKind, admin §2.5): the app opens `link.url` — always an absolute `https` URL ≤500 (validated
 when staff save it; open question GC-3) — in the system browser (or the in-app browser), never in a web view with the
 session. Every key of `link` is always present (`null` when it does not apply).
-**`GET catalog/categories/`** → `{"results": [{"slug", "name", "content_language", "image_url" | null, "product_count",
+**`GET catalog/categories/`** → `{"results": [{"slug", "name", "content_language", "image_url" | null, "image_thumbnail_url" | null, "image_medium_url" | null, "product_count",
 "updated_at", "seo_title", "seo_description"}]}` (`content_language`: §1.4): active categories by `position`; `product_count` = visible products; `image_url` is
 the image staff upload in the admin (admin §2.4, gap ADM-5.1), `null` without one; B-W1: `updated_at` (sitemap) and
 the staff-written `seo_title` / `seo_description` in the resolved language only (`""` = none).
@@ -1211,6 +1216,7 @@ placed earlier.
 {"items": [                                          // CartLine[], cart order (added_at, id)
    {"product_id": 4, "name": "Seramidli namlantiruvchi krem", "volume": "50 ml",
     "main_image_url": "https://…/a1b2.webp",          // | null
+    "main_image_thumbnail_url": "https://…/a1b2_400.webp", "main_image_medium_url": "https://…/a1b2_1000.webp",
     "unit_price": 312000, "promo": false,             // current Product.price / promo (no snapshot)
     "quantity": 2, "line_total": 624000,
     "available": 7,                                   // §1.4
@@ -1525,6 +1531,7 @@ Only orders created at or after the history horizon (§2.2.3).
  "status": "handed_to_courier", "status_label": "Kuryerga topshirildi",
  "fulfilment": "delivery", "total": 784400, "item_count": 3,
  "preview_images": ["https://…/a1b2.webp"],          // ≤3 item image URLs (snapshots), nulls skipped
+ "preview_thumbnail_images": ["https://…/a1b2_400.webp"],   // the same, as 400 px variants, same order
  "payment": {"status": "paid", "status_label": "To‘langan", "provider": "click",
              "in_progress": false},                  // true while a provider transaction is in flight (§2.7.2)
  "pay_by": null,                                    // reservation_expires_at while awaiting_payment, else null
@@ -1535,6 +1542,7 @@ Only orders created at or after the history horizon (§2.2.3).
 { /* …OrderSummary… */
  "fulfilment_label": "Yetkazib berish",
  "items": [{"product_id": 4, "name": "Seramidli namlantiruvchi krem", "image_url": "…" /* | null */,
+            "image_thumbnail_url": "…", "image_medium_url": "…" /* image variants | null */,
             "quantity": 1, "unit_price": 312000, "promo": false, "line_total": 312000}],
  "items_subtotal": 808000, "promo_subtotal": 240000, "delivery_fee": 25000, "cashback_used": 48600,
  "address": "Toshkent, Chilonzor tumani, 9-kvartal, 12-uy, 45-xonadon",   // delivery snapshot | null
@@ -1713,7 +1721,7 @@ links to active services (`professionals.selectors.booking_catalogue`).
 // Specialist
 {"id": 1, "name": "Nodira Rahimova", "role": "dermatologist", "role_label": "Dermatolog",
  "content_language": "ru",                             // §1.4: the language bio came from (requested | "uz"); name is not localized
- "photo_url": null, "bio": "…",
+ "photo_url": null, "photo_thumbnail_url": null, "photo_medium_url": null, "bio": "…",
  "qualifications": "…",                                // FND-7: diplomas, certificates (localized like bio; "" = none)
  "experience_years": 8,
  "location": {"id": 1, "name": "Glow Derma Yunusobod", "address": "…", "phone": "+998712000000",
@@ -1779,7 +1787,8 @@ customer`; audit `appointment.requested` (actor_type `customer`). No push (the c
 ```jsonc
 // Appointment
 {"id": 41, "status": "requested", "status_label": "Tasdiqlanishi kutilmoqda",
- "specialist": {"id": 1, "name": "Nodira Rahimova", "role": "dermatologist", "role_label": "Dermatolog", "photo_url": null},
+ "specialist": {"id": 1, "name": "Nodira Rahimova", "role": "dermatologist", "role_label": "Dermatolog", "photo_url": null,
+                "photo_thumbnail_url": null, "photo_medium_url": null},
  "service": {"id": 1, "name": "Dermatolog konsultatsiyasi", "short_name": "Konsultatsiya"},
  "location": {"name": "Glow Derma Yunusobod", "address": "…", "phone": "+998712000000"},
  "start": "2026-10-28T09:00:00+05:00", "end": "2026-10-28T09:30:00+05:00",
@@ -1810,7 +1819,7 @@ admin-only by DB constraint).
 // InboxItem
 {"id": 901, "kind": "order_status",          // InboxKind: promo | general | order_status | appointment
  "title": "Kuryerga topshirildi", "body": "Buyurtma №10248 kuryerga topshirildi.",   // rendered at creation in the customer's language (title = §4.3 customer label); never re-rendered after a language switch
- "image_url": null,
+ "image_url": null, "image_thumbnail_url": null, "image_medium_url": null,   // variants derived from image_url
  "link": {"kind": "order", "product_id": null, "order_id": 10248, "appointment_id": null, "url": null},   // InboxLinkKind: none | product | order | appointment | url
  // a campaign with an https destination (gap ADM-10.1): "link": {"kind": "url", "product_id": null, "order_id": null, "appointment_id": null, "url": "https://glowderma.uz/aksiya"}
  "created_at": "2026-10-23T16:40:00+05:00", "read_at": null, "delivered_at": "2026-10-23T16:40:05+05:00"}

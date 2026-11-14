@@ -24,6 +24,7 @@ from glowderma.accounts.models import Customer, CustomerSocialIdentity, Device, 
 from glowderma.core import timeutils
 from glowderma.core.models import IdempotencyRecord
 from glowderma.core.seeding import placeholder_art
+from glowderma.core.variants import store_variants
 
 OWNER_EMAIL = "e2e-owner@e2e.uz"
 
@@ -67,6 +68,7 @@ def fill_empty_models() -> dict[str, Any]:
             banner = Banner(title_uz="E2E banner", image_width=width, image_height=height)
             banner.save()  # the upload path is built from the id
             banner.image.save("e2e.webp", ContentFile(art), save=False)
+            store_variants(banner.image.storage, str(banner.image.name), art)
             banner.image_width, banner.image_height = width, height
             banner.save()
             created.append("catalog.banner")

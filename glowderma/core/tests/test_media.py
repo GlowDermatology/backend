@@ -3,7 +3,15 @@ from hashlib import sha256
 import pytest
 from django.test import override_settings
 
-from glowderma.core.media import absolute_media_url, media_name
+from glowderma.core.media import (
+    VARIANT_SIDES,
+    absolute_media_url,
+    media_name,
+    optional_variant_url,
+    url_fields,
+    variant_name,
+    variant_url,
+)
 
 
 @pytest.mark.parametrize("base", ["https://media.example.uz/", "https://media.example.uz"])
@@ -24,3 +32,65 @@ def test_media_name_is_content_addressed() -> None:
     assert media_name("products", 1, content, "webp") == f"products/1/{digest}.webp"
     assert media_name("banners", "abc", content, "jpg") == f"banners/abc/{digest}.jpg"
     assert media_name("products", 1, b"other", "webp") != media_name("products", 1, content, "webp")
+
+
+def test_variant_name_replaces_extension() -> None:
+    assert (
+        variant_name("products/12/d5872db9aa73d5e9.jpg", "thumbnail")
+        == "products/12/d5872db9aa73d5e9_400.webp"
+    )
+    assert (
+        variant_name("products/12/d5872db9aa73d5e9.jpg", "medium") == "products/12/d5872db9aa73d5e9_1000.webp"
+    )
+
+
+def test_variant_name_keeps_collision_suffix() -> None:
+    assert variant_name("products/4/98967745a01b7d3b_mkY6nkg.webp", "thumbnail") == (
+        "products/4/98967745a01b7d3b_mkY6nkg_400.webp"
+    )
+
+
+def test_variant_name_works_on_a_url_and_touches_only_the_last_segment() -> None:
+    assert variant_name("https://glow.example/media/v1.2/banners/1/8349b8f7b347589a.png", "medium") == (
+        "https://glow.example/media/v1.2/banners/1/8349b8f7b347589a_1000.webp"
+    )
+
+
+def test_variant_name_without_extension() -> None:
+    assert variant_name("customers/7/abc", "thumbnail") == "customers/7/abc_400.webp"
+
+
+def test_variant_sides() -> None:
+    assert VARIANT_SIDES == {"thumbnail": 400, "medium": 1000}
+
+
+def test_variant_url() -> None:
+    with override_settings(PUBLIC_MEDIA_BASE_URL="https://glow.example/media/"):
+        assert (
+            variant_url("categories/3/aa.png", "thumbnail")
+            == "https://glow.example/media/categories/3/aa_400.webp"
+        )
+
+
+def test_optional_variant_url() -> None:
+    assert optional_variant_url("", "medium") is None
+    assert optional_variant_url(None, "thumbnail") is None
+    assert optional_variant_url("a/1/b.png", "medium") == variant_url("a/1/b.png", "medium")
+
+
+def test_url_fields_names_the_siblings_by_the_spec_rule() -> None:
+    assert url_fields("image", "a/1/b.png") == {
+        "image_url": absolute_media_url("a/1/b.png"),
+        "image_thumbnail_url": variant_url("a/1/b.png", "thumbnail"),
+        "image_medium_url": variant_url("a/1/b.png", "medium"),
+    }
+    assert url_fields("", "a/1/b.png") == {
+        "url": absolute_media_url("a/1/b.png"),
+        "thumbnail_url": variant_url("a/1/b.png", "thumbnail"),
+        "medium_url": variant_url("a/1/b.png", "medium"),
+    }
+    assert url_fields("photo", "") == {
+        "photo_url": None,
+        "photo_thumbnail_url": None,
+        "photo_medium_url": None,
+    }

@@ -15491,9 +15491,23 @@ components:
           type: string
           nullable: true
           readOnly: true
+        photo_thumbnail_url:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
+          description: 400 px WebP variant.
+        photo_medium_url:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
+          description: 1000 px WebP variant.
       required:
       - id
       - name
+      - photo_medium_url
+      - photo_thumbnail_url
       - photo_url
       - role
       - role_label
@@ -15656,6 +15670,16 @@ components:
           type: string
           format: uri
           readOnly: true
+        image_thumbnail_url:
+          type: string
+          format: uri
+          readOnly: true
+          description: 400 px WebP variant.
+        image_medium_url:
+          type: string
+          format: uri
+          readOnly: true
+          description: 1000 px WebP variant.
         link:
           allOf:
           - $ref: '#/components/schemas/BannerLink'
@@ -15682,6 +15706,8 @@ components:
       - created_at
       - ends_at
       - id
+      - image_medium_url
+      - image_thumbnail_url
       - image_url
       - is_active
       - link
@@ -16305,6 +16331,18 @@ components:
           format: uri
           nullable: true
           readOnly: true
+        image_thumbnail_url:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
+          description: 400 px WebP variant.
+        image_medium_url:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
+          description: 1000 px WebP variant.
         position:
           type: integer
         is_active:
@@ -16327,6 +16365,8 @@ components:
           format: date-time
       required:
       - created_at
+      - image_medium_url
+      - image_thumbnail_url
       - image_url
       - is_active
       - name
@@ -16618,6 +16658,18 @@ components:
           format: uri
           nullable: true
           readOnly: true
+        photo_thumbnail_url:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
+          description: 400 px WebP variant.
+        photo_medium_url:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
+          description: 1000 px WebP variant.
         location_id:
           type: integer
         staff_user:
@@ -16655,6 +16707,8 @@ components:
       - is_active
       - location_id
       - name
+      - photo_medium_url
+      - photo_thumbnail_url
       - photo_url
       - position
       - qualifications
@@ -16919,6 +16973,16 @@ components:
           type: string
           format: uri
           nullable: true
+        image_thumbnail_url:
+          type: string
+          format: uri
+          nullable: true
+          description: 400 px WebP variant.
+        image_medium_url:
+          type: string
+          format: uri
+          nullable: true
+          description: 1000 px WebP variant.
         image_width:
           type: integer
         image_height:
@@ -16928,6 +16992,8 @@ components:
       required:
       - id
       - image_height
+      - image_medium_url
+      - image_thumbnail_url
       - image_url
       - image_width
       - link
@@ -17147,6 +17213,14 @@ components:
         main_image_url:
           type: string
           nullable: true
+        main_image_thumbnail_url:
+          type: string
+          nullable: true
+          description: 400 px WebP variant.
+        main_image_medium_url:
+          type: string
+          nullable: true
+          description: 1000 px WebP variant.
         unit_price:
           type: integer
         promo:
@@ -17171,6 +17245,8 @@ components:
       required:
       - available
       - line_total
+      - main_image_medium_url
+      - main_image_thumbnail_url
       - main_image_url
       - max_quantity
       - max_reached
@@ -17203,6 +17279,16 @@ components:
           type: string
           format: uri
           nullable: true
+        image_thumbnail_url:
+          type: string
+          format: uri
+          nullable: true
+          description: 400 px WebP variant.
+        image_medium_url:
+          type: string
+          format: uri
+          nullable: true
+          description: 1000 px WebP variant.
         product_count:
           type: integer
         updated_at:
@@ -17214,6 +17300,8 @@ components:
           type: string
       required:
       - content_language
+      - image_medium_url
+      - image_thumbnail_url
       - image_url
       - name
       - product_count
@@ -17329,6 +17417,14 @@ components:
         image_url:
           type: string
           nullable: true
+        image_thumbnail_url:
+          type: string
+          nullable: true
+          description: 400 px WebP variant.
+        image_medium_url:
+          type: string
+          nullable: true
+          description: 1000 px WebP variant.
         quantity:
           type: integer
         unit_price:
@@ -17338,6 +17434,8 @@ components:
         line_total:
           type: integer
       required:
+      - image_medium_url
+      - image_thumbnail_url
       - image_url
       - line_total
       - name
@@ -17587,6 +17685,16 @@ components:
           type: string
           format: uri
           nullable: true
+        image_thumbnail_url:
+          type: string
+          format: uri
+          nullable: true
+          description: 400 px WebP variant.
+        image_medium_url:
+          type: string
+          format: uri
+          nullable: true
+          description: 1000 px WebP variant.
         registered_at:
           type: string
           format: date-time
@@ -17610,6 +17718,8 @@ components:
       - email
       - has_password
       - id
+      - image_medium_url
+      - image_thumbnail_url
       - image_url
       - language
       - linked_providers
@@ -17665,6 +17775,11 @@ components:
           type: array
           items:
             type: string
+        preview_thumbnail_images:
+          type: array
+          items:
+            type: string
+          description: '`preview_images` as their 400 px WebP variants, same order.'
         payment:
           $ref: '#/components/schemas/CustomerDetailPayment'
         pay_by:
@@ -17744,6 +17859,7 @@ components:
       - payment
       - pickup_address
       - preview_images
+      - preview_thumbnail_images
       - progress
       - promo_subtotal
       - refund
@@ -17775,6 +17891,11 @@ components:
           type: array
           items:
             type: string
+        preview_thumbnail_images:
+          type: array
+          items:
+            type: string
+          description: '`preview_images` as their 400 px WebP variants, same order.'
         payment:
           $ref: '#/components/schemas/CustomerSummaryPayment'
         pay_by:
@@ -17792,6 +17913,7 @@ components:
       - pay_by
       - payment
       - preview_images
+      - preview_thumbnail_images
       - status
       - status_label
       - total
@@ -17845,11 +17967,21 @@ components:
         url:
           type: string
           format: uri
+        thumbnail_url:
+          type: string
+          format: uri
+          description: 400 px WebP variant.
+        medium_url:
+          type: string
+          format: uri
+          description: 1000 px WebP variant.
         position:
           type: integer
       required:
       - id
+      - medium_url
       - position
+      - thumbnail_url
       - url
     CustomerProgressStep:
       type: object
@@ -18604,7 +18736,17 @@ components:
         image_url:
           type: string
           format: uri
+        image_thumbnail_url:
+          type: string
+          format: uri
+          description: 400 px WebP variant.
+        image_medium_url:
+          type: string
+          format: uri
+          description: 1000 px WebP variant.
       required:
+      - image_medium_url
+      - image_thumbnail_url
       - image_url
     ImagesResponse:
       type: object
@@ -18632,6 +18774,16 @@ components:
           type: string
           nullable: true
           readOnly: true
+        image_thumbnail_url:
+          type: string
+          nullable: true
+          readOnly: true
+          description: 400 px WebP variant.
+        image_medium_url:
+          type: string
+          nullable: true
+          readOnly: true
+          description: 1000 px WebP variant.
         link:
           allOf:
           - $ref: '#/components/schemas/InboxLink'
@@ -18652,6 +18804,8 @@ components:
       - created_at
       - delivered_at
       - id
+      - image_medium_url
+      - image_thumbnail_url
       - image_url
       - kind
       - link
@@ -19481,6 +19635,16 @@ components:
           type: string
           nullable: true
           readOnly: true
+        image_thumbnail_url:
+          type: string
+          nullable: true
+          readOnly: true
+          description: 400 px WebP variant.
+        image_medium_url:
+          type: string
+          nullable: true
+          readOnly: true
+          description: 1000 px WebP variant.
         link:
           allOf:
           - $ref: '#/components/schemas/NotificationLink'
@@ -19609,6 +19773,8 @@ components:
       - failed
       - failed_at
       - id
+      - image_medium_url
+      - image_thumbnail_url
       - image_url
       - kind
       - last_error
@@ -19994,6 +20160,14 @@ components:
         image_url:
           type: string
           nullable: true
+        image_thumbnail_url:
+          type: string
+          nullable: true
+          description: 400 px WebP variant.
+        image_medium_url:
+          type: string
+          nullable: true
+          description: 1000 px WebP variant.
         quantity:
           type: integer
         unit_price:
@@ -20002,6 +20176,8 @@ components:
           type: boolean
       required:
       - billz_id
+      - image_medium_url
+      - image_thumbnail_url
       - image_url
       - name
       - product_id
@@ -21173,6 +21349,18 @@ components:
           format: uri
           nullable: true
           readOnly: true
+        main_image_thumbnail_url:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
+          description: 400 px WebP variant.
+        main_image_medium_url:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
+          description: 1000 px WebP variant.
         images:
           type: array
           items:
@@ -21210,6 +21398,8 @@ components:
       - images
       - is_new_from_billz
       - last_change
+      - main_image_medium_url
+      - main_image_thumbnail_url
       - main_image_url
       - price
       - promo
@@ -21259,6 +21449,16 @@ components:
           type: string
           format: uri
           nullable: true
+        main_image_thumbnail_url:
+          type: string
+          format: uri
+          nullable: true
+          description: 400 px WebP variant.
+        main_image_medium_url:
+          type: string
+          format: uri
+          nullable: true
+          description: 1000 px WebP variant.
         available:
           type: integer
         stock_status:
@@ -21275,6 +21475,8 @@ components:
       - content_language
       - id
       - in_cart_quantity
+      - main_image_medium_url
+      - main_image_thumbnail_url
       - main_image_url
       - name
       - price
@@ -21350,6 +21552,16 @@ components:
           type: string
           format: uri
           nullable: true
+        main_image_thumbnail_url:
+          type: string
+          format: uri
+          nullable: true
+          description: 400 px WebP variant.
+        main_image_medium_url:
+          type: string
+          format: uri
+          nullable: true
+          description: 1000 px WebP variant.
         available:
           type: integer
         stock_status:
@@ -21387,6 +21599,8 @@ components:
       - images
       - in_cart_quantity
       - ingredients
+      - main_image_medium_url
+      - main_image_thumbnail_url
       - main_image_url
       - max_quantity
       - name
@@ -21402,18 +21616,29 @@ components:
       - volume
     ProductImage:
       type: object
-      description: Contract §2.3 ``ProductImage = {id, url, position}``.
+      description: Contract §2.3 ``ProductImage = {id, url, thumbnail_url, medium_url,
+        position}``.
       properties:
         id:
           type: integer
         url:
           type: string
           readOnly: true
+        thumbnail_url:
+          type: string
+          readOnly: true
+          description: 400 px WebP variant.
+        medium_url:
+          type: string
+          readOnly: true
+          description: 1000 px WebP variant.
         position:
           type: integer
       required:
       - id
+      - medium_url
       - position
+      - thumbnail_url
       - url
     ProductImageUploadRequest:
       type: object
@@ -22716,6 +22941,18 @@ components:
           type: string
           nullable: true
           readOnly: true
+        photo_thumbnail_url:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
+          description: 400 px WebP variant.
+        photo_medium_url:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
+          description: 1000 px WebP variant.
         bio:
           type: string
           readOnly: true
@@ -22745,6 +22982,8 @@ components:
       - id
       - location
       - name
+      - photo_medium_url
+      - photo_thumbnail_url
       - photo_url
       - qualifications
       - role

@@ -121,6 +121,8 @@ def test_list_shape_ordering_and_filters(staff_client: APIClient, staff: StaffUs
         "title": "Rejalashtirilgan",
         "body": scheduled.body,
         "image_url": None,
+        "image_thumbnail_url": None,
+        "image_medium_url": None,
         "link": {"kind": "none", "product_id": None, "label": None, "url": None},
         "audience": {
             "type": "segment",

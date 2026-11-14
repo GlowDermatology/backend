@@ -25,7 +25,7 @@ from glowderma.core.api.fields import (
     i18n_text,
 )
 from glowderma.core.api.serializers import ActorSerializer
-from glowderma.core.media import absolute_media_url
+from glowderma.core.media import absolute_media_url, optional_variant_url
 from glowderma.integrations.billz.ports import BillzError, BillzPort, BillzProduct
 
 BILLZ_ID_PATTERN = r"^\d{6,14}$"
@@ -62,14 +62,22 @@ class BannerTitlePatchSerializer(BannerTitleSerializer):
 
 
 class ProductImageSerializer(serializers.Serializer[ProductImage]):
-    """Contract §2.3 ``ProductImage = {id, url, position}``."""
+    """Contract §2.3 ``ProductImage = {id, url, thumbnail_url, medium_url, position}``."""
 
     id = serializers.IntegerField()
     url = serializers.SerializerMethodField()
+    thumbnail_url = serializers.SerializerMethodField(help_text="400 px WebP variant.")
+    medium_url = serializers.SerializerMethodField(help_text="1000 px WebP variant.")
     position = serializers.IntegerField()
 
     def get_url(self, obj: ProductImage) -> str:
         return absolute_media_url(obj.file.name or "")
+
+    def get_thumbnail_url(self, obj: ProductImage) -> str:
+        return optional_variant_url(obj.file.name, "thumbnail") or ""
+
+    def get_medium_url(self, obj: ProductImage) -> str:
+        return optional_variant_url(obj.file.name, "medium") or ""
 
 
 class ProductTextSerializer(serializers.Serializer[dict[str, str]]):
@@ -205,6 +213,8 @@ class ProductSerializer(serializers.Serializer[Product]):
     is_new_from_billz = serializers.BooleanField()
     texts = serializers.SerializerMethodField()
     main_image_url = serializers.SerializerMethodField()
+    main_image_thumbnail_url = serializers.SerializerMethodField(help_text="400 px WebP variant.")
+    main_image_medium_url = serializers.SerializerMethodField(help_text="1000 px WebP variant.")
     images = serializers.SerializerMethodField()
     last_change = serializers.SerializerMethodField()
     slug = serializers.CharField(help_text="The website URL segment (B-W1): unique, editable.")
@@ -243,6 +253,16 @@ class ProductSerializer(serializers.Serializer[Product]):
     def get_main_image_url(self, obj: Product) -> str | None:
         images = self._images(obj)
         return absolute_media_url(images[0].file.name or "") if images else None
+
+    @extend_schema_field(serializers.URLField(allow_null=True))
+    def get_main_image_thumbnail_url(self, obj: Product) -> str | None:
+        images = self._images(obj)
+        return optional_variant_url(images[0].file.name, "thumbnail") if images else None
+
+    @extend_schema_field(serializers.URLField(allow_null=True))
+    def get_main_image_medium_url(self, obj: Product) -> str | None:
+        images = self._images(obj)
+        return optional_variant_url(images[0].file.name, "medium") if images else None
 
     @extend_schema_field(ProductImageSerializer(many=True))
     def get_images(self, obj: Product) -> list[dict[str, Any]]:
@@ -414,6 +434,8 @@ class CategorySerializer(serializers.Serializer[Category]):
     slug = serializers.CharField()
     name = serializers.SerializerMethodField()
     image_url = serializers.SerializerMethodField()
+    image_thumbnail_url = serializers.SerializerMethodField(help_text="400 px WebP variant.")
+    image_medium_url = serializers.SerializerMethodField(help_text="1000 px WebP variant.")
     position = serializers.IntegerField()
     is_active = serializers.BooleanField()
     product_count = serializers.IntegerField()
@@ -441,6 +463,14 @@ class CategorySerializer(serializers.Serializer[Category]):
     def get_image_url(self, obj: Category) -> str | None:
         """Gap ADM-5.1: the category image (absolute, ``PUBLIC_MEDIA_BASE_URL``) | ``null``."""
         return absolute_media_url(obj.image.name) if obj.image.name else None
+
+    @extend_schema_field(serializers.URLField(allow_null=True))
+    def get_image_thumbnail_url(self, obj: Category) -> str | None:
+        return optional_variant_url(obj.image.name, "thumbnail")
+
+    @extend_schema_field(serializers.URLField(allow_null=True))
+    def get_image_medium_url(self, obj: Category) -> str | None:
+        return optional_variant_url(obj.image.name, "medium")
 
 
 class CategoryListQuerySerializer(serializers.Serializer[dict[str, Any]]):
@@ -521,6 +551,8 @@ class BannerSerializer(serializers.Serializer[Banner]):
     id = serializers.IntegerField()
     title = serializers.SerializerMethodField()
     image_url = serializers.SerializerMethodField()
+    image_thumbnail_url = serializers.SerializerMethodField(help_text="400 px WebP variant.")
+    image_medium_url = serializers.SerializerMethodField(help_text="1000 px WebP variant.")
     link = serializers.SerializerMethodField()
     is_active = serializers.BooleanField()
     starts_at = serializers.DateTimeField(allow_null=True)
@@ -536,6 +568,14 @@ class BannerSerializer(serializers.Serializer[Banner]):
     @extend_schema_field(serializers.URLField())
     def get_image_url(self, obj: Banner) -> str:
         return absolute_media_url(obj.image.name or "")
+
+    @extend_schema_field(serializers.URLField())
+    def get_image_thumbnail_url(self, obj: Banner) -> str:
+        return optional_variant_url(obj.image.name, "thumbnail") or ""
+
+    @extend_schema_field(serializers.URLField())
+    def get_image_medium_url(self, obj: Banner) -> str:
+        return optional_variant_url(obj.image.name, "medium") or ""
 
     @extend_schema_field(BannerLinkSerializer())
     def get_link(self, obj: Banner) -> dict[str, Any]:

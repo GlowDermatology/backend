@@ -30,7 +30,7 @@ from glowderma.core.api.fields import (
     i18n_text,
 )
 from glowderma.core.api.serializers import ActorSerializer
-from glowderma.core.media import absolute_media_url
+from glowderma.core.media import absolute_media_url, optional_variant_url
 from glowderma.professionals.models import (
     BlockedPeriod,
     Location,
@@ -210,6 +210,8 @@ class ClinicSpecialistSerializer(serializers.Serializer[Professional]):
     bio = serializers.SerializerMethodField()
     experience_years = serializers.IntegerField(allow_null=True)
     photo_url = serializers.SerializerMethodField()
+    photo_thumbnail_url = serializers.SerializerMethodField(help_text="400 px WebP variant.")
+    photo_medium_url = serializers.SerializerMethodField(help_text="1000 px WebP variant.")
     location_id = serializers.IntegerField()
     staff_user = ActorSerializer(allow_null=True)
     slot_step_min = serializers.IntegerField()
@@ -232,6 +234,14 @@ class ClinicSpecialistSerializer(serializers.Serializer[Professional]):
     @extend_schema_field(serializers.URLField(allow_null=True))
     def get_photo_url(self, obj: Professional) -> str | None:
         return absolute_media_url(obj.photo.name or "") if obj.photo else None
+
+    @extend_schema_field(serializers.URLField(allow_null=True))
+    def get_photo_thumbnail_url(self, obj: Professional) -> str | None:
+        return optional_variant_url(obj.photo.name, "thumbnail") if obj.photo else None
+
+    @extend_schema_field(serializers.URLField(allow_null=True))
+    def get_photo_medium_url(self, obj: Professional) -> str | None:
+        return optional_variant_url(obj.photo.name, "medium") if obj.photo else None
 
     def get_upcoming_appointments(self, obj: Professional) -> int:
         return int(self.context.get("upcoming", {}).get(obj.pk, 0))
