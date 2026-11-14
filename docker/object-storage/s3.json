@@ -1,0 +1,18 @@
+{
+  "identities": [
+    {
+      "name": "admin",
+      "credentials": [{"accessKey": "glowderma-admin", "secretKey": "glowderma-admin-dev-secret"}],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    },
+    {
+      "name": "app",
+      "credentials": [{"accessKey": "glowderma", "secretKey": "glowderma-dev-secret"}],
+      "actions": ["Read:glowderma-media", "Write:glowderma-media", "List:glowderma-media", "Tagging:glowderma-media"]
+    },
+    {
+      "name": "anonymous",
+      "actions": ["Read:glowderma-media"]
+    }
+  ]
+}
