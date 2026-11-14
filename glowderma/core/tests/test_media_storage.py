@@ -1,12 +1,17 @@
 """``sync_media_to_s3`` and ``media_storage_check`` against a moto bucket."""
 
+import os
+import subprocess
+import sys
 from io import StringIO
 from typing import Any
 
 import pytest
+from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.management import CommandError, call_command
 
+from config.storage import S3_BACKEND
 from glowderma.catalog.tests.factories import CategoryFactory
 from glowderma.commerce.models import OrderItem
 from glowderma.commerce.tests.factories import OrderItemFactory
@@ -34,6 +39,35 @@ def test_sync_apply_uploads_missing_and_is_idempotent(s3_storage: Any, media_fil
 def test_sync_refuses_when_default_storage_is_disk(media_file: str) -> None:
     with pytest.raises(CommandError, match="USE_S3"):
         call_command("sync_media_to_s3", "--apply")
+
+
+def test_use_s3_in_one_process_environment_switches_only_that_process() -> None:
+    """The deployed `sync-media` runs `exec -e USE_S3=true` in the running API container (still on the disk):
+    USE_S3 is read when the settings are imported, so that one process gets the S3 default storage."""
+    env = {
+        **os.environ,
+        "DJANGO_SETTINGS_MODULE": "config.settings.test",
+        "USE_S3": "true",
+        "S3_BUCKET_NAME": "bucket",
+        "S3_ACCESS_KEY_ID": "access",
+        "S3_SECRET_ACCESS_KEY": "secret",
+    }
+    env.pop("DJANGO_SECRETS_FILE", None)
+    code = (
+        "import django; from django.conf import settings; django.setup(); "
+        "print(settings.STORAGES['default']['BACKEND'])"
+    )
+    result = subprocess.run(  # noqa: S603 - our own interpreter and a fixed snippet
+        [sys.executable, "-c", code],
+        env=env,
+        cwd=settings.BASE_DIR,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+    assert result.stdout.strip() == S3_BACKEND
+    assert settings.STORAGES["default"]["BACKEND"] != S3_BACKEND  # this (test) process is untouched
 
 
 @pytest.mark.django_db
