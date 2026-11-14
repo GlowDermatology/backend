@@ -21,6 +21,7 @@ e2e_admin
 openapi
 compose.yaml
 Dockerfile
+Dockerfile.local
 .dockerignore
 .importlinter
 AGENTS.md

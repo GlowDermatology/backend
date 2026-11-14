@@ -1,7 +1,14 @@
 # Local development stack (Django + Celery + PostgreSQL + Redis). Production runs from the infra repository
 # (GlowDermatology/infra): images from GHCR, secrets from Vault, Caddy in front.
+# Build once with `docker compose up -d --build`; API Python edits reload through the source bind mount.
+# Celery code edits need `docker compose restart worker beat`; dependency/image changes need a rebuild.
 x-app: &app
-  build: .
+  build:
+    context: .
+    dockerfile: Dockerfile.local
+  volumes:
+    - .:/app
+    - media:/app/media
   env_file: .env
   environment: &environment
     DJANGO_SETTINGS_MODULE: config.settings.local
@@ -23,22 +30,23 @@ x-app: &app
 services:
   api:
     <<: *app
-    command: api
+    # Polling also detects host edits through Docker Desktop bind mounts.
+    command: ["api", "--reload", "--reload-engine", "poll", "--workers", "1"]
     environment:
       <<: *environment
       # Local development only: production runs migrations once per release in a dedicated container.
       MIGRATE_ON_START: "true"
     ports: ["127.0.0.1:8000:8000"]
-    volumes: ["media:/app/media"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:8000/api/v1/health/', headers={'Host': 'localhost'}), timeout=5).read()"]
       interval: 10s
       timeout: 6s
       retries: 6
+      # Cold imports through Docker Desktop's source mount can take longer than image-only startup.
+      start_period: 120s
   worker:
     <<: *app
     command: worker
-    volumes: ["media:/app/media"]
     healthcheck:
       test: ["CMD-SHELL", "celery -A config inspect ping -d celery@$$HOSTNAME --timeout 5"]
       interval: 30s
