@@ -103,7 +103,7 @@ image host still needs a frontend rebuild.
 - **Caddy**: `/media/*` on the site and the ops host is chosen by `MEDIA_BACKEND` (`disk` | `object-storage`) passed to the
   edge. `object-storage` rewrites to `/<bucket>/<location>/...` and reverse-proxies to `172.30.0.40:8333`, keeping today's
   headers (Cache-Control, nosniff, CSP). `disk` is today's `file_server`. `edge_probe.py` covers both.
-- **`validate.sh`**: it refuses `USE_S3=true` with `S3_ENDPOINT_URL` pointing at `172.30.0.40` while `OBJECT_STORAGE_ENABLED=false`.
+- **`validate.sh`**: it refuses `USE_S3=true` with `S3_ENDPOINT_URL` pointing at `http://object-storage:8333` (the service name on `back`; the edge alone uses `172.30.0.40` on `front`) while `OBJECT_STORAGE_ENABLED=false`.
   It also checks the new IP literal stays consistent.
 - **Backups (`backup.sh`)**: with the local object storage in use, it runs `aws s3 sync` of the bucket into a staging dir and
   then makes the usual tarball. With an external provider, it skips media (provider durability) and says so. With

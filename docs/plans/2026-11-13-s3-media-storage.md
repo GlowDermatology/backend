@@ -41,7 +41,7 @@ Two git repos: `backend/` (tasks 1-3) and `infra/` (tasks 4-7). Both are on `mai
   Both are pinned by tag and digest. SeaweedFS runs as `999:999` (the datastores agent's UID, so it can read the
   0400 secret files; the image runs as root by default, so the implementer verifies it works as 999:999 with a
   999-owned data dir) with the `x-hardened` anchor, and publishes no ports.
-- Fixed IPv4 literal for the object storage on `front`: `172.30.0.40`. It is also on `back`.
+- Fixed IPv4 literal for the object storage on `front`: `172.30.0.40`. It is also on `back`. Backend services and `object-storage-init` reach it by its service name `object-storage` on `back` (`http://object-storage:8333`); only the edge uses the IP.
 - Access model: a SeaweedFS `s3.json` identities file rendered by `vault-agent-datastores` from Vault
   (`secret/<env>/object-storage` + `secret/<env>/s3`), mounted read-only into the service. Identities: `admin`
   (`Admin`, `Read`, `Write`, `List`, `Tagging`), `app` (`Read|Write|List|Tagging:glowderma-media`, the
@@ -63,7 +63,7 @@ Two git repos: `backend/` (tasks 1-3) and `infra/` (tasks 4-7). Both are on `mai
    or reach another bucket or prefix. Expected: 404 or the object only (Task 6).
 4. **The same image uploaded twice.** S3 must behave like disk: same resulting name and URL behavior as
    `FileSystemStorage`, no orphan objects after replace or delete (Task 2).
-5. **`USE_S3=true` with Vault's endpoint at `172.30.0.40` while `OBJECT_STORAGE_ENABLED=false`, or an external endpoint
+5. **`USE_S3=true` with Vault's endpoint host `object-storage` while `OBJECT_STORAGE_ENABLED=false`, or an external endpoint
    without a `PUBLIC_MEDIA_BASE_URL` override.** Expected: `deploy.sh` refuses it with a clear message before
    touching containers (Task 7; `validate.sh` can't see Vault).
 
@@ -303,7 +303,7 @@ git commit -m "chore(storage): optional local SeaweedFS profile; record I1 resol
 - Produces:
   - Vault paths `secret/<env>/object-storage` `{OBJECT_STORAGE_ADMIN_ACCESS_KEY_ID,
     OBJECT_STORAGE_ADMIN_SECRET_ACCESS_KEY}` and `secret/<env>/s3`, whose keys are env var
-    names (seeded: `S3_ENDPOINT_URL=http://172.30.0.40:8333`, `S3_BUCKET_NAME=glowderma-media`,
+    names (seeded: `S3_ENDPOINT_URL=http://object-storage:8333`, `S3_BUCKET_NAME=glowderma-media`,
     `S3_REGION_NAME=us-east-1`, `S3_ADDRESSING_STYLE=path`, random `S3_ACCESS_KEY_ID`, random
     `S3_SECRET_ACCESS_KEY`).
   - `django.json` gains every key of `secret/<env>/s3` (ranged like `secret/<env>/django`).
@@ -379,7 +379,7 @@ git commit -m "feat(vault): object storage admin credentials, S3 app credentials
 
 For each env, render `docker compose config` both without and with `--profile object-storage`, and assert:
 - `OBJECT_STORAGE_ENABLED` and `USE_S3` are `true` or `false`; `S3_LOCATION` is non-empty.
-- `172.30.0.40` is the same in `object-storage`'s `ipv4_address`, the edge's `OBJECT_STORAGE_UPSTREAM` and the seeded
+- `172.30.0.40` is the same in `object-storage`'s `ipv4_address` and the edge's `OBJECT_STORAGE_UPSTREAM`; the seeded `S3_ENDPOINT_URL` is `http://object-storage:8333` and `object-storage` is on `back`; and the seeded
   `S3_ENDPOINT_URL` in `scripts/vault/generate-app-secrets.sh`.
 - `glowderma-media` is the same in the edge env, `object-storage-init` env and the seeded `S3_BUCKET_NAME`.
 - Without the profile, the rendered config has no `object-storage` service.
@@ -416,7 +416,7 @@ S3_LOCATION=media
   creates the bucket, idempotent:
   1. export the admin key pair from `/run/secrets/object_storage_admin_*` as `AWS_ACCESS_KEY_ID` /
      `AWS_SECRET_ACCESS_KEY`, plus `AWS_DEFAULT_REGION=us-east-1`
-  2. `aws --endpoint-url http://172.30.0.40:8333 s3api create-bucket --bucket "$OBJECT_STORAGE_BUCKET"`; HTTP 409
+  2. `aws --endpoint-url http://object-storage:8333 s3api create-bucket --bucket "$OBJECT_STORAGE_BUCKET"`; HTTP 409
      (BucketAlreadyOwnedByYou / BucketAlreadyExists) counts as success, any other failure exits non-zero
 - Backend services `backend-api`, `backend-worker`, `backend-migrate`, `backend-beat`: the new env keys, plus
   `depends_on: object-storage: {condition: service_healthy, required: false}`.
@@ -497,7 +497,7 @@ git commit -m "feat(edge): serve /media from disk or proxy to the object storage
   and, with the object storage, `secret/<env>/object-storage`. If either is missing, die with
   `run scripts/vault/generate-app-secrets.sh $ENV first`. With `USE_S3=true` and `OBJECT_STORAGE_ENABLED=false`, read
   `S3_ENDPOINT_URL` and `PUBLIC_MEDIA_BASE_URL` from `secret/<env>/s3` (never print other values) and die if the
-  endpoint contains `172.30.0.40` (`USE_S3 points at the stack's object storage but OBJECT_STORAGE_ENABLED=false`) or if
+  endpoint host is `object-storage` (`USE_S3 points at the stack's object storage but OBJECT_STORAGE_ENABLED=false`) or if
   `PUBLIC_MEDIA_BASE_URL` is unset (`an external provider needs PUBLIC_MEDIA_BASE_URL in secret/$ENV/s3`).
   Put these rules in a function in `lib.sh` and cover each with a case in a small `scripts/ci/test-media-preflight.sh`
   that stubs the Vault read.
@@ -511,7 +511,7 @@ git commit -m "feat(edge): serve /media from disk or proxy to the object storage
 - [ ] **Step 2: Change `backup.sh` (nightly)**
 
 - `MEDIA_BACKEND=object-storage`: `object-storage-init` run with `--entrypoint sh -c` does
-  `aws --endpoint-url http://172.30.0.40:8333 s3 sync s3://glowderma-media/<location> /mirror --delete` (admin keys
+  `aws --endpoint-url http://object-storage:8333 s3 sync s3://glowderma-media/<location> /mirror --delete` (admin keys
   exported as in `init.sh`), then today's tar of `$RUNTIME_DIR/media-mirror`.
 - `USE_S3=true` without the object storage: print `media: external provider, not backed up here` and skip.
 - Otherwise: unchanged.
