@@ -379,8 +379,8 @@ git commit -m "feat(vault): object storage admin credentials, S3 app credentials
 
 For each env, render `docker compose config` both without and with `--profile object-storage`, and assert:
 - `OBJECT_STORAGE_ENABLED` and `USE_S3` are `true` or `false`; `S3_LOCATION` is non-empty.
-- `172.30.0.40` is the same in `object-storage`'s `ipv4_address` and the edge's `OBJECT_STORAGE_UPSTREAM`; the seeded `S3_ENDPOINT_URL` is `http://object-storage:8333` and `object-storage` is on `back`; and the seeded
-  `S3_ENDPOINT_URL` in `scripts/vault/generate-app-secrets.sh`.
+- `172.30.0.40` is the same in `object-storage`'s `ipv4_address` and the edge's `OBJECT_STORAGE_UPSTREAM`; the seeded `S3_ENDPOINT_URL` is `http://object-storage:8333` and `object-storage` is on `back`
+  (seed in `scripts/vault/generate-app-secrets.sh`).
 - `glowderma-media` is the same in the edge env, `object-storage-init` env and the seeded `S3_BUCKET_NAME`.
 - Without the profile, the rendered config has no `object-storage` service.
 (Vault-dependent consistency rules live in `deploy.sh`, Task 7.)
