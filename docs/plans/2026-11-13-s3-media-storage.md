@@ -3,14 +3,14 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Media can be stored on local disk (default) or in any S3-compatible bucket (`USE_S3`). The deployed
-stack can optionally pull and run MinIO (`MINIO_ENABLED`).
+stack can optionally pull and run SeaweedFS (`OBJECT_STORAGE_ENABLED`).
 
 **Architecture:** A pure settings helper builds `STORAGES["default"]` from env, either `FileSystemStorage` or
-`storages.backends.s3.S3Storage`. Public URLs stay `PUBLIC_MEDIA_BASE_URL` + stored name. In infra, MinIO and a
-one-shot `minio-init` sit behind Compose profiles that `lib.sh` turns on from `stack.env`. Caddy serves
-`/media/*` from disk or proxies to MinIO, and Vault supplies the credentials.
+`storages.backends.s3.S3Storage`. Public URLs stay `PUBLIC_MEDIA_BASE_URL` + stored name. In infra, SeaweedFS and a
+one-shot `object-storage-init` sit behind Compose profiles that `lib.sh` turns on from `stack.env`. Caddy serves
+`/media/*` from disk or proxies to the object storage, and Vault supplies the credentials.
 
-**Tech Stack:** Django 6.1, django-storages[s3] (boto3), moto (tests), Docker Compose profiles, MinIO + mc, Caddy
+**Tech Stack:** Django 6.1, django-storages[s3] (boto3), moto (tests), Docker Compose profiles, SeaweedFS + aws-cli, Caddy
 2.11, Vault Agent templates, bash.
 
 **Spec:** `backend/docs/specs/2026-11-13-s3-media-storage-design.md`
@@ -20,7 +20,7 @@ Two git repos: `backend/` (tasks 1-3) and `infra/` (tasks 4-7). Both are on `mai
 
 ## Global Constraints
 
-- Local disk stays the default everywhere: `USE_S3` defaults to `false` and `MINIO_ENABLED=false` in both
+- Local disk stays the default everywhere: `USE_S3` defaults to `false` and `OBJECT_STORAGE_ENABLED=false` in both
   `stack.env` files.
 - No signed URLs: `querystring_auth=False`, `default_acl=None`, `file_overwrite=False`.
 - S3 defaults: `S3_REGION_NAME=us-east-1`, `S3_ADDRESSING_STYLE=path`, `S3_LOCATION=media`, `S3_VERIFY=true`.
@@ -28,16 +28,27 @@ Two git repos: `backend/` (tasks 1-3) and `infra/` (tasks 4-7). Both are on `mai
 - Provider settings live in Vault so a provider or bucket change needs no PR: `secret/<env>/s3` keys are env var
   names: `S3_ENDPOINT_URL`, `S3_BUCKET_NAME`, `S3_REGION_NAME`, `S3_ADDRESSING_STYLE`, `S3_ACCESS_KEY_ID`,
   `S3_SECRET_ACCESS_KEY`, plus optional `S3_VERIFY` and `PUBLIC_MEDIA_BASE_URL` (backend + datastores). Changing it
-  = `vault kv patch` + `scripts/restart.sh <env> backend`. `secret/<env>/minio` (`root_user`, `root_password`) is
-  datastores only.
-- `stack.env` holds only `MINIO_ENABLED`, `USE_S3`, `S3_LOCATION` (they change what runs and how Caddy serves).
+  = `vault kv patch` + `scripts/restart.sh <env> backend`. `secret/<env>/object-storage` (admin access key pair:
+  `OBJECT_STORAGE_ADMIN_ACCESS_KEY_ID`, `OBJECT_STORAGE_ADMIN_SECRET_ACCESS_KEY`) is datastores only.
+- `stack.env` holds only `OBJECT_STORAGE_ENABLED`, `USE_S3`, `S3_LOCATION` (they change what runs and how Caddy serves).
   Topology keys (Vault may not set): `USE_S3`, `S3_LOCATION`. `PUBLIC_MEDIA_BASE_URL` is no longer a topology key.
-- The stack's own MinIO bucket is fixed: `glowderma-media` (Caddy and `minio-init` use the literal; Vault's
+- The stack's own bucket is fixed: `glowderma-media` (Caddy and `object-storage-init` use the literal; Vault's
   `S3_BUCKET_NAME` is seeded with the same value).
 - Error messages name keys, never values.
-- MinIO and mc images are pinned by tag and digest. MinIO runs as `999:999` (the datastores agent's UID, so it
-  can read the 0400 secret files) with the `x-hardened` anchor, and publishes no ports.
-- Fixed IPv4 literal for MinIO on `front`: `172.30.0.40`. MinIO is also on `back`.
+- Engine: SeaweedFS (Apache-2.0), image `chrislusf/seaweedfs:4.53@sha256:ccad23e18639c8b98cee17e7100b95830a06077b56d8e5b006d6dcf8ec5e94a0`, command
+  `server -dir=/data -s3 -s3.config=/etc/seaweedfs/s3.json` (S3 API on 8333; add `-ip.bind=0.0.0.0` where needed).
+  Tool image for init and backups: `amazon/aws-cli:2.40.3@sha256:33a16c53ea442e918b58df67301ad76a8fb57082c39f7e78753b898c3f3e87c2` (every step is `aws --endpoint-url ... s3api|s3`).
+  Both are pinned by tag and digest. SeaweedFS runs as `999:999` (the datastores agent's UID, so it can read the
+  0400 secret files; the image runs as root by default, so the implementer verifies it works as 999:999 with a
+  999-owned data dir) with the `x-hardened` anchor, and publishes no ports.
+- Fixed IPv4 literal for the object storage on `front`: `172.30.0.40`. It is also on `back`.
+- Access model: a SeaweedFS `s3.json` identities file rendered by `vault-agent-datastores` from Vault
+  (`secret/<env>/object-storage` + `secret/<env>/s3`), mounted read-only into the service. Identities: `admin`
+  (`Admin`, `Read`, `Write`, `List`, `Tagging`), `app` (`Read|Write|List|Tagging:glowderma-media`, the
+  `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` pair) and `anonymous` (`Read:glowderma-media`, which is how
+  SeaweedFS grants unauthenticated GET). No admin API, no bucket policy. Anonymous read is bucket-wide, not
+  limited to `<location>/*` (the bucket holds only media plus short-lived healthcheck probes); anonymous
+  LIST/PUT/DELETE are refused.
 - New dependencies are pinned exactly, matching `pyproject.toml` style.
 
 ## Review Focus
@@ -48,11 +59,11 @@ Two git repos: `backend/` (tasks 1-3) and `infra/` (tasks 4-7). Both are on `mai
 2. **`USE_S3=true` is turned on before existing files are copied.** Every old image would 404. Expected:
    `media_storage_check` lists stored names missing from the active storage and exits 1, and `deploy.sh` runs it
    (Task 2, Task 7).
-3. **`/media/` as a probe into MinIO.** `/media/`, `/media/../x` or `/media/%2e%2e/...` must not list the bucket
+3. **`/media/` as a probe into the object storage.** `/media/`, `/media/../x` or `/media/%2e%2e/...` must not list the bucket
    or reach another bucket or prefix. Expected: 404 or the object only (Task 6).
 4. **The same image uploaded twice.** S3 must behave like disk: same resulting name and URL behavior as
    `FileSystemStorage`, no orphan objects after replace or delete (Task 2).
-5. **`USE_S3=true` with Vault's endpoint at `172.30.0.40` while `MINIO_ENABLED=false`, or an external endpoint
+5. **`USE_S3=true` with Vault's endpoint at `172.30.0.40` while `OBJECT_STORAGE_ENABLED=false`, or an external endpoint
    without a `PUBLIC_MEDIA_BASE_URL` override.** Expected: `deploy.sh` refuses it with a clear message before
    touching containers (Task 7; `validate.sh` can't see Vault).
 
@@ -84,11 +95,11 @@ Expected: `pyproject.toml` and `uv.lock` updated, and `uv run python -c "import 
 def test_default_is_filesystem():
     assert media_storage() == {"BACKEND": "django.core.files.storage.FileSystemStorage"}
 
-def test_use_s3_builds_s3_options(s3_env):  # USE_S3=true, bucket, keys, endpoint http://minio:9000
+def test_use_s3_builds_s3_options(s3_env):  # USE_S3=true, bucket, keys, endpoint http://object-storage:8333
     cfg = media_storage()
     assert cfg["BACKEND"] == "storages.backends.s3.S3Storage"
     assert cfg["OPTIONS"] == {
-        "bucket_name": "glowderma-media", "endpoint_url": "http://minio:9000",
+        "bucket_name": "glowderma-media", "endpoint_url": "http://object-storage:8333",
         "access_key": "AK", "secret_key": "SK", "region_name": "us-east-1",
         "addressing_style": "path", "location": "media", "verify": True,
         "querystring_auth": False, "default_acl": None, "file_overwrite": False,
@@ -236,71 +247,78 @@ git add glowderma/core glowderma/catalog/tests/test_s3_parity.py
 git commit -m "feat(storage): sync_media_to_s3 and media_storage_check commands, S3 parity tests"
 ```
 
-### Task 3: Local MinIO and decision log (backend)
+### Task 3: Local object storage and decision log (backend)
 
 **Files:**
 - Modify: `backend/compose.yaml`, `backend/.env.example`, `backend/docs/decisions/open-questions.md` (C1, I1, T8), `backend/README.md` (media section, if one exists)
+- Create: a committed dev-only `s3.json` (e.g. `backend/docker/object-storage/s3.json`)
 
-- [ ] **Step 1: Add `minio` and `minio-init` to `compose.yaml` under `profiles: ["minio"]`**
+- [ ] **Step 1: Add `object-storage` and `object-storage-init` to `compose.yaml` under `profiles: ["object-storage"]`**
 
-Use the same pinned images as Task 5. Ports are `127.0.0.1:9000:9000` and `127.0.0.1:9001:9001`, with a `minio`
-volume and dev-only root `glowderma` / `glowderma-dev-secret`. `minio-init` uses mc to create the bucket
-`glowderma-media` and gives anonymous download on `media/*`.
+`object-storage` uses the same pinned SeaweedFS image and command as Task 5, publishes `127.0.0.1:8333:8333`, and
+has a volume for `/data`. Its `s3.json` is committed, mounted read-only at `/etc/seaweedfs/s3.json`, and labelled
+as dev-only keys, not for production (identities as in Global Constraints; `app` keys `glowderma` /
+`glowderma-dev-secret`). `object-storage-init` is a one-shot (the aws-cli image from Task 5, admin dev keys) that
+creates the bucket `glowderma-media`; HTTP 409 counts as success.
 
 - [ ] **Step 2: Document the variables in `.env.example`, commented out by default**
 
 ```
-# S3 media (optional): docker compose --profile minio up
+# S3 media (optional): docker compose --profile object-storage up
 # USE_S3=true
-# S3_ENDPOINT_URL=http://minio:9000
+# S3_ENDPOINT_URL=http://localhost:8333
 # S3_BUCKET_NAME=glowderma-media
 # S3_ACCESS_KEY_ID=glowderma
 # S3_SECRET_ACCESS_KEY=glowderma-dev-secret
-# PUBLIC_MEDIA_BASE_URL=http://127.0.0.1:9000/glowderma-media/media/
+# PUBLIC_MEDIA_BASE_URL=http://127.0.0.1:8333/glowderma-media/media/
 ```
 
 - [ ] **Step 3: Verify**
 
-Run: `docker compose --profile minio up -d minio minio-init`, then with the variables above enabled,
+Run: `docker compose --profile object-storage up -d object-storage object-storage-init`, then with the variables above enabled,
 `docker compose up -d api` and `docker compose exec api python manage.py media_storage_check`.
 Expected: `ok backend=S3Storage`. Then run `docker compose config --services` without the profile.
-Expected: no `minio`.
+Expected: no `object-storage`.
 
 - [ ] **Step 4: Update the decision log**
 
 - C1: obsolete (owner, 2026-11-13).
-- I1: resolved, pointing to the spec.
+- I1: resolved (SeaweedFS as the self-hosted option), pointing to the spec.
 - T8: storage is disk or S3 via `USE_S3`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add compose.yaml .env.example docs/
-git commit -m "chore(storage): optional local MinIO profile; record I1 resolved and C1 obsolete"
+git commit -m "chore(storage): optional local SeaweedFS profile; record I1 resolved and C1 obsolete"
 ```
 
-### Task 4: Vault secrets for MinIO and the app key (infra)
+### Task 4: Vault secrets for object storage and the app key (infra)
 
 **Files:**
 - Modify: `infra/scripts/vault/generate-app-secrets.sh`, `infra/vault/policies/{production,staging}/backend.hcl`, `infra/vault/policies/{production,staging}/datastores.hcl`, `infra/vault/agent/templates/django.json.ctmpl`, `infra/vault/agent/datastores.hcl`, `infra/scripts/ci/test-vault.sh`, `infra/docs/secrets-management.md`
-- Create: `infra/vault/agent/templates/minio_root_user.ctmpl`, `minio_root_password.ctmpl`, `s3_app_access_key.ctmpl`, `s3_app_secret_key.ctmpl`
+- Create: `infra/vault/agent/templates/object_storage_s3.json.ctmpl`, `object_storage_admin_access_key.ctmpl`, `object_storage_admin_secret_key.ctmpl`
 
 **Interfaces:**
 - Produces:
-  - Vault paths `secret/<env>/minio` `{root_user, root_password}` and `secret/<env>/s3`, whose keys are env var
-    names (seeded: `S3_ENDPOINT_URL=http://172.30.0.40:9000`, `S3_BUCKET_NAME=glowderma-media`,
+  - Vault paths `secret/<env>/object-storage` `{OBJECT_STORAGE_ADMIN_ACCESS_KEY_ID,
+    OBJECT_STORAGE_ADMIN_SECRET_ACCESS_KEY}` and `secret/<env>/s3`, whose keys are env var
+    names (seeded: `S3_ENDPOINT_URL=http://172.30.0.40:8333`, `S3_BUCKET_NAME=glowderma-media`,
     `S3_REGION_NAME=us-east-1`, `S3_ADDRESSING_STYLE=path`, random `S3_ACCESS_KEY_ID`, random
     `S3_SECRET_ACCESS_KEY`).
   - `django.json` gains every key of `secret/<env>/s3` (ranged like `secret/<env>/django`).
-  - Files in the datastores volume: `/run/secrets/minio_root_user`, `minio_root_password`, `s3_app_access_key`,
-    `s3_app_secret_key` (0400, uid 999), from `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY`.
+  - Files in the datastores volume (0400, uid 999): `/run/secrets/object_storage_s3.json` (the SeaweedFS
+    identities file: `admin` from the object-storage pair, `app` from `S3_ACCESS_KEY_ID` /
+    `S3_SECRET_ACCESS_KEY`, plus `anonymous`; see Global Constraints), and `object_storage_admin_access_key`,
+    `object_storage_admin_secret_key` (for `object-storage-init` and backups).
 
 - [ ] **Step 1: Write the failing checks in `test-vault.sh`**
 
 - The backend agent's `django.json` contains every key of `secret/<env>/s3` with its value, and a key added later
   with `vault kv patch` (e.g. `PUBLIC_MEDIA_BASE_URL`) appears after re-render.
-- The datastores agent renders all 4 files.
-- The backend token reading `secret/data/<env>/minio` gets 403.
+- The datastores agent renders all 3 files, and `object_storage_s3.json` is valid JSON with the three identities
+  and the `app` key pair from `secret/<env>/s3`.
+- The backend token reading `secret/data/<env>/object-storage` gets 403.
 - The frontend token reading `secret/data/<env>/s3` gets 403.
 - A second `generate-app-secrets.sh` run keeps existing values.
 
@@ -311,15 +329,16 @@ Expected: `FAIL` lines for the new checks.
 
 - [ ] **Step 3: Implement**
 
-- `put_new minio` uses `root_user` `glowderma-root` and a random 32-hex `root_password`.
+- `put_new object-storage` uses `OBJECT_STORAGE_ADMIN_ACCESS_KEY_ID` `glowderma-admin` and a random 40-char
+  `OBJECT_STORAGE_ADMIN_SECRET_ACCESS_KEY`.
 - `put_new s3` with the seeded values above (access key: random 20 alphanumeric chars, secret: random 40).
 - Update the layout comment.
 - Policies:
   - backend reads `s3`
-  - datastores reads `minio` and `s3`
+  - datastores reads `object-storage` and `s3`
 - In `django.json.ctmpl`, range over `secret/<env>/s3` the same way as `secret/<env>/django`, placed before the
   `redis` block so the JSON stays valid.
-- The 4 templates go in `datastores.hcl` with `error_on_missing_key = true`.
+- The 3 templates go in `datastores.hcl` with `error_on_missing_key = true`.
 - `secrets-management.md`: changing provider or bucket = `vault kv patch secret/<env>/s3 ...` then
   `scripts/restart.sh <env> backend` (no PR). For an external provider, also set `PUBLIC_MEDIA_BASE_URL` there.
   The frontend's `GLOWDERMA_MEDIA_HOSTS` is build-time, so a new image host still needs a frontend rebuild. For
@@ -333,102 +352,104 @@ Expected: every line `ok`, exit 0.
 
 ```bash
 git add scripts/vault vault scripts/ci/test-vault.sh docs/secrets-management.md
-git commit -m "feat(vault): MinIO root and S3 app credentials"
+git commit -m "feat(vault): object storage admin credentials, S3 app credentials and s3.json template"
 ```
 
 ### Task 5: Compose services, profile switch and validation (infra)
 
 **Files:**
-- Modify: `infra/compose/app.yaml`, `infra/scripts/lib.sh` (`app_compose`), `infra/scripts/validate.sh`, `infra/environments/{production,staging}/stack.env`, `infra/scripts/bootstrap-server.sh` (`install -d -o 999 -g 999 "$RUNTIME/minio" "$RUNTIME/media-mirror"`)
-- Create: `infra/minio/init.sh`, `infra/minio/app-policy.json`, `infra/minio/public-read.json`
+- Modify: `infra/compose/app.yaml`, `infra/scripts/lib.sh` (`app_compose`), `infra/scripts/validate.sh`, `infra/environments/{production,staging}/stack.env`, `infra/scripts/bootstrap-server.sh` (`install -d -o 999 -g 999 "$RUNTIME/object-storage" "$RUNTIME/media-mirror"`)
+- Create: `infra/object-storage/init.sh`
 
 **Interfaces:**
 - Consumes: the Task 4 secret files.
 - Produces:
-  - Services `minio` (profile `minio`) and `minio-init` (profile `minio-tools`; run with `run --rm`, never `up`).
-  - `app_compose` exports `MEDIA_BACKEND=minio|disk` and adds `--profile minio` when `MINIO_ENABLED=true`.
+  - Services `object-storage` (profile `object-storage`) and `object-storage-init` (profile
+    `object-storage-tools`; run with `run --rm`, never `up`).
+  - `app_compose` exports `MEDIA_BACKEND=object-storage|disk` and adds `--profile object-storage` when
+    `OBJECT_STORAGE_ENABLED=true`.
   - Backend env keys from the stack: `USE_S3`, `S3_LOCATION` only (the other `S3_*` come from Vault via
     `django.json`). `PUBLIC_MEDIA_BASE_URL` stays `https://${SITE_DOMAIN}/media/` in compose; Vault may override
     it.
-  - Edge env `MEDIA_BACKEND`, `MINIO_UPSTREAM: 172.30.0.40:9000`, `MINIO_BUCKET: glowderma-media`, `S3_LOCATION`.
-    `minio-init` gets `MINIO_BUCKET: glowderma-media` and `S3_LOCATION` too.
+  - Edge env `MEDIA_BACKEND`, `OBJECT_STORAGE_UPSTREAM: 172.30.0.40:8333`,
+    `OBJECT_STORAGE_BUCKET: glowderma-media`, `S3_LOCATION`.
+    `object-storage-init` gets `OBJECT_STORAGE_BUCKET: glowderma-media` too.
 
 - [ ] **Step 1: Write the failing validations in `validate.sh`**
 
-For each env, render `docker compose config` both without and with `--profile minio`, and assert:
-- `MINIO_ENABLED` and `USE_S3` are `true` or `false`; `S3_LOCATION` is non-empty.
-- `172.30.0.40` is the same in `minio`'s `ipv4_address`, the edge's `MINIO_UPSTREAM` and the seeded
+For each env, render `docker compose config` both without and with `--profile object-storage`, and assert:
+- `OBJECT_STORAGE_ENABLED` and `USE_S3` are `true` or `false`; `S3_LOCATION` is non-empty.
+- `172.30.0.40` is the same in `object-storage`'s `ipv4_address`, the edge's `OBJECT_STORAGE_UPSTREAM` and the seeded
   `S3_ENDPOINT_URL` in `scripts/vault/generate-app-secrets.sh`.
-- `glowderma-media` is the same in the edge env, `minio-init` env and the seeded `S3_BUCKET_NAME`.
-- Without the profile, the rendered config has no `minio` service.
+- `glowderma-media` is the same in the edge env, `object-storage-init` env and the seeded `S3_BUCKET_NAME`.
+- Without the profile, the rendered config has no `object-storage` service.
 (Vault-dependent consistency rules live in `deploy.sh`, Task 7.)
 
 - [ ] **Step 2: Run it to verify it fails**
 
 Run: `scripts/validate.sh`
-Expected: fails because the keys are missing from `stack.env` and there's no `minio` service.
+Expected: fails because the keys are missing from `stack.env` and there's no `object-storage` service.
 
 - [ ] **Step 3: Implement**
 
 `stack.env` (both envs; public values only):
 
 ```
-# Media storage. MINIO_ENABLED pulls/runs MinIO; USE_S3 makes Django store media in S3 (either can be off).
+# Media storage. OBJECT_STORAGE_ENABLED pulls/runs SeaweedFS; USE_S3 makes Django store media in S3 (either can be off).
 # Provider, bucket, endpoint and keys are in Vault: secret/<env>/s3 (change + scripts/restart.sh <env> backend).
-MINIO_ENABLED=false
+OBJECT_STORAGE_ENABLED=false
 USE_S3=false
 S3_LOCATION=media
 ```
 
-- `minio`:
-  - `command: server /data`
-  - `MINIO_ROOT_USER_FILE` / `MINIO_ROOT_PASSWORD_FILE` → `/run/secrets/minio_root_*`
-  - `MINIO_BROWSER: "off"`
-  - volume `${RUNTIME_DIR}/minio:/data`
-  - `datastores-secrets:/run/secrets:ro`
-  - healthcheck `["CMD", "mc", "ready", "local"]` (confirm the pinned image ships `mc`; otherwise use
-    `curl -f http://127.0.0.1:9000/minio/health/live`)
+- `object-storage`:
+  - `command: server -dir=/data -s3 -s3.config=/etc/seaweedfs/s3.json -ip.bind=0.0.0.0`
+  - `user: "999:999"`; verify the image works as 999:999 with a 999-owned `/data` (it runs as root by default)
+  - `object_storage_s3.json` from `datastores-secrets` mounted read-only at `/etc/seaweedfs/s3.json` (a named-volume
+    `subpath` mount or equivalent)
+  - volume `${RUNTIME_DIR}/object-storage:/data`
+  - healthcheck: the image has wget and curl; the implementer verifies the exact probe against S3 port 8333
+    (e.g. `["CMD", "curl", "-f", "http://127.0.0.1:8333/status"]`)
   - `depends_on vault-agent-datastores`
-- `minio-init`: the mc image, `entrypoint: ["/bin/sh", "/init/init.sh"]`, and mounts `../minio:/init:ro`,
-  `datastores-secrets`, and `${RUNTIME_DIR}/media-mirror:/mirror`. `init.sh`, idempotent:
-  1. `mc alias set`
-  2. `mc mb --ignore-existing`
-  3. `mc anonymous set-json public-read.json` (`s3:GetObject` on `arn:aws:s3:::<bucket>/<location>/*` only)
-  4. `mc admin user add` the app key
-  5. `mc admin policy create glowderma-app app-policy.json` (Get/Put/Delete on objects, ListBucket on the bucket)
-  6. `mc admin policy attach` (treat "already attached" as success)
+- `object-storage-init`: the aws-cli image, `entrypoint: ["/bin/sh", "/init/init.sh"]`, and mounts
+  `../object-storage:/init:ro`, `datastores-secrets`, and `${RUNTIME_DIR}/media-mirror:/mirror`. `init.sh` only
+  creates the bucket, idempotent:
+  1. export the admin key pair from `/run/secrets/object_storage_admin_*` as `AWS_ACCESS_KEY_ID` /
+     `AWS_SECRET_ACCESS_KEY`, plus `AWS_DEFAULT_REGION=us-east-1`
+  2. `aws --endpoint-url http://172.30.0.40:8333 s3api create-bucket --bucket "$OBJECT_STORAGE_BUCKET"`; HTTP 409
+     (BucketAlreadyOwnedByYou / BucketAlreadyExists) counts as success, any other failure exits non-zero
 - Backend services `backend-api`, `backend-worker`, `backend-migrate`, `backend-beat`: the new env keys, plus
-  `depends_on: minio: {condition: service_healthy, required: false}`.
-- `lib.sh`: compute `MEDIA_BACKEND` from `stack_value MINIO_ENABLED` and `stack_value USE_S3` (`minio` only when
+  `depends_on: object-storage: {condition: service_healthy, required: false}`.
+- `lib.sh`: compute `MEDIA_BACKEND` from `stack_value OBJECT_STORAGE_ENABLED` and `stack_value USE_S3` (`object-storage` only when
   both are `true`) and export it before `docker compose`.
 
 - [ ] **Step 4: Run it to verify it passes**
 
-Run: `scripts/validate.sh`, then `MINIO_ENABLED=true` in a temp copy of `stack.env` and validate again.
+Run: `scripts/validate.sh`, then `OBJECT_STORAGE_ENABLED=true` in a temp copy of `stack.env` and validate again.
 Expected: both pass. Each mismatch rule, tried in a temp copy, fails with its message.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add compose minio scripts/lib.sh scripts/validate.sh scripts/bootstrap-server.sh environments
-git commit -m "feat(stack): optional MinIO behind MINIO_ENABLED, S3 settings passed to Django"
+git add compose object-storage scripts/lib.sh scripts/validate.sh scripts/bootstrap-server.sh environments
+git commit -m "feat(stack): optional SeaweedFS behind OBJECT_STORAGE_ENABLED, S3 settings passed to Django"
 ```
 
-### Task 6: Caddy serves media from disk or MinIO (infra)
+### Task 6: Caddy serves media from disk or the object storage (infra)
 
 **Files:**
 - Modify: `infra/caddy/Caddyfile` (site block around line 79 and ops block around line 153), `infra/caddy/edge_probe.py`
 
 **Interfaces:**
-- Consumes: edge env `MEDIA_BACKEND`, `MINIO_UPSTREAM`, `MINIO_BUCKET`, `S3_LOCATION` (Task 5).
-- Produces: snippets `(media_disk)` and `(media_minio)`, used as `import media_{$MEDIA_BACKEND:disk}` inside both
+- Consumes: edge env `MEDIA_BACKEND`, `OBJECT_STORAGE_UPSTREAM`, `OBJECT_STORAGE_BUCKET`, `S3_LOCATION` (Task 5).
+- Produces: snippets `(media_disk)` and `(media_object_storage)`, used as `import media_{$MEDIA_BACKEND:disk}` inside both
   `handle_path /media/*` blocks. The headers (Cache-Control, nosniff, the site's CSP) stay in the shared block.
 
 - [ ] **Step 1: Write the failing probe checks**
 
-`edge_probe.py` gains a third stub upstream (the "MinIO" stub records the request path and answers 200 for
+`edge_probe.py` gains a third stub upstream (the "object storage" stub records the request path and answers 200 for
 `/glowderma-media/media/products/1/a.webp`, 404 otherwise). It runs the existing media checks with
-`MEDIA_BACKEND=disk`, then a second Caddy with `MEDIA_BACKEND=minio`, asserting:
+`MEDIA_BACKEND=disk`, then a second Caddy with `MEDIA_BACKEND=object-storage`, asserting:
 - `GET /media/products/1/a.webp` → 200, the stub saw `/glowderma-media/media/products/1/a.webp`, and the response
   keeps the Cache-Control, nosniff and CSP headers with no `Server` or `X-Amz-*` headers
 - `GET /media/` → 404 and the stub never saw a bucket-root or `?list-type` request
@@ -439,13 +460,14 @@ git commit -m "feat(stack): optional MinIO behind MINIO_ENABLED, S3 settings pas
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `python3 caddy/edge_probe.py --caddy $(which caddy)`
-Expected: FAIL on the minio checks.
+Expected: FAIL on the object-storage checks.
 
 - [ ] **Step 3: Implement the snippets**
 
 - `(media_disk)`: today's `root` + `file_server`.
-- `(media_minio)`: `rewrite * /{$MINIO_BUCKET}/{$S3_LOCATION:media}{path}`, then `reverse_proxy {$MINIO_UPSTREAM}`
-  with `header_up Host {upstream_hostport}` and `header_down -Server -X-Amz-* -X-Minio-*`.
+- `(media_object_storage)`: `rewrite * /{$OBJECT_STORAGE_BUCKET}/{$S3_LOCATION:media}{path}`, then
+  `reverse_proxy {$OBJECT_STORAGE_UPSTREAM}` with `header_up Host {upstream_hostport}` and
+  `header_down -Server -X-Amz-*`.
 - If the env-placeholder `import` doesn't parse in Caddy 2.11, switch to a matcher on `{env.MEDIA_BACKEND}` and
   say so in the commit.
 
@@ -458,7 +480,7 @@ Expected: valid in both modes, and every probe line passes.
 
 ```bash
 git add caddy
-git commit -m "feat(edge): serve /media from disk or proxy to MinIO"
+git commit -m "feat(edge): serve /media from disk or proxy to the object storage"
 ```
 
 ### Task 7: Deploy, backup, manage and runbook (infra)
@@ -467,29 +489,31 @@ git commit -m "feat(edge): serve /media from disk or proxy to MinIO"
 - Modify: `infra/scripts/deploy.sh`, `infra/scripts/backup.sh` (around lines 60-67), `infra/scripts/manage.sh`, `infra/docs/architecture.md`, `infra/docs/deployment.md`, `infra/docs/disaster-recovery.md`
 
 **Interfaces:**
-- Consumes: `minio`, `minio-init` and `MEDIA_BACKEND` (Task 5), the Task 2 commands, and the Task 4 Vault paths.
+- Consumes: `object-storage`, `object-storage-init` and `MEDIA_BACKEND` (Task 5), the Task 2 commands, and the Task 4 Vault paths.
 
 - [ ] **Step 1: Change `deploy.sh`**
 
-- Preflight, after the Vault status: if `MINIO_ENABLED` or `USE_S3` is `true`, `vault kv get` `secret/<env>/s3`
-  and, with MinIO, `secret/<env>/minio`. If either is missing, die with
-  `run scripts/vault/generate-app-secrets.sh $ENV first`. With `USE_S3=true` and `MINIO_ENABLED=false`, read
+- Preflight, after the Vault status: if `OBJECT_STORAGE_ENABLED` or `USE_S3` is `true`, `vault kv get` `secret/<env>/s3`
+  and, with the object storage, `secret/<env>/object-storage`. If either is missing, die with
+  `run scripts/vault/generate-app-secrets.sh $ENV first`. With `USE_S3=true` and `OBJECT_STORAGE_ENABLED=false`, read
   `S3_ENDPOINT_URL` and `PUBLIC_MEDIA_BASE_URL` from `secret/<env>/s3` (never print other values) and die if the
-  endpoint contains `172.30.0.40` (`USE_S3 points at the stack's MinIO but MINIO_ENABLED=false`) or if
+  endpoint contains `172.30.0.40` (`USE_S3 points at the stack's object storage but OBJECT_STORAGE_ENABLED=false`) or if
   `PUBLIC_MEDIA_BASE_URL` is unset (`an external provider needs PUBLIC_MEDIA_BASE_URL in secret/$ENV/s3`).
   Put these rules in a function in `lib.sh` and cover each with a case in a small `scripts/ci/test-media-preflight.sh`
   that stubs the Vault read.
-- Pull: when MinIO is enabled, also `app_compose --profile minio-tools pull --quiet minio-init`.
-- After the datastores start: with MinIO, `app_compose up -d --wait minio`, then
-  `app_compose --profile minio-tools run --rm --no-deps minio-init`, and die on failure.
+- Pull: when the object storage is enabled, also
+  `app_compose --profile object-storage-tools pull --quiet object-storage-init`.
+- After the datastores start: with the object storage, `app_compose up -d --wait object-storage`, then
+  `app_compose --profile object-storage-tools run --rm --no-deps object-storage-init`, and die on failure.
 - After the release is healthy: if `USE_S3=true`, run
   `app_compose exec -T backend-api python manage.py media_storage_check` and fail the deploy with its output.
 
 - [ ] **Step 2: Change `backup.sh` (nightly)**
 
-- `MEDIA_BACKEND=minio`: `minio-init` run with `--entrypoint sh -c` does `mc mirror --overwrite --remove` of
-  `<bucket>/<location>` into `/mirror`, then today's tar of `$RUNTIME_DIR/media-mirror`.
-- `USE_S3=true` without MinIO: print `media: external provider, not backed up here` and skip.
+- `MEDIA_BACKEND=object-storage`: `object-storage-init` run with `--entrypoint sh -c` does
+  `aws --endpoint-url http://172.30.0.40:8333 s3 sync s3://glowderma-media/<location> /mirror --delete` (admin keys
+  exported as in `init.sh`), then today's tar of `$RUNTIME_DIR/media-mirror`.
+- `USE_S3=true` without the object storage: print `media: external provider, not backed up here` and skip.
 - Otherwise: unchanged.
 
 - [ ] **Step 3: Add `sync-media` to `manage.sh`**
@@ -500,7 +524,7 @@ git commit -m "feat(edge): serve /media from disk or proxy to MinIO"
 - [ ] **Step 4: Write the runbook and docs**
 
 Switch-on order in `deployment.md`:
-1. Set `MINIO_ENABLED=true` and deploy.
+1. Set `OBJECT_STORAGE_ENABLED=true` and deploy.
 2. Run `scripts/manage.sh <env> sync-media` (dry run), then with `--apply`.
 3. Set `USE_S3=true` and deploy. `media_storage_check` gates this deploy.
 
@@ -509,18 +533,18 @@ For an external provider (or a bucket change), `deployment.md` also covers, with
   `PUBLIC_MEDIA_BASE_URL`, then `scripts/restart.sh <env> backend`
 - if the image host changes, adding it to the frontend's `GLOWDERMA_MEDIA_HOSTS` (a frontend rebuild)
 
-Rollback in `deployment.md`: set `USE_S3=false`, but first `mc mirror` the bucket back into `runtime/media`.
+Rollback in `deployment.md`: set `USE_S3=false`, but first `aws s3 sync` the bucket back into `runtime/media`.
 Otherwise uploads made while on S3 404.
 
-`disaster-recovery.md`: restore per mode (untar into `media-mirror`, then `mc mirror` back into the bucket).
-`architecture.md`: the `/media/*` row and the MinIO service.
+`disaster-recovery.md`: restore per mode (untar into `media-mirror`, then `aws s3 sync` back into the bucket).
+`architecture.md`: the `/media/*` row and the object-storage service.
 
 - [ ] **Step 5: Verify**
 
 Run: `bash -n scripts/*.sh && shellcheck scripts/deploy.sh scripts/backup.sh scripts/manage.sh scripts/lib.sh && scripts/validate.sh`
 Expected: clean.
 
-If a staging server is available, deploy there with `MINIO_ENABLED=true USE_S3=false`. Then run
+If a staging server is available, deploy there with `OBJECT_STORAGE_ENABLED=true USE_S3=false`. Then run
 `sync-media --apply`, deploy with `USE_S3=true`, and expect `media_storage_check` to print `ok` and a product
 image URL to return 200. If no server is available, report that this end-to-end check wasn't run.
 
@@ -528,5 +552,5 @@ image URL to return 200. If no server is available, report that this end-to-end 
 
 ```bash
 git add scripts docs
-git commit -m "feat(ops): deploy, backup and sync for S3/MinIO media"
+git commit -m "feat(ops): deploy, backup and sync for S3 object-storage media"
 ```
