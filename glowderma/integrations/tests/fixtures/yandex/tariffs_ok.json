@@ -1,0 +1,48 @@
+{
+  "available_tariffs": [
+    {
+      "name": "courier",
+      "title": "Курьер",
+      "text": "До 10 кг",
+      "minimal_price": 14999.5,
+      "supported_requirements": [
+        {
+          "name": "cargo_options",
+          "title": "Опции",
+          "text": "Опции",
+          "type": "multi_select",
+          "required": false,
+          "options": [
+            {
+              "title": "Термосумка",
+              "text": "Термосумка",
+              "value": "thermobag"
+            }
+          ]
+        }
+      ],
+      "delivery_options": [
+        {
+          "description": "Срочная доставка"
+        }
+      ]
+    },
+    {
+      "name": "express",
+      "title": "Экспресс",
+      "text": "До 20 кг",
+      "minimal_price": 19000,
+      "supported_requirements": [
+        {
+          "name": "pro_courier",
+          "title": "Pro",
+          "text": "Pro",
+          "type": "bool",
+          "required": false,
+          "default": false
+        }
+      ],
+      "delivery_options": []
+    }
+  ]
+}

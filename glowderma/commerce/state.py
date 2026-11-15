@@ -24,6 +24,7 @@ class Trigger(StrEnum):
     CUSTOMER_CANCEL = "customer_cancel"  # M2 POST /orders/{id}/cancel (C-6, optional)
     ADMIN_TRANSITION = "admin_transition"  # POST orders/{id}/transition/ → transition
     BTS_STATUS = "bts_status"  # BTS webhook / commerce.poll_bts → apply_bts_status
+    YANDEX_STATUS = "yandex_status"  # Yandex claim snapshot (callback hint / commerce.poll_yandex)
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,6 +188,37 @@ TRANSITIONS: tuple[Transition, ...] = (
         fulfilment=_F.DELIVERY,
         push=True,
     ),
+    # Rows 11–12 again for the second carrier: Yandex ``pickuped`` / ``delivered*`` (delivery.yandex).
+    Transition(
+        row=11,
+        source=_S.PROCESSING,
+        target=_S.HANDED_TO_COURIER,
+        trigger=Trigger.YANDEX_STATUS,
+        event_type=_E.HANDED_TO_COURIER,
+        event_source=_SRC.YANDEX,
+        fulfilment=_F.DELIVERY,
+        push=True,
+    ),
+    Transition(
+        row=12,
+        source=_S.PROCESSING,
+        target=_S.DELIVERED,
+        trigger=Trigger.YANDEX_STATUS,
+        event_type=_E.DELIVERED,
+        event_source=_SRC.YANDEX,
+        fulfilment=_F.DELIVERY,
+        push=True,
+    ),
+    Transition(
+        row=12,
+        source=_S.HANDED_TO_COURIER,
+        target=_S.DELIVERED,
+        trigger=Trigger.YANDEX_STATUS,
+        event_type=_E.DELIVERED,
+        event_source=_SRC.YANDEX,
+        fulfilment=_F.DELIVERY,
+        push=True,
+    ),
 )
 
 TERMINAL_STATUSES: frozenset[str] = frozenset({_S.DELIVERED, _S.CANCELLED})  # §4.1 row 17
@@ -234,8 +266,23 @@ def find_transition(
     return None
 
 
-def manual_transitions(status: str, fulfilment: str) -> list[str]:
-    """``available_actions.transitions`` (§4.2): the admin-driven targets offered for ``status``."""
+def manual_transitions(
+    status: str,
+    fulfilment: str,
+    *,
+    provider: str = enums.DeliveryProvider.BTS,
+    parcel_unaccounted: bool = False,
+) -> list[str]:
+    """``available_actions.transitions`` (§4.2): the admin-driven targets offered for ``status``.
+
+    A Yandex order moves only by Yandex's statuses (plan decision 8), so staff get no manual row — except
+    ``handed_to_courier → delivered`` while the caller reports an open ``parcel_unaccounted`` issue: Yandex
+    stopped accounting for a parcel it holds, and staff record the hand-over they confirmed themselves.
+    """
+    if provider == enums.DeliveryProvider.YANDEX:
+        if parcel_unaccounted and status == _S.HANDED_TO_COURIER and fulfilment == _F.DELIVERY:
+            return [_S.DELIVERED]
+        return []
     return [
         t.target
         for t in TRANSITIONS
@@ -251,11 +298,18 @@ def can_cancel(status: str) -> bool:
 
 
 def can_retry_shipment(
-    fulfilment: str, status: str, shipment_state: str | None, shipment_pending: bool
+    fulfilment: str,
+    status: str,
+    shipment_state: str | None,
+    shipment_pending: bool,
+    *,
+    provider: str = enums.DeliveryProvider.BTS,
 ) -> bool:
-    """``available_actions.retry_shipment`` (§4.2): delivery ∧ processing ∧ shipment failed ∧ ¬pending."""
+    """``available_actions.retry_shipment`` (§4.2): delivery ∧ processing ∧ shipment failed ∧ ¬pending, for a
+    BTS parcel only (a Yandex courier is summoned by the dispatch action, never by this retry)."""
     return (
-        fulfilment == _F.DELIVERY
+        provider == enums.DeliveryProvider.BTS
+        and fulfilment == _F.DELIVERY
         and status == _S.PROCESSING
         and shipment_state == enums.ShipmentState.FAILED
         and not shipment_pending

@@ -310,6 +310,7 @@ def test_integrations_mode_validated_at_startup(
         "ESKIZ_MODE",
         "FCM_MODE",
         "BILLZ_MODE",
+        "YANDEX_DELIVERY_MODE",
     ):
         monkeypatch.setenv(name, "fake")
     if ok:
@@ -547,7 +548,15 @@ def test_live_oauth_follows_integrations_mode_and_rejects_placeholders(
 ) -> None:
     monkeypatch.delenv("OAUTH_MODE", raising=False)
     monkeypatch.setenv("INTEGRATIONS_MODE", "live")
-    for name in ("CLICK_MODE", "PAYME_MODE", "BTS_MODE", "ESKIZ_MODE", "FCM_MODE", "BILLZ_MODE"):
+    for name in (
+        "CLICK_MODE",
+        "PAYME_MODE",
+        "BTS_MODE",
+        "ESKIZ_MODE",
+        "FCM_MODE",
+        "BILLZ_MODE",
+        "YANDEX_DELIVERY_MODE",
+    ):
         monkeypatch.setenv(name, "fake")  # their live settings are tested in integrations/tests
     for name, value in LIVE_OAUTH_ENV.items():
         monkeypatch.setenv(name, value)

@@ -433,7 +433,8 @@ def test_orderevent_status_by_type() -> None:
                 data={},
             )
     for event_type in NON_STATUS_EVENT_TYPES:
-        OrderEventFactory.create(type=event_type, source="system", status_after="", data={})
+        source = EVENT_SOURCES[event_type][0]  # system, or yandex for the Yandex delivery events
+        OrderEventFactory.create(type=event_type, source=source, status_after="", data={})
     assert set(EVENT_STATUS_AFTER) | set(NON_STATUS_EVENT_TYPES) == set(enums.OrderEventType.values)
 
 

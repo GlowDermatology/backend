@@ -5,7 +5,7 @@ from django.test import override_settings
 
 from glowderma.core import integration_modes
 
-ALL = ("OAUTH", "BILLZ", "FCM", "CLICK", "PAYME", "BTS", "ESKIZ", "EMAIL")
+ALL = ("OAUTH", "BILLZ", "FCM", "CLICK", "PAYME", "BTS", "ESKIZ", "EMAIL", "YANDEX_DELIVERY")
 
 
 def modes(mode: str, **overrides: str) -> dict[str, str]:
@@ -27,10 +27,12 @@ def test_fake_in_production_matrix(mode: str, dev: bool, fake_in_production: boo
     with override_settings(**modes(mode), DEV_FEATURES_ALLOWED=dev):
         for provider in integration_modes.PROVIDER_MODE_SETTINGS:
             assert integration_modes.fake_in_production(provider) is fake_in_production
-        for provider in ("click", "payme", "bts"):
+        for provider in ("click", "payme", "bts", "yandex"):
             assert integration_modes.callbacks_refused(provider) is fake_in_production
         assert integration_modes.payable_providers() == ([] if fake_in_production else ["click", "payme"])
         assert integration_modes.delivery_available() is not fake_in_production
+        assert integration_modes.yandex_delivery_available() is not fake_in_production
+        assert integration_modes.delivery_providers() == ([] if fake_in_production else ["yandex", "bts"])
         assert integration_modes.fulfilment_methods() == (
             ["pickup"] if fake_in_production else ["delivery", "pickup"]
         )

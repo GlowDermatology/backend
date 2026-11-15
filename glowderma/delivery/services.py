@@ -4,6 +4,10 @@ Scalar in, values out: callers pass the order id and plain values (never a ``com
 happens while the caller (``commerce.services`` / ``commerce.tasks``) holds the **Order** lock; ``Shipment``
 has no lock of its own (02 §1.9.2). The BTS adapter comes from ``integrations.bts.registry`` with the
 order's fake scenario (``Order.metadata["fake"]["bts"]``), which the orchestrator hands in.
+
+The BTS writers refuse a Yandex shipment (:class:`NotBtsShipment`): a Yandex parcel never reaches BTS, and
+a BTS answer can never land on it (plan decision 3). The exception queue (``DeliveryIssue``) is written by
+:func:`open_issue` / :func:`resolve_issue` / :func:`resolve_kind`.
 """
 
 from __future__ import annotations
@@ -13,12 +17,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from django.db import transaction
+from django.contrib.auth import get_user_model
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
-from glowderma.core import enums, outbox, timeutils
-from glowderma.delivery import bts
-from glowderma.delivery.models import Shipment, ShipmentEvent
+from glowderma.core import audit, enums, outbox, timeutils
+from glowderma.delivery import bts, selectors
+from glowderma.delivery.models import DeliveryIssue, DeliveryQuote, Shipment, ShipmentEvent
 from glowderma.delivery.topics import BTS_CREATE_SHIPMENT, bts_create_shipment_key
 from glowderma.integrations.bts.ports import STATUS_ACCEPTED, Parcel
 from glowderma.integrations.bts.registry import get_bts
@@ -29,6 +34,14 @@ class DeliveryError(Exception):
 
 
 class ShipmentMissing(DeliveryError):
+    pass
+
+
+class NotBtsShipment(DeliveryError):
+    """A BTS operation was asked for a shipment of another carrier (a guard that must never fire)."""
+
+
+class IssueNotFound(DeliveryError):
     pass
 
 
@@ -72,9 +85,30 @@ def _shipment(order_id: int) -> Shipment:
     return shipment
 
 
-def ensure_shipment(order_id: int) -> int:
-    """The delivery order's shipment row (``not_created`` at checkout); idempotent, returns its id."""
-    shipment, _ = Shipment.objects.get_or_create(order_id=order_id)
+def _bts_shipment(order_id: int) -> Shipment:
+    shipment = _shipment(order_id)
+    if shipment.provider != enums.DeliveryProvider.BTS:
+        raise NotBtsShipment(f"Shipment of order {order_id} is {shipment.provider}, not BTS")
+    return shipment
+
+
+def ensure_shipment(
+    order_id: int,
+    *,
+    provider: str = enums.DeliveryProvider.BTS,
+    method: str = "",
+    quote_id: Any = None,
+) -> int:
+    """The delivery order's shipment row (``not_created`` at checkout); idempotent, returns its id.
+
+    A new row takes ``provider`` / ``method`` / ``quote_id``; an existing one is returned as it is, unless
+    it belongs to another carrier (``DeliveryError``: an order never changes carrier silently).
+    """
+    shipment, created = Shipment.objects.get_or_create(
+        order_id=order_id, defaults={"provider": provider, "method": method, "quote_id": quote_id}
+    )
+    if not created and provider != enums.DeliveryProvider.BTS and shipment.provider != provider:
+        raise DeliveryError(f"Order {order_id} ships with {shipment.provider}, not {provider}")
     return shipment.pk
 
 
@@ -87,7 +121,7 @@ def request_bts_create(order_id: int, *, manual: bool, actor_id: int | None) -> 
     Returns the outbox message id.
     """
     with transaction.atomic():
-        shipment = _shipment(order_id)
+        shipment = _bts_shipment(order_id)
         request_no = shipment.create_requests + 1
         message = outbox.enqueue(
             BTS_CREATE_SHIPMENT,
@@ -123,7 +157,7 @@ def mark_created(
     _aware(at, "at")
     instant = at or timeutils.now()
     with transaction.atomic():
-        shipment = _shipment(order_id)
+        shipment = _bts_shipment(order_id)
         if shipment.state in (Shipment.State.CREATED, Shipment.State.CANCELLED):
             return False
         shipment.state = Shipment.State.CREATED
@@ -167,7 +201,7 @@ def mark_failed(
     _aware(at, "at")
     instant = at or timeutils.now()
     with transaction.atomic():
-        shipment = _shipment(order_id)
+        shipment = _bts_shipment(order_id)
         if shipment.state in (Shipment.State.CREATED, Shipment.State.CANCELLED):
             return None
         if _answered(shipment, request_no):
@@ -212,7 +246,7 @@ def apply_status(
     code = str(bts_status)
     body = dict(payload or {})
     with transaction.atomic():
-        shipment = _shipment(order_id)
+        shipment = _bts_shipment(order_id)
         if shipment.state not in (Shipment.State.CREATED, Shipment.State.CANCELLED):
             raise DeliveryError(f"Shipment of order {order_id} is {shipment.state}: BTS has no parcel")
         newest = (
@@ -259,7 +293,7 @@ def cancel(
     transaction rolled back after BTS agreed can simply be repeated.
     """
     _aware(at, "at")
-    shipment = _shipment(order_id)
+    shipment = _bts_shipment(order_id)
     if shipment.state != Shipment.State.CREATED:
         raise DeliveryError(f"Shipment of order {order_id} is {shipment.state}, not created")
     result = get_bts(scenario).cancel(_parcel(shipment))
@@ -296,7 +330,7 @@ def cancel_orphan(
     before any write (the outbox retries). Returns the BTS outcome.
     """
     _aware(at, "at")
-    shipment = _shipment(order_id)
+    shipment = _bts_shipment(order_id)
     if shipment.state in (Shipment.State.CREATED, Shipment.State.CANCELLED):
         return CancelOutcome(ok=shipment.state == Shipment.State.CANCELLED)
     result = get_bts(scenario).cancel(parcel)
@@ -335,9 +369,173 @@ def cancel_orphan(
     return CancelOutcome(ok=result.ok, reason=result.reason)
 
 
+# --- Yandex Delivery ----------------------------------------------------------------------------------------
+
+
+def mark_awaiting_dispatch(order_id: int, *, at: datetime) -> bool:
+    """A Yandex order was paid at ``at`` (plan §3.5): stage ``awaiting_dispatch`` and the promised window
+    recomputed from ``at`` with the method's courier time (left empty when the calendar has no open day).
+    Nothing goes to Yandex. Returns ``False`` when the stage had moved on already (a replayed capture).
+    """
+    _aware(at, "at")
+    with transaction.atomic():
+        shipment = _shipment(order_id)
+        if shipment.provider != enums.DeliveryProvider.YANDEX:
+            raise DeliveryError(f"Shipment of order {order_id} is {shipment.provider}, not Yandex")
+        if shipment.stage:
+            return False
+        method = selectors.method_settings(shipment.method)
+        window = selectors.warehouse_calendar(timeutils.local_date(at)).eta_window(
+            method.eta_min_minutes, method.eta_max_minutes, at
+        )
+        shipment.stage = enums.ShipmentStage.AWAITING_DISPATCH
+        shipment.promised_from = window.eta_from if window is not None else None
+        shipment.promised_to = window.eta_to if window is not None else None
+        shipment.save(update_fields=["stage", "promised_from", "promised_to"])
+        return True
+
+
+ISSUE_NOTE_MAX = 1000
+AUDIT_ISSUE_RESOLVED = "delivery.issue_resolved"
+
+
+def _clean_note(note: str) -> str:
+    text = note.strip()
+    if len(text) > ISSUE_NOTE_MAX:
+        raise ValueError(f"note must be at most {ISSUE_NOTE_MAX} characters")
+    return text
+
+
+def open_issue(
+    order_id: int,
+    kind: str,
+    *,
+    code: str,
+    urgent: bool,
+    details: Mapping[str, Any],
+    note: str = "",
+    actor_id: int | None = None,
+) -> tuple[int, bool]:
+    """Open the ``kind`` issue of an order, or refresh the one that is open: ``(issue_id, created)``.
+
+    Idempotent for at-least-once callers: the open row (one per order and kind) takes the new ``code``,
+    ``urgent`` and ``details`` (a non-empty ``note`` too) and ``created`` is ``False``. ``details`` must be
+    ids and amounts only — it reaches the alert webhook. A concurrent opener is absorbed by the partial
+    unique index (the loser updates the winner's row).
+    """
+    if kind not in enums.DeliveryIssueKind.values:
+        raise ValueError(f"Unknown delivery issue kind {kind!r}")
+    text = _clean_note(note)
+    body = dict(details)
+    now = timeutils.now()
+    for _attempt in range(2):
+        with transaction.atomic():
+            row = (
+                DeliveryIssue.objects.select_for_update()
+                .filter(order_id=order_id, kind=kind, state=enums.DeliveryIssueState.OPEN)
+                .first()
+            )
+            if row is not None:
+                row.code = code[:64]
+                row.urgent = urgent
+                row.details = body
+                fields = ["code", "urgent", "details", "updated_at"]
+                if text:
+                    row.note = text
+                    fields.append("note")
+                row.updated_at = now
+                row.save(update_fields=fields)
+                return row.pk, False
+            try:
+                with transaction.atomic():
+                    created = DeliveryIssue.objects.create(
+                        order_id=order_id,
+                        kind=kind,
+                        code=code[:64],
+                        urgent=urgent,
+                        details=body,
+                        note=text,
+                        opened_at=now,
+                        updated_at=now,
+                        created_by_id=actor_id,
+                    )
+            except IntegrityError:
+                continue  # another transaction opened it first: update that row
+            return created.pk, True
+    raise DeliveryError(f"Could not open the {kind} issue of order {order_id}")
+
+
+def resolve_issue(issue_id: int, *, actor_id: int, note: str, request: Any = None) -> bool:
+    """Staff close an issue (audited ``delivery.issue_resolved``). ``False`` when it was resolved already
+    (nothing written); :class:`IssueNotFound` for an unknown id."""
+    text = _clean_note(note)
+    actor = get_user_model().objects.get(pk=actor_id)
+    with transaction.atomic():
+        row = DeliveryIssue.objects.select_for_update().filter(pk=issue_id).first()
+        if row is None:
+            raise IssueNotFound(f"Delivery issue {issue_id} does not exist")
+        if row.state == enums.DeliveryIssueState.RESOLVED:
+            return False
+        now = timeutils.now()
+        row.state = enums.DeliveryIssueState.RESOLVED
+        row.resolved_at = now
+        row.resolved_by_id = actor_id
+        row.resolution_note = text
+        row.updated_at = now
+        row.save(update_fields=["state", "resolved_at", "resolved_by", "resolution_note", "updated_at"])
+        audit.record(
+            action=AUDIT_ISSUE_RESOLVED,
+            entity_type="delivery_issue",
+            entity_id=str(row.pk),
+            actor=actor,
+            request=request,
+            before={"state": enums.DeliveryIssueState.OPEN},
+            after={
+                "state": enums.DeliveryIssueState.RESOLVED,
+                "order_id": row.order_id,
+                "kind": row.kind,
+                "code": row.code,
+                "note": text,
+            },
+        )
+        return True
+
+
+def resolve_kind(order_id: int, kind: str, note: str = "") -> bool:
+    """The system closes the order's open ``kind`` issue because the case resolved itself (no actor, no
+    audit); ``False`` when none was open."""
+    text = _clean_note(note)
+    with transaction.atomic():
+        row = (
+            DeliveryIssue.objects.select_for_update()
+            .filter(order_id=order_id, kind=kind, state=enums.DeliveryIssueState.OPEN)
+            .first()
+        )
+        if row is None:
+            return False
+        now = timeutils.now()
+        row.state = enums.DeliveryIssueState.RESOLVED
+        row.resolved_at = now
+        row.resolution_note = text
+        row.updated_at = now
+        row.save(update_fields=["state", "resolved_at", "resolution_note", "updated_at"])
+        return True
+
+
+def purge_quotes(before: datetime) -> int:
+    """Delete the quotes nobody used that expired before ``before`` (beat ``delivery.purge_quotes``);
+    returns how many. A used quote stays: it documents the fee an order charged."""
+    _aware(before, "before")
+    deleted, _ = DeliveryQuote.objects.filter(used_at__isnull=True, expires_at__lt=before).delete()
+    return deleted
+
+
 __all__ = [
+    "AUDIT_ISSUE_RESOLVED",
     "CancelOutcome",
     "DeliveryError",
+    "IssueNotFound",
+    "NotBtsShipment",
     "ShipmentMissing",
     "StatusResult",
     "apply_status",
@@ -345,6 +543,11 @@ __all__ = [
     "cancel_orphan",
     "ensure_shipment",
     "mark_created",
+    "mark_awaiting_dispatch",
     "mark_failed",
+    "open_issue",
+    "purge_quotes",
     "request_bts_create",
+    "resolve_issue",
+    "resolve_kind",
 ]

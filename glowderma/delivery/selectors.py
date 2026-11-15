@@ -10,22 +10,34 @@ The contract's ``shipment`` union (``OrderSummary.shipment``):
 | ``created`` | ``tracking_number``, ``tariff``, ``updated_at``, ``via`` (also a ``cancelled`` parcel, D-1) |
 
 ``pending`` is true while the newest ``bts.create_shipment`` message is ``pending``/``failed``/``in_flight``.
+
+Every BTS read (polling candidates, webhook lookup, ``bts_failed``, K4) goes through
+``Shipment.objects.bts()``: a Yandex shipment in any state is invisible to them (plan decision 3).
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 from django.core.cache import cache
-from django.db.models import Q
+from django.db.models import Count, Exists, OuterRef, Q
 from django.db.models.functions import Coalesce
 
 from glowderma.core import enums, integration_modes, timeutils
 from glowderma.core.consistency import Finding, finding
-from glowderma.delivery.models import Shipment, ShipmentEvent
+from glowderma.delivery.models import (
+    CourierClaim,
+    DeliveryIssue,
+    DeliverySettings,
+    Shipment,
+    ShipmentEvent,
+    WarehouseClosure,
+    WarehouseHours,
+)
+from glowderma.delivery.warehouse import HORIZON_DAYS, WarehouseCalendar
 from glowderma.integrations.bts.ports import BtsUnavailable, City, Region
 from glowderma.integrations.bts.registry import get_bts
 
@@ -55,11 +67,24 @@ class ShipmentInfo:
     attempts: int
     create_requests: int
     created_at: datetime  # the row (created at checkout, before any create request)
+    provider: str = enums.DeliveryProvider.BTS  # DeliveryProvider
+    stage: str = ""  # ShipmentStage ("" for BTS)
+    claim_open: bool = False  # a Yandex CourierClaim of this shipment is not ended
+
+    @property
+    def is_bts(self) -> bool:
+        return self.provider == enums.DeliveryProvider.BTS
 
 
 def shipment_info(order_id: int) -> ShipmentInfo | None:
-    """The order's shipment (``None`` for pickup orders and orders without a row)."""
-    row = Shipment.objects.with_pending().filter(order_id=order_id).first()
+    """The order's shipment (``None`` for pickup orders and orders without a row); one query."""
+    open_claim = CourierClaim.objects.filter(shipment=OuterRef("pk"), ended_at__isnull=True)
+    row = (
+        Shipment.objects.with_pending()
+        .annotate(claim_open=Exists(open_claim))
+        .filter(order_id=order_id)
+        .first()
+    )
     if row is None:
         return None
     return ShipmentInfo(
@@ -73,7 +98,15 @@ def shipment_info(order_id: int) -> ShipmentInfo | None:
         attempts=row.attempts,
         create_requests=row.create_requests,
         created_at=row.created_at,
+        provider=row.provider,
+        stage=row.stage,
+        claim_open=bool(row.claim_open),  # type: ignore[attr-defined]
     )
+
+
+def shipment_provider(order_id: int) -> str | None:
+    """The order's carrier (``None`` without a shipment row: a pickup order)."""
+    return Shipment.objects.filter(order_id=order_id).values_list("provider", flat=True).first()
 
 
 def create_request_answered(order_id: int, request_no: int) -> bool:
@@ -138,10 +171,12 @@ def shipment_for_order(order_id: int, fulfilment: str = enums.FulfilmentMethod.D
 
 
 def bts_failed_count() -> int:
-    """Dashboard ``attention.bts_failed``: processing orders whose shipment is ``failed`` (02 §3.1)."""
-    return Shipment.objects.filter(
-        state=Shipment.State.FAILED, order__status=enums.OrderStatus.PROCESSING
-    ).count()
+    """Dashboard ``attention.bts_failed``: processing orders whose BTS shipment is ``failed`` (02 §3.1)."""
+    return (
+        Shipment.objects.bts()
+        .filter(state=Shipment.State.FAILED, order__status=enums.OrderStatus.PROCESSING)
+        .count()
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,7 +255,8 @@ def stale_shipments(stale_before: datetime) -> list[tuple[int, int, str]]:
     order is ``processing`` / ``handed_to_courier`` and whose ``last_status_at`` (or creation) is older than
     ``stale_before``; ``(shipment_id, order_id, tracking_number)`` in id order."""
     rows = (
-        Shipment.objects.filter(
+        Shipment.objects.bts()
+        .filter(
             state=Shipment.State.CREATED,
             order__status__in=[enums.OrderStatus.PROCESSING, enums.OrderStatus.HANDED_TO_COURIER],
         )
@@ -234,11 +270,14 @@ def stale_shipments(stale_before: datetime) -> list[tuple[int, int, str]]:
 
 
 def shipment_by_tracking(tracking_number: str) -> ShipmentInfo | None:
-    """The shipment whose stored tracking number is ``tracking_number`` (BTS webhook lookup)."""
+    """The BTS shipment whose stored tracking number is ``tracking_number`` (BTS webhook lookup)."""
     if not tracking_number:
         return None
     order_id = (
-        Shipment.objects.filter(tracking_number=tracking_number).values_list("order_id", flat=True).first()
+        Shipment.objects.bts()
+        .filter(tracking_number=tracking_number)
+        .values_list("order_id", flat=True)
+        .first()
     )
     return None if order_id is None else shipment_info(int(order_id))
 
@@ -257,7 +296,8 @@ def untracked_parcels(status_before: datetime, *, limit: int) -> Finding:
     gets the same plan), so the cost grows with all shipments ever created (~45 ms per 120 000): linear, far
     inside the check's 60 s statement timeout for years of parcels."""
     queryset = (
-        Shipment.objects.filter(
+        Shipment.objects.bts()
+        .filter(
             state=Shipment.State.CREATED,
             order__status__in=[enums.OrderStatus.PROCESSING, enums.OrderStatus.HANDED_TO_COURIER],
         )
@@ -265,6 +305,151 @@ def untracked_parcels(status_before: datetime, *, limit: int) -> Finding:
         .filter(reference__lt=status_before)
     )
     return finding(queryset, limit=limit, id_field="order_id")
+
+
+# --- Yandex Delivery: warehouse calendar, method settings, exception queue ----------------------------------
+
+
+def warehouse_calendar(today: date | None = None) -> WarehouseCalendar:
+    """The :class:`~glowderma.delivery.warehouse.WarehouseCalendar` of the stored settings, hours and the
+    closures from ``today`` (Tashkent; default the current day) to the end of the search horizon. Three
+    queries; reads never create the settings row (missing → defaults, not configured)."""
+    settings_row = DeliverySettings.objects.filter(pk=1).first() or DeliverySettings()
+    start = today or timeutils.local_date(timeutils.now())
+    hours = {row.weekday: (row.opens_at, row.closes_at) for row in WarehouseHours.objects.all()}
+    closures: dict[date, tuple[time, time] | None] = {}
+    for row in WarehouseClosure.objects.filter(
+        date__gte=start - timedelta(days=1), date__lte=start + timedelta(days=HORIZON_DAYS + 1)
+    ):
+        opened = row.opens_at is not None and row.closes_at is not None
+        closures[row.date] = (row.opens_at, row.closes_at) if opened else None  # type: ignore[assignment]
+    return WarehouseCalendar(
+        hours=hours,
+        closures=closures,
+        prep_minutes=settings_row.prep_minutes,
+        dispatch_cutoff_minutes=settings_row.dispatch_cutoff_minutes,
+        returns_accepted=settings_row.returns_accepted,
+        dispatch_suspended=settings_row.dispatch_suspended,
+        suspended_until=settings_row.suspended_until,
+        configured=warehouse_configured(settings_row),
+    )
+
+
+def warehouse_configured(settings_row: DeliverySettings) -> bool:
+    """Point A is complete: a pin, an address and a contact name and phone (Yandex needs all four)."""
+    return (
+        settings_row.warehouse_latitude is not None
+        and settings_row.warehouse_longitude is not None
+        and bool(settings_row.warehouse_address.strip())
+        and bool(settings_row.contact_name.strip())
+        and bool(settings_row.contact_phone)
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class MethodSettings:
+    """One delivery method as configured: switched on, its Yandex class and its courier time once called."""
+
+    method: str  # DeliveryMethod
+    enabled: bool
+    taxi_class: str
+    eta_min_minutes: int
+    eta_max_minutes: int
+
+
+def method_settings(method: str, settings_row: DeliverySettings | None = None) -> MethodSettings:
+    """The configuration of ``method`` (``standard`` / ``express``); ``ValueError`` for anything else."""
+    if method not in enums.DeliveryMethod.values:
+        raise ValueError(f"Unknown delivery method {method!r}")
+    row = settings_row or DeliverySettings.objects.filter(pk=1).first() or DeliverySettings()
+    return MethodSettings(
+        method=method,
+        enabled=bool(getattr(row, f"{method}_enabled")),
+        taxi_class=str(getattr(row, f"{method}_taxi_class")),
+        eta_min_minutes=int(getattr(row, f"{method}_eta_min_minutes")),
+        eta_max_minutes=int(getattr(row, f"{method}_eta_max_minutes")),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class IssueInfo:
+    """One ``DeliveryIssue`` row as the queue and the order card show it (no staff note in alerts)."""
+
+    id: int
+    order_id: int
+    kind: str  # DeliveryIssueKind
+    code: str
+    urgent: bool
+    state: str  # DeliveryIssueState
+    details: dict[str, Any]
+    note: str
+    opened_at: datetime
+    updated_at: datetime
+    reminded_at: datetime | None
+    reminders: int
+    resolved_at: datetime | None
+    resolved_by_id: int | None
+    resolution_note: str
+    created_by_id: int | None
+
+
+def _issue_info(row: DeliveryIssue) -> IssueInfo:
+    return IssueInfo(
+        id=row.pk,
+        order_id=row.order_id,
+        kind=row.kind,
+        code=row.code,
+        urgent=row.urgent,
+        state=row.state,
+        details=dict(row.details) if isinstance(row.details, dict) else {},
+        note=row.note,
+        opened_at=row.opened_at,
+        updated_at=row.updated_at,
+        reminded_at=row.reminded_at,
+        reminders=row.reminders,
+        resolved_at=row.resolved_at,
+        resolved_by_id=row.resolved_by_id,
+        resolution_note=row.resolution_note,
+        created_by_id=row.created_by_id,
+    )
+
+
+def issue(issue_id: int) -> IssueInfo | None:
+    row = DeliveryIssue.objects.filter(pk=issue_id).first()
+    return None if row is None else _issue_info(row)
+
+
+def open_issues(
+    *,
+    order_id: int | None = None,
+    kind: str | None = None,
+    urgent: bool | None = None,
+    limit: int | None = None,
+) -> list[IssueInfo]:
+    """Open issues, urgent first, then oldest first (``deliveryissue_queue_idx``)."""
+    rows = DeliveryIssue.objects.filter(state=enums.DeliveryIssueState.OPEN)
+    if order_id is not None:
+        rows = rows.filter(order_id=order_id)
+    if kind is not None:
+        rows = rows.filter(kind=kind)
+    if urgent is not None:
+        rows = rows.filter(urgent=urgent)
+    ordered = rows.order_by("-urgent", "opened_at", "id")
+    return [_issue_info(row) for row in (ordered[:limit] if limit is not None else ordered)]
+
+
+def has_open_issue(order_id: int, kind: str) -> bool:
+    return DeliveryIssue.objects.filter(
+        order_id=order_id, kind=kind, state=enums.DeliveryIssueState.OPEN
+    ).exists()
+
+
+def issue_counts() -> dict[str, int]:
+    """``{open, urgent}`` of the queue (nav badge, dashboard); one query."""
+    counts = DeliveryIssue.objects.filter(state=enums.DeliveryIssueState.OPEN).aggregate(
+        open=Count("id"), urgent=Count("id", filter=Q(urgent=True))
+    )
+    return {"open": int(counts["open"] or 0), "urgent": int(counts["urgent"] or 0)}
 
 
 __all__ = [
@@ -285,4 +470,14 @@ __all__ = [
     "shipment_info",
     "shipment_view",
     "updated_at",
+    "IssueInfo",
+    "MethodSettings",
+    "has_open_issue",
+    "issue",
+    "issue_counts",
+    "method_settings",
+    "open_issues",
+    "shipment_provider",
+    "warehouse_calendar",
+    "warehouse_configured",
 ]

@@ -67,6 +67,7 @@ from glowderma.core.api.exceptions import (
 from glowderma.core.api.exceptions import OutOfStock as OutOfStockError
 from glowderma.delivery import selectors as delivery_selectors
 from glowderma.delivery import services as delivery_services
+from glowderma.delivery import yandex as delivery_yandex
 from glowderma.delivery.models import Shipment
 from glowderma.integrations.billz.registry import billz_mode
 from glowderma.integrations.bts.ports import BtsRejected, BtsUnavailable
@@ -628,8 +629,9 @@ def confirm_payment_effects(
     availability until the next Billz sync, 03 §1.6), the cashback hold is captured (debit), the purchase and
     its credit are recorded under the policy active at ``at``, status ``processing``; events
     ``payment_confirmed`` (+ ``cashback_credited`` when the credit is positive); outbox ``billz.push_sale``
-    (the Billz order UUID is persisted on the purchase first), ``bts.create_shipment`` for delivery orders
-    and ``push.order_status processing``. No audit (system).
+    (the Billz order UUID is persisted on the purchase first), ``bts.create_shipment`` for a BTS delivery
+    (a Yandex shipment only becomes ``awaiting_dispatch``: nothing goes to Yandex at payment, plan §3.5) and
+    ``push.order_status processing``. No audit (system).
 
     Without an explicit ``at`` (every live path) the instant of the step is :func:`ledger_instant` — read
     under the Order → Payment → LoyaltyAccount locks, never before them (``floor`` is the caller's instant,
@@ -713,7 +715,10 @@ def confirm_payment_effects(
             )
         if order.fulfilment == enums.FulfilmentMethod.DELIVERY:
             delivery_services.ensure_shipment(order.pk)
-            delivery_services.request_bts_create(order.pk, manual=False, actor_id=None)
+            if delivery_selectors.shipment_provider(order.pk) == enums.DeliveryProvider.YANDEX:
+                delivery_services.mark_awaiting_dispatch(order.pk, at=instant)
+            else:
+                delivery_services.request_bts_create(order.pk, manual=False, actor_id=None)
         _enqueue_push(order, _S.PROCESSING, confirmed)
 
 
@@ -932,6 +937,8 @@ def cancel_order(
 
     * ``awaiting_payment`` → the pending payment fails (Payme state 1 excepted), reservations and the hold
       are released;
+    * a Yandex shipment never calls BTS: the order is cancelled only while no courier can still come for
+      or bring the parcel (no open claim, or the parcel is returning / back; plan §3.8), else 409;
     * ``processing`` / ``handed_to_courier`` → a BTS parcel that exists is cancelled **first**, synchronously
       (refusal → 409 ``not_cancellable`` with BTS's reason; transport failure → 503 ``provider_unavailable``;
       nothing is written before the answer, and every check that can refuse runs before the call; BTS
@@ -960,8 +967,14 @@ def cancel_order(
             paid = payment_selectors.active_payment(order.pk, enums.PaymentStatus.PAID)
             purchase = loyalty_selectors.purchase_for_order(order.pk)
             shipment = delivery_selectors.shipment_info(order.pk)
-            has_parcel = shipment is not None and shipment.state == Shipment.State.CREATED
-            if order.status == _S.HANDED_TO_COURIER and not has_parcel:
+            yandex = shipment is not None and shipment.provider == enums.DeliveryProvider.YANDEX
+            has_parcel = shipment is not None and shipment.is_bts and shipment.state == Shipment.State.CREATED
+            if yandex and shipment is not None:
+                if shipment.stage == enums.ShipmentStage.DELIVERED or not (
+                    delivery_yandex.cancel_without_carrier(shipment.stage, claim_open=shipment.claim_open)
+                ):
+                    raise NotCancellable(MESSAGE_NOT_CANCELLABLE)
+            elif order.status == _S.HANDED_TO_COURIER and not has_parcel:
                 raise NotCancellable(MESSAGE_NOT_CANCELLABLE)
             if has_parcel:
                 try:
@@ -1059,12 +1072,20 @@ def cancel_order(
 def transition(
     order_id: int, status: str, actor_id: int, *, at: datetime | None = None, request: Any = None
 ) -> None:
-    """``POST orders/{id}/transition/``: one of ``available_actions.transitions`` (state.py rows 8–10), else
-    409 ``invalid_transition``. Event ``status_changed``, push, audit ``order.status_changed``."""
+    """``POST orders/{id}/transition/``: one of ``available_actions.transitions`` (state.py rows 8–10; none
+    for a Yandex order but the ``parcel_unaccounted`` exception), else 409 ``invalid_transition``. Event
+    ``status_changed``, push, audit ``order.status_changed``."""
     _aware(at, "at")
     with transaction.atomic():
         order = lock_order(order_id, wait=ADMIN_LOCK_WAIT)
-        if status not in state.manual_transitions(order.status, order.fulfilment):
+        provider = delivery_selectors.shipment_provider(order.pk) or enums.DeliveryProvider.BTS
+        unaccounted = provider == enums.DeliveryProvider.YANDEX and delivery_selectors.has_open_issue(
+            order.pk, enums.DeliveryIssueKind.PARCEL_UNACCOUNTED
+        )
+        offered = state.manual_transitions(
+            order.status, order.fulfilment, provider=provider, parcel_unaccounted=unaccounted
+        )
+        if status not in offered:
             raise InvalidTransition(MESSAGE_INVALID_TRANSITION)
         instant = at or timeutils.now()
         before = order.status
@@ -1126,15 +1147,20 @@ def apply_bts_status(
 
 
 def retry_shipment(order_id: int, actor_id: int, *, request: Any = None) -> None:
-    """``POST orders/{id}/retry-shipment/``: delivery ∧ ``processing`` ∧ shipment ``failed`` (else 409
-    ``invalid_transition``), not ``pending`` (else 409 ``conflict``); enqueues a manual
-    ``bts.create_shipment`` and audits ``order.shipment_retry_requested``. Both checks run under the Order
-    lock, so two concurrent retries cannot both enqueue."""
+    """``POST orders/{id}/retry-shipment/``: delivery ∧ ``processing`` ∧ BTS shipment ``failed`` (else 409
+    ``invalid_transition``; a Yandex shipment never), not ``pending`` (else 409 ``conflict``); enqueues a
+    manual ``bts.create_shipment`` and audits ``order.shipment_retry_requested``. Both checks run under the
+    Order lock, so two concurrent retries cannot both enqueue."""
     with transaction.atomic():
         order = lock_order(order_id, wait=ADMIN_LOCK_WAIT)
         shipment = delivery_selectors.shipment_info(order.pk)
         open_delivery = order.fulfilment == enums.FulfilmentMethod.DELIVERY and order.status == _S.PROCESSING
-        if shipment is None or not open_delivery or shipment.state != Shipment.State.FAILED:
+        if (
+            shipment is None
+            or not shipment.is_bts
+            or not open_delivery
+            or shipment.state != Shipment.State.FAILED
+        ):
             raise InvalidTransition(MESSAGE_RETRY_REFUSED)
         if shipment.pending:
             raise Conflict(MESSAGE_RETRY_PENDING)

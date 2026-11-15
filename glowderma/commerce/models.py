@@ -39,6 +39,8 @@ NON_STATUS_EVENT_TYPES: tuple[str, ...] = (
     enums.OrderEventType.REFUND_REQUESTED,
     enums.OrderEventType.REFUND_SUCCEEDED,
     enums.OrderEventType.REFUND_FAILED,
+    enums.OrderEventType.DELIVERY_FAILED,
+    enums.OrderEventType.SHIPMENT_RETURNED,
 )
 # Allowed ``source`` per event type (contract §4 "source" column).
 EVENT_SOURCES: dict[str, tuple[str, ...]] = {
@@ -51,13 +53,16 @@ EVENT_SOURCES: dict[str, tuple[str, ...]] = {
     enums.OrderEventType.RESERVATION_EXPIRED: (enums.EventSource.SYSTEM,),
     enums.OrderEventType.REFUND_SUCCEEDED: (enums.EventSource.SYSTEM,),
     enums.OrderEventType.REFUND_FAILED: (enums.EventSource.SYSTEM,),
-    enums.OrderEventType.HANDED_TO_COURIER: (enums.EventSource.BTS,),
-    enums.OrderEventType.DELIVERED: (enums.EventSource.BTS,),
+    enums.OrderEventType.HANDED_TO_COURIER: (enums.EventSource.BTS, enums.EventSource.YANDEX),
+    enums.OrderEventType.DELIVERED: (enums.EventSource.BTS, enums.EventSource.YANDEX),
     enums.OrderEventType.STATUS_CHANGED: (enums.EventSource.ADMIN,),
     enums.OrderEventType.SHIPMENT_CREATED: (enums.EventSource.SYSTEM, enums.EventSource.ADMIN),
     enums.OrderEventType.SHIPMENT_FAILED: (enums.EventSource.SYSTEM, enums.EventSource.ADMIN),
     enums.OrderEventType.REFUND_REQUESTED: (enums.EventSource.SYSTEM, enums.EventSource.ADMIN),
     enums.OrderEventType.CANCELLED: (enums.EventSource.SYSTEM, enums.EventSource.ADMIN),
+    # Yandex reports the failed hand-over; the return is Yandex's status or staff confirming the parcel back
+    enums.OrderEventType.DELIVERY_FAILED: (enums.EventSource.YANDEX,),
+    enums.OrderEventType.SHIPMENT_RETURNED: (enums.EventSource.YANDEX, enums.EventSource.ADMIN),
 }
 
 
@@ -159,6 +164,9 @@ class Order(TimeStampedModel):
     )  # BTS region id from accounts.Address
     address_city_code = models.CharField(max_length=16, blank=True, verbose_name="shahar kodi")  # BTS city id
     address_comment = models.CharField(max_length=200, blank=True, verbose_name="manzil izohi")
+    # the map pin of accounts.Address at checkout (both or neither); Yandex needs it, BTS never reads it
+    address_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, verbose_name="kenglik")
+    address_longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, verbose_name="uzunlik")
     # D-3: BTS needs a name after a scrub
     recipient_name = models.CharField(max_length=150, blank=True, verbose_name="qabul qiluvchi")
     recipient_phone = models.CharField(max_length=13, blank=True, verbose_name="qabul qiluvchi telefoni")
@@ -244,6 +252,11 @@ class Order(TimeStampedModel):
             models.CheckConstraint(
                 condition=Q(recipient_phone="") | Q(recipient_phone__regex=PHONE_E164_REGEX),
                 name="order_recipient_phone_e164",
+            ),
+            models.CheckConstraint(
+                condition=Q(address_latitude__isnull=True, address_longitude__isnull=True)
+                | Q(address_latitude__isnull=False, address_longitude__isnull=False),
+                name="order_address_latlng_pair",
             ),
             models.CheckConstraint(
                 condition=(
@@ -379,7 +392,7 @@ class OrderEvent(AppendOnlyModel):
         "commerce.Order", on_delete=models.PROTECT, related_name="events", verbose_name="buyurtma"
     )
     type = models.CharField(max_length=32, choices=enums.OrderEventType.choices, verbose_name="turi")
-    # system|bts|admin
+    # system|bts|admin|yandex
     source = models.CharField(max_length=8, choices=enums.EventSource.choices, verbose_name="manba")
     # "" → null
     status_after = models.CharField(

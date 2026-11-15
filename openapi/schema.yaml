@@ -18454,11 +18454,13 @@ components:
       - system
       - bts
       - admin
+      - yandex
       type: string
       description: |-
         * `system` - system
         * `bts` - bts
         * `admin` - admin
+        * `yandex` - yandex
     FreeSlots:
       type: object
       properties:
@@ -20145,6 +20147,8 @@ components:
       - refund_requested
       - refund_succeeded
       - refund_failed
+      - delivery_failed
+      - shipment_returned
       type: string
       description: |-
         * `order_created` - order_created
@@ -20163,6 +20167,8 @@ components:
         * `refund_requested` - refund_requested
         * `refund_succeeded` - refund_succeeded
         * `refund_failed` - refund_failed
+        * `delivery_failed` - delivery_failed
+        * `shipment_returned` - shipment_returned
     OrderItem:
       type: object
       properties:
@@ -21909,6 +21915,8 @@ components:
           $ref: '#/components/schemas/IntegrationModeEnum'
         email:
           $ref: '#/components/schemas/IntegrationModeEnum'
+        yandex:
+          $ref: '#/components/schemas/IntegrationModeEnum'
       required:
       - billz
       - bts
@@ -21918,6 +21926,7 @@ components:
       - fcm
       - oauth
       - payme
+      - yandex
     ProviderReadiness:
       type: object
       properties:
@@ -23420,6 +23429,8 @@ components:
       - cancelled
       - refund_in_progress
       - refund_succeeded
+      - delivery_failed
+      - shipment_returned
       type: string
       description: |-
         * `order_created` - order_created
@@ -23431,6 +23442,8 @@ components:
         * `cancelled` - cancelled
         * `refund_in_progress` - refund_in_progress
         * `refund_succeeded` - refund_succeeded
+        * `delivery_failed` - delivery_failed
+        * `shipment_returned` - shipment_returned
     TransitionRequest:
       type: object
       properties:

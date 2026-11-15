@@ -55,7 +55,7 @@ def test_seed_demo_runs_the_three_seeders_in_layer_order_and_is_idempotent(
     call_command("seed_demo", force=True, stdout=out)
     assert "ran: accounts, integrations, site_config\n" in out.getvalue()
     first = counts()
-    assert first == (1, 432, 432, 1, 1, 6, 1)
+    assert first == (1, 432, 432, 1, 1, 7, 1)
     assert Job.objects.get().created_by == get_user_model().objects.get(email="admin@glowderma.uz")
     assert SiteSettings.load().support_phone == "+998712000000"
     # design 03 §7.1: every seeded timestamp is absolute, nothing carries the real clock

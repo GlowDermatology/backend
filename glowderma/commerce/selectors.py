@@ -303,13 +303,22 @@ def _cashback_hold(order_id: int) -> dict[str, Any] | None:
 
 
 def available_actions(order: Order, shipment: Shipment | None) -> dict[str, Any]:
-    """03 §4.2: ``transitions`` (state.py manual rows), ``cancel``, ``retry_shipment``."""
+    """03 §4.2: ``transitions`` (state.py manual rows), ``cancel``, ``retry_shipment``; provider-aware (a
+    Yandex order gets no manual transition but the ``parcel_unaccounted`` exception, and never a retry)."""
     pending = shipment.is_pending if shipment is not None else False
     shipment_state = delivery_selectors.api_state(shipment, order.fulfilment)
+    provider = shipment.provider if shipment is not None else enums.DeliveryProvider.BTS
+    unaccounted = provider == enums.DeliveryProvider.YANDEX and delivery_selectors.has_open_issue(
+        order.pk, enums.DeliveryIssueKind.PARCEL_UNACCOUNTED
+    )
     return {
-        "transitions": state.manual_transitions(order.status, order.fulfilment),
+        "transitions": state.manual_transitions(
+            order.status, order.fulfilment, provider=provider, parcel_unaccounted=unaccounted
+        ),
         "cancel": state.can_cancel(order.status),
-        "retry_shipment": state.can_retry_shipment(order.fulfilment, order.status, shipment_state, pending),
+        "retry_shipment": state.can_retry_shipment(
+            order.fulfilment, order.status, shipment_state, pending, provider=provider
+        ),
     }
 
 
@@ -1369,14 +1378,22 @@ def dead_billz_sales(*, limit: int) -> Finding:
 
 def unshipped_paid_orders(paid_before: datetime, *, limit: int) -> Finding:
     """K4: delivery orders still ``processing`` that were paid before ``paid_before`` and have no BTS parcel:
-    no shipment row, or one ``not_created`` / ``failed`` (the dashboard's ``bts_failed`` is a subset).
+    no shipment row, or a BTS one ``not_created`` / ``failed`` (the dashboard's ``bts_failed`` is a subset).
+    A Yandex order waits for staff to dispatch it by design: it is never a K4 finding.
 
     Plan: ``order_status_idx`` range scan on ``status = 'processing'`` (open orders only), the shipment
     through its unique ``order_id``."""
     parcel = Shipment.objects.filter(
         order_id=OuterRef("pk"), state__in=[Shipment.State.CREATED, Shipment.State.CANCELLED]
     )
-    queryset = Order.objects.filter(
-        status=_S.PROCESSING, fulfilment=enums.FulfilmentMethod.DELIVERY, paid_at__lt=paid_before
-    ).exclude(Exists(parcel))
+    other_carrier = Shipment.objects.filter(order_id=OuterRef("pk")).exclude(
+        provider=enums.DeliveryProvider.BTS
+    )
+    queryset = (
+        Order.objects.filter(
+            status=_S.PROCESSING, fulfilment=enums.FulfilmentMethod.DELIVERY, paid_at__lt=paid_before
+        )
+        .exclude(Exists(parcel))
+        .exclude(Exists(other_carrier))
+    )
     return finding(queryset, limit=limit)

@@ -54,6 +54,7 @@ class EventSource(TextChoices):
     SYSTEM = "system", "Tizim"
     BTS = "bts", "BTS"
     ADMIN = "admin", "Admin"
+    YANDEX = "yandex", "Yandex Dostavka"
 
 
 class OrderEventType(TextChoices):
@@ -73,6 +74,9 @@ class OrderEventType(TextChoices):
     REFUND_REQUESTED = "refund_requested", "Qaytarish so‘raldi"
     REFUND_SUCCEEDED = "refund_succeeded", "Pul qaytarildi"
     REFUND_FAILED = "refund_failed", "Qaytarib bo‘lmadi"
+    # Yandex Delivery: the courier could not hand the parcel over / the parcel came back to the warehouse
+    DELIVERY_FAILED = "delivery_failed", "Yetkazib bo‘lmadi"
+    SHIPMENT_RETURNED = "shipment_returned", "Jo‘natma qaytdi"
 
 
 class CancellationReason(TextChoices):
@@ -427,6 +431,9 @@ class TimelineType(TextChoices):
     CANCELLED = "cancelled"
     REFUND_IN_PROGRESS = "refund_in_progress"
     REFUND_SUCCEEDED = "refund_succeeded"
+    # Yandex Delivery (added values: a released app shows an unknown type generically)
+    DELIVERY_FAILED = "delivery_failed"
+    SHIPMENT_RETURNED = "shipment_returned"
 
 
 class ProgressStep(TextChoices):
@@ -527,6 +534,71 @@ class SeoIssueCode(TextChoices):
     NO_ACTIVE_PRODUCTS = "no_active_products"
 
 
+# --- Yandex Delivery (docs/integrations/yandex-delivery.md) ------------------------------------------------
+
+
+class DeliveryProvider(TextChoices):
+    """The carrier of a delivery order's shipment; a row without one (every pre-Yandex order) is ``bts``."""
+
+    BTS = "bts", "BTS pochta"
+    YANDEX = "yandex", "Yandex Dostavka"
+
+
+class DeliveryMethod(TextChoices):
+    """The service level of a Yandex delivery (Standard = ``courier`` class, Express = ``express``)."""
+
+    STANDARD = "standard", "Standart"
+    EXPRESS = "express", "Ekspress"
+
+
+class ShipmentStage(TextChoices):
+    """The finer progress of a Yandex shipment (the order status stays the coarse one, decision 8)."""
+
+    AWAITING_DISPATCH = "awaiting_dispatch", "Kuryer chaqirilishini kutmoqda"
+    COURIER_REQUESTED = "courier_requested", "Kuryer qidirilmoqda"
+    COURIER_ASSIGNED = "courier_assigned", "Kuryer biriktirildi"
+    COURIER_ARRIVED = "courier_arrived", "Kuryer omborga keldi"
+    IN_TRANSIT = "in_transit", "Yo‘lda"
+    AT_DESTINATION = "at_destination", "Kuryer manzilda"
+    DELIVERED = "delivered", "Topshirildi"
+    RETURNING = "returning", "Omborga qaytarilmoqda"
+    RETURNED = "returned", "Omborga qaytdi"
+    CANCELLED = "cancelled", "Bekor qilindi"
+    FAILED = "failed", "Kuryer topilmadi yoki xato"
+
+
+class DeliveryIssueKind(TextChoices):
+    """A delivery case staff must look at (the ``DeliveryIssue`` queue, plan §3.9)."""
+
+    DISPATCH_FAILED = "dispatch_failed", "Kuryer chaqirilmadi"
+    DISPATCH_UNKNOWN = "dispatch_unknown", "Kuryer chaqiruvi noaniq"
+    DISPATCH_REVIEW = "dispatch_review", "Narxni tasdiqlash kerak"
+    DELIVERY_FAILED = "delivery_failed", "Yetkazib bo‘lmadi"
+    RETURN_PENDING = "return_pending", "Qaytish kutilmoqda"
+    PREPARATION_OVERDUE = "preparation_overdue", "Tayyorlash kechikdi"
+    CANCEL_INCOMPLETE = "cancel_incomplete", "Bekor qilish tugallanmadi"
+    PARCEL_UNACCOUNTED = "parcel_unaccounted", "Jo‘natma nazoratdan chiqdi"
+    INCIDENT = "incident", "Hodisa"
+
+
+class DeliveryIssueState(TextChoices):
+    OPEN = "open", "Ochiq"
+    RESOLVED = "resolved", "Hal qilindi"
+
+
+class DeliveryUnavailableReason(TextChoices):
+    """Why a delivery option cannot be chosen at checkout (``options[].unavailable_reason``)."""
+
+    COORDINATES_REQUIRED = "coordinates_required", "Xaritada nuqta belgilanmagan"
+    PROVIDER_UNAVAILABLE = "provider_unavailable", "Yetkazib beruvchi javob bermadi"
+    OUT_OF_ZONE = "out_of_zone", "Manzil xizmat hududidan tashqarida"
+    METHOD_DISABLED = "method_disabled", "Usul o‘chirilgan"
+    TOO_HEAVY = "too_heavy", "Jo‘natma juda og‘ir"
+    WAREHOUSE_CLOSED = "warehouse_closed", "Ombor yopiq"
+    DISPATCH_SUSPENDED = "dispatch_suspended", "Jo‘natish to‘xtatilgan"
+    NOT_CONFIGURED = "not_configured", "Sozlanmagan"
+
+
 CONTRACT_ENUMS: tuple[type[TextChoices], ...] = (
     OrderStatus,
     PaymentStatus,
@@ -598,6 +670,12 @@ CONTRACT_ENUMS: tuple[type[TextChoices], ...] = (
     AccountSecurityEvent,
     SeoSeverity,
     SeoIssueCode,
+    DeliveryProvider,
+    DeliveryMethod,
+    ShipmentStage,
+    DeliveryIssueKind,
+    DeliveryIssueState,
+    DeliveryUnavailableReason,
 )
 
 

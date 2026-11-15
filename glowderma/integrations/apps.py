@@ -3,6 +3,7 @@ from typing import Any
 
 from django.apps import AppConfig
 from django.apps import apps as global_apps
+from django.conf import settings
 from django.db.models.signals import post_migrate
 
 from glowderma.core import integration_modes
@@ -10,7 +11,7 @@ from glowderma.core import integration_modes
 logger = logging.getLogger("glowderma.integrations")
 _fake_mode_warned = False
 
-PROVIDERS = ("billz", "bts", "click", "payme", "eskiz", "fcm")
+PROVIDERS = ("billz", "bts", "click", "payme", "eskiz", "fcm", "yandex")
 
 
 def ensure_provider_rows(sender: AppConfig, *, using: str, apps: Any = global_apps, **kwargs: Any) -> None:
@@ -64,6 +65,23 @@ def warn_sandbox_providers() -> bool:
     return True
 
 
+_yandex_alerts_warned = False
+
+
+def warn_yandex_without_alerts() -> bool:
+    """Log one WARNING per process when Yandex Delivery is live but ``ALERT_WEBHOOK_URL`` is empty: urgent
+    delivery issues (a parcel nobody accounts for, a return arriving after hours) then reach the admin panel
+    only, nobody's phone (plan §3.11). Never a refusal to start. Returns whether the line was emitted."""
+    global _yandex_alerts_warned
+    if _yandex_alerts_warned or integration_modes.provider_mode("yandex") != "live":
+        return False
+    if str(getattr(settings, "ALERT_WEBHOOK_URL", "") or ""):
+        return False
+    _yandex_alerts_warned = True
+    logger.warning("yandex delivery is live without ALERT_WEBHOOK_URL: urgent delivery issues alert nobody")
+    return True
+
+
 class IntegrationsConfig(AppConfig):
     name = "glowderma.integrations"
     label = "integrations"
@@ -78,5 +96,6 @@ class IntegrationsConfig(AppConfig):
         )
         warn_fake_providers()
         warn_sandbox_providers()
+        warn_yandex_without_alerts()
         # health/?ready=1: live providers' configured flags and sync ages (core cannot import integrations)
         readiness.register(PROBE)

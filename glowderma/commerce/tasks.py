@@ -155,8 +155,8 @@ class _CreatePlan:
 
 def _plan_create(payload: dict[str, Any]) -> _CreatePlan | None:
     """Under the Order lock: skip unless the order is ``processing`` (or ``cancelled``: orphan lookup) and the
-    shipment is not created yet, and skip a request BTS already answered (``request_no``) or one superseded by
-    a newer request."""
+    BTS shipment is not created yet (a Yandex shipment never), and skip a request BTS already answered
+    (``request_no``) or one superseded by a newer request."""
     order_id = int(payload["order_id"])
     manual, actor_id = _shipment_source(payload)
     request_no = _request_no(payload)
@@ -165,7 +165,9 @@ def _plan_create(payload: dict[str, Any]) -> _CreatePlan | None:
         if order.fulfilment != enums.FulfilmentMethod.DELIVERY:
             return None
         shipment = delivery_selectors.shipment_info(order_id)
-        if shipment is None or shipment.state in (Shipment.State.CREATED, Shipment.State.CANCELLED):
+        if shipment is None or not shipment.is_bts:
+            return None
+        if shipment.state in (Shipment.State.CREATED, Shipment.State.CANCELLED):
             return None
         if request_no is not None and (
             request_no < shipment.create_requests
@@ -219,7 +221,7 @@ def _record_parcel(plan: _CreatePlan, parcel: Parcel) -> None:
     with transaction.atomic():
         order = services.lock_order(order_id)
         shipment = delivery_selectors.shipment_info(order_id)
-        if shipment is None:
+        if shipment is None or not shipment.is_bts:
             return
         if shipment.state in (Shipment.State.CREATED, Shipment.State.CANCELLED):
             if shipment.tracking_number and shipment.tracking_number != parcel.tracking_number:
@@ -336,9 +338,9 @@ def on_bts_create_dead(message: OutboxMessage) -> None:
         order = services.lock_order(order_id)
         if order.status != enums.OrderStatus.PROCESSING:
             return
-        shipment = Shipment.objects.filter(order_id=order_id).first()
+        shipment = Shipment.objects.bts().filter(order_id=order_id).first()
         if shipment is None or shipment.create_message_id not in (None, message.pk):
-            return  # a newer create request owns the shipment now
+            return  # a Yandex shipment, or a newer create request owns the shipment now
         number = delivery_services.mark_failed(
             order_id,
             error_code=topics.DEAD_LETTER_ERROR_CODE,

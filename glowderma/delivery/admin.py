@@ -84,6 +84,7 @@ class ShipmentAdmin(ReadOnlyAdmin):
     search_fields = ("tracking_number", "=order__id")
     ordering = ("-id",)
     autocomplete_fields = ("order", "create_message")
+    raw_id_fields = ("quote", "claim", "prepared_by", "return_confirmed_by")  # Yandex Delivery
     inlines = (ShipmentEventInline,)
 
 

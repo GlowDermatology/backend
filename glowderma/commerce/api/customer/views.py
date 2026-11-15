@@ -87,7 +87,8 @@ def fake_scenario_header(request: Request) -> dict[str, Any] | None:
         return None
     if not getattr(settings, "FAKE_SCENARIO_HEADER_ENABLED", False):
         return None
-    if any(integration_modes.provider_mode(p) != "fake" for p in ("eskiz", "click", "payme", "bts", "fcm")):
+    providers = ("eskiz", "click", "payme", "bts", "yandex", "fcm")
+    if any(integration_modes.provider_mode(p) != "fake" for p in providers):
         return None
     try:
         value = json.loads(raw)

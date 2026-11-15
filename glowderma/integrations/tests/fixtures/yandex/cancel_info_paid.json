@@ -1,0 +1,7 @@
+{
+  "_source": "documented shape; UZS is our assumption",
+  "cancel_state": "paid",
+  "price": "10000.0000",
+  "price_with_vat": "12000.5000",
+  "currency": "UZS"
+}

@@ -237,6 +237,10 @@ msgstr[1] "%(count)s ошибки"
 msgstr[2] "%(count)s ошибок"
 msgstr[3] "%(count)s ошибок"
 
+#: glowderma/delivery/models.py
+msgid "%(date)s: yopiq"
+msgstr "%(date)s: закрыто"
+
 #: glowderma/loyalty/models.py
 msgid "%(device)s · nofaol"
 msgstr "%(device)s · неактивно"
@@ -531,6 +535,10 @@ msgid "Autentifikator ilovasini (Google Authenticator, Microsoft Authenticator, 
 msgstr "Откройте приложение-аутентификатор (Google Authenticator, Microsoft Authenticator, 1Password …) и введите код, показанный для «Glow Derma Ops»."
 
 #: model metadata
+msgid "B nuqta ID"
+msgstr "ID точки B"
+
+#: model metadata
 msgid "BTS"
 msgstr "BTS"
 
@@ -558,6 +566,10 @@ msgstr "Запросить статусы BTS"
 #: glowderma/reporting/dashboards/ops.py
 msgid "BTS kuzatuvi"
 msgstr "Отслеживание BTS"
+
+#: model metadata
+msgid "BTS pochta"
+msgstr "Почта BTS"
 
 #: glowderma/integrations/admin.py
 msgid "BTS soxta rejimda ishlayapti: holat so‘rovi o‘chirilgan."
@@ -670,6 +682,10 @@ msgstr "Отмена"
 #: model metadata
 msgid "Bekor qilish rad etildi"
 msgstr "Отмена отклонена"
+
+#: model metadata
+msgid "Bekor qilish tugallanmadi"
+msgstr "Отмена не завершена"
 
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "Berildi"
@@ -975,6 +991,10 @@ msgstr "Отправление по заказу №%(order)s: %(state)s"
 msgid "Buyurtma №%(order)s: %(kind)s (%(source)s) · %(at)s"
 msgstr "Заказ №%(order)s: %(kind)s (%(source)s) · %(at)s"
 
+#: glowderma/delivery/models.py
+msgid "Buyurtma №%(order)s: %(kind)s (%(state)s)"
+msgstr "Заказ №%(order)s: %(kind)s (%(state)s)"
+
 #: glowderma/commerce/admin.py
 msgid "Buyurtma №{obj.pk}"
 msgstr "Заказ №{obj.pk}"
@@ -1182,6 +1202,26 @@ msgstr "Понедельник"
 msgid "E-pochtani tasdiqlash"
 msgstr "Подтверждение электронной почты"
 
+#: model metadata
+msgid "Ekspress"
+msgstr "Экспресс"
+
+#: model metadata
+msgid "Ekspress yoqilgan"
+msgstr "Экспресс включён"
+
+#: model metadata
+msgid "Ekspress: Yandex klassi"
+msgstr "Экспресс: класс Яндекса"
+
+#: model metadata
+msgid "Ekspress: eng kech (daqiqa)"
+msgstr "Экспресс: самое позднее (мин)"
+
+#: model metadata
+msgid "Ekspress: eng tez (daqiqa)"
+msgstr "Экспресс: самое раннее (мин)"
+
 #: glowderma/reporting/dashboards/customers.py
 msgid "Emailni tasdiqlash"
 msgstr "Подтверждение электронной почты"
@@ -1358,6 +1398,10 @@ msgstr "Да, сбросить 2FA"
 msgid "Hafta kuni"
 msgstr "День недели"
 
+#: model metadata
+msgid "Hal qilindi"
+msgstr "Решено"
+
 #: glowderma/reporting/dashboards/ops.py
 msgid "Hali ishlamagan"
 msgstr "Запусков ещё не было"
@@ -1470,6 +1514,7 @@ msgid "Hisobotni hozir ishga tushirish"
 msgstr "Запустить отчёт сейчас"
 
 #: glowderma/delivery/admin.py
+#: model metadata
 msgid "Hodisa"
 msgstr "Событие"
 
@@ -1715,12 +1760,24 @@ msgid "Jo‘natma"
 msgstr "Отправление"
 
 #: glowderma/delivery/models.py
+msgid "Jo‘natma #%(shipment)s, kuryer buyurtmasi %(number)s: %(status)s"
+msgstr "Отправление #%(shipment)s, заявка курьеру %(number)s: %(status)s"
+
+#: glowderma/delivery/models.py
 msgid "Jo‘natma #%(shipment)s: %(event)s · %(at)s"
 msgstr "Отправление #%(shipment)s: %(event)s · %(at)s"
 
 #: glowderma/commerce/diagnostics.py
 msgid "Jo‘natma hali yaratilmagan"
 msgstr "Отправление ещё не создано"
+
+#: model metadata
+msgid "Jo‘natma nazoratdan chiqdi"
+msgstr "Посылка вне учёта"
+
+#: model metadata
+msgid "Jo‘natma qaytdi"
+msgstr "Отправление возвращено"
 
 #: model metadata
 msgid "Jo‘natma yaratildi"
@@ -1969,6 +2026,42 @@ msgstr "Дневная выручка по каналам"
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "Kunlik va soatlik limitlar (Redis hisoblagichlari) yozuv qoldirmaydi — bu yerda faqat bazadagi kodlar."
 msgstr "Суточные и часовые лимиты (счётчики Redis) не оставляют записей — здесь только коды из базы данных."
+
+#: model metadata
+msgid "Kuryer biriktirildi"
+msgstr "Курьер назначен"
+
+#: model metadata
+msgid "Kuryer chaqirilishini kutmoqda"
+msgstr "Ожидает вызова курьера"
+
+#: model metadata
+msgid "Kuryer chaqirilmadi"
+msgstr "Курьер не вызван"
+
+#: model metadata
+msgid "Kuryer chaqiruvi noaniq"
+msgstr "Вызов курьера не подтверждён"
+
+#: model metadata
+msgid "Kuryer manzilda"
+msgstr "Курьер на адресе"
+
+#: model metadata
+msgid "Kuryer omborga keldi"
+msgstr "Курьер прибыл на склад"
+
+#: model metadata
+msgid "Kuryer qidirilmoqda"
+msgstr "Поиск курьера"
+
+#: model metadata
+msgid "Kuryer so‘raldi"
+msgstr "Курьер запрошен"
+
+#: model metadata
+msgid "Kuryer topilmadi yoki xato"
+msgstr "Курьер не найден или ошибка"
 
 #: glowderma/delivery/admin.py
 msgid "Kuryerda / yo‘lda"
@@ -2277,6 +2370,18 @@ msgstr "Цена"
 msgid "Narx o‘zgardi"
 msgstr "Цена изменена"
 
+#: glowderma/delivery/models.py
+msgid "Narx taklifi %(id)s: %(provider)s %(method)s, %(fee)s so‘m"
+msgstr "Расчёт %(id)s: %(provider)s %(method)s, %(fee)s сум"
+
+#: model metadata
+msgid "Narx tekshiruvga yuborildi"
+msgstr "Цена отправлена на проверку"
+
+#: model metadata
+msgid "Narxni tasdiqlash kerak"
+msgstr "Нужно подтвердить цену"
+
 #: glowderma/integrations/admin.py
 msgid "Natija"
 msgstr "Результат"
@@ -2347,6 +2452,10 @@ msgstr "ОС"
 msgid "OTP · 24 soat"
 msgstr "OTP · 24 часа"
 
+#: model metadata
+msgid "Ochiq"
+msgstr "Открыто"
+
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "Ochiq sessiya yo‘q"
 msgstr "Открытых сеансов нет"
@@ -2391,6 +2500,14 @@ msgstr "Самовывоз"
 #: glowderma/site_config/templates/site_config/console/settings.html
 msgid "Olib ketish manzili"
 msgstr "Адрес самовывоза"
+
+#: model metadata
+msgid "Omborga qaytarilmoqda"
+msgstr "Возвращается на склад"
+
+#: model metadata
+msgid "Omborga qaytdi"
+msgstr "Вернулось на склад"
 
 #: model metadata
 msgid "Onlayn"
@@ -2704,6 +2821,10 @@ msgstr "Возврат долго остаётся открытым: откро�
 #: glowderma/payments/admin.py
 msgid "Qaytarishlar"
 msgstr "Возвраты"
+
+#: model metadata
+msgid "Qaytish kutilmoqda"
+msgstr "Ожидается возврат"
 
 #: glowderma.core.labels.NOTIFICATION_STATE
 #: model metadata
@@ -3155,6 +3276,10 @@ msgstr "Запрос не принят"
 msgid "So‘rov tushunarsiz. Sahifani yangilang va qayta urinib ko‘ring."
 msgstr "Запрос не распознан. Обновите страницу и повторите попытку."
 
+#: model metadata
+msgid "Standart"
+msgstr "Стандарт"
+
 #: admin history (professionals.Service)
 msgid "Standart davomiylik (daq.)"
 msgstr "Длительность по умолчанию (мин.)"
@@ -3162,6 +3287,22 @@ msgstr "Длительность по умолчанию (мин.)"
 #: admin history (professionals.Service)
 msgid "Standart narx"
 msgstr "Цена по умолчанию"
+
+#: model metadata
+msgid "Standart yoqilgan"
+msgstr "Стандарт включён"
+
+#: model metadata
+msgid "Standart: Yandex klassi"
+msgstr "Стандарт: класс Яндекса"
+
+#: model metadata
+msgid "Standart: eng kech (daqiqa)"
+msgstr "Стандарт: самое позднее (мин)"
+
+#: model metadata
+msgid "Standart: eng tez (daqiqa)"
+msgstr "Стандарт: самое раннее (мин)"
 
 #: glowderma/commerce/admin.py
 #: glowderma/loyalty/admin.py
@@ -3268,6 +3409,10 @@ msgstr "Описание слишком короткое"
 msgid "Tavsif yo‘q"
 msgstr "Нет описания"
 
+#: model metadata
+msgid "Tayyorlash kechikdi"
+msgstr "Подготовка просрочена"
+
 #: glowderma/reporting/templates/reporting/dashboards/money.html
 msgid "Tekshiruv"
 msgstr "Проверка"
@@ -3357,6 +3502,10 @@ msgstr[0] "Топ-%(count)s товар"
 msgstr[1] "Топ-%(count)s товара"
 msgstr[2] "Топ-%(count)s товаров"
 msgstr[3] "Топ-%(count)s товаров"
+
+#: model metadata
+msgid "Topshirildi"
+msgstr "Вручено"
 
 #: glowderma/reporting/templates/reporting/dashboards/sales.html
 msgid "Toshkent vaqti"
@@ -3706,6 +3855,34 @@ msgstr "Воскресенье"
 msgid "Yana o‘lik xabarlar qoldi — amalni takrorlang."
 msgstr "Остались ещё «мёртвые» сообщения — повторите действие."
 
+#: model metadata
+msgid "Yandex Delivery"
+msgstr "Яндекс Доставка"
+
+#: model metadata
+msgid "Yandex Dostavka"
+msgstr "Яндекс Доставка"
+
+#: model metadata
+msgid "Yandex buyurtma ID"
+msgstr "ID заявки Яндекса"
+
+#: model metadata
+msgid "Yandex holati"
+msgstr "Статус Яндекса"
+
+#: model metadata
+msgid "Yandex holati keldi"
+msgstr "Получен статус Яндекса"
+
+#: model metadata
+msgid "Yandex klassi"
+msgstr "Класс Яндекса"
+
+#: model metadata
+msgid "Yandex yangilagan"
+msgstr "Обновлено Яндексом"
+
 #: glowderma/reporting/dashboards/customers.py
 msgid "Yangi mijozlar · %(days)s kun"
 msgid_plural "Yangi mijozlar · %(days)s kun"
@@ -3786,6 +3963,10 @@ msgstr "Списанный резерв ↔ запись списания"
 msgid "Yetkazib berish"
 msgstr "Доставка"
 
+#: model metadata
+msgid "Yetkazib bo‘lmadi"
+msgstr "Не удалось доставить"
+
 #: glowderma.core.labels.ORDER_STATUS
 #: glowderma/delivery/admin.py
 #: model metadata
@@ -3799,6 +3980,10 @@ msgstr "Доставка"
 #: glowderma/commerce/templates/admin/commerce/order_diagnostics.html
 msgid "Yetkazish (BTS)"
 msgstr "Доставка (BTS)"
+
+#: glowderma/delivery/models.py
+msgid "Yetkazish sozlamalari"
+msgstr "Настройки доставки"
 
 #: config/settings/ops_admin.py
 msgid "Yetkazish tarixi"
@@ -3815,6 +4000,10 @@ msgstr "Запись #%(id)s %(kind)s %(amount)s → %(balance)s (счёт #%(ac
 #: glowderma/reporting/dashboards/money.py
 msgid "Yozuvlar zanjiri (har bir yozuvdan keyingi balans)"
 msgstr "Цепочка записей (баланс после каждой записи)"
+
+#: model metadata
+msgid "Yo‘lda"
+msgstr "В пути"
 
 #: glowderma/core/templatetags/ops_admin.py
 #: glowderma/reporting/dashboards/money.py
@@ -3945,6 +4134,10 @@ msgstr "телефон аудитории"
 msgid "auditoriya turi"
 msgstr "тип аудитории"
 
+#: model metadata
+msgid "avtomatik qabul qilinadigan oshish (so‘m)"
+msgstr "автоматически принимаемое повышение (сум)"
+
 #: glowderma/commerce/tasks.py
 msgid "avval Billz’da shu buyurtmaning sotuvi qo‘lda kiritilmaganini tekshiring. Kiritilgan bo‘lsa, qayta navbatga qo‘ymang — sotuv Billz’da ikki marta yoziladi; texnik guruhga buyurtma raqamini yuboring, ular sotuvni «qo‘lda yozilgan» deb belgilaydi."
 msgstr "сначала проверьте в Billz, не внесена ли продажа по этому заказу вручную. Если внесена, не возвращайте сообщение в очередь — продажа будет зарегистрирована в Billz дважды; отправьте номер заказа технической группе, и она отметит продажу как «зарегистрированную вручную»."
@@ -4010,6 +4203,14 @@ msgid "bekor qilish sababi"
 msgstr "причина отмены"
 
 #: model metadata
+msgid "bekor qilish so‘ralgan"
+msgstr "запрошена отмена"
+
+#: model metadata
+msgid "bekor qilish to‘lovi"
+msgstr "плата за отмену"
+
+#: model metadata
 msgid "bekor qilish yozuvi"
 msgstr "запись отмены"
 
@@ -4028,6 +4229,14 @@ msgstr "биография (uz)"
 #: model metadata
 msgid "birlik narxi"
 msgstr "цена за единицу"
+
+#: model metadata
+msgid "bitta jo‘natmadagi eng katta zarar (so‘m)"
+msgstr "максимальный убыток на отправление (сум)"
+
+#: model metadata
+msgid "bitta mahsulot og‘irligi (g)"
+msgstr "вес одного товара (г)"
 
 #: model metadata
 msgid "bog‘langandagi email"
@@ -4052,6 +4261,10 @@ msgstr "начало"
 #: glowderma/core/templatetags/ops_admin.py
 msgid "boshlanishi:"
 msgstr "начинается с:"
+
+#: model metadata
+msgid "bosqich"
+msgstr "этап"
 
 #: glowderma/core/templatetags/ops_admin.py
 msgid "bo‘sh"
@@ -4154,6 +4367,10 @@ msgstr "политики кешбэка"
 msgid "cashback summasi"
 msgstr "сумма кешбэка"
 
+#: model metadata
+msgid "chaqirgan"
+msgstr "вызвал"
+
 #: glowderma/professionals/models.py
 msgid "dam olish"
 msgstr "выходной"
@@ -4186,6 +4403,14 @@ msgstr "эл. почта подтверждена"
 msgid "eni"
 msgstr "ширина"
 
+#: model metadata
+msgid "eslatilgan"
+msgstr "напомнено"
+
+#: model metadata
+msgid "eslatmalar"
+msgstr "напоминания"
+
 #: glowderma/site_config/templates/site_config/console/settings.html
 msgid "e’lon qilingan <time datetime=\"%(iso)s\">%(at)s</time>"
 msgstr "опубликована <time datetime=\"%(iso)s\">%(at)s</time>"
@@ -4205,6 +4430,10 @@ msgstr[3] "активных учётных записей"
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "faol mijozlar, umrbod xarid bo‘yicha"
 msgstr "активные клиенты, по сумме покупок за всё время"
+
+#: model metadata
+msgid "farq (so‘m)"
+msgstr "разница (сум)"
 
 #: model metadata
 msgid "fayl"
@@ -4269,6 +4498,14 @@ msgstr "объём"
 #: model metadata
 msgid "hajmi (bayt)"
 msgstr "размер (байт)"
+
+#: model metadata
+msgid "hal qilgan"
+msgstr "решил"
+
+#: model metadata
+msgid "hal qilingan"
+msgstr "решено"
 
 #: glowderma/integrations/models.py
 msgid "hali yo‘q"
@@ -4337,6 +4574,10 @@ msgstr "счёт"
 #: model metadata
 msgid "hisob asosi"
 msgstr "база расчёта"
+
+#: model metadata
+msgid "hisob-kitob yopilgan"
+msgstr "расчёт закрыт"
 
 #: model metadata
 msgid "hisoblangan yozuv"
@@ -4475,6 +4716,10 @@ msgid "javob tanasi"
 msgstr "тело ответа"
 
 #: model metadata
+msgid "joriy kuryer buyurtmasi"
+msgstr "текущая заявка курьеру"
+
+#: model metadata
 msgid "joy nomi"
 msgstr "название места"
 
@@ -4483,8 +4728,16 @@ msgid "joylashuv"
 msgstr "местоположение"
 
 #: model metadata
+msgid "jo‘natish to‘xtatilgan"
+msgstr "отправка приостановлена"
+
+#: model metadata
 msgid "jo‘natma"
 msgstr "отправление"
+
+#: model metadata
+msgid "jo‘natma og‘irligi (g)"
+msgstr "вес посылки (г)"
 
 #: model metadata
 msgid "jo‘natmalar"
@@ -4568,6 +4821,14 @@ msgid "kirish usuli"
 msgstr "способ входа"
 
 #: model metadata
+msgid "kiritgan"
+msgstr "добавил"
+
+#: model metadata
+msgid "kod"
+msgstr "код"
+
+#: model metadata
 msgid "kod HMAC"
 msgstr "HMAC кода"
 
@@ -4608,8 +4869,28 @@ msgid "kun ish vaqtlari"
 msgstr "рабочее время по датам"
 
 #: model metadata
+msgid "kuryer"
+msgstr "курьер"
+
+#: model metadata
+msgid "kuryer buyurtmalari"
+msgstr "заявки курьерам"
+
+#: model metadata
+msgid "kuryer buyurtmasi"
+msgstr "заявка курьеру"
+
+#: model metadata
+msgid "kuryer uchun izoh"
+msgstr "комментарий для курьера"
+
+#: model metadata
 msgid "kuryerga berilgan"
 msgstr "передано курьеру"
+
+#: model metadata
+msgid "kuzatish havolasi"
+msgstr "ссылка для отслеживания"
 
 #: glowderma/reporting/dashboards/sales.py
 #: model metadata
@@ -4685,6 +4966,10 @@ msgid "manzil (uz)"
 msgstr "адрес (uz)"
 
 #: model metadata
+msgid "manzil ID"
+msgstr "ID адреса"
+
+#: model metadata
 msgid "manzil izohi"
 msgstr "примечание к адресу"
 
@@ -4695,6 +4980,18 @@ msgstr "адреса"
 #: model metadata
 msgid "maqsad"
 msgstr "назначение"
+
+#: model metadata
+msgid "mas’ul e-pochtasi"
+msgstr "e-mail контактного лица"
+
+#: model metadata
+msgid "mas’ul shaxs"
+msgstr "контактное лицо"
+
+#: model metadata
+msgid "mas’ul telefoni"
+msgstr "телефон контактного лица"
 
 #: model metadata
 msgid "matn"
@@ -4773,6 +5070,10 @@ msgid "mijoz izohi"
 msgstr "примечание клиента"
 
 #: model metadata
+msgid "mijoz to‘lovi"
+msgstr "плата клиента"
+
+#: model metadata
 msgid "mijozlar"
 msgstr "клиенты"
 
@@ -4832,6 +5133,10 @@ msgstr "абсолютный срок действия"
 msgid "narx"
 msgstr "цена"
 
+#: model metadata
+msgid "narx taklifi"
+msgstr "расчёт стоимости"
+
 #: glowderma/integrations/admin.py
 #: model metadata
 msgid "natija"
@@ -4875,6 +5180,26 @@ msgid "obyekt turi"
 msgstr "тип объекта"
 
 #: model metadata
+msgid "ochgan"
+msgstr "открыл"
+
+#: model metadata
+msgid "ochiladi"
+msgstr "открывается"
+
+#: model metadata
+msgid "ochilgan"
+msgstr "открыто"
+
+#: model metadata
+msgid "ogohlantirishlar"
+msgstr "предупреждения"
+
+#: model metadata
+msgid "og‘irlik (g)"
+msgstr "вес (г)"
+
+#: model metadata
 msgid "oldin"
 msgstr "до"
 
@@ -4901,6 +5226,38 @@ msgstr "адрес самовывоза (uz)"
 #: model metadata
 msgid "olish usuli"
 msgstr "способ получения"
+
+#: model metadata
+msgid "ombor ish vaqti"
+msgstr "часы работы склада"
+
+#: model metadata
+msgid "ombor kengligi"
+msgstr "широта склада"
+
+#: model metadata
+msgid "ombor manzili"
+msgstr "адрес склада"
+
+#: model metadata
+msgid "ombor maxsus kuni"
+msgstr "особый день склада"
+
+#: model metadata
+msgid "ombor maxsus kunlari"
+msgstr "особые дни склада"
+
+#: model metadata
+msgid "ombor nomi"
+msgstr "название склада"
+
+#: model metadata
+msgid "ombor uzunligi"
+msgstr "долгота склада"
+
+#: model metadata
+msgid "omborga qaytgan"
+msgstr "вернулось на склад"
 
 #: glowderma/notifications/admin.py
 msgid "onlayn buyurtmalar %(orders)s · umrbod xarid %(amount)s"
@@ -5159,6 +5516,14 @@ msgid "qaytarishlar"
 msgstr "возвраты"
 
 #: model metadata
+msgid "qaytgan jo‘natmalar qabul qilinadi"
+msgstr "возвраты принимаются"
+
+#: model metadata
+msgid "qaytishni tasdiqlagan"
+msgstr "возврат подтвердил"
+
+#: model metadata
 msgid "qidiruv matni"
 msgstr "текст для поиска"
 
@@ -5258,6 +5623,10 @@ msgstr "ссылка на изображение"
 #: model metadata
 msgid "refresh token xeshi"
 msgstr "хеш refresh-токена"
+
+#: model metadata
+msgid "rejalashtirilgan"
+msgstr "запланировано"
 
 #: model metadata
 msgid "rol"
@@ -5381,6 +5750,10 @@ msgid "shartlar yangilangan"
 msgstr "условия обновлены"
 
 #: model metadata
+msgid "shoshilinch"
+msgstr "срочно"
+
+#: model metadata
 msgid "sinxronlangan"
 msgstr "синхронизировано"
 
@@ -5498,8 +5871,20 @@ msgstr[2] "платежей"
 msgstr[3] "платежей"
 
 #: model metadata
+msgid "tafsilotlar"
+msgstr "подробности"
+
+#: model metadata
 msgid "tajriba (yil)"
 msgstr "опыт (лет)"
+
+#: model metadata
+msgid "taklif muddati"
+msgstr "предложение действует до"
+
+#: model metadata
+msgid "taklif narxi"
+msgstr "цена предложения"
 
 #: model metadata
 msgid "takrorlanmaslik kaliti"
@@ -5538,6 +5923,10 @@ msgid "tartib"
 msgstr "порядок"
 
 #: model metadata
+msgid "tartib raqami"
+msgstr "порядковый номер"
+
+#: model metadata
 msgid "tasdiq ishlatilgan"
 msgstr "подтверждение использовано"
 
@@ -5548,6 +5937,10 @@ msgstr "срок действия подтверждения"
 #: model metadata
 msgid "tasdiq tokeni xeshi"
 msgstr "хеш токена подтверждения"
+
+#: model metadata
+msgid "tasdiq yuborilgan"
+msgstr "подтверждение отправлено"
 
 #: model metadata
 msgid "tasdiqlagan"
@@ -5561,6 +5954,10 @@ msgstr "подтверждено"
 msgctxt "belgi"
 msgid "tasdiqlangan"
 msgstr "подтверждено"
+
+#: model metadata
+msgid "tasdiqlangan narx"
+msgstr "подтверждённая цена"
 
 #: model metadata
 msgid "tasdiqlangan versiya"
@@ -5581,6 +5978,30 @@ msgstr "описание (ru)"
 #: model metadata
 msgid "tavsif (uz)"
 msgstr "описание (uz)"
+
+#: model metadata
+msgid "taxminga QQS (%)"
+msgstr "НДС к оценке (%)"
+
+#: model metadata
+msgid "taxminiy narx"
+msgstr "оценочная цена"
+
+#: model metadata
+msgid "tayyorlagan"
+msgstr "подготовил"
+
+#: model metadata
+msgid "tayyorlangan"
+msgstr "подготовлено"
+
+#: model metadata
+msgid "tayyorlash muddati (ish daqiqasi)"
+msgstr "срок подготовки (рабочие минуты)"
+
+#: model metadata
+msgid "tayyorlash vaqti (daqiqa)"
+msgstr "время подготовки (мин)"
 
 #: model metadata
 msgid "telefon"
@@ -5639,6 +6060,10 @@ msgid "to‘langan"
 msgstr "оплачено"
 
 #: model metadata
+msgid "to‘langan narx"
+msgstr "оплаченная цена"
+
+#: model metadata
 msgid "to‘liq ism"
 msgstr "полное имя"
 
@@ -5663,12 +6088,24 @@ msgid "to‘xtatilgan"
 msgstr "остановлено"
 
 #: model metadata
+msgid "to‘xtatish izohi"
+msgstr "причина приостановки"
+
+#: model metadata
+msgid "to‘xtatish muddati"
+msgstr "приостановлено до"
+
+#: model metadata
 msgid "to‘xtatish so‘ralgan"
 msgstr "остановка запрошена"
 
 #: model metadata
 msgid "to‘xtatishni so‘ragan"
 msgstr "кем запрошена остановка"
+
+#: model metadata
+msgid "transport"
+msgstr "транспорт"
 
 #: model metadata
 msgid "trek raqami"
@@ -5711,6 +6148,10 @@ msgid "user-agent"
 msgstr "user-agent"
 
 #: model metadata
+msgid "ustama (%)"
+msgstr "наценка (%)"
+
+#: model metadata
 msgid "usul"
 msgstr "метод"
 
@@ -5721,6 +6162,14 @@ msgstr "долгота"
 #: model metadata
 msgid "vaqt"
 msgstr "время"
+
+#: model metadata
+msgid "va’da qilingan (dan)"
+msgstr "обещано с"
+
+#: model metadata
+msgid "va’da qilingan (gacha)"
+msgstr "обещано до"
 
 #: model metadata
 msgid "veb-sayt havolasi"
@@ -5818,6 +6267,10 @@ msgid "xodimlar"
 msgstr "сотрудники"
 
 #: model metadata
+msgid "yakuniy narx"
+msgstr "итоговая цена"
+
+#: model metadata
 msgid "yakunlangan"
 msgstr "завершено"
 
@@ -5855,8 +6308,28 @@ msgid "yechib olingan"
 msgstr "списано"
 
 #: model metadata
+msgid "yechim izohi"
+msgstr "комментарий к решению"
+
+#: model metadata
 msgid "yechish yozuvi"
 msgstr "запись списания"
+
+#: model metadata
+msgid "yetkazib beruvchi"
+msgstr "перевозчик"
+
+#: model metadata
+msgid "yetkazib beruvchi holati"
+msgstr "статус перевозчика"
+
+#: model metadata
+msgid "yetkazib beruvchi narxi"
+msgstr "цена перевозчика"
+
+#: model metadata
+msgid "yetkazib beruvchi xarajati (so‘m)"
+msgstr "расходы на перевозчика (сум)"
 
 #: model metadata
 msgid "yetkazildi"
@@ -5867,16 +6340,52 @@ msgid "yetkazilgan"
 msgstr "доставлено"
 
 #: model metadata
+msgid "yetkazish (dan)"
+msgstr "доставка с"
+
+#: model metadata
+msgid "yetkazish (gacha)"
+msgstr "доставка до"
+
+#: model metadata
 msgid "yetkazish hodisasi"
 msgstr "событие доставки"
+
+#: model metadata
+msgid "yetkazish muammolari"
+msgstr "проблемы доставки"
+
+#: model metadata
+msgid "yetkazish muammosi"
+msgstr "проблема доставки"
 
 #: model metadata
 msgid "yetkazish narxi"
 msgstr "стоимость доставки"
 
 #: model metadata
+msgid "yetkazish narxi taklifi"
+msgstr "расчёт стоимости доставки"
+
+#: model metadata
+msgid "yetkazish narxi takliflari"
+msgstr "расчёты стоимости доставки"
+
+#: model metadata
+msgid "yetkazish sozlamalari"
+msgstr "настройки доставки"
+
+#: model metadata
 msgid "yetkazish tarixi"
 msgstr "история доставки"
+
+#: model metadata
+msgid "yopiladi"
+msgstr "закрывается"
+
+#: model metadata
+msgid "yopilishdan oldin oxirgi chaqiruv (daqiqa)"
+msgstr "последний вызов до закрытия (мин)"
 
 #: model metadata
 msgid "yorliq"

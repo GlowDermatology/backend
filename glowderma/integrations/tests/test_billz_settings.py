@@ -58,7 +58,15 @@ def test_integrations_mode_live_makes_billz_live_and_demands_its_values(
 ) -> None:
     monkeypatch.setenv("INTEGRATIONS_MODE", "live")
     # the other live adapters would demand their own values first (integrations/tests/test_live_settings.py)
-    for name in ("OAUTH_MODE", "CLICK_MODE", "PAYME_MODE", "BTS_MODE", "ESKIZ_MODE", "FCM_MODE"):
+    for name in (
+        "OAUTH_MODE",
+        "CLICK_MODE",
+        "PAYME_MODE",
+        "BTS_MODE",
+        "ESKIZ_MODE",
+        "FCM_MODE",
+        "YANDEX_DELIVERY_MODE",
+    ):
         monkeypatch.setenv(name, "fake")
     monkeypatch.delenv("BILLZ_MODE", raising=False)
     with pytest.raises(ImproperlyConfigured, match="BILLZ_SECRET_KEY is required"):

@@ -5,9 +5,10 @@ that refuses its settings raises ``ImproperlyConfigured`` / ``ValueError`` → n
 ``is_configured()`` must say yes (Billz: the key and the shop, cash box and payment-type ids; Payme: the
 merchant id and key; Click: the three numeric ids, not ``00000``, and the secret key; BTS: login, password,
 sender city code and, for a branch pickup, the branch code; Eskiz: email, password and sender; e-mail
-(``EMAIL_MODE=smtp``): host and sender; FCM: the project id and an existing key file). Building an adapter
-reads settings only and sends nothing. ``last_syncs()`` reads ``IntegrationState.last_sync_at`` of the live
-providers that sync (Billz catalog sync, BTS polling).
+(``EMAIL_MODE=smtp``): host and sender; FCM: the project id and an existing key file; Yandex Delivery: the
+token, an https base URL, the currency and the language). Building an adapter reads settings only and sends
+nothing. ``last_syncs()`` reads ``IntegrationState.last_sync_at`` of the live providers that sync (Billz
+catalog sync, BTS and Yandex polling).
 """
 
 from __future__ import annotations
@@ -26,12 +27,13 @@ from glowderma.integrations.fcm.registry import get_fcm_port
 from glowderma.integrations.models import IntegrationState
 from glowderma.integrations.oauth.registry import STAFF_PROVIDERS, get_oauth_provider
 from glowderma.integrations.payme.registry import get_payme
+from glowderma.integrations.yandex_delivery.registry import get_yandex_delivery
 
 logger = logging.getLogger(__name__)
 
 LIVE = "live"
-# Providers whose IntegrationState.last_sync_at is a sync (Billz) or a polling run (BTS).
-SYNCING_PROVIDERS: tuple[str, ...] = ("billz", "bts")
+# Providers whose IntegrationState.last_sync_at is a sync (Billz) or a polling run (BTS, Yandex).
+SYNCING_PROVIDERS: tuple[str, ...] = ("billz", "bts", "yandex")
 # provider → the adapters its live mode uses (built from settings; nothing is sent).
 BUILDERS: dict[str, Callable[[], Iterable[object]]] = {
     "oauth": lambda: [get_oauth_provider(name) for name in STAFF_PROVIDERS],
@@ -42,6 +44,7 @@ BUILDERS: dict[str, Callable[[], Iterable[object]]] = {
     "bts": lambda: [get_bts()],
     "eskiz": lambda: [get_eskiz_port()],
     "email": lambda: [get_email_port()],
+    "yandex": lambda: [get_yandex_delivery()],
 }
 
 

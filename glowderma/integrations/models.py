@@ -22,6 +22,7 @@ class WebhookInbox(AppendOnlyModel):
         PAYME = "payme", "Payme"
         BTS = "bts", "BTS"
         BILLZ = "billz", "Billz"
+        YANDEX = "yandex", "Yandex Delivery"
 
     provider = models.CharField(max_length=16, choices=Provider.choices, verbose_name="provayder")
     # provider-specific natural key of the delivery
@@ -139,11 +140,12 @@ class IntegrationState(models.Model):
         PAYME = "payme", "Payme"
         ESKIZ = "eskiz", "Eskiz"
         FCM = "fcm", "FCM"
+        YANDEX = "yandex", "Yandex Delivery"
 
     provider = models.CharField(
         max_length=16, choices=Provider.choices, unique=True, verbose_name="provayder"
     )
-    # last successful full/delta sync (billz) or poll (bts)
+    # last successful full/delta sync (billz) or poll (bts, yandex)
     last_sync_at = models.DateTimeField(null=True, verbose_name="oxirgi sinxronlash")
     # last successful call of any kind
     last_success_at = models.DateTimeField(null=True, verbose_name="oxirgi muvaffaqiyat")

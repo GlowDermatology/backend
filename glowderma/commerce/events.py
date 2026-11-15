@@ -36,6 +36,10 @@ EVENT_DATA_KEYS: dict[str, tuple[str, ...]] = {
     _E.REFUND_REQUESTED: ("refund_id", "amount", "provider", "manual", "manual_reason"),
     _E.REFUND_SUCCEEDED: ("refund_id", "amount", "provider"),
     _E.REFUND_FAILED: ("refund_id", "amount", "provider", "state", "error_code"),
+    # Yandex Delivery: ``provider`` is a DeliveryProvider, ``carrier_status`` the carrier's own status
+    # ("" when staff confirm a return by hand), ``reason`` the carrier's return reason ("" when it names none)
+    _E.DELIVERY_FAILED: ("provider", "carrier_status", "reason", "claim_id"),
+    _E.SHIPMENT_RETURNED: ("provider", "carrier_status", "claim_id"),
 }
 
 # Events written by at-least-once handlers carry a discriminating key: a second delivery finds the event
@@ -47,6 +51,8 @@ DEDUPE_KEYS: dict[str, tuple[str, ...]] = {
     _E.REFUND_REQUESTED: ("refund_id",),
     _E.REFUND_SUCCEEDED: ("refund_id",),
     _E.REFUND_FAILED: ("refund_id", "state"),  # an ``unknown`` refund resolved as ``failed`` is a second row
+    _E.DELIVERY_FAILED: ("claim_id",),  # one failed hand-over per courier claim
+    _E.SHIPMENT_RETURNED: ("claim_id",),  # one return per courier claim
 }
 
 

@@ -16,7 +16,8 @@ from glowderma.integrations import apps as integrations_apps
 
 PRODUCTION = {"DEV_FEATURES_ALLOWED": False}
 ALL_FAKE = {
-    f"{name}_MODE": "fake" for name in ("OAUTH", "BILLZ", "FCM", "CLICK", "PAYME", "BTS", "ESKIZ", "EMAIL")
+    f"{name}_MODE": "fake"
+    for name in ("OAUTH", "BILLZ", "FCM", "CLICK", "PAYME", "BTS", "ESKIZ", "EMAIL", "YANDEX_DELIVERY")
 }
 
 
@@ -53,7 +54,10 @@ def test_production_warns_once_per_process_listing_the_fake_providers(
         assert integrations_apps.warn_fake_providers() is False
         django_apps.get_app_config("integrations").ready()  # a second ready() in the process stays silent
     assert _lines(caplog) == [
-        ("WARNING", "integrations running in fake mode in production: billz, fcm, click, payme, eskiz, email")
+        (
+            "WARNING",
+            "integrations running in fake mode in production: billz, fcm, click, payme, eskiz, email, yandex",
+        )
     ]
 
 
@@ -80,7 +84,7 @@ def test_ready_emits_the_warning_and_no_system_check_reports_fake_mode(
         (
             "WARNING",
             "integrations running in fake mode in production: oauth, billz, fcm, click, payme, bts, eskiz, "
-            "email",
+            "email, yandex",
         )
     ]
     assert not [m for m in messages if "fake" in str(m.msg).lower()]
@@ -97,6 +101,7 @@ def test_provider_modes_cover_every_mode_setting() -> None:
             "bts": "fake",
             "eskiz": "fake",
             "email": "fake",
+            "yandex": "fake",
         }
         assert integration_modes.fake_providers() == [
             "oauth",
@@ -106,6 +111,7 @@ def test_provider_modes_cover_every_mode_setting() -> None:
             "bts",
             "eskiz",
             "email",
+            "yandex",
         ]
     with override_settings(EMAIL_MODE="smtp"):
         assert integration_modes.provider_mode("email") == "live"
