@@ -390,7 +390,8 @@ def test_no_console_page_keeps_uzbek_text_in_another_language(language: str, dem
     data = stored_text()
     leftovers: dict[str, list[str]] = {}
     for url in pages:
-        page = client.get(url)
+        # the delivery settings singleton's list redirects to its one change page
+        page = client.get(url, follow=url.endswith("/deliverysettings/"))
         assert page.status_code == 200, url
         assert f'<html lang="{language}"' in page.content.decode()
         text = text_of(page)
