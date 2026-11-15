@@ -17907,7 +17907,7 @@ components:
           nullable: true
         with_options:
           type: boolean
-          default: false
+          nullable: true
           description: List every delivery option (Yandex Standard / Express, BTS)
             with its fee, ETA and quote.
         delivery_provider:

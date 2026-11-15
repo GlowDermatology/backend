@@ -40,7 +40,8 @@ class CustomerDeliveryCalculateSerializer(serializers.Serializer[dict[str, Any]]
     # plan §3.4 (all optional; a request without them is answered exactly as before)
     with_options = serializers.BooleanField(
         required=False,
-        default=False,
+        allow_null=True,
+        default=None,  # not ``False``: generated clients would read an emitted default as a required key
         help_text="List every delivery option (Yandex Standard / Express, BTS) with its fee, ETA and quote.",
     )
     delivery_provider = serializers.ChoiceField(
