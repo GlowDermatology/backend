@@ -37,7 +37,7 @@ from django.db.models.lookups import Contains
 from glowderma.accounts.models import Customer
 from glowderma.catalog import selectors as catalog_selectors
 from glowderma.catalog.models import Product, ProductStock
-from glowderma.commerce import state, topics
+from glowderma.commerce import delivery_admin, state, topics
 from glowderma.commerce.models import Cart, CartItem, Order, OrderEvent, OrderItem, StockReservation
 from glowderma.core import enums, i18n, integration_modes, timeutils
 from glowderma.core.consistency import Finding, finding
@@ -148,6 +148,10 @@ class OrderFilters(TypedDict, total=False):
     date_to: date
     customer: int
     ordering: str
+    # Yandex Delivery (plan §3.10; glowderma.commerce.delivery_admin.filter_delivery)
+    provider: str
+    stage: str
+    attention: str
 
 
 def order_queryset() -> QuerySet[Order]:
@@ -182,6 +186,7 @@ def filter_orders(
         qs = qs.filter(fulfilment=filters["fulfilment"])
     if "customer" in filters:
         qs = qs.filter(customer_id=filters["customer"])
+    qs = delivery_admin.filter_delivery(qs, filters)  # provider / stage / attention
     if "payment" in filters:
         qs = qs.annotate(display_payment_status=payment_selectors.display_status_subquery()).filter(
             display_payment_status=filters["payment"]
@@ -292,6 +297,7 @@ class OrderDetail:
     cashback: list[dict[str, Any]]
     history: list[OrderEvent]
     available_actions: dict[str, Any]
+    delivery: dict[str, Any] | None = None  # Yandex Delivery (delivery_admin.detail_delivery)
 
 
 def _cashback_hold(order_id: int) -> dict[str, Any] | None:
@@ -374,6 +380,7 @@ def order_detail(order_id: int) -> OrderDetail | None:
         cashback=cashback,
         history=history,
         available_actions=available_actions(order, shipment),
+        delivery=delivery_admin.detail_delivery(order, shipment),
     )
 
 
@@ -901,7 +908,7 @@ def customer_orders(customer_id: int, scope: str = enums.OrderScope.ALL) -> Quer
     if statuses is not None:
         qs = qs.filter(status__in=list(statuses))
     return (
-        qs.select_related("shipment")
+        qs.select_related("shipment", "shipment__quote", "shipment__claim")
         .prefetch_related("payments", "items", "items__product", "items__product__images")
         .order_by("-created_at", "-id")
     )
@@ -940,6 +947,58 @@ def _shipment(order: Order) -> Shipment | None:
         return None
 
 
+def _is_yandex(shipment: Shipment | None) -> bool:
+    return shipment is not None and shipment.provider == enums.DeliveryProvider.YANDEX
+
+
+def _open_claim(shipment: Shipment) -> Any:
+    """The shipment's current Yandex claim while it is not ended (courier and tracking link come from it)."""
+    if shipment.claim_id is None:
+        return None
+    claim = shipment.claim
+    return claim if claim is not None and claim.ended_at is None else None
+
+
+def delivery_view(order: Order, shipment: Shipment | None, lang: str) -> dict[str, Any] | None:
+    """``delivery`` of ``OrderSummary`` / ``OrderDetail`` (plan §3.4): ``null`` for pickup; a BTS order has
+    only ``provider``; a Yandex order adds its method, stage, the promised window (the quote's until it is
+    paid), the courier's name and vehicle (never a phone) and the tracking link while a claim is open."""
+    if order.fulfilment != enums.FulfilmentMethod.DELIVERY:
+        return None
+    view: dict[str, Any] = {
+        "provider": enums.DeliveryProvider.BTS,
+        "method": None,
+        "method_label": None,
+        "stage": None,
+        "stage_label": None,
+        "eta_from": None,
+        "eta_to": None,
+        "courier_name": None,
+        "courier_vehicle": None,
+        "tracking_url": None,
+    }
+    if shipment is None or not _is_yandex(shipment):
+        return view
+    quote = shipment.quote if shipment.quote_id is not None else None
+    claim = _open_claim(shipment)
+    eta_from, eta_to = shipment.promised_from, shipment.promised_to
+    if eta_from is None and quote is not None:
+        eta_from, eta_to = quote.eta_from, quote.eta_to
+    return {
+        **view,
+        "provider": enums.DeliveryProvider.YANDEX,
+        "method": shipment.method or None,
+        "method_label": i18n.t(f"label.delivery_method.{shipment.method}", lang) if shipment.method else None,
+        "stage": shipment.stage or None,
+        "stage_label": i18n.t(f"label.shipment_stage.{shipment.stage}", lang) if shipment.stage else None,
+        "eta_from": eta_from,
+        "eta_to": eta_to,
+        "courier_name": (claim.courier_name or None) if claim is not None else None,
+        "courier_vehicle": (claim.courier_vehicle or None) if claim is not None else None,
+        "tracking_url": (claim.tracking_url or None) if claim is not None else None,
+    }
+
+
 def order_summary(order: Order, lang: str, now: datetime) -> dict[str, Any]:
     """``OrderSummary``."""
     payment = payment_selectors.pick_display(_payments(order))
@@ -965,7 +1024,11 @@ def order_summary(order: Order, lang: str, now: datetime) -> dict[str, Any]:
             "in_progress": payment_in_progress(order, now),
         },
         "pay_by": order.reservation_expires_at if order.status == _S.AWAITING_PAYMENT else None,
-        "tracking_number": (shipment.tracking_number or None) if shipment is not None else None,
+        # the BTS tracking number only (a Yandex claim id is not a tracking number)
+        "tracking_number": (
+            (shipment.tracking_number or None) if shipment is not None and not _is_yandex(shipment) else None
+        ),
+        "delivery": delivery_view(order, shipment, lang),
     }
 
 
@@ -1020,11 +1083,14 @@ def customer_order_detail(order: Order, lang: str, now: datetime | None = None) 
         )
     delivery = order.fulfilment == enums.FulfilmentMethod.DELIVERY
     shipment = _shipment(order)
-    has_parcel = (
-        shipment is not None
-        and shipment.state in (Shipment.State.CREATED, Shipment.State.CANCELLED)
-        and bool(shipment.tracking_number)
-    )
+    parcel: dict[str, Any] | None = None
+    if shipment is not None and shipment.state in (Shipment.State.CREATED, Shipment.State.CANCELLED):
+        if _is_yandex(shipment):
+            claim = _open_claim(shipment)
+            tracking_url = (claim.tracking_url or None) if claim is not None else None
+            parcel = {"carrier": "Yandex", "tracking_number": "", "tracking_url": tracking_url}
+        elif shipment.tracking_number:
+            parcel = {"carrier": "BTS", "tracking_number": shipment.tracking_number, "tracking_url": None}
     return {
         **summary,
         "fulfilment_label": i18n.t(f"label.fulfilment.{order.fulfilment}", lang),
@@ -1044,11 +1110,7 @@ def customer_order_detail(order: Order, lang: str, now: datetime | None = None) 
             "in_progress_label": i18n.t("label.payment.in_progress", lang) if in_progress else None,
         },
         "refund": _refund_view(order, payment, lang),
-        "shipment": (
-            {"carrier": "BTS", "tracking_number": shipment.tracking_number, "tracking_url": None}
-            if has_parcel and shipment is not None
-            else None
-        ),
+        "shipment": parcel,
         "cashback": _cashback_view(order),
         "cancellation": (
             {
@@ -1085,6 +1147,7 @@ def customer_timeline(order: Order, lang: str) -> list[dict[str, Any]]:
         (int(event.data.get("amount") or 0) for event in events if event.type == _E.CASHBACK_CREDITED), 0
     )
     pickup = order.fulfilment == enums.FulfilmentMethod.PICKUP
+    yandex = _is_yandex(_shipment(order)) if not pickup else False
 
     def n(value: Any) -> str:
         return i18n.format_number(int(value or 0), lang)
@@ -1096,6 +1159,8 @@ def customer_timeline(order: Order, lang: str) -> list[dict[str, Any]]:
     for event in events:
         data = event.data if isinstance(event.data, dict) else {}
         provider = provider_brand(str(data.get("provider") or ""))
+        by_yandex = yandex or event.source == enums.EventSource.YANDEX
+        carrier = label("label.timeline.sub_yandex" if by_yandex else "label.timeline.sub_bts")
         if event.type == _E.ORDER_CREATED:
             entries.append(
                 _entry(
@@ -1136,14 +1201,20 @@ def customer_timeline(order: Order, lang: str) -> list[dict[str, Any]]:
                 )
             )
         elif event.type == _E.SHIPMENT_CREATED:
+            # Yandex: the event's tracking_number is the claim id, never shown; no BTS wording
+            subtitle = (
+                label("label.timeline.sub_yandex")
+                if yandex
+                else label(
+                    "label.timeline.sub_tracking", tracking_number=str(data.get("tracking_number") or "")
+                )
+            )
             entries.append(
                 _entry(
                     enums.TimelineType.SHIPMENT_CREATED,
                     event.at,
                     label("label.timeline.shipment_created"),
-                    label(
-                        "label.timeline.sub_tracking", tracking_number=str(data.get("tracking_number") or "")
-                    ),
+                    subtitle,
                 )
             )
         elif event.type == _E.STATUS_CHANGED and data.get("to") == _S.HANDED_TO_COURIER:
@@ -1164,7 +1235,7 @@ def customer_timeline(order: Order, lang: str) -> list[dict[str, Any]]:
                     enums.TimelineType.HANDED_TO_COURIER,
                     event.at,
                     label("label.timeline.handed_to_courier"),
-                    label("label.timeline.sub_bts"),
+                    carrier,
                 )
             )
         elif event.type == _E.DELIVERED:
@@ -1173,7 +1244,25 @@ def customer_timeline(order: Order, lang: str) -> list[dict[str, Any]]:
                     enums.TimelineType.DELIVERED,
                     event.at,
                     label("label.timeline.delivered"),
-                    label("label.timeline.sub_bts"),
+                    carrier,
+                )
+            )
+        elif event.type == _E.DELIVERY_FAILED:
+            entries.append(
+                _entry(
+                    enums.TimelineType.DELIVERY_FAILED,
+                    event.at,
+                    label("label.timeline.delivery_failed"),
+                    label("label.timeline.sub_delivery_failed"),
+                )
+            )
+        elif event.type == _E.SHIPMENT_RETURNED:
+            entries.append(
+                _entry(
+                    enums.TimelineType.SHIPMENT_RETURNED,
+                    event.at,
+                    label("label.timeline.shipment_returned"),
+                    None,
                 )
             )
         elif event.type == _E.CANCELLED:

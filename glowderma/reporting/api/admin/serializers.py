@@ -47,6 +47,7 @@ class AuditLogQuerySerializer(serializers.Serializer[dict[str, Any]]):
 class NavCountsSerializer(serializers.Serializer[dict[str, int]]):
     orders_processing = serializers.IntegerField()
     appointments_pending = serializers.IntegerField()
+    delivery_issues_open = serializers.IntegerField(help_text="Open delivery issues (the exception queue).")
 
 
 # --- dashboard (contract §2.10) -----------------------------------------------------------------------------
@@ -124,6 +125,27 @@ class DashboardAttentionSerializer(serializers.Serializer[dict[str, Any]]):
         help_text="No cashback policy version is in force now (none exists, or only a future one): purchases "
         "earn no cashback until one starts."
     )
+    yandex_failing = serializers.BooleanField(
+        help_text="Yandex Delivery is live and its last status poll or price check failed (always false in "
+        "fake mode)."
+    )
+
+
+class DashboardFulfilmentSerializer(serializers.Serializer[dict[str, int]]):
+    """Order-state counters as the orders stand now (not windowed by ``range``)."""
+
+    paid_to_prepare = serializers.IntegerField(
+        help_text="Processing orders still to be prepared: Yandex `awaiting_dispatch` (or `failed` / "
+        "`returned` waiting for a new dispatch), BTS not handed over, pickup."
+    )
+    to_hand_to_courier = serializers.IntegerField(
+        help_text="Processing Yandex orders whose courier is requested, assigned or arrived."
+    )
+    in_delivery = serializers.IntegerField(help_text="Handed to the courier and not coming back.")
+    returning = serializers.IntegerField(help_text="Yandex `returning` / `returned` while the order is open.")
+    completed_today = serializers.IntegerField(help_text="Delivered today (Asia/Tashkent), pickup included.")
+    needs_action = serializers.IntegerField(help_text="Open delivery issues.")
+    urgent = serializers.IntegerField(help_text="Open urgent delivery issues.")
 
 
 class DashboardSerializer(serializers.Serializer[dict[str, Any]]):
@@ -135,6 +157,7 @@ class DashboardSerializer(serializers.Serializer[dict[str, Any]]):
     previous_period_orders = serializers.IntegerField()
     stats = DashboardStatsSerializer()
     attention = DashboardAttentionSerializer()
+    fulfilment = DashboardFulfilmentSerializer()
     generated_at = serializers.DateTimeField()
 
     def get_fields(self) -> dict[str, serializers.Field[Any, Any, Any, Any]]:

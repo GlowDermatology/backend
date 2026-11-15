@@ -7,11 +7,13 @@ from typing import Any
 from drf_spectacular.utils import PolymorphicProxySerializer, extend_schema_field
 from rest_framework import serializers
 
-from glowderma.commerce import selectors
+from glowderma.commerce import delivery_admin, selectors
 from glowderma.commerce.models import Order, OrderEvent
-from glowderma.core import enums
+from glowderma.core import enums, timeutils
 from glowderma.core.api.exceptions import field_error
+from glowderma.core.api.fields import AwareDateTimeField, QueryBooleanField
 from glowderma.core.api.serializers import ActorSerializer, CustomerRefSerializer
+from glowderma.delivery.models import DeliveryIssue
 from glowderma.payments.api.admin.serializers import PeriodQuerySerializer, RefundSerializer
 
 REASON_MIN_LENGTH = 3
@@ -64,6 +66,55 @@ def render_shipment(view: dict[str, Any]) -> dict[str, Any]:
     return dict(SHIPMENT_SERIALIZERS[enums.ShipmentState(view["state"])](view).data)
 
 
+# --- delivery object (Yandex Delivery plan §3.10) -----------------------------------------------------------
+
+
+class DeliveryIssueRefSerializer(serializers.Serializer[Any]):
+    """One open issue on the order card (the queue has the full row: ``GET delivery/issues/``)."""
+
+    id = serializers.IntegerField()
+    kind = serializers.ChoiceField(choices=enums.DeliveryIssueKind.values)
+    code = serializers.CharField()
+    urgent = serializers.BooleanField()
+    opened_at = serializers.DateTimeField()
+
+
+class OrderDeliverySerializer(serializers.Serializer[Any]):
+    """The order's carrier view (``null`` for pickup). BTS: ``provider`` and ``open_issues`` only, every
+    Yandex key ``null``. Amounts in so'm; ``claim_status`` is Yandex's status verbatim; no courier phone."""
+
+    provider = serializers.ChoiceField(choices=enums.DeliveryProvider.values)
+    method = serializers.ChoiceField(choices=enums.DeliveryMethod.values, allow_null=True)
+    stage = serializers.ChoiceField(choices=enums.ShipmentStage.values, allow_null=True)
+    promised_from = serializers.DateTimeField(allow_null=True)
+    promised_to = serializers.DateTimeField(allow_null=True)
+    quote_fee = serializers.IntegerField(allow_null=True, help_text="The fee the checkout quote charged.")
+    carrier_price = serializers.IntegerField(
+        allow_null=True, help_text="Yandex's estimate the checkout quote was computed from."
+    )
+    offer_price = serializers.IntegerField(
+        allow_null=True, help_text="The binding offer of the current courier claim (VAT included)."
+    )
+    approved_price = serializers.IntegerField(allow_null=True)
+    carrier_cost_total = serializers.IntegerField(
+        allow_null=True, help_text="Yandex's final prices of every claim of the shipment, summed."
+    )
+    cost_difference = serializers.IntegerField(allow_null=True)
+    parcel_weight_g = serializers.IntegerField(allow_null=True)
+    prepared_at = serializers.DateTimeField(allow_null=True)
+    courier_name = serializers.CharField(allow_null=True)
+    courier_vehicle = serializers.CharField(allow_null=True)
+    tracking_url = serializers.CharField(allow_null=True)
+    claim_status = serializers.CharField(allow_null=True)
+    claim_number = serializers.IntegerField(allow_null=True)
+    failure_code = serializers.CharField(allow_null=True)
+    open_issues = DeliveryIssueRefSerializer(many=True)
+
+
+def render_delivery(view: dict[str, Any] | None) -> dict[str, Any] | None:
+    return None if view is None else dict(OrderDeliverySerializer(view).data)
+
+
 # --- summary pieces -----------------------------------------------------------------------------------------
 
 
@@ -95,6 +146,7 @@ class OrderSummarySerializer(serializers.Serializer[Order]):
     fulfilment = serializers.ChoiceField(choices=enums.FulfilmentMethod.values)
     shipment = serializers.SerializerMethodField()
     cancellation = serializers.SerializerMethodField()
+    delivery = serializers.SerializerMethodField()
 
     @extend_schema_field(PaymentSummarySerializer)
     def get_payment(self, obj: Order) -> dict[str, Any]:
@@ -103,6 +155,10 @@ class OrderSummarySerializer(serializers.Serializer[Order]):
     @extend_schema_field(SHIPMENT_SCHEMA)
     def get_shipment(self, obj: Order) -> dict[str, Any]:
         return render_shipment(selectors.shipment_summary(obj))
+
+    @extend_schema_field(OrderDeliverySerializer(allow_null=True))
+    def get_delivery(self, obj: Order) -> dict[str, Any] | None:
+        return render_delivery(delivery_admin.summary_delivery(obj))
 
     @extend_schema_field(CancellationSerializer(allow_null=True))
     def get_cancellation(self, obj: Order) -> dict[str, Any] | None:
@@ -187,10 +243,15 @@ class OrderDetailSerializer(serializers.Serializer[selectors.OrderDetail]):
     cashback = OrderCashbackSerializer(many=True)
     history = OrderEventSerializer(many=True)
     available_actions = AvailableActionsSerializer()
+    delivery = serializers.SerializerMethodField()
 
     @extend_schema_field(SHIPMENT_SCHEMA)
     def get_shipment(self, obj: selectors.OrderDetail) -> dict[str, Any]:
         return render_shipment(obj.shipment)
+
+    @extend_schema_field(OrderDeliverySerializer(allow_null=True))
+    def get_delivery(self, obj: selectors.OrderDetail) -> dict[str, Any] | None:
+        return render_delivery(obj.delivery)
 
     @extend_schema_field(CancellationSerializer(allow_null=True))
     def get_cancellation(self, obj: selectors.OrderDetail) -> dict[str, Any] | None:
@@ -210,6 +271,17 @@ class OrderCountsQuerySerializer(PeriodQuerySerializer):
     fulfilment = serializers.ChoiceField(choices=enums.FulfilmentMethod.values, required=False)
     payment = serializers.ChoiceField(choices=enums.PaymentStatus.values, required=False)
     customer = serializers.IntegerField(required=False, min_value=1)
+    provider = serializers.ChoiceField(
+        choices=enums.DeliveryProvider.values, required=False, help_text="The shipment's carrier."
+    )
+    stage = serializers.ChoiceField(
+        choices=enums.ShipmentStage.values, required=False, help_text="A Yandex shipment's stage."
+    )
+    attention = serializers.ChoiceField(
+        choices=list(delivery_admin.ATTENTION_VALUES),
+        required=False,
+        help_text="`open`: the order has an open delivery issue; `urgent`: an open urgent one.",
+    )
 
 
 class OrderListQuerySerializer(OrderCountsQuerySerializer):
@@ -263,3 +335,105 @@ class ResolveRefundSerializer(serializers.Serializer[dict[str, Any]]):
         if value not in RESOLVE_STATES:
             raise serializers.ValidationError(field_error("invalid_choice"))
         return value
+
+
+# --- delivery exception queue (plan §3.9) -------------------------------------------------------------------
+
+ISSUE_NOTE_MIN_LENGTH = 3
+ISSUE_NOTE_MAX_LENGTH = 1000
+SUSPENSION_NOTE_MAX_LENGTH = 300
+MESSAGE_NOTE = "Izohni kiriting."
+MESSAGE_NOTE_MAX = "1000 belgidan oshmasin."
+MESSAGE_SUSPENSION_NOTE_MAX = "300 belgidan oshmasin."
+MESSAGE_UNTIL_PAST = "Kelajakdagi vaqtni tanlang."
+
+
+class DeliveryIssueSerializer(serializers.Serializer[DeliveryIssue]):
+    """One row of the exception queue: ``details`` holds ids and amounts only; ``resolved_by`` is ``null``
+    while open or when the system closed it."""
+
+    id = serializers.IntegerField()
+    order_id = serializers.IntegerField()
+    kind = serializers.ChoiceField(choices=enums.DeliveryIssueKind.values)
+    code = serializers.CharField()
+    urgent = serializers.BooleanField()
+    details = serializers.JSONField()
+    note = serializers.CharField(allow_blank=True)
+    state = serializers.ChoiceField(choices=enums.DeliveryIssueState.values)
+    opened_at = serializers.DateTimeField()
+    updated_at = serializers.DateTimeField()
+    reminded_at = serializers.DateTimeField(allow_null=True)
+    reminders = serializers.IntegerField()
+    resolved_at = serializers.DateTimeField(allow_null=True)
+    resolved_by = ActorSerializer(allow_null=True)
+    resolution_note = serializers.CharField(allow_blank=True)
+
+
+class DeliveryIssueQuerySerializer(serializers.Serializer[dict[str, Any]]):
+    state = serializers.ChoiceField(choices=enums.DeliveryIssueState.values, required=False)
+    urgent = QueryBooleanField(required=False)
+    kind = serializers.ChoiceField(choices=enums.DeliveryIssueKind.values, required=False)
+    order = serializers.IntegerField(required=False, min_value=1)
+
+
+def _note(value: str, *, required: bool) -> str:
+    text = value.strip()
+    if required and len(text) < ISSUE_NOTE_MIN_LENGTH:
+        raise serializers.ValidationError(field_error("min_length", MESSAGE_REASON_MIN))
+    if len(text) > ISSUE_NOTE_MAX_LENGTH:
+        raise serializers.ValidationError(field_error("max_length", MESSAGE_NOTE_MAX))
+    return text
+
+
+class OpenIssueSerializer(serializers.Serializer[dict[str, Any]]):
+    """``POST orders/{id}/issues/``: staff open an ``incident`` (a wrong or missing product…); every other
+    kind is opened by the system only."""
+
+    kind = serializers.CharField(help_text="`incident` (the only kind staff may open)")
+    note = serializers.CharField(allow_blank=True, trim_whitespace=True)
+    urgent = serializers.BooleanField(required=False, default=False)
+
+    def validate_kind(self, value: str) -> str:
+        if value != enums.DeliveryIssueKind.INCIDENT:
+            raise serializers.ValidationError(field_error("invalid_choice"))
+        return value
+
+    def validate_note(self, value: str) -> str:
+        return _note(value, required=True)
+
+
+class ResolveIssueSerializer(serializers.Serializer[dict[str, Any]]):
+    note = serializers.CharField(allow_blank=True, trim_whitespace=True)
+
+    def validate_note(self, value: str) -> str:
+        return _note(value, required=True)
+
+
+class SuspensionSerializer(serializers.Serializer[Any]):
+    """The courier-dispatch switch: ``suspended`` is in effect now (``until`` passed → ``false``)."""
+
+    suspended = serializers.BooleanField()
+    until = serializers.DateTimeField(allow_null=True)
+    note = serializers.CharField(allow_blank=True)
+    updated_at = serializers.DateTimeField()
+
+
+class SuspensionBodySerializer(serializers.Serializer[dict[str, Any]]):
+    """``POST delivery/suspension/``: ``until`` (future, optional: until lifted) only while suspending."""
+
+    suspended = serializers.BooleanField()
+    until = AwareDateTimeField(required=False, allow_null=True, default=None)
+    note = serializers.CharField(required=False, allow_blank=True, default="", trim_whitespace=True)
+
+    def validate_note(self, value: str) -> str:
+        if len(value) > SUSPENSION_NOTE_MAX_LENGTH:
+            raise serializers.ValidationError(field_error("max_length", MESSAGE_SUSPENSION_NOTE_MAX))
+        return value
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        until = attrs.get("until")
+        if attrs["suspended"] and until is not None and until <= timeutils.now():
+            raise serializers.ValidationError({"until": [field_error("in_past", MESSAGE_UNTIL_PAST)]})
+        if not attrs["suspended"]:
+            attrs["until"] = None
+        return attrs

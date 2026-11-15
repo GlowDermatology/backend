@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 from rest_framework.test import APIClient
 
-from glowderma.commerce import services, topics
+from glowderma.commerce import delivery_admin, services, topics
 from glowderma.commerce.models import Order
 from glowderma.commerce.tests.support import AT, at, deliver, pay, place, product, ship, shopper
 from glowderma.core.media import absolute_media_url, variant_url
@@ -56,6 +56,12 @@ def test_list_shape_ordering_and_paging(staff_client: APIClient) -> None:
         "fulfilment": "delivery",
         "shipment": {"state": "not_created", "pending": False},
         "cancellation": None,
+        # Yandex Delivery (additive): a BTS order names its carrier; every Yandex-only key is null
+        "delivery": {
+            "provider": "bts",
+            **dict.fromkeys(delivery_admin.YANDEX_KEYS),
+            "open_issues": [],
+        },
     }
     assert _ids(staff_client.get(URL, {"ordering": "created_at"}))[:2] == [orders[0].pk, orders[1].pk]
     assert staff_client.get(URL).json()["page_size"] == 10

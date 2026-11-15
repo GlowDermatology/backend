@@ -36,7 +36,7 @@ from glowderma.catalog import billz as catalog_billz
 from glowderma.catalog import selectors as catalog_selectors
 from glowderma.catalog import services as catalog_services
 from glowderma.catalog.models import Product, ProductStock
-from glowderma.commerce import events, selectors, state, topics
+from glowderma.commerce import events, quoting, selectors, state, topics
 from glowderma.commerce.models import (
     EVENT_SOURCES,
     EVENT_STATUS_AFTER,
@@ -65,6 +65,7 @@ from glowderma.core.api.exceptions import (
     not_cancellable,
 )
 from glowderma.core.api.exceptions import OutOfStock as OutOfStockError
+from glowderma.delivery import quotes as delivery_quotes
 from glowderma.delivery import selectors as delivery_selectors
 from glowderma.delivery import services as delivery_services
 from glowderma.delivery import yandex as delivery_yandex
@@ -393,6 +394,9 @@ def create_order(
     order_id: int | None = None,
     billz_order_uuid: UUID | None = None,
     enforce_stock: bool = True,
+    delivery_provider: str = enums.DeliveryProvider.BTS,
+    delivery_method: str = "",
+    delivery_quote_id: UUID | None = None,
 ) -> int:
     """Checkout (03 §4.1 row 1; customer contract §2.7.1 rows 7–10): snapshot the lines, reserve stock, hold
     cashback → ``awaiting_payment``.
@@ -410,6 +414,10 @@ def create_order(
     only). Writes the ``Order`` (with ``customer_note``), items, reservations, the hold, the ``pending``
     payment, the delivery shipment and the events ``order_created`` + ``reservation_created``; no outbox, no
     audit. Returns the id.
+
+    ``delivery_provider="yandex"`` (checkout with a locked quote, plan §3.4) needs a saved address with a pin
+    instead of the BTS region and city: the pin is snapshotted into ``address_latitude/longitude`` and the
+    shipment is created for Yandex with ``delivery_method`` and the quote.
     """
     _aware(at, "at")
     instant = at or timeutils.now()
@@ -432,6 +440,9 @@ def create_order(
     if delivery_fee < 0 or (not delivery and delivery_fee != 0):
         raise CheckoutError("The delivery fee is a non-negative quote, 0 for pickup")
     meta = dict(metadata or {})
+    yandex = delivery and delivery_provider == enums.DeliveryProvider.YANDEX
+    if delivery_provider not in enums.DeliveryProvider.values or (yandex and not delivery_method):
+        raise CheckoutError("A Yandex shipment needs its method")
     with transaction.atomic():
         customer = Customer.objects.filter(pk=customer_id).first()
         if customer is None or customer.status != enums.CustomerStatus.ACTIVE:
@@ -442,7 +453,10 @@ def create_order(
             raise CheckoutError(f"Unknown products {sorted(missing)}")
         lines = [_Line(products[product_id], quantity) for product_id, quantity in items]
         address = {"text": "", "region_code": "", "city_code": "", "comment": ""}
+        pin: dict[str, Any] = {}
         if delivery:
+            if yandex and address_id is None:
+                raise AddressNotFound("A Yandex delivery needs a saved address")
             if address_id is not None:
                 saved = Address.objects.filter(pk=address_id, customer_id=customer_id).first()
                 if saved is None:
@@ -453,6 +467,10 @@ def create_order(
                     "city_code": saved.city_code,
                     "comment": saved.comment,
                 }
+                if yandex:
+                    if saved.latitude is None or saved.longitude is None:
+                        raise AddressIncomplete("A Yandex delivery address needs its map pin")
+                    pin = {"address_latitude": saved.latitude, "address_longitude": saved.longitude}
             else:
                 address = {
                     "text": address_text,
@@ -462,7 +480,7 @@ def create_order(
                 }
             if not address["text"]:
                 raise AddressNotFound("A delivery order needs an address")
-            if not address["region_code"] or not address["city_code"]:
+            if not yandex and (not address["region_code"] or not address["city_code"]):
                 raise AddressIncomplete("A delivery address needs the BTS region and city")
         # the caller's BTS quote ran before any row lock; the stock rows are locked only from here to commit
         if enforce_stock:
@@ -516,6 +534,7 @@ def create_order(
             address_region_code=address["region_code"],
             address_city_code=address["city_code"],
             address_comment=address["comment"],
+            **pin,
             recipient_name=customer.name,
             recipient_phone=customer.phone or "",  # checkout is phone-gated (C§2.2.10)
             customer_note=customer_note,
@@ -563,7 +582,11 @@ def create_order(
             except loyalty_services.InsufficientBalance as exc:
                 raise InsufficientCashback(exc.available) from exc
         payment_services.create_payment(order.pk, payment_provider, total)
-        if delivery:
+        if yandex:
+            delivery_services.ensure_shipment(
+                order.pk, provider=delivery_provider, method=delivery_method, quote_id=delivery_quote_id
+            )
+        elif delivery:
             delivery_services.ensure_shipment(order.pk)
         record_event(
             order,
@@ -1849,6 +1872,37 @@ class CheckoutInput:
     customer_note: str = ""
     scenario: Mapping[str, Any] | None = None  # X-GD-Fake-Scenario (local/test only), copied to metadata.fake
     checkout_meta: Mapping[str, Any] | None = None  # metadata.checkout: app_version, device_id
+    # a Yandex delivery quote (plan §3.4) the view checked or re-quoted before the transaction; None = BTS
+    delivery_quote_id: UUID | None = None
+
+
+def _lock_yandex_quote(customer_id: int, quote_id: UUID, address_id: int) -> delivery_quotes.QuoteRow:
+    """Checkout's transaction (no network): lock the quote and check it again against the saved address as it
+    is now and the method settings; anything off raises :class:`quoting.QuoteExpired` (409
+    ``quote_expired``)."""
+    now = timeutils.now()
+    saved = Address.objects.filter(pk=address_id, customer_id=customer_id).first()
+    if saved is None:
+        raise AddressNotFound(f"Unknown address {address_id}")
+    snapshot = delivery_quotes.AddressSnapshot(
+        address_id=saved.pk,
+        text=saved.text,
+        latitude=saved.latitude,
+        longitude=saved.longitude,
+        region_code=saved.region_code,
+        city_code=saved.city_code,
+    )
+    try:
+        quote = delivery_quotes.lock_for_checkout(
+            quote_id, customer_id=customer_id, address=snapshot, now=now
+        )
+    except delivery_quotes.QuoteUnusable as exc:
+        raise quoting.QuoteExpired() from exc
+    if quote.provider != enums.DeliveryProvider.YANDEX or not quoting.method_usable(
+        customer_id, quote.method, now
+    ):
+        raise quoting.QuoteExpired()
+    return quote
 
 
 def lock_customer(customer_id: int) -> Customer | None:
@@ -1869,8 +1923,14 @@ def checkout(customer_id: int, data: CheckoutInput, *, stock: StockCheck = FRESH
     _sales_on()
     delivery = data.fulfilment == enums.FulfilmentMethod.DELIVERY
     scenario = dict(data.scenario or {})
+    yandex_quote = delivery and data.delivery_quote_id is not None
+    if yandex_quote and data.address_id is None:
+        raise CheckoutError("A Yandex quote needs a saved address")
     bts_scenario = scenario.get("bts") if isinstance(scenario.get("bts"), dict) else None
-    fee = quote_delivery(data.region_code, data.city_code, bts_scenario) if delivery else 0
+    # a Yandex quote was priced before the transaction (the view's post()); BTS is quoted here, no lock held
+    fee = (
+        quote_delivery(data.region_code, data.city_code, bts_scenario) if delivery and not yandex_quote else 0
+    )
     if stock.refuses_checkout(timeutils.now()):
         logger.warning(
             "checkout.stock_unconfirmed customer_id=%s products=%s", customer_id, sorted(stock.unread)
@@ -1880,6 +1940,13 @@ def checkout(customer_id: int, data: CheckoutInput, *, stock: StockCheck = FRESH
         customer = lock_customer(customer_id)
         if customer is None or customer.status != enums.CustomerStatus.ACTIVE:
             raise AuthFailed("SESSION_EXPIRED")
+        quote = None
+        if yandex_quote:
+            # under the customer lock, before anything else: a quote lost to a concurrent checkout of the same
+            # customer is 409 quote_expired (not the emptied cart)
+            assert data.delivery_quote_id is not None and data.address_id is not None  # noqa: S101
+            quote = _lock_yandex_quote(customer_id, data.delivery_quote_id, data.address_id)
+            fee = quote.customer_fee
         open_orders = Order.objects.filter(customer_id=customer_id, status=_S.AWAITING_PAYMENT).order_by(
             "-created_at", "-id"
         )
@@ -1905,9 +1972,20 @@ def checkout(customer_id: int, data: CheckoutInput, *, stock: StockCheck = FRESH
         )
         if not items:
             raise CartEmpty()
+        if quote is not None and quote.weight_g != quoting.parcel_weight_g(
+            sum(int(quantity) for _, quantity in items)
+        ):
+            raise quoting.QuoteExpired()  # the cart changed after the quote was checked
         metadata: dict[str, Any] = {"checkout": dict(data.checkout_meta or {})}
         if scenario:
             metadata["fake"] = scenario
+        shipment: dict[str, Any] = {}
+        if quote is not None:
+            shipment = {
+                "delivery_provider": enums.DeliveryProvider.YANDEX,
+                "delivery_method": quote.method,
+                "delivery_quote_id": quote.id,
+            }
         order_id = create_order(
             customer_id,
             [(int(product_id), int(quantity)) for product_id, quantity in items],
@@ -1922,7 +2000,13 @@ def checkout(customer_id: int, data: CheckoutInput, *, stock: StockCheck = FRESH
             visible_only=True,
             customer_note=data.customer_note,
             metadata=metadata,
+            **shipment,
         )
+        if quote is not None:
+            try:
+                delivery_quotes.mark_used(quote.id, order_id=order_id, at=timeutils.now())
+            except delivery_quotes.QuoteUnusable as exc:  # pragma: no cover - the row is locked above
+                raise quoting.QuoteExpired() from exc
         CartItem.objects.filter(cart=cart).delete()
         cart.last_checkout_order_id = order_id
         cart.save()

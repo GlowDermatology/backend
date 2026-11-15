@@ -9,7 +9,7 @@ from django.urls import reverse
 from glowderma.accounts.tests.factories import StaffUserFactory
 from glowderma.accounts.tests.ops_helpers import ops_login
 from glowderma.core.admin import ReadOnlyAdmin, column_field
-from glowderma.delivery.admin import ShipmentAdmin, ShipmentEventInline
+from glowderma.delivery.admin import CourierClaimInline, ShipmentAdmin, ShipmentEventInline
 from glowderma.delivery.models import Shipment, ShipmentEvent
 from glowderma.delivery.tests.factories import ShipmentEventFactory, ShipmentFactory, create_message_for
 
@@ -56,7 +56,10 @@ def test_shipment_admin_as_designed() -> None:
     assert tuple(map(column_field, model_admin.list_display)) == (
         "id",
         "order",
+        "provider",
         "state",
+        "stage",
+        "method",
         "tracking_number",
         "tariff",
         "bts_status",
@@ -65,13 +68,20 @@ def test_shipment_admin_as_designed() -> None:
         "last_error_code",
         "last_attempt_at",
     )
-    assert tuple(map(column_field, model_admin.list_filter)) == ("state", "via", "last_attempt_at")
+    assert tuple(map(column_field, model_admin.list_filter)) == (
+        "provider",
+        "state",
+        "stage",
+        "via",
+        "last_attempt_at",
+    )
     assert model_admin.search_fields == ("tracking_number", "=order__id")
-    assert model_admin.inlines == (ShipmentEventInline,)
+    assert model_admin.inlines == (ShipmentEventInline, CourierClaimInline)
     request = RequestFactory().get("/django-admin/")
     request.user = StaffUserFactory.create(is_staff=True)
-    (inline,) = model_admin.get_inline_instances(request)
-    assert isinstance(inline, ShipmentEventInline)
+    inline, claims = model_admin.get_inline_instances(request)
+    assert isinstance(inline, ShipmentEventInline) and isinstance(claims, CourierClaimInline)
+    assert not claims.has_add_permission(request, None) and not claims.has_change_permission(request, None)
     assert inline.has_view_permission(request, None)
     assert not inline.has_add_permission(request, None)
     assert not inline.has_change_permission(request, None)
@@ -83,6 +93,7 @@ def test_shipment_admin_as_designed() -> None:
         "shipment",
         "kind",
         "bts_status",
+        "carrier_status",
         "via",
         "error_code",
     )

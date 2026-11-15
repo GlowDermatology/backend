@@ -12,21 +12,46 @@ a BTS answer can never land on it (plan decision 3). The exception queue (``Deli
 
 from __future__ import annotations
 
+import logging
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import date as date_cls
 from datetime import datetime
+from datetime import time as time_cls
+from decimal import Decimal
 from typing import Any
 
 from django.contrib.auth import get_user_model
-from django.db import IntegrityError, transaction
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, models, transaction
 from django.utils import timezone
+from django.utils.translation import gettext_lazy
 
-from glowderma.core import audit, enums, outbox, timeutils
+from glowderma.core import alerts, audit, enums, integration_modes, outbox, timeutils
 from glowderma.delivery import bts, selectors
-from glowderma.delivery.models import DeliveryIssue, DeliveryQuote, Shipment, ShipmentEvent
+from glowderma.delivery.models import (
+    PHONE_E164_REGEX,
+    UZ_LATITUDE,
+    UZ_LONGITUDE,
+    DeliveryIssue,
+    DeliveryQuote,
+    DeliverySettings,
+    Shipment,
+    ShipmentEvent,
+    WarehouseClosure,
+    WarehouseHours,
+)
 from glowderma.delivery.topics import BTS_CREATE_SHIPMENT, bts_create_shipment_key
+from glowderma.integrations import selectors as integration_selectors
+from glowderma.integrations import services as integration_services
 from glowderma.integrations.bts.ports import STATUS_ACCEPTED, Parcel
 from glowderma.integrations.bts.registry import get_bts
+from glowderma.integrations.httpclient import safe_text
+from glowderma.integrations.yandex_delivery.ports import Point, YandexError, YandexRejected
+from glowderma.integrations.yandex_delivery.registry import get_yandex_delivery
+
+logger = logging.getLogger(__name__)
 
 
 class DeliveryError(Exception):
@@ -530,8 +555,568 @@ def purge_quotes(before: datetime) -> int:
     return deleted
 
 
+# --- ops console and admin API: settings, calendar, suspension, tariffs check, staff incidents --------------
+
+AUDIT_SETTINGS_UPDATED = "delivery.settings_updated"
+AUDIT_SUSPENSION_UPDATED = "delivery.suspension_updated"
+AUDIT_HOURS_SAVED = "delivery.hours_saved"
+AUDIT_HOURS_DELETED = "delivery.hours_deleted"
+AUDIT_CLOSURE_SAVED = "delivery.closure_saved"
+AUDIT_CLOSURE_DELETED = "delivery.closure_deleted"
+AUDIT_TARIFFS_CHECKED = "delivery.tariffs_checked"
+AUDIT_ISSUE_OPENED = "delivery.issue_opened"
+ALERT_ISSUE_OPENED = "delivery.issue_opened"
+SETTINGS_ENTITY = "delivery_settings"
+INCIDENT_CODE = "staff_report"
+SUSPENSION_NOTE_MAX = 300
+
+# Every column of ``DeliverySettings`` the ops console edits (bookkeeping and the pk excluded).
+SETTINGS_FIELDS: tuple[str, ...] = (
+    "warehouse_name",
+    "warehouse_address",
+    "warehouse_latitude",
+    "warehouse_longitude",
+    "contact_name",
+    "contact_phone",
+    "contact_email",
+    "courier_comment",
+    "prep_minutes",
+    "dispatch_cutoff_minutes",
+    "returns_accepted",
+    "dispatch_suspended",
+    "suspended_until",
+    "suspension_note",
+    "standard_enabled",
+    "standard_taxi_class",
+    "standard_eta_min_minutes",
+    "standard_eta_max_minutes",
+    "express_enabled",
+    "express_taxi_class",
+    "express_eta_min_minutes",
+    "express_eta_max_minutes",
+    "default_item_weight_g",
+    "markup_percent",
+    "estimate_vat_percent",
+    "max_auto_increase",
+    "max_loss_per_shipment",
+    "prep_deadline_minutes",
+)
+# Personal data and the full address: the audit row says that they changed, never what they are.
+PRIVATE_SETTINGS_FIELDS = frozenset({"warehouse_address", "contact_name", "contact_phone", "contact_email"})
+# The classes a customer method may use (``cargo`` is never offered at checkout).
+METHOD_TAXI_CLASSES: tuple[str, ...] = ("courier", "express")
+# Inclusive bounds of the numeric columns (the CHECK constraints of ``DeliverySettings``).
+SETTINGS_RANGES: dict[str, tuple[int | Decimal, int | Decimal]] = {
+    "prep_minutes": (0, 480),
+    "dispatch_cutoff_minutes": (0, 720),
+    "prep_deadline_minutes": (15, 2880),
+    "standard_eta_min_minutes": (1, 1440),
+    "standard_eta_max_minutes": (1, 1440),
+    "express_eta_min_minutes": (1, 1440),
+    "express_eta_max_minutes": (1, 1440),
+    "default_item_weight_g": (1, 20_000),
+    "markup_percent": (Decimal(0), Decimal(100)),
+    "estimate_vat_percent": (Decimal(0), Decimal(100)),
+    "max_auto_increase": (0, 100_000_000),
+    "max_loss_per_shipment": (0, 100_000_000),
+}
+
+# Refusals shown on the ops console page (in the viewer's language; never stored or sent).
+MESSAGE_LATLNG_PAIR = gettext_lazy("Kenglik va uzunlikni birga kiriting yoki ikkalasini ham bo‘sh qoldiring.")
+MESSAGE_OUTSIDE_UZBEKISTAN = gettext_lazy("Nuqta O‘zbekiston hududida bo‘lishi kerak.")
+MESSAGE_PHONE = gettext_lazy("Telefon raqamini +998XXXXXXXXX ko‘rinishida kiriting.")
+MESSAGE_TAXI_CLASS = gettext_lazy("Yandex klassi «courier» yoki «express» bo‘lishi kerak.")
+MESSAGE_RANGE = gettext_lazy("Qiymat %(low)s dan %(high)s gacha bo‘lishi kerak.")
+MESSAGE_ETA_ORDER = gettext_lazy("Eng kech vaqt eng tez vaqtdan kam bo‘lmasin.")
+MESSAGE_CLASS_UNCHECKED = gettext_lazy(
+    "Usulni yoqishdan oldin «Yandex bilan tekshirish» amalini bajaring: ombor nuqtasida qaysi Yandex "
+    "klasslari borligi hali ma’lum emas."
+)
+MESSAGE_CLASS_UNAVAILABLE = gettext_lazy(
+    "Yandex ombor nuqtasida «%(taxi_class)s» klassini taklif qilmaydi: usulni yoqib bo‘lmaydi."
+)
+MESSAGE_HOURS_ORDER = gettext_lazy("Ochilish vaqti yopilish vaqtidan oldin bo‘lsin.")
+MESSAGE_WEEKDAY = gettext_lazy("Hafta kunini tanlang.")
+MESSAGE_WEEKDAY_TAKEN = gettext_lazy("Bu hafta kuni allaqachon kiritilgan.")
+MESSAGE_CLOSURE_TIMES = gettext_lazy(
+    "Ikkala vaqtni kiriting (maxsus ish vaqti) yoki ikkalasini ham bo‘sh qoldiring (yopiq kun)."
+)
+MESSAGE_CLOSURE_TAKEN = gettext_lazy("Bu sana allaqachon kiritilgan.")
+
+
+def _json_value(value: Any) -> Any:
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, (datetime, date_cls, time_cls)):
+        return value.isoformat()
+    return value
+
+
+def settings_snapshot(row: DeliverySettings) -> dict[str, Any]:
+    """The editable columns of ``row`` (raw values: ``Decimal``, aware ``datetime``)."""
+    return {name: getattr(row, name) for name in SETTINGS_FIELDS}
+
+
+def normalise_phone(value: str) -> str:
+    """``+998 90 123-45-67`` / ``998901234567`` → ``+998901234567``; anything else is returned stripped (the
+    validation refuses it)."""
+    text = re.sub(r"[\s\-()]", "", value or "")
+    if re.fullmatch(r"998\d{9}", text):
+        return f"+{text}"
+    return text
+
+
+def method_class_refusal(taxi_class: str) -> tuple[Any, dict[str, Any]] | None:
+    """Why ``taxi_class`` may not back an enabled method, or ``None``. In live mode the class must be one
+    Yandex offered at the warehouse in the last ``tariffs`` answer stored by «Yandex bilan tekshirish» (or
+    ``manage.py yandex_delivery_check``) in live mode; the fake allows every class."""
+    if integration_modes.provider_mode("yandex") != enums.IntegrationMode.LIVE:
+        return None
+    data = integration_selectors.provider_data("yandex")
+    tariffs = data.get("tariffs")
+    if data.get("tariffs_mode") != enums.IntegrationMode.LIVE or not isinstance(tariffs, list):
+        return MESSAGE_CLASS_UNCHECKED, {}
+    if taxi_class not in tariffs:
+        return MESSAGE_CLASS_UNAVAILABLE, {"taxi_class": taxi_class}
+    return None
+
+
+def settings_errors(
+    values: Mapping[str, Any], *, previous: Mapping[str, Any] | None = None
+) -> dict[str, list[tuple[Any, dict[str, Any]]]]:
+    """Validation of a complete settings image ``values`` (``{field: [(message, params)]}``, empty = valid).
+
+    ``previous`` is the stored image: the live-mode class rule (:func:`method_class_refusal`) applies only to
+    a method being switched on or moved to another class, so an unrelated save never fails on it."""
+    errors: dict[str, list[tuple[Any, dict[str, Any]]]] = {}
+
+    def add(field: str, message: Any, **params: Any) -> None:
+        errors.setdefault(field, []).append((message, params))
+
+    latitude, longitude = values.get("warehouse_latitude"), values.get("warehouse_longitude")
+    if (latitude is None) != (longitude is None):
+        add("warehouse_longitude" if longitude is None else "warehouse_latitude", MESSAGE_LATLNG_PAIR)
+    elif latitude is not None and longitude is not None:
+        if not UZ_LATITUDE[0] <= Decimal(latitude) <= UZ_LATITUDE[1]:
+            add("warehouse_latitude", MESSAGE_OUTSIDE_UZBEKISTAN)
+        if not UZ_LONGITUDE[0] <= Decimal(longitude) <= UZ_LONGITUDE[1]:
+            add("warehouse_longitude", MESSAGE_OUTSIDE_UZBEKISTAN)
+    phone = values.get("contact_phone") or ""
+    if phone and not re.fullmatch(PHONE_E164_REGEX, phone):
+        add("contact_phone", MESSAGE_PHONE)
+    for name, (low, high) in SETTINGS_RANGES.items():
+        value = values.get(name)
+        if value is not None and not low <= value <= high:
+            add(name, MESSAGE_RANGE, low=low, high=high)
+    for method in enums.DeliveryMethod.values:
+        low_name, high_name = f"{method}_eta_min_minutes", f"{method}_eta_max_minutes"
+        low_value, high_value = values.get(low_name), values.get(high_name)
+        if low_value is not None and high_value is not None and high_value < low_value:
+            add(high_name, MESSAGE_ETA_ORDER)
+        taxi_class = values.get(f"{method}_taxi_class") or ""
+        if taxi_class not in METHOD_TAXI_CLASSES:
+            add(f"{method}_taxi_class", MESSAGE_TAXI_CLASS)
+            continue
+        enabled = bool(values.get(f"{method}_enabled"))
+        was_enabled = bool(previous.get(f"{method}_enabled")) if previous is not None else False
+        same_class = previous is not None and previous.get(f"{method}_taxi_class") == taxi_class
+        if enabled and not (was_enabled and same_class):
+            refusal = method_class_refusal(taxi_class)
+            if refusal is not None:
+                add(f"{method}_enabled", refusal[0], **refusal[1])
+    return errors
+
+
+def _validation_error(errors: Mapping[str, list[tuple[Any, dict[str, Any]]]]) -> ValidationError:
+    return ValidationError(
+        {
+            field: [ValidationError(message, params=params or None) for message, params in entries]
+            for field, entries in errors.items()
+        }
+    )
+
+
+def _settings_diff(before: Mapping[str, Any], after: Mapping[str, Any]) -> dict[str, Any]:
+    diff: dict[str, Any] = {}
+    for name in SETTINGS_FIELDS:
+        old, new = before.get(name), after.get(name)
+        if old == new:
+            continue
+        if name in PRIVATE_SETTINGS_FIELDS:
+            diff[name] = {"changed": True}
+        else:
+            diff[name] = {"from": _json_value(old), "to": _json_value(new)}
+    return diff
+
+
+def update_settings(changes: Mapping[str, Any], *, actor: Any, request: Any = None) -> DeliverySettings:
+    """Apply ``changes`` (column → value, :data:`SETTINGS_FIELDS` only: ``ValueError`` otherwise) to the
+    singleton under its row lock, validated by :func:`settings_errors` (``ValidationError`` with console
+    messages), and audit ``delivery.settings_updated`` with the changed columns only (``{"from", "to"}``;
+    the address and the contact as ``{"changed": true}``). Nothing changed → nothing written."""
+    unknown = sorted(set(changes) - set(SETTINGS_FIELDS))
+    if unknown:
+        raise ValueError(f"Not editable delivery settings: {', '.join(unknown)}")
+    with transaction.atomic():
+        row = DeliverySettings.objects.select_for_update().get(pk=1)
+        before = settings_snapshot(row)
+        for name, value in changes.items():
+            if name == "contact_phone":
+                value = normalise_phone(str(value or ""))
+            elif isinstance(value, str) and name not in ("standard_taxi_class", "express_taxi_class"):
+                value = value.strip()
+            _aware(value if isinstance(value, datetime) else None, name)
+            setattr(row, name, value)
+        after = settings_snapshot(row)
+        errors = settings_errors(after, previous=before)
+        if errors:
+            raise _validation_error(errors)
+        diff = _settings_diff(before, after)
+        if not diff:
+            return row
+        row.updated_at = timeutils.now()
+        row.updated_by = actor
+        row.save()
+        audit.record(
+            action=AUDIT_SETTINGS_UPDATED,
+            entity_type=SETTINGS_ENTITY,
+            entity_id="1",
+            actor=actor,
+            request=request,
+            after=diff,
+        )
+        return row
+
+
+@dataclass(frozen=True, slots=True)
+class Suspension:
+    """The dispatch switch: ``suspended`` = in effect now (the flag, until ``until`` passes)."""
+
+    suspended: bool
+    until: datetime | None
+    note: str
+    updated_at: datetime
+
+
+def suspension_of(row: DeliverySettings, now: datetime | None = None) -> Suspension:
+    instant = now or timeutils.now()
+    active = row.dispatch_suspended and (row.suspended_until is None or instant < row.suspended_until)
+    return Suspension(
+        suspended=active,
+        until=row.suspended_until if active else None,
+        note=row.suspension_note,
+        updated_at=row.updated_at,
+    )
+
+
+def set_suspension(
+    suspended: bool, until: datetime | None, note: str, *, actor: Any, request: Any = None
+) -> Suspension:
+    """Suspend (until ``until``, or until lifted) or resume courier dispatch (plan decision 13); audited
+    ``delivery.suspension_updated`` with the before/after switch. Resuming clears ``until``; a past ``until``
+    is a ``ValueError`` (the API refuses it first). Nothing changed → nothing written."""
+    _aware(until, "until")
+    text = (note or "").strip()
+    if len(text) > SUSPENSION_NOTE_MAX:
+        raise ValueError(f"note must be at most {SUSPENSION_NOTE_MAX} characters")
+    now = timeutils.now()
+    if suspended and until is not None and until <= now:
+        raise ValueError("until must be in the future")
+    target_until = until if suspended else None
+    with transaction.atomic():
+        row = DeliverySettings.objects.select_for_update().get(pk=1)
+        before = {
+            "suspended": row.dispatch_suspended,
+            "until": _json_value(row.suspended_until),
+            "note": row.suspension_note,
+        }
+        after = {"suspended": suspended, "until": _json_value(target_until), "note": text}
+        if before == after:
+            return suspension_of(row, now)
+        row.dispatch_suspended = suspended
+        row.suspended_until = target_until
+        row.suspension_note = text
+        row.updated_at = now
+        row.updated_by = actor
+        row.save(
+            update_fields=[
+                "dispatch_suspended",
+                "suspended_until",
+                "suspension_note",
+                "updated_at",
+                "updated_by",
+            ]
+        )
+        audit.record(
+            action=AUDIT_SUSPENSION_UPDATED,
+            entity_type=SETTINGS_ENTITY,
+            entity_id="1",
+            actor=actor,
+            request=request,
+            before=before,
+            after=after,
+        )
+        return suspension_of(row, now)
+
+
+def _hours_image(row: WarehouseHours) -> dict[str, Any]:
+    return {
+        "weekday": row.weekday,
+        "opens_at": _json_value(row.opens_at),
+        "closes_at": _json_value(row.closes_at),
+    }
+
+
+def _closure_image(row: WarehouseClosure) -> dict[str, Any]:
+    return {
+        "date": _json_value(row.date),
+        "opens_at": _json_value(row.opens_at),
+        "closes_at": _json_value(row.closes_at),
+        "note": row.note,
+    }
+
+
+def _save_unique(row: models.Model, field: str, taken: Any) -> None:
+    try:
+        with transaction.atomic():
+            row.save()
+    except IntegrityError as exc:  # the unique weekday / date (a second tab saved it first)
+        raise ValidationError({field: [ValidationError(taken)]}) from exc
+
+
+def save_hours(row: WarehouseHours, *, actor: Any, request: Any = None) -> WarehouseHours:
+    """Create or change one weekday's opening hours (validated; audited ``delivery.hours_saved``)."""
+    errors: dict[str, list[ValidationError]] = {}
+    if row.weekday is None or not 0 <= int(row.weekday) <= 6:
+        errors["weekday"] = [ValidationError(MESSAGE_WEEKDAY)]
+    if row.opens_at is None or row.closes_at is None or row.opens_at >= row.closes_at:
+        errors["closes_at"] = [ValidationError(MESSAGE_HOURS_ORDER)]
+    if errors:
+        raise ValidationError(errors)
+    before = None
+    if not row._state.adding:
+        stored = WarehouseHours.objects.filter(pk=row.pk).first()
+        before = _hours_image(stored) if stored is not None else None
+    with transaction.atomic():
+        _save_unique(row, "weekday", MESSAGE_WEEKDAY_TAKEN)
+        audit.record(
+            action=AUDIT_HOURS_SAVED,
+            entity_type="warehouse_hours",
+            entity_id=str(row.pk),
+            actor=actor,
+            request=request,
+            before=before,
+            after=_hours_image(row),
+        )
+    return row
+
+
+def delete_hours(row: WarehouseHours, *, actor: Any, request: Any = None) -> None:
+    """Remove a weekday (closed from now on); audited ``delivery.hours_deleted``."""
+    with transaction.atomic():
+        image, pk = _hours_image(row), row.pk
+        row.delete()
+        audit.record(
+            action=AUDIT_HOURS_DELETED,
+            entity_type="warehouse_hours",
+            entity_id=str(pk),
+            actor=actor,
+            request=request,
+            before=image,
+        )
+
+
+def save_closure(row: WarehouseClosure, *, actor: Any, request: Any = None) -> WarehouseClosure:
+    """Create or change a special day (closed: both times empty; else special hours); audited
+    ``delivery.closure_saved``; a new row records ``created_by``."""
+    opened = row.opens_at is not None or row.closes_at is not None
+    if opened and (row.opens_at is None or row.closes_at is None or row.opens_at >= row.closes_at):
+        raise ValidationError({"closes_at": [ValidationError(MESSAGE_CLOSURE_TIMES)]})
+    row.note = (row.note or "").strip()
+    before = None
+    if not row._state.adding:
+        stored = WarehouseClosure.objects.filter(pk=row.pk).first()
+        before = _closure_image(stored) if stored is not None else None
+    elif row.created_by_id is None and getattr(actor, "pk", None) is not None:
+        row.created_by = actor
+    with transaction.atomic():
+        _save_unique(row, "date", MESSAGE_CLOSURE_TAKEN)
+        audit.record(
+            action=AUDIT_CLOSURE_SAVED,
+            entity_type="warehouse_closure",
+            entity_id=str(row.pk),
+            actor=actor,
+            request=request,
+            before=before,
+            after=_closure_image(row),
+        )
+    return row
+
+
+def delete_closure(row: WarehouseClosure, *, actor: Any, request: Any = None) -> None:
+    """Remove a special day (the weekly hours apply again); audited ``delivery.closure_deleted``."""
+    with transaction.atomic():
+        image, pk = _closure_image(row), row.pk
+        row.delete()
+        audit.record(
+            action=AUDIT_CLOSURE_DELETED,
+            entity_type="warehouse_closure",
+            entity_id=str(pk),
+            actor=actor,
+            request=request,
+            before=image,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class TariffCheck:
+    """What «Yandex bilan tekshirish» found: the classes offered at the warehouse, or an error code (a
+    Yandex code through ``safe_text``, ``provider_unavailable``, ``not_configured``) — never provider text."""
+
+    ok: bool
+    mode: str
+    tariffs: tuple[str, ...] = ()
+    error_code: str = ""
+
+
+TARIFFS_NOT_CONFIGURED = "not_configured"
+TARIFFS_UNAVAILABLE = "provider_unavailable"
+
+
+def check_yandex_tariffs(*, actor: Any = None, request: Any = None) -> TariffCheck:
+    """Ask Yandex which classes the warehouse point offers (the port's ``tariffs``, read-only) and store them
+    in ``IntegrationState(yandex).data`` the way ``manage.py yandex_delivery_check`` does (``tariffs``,
+    ``tariffs_checked_at``, ``tariffs_mode``, ``tariffs_point``), which the method rule reads
+    (:func:`method_class_refusal`). Audited ``delivery.tariffs_checked`` (the classes or the error code).
+
+    The caller must not hold a transaction: the Yandex call runs on its own and only the bookkeeping after it
+    is written in a short transaction. A failure stores nothing in the provider document."""
+    mode = integration_modes.provider_mode("yandex")
+    row = DeliverySettings.objects.filter(pk=1).first()
+    result: TariffCheck
+    if (
+        row is None
+        or row.warehouse_latitude is None
+        or row.warehouse_longitude is None
+        or not row.warehouse_address.strip()
+    ):
+        result = TariffCheck(ok=False, mode=mode, error_code=TARIFFS_NOT_CONFIGURED)
+    else:
+        point = Point(
+            lon=float(row.warehouse_longitude),
+            lat=float(row.warehouse_latitude),
+            fullname=row.warehouse_address.strip(),
+        )
+        try:
+            names = tuple(tariff.name for tariff in get_yandex_delivery().tariffs(point))
+        except YandexRejected as exc:
+            result = TariffCheck(ok=False, mode=mode, error_code=safe_text(exc.code, 64) or "rejected")
+        except YandexError:
+            result = TariffCheck(ok=False, mode=mode, error_code=TARIFFS_UNAVAILABLE)
+        else:
+            result = TariffCheck(ok=True, mode=mode, tariffs=names)
+            with transaction.atomic():
+                integration_services.update_provider_data(
+                    "yandex",
+                    {
+                        "tariffs": list(names),
+                        "tariffs_checked_at": timeutils.now().isoformat(),
+                        "tariffs_mode": mode,
+                        "tariffs_point": [point.lon, point.lat],
+                    },
+                )
+    if result.ok:
+        logger.info("yandex.tariffs_checked mode=%s classes=%s", mode, ",".join(result.tariffs) or "-")
+    else:
+        logger.warning("yandex.tariffs_check_failed mode=%s code=%s", mode, result.error_code)
+    audit.record(
+        action=AUDIT_TARIFFS_CHECKED,
+        entity_type="integration",
+        entity_id="yandex",
+        actor=actor,
+        request=request,
+        after={
+            "ok": result.ok,
+            "mode": mode,
+            "tariffs": list(result.tariffs),
+            "error_code": result.error_code,
+        },
+    )
+    return result
+
+
+def open_incident(
+    order_id: int, *, note: str, urgent: bool, actor_id: int, request: Any = None
+) -> tuple[int, bool]:
+    """Staff report a delivery incident of an order (a wrong or missing product…): the order's open
+    ``incident`` issue is opened or refreshed (:func:`open_issue`, code ``staff_report``), audited
+    ``delivery.issue_opened``; an urgent one alerts ``delivery.issue_opened`` (ids and codes only).
+    ``(issue_id, created)``; an empty note is a ``ValueError``."""
+    text = _clean_note(note)
+    if not text:
+        raise ValueError("note must not be empty")
+    actor = get_user_model().objects.get(pk=actor_id)
+    kind = enums.DeliveryIssueKind.INCIDENT
+    with transaction.atomic():
+        issue_id, created = open_issue(
+            order_id,
+            kind,
+            code=INCIDENT_CODE,
+            urgent=urgent,
+            details={"order_id": order_id},
+            note=text,
+            actor_id=actor_id,
+        )
+        audit.record(
+            action=AUDIT_ISSUE_OPENED,
+            entity_type="delivery_issue",
+            entity_id=str(issue_id),
+            actor=actor,
+            request=request,
+            after={
+                "order_id": order_id,
+                "kind": kind,
+                "code": INCIDENT_CODE,
+                "urgent": urgent,
+                "created": created,
+                "note": text,
+            },
+        )
+        if urgent:
+            alerts.alert(
+                ALERT_ISSUE_OPENED,
+                {"order_id": order_id, "kind": kind, "code": INCIDENT_CODE},
+                scope=str(issue_id),
+            )
+    return issue_id, created
+
+
 __all__ = [
+    "AUDIT_CLOSURE_DELETED",
+    "AUDIT_CLOSURE_SAVED",
+    "AUDIT_HOURS_DELETED",
+    "AUDIT_HOURS_SAVED",
+    "AUDIT_ISSUE_OPENED",
     "AUDIT_ISSUE_RESOLVED",
+    "AUDIT_SETTINGS_UPDATED",
+    "AUDIT_SUSPENSION_UPDATED",
+    "AUDIT_TARIFFS_CHECKED",
+    "SETTINGS_FIELDS",
+    "Suspension",
+    "TariffCheck",
+    "check_yandex_tariffs",
+    "delete_closure",
+    "delete_hours",
+    "method_class_refusal",
+    "normalise_phone",
+    "open_incident",
+    "save_closure",
+    "save_hours",
+    "set_suspension",
+    "settings_errors",
+    "settings_snapshot",
+    "suspension_of",
+    "update_settings",
     "CancelOutcome",
     "DeliveryError",
     "IssueNotFound",

@@ -20,10 +20,10 @@ from __future__ import annotations
 import logging
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, time, timedelta
-from typing import Any
+from typing import Any, TypedDict
 
 from django.core.cache import cache
-from django.db.models import Count, Exists, OuterRef, Q
+from django.db.models import Case, Count, Exists, OuterRef, Q, QuerySet, Value, When
 from django.db.models.functions import Coalesce
 
 from glowderma.core import enums, integration_modes, timeutils
@@ -452,6 +452,37 @@ def issue_counts() -> dict[str, int]:
     return {"open": int(counts["open"] or 0), "urgent": int(counts["urgent"] or 0)}
 
 
+def settings_row() -> DeliverySettings:
+    """The stored singleton, or an unsaved default row when it is missing (reads never create it)."""
+    return DeliverySettings.objects.filter(pk=1).first() or DeliverySettings()
+
+
+class IssueFilters(TypedDict, total=False):
+    state: str  # DeliveryIssueState
+    urgent: bool
+    kind: str  # DeliveryIssueKind
+    order: int
+
+
+def issues_queryset(filters: IssueFilters) -> QuerySet[DeliveryIssue]:
+    """``GET delivery/issues/``: the queue filtered by ``state`` / ``urgent`` / ``kind`` / ``order`` (with the
+    resolver loaded). Open rows first — urgent first, then oldest first (``deliveryissue_queue_idx``); a
+    ``state=resolved`` list is newest resolved first."""
+    rows = DeliveryIssue.objects.select_related("resolved_by")
+    if "state" in filters:
+        rows = rows.filter(state=filters["state"])
+    if "urgent" in filters:
+        rows = rows.filter(urgent=filters["urgent"])
+    if "kind" in filters:
+        rows = rows.filter(kind=filters["kind"])
+    if "order" in filters:
+        rows = rows.filter(order_id=filters["order"])
+    if filters.get("state") == enums.DeliveryIssueState.RESOLVED:
+        return rows.order_by("-resolved_at", "-id")
+    open_first = Case(When(state=enums.DeliveryIssueState.OPEN, then=Value(0)), default=Value(1))
+    return rows.order_by(open_first, "-urgent", "opened_at", "id")
+
+
 __all__ = [
     "REGIONS_CACHE_KEY",
     "RegionCatalog",
@@ -470,8 +501,11 @@ __all__ = [
     "shipment_info",
     "shipment_view",
     "updated_at",
+    "IssueFilters",
     "IssueInfo",
     "MethodSettings",
+    "issues_queryset",
+    "settings_row",
     "has_open_issue",
     "issue",
     "issue_counts",

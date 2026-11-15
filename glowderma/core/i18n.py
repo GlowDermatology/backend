@@ -873,6 +873,118 @@ CATALOG: Final[dict[str, dict[str, str]]] = {
         "ru": "Отменён",
         "en": "Cancelled",
     },
+    # --- Yandex Delivery (plan §3.4): quote errors, options, methods, shipment stages, timeline ---
+    "error.quote_expired": {
+        "uz": "Yetkazish narxi eskirdi. Narxni qayta hisoblang.",
+        "ru": "Стоимость доставки устарела. Пересчитайте её.",
+        "en": "The delivery price has expired. Please recalculate it.",
+    },
+    "error.delivery_price_changed": {
+        "uz": "Yetkazish narxi o‘zgardi. Yangi narxni tekshiring.",
+        "ru": "Стоимость доставки изменилась. Проверьте новую цену.",
+        "en": "The delivery price has changed. Please review the new price.",
+    },
+    "label.delivery_option.yandex_standard": {
+        "uz": "Yandex Standart",
+        "ru": "Яндекс Стандарт",
+        "en": "Yandex Standard",
+    },
+    "label.delivery_option.yandex_express": {
+        "uz": "Yandex Ekspress",
+        "ru": "Яндекс Экспресс",
+        "en": "Yandex Express",
+    },
+    "label.delivery_option.bts": {
+        "uz": "BTS pochta",
+        "ru": "Почта BTS",
+        "en": "BTS post",
+    },
+    "label.delivery_method.standard": {
+        "uz": "Standart",
+        "ru": "Стандарт",
+        "en": "Standard",
+    },
+    "label.delivery_method.express": {
+        "uz": "Ekspress",
+        "ru": "Экспресс",
+        "en": "Express",
+    },
+    "label.shipment_stage.awaiting_dispatch": {
+        "uz": "Jo‘natishga tayyorlanmoqda",
+        "ru": "Готовится к отправке",
+        "en": "Being prepared",
+    },
+    "label.shipment_stage.courier_requested": {
+        "uz": "Kuryer qidirilmoqda",
+        "ru": "Ищем курьера",
+        "en": "Looking for a courier",
+    },
+    "label.shipment_stage.courier_assigned": {
+        "uz": "Kuryer tayinlandi",
+        "ru": "Курьер назначен",
+        "en": "Courier assigned",
+    },
+    "label.shipment_stage.courier_arrived": {
+        "uz": "Kuryer do‘konga keldi",
+        "ru": "Курьер прибыл в магазин",
+        "en": "The courier is at the shop",
+    },
+    "label.shipment_stage.in_transit": {
+        "uz": "Yo‘lda",
+        "ru": "В пути",
+        "en": "On the way",
+    },
+    "label.shipment_stage.at_destination": {
+        "uz": "Kuryer manzilda",
+        "ru": "Курьер на месте",
+        "en": "The courier has arrived",
+    },
+    "label.shipment_stage.delivered": {
+        "uz": "Yetkazildi",
+        "ru": "Доставлен",
+        "en": "Delivered",
+    },
+    "label.shipment_stage.returning": {
+        "uz": "Do‘konga qaytarilmoqda",
+        "ru": "Возвращается в магазин",
+        "en": "Returning to the shop",
+    },
+    "label.shipment_stage.returned": {
+        "uz": "Do‘konga qaytarildi",
+        "ru": "Возвращён в магазин",
+        "en": "Returned to the shop",
+    },
+    "label.shipment_stage.cancelled": {
+        "uz": "Yetkazish bekor qilindi",
+        "ru": "Доставка отменена",
+        "en": "Delivery cancelled",
+    },
+    "label.shipment_stage.failed": {
+        "uz": "Kuryer qayta chaqiriladi",
+        "ru": "Курьер будет вызван повторно",
+        "en": "A courier will be called again",
+    },
+    "label.timeline.sub_yandex": {
+        "uz": "Yandex Dostavka",
+        "ru": "Яндекс Доставка",
+        "en": "Yandex Delivery",
+    },
+    "label.timeline.delivery_failed": {
+        "uz": "Yetkazib bo‘lmadi",
+        "ru": "Не удалось доставить",
+        "en": "Delivery failed",
+    },
+    "label.timeline.sub_delivery_failed": {
+        "uz": "Buyurtma do‘konga qaytariladi, biz siz bilan bog‘lanamiz",
+        "ru": "Заказ вернётся в магазин, мы с вами свяжемся",
+        "en": "The order goes back to the shop; we will contact you",
+    },
+    "label.timeline.shipment_returned": {
+        "uz": "Buyurtma do‘konga qaytdi",
+        "ru": "Заказ вернулся в магазин",
+        "en": "The order is back at the shop",
+    },
+    # --- end Yandex Delivery ---
     "label.ledger.credit": {
         "uz": "Cashback hisoblandi",
         "ru": "Начислен кешбэк",

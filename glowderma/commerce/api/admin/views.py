@@ -15,20 +15,26 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from glowderma.accounts.api.base import AdminAPIView, AdminGenericViewSet
-from glowderma.commerce import selectors, services
+from glowderma.commerce import delivery_admin, selectors, services
 from glowderma.commerce.api.admin.serializers import (
     MESSAGE_REASON,
     CancelOrderSerializer,
+    DeliveryIssueQuerySerializer,
+    DeliveryIssueSerializer,
+    OpenIssueSerializer,
     OrderCountsQuerySerializer,
     OrderDetailSerializer,
     OrderListQuerySerializer,
     OrderSummarySerializer,
+    ResolveIssueSerializer,
     ResolveRefundSerializer,
     StatusCountsSerializer,
+    SuspensionBodySerializer,
+    SuspensionSerializer,
     TransitionSerializer,
 )
 from glowderma.commerce.models import Order
-from glowderma.core import labels
+from glowderma.core import enums, labels
 from glowderma.core.api.exceptions import Conflict, ContractValidationError
 from glowderma.core.api.schema import (
     ADMIN_ERRORS,
@@ -38,6 +44,9 @@ from glowderma.core.api.schema import (
 )
 from glowderma.core.exports import ExportMixin, format_export_datetime
 from glowderma.core.idempotency import idempotent
+from glowderma.delivery import selectors as delivery_selectors
+from glowderma.delivery import services as delivery_services
+from glowderma.delivery.models import DeliveryIssue
 from glowderma.loyalty.services import PurchaseConflict
 from glowderma.payments import selectors as payment_selectors
 from glowderma.payments.api.admin.serializers import PaymentSerializer
@@ -79,7 +88,8 @@ class OrderViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
     def get_queryset(self) -> QuerySet[Order]:
         query = OrderListQuerySerializer(data=self.request.query_params.dict())
         query.is_valid(raise_exception=True)
-        return selectors.orders_list(cast(selectors.OrderFilters, dict(query.validated_data)))
+        filters = cast(selectors.OrderFilters, dict(query.validated_data))
+        return delivery_admin.with_delivery(selectors.orders_list(filters))
 
     def get_export_rows(self, items: Iterable[Order]) -> Iterable[Sequence[Any]]:
         for order in items:
@@ -243,3 +253,129 @@ class RefundResolveView(AdminAPIView):
         except RefundNotFound as exc:
             raise NotFound from exc
         return _payment_response(pk)
+
+
+# --- delivery exception queue and dispatch suspension (Yandex Delivery plan §3.9) ---------------------------
+
+MESSAGE_PICKUP_ISSUE = "Olib ketiladigan buyurtma uchun yetkazish muammosi ochilmaydi."
+MESSAGE_ISSUE_RESOLVED = "Bu muammo allaqachon hal qilingan."
+
+
+def _issue_response(issue_id: int, status: int = 200) -> Response:
+    row = DeliveryIssue.objects.select_related("resolved_by").filter(pk=issue_id).first()
+    if row is None:
+        raise NotFound
+    return Response(DeliveryIssueSerializer(row).data, status=status)
+
+
+class DeliveryIssueViewSet(mixins.ListModelMixin, AdminGenericViewSet):
+    serializer_class = DeliveryIssueSerializer
+
+    def get_queryset(self) -> QuerySet[DeliveryIssue]:
+        query = DeliveryIssueQuerySerializer(data=self.request.query_params.dict())
+        query.is_valid(raise_exception=True)
+        return delivery_selectors.issues_queryset(
+            cast(delivery_selectors.IssueFilters, dict(query.validated_data))
+        )
+
+    @extend_schema(
+        operation_id="admin_delivery_issues_list",
+        description="The delivery exception queue: open issues first (urgent first, then oldest first); "
+        "`state=resolved` lists the newest resolved first.",
+        parameters=[DeliveryIssueQuerySerializer],
+        responses={200: DeliveryIssueSerializer(many=True), **ADMIN_ERRORS},
+    )
+    def list(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        return super().list(request, *args, **kwargs)
+
+
+class OrderIssueCreateView(AdminAPIView):
+    @extend_schema(
+        operation_id="admin_orders_issues_create",
+        description="Staff report a delivery incident of a delivery order (a wrong or missing product…): "
+        "`kind` must be `incident`. 201 opens the order's incident issue; 200 refreshes the one already "
+        "open (note and urgency). Audited `delivery.issue_opened`; an urgent incident alerts staff. A pickup "
+        "order → 409 `conflict`.",
+        parameters=[IDEMPOTENCY_KEY_HEADER],
+        request=OpenIssueSerializer,
+        responses={201: DeliveryIssueSerializer, 200: DeliveryIssueSerializer, **ADMIN_ERRORS},
+    )
+    @idempotent()
+    def post(self, request: Request, pk: int) -> Response:
+        # the Order lock first (lock order Order → …), inside the idempotent transaction
+        fulfilment = (
+            Order.objects.select_for_update().filter(pk=pk).values_list("fulfilment", flat=True).first()
+        )
+        if fulfilment is None:
+            raise NotFound
+        body = OpenIssueSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        if fulfilment != enums.FulfilmentMethod.DELIVERY:
+            raise Conflict(MESSAGE_PICKUP_ISSUE)
+        issue_id, created = delivery_services.open_incident(
+            pk,
+            note=body.validated_data["note"],
+            urgent=bool(body.validated_data["urgent"]),
+            actor_id=_actor_id(request),
+            request=request,
+        )
+        return _issue_response(issue_id, status=201 if created else 200)
+
+
+class DeliveryIssueResolveView(AdminAPIView):
+    @extend_schema(
+        operation_id="admin_delivery_issues_resolve",
+        description="Close an open issue with a note (audited `delivery.issue_resolved`); 409 `conflict` "
+        "when it is resolved already.",
+        parameters=[IDEMPOTENCY_KEY_HEADER],
+        request=ResolveIssueSerializer,
+        responses={200: DeliveryIssueSerializer, **ADMIN_ERRORS},
+    )
+    @idempotent()
+    def post(self, request: Request, pk: int) -> Response:
+        if not DeliveryIssue.objects.filter(pk=pk).exists():
+            raise NotFound
+        body = ResolveIssueSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        try:
+            changed = delivery_services.resolve_issue(
+                pk, actor_id=_actor_id(request), note=body.validated_data["note"], request=request
+            )
+        except delivery_services.IssueNotFound as exc:
+            raise NotFound from exc
+        if not changed:
+            raise Conflict(MESSAGE_ISSUE_RESOLVED)
+        return _issue_response(pk)
+
+
+class DeliverySuspensionView(AdminAPIView):
+    @extend_schema(
+        operation_id="admin_delivery_suspension_retrieve",
+        description="Whether courier dispatch is suspended now (`until` passed → `suspended: false`).",
+        responses={200: SuspensionSerializer, **ADMIN_ERRORS},
+    )
+    def get(self, request: Request) -> Response:
+        current = delivery_services.suspension_of(delivery_selectors.settings_row())
+        return Response(SuspensionSerializer(current).data)
+
+    @extend_schema(
+        operation_id="admin_delivery_suspension_update",
+        description="Suspend courier dispatch (until `until`, or until lifted) or resume it; audited "
+        "`delivery.suspension_updated`. `until` must be in the future (`in_past`); it is ignored when "
+        "resuming.",
+        parameters=[IDEMPOTENCY_KEY_HEADER],
+        request=SuspensionBodySerializer,
+        responses={200: SuspensionSerializer, **ADMIN_ERRORS},
+    )
+    @idempotent()
+    def post(self, request: Request) -> Response:
+        body = SuspensionBodySerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        current = delivery_services.set_suspension(
+            bool(body.validated_data["suspended"]),
+            body.validated_data["until"],
+            body.validated_data["note"],
+            actor=request.user,
+            request=request,
+        )
+        return Response(SuspensionSerializer(current).data)

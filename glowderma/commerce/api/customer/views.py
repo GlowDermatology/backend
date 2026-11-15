@@ -21,13 +21,15 @@ from glowderma.accounts import services as account_services
 from glowderma.accounts.api.customer_base import CustomerAPIView, CustomerGenericViewSet
 from glowderma.accounts.api.throttles import CheckoutThrottle, CustomerRateThrottle, PayThrottle
 from glowderma.accounts.models import Address, AuthSession, Customer
-from glowderma.commerce import payment_ref, selectors, services, state
+from glowderma.commerce import payment_ref, quoting, selectors, services, state
 from glowderma.commerce.api.customer.serializers import (
     CustomerCartAddSerializer,
     CustomerCartQuantitySerializer,
     CustomerCartSerializer,
     CustomerCheckoutSerializer,
     CustomerDeliveryCalculateSerializer,
+    CustomerDeliveryOptionSerializer,
+    CustomerDeliveryQuoteBaseSerializer,
     CustomerDeliveryQuoteSerializer,
     CustomerOrderDetailSerializer,
     CustomerOrderScopeQuerySerializer,
@@ -41,6 +43,7 @@ from glowderma.core import enums, integration_modes, timeutils
 from glowderma.core.api.exceptions import (
     AlreadyPaid,
     CartEmpty,
+    CustomerError,
     DeliveryUnavailable,
     NotPayable,
     OnlineSalesUnavailable,
@@ -155,6 +158,12 @@ def _delivery_address(
         field = "address_id" if address_id is not None else "region_code"
         raise _field(field, "address_incomplete", message_key="field.address_incomplete")
     return address_id, region, city
+
+
+def _quote_expired(exc: quoting.QuoteExpired) -> CustomerError:
+    """409 ``quote_expired``; ``details.options`` carries the fresh options when a re-quote ran."""
+    details = {"options": _options_data(exc.options)} if exc.options is not None else None
+    return CustomerError("quote_expired", 409, details=details)
 
 
 def _localized_lines(lines: list[dict[str, Any]], lang: str) -> list[dict[str, Any]]:
@@ -322,6 +331,55 @@ class CartItemView(CustomerAPIView):
 # ----------------------------------------------------------------
 
 
+def _wants_options(data: dict[str, Any]) -> bool:
+    """A request with any plan §3.4 key (``with_options``, ``delivery_provider``, ``delivery_method``) gets
+    the options answer; without them ``delivery/calculate/`` answers exactly as the released app expects."""
+    return bool(data.get("with_options") or data.get("delivery_provider") or data.get("delivery_method"))
+
+
+def _address_snapshot(address: Address) -> quoting.AddressSnapshot:
+    return quoting.AddressSnapshot(
+        address_id=address.pk,
+        text=address.text,
+        latitude=address.latitude,
+        longitude=address.longitude,
+        region_code=address.region_code,
+        city_code=address.city_code,
+    )
+
+
+def _options_address(
+    customer: Customer, address_id: int | None, region_code: str | None, city_code: str | None
+) -> quoting.AddressSnapshot:
+    """The destination of the options answer: a saved address (its pin serves Yandex, its BTS codes BTS) or a
+    bare region/city pair (BTS only). No BTS codes are required here: each option says what it lacks."""
+    if not integration_modes.delivery_providers():
+        raise DeliveryUnavailable(key="error.delivery_not_offered")
+    if address_id is not None and (region_code or city_code):  # exactly one of the two (§2.6)
+        raise _field("address_id", "required", message_key="field.address_required")
+    if address_id is not None:
+        address = Address.objects.filter(pk=address_id, customer_id=customer.pk).first()
+        if address is None:
+            raise _field("address_id", "does_not_exist", message_key="field.address_not_found")
+        return _address_snapshot(address)
+    if region_code and city_code:
+        return quoting.AddressSnapshot(
+            address_id=None,
+            text="",
+            latitude=None,
+            longitude=None,
+            region_code=region_code,
+            city_code=city_code,
+        )
+    raise _field("address_id", "required", message_key="field.address_required")
+
+
+def _options_data(options: list[quoting.DeliveryOption]) -> list[dict[str, Any]]:
+    rows: Any = [option.as_dict() for option in options]
+    serializer: Any = CustomerDeliveryOptionSerializer(rows, many=True)
+    return list(serializer.data)
+
+
 class DeliveryCalculateView(CustomerAPIView):
     @extend_schema(
         operation_id="customer_delivery_calculate",
@@ -329,11 +387,86 @@ class DeliveryCalculateView(CustomerAPIView):
         request=CustomerDeliveryCalculateSerializer,
         responses={200: CustomerDeliveryQuoteSerializer, **CUSTOMER_ERRORS},
     )
-    @idempotent(required=False)
     def post(self, request: Request) -> Response:
+        # plan §3.4: the carriers are asked here, before the @idempotent transaction (which only stores and
+        # returns the answer); a replayed key asks nobody
+        body = CustomerDeliveryCalculateSerializer(data=request.data)
+        prepared = None
+        if body.is_valid() and _wants_options(body.validated_data) and not already_answered(request):
+            prepared = self._options_answer(request, body.validated_data)
+        return self._calculate(request, prepared)
+
+    def _options_answer(self, request: Request, data: dict[str, Any]) -> dict[str, Any]:
+        """The superset answer: the released keys for the selected option plus ``provider``, ``method``,
+        ``quote_id``, ``quote_expires_at`` and ``options[]``. Same checks, in the same order, as the released
+        path (address, then the cart)."""
+        customer = _customer(request)
+        delivery = data["fulfilment"] == enums.FulfilmentMethod.DELIVERY
+        snapshot = (
+            _options_address(customer, data["address_id"], data["region_code"], data["city_code"])
+            if delivery
+            else None
+        )
+        cart = selectors.cart_view(customer.pk, self.language)
+        if not cart["items"]:
+            raise CartEmpty()
+        now = timeutils.now()
+        subtotal = int(cart["items_subtotal"])
+        available = loyalty_selectors.account_summary(customer.pk).available
+        wanted = int(data["cashback_to_use"] or 0)
+        selected: quoting.DeliveryOption | None = None
+        options: list[quoting.DeliveryOption] = []
+        if snapshot is not None:
+            options = quoting.delivery_options(
+                quoting.QuoteRequest(
+                    customer_id=customer.pk,
+                    address=snapshot,
+                    quantity=int(cart["quantity_total"]),
+                    items_subtotal=subtotal,
+                    cashback_available=available,
+                    cashback_to_use=wanted,
+                    lang=self.language,
+                    now=now,
+                    scenario=fake_scenario_header(request),
+                )
+            )
+            selected = quoting.select_option(options, data["delivery_provider"], data["delivery_method"])
+            if selected is None or selected.fee is None:
+                raise DeliveryUnavailable(
+                    key="error.delivery_unavailable", details={"options": _options_data(options)}
+                )
+        fee = selected.fee if selected is not None and selected.fee is not None else 0
+        maximum = selectors.cashback_max(subtotal, fee, available)
+        to_use = min(wanted, maximum)
+        quote = {
+            "fulfilment": data["fulfilment"],
+            "delivery_fee": fee,
+            "region_code": (snapshot.region_code or None) if snapshot is not None else None,
+            "city_code": (snapshot.city_code or None) if snapshot is not None else None,
+            "weight_g": selected.weight_g if selected is not None else None,
+            "pickup_address": None if delivery else selectors.pickup_address(self.language),
+            "quoted_at": now,
+            "items_subtotal": subtotal,
+            "cashback_max": maximum,
+            "cashback_to_use": to_use,
+            "expected_total": subtotal + fee - to_use,
+            "provider": selected.provider if selected is not None else None,
+            "method": selected.method if selected is not None else None,
+            "quote_id": selected.quote_id if selected is not None else None,
+            "quote_expires_at": selected.expires_at if selected is not None else None,
+            "options": [option.as_dict() for option in options],
+        }
+        return dict(CustomerDeliveryQuoteSerializer(quote).data)
+
+    @idempotent(required=False)
+    def _calculate(self, request: Request, prepared: dict[str, Any] | None) -> Response:
+        if prepared is not None:
+            return Response(prepared)
         body = CustomerDeliveryCalculateSerializer(data=request.data)
         body.is_valid(raise_exception=True)
         data = body.validated_data
+        if _wants_options(data):  # pragma: no cover - only a key whose stored answer expired mid-request
+            raise ProviderUnavailable()
         customer = _customer(request)
         delivery = data["fulfilment"] == enums.FulfilmentMethod.DELIVERY
         region = city = ""
@@ -366,7 +499,7 @@ class DeliveryCalculateView(CustomerAPIView):
             "cashback_to_use": to_use,
             "expected_total": subtotal + fee - to_use,
         }
-        return Response(CustomerDeliveryQuoteSerializer(quote).data)
+        return Response(CustomerDeliveryQuoteBaseSerializer(quote).data)
 
 
 # --- checkout, pay, cancel, reorder (customer contract §2.7)
@@ -394,10 +527,73 @@ class CheckoutView(CustomerAPIView):
             stock = _refresh_stock(
                 request, selectors.cart_product_ids(_customer(request).pk), key_required=True
             )
-        return self._checkout(request, stock)
+        # plan §3.4: a Yandex quote is checked (and re-quoted when it no longer fits) before the transaction
+        return self._checkout(request, stock, self._yandex_quote(request))
+
+    def _yandex_quote(self, request: Request) -> quoting.CheckoutQuote | None:
+        """The quote of a ``delivery_quote_id`` checkout, checked against the address, the cart and the
+        method settings as they are now; a stale one is re-quoted (an equal fee proceeds, another fee → 409
+        ``price_changed`` with the fresh options, nothing available → 409 ``quote_expired``). ``None`` — and
+        no carrier is asked — for a request the transaction will refuse or replay anyway."""
+        body = CustomerCheckoutSerializer(data=request.data)
+        if not body.is_valid():
+            return None
+        data = body.validated_data
+        if data["delivery_quote_id"] is None or data["fulfilment"] != enums.FulfilmentMethod.DELIVERY:
+            return None
+        customer = _customer(request)
+        if (
+            data["address_id"] is None
+            or not integration_modes.online_sales_enabled()
+            or not customer.phone
+            or data["payment_provider"] not in integration_modes.payable_providers()
+            or site_config_selectors.outdated_consent(customer.terms_version) is not None
+            or idempotency_key(request) is None
+            or already_answered(request)
+        ):
+            return None
+        address = Address.objects.filter(pk=data["address_id"], customer_id=customer.pk).first()
+        if address is None:
+            return None
+        cart = selectors.cart_view(customer.pk, self.language)
+        if not cart["items"]:
+            return None
+        subtotal = int(cart["items_subtotal"])
+        wanted = int(data["cashback_to_use"] or 0)
+        quote_request = quoting.QuoteRequest(
+            customer_id=customer.pk,
+            address=_address_snapshot(address),
+            quantity=int(cart["quantity_total"]),
+            items_subtotal=subtotal,
+            cashback_available=loyalty_selectors.account_summary(customer.pk).available,
+            cashback_to_use=wanted,
+            lang=self.language,
+            now=timeutils.now(),
+            scenario=fake_scenario_header(request),
+        )
+        try:
+            return quoting.checkout_quote(quote_request, data["delivery_quote_id"])
+        except quoting.DeliveryFeeChanged as exc:
+            fee = int(exc.option.fee or 0)
+            raise PriceChanged(
+                key="error.delivery_price_changed",
+                details={
+                    "total": subtotal + fee - wanted,
+                    "items_subtotal": subtotal,
+                    "delivery_fee": fee,
+                    "cashback_used": wanted,
+                    "cart": CustomerCartSerializer(cart).data,
+                    "quote_id": str(exc.option.quote_id) if exc.option.quote_id is not None else None,
+                    "options": _options_data(exc.options),
+                },
+            ) from exc
+        except quoting.QuoteExpired as exc:
+            raise _quote_expired(exc) from exc
 
     @idempotent()
-    def _checkout(self, request: Request, stock: services.StockCheck) -> Response:
+    def _checkout(
+        self, request: Request, stock: services.StockCheck, prepared: quoting.CheckoutQuote | None
+    ) -> Response:
         if not integration_modes.online_sales_enabled():  # row 0: nothing read or quoted
             raise OnlineSalesUnavailable()
         account_services.require_phone(_customer(request))  # row 0a: hybrid identity, C§2.2.10
@@ -411,10 +607,20 @@ class CheckoutView(CustomerAPIView):
             raise _field("address_id", "required", message_key="field.address_required")
         if not delivery and data["address_id"] is not None:
             raise _field("address_id", "invalid")
+        if not delivery and data["delivery_quote_id"] is not None:
+            raise _field("delivery_quote_id", "invalid")
         customer = _customer(request)
         _consent_current(customer)
         region = city = ""
-        if delivery:
+        quote_id = None
+        if delivery and data["delivery_quote_id"] is not None:
+            # Yandex: an own saved address (its pin), no BTS region/city; the quote was checked in post()
+            if not Address.objects.filter(pk=data["address_id"], customer_id=customer.pk).exists():
+                raise _field("address_id", "does_not_exist", message_key="field.address_not_found")
+            if prepared is None:  # pragma: no cover - only a key whose stored answer expired mid-request
+                raise _quote_expired(quoting.QuoteExpired())
+            quote_id = prepared.quote_id
+        elif delivery:
             _, region, city = _delivery_address(customer, data["address_id"], None, None)
         device = self.device
         claims = request.auth if isinstance(request.auth, dict) else {}
@@ -437,9 +643,12 @@ class CheckoutView(CustomerAPIView):
                         "app_version": device.app_version if device is not None else "",
                         "device_id": session.device_id if session is not None else None,
                     },
+                    delivery_quote_id=quote_id,
                 ),
                 stock=stock,
             )
+        except quoting.QuoteExpired as exc:
+            raise _quote_expired(exc) from exc
         except services.OutOfStock as exc:
             raise OutOfStockError(details={"lines": _localized_lines(exc.lines, self.language)}) from exc
         except services.CashbackAboveMax as exc:

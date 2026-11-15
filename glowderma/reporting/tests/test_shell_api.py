@@ -170,6 +170,7 @@ def test_nav_counts(staff_client: APIClient, clock: None) -> None:
     assert staff_client.get("/api/v1/admin/nav-counts/").data == {
         "orders_processing": 0,
         "appointments_pending": 0,
+        "delivery_issues_open": 0,
     }
     OrderFactory.create(paid=True)
     OrderFactory.create(paid=True)
@@ -182,4 +183,4 @@ def test_nav_counts(staff_client: APIClient, clock: None) -> None:
     )
     response = staff_client.get("/api/v1/admin/nav-counts/")
     assert response.status_code == 200
-    assert response.data == {"orders_processing": 2, "appointments_pending": 1}
+    assert response.data == {"orders_processing": 2, "appointments_pending": 1, "delivery_issues_open": 0}

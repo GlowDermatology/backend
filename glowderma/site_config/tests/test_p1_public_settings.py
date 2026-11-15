@@ -47,12 +47,14 @@ def test_shape_and_languages() -> None:
         "fulfilment_methods",
         "min_app_version",
         "store_urls",
+        "delivery",
     }
     assert data["pickup_address"] == "Ташкент, Юнусабад"
     assert data["terms"] == "Shartlar"  # ru empty → uz
     assert data["terms_version"] == "2026-10-01"
     assert data["payment_providers"] == ["click", "payme"]
     assert data["fulfilment_methods"] == ["delivery", "pickup"]
+    assert data["delivery"] == {"providers": ["yandex", "bts"], "default_provider": "yandex"}
     assert data["online_sales_enabled"] is True
     assert data["min_app_version"] == {"ios": "0.0.0", "android": "0.0.0"}
     response = APIClient().get(URL)
@@ -86,6 +88,27 @@ def test_fake_providers_under_the_production_settings() -> None:
     assert data["payment_providers"] == []
     assert data["fulfilment_methods"] == ["pickup"]
     assert data["online_sales_enabled"] is False
+    assert data["delivery"] == {"providers": [], "default_provider": None}
+
+
+@pytest.mark.parametrize(
+    ("bts", "yandex", "expected"),
+    [
+        ("live", "live", {"providers": ["yandex", "bts"], "default_provider": "yandex"}),
+        ("live", "fake", {"providers": ["bts"], "default_provider": "bts"}),
+        ("fake", "live", {"providers": ["yandex"], "default_provider": "yandex"}),
+    ],
+)
+def test_delivery_providers_follow_the_integration_modes(
+    bts: str, yandex: str, expected: dict[str, Any]
+) -> None:
+    """``delivery`` (plan §3.4) comes from ``core.integration_modes`` only: a fake carrier under the
+    production settings is not offered; the pilot list and the warehouse are decided by
+    ``delivery/calculate/``."""
+    with override_settings(DEV_FEATURES_ALLOWED=False, BTS_MODE=bts, YANDEX_DELIVERY_MODE=yandex):
+        data = get()
+    assert data["delivery"] == expected
+    assert data["fulfilment_methods"] == (["delivery", "pickup"] if bts == "live" else ["pickup"])
 
 
 def test_a_snapshot_read_before_a_change_is_never_served_after_it(monkeypatch: pytest.MonkeyPatch) -> None:

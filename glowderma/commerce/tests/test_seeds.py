@@ -15,6 +15,7 @@ from rest_framework.test import APIClient
 
 from glowderma.accounts.models import Customer
 from glowderma.catalog.models import Product
+from glowderma.commerce import delivery_admin
 from glowderma.commerce.models import Order, OrderEvent, StockReservation
 from glowderma.core import seeding
 from glowderma.core.models import AuditEntry, OutboxMessage
@@ -179,6 +180,8 @@ DETAIL_10248: dict[str, Any] = {  # contract §2.2 example (ids pinned, image UR
     ],
     "history": HISTORY_10248,
     "available_actions": {"transitions": ["delivered"], "cancel": True, "retry_shipment": False},
+    # Yandex Delivery (additive): a BTS order names its carrier, every Yandex-only key is null
+    "delivery": {"provider": "bts", **dict.fromkeys(delivery_admin.YANDEX_KEYS), "open_issues": []},
 }
 COUNTED = (
     Order,
@@ -299,6 +302,7 @@ def test_seed_demo_reproduces_the_design_vectors(staff_client: APIClient) -> Non
         assert staff_client.get("/api/v1/admin/nav-counts/").json() == {
             "orders_processing": 12,
             "appointments_pending": 3,
+            "delivery_issues_open": 0,
         }
         dashboard = staff_client.get("/api/v1/admin/dashboard/").json()
         recent = staff_client.get("/api/v1/admin/orders/", {"page_size": 6}).json()
@@ -316,6 +320,7 @@ def test_seed_demo_reproduces_the_design_vectors(staff_client: APIClient) -> Non
         "refunds_needing_action": 2,  # M3: the seeded failed Click refunds of №10100 and №10175
         "bts_polling_failing": False,
         "cashback_policy_missing": False,  # v3 is active
+        "yandex_failing": False,  # fake mode
     }
     assert sum(bucket["revenue"] for bucket in dashboard["buckets"]) == 768_000
     assert (

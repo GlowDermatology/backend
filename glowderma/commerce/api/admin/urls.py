@@ -8,7 +8,11 @@ declared here (T16 pattern).
 from django.urls import URLPattern, URLResolver, path
 
 from .views import (
+    DeliveryIssueResolveView,
+    DeliveryIssueViewSet,
+    DeliverySuspensionView,
     OrderCancelView,
+    OrderIssueCreateView,
     OrderRetryShipmentView,
     OrderStatusCountsView,
     OrderTransitionView,
@@ -26,6 +30,15 @@ urlpatterns: list[URLPattern | URLResolver] = [
     path(
         "orders/<int:pk>/retry-shipment/", OrderRetryShipmentView.as_view(), name="admin-order-retry-shipment"
     ),
+    # Yandex Delivery exception queue and dispatch suspension (plan §3.9)
+    path("orders/<int:pk>/issues/", OrderIssueCreateView.as_view(), name="admin-order-issues"),
+    path("delivery/issues/", DeliveryIssueViewSet.as_view({"get": "list"}), name="admin-delivery-issues"),
+    path(
+        "delivery/issues/<int:pk>/resolve/",
+        DeliveryIssueResolveView.as_view(),
+        name="admin-delivery-issue-resolve",
+    ),
+    path("delivery/suspension/", DeliverySuspensionView.as_view(), name="admin-delivery-suspension"),
     path(
         "payments/<int:pk>/refunds/<int:refund_id>/retry/",
         RefundRetryView.as_view(),

@@ -97,7 +97,8 @@ def test_console_pages_leave_no_english_ui_words(ops_client: Client) -> None:
     pages = _pages()
     assert len(pages) > 80  # every list, and the change page of each model the demo shop fills
     for url, model in pages:
-        response = ops_client.get(url)
+        # a singleton's list opens its one row (the delivery settings page)
+        response = ops_client.get(url, follow=url.endswith("/deliverysettings/"))
         assert response.status_code == 200, url
         found = _leftovers(_text(response.content), model)
         if found:

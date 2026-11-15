@@ -31,6 +31,8 @@ app.conf.beat_schedule = {
     "commerce-poll-bts": {"task": "commerce.poll_bts", "schedule": 600.0},
     # M3: BTS's region list is refreshed before it goes stale (24 h), so no customer request pays for it.
     "delivery-refresh-bts-regions": {"task": "delivery.refresh_bts_regions", "schedule": 6 * 3600.0},
+    # Yandex Delivery (plan §3.11): unused checkout quotes are deleted a day after they expired.
+    "delivery-purge-quotes": {"task": "delivery.purge_quotes", "schedule": crontab(hour=3, minute=35)},
     # M3 retention (docs/ops/compliance.md): done outbox rows (never dead ones) after OUTBOX_RETENTION_DAYS,
     # raw provider callbacks (WebhookInbox) after WEBHOOK_INBOX_RETENTION_DAYS; batched, at most 5 minutes a
     # night each.
