@@ -168,3 +168,25 @@ def test_restore_obeys_ownership_and_cart_read_obeys_history_horizon(
     Customer.objects.filter(pk=customer.pk).update(history_from=order.created_at + timedelta(seconds=1))
     assert customer_client.get("/api/v1/cart/").json()["checkout_order"] is None
     assert restore(customer_client, order).status_code == 404
+
+
+def test_pending_order_takes_priority_over_a_cancelled_checkout(
+    customer_client: APIClient,
+    customer: Customer,
+) -> None:
+    post(customer_client, "cart/items", {"product_id": product(stock=10).pk})
+    old = checkout(customer_client)
+    services.cancel_by_customer(old.pk, customer.pk)
+    pending = place(customer, fulfilment="pickup", when=real_now())
+    body = customer_client.get("/api/v1/cart/").json()
+    assert body["checkout_order"]["id"] == pending.pk
+    assert Cart.objects.get(customer=customer).last_checkout_order_id == old.pk
+
+
+def test_order_created_before_a_cart_is_still_discoverable(
+    customer_client: APIClient,
+    customer: Customer,
+) -> None:
+    pending = place(customer, fulfilment="pickup", when=real_now())
+    assert not Cart.objects.filter(customer=customer).exists()
+    assert customer_client.get("/api/v1/cart/").json()["checkout_order"]["id"] == pending.pk

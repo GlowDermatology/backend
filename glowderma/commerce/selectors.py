@@ -769,7 +769,32 @@ def visible_ids(product_ids: Iterable[int]) -> set[int]:
 
 def cart_view(customer_id: int, lang: str, *, last_change: dict[str, Any] | None = None) -> dict[str, Any]:
     """The ``Cart`` of customer contract §2.5 (a GET never changes stored quantities)."""
-    cart = Cart.objects.filter(customer_id=customer_id).first()
+    # Resolve recovery in the existing cart query. Customers with no recoverable purchase must not
+    # pay for separate history-horizon and order reads on every cart/header request.
+    recovery_orders = (
+        Order.objects.filter(customer_id=OuterRef("customer_id"))
+        .filter(Q(customer__history_from__isnull=True) | Q(created_at__gte=F("customer__history_from")))
+        .order_by("-created_at", "-id")
+    )
+    cart = (
+        Cart.objects.filter(customer_id=customer_id)
+        .annotate(
+            checkout_recovery_id=Coalesce(
+                Subquery(recovery_orders.filter(status=_S.AWAITING_PAYMENT).values("pk")[:1]),
+                Subquery(
+                    recovery_orders.filter(
+                        pk=OuterRef("last_checkout_order_id"),
+                        status=_S.CANCELLED,
+                        cancellation_reason__in=[
+                            enums.CancellationReason.RESERVATION_EXPIRED,
+                            enums.CancellationReason.CUSTOMER_REQUEST,
+                        ],
+                    ).values("pk")[:1]
+                ),
+            )
+        )
+        .first()
+    )
     items: list[CartItem] = []
     if cart is not None:
         items = list(
@@ -837,17 +862,15 @@ def cart_checkout_order(customer_id: int, cart: Cart | None, lang: str) -> dict[
     Active orders take priority. After expiry/cancellation, only the last checkout is offered for
     recovery, until its lines are restored. Ownership and the history horizon apply to both reads.
     """
+    if cart is not None:
+        order_id = getattr(cart, "checkout_recovery_id", None)
+        if order_id is None:
+            return None
+        order = customer_order(order_id, customer_id)
+        return customer_order_detail(order, lang) if order is not None else None
+    # Orders created outside cart checkout may exist before the customer's first cart row.
     orders = customer_orders(customer_id)
     order = orders.filter(status=_S.AWAITING_PAYMENT).first()
-    if order is None and cart is not None and cart.last_checkout_order_id is not None:
-        order = orders.filter(
-            pk=cart.last_checkout_order_id,
-            status=_S.CANCELLED,
-            cancellation_reason__in=[
-                enums.CancellationReason.RESERVATION_EXPIRED,
-                enums.CancellationReason.CUSTOMER_REQUEST,
-            ],
-        ).first()
     return customer_order_detail(order, lang) if order is not None else None
 
 
