@@ -38,6 +38,7 @@ def test_every_customer_throttle_has_a_default_scope() -> None:
         throttles.CustomerRateThrottle,
         throttles.CheckoutThrottle,
         throttles.PayThrottle,
+        throttles.DeliveryQuoteThrottle,
         throttles.QrThrottle,
         throttles.PublicDeviceThrottle,
         throttles.PublicIPThrottle,
@@ -65,6 +66,16 @@ def test_customer_scoped_throttles_key_on_the_customer_and_skip_anonymous() -> N
     ):
         assert cls().get_cache_key(request(customer(7)), VIEW) == f"throttle_{cls.scope}_7"
         assert cls().get_cache_key(request(), VIEW) is None
+
+
+def test_the_delivery_quote_throttle_counts_only_requests_that_ask_the_carriers() -> None:
+    cls = throttles.DeliveryQuoteThrottle
+    for body in ({"with_options": True}, {"delivery_provider": "yandex"}, {"delivery_method": "express"}):
+        assert cls().get_cache_key(request(customer(7), body), VIEW) == "throttle_delivery_quote_7"
+    # the released request (and an explicit "no options") stays under the customer scope only
+    assert cls().get_cache_key(request(customer(7), {"fulfilment": "delivery"}), VIEW) is None
+    assert cls().get_cache_key(request(customer(7), {"with_options": False}), VIEW) is None
+    assert cls().get_cache_key(request(None, {"with_options": True}), VIEW) is None
 
 
 def test_public_throttles_key_on_the_device_then_the_ip_for_anonymous_callers_only() -> None:

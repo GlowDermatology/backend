@@ -3719,6 +3719,10 @@ msgstr "Suspension note"
 msgid "To‘xtatish muddati"
 msgstr "Suspended until"
 
+#: glowderma/delivery/admin.py
+msgid "To‘xtatish muddati kelajakda bo‘lishi kerak."
+msgstr "The suspension end must be in the future."
+
 #: glowderma/catalog/admin.py
 msgid "Tugagan (0 yoki Billz’da yozuvi yo‘q)"
 msgstr "Out of stock (0 or no record in Billz)"

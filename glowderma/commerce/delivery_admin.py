@@ -180,9 +180,19 @@ def detail_delivery(order: Order, shipment: Shipment | None) -> dict[str, Any] |
     and, for Yandex, its shipment with the claim and the quote (one more)."""
     if order.fulfilment == enums.FulfilmentMethod.PICKUP:
         return None
-    if shipment is not None and shipment.provider == _YANDEX:
-        shipment = Shipment.objects.select_related("claim", "quote").get(pk=shipment.pk)
+    if shipment is not None and shipment.provider == _YANDEX and not yandex_rows_loaded(shipment):
+        shipment = load_yandex_rows(shipment)
     return delivery_view(order, shipment, list(open_issue_rows().filter(order_id=order.pk)))
+
+
+def yandex_rows_loaded(shipment: Shipment) -> bool:
+    """The shipment came with its current claim and its quote (a ``None`` FK counts as loaded)."""
+    return bool(Shipment.claim.is_cached(shipment) and Shipment.quote.is_cached(shipment))
+
+
+def load_yandex_rows(shipment: Shipment) -> Shipment:
+    """The Yandex shipment again with its current claim, quote and create message joined (one query)."""
+    return Shipment.objects.select_related("claim", "quote", "create_message").get(pk=shipment.pk)
 
 
 # --- dashboard ``fulfilment`` (plan §3.10) ------------------------------------------------------------------
@@ -254,6 +264,8 @@ __all__ = [
     "detail_delivery",
     "filter_delivery",
     "fulfilment_counts",
+    "load_yandex_rows",
+    "yandex_rows_loaded",
     "open_issue_rows",
     "summary_delivery",
     "with_delivery",

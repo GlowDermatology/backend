@@ -123,6 +123,35 @@ FINISHED: frozenset[str] = frozenset(
 # parcel is on its way back or back at the warehouse (plan §3.8 "returning / returned").
 RETURN_STAGES: frozenset[str] = frozenset({_G.RETURNING, _G.RETURNED})
 
+# Before ``claims/accept`` took effect: no courier is searched for, the claim summons nobody (plan §3.6).
+PRE_ACCEPT: frozenset[str] = frozenset({"new", "estimating", "ready_for_approval"})
+# Statuses Yandex reaches only after the claim was accepted (a courier was searched for). ``failed`` and
+# ``cancelled`` are not among them: an unaccepted claim can end in either (an expired offer, our own cancel).
+ACCEPT_IMPLIED: frozenset[str] = (
+    frozenset(STATUSES) - PRE_ACCEPT - {"estimating_failed", "failed", "cancelled"}
+)
+DELIVERED_STATUSES: frozenset[str] = frozenset({"delivered", "delivered_finish"})
+RETURNED_STATUSES: frozenset[str] = frozenset({"returned", "returned_finish"})
+CANCELLED_STATUSES: frozenset[str] = frozenset(
+    {"cancelled", "cancelled_with_payment", "cancelled_by_taxi", "cancelled_with_items_on_hands"}
+)
+# A claim that ends here never delivered nor returned anything: no courier came (dispatch again) or the
+# parcel is out of our sight (after pickup).
+FAILURE_STATUSES: frozenset[str] = CANCELLED_STATUSES | {"failed", "estimating_failed", "performer_not_found"}
+# Finished claims Yandex charges nothing for, by our reading of the docs (no courier took the parcel or none
+# came; the documented fees are for a cancellation after the courier's arrival and for deliveries/returns):
+# settled at once with no cost instead of waiting 24 h for a ``final_price``.
+NO_COST_ENDS: frozenset[str] = frozenset(
+    {"estimating_failed", "performer_not_found", "cancelled", "cancelled_by_taxi"}
+)
+# Yandex accepted the claim and is still searching for a courier (no performer yet): the review beat flags a
+# search that takes longer than 30 minutes (``dispatch_failed`` ``courier_search_slow``).
+SEARCHING: frozenset[str] = frozenset({"accepted", "performer_lookup", "performer_draft"})
+# Stages with a courier on the claim (the tracking link exists from here, the courier's name and car too).
+COURIER_STAGES: frozenset[str] = frozenset(
+    {_G.COURIER_ASSIGNED, _G.COURIER_ARRIVED, _G.IN_TRANSIT, _G.AT_DESTINATION}
+)
+
 
 def stage_for(status: str) -> str | None:
     """The :class:`~glowderma.core.enums.ShipmentStage` of a claim status; ``None`` for an unknown one."""
@@ -149,10 +178,19 @@ def cancel_without_carrier(stage: str, *, claim_open: bool) -> bool:
 
 
 __all__ = [
+    "ACCEPT_IMPLIED",
+    "CANCELLED_STATUSES",
+    "COURIER_STAGES",
+    "DELIVERED_STATUSES",
+    "FAILURE_STATUSES",
     "FINISHED",
+    "NO_COST_ENDS",
     "ORDER_EFFECT",
     "PICKED_UP",
+    "PRE_ACCEPT",
+    "RETURNED_STATUSES",
     "RETURN_STAGES",
+    "SEARCHING",
     "STAGE_BY_STATUS",
     "STATUSES",
     "cancel_without_carrier",

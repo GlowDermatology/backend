@@ -17,7 +17,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date as date_cls
-from datetime import datetime
+from datetime import datetime, timedelta
 from datetime import time as time_cls
 from decimal import Decimal
 from typing import Any
@@ -25,15 +25,18 @@ from typing import Any
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, models, transaction
+from django.db.models import Max
 from django.utils import timezone
 from django.utils.translation import gettext_lazy
 
 from glowderma.core import alerts, audit, enums, integration_modes, outbox, timeutils
 from glowderma.delivery import bts, selectors
+from glowderma.delivery import yandex as yandex_statuses
 from glowderma.delivery.models import (
     PHONE_E164_REGEX,
     UZ_LATITUDE,
     UZ_LONGITUDE,
+    CourierClaim,
     DeliveryIssue,
     DeliveryQuote,
     DeliverySettings,
@@ -48,7 +51,14 @@ from glowderma.integrations import services as integration_services
 from glowderma.integrations.bts.ports import STATUS_ACCEPTED, Parcel
 from glowderma.integrations.bts.registry import get_bts
 from glowderma.integrations.httpclient import safe_text
-from glowderma.integrations.yandex_delivery.ports import Point, YandexError, YandexRejected
+from glowderma.integrations.yandex_delivery.ports import (
+    Claim,
+    Point,
+    YandexConflict,
+    YandexError,
+    YandexRejected,
+    YandexUnavailable,
+)
 from glowderma.integrations.yandex_delivery.registry import get_yandex_delivery
 
 logger = logging.getLogger(__name__)
@@ -420,8 +430,599 @@ def mark_awaiting_dispatch(order_id: int, *, at: datetime) -> bool:
         return True
 
 
+# --- Yandex Delivery: courier claims (plan §3.6 dispatch, §3.7 status sync) --------------------------------
+#
+# Every writer below runs while ``commerce`` holds the Order lock, and never calls Yandex: the dispatch and
+# sync flows (``commerce.yandex_flow``) call the port outside any transaction and record the answers here.
+
+_STAGE = enums.ShipmentStage
+_STATUS_VIA = (enums.ShipmentVia.WEBHOOK, enums.ShipmentVia.POLLING)
+# A claim snapshot as recorded by :func:`record_claim_snapshot`.
+SNAPSHOT_APPLIED = "applied"
+SNAPSHOT_DUPLICATE = "duplicate"  # same status, version and final price as stored
+SNAPSHOT_STALE = "stale"  # older than the stored one (claims/info may lag)
+SNAPSHOT_UNKNOWN_CLAIM = "unknown_claim"  # no claim of this order has that Yandex id
+COST_UNKNOWN = "cost_unknown"
+COURIER_DETAILS_RETENTION_DAYS = 7
+
+
+class DispatchConflict(DeliveryError):
+    """A claim of the shipment is still open (``courierclaim_one_open_per_shipment``): no second courier."""
+
+
+@dataclass(frozen=True, slots=True)
+class ClaimUpdate:
+    """What :func:`record_claim_snapshot` recorded; the order side is decided by ``commerce``.
+
+    ``live`` = the snapshot is of the shipment's current claim and that claim was open: only then do the
+    stage, the state and the order move. ``picked_up`` = this claim reached pickup (now or earlier).
+    """
+
+    outcome: str
+    claim_pk: int | None = None
+    claim_number: int = 0
+    claim_id: str = ""
+    previous_status: str = ""
+    status: str = ""
+    known: bool = True
+    live: bool = False
+    current: bool = False
+    stage: str = ""
+    accepted_now: bool = False
+    accepted: bool = False  # the claim was accepted (now or earlier)
+    accept_sent: bool = False
+    finished_now: bool = False
+    picked_up: bool = False
+    cancel_requested: bool = False
+    requested_by_id: int | None = None
+    tariff: int | None = None
+    needs_tracking_link: bool = False
+    final_price_added: int | None = None
+
+    @property
+    def applied(self) -> bool:
+        return self.outcome == SNAPSHOT_APPLIED
+
+
+def _yandex_shipment(order_id: int) -> Shipment:
+    shipment = _shipment(order_id)
+    if shipment.provider != enums.DeliveryProvider.YANDEX:
+        raise DeliveryError(f"Shipment of order {order_id} is {shipment.provider}, not Yandex")
+    return shipment
+
+
+def _settle_cost(shipment: Shipment, paid_fee: int) -> None:
+    """``cost_difference`` = the fee the customer paid − everything Yandex charged so far."""
+    shipment.cost_difference = paid_fee - shipment.carrier_cost_total
+
+
+def start_dispatch(
+    order_id: int,
+    *,
+    method: str,
+    taxi_class: str,
+    weight_g: int,
+    quoted_fee: int | None,
+    estimate_price: int | None,
+    approved_price: int | None,
+    actor_id: int | None,
+    at: datetime,
+) -> int:
+    """Staff verified and weighed the parcel and call a courier (plan §3.6): a new open ``CourierClaim``
+    (the next ``number``, a fresh UUID ``request_id``) becomes the shipment's current claim, the parcel is
+    recorded (``parcel_weight_g``, ``prepared_at`` / ``prepared_by``, ``method``), stage ``courier_requested``
+    and a ``claim_requested`` event. Returns the claim pk; :class:`DispatchConflict` while another claim of
+    the shipment is open (the partial unique index decides, so a double click cannot open two)."""
+    _aware(at, "at")
+    if method not in enums.DeliveryMethod.values:
+        raise ValueError(f"Unknown delivery method {method!r}")
+    with transaction.atomic():
+        shipment = _yandex_shipment(order_id)
+        number = (CourierClaim.objects.filter(shipment=shipment).aggregate(top=Max("number"))["top"] or 0) + 1
+        try:
+            with transaction.atomic():
+                claim = CourierClaim.objects.create(
+                    shipment=shipment,
+                    number=number,
+                    taxi_class=taxi_class,
+                    method=method,
+                    quoted_fee=quoted_fee,
+                    estimate_price=estimate_price,
+                    approved_price=approved_price,
+                    requested_by_id=actor_id,
+                )
+        except IntegrityError as exc:
+            raise DispatchConflict(f"Order {order_id} has an open courier claim") from exc
+        shipment.method = method
+        shipment.parcel_weight_g = weight_g
+        shipment.prepared_at = at
+        shipment.prepared_by_id = actor_id
+        shipment.stage = _STAGE.COURIER_REQUESTED
+        shipment.claim = claim
+        shipment.save(
+            update_fields=["method", "parcel_weight_g", "prepared_at", "prepared_by", "stage", "claim"]
+        )
+        ShipmentEvent.objects.create(
+            shipment=shipment,
+            kind=ShipmentEvent.Kind.CLAIM_REQUESTED,
+            payload={
+                "claim_number": number,
+                "request_id": str(claim.request_id),
+                "method": method,
+                "taxi_class": taxi_class,
+                "weight_g": weight_g,
+                "approved_price": approved_price,
+            },
+            at=at,
+        )
+        return claim.pk
+
+
+def attach_claim(claim_pk: int, claim_id: str) -> None:
+    """Store Yandex's id of the claim our ``request_id`` created (idempotent; another id is an error)."""
+    with transaction.atomic():
+        row = CourierClaim.objects.select_for_update().get(pk=claim_pk)
+        if row.claim_id == claim_id:
+            return
+        if row.claim_id:
+            raise DeliveryError(f"Courier claim {claim_pk} is {row.claim_id}, not {claim_id}")
+        row.claim_id = claim_id[:64]
+        try:
+            with transaction.atomic():
+                row.save(update_fields=["claim_id"])
+        except IntegrityError as exc:
+            raise DeliveryError(f"Yandex claim {claim_id} belongs to another courier claim") from exc
+
+
+def stamp_accept_sent(claim_pk: int, *, at: datetime) -> bool:
+    """``accept_sent_at`` — committed **before** ``claims/accept`` is sent, so a redelivery never sends a
+    second one (it re-reads the claim instead). ``False`` when the claim is closed or was stamped already."""
+    _aware(at, "at")
+    with transaction.atomic():
+        row = CourierClaim.objects.select_for_update().get(pk=claim_pk)
+        if row.ended_at is not None or row.accept_sent_at is not None:
+            return False
+        row.accept_sent_at = at
+        row.save(update_fields=["accept_sent_at"])
+        return True
+
+
+def close_claim(claim_pk: int, *, at: datetime, error_code: str = "") -> bool:
+    """End a claim we stop following for dispatch (refused, held for review, timed out, superseded):
+    ``ended_at`` (+ ``error_code``); a claim that was never accepted costs nothing and is settled at once.
+    ``False`` when it was ended already (its ``error_code`` is then kept)."""
+    _aware(at, "at")
+    with transaction.atomic():
+        row = CourierClaim.objects.select_for_update().get(pk=claim_pk)
+        if row.ended_at is not None:
+            return False
+        row.ended_at = at
+        fields = ["ended_at"]
+        if error_code:
+            row.error_code = error_code[:64]
+            fields.append("error_code")
+        if row.accepted_at is None:
+            row.settled_at = at
+            fields.append("settled_at")
+        row.save(update_fields=fields)
+        return True
+
+
+def set_dispatch_stage(
+    order_id: int,
+    claim_pk: int,
+    *,
+    stage: str,
+    at: datetime,
+    event_kind: str | None = None,
+    payload: Mapping[str, Any] | None = None,
+) -> bool:
+    """The dispatch of claim ``claim_pk`` ended without a courier: the shipment shows ``stage``
+    (``failed``: dispatch again; ``awaiting_dispatch``: a price waits for staff) — only while that claim is
+    the current one; ``failed`` before any accepted claim is also the shipment's ``failed`` state. An
+    optional ``event_kind`` event (``price_review`` …) is recorded either way. Returns whether the stage
+    changed."""
+    _aware(at, "at")
+    if stage not in enums.ShipmentStage.values:
+        raise ValueError(f"Unknown shipment stage {stage!r}")
+    with transaction.atomic():
+        shipment = _yandex_shipment(order_id)
+        changed = False
+        if shipment.claim_id == claim_pk and shipment.stage != stage:
+            shipment.stage = stage
+            fields = ["stage"]
+            if stage == _STAGE.FAILED and shipment.state == Shipment.State.NOT_CREATED:
+                shipment.state = Shipment.State.FAILED
+                fields.append("state")
+            shipment.save(update_fields=fields)
+            changed = True
+        if event_kind is not None:
+            ShipmentEvent.objects.create(
+                shipment=shipment, kind=event_kind, payload=dict(payload or {}), at=at
+            )
+        return changed
+
+
+def restore_previous_claim(order_id: int, claim_pk: int, previous_pk: int, *, at: datetime) -> None:
+    """A new dispatch found the previous claim still alive at Yandex (plan §3.6 step 1): the new claim is
+    closed (``previous_claim_active``), the previous one is open and current again and the stage follows its
+    status — the courier it summoned is the one we follow."""
+    _aware(at, "at")
+    with transaction.atomic():
+        shipment = _yandex_shipment(order_id)
+        close_claim(claim_pk, at=at, error_code="previous_claim_active")
+        previous = CourierClaim.objects.select_for_update().get(pk=previous_pk, shipment=shipment)
+        previous.ended_at = None
+        previous.settled_at = None
+        previous.save(update_fields=["ended_at", "settled_at"])
+        shipment.claim = previous
+        shipment.stage = yandex_statuses.stage_for(previous.status) or _STAGE.FAILED
+        shipment.save(update_fields=["claim", "stage"])
+
+
+def set_tracking_url(claim_pk: int, url: str) -> bool:
+    """The destination's tracking link of an open claim (``claims/tracking-links``; https only)."""
+    if not url.startswith("https://"):
+        return False
+    with transaction.atomic():
+        row = CourierClaim.objects.select_for_update().get(pk=claim_pk)
+        if row.ended_at is not None or row.tracking_url == url[:500]:
+            return False
+        row.tracking_url = url[:500]
+        row.save(update_fields=["tracking_url"])
+        return True
+
+
+def _picked_up_before(shipment: Shipment, claim: CourierClaim) -> bool:
+    return ShipmentEvent.objects.filter(
+        shipment=shipment,
+        kind=ShipmentEvent.Kind.CLAIM_STATUS,
+        carrier_status__in=list(yandex_statuses.PICKED_UP),
+        payload__claim_id=claim.claim_id,
+    ).exists()
+
+
+def record_claim_snapshot(
+    order_id: int, snapshot: Claim, *, via: str, paid_fee: int, at: datetime
+) -> ClaimUpdate:
+    """The delivery half of ``commerce.services.apply_yandex_claim`` (the single writer of Yandex statuses).
+
+    The claim of this order whose id the snapshot names is updated: status (verbatim, any value), version,
+    ``updated_ts``, offer, final price, courier name / vehicle, point B's id, warnings and Yandex's error
+    code. A snapshot older than the stored one (``updated_ts``) is ``stale`` and one with the same status,
+    version and final price a ``duplicate``: nothing but a newer ``updated_ts`` is written. A status that
+    implies acceptance records it (``accepted_at``; ``accept_sent_at`` too when Yandex accepted without us,
+    logged), a finished one ends the claim, and the first ``final_price`` is added once to the shipment's
+    ``carrier_cost_total`` (``cost_difference`` = ``paid_fee`` − total); an ended claim is settled once its
+    cost is final (a price, never accepted, or a no-cost end). Only for the current, open claim do the
+    shipment's stage (``delivery.yandex.stage_for``; an unknown status moves nothing) and state
+    (``not_created`` / ``failed`` before any accepted claim, ``created`` after) follow. A ``claim_status``
+    event with an allow-listed payload (ids, status, version, prices — never contacts) records each change.
+    """
+    _aware(at, "at")
+    if via not in _STATUS_VIA:
+        raise ValueError(f"Unknown status source {via!r}")
+    with transaction.atomic():
+        shipment = _yandex_shipment(order_id)
+        claim = (
+            CourierClaim.objects.select_for_update()
+            .filter(shipment=shipment, claim_id=snapshot.claim_id)
+            .first()
+            if snapshot.claim_id
+            else None
+        )
+        if claim is None:
+            return ClaimUpdate(SNAPSHOT_UNKNOWN_CLAIM, claim_id=snapshot.claim_id)
+        base: dict[str, Any] = {
+            "claim_pk": claim.pk,
+            "claim_number": claim.number,
+            "claim_id": claim.claim_id,
+        }
+        if claim.updated_ts and snapshot.updated_ts and snapshot.updated_ts < claim.updated_ts:
+            return ClaimUpdate(SNAPSHOT_STALE, status=claim.status, **base)
+        status = snapshot.status[:40]
+        if (
+            status == claim.status
+            and snapshot.version == claim.version
+            and (snapshot.final_price is None or snapshot.final_price == claim.final_price)
+        ):
+            if snapshot.updated_ts and (claim.updated_ts is None or snapshot.updated_ts > claim.updated_ts):
+                claim.updated_ts = snapshot.updated_ts
+                claim.save(update_fields=["updated_ts"])
+            return ClaimUpdate(SNAPSHOT_DUPLICATE, status=status, **base)
+        previous = claim.status
+        was_open = claim.ended_at is None
+        current = shipment.claim_id == claim.pk
+        claim.status = status
+        claim.version = snapshot.version
+        if snapshot.updated_ts is not None:
+            claim.updated_ts = snapshot.updated_ts
+        if snapshot.offer_price is not None:
+            claim.offer_price = snapshot.offer_price
+            claim.offer_valid_until = snapshot.offer_valid_until
+        if snapshot.courier_name:
+            claim.courier_name = snapshot.courier_name[:150]
+        if snapshot.courier_vehicle:
+            claim.courier_vehicle = snapshot.courier_vehicle[:150]
+        if snapshot.destination_point_id is not None:
+            claim.destination_point_id = snapshot.destination_point_id
+        claim.warnings = list(snapshot.warnings)
+        if snapshot.error_codes and not claim.error_code:
+            claim.error_code = snapshot.error_codes[0][:64]
+        known = yandex_statuses.stage_for(status) is not None
+        accepted_now = False
+        if claim.accepted_at is None and status in yandex_statuses.ACCEPT_IMPLIED:
+            if claim.accept_sent_at is None:
+                logger.warning("yandex.accepted_without_us %s", {"order_id": order_id, "claim": claim.pk})
+                claim.accept_sent_at = at
+            claim.accepted_at = at
+            accepted_now = True
+        finished_now = False
+        if yandex_statuses.is_finished(status) and claim.ended_at is None:
+            claim.ended_at = at
+            finished_now = True
+        cost_changed = False
+        final_added = None
+        if snapshot.final_price is not None and claim.final_price is None:
+            claim.final_price = snapshot.final_price
+            final_added = snapshot.final_price
+            # a paid cancel's fee was counted while no final price was known: the final price replaces it
+            shipment.carrier_cost_total += snapshot.final_price - (claim.cancel_fee or 0)
+            cost_changed = True
+        if claim.ended_at is not None and claim.settled_at is None:
+            if (
+                claim.final_price is not None
+                or claim.accepted_at is None
+                or status in yandex_statuses.NO_COST_ENDS
+            ):
+                claim.settled_at = at
+                cost_changed = True
+        claim.save()
+        live = current and was_open
+        stage = shipment.stage
+        if live and known:
+            stage = yandex_statuses.stage_for(status) or stage
+            if stage == _STAGE.RETURNING and shipment.stage == _STAGE.RETURNED:
+                stage = _STAGE.RETURNED  # staff confirmed the parcel back before Yandex's lagging statuses
+            shipment.stage = stage
+            if stage == _STAGE.RETURNED and shipment.returned_at is None:
+                shipment.returned_at = at
+            if shipment.state != Shipment.State.CANCELLED:
+                if claim.accepted_at is not None or shipment.state == Shipment.State.CREATED:
+                    shipment.state = Shipment.State.CREATED
+                elif stage == _STAGE.FAILED:
+                    shipment.state = Shipment.State.FAILED
+                else:
+                    shipment.state = Shipment.State.NOT_CREATED
+            if accepted_now and claim.offer_price is not None:
+                shipment.tariff = claim.offer_price
+        if cost_changed:
+            _settle_cost(shipment, paid_fee)
+        shipment.save()
+        picked_up = (
+            yandex_statuses.is_picked_up(status)
+            or yandex_statuses.is_picked_up(previous)
+            or _picked_up_before(shipment, claim)
+        )
+        ShipmentEvent.objects.create(
+            shipment=shipment,
+            kind=ShipmentEvent.Kind.CLAIM_STATUS,
+            carrier_status=status,
+            via=via,
+            payload={
+                "claim_id": claim.claim_id,
+                "claim_number": claim.number,
+                "status": status,
+                "version": snapshot.version,
+                "offer_price": snapshot.offer_price,
+                "final_price": snapshot.final_price,
+            },
+            at=at,
+        )
+        return ClaimUpdate(
+            SNAPSHOT_APPLIED,
+            previous_status=previous,
+            status=status,
+            known=known,
+            live=live,
+            current=current,
+            stage=stage,
+            accepted_now=accepted_now,
+            accepted=claim.accepted_at is not None,
+            accept_sent=claim.accept_sent_at is not None,
+            finished_now=finished_now,
+            picked_up=picked_up,
+            cancel_requested=shipment.cancel_requested_at is not None,
+            requested_by_id=claim.requested_by_id,
+            tariff=shipment.tariff,
+            needs_tracking_link=(
+                live
+                and claim.ended_at is None
+                and not claim.tracking_url
+                and stage in yandex_statuses.COURIER_STAGES
+            ),
+            final_price_added=final_added,
+            **base,
+        )
+
+
+def settle_cost_unknown(claim_pk: int, *, paid_fee: int, at: datetime) -> bool:
+    """A finished, accepted claim Yandex gave no ``final_price`` for within 24 h: settled with error code
+    ``cost_unknown`` (``cost_difference`` = paid fee − what was charged so far; staff check the cabinet).
+    ``False`` when it was settled meanwhile."""
+    _aware(at, "at")
+    with transaction.atomic():
+        row = CourierClaim.objects.select_for_update().select_related("shipment").get(pk=claim_pk)
+        if row.settled_at is not None or row.ended_at is None:
+            return False
+        row.settled_at = at
+        row.error_code = COST_UNKNOWN
+        row.save(update_fields=["settled_at", "error_code"])
+        shipment = row.shipment
+        _settle_cost(shipment, paid_fee)
+        shipment.save(update_fields=["cost_difference"])
+        logger.warning("yandex.cost_unknown %s", {"order_id": shipment.order_id, "claim": row.pk})
+        return True
+
+
+def blank_courier_details(before: datetime) -> int:
+    """Courier name, vehicle and tracking link of the claims that ended before ``before`` are blanked (plan
+    §3.1: kept 7 days after the end); returns how many claims were cleared."""
+    _aware(before, "before")
+    rows = CourierClaim.objects.filter(ended_at__lt=before).exclude(
+        courier_name="", courier_vehicle="", tracking_url=""
+    )
+    return rows.update(courier_name="", courier_vehicle="", tracking_url="", updated_at=timeutils.now())
+
+
+# --- Yandex Delivery: carrier-side cancel and returns (plan §3.8) -------------------------------------------
+#
+# ``commerce.services.cancel_at_carrier`` calls Yandex between two short transactions and records here, under
+# the Order lock; nothing below calls Yandex.
+
+# The error code of a claim the cancel closed before any accept was sent (it summoned nobody).
+CANCEL_WITHDRAWN = "cancel_requested"
+# The statuses our own ``claims/cancel`` produces (free → ``cancelled``, paid → ``cancelled_with_payment``).
+OUR_CANCEL_STATUSES: frozenset[str] = frozenset({"cancelled", "cancelled_with_payment"})
+
+
+def request_carrier_cancel(order_id: int, *, at: datetime) -> None:
+    """Txn A of the carrier-side cancel: ``cancel_requested_at`` — committed before any Yandex call, so no
+    dispatch sends an ``accept`` from here on and the status writer reads a cancel / return as ours."""
+    _aware(at, "at")
+    with transaction.atomic():
+        shipment = _yandex_shipment(order_id)
+        shipment.cancel_requested_at = at
+        shipment.save(update_fields=["cancel_requested_at"])
+
+
+def clear_carrier_cancel(order_id: int) -> bool:
+    """Yandex refused (or did not answer) the cancel / return: the stamp goes, the order carries on as it
+    was. ``False`` when there was none."""
+    with transaction.atomic():
+        shipment = _yandex_shipment(order_id)
+        if shipment.cancel_requested_at is None:
+            return False
+        shipment.cancel_requested_at = None
+        shipment.save(update_fields=["cancel_requested_at"])
+        return True
+
+
+def withdraw_claim(order_id: int, claim_pk: int, *, at: datetime) -> bool:
+    """The cancel closes an open claim whose ``accept`` was never sent (it summons nobody; ``accept`` is
+    the only call that does): ended with :data:`CANCEL_WITHDRAWN` (settled at once, cost 0), stage
+    ``cancelled`` while it is the current claim. ``False`` when it had ended already."""
+    _aware(at, "at")
+    with transaction.atomic():
+        closed = close_claim(claim_pk, at=at, error_code=CANCEL_WITHDRAWN)
+        set_dispatch_stage(order_id, claim_pk, stage=_STAGE.CANCELLED, at=at)
+        return closed
+
+
+def record_cancel_fee(order_id: int, claim_pk: int, fee: int, *, paid_fee: int) -> bool:
+    """The fee of a paid cancellation (``claims/cancel-info`` price) on the claim (``cancel_fee``) and —
+    unless Yandex's ``final_price`` of that claim is counted already — in ``carrier_cost_total``; a
+    ``final_price`` that arrives later replaces it (:func:`record_claim_snapshot` adds the difference), so a
+    cost is never counted twice. ``False`` when the fee was recorded before."""
+    if fee < 0:
+        raise ValueError("fee must be ≥ 0")
+    with transaction.atomic():
+        shipment = _yandex_shipment(order_id)
+        claim = CourierClaim.objects.select_for_update().get(pk=claim_pk, shipment=shipment)
+        if claim.cancel_fee is not None:
+            return False
+        claim.cancel_fee = fee
+        claim.save(update_fields=["cancel_fee"])
+        if claim.final_price is None:
+            shipment.carrier_cost_total += fee
+            _settle_cost(shipment, paid_fee)
+            shipment.save(update_fields=["carrier_cost_total", "cost_difference"])
+        return True
+
+
+def record_return_request(order_id: int, claim_pk: int, *, at: datetime) -> None:
+    """Yandex accepted our ``claims/return`` of the claim (a ``return_requested`` event: ids only)."""
+    _aware(at, "at")
+    with transaction.atomic():
+        shipment = _yandex_shipment(order_id)
+        claim = CourierClaim.objects.get(pk=claim_pk, shipment=shipment)
+        ShipmentEvent.objects.create(
+            shipment=shipment,
+            kind=ShipmentEvent.Kind.RETURN_REQUESTED,
+            payload={"claim_id": claim.claim_id, "claim_number": claim.number},
+            at=at,
+        )
+
+
+def confirm_return(order_id: int, *, actor_id: int, at: datetime, clear_cancel_request: bool) -> bool:
+    """Staff confirm the current claim's parcel is physically back (``POST orders/{id}/confirm-return/``):
+    stage ``returned`` (if Yandex has not said so yet), ``returned_at``, ``return_confirmed_by`` and a
+    ``returned`` event of the claim; ``clear_cancel_request`` ends a cancel stamp of an order that stays
+    open (staff dispatch again or cancel). ``False`` when the parcel is not returning / returned or its
+    return was confirmed already."""
+    _aware(at, "at")
+    with transaction.atomic():
+        shipment = _yandex_shipment(order_id)
+        claim = shipment.claim
+        if claim is None or shipment.stage not in yandex_statuses.RETURN_STAGES:
+            return False
+        if selectors.return_confirmed(order_id, claim.number):
+            return False
+        stale = (
+            shipment.returned_at is None
+            or shipment.stage != _STAGE.RETURNED
+            or (claim.accepted_at is not None and shipment.returned_at < claim.accepted_at)
+        )
+        if stale:  # Yandex has not said "returned" for this claim: the parcel came back now
+            shipment.returned_at = at
+        shipment.stage = _STAGE.RETURNED
+        shipment.return_confirmed_by_id = actor_id
+        fields = ["stage", "returned_at", "return_confirmed_by"]
+        if clear_cancel_request and shipment.cancel_requested_at is not None:
+            shipment.cancel_requested_at = None
+            fields.append("cancel_requested_at")
+        shipment.save(update_fields=fields)
+        ShipmentEvent.objects.create(
+            shipment=shipment,
+            kind=ShipmentEvent.Kind.RETURNED,
+            carrier_status=claim.status,
+            payload={"claim_id": claim.claim_id, "claim_number": claim.number, "confirmed_by": actor_id},
+            at=at,
+        )
+        return True
+
+
+def mark_yandex_cancelled(order_id: int, *, at: datetime) -> bool:
+    """``cancel_order`` of a Yandex order: ``True`` when its courier claim was cancelled **at Yandex by our
+    request** (the current claim ended ``cancelled`` / ``cancelled_with_payment`` while
+    ``cancel_requested_at`` is set — the event's ``bts_cancelled``); an accepted shipment (state ``created``)
+    then becomes ``cancelled``. Anything else changes nothing."""
+    _aware(at, "at")
+    with transaction.atomic():
+        shipment = (
+            Shipment.objects.select_related("claim")
+            .filter(order_id=order_id, provider=enums.DeliveryProvider.YANDEX)
+            .first()
+        )
+        if shipment is None or shipment.claim is None or shipment.cancel_requested_at is None:
+            return False
+        claim = shipment.claim
+        if not claim.claim_id or claim.ended_at is None or claim.status not in OUR_CANCEL_STATUSES:
+            return False
+        if shipment.state == Shipment.State.CREATED:
+            shipment.state = Shipment.State.CANCELLED
+            shipment.cancelled_at = at
+            shipment.save(update_fields=["state", "cancelled_at"])
+        return True
+
+
 ISSUE_NOTE_MAX = 1000
 AUDIT_ISSUE_RESOLVED = "delivery.issue_resolved"
+# Alert events of the exception queue (the Telegram bot renders both: ``bot/src/glowderma_bot/messages.py``).
+ALERT_ISSUE_OPENED = "delivery.issue_opened"
+ALERT_ISSUE_REMINDER = "delivery.issue_reminder"
+# An open urgent issue nobody touched for this long is reminded (beat ``commerce.review_delivery_issues``).
+REMIND_AFTER = timedelta(minutes=30)
 
 
 def _clean_note(note: str) -> str:
@@ -429,6 +1030,25 @@ def _clean_note(note: str) -> str:
     if len(text) > ISSUE_NOTE_MAX:
         raise ValueError(f"note must be at most {ISSUE_NOTE_MAX} characters")
     return text
+
+
+def issue_alert_fields(row: DeliveryIssue) -> dict[str, Any]:
+    """The fields of an issue alert — exactly what the bot renders: ids, the kind, the code, the urgency
+    (never the staff note or the details)."""
+    return {
+        "order_id": row.order_id,
+        "kind": row.kind,
+        "code": row.code,
+        "urgent": row.urgent,
+        "issue_id": row.pk,
+    }
+
+
+def _alert_urgent(row: DeliveryIssue) -> None:
+    """``delivery.issue_opened`` for an issue that just became urgent (opened urgent, or escalated). The
+    alert is an outbox message of the caller's transaction: it leaves only once that commits, and never
+    for an issue that was rolled back."""
+    alerts.alert(ALERT_ISSUE_OPENED, issue_alert_fields(row), scope=str(row.pk))
 
 
 def open_issue(
@@ -445,8 +1065,12 @@ def open_issue(
 
     Idempotent for at-least-once callers: the open row (one per order and kind) takes the new ``code``,
     ``urgent`` and ``details`` (a non-empty ``note`` too) and ``created`` is ``False``. ``details`` must be
-    ids and amounts only — it reaches the alert webhook. A concurrent opener is absorbed by the partial
-    unique index (the loser updates the winner's row).
+    ids and amounts only. A concurrent opener is absorbed by the partial unique index (the loser updates
+    the winner's row).
+
+    This is the single place issues are opened, so it is the single place that alerts: an issue that
+    becomes urgent here — opened urgent, or an open one escalated — queues ``delivery.issue_opened``
+    (:func:`issue_alert_fields`, scope = the issue id) in the same transaction.
     """
     if kind not in enums.DeliveryIssueKind.values:
         raise ValueError(f"Unknown delivery issue kind {kind!r}")
@@ -461,6 +1085,7 @@ def open_issue(
                 .first()
             )
             if row is not None:
+                escalated = urgent and not row.urgent
                 row.code = code[:64]
                 row.urgent = urgent
                 row.details = body
@@ -470,6 +1095,8 @@ def open_issue(
                     fields.append("note")
                 row.updated_at = now
                 row.save(update_fields=fields)
+                if escalated:
+                    _alert_urgent(row)
                 return row.pk, False
             try:
                 with transaction.atomic():
@@ -486,6 +1113,8 @@ def open_issue(
                     )
             except IntegrityError:
                 continue  # another transaction opened it first: update that row
+            if urgent:
+                _alert_urgent(created)
             return created.pk, True
     raise DeliveryError(f"Could not open the {kind} issue of order {order_id}")
 
@@ -526,9 +1155,10 @@ def resolve_issue(issue_id: int, *, actor_id: int, note: str, request: Any = Non
         return True
 
 
-def resolve_kind(order_id: int, kind: str, note: str = "") -> bool:
+def resolve_kind(order_id: int, kind: str, note: str = "", *, code: str | None = None) -> bool:
     """The system closes the order's open ``kind`` issue because the case resolved itself (no actor, no
-    audit); ``False`` when none was open."""
+    audit); with ``code`` only while the open issue still has that code (another writer may have turned it
+    into another case). ``False`` when none was closed."""
     text = _clean_note(note)
     with transaction.atomic():
         row = (
@@ -536,7 +1166,7 @@ def resolve_kind(order_id: int, kind: str, note: str = "") -> bool:
             .filter(order_id=order_id, kind=kind, state=enums.DeliveryIssueState.OPEN)
             .first()
         )
-        if row is None:
+        if row is None or (code is not None and row.code != code):
             return False
         now = timeutils.now()
         row.state = enums.DeliveryIssueState.RESOLVED
@@ -547,11 +1177,101 @@ def resolve_kind(order_id: int, kind: str, note: str = "") -> bool:
         return True
 
 
+def remind_issues(*, at: datetime, after: timedelta = REMIND_AFTER) -> list[int]:
+    """Remind staff of every open urgent issue nothing touched for ``after`` (neither updated nor reminded):
+    ``reminded_at`` = ``at``, ``reminders`` + 1 and one ``delivery.issue_reminder`` alert each (scope = the
+    issue id and the reminder number, so every reminder is its own alert whatever the dedupe window).
+    Rows another transaction holds are skipped (the next run takes them). Returns the reminded ids."""
+    _aware(at, "at")
+    cutoff = at - after
+    with transaction.atomic():
+        rows = list(
+            DeliveryIssue.objects.select_for_update(skip_locked=True)
+            .filter(state=enums.DeliveryIssueState.OPEN, urgent=True, updated_at__lte=cutoff)
+            .filter(models.Q(reminded_at__isnull=True) | models.Q(reminded_at__lte=cutoff))
+            .order_by("id")
+        )
+        for row in rows:
+            row.reminded_at = at
+            row.reminders += 1
+            row.save(update_fields=["reminded_at", "reminders"])
+            alerts.alert(ALERT_ISSUE_REMINDER, issue_alert_fields(row), scope=f"{row.pk}:{row.reminders}")
+    return [row.pk for row in rows]
+
+
+# --- Yandex account health (plan §3.9): attention.yandex_failing + alert delivery.provider_failing ----------
+
+ALERT_PROVIDER_FAILING = "delivery.provider_failing"
+# This many failures in a row (IntegrationState(yandex).consecutive_failures) raise the alert, once per run.
+PROVIDER_FAILING_AFTER = 3
+# check-price refusals that are the account's (payment method / contract), not the address's.
+PAYMENT_FAILURE_CODES: frozenset[str] = frozenset(
+    {
+        "estimating.cargocorp_payment_failure",
+        "estimating.payment_method_cant_order",
+        "estimating.payment_method_zone_unavailable",
+    }
+)
+_AUTH_CODES: dict[int, str] = {401: "unauthorized", 403: "forbidden"}
+
+
+def yandex_account_failure(exc: YandexError) -> str | None:
+    """The code of a failure that is the account's (the token: 401 ``unauthorized`` / 403 ``forbidden``;
+    payment: Yandex's code), else ``None`` (a timeout, an address Yandex does not serve…)."""
+    if isinstance(exc, YandexUnavailable) and exc.status in _AUTH_CODES:
+        return _AUTH_CODES[exc.status]
+    if isinstance(exc, YandexRejected) and exc.code in PAYMENT_FAILURE_CODES:
+        return exc.code
+    return None
+
+
+def yandex_failure_code(exc: YandexError) -> str:
+    """A short code for any Yandex failure: the account's (:func:`yandex_account_failure`), ``unavailable``
+    for an outage, else Yandex's code."""
+    account = yandex_account_failure(exc)
+    if account is not None:
+        return account
+    if isinstance(exc, YandexRejected | YandexConflict):
+        return safe_text(exc.code, 64) or "rejected"
+    return "unavailable"
+
+
+def record_yandex_failure(source: str, code: str) -> int:
+    """A failed poll or an account failure of ``check_price``: ``IntegrationState(yandex)`` counts it
+    (``consecutive_failures`` → ``attention.yandex_failing``); the :data:`PROVIDER_FAILING_AFTER`-th failure
+    in a row alerts ``delivery.provider_failing`` ``{provider, code}`` (scope = the Tashkent day). Its own
+    transaction (callers are outside one); returns the failure count."""
+    state = integration_services.record_failure("yandex", f"{source}: {code}")
+    count = state.consecutive_failures
+    if count == PROVIDER_FAILING_AFTER:
+        logger.error("yandex.provider_failing %s", {"source": source, "code": code, "failures": count})
+        alerts.alert(
+            ALERT_PROVIDER_FAILING,
+            {"provider": "yandex", "code": code},
+            scope=timeutils.local_date(timeutils.now()).isoformat(),
+        )
+    return count
+
+
+def record_yandex_success() -> bool:
+    """A Yandex call that proves the account works (a price check): the failure run, if any, ends (one
+    UPDATE matching no row while healthy)."""
+    return integration_services.record_success("yandex")
+
+
 def purge_quotes(before: datetime) -> int:
     """Delete the quotes nobody used that expired before ``before`` (beat ``delivery.purge_quotes``);
     returns how many. A used quote stays: it documents the fee an order charged."""
     _aware(before, "before")
     deleted, _ = DeliveryQuote.objects.filter(used_at__isnull=True, expires_at__lt=before).delete()
+    return deleted
+
+
+def delete_unused_quotes(customer_id: int) -> int:
+    """Account deletion (``customers.services.delete_account``, in its transaction): the customer's quotes
+    nobody used go at once with the saved addresses whose text and pin they copy; returns how many. A used
+    quote stays (the order keeps the same address snapshot)."""
+    deleted, _ = DeliveryQuote.objects.filter(customer_id=customer_id, used_at__isnull=True).delete()
     return deleted
 
 
@@ -565,7 +1285,6 @@ AUDIT_CLOSURE_SAVED = "delivery.closure_saved"
 AUDIT_CLOSURE_DELETED = "delivery.closure_deleted"
 AUDIT_TARIFFS_CHECKED = "delivery.tariffs_checked"
 AUDIT_ISSUE_OPENED = "delivery.issue_opened"
-ALERT_ISSUE_OPENED = "delivery.issue_opened"
 SETTINGS_ENTITY = "delivery_settings"
 INCIDENT_CODE = "staff_report"
 SUSPENSION_NOTE_MAX = 300
@@ -1050,7 +1769,7 @@ def open_incident(
 ) -> tuple[int, bool]:
     """Staff report a delivery incident of an order (a wrong or missing product…): the order's open
     ``incident`` issue is opened or refreshed (:func:`open_issue`, code ``staff_report``), audited
-    ``delivery.issue_opened``; an urgent one alerts ``delivery.issue_opened`` (ids and codes only).
+    ``delivery.issue_opened``; one that becomes urgent alerts ``delivery.issue_opened`` (:func:`open_issue`).
     ``(issue_id, created)``; an empty note is a ``ValueError``."""
     text = _clean_note(note)
     if not text:
@@ -1082,16 +1801,49 @@ def open_incident(
                 "note": text,
             },
         )
-        if urgent:
-            alerts.alert(
-                ALERT_ISSUE_OPENED,
-                {"order_id": order_id, "kind": kind, "code": INCIDENT_CODE},
-                scope=str(issue_id),
-            )
+        # an urgent incident (new, or an open one made urgent) alerts from open_issue
     return issue_id, created
 
 
 __all__ = [
+    "ALERT_ISSUE_OPENED",
+    "ALERT_ISSUE_REMINDER",
+    "ALERT_PROVIDER_FAILING",
+    "CANCEL_WITHDRAWN",
+    "OUR_CANCEL_STATUSES",
+    "PAYMENT_FAILURE_CODES",
+    "PROVIDER_FAILING_AFTER",
+    "REMIND_AFTER",
+    "clear_carrier_cancel",
+    "confirm_return",
+    "issue_alert_fields",
+    "mark_yandex_cancelled",
+    "record_cancel_fee",
+    "record_return_request",
+    "record_yandex_failure",
+    "record_yandex_success",
+    "remind_issues",
+    "request_carrier_cancel",
+    "withdraw_claim",
+    "yandex_account_failure",
+    "yandex_failure_code",
+    "COST_UNKNOWN",
+    "SNAPSHOT_APPLIED",
+    "SNAPSHOT_DUPLICATE",
+    "SNAPSHOT_STALE",
+    "SNAPSHOT_UNKNOWN_CLAIM",
+    "ClaimUpdate",
+    "DispatchConflict",
+    "attach_claim",
+    "blank_courier_details",
+    "close_claim",
+    "record_claim_snapshot",
+    "restore_previous_claim",
+    "set_dispatch_stage",
+    "set_tracking_url",
+    "settle_cost_unknown",
+    "stamp_accept_sent",
+    "start_dispatch",
     "AUDIT_CLOSURE_DELETED",
     "AUDIT_CLOSURE_SAVED",
     "AUDIT_HOURS_DELETED",
@@ -1131,6 +1883,7 @@ __all__ = [
     "mark_awaiting_dispatch",
     "mark_failed",
     "open_issue",
+    "delete_unused_quotes",
     "purge_quotes",
     "request_bts_create",
     "resolve_issue",

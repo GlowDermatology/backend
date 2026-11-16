@@ -3,7 +3,7 @@ through the audited services), the hours / special-day pages, the «Yandex bilan
 read-only claim, issue and quote pages, in the three console languages."""
 
 from collections.abc import Iterator
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any, cast
 
@@ -17,7 +17,7 @@ from django.urls import reverse
 
 from glowderma.accounts.tests.factories import StaffUserFactory
 from glowderma.accounts.tests.ops_helpers import ops_login
-from glowderma.core import console_i18n
+from glowderma.core import console_i18n, timeutils
 from glowderma.core.admin import ReadOnlyAdmin, ServiceBackedAdmin
 from glowderma.core.models import AuditEntry
 from glowderma.core.tests.console import confirm, messages_of
@@ -88,14 +88,22 @@ def _doc(value: Any) -> dict[str, Any]:
 
 
 def payload(response: Any, **changes: Any) -> dict[str, str]:
-    """The change form as a browser submits it (every field with its rendered value), with ``changes`` on
-    top (``True`` / ``False`` tick or clear a checkbox)."""
+    """The change form as a browser submits it (every field with its rendered value, and the hidden
+    ``initial-<name>`` baseline of a field rendered with ``show_hidden_initial``), with ``changes`` on top
+    (``True`` / ``False`` tick or clear a checkbox)."""
     form = _context(response)["adminform"].form
     data: dict[str, str] = {}
     values = {name: form[name].value() for name in form.fields}
     values.update(changes)
     for name, field in form.fields.items():
         value = values[name]
+        if field.show_hidden_initial:
+            initial = form[name].initial
+            if isinstance(field.widget, forms.MultiWidget):
+                for index, part in enumerate(field.hidden_widget().decompress(initial) or []):
+                    data[f"initial-{name}_{index}"] = _plain(part)
+            else:
+                data[f"initial-{name}"] = _plain(initial)
         if isinstance(field.widget, forms.CheckboxInput):
             if value:
                 data[name] = "on"
@@ -246,6 +254,53 @@ def test_the_settings_page_saves_through_the_audited_service(console: Client) ->
     # an unchanged submit writes no audit row
     assert console.post(SETTINGS_URL, payload(console.get(SETTINGS_URL))).status_code == 302
     assert AuditEntry.objects.filter(action=services.AUDIT_SETTINGS_UPDATED).count() == 1
+
+
+def test_a_stale_page_never_writes_back_a_colleagues_change(console: Client) -> None:
+    # A opens the page; B suspends dispatch from the admin panel and switches Express off meanwhile
+    services.update_settings({"express_enabled": True}, actor=None)
+    page = console.get(SETTINGS_URL)
+    services.set_suspension(True, None, "Yandex nosozligi", actor=None)
+    services.update_settings({"express_enabled": False}, actor=None)
+    # A changes only the markup and saves the page that still shows the old switch and method
+    response = console.post(SETTINGS_URL, payload(page, markup_percent="7"))
+    assert response.status_code == 302, _context(response)["adminform"].form.errors
+    row = DeliverySettings.objects.get(pk=1)
+    assert row.markup_percent == Decimal(7)
+    assert row.dispatch_suspended and row.suspension_note == "Yandex nosozligi"
+    assert not row.express_enabled
+    entry = AuditEntry.objects.filter(action=services.AUDIT_SETTINGS_UPDATED).latest("pk")
+    assert set(_doc(entry.after)) == {"markup_percent"}  # only what A edited, under A's name
+    assert entry.actor_type == "staff"
+
+
+def test_the_console_switch_is_saved_by_set_suspension(console: Client) -> None:
+    response = console.post(
+        SETTINGS_URL,
+        payload(console.get(SETTINGS_URL), dispatch_suspended=True, suspension_note="Inventarizatsiya"),
+    )
+    assert response.status_code == 302, _context(response)["adminform"].form.errors
+    row = DeliverySettings.objects.get(pk=1)
+    assert row.dispatch_suspended and row.suspension_note == "Inventarizatsiya"
+    entry = AuditEntry.objects.get(action=services.AUDIT_SUSPENSION_UPDATED)
+    assert _doc(entry.after) == {"suspended": True, "until": None, "note": "Inventarizatsiya"}
+    assert not AuditEntry.objects.filter(action=services.AUDIT_SETTINGS_UPDATED).exists()
+    # a past «until» is refused on its field and nothing is written
+    refused = console.post(
+        SETTINGS_URL,
+        payload(console.get(SETTINGS_URL), suspended_until=datetime(2020, 1, 1, 9, 0)),
+    )
+    assert refused.status_code == 200
+    assert "suspended_until" in _context(refused)["adminform"].form.errors
+    assert DeliverySettings.objects.get(pk=1).suspended_until is None
+    # resuming clears «until» and keeps one more audit row of the same action
+    future = DeliverySettings.objects.get(pk=1)
+    services.set_suspension(True, timeutils.now() + timedelta(hours=2), "Inventarizatsiya", actor=None)
+    resumed = console.post(SETTINGS_URL, payload(console.get(SETTINGS_URL), dispatch_suspended=False))
+    assert resumed.status_code == 302, _context(resumed)["adminform"].form.errors
+    future.refresh_from_db()
+    assert not future.dispatch_suspended and future.suspended_until is None
+    assert AuditEntry.objects.filter(action=services.AUDIT_SUSPENSION_UPDATED).count() == 3
 
 
 @pytest.mark.parametrize("language", LANGUAGES)

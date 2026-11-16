@@ -30,6 +30,7 @@ def test_defaults_match_contract_1_9() -> None:
         "sms_ip",
         "checkout",
         "pay",
+        "delivery_quote",  # Yandex Delivery
         "pos",
         # M2 (customer contract §1.8)
         "sms_device",

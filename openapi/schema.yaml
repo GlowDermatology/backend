@@ -4578,6 +4578,16 @@ paths:
   /api/v1/admin/orders/{id}/cancel/:
     post:
       operationId: admin_orders_cancel
+      description: 'Cancel an order (full refund when paid). A Yandex Delivery order
+        is first made carrier-safe outside the transaction (plan §3.8): an open courier
+        claim is cancelled at Yandex before pickup (free or paid), after pickup a
+        return to the warehouse is requested and the cancel proceeds once Yandex reports
+        it `returning`; a returning / returned parcel needs no call, a delivered order
+        is refused. 409 `not_cancellable` (Yandex refused, delivered, parcel not coming
+        back), 409 `return_requested` (return asked, not confirmed yet: retry later;
+        the order is unchanged), 409 `conflict` (another Yandex operation of the order
+        is running, or Yandex has not shown the cancel yet), 503 `provider_unavailable`
+        (Yandex did not answer; nothing changed).'
       parameters:
       - in: header
         name: Idempotency-Key
@@ -4652,6 +4662,168 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
         '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/orders/{id}/confirm-return/:
+    post:
+      operationId: admin_orders_confirm_return
+      description: 'Confirm that the parcel of a Yandex order whose delivery stage
+        is `returning` / `returned` is physically back at the warehouse: stage `returned`,
+        `returned_at`, the open `return_pending` issue resolved (the note is its resolution
+        note), order event `shipment_returned`, audit `order.return_confirmed`. A
+        cancelled order stays cancelled; an open order stays as it is (staff dispatch
+        again or cancel). 409 `invalid_transition` (no returning parcel), 409 `conflict`
+        (confirmed already, or the order is busy).'
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmReturnRequest'
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderDetail'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/orders/{id}/dispatch/:
+    post:
+      operationId: admin_orders_dispatch
+      description: |-
+        Yandex Delivery plan §3.6: staff call a courier. Nothing is sent to Yandex in the request: the claim
+        is stored and ``yandex.dispatch`` enqueued (202, the order detail; ``delivery.stage`` =
+        ``courier_requested``).
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DispatchRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '202':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderDetail'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
           content:
             application/json:
               schema:
@@ -15747,6 +15919,50 @@ paths:
                 type: object
                 additionalProperties: {}
           description: ''
+  /api/v1/webhooks/yandex-delivery/:
+    post:
+      operationId: webhook_yandex_delivery_status
+      description: 'Yandex Delivery claim callback (an unauthenticated hint): `?ref=<order>-<hmac>`
+        (our own reference, registered per claim) plus the `updated_ts` and `claim_id`
+        Yandex appends; answers 200 for a verified ref and re-reads the claim asynchronously.'
+      parameters:
+      - in: query
+        name: claim_id
+        schema:
+          type: string
+      - in: query
+        name: ref
+        schema:
+          type: string
+        required: true
+      - in: query
+        name: updated_ts
+        schema:
+          type: string
+      tags:
+      - webhooks
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
 components:
   schemas:
     Access:
@@ -16184,8 +16400,18 @@ components:
           type: boolean
         retry_shipment:
           type: boolean
+        dispatch:
+          type: boolean
+          description: 'Yandex Delivery: `POST orders/{id}/dispatch/` would be accepted
+            now (false for BTS).'
+        confirm_return:
+          type: boolean
+          description: 'Yandex Delivery: the parcel is returning / returned and its
+            return is not confirmed yet (`POST orders/{id}/confirm-return/`).'
       required:
       - cancel
+      - confirm_return
+      - dispatch
       - retry_shipment
       - transitions
     Banner:
@@ -17334,6 +17560,16 @@ components:
       - phone_mask
       - purpose
       - resend_in
+    ConfirmReturnRequest:
+      type: object
+      description: '``POST orders/{id}/confirm-return/`` (Yandex Delivery plan §3.8):
+        the parcel is physically back.'
+      properties:
+        note:
+          type: string
+          default: ''
+          description: 'Optional (≤ 1000): the parcel''s condition; becomes the `return_pending`
+            resolution note.'
     ConsentRequest:
       type: object
       properties:
@@ -19313,6 +19549,39 @@ components:
       - os
       - platform
       - push_enabled
+    DispatchRequest:
+      type: object
+      description: '``POST orders/{id}/dispatch/`` (Yandex Delivery plan §3.6): staff
+        checked the parcel and weighed it.'
+      properties:
+        contents_verified:
+          type: boolean
+          description: 'Must be `true`: staff checked the contents.'
+        weight_g:
+          type: integer
+          maximum: 20000
+          minimum: 1
+          description: Grams.
+        approved_price:
+          type: integer
+          maximum: 100000000
+          minimum: 0
+          nullable: true
+          description: 'So''m (VAT-inclusive): the courier price staff approved; only
+            while a `dispatch_review` issue is open.'
+        method:
+          nullable: true
+          description: |-
+            Switch the delivery method (the fee the customer paid never changes).
+
+            * `standard` - standard
+            * `express` - express
+          oneOf:
+          - $ref: '#/components/schemas/DeliveryMethodEnum'
+          - $ref: '#/components/schemas/NullEnum'
+      required:
+      - contents_verified
+      - weight_g
     ErrorEnvelope:
       type: object
       properties:

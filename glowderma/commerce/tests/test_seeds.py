@@ -179,7 +179,14 @@ DETAIL_10248: dict[str, Any] = {  # contract §2.2 example (ids pinned, image UR
         },  # noqa: E501
     ],
     "history": HISTORY_10248,
-    "available_actions": {"transitions": ["delivered"], "cancel": True, "retry_shipment": False},
+    "available_actions": {
+        "transitions": ["delivered"],
+        "cancel": True,
+        "retry_shipment": False,
+        # Yandex Delivery (additive): a BTS order is never dispatched to Yandex
+        "dispatch": False,
+        "confirm_return": False,
+    },
     # Yandex Delivery (additive): a BTS order names its carrier, every Yandex-only key is null
     "delivery": {"provider": "bts", **dict.fromkeys(delivery_admin.YANDEX_KEYS), "open_issues": []},
 }

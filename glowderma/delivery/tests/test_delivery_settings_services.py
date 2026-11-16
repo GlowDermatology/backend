@@ -286,10 +286,12 @@ def test_open_incident_is_audited_and_an_urgent_one_alerts() -> None:
     assert [_doc(entry.after)["created"] for entry in audits] == [True, False]
     alert = OutboxMessage.objects.get(topic="alert.send")
     assert alert.payload["event"] == "delivery.issue_opened"
-    assert alert.payload["fields"] == {
+    assert alert.payload["fields"] == {  # what the Telegram bot renders (ids and codes only)
         "order_id": order.pk,
         "kind": "incident",
         "code": services.INCIDENT_CODE,
+        "urgent": True,
+        "issue_id": issue_id,
     }
     with pytest.raises(ValueError):
         services.open_incident(order.pk, note="  ", urgent=False, actor_id=staff.pk)

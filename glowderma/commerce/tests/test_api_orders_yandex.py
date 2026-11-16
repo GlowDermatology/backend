@@ -113,7 +113,14 @@ def test_a_yandex_order_shows_its_carrier_view(staff_client: APIClient) -> None:
     assert "phone" not in str(delivery)
     # the existing keys are untouched (superset): the shipment union and the actions
     assert detail["shipment"]["state"] == "created"
-    assert set(detail["available_actions"]) == {"transitions", "cancel", "retry_shipment"}
+    assert set(detail["available_actions"]) == {
+        "transitions",
+        "cancel",
+        "retry_shipment",
+        "dispatch",
+        "confirm_return",
+    }
+    assert detail["available_actions"]["dispatch"] is False  # a courier is assigned
     row = next(item for item in staff_client.get(ORDERS).json()["results"] if item["id"] == shipment.order_id)
     assert SUMMARY_KEYS <= set(row) and row["delivery"] == delivery
 

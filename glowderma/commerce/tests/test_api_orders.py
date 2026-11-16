@@ -204,7 +204,13 @@ def test_detail_404_and_shape_of_a_cancelled_refunded_order(staff_client: APICli
         body["payment"]["status"] == "paid" and body["payment"]["confirmed_at"] == "2026-10-20T12:03:00+05:00"
     )
     assert body["shipment"]["state"] == "created"  # a cancelled parcel renders as created (D-1)
-    assert body["available_actions"] == {"transitions": [], "cancel": False, "retry_shipment": False}
+    assert body["available_actions"] == {
+        "transitions": [],
+        "cancel": False,
+        "retry_shipment": False,
+        "dispatch": False,
+        "confirm_return": False,
+    }
     assert [event["type"] for event in body["history"]][:2] == ["refund_requested", "cancelled"]
     cancelled = body["history"][1]
     assert cancelled["actor"]["display_name"] and cancelled["source"] == "admin"
@@ -259,7 +265,13 @@ def test_detail_of_an_open_order_shows_the_active_hold_and_items(staff_client: A
         "confirmed_at": None,
     }
     assert body["shipment"] == {"state": "not_required"}
-    assert body["available_actions"] == {"transitions": [], "cancel": True, "retry_shipment": False}
+    assert body["available_actions"] == {
+        "transitions": [],
+        "cancel": True,
+        "retry_shipment": False,
+        "dispatch": False,
+        "confirm_return": False,
+    }
     pay(order)
     paid = staff_client.get(f"{URL}{order.pk}/").json()
     assert paid["cashback_hold"] is None

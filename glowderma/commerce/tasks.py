@@ -59,7 +59,7 @@ from django.db import connection, transaction
 from django.utils.translation import gettext, gettext_lazy
 
 from glowderma.catalog import topics as catalog_topics
-from glowderma.commerce import selectors, services, topics
+from glowderma.commerce import delivery_review, selectors, services, topics, yandex_flow
 from glowderma.commerce.billz_sales import PurchaseJournal, get_sale_port, sale_request
 from glowderma.commerce.models import Order, StockReservation
 from glowderma.core import alerts, audit, enums, integration_modes, outbox, timeutils
@@ -916,6 +916,11 @@ def expire_reservations() -> list[int]:
 
 
 __all__ = [
+    "review_delivery_issues",
+    "dispatch_courier",
+    "on_yandex_dispatch_dead",
+    "poll_yandex",
+    "sync_yandex_claim",
     "create_shipment",
     "expire_reservations",
     "handle_billz_push_sale",
@@ -1128,3 +1133,44 @@ def _report_open_money_at_worker_start(**_kwargs: Any) -> None:
         report_fake_provider_open_money()
     except Exception:  # the check must never keep a worker from starting
         logger.exception("providers.fake_with_open_money check failed")
+
+
+# --- Yandex Delivery (plan §3.6 dispatch, §3.7 status sync) ----------------------------------------------
+
+
+@outbox.register(topics.YANDEX_DISPATCH)
+def dispatch_courier(message: OutboxMessage) -> None:
+    """``yandex.dispatch``: create the claim (same ``request_id`` on every retry), wait for the estimate,
+    apply the pricing policy, accept once (``commerce.yandex_flow.dispatch``; module doc there)."""
+    yandex_flow.dispatch(_payload(message))
+
+
+def on_yandex_dispatch_dead(message: OutboxMessage) -> None:
+    """A dead dispatch → issue ``dispatch_unknown`` (the claim stays open and polled)."""
+    yandex_flow.on_dispatch_dead(_payload(message))
+
+
+@outbox.register(topics.YANDEX_SYNC_CLAIM)
+def sync_yandex_claim(message: OutboxMessage) -> None:
+    """``yandex.sync_claim``: a callback's hint → ``claims/info`` → ``services.apply_yandex_claim``."""
+    yandex_flow.sync_claim(_payload(message), received_at=message.created_at)
+
+
+outbox.on_dead(topics.YANDEX_DISPATCH)(on_yandex_dispatch_dead)
+outbox.register_deferral_window(topics.YANDEX_DISPATCH, lambda: yandex_flow.DISPATCH_DEFERRAL_WINDOW)
+
+
+@shared_task(name="commerce.poll_yandex")  # type: ignore[untyped-decorator]
+def poll_yandex() -> list[int]:
+    """Yandex status polling (beat ``commerce-poll-yandex`` every 60 s, ``claims/bulk_info``; a no-op while
+    the fake runs under the production settings): the order ids whose claim snapshot was applied."""
+    return yandex_flow.run_poll().applied
+
+
+@shared_task(name="commerce.review_delivery_issues")  # type: ignore[untyped-decorator]
+def review_delivery_issues() -> dict[str, int]:
+    """The delivery exception queue's beat (``commerce-review-delivery-issues`` every 5 minutes; plan §3.9):
+    preparation deadlines, slow courier searches, returns while the warehouse is closed, cancels that
+    stopped half-way, reminders of urgent issues (``commerce.delivery_review``). Counts only."""
+    result = delivery_review.review_delivery_issues()
+    return {"opened": len(result.opened), "resolved": len(result.resolved), "reminded": len(result.reminded)}

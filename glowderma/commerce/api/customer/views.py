@@ -19,7 +19,12 @@ from rest_framework.response import Response
 
 from glowderma.accounts import services as account_services
 from glowderma.accounts.api.customer_base import CustomerAPIView, CustomerGenericViewSet
-from glowderma.accounts.api.throttles import CheckoutThrottle, CustomerRateThrottle, PayThrottle
+from glowderma.accounts.api.throttles import (
+    CheckoutThrottle,
+    CustomerRateThrottle,
+    DeliveryQuoteThrottle,
+    PayThrottle,
+)
 from glowderma.accounts.models import Address, AuthSession, Customer
 from glowderma.commerce import payment_ref, quoting, selectors, services, state
 from glowderma.commerce.api.customer.serializers import (
@@ -381,6 +386,8 @@ def _options_data(options: list[quoting.DeliveryOption]) -> list[dict[str, Any]]
 
 
 class DeliveryCalculateView(CustomerAPIView):
+    throttle_classes = [CustomerRateThrottle, DeliveryQuoteThrottle]
+
     @extend_schema(
         operation_id="customer_delivery_calculate",
         parameters=[*DEVICE_HEADERS, OPTIONAL_IDEMPOTENCY_KEY_HEADER],
@@ -575,6 +582,13 @@ class CheckoutView(CustomerAPIView):
             return quoting.checkout_quote(quote_request, data["delivery_quote_id"])
         except quoting.DeliveryFeeChanged as exc:
             fee = int(exc.option.fee or 0)
+            # row 8 before row 9, as in create_order: a cashback the new fee no longer allows is the
+            # transaction's own refusal, never a "new total" built on it (negative or below the minimum)
+            maximum = selectors.cashback_max(subtotal, fee, None)
+            if wanted > maximum:
+                raise _field(
+                    "cashback_to_use", "max_value", message_key="field.cashback_max", params={"max": maximum}
+                ) from exc
             raise PriceChanged(
                 key="error.delivery_price_changed",
                 details={
@@ -617,9 +631,10 @@ class CheckoutView(CustomerAPIView):
             # Yandex: an own saved address (its pin), no BTS region/city; the quote was checked in post()
             if not Address.objects.filter(pk=data["address_id"], customer_id=customer.pk).exists():
                 raise _field("address_id", "does_not_exist", message_key="field.address_not_found")
-            if prepared is None:  # pragma: no cover - only a key whose stored answer expired mid-request
-                raise _quote_expired(quoting.QuoteExpired())
-            quote_id = prepared.quote_id
+            # None when post() asked no carrier (an emptied cart, a key whose stored answer expired): the
+            # transaction re-checks the quote under the customer lock (own, unused, unexpired, same address,
+            # method usable, weight), so a used quote stays quote_expired while an empty cart is cart_empty
+            quote_id = prepared.quote_id if prepared is not None else data["delivery_quote_id"]
         elif delivery:
             _, region, city = _delivery_address(customer, data["address_id"], None, None)
         device = self.device

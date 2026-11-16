@@ -481,6 +481,7 @@ def test_error_mapping_of_a_claim_write(
     if outcome_unknown is not None:
         assert isinstance(failure.value, YandexUnavailable)
         assert failure.value.outcome_unknown is outcome_unknown
+        assert failure.value.status == status  # 401 / 403 tell an account problem from an outage
     else:
         assert isinstance(failure.value, YandexRejected | YandexConflict) and failure.value.code == "x_code"
     assert len(script.requests) == 1

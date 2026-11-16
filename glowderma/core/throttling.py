@@ -24,6 +24,9 @@ DEFAULT_THROTTLE_RATES: Final[dict[str, str]] = {
     "sms_ip": "600/min",
     "checkout": "30/min",
     "pay": "30/min",
+    # Yandex Delivery plan §3.4: a delivery/calculate/ call that asks the carriers (Yandex check-price per
+    # enabled class); the released BTS request stays under "customer" only.
+    "delivery_quote": "30/min",
     "pos": "120/min",
     # M2 (customer contract §1.8): device-first keys because of carrier-grade NAT, pure-IP ceilings as
     # backstops.

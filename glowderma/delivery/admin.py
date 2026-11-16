@@ -276,6 +276,10 @@ else:  # Django's ModelForm is not subscriptable at runtime
     _SettingsForm = _HoursForm = forms.ModelForm
 CALENDAR_DAYS_SHOWN = 10  # coming special days listed on the settings page
 TAXI_CLASS_CHOICES = [(name, name) for name in services.METHOD_TAXI_CLASSES]
+# The dispatch switch: edited on the settings page, saved by services.set_suspension (one writer with the
+# admin panel's «Muammolar» switch).
+SUSPENSION_FIELDS = ("dispatch_suspended", "suspended_until", "suspension_note")
+MESSAGE_UNTIL_PAST = _("To‘xtatish muddati kelajakda bo‘lishi kerak.")
 WEEKDAY_CHOICES = [(index, gettext_lazy(name)) for index, name in enumerate(labels.WEEKDAYS)]
 
 
@@ -299,11 +303,29 @@ class DeliverySettingsForm(_SettingsForm):
         model = DeliverySettings
         fields = list(services.SETTINGS_FIELDS)
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        # Each field posts the value it was rendered with (``initial-<name>``), so ``changed_data`` is what
+        # this staff member edited, never a colleague's later change (a suspension set from the admin panel,
+        # a method switched off in another tab) read back at POST time; a form sent back with errors keeps
+        # the baseline it was posted with (Django propagates the hidden initial values).
+        for field in self.fields.values():
+            field.show_hidden_initial = True
+
     def clean_contact_phone(self) -> str:
         return services.normalise_phone(str(self.cleaned_data.get("contact_phone") or ""))
 
     def clean(self) -> dict[str, Any]:
         cleaned = super().clean() or {}
+        # the dispatch switch is saved by set_suspension (service_save): its rule shows on the field
+        until = cleaned.get("suspended_until")
+        if (
+            {"dispatch_suspended", "suspended_until"} & set(self.changed_data)
+            and cleaned.get("dispatch_suspended")
+            and until is not None
+            and until <= timeutils.now()
+        ):
+            self.add_error("suspended_until", MESSAGE_UNTIL_PAST)
         stored = DeliverySettings.objects.filter(pk=self.instance.pk).first()
         previous = services.settings_snapshot(stored) if stored is not None else None
         values = {**(previous or {}), **{name: cleaned.get(name) for name in services.SETTINGS_FIELDS}}
@@ -526,8 +548,23 @@ class DeliverySettingsAdmin(OpsActionsMixin, ServiceBackedAdmin):
         changes = {
             name: form.cleaned_data[name] for name in form.changed_data if name in services.SETTINGS_FIELDS
         }
+        # The dispatch switch has one writer, set_suspension (as from the admin panel): its own audit action,
+        # a resume clears «until», a past «until» is refused. The fields not edited keep their stored values.
+        switch = {name: changes.pop(name) for name in SUSPENSION_FIELDS if name in changes}
         if changes:
             services.update_settings(changes, actor=request.user, request=request)
+        if switch:
+            row = DeliverySettings.objects.get(pk=1)
+            try:
+                services.set_suspension(
+                    bool(switch.get("dispatch_suspended", row.dispatch_suspended)),
+                    switch.get("suspended_until", row.suspended_until),
+                    str(switch.get("suspension_note", row.suspension_note) or ""),
+                    actor=request.user,
+                    request=request,
+                )
+            except ValueError as exc:  # the form checked «until» first: only a race reaches this
+                raise ValidationError({"suspended_until": [MESSAGE_UNTIL_PAST]}) from exc
 
     def service_delete(self, request: HttpRequest, obj: models.Model) -> None:
         raise ValidationError(gettext("Yetkazish sozlamalarini o‘chirib bo‘lmaydi."))

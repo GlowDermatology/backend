@@ -217,6 +217,13 @@ class AvailableActionsSerializer(serializers.Serializer[Any]):
     transitions = serializers.ListField(child=serializers.ChoiceField(choices=enums.OrderStatus.values))
     cancel = serializers.BooleanField()
     retry_shipment = serializers.BooleanField()
+    dispatch = serializers.BooleanField(
+        help_text="Yandex Delivery: `POST orders/{id}/dispatch/` would be accepted now (false for BTS)."
+    )
+    confirm_return = serializers.BooleanField(
+        help_text="Yandex Delivery: the parcel is returning / returned and its return is not confirmed yet "
+        "(`POST orders/{id}/confirm-return/`)."
+    )
 
 
 class OrderDetailSerializer(serializers.Serializer[selectors.OrderDetail]):
@@ -315,6 +322,39 @@ class TransitionSerializer(serializers.Serializer[dict[str, Any]]):
     status = serializers.ChoiceField(choices=enums.OrderStatus.values)
 
 
+MESSAGE_CONTENTS_UNVERIFIED = "Jo‘natma tarkibini tekshirganingizni tasdiqlang."
+DISPATCH_WEIGHT_MAX_G = 20_000
+DISPATCH_PRICE_MAX = 100_000_000
+
+
+class DispatchSerializer(serializers.Serializer[dict[str, Any]]):
+    """``POST orders/{id}/dispatch/`` (Yandex Delivery plan §3.6): staff checked the parcel and weighed it."""
+
+    contents_verified = serializers.BooleanField(help_text="Must be `true`: staff checked the contents.")
+    weight_g = serializers.IntegerField(min_value=1, max_value=DISPATCH_WEIGHT_MAX_G, help_text="Grams.")
+    approved_price = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        default=None,
+        min_value=0,
+        max_value=DISPATCH_PRICE_MAX,
+        help_text="So'm (VAT-inclusive): the courier price staff approved; only while a `dispatch_review` "
+        "issue is open.",
+    )
+    method = serializers.ChoiceField(
+        choices=enums.DeliveryMethod.values,
+        required=False,
+        allow_null=True,
+        default=None,
+        help_text="Switch the delivery method (the fee the customer paid never changes).",
+    )
+
+    def validate_contents_verified(self, value: bool) -> bool:
+        if value is not True:
+            raise serializers.ValidationError(field_error("invalid", MESSAGE_CONTENTS_UNVERIFIED))
+        return value
+
+
 RESOLVE_STATES = (enums.RefundState.SUCCEEDED, enums.RefundState.FAILED)
 
 
@@ -407,6 +447,21 @@ class ResolveIssueSerializer(serializers.Serializer[dict[str, Any]]):
 
     def validate_note(self, value: str) -> str:
         return _note(value, required=True)
+
+
+class ConfirmReturnSerializer(serializers.Serializer[dict[str, Any]]):
+    """``POST orders/{id}/confirm-return/`` (Yandex Delivery plan §3.8): the parcel is physically back."""
+
+    note = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+        trim_whitespace=True,
+        help_text="Optional (≤ 1000): the parcel's condition; becomes the `return_pending` resolution note.",
+    )
+
+    def validate_note(self, value: str) -> str:
+        return _note(value, required=False)
 
 
 class SuspensionSerializer(serializers.Serializer[Any]):

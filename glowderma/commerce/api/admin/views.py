@@ -19,8 +19,10 @@ from glowderma.commerce import delivery_admin, selectors, services
 from glowderma.commerce.api.admin.serializers import (
     MESSAGE_REASON,
     CancelOrderSerializer,
+    ConfirmReturnSerializer,
     DeliveryIssueQuerySerializer,
     DeliveryIssueSerializer,
+    DispatchSerializer,
     OpenIssueSerializer,
     OrderCountsQuerySerializer,
     OrderDetailSerializer,
@@ -43,7 +45,7 @@ from glowderma.core.api.schema import (
     ErrorEnvelopeSerializer,
 )
 from glowderma.core.exports import ExportMixin, format_export_datetime
-from glowderma.core.idempotency import idempotent
+from glowderma.core.idempotency import already_answered, idempotency_key, idempotent
 from glowderma.delivery import selectors as delivery_selectors
 from glowderma.delivery import services as delivery_services
 from glowderma.delivery.models import DeliveryIssue
@@ -138,12 +140,32 @@ class OrderStatusCountsView(AdminAPIView):
 class OrderCancelView(AdminAPIView):
     @extend_schema(
         operation_id="admin_orders_cancel",
+        description="Cancel an order (full refund when paid). A Yandex Delivery order is first made "
+        "carrier-safe outside the transaction (plan §3.8): an open courier claim is cancelled at Yandex "
+        "before pickup (free or paid), after pickup a return to the warehouse is requested and the cancel "
+        "proceeds once Yandex reports it `returning`; a returning / returned parcel needs no call, a "
+        "delivered order is refused. 409 `not_cancellable` (Yandex refused, delivered, parcel not coming "
+        "back), 409 `return_requested` (return asked, not confirmed yet: retry later; the order is "
+        "unchanged), 409 `conflict` (another Yandex operation of the order is running, or Yandex has not "
+        "shown the cancel yet), 503 `provider_unavailable` (Yandex did not answer; nothing changed).",
         parameters=[IDEMPOTENCY_KEY_HEADER],
         request=CancelOrderSerializer,
         responses={200: OrderDetailSerializer, **ACTION_ERRORS},
     )
-    @idempotent()
     def post(self, request: Request, pk: int) -> Response:
+        # plan §3.8: the carrier is asked here, before the @idempotent transaction (a replay asks nobody)
+        body = CancelOrderSerializer(data=request.data)
+        if (
+            body.is_valid()
+            and idempotency_key(request) is not None
+            and not already_answered(request)
+            and Order.objects.filter(pk=pk).exists()
+        ):
+            _order_or_404(lambda: services.cancel_at_carrier(pk, _actor_id(request), request=request))
+        return self._cancel(request, pk)
+
+    @idempotent()
+    def _cancel(self, request: Request, pk: int) -> Response:
         if not Order.objects.filter(pk=pk).exists():
             raise NotFound
         body = CancelOrderSerializer(data=request.data)
@@ -189,6 +211,66 @@ class OrderRetryShipmentView(AdminAPIView):
     def post(self, request: Request, pk: int) -> Response:
         _order_or_404(lambda: services.retry_shipment(pk, _actor_id(request), request=request))
         return _detail_response(pk, status=202)
+
+
+class OrderDispatchView(AdminAPIView):
+    """Yandex Delivery plan §3.6: staff call a courier. Nothing is sent to Yandex in the request: the claim
+    is stored and ``yandex.dispatch`` enqueued (202, the order detail; ``delivery.stage`` =
+    ``courier_requested``)."""
+
+    @extend_schema(
+        operation_id="admin_orders_dispatch",
+        parameters=[IDEMPOTENCY_KEY_HEADER],
+        request=DispatchSerializer,
+        responses={202: OrderDetailSerializer, **ADMIN_ERRORS},
+    )
+    @idempotent()
+    def post(self, request: Request, pk: int) -> Response:
+        if not Order.objects.filter(pk=pk).exists():
+            raise NotFound
+        body = DispatchSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        data = body.validated_data
+        _order_or_404(
+            lambda: services.request_dispatch(
+                pk,
+                _actor_id(request),
+                weight_g=data["weight_g"],
+                method=data["method"],
+                approved_price=data["approved_price"],
+                request=request,
+            )
+        )
+        return _detail_response(pk, status=202)
+
+
+class OrderConfirmReturnView(AdminAPIView):
+    """Yandex Delivery plan §3.8: staff confirm the returning / returned parcel is physically back."""
+
+    @extend_schema(
+        operation_id="admin_orders_confirm_return",
+        description="Confirm that the parcel of a Yandex order whose delivery stage is `returning` / "
+        "`returned` is physically back at the warehouse: stage `returned`, `returned_at`, the open "
+        "`return_pending` issue resolved (the note is its resolution note), order event "
+        "`shipment_returned`, audit `order.return_confirmed`. A cancelled order stays cancelled; an open "
+        "order stays as it is (staff dispatch again or cancel). 409 `invalid_transition` (no returning "
+        "parcel), 409 `conflict` (confirmed already, or the order is busy).",
+        parameters=[IDEMPOTENCY_KEY_HEADER],
+        request=ConfirmReturnSerializer,
+        responses={200: OrderDetailSerializer, **ADMIN_ERRORS},
+    )
+    @idempotent()
+    def post(self, request: Request, pk: int) -> Response:
+        if not Order.objects.filter(pk=pk).exists():
+            raise NotFound
+        body = ConfirmReturnSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        _order_or_404(
+            lambda: services.confirm_return(
+                pk, _actor_id(request), note=body.validated_data["note"], request=request
+            )
+        )
+        return _detail_response(pk)
 
 
 # --- refund operations (contract §7 item 18) ----------------------------------------------------------------

@@ -173,6 +173,50 @@ def test_an_expired_quote_with_another_fee_is_price_changed(
     assert Order.objects.get().delivery_fee == fresh_fee
 
 
+def test_a_changed_fee_never_reports_a_total_built_on_cashback_above_the_cap(
+    customer_client: APIClient, customer: Customer, frozen: Any
+) -> None:
+    # review: the re-quote's 409 price_changed used the raw cashback_to_use (a negative "new total"); like
+    # create_order, row 8 (cashback above the cap) comes before row 9 (another price)
+    address, quote = _quoted(customer_client, customer)
+    _expire(quote["quote_id"])
+    response = checkout(
+        customer_client,
+        yandex_body(address, quote, cashback_to_use=400_000),  # above the 300 000 items subtotal
+        header=scenario_header({"price": 99_000}),
+    )
+    assert response.status_code == 400, response.json()
+    error = response.json()["errors"][0]
+    assert error["field"] == "cashback_to_use" and error["code"] == "max_value"
+    assert not Order.objects.exists()
+
+
+def test_an_emptied_cart_with_a_valid_quote_is_cart_empty(
+    customer_client: APIClient, customer: Customer, frozen: Any
+) -> None:
+    # review: post() asks no carrier for an empty cart; the transaction answers it (row 6), not quote_expired
+    address, quote = _quoted(customer_client, customer)
+    services.remove_from_cart(customer.pk, list(customer.cart.items.values_list("product_id", flat=True)))
+    response = checkout(customer_client, yandex_body(address, quote))
+    assert response.status_code == 409 and response.json()["code"] == "cart_empty", response.json()
+    assert DeliveryQuote.objects.get(pk=quote["quote_id"]).used_at is None
+
+
+def test_a_second_quote_after_a_placed_order_is_open_order_exists(
+    customer_client: APIClient, customer: Customer, frozen: Any
+) -> None:
+    # review: two tabs, each with its own quote; the second checkout learns the order it should pay
+    address, first = _quoted(customer_client, customer)
+    second = calculate(customer_client, address, delivery_method="express").json()
+    assert second["quote_id"] != first["quote_id"]
+    placed = checkout(customer_client, yandex_body(address, first))
+    assert placed.status_code == 201, placed.json()
+    response = checkout(customer_client, yandex_body(address, second))
+    assert response.status_code == 409 and response.json()["code"] == "open_order_exists", response.json()
+    assert response.json()["details"]["order_id"] == placed.json()["id"]
+    assert Order.objects.count() == 1
+
+
 def test_no_fresh_quote_is_quote_expired(customer_client: APIClient, customer: Customer, frozen: Any) -> None:
     address, quote = _quoted(customer_client, customer)
     _expire(quote["quote_id"])

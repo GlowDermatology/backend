@@ -746,8 +746,9 @@ class ShipmentEvent(AppendOnlyModel):
 
 class DeliveryIssue(models.Model):
     """A delivery case staff must look at (plan §3.9): one open row per (order, kind), opened idempotently
-    and mostly closed by the code that opened it. ``details`` holds ids and amounts only (it reaches the
-    alert webhook and the Telegram bot), ``note`` is the staff text."""
+    and mostly closed by the code that opened it. ``details`` holds ids and amounts only (shown to staff in
+    the admin API; alerts carry ``delivery.services.issue_alert_fields`` instead, never ``details``),
+    ``note`` is the staff text."""
 
     order = models.ForeignKey(
         "commerce.Order", on_delete=models.PROTECT, related_name="delivery_issues", verbose_name="buyurtma"

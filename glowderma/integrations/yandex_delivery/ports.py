@@ -192,11 +192,13 @@ class YandexConflict(YandexError):
 class YandexUnavailable(YandexError):
     """No usable answer. ``outcome_unknown`` is true when the request may have been processed (never
     resent by the adapter), false when it provably was not (not sent, or refused unprocessed: 401/403/408/
-    425/429, a redirect)."""
+    425/429, a redirect). ``status`` is the HTTP status of an answer that was refused or failed (``None``
+    without an answer): 401 / 403 tell an account problem (token, contract) from an outage."""
 
-    def __init__(self, message: str = "", *, outcome_unknown: bool = True) -> None:
+    def __init__(self, message: str = "", *, outcome_unknown: bool = True, status: int | None = None) -> None:
         super().__init__(message)
         self.outcome_unknown = outcome_unknown
+        self.status = status
 
 
 class YandexDeliveryPort(Protocol):

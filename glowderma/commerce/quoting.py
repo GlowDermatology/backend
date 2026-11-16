@@ -42,6 +42,7 @@ from glowderma.core import enums, i18n, integration_modes, timeutils
 from glowderma.delivery import pricing
 from glowderma.delivery import quotes as delivery_quotes
 from glowderma.delivery import selectors as delivery_selectors
+from glowderma.delivery import services as delivery_services
 from glowderma.delivery.models import DeliverySettings
 from glowderma.delivery.quotes import AddressSnapshot, QuoteRow
 from glowderma.delivery.warehouse import EtaWindow, WarehouseCalendar
@@ -235,6 +236,16 @@ def _refusal(
     return None, window
 
 
+def _account_failure(exc: YandexError) -> str | None:
+    """A check-price failure that is the account's (401/403, a payment refusal): counted on
+    ``IntegrationState(yandex)`` (``attention.yandex_failing``; the third in a row alerts
+    ``delivery.provider_failing``). A timeout or an address Yandex does not serve is not counted."""
+    code = delivery_services.yandex_account_failure(exc)
+    if code is not None:
+        delivery_services.record_yandex_failure("check_price", code)
+    return code
+
+
 def _yandex_options(request: QuoteRequest) -> list[DeliveryOption]:
     if not yandex_offered(request.customer_id):
         return []
@@ -286,12 +297,18 @@ def _yandex_options(request: QuoteRequest) -> list[DeliveryOption]:
         )
         try:
             estimate = port.check_price(source, destination, item, method.taxi_class, deadline=deadline)
-        except YandexUnavailable:
+        except YandexUnavailable as exc:
             logger.warning("delivery.quote_unavailable provider=yandex method=%s reason=down", method.method)
+            _account_failure(exc)
             options.append(_unavailable(request, _P.YANDEX, method.method, _R.PROVIDER_UNAVAILABLE))
             continue
         except YandexRejected as exc:
-            reason = _R.PROVIDER_UNAVAILABLE if exc.code in _NOT_ZONE_CODES else _R.OUT_OF_ZONE
+            account = _account_failure(exc)
+            reason = (
+                _R.PROVIDER_UNAVAILABLE
+                if exc.code in _NOT_ZONE_CODES or account is not None
+                else _R.OUT_OF_ZONE
+            )
             logger.info(
                 "delivery.quote_refused provider=yandex method=%s code=%s", method.method, exc.code[:80]
             )
@@ -301,6 +318,7 @@ def _yandex_options(request: QuoteRequest) -> list[DeliveryOption]:
             logger.warning("delivery.quote_unavailable provider=yandex method=%s reason=error", method.method)
             options.append(_unavailable(request, _P.YANDEX, method.method, _R.PROVIDER_UNAVAILABLE))
             continue
+        delivery_services.record_yandex_success()  # an answered price check ends a failure run, if any
         fee = pricing.customer_fee(
             estimate.price, markup_percent=row.markup_percent, vat_percent=row.estimate_vat_percent
         )

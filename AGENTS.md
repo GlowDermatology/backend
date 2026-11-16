@@ -122,7 +122,14 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
   overridable by the `THROTTLE_RATES` env JSON); a new throttle class must add its scope there or settings
   validation fails. `LOG_LEVEL` sets the `glowderma.*` logger level; every log line carries `request_id`.
 - The Django admin is read-only: register models through `glowderma.core.admin.register_read_only` (`ReadOnlyAdmin`);
-  never expose `password` or `refresh_hash`. Only the professionals models become editable, through services.
+  never expose `password` or `refresh_hash`. Only the professionals models and the Yandex Delivery warehouse pages
+  become editable, through services, with `glowderma.core.admin.ServiceBackedAdmin` (abstract `service_save` /
+  `service_delete` hooks; a `ValidationError` from a hook rolls back and re-renders the form; professionals keeps a
+  thin subclass): `DeliverySettings` (the singleton page `/django-admin/delivery/deliverysettings/1/change/`, saved
+  through `delivery.services.update_settings`, with the detail action «Yandex bilan tekshirish» →
+  `check_yandex_tariffs`, which runs **outside** a transaction), `WarehouseHours` and `WarehouseClosure`
+  (`delivery.services.save_hours` / `delete_hours` / `save_closure` / `delete_closure`); every write is audited
+  (`delivery.*`). `CourierClaim`, `DeliveryIssue`, `DeliveryQuote` stay read-only.
   One exception that is not a ModelAdmin: the settings page `/django-admin/settings/` (`admin:site_config_settings`,
   `glowderma/site_config/admin_views.py` + `forms.py`, mounted by `UNFOLD["SITE_VIEWS"]` in
   `config/settings/ops_admin.py`) edits the store settings, contacts and legal texts and publishes the terms, writing
@@ -145,7 +152,12 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
   above it): provider-facing admin routes (`integrations/billz/import/`, `jobs/<pk>/`) are declared by the
   orchestrating module (`catalog`) while the paths stay as the contract says. Billz: `integrations/billz/{ports,fake,
   registry}.py` (`FakeBillz`: a known product returns its own fields, an id ending in `0000` is not found, anything
-  else is synthetic; an import always yields the three `46070199xx` new products once). Jobs go through
+  else is synthetic; an import always yields the three `46070199xx` new products once). Yandex Delivery:
+  `integrations/yandex_delivery/{ports,protocol,fake,live,registry}.py` (`YANDEX_DELIVERY_MODE`; `FakeYandexDelivery`
+  is deterministic, idempotent per `request_id`, scripted through `Order.metadata["fake"]["yandex"]` /
+  `X-GD-Fake-Scenario` — see `docs/integrations/yandex-delivery.md` §5 — and process-wide: tests call
+  `fake.reset()`; under the production posture it invents nothing) plus `manage.py yandex_delivery_check`
+  (`integrations/management/commands/`). Jobs go through
   `integrations.services` (`start_job` single-flight, `claim_job`, `report_progress`, `finish_job`, `fail_job`,
   `reap_stale_jobs`). OAuth: `integrations/oauth/{ports,fake,google,facebook,registry}.py` (fake
   codes `fake:<subject>:<email>[:hd]`, `fake-unverified:…`, `fake-fail`, `fake-down`; FakeGoogle nonce
@@ -154,7 +166,7 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
   **Billz is the documented exception** (`integrations/billz/client.py`): its 429 is Billz's documented rate-limit
   signal (a shared limiter pauses every worker), and transport errors / 5xx are retried only for calls that are
   safe to repeat (reads, absolute upserts) or that certainly never reached Billz.
-- **Live adapters (M3: Click, Payme, BTS, Eskiz, FCM)** share `glowderma/integrations/httpclient.py`: one
+- **Live adapters (M3: Click, Payme, BTS, Eskiz, FCM; Yandex Delivery)** share `glowderma/integrations/httpclient.py`: one
   `Deadline` per port call (10 s; 4 s on a customer request path), `send()` retries only what never left
   (`TransportFailure(sent=False)`), and **every** other failure once the request may have left — a timeout, a body
   that does not decode, any unexpected exception — is `TransportFailure(sent=True)` ("outcome unknown", never
@@ -171,7 +183,11 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
   `ClickRefundRejected` (definitive), `ClickNotProcessed` (nothing happened: the handler releases its claim),
   `ClickUnavailable` (unknown) and `ClickStatusUnknown` (a status it cannot name: never `paid`/`reversed`); any
   other exception after the refund claim records `unknown`. FCM results add `not_sent` (give the claim back,
-  send later) and `unavailable` (unknown: never resent). No BTS call runs under the Order row lock. Tests replay
+  send later) and `unavailable` (unknown: never resent). Yandex Delivery's port types `YandexRejected(code)` (a
+  documented 4xx, or our own `invalid_request` before sending), `YandexConflict(code)` (409 of accept / cancel /
+  return / tracking links) and `YandexUnavailable(outcome_unknown=…, status=…)`; `claims/create` is idempotent per
+  `request_id`, so the **caller** retries it with the same stored UUID (the adapter never resends); every price must
+  be in `YANDEX_DELIVERY_CURRENCY`. No BTS call runs under the Order row lock. Tests replay
   documented answers with `integrations/tests/live_fixtures.Script` (`Script().on(method, path, *responders)`
   over `httpx.MockTransport`; an unscripted route answers 599) and `monkeypatch.setattr(httpclient, "new_client",
   …)` for code that builds its own client — never the network.
@@ -190,11 +206,20 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
   Malika's ledger still reproduce), but the design's policy-history cards (v1 "20 mln gacha 1%") need
   `seed_demo --reset`; the test settings disable the bootstrap (`LOYALTY_BOOTSTRAP_POLICY=False`). `settings.FAKE_NOW` (env `FAKE_NOW`, local/test only) pins
   `timeutils.now()` for demos and e2e runs.
+- **Yandex Delivery calls** (`commerce.yandex_flow`, `commerce.services.cancel_at_carrier`): never inside a database
+  transaction and never under the Order row lock — plan under the Order lock and commit, call Yandex holding only the
+  session advisory lock `commerce.locks.yandex_lock(order_id)` (`pg_try_advisory_lock(hashtext('yandex:{order_id}'))`;
+  busy → `YandexBusy`: the dispatch handler defers, an admin request answers 409), then re-lock and record. Every
+  flow that calls Yandex for an order holds that lock; views call Yandex in `post()` **before** their `@idempotent`
+  inner method (skipped on a replay). `commerce.services.apply_yandex_claim` is the single writer of claim
+  statuses; `accept` is sent once per claim, after `accept_sent_at` is committed.
 - Retention jobs delete from `core.db.PURGEABLE_TABLES` only inside `core.db.purge_window()`; the outbox offers
   `outbox.on_dead(topic)` hooks for the orchestrating module to record what a dead message means.
-- Rows that must always exist (the `SiteSettings` singleton, the six `IntegrationState` rows, status templates,
+- Rows that must always exist (the `SiteSettings` and `DeliverySettings` singletons, the seven `IntegrationState`
+  rows — billz, bts, click, payme, eskiz, fcm, yandex —, status templates,
   …) are created by a data migration **and** re-ensured by a `post_migrate` receiver in the app's `AppConfig.ready()`
-  (pattern: `glowderma/integrations/apps.py` `ensure_provider_rows`, `glowderma/site_config/apps.py`
+  (pattern: `glowderma/integrations/apps.py` `ensure_provider_rows`, `glowderma/delivery/apps.py` `ensure_settings`,
+  `glowderma/site_config/apps.py`
   `ensure_singleton`), because pytest-django flushes the database after `transaction=True` tests and `--reuse-db`
   reruns would otherwise start without them. Reads never create such rows.
 - Time only via `timeutils.now()` (module attribute, never an imported name). Money: integer so'm

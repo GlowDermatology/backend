@@ -3799,6 +3799,10 @@ msgstr "Причина приостановки"
 msgid "To‘xtatish muddati"
 msgstr "Приостановлено до"
 
+#: glowderma/delivery/admin.py
+msgid "To‘xtatish muddati kelajakda bo‘lishi kerak."
+msgstr "Срок приостановки должен быть в будущем."
+
 #: glowderma/catalog/admin.py
 msgid "Tugagan (0 yoki Billz’da yozuvi yo‘q)"
 msgstr "Нет в наличии (0 или нет записи в Billz)"

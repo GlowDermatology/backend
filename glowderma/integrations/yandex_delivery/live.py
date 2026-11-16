@@ -131,10 +131,12 @@ class LiveYandexDelivery:
             logger.error("yandex.auth_failed status=401 (check YANDEX_DELIVERY_TOKEN)")
         if answer.not_processed:
             raise YandexUnavailable(
-                f"Yandex {path}: HTTP {answer.status} (not processed)", outcome_unknown=False
+                f"Yandex {path}: HTTP {answer.status} (not processed)",
+                outcome_unknown=False,
+                status=answer.status,
             )
         if answer.status >= 500 or answer.status < 200:
-            raise YandexUnavailable(f"Yandex {path}: HTTP {answer.status}")
+            raise YandexUnavailable(f"Yandex {path}: HTTP {answer.status}", status=answer.status)
         if answer.ok:
             return answer
         code = protocol.error_code(answer.data, answer.status)

@@ -31,3 +31,12 @@ def purge_quotes() -> int:
     """Delete the checkout quotes nobody used that expired more than a day ago (beat daily); a used quote
     stays with its order. Returns how many were deleted."""
     return services.purge_quotes(timeutils.now() - QUOTE_RETENTION)
+
+
+@shared_task(name="delivery.blank_courier_details")  # type: ignore[untyped-decorator]
+def blank_courier_details() -> int:
+    """Blank the courier's name and vehicle and the tracking link of every claim that ended more than
+    ``COURIER_DETAILS_RETENTION_DAYS`` (7) days ago (beat daily); returns how many claims were cleared."""
+    return services.blank_courier_details(
+        timeutils.now() - timedelta(days=services.COURIER_DETAILS_RETENTION_DAYS)
+    )

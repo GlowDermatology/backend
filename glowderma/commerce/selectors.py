@@ -46,6 +46,7 @@ from glowderma.core.models import OutboxMessage
 from glowderma.core.search import SearchFold
 from glowderma.core.timeutils import TASHKENT
 from glowderma.delivery import selectors as delivery_selectors
+from glowderma.delivery import yandex as delivery_yandex
 from glowderma.delivery.models import Shipment
 from glowderma.loyalty import selectors as loyalty_selectors
 from glowderma.payments import selectors as payment_selectors
@@ -310,7 +311,9 @@ def _cashback_hold(order_id: int) -> dict[str, Any] | None:
 
 def available_actions(order: Order, shipment: Shipment | None) -> dict[str, Any]:
     """03 §4.2: ``transitions`` (state.py manual rows), ``cancel``, ``retry_shipment``; provider-aware (a
-    Yandex order gets no manual transition but the ``parcel_unaccounted`` exception, and never a retry)."""
+    Yandex order gets no manual transition but the ``parcel_unaccounted`` exception, and never a retry).
+    Yandex Delivery adds ``dispatch`` (:func:`dispatch_blocker` finds nothing) and ``confirm_return`` (the
+    parcel is returning / back and its return not confirmed yet: ``POST orders/{id}/confirm-return/``)."""
     pending = shipment.is_pending if shipment is not None else False
     shipment_state = delivery_selectors.api_state(shipment, order.fulfilment)
     provider = shipment.provider if shipment is not None else enums.DeliveryProvider.BTS
@@ -325,7 +328,68 @@ def available_actions(order: Order, shipment: Shipment | None) -> dict[str, Any]
         "retry_shipment": state.can_retry_shipment(
             order.fulfilment, order.status, shipment_state, pending, provider=provider
         ),
+        "dispatch": provider == enums.DeliveryProvider.YANDEX and dispatch_blocker(order, shipment) is None,
+        "confirm_return": _return_confirmable(order, shipment),
     }
+
+
+def _return_confirmable(order: Order, shipment: Shipment | None) -> bool:
+    """``available_actions.confirm_return``: a Yandex parcel returning / back whose return staff have not
+    confirmed yet (one query, only at those stages)."""
+    if (
+        shipment is None
+        or shipment.provider != enums.DeliveryProvider.YANDEX
+        or shipment.stage not in delivery_yandex.RETURN_STAGES
+        or shipment.claim is None
+    ):
+        return False
+    return not delivery_selectors.return_confirmed(order.pk, shipment.claim.number)
+
+
+# --- Yandex Delivery: may staff call a courier? (plan §3.6) -------------------------------------------------
+
+# Why a dispatch is refused (``commerce.services.request_dispatch`` maps each to the API error) — besides the
+# warehouse calendar's ``DispatchRefusal`` codes (``not_configured``, ``suspended``, ``closed``,
+# ``after_cutoff``, ``returns_unavailable``), which are answered as they are.
+DISPATCH_NOT_ALLOWED = "not_dispatchable"  # not a paid, open Yandex delivery at a stage that waits for one
+DISPATCH_CLAIM_OPEN = "claim_open"  # a courier claim is open (a dispatch runs, or a courier may come)
+DISPATCH_CANCEL_REQUESTED = "cancel_requested"  # the carrier-side cancel is in progress
+DISPATCH_NO_PIN = "coordinates_required"  # the order's address has no map pin
+DISPATCH_STAGES = frozenset(
+    {enums.ShipmentStage.AWAITING_DISPATCH, enums.ShipmentStage.FAILED, enums.ShipmentStage.RETURNED}
+)
+
+
+def dispatch_blocker(order: Order, shipment: Shipment | None, *, now: datetime | None = None) -> str | None:
+    """Why staff cannot call a Yandex courier for ``order`` now, or ``None`` (``available_actions.dispatch``
+    and the checks of ``POST orders/{id}/dispatch/``, which repeats them under the Order lock).
+
+    A dispatch needs a paid delivery order that is ``processing`` (or ``handed_to_courier`` with its parcel
+    ``returned``), a Yandex shipment at ``awaiting_dispatch`` / ``failed`` / ``returned`` without an open
+    claim or a cancel in progress, a pinned address and a warehouse that may call a courier now
+    (``WarehouseCalendar.dispatch_refusal``). ``shipment`` is the order's row with its current claim (the
+    only claim that can be open); the calendar is read only when everything else allows the dispatch."""
+    if (
+        order.fulfilment != enums.FulfilmentMethod.DELIVERY
+        or shipment is None
+        or shipment.provider != enums.DeliveryProvider.YANDEX
+        or order.paid_at is None
+        or order.status not in (enums.OrderStatus.PROCESSING, enums.OrderStatus.HANDED_TO_COURIER)
+    ):
+        return DISPATCH_NOT_ALLOWED
+    claim = shipment.claim
+    if claim is not None and claim.ended_at is None:
+        return DISPATCH_CLAIM_OPEN
+    if shipment.cancel_requested_at is not None:
+        return DISPATCH_CANCEL_REQUESTED
+    if shipment.stage not in DISPATCH_STAGES:
+        return DISPATCH_NOT_ALLOWED
+    if order.status == enums.OrderStatus.HANDED_TO_COURIER and shipment.stage != enums.ShipmentStage.RETURNED:
+        return DISPATCH_NOT_ALLOWED
+    if order.address_latitude is None or order.address_longitude is None:
+        return DISPATCH_NO_PIN
+    instant = now or timeutils.now()
+    return delivery_selectors.warehouse_calendar(timeutils.local_date(instant)).dispatch_refusal(instant)
 
 
 def image_url(path: str) -> str | None:
@@ -345,6 +409,9 @@ def order_detail(order_id: int) -> OrderDetail | None:
     if order is None:
         return None
     shipment = _shipment_of(order)
+    if shipment is not None and shipment.provider == enums.DeliveryProvider.YANDEX:
+        # one read of the claim and the quote serves available_actions and the delivery object
+        shipment = delivery_admin.load_yandex_rows(shipment)
     items = [
         {
             "product_id": item.product_id,
@@ -507,6 +574,11 @@ __all__ = [
     "OrderDetail",
     "OrderFilters",
     "available_actions",
+    "DISPATCH_CANCEL_REQUESTED",
+    "DISPATCH_CLAIM_OPEN",
+    "DISPATCH_NOT_ALLOWED",
+    "DISPATCH_NO_PIN",
+    "dispatch_blocker",
     "available_stock",
     "image_url",
     "customer_available_stock",

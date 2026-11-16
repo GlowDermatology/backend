@@ -77,6 +77,16 @@ stays, which is why log-based alerting is the primary path and the webhook the p
 **Compliance.** The receiver must be hosted in Uzbekistan or receive no personal data (`docs/ops/compliance.md`
 §1.2). The alert fields are designed to carry none; keep it that way when adding alerts (ids and counts only).
 
+**The receiver: the Telegram bot** (repository `bot`, `GlowDerma alert bot`). A one-way notifier the operator runs as
+its own service: `POST /hooks/alerts` verifies `X-GD-Signature` with the same `ALERT_WEBHOOK_SECRET`, refuses stale
+or replayed bodies, renders one Uzbek message per event (order number, kind, code, deep links to the admin panel)
+and posts it to `TELEGRAM_CHAT_ID` with `sendMessage`; a Telegram failure answers 502, so the outbox retries.
+Point `ALERT_WEBHOOK_URL` at `https://<bot host>/hooks/alerts`. It needs `TELEGRAM_BOT_TOKEN` (BotFather),
+`TELEGRAM_CHAT_ID` (`python -m glowderma_bot chat-id` finds it) and optionally `ADMIN_BASE_URL`,
+`BOT_ENV_ALLOWLIST`; its README lists its answers and how each maps to the outbox outcome. Telegram receives what
+the alert carries: ids and short codes. With Yandex Delivery live and no `ALERT_WEBHOOK_URL`, every process logs a
+startup WARNING (§2.1): urgent delivery issues then reach the admin panel only.
+
 ## 2. Events to alert on
 
 *Webhook* = also sent through §1. The others are ERROR (or, where noted, WARNING) lines only — alert on them from
@@ -110,6 +120,59 @@ the logs. Ids in the lines are order, payment, refund, purchase, message or acco
 | `report.consistency_check_failed` | no (the report's alert lists the check under `errors`) | one check of the nightly report failed (timeout, database error) | Read the traceback in the worker log; rerun `manage.py consistency_report` |
 | `report.consistency_time_limit stopped=<checks>` | no (the report's alert lists them under `errors: time_limit`) | the report hit its Celery soft time limit; the listed checks did not run | Rerun `manage.py consistency_report` (no task time limit); if it repeats, find the slow check with `--json` and its plan (§3.1) |
 | `alert.send_failed`, `alert.enqueue_failed` (WARNING) | no | the alert webhook is unreachable or refused, or an alert could not be queued | Check the receiver; dead `alert.send` messages are listed by `requeue_outbox --topic alert.send --dead --dry-run` |
+
+### 2.1 Yandex Delivery (`docs/integrations/yandex-delivery.md`)
+
+**Alerts** (webhook; ids and codes only — the bot renders exactly these fields):
+
+| Event | Fields | Scope (dedupe) | Raised when | What to do |
+|---|---|---|---|---|
+| `delivery.issue_opened` | `order_id`, `kind`, `code`, `urgent`, `issue_id` | the issue id | a delivery issue **becomes urgent** (opened urgent, or an open one escalated): `parcel_unaccounted`, `cancel_incomplete`, `return_pending` `warehouse_closed`, `dispatch_failed` `previous_claim_active` / `courier_search_slow`, `dispatch_unknown` `accept_unconfirmed` / `dead_letter` (after the accept) / `unexpected_acceptance`, an urgent staff `incident`. Queued in the issue's own transaction (never for a rolled-back issue) | Open the order (the bot links it) and the queue «Muammolar» (`GET admin/delivery/issues/`); the issue kinds and their resolution are in the integration doc §11 |
+| `delivery.issue_reminder` | the same five | `"<issue id>:<reminder no>"` (each reminder is its own alert) | every open urgent issue nobody touched for 30 minutes (beat `commerce-review-delivery-issues`, every 5 minutes; no cap on the count) | Resolve it or act on it: any change (or the resolve endpoint) stops the reminders |
+| `delivery.provider_failing` | `provider` (`yandex`), `code` (`unauthorized`, `forbidden`, a Yandex payment code such as `estimating.cargocorp_payment_failure`, `unavailable`, or Yandex's code) | the Tashkent date | the **third** Yandex account failure in a row: a failed status poll, or a checkout price check refused with 401 / 403 / a payment refusal (also ERROR `yandex.provider_failing {source, code, failures}`) | `unauthorized` / `forbidden`: the token (`YANDEX_DELIVERY_TOKEN`; a cabinet password change invalidates it). A payment code: the prepaid balance or the contract in the Yandex cabinet. `unavailable`: Yandex or the egress to `b2b.taxi.yandex.net`. The dashboard shows `attention.yandex_failing` until a poll or price check is answered |
+
+A dead `yandex.dispatch` outbox message raises the usual `outbox.dead` (alert and audit row) and, through its dead
+hook, opens the issue `dispatch_unknown` `dead_letter` (urgent once the accept was sent → `delivery.issue_opened`), the claim stays open
+and polled, and `requeue_outbox --topic yandex.dispatch --dead --dry-run` (then without `--dry-run`) resumes the
+dispatch where it stopped — never a second claim, never a second accept. `outbox.dead` and K6 still list it.
+
+**Log keys** (logger `glowderma.*`, key first, then a dict or key=value of ids, codes and amounts — never a name,
+phone, address or token):
+
+| Level | Key | Fields | Meaning / action |
+|---|---|---|---|
+| ERROR | `yandex.auth_failed status=401` | — | Yandex refused the token: check `YANDEX_DELIVERY_TOKEN` |
+| ERROR | `yandex.currency_mismatch path=… expected=UZS` | path | a price came in another currency (or none): the answer is refused as unreadable; ask the Yandex manager (open question YD-5) |
+| ERROR | `yandex.provider_failing` | `source` (`poll` \| `check_price`), `code`, `failures` | the alert above |
+| ERROR | `yandex.previous_claim_active` | `order_id`, `claim` | a new dispatch found the previous claim still alive: the new claim was closed, urgent `dispatch_failed` |
+| ERROR | `yandex.foreign_claim` | `order_id`, `claim` | `claims/create` returned a claim of another order: closed, `dispatch_unknown` `foreign_claim`; check the cabinet |
+| ERROR | `yandex.poll_apply_failed` (with traceback) | `order_id` | one claim snapshot could not be applied (a bug); the others went on |
+| ERROR | `yandex.webhook failed; everything rolled back` (traceback) | — | the callback view crashed: answered 500 (Yandex retries); the poll catches up |
+| WARNING | `yandex delivery is live without ALERT_WEBHOOK_URL: urgent delivery issues alert nobody` | — | startup (api, worker, beat): set the alert webhook (§1) |
+| WARNING | `yandex.dispatch_stopped` | `order_id`, `claim`, `code` | a dispatch ended without a courier (the issue carries the code) |
+| WARNING | `yandex.dispatch_review` | `order_id`, `claim`, `code`, `offer` | the offer went to staff review (`dispatch_review`) |
+| WARNING | `yandex.accept_conflict` | `order_id`, `code` | `claims/accept` answered 409 (other than `offer_expired`): the claim is re-read |
+| WARNING | `yandex.accept_unanswered` | `order_id`, `unknown` | `claims/accept` got no answer: never resent, the claim is re-read |
+| WARNING | `yandex.unknown_status` | `order_id`, `claim`, `status` | Yandex sent a status outside the documented 26: stored, nothing moved; tell the developers |
+| WARNING | `yandex.unknown_claim` | `order_id`, `source` | a snapshot of a claim we do not hold for that order: ignored |
+| WARNING | `yandex.accepted_without_us` | `order_id`, `claim` | Yandex shows a claim accepted although we never sent the accept (`auto_accept` on in the cabinet?): it must stay off |
+| WARNING | `yandex.poll_failed` | `claims`, `error` | a `claims/bulk_info` run failed (counted on `IntegrationState(yandex)`) |
+| WARNING | `yandex.sync_rejected` | `order_id`, `code` | a callback's `claims/info` was refused (unknown claim at Yandex) |
+| WARNING | `yandex.webhook_foreign_claim` | `order_id` | a verified callback named a claim of another order: acknowledged, ignored |
+| WARNING | `yandex.cost_unknown` | `order_id`, `claim` | a finished claim still has no `final_price` 24 h after its end: settled with code `cost_unknown` (check the cabinet's bill) |
+| WARNING | `yandex.unreadable_claim claim_id=… error=…` | claim id | one `bulk_info` entry could not be read: skipped, the others synced |
+| WARNING | `yandex.tariffs_check_failed mode=… code=…` | mode, code | «Yandex bilan tekshirish» failed (nothing stored) |
+| WARNING | `delivery.quote_unavailable provider=yandex method=… reason=down\|error` | method | a checkout price check failed: the option is `provider_unavailable` |
+| INFO | `yandex.dispatch_requested` | `order_id`, `claim_number`, `method` | staff pressed «Kuryer chaqirish» |
+| INFO | `yandex.claim_created`, `yandex.accept_sent`, `yandex.claim_accepted` | `order_id`, `claim` | dispatch progress |
+| INFO | `yandex.issue` | `order_id`, `kind`, `code`, `urgent` | an issue opened or refreshed by the dispatch / the status writer / the cancel |
+| INFO | `yandex.carrier_cancel` | `order_id`, `outcome`, `claim_number`, codes / amounts | each carrier step of an admin cancel (also the audit `order.carrier_cancel`) |
+| INFO | `yandex.carrier_reread_failed`, `yandex.cancel_unaccepted_failed`, `yandex.tracking_link_unavailable` | `order_id`, `error` | a best-effort read / cancel / link failed (nothing depends on it) |
+| INFO | `yandex.tariffs_checked mode=… classes=…` | mode, classes | «Yandex bilan tekshirish» succeeded |
+| INFO | `delivery.quote_refused provider=yandex method=… code=…` | method, Yandex's code | Yandex does not serve the address (`out_of_zone`) |
+| INFO | `delivery.review` | `opened`, `resolved`, `reminded` | a review-beat run that changed something |
+
+The live adapter's HTTP lines (`httpclient`) carry the path, the status and the duration only.
 
 ## 3. Nightly consistency report
 
@@ -146,12 +209,12 @@ first due row (no sort, no done row visited), and the outbox checks filter its f
 | `k2_click_paid_without_paydoc` | Click payments `paid` without `click_paydoc_id` (their refunds become manual) | confirmed within the look-back | payment | `payment_confirmed_idx` range on `confirmed_at` |
 | `k3_refund_open` | refunds `requested`, `submitting`, `unknown` or `manual_required` | requested more than `CONSISTENCY_REFUND_OPEN_HOURS` (24) ago | refund | the partial unique index `refund_one_open_per_payment` (open refunds only) |
 | `k3_refund_failed` | `failed` refunds still needing staff (the dashboard rule: not superseded by a later succeeded refund, payment not `refunded`) | — | refund | `refund_attention_idx` on `state = 'failed'` |
-| `k4_shipment_missing` | delivery orders `processing` without a BTS parcel (no shipment, or `not_created` / `failed`) | paid more than `CONSISTENCY_SHIPMENT_MINUTES` (60) ago | order | `order_status_idx` on `processing`, shipment by unique `order_id` |
-| `k4_parcel_untracked` | parcels created at BTS for orders `processing` / `handed_to_courier` without a new BTS status | last status (or creation) older than `CONSISTENCY_PARCEL_UNTRACKED_HOURS` (48) | order | merge join: `order_status_idx` on the two open statuses against the shipments' unique `order_id` index walked in order (every shipment; ~45 ms per 120 000) |
+| `k4_shipment_missing` | delivery orders `processing` without a BTS parcel (no shipment, or `not_created` / `failed`); a Yandex Delivery order is never counted (it waits for staff to dispatch it; its delays are the `preparation_overdue` issue, §2.1) | paid more than `CONSISTENCY_SHIPMENT_MINUTES` (60) ago | order | `order_status_idx` on `processing`, shipment by unique `order_id` |
+| `k4_parcel_untracked` | parcels created at BTS (BTS shipments only) for orders `processing` / `handed_to_courier` without a new BTS status | last status (or creation) older than `CONSISTENCY_PARCEL_UNTRACKED_HOURS` (48) | order | merge join: `order_status_idx` on the two open statuses against the shipments' unique `order_id` index walked in order (every shipment; ~45 ms per 120 000) |
 | `k5_late_capture_unrefunded` | refused (late) captures still `paid` with no succeeded refund | captured more than `CONSISTENCY_LATE_CAPTURE_HOURS` (24) ago | payment | `payment_late_capture_open_idx` (payments.0003) |
 | `k6_outbox_dead` | outbox messages that went dead | in the last `CONSISTENCY_OUTBOX_DEAD_HOURS` (24) | message | `outbox_unfinished_idx`, filtered by status and `updated_at` |
 | `k6_outbox_overdue` | open messages (pending, failed, in flight) due for longer than `CONSISTENCY_OUTBOX_OVERDUE_MINUTES` (60), deferred ones excluded | — | message | `outbox_unfinished_idx` range on `available_at`, filtered by status |
-| `k6_outbox_deferred_past_window` | open deferred messages (`RetryLater`) deferred longer than their topic's window + the overdue grace | `billz.push_sale`: `BILLZ_SHIFT_RETRY_MAX_HOURS` (36); `push.order_status`, `push.appointment`, `push.account_security`, `campaign.send_batch`: 6 h (FCM "not sent"); other topics `OUTBOX_DEFERRAL_WINDOW_HOURS` (24) | message | `outbox_unfinished_idx`, filtered by status and `deferred_since` |
+| `k6_outbox_deferred_past_window` | open deferred messages (`RetryLater`) deferred longer than their topic's window + the overdue grace | `billz.push_sale`: `BILLZ_SHIFT_RETRY_MAX_HOURS` (36); `push.order_status`, `push.appointment`, `push.account_security`, `campaign.send_batch`: 6 h (FCM "not sent"); `yandex.dispatch`: 45 min (waiting for the estimate / the acceptance, Yandex's 429); other topics `OUTBOX_DEFERRAL_WINDOW_HOURS` (24) | message | `outbox_unfinished_idx`, filtered by status and `deferred_since` |
 | `loyalty_reconciliation` | ledger mismatches (checks C1–C3, C5, C6 of design 02 §1.9.3) and the count of negative balances | — | (see its audit rows) | reads the whole ledger by design; 240 s statement timeout (`LOYALTY_TIMEOUT_MS`) |
 
 ### 3.2 What to do
@@ -188,8 +251,9 @@ secret) also get:
   "last_sync_age_seconds": int | null}`. `configured` means the live adapter can be built and its
   `is_configured()` says yes (settings only: Billz key, shop, cash box and payment type; Payme merchant id and
   key; Click numeric ids and secret key; BTS login, password and sender city/branch code; Eskiz email, password
-  and sender; FCM project id and key file); a live adapter that refuses its settings when built is `false`. `last_sync_at` is the last successful Billz catalog
-  sync or BTS polling run (null for the other providers).
+  and sender; FCM project id and key file; Yandex Delivery token, an https base URL, a three-letter currency and
+  `ru`/`en`); a live adapter that refuses its settings when built is `false`. `last_sync_at` is the last successful
+  Billz catalog sync, BTS polling run or Yandex `claims/bulk_info` poll (null for the other providers).
 - `sandbox`: the live providers configured against a sandbox (`bts` test host, `payme` test mode or sandbox
   checkout, `eskiz` test sender 4546); informational, never fails readiness, and must be `[]` in production.
 
@@ -204,7 +268,17 @@ scripts/manage.sh <env> django shell -c \
 Useful thresholds for an external monitor reading `providers` from inside the gate: Billz
 `last_sync_age_seconds` above ~30 min (the delta sync runs every `BILLZ_DELTA_SYNC_SECONDS`, 300 s by default;
 while Billz is unreachable for longer than `BILLZ_STOCK_STALE_REFUSE_SECONDS` checkouts of lines Billz cannot confirm
-answer 503, open question GC-6), BTS above ~30 min while parcels are in transit (polling every 10 min).
+answer 503, open question GC-6), BTS above ~30 min while parcels are in transit (polling every 10 min), Yandex above
+~5 min while claims are open (polling every 60 s; a run with no open claim writes nothing, so `last_sync_at` ages
+harmlessly when nothing is in delivery).
+
+**`IntegrationState(yandex)`** (ops console «Integratsiyalar», or `integrations.selectors.provider_state("yandex")`):
+`last_sync_at` / `last_success_at` = the last answered poll; `consecutive_failures` = the current run of failed polls
+and account failures of the checkout price check (timeouts of a price check are not counted); `last_error` =
+`"poll: <code>"` or `"check_price: <code>"`; `data` = the classes of the last `yandex_delivery_check` /
+«Yandex bilan tekshirish» (`tariffs`, `tariffs_checked_at`, `tariffs_mode`, `tariffs_point`). The admin dashboard's
+`attention.yandex_failing` is `consecutive_failures > 0` while Yandex is live; the third failure in a row alerts
+`delivery.provider_failing` (§2.1).
 
 ## 5. Beat schedule (`config/celery.py`, Asia/Tashkent)
 
@@ -216,11 +290,16 @@ answer 503, open question GC-6), BTS above ~30 min while parcels are in transit 
 | `reap-stale-jobs` | `integrations.reap_stale_jobs` | every 5 minutes |
 | `commerce-poll-bts` | `commerce.poll_bts` | every 10 minutes |
 | `accounts-cleanup-auth` | `accounts.cleanup_auth` | hourly |
+| `notifications-finalise-stopping` | `notifications.finalise_stopping_campaigns` | every minute |
+| `commerce-poll-yandex` | `commerce.poll_yandex` | every 60 s (Yandex Delivery `claims/bulk_info`; single flight; no-op while Yandex is fake under the production settings) |
+| `commerce-review-delivery-issues` | `commerce.review_delivery_issues` | every 5 minutes (Yandex Delivery exception queue and urgent-issue reminders, §2.1) |
 | `delivery-refresh-bts-regions` | `delivery.refresh_bts_regions` | every 6 hours (M3; BTS's region list, served stale up to 24 h) |
 | `billz-sync-delta` | `catalog.billz_sync_delta` | every `BILLZ_DELTA_SYNC_SECONDS` (300 s; gap X-STOCK-FRESHNESS) |
 | `purge-idempotency-records` | `core.purge_idempotency_records` | 03:00 |
 | `core-purge-outbox` | `core.purge_outbox` | 03:20 (M3) |
 | `integrations-purge-webhook-inbox` | `integrations.purge_webhook_inbox` | 03:25 (M3) |
+| `delivery-purge-quotes` | `delivery.purge_quotes` | 03:35 (Yandex Delivery: unused checkout quotes a day after they expired) |
+| `delivery-blank-courier-details` | `delivery.blank_courier_details` | 03:37 (Yandex Delivery: courier name, vehicle and tracking link 7 days after a claim ended) |
 | `reporting-consistency-report` | `reporting.consistency_report` (incl. the loyalty reconciliation) | 03:40 (M3) |
 | `billz-sync-full` | `catalog.billz_sync_full` | 04:23 |
 
