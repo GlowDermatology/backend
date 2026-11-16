@@ -154,3 +154,14 @@ def test_customer_available_stock_is_zero_while_online_selling_is_off() -> None:
     }  # local/test: B5 value
     with override_settings(DEV_FEATURES_ALLOWED=False, BILLZ_MODE="fake"):
         assert commerce_selectors.customer_available_stock([product.pk, 999]) == {product.pk: 0, 999: 0}
+
+
+def test_staging_active_fake_billz_creates_products(staff_client: APIClient) -> None:
+    """``config.settings.staging`` (``STAGING_ACTIVE_FAKES = ["billz"]``): the fake Billz acts as locally."""
+    with override_settings(DEV_FEATURES_ALLOWED=False, BILLZ_MODE="fake", STAGING_ACTIVE_FAKES=["billz"]):
+        services.require_live_billz()  # no BillzNotLive
+        created = staff_client.post(
+            PRODUCTS, {"billz_id": "4607012301", "texts": {"uz": {"name": "Serum"}}, "price": 185000}
+        )
+    assert created.status_code == 201, created.json()
+    assert Product.objects.get(billz_id="4607012301").billz_name == "BILLZ ITEM 4607012301"

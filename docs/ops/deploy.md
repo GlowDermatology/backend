@@ -76,6 +76,15 @@ live Click and/or Payme (payment), live BTS and/or live Yandex Delivery (deliver
 (`FAKE_NOW`, `FAKE_PAYMENTS_ENABLED`, `FAKE_SCENARIO_HEADER_ENABLED`, `ESKIZ_FAKE_CODE`, `POS_API_KEYS`) are refused by
 the production settings whatever the modes.
 
+**Staging: `config.settings.staging`.** Staging runs its own settings module, which imports
+`config.settings.production` (every production check applies) and adds only the staging differences: the
+`STAGING` badge, `ALERT_ENV=staging` by default, and `STAGING_ACTIVE_FAKES = ["billz"]` — the fake Billz behaves as
+locally, so products can be created (synthetic Billz name, price and stock; an id ending in `0000` is "not found"),
+the import yields the three demo products, and online selling is on (payments, delivery, SMS and OAuth fakes keep
+the rows above). It has no effect once staging sets `BILLZ_MODE=live`. The infra repository selects the module per
+environment (`DJANGO_SETTINGS_MODULE` in `environments/<env>/stack.env`). `seed_demo --reset` and the demo-admin
+password rule treat staging exactly like production.
+
 A live provider that is not configured makes `health/?ready=1` answer `503` (§10). The production settings already
 refuse to start when a live provider misses a required value, so in practice that means a key file that became
 unreadable after boot or a setting the adapter itself refuses when it is built.

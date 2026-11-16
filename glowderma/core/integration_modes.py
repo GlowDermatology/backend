@@ -39,6 +39,8 @@ CALLBACK_PROVIDERS: frozenset[str] = frozenset({"click", "payme", "bts", "yandex
 # Home-delivery providers in the order checkout prefers them (plan §3.4: Yandex, else BTS).
 DELIVERY_PROVIDERS: tuple[str, ...] = ("yandex", "bts")
 PRODUCTION_SETTINGS_MODULE = "config.settings.production"
+# Settings modules of internet-facing deployments: production, and staging (which extends it).
+INTERNET_FACING_SETTINGS_MODULES = frozenset({PRODUCTION_SETTINGS_MODULE, "config.settings.staging"})
 
 
 def provider_modes() -> dict[str, str]:
@@ -56,6 +58,11 @@ def is_production() -> bool:
     return str(getattr(settings, "SETTINGS_MODULE", "")) == PRODUCTION_SETTINGS_MODULE
 
 
+def is_internet_facing() -> bool:
+    """Whether the process runs the production or the staging settings module (demo-data safety checks)."""
+    return str(getattr(settings, "SETTINGS_MODULE", "")) in INTERNET_FACING_SETTINGS_MODULES
+
+
 def dev_features_allowed() -> bool:
     """``settings.DEV_FEATURES_ALLOWED``: ``True`` only under the local/test settings modules."""
     return bool(getattr(settings, "DEV_FEATURES_ALLOWED", False))
@@ -69,8 +76,13 @@ def provider_mode(provider: str) -> str:
 
 
 def fake_in_production(provider: str) -> bool:
-    """The one predicate of customer contract §6.14: ``provider`` runs its fake adapter outside local/test."""
-    return provider_mode(provider) == enums.IntegrationMode.FAKE and not dev_features_allowed()
+    """The one predicate of customer contract §6.14: ``provider`` runs its fake adapter outside local/test.
+
+    A provider listed in ``settings.STAGING_ACTIVE_FAKES`` (set only by ``config.settings.staging``) is
+    exempt: its fake behaves as under local/test."""
+    if provider_mode(provider) != enums.IntegrationMode.FAKE or dev_features_allowed():
+        return False
+    return provider not in getattr(settings, "STAGING_ACTIVE_FAKES", ())
 
 
 def callbacks_refused(provider: str) -> bool:

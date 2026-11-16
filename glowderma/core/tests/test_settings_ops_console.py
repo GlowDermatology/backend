@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import importlib
+import sys
 from collections.abc import Callable
 from types import ModuleType
 
@@ -38,3 +40,20 @@ def test_production_label_and_manifest_storage(
     monkeypatch.setenv("OPS_ENVIRONMENT_LABEL", "LOCAL")
     with pytest.raises(ImproperlyConfigured, match="OPS_ENVIRONMENT_LABEL must be PRODUCTION or STAGING"):
         load_fresh_production()
+
+
+def test_staging_extends_production_with_the_active_fake_billz(
+    production_env: None, monkeypatch: pytest.MonkeyPatch, load_fresh_production: Callable[[], ModuleType]
+) -> None:
+    monkeypatch.delenv("OPS_ENVIRONMENT_LABEL", raising=False)
+    monkeypatch.delenv("ALERT_ENV", raising=False)
+    production = load_fresh_production()
+    assert production.STAGING_ACTIVE_FAKES == []
+    assert production.OPS_ENVIRONMENT_LABEL == "PRODUCTION"
+    sys.modules.pop("config.settings.staging", None)
+    staging = importlib.import_module("config.settings.staging")
+    assert staging.STAGING_ACTIVE_FAKES == ["billz"]
+    assert (staging.OPS_ENVIRONMENT_LABEL, staging.ALERT_ENV) == ("STAGING", "staging")
+    assert staging.DEV_FEATURES_ALLOWED is False and staging.DEBUG is False
+    assert staging.FAKE_PAYMENTS_ENABLED is False
+    sys.modules.pop("config.settings.staging", None)

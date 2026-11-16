@@ -14,13 +14,12 @@ from __future__ import annotations
 import os
 from datetime import datetime
 
-from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.db import transaction
 
 from glowderma.accounts import services
 from glowderma.accounts.models import Address, Customer, Device, StaffUser
-from glowderma.core import enums
+from glowderma.core import enums, integration_modes
 from glowderma.core.seeding import MockRandom, SeedContext, pinned_clock, register_seeder
 from glowderma.core.timeutils import TASHKENT
 
@@ -116,7 +115,7 @@ def preflight() -> str | None:
     """Under the production settings (``seed_demo --force`` on an internet-facing staging stack) the demo
     admin is never created with a known password: SEED_ADMIN_PASSWORD must be set, at least 12 characters, not
     a placeholder and not the committed demo default. An existing admin keeps its password."""
-    if settings.SETTINGS_MODULE != "config.settings.production":
+    if not integration_modes.is_internet_facing():
         return None
     if StaffUser.objects.filter(email=ADMIN_EMAIL).exists():
         return None

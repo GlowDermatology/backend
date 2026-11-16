@@ -6,6 +6,7 @@ from django.core.management import call_command
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.db import transaction
 
+from glowderma.core import integration_modes
 from glowderma.core.seeding import (
     DEFAULT_ANCHOR,
     SeedContext,
@@ -63,7 +64,7 @@ class Command(BaseCommand):
         if anchor.tzinfo is None:
             raise CommandError("--anchor must carry a timezone offset")
         if options["reset"]:
-            if settings.SETTINGS_MODULE == "config.settings.production":
+            if integration_modes.is_internet_facing():
                 raise CommandError("--reset is refused under the production settings.")
             if not (settings.DEBUG or options["force"]):
                 raise CommandError("--reset empties the database; it needs DEBUG or --force.")

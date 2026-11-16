@@ -50,6 +50,27 @@ def test_predicates_are_per_provider_when_modes_are_mixed() -> None:
         assert integration_modes.online_sales_enabled() is True
 
 
+def test_staging_active_fakes_exempt_only_the_listed_provider() -> None:
+    with override_settings(**modes("fake"), DEV_FEATURES_ALLOWED=False, STAGING_ACTIVE_FAKES=["billz"]):
+        assert integration_modes.fake_in_production("billz") is False
+        assert integration_modes.online_sales_enabled() is True
+        assert integration_modes.fake_in_production("bts") is True
+        assert integration_modes.payable_providers() == []
+
+
+@pytest.mark.parametrize(
+    ("module", "facing"),
+    [
+        ("config.settings.production", True),
+        ("config.settings.staging", True),
+        ("config.settings.test", False),
+    ],
+)
+def test_staging_counts_as_internet_facing(module: str, facing: bool) -> None:
+    with override_settings(SETTINGS_MODULE=module):
+        assert integration_modes.is_internet_facing() is facing
+
+
 def test_unknown_providers_are_programming_errors() -> None:
     with pytest.raises(KeyError):
         integration_modes.fake_in_production("sms")

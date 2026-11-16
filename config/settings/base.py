@@ -501,6 +501,10 @@ if BTS_MODE not in {"fake", "live"}:
 # test). It gates every development switch (fixed OTP, dev simulate, scenario header, seeded POS keys, the
 # OAuth fakes' "*" nonce) and decides what a fake provider may do (core.integration_modes.fake_in_production).
 DEV_FEATURES_ALLOWED = False
+# Providers whose fake adapter behaves as under local/test although DEV_FEATURES_ALLOWED is false
+# (core.integration_modes.fake_in_production). A settings-module constant, never an environment variable:
+# set only by config.settings.staging.
+STAGING_ACTIVE_FAKES: list[str] = []
 
 
 def env_positive_int(name: str, default: int) -> int:
