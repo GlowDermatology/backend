@@ -212,7 +212,26 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
   busy → `YandexBusy`: the dispatch handler defers, an admin request answers 409), then re-lock and record. Every
   flow that calls Yandex for an order holds that lock; views call Yandex in `post()` **before** their `@idempotent`
   inner method (skipped on a replay). `commerce.services.apply_yandex_claim` is the single writer of claim
-  statuses; `accept` is sent once per claim, after `accept_sent_at` is committed.
+  statuses. `accept` is sent **at most once** per claim, after `accept_sent_at` is committed; only an answer proving
+  Yandex did not take it ("not processed", or 409 `old_version`) releases the stamp
+  (`delivery.services.release_accept_sent`) so a later run re-checks the offer and sends one accept again — an
+  accept whose outcome is unknown is never resent, the claim is re-read. A carrier `claims/cancel` /
+  `claims/return` is never sent again once Yandex answered it 2xx or its outcome is unknown: right after it, in
+  its own short transaction, the marker is committed — `CourierClaim.cancel_sent_at` + `cancel_state`
+  (+ `cancel_price`, a paid cancel's `cancel-info` price) or a `return_requested` `ShipmentEvent` — and every retry
+  only re-reads the claim (except that a sent cancel whose claim the courier has since picked up takes the return
+  path: one `claims/return`, itself marked). A refusal (409 / another 4xx, unless the re-read shows the change all the same) or a
+  "not processed" answer writes no marker and clears the stamp, so a later attempt may send the call again; so may
+  one after a lost marker (below). The stamp `Shipment.cancel_requested_at` keeps its first time; the cancel clears
+  it only when Yandex provably changed nothing (nothing sent: the first read or `cancel-info` failed, the call not
+  processed; terms `unavailable`; a definitive refusal the re-read confirms; delivered; no point B id; a parcel
+  gone after pickup), and staff confirming the return of an order that stays open (`confirm-return`) clear it
+  too. The marker's transaction waits up to `CARRIER_RECORD_WAIT` (15 s) for the Order row (txn A and txn B wait
+  the 5 s admin lock wait) and, past it, writes the marker alone without the Order lock (claim row lock, or an
+  insert-only event), waiting up to `CARRIER_MARK_WAIT` (5 s) more; the snapshot writer's own Order-row waits in
+  the same request (`apply_yandex_claim` for the first read and every re-read) are unbounded, as in every call of
+  that writer. A crash between Yandex's answer and that commit, or both waits running out (ERROR
+  `yandex.carrier_marker_lost`), loses the marker (a known limit, `docs/integrations/yandex-delivery.md` §12).
 - Retention jobs delete from `core.db.PURGEABLE_TABLES` only inside `core.db.purge_window()`; the outbox offers
   `outbox.on_dead(topic)` hooks for the orchestrating module to record what a dead message means.
 - Rows that must always exist (the `SiteSettings` and `DeliverySettings` singletons, the seven `IntegrationState`

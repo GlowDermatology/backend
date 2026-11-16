@@ -113,7 +113,7 @@ Collections embedded in a resource (customer ledger and purchases, order items, 
 | 409 | `invalid_transition` | A state machine refuses (order transition, appointment action, retry-shipment precondition) |
 | 409 | `click_not_reversed` | M3: `payments/{id}/refunds/{refund_id}/resolve/` of a failed Click refund without `manual_payout` while Click still shows the payment paid (§7 item 18); the UI then offers "Qo‘lda to‘landi" |
 | 409 | `not_cancellable` | Order cancel refused (§2.2; a Yandex Delivery order also when Yandex refuses, the parcel is delivered or out of sight, §2.18) |
-| 409 | `return_requested` | Yandex Delivery: the cancel of a picked-up order asked Yandex to bring the parcel back and Yandex has not confirmed the return yet; the order is unchanged, retry later (§2.18) |
+| 409 | `return_requested` | Yandex Delivery: the cancel of a picked-up order asked Yandex to bring the parcel back (or the request's answer was lost) and Yandex has not shown the return yet; the order is unchanged, retry later — a retry only re-reads, the return is never requested twice (§2.18) |
 | 409 | `coordinates_required` · `method_disabled` · `too_heavy` · `not_configured` · `suspended` · `closed` · `after_cutoff` · `returns_unavailable` | `orders/{id}/dispatch/` refusals: no map pin, the chosen method is off, the parcel is too heavy for the class, the warehouse calendar refuses a courier now (§2.18) |
 | 409 | `conflict` | Other state conflicts (category has products, BTS message in flight, last image of an active product, a manager acting on their own account or removing the last active manager (§2.16), …) |
 | 409 | `request_in_progress` | The same `Idempotency-Key` is still executing; `Retry-After: 1` |
@@ -122,7 +122,7 @@ Collections embedded in a resource (customer ledger and purchases, order items, 
 | 422 | `idempotency_key_reused` | Same key, different request fingerprint |
 | 429 | `throttled` | `Retry-After` in seconds |
 | 500 | `server_error` | Unexpected; quote `request_id` |
-| 503 | `provider_unavailable` | A synchronous provider call failed transiently (BTS cancel; the Yandex carrier cancel of `orders/{id}/cancel/`, §2.18; the Billz lookup of `POST products/` and of a `PATCH products/{id}/` that changes `billz_id`, §2.3). Safe to retry with the same key. |
+| 503 | `provider_unavailable` | A synchronous provider call failed transiently (BTS cancel; the Yandex carrier cancel of `orders/{id}/cancel/` when nothing can have reached Yandex — a call that may have reached it answers 409 instead, §2.18; the Billz lookup of `POST products/` and of a `PATCH products/{id}/` that changes `billz_id`, §2.3). Safe to retry with the same key. |
 
 Default top-level messages: `not_authenticated` "Avtorizatsiya talab qilinadi." · `SESSION_EXPIRED` "Sessiya tugadi. Qayta kiring." · `SESSION_REPLACED` "Boshqa qurilmadan kirildi." · `invalid_credentials` "Login yoki parol noto‘g‘ri." · `permission_denied` "Ruxsat yo‘q." · `not_found` "Topilmadi." · `request_in_progress` "So‘rov bajarilmoqda. Birozdan so‘ng qayta urinib ko‘ring." · `idempotency_key_reused` "Bu kalit boshqa so‘rov uchun ishlatilgan." · `idempotency_key_required` "Idempotency-Key sarlavhasi kerak." · `throttled` "Juda ko‘p urinish. {n} soniyadan so‘ng qayta urinib ko‘ring." · `payload_too_large` "Fayl juda katta." · `provider_unavailable` "Tashqi xizmat javob bermadi. Qayta urinib ko‘ring." · `server_error` "Kutilmagan xato."
 
@@ -453,7 +453,7 @@ A Yandex Delivery shipment (§2.18) keeps this union BTS-shaped: `not_created` u
   - `cancel` = status is `awaiting_payment`, `processing` or `handed_to_courier`.
   - `retry_shipment` = delivery ∧ `processing` ∧ BTS shipment `failed` ∧ ¬`pending` (never for a Yandex shipment).
   - `dispatch` (Yandex Delivery) = `POST orders/{id}/dispatch/` would be accepted now (§2.18); false for BTS and pickup.
-  - `confirm_return` (Yandex Delivery) = the parcel is `returning` / `returned` and its return is not confirmed yet (§2.18).
+  - `confirm_return` (Yandex Delivery) = the parcel is `returning` / `returned` and the return of the claim that carried it is not confirmed yet (§2.18).
   - A Yandex order has **no manual transition**, except `delivered` while a `parcel_unaccounted` issue is open (§2.18).
 
 **`POST orders/{id}/cancel/`** (I). Body `{"reason": str}`, trimmed, 3..500.
@@ -476,8 +476,8 @@ A Yandex Delivery shipment (§2.18) keeps this union BTS-shaped: `not_created` u
 - **Errors:**
   - 400 `reason` (`min_length` "Kamida 3 ta belgi kiriting.", `max_length` "500 belgidan oshmasin."), top-level message "Sababni kiriting.".
   - 409 `not_cancellable` "Bu buyurtmani bekor qilib bo‘lmaydi." (BTS refusal: "BTS buyurtmani bekor qilmadi: posilka kuryerda."; the Yandex messages are in §2.18).
-  - Yandex Delivery only: 409 `return_requested`, 409 `conflict` (another Yandex operation of the order is running, or Yandex has not shown the cancel yet) (§2.18).
-  - 503 `provider_unavailable`.
+  - Yandex Delivery only: 409 `return_requested`, 409 `conflict` (another Yandex operation of the order is running, Yandex has not shown the cancel yet — its answer lost included —, or the order stayed busy right after Yandex answered) (§2.18).
+  - 503 `provider_unavailable` (a Yandex order: only when nothing can have reached Yandex, §2.18).
 
 **`POST orders/{id}/transition/`** (I). Body `{"status": OrderStatus}`.
 - The target must be in `available_actions.transitions`, else 409 `invalid_transition` "Bu holatga o‘tib bo‘lmaydi.". A non-OrderStatus value → 400 `invalid_choice`.
@@ -491,7 +491,7 @@ A Yandex Delivery shipment (§2.18) keeps this union BTS-shaped: `not_created` u
 - 202 `Order` with `shipment.pending=true`. The outcome arrives later as `shipment_created` or `shipment_failed` with `manual=true`.
 
 **Shared outcomes of the order actions** (`cancel`, `transition`, `retry-shipment`; the busy-order outcome also covers the refund `retry` / `resolve` of §2.12):
-- **Busy order.** Every action locks the order row first and waits at most `ADMIN_LOCK_WAIT` (5 s; a BTS create holds the row across its bounded calls). When the row stays locked → 409 `conflict` "Buyurtma boshqa amal bilan band. Birozdan so‘ng qayta urinib ko‘ring.". Nothing is written; retry with the same `Idempotency-Key`.
+- **Busy order.** Every action locks the order row first and waits at most `ADMIN_LOCK_WAIT` (5 s; a BTS create holds the row across its bounded calls). A Yandex cancel waits longer (§2.18): recording what Yandex answered waits up to 15 s for the row, then up to 5 s more to write that record without it (answering its own 409), and the Yandex snapshots the cancel applies wait for the row without a limit. When the row stays locked → 409 `conflict` "Buyurtma boshqa amal bilan band. Birozdan so‘ng qayta urinib ko‘ring.". Nothing is written; retry with the same `Idempotency-Key`.
 - **Purchase conflict** (`cancel`, `transition`, `retry-shipment` only; the refund operations never touch the loyalty purchase). When the order's loyalty purchase belongs to another customer (data inconsistency surfaced by `loyalty`) → 409 `conflict` "Buyurtma xaridi boshqa mijozga tegishli. Ma’lumotlarni tekshiring.". Nothing is written.
 
 ### 2.3 Products and Billz
@@ -1401,9 +1401,9 @@ progress, a pinned address and a warehouse that may call a courier now. Resolves
 |---|---|
 | body | 400 `validation_error`: `contents_verified` `required` / `invalid` "Jo‘natma tarkibini tekshirganingizni tasdiqlang."; `weight_g` `required` / `min_value` / `max_value`; `method` `invalid_choice`; `approved_price` `min_value` / `max_value` |
 | unknown order | 404 |
-| not a paid open Yandex delivery at a dispatchable stage | 409 `invalid_transition` "Bu buyurtma uchun kuryer chaqirib bo‘lmaydi." |
-| a claim is open (double click, a dispatch running, a courier may come) | 409 `conflict` "Kuryer allaqachon chaqirilgan." |
-| a carrier cancel is in progress | 409 `conflict` "Buyurtma bekor qilinmoqda." |
+| not a paid open Yandex delivery waiting for a courier (stage `awaiting_dispatch` / `failed` / `returned`; a `handed_to_courier` order only once its parcel is `returned`) | 409 `invalid_transition` "Bu buyurtma uchun kuryer chaqirib bo‘lmaydi." |
+| a courier claim is still open (double click, a dispatch running, a courier may come) | 409 `conflict` "Kuryer allaqachon chaqirilgan." |
+| a carrier cancel is in progress and its claim has ended (the cancel stamp still set, e.g. the claim closed as `cancel_requested` with the order open; while the claim is open the row above answers) | 409 `conflict` "Buyurtma bekor qilinmoqda." |
 | `approved_price` without an open `dispatch_review` | 409 `conflict` "Bu buyurtmada tasdiqlanadigan narx yo‘q." |
 | the order's address has no map pin | 409 `coordinates_required` "Manzilning xaritadagi nuqtasi yo‘q." |
 | the switched-to method is off | 409 `method_disabled` "Bu yetkazish usuli o‘chirilgan." |
@@ -1414,7 +1414,13 @@ progress, a pinned address and a warehouse that may call a courier now. Resolves
 The outcome arrives later: the stage moves with Yandex's statuses (`courier_assigned`, … `delivered`), or an issue
 opens (`dispatch_failed`, `dispatch_review` with the offer, the estimate and the limits in `details`,
 `dispatch_unknown`). For a `dispatch_review`, staff dispatch again with `approved_price` (accepted up to that
-amount), with another `method`, or cancel the order.
+amount), with another `method`, or cancel the order. A dispatch that ends without a courier — Yandex refused the
+claim or the accept, the accept is still not visible 15 minutes after it was sent (or, once the offer expired, at
+least 2 minutes after it: `accept_unconfirmed`), the dispatch died with no accept outstanding (`dead_letter`),
+`claims/info` refuses the claim after the accept (`dispatch_unknown` `not_found`) — closes its claim and leaves the stage `failed` (`returned` after a return), so `dispatch` is
+allowed again; only a claim Yandex may still be serving (a dispatch running, an accept whose outcome is not known
+yet, a dead dispatch after the accept: urgent `dispatch_unknown` `dead_letter`) keeps it blocked
+(`docs/integrations/yandex-delivery.md` §9).
 
 **Cancel of a Yandex order** (`POST orders/{id}/cancel/`, body and success as §2.2). Before its idempotent
 transaction the view makes the order carrier-safe (skipped on a replay of the same key), holding the order's Yandex
@@ -1424,18 +1430,25 @@ advisory lock; then the unchanged cancel runs (full refund when paid).
 |---|---|
 | unpaid, or paid with no open courier claim | as §2.2 (no Yandex call) |
 | a claim whose accept was never sent | the claim is closed here (it summons nobody; best-effort free cancel at Yandex) → 200, cancelled and refunded |
-| claim open, before pickup | Yandex's cancel terms, then its cancel (free or paid) and a re-read showing it cancelled → 200, cancelled and refunded; a paid cancel fee is recorded in `carrier_cost_total`; the `cancelled` event has `bts_cancelled: true` |
-| Yandex refuses (terms `unavailable`, a conflict) | 409 `not_cancellable` "Yandex kuryer buyurtmasini bekor qilmadi (kuryer posilkani olgan yoki bekor qilish muddati o‘tgan). Holatni tekshirib, qayta urinib ko‘ring." — order unchanged |
-| Yandex does not answer | 503 `provider_unavailable` "Yandex javob bermadi, buyurtma bekor qilinmadi. Qayta urinib ko‘ring." — order unchanged |
-| the cancel was answered but Yandex does not show it yet | 409 `conflict` "Yandex kuryer buyurtmasini bekor qilishni hali tasdiqlamadi. Birozdan so‘ng qayta urinib ko‘ring." |
-| picked up (in transit, at the customer) | Yandex is asked to bring the parcel back: shown `returning…` → 200, cancelled and refunded, issue `return_pending` until staff confirm the parcel back; not shown yet → **409 `return_requested`** "Yandexdan posilkani omborga qaytarish so‘raldi. Buyurtma hali bekor qilinmadi: Yandex qaytarishni tasdiqlagach, bekor qilishni qayta bosing." (order unchanged, `return_pending` open); refused → 409 `not_cancellable` "Yandex posilkani omborga qaytarishni rad etdi. Yandex qo‘llab-quvvatlash xizmatiga murojaat qiling."; no answer → 503 |
-| stage `returning` / `returned` | no Yandex call → 200, cancelled and refunded; `return_pending` kept / opened |
+| claim open, before pickup | Yandex's cancel terms, then its cancel (free or paid) and a re-read showing it cancelled → 200, cancelled and refunded; a paid cancel fee is recorded in `carrier_cost_total` as soon as Yandex answered the cancel 2xx and that answer was recorded under the order lock (also when the 409 below follows) — after a lost answer, or the busy order below, only once Yandex shows `cancelled_with_payment`; the `cancelled` event has `bts_cancelled: true` |
+| Yandex refuses (terms `unavailable`, a conflict) | 409 `not_cancellable` "Yandex kuryer buyurtmasini bekor qilmadi (kuryer posilkani olgan yoki bekor qilish muddati o‘tgan). Holatni tekshirib, qayta urinib ko‘ring." — order unchanged (a refused cancel whose re-read shows the claim cancelled all the same → 200) |
+| nothing can have reached Yandex (Yandex unreachable for the first read or the terms, or the cancel / return answered "not processed") | 503 `provider_unavailable` "Yandex javob bermadi, buyurtma bekor qilinmadi. Qayta urinib ko‘ring." — order unchanged |
+| the cancel was answered 2xx, **or its answer was lost**, and Yandex does not show it yet | 409 `conflict` "Yandex kuryer buyurtmasini bekor qilishni hali tasdiqlamadi. Birozdan so‘ng qayta urinib ko‘ring." — order unchanged |
+| picked up (in transit, at the customer) | Yandex is asked to bring the parcel back: shown `returning…` → 200, cancelled and refunded, issue `return_pending` until staff confirm the parcel back; not shown yet, **or the answer lost** → **409 `return_requested`** "Yandexdan posilkani omborga qaytarish so‘raldi. Buyurtma hali bekor qilinmadi: Yandex qaytarishni tasdiqlagach, bekor qilishni qayta bosing." (order unchanged, `return_pending` open); refused → 409 `not_cancellable` "Yandex posilkani omborga qaytarishni rad etdi. Yandex qo‘llab-quvvatlash xizmatiga murojaat qiling."; not processed → 503 |
+| a retry after 409 `conflict` / `return_requested` | the cancel or return is **never sent again** once it was recorded as sent (Yandex answered 2xx, or the outcome is unknown): Yandex's claim is only read again — shown → 200, cancelled and refunded; not yet, or the read fails → the same 409 (never 503). Without that record (lost in a crash, or ERROR `yandex.carrier_marker_lost` below) a later attempt may send the cancel / return again |
+| the order stays busy (> 15 s) right after Yandex answered the cancel / return 2xx (or its outcome turned unknown) | 409 `conflict` with the pending-cancel / requested-return message (a return without the code `return_requested`); the "sent" record is written without the order lock (up to 5 s more), so a retry only reads — unless that write times out too (ERROR `yandex.carrier_marker_lost`): no record, and a later attempt may send the call again. This step writes no `order.carrier_cancel` audit (log WARNING `yandex.carrier_record_busy`); a paid fee is counted only once Yandex shows `cancelled_with_payment` (never when it shows plain `cancelled`) |
+| stage `returning` / `returned` | no Yandex call → 200, cancelled and refunded; `return_pending` kept / opened (unless the return of the claim that carried the parcel was confirmed) |
 | delivered | 409 `not_cancellable` "Buyurtma mijozga yetkazilgan: uni bekor qilib bo‘lmaydi." |
 | picked up, the claim ended without a return | 409 `not_cancellable` "Posilka kuryerda, Yandex esa uni omborga qaytarayotganini bildirmagan: buyurtmani hozir bekor qilib bo‘lmaydi." |
 | another Yandex operation of the order is running (a dispatch) | 409 `conflict` "Bu buyurtma bo‘yicha Yandex bilan boshqa amal bajarilmoqda (kuryer chaqirilmoqda). Birozdan so‘ng qayta urinib ko‘ring." |
 
-Each carrier step is audited `order.carrier_cancel {outcome, claim_number, cancel_state?, cancel_fee?, status?,
-error_code?}` next to `order.cancelled`. A cancelled Yandex order also resolves its `dispatch_failed`,
+While a sent cancel or return waits for Yandex (409 `conflict` / `return_requested` above) its claim is still
+open, so `orders/{id}/dispatch/` answers 409 `conflict` "Kuryer allaqachon chaqirilgan."; "Buyurtma bekor
+qilinmoqda." (409 `conflict` too) comes only once that claim has ended with the cancel stamp still set (e.g. a
+claim closed as `cancel_requested`). Each carrier outcome is audited `order.carrier_cancel {outcome, claim_number,
+cancel_state?, cancel_fee?, status?, error_code?}` next to `order.cancelled` — except the busy-order step above,
+which writes no audit row (only its WARNING `yandex.carrier_record_busy` / ERROR `yandex.carrier_marker_lost` log
+line). A cancelled Yandex order also resolves its `dispatch_failed`,
 `dispatch_review`, `preparation_overdue`, `delivery_failed` and `cancel_incomplete` issues (`return_pending`,
 `parcel_unaccounted`, `dispatch_unknown` and `incident` stay).
 
@@ -1444,13 +1457,20 @@ Body `{"note": str ≤1000, optional, default ""}` (its condition; it becomes th
 → **200 `Order`**: stage `returned`, event `shipment_returned` (source `admin`), the open `return_pending`
 resolved by the caller (audit `delivery.issue_resolved`), audit `order.return_confirmed {claim_number,
 order_status, note}`. A cancelled order stays cancelled (its failed-delivery issues close); an open order stays as
-it is (staff dispatch again or cancel). Errors: 400 `note` `max_length` "1000 belgidan oshmasin."; 404; 409
-`invalid_transition` "Qaytayotgan posilka yo‘q: qaytishni tasdiqlab bo‘lmaydi."; 409 `conflict` "Posilka qaytgani
-allaqachon tasdiqlangan." (or the order is busy).
+it is (staff dispatch again or cancel). The return confirmed is the one of the claim that **carried the parcel**
+(the highest-numbered claim that picked it up), not of the current claim: `claim_number` and the event's
+`claim_id` are that claim's, and a re-dispatch after a confirmed return that fails or goes to price review (stage
+back at `returned`) offers no second confirmation (`available_actions.confirm_return` false, a further call 409
+`conflict`, a cancel opens no new `return_pending`). Errors: 400 `note` `max_length` "1000 belgidan oshmasin."; 404;
+409 `invalid_transition` "Qaytayotgan posilka yo‘q: qaytishni tasdiqlab bo‘lmaydi." (also when no claim ever
+picked the parcel up); 409 `conflict` "Posilka qaytgani allaqachon tasdiqlangan." (or the order is busy).
 
 **Manual transition.** A Yandex order offers no manual status change, except `delivered` from
 `handed_to_courier` while a `parcel_unaccounted` issue is open (staff know the parcel reached the customer although
-Yandex says otherwise); that transition resolves `parcel_unaccounted`.
+Yandex says otherwise); that transition resolves `parcel_unaccounted` and sets `delivery.stage` to `delivered`
+(a manual shipment event records who confirmed it; the shipment state, the costs and the claim stay as Yandex
+left them), so neither the customer nor staff see the stage Yandex left (`cancelled` / `failed`) on a delivered
+order.
 
 **Delivery issues** — the exception queue. One open row per order and kind; most are opened and closed by the
 system; urgent ones alert staff (alert webhook → Telegram, `docs/ops/monitoring.md` §1) and are reminded every
@@ -1471,13 +1491,13 @@ system; urgent ones alert staff (alert webhook → Telegram, `docs/ops/monitorin
 
 | `kind` | Opened when (codes) |
 |---|---|
-| `dispatch_failed` | a dispatch summoned no courier: Yandex's refusal code, `not_configured`, `coordinates_required`, `estimating_timeout`, `offer_expired`, `previous_claim_active` (urgent), `not_found`, a calendar refusal at the accept; a claim that failed before pickup (`performer_not_found`, `cancelled_by_taxi`, `failed`, …); `courier_search_slow` (urgent: no courier 30 minutes after acceptance) |
-| `dispatch_unknown` | the dispatch outcome is unknown: `accept_unconfirmed` (urgent), `dead_letter` (urgent once the accept was sent), `foreign_claim`, `unexpected_acceptance` (urgent), `not_found` |
+| `dispatch_failed` | a dispatch summoned no courier: Yandex's refusal code (of the claim, or the 409 code of a refused accept), `not_configured`, `coordinates_required`, `estimating_timeout`, `offer_expired`, `previous_claim_active` (urgent), `not_found`, a calendar refusal at the accept, `accept_unconfirmed` (the accept still not visible 15 minutes after it was sent, or once the offer expired and at least 2 minutes after it was sent), `dead_letter` (the dispatch died with no accept outstanding); a claim that failed before pickup (`performer_not_found`, `cancelled_by_taxi`, `failed`, …); `courier_search_slow` (urgent: no courier 30 minutes after acceptance) |
+| `dispatch_unknown` | Yandex may have taken our accept: `not_found` (urgent: Yandex refuses to show the claim 15 minutes after the accept; the claim stays polled), `dead_letter` (urgent: the dispatch died after the accept was sent), `unexpected_acceptance` (urgent: a claim we no longer follow shows accepted), `foreign_claim` |
 | `dispatch_review` | the binding offer needs staff: `increase_over_limit`, `loss_over_limit`, `above_approved`, `warnings`, `offer_missing` |
 | `delivery_failed` | Yandex started a return we did not ask for (Yandex's return reason, else the status) |
 | `return_pending` | a parcel is coming / came back: `returning`, `returned`, `return_requested`, `warehouse_closed` (urgent) |
 | `preparation_overdue` | still not dispatched `prep_deadline_minutes` working minutes after payment: `overdue`, `suspended`, `closed`, `not_configured`, `returns_unavailable` |
-| `cancel_incomplete` (urgent) | a carrier cancel stopped half-way for 10 minutes: `carrier_cancelled`, `returning` |
+| `cancel_incomplete` (urgent) | a carrier cancel stopped half-way for 10 minutes (from its first press) with the order still open: `carrier_cancelled` (Yandex shows the claim cancelled, or the claim was withdrawn for the cancel), `returning` |
 | `parcel_unaccounted` (urgent) | the claim ended after pickup without a return (code = Yandex's status) or Yandex delivered a cancelled order (`delivered_after_cancel`) |
 | `incident` | staff report (`staff_report`) |
 

@@ -127,14 +127,22 @@ the logs. Ids in the lines are order, payment, refund, purchase, message or acco
 
 | Event | Fields | Scope (dedupe) | Raised when | What to do |
 |---|---|---|---|---|
-| `delivery.issue_opened` | `order_id`, `kind`, `code`, `urgent`, `issue_id` | the issue id | a delivery issue **becomes urgent** (opened urgent, or an open one escalated): `parcel_unaccounted`, `cancel_incomplete`, `return_pending` `warehouse_closed`, `dispatch_failed` `previous_claim_active` / `courier_search_slow`, `dispatch_unknown` `accept_unconfirmed` / `dead_letter` (after the accept) / `unexpected_acceptance`, an urgent staff `incident`. Queued in the issue's own transaction (never for a rolled-back issue) | Open the order (the bot links it) and the queue «Muammolar» (`GET admin/delivery/issues/`); the issue kinds and their resolution are in the integration doc §11 |
+| `delivery.issue_opened` | `order_id`, `kind`, `code`, `urgent`, `issue_id` | the issue id | a delivery issue **becomes urgent** (opened urgent, or an open one escalated): `parcel_unaccounted`, `cancel_incomplete`, `return_pending` `warehouse_closed`, `dispatch_failed` `previous_claim_active` / `courier_search_slow`, `dispatch_unknown` `not_found` (`claims/info` refuses a claim 15 min after our accept; it stays polled) / `dead_letter` (the dispatch died after the accept was sent) / `unexpected_acceptance` (a claim we no longer follow shows accepted), an urgent staff `incident`. (`accept_unconfirmed` is no longer an alert: an accept still not visible 15 min after it was sent — or, once the offer expired, 2 min after it — ends the dispatch, non-urgent `dispatch_failed`.) Queued in the issue's own transaction (never for a rolled-back issue) | Open the order (the bot links it) and the queue «Muammolar» (`GET admin/delivery/issues/`); the issue kinds and their resolution are in the integration doc §11 |
 | `delivery.issue_reminder` | the same five | `"<issue id>:<reminder no>"` (each reminder is its own alert) | every open urgent issue nobody touched for 30 minutes (beat `commerce-review-delivery-issues`, every 5 minutes; no cap on the count) | Resolve it or act on it: any change (or the resolve endpoint) stops the reminders |
 | `delivery.provider_failing` | `provider` (`yandex`), `code` (`unauthorized`, `forbidden`, a Yandex payment code such as `estimating.cargocorp_payment_failure`, `unavailable`, or Yandex's code) | the Tashkent date | the **third** Yandex account failure in a row: a failed status poll, or a checkout price check refused with 401 / 403 / a payment refusal (also ERROR `yandex.provider_failing {source, code, failures}`) | `unauthorized` / `forbidden`: the token (`YANDEX_DELIVERY_TOKEN`; a cabinet password change invalidates it). A payment code: the prepaid balance or the contract in the Yandex cabinet. `unavailable`: Yandex or the egress to `b2b.taxi.yandex.net`. The dashboard shows `attention.yandex_failing` until a poll or price check is answered |
 
 A dead `yandex.dispatch` outbox message raises the usual `outbox.dead` (alert and audit row) and, through its dead
-hook, opens the issue `dispatch_unknown` `dead_letter` (urgent once the accept was sent → `delivery.issue_opened`), the claim stays open
-and polled, and `requeue_outbox --topic yandex.dispatch --dead --dry-run` (then without `--dry-run`) resumes the
-dispatch where it stopped — never a second claim, never a second accept. `outbox.dead` and K6 still list it.
+hook (`commerce.yandex_flow.on_dispatch_dead`):
+- **the accept was sent** → urgent `dispatch_unknown` `dead_letter` (→ `delivery.issue_opened`); the claim stays open
+  and polled, and `requeue_outbox --topic yandex.dispatch --dead --dry-run` (then without `--dry-run`) resumes the
+  dispatch where it stopped — never a second claim, never a second accept;
+- **no accept outstanding** (no Yandex id yet, or no / a released `accept_sent_at`) → the claim is closed (settled
+  when it has no Yandex id; otherwise left polled until a status or the 24 h settlement settles it, keeping the
+  code `dead_letter`), stage `failed`,
+  non-urgent `dispatch_failed` `dead_letter`, WARNING `yandex.dispatch_stopped`: staff simply dispatch again (the next
+  dispatch cancels the old claim at Yandex). A requeue then does nothing.
+
+`outbox.dead` and K6 still list the message.
 
 **Log keys** (logger `glowderma.*`, key first, then a dict or key=value of ids, codes and amounts — never a name,
 phone, address or token):
@@ -145,26 +153,31 @@ phone, address or token):
 | ERROR | `yandex.currency_mismatch path=… expected=UZS` | path | a price came in another currency (or none): the answer is refused as unreadable; ask the Yandex manager (open question YD-5) |
 | ERROR | `yandex.provider_failing` | `source` (`poll` \| `check_price`), `code`, `failures` | the alert above |
 | ERROR | `yandex.previous_claim_active` | `order_id`, `claim` | a new dispatch found the previous claim still alive: the new claim was closed, urgent `dispatch_failed` |
-| ERROR | `yandex.foreign_claim` | `order_id`, `claim` | `claims/create` returned a claim of another order: closed, `dispatch_unknown` `foreign_claim`; check the cabinet |
+| ERROR | `yandex.foreign_claim` | `order_id`, `claim` | `claims/create` returned a claim whose echoed order reference (`external_order_id` or an item's `extra_id`) names another order: closed, `dispatch_unknown` `foreign_claim`; check the cabinet |
+| ERROR | `yandex.carrier_marker_lost` | `order_id`, `claim_number`, `call` (`cancel` \| `return`) | Yandex answered (2xx) an admin cancel's `claims/cancel` / `claims/return`, or its outcome is unknown, but neither the Order row (15 s) nor, without it, the marker write (5 s: the claim row for a cancel, the insert of the `return_requested` event for a return) got its lock to record it: no "sent" marker, as after a crash (integration doc §12, residual window). The admin got 409 `conflict`; a repeated cancel sends the call again — check the claim in the Yandex cabinet first and find what held the rows |
 | ERROR | `yandex.poll_apply_failed` (with traceback) | `order_id` | one claim snapshot could not be applied (a bug); the others went on |
 | ERROR | `yandex.webhook failed; everything rolled back` (traceback) | — | the callback view crashed: answered 500 (Yandex retries); the poll catches up |
 | WARNING | `yandex delivery is live without ALERT_WEBHOOK_URL: urgent delivery issues alert nobody` | — | startup (api, worker, beat): set the alert webhook (§1) |
-| WARNING | `yandex.dispatch_stopped` | `order_id`, `claim`, `code` | a dispatch ended without a courier (the issue carries the code) |
+| WARNING | `yandex.dispatch_stopped` | `order_id`, `claim`, `code` | a dispatch ended without a courier (the issue carries the code; also the dead hook's `dead_letter` close); not logged when a poll or callback saw the claim accepted or ended meanwhile |
 | WARNING | `yandex.dispatch_review` | `order_id`, `claim`, `code`, `offer` | the offer went to staff review (`dispatch_review`) |
-| WARNING | `yandex.accept_conflict` | `order_id`, `code` | `claims/accept` answered 409 (other than `offer_expired`): the claim is re-read |
-| WARNING | `yandex.accept_unanswered` | `order_id`, `unknown` | `claims/accept` got no answer: never resent, the claim is re-read |
+| WARNING | `yandex.accept_conflict` | `order_id`, `code` | `claims/accept` answered 409 (other than `offer_expired`): `old_version` → the stamp is released and the fresh version accepted on a later run; any other code → one re-read, still before acceptance → `dispatch_failed <code>` |
+| WARNING | `yandex.accept_unanswered` | `order_id`, `unknown` | `claims/accept` got no usable answer: `unknown` false ("not processed": 429, 401/403, never sent) → the stamp is released and the accept sent once more on a later run; `unknown` true → never resent, the claim is re-read (still not visible 15 min after it, or 2 min after it once the offer expired → `dispatch_failed` `accept_unconfirmed`) |
+| WARNING | `yandex.claim_ref_missing` | `order_id`, `claim` | the `claims/create` answer echoed neither `external_order_id` nor an item's `extra_id`: the claim (returned for our own `request_id`) is followed; if it is constant, ask Yandex whether `external_order_id` is permitted (YD-21) |
+| WARNING | `yandex.carrier_record_busy` | `order_id`, `claim_number`, `call` (`cancel` \| `return`) | the Order row stayed locked more than 15 s after Yandex answered (2xx) an admin cancel / return, or its outcome turned unknown: the "sent" marker is then written without the Order lock (no audit row) and the admin gets 409 `conflict`; the next attempt only re-reads — unless ERROR `yandex.carrier_marker_lost` follows with the same fields (then no marker exists and the next attempt may send the call again). Find the long transaction that held the order |
 | WARNING | `yandex.unknown_status` | `order_id`, `claim`, `status` | Yandex sent a status outside the documented 26: stored, nothing moved; tell the developers |
 | WARNING | `yandex.unknown_claim` | `order_id`, `source` | a snapshot of a claim we do not hold for that order: ignored |
 | WARNING | `yandex.accepted_without_us` | `order_id`, `claim` | Yandex shows a claim accepted although we never sent the accept (`auto_accept` on in the cabinet?): it must stay off |
 | WARNING | `yandex.poll_failed` | `claims`, `error` | a `claims/bulk_info` run failed (counted on `IntegrationState(yandex)`) |
 | WARNING | `yandex.sync_rejected` | `order_id`, `code` | a callback's `claims/info` was refused (unknown claim at Yandex) |
 | WARNING | `yandex.webhook_foreign_claim` | `order_id` | a verified callback named a claim of another order: acknowledged, ignored |
-| WARNING | `yandex.cost_unknown` | `order_id`, `claim` | a finished claim still has no `final_price` 24 h after its end: settled with code `cost_unknown` (check the cabinet's bill) |
+| WARNING | `yandex.cost_unknown` | `order_id`, `claim` (the claim's row id) | a finished claim still has no `final_price` 24 h after its end: settled with code `cost_unknown` (check the cabinet's bill); a paid cancel whose quoted `cancel-info` price nobody had counted gets it counted as its fee then (the claim keeps its code) |
+| WARNING | `yandex.claim_unanswered` | `order_id`, `claim` (the claim's row id) | a claim a dispatch closed unsettled (never accepted; kept polled in case Yandex took an accept we could not confirm) showed no new status for 24 h after its end: settled at cost 0 — `no_answer` only fills a blank code, and every path that closes a claim unsettled sets one (`accept_unconfirmed`, `not_found`, the 409's code, `dead_letter`, `cancel_requested`), so in practice the closing code stays; the poll stops reading it |
 | WARNING | `yandex.unreadable_claim claim_id=… error=…` | claim id | one `bulk_info` entry could not be read: skipped, the others synced |
 | WARNING | `yandex.tariffs_check_failed mode=… code=…` | mode, code | «Yandex bilan tekshirish» failed (nothing stored) |
 | WARNING | `delivery.quote_unavailable provider=yandex method=… reason=down\|error` | method | a checkout price check failed: the option is `provider_unavailable` |
 | INFO | `yandex.dispatch_requested` | `order_id`, `claim_number`, `method` | staff pressed «Kuryer chaqirish» |
 | INFO | `yandex.claim_created`, `yandex.accept_sent`, `yandex.claim_accepted` | `order_id`, `claim` | dispatch progress |
+| INFO | `yandex.accept_released` | `order_id`, `claim` | Yandex provably did not take the accept ("not processed", 409 `old_version`): `accept_sent_at` released, one accept is sent again on a later run after the offer is re-checked |
 | INFO | `yandex.issue` | `order_id`, `kind`, `code`, `urgent` | an issue opened or refreshed by the dispatch / the status writer / the cancel |
 | INFO | `yandex.carrier_cancel` | `order_id`, `outcome`, `claim_number`, codes / amounts | each carrier step of an admin cancel (also the audit `order.carrier_cancel`) |
 | INFO | `yandex.carrier_reread_failed`, `yandex.cancel_unaccepted_failed`, `yandex.tracking_link_unavailable` | `order_id`, `error` | a best-effort read / cancel / link failed (nothing depends on it) |

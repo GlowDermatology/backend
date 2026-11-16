@@ -13,7 +13,8 @@ unknown one is a valid snapshot: the caller stores it and moves nothing).
 Failures are typed so callers can tell "it did not happen" from "we do not know":
 
 * :class:`YandexRejected` — a definitive refusal (a documented 4xx; for ``check-price`` also its documented
-  409 "no suitable vehicle" codes): nothing was created or changed;
+  409 "no suitable vehicle" codes, for ``claims/create`` its documented 403 codes): nothing was created or
+  changed;
 * :class:`YandexConflict` — the 409 of ``accept`` / ``cancel`` / ``return`` (``old_version``,
   ``offer_expired``, ``inappropriate_status``, …): the claim is not in the state the call needs, re-read it;
 * :class:`YandexUnavailable` — no usable answer: a transport failure, a 5xx, 401/403/408/425/429, a redirect,
@@ -128,7 +129,9 @@ class Claim:
     """A claim as Yandex reports it (``claims/create`` / ``info`` / ``bulk_info``). Every field but the id,
     status and version is optional in the documentation and ``None`` / empty when absent. Prices are so'm in
     :data:`currency` (checked against ``YANDEX_DELIVERY_CURRENCY``); ``courier_vehicle`` is the car model,
-    colour and plate joined by spaces — the courier's phone is never part of a snapshot."""
+    colour and plate joined by spaces — the courier's phone is never part of a snapshot. Our order reference
+    comes back as point B's ``external_order_id`` and the items' ``extra_id`` (``item_extra_ids``) when
+    Yandex echoes them."""
 
     claim_id: str
     status: str
@@ -146,6 +149,7 @@ class Claim:
     return_reasons: tuple[str, ...] = ()
     external_order_id: str | None = None
     taxi_class: str | None = None
+    item_extra_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

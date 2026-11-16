@@ -15,7 +15,8 @@ Endpoints (all ``POST`` under :data:`PREFIX` except ``tracking-links``, which is
   (1–1000) → ``{claims: []}``;
 * ``claims/accept?claim_id= {version}``; ``claims/cancel-info?claim_id=`` → ``cancel_state``, ``price``,
   ``price_with_vat``, ``currency``; ``claims/cancel?claim_id= {version, cancel_state}``;
-  ``claims/return?claim_id= {point_id, comment}`` (200 without a body);
+  ``claims/return?claim_id= {point_id, comment, need_return_items: true}`` (200 without a body; the flag is
+  the documented "return the item to the initial point of dispatch", as in the documented example);
 * ``GET claims/tracking-links?claim_id=`` → ``route_points[{type, sharing_link}]``.
 
 Coordinates are ``[longitude, latitude]`` — exactly that order — and always sent. The item's destination
@@ -77,6 +78,11 @@ ORDER_ID_MAX: Final = 512
 RETURN_COMMENT_MAX: Final = 1000
 # The largest price we accept (so'm); anything above is not a delivery price.
 MAX_PRICE: Final = 100_000_000
+# claims/create's documented 403 codes: definitive refusals of the claim (the account's anti-fraud check, a
+# payment option the contract lacks), not the "token / account, try later" 403 of any other answer.
+CREATE_FORBIDDEN_CODES: Final = frozenset(
+    {"forbidden_by_antifake", "buyout_disabled", "payment_on_delivery_disabled"}
+)
 TEXT_MAX: Final = 120
 _MONEY = re.compile(r"-?[0-9]{1,14}(?:\.[0-9]{0,4})?")
 _CLAIM_ID = re.compile(r"[A-Za-z0-9_.-]{1,64}")
@@ -336,7 +342,13 @@ def cancel_payload(version: int, state: str) -> dict[str, Any]:
 
 
 def return_payload(point_id: int, comment: str) -> dict[str, Any]:
-    return {"point_id": point_id, "comment": comment.strip()[:RETURN_COMMENT_MAX] or "-"}
+    """Skip point ``point_id`` and bring the item back to point A (``need_return_items``: without it the
+    documentation leaves what happens to the parcel open)."""
+    return {
+        "point_id": point_id,
+        "comment": comment.strip()[:RETURN_COMMENT_MAX] or "-",
+        "need_return_items": True,
+    }
 
 
 # --- answers --------------------------------------------------------------------------------------------
@@ -466,6 +478,11 @@ def claim_from(body: dict[str, Any], *, currency: str) -> Claim:
         ),
         external_order_id=external if isinstance(external, str) and external else None,
         taxi_class=_claim_taxi_class(body),
+        item_extra_ids=tuple(
+            item["extra_id"][:ORDER_ID_MAX]
+            for item in _list(body.get("items"))
+            if isinstance(item, dict) and isinstance(item.get("extra_id"), str) and item["extra_id"]
+        ),
     )
 
 

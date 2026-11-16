@@ -211,7 +211,15 @@ class CourierClaimAdmin(ReadOnlyAdmin):
     ordering = ("-id",)
     raw_id_fields = ("shipment", "requested_by")
     money_fields = frozenset(
-        {"quoted_fee", "estimate_price", "offer_price", "approved_price", "final_price", "cancel_fee"}
+        {
+            "quoted_fee",
+            "estimate_price",
+            "offer_price",
+            "approved_price",
+            "final_price",
+            "cancel_fee",
+            "cancel_price",
+        }
     )
     title_format = _("Kuryer buyurtmasi #{obj.pk}")
 
@@ -461,6 +469,8 @@ class DeliverySettingsAdmin(OpsActionsMixin, ServiceBackedAdmin):
     list_display = ("warehouse_name", "updated_at", "updated_by")
     readonly_fields = ("updated_by", "yandex_tariffs", "calendar")
     actions_detail = ("yandex_check",)
+    # One row: the list redirects to its change page (read by the console browser suite's registry).
+    singleton = True
     fieldsets = (
         (
             _("Ombor"),

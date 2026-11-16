@@ -14,7 +14,7 @@ from glowderma.accounts.tests.factories import StaffUserFactory
 from glowderma.core import enums, timeutils
 from glowderma.delivery import selectors, services
 from glowderma.delivery.models import CourierClaim, Shipment, ShipmentEvent
-from glowderma.delivery.tests.factories import CourierClaimFactory, yandex_shipment
+from glowderma.delivery.tests.factories import CourierClaimFactory, ShipmentFactory, yandex_shipment
 from glowderma.integrations.yandex_delivery.ports import Claim
 
 pytestmark = pytest.mark.django_db
@@ -45,9 +45,14 @@ def _record(shipment: Shipment, snapshot: Claim) -> services.ClaimUpdate:
 
 def test_the_cancel_stamp_is_set_and_cleared() -> None:
     shipment = _accepted()
-    services.request_carrier_cancel(shipment.order_id, at=timeutils.now())
+    first = timeutils.now() - timedelta(minutes=5)
+    assert services.request_carrier_cancel(shipment.order_id, at=first) is True
     shipment.refresh_from_db()
-    assert shipment.cancel_requested_at is not None
+    assert shipment.cancel_requested_at == first
+    # a repeated cancel resumes the first one: the review beat's 10 minutes run from the first request
+    assert services.request_carrier_cancel(shipment.order_id, at=timeutils.now()) is False
+    shipment.refresh_from_db()
+    assert shipment.cancel_requested_at == first
     assert services.clear_carrier_cancel(shipment.order_id) is True
     assert services.clear_carrier_cancel(shipment.order_id) is False
     shipment.refresh_from_db()
@@ -95,6 +100,215 @@ def test_a_cancel_fee_after_the_final_price_adds_nothing() -> None:
     assert claim.cancel_fee == 9_000
     with pytest.raises(ValueError):
         services.record_cancel_fee(shipment.order_id, claim.pk, -1, paid_fee=PAID_FEE)
+
+
+def test_a_sent_cancel_and_a_sent_return_are_recorded_once() -> None:
+    shipment = _accepted(status="pickup_arrived", stage=G.COURIER_ARRIVED)
+    claim = shipment.claim
+    assert claim is not None
+    sent = timeutils.now() - timedelta(minutes=2)
+    assert services.record_cancel_sent(shipment.order_id, claim.pk, cancel_state="paid", at=sent) is True
+    later = timeutils.now()
+    assert services.record_cancel_sent(shipment.order_id, claim.pk, cancel_state="free", at=later) is False
+    claim.refresh_from_db()
+    assert (claim.cancel_sent_at, claim.cancel_state) == (sent, "paid")  # the first send is kept
+    row = selectors.claim_row(claim.pk)
+    assert row is not None and (row.cancel_sent_at, row.cancel_state) == (sent, "paid")
+    assert not selectors.return_requested(shipment.pk, claim.claim_id)
+    assert services.record_return_request(shipment.order_id, claim.pk, at=later) is True
+    assert services.record_return_request(shipment.order_id, claim.pk, at=later) is False
+    assert selectors.return_requested(shipment.pk, claim.claim_id)
+    assert not selectors.return_requested(shipment.pk, "")
+    events = ShipmentEvent.objects.filter(shipment=shipment, kind=ShipmentEvent.Kind.RETURN_REQUESTED)
+    assert [event.payload for event in events] == [{"claim_id": claim.claim_id, "claim_number": 1}]
+
+
+def _paid_cancel_sent(price: int | None = 9_000, state: str = "paid") -> tuple[Shipment, CourierClaim]:
+    shipment = _accepted(status="pickup_arrived", stage=G.COURIER_ARRIVED)
+    claim = shipment.claim
+    assert claim is not None
+    at = timeutils.now()
+    assert services.record_cancel_sent(shipment.order_id, claim.pk, cancel_state=state, price=price, at=at)
+    claim.refresh_from_db()
+    return shipment, claim
+
+
+def test_a_lost_paid_cancel_counts_its_quoted_price_once_yandex_shows_it() -> None:
+    shipment, claim = _paid_cancel_sent()
+    assert (claim.cancel_state, claim.cancel_price, claim.cancel_fee) == ("paid", 9_000, None)
+    later = timeutils.now()
+    assert not services.record_cancel_sent(  # the first terms and price are kept
+        shipment.order_id, claim.pk, cancel_state="paid", price=1, at=later
+    )
+    _record(shipment, _snapshot(claim, "pickup_arrived"))  # claims/info lags: nothing is counted
+    shipment.refresh_from_db()
+    assert shipment.carrier_cost_total == 0
+    claim.refresh_from_db()
+    _record(shipment, _snapshot(claim, "cancelled_with_payment", minutes=2))
+    claim.refresh_from_db()
+    assert (claim.cancel_price, claim.cancel_fee, claim.final_price) == (9_000, 9_000, None)
+    shipment.refresh_from_db()
+    assert (shipment.carrier_cost_total, shipment.cost_difference) == (9_000, PAID_FEE - 9_000)
+    # every later path finds it counted: the writer again, txn B, the answered fee
+    _record(shipment, _snapshot(claim, "cancelled_with_payment", minutes=3))
+    assert services.count_cancel_fee(shipment.order_id, claim.pk, paid_fee=PAID_FEE) == 9_000
+    assert services.count_cancel_fee(shipment.order_id, claim.pk, paid_fee=PAID_FEE, quoted=8_000) == 9_000
+    assert services.record_cancel_fee(shipment.order_id, claim.pk, 9_000, paid_fee=PAID_FEE) is False
+    shipment.refresh_from_db()
+    assert shipment.carrier_cost_total == 9_000
+    claim.refresh_from_db()
+    _record(shipment, _snapshot(claim, "cancelled_with_payment", minutes=4, final_price=9_400))
+    shipment.refresh_from_db()  # the final price replaces the fee
+    assert (shipment.carrier_cost_total, shipment.cost_difference) == (9_400, PAID_FEE - 9_400)
+
+
+def test_a_quoted_fee_shown_with_the_final_price_counts_the_final_price_only() -> None:
+    shipment, claim = _paid_cancel_sent()
+    _record(shipment, _snapshot(claim, "cancelled_with_payment", final_price=9_200))
+    claim.refresh_from_db()
+    assert (claim.cancel_fee, claim.final_price, claim.settled_at is not None) == (9_000, 9_200, True)
+    shipment.refresh_from_db()
+    assert (shipment.carrier_cost_total, shipment.cost_difference) == (9_200, PAID_FEE - 9_200)
+
+
+@pytest.mark.parametrize(
+    ("state", "price", "status"),
+    [
+        ("free", 9_000, "cancelled_with_payment"),  # a free cancel stores no price
+        ("paid", None, "cancelled_with_payment"),  # cancel-info gave no price
+        ("paid", 9_000, "cancelled"),  # Yandex ended it free
+        ("paid", 9_000, "cancelled_by_taxi"),  # the courier cancelled
+    ],
+)
+def test_no_fee_is_counted_without_a_paid_cancel_yandex_shows(
+    state: str, price: int | None, status: str
+) -> None:
+    shipment, claim = _paid_cancel_sent(price, state)
+    assert claim.cancel_price == (price if state == "paid" else None)
+    _record(shipment, _snapshot(claim, status))
+    claim.refresh_from_db()
+    assert claim.cancel_fee is None
+    assert services.count_cancel_fee(shipment.order_id, claim.pk, paid_fee=PAID_FEE) is None
+    shipment.refresh_from_db()
+    assert shipment.carrier_cost_total == 0
+
+
+def test_a_paid_cancel_yandex_showed_before_it_was_marked_is_counted_by_txn_b() -> None:
+    shipment = _accepted(status="pickup_arrived", stage=G.COURIER_ARRIVED)
+    claim = shipment.claim
+    assert claim is not None
+    _record(shipment, _snapshot(claim, "cancelled_with_payment"))  # a poll, before our cancel was marked
+    assert services.count_cancel_fee(shipment.order_id, claim.pk, paid_fee=PAID_FEE) is None  # no price
+    assert services.record_cancel_sent(
+        shipment.order_id, claim.pk, cancel_state="paid", price=9_000, at=timeutils.now()
+    )
+    assert services.count_cancel_fee(shipment.order_id, claim.pk, paid_fee=PAID_FEE) == 9_000
+    assert services.count_cancel_fee(shipment.order_id, claim.pk, paid_fee=PAID_FEE) == 9_000  # once
+    shipment.refresh_from_db()
+    assert (shipment.carrier_cost_total, shipment.cost_difference) == (9_000, PAID_FEE - 9_000)
+    with pytest.raises(ValueError):
+        services.count_cancel_fee(shipment.order_id, claim.pk, paid_fee=PAID_FEE, quoted=-1)
+    # a cancel refused while the claim got cancelled all the same counts the price this attempt read
+    other = _accepted(status="pickup_arrived", stage=G.COURIER_ARRIVED)
+    refused = other.claim
+    assert refused is not None
+    _record(other, _snapshot(refused, "cancelled_with_payment"))
+    assert services.count_cancel_fee(other.order_id, refused.pk, paid_fee=PAID_FEE, quoted=7_000) == 7_000
+    other.refresh_from_db()
+    assert other.carrier_cost_total == 7_000
+
+
+def _re_dispatched(*, confirmed: bool) -> tuple[Shipment, CourierClaim, CourierClaim]:
+    """Claim 1 carried the parcel and brought it back (``returned_finish``; confirmed by staff or not); claim
+    2, a re-dispatch Yandex found no courier for, is the current one and never took anything."""
+    shipment = _accepted(status="pickuped", stage=G.IN_TRANSIT)
+    first = shipment.claim
+    assert first is not None
+    _record(shipment, _snapshot(first, "returning"))
+    first.refresh_from_db()
+    _record(shipment, _snapshot(first, "returned", minutes=2))
+    if confirmed:
+        staff = StaffUserFactory.create()
+        services.confirm_return(
+            shipment.order_id, actor_id=staff.pk, at=timeutils.now(), clear_cancel_request=True
+        )
+    first.refresh_from_db()
+    _record(shipment, _snapshot(first, "returned_finish", minutes=3))
+    second = CourierClaimFactory.create(
+        shipment=shipment,
+        status="performer_not_found",
+        accept_sent_at=timeutils.now(),
+        accepted_at=timeutils.now(),
+        ended_at=timeutils.now(),
+    )
+    Shipment.objects.filter(pk=shipment.pk).update(claim=second, stage=G.RETURNED)
+    shipment.refresh_from_db()
+    return shipment, first, second
+
+
+def test_the_return_belongs_to_the_claim_that_carried_the_parcel() -> None:
+    shipment, first, second = _re_dispatched(confirmed=False)
+    carried = selectors.return_claim(shipment.pk)
+    assert carried is not None
+    assert (carried.id, carried.number, carried.claim_id, carried.confirmed) == (
+        first.pk,
+        1,
+        first.claim_id,
+        False,
+    )
+    view = selectors.yandex_cancel_view(shipment.order_id)
+    assert view is not None and view.claim is not None and view.claim.id == second.pk  # the current claim
+    assert view.return_claim == carried and view.return_confirmed is False
+    returned_at = shipment.returned_at
+    staff = StaffUserFactory.create()
+    assert services.confirm_return(
+        shipment.order_id, actor_id=staff.pk, at=timeutils.now(), clear_cancel_request=False
+    )
+    event = ShipmentEvent.objects.get(shipment=shipment, kind=ShipmentEvent.Kind.RETURNED)
+    assert event.payload["claim_number"] == 1 and event.carrier_status == "returned_finish"
+    shipment.refresh_from_db()
+    assert shipment.returned_at == returned_at  # the claim that brought it back is not stale
+    carried = selectors.return_claim(shipment.pk)
+    assert carried is not None and carried.confirmed
+    assert not services.confirm_return(
+        shipment.order_id, actor_id=staff.pk, at=timeutils.now(), clear_cancel_request=False
+    )
+
+
+def test_a_confirmed_return_is_not_offered_again_after_a_failed_re_dispatch() -> None:
+    shipment, first, _second = _re_dispatched(confirmed=True)
+    carried = selectors.return_claim(shipment.pk)
+    assert carried is not None and carried.id == first.pk and carried.confirmed
+    view = selectors.yandex_cancel_view(shipment.order_id)
+    assert view is not None and view.return_confirmed is True
+    staff = StaffUserFactory.create()
+    assert not services.confirm_return(
+        shipment.order_id, actor_id=staff.pk, at=timeutils.now(), clear_cancel_request=False
+    )
+    assert ShipmentEvent.objects.filter(shipment=shipment, kind=ShipmentEvent.Kind.RETURNED).count() == 1
+    # a parcel nobody ever took has no return to confirm
+    untouched = _accepted()
+    assert selectors.return_claim(untouched.pk) is None
+
+
+def test_staff_marking_an_unaccounted_parcel_delivered_moves_only_the_stage() -> None:
+    shipment = _accepted(status="pickuped", stage=G.IN_TRANSIT)
+    claim = shipment.claim
+    assert claim is not None
+    _record(shipment, _snapshot(claim, "cancelled_with_items_on_hands"))
+    shipment.refresh_from_db()
+    before = (shipment.state, shipment.carrier_cost_total, shipment.cost_difference)
+    assert shipment.stage == G.CANCELLED
+    staff = StaffUserFactory.create()
+    assert services.mark_delivered_by_staff(shipment.order_id, actor_id=staff.pk, at=timeutils.now()) is True
+    shipment.refresh_from_db()
+    assert shipment.stage == G.DELIVERED
+    assert (shipment.state, shipment.carrier_cost_total, shipment.cost_difference) == before
+    event = ShipmentEvent.objects.get(shipment=shipment, kind=ShipmentEvent.Kind.STATUS_RECEIVED)
+    assert event.manual and event.payload["confirmed_by"] == staff.pk and event.bts_status == ""
+    assert services.mark_delivered_by_staff(shipment.order_id, actor_id=staff.pk, at=timeutils.now()) is False
+    bts = ShipmentFactory.create(created=True)
+    assert services.mark_delivered_by_staff(bts.order_id, actor_id=staff.pk, at=timeutils.now()) is False
 
 
 def test_a_confirmed_return_stays_returned_whatever_lags_behind() -> None:

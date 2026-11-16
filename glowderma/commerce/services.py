@@ -24,6 +24,7 @@ import time
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import Any, NoReturn
 from uuid import UUID
 
@@ -66,6 +67,7 @@ from glowderma.core.api.exceptions import (
     not_cancellable,
 )
 from glowderma.core.api.exceptions import OutOfStock as OutOfStockError
+from glowderma.delivery import pricing as delivery_pricing
 from glowderma.delivery import quotes as delivery_quotes
 from glowderma.delivery import selectors as delivery_selectors
 from glowderma.delivery import services as delivery_services
@@ -80,6 +82,7 @@ from glowderma.integrations.yandex_delivery.ports import (
     CANCEL_FREE,
     CANCEL_PAID,
     CANCEL_UNAVAILABLE,
+    CancelTerms,
     Claim,
     YandexDeliveryPort,
     YandexError,
@@ -1142,6 +1145,7 @@ def transition(
         )
         _enqueue_push(order, status, changed)
         if unaccounted and status == _S.DELIVERED:  # staff confirmed the hand-over Yandex lost track of
+            delivery_services.mark_delivered_by_staff(order.pk, actor_id=actor_id, at=instant)
             for kind in (enums.DeliveryIssueKind.PARCEL_UNACCOUNTED, *DELIVERED_RESOLVES):
                 delivery_services.resolve_kind(order.pk, kind, RESOLVED_BY_STAFF_DELIVERED_NOTE)
         _audit(state.AUDIT_ORDER_STATUS_CHANGED, order, actor_id, request, {"from": before, "to": status})
@@ -1337,7 +1341,16 @@ def request_dispatch(
         ):
             raise Conflict(MESSAGE_DISPATCH_NO_REVIEW)
         quote = shipment.quote
-        estimate = quote.carrier_price if quote is not None and quote.method == chosen else None
+        estimate = None
+        if quote is not None and quote.method == chosen:
+            # on the offer's basis (claims/info prices include VAT; check-price may not: the same uplift as
+            # the customer fee, without the markup or the 500 so'm rounding)
+            estimate = delivery_pricing.customer_fee(
+                quote.carrier_price,
+                markup_percent=Decimal(0),
+                vat_percent=delivery_selectors.settings_row().estimate_vat_percent,
+                step=1,
+            )
         try:
             claim_pk = delivery_services.start_dispatch(
                 order.pk,
@@ -1640,6 +1653,13 @@ CARRIER_RETURNING = "returning"  # the courier is bringing the parcel back at ou
 CARRIER_CONFIRM_READS = 3
 CARRIER_CONFIRM_PAUSE_SECONDS = 1.0
 _carrier_pause: Callable[[float], None] = time.sleep  # a module attribute so tests skip the pauses
+# Recording that claims/cancel / claims/return was sent waits this long for the Order row (no flow holds it
+# across a Yandex call) — generous, yet with the fallback below (≤ 20 s together) inside gunicorn's
+# graceful_timeout (30 s): a deploy's restart that begins once Yandex answered still lets the marker commit
+# before the worker is killed (a kill loses it like a crash).
+CARRIER_RECORD_WAIT = timedelta(seconds=15)
+# Past it, the marker alone is written without the Order lock, waiting at most this long for its own row.
+CARRIER_MARK_WAIT = timedelta(seconds=5)
 
 _WITHDRAW = "withdraw"
 _CANCEL = "cancel"
@@ -1708,15 +1728,24 @@ def cancel_at_carrier(order_id: int, actor_id: int, *, request: Any = None) -> C
       returning parcel keeps / opens ``return_pending``); delivered → 409 ``not_cancellable``;
     * an open claim whose ``accept`` was never sent summons nobody → best-effort free cancel at Yandex and
       the claim is closed here;
-    * before pickup → fresh ``claims/info`` → ``cancel-info`` → ``claims/cancel(version, free|paid)`` → a
-      re-read must show ``cancelled*`` (a paid fee goes on the claim and into the carrier cost); terms
-      ``unavailable`` / a 409 / a refusal → 409 ``not_cancellable``, Yandex not answering → 503
-      ``provider_unavailable`` (both clear the stamp); not visible yet → 409 ``conflict`` (stamp kept: the
-      review beat opens ``cancel_incomplete`` if Yandex then shows it cancelled);
-    * after pickup → ``claims/return(point B)`` → a re-read showing ``returning…`` lets the cancel proceed
-      (refund) with ``return_pending`` open until the parcel is confirmed back; still in transit → 409
-      ``return_requested`` (order unchanged, ``return_pending`` open, stamp kept); refused → 409
-      ``not_cancellable``; no answer → 503;
+    * before pickup → fresh ``claims/info`` → ``cancel-info`` → ``claims/cancel(version, free|paid)``; once
+      Yandex answered it — or its outcome is unknown — the claim is marked ``cancel_sent_at`` with the
+      terms and a paid one's ``cancel-info`` price in its own short transaction (the fee goes on the claim
+      and into the carrier cost at once when Yandex answered, else once a read or the poll shows
+      ``cancelled_with_payment``; the Order lock waits ≤ :data:`CARRIER_RECORD_WAIT`, past it the marker
+      alone is kept and the answer is 409 ``conflict``), then a re-read must show ``cancelled*``; terms
+      ``unavailable`` / a 409 / a refusal → 409 ``not_cancellable``,
+      Yandex not answering before anything was sent → 503 ``provider_unavailable`` (both clear the stamp);
+      not visible yet, an unknown outcome included → 409 ``conflict`` (stamp kept: the review beat opens
+      ``cancel_incomplete`` if Yandex then shows it cancelled);
+    * after pickup → ``claims/return(point B)``, marked sent (``return_requested`` event) the same way → a
+      re-read showing ``returning…`` lets the cancel proceed (refund) with ``return_pending`` open until the
+      parcel is confirmed back; still in transit, an unknown outcome included → 409 ``return_requested``
+      (order unchanged, ``return_pending`` open, stamp kept); refused → 409 ``not_cancellable``; not
+      processed → 503;
+    * a retry of a cancel / return that was sent → never a second ``cancel-info`` / ``claims/cancel`` /
+      ``claims/return``: the claim is only read again (shown → proceeds; else the same 409, the stamp kept
+      with its first time — a failed read never clears it);
     * a claim Yandex already shows cancelled (a cancel that crashed before the order was cancelled) → no
       second call.
 
@@ -1736,11 +1765,16 @@ def _cancel_at_carrier(order_id: int, actor_id: int, request: Any) -> CarrierCan
     if isinstance(plan, CarrierCancel):
         return plan
     port = get_yandex_delivery(plan.scenario)
+    sent = _carrier_call_sent(plan)
     try:
         snapshot = port.claim(plan.claim.claim_id)
     except YandexUnavailable as exc:
+        if sent is not None:  # our cancel / return is with Yandex: a failed read never undoes it
+            _carrier_call_pending(plan, sent)
         _carrier_refused(plan, "unavailable", ProviderUnavailable(MESSAGE_YANDEX_UNAVAILABLE), exc)
     except YandexError as exc:
+        if sent is not None:
+            _carrier_call_pending(plan, sent)
         if plan.claim.accept_sent_at is None:  # Yandex does not know a claim nobody accepted
             return _withdraw_claim(plan, port, None)
         _carrier_refused(plan, "refused", NotCancellable(MESSAGE_YANDEX_REFUSED), exc)
@@ -1749,19 +1783,45 @@ def _cancel_at_carrier(order_id: int, actor_id: int, request: Any) -> CarrierCan
     if status in delivery_yandex.DELIVERED_STATUSES:
         _carrier_refused(plan, "delivered", NotCancellable(MESSAGE_YANDEX_DELIVERED))
     if delivery_yandex.stage_for(status) in delivery_yandex.RETURN_STAGES:
-        return _carrier_returning(plan, snapshot, requested=False)
+        return _carrier_returning(plan, snapshot, requested=sent == _RETURN)
     picked_up = delivery_selectors.claim_picked_up(plan.shipment_id, plan.claim.claim_id, status)
     if delivery_yandex.is_finished(status):
         if picked_up:  # gone after pickup without a return: parcel_unaccounted, never refunded here
             _carrier_refused(plan, "parcel_out", NotCancellable(MESSAGE_YANDEX_PARCEL_OUT))
-        cancelled = status in delivery_services.OUR_CANCEL_STATUSES
-        _record_carrier(plan, "already_" + ("cancelled" if cancelled else "finished"), status=status)
-        return CarrierCancel(CARRIER_CANCELLED if cancelled else CARRIER_NOTHING, plan.claim.number)
+        if status in delivery_services.OUR_CANCEL_STATUSES:  # a fee our sent cancel left uncounted counts now
+            return _carrier_already_cancelled(plan, status)
+        _record_carrier(plan, "already_finished", status=status)
+        return CarrierCancel(CARRIER_NOTHING, plan.claim.number)
     if status in delivery_yandex.PRE_ACCEPT and plan.claim.accept_sent_at is None:
         return _withdraw_claim(plan, port, snapshot)
     if picked_up:
+        if sent == _RETURN:  # asked before (409 return_requested / a lost answer): only read again
+            return _carrier_return_read(port, plan)
         return _carrier_return(port, plan, snapshot)
+    if sent == _CANCEL:  # asked before (409 conflict / a lost answer): only read again
+        latest = _carrier_reread(port, plan, delivery_yandex.CANCELLED_STATUSES)
+        return _carrier_cancelled(plan, latest, plan.claim.cancel_state, plan.claim.cancel_fee)
     return _carrier_cancel(port, plan, snapshot)
+
+
+def _carrier_call_sent(plan: _CarrierPlan) -> str | None:
+    """The carrier call an earlier attempt of this cancel already sent for the claim — Yandex answered it,
+    or its outcome is unknown (:data:`_RETURN`: a ``return_requested`` event, :data:`_CANCEL`:
+    ``cancel_sent_at``) — or ``None``. Such a call is never sent again (a duplicate Yandex refuses must not
+    clear the stamp of the first): a retry only reads the claim."""
+    if delivery_selectors.return_requested(plan.shipment_id, plan.claim.claim_id):
+        return _RETURN
+    if plan.claim.cancel_sent_at is not None:
+        return _CANCEL
+    return None
+
+
+def _carrier_call_pending(plan: _CarrierPlan, sent: str) -> NoReturn:
+    """Yandex has our cancel / return but does not show it (yet): the same 409 as when it was sent — the
+    stamp stays (no dispatch; the writer reads the coming ``cancelled*`` / ``returning`` as ours)."""
+    if sent == _RETURN:
+        _return_pending(plan, None)
+    _cancel_pending(plan, plan.claim.cancel_state, plan.claim.cancel_fee)
 
 
 def _plan_carrier_cancel(order_id: int, actor_id: int, request: Any) -> _CarrierPlan | CarrierCancel:
@@ -1781,13 +1841,16 @@ def _plan_carrier_cancel(order_id: int, actor_id: int, request: Any) -> _Carrier
             refusal = yandex_cancel_refusal(view)
             if refusal is not None:
                 raise NotCancellable(refusal)
-            if view.returning and not view.return_confirmed:
-                _ensure_return_pending(order.pk, claim.number if claim is not None else None, str(view.stage))
+            if view.returning and not view.return_confirmed:  # the return of the claim that carried it
+                carried = view.return_claim or claim
+                _ensure_return_pending(
+                    order.pk, carried.number if carried is not None else None, str(view.stage)
+                )
             return CarrierCancel(CARRIER_NOTHING, claim.number if claim is not None else None)
         if claim is None or not claim.is_open:  # the open claim is always the current one
             raise NotCancellable(MESSAGE_YANDEX_COURIER_ACTIVE)
         now = timeutils.now()
-        delivery_services.request_carrier_cancel(order.pk, at=now)
+        delivery_services.request_carrier_cancel(order.pk, at=now)  # a repeated cancel keeps the first time
         plan = _CarrierPlan(
             order_id=order.pk,
             shipment_id=view.shipment_id,
@@ -1871,8 +1934,11 @@ def _withdraw_claim(plan: _CarrierPlan, port: YandexDeliveryPort, snapshot: Clai
 
 
 def _carrier_cancel(port: YandexDeliveryPort, plan: _CarrierPlan, snapshot: Claim) -> CarrierCancel:
-    """Before pickup: the terms, the cancel (free or paid), then a re-read that must show ``cancelled*``."""
-    latest: Claim | None = None
+    """Before pickup: the terms, the cancel (free or paid) — recorded as sent with its terms and the paid
+    price (:func:`_record_cancel_sent`) the moment Yandex answered it or its outcome became unknown, so it is
+    never sent twice — then a re-read that must show ``cancelled*``. Only a call that provably changed
+    nothing clears the stamp: ``cancel-info`` failing or refusing, terms ``unavailable``, ``claims/cancel``
+    not processed or refused (unless Yandex shows the claim cancelled all the same)."""
     try:
         terms = port.cancel_terms(snapshot.claim_id)
     except YandexUnavailable as exc:
@@ -1881,33 +1947,139 @@ def _carrier_cancel(port: YandexDeliveryPort, plan: _CarrierPlan, snapshot: Clai
         _carrier_refused(plan, "refused", NotCancellable(MESSAGE_YANDEX_REFUSED), exc)
     if terms.state == CANCEL_UNAVAILABLE:
         _carrier_refused(plan, "unavailable_terms", NotCancellable(MESSAGE_YANDEX_REFUSED))
+    fee = terms.price if terms.state == CANCEL_PAID else None
     try:
         port.cancel(snapshot.claim_id, snapshot.version, terms.state)
     except YandexUnavailable as exc:
-        if not exc.outcome_unknown:
+        if not exc.outcome_unknown:  # nothing reached Yandex
             _carrier_refused(plan, "unavailable", ProviderUnavailable(MESSAGE_YANDEX_UNAVAILABLE), exc)
-        # the cancel may have been processed: never resent, the claim says what happened
-        latest = _carrier_reread(port, plan, delivery_yandex.CANCELLED_STATUSES)
-        if latest is None or latest.status not in delivery_yandex.CANCELLED_STATUSES:
-            _carrier_refused(plan, "unavailable", ProviderUnavailable(MESSAGE_YANDEX_UNAVAILABLE), exc)
+        # the cancel may have been processed: never resent, the claim says what happened (a paid one's fee
+        # counts once Yandex shows ``cancelled_with_payment``, whichever read or poll shows it)
+        _record_cancel_sent(plan, terms, answered=False)
+        fee = None
     except YandexError as exc:  # 409 (terms changed, old version) or a refusal: nothing was cancelled
-        _carrier_reread(port, plan, ())
-        _carrier_refused(plan, "refused", NotCancellable(MESSAGE_YANDEX_REFUSED), exc)
+        latest = _carrier_reread(port, plan, delivery_services.OUR_CANCEL_STATUSES)
+        if latest is None or latest.status not in delivery_services.OUR_CANCEL_STATUSES:
+            _carrier_refused(plan, "refused", NotCancellable(MESSAGE_YANDEX_REFUSED), exc)
+        return _carrier_already_cancelled(plan, latest.status, quoted=fee)  # cancelled all the same
     else:
-        latest = _carrier_reread(port, plan, delivery_yandex.CANCELLED_STATUSES)
-    fee = terms.price if terms.state == CANCEL_PAID else None
-    if latest is None or latest.status not in delivery_yandex.CANCELLED_STATUSES:
-        # Yandex took the cancel but does not show it yet: the stamp stays, nothing else changes
-        _record_carrier(plan, "cancel_pending", cancel_state=terms.state, cancel_fee=fee)
-        raise Conflict(MESSAGE_YANDEX_CANCEL_PENDING)
+        _record_cancel_sent(plan, terms, answered=True)
+    latest = _carrier_reread(port, plan, delivery_yandex.CANCELLED_STATUSES)
+    return _carrier_cancelled(plan, latest, terms.state, fee)
+
+
+def _record_cancel_sent(plan: _CarrierPlan, terms: CancelTerms, *, answered: bool) -> None:
+    """Right after ``claims/cancel`` answered (``answered``) or its outcome became unknown, before any
+    re-read, in its own short transaction: the cancel is marked sent with its terms and, for a paid one, the
+    ``cancel-info`` price (``cancel_price``). The fee of a paid cancel Yandex answered is counted at once; one
+    whose answer was lost is counted once Yandex shows ``cancelled_with_payment`` — by the single writer, or
+    here should a poll have shown it before this mark — so neither a lagging ``claims/info``, a lost answer
+    nor a busy order loses it (counted once; a later ``final_price`` replaces it).
+
+    The Order lock waits at most :data:`CARRIER_RECORD_WAIT`; past it the marker alone is written without it
+    (:func:`_mark_without_order`) and the answer is 409 ``conflict`` with the stamp kept: the next attempt
+    finds the marker, only re-reads, and its txn B counts a fee left uncounted.
+
+    Residual window (accepted, not closed): the marker is committed only after Yandex answered, so a crash
+    or a worker kill between that answer and this commit — or both waits running out — leaves no marker
+    (logged ``yandex.carrier_marker_lost`` when it is the waits). The next attempt then sends
+    ``cancel-info`` / ``claims/cancel`` again; Yandex refusing that duplicate while ``claims/info`` still
+    lags clears the stamp."""
+    price = terms.price if terms.state == CANCEL_PAID else None
+    now = timeutils.now()
+    try:
+        with transaction.atomic():
+            order = lock_order(plan.order_id, wait=CARRIER_RECORD_WAIT)
+            # the marker, committed only after Yandex answered: a crash before this commit loses it
+            # (the residual window above)
+            delivery_services.record_cancel_sent(
+                order.pk, plan.claim.id, cancel_state=terms.state, price=price, at=now
+            )
+            if price is None:
+                return
+            paid_fee = order.delivery_fee
+            if answered:
+                delivery_services.record_cancel_fee(order.pk, plan.claim.id, price, paid_fee=paid_fee)
+            else:  # a poll may have shown cancelled_with_payment before the price was stored
+                delivery_services.count_cancel_fee(order.pk, plan.claim.id, paid_fee=paid_fee)
+            return
+    except Conflict as exc:  # only lock_order raises it here: the order stayed busy
+        busy = exc
+    _mark_without_order(
+        plan,
+        _CANCEL,
+        lambda: delivery_services.record_cancel_sent(
+            plan.order_id, plan.claim.id, cancel_state=terms.state, price=price, at=now
+        ),
+    )
+    raise Conflict(MESSAGE_YANDEX_CANCEL_PENDING) from busy
+
+
+def _mark_without_order(plan: _CarrierPlan, call: str, write: Callable[[], object]) -> None:
+    """The Order row stayed locked past :data:`CARRIER_RECORD_WAIT`: the sent marker alone is written
+    without it — the claim's own columns under its row lock (a cancel) or an insert-only event (a return);
+    no flow holds either for long, and this wait is bounded too (:data:`CARRIER_MARK_WAIT`). Every cancel
+    attempt holds the advisory lock, so no other one races it. Should this wait run out as well, the marker
+    is lost as in a crash: logged, never silent."""
+    fields = {"order_id": plan.order_id, "claim_number": plan.claim.number, "call": call}
+    logger.warning("yandex.carrier_record_busy %s", fields)
+    try:
+        with transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT current_setting('lock_timeout')")
+                row = cursor.fetchone()
+            previous = str(row[0]) if row else "0"
+            _set_lock_timeout(f"{max(1, int(CARRIER_MARK_WAIT.total_seconds() * 1000))}ms")
+            write()
+            _set_lock_timeout(previous)
+    except OperationalError as exc:
+        if getattr(exc.__cause__, "sqlstate", None) != LOCK_NOT_AVAILABLE:
+            raise
+        logger.error("yandex.carrier_marker_lost %s", fields)
+
+
+def _carrier_already_cancelled(
+    plan: _CarrierPlan, status: str, *, quoted: int | None = None
+) -> CarrierCancel:
+    """Yandex shows the claim ``cancelled*`` although this attempt's own cancel did not just do it (an earlier
+    attempt's cancel, or ours refused while the claim got cancelled all the same): txn B counts the fee of a
+    paid one nobody counted yet — ``quoted``, the price this attempt's ``cancel-info`` gave, else the one
+    stored when our cancel was sent — and audits ``already_cancelled``; the order cancel follows."""
     with transaction.atomic():
         order = lock_order(plan.order_id, wait=ADMIN_LOCK_WAIT)
-        if fee is not None:
-            delivery_services.record_cancel_fee(order.pk, plan.claim.id, fee, paid_fee=order.delivery_fee)
+        fee = None
+        if status == delivery_services.PAID_CANCEL_STATUS:
+            fee = delivery_services.count_cancel_fee(
+                order.pk, plan.claim.id, paid_fee=order.delivery_fee, quoted=quoted
+            )
+        extra = {"cancel_fee": fee} if fee is not None else {}
+        _audit_carrier(order, plan, "already_cancelled", status=status, **extra)
+    return CarrierCancel(CARRIER_CANCELLED, plan.claim.number, cancel_fee=fee)
+
+
+def _carrier_cancelled(
+    plan: _CarrierPlan, latest: Claim | None, cancel_state: str, fee: int | None
+) -> CarrierCancel:
+    """A sent cancel: Yandex shows ``cancelled*`` → the order cancel proceeds (txn B counts a paid fee no
+    writer counted yet and audits it); not yet → 409 ``conflict`` with the stamp kept (a retry only reads
+    again; the review beat opens ``cancel_incomplete`` if Yandex then shows it cancelled and nobody
+    finishes the cancel). ``fee`` = the fee known counted so far (``None`` after a lost answer)."""
+    if latest is None or latest.status not in delivery_yandex.CANCELLED_STATUSES:
+        _cancel_pending(plan, cancel_state, fee)
+    with transaction.atomic():
+        order = lock_order(plan.order_id, wait=ADMIN_LOCK_WAIT)
+        if latest.status == delivery_services.PAID_CANCEL_STATUS:
+            fee = delivery_services.count_cancel_fee(order.pk, plan.claim.id, paid_fee=order.delivery_fee)
         _audit_carrier(
-            order, plan, "cancelled", cancel_state=terms.state, cancel_fee=fee, status=latest.status
+            order, plan, "cancelled", cancel_state=cancel_state, cancel_fee=fee, status=latest.status
         )
-    return CarrierCancel(CARRIER_CANCELLED, plan.claim.number, terms.state, fee)
+    return CarrierCancel(CARRIER_CANCELLED, plan.claim.number, cancel_state, fee)
+
+
+def _cancel_pending(plan: _CarrierPlan, cancel_state: str, fee: int | None) -> NoReturn:
+    """Yandex has the cancel but does not show it yet: the stamp stays, nothing else changes."""
+    _record_carrier(plan, "cancel_pending", cancel_state=cancel_state, cancel_fee=fee)
+    raise Conflict(MESSAGE_YANDEX_CANCEL_PENDING)
 
 
 _RETURN_STATUSES = frozenset(
@@ -1918,34 +2090,66 @@ _RETURN_STATUSES = frozenset(
 
 
 def _carrier_return(port: YandexDeliveryPort, plan: _CarrierPlan, snapshot: Claim) -> CarrierCancel:
-    """After pickup: ``claims/return`` to point B's id, then a re-read; ``returning…`` → the cancel proceeds
-    (refund), else 409 ``return_requested`` with ``return_pending`` open."""
+    """After pickup: ``claims/return`` to point B's id — recorded as sent (a ``return_requested`` event) the
+    moment Yandex answered it or its outcome became unknown, so it is never sent twice — then the re-read
+    (:func:`_carrier_return_read`). Only a call that provably started nothing clears the stamp: not
+    processed, or refused while Yandex shows no return."""
     point = snapshot.destination_point_id or plan.claim.destination_point_id
     if point is None:
         _carrier_refused(plan, "no_point", NotCancellable(MESSAGE_YANDEX_RETURN_REFUSED))
-    wanted = _RETURN_STATUSES | delivery_yandex.DELIVERED_STATUSES
-    latest: Claim | None = None
     try:
         port.request_return(snapshot.claim_id, point, RETURN_COMMENT)
     except YandexUnavailable as exc:
-        if not exc.outcome_unknown:
+        if not exc.outcome_unknown:  # nothing reached Yandex
             _carrier_refused(plan, "unavailable", ProviderUnavailable(MESSAGE_YANDEX_UNAVAILABLE), exc)
-        latest = _carrier_reread(port, plan, wanted)
-        if latest is None or latest.status not in _RETURN_STATUSES:
-            _carrier_refused(plan, "unavailable", ProviderUnavailable(MESSAGE_YANDEX_UNAVAILABLE), exc)
+        _record_return_sent(plan)  # the return may have been started: never resent, the claim says
     except YandexError as exc:  # not_allowed, state_mismatch, inactive claim: no return was started
-        _carrier_reread(port, plan, ())
+        latest = _carrier_reread(port, plan, _RETURN_STATUSES)
+        if latest is not None and latest.status in _RETURN_STATUSES:  # coming back all the same
+            return _carrier_returning(plan, latest, requested=False)
         _carrier_refused(plan, "return_refused", NotCancellable(MESSAGE_YANDEX_RETURN_REFUSED), exc)
     else:
-        latest = _carrier_reread(port, plan, wanted)
-    with transaction.atomic():
-        lock_order(plan.order_id, wait=ADMIN_LOCK_WAIT)
-        delivery_services.record_return_request(plan.order_id, plan.claim.id, at=timeutils.now())
+        _record_return_sent(plan)
+    return _carrier_return_read(port, plan)
+
+
+def _record_return_sent(plan: _CarrierPlan) -> None:
+    """Right after ``claims/return`` answered (or its outcome became unknown), before any re-read, in its own
+    short transaction: the ``return_requested`` marker (idempotent). The Order lock waits at most
+    :data:`CARRIER_RECORD_WAIT`; past it the marker alone is written without it (:func:`_mark_without_order`)
+    and the answer is 409 ``conflict`` with the stamp kept: the next attempt finds the marker, only re-reads
+    and opens ``return_pending``. The residual crash window of :func:`_record_cancel_sent` applies here too
+    (no marker: a duplicate ``claims/return`` Yandex refuses while ``claims/info`` lags clears the stamp)."""
+    now = timeutils.now()
+    try:
+        with transaction.atomic():
+            order = lock_order(plan.order_id, wait=CARRIER_RECORD_WAIT)
+            # the marker, committed only after Yandex answered: a crash before this commit loses it
+            delivery_services.record_return_request(order.pk, plan.claim.id, at=now)
+            return
+    except Conflict as exc:  # only lock_order raises it here: the order stayed busy
+        busy = exc
+    _mark_without_order(
+        plan, _RETURN, lambda: delivery_services.record_return_request(plan.order_id, plan.claim.id, at=now)
+    )
+    raise Conflict(MESSAGE_YANDEX_RETURN_REQUESTED) from busy
+
+
+def _carrier_return_read(port: YandexDeliveryPort, plan: _CarrierPlan) -> CarrierCancel:
+    """A sent return (now, or by an earlier attempt): read until Yandex shows it — ``returning…`` → the
+    cancel proceeds (refund) with ``return_pending`` open; delivered meanwhile → 409 ``not_cancellable``;
+    else 409 ``return_requested`` (order unchanged, ``return_pending`` open, stamp kept)."""
+    latest = _carrier_reread(port, plan, _RETURN_STATUSES | delivery_yandex.DELIVERED_STATUSES)
     if latest is not None and latest.status in delivery_yandex.DELIVERED_STATUSES:
         _carrier_refused(plan, "delivered", NotCancellable(MESSAGE_YANDEX_DELIVERED))
     if latest is not None and latest.status in _RETURN_STATUSES:
         return _carrier_returning(plan, latest, requested=True)
-    with transaction.atomic():  # Yandex has not confirmed the return yet: the order stays as it is
+    _return_pending(plan, latest)
+
+
+def _return_pending(plan: _CarrierPlan, latest: Claim | None) -> NoReturn:
+    """Yandex has the return but does not show it yet: the order stays as it is, ``return_pending`` open."""
+    with transaction.atomic():
         order = lock_order(plan.order_id, wait=ADMIN_LOCK_WAIT)
         _ensure_return_pending(order.pk, plan.claim.number, CODE_RETURN_REQUESTED)
         _audit_carrier(order, plan, "return_requested", status=latest.status if latest is not None else "")
@@ -1973,12 +2177,14 @@ def confirm_return(order_id: int, actor_id: int, *, note: str = "", request: Any
     (source ``admin``, once per claim), the open ``return_pending`` resolved by the actor (audited
     ``delivery.issue_resolved``), audit ``order.return_confirmed``. A cancelled order also closes its failed
     delivery / cancel issues; an open order stays as it is (its cancel stamp is cleared: staff dispatch
-    again or cancel). Not returning → 409 ``invalid_transition``; confirmed already → 409 ``conflict``."""
+    again or cancel). The return is the one of the claim that carried the parcel (``return_claim``), not of
+    a later re-dispatch that summoned nobody. Not returning → 409 ``invalid_transition``; confirmed already
+    → 409 ``conflict``."""
     text = note.strip()[: delivery_services.ISSUE_NOTE_MAX]
     with transaction.atomic():
         order = lock_order(order_id, wait=ADMIN_LOCK_WAIT)
         view = delivery_selectors.yandex_cancel_view(order.pk)
-        if view is None or view.claim is None or not view.returning:
+        if view is None or view.return_claim is None or not view.returning:
             raise InvalidTransition(MESSAGE_RETURN_NOT_CONFIRMABLE)
         if view.return_confirmed:
             raise Conflict(MESSAGE_RETURN_CONFIRMED)
@@ -1987,7 +2193,7 @@ def confirm_return(order_id: int, actor_id: int, *, note: str = "", request: Any
         delivery_services.confirm_return(
             order.pk, actor_id=actor_id, at=now, clear_cancel_request=not cancelled
         )
-        claim = view.claim
+        claim = view.return_claim  # shipment_returned of that claim: deduplicated with Yandex's returned*
         record_event_once(
             order,
             _E.SHIPMENT_RETURNED,

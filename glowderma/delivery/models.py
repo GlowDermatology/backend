@@ -615,6 +615,13 @@ class CourierClaim(TimeStampedModel):
     approved_price = models.BigIntegerField(null=True, blank=True, verbose_name="tasdiqlangan narx")
     final_price = models.BigIntegerField(null=True, blank=True, verbose_name="yakuniy narx")
     cancel_fee = models.BigIntegerField(null=True, blank=True, verbose_name="bekor qilish to‘lovi")
+    # our claims/cancel was sent (Yandex answered it, or its outcome is unknown): never sent a second time;
+    # cancel_state = the terms it was sent with (free | paid)
+    cancel_sent_at = models.DateTimeField(null=True, blank=True, verbose_name="bekor qilish yuborilgan")
+    cancel_state = models.CharField(max_length=16, blank=True, verbose_name="bekor qilish sharti")
+    # so'm: the claims/cancel-info price of the paid cancel we sent; it becomes cancel_fee once Yandex shows
+    # the claim cancelled_with_payment, also when the answer of claims/cancel was lost
+    cancel_price = models.BigIntegerField(null=True, blank=True, verbose_name="bekor qilish narxi")
     # Yandex warning codes of the estimate (a list of strings)
     warnings = models.JSONField(
         default=list, blank=True, encoder=DjangoJSONEncoder, verbose_name="ogohlantirishlar"

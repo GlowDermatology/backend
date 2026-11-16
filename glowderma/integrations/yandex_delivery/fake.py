@@ -30,11 +30,18 @@ Every rule may be overridden through ``scenario`` — ``Order.metadata["fake"]["
 
 ``accept(claim_id, version)``
     ``scenario["accept"]``: ``"conflict"`` → :class:`YandexConflict` ``inappropriate_status``; ``"down"`` →
-    :class:`YandexUnavailable` (nothing accepted, ``outcome_unknown`` false); ``"expired"`` → answered
-    ``accepted``, but the next read shows ``failed`` with error code ``offer_expired`` (FAQ 14). A claim that
-    is not ``ready_for_approval`` → ``inappropriate_status``, another version → ``old_version``.
+    :class:`YandexUnavailable` (nothing accepted, ``outcome_unknown`` false); ``"down_once"`` → the same for
+    the claim's first accept only (a later one goes through); ``"old_version_once"`` → the claim's first
+    accept finds it edited: its version moves on by one (the next read shows it) and :class:`YandexConflict`
+    ``old_version``, a later accept of the new version goes through; ``"timeout"`` →
+    :class:`YandexUnavailable` with ``outcome_unknown`` true although nothing was accepted (the claim stays
+    ``ready_for_approval``); ``"expired"`` → answered ``accepted``, but the next read shows ``failed`` with
+    error code ``offer_expired`` (FAQ 14). A claim that is not ``ready_for_approval`` →
+    ``inappropriate_status``, another version → ``old_version``.
 
 ``claim(claim_id)`` / ``claims(ids)``
+    ``scenario["info"] == "not_found"`` → ``claim`` raises :class:`YandexRejected` ``not_found`` for a claim
+    the fake does hold (``claims`` is unaffected; the poll reads without a scenario anyway). Otherwise
     each read of an accepted claim applies the next status of ``scenario["statuses"]`` (default
     :data:`DEFAULT_SCRIPT`: ``performer_lookup`` → ``performer_found`` → ``pickup_arrived`` → ``pickuped`` →
     ``delivery_arrived`` → ``delivered`` → ``delivered_finish``); the courier's name and car appear from
@@ -159,6 +166,7 @@ class _Remote:
     warnings: tuple[str, ...] = ()
     error_codes: tuple[str, ...] = ()
     expired: bool = False
+    accepts: int = 0  # accept calls that reached this claim ("down_once" / "old_version_once")
 
 
 _claims: dict[str, _Remote] = {}
@@ -219,6 +227,7 @@ def _snapshot(remote: _Remote) -> Claim:
         destination_point_id=protocol.DESTINATION_POINT_ID,
         external_order_id=remote.external_order_id,
         taxi_class=remote.taxi_class,
+        item_extra_ids=(remote.external_order_id,),
     )
 
 
@@ -386,6 +395,8 @@ class FakeYandexDelivery:
         self._unavailable_in_production()
         with _lock:
             remote = _known(claim_id)
+            if self.scenario.get("info") == "not_found":
+                raise YandexRejected("not_found", "Yandex does not know this claim (fake: info not_found)")
             self._read_step(remote)
             return _snapshot(remote)
 
@@ -412,8 +423,19 @@ class FakeYandexDelivery:
         answer = self.scenario.get("accept")
         if answer == "down":
             raise YandexUnavailable("Yandex did not answer (fake: accept down)", outcome_unknown=False)
+        if answer == "timeout":  # the answer is lost; this fake accepted nothing
+            raise YandexUnavailable("Yandex did not answer in time (fake: accept timeout)")
         with _lock:
             remote = _known(claim_id)
+            remote.accepts += 1
+            if answer == "down_once" and remote.accepts == 1:
+                raise YandexUnavailable(
+                    "Yandex did not answer (fake: accept down once)", outcome_unknown=False
+                )
+            if answer == "old_version_once" and remote.accepts == 1:
+                remote.version += 1
+                remote.updated_ts = timeutils.now()
+                raise YandexConflict("old_version", "The claim was edited meanwhile (fake)")
             if answer == "conflict" or remote.status != "ready_for_approval":
                 raise YandexConflict("inappropriate_status", "The claim is not awaiting confirmation (fake)")
             if version != remote.version:

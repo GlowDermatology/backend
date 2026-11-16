@@ -25,8 +25,9 @@ from typing import Any, TypedDict
 
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
-from django.db.models import Case, Count, Exists, F, OuterRef, Q, QuerySet, Value, When
-from django.db.models.functions import Coalesce
+from django.db.models import Case, Count, Exists, F, OuterRef, Q, QuerySet, TextField, Value, When
+from django.db.models.fields.json import KT
+from django.db.models.functions import Cast, Coalesce
 
 from glowderma.core import enums, integration_modes, timeutils
 from glowderma.core.consistency import Finding, finding
@@ -495,6 +496,8 @@ class ClaimRow:
     current: bool  # the shipment's current claim
     destination_point_id: int | None = None  # Yandex's id of point B (what claims/return needs)
     cancel_fee: int | None = None  # so'm: the fee of a paid cancellation we asked for
+    cancel_sent_at: datetime | None = None  # our claims/cancel was sent (answered or outcome unknown)
+    cancel_state: str = ""  # the terms it was sent with (free | paid)
 
     @property
     def is_open(self) -> bool:
@@ -531,6 +534,8 @@ def _claim_row(row: CourierClaim) -> ClaimRow:
         current=row.shipment.claim_id == row.pk,
         destination_point_id=row.destination_point_id,
         cancel_fee=row.cancel_fee,
+        cancel_sent_at=row.cancel_sent_at,
+        cancel_state=row.cancel_state,
     )
 
 
@@ -609,6 +614,24 @@ def claims_without_final_price(ended_before: datetime) -> list[tuple[int, int]]:
     return [(int(pk), int(order_id)) for pk, order_id in rows]
 
 
+def unanswered_claims(ended_before: datetime) -> list[tuple[int, int]]:
+    """Claims Yandex knows that ended before ``ended_before`` without any acceptance yet are still unsettled
+    — closed by a dispatch that could not rule out an acceptance, so the poll kept reading them, and Yandex
+    has shown no new status since (a new one settles them through the writer): ``(claim pk, order id)``
+    (the poll settles them with ``no_answer`` after 24 h)."""
+    rows = (
+        CourierClaim.objects.filter(
+            settled_at__isnull=True,
+            ended_at__lt=ended_before,
+            accepted_at__isnull=True,
+        )
+        .exclude(claim_id="")
+        .order_by("id")
+        .values_list("id", "shipment__order_id")
+    )
+    return [(int(pk), int(order_id)) for pk, order_id in rows]
+
+
 # --- Yandex Delivery: cancellation, returns (plan §3.8) -----------------------------------------------------
 
 
@@ -635,11 +658,67 @@ def return_confirmed(order_id: int, claim_number: int) -> bool:
     ).exists()
 
 
+def return_requested(shipment_id: int, claim_id: str) -> bool:
+    """Our ``claims/return`` of Yandex claim ``claim_id`` was sent (Yandex answered it, or its outcome is
+    unknown): its ``return_requested`` event. Such a return is never sent a second time."""
+    if not claim_id:
+        return False
+    return ShipmentEvent.objects.filter(
+        shipment_id=shipment_id, kind=ShipmentEvent.Kind.RETURN_REQUESTED, payload__claim_id=claim_id
+    ).exists()
+
+
+@dataclass(frozen=True, slots=True)
+class ReturnClaim:
+    """The claim that carried the parcel last: the shipment's highest-numbered claim that took it (its own
+    status or one of its ``claim_status`` events is a picked-up one). A return to confirm belongs to it,
+    whichever claim a later dispatch made current (a re-dispatch that summoned nobody never carried it)."""
+
+    id: int
+    number: int
+    claim_id: str
+    status: str
+    accepted_at: datetime | None
+    confirmed: bool  # staff confirmed its parcel back at the warehouse (its ``returned`` event)
+
+
+def return_claim(shipment_id: int) -> ReturnClaim | None:
+    """The shipment's :class:`ReturnClaim` (``None`` when no claim ever took the parcel); one query."""
+    took = (
+        ShipmentEvent.objects.filter(
+            shipment_id=shipment_id,
+            kind=ShipmentEvent.Kind.CLAIM_STATUS,
+            carrier_status__in=list(yandex_statuses.PICKED_UP),
+        )
+        .annotate(event_claim=KT("payload__claim_id"))
+        .filter(event_claim=OuterRef("claim_id"))
+    )
+    confirmed = (
+        ShipmentEvent.objects.filter(shipment_id=shipment_id, kind=ShipmentEvent.Kind.RETURNED)
+        .annotate(event_number=KT("payload__claim_number"))
+        .filter(event_number=Cast(OuterRef("number"), output_field=TextField()))
+    )
+    row = (
+        CourierClaim.objects.filter(shipment_id=shipment_id)
+        .exclude(claim_id="")
+        .annotate(took=Exists(took), confirmed=Exists(confirmed))
+        .filter(Q(status__in=list(yandex_statuses.PICKED_UP)) | Q(took=True))
+        .order_by("-number")
+        .values_list("pk", "number", "claim_id", "status", "accepted_at", "confirmed")
+        .first()
+    )
+    if row is None:
+        return None
+    pk, number, claim_id, status, accepted_at, is_confirmed = row
+    return ReturnClaim(int(pk), int(number), str(claim_id), str(status), accepted_at, bool(is_confirmed))
+
+
 @dataclass(frozen=True, slots=True)
 class YandexCancelView:
     """What the carrier-aware cancel decides from (``commerce.services.cancel_at_carrier`` and the guard of
     ``cancel_order``): the Yandex shipment's stage, its current claim, whether that claim took the parcel
-    and whether staff confirmed its return."""
+    and — while the parcel is returning / back — the claim that carried it and whether staff confirmed its
+    return."""
 
     shipment_id: int
     state: str  # Shipment.State
@@ -648,7 +727,8 @@ class YandexCancelView:
     claim: ClaimRow | None  # the current claim
     claim_open: bool  # a claim of the shipment is open (only the current one can be)
     picked_up: bool  # the current claim took the parcel (now or earlier)
-    return_confirmed: bool  # staff confirmed the current claim's parcel back at the warehouse
+    return_confirmed: bool  # staff confirmed the returning parcel back at the warehouse (its return claim)
+    return_claim: ReturnClaim | None = None  # the claim that carried the parcel (read at the return stages)
 
     @property
     def returning(self) -> bool:
@@ -667,6 +747,7 @@ def yandex_cancel_view(order_id: int) -> YandexCancelView | None:
     if shipment is None:
         return None
     claim = claim_row(shipment.claim_id) if shipment.claim_id is not None else None
+    returned = return_claim(shipment.pk) if shipment.stage in yandex_statuses.RETURN_STAGES else None
     return YandexCancelView(
         shipment_id=shipment.pk,
         state=shipment.state,
@@ -675,7 +756,8 @@ def yandex_cancel_view(order_id: int) -> YandexCancelView | None:
         claim=claim,
         claim_open=bool(shipment.claim_open),  # type: ignore[attr-defined]
         picked_up=claim is not None and claim_picked_up(shipment.pk, claim.claim_id, claim.status),
-        return_confirmed=claim is not None and return_confirmed(order_id, claim.number),
+        return_confirmed=returned is not None and returned.confirmed,
+        return_claim=returned,
     )
 
 
@@ -712,6 +794,7 @@ class CancelRequest:
     claim_number: int | None
     claim_status: str
     claim_ended: bool
+    claim_error_code: str = ""  # ``cancel_requested``: withdrawn for the cancel (never accepted)
 
 
 def cancel_requests(requested_before: datetime) -> list[CancelRequest]:
@@ -732,6 +815,7 @@ def cancel_requests(requested_before: datetime) -> list[CancelRequest]:
             claim_number=row.claim.number if row.claim is not None else None,
             claim_status=row.claim.status if row.claim is not None else "",
             claim_ended=row.claim is not None and row.claim.ended_at is not None,
+            claim_error_code=row.claim.error_code if row.claim is not None else "",
         )
         for row in rows
     ]
@@ -788,7 +872,10 @@ __all__ = [
     "slow_courier_searches",
     "yandex_orders_at",
     "claim_picked_up",
+    "ReturnClaim",
+    "return_claim",
     "return_confirmed",
+    "return_requested",
     "yandex_cancel_view",
     "claim_by_claim_id",
     "claim_by_request",
@@ -796,6 +883,7 @@ __all__ = [
     "claims_without_final_price",
     "current_claim",
     "previous_claim",
+    "unanswered_claims",
     "unsettled_claims",
     "yandex_shipment",
     "IssueFilters",

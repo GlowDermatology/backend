@@ -4421,8 +4421,16 @@ msgid "bekor qilish izohi"
 msgstr "cancellation note"
 
 #: model metadata
+msgid "bekor qilish narxi"
+msgstr "cancellation price"
+
+#: model metadata
 msgid "bekor qilish sababi"
 msgstr "cancellation reason"
+
+#: model metadata
+msgid "bekor qilish sharti"
+msgstr "cancellation terms"
 
 #: model metadata
 msgid "bekor qilish so‘ralgan"
@@ -4435,6 +4443,10 @@ msgstr "cancellation fee"
 #: model metadata
 msgid "bekor qilish yozuvi"
 msgstr "reversal entry"
+
+#: model metadata
+msgid "bekor qilish yuborilgan"
+msgstr "cancellation sent"
 
 #: model metadata
 msgid "bio (en)"

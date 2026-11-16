@@ -11,11 +11,22 @@ stopped:
   (``claims/create`` with the claim's own ``request_id`` — a retry after a timeout returns the same claim);
 * a claim with an id → step 3 (wait for the estimate) and step 4 (warnings / pricing policy → review);
 * step 5 stamps ``accept_sent_at`` and commits **before** ``claims/accept`` is sent: a claim that has the
-  stamp is only ever re-read (never a second accept), until Yandex moves it past ``ready_for_approval``.
+  stamp is only ever re-read (never a second accept), until Yandex moves it past ``ready_for_approval`` —
+  unless Yandex provably did not take the accept ("not processed", or 409 ``old_version``): the stamp is
+  released and the next run re-checks the offer and sends one accept with the fresh version. Any other 409,
+  or an accept still not visible after :data:`ACCEPT_CONFIRM_WINDOW` (or, once the offer has expired,
+  :data:`INFO_LAG` after it was sent), ends the dispatch (``dispatch_failed``) so staff can call a courier
+  again: the claim is closed — settled once Yandex took the free cancel (or when Yandex refused the accept
+  and then refused to show the claim), else left unsettled and still polled, since Yandex may yet show an
+  acceptance.
 
 Outcomes the outbox understands: a transport failure that may have reached Yandex raises (retried with
-backoff, ``dead`` after 10 attempts → issue ``dispatch_unknown``); "not processed" (429, 401/403, …) and
+backoff, ``dead`` after 10 attempts → an urgent ``dispatch_unknown`` once the accept was sent; any other
+claim summons nobody and is closed instead, ``dispatch_failed``); "not processed" (429, 401/403, …) and
 "wait" (estimating, acceptance not visible yet, the order busy) defer (``RetryLater``, no attempt spent).
+While a carrier cancel is under way a dispatch run never sends ``claims/cancel`` for a claim whose accept
+was sent (:func:`_end_unaccepted` only closes it as ``cancel_requested``: the cancel owns it at Yandex); a
+claim with no accept sent still gets the best-effort free cancel when the run stops for the cancel.
 Logs carry ids, codes and amounts only — never the courier's or the customer's phone, name or address.
 """
 
@@ -69,9 +80,14 @@ ESTIMATING = frozenset({"new", "estimating"})
 ESTIMATE_READS = 3
 ESTIMATE_PAUSE_SECONDS = 1.0
 ESTIMATE_GIVE_UP = timedelta(minutes=5)
-# Step 5: after the accept, re-read until the claim moves; still ``ready_for_approval`` this long after the
-# accept was sent → issue ``dispatch_unknown`` (the claim stays open and polled; nothing is resent).
+# Step 5: after the accept, re-read until the claim moves; still before acceptance this long after the
+# accept was sent (longer than the 10-minute offer) → the dispatch ends, ``dispatch_failed``
+# ``accept_unconfirmed`` (nothing is resent). A claims/info refusal (4xx) is retried this long, then the
+# claim is closed unsettled (still polled) with an urgent ``dispatch_unknown`` ``not_found``.
 ACCEPT_CONFIRM_WINDOW = timedelta(minutes=15)
+# claims/info may lag 5–30 s (docs): a read still before acceptance this long after the accept, once the
+# offer has expired (Yandex then only fails a late confirm), also ends the dispatch.
+INFO_LAG = timedelta(minutes=2)
 RETRY_DELAY = timedelta(seconds=10)
 BUSY_DELAY = timedelta(seconds=15)
 # Yandex answered "not processed" (429, 401/403, 408/425, a redirect): nothing happened, try again later.
@@ -85,6 +101,9 @@ SYNC_STALE_WINDOW = timedelta(minutes=2)
 POLL_LOCK_KEY = "gd:lock:poll_yandex"
 POLL_LOCK_SECONDS = 300
 COST_UNKNOWN_AFTER = timedelta(hours=24)
+# A claim the dispatch closed unsettled (never accepted, still polled in case Yandex took an accept we could
+# not confirm) whose status never moves is settled ``no_answer`` this long after its end: polling stops.
+UNANSWERED_AFTER = timedelta(hours=24)
 
 # Dispatch failure codes of our own (Yandex's codes pass through as they are).
 CODE_ESTIMATING_TIMEOUT = "estimating_timeout"
@@ -98,6 +117,16 @@ CODE_CANCEL_REQUESTED = "cancel_requested"
 CODE_OFFER_MISSING = "offer_missing"
 CODE_WARNINGS = "warnings"
 CODE_NOT_FOUND = "not_found"
+CODE_OLD_VERSION = "old_version"  # Yandex's 409 of an accept for another claim version
+# The ``dispatch_unknown`` codes that are about the current claim's accept (resolved when it ends unaccepted);
+# ``unexpected_acceptance`` (another claim Yandex accepted) and ``foreign_claim`` are never resolved here.
+UNKNOWN_ACCEPT_CODES = (CODE_ACCEPT_UNCONFIRMED, CODE_DEAD_LETTER)
+
+# What the best-effort free cancel of a never-accepted claim got (:func:`_cancel_if_unaccepted`).
+_CANCEL_TAKEN = "taken"
+_CANCEL_REFUSED = "refused"
+_CANCEL_UNANSWERED = "unanswered"
+_CANCEL_SKIPPED = "skipped"
 
 _sleep: Callable[[float], None] = time.sleep  # a module attribute so tests skip the pauses
 
@@ -137,17 +166,27 @@ def store_tracking_link(port: YandexDeliveryPort, order_id: int, claim_pk: int, 
     return url
 
 
-def _cancel_if_unaccepted(port: YandexDeliveryPort, order_id: int, snapshot: Claim) -> None:
+def _cancel_if_unaccepted(port: YandexDeliveryPort, order_id: int, snapshot: Claim) -> str:
     """Best effort: cancel a claim Yandex shows as never accepted (it summons nobody; this keeps Yandex's
-    list clean and stops a lagging acceptance). Free terms only."""
+    list clean and stops a lagging acceptance). Free terms only. Returns what Yandex made of it:
+    :data:`_CANCEL_TAKEN` (claims/cancel answered), :data:`_CANCEL_REFUSED` (the terms are not free, or
+    Yandex refused cancel-info / the cancel — it no longer treats the claim as unaccepted),
+    :data:`_CANCEL_UNANSWERED` (no answer; it may or may not have been cancelled) or
+    :data:`_CANCEL_SKIPPED` (the claim is past acceptance: nothing asked)."""
     if snapshot.status not in delivery_yandex.PRE_ACCEPT:
-        return
+        return _CANCEL_SKIPPED
     try:
         terms = port.cancel_terms(snapshot.claim_id)
-        if terms.state == CANCEL_FREE:
-            port.cancel(snapshot.claim_id, snapshot.version, CANCEL_FREE)
+        if terms.state != CANCEL_FREE:
+            return _CANCEL_REFUSED
+        port.cancel(snapshot.claim_id, snapshot.version, CANCEL_FREE)
+    except YandexUnavailable as exc:
+        logger.info("yandex.cancel_unaccepted_failed %s", {"order_id": order_id, "error": type(exc).__name__})
+        return _CANCEL_UNANSWERED
     except YandexError as exc:
         logger.info("yandex.cancel_unaccepted_failed %s", {"order_id": order_id, "error": type(exc).__name__})
+        return _CANCEL_REFUSED
+    return _CANCEL_TAKEN
 
 
 def _cancel_unaccepted(port: YandexDeliveryPort, order_id: int, claim_id: str) -> None:
@@ -274,25 +313,53 @@ def _read(port: YandexDeliveryPort, claim_id: str) -> Claim:
         _not_processed(exc, "claims/info")
 
 
-def _close(plan: _Plan, code: str, *, issue: str | None, stage: str | None = None, **details: Any) -> None:
-    """End the dispatch of ``plan.claim`` without a courier: the claim is closed (``code``), the shipment
-    shows ``stage`` and staff get the ``issue`` (``dispatch_failed`` / ``dispatch_review`` /
-    ``dispatch_unknown``) with ``details`` (ids and amounts)."""
+def _close(
+    plan: _Plan,
+    code: str,
+    *,
+    issue: str | None,
+    stage: str | None = None,
+    urgent: bool = False,
+    settle: bool = True,
+    resolve_unknown: bool = False,
+    **details: Any,
+) -> bool:
+    """End the dispatch of ``plan.claim`` without a courier: the claim is closed (``code``; ``settle=False``
+    keeps it polled), the shipment shows ``stage`` and staff get the ``issue`` (``dispatch_failed`` /
+    ``dispatch_review`` / ``dispatch_unknown``, ``urgent``) with ``details`` (ids and amounts);
+    ``resolve_unknown`` closes an open ``dispatch_unknown`` about this claim's accept
+    (:data:`UNKNOWN_ACCEPT_CODES`). Re-checked under the Order lock: a claim a poll or callback saw accepted
+    meanwhile (a courier is coming), or one that ended meanwhile (its writer recorded what that means), is
+    left as it is — no stage, no issue. Returns whether the dispatch was ended here."""
     now = timeutils.now()
     with transaction.atomic():
         order = services.lock_order(plan.order_id)
-        delivery_services.close_claim(plan.claim.id, at=now, error_code=code)
+        claim = delivery_selectors.claim_row(plan.claim.id)
+        if claim is None or claim.accepted_at is not None:
+            return False
+        if not delivery_services.close_claim(plan.claim.id, at=now, error_code=code, settle=settle):
+            return False
         if stage is not None:
             delivery_services.set_dispatch_stage(
                 plan.order_id, plan.claim.id, stage=services.parked_stage(order, stage), at=now
             )
         if issue is not None:
             services.open_delivery_issue(
-                plan.order_id, issue, code, details={"claim_number": plan.claim.number, **details}
+                plan.order_id,
+                issue,
+                code,
+                urgent=urgent,
+                details={"claim_number": plan.claim.number, **details},
             )
+        if resolve_unknown:
+            for unknown in UNKNOWN_ACCEPT_CODES:
+                delivery_services.resolve_kind(
+                    plan.order_id, _I.DISPATCH_UNKNOWN, services.RESOLVED_BY_STATUS_NOTE, code=unknown
+                )
     logger.warning(
         "yandex.dispatch_stopped %s", {"order_id": plan.order_id, "claim": plan.claim.number, "code": code}
     )
+    return True
 
 
 def _fail(port: YandexDeliveryPort, plan: _Plan, code: str, *, claim_id: str = "") -> None:
@@ -339,6 +406,18 @@ def _settle_previous(port: YandexDeliveryPort, plan: _Plan) -> bool:
     return False
 
 
+def _foreign(plan: _Plan, snapshot: Claim) -> bool:
+    """Whether the claim ``claims/create`` returned names another order: an order reference Yandex echoes
+    (point B's ``external_order_id``, an item's ``extra_id`` — we set both to the order id) that is not ours.
+    The echo is optional in the documentation, so a claim that echoes neither is ours (it came back for our
+    own ``request_id``); that is logged, WARNING ``yandex.claim_ref_missing`` (ids only)."""
+    echoed = [ref for ref in (snapshot.external_order_id, *snapshot.item_extra_ids) if ref]
+    if not echoed:
+        logger.warning("yandex.claim_ref_missing %s", {"order_id": plan.order_id, "claim": plan.claim.number})
+        return False
+    return any(ref != str(plan.order_id) for ref in echoed)
+
+
 def _create(port: YandexDeliveryPort, plan: _Plan) -> Claim | None:
     """Step 2: ``claims/create`` with the claim's ``request_id``; the claim id is committed at once. ``None``
     when the dispatch ended here (a definitive refusal, or a claim that is not ours)."""
@@ -350,7 +429,7 @@ def _create(port: YandexDeliveryPort, plan: _Plan) -> Claim | None:
         return None
     except YandexUnavailable as exc:
         _not_processed(exc, "claims/create")
-    if snapshot.external_order_id != str(plan.order_id):
+    if _foreign(plan, snapshot):
         # a replayed request_id must return our own claim: never follow (or accept) anything else
         _close(plan, CODE_FOREIGN_CLAIM, issue=_I.DISPATCH_UNKNOWN, stage=_G.FAILED)
         logger.error("yandex.foreign_claim %s", {"order_id": plan.order_id, "claim": plan.claim.number})
@@ -482,44 +561,153 @@ def _decide_and_accept(port: YandexDeliveryPort, plan: _Plan, snapshot: Claim) -
             _close(plan, CODE_OFFER_EXPIRED, issue=_I.DISPATCH_FAILED, stage=_G.FAILED)
             return
         logger.warning("yandex.accept_conflict %s", {"order_id": plan.order_id, "code": exc.code[:64]})
+        if exc.code == CODE_OLD_VERSION and _release_accept(plan):
+            # refused, our snapshot is stale: the next run re-reads and accepts the fresh version once
+            raise outbox.RetryLater(
+                RETRY_DELAY, "yandex claims/accept: old_version", give_up_after=NOT_PROCESSED_GIVE_UP
+            ) from exc
+        _accept_refused(port, plan, snapshot.claim_id, exc.code[:64] or "conflict")
+        return
     except YandexRejected as exc:  # 404: Yandex does not know the claim; nothing can come for it
         _close(plan, exc.code[:64] or CODE_NOT_FOUND, issue=_I.DISPATCH_FAILED, stage=_G.FAILED)
         return
-    except YandexUnavailable as exc:  # the outcome is unknown: never resent, the claim is re-read
+    except YandexUnavailable as exc:
         logger.warning(
             "yandex.accept_unanswered %s", {"order_id": plan.order_id, "unknown": exc.outcome_unknown}
         )
+        if not exc.outcome_unknown and _release_accept(plan):
+            _not_processed(exc, "claims/accept")  # provably not taken: sent again on a later run
+        # the outcome is unknown: never resent, the claim is re-read
     _confirm(port, plan, snapshot.claim_id)
+
+
+def _release_accept(plan: _Plan) -> bool:
+    """Yandex provably did not take the accept: ``accept_sent_at`` is released (the claim is still open and
+    not accepted), so a later run sends one accept again after re-checking the claim and the offer."""
+    with transaction.atomic():
+        services.lock_order(plan.order_id)
+        released = delivery_services.release_accept_sent(plan.claim.id)
+    if released:
+        logger.info("yandex.accept_released %s", {"order_id": plan.order_id, "claim": plan.claim.number})
+    return released
+
+
+def _carrier_cancel_started(plan: _Plan) -> bool:
+    """A carrier cancel of the order is under way: ``Shipment.cancel_requested_at`` is set, or our
+    ``claims/cancel`` of this claim was sent (``cancel_sent_at``). That flow owns the claim at Yandex and
+    never sends a second cancel, so no dispatch run may send one either (it cannot run meanwhile: both hold
+    the advisory lock ``yandex:{order_id}``)."""
+    claim = delivery_selectors.claim_row(plan.claim.id)
+    if claim is not None and claim.cancel_sent_at is not None:
+        return True
+    return Shipment.objects.filter(pk=plan.claim.shipment_id, cancel_requested_at__isnull=False).exists()
+
+
+def _end_unaccepted(port: YandexDeliveryPort, plan: _Plan, snapshot: Claim, code: str) -> None:
+    """Our accept went out but Yandex shows the claim still before acceptance (it refused the accept with a
+    409, or it is not visible after :data:`ACCEPT_CONFIRM_WINDOW` / past the offer's validity): no courier
+    is coming, so the dispatch ends like :func:`_fail` — a best-effort free cancel, the claim closed, stage
+    ``failed``, ``dispatch_failed`` (``code``) — and an open ``dispatch_unknown`` about this accept is
+    resolved: staff may dispatch again.
+
+    * Yandex took the free cancel → the claim is settled (nothing is left to follow);
+    * the terms are not free, or Yandex refused the cancel → that read was probably stale (Yandex has
+      moved the claim): one fresh read; past acceptance (or ended) → the writer records it and nothing
+      ends here; still before acceptance (or no answer) → closed **unsettled**;
+    * no answer to the cancel → closed unsettled.
+
+    An unsettled claim stays polled, so a late acceptance still raises ``unexpected_acceptance`` (a claim
+    whose status never moves is settled ``no_answer`` after :data:`UNANSWERED_AFTER`).
+
+    While a carrier cancel is under way (:func:`_carrier_cancel_started`) nothing is sent to Yandex, no
+    ``dispatch_failed`` opens and the stage stays: the claim is only closed unsettled as withdrawn for the
+    cancel (:data:`CODE_CANCEL_REQUESTED`), so the cancel's next attempt finds no open claim and finishes
+    the order cancel, and the review beat raises ``cancel_incomplete`` if nobody repeats it (an open claim
+    Yandex keeps before acceptance would leave that cancel answering 409 forever)."""
+    if _carrier_cancel_started(plan):
+        _close(plan, CODE_CANCEL_REQUESTED, issue=None, settle=False, resolve_unknown=True)
+        return
+    cancel = _cancel_if_unaccepted(port, plan.order_id, snapshot)
+    if cancel == _CANCEL_REFUSED:
+        try:
+            latest = port.claim(snapshot.claim_id)
+        except YandexError:
+            latest = None
+        if latest is not None:
+            _apply(plan, latest)
+            if latest.status not in delivery_yandex.PRE_ACCEPT:  # accepted (or ended): the writer has it
+                _accepted(port, plan, snapshot.claim_id, latest)
+                return
+    _close(
+        plan,
+        code,
+        issue=_I.DISPATCH_FAILED,
+        stage=_G.FAILED,
+        settle=cancel == _CANCEL_TAKEN,
+        resolve_unknown=True,
+    )
+
+
+def _accepted(port: YandexDeliveryPort, plan: _Plan, claim_id: str, snapshot: Claim) -> None:
+    """A re-read after the accept shows a status only an acceptance reaches: the writer recorded it; fetch
+    the tracking link."""
+    if snapshot.status in delivery_yandex.ACCEPT_IMPLIED:
+        logger.info("yandex.claim_accepted %s", {"order_id": plan.order_id, "claim": plan.claim.number})
+        store_tracking_link(port, plan.order_id, plan.claim.id, claim_id)
+
+
+def _accept_refused(port: YandexDeliveryPort, plan: _Plan, claim_id: str, code: str) -> None:
+    """``claims/accept`` answered 409 (``inappropriate_status``, ``state_mismatch``, …): Yandex did not take
+    it. One fresh read: still before acceptance → the dispatch ends (:func:`_end_unaccepted`, the 409's
+    code); moved on (accepted another way, failed, cancelled) → the writer recorded it; Yandex does not know
+    the claim → closed, ``dispatch_failed``. A read without an answer defers: the next run confirms."""
+    try:
+        snapshot = _read(port, claim_id)
+    except YandexRejected:
+        _close(plan, code, issue=_I.DISPATCH_FAILED, stage=_G.FAILED)
+        return
+    _apply(plan, snapshot)
+    if snapshot.status in delivery_yandex.PRE_ACCEPT:
+        _end_unaccepted(port, plan, snapshot, code)
+        return
+    _accepted(port, plan, claim_id, snapshot)
+
+
+def _accept_lapsed(snapshot: Claim, sent: datetime, now: datetime) -> bool:
+    """A claim still before acceptance this long after our accept will not be accepted by it:
+    :data:`ACCEPT_CONFIRM_WINDOW` has passed, or the offer has expired and the read is past
+    :data:`INFO_LAG` (a lagging ``claims/info`` cannot hide an acceptance any more)."""
+    elapsed = now - sent
+    if elapsed > ACCEPT_CONFIRM_WINDOW:
+        return True
+    return (
+        snapshot.offer_valid_until is not None and snapshot.offer_valid_until <= now and elapsed >= INFO_LAG
+    )
 
 
 def _confirm(port: YandexDeliveryPort, plan: _Plan, claim_id: str) -> None:
     """After the accept was sent: re-read until the status moves past ``ready_for_approval`` (the writer
     records the acceptance, the ``shipment_created`` event and the stage), then the tracking link. An
-    expired offer (``failed``) is recorded by the writer as ``dispatch_failed`` ``offer_expired``. Still not
-    moved after :data:`ACCEPT_CONFIRM_WINDOW` → ``dispatch_unknown`` (the claim stays open and polled)."""
+    expired offer (``failed``) is recorded by the writer as ``dispatch_failed`` ``offer_expired``. Still
+    before acceptance once :func:`_accept_lapsed` → the dispatch ends (:func:`_end_unaccepted`,
+    ``accept_unconfirmed``). A ``claims/info`` refusal (4xx) is retried within the window; after it the
+    claim is closed with stage ``failed`` but left unsettled — Yandex may have accepted it, so the poll keeps
+    reading it — and staff get an urgent ``dispatch_unknown`` ``not_found``."""
+    sent = plan.claim.accept_sent_at or timeutils.now()
     try:
         snapshot = _read(port, claim_id)
-    except YandexRejected:
-        _close(plan, CODE_NOT_FOUND, issue=_I.DISPATCH_UNKNOWN)
+    except YandexRejected as exc:
+        if timeutils.now() - sent <= ACCEPT_CONFIRM_WINDOW:
+            raise outbox.RetryLater(RETRY_DELAY, "yandex: claims/info refused after the accept") from exc
+        _close(plan, CODE_NOT_FOUND, issue=_I.DISPATCH_UNKNOWN, stage=_G.FAILED, urgent=True, settle=False)
         return
     _apply(plan, snapshot)
     if snapshot.status in delivery_yandex.PRE_ACCEPT:
-        sent = plan.claim.accept_sent_at or timeutils.now()
-        if timeutils.now() - sent > ACCEPT_CONFIRM_WINDOW:
-            with transaction.atomic():
-                services.lock_order(plan.order_id)
-                services.open_delivery_issue(
-                    plan.order_id,
-                    _I.DISPATCH_UNKNOWN,
-                    CODE_ACCEPT_UNCONFIRMED,
-                    urgent=True,
-                    details={"claim_number": plan.claim.number},
-                )
+        if _accept_lapsed(snapshot, sent, timeutils.now()):
+            _end_unaccepted(port, plan, snapshot, CODE_ACCEPT_UNCONFIRMED)
             return
         raise outbox.RetryLater(RETRY_DELAY, "yandex: waiting for the acceptance to show")
-    if snapshot.status in delivery_yandex.ACCEPT_IMPLIED:
-        logger.info("yandex.claim_accepted %s", {"order_id": plan.order_id, "claim": plan.claim.number})
-        store_tracking_link(port, plan.order_id, plan.claim.id, claim_id)
+    _accepted(port, plan, claim_id, snapshot)
 
 
 def _dispatch(order_id: int, request_id: str) -> None:
@@ -572,20 +760,44 @@ def dispatch(payload: dict[str, Any]) -> None:
 
 
 def on_dispatch_dead(payload: dict[str, Any]) -> None:
-    """The dispatch died (ten transport failures, or deferred too long): issue ``dispatch_unknown``
-    (urgent once the accept was sent: a courier may come). The claim stays open and polled; requeueing the
+    """The dispatch died (ten transport failures, or deferred too long). A claim with no accept outstanding
+    can summon nobody — Yandex never gave it an id (the accept needs the id, committed first), or no accept
+    was sent / Yandex provably did not take it (``accept_sent_at`` empty, e.g. 30 minutes of "not
+    processed" accepts) — so it is closed, stage ``failed``, issue ``dispatch_failed`` ``dead_letter``:
+    staff may dispatch again. A claim Yandex knows is left unsettled (still polled) and the next dispatch's
+    step 1 reads it again and cancels it; one without an id is settled at once. A claim whose accept was
+    sent stays open and polled with an urgent ``dispatch_unknown`` (a courier may come); requeueing the
     message resumes it."""
     order_id = int(payload["order_id"])
     claim = delivery_selectors.claim_by_request(str(payload["request_id"]))
     if claim is None or not claim.is_open:
         return
+    now = timeutils.now()
     with transaction.atomic():
-        services.lock_order(order_id)
+        order = services.lock_order(order_id)
+        claim = delivery_selectors.claim_row(claim.id)  # as it is under the lock
+        if claim is None or not claim.is_open:
+            return
+        if not claim.claim_id or (claim.accept_sent_at is None and claim.accepted_at is None):
+            delivery_services.close_claim(
+                claim.id, at=now, error_code=CODE_DEAD_LETTER, settle=not claim.claim_id
+            )
+            delivery_services.set_dispatch_stage(
+                order_id, claim.id, stage=services.parked_stage(order, _G.FAILED), at=now
+            )
+            services.open_delivery_issue(
+                order_id, _I.DISPATCH_FAILED, CODE_DEAD_LETTER, details={"claim_number": claim.number}
+            )
+            logger.warning(
+                "yandex.dispatch_stopped %s",
+                {"order_id": order_id, "claim": claim.number, "code": CODE_DEAD_LETTER},
+            )
+            return
         services.open_delivery_issue(
             order_id,
             _I.DISPATCH_UNKNOWN,
             CODE_DEAD_LETTER,
-            urgent=claim.accept_sent_at is not None,
+            urgent=True,
             details={"claim_number": claim.number},
         )
 
@@ -641,6 +853,7 @@ class PollResult:
     failed: bool = False
     apply_failed: int = 0
     settled_unknown: int = 0
+    settled_unanswered: int = 0
 
 
 def _settle_unknown_costs(now: datetime) -> int:
@@ -656,11 +869,25 @@ def _settle_unknown_costs(now: datetime) -> int:
     return count
 
 
+def _settle_unanswered(now: datetime) -> int:
+    """Claims a dispatch closed unsettled without any acceptance (kept polled in case Yandex took an accept
+    we could not confirm) whose status never moved within :data:`UNANSWERED_AFTER` of their end →
+    ``no_answer`` (cost 0): the poll stops reading them."""
+    count = 0
+    for claim_pk, order_id in delivery_selectors.unanswered_claims(now - UNANSWERED_AFTER):
+        with transaction.atomic():
+            order = services.lock_order(order_id)
+            if delivery_services.settle_unanswered(claim_pk, paid_fee=order.delivery_fee, at=timeutils.now()):
+                count += 1
+    return count
+
+
 def run_poll() -> PollResult:
     """One ``commerce.poll_yandex`` run (beat every 60 s, the reliable path of decision 10): single flight
     (``cache.add`` lock), ``claims/bulk_info`` over every claim with a Yandex id and no settled cost, each
     snapshot through ``apply_yandex_claim`` (``source="poll"``; one failing claim never stops the others),
-    then the 24 h ``cost_unknown`` settlement. Health: a failed ``bulk_info`` →
+    then the 24 h settlements (``cost_unknown``: a finished accepted claim without a price; ``no_answer``: a
+    closed, never accepted claim whose status never moved). Health: a failed ``bulk_info`` →
     ``delivery.services.record_yandex_failure("poll", code)`` (``IntegrationState(yandex)`` failure run; the
     third in a row alerts ``delivery.provider_failing``), an answered one → ``record_sync_success("yandex")``;
     no candidate → nothing written. A no-op while the
@@ -708,7 +935,14 @@ def _poll() -> PollResult:
                 store_tracking_link(port, order_id, result.claim_pk, snapshot.claim_id)
         integration_services.record_sync_success("yandex")
     settled = _settle_unknown_costs(now)
-    return PollResult(applied=applied, polled=len(rows), apply_failed=apply_failed, settled_unknown=settled)
+    unanswered = _settle_unanswered(now)
+    return PollResult(
+        applied=applied,
+        polled=len(rows),
+        apply_failed=apply_failed,
+        settled_unknown=settled,
+        settled_unanswered=unanswered,
+    )
 
 
 __all__ = [
@@ -716,7 +950,9 @@ __all__ = [
     "COST_UNKNOWN_AFTER",
     "DISPATCH_DEFERRAL_WINDOW",
     "ESTIMATE_GIVE_UP",
+    "INFO_LAG",
     "POLL_LOCK_KEY",
+    "UNANSWERED_AFTER",
     "PollResult",
     "claim_request",
     "dispatch",

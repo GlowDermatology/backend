@@ -329,21 +329,22 @@ def available_actions(order: Order, shipment: Shipment | None) -> dict[str, Any]
             order.fulfilment, order.status, shipment_state, pending, provider=provider
         ),
         "dispatch": provider == enums.DeliveryProvider.YANDEX and dispatch_blocker(order, shipment) is None,
-        "confirm_return": _return_confirmable(order, shipment),
+        "confirm_return": _return_confirmable(shipment),
     }
 
 
-def _return_confirmable(order: Order, shipment: Shipment | None) -> bool:
+def _return_confirmable(shipment: Shipment | None) -> bool:
     """``available_actions.confirm_return``: a Yandex parcel returning / back whose return staff have not
-    confirmed yet (one query, only at those stages)."""
+    confirmed yet — the return of the claim that carried it (``delivery.selectors.return_claim``), not of
+    a later re-dispatch that summoned nobody (one query, only at those stages)."""
     if (
         shipment is None
         or shipment.provider != enums.DeliveryProvider.YANDEX
         or shipment.stage not in delivery_yandex.RETURN_STAGES
-        or shipment.claim is None
     ):
         return False
-    return not delivery_selectors.return_confirmed(order.pk, shipment.claim.number)
+    carried = delivery_selectors.return_claim(shipment.pk)
+    return carried is not None and not carried.confirmed
 
 
 # --- Yandex Delivery: may staff call a courier? (plan §3.6) -------------------------------------------------

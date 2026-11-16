@@ -9,7 +9,8 @@ import hashlib
 import io
 import secrets
 import uuid
-from datetime import timedelta
+from datetime import time, timedelta
+from decimal import Decimal
 from typing import Any
 
 from django.contrib import admin
@@ -21,7 +22,7 @@ from PIL import Image
 
 from glowderma.accounts.console import twofactor
 from glowderma.accounts.models import Customer, CustomerSocialIdentity, Device, SocialIdentity, StaffUser
-from glowderma.core import timeutils
+from glowderma.core import enums, timeutils
 from glowderma.core.models import IdempotencyRecord
 from glowderma.core.seeding import placeholder_art
 from glowderma.core.variants import store_variants
@@ -112,6 +113,8 @@ def fill_empty_models() -> dict[str, Any]:
                     professional=professional, date=(now + timedelta(days=40)).date(), start=None, end=None
                 )
                 created.append("professionals.workinghoursoverride")
+        if customer is not None:
+            created.extend(_delivery_rows(customer, owner, now))
         if _empty("otp_totp.totpdevice"):
             twofactor.enrolment_device(owner, None)
             created.append("otp_totp.totpdevice")
@@ -134,6 +137,124 @@ def fill_empty_models() -> dict[str, Any]:
                 created.append("accounts.customersocialidentity (refresh token)")
     empty = [m._meta.label_lower for m in admin.site._registry if not _has_rows(m)]
     return {"created": created, "still_empty": empty}
+
+
+def _delivery_rows(customer: Customer, owner: StaffUser, now: Any) -> list[str]:
+    """Yandex Delivery rows the demo seed leaves empty: the warehouse week and a special day, and one paid
+    Yandex Standard order of its own (never a design order) with its used quote (a pin: the quote's secret
+    columns), an accepted claim with a courier, and a resolved issue."""
+    from glowderma.commerce.models import Order
+    from glowderma.delivery.models import (
+        CourierClaim,
+        DeliveryIssue,
+        DeliveryQuote,
+        Shipment,
+        WarehouseClosure,
+        WarehouseHours,
+    )
+
+    created: list[str] = []
+    if _empty("delivery.warehousehours"):
+        WarehouseHours.objects.bulk_create(
+            WarehouseHours(weekday=weekday, opens_at=time(9), closes_at=time(20)) for weekday in range(6)
+        )
+        created.append("delivery.warehousehours")
+    if _empty("delivery.warehouseclosure"):
+        WarehouseClosure.objects.create(
+            date=(now + timedelta(days=45)).date(), note="E2E bayram", created_by=owner
+        )
+        created.append("delivery.warehouseclosure")
+    if not (
+        _empty("delivery.courierclaim")
+        or _empty("delivery.deliveryissue")
+        or _empty("delivery.deliveryquote")
+    ):
+        return created
+    pin = (Decimal("41.311081"), Decimal("69.240562"))
+    ordered = now - timedelta(hours=2)
+    paid = ordered + timedelta(minutes=3)
+    order = Order.objects.create(
+        customer=customer,
+        channel=enums.OrderChannel.WEB,
+        fulfilment=enums.FulfilmentMethod.DELIVERY,
+        address_text="Toshkent, Yunusobod tumani, 4-mavze, 12-uy (E2E)",
+        address_latitude=pin[0],
+        address_longitude=pin[1],
+        recipient_name=customer.name,
+        recipient_phone=str(customer.phone),  # the coverage customer has a phone (filtered above)
+        items_subtotal=185_000,
+        promo_subtotal=0,
+        delivery_fee=25_000,
+        cashback_used=0,
+        total=210_000,
+        payment_provider=enums.PaymentProvider.CLICK,
+        reservation_minutes=15,
+        created_at=ordered,
+        reservation_expires_at=ordered + timedelta(minutes=15),
+        status=enums.OrderStatus.PROCESSING,
+        paid_at=paid,
+        status_changed_at=paid,
+    )
+    quote = DeliveryQuote.objects.create(
+        customer=customer,
+        address_text=order.address_text,
+        latitude=pin[0],
+        longitude=pin[1],
+        provider=enums.DeliveryProvider.YANDEX,
+        method=enums.DeliveryMethod.STANDARD,
+        carrier_price=20_000,
+        customer_fee=25_000,
+        weight_g=300,
+        eta_from=paid + timedelta(minutes=90),
+        eta_to=paid + timedelta(minutes=210),
+        created_at=ordered - timedelta(minutes=5),
+        expires_at=ordered + timedelta(minutes=10),
+        used_at=ordered,
+        order=order,
+    )
+    shipment = Shipment.objects.create(
+        order=order,
+        provider=enums.DeliveryProvider.YANDEX,
+        method=enums.DeliveryMethod.STANDARD,
+        stage=enums.ShipmentStage.COURIER_ASSIGNED,
+        quote=quote,
+        parcel_weight_g=300,
+        prepared_at=paid + timedelta(minutes=20),
+        prepared_by=owner,
+        created_at=ordered,
+    )
+    claim = CourierClaim.objects.create(
+        shipment=shipment,
+        number=1,
+        request_id=uuid.uuid4(),
+        claim_id=f"e2e{uuid.uuid4().hex}",
+        status="performer_found",
+        version=2,
+        taxi_class="courier",
+        method=enums.DeliveryMethod.STANDARD,
+        quoted_fee=25_000,
+        estimate_price=20_000,
+        offer_price=21_000,
+        accept_sent_at=paid + timedelta(minutes=22),
+        accepted_at=paid + timedelta(minutes=22),
+        courier_name="E2E Kuryer",
+        courier_vehicle="Chevrolet Cobalt, oq",
+        requested_by=owner,
+    )
+    Shipment.objects.filter(pk=shipment.pk).update(state=Shipment.State.CREATED, claim=claim, tariff=21_000)
+    DeliveryIssue.objects.create(
+        order=order,
+        kind=enums.DeliveryIssueKind.DISPATCH_REVIEW,
+        code="increase_over_limit",
+        urgent=False,
+        details={"order_id": order.pk, "offer_price": 21_000, "estimate_price": 20_000},
+        state=enums.DeliveryIssueState.RESOLVED,
+        resolved_at=paid + timedelta(minutes=21),
+        resolved_by=owner,
+        resolution_note="E2E: taklif tasdiqlandi",
+    )
+    created.extend(["delivery.deliveryquote", "delivery.courierclaim", "delivery.deliveryissue"])
+    return created
 
 
 def _has_rows(model: type[models.Model]) -> bool:

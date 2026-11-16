@@ -35,6 +35,7 @@ from glowderma.commerce.tests.yandex_dispatch_support import (  # noqa: F401 - f
 )
 from glowderma.core import enums, integration_modes, timeutils
 from glowderma.core.models import OutboxMessage
+from glowderma.core.seeding import pinned_clock
 from glowderma.delivery import services as delivery_services
 from glowderma.delivery import tasks as delivery_tasks
 from glowderma.delivery import yandex as delivery_yandex
@@ -405,11 +406,39 @@ def test_a_finished_claim_without_a_price_is_settled_cost_unknown_after_24_hours
     assert claim.settled_at is None
     CourierClaim.objects.filter(pk=claim.pk).update(ended_at=timeutils.now() - timedelta(hours=25))
     result = yandex_flow.run_poll()
-    assert result.settled_unknown == 1
+    assert result.settled_unknown == 1 and result.settled_unanswered == 0
     claim = CourierClaim.objects.get(pk=claim.pk)
     shipment = shipment_of(order)
     assert claim.settled_at is not None and claim.error_code == "cost_unknown"
     assert shipment.cost_difference == PAID_FEE and shipment.carrier_cost_total == 0
+
+
+def test_a_closed_unaccepted_claim_whose_status_never_moves_is_settled_after_24_hours_keeping_its_code(
+    staff: StaffUser, caplog: pytest.LogCaptureFixture
+) -> None:
+    # the accept's answer was lost and cancel-info is not free: the dispatch ends but keeps polling the claim
+    order = yandex_order(fake={"accept": "timeout", "cancel": "paid"})
+    claim = dispatch(order, staff.pk)
+    assert run(claim) is not None
+    with pinned_clock(timeutils.now() + yandex_flow.ACCEPT_CONFIRM_WINDOW + timedelta(minutes=1)):
+        assert run(claim) is None
+    claim = CourierClaim.objects.get(pk=claim.pk)
+    assert claim.ended_at is not None and claim.settled_at is None and claim.accepted_at is None
+    result = yandex_flow.run_poll()  # within 24 h: still read, Yandex answers the same status every time
+    assert result.polled == 1 and result.settled_unanswered == 0
+    CourierClaim.objects.filter(pk=claim.pk).update(ended_at=timeutils.now() - timedelta(hours=25))
+    with caplog.at_level("WARNING", logger="glowderma.delivery.services"):
+        result = yandex_flow.run_poll()
+    assert result.settled_unanswered == 1 and result.settled_unknown == 0
+    claim = CourierClaim.objects.get(pk=claim.pk)
+    # settled, and the reason it was closed stays (no_answer only fills a blank code)
+    assert claim.settled_at is not None and claim.error_code == "accept_unconfirmed"
+    shipment = shipment_of(order)
+    assert shipment.carrier_cost_total == 0 and shipment.cost_difference == PAID_FEE
+    assert yandex_flow.run_poll().polled == 0  # no longer read
+    logged = [record for record in caplog.records if "yandex.claim_unanswered" in record.getMessage()]
+    assert len(logged) == 1 and logged[0].levelname == "WARNING"
+    assert str({"order_id": order.pk, "claim": claim.pk}) in logged[0].getMessage()
 
 
 # --- the poll ----------------------------------------------------------------------------------------------

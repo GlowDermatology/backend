@@ -443,6 +443,7 @@ SNAPSHOT_DUPLICATE = "duplicate"  # same status, version and final price as stor
 SNAPSHOT_STALE = "stale"  # older than the stored one (claims/info may lag)
 SNAPSHOT_UNKNOWN_CLAIM = "unknown_claim"  # no claim of this order has that Yandex id
 COST_UNKNOWN = "cost_unknown"
+NO_ANSWER = "no_answer"  # an unaccepted claim kept polled whose status never moved: settled after 24 h
 COURIER_DETAILS_RETENTION_DAYS = 7
 
 
@@ -587,10 +588,26 @@ def stamp_accept_sent(claim_pk: int, *, at: datetime) -> bool:
         return True
 
 
-def close_claim(claim_pk: int, *, at: datetime, error_code: str = "") -> bool:
+def release_accept_sent(claim_pk: int) -> bool:
+    """Clear ``accept_sent_at`` once Yandex provably did not take the accept (``claims/accept`` not
+    processed — not sent, 401/403/408/425/429, a redirect — or refused with 409 ``old_version``): the next
+    dispatch run re-checks the offer and sends one accept with the claim's fresh version. Only an open claim
+    that has the stamp and was not accepted; ``False`` otherwise (nothing written)."""
+    with transaction.atomic():
+        row = CourierClaim.objects.select_for_update().get(pk=claim_pk)
+        if row.ended_at is not None or row.accepted_at is not None or row.accept_sent_at is None:
+            return False
+        row.accept_sent_at = None
+        row.save(update_fields=["accept_sent_at"])
+        return True
+
+
+def close_claim(claim_pk: int, *, at: datetime, error_code: str = "", settle: bool = True) -> bool:
     """End a claim we stop following for dispatch (refused, held for review, timed out, superseded):
-    ``ended_at`` (+ ``error_code``); a claim that was never accepted costs nothing and is settled at once.
-    ``False`` when it was ended already (its ``error_code`` is then kept)."""
+    ``ended_at`` (+ ``error_code``); a claim that was never accepted costs nothing and is settled at once —
+    unless ``settle=False``: Yandex may still have taken our accept, so the claim stays unsettled and the poll
+    keeps reading it (an acceptance then raises ``unexpected_acceptance``). ``False`` when it was ended
+    already (its ``error_code`` is then kept)."""
     _aware(at, "at")
     with transaction.atomic():
         row = CourierClaim.objects.select_for_update().get(pk=claim_pk)
@@ -601,7 +618,7 @@ def close_claim(claim_pk: int, *, at: datetime, error_code: str = "") -> bool:
         if error_code:
             row.error_code = error_code[:64]
             fields.append("error_code")
-        if row.accepted_at is None:
+        if settle and row.accepted_at is None:
             row.settled_at = at
             fields.append("settled_at")
         row.save(update_fields=fields)
@@ -693,7 +710,9 @@ def record_claim_snapshot(
     version and final price a ``duplicate``: nothing but a newer ``updated_ts`` is written. A status that
     implies acceptance records it (``accepted_at``; ``accept_sent_at`` too when Yandex accepted without us,
     logged), a finished one ends the claim, and the first ``final_price`` is added once to the shipment's
-    ``carrier_cost_total`` (``cost_difference`` = ``paid_fee`` − total); an ended claim is settled once its
+    ``carrier_cost_total`` (``cost_difference`` = ``paid_fee`` − total), replacing a cancel fee counted
+    before; ``cancelled_with_payment`` of our paid cancel whose fee nobody counted yet (its answer was lost)
+    counts the stored ``cancel_price`` as ``cancel_fee`` once; an ended claim is settled once its
     cost is final (a price, never accepted, or a no-cost end). Only for the current, open claim do the
     shipment's stage (``delivery.yandex.stage_for``; an unknown status moves nothing) and state
     (``not_created`` / ``failed`` before any accepted claim, ``created`` after) follow. A ``claim_status``
@@ -769,6 +788,8 @@ def record_claim_snapshot(
             # a paid cancel's fee was counted while no final price was known: the final price replaces it
             shipment.carrier_cost_total += snapshot.final_price - (claim.cancel_fee or 0)
             cost_changed = True
+        # our paid cancel (its answer lost, or not recorded in time) shows taken: its cancel-info price counts
+        cost_changed = _count_quoted_cancel_fee(shipment, claim, _quoted_cancel_fee(claim)) or cost_changed
         if claim.ended_at is not None and claim.settled_at is None:
             if (
                 claim.final_price is not None
@@ -855,13 +876,40 @@ def settle_cost_unknown(claim_pk: int, *, paid_fee: int, at: datetime) -> bool:
         row = CourierClaim.objects.select_for_update().select_related("shipment").get(pk=claim_pk)
         if row.settled_at is not None or row.ended_at is None:
             return False
+        shipment = row.shipment
+        # a paid cancel whose fee no writer counted (Yandex showed cancelled_with_payment before our cancel
+        # was marked sent): its quoted price is what was charged, counted once now
+        fee = _quoted_cancel_fee(row)
+        _count_quoted_cancel_fee(shipment, row, fee)
         row.settled_at = at
-        row.error_code = COST_UNKNOWN
+        row.error_code = COST_UNKNOWN if fee is None else row.error_code
+        row.save(update_fields=["settled_at", "error_code", "cancel_fee"])
+        _settle_cost(shipment, paid_fee)
+        shipment.save(update_fields=["carrier_cost_total", "cost_difference"])
+        logger.warning("yandex.cost_unknown %s", {"order_id": shipment.order_id, "claim": row.pk})
+        return True
+
+
+def settle_unanswered(claim_pk: int, *, paid_fee: int, at: datetime) -> bool:
+    """A claim the dispatch closed without any acceptance but left unsettled (Yandex might still have shown
+    an accept we could not confirm), whose status Yandex has not moved within 24 h: it costs nothing and
+    the poll stops reading it — settled with error code ``no_answer`` (nothing is added to
+    ``carrier_cost_total``; ``cost_difference`` = paid fee − what was charged so far). ``False`` when it
+    was settled or accepted meanwhile."""
+    _aware(at, "at")
+    with transaction.atomic():
+        row = CourierClaim.objects.select_for_update().select_related("shipment").get(pk=claim_pk)
+        if row.settled_at is not None or row.ended_at is None or row.accepted_at is not None:
+            return False
+        row.settled_at = at
+        # the reason the claim was closed stays (cancel_requested is what the review beat's cancel_incomplete
+        # reads; accept_unconfirmed / not_found / dead_letter is what staff see): no_answer only fills a blank
+        row.error_code = row.error_code or NO_ANSWER
         row.save(update_fields=["settled_at", "error_code"])
         shipment = row.shipment
         _settle_cost(shipment, paid_fee)
         shipment.save(update_fields=["cost_difference"])
-        logger.warning("yandex.cost_unknown %s", {"order_id": shipment.order_id, "claim": row.pk})
+        logger.warning("yandex.claim_unanswered %s", {"order_id": shipment.order_id, "claim": row.pk})
         return True
 
 
@@ -884,16 +932,24 @@ def blank_courier_details(before: datetime) -> int:
 CANCEL_WITHDRAWN = "cancel_requested"
 # The statuses our own ``claims/cancel`` produces (free → ``cancelled``, paid → ``cancelled_with_payment``).
 OUR_CANCEL_STATUSES: frozenset[str] = frozenset({"cancelled", "cancelled_with_payment"})
+# A paid cancel: the ``cancel-info`` terms it is sent with, and the status Yandex then shows.
+PAID_CANCEL = "paid"
+PAID_CANCEL_STATUS = "cancelled_with_payment"
 
 
-def request_carrier_cancel(order_id: int, *, at: datetime) -> None:
+def request_carrier_cancel(order_id: int, *, at: datetime) -> bool:
     """Txn A of the carrier-side cancel: ``cancel_requested_at`` — committed before any Yandex call, so no
-    dispatch sends an ``accept`` from here on and the status writer reads a cancel / return as ours."""
+    dispatch sends an ``accept`` from here on and the status writer reads a cancel / return as ours. A stamp
+    already set keeps its time (a repeated cancel resumes the first: the review beat counts from it).
+    Returns whether it was set now."""
     _aware(at, "at")
     with transaction.atomic():
         shipment = _yandex_shipment(order_id)
+        if shipment.cancel_requested_at is not None:
+            return False
         shipment.cancel_requested_at = at
         shipment.save(update_fields=["cancel_requested_at"])
+        return True
 
 
 def clear_carrier_cancel(order_id: int) -> bool:
@@ -940,34 +996,112 @@ def record_cancel_fee(order_id: int, claim_pk: int, fee: int, *, paid_fee: int) 
         return True
 
 
-def record_return_request(order_id: int, claim_pk: int, *, at: datetime) -> None:
-    """Yandex accepted our ``claims/return`` of the claim (a ``return_requested`` event: ids only)."""
+def _quoted_cancel_fee(claim: CourierClaim, quoted: int | None = None) -> int | None:
+    """The fee of a paid cancel still to count: Yandex shows the claim ``cancelled_with_payment`` and no
+    cancel fee is recorded — ``quoted`` (a ``cancel-info`` price the caller read), else the ``cancel_price``
+    of the paid cancel we sent. ``None`` otherwise."""
+    if claim.cancel_fee is not None or claim.status != PAID_CANCEL_STATUS:
+        return None
+    if quoted is not None:
+        return quoted
+    return claim.cancel_price if claim.cancel_state == PAID_CANCEL else None
+
+
+def _count_quoted_cancel_fee(shipment: Shipment, claim: CourierClaim, fee: int | None) -> bool:
+    """``fee`` becomes the claim's ``cancel_fee`` and — unless its ``final_price`` is counted already — goes
+    into ``carrier_cost_total`` (a later final price replaces it). The caller saves both rows; returns whether
+    the shipment's cost changed."""
+    if fee is None:
+        return False
+    claim.cancel_fee = fee
+    if claim.final_price is not None:
+        return False
+    shipment.carrier_cost_total += fee
+    return True
+
+
+def count_cancel_fee(order_id: int, claim_pk: int, *, paid_fee: int, quoted: int | None = None) -> int | None:
+    """Txn B of a cancel Yandex shows ``cancelled_with_payment``: the fee of the paid cancel no writer counted
+    yet (its status was recorded before our cancel was marked sent, or another cancel took the claim while
+    ours was refused) — ``quoted``, else the claim's ``cancel_price`` — becomes its ``cancel_fee`` and is
+    counted once (a later ``final_price`` replaces it). The caller holds the Order lock. Returns the claim's
+    cancel fee (counted now or before), ``None`` when it has none."""
+    if quoted is not None and quoted < 0:
+        raise ValueError("quoted must be ≥ 0")
+    with transaction.atomic():
+        shipment = _yandex_shipment(order_id)
+        claim = CourierClaim.objects.select_for_update().get(pk=claim_pk, shipment=shipment)
+        fee = _quoted_cancel_fee(claim, quoted)
+        if fee is not None:
+            if _count_quoted_cancel_fee(shipment, claim, fee):
+                _settle_cost(shipment, paid_fee)
+                shipment.save(update_fields=["carrier_cost_total", "cost_difference"])
+            claim.save(update_fields=["cancel_fee"])
+        return claim.cancel_fee
+
+
+def record_cancel_sent(
+    order_id: int, claim_pk: int, *, cancel_state: str, at: datetime, price: int | None = None
+) -> bool:
+    """Our ``claims/cancel`` of the claim was sent — Yandex answered it, or its outcome is unknown
+    (``cancel_sent_at`` + the terms it was sent with + ``cancel_price``, the ``cancel-info`` price of a paid
+    one, which :func:`record_claim_snapshot` counts as the fee once Yandex shows ``cancelled_with_payment``):
+    from now on the cancel only re-reads the claim, it never sends a second ``claims/cancel`` /
+    ``cancel-info``. ``False`` when it was recorded before (the first time, terms and price are kept).
+
+    It writes the claim's own columns only, under the claim row lock every claim writer takes: the caller
+    holds the Order lock — or, when the order stays busy past ``commerce``'s bounded wait, records the marker
+    without it rather than lose it."""
+    _aware(at, "at")
+    with transaction.atomic():
+        shipment = _yandex_shipment(order_id)
+        claim = CourierClaim.objects.select_for_update().get(pk=claim_pk, shipment=shipment)
+        if claim.cancel_sent_at is not None:
+            return False
+        claim.cancel_sent_at = at
+        claim.cancel_state = cancel_state[:16]
+        paid = cancel_state == PAID_CANCEL and price is not None and price >= 0
+        claim.cancel_price = price if paid else None
+        claim.save(update_fields=["cancel_sent_at", "cancel_state", "cancel_price"])
+        return True
+
+
+def record_return_request(order_id: int, claim_pk: int, *, at: datetime) -> bool:
+    """Our ``claims/return`` of the claim was sent — Yandex answered it, or its outcome is unknown (a
+    ``return_requested`` event: ids only; ``selectors.return_requested`` reads it, so the return is never
+    sent a second time). ``False`` when the claim has one already. Insert-only (it locks no row), so
+    ``commerce`` may record it without the Order lock when the order stays busy past its bounded wait."""
     _aware(at, "at")
     with transaction.atomic():
         shipment = _yandex_shipment(order_id)
         claim = CourierClaim.objects.get(pk=claim_pk, shipment=shipment)
+        if selectors.return_requested(shipment.pk, claim.claim_id):
+            return False
         ShipmentEvent.objects.create(
             shipment=shipment,
             kind=ShipmentEvent.Kind.RETURN_REQUESTED,
             payload={"claim_id": claim.claim_id, "claim_number": claim.number},
             at=at,
         )
+        return True
 
 
 def confirm_return(order_id: int, *, actor_id: int, at: datetime, clear_cancel_request: bool) -> bool:
-    """Staff confirm the current claim's parcel is physically back (``POST orders/{id}/confirm-return/``):
-    stage ``returned`` (if Yandex has not said so yet), ``returned_at``, ``return_confirmed_by`` and a
-    ``returned`` event of the claim; ``clear_cancel_request`` ends a cancel stamp of an order that stays
-    open (staff dispatch again or cancel). ``False`` when the parcel is not returning / returned or its
-    return was confirmed already."""
+    """Staff confirm the parcel is physically back (``POST orders/{id}/confirm-return/``) — the parcel of
+    the claim that carried it (``selectors.return_claim``; a later re-dispatch that summoned nobody never
+    did): stage ``returned`` (if Yandex has not said so yet), ``returned_at``, ``return_confirmed_by`` and a
+    ``returned`` event of that claim; ``clear_cancel_request`` ends a cancel stamp of an order that stays
+    open (staff dispatch again or cancel). ``False`` when the parcel is not returning / returned, no claim
+    ever took it, or its return was confirmed already."""
     _aware(at, "at")
     with transaction.atomic():
         shipment = _yandex_shipment(order_id)
-        claim = shipment.claim
-        if claim is None or shipment.stage not in yandex_statuses.RETURN_STAGES:
+        if shipment.stage not in yandex_statuses.RETURN_STAGES:
             return False
-        if selectors.return_confirmed(order_id, claim.number):
+        carried = selectors.return_claim(shipment.pk)
+        if carried is None or carried.confirmed:
             return False
+        claim = CourierClaim.objects.get(pk=carried.id, shipment=shipment)
         stale = (
             shipment.returned_at is None
             or shipment.stage != _STAGE.RETURNED
@@ -1013,6 +1147,38 @@ def mark_yandex_cancelled(order_id: int, *, at: datetime) -> bool:
             shipment.state = Shipment.State.CANCELLED
             shipment.cancelled_at = at
             shipment.save(update_fields=["state", "cancelled_at"])
+        return True
+
+
+def mark_delivered_by_staff(order_id: int, *, actor_id: int, at: datetime) -> bool:
+    """Staff confirmed the hand-over of a parcel Yandex lost track of (the manual ``delivered`` of an
+    unaccounted parcel; the caller holds the Order lock): the Yandex shipment's stage becomes ``delivered``
+    and a manual ``status_received`` event (ids only) records who said so. State, costs and the claim stay
+    as Yandex left them. ``False`` for a BTS shipment or one at ``delivered`` already."""
+    _aware(at, "at")
+    with transaction.atomic():
+        shipment = (
+            Shipment.objects.select_related("claim")
+            .filter(order_id=order_id, provider=enums.DeliveryProvider.YANDEX)
+            .first()
+        )
+        if shipment is None or shipment.stage == _STAGE.DELIVERED:
+            return False
+        shipment.stage = _STAGE.DELIVERED
+        shipment.save(update_fields=["stage"])
+        claim = shipment.claim
+        ShipmentEvent.objects.create(
+            shipment=shipment,
+            kind=ShipmentEvent.Kind.STATUS_RECEIVED,
+            manual=True,
+            payload={
+                "stage": _STAGE.DELIVERED,
+                "claim_id": claim.claim_id if claim is not None else "",
+                "claim_number": claim.number if claim is not None else None,
+                "confirmed_by": actor_id,
+            },
+            at=at,
+        )
         return True
 
 
@@ -1811,14 +1977,19 @@ __all__ = [
     "ALERT_PROVIDER_FAILING",
     "CANCEL_WITHDRAWN",
     "OUR_CANCEL_STATUSES",
+    "PAID_CANCEL",
+    "PAID_CANCEL_STATUS",
     "PAYMENT_FAILURE_CODES",
     "PROVIDER_FAILING_AFTER",
     "REMIND_AFTER",
     "clear_carrier_cancel",
     "confirm_return",
+    "count_cancel_fee",
     "issue_alert_fields",
+    "mark_delivered_by_staff",
     "mark_yandex_cancelled",
     "record_cancel_fee",
+    "record_cancel_sent",
     "record_return_request",
     "record_yandex_failure",
     "record_yandex_success",
@@ -1828,6 +1999,7 @@ __all__ = [
     "yandex_account_failure",
     "yandex_failure_code",
     "COST_UNKNOWN",
+    "NO_ANSWER",
     "SNAPSHOT_APPLIED",
     "SNAPSHOT_DUPLICATE",
     "SNAPSHOT_STALE",
@@ -1838,10 +2010,12 @@ __all__ = [
     "blank_courier_details",
     "close_claim",
     "record_claim_snapshot",
+    "release_accept_sent",
     "restore_previous_claim",
     "set_dispatch_stage",
     "set_tracking_url",
     "settle_cost_unknown",
+    "settle_unanswered",
     "stamp_accept_sent",
     "start_dispatch",
     "AUDIT_CLOSURE_DELETED",

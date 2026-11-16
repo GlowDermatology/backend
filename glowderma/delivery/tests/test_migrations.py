@@ -70,6 +70,7 @@ def test_migration_dependencies_as_designed() -> None:
         "0005_uz_field_labels.py",
         "0006_yandex_delivery.py",
         "0007_seed_delivery_settings.py",
+        "0008_courierclaim_cancel_sent.py",
     ]
 
 
@@ -103,6 +104,7 @@ def test_migrate_zero_and_forward_again() -> None:
         "0005_uz_field_labels",
         "0006_yandex_delivery",
         "0007_seed_delivery_settings",
+        "0008_courierclaim_cancel_sent",
     }
     assert {"shipment_yandex_stage_idx"} <= index_names("delivery_shipment")
     assert DeliverySettings.objects.filter(pk=1).exists()  # 0007 (and post_migrate) keep the singleton

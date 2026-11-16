@@ -18,7 +18,7 @@ from django.db import connection
 from rest_framework.test import APIClient
 
 from glowderma.accounts.models import StaffUser
-from glowderma.commerce import selectors, services, tasks, topics, yandex_flow, yandex_ref
+from glowderma.commerce import delivery_review, selectors, services, tasks, topics, yandex_flow, yandex_ref
 from glowderma.commerce.models import Order, OrderEvent
 from glowderma.commerce.tests.support import pay, place
 from glowderma.commerce.tests.yandex_dispatch_support import (  # noqa: F401 - fixtures
@@ -41,6 +41,7 @@ from glowderma.core import enums, outbox, timeutils
 from glowderma.core.api.exceptions import Conflict
 from glowderma.core.models import AuditEntry, OutboxMessage
 from glowderma.core.seeding import pinned_clock
+from glowderma.delivery import selectors as delivery_selectors
 from glowderma.delivery.models import (
     CourierClaim,
     DeliveryIssue,
@@ -51,7 +52,16 @@ from glowderma.delivery.models import (
 )
 from glowderma.delivery.tests.factories import DeliveryIssueFactory
 from glowderma.integrations.yandex_delivery import fake as fake_yandex
-from glowderma.integrations.yandex_delivery.ports import ClaimRequest, YandexConflict, YandexUnavailable
+from glowderma.integrations.yandex_delivery.ports import (
+    CANCEL_FREE,
+    CANCEL_PAID,
+    CancelTerms,
+    ClaimRequest,
+    YandexConflict,
+    YandexUnavailable,
+)
+from glowderma.integrations.yandex_delivery.registry import get_yandex_delivery
+from glowderma.payments.models import Refund
 
 pytestmark = pytest.mark.django_db
 
@@ -455,36 +465,323 @@ def test_timeout_after_accept_is_re_read_never_resent(
     assert calls["accept"] == 1
 
 
-def test_accept_without_a_visible_outcome_waits_then_reports_unknown(
-    staff: StaffUser, calls: dict[str, int], monkeypatch: pytest.MonkeyPatch
+def test_an_accept_without_a_visible_outcome_waits_then_ends_the_dispatch(
+    staff: StaffUser, calls: dict[str, int]
 ) -> None:
-    sent: list[str] = []
-
-    def never_answers(self: Any, claim_id: str, version: int, **kwargs: Any) -> Any:
-        sent.append(claim_id)
-        raise YandexUnavailable("timeout")  # Yandex never saw it: the claim stays ready_for_approval
-
-    monkeypatch.setattr(fake_yandex.FakeYandexDelivery, "accept", never_answers)
-    order = yandex_order()
+    # the answer is lost and Yandex never took the accept: the claim stays ready_for_approval
+    order = yandex_order(fake={"accept": "timeout"})
     claim = dispatch(order, staff.pk)
     deferred = run(claim)
     assert isinstance(deferred, outbox.RetryLater)
     claim.refresh_from_db()
     assert claim.accept_sent_at is not None and claim.accepted_at is None
-    assert isinstance(run(claim), outbox.RetryLater)  # re-read only
+    assert isinstance(run(claim), outbox.RetryLater)  # re-read only, never a second accept
     with pinned_clock(timeutils.now() + yandex_flow.ACCEPT_CONFIRM_WINDOW + timedelta(minutes=1)):
         assert run(claim) is None
-    issue = _open(order, K.DISPATCH_UNKNOWN)
-    assert issue is not None and issue.code == "accept_unconfirmed" and issue.urgent
     claim.refresh_from_db()
-    assert claim.ended_at is None  # stays open and polled
-    assert len(sent) == 1
-    # the poll later sees Yandex fail it (an offer confirmed too late): the uncertainty is resolved
-    fake_yandex.advance(claim.claim_id, "failed")
-    tasks.poll_yandex()
+    assert claim.ended_at is not None and claim.error_code == "accept_unconfirmed"
+    assert claim.settled_at is not None  # Yandex took the free cancel: nothing left to follow
+    assert fake_yandex._claims[claim.claim_id].status == "cancelled"
+    failed = _open(order, K.DISPATCH_FAILED)
+    assert failed is not None and failed.code == "accept_unconfirmed" and not failed.urgent
     assert _open(order, K.DISPATCH_UNKNOWN) is None
+    shipment = shipment_of(order)
+    assert shipment.stage == G.FAILED
+    order.refresh_from_db()
+    assert selectors.dispatch_blocker(order, shipment) is None  # staff may call a courier again
+    assert calls["accept"] == 1
+    assert dispatch(order, staff.pk).number == 2
+
+
+def test_an_unconfirmed_accept_ends_once_the_offer_expired_and_claims_info_cannot_lag(
+    staff: StaffUser, calls: dict[str, int], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(fake_yandex, "OFFER_VALID_MINUTES", 1)
+    order = yandex_order(fake={"accept": "timeout"})
+    claim = dispatch(order, staff.pk)
+    start = timeutils.now()
+    assert isinstance(run(claim), outbox.RetryLater)
+    # the offer has expired, but a read this soon after the accept may still lag an acceptance
+    with pinned_clock(start + timedelta(seconds=90)):
+        assert isinstance(run(claim), outbox.RetryLater)
+    # past the documented lag and the offer, still before ACCEPT_CONFIRM_WINDOW: the dispatch ends
+    with pinned_clock(start + yandex_flow.INFO_LAG + timedelta(seconds=30)):
+        assert run(claim) is None
+    claim.refresh_from_db()
+    assert claim.ended_at is not None and claim.settled_at is not None  # Yandex took the free cancel
+    failed = _open(order, K.DISPATCH_FAILED)
+    assert failed is not None and failed.code == "accept_unconfirmed"
+    assert calls["accept"] == 1
+
+
+def test_an_unconfirmed_accept_yandex_will_not_cancel_free_stays_polled_and_a_late_acceptance_is_raised(
+    staff: StaffUser, calls: dict[str, int]
+) -> None:
+    # cancel-info is not free for a claim the read shows before acceptance: that read is probably stale
+    order = yandex_order(fake={"accept": "timeout", "cancel": "paid"})
+    claim = dispatch(order, staff.pk)
+    assert isinstance(run(claim), outbox.RetryLater)
+    reads = calls["claim"]
+    with pinned_clock(timeutils.now() + yandex_flow.ACCEPT_CONFIRM_WINDOW + timedelta(minutes=1)):
+        assert run(claim) is None  # the offer has expired too: that alone settles nothing
+    assert calls["claim"] == reads + 2  # the confirm read, then one fresh read after the refusal
+    assert calls.get("cancel", 0) == 0  # never a paid cancel
+    claim = CourierClaim.objects.get(pk=claim.pk)
+    assert claim.ended_at is not None and claim.error_code == "accept_unconfirmed"
+    assert claim.settled_at is None  # Yandex took no cancel: the poll keeps reading it
+    assert claim.pk in [pk for pk, _order, _claim in delivery_selectors.unsettled_claims()]
+    failed = _open(order, K.DISPATCH_FAILED)
+    assert failed is not None and failed.code == "accept_unconfirmed"
+    shipment = shipment_of(order)
+    assert shipment.stage == G.FAILED
+    order.refresh_from_db()
+    assert selectors.dispatch_blocker(order, shipment) is None
+    # Yandex had taken the accept after all: the poll still reads the claim and raises it
+    fake_yandex.advance(claim.claim_id, "performer_found")
+    tasks.poll_yandex()
+    claim.refresh_from_db()
+    assert claim.accepted_at is not None
+    issue = _open(order, K.DISPATCH_UNKNOWN)
+    assert issue is not None and issue.code == "unexpected_acceptance" and issue.urgent
+
+
+@pytest.mark.parametrize("refusal", ["terms_not_free", "cancel_refused"])
+def test_an_unconfirmed_accept_yandex_refuses_to_cancel_is_read_again_and_a_late_acceptance_followed(
+    staff: StaffUser, calls: dict[str, int], monkeypatch: pytest.MonkeyPatch, refusal: str
+) -> None:
+    order = yandex_order(fake={"accept": "timeout"})
+    claim = dispatch(order, staff.pk)
+    assert isinstance(run(claim), outbox.RetryLater)
+    claim_id = claim_id_of(claim)
+    sent: list[str] = []
+
+    def accepted_meanwhile(self: Any, claim_id: str, **kwargs: Any) -> CancelTerms:
+        fake_yandex.advance(claim_id, "performer_lookup")  # the read before was stale: Yandex accepted it
+        if refusal == "terms_not_free":
+            return CancelTerms(state=CANCEL_PAID, price=PAID_FEE)
+        return CancelTerms(state=CANCEL_FREE)
+
+    def refused(self: Any, claim_id: str, *args: Any, **kwargs: Any) -> None:
+        sent.append(claim_id)
+        raise YandexConflict("inappropriate_status")
+
+    monkeypatch.setattr(fake_yandex.FakeYandexDelivery, "cancel_terms", accepted_meanwhile)
+    monkeypatch.setattr(fake_yandex.FakeYandexDelivery, "cancel", refused)
+    with pinned_clock(timeutils.now() + yandex_flow.ACCEPT_CONFIRM_WINDOW + timedelta(minutes=1)):
+        assert run(claim) is None
+    claim = CourierClaim.objects.get(pk=claim.pk)
+    assert claim.ended_at is None and claim.accepted_at is not None and claim.status == "performer_lookup"
+    assert claim.error_code == ""
+    assert _open(order, K.DISPATCH_FAILED) is None
+    shipment = shipment_of(order)
+    assert (shipment.stage, shipment.state) == (G.COURIER_REQUESTED, "created")
+    assert OrderEvent.objects.filter(order=order, type="shipment_created").count() == 1
+    assert sent == ([] if refusal == "terms_not_free" else [claim_id])
+    assert calls["accept"] == 1
+
+
+def test_an_unconfirmed_accept_during_a_carrier_cancel_sends_no_second_cancel(
+    staff: StaffUser, staff_client: APIClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(services, "_carrier_pause", lambda _seconds: None)
+    order = yandex_order(fake={"accept": "timeout"})
+    claim = dispatch(order, staff.pk)
+    assert isinstance(run(claim), outbox.RetryLater)
+    sent: list[str] = []
+
+    def lost(self: Any, claim_id: str, *args: Any, **kwargs: Any) -> None:
+        sent.append(claim_id)
+        raise YandexUnavailable("timeout after send (test)")  # outcome unknown; Yandex cancelled nothing
+
+    monkeypatch.setattr(fake_yandex.FakeYandexDelivery, "cancel", lost)
+    response = staff_client.post(
+        f"{ORDERS}{order.pk}/cancel/", {"reason": "Mijoz bekor qildi"}, format="json", **_key()
+    )
+    assert response.status_code == 409 and response.json()["code"] == "conflict", response.json()
+    claim.refresh_from_db()
+    assert claim.cancel_sent_at is not None  # the carrier cancel owns the claim now
+    before = shipment_of(order)
+    assert before.cancel_requested_at is not None
+    later = timeutils.now() + yandex_flow.ACCEPT_CONFIRM_WINDOW + timedelta(minutes=1)
+    with pinned_clock(later):
+        assert run(claim) is None
+    assert sent == [claim.claim_id]  # never a second claims/cancel
+    claim = CourierClaim.objects.get(pk=claim.pk)
+    assert claim.ended_at is not None and claim.error_code == yandex_flow.CODE_CANCEL_REQUESTED
+    assert claim.settled_at is None  # still polled
+    assert _open(order, K.DISPATCH_FAILED) is None
+    shipment = shipment_of(order)
+    assert shipment.stage == before.stage and shipment.cancel_requested_at == before.cancel_requested_at
+    order.refresh_from_db()
+    assert order.status == "processing"
+    # nobody repeats the cancel: the review beat flags it
+    with pinned_clock(later + timedelta(minutes=1)):
+        delivery_review.review_delivery_issues()
+    incomplete = _open(order, K.CANCEL_INCOMPLETE)
+    assert incomplete is not None and incomplete.urgent and incomplete.code == "carrier_cancelled"
+    # the repeated cancel finds no open claim: the order is cancelled and refunded, nothing more is sent
+    retry = staff_client.post(
+        f"{ORDERS}{order.pk}/cancel/", {"reason": "Mijoz bekor qildi"}, format="json", **_key()
+    )
+    assert retry.status_code == 200, retry.json()
+    order.refresh_from_db()
+    assert order.status == "cancelled" and Refund.objects.get(payment__order=order).amount == order.total
+    incomplete.refresh_from_db()
+    assert incomplete.state == "resolved"
+    assert sent == [claim.claim_id]
+
+
+def _meanwhile(monkeypatch: pytest.MonkeyPatch, claim: CourierClaim, status: str) -> None:
+    """A poll applies Yandex's ``status`` of the claim between a dispatch run's read and its close."""
+
+    def poll_first(port: Any, order_id: int, snapshot: Any) -> str:
+        fake_yandex.advance(claim.claim_id, status)
+        services.apply_yandex_claim(order_id, get_yandex_delivery().claim(claim.claim_id), source="poll")
+        return yandex_flow._CANCEL_UNANSWERED
+
+    monkeypatch.setattr(yandex_flow, "_cancel_if_unaccepted", poll_first)
+
+
+def test_an_acceptance_a_poll_records_while_the_dispatch_ends_is_kept(
+    staff: StaffUser, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    order = yandex_order(fake={"accept": "timeout"})
+    claim = dispatch(order, staff.pk)
+    assert isinstance(run(claim), outbox.RetryLater)
+    claim_id_of(claim)
+    _meanwhile(monkeypatch, claim, "performer_found")
+    with pinned_clock(timeutils.now() + yandex_flow.ACCEPT_CONFIRM_WINDOW + timedelta(minutes=1)):
+        assert run(claim) is None
+    claim = CourierClaim.objects.get(pk=claim.pk)
+    assert claim.ended_at is None and claim.accepted_at is not None and claim.error_code == ""
+    assert _open(order, K.DISPATCH_FAILED) is None
+    shipment = shipment_of(order)
+    assert (shipment.stage, shipment.state) == (G.COURIER_ASSIGNED, "created")
+
+
+def test_a_claim_that_ends_while_the_dispatch_ends_it_keeps_what_its_writer_recorded(
+    staff: StaffUser, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    order = yandex_order(fake={"accept": "timeout"})
+    claim = dispatch(order, staff.pk)
+    assert isinstance(run(claim), outbox.RetryLater)
+    claim_id_of(claim)
+    _meanwhile(monkeypatch, claim, "failed")  # Yandex failed the confirmed offer meanwhile
+    with pinned_clock(timeutils.now() + yandex_flow.ACCEPT_CONFIRM_WINDOW + timedelta(minutes=1)):
+        assert run(claim) is None
+    claim = CourierClaim.objects.get(pk=claim.pk)
+    assert claim.status == "failed" and claim.ended_at is not None and claim.error_code == ""
+    failed = _open(order, K.DISPATCH_FAILED)
+    assert failed is not None and failed.code == "offer_expired"  # the writer's code, not overwritten
+    assert shipment_of(order).stage == G.FAILED
+
+
+def test_an_accept_yandex_did_not_process_is_sent_once_more(staff: StaffUser, calls: dict[str, int]) -> None:
+    order = yandex_order(fake={"accept": "down_once"})  # 429 / 401 / 403 / a redirect / not sent
+    claim = dispatch(order, staff.pk)
+    deferred = run(claim)
+    assert isinstance(deferred, outbox.RetryLater)
+    assert deferred.give_up_after == yandex_flow.NOT_PROCESSED_GIVE_UP
+    claim.refresh_from_db()
+    assert claim.accept_sent_at is None and claim.accepted_at is None and claim.ended_at is None
+    assert run(claim) is None  # the offer re-checked, one accept again
+    claim = CourierClaim.objects.get(pk=claim.pk)
+    assert claim.accept_sent_at is not None and claim.accepted_at is not None
+    assert calls["accept"] == 2 and calls["create_claim"] == 1
+    assert OrderEvent.objects.filter(order=order, type="shipment_created").count() == 1
+    run(claim)
+    assert calls["accept"] == 2  # never a third
+
+
+def test_an_old_version_conflict_on_accept_is_sent_again_with_the_fresh_version(
+    staff: StaffUser, calls: dict[str, int], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    versions: list[int] = []
+    counting = fake_yandex.FakeYandexDelivery.accept
+
+    def spy(self: Any, claim_id: str, version: int, **kwargs: Any) -> Any:
+        versions.append(version)
+        return counting(self, claim_id, version, **kwargs)
+
+    monkeypatch.setattr(fake_yandex.FakeYandexDelivery, "accept", spy)
+    order = yandex_order(fake={"accept": "old_version_once"})  # the claim was edited meanwhile
+    claim = dispatch(order, staff.pk)
+    deferred = run(claim)
+    assert isinstance(deferred, outbox.RetryLater) and "old_version" in deferred.reason
+    claim.refresh_from_db()
+    assert claim.accept_sent_at is None and claim.ended_at is None
+    assert run(claim) is None
+    claim.refresh_from_db()
+    assert claim.accepted_at is not None and claim.version == 2
+    assert versions == [1, 2] and calls["accept"] == 2
+    assert _open(order, K.DISPATCH_FAILED) is None
+
+
+def test_an_accept_never_processed_until_the_offer_expired_fails_the_dispatch(
+    staff: StaffUser, calls: dict[str, int]
+) -> None:
+    order = yandex_order(fake={"accept": "down"})
+    claim = dispatch(order, staff.pk)
+    assert isinstance(run(claim), outbox.RetryLater)
+    with pinned_clock(timeutils.now() + timedelta(minutes=fake_yandex.OFFER_VALID_MINUTES + 1)):
+        assert run(claim) is None  # the re-check sees the expired offer: no accept is sent
+    claim.refresh_from_db()
+    assert claim.ended_at is not None and claim.error_code == "offer_expired" and claim.accepted_at is None
     failed = _open(order, K.DISPATCH_FAILED)
     assert failed is not None and failed.code == "offer_expired"
+    assert calls["accept"] == 1
+    assert fake_yandex._claims[claim.claim_id].status == "cancelled"
+    order.refresh_from_db()
+    assert selectors.dispatch_blocker(order, shipment_of(order)) is None
+
+
+def test_another_conflict_on_accept_ends_the_dispatch_at_once(
+    staff: StaffUser, calls: dict[str, int]
+) -> None:
+    order = yandex_order(fake={"accept": "conflict"})  # 409 inappropriate_status: Yandex took nothing
+    claim = dispatch(order, staff.pk)
+    assert run(claim) is None
+    claim.refresh_from_db()
+    assert claim.ended_at is not None and claim.error_code == "inappropriate_status"
+    assert claim.settled_at is not None  # the free cancel went through
+    assert fake_yandex._claims[claim.claim_id].status == "cancelled"
+    failed = _open(order, K.DISPATCH_FAILED)
+    assert failed is not None and failed.code == "inappropriate_status"
+    shipment = shipment_of(order)
+    assert (shipment.stage, shipment.state) == (G.FAILED, "failed")
+    order.refresh_from_db()
+    assert selectors.dispatch_blocker(order, shipment) is None
+    assert calls["accept"] == 1
+
+
+def test_a_claims_info_refusal_after_the_accept_closes_the_claim_but_keeps_polling_it(
+    staff: StaffUser, calls: dict[str, int]
+) -> None:
+    order = yandex_order(fake={"accept": "timeout", "info": "not_found"})
+    claim = dispatch(order, staff.pk)
+    deferred = run(claim)  # inside the window a 4xx of claims/info is retried, nothing ends
+    assert isinstance(deferred, outbox.RetryLater) and "refused" in deferred.reason
+    claim.refresh_from_db()
+    assert claim.ended_at is None and claim.accept_sent_at is not None
+    with pinned_clock(timeutils.now() + yandex_flow.ACCEPT_CONFIRM_WINDOW + timedelta(minutes=1)):
+        assert run(claim) is None
+    claim = CourierClaim.objects.get(pk=claim.pk)
+    assert claim.ended_at is not None and claim.settled_at is None and claim.error_code == "not_found"
+    assert claim.pk in [pk for pk, _order, _claim in delivery_selectors.unsettled_claims()]
+    issue = _open(order, K.DISPATCH_UNKNOWN)
+    assert issue is not None and issue.code == "not_found" and issue.urgent
+    shipment = shipment_of(order)
+    assert shipment.stage == G.FAILED
+    order.refresh_from_db()
+    assert selectors.dispatch_blocker(order, shipment) is None
+    assert calls["accept"] == 1
+    # the poll still reads it: an acceptance Yandex shows later is raised, never lost
+    fake_yandex.advance(claim.claim_id, "performer_lookup")
+    tasks.poll_yandex()
+    claim.refresh_from_db()
+    assert claim.accepted_at is not None and claim.settled_at is None
+    issue = _open(order, K.DISPATCH_UNKNOWN)
+    assert issue is not None and issue.code == "unexpected_acceptance" and issue.urgent
 
 
 def test_offer_expired_after_accept(staff: StaffUser) -> None:
@@ -512,16 +809,94 @@ def test_offer_expired_conflict_on_accept(staff: StaffUser, monkeypatch: pytest.
     assert issue is not None and issue.code == "offer_expired"
 
 
-def test_the_dead_letter_opens_dispatch_unknown(staff: StaffUser) -> None:
-    order = yandex_order()
-    claim = dispatch(order, staff.pk)
+def _die(claim: CourierClaim) -> None:
     message = message_of(claim)
     OutboxMessage.objects.filter(pk=message.pk).update(status="dead", last_error="boom")
     outbox.notify_dead(message)
-    issue = _open(order, K.DISPATCH_UNKNOWN)
+
+
+def test_a_dead_dispatch_without_a_yandex_id_fails_and_can_be_dispatched_again(staff: StaffUser) -> None:
+    order = yandex_order()
+    claim = dispatch(order, staff.pk)
+    _die(claim)  # e.g. ten create timeouts: no claim id, so no accept can have been sent
+    claim.refresh_from_db()
+    assert claim.ended_at is not None and claim.settled_at is not None and claim.error_code == "dead_letter"
+    issue = _open(order, K.DISPATCH_FAILED)
     assert issue is not None and issue.code == "dead_letter" and not issue.urgent
+    assert _open(order, K.DISPATCH_UNKNOWN) is None
+    shipment = shipment_of(order)
+    assert (shipment.stage, shipment.state) == (G.FAILED, "failed")
+    order.refresh_from_db()
+    assert selectors.dispatch_blocker(order, shipment) is None
+    assert dispatch(order, staff.pk).number == 2
+
+
+@pytest.mark.parametrize(
+    "fake",
+    [
+        {"estimate": "pending"},  # Yandex's id is stored, no accept sent yet
+        {"accept": "down"},  # 30 minutes of "not processed" accepts: the stamp was released each time
+    ],
+)
+def test_a_dead_dispatch_with_no_accept_outstanding_fails_and_the_next_dispatch_cancels_its_claim(
+    staff: StaffUser, calls: dict[str, int], fake: dict[str, str]
+) -> None:
+    order = yandex_order(fake=fake)
+    claim = dispatch(order, staff.pk)
+    assert isinstance(run(claim), outbox.RetryLater)
+    claim.refresh_from_db()
+    assert claim.claim_id and claim.accept_sent_at is None
+    _die(claim)
+    claim.refresh_from_db()
+    assert claim.ended_at is not None and claim.error_code == "dead_letter"
+    assert claim.settled_at is None  # Yandex knows it: still polled until it shows how it ended
+    assert claim.pk in [pk for pk, _order, _claim in delivery_selectors.unsettled_claims()]
+    issue = _open(order, K.DISPATCH_FAILED)
+    assert issue is not None and issue.code == "dead_letter" and not issue.urgent
+    assert _open(order, K.DISPATCH_UNKNOWN) is None
+    shipment = shipment_of(order)
+    assert (shipment.stage, shipment.state) == (G.FAILED, "failed")
+    order.refresh_from_db()
+    assert selectors.dispatch_blocker(order, shipment) is None  # staff may call a courier again
+    second = dispatch(order, staff.pk)
+    assert second.number == 2
+    assert isinstance(run(second), outbox.RetryLater)  # step 1 read the first claim and cancelled it
+    assert fake_yandex._claims[claim.claim_id].status == "cancelled"
+    second.refresh_from_db()
+    assert second.claim_id and second.claim_id != claim.claim_id
+    tasks.poll_yandex()  # Yandex shows the first claim cancelled: settled, no longer read
+    assert CourierClaim.objects.get(pk=claim.pk).settled_at is not None
+    assert calls.get("accept", 0) == (2 if "accept" in fake else 0)
+
+
+def test_a_dead_dispatch_after_the_accept_opens_an_urgent_dispatch_unknown_and_a_requeue_resumes_it(
+    staff: StaffUser, calls: dict[str, int]
+) -> None:
+    order = yandex_order(fake={"accept": "timeout"})
+    claim = dispatch(order, staff.pk)
+    assert isinstance(run(claim), outbox.RetryLater)
+    _die(claim)
+    issue = _open(order, K.DISPATCH_UNKNOWN)
+    assert issue is not None and issue.code == "dead_letter" and issue.urgent  # a courier may come
     claim.refresh_from_db()
     assert claim.ended_at is None
+    # the requeued message finds the accept still not taken after the window: it ends and the
+    # uncertainty it opened is resolved
+    with pinned_clock(timeutils.now() + yandex_flow.ACCEPT_CONFIRM_WINDOW + timedelta(minutes=1)):
+        assert run(claim) is None
+    assert _open(order, K.DISPATCH_UNKNOWN) is None
+    failed = _open(order, K.DISPATCH_FAILED)
+    assert failed is not None and failed.code == "accept_unconfirmed"
+    assert calls["accept"] == 1
+
+
+def test_an_unexpected_acceptance_stays_open_when_the_current_accept_ends(staff: StaffUser) -> None:
+    order = yandex_order(fake={"accept": "conflict"})
+    services.open_delivery_issue(order.pk, K.DISPATCH_UNKNOWN, "unexpected_acceptance", urgent=True)
+    run(dispatch(order, staff.pk))
+    issue = _open(order, K.DISPATCH_UNKNOWN)  # about another claim Yandex accepted: never resolved here
+    assert issue is not None and issue.code == "unexpected_acceptance"
+    assert _open(order, K.DISPATCH_FAILED) is not None
 
 
 # --- estimate, warnings, policy ----------------------------------------------------------------------------
@@ -703,6 +1078,51 @@ def test_an_adopted_claim_of_another_order_is_never_followed(
     assert issue is not None and issue.code == "foreign_claim"
 
 
+@pytest.mark.parametrize(
+    ("external", "extras", "followed"),
+    [
+        (None, ("1",), False),  # only the item's extra_id is echoed, and it is another order's
+        ("ours", ("1",), False),  # one echoed reference that is not ours is enough
+        (None, (), True),  # nothing echoed (optional in the docs): it came back for our request_id
+        ("ours", (), True),
+    ],
+)
+def test_the_adopted_claim_guard_refuses_only_a_reference_that_is_not_ours(
+    staff: StaffUser,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    external: str | None,
+    extras: tuple[str, ...],
+    followed: bool,
+) -> None:
+    from dataclasses import replace
+
+    order = yandex_order()
+    ours = str(order.pk)
+    original = fake_yandex.FakeYandexDelivery.create_claim
+
+    def echo(self: Any, request: ClaimRequest, **kw: Any) -> Any:
+        return replace(
+            original(self, request, **kw),
+            external_order_id=ours if external == "ours" else external,
+            item_extra_ids=extras,
+        )
+
+    monkeypatch.setattr(fake_yandex.FakeYandexDelivery, "create_claim", echo)
+    claim = dispatch(order, staff.pk)
+    with caplog.at_level("WARNING", logger="glowderma.commerce.yandex_flow"):
+        assert run(claim) is None
+    claim.refresh_from_db()
+    assert (claim.accepted_at is not None) is followed
+    assert (_open(order, K.DISPATCH_UNKNOWN) is None) is followed
+    missing = [record for record in caplog.records if "yandex.claim_ref_missing" in record.getMessage()]
+    if followed and external is None:
+        (record,) = missing
+        assert record.args == {"order_id": order.pk, "claim": 1}  # ids only (a lone mapping argument)
+    else:
+        assert missing == []
+
+
 # --- the live adapter over a scripted transport (no network) ----------------------------------------------
 
 
@@ -713,6 +1133,8 @@ def _live_claim(name: str, order: Order, **changes: Any) -> dict[str, Any]:
     for point in document["route_points"]:
         if point.get("type") == "destination":
             point["external_order_id"] = str(order.pk)
+    for item in document.get("items", []):
+        item["extra_id"] = str(order.pk)
     document["pricing"]["offer"]["valid_until"] = (timeutils.now() + timedelta(minutes=10)).isoformat()
     document.update(changes)
     return document
@@ -759,6 +1181,33 @@ def test_the_live_adapter_creates_with_our_request_id_and_accepts_once(
     assert (shipment.state, shipment.stage, shipment.tariff) == ("created", G.COURIER_ASSIGNED, 25_201)
     # the bearer token never leaves the Authorization header
     assert all("test-oauth-token" not in str(request.url) for request in script.requests)
+
+
+def test_a_documented_403_of_claims_create_fails_the_dispatch_at_once(
+    staff: StaffUser, monkeypatch: pytest.MonkeyPatch, settings: Any
+) -> None:
+    import httpx
+
+    from glowderma.integrations import httpclient
+    from glowderma.integrations.tests.live_fixtures import Script
+    from glowderma.integrations.yandex_delivery import protocol
+
+    settings.YANDEX_DELIVERY_MODE = "live"
+    settings.YANDEX_DELIVERY_TOKEN = "test-oauth-token"  # noqa: S105 - a test value
+    refusal = {"code": "forbidden_by_antifake", "message": "Claim creation is forbidden"}
+    script = Script().on("POST", protocol.PATH_CREATE, httpx.Response(403, json=refusal))
+    real = httpclient.new_client
+    monkeypatch.setattr(httpclient, "new_client", lambda transport=None: real(script.transport))
+    order = yandex_order()
+    claim = dispatch(order, staff.pk)
+    assert run(claim) is None  # a definitive refusal, not "not processed": no 30 minutes of resends
+    claim.refresh_from_db()
+    assert claim.ended_at is not None and claim.error_code == "forbidden_by_antifake"
+    issue = _open(order, K.DISPATCH_FAILED)
+    assert issue is not None and issue.code == "forbidden_by_antifake"
+    assert len(script.to("POST", protocol.PATH_CREATE)) == 1
+    order.refresh_from_db()
+    assert selectors.dispatch_blocker(order, shipment_of(order)) is None
 
 
 def test_bts_orders_are_untouched(staff: StaffUser, calls: dict[str, int]) -> None:

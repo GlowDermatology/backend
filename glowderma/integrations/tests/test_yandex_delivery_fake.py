@@ -182,6 +182,38 @@ def test_accept_scenarios() -> None:
         plain.accept(claim.claim_id, 1)
 
 
+def test_accept_scenarios_for_the_first_accept_only_and_lost_answers() -> None:
+    adapter = FakeYandexDelivery({"accept": "down_once"})
+    claim = adapter.create_claim(REQUEST)
+    assert claim.item_extra_ids == ("10248",)  # the order reference is echoed like Yandex does
+    with pytest.raises(YandexUnavailable) as down:
+        adapter.accept(claim.claim_id, 1)
+    assert down.value.outcome_unknown is False
+    assert adapter.claim(claim.claim_id).status == "ready_for_approval"
+    assert adapter.accept(claim.claim_id, 1) is not None  # the second one goes through
+    assert adapter.claim(claim.claim_id).status == "performer_lookup"
+    edited = FakeYandexDelivery({"accept": "old_version_once"})
+    other = edited.create_claim(replace(REQUEST, request_id="r-old"))
+    with pytest.raises(YandexConflict) as old:
+        edited.accept(other.claim_id, 1)
+    assert old.value.code == "old_version"
+    assert edited.claim(other.claim_id).version == 2  # the fresh version shows on the next read
+    with pytest.raises(YandexConflict):
+        edited.accept(other.claim_id, 1)  # the stale version is still refused
+    assert edited.accept(other.claim_id, 2) is not None
+    lost = FakeYandexDelivery({"accept": "timeout"})
+    third = lost.create_claim(replace(REQUEST, request_id="r-lost"))
+    with pytest.raises(YandexUnavailable) as timeout:
+        lost.accept(third.claim_id, 1)
+    assert timeout.value.outcome_unknown is True
+    assert lost.claim(third.claim_id).status == "ready_for_approval"  # nothing was accepted
+    unknown = FakeYandexDelivery({"info": "not_found"})
+    with pytest.raises(YandexRejected) as missing:
+        unknown.claim(third.claim_id)
+    assert missing.value.code == "not_found"
+    assert [snapshot.claim_id for snapshot in unknown.claims([third.claim_id])] == [third.claim_id]
+
+
 def test_cancel_terms_follow_the_courier() -> None:
     adapter = FakeYandexDelivery()
     claim = adapter.create_claim(REQUEST)

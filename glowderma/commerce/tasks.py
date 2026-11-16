@@ -1146,7 +1146,9 @@ def dispatch_courier(message: OutboxMessage) -> None:
 
 
 def on_yandex_dispatch_dead(message: OutboxMessage) -> None:
-    """A dead dispatch → issue ``dispatch_unknown`` (the claim stays open and polled)."""
+    """A dead dispatch (``commerce.yandex_flow.on_dispatch_dead``): a claim whose accept was sent stays open
+    and polled with an urgent ``dispatch_unknown``; any other claim summons nobody and is closed with
+    ``dispatch_failed`` ``dead_letter`` (staff may dispatch again)."""
     yandex_flow.on_dispatch_dead(_payload(message))
 
 

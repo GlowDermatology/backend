@@ -4505,8 +4505,16 @@ msgid "bekor qilish izohi"
 msgstr "примечание к отмене"
 
 #: model metadata
+msgid "bekor qilish narxi"
+msgstr "стоимость отмены"
+
+#: model metadata
 msgid "bekor qilish sababi"
 msgstr "причина отмены"
+
+#: model metadata
+msgid "bekor qilish sharti"
+msgstr "условия отмены"
 
 #: model metadata
 msgid "bekor qilish so‘ralgan"
@@ -4519,6 +4527,10 @@ msgstr "плата за отмену"
 #: model metadata
 msgid "bekor qilish yozuvi"
 msgstr "запись отмены"
+
+#: model metadata
+msgid "bekor qilish yuborilgan"
+msgstr "отмена отправлена"
 
 #: model metadata
 msgid "bio (en)"

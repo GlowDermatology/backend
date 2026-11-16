@@ -195,6 +195,7 @@ def test_create_passes_request_id_as_a_query_and_sends_the_documented_body() -> 
         destination_point_id=6988,
         external_order_id="10248",
         taxi_class="courier",
+        item_extra_ids=("10248",),
     )
 
 
@@ -314,6 +315,19 @@ def test_claim_info_prefers_the_vat_inclusive_offer() -> None:
     document["pricing"]["offer"].pop("price_with_vat")
     script = Script().on("POST", INFO, httpx.Response(200, json=document))
     assert yandex(script).claim(CLAIM_ID).offer_price == 21_000  # without VAT when nothing else is sent
+
+
+def test_the_order_reference_is_read_from_point_b_and_the_items() -> None:
+    script = Script().on("POST", INFO, reply("yandex", "claim_ready"))
+    claim = yandex(script).claim(CLAIM_ID)
+    assert (claim.external_order_id, claim.item_extra_ids) == ("10248", ("10248",))
+    document = load("yandex", "claim_ready")
+    document["items"][0].pop("extra_id")
+    for point in document["route_points"]:
+        point.pop("external_order_id", None)
+    script = Script().on("POST", INFO, httpx.Response(200, json=document))
+    bare = yandex(script).claim(CLAIM_ID)
+    assert (bare.external_order_id, bare.item_extra_ids) == (None, ())  # nothing echoed: nothing invented
 
 
 def test_claim_courier_final_price_and_return_reasons_without_any_phone() -> None:
@@ -487,6 +501,34 @@ def test_error_mapping_of_a_claim_write(
     assert len(script.requests) == 1
 
 
+@pytest.mark.parametrize("code", ["forbidden_by_antifake", "buyout_disabled", "payment_on_delivery_disabled"])
+def test_a_documented_403_of_claims_create_is_a_definitive_refusal(code: str) -> None:
+    answer = httpx.Response(403, json={"code": code, "message": "Phone +998 90 123 45 67 is blocked"})
+    script = Script().on("POST", protocol.PATH_CREATE, answer)
+    with pytest.raises(YandexRejected) as refused:
+        yandex(script).create_claim(REQUEST)
+    assert refused.value.code == code and "123 45 67" not in refused.value.message  # safe_text
+    assert len(script.requests) == 1
+
+
+def test_any_other_403_stays_not_processed() -> None:
+    for answer in (
+        httpx.Response(403, json={"code": "forbidden"}),  # the token / contract: try again later
+        httpx.Response(403, content=b"<html>Forbidden</html>"),
+    ):
+        script = Script().on("POST", protocol.PATH_CREATE, answer)
+        with pytest.raises(YandexUnavailable) as unavailable:
+            yandex(script).create_claim(REQUEST)
+        assert unavailable.value.outcome_unknown is False and unavailable.value.status == 403
+    # claims/create's codes are refusals of that endpoint only
+    script = Script().on(
+        "POST", protocol.PATH_CANCEL, httpx.Response(403, json={"code": "forbidden_by_antifake"})
+    )
+    with pytest.raises(YandexUnavailable) as other:
+        yandex(script).cancel(CLAIM_ID, 1, "free")
+    assert other.value.outcome_unknown is False and other.value.status == 403
+
+
 def test_an_error_without_a_code_names_the_status() -> None:
     script = Script().on("POST", INFO, httpx.Response(400, content=b"<html>bad</html>"))
     with pytest.raises(YandexRejected) as refused:
@@ -545,7 +587,12 @@ def test_request_return() -> None:
     yandex(script).request_return(CLAIM_ID, 6988, "Mijoz buyurtmani rad etdi")
     (request,) = script.requests
     assert dict(request.url.params) == {"claim_id": CLAIM_ID}
-    assert body(request) == {"point_id": 6988, "comment": "Mijoz buyurtmani rad etdi"}
+    # need_return_items: the documented "return the item to the initial point of dispatch"
+    assert body(request) == {
+        "point_id": 6988,
+        "comment": "Mijoz buyurtmani rad etdi",
+        "need_return_items": True,
+    }
     script = Script().on("POST", protocol.PATH_RETURN, reply("yandex", "return_409", 409))
     with pytest.raises(YandexConflict) as conflict:
         yandex(script).request_return(CLAIM_ID, 6988, "x")

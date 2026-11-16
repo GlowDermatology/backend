@@ -16,9 +16,10 @@ next run takes it):
   or does not accept returns; back to ``returning`` (not urgent) once it opens, ``returned`` / resolved once
   the parcel is back / confirmed.
 * ``cancel_incomplete`` (urgent) — staff asked for a carrier cancel more than 10 minutes ago, Yandex shows the
-  claim cancelled (``carrier_cancelled``) or the parcel returning (``returning``) and the order is still
-  open: a cancel that stopped between its two phases; resolved by repeating the cancel (no second carrier
-  call), by a delivered order or by a confirmed return.
+  claim cancelled or the claim was withdrawn for the cancel (error code ``cancel_requested``: by the cancel,
+  or by a dispatch run that found the stamp) (``carrier_cancelled``), or the parcel is returning
+  (``returning``), and the order is still open: a cancel that stopped between its two phases; resolved by
+  repeating the cancel (no second carrier call), by a delivered order or by a confirmed return.
 * reminders — every open urgent issue untouched for 30 minutes (``delivery.services.remind_issues``).
 
 Alerts (ids and codes only) come from ``delivery.services``: an issue that becomes urgent queues
@@ -247,6 +248,10 @@ def _calming(result: ReviewResult, order_id: int, code: str) -> Callable[[Order]
 
 def _carrier_done(request: delivery_selectors.CancelRequest) -> str | None:
     if request.claim_ended and request.claim_status in delivery_services.OUR_CANCEL_STATUSES:
+        return CODE_CARRIER_CANCELLED
+    if request.claim_ended and request.claim_error_code == delivery_services.CANCEL_WITHDRAWN:
+        # the claim was withdrawn for this cancel (by the cancel itself, or by a dispatch run that found the
+        # stamp) and nothing summons a courier any more, yet the order is still open
         return CODE_CARRIER_CANCELLED
     if request.stage in delivery_yandex.RETURN_STAGES:
         return CODE_RETURNING

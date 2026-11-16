@@ -181,6 +181,7 @@ here; they are made in the infra repository.
 | `commerce.0013_yandex_delivery` | `Order.address_latitude` / `address_longitude` (nullable, both or neither); the `OrderEvent` checks regenerated (`delivery_failed`, `shipment_returned`; source `yandex` for `handed_to_courier` / `delivered`) — checks only widen |
 | `delivery.0006_yandex_delivery` | new tables `delivery_deliverysettings`, `delivery_warehousehours`, `delivery_warehouseclosure`, `delivery_deliveryquote`, `delivery_courierclaim`, `delivery_deliveryissue`; `Shipment` gains `provider` (database default `bts`), `method`, `stage`, `quote`, `claim`, the parcel and cost columns (nullable or with database defaults); `ShipmentEvent.carrier_status` (database default `""`); constraints and partial indexes (one open claim per shipment, one open issue per order and kind). Depends on `commerce.0013` |
 | `delivery.0007_seed_delivery_settings` | the `DeliverySettings` singleton (also re-ensured on every `migrate`) |
+| `delivery.0008_courierclaim_cancel_sent` | `CourierClaim` gains `cancel_sent_at` (nullable: our `claims/cancel` was sent, never sent again), `cancel_state` (`varchar(16)`, existing rows `''`: the terms it was sent with) and `cancel_price` (nullable: a paid cancel's quoted price, counted as the fee once Yandex shows `cancelled_with_payment`); columns only, no index or constraint. Depends on `delivery.0007` |
 
 **Environment** (Vault `secret/<env>/django`; full list in `.env.example`, rules in the integration doc §7):
 `YANDEX_DELIVERY_MODE` (`live` to go live), `YANDEX_DELIVERY_TOKEN` (**secret**, required when live),
@@ -236,6 +237,12 @@ ops console (`DJANGO_ADMIN_ENABLED=true`, `OPS_DOMAIN`, `OPS_ALLOWED_IPS`, TOTP;
 6. A second pilot order cancelled before pickup (free cancel), and — if Yandex agrees — one after pickup (return,
    confirm return, refund). Record the fees.
 7. Clear `YANDEX_DELIVERY_PILOT_CUSTOMER_IDS` to open Yandex to everyone; switch on Express when decided.
+
+**Restarts during an admin cancel.** An api restart that kills a Yandex order's cancel between Yandex's answer and
+the commit of its "sent" marker loses the marker (a known limit: integration doc §12, residual window; gunicorn
+waits `graceful_timeout`, 30 s, for running requests). Staff who got no answer for a cancel during a deploy should
+let the poll catch up (a claim Yandex cancelled then raises `cancel_incomplete` 10–15 minutes after the first press,
+and repeating the cancel then makes no carrier call) rather than press cancel again at once.
 
 **Switching off.** To stop offering Yandex, switch the methods off in the ops console (or suspend dispatch): open
 claims keep being polled and cancellable. Do **not** set `YANDEX_DELIVERY_MODE=fake` while claims are open: under the

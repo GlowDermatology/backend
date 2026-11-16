@@ -11,7 +11,9 @@ Failure mapping (AGENTS.md "Live adapters"): no answer, or a request that may ha
 here (``claims/create`` is repeated by the caller with the same ``request_id``, which the documentation
 prescribes for exactly that case); a redirect (never followed), 401/403/408/425/429 →
 :class:`YandexUnavailable` "not processed" (429 is Yandex's rate limit, not a refusal; a 401 also logs ERROR
-``yandex.auth_failed``); a 2xx we cannot read, or a price in another currency → :class:`YandexUnavailable`;
+``yandex.auth_failed``) — except a 403 of ``claims/create`` with one of its documented codes
+(``protocol.CREATE_FORBIDDEN_CODES``: ``forbidden_by_antifake`` …), a definitive :class:`YandexRejected`;
+a 2xx we cannot read, or a price in another currency → :class:`YandexUnavailable`;
 409 of ``accept`` / ``cancel`` / ``return`` / ``tracking-links`` → :class:`YandexConflict`; any other 4xx
 → :class:`YandexRejected` with Yandex's ``code``. Yandex's ``message`` goes through ``httpclient.safe_text``.
 
@@ -111,9 +113,11 @@ class LiveYandexDelivery:
         *,
         deadline: httpclient.Deadline | None,
         conflict: bool = False,
+        forbidden: frozenset[str] = frozenset(),
         **kwargs: Any,
     ) -> httpclient.Answer:
-        """One request; returns a 2xx answer, raises the typed error of anything else."""
+        """One request; returns a 2xx answer, raises the typed error of anything else. ``forbidden``: the
+        endpoint's documented 403 codes, definitive refusals (any other 403 stays "not processed")."""
         try:
             with httpclient.new_client(self.transport) as http:
                 answer = httpclient.send(
@@ -129,6 +133,8 @@ class LiveYandexDelivery:
             raise YandexUnavailable(f"Yandex {path}: {exc}", outcome_unknown=exc.sent) from exc
         if answer.status == 401:
             logger.error("yandex.auth_failed status=401 (check YANDEX_DELIVERY_TOKEN)")
+        if answer.status == 403 and (refusal := protocol.error_code(answer.data, 403)) in forbidden:
+            raise YandexRejected(refusal, httpclient.safe_text(protocol.error_message(answer.data)))
         if answer.not_processed:
             raise YandexUnavailable(
                 f"Yandex {path}: HTTP {answer.status} (not processed)",
@@ -208,6 +214,7 @@ class LiveYandexDelivery:
             "POST",
             protocol.PATH_CREATE,
             deadline=deadline,
+            forbidden=protocol.CREATE_FORBIDDEN_CODES,
             params={"request_id": request.request_id},
             json=body,
         )
