@@ -82,6 +82,14 @@ SIDEBAR_NAVIGATION: list[dict[str, Any]] = [
                 _("Qaytarishlar"), "currency_exchange", "payments", "refund", badge="refunds_needing_action"
             ),
             _item(_("Yetkazib berish"), "local_shipping", "delivery", "shipment"),
+            _item(
+                _("Yetkazish muammolari"), "report", "delivery", "deliveryissue", badge="delivery_issues_open"
+            ),
+            _item(_("Kuryer buyurtmalari"), "two_wheeler", "delivery", "courierclaim"),
+            _item(_("Yetkazish sozlamalari"), "tune", "delivery", "deliverysettings"),
+            _item(_("Ombor ish vaqti"), "schedule", "delivery", "warehousehours"),
+            _item(_("Ombor maxsus kunlari"), "event_busy", "delivery", "warehouseclosure"),
+            _item(_("Narx takliflari"), "request_quote", "delivery", "deliveryquote"),
             _item(_("Savatlar"), "shopping_cart", "commerce", "cart"),
             _item(_("Buyurtma qatorlari"), "list_alt", "commerce", "orderitem"),
             _item(_("Buyurtma tarixi"), "history", "commerce", "orderevent"),

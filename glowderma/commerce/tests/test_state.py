@@ -27,6 +27,9 @@ def test_transition_table_matches_design_rows() -> None:
         (11, "processing", "handed_to_courier", Trigger.BTS_STATUS),
         (12, "processing", "delivered", Trigger.BTS_STATUS),
         (12, "handed_to_courier", "delivered", Trigger.BTS_STATUS),
+        (11, "processing", "handed_to_courier", Trigger.YANDEX_STATUS),
+        (12, "processing", "delivered", Trigger.YANDEX_STATUS),
+        (12, "handed_to_courier", "delivered", Trigger.YANDEX_STATUS),
     ]
     # manual transitions never go backwards and nothing leaves a terminal status (§4.1 row 17)
     assert not [t for t in state.TRANSITIONS if t.source in state.TERMINAL_STATUSES]
@@ -168,8 +171,20 @@ def test_outbox_topic_registry() -> None:
         "billz.push_sale",
         "refund.submit",
         "billz.stock_reread",  # gap X-STOCK-FRESHNESS
+        "yandex.dispatch",  # Yandex Delivery plan §3.6
+        "yandex.sync_claim",  # Yandex Delivery plan §3.7
     )
-    assert topics.PRODUCED_TOPICS == ("billz.push_sale", "push.order_status", "billz.stock_reread")
+    assert topics.PRODUCED_TOPICS == (
+        "billz.push_sale",
+        "push.order_status",
+        "billz.stock_reread",
+        "yandex.dispatch",
+        "yandex.sync_claim",
+    )
+    assert topics.yandex_dispatch_key("0d6f6c1e") == "yandex.dispatch:0d6f6c1e"
+    assert topics.yandex_sync_claim_key("c1", "2026-11-15T10:00:00+00:00") == (
+        "yandex.sync_claim:c1:2026-11-15T10:00:00+00:00"
+    )
     assert topics.DEAD_LETTER_TOPICS == ("bts.create_shipment", "refund.submit")
     assert set(topics.PAYLOAD_KEYS) == set(topics.HANDLED_TOPICS) | set(topics.PRODUCED_TOPICS)
     assert topics.bts_create_shipment_key(10250, 2) == "bts.create_shipment:10250:2"
@@ -184,3 +199,39 @@ def test_outbox_topic_registry() -> None:
     )
     assert topics.order_status_inbox_key(10248, "handed_to_courier") == "order_status:10248:handed_to_courier"
     assert topics.DEAD_LETTER_ERROR_CODE == "dead_letter"
+
+
+def test_yandex_rows_mirror_the_bts_rows_with_their_own_source() -> None:
+    bts = [t for t in state.TRANSITIONS if t.trigger == Trigger.BTS_STATUS]
+    yandex = [t for t in state.TRANSITIONS if t.trigger == Trigger.YANDEX_STATUS]
+    assert [(t.row, t.source, t.target, t.event_type, t.fulfilment, t.push) for t in yandex] == [
+        (t.row, t.source, t.target, t.event_type, t.fulfilment, t.push) for t in bts
+    ]
+    assert {t.event_source for t in yandex} == {enums.EventSource.YANDEX}
+    assert (
+        state.find_transition(S.PROCESSING, S.HANDED_TO_COURIER, Trigger.YANDEX_STATUS, fulfilment=F.PICKUP)
+        is None
+    )
+
+
+def test_a_yandex_order_has_no_manual_transition_but_the_unaccounted_parcel() -> None:
+    Y = enums.DeliveryProvider.YANDEX
+    for status in S.values:
+        assert state.manual_transitions(status, F.DELIVERY, provider=Y) == []
+    assert state.manual_transitions(S.HANDED_TO_COURIER, F.DELIVERY, provider=Y, parcel_unaccounted=True) == [
+        "delivered"
+    ]
+    for status in (S.AWAITING_PAYMENT, S.PROCESSING, S.DELIVERED, S.CANCELLED):
+        assert state.manual_transitions(status, F.DELIVERY, provider=Y, parcel_unaccounted=True) == []
+    # the flag means nothing for BTS: today's rows stay as they are
+    assert state.manual_transitions(S.PROCESSING, F.DELIVERY, parcel_unaccounted=True) == [
+        "handed_to_courier"
+    ]
+    assert state.manual_transitions(S.PROCESSING, F.DELIVERY, provider=enums.DeliveryProvider.BTS) == [
+        "handed_to_courier"
+    ]
+
+
+def test_retry_shipment_is_bts_only() -> None:
+    assert state.can_retry_shipment(F.DELIVERY, S.PROCESSING, "failed", False, provider="bts")
+    assert not state.can_retry_shipment(F.DELIVERY, S.PROCESSING, "failed", False, provider="yandex")

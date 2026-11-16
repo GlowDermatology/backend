@@ -1,0 +1,123 @@
+{
+  "_source": "documented shape (claims/info, V2ClaimInfo); values ours: the docs show RUB only, UZS is our assumption",
+  "id": "7f5c2a9b1d3e4f60a1b2c3d4e5f60718",
+  "corp_client_id": "cd8cc018bde34597932855e3cfdce927",
+  "items": [
+    {
+      "title": "Buyurtma 10248",
+      "cost_value": "540000",
+      "cost_currency": "UZS",
+      "quantity": 1,
+      "weight": 1.2,
+      "pickup_point": 6987,
+      "droppof_point": 6988,
+      "extra_id": "10248"
+    }
+  ],
+  "route_points": [
+    {
+      "id": 6987,
+      "contact": {
+        "name": "Glow Derma ombori",
+        "phone": "+998712000000",
+        "email": "sklad@glowderma.uz"
+      },
+      "address": {
+        "fullname": "Toshkent, Amir Temur ko'chasi, 1",
+        "coordinates": [
+          69.279737,
+          41.311151
+        ]
+      },
+      "type": "source",
+      "visit_order": 1,
+      "visit_status": "pending",
+      "visited_at": {},
+      "skip_confirmation": false
+    },
+    {
+      "id": 6988,
+      "contact": {
+        "name": "Malika Karimova",
+        "phone": "+998901234567"
+      },
+      "address": {
+        "fullname": "Toshkent, Chilonzor 9, 12-uy",
+        "coordinates": [
+          69.203522,
+          41.285446
+        ]
+      },
+      "type": "destination",
+      "visit_order": 2,
+      "visit_status": "pending",
+      "visited_at": {},
+      "skip_confirmation": false,
+      "external_order_id": "10248"
+    },
+    {
+      "id": 6989,
+      "contact": {
+        "name": "Glow Derma ombori",
+        "phone": "+998712000000",
+        "email": "sklad@glowderma.uz"
+      },
+      "address": {
+        "fullname": "Toshkent, Amir Temur ko'chasi, 1",
+        "coordinates": [
+          69.279737,
+          41.311151
+        ]
+      },
+      "type": "return",
+      "visit_order": 3,
+      "visit_status": "pending",
+      "visited_at": {},
+      "skip_confirmation": false
+    }
+  ],
+  "current_point_id": 6987,
+  "status": "performer_found",
+  "version": 1,
+  "revision": 4,
+  "user_request_revision": "1",
+  "client_requirements": {
+    "taxi_class": "courier"
+  },
+  "optional_return": false,
+  "callback_properties": {
+    "callback_url": "https://api.glowderma.uz/api/v1/webhooks/yandex-delivery/?ref=10248-abc&"
+  },
+  "created_ts": "2026-11-15T10:00:00.000000+00:00",
+  "updated_ts": "2026-11-15T10:05:00+00:00",
+  "pricing": {
+    "offer": {
+      "offer_id": "28ae5f1d72364468be3f5e26cd6a66bf",
+      "price": "21000.0000",
+      "price_with_vat": "25200.4000",
+      "valid_until": "2026-11-15T10:10:04+00:00"
+    },
+    "currency": "UZS",
+    "currency_rules": {
+      "code": "UZS",
+      "template": "$VALUE$ $SIGN$$CURRENCY$",
+      "text": "сум",
+      "sign": "сўм"
+    }
+  },
+  "matched_cars": [
+    {
+      "taxi_class": "courier",
+      "door_to_door": true
+    }
+  ],
+  "performer_info": {
+    "courier_name": "Rustam",
+    "legal_name": "OOO Kuryer Servis",
+    "car_model": "Chevrolet Cobalt",
+    "car_color": "oq",
+    "car_color_hex": "FFFFFF",
+    "car_number": "01A123BC",
+    "transport_type": "car"
+  }
+}

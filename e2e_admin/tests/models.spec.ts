@@ -30,6 +30,8 @@ interface ModelInfo {
   filters: FilterInfo[];
   list_per_page: number;
   date_hierarchy: string | null;
+  /** One row (the delivery settings): its list redirects to that row's change page. */
+  singleton: boolean;
 }
 
 interface Facts {
@@ -92,6 +94,11 @@ for (const model of REGISTRY) {
       const response = await page.goto(model.changelist);
       expect(response?.status()).toBe(200);
       const fact = facts[model.label];
+      if (model.singleton) {
+        expect(new URL(page.url()).pathname).toBe(fact.change_url);
+        await expect(page.locator("h1").first()).toContainText(model.verbose_name_plural, { ignoreCase: true });
+        return;
+      }
       await expect(page.locator("h1").first()).toContainText(model.verbose_name_plural, { ignoreCase: true });
       if (fact.count > 0) {
         await expect(page.locator("#result_list tbody tr").first()).toBeVisible();

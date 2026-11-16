@@ -27,6 +27,7 @@ PROVIDER_MODE_SETTINGS: dict[str, str] = {
     "bts": "BTS_MODE",
     "eskiz": "ESKIZ_MODE",
     "email": "EMAIL_MODE",
+    "yandex": "YANDEX_DELIVERY_MODE",
 }
 # Setting values that name the live adapter of a provider with its own vocabulary (``EMAIL_MODE=smtp``).
 LIVE_MODE_ALIASES: dict[str, str] = {"smtp": "live"}
@@ -34,7 +35,9 @@ LIVE_MODE_ALIASES: dict[str, str] = {"smtp": "live"}
 PAYMENT_PROVIDERS: tuple[str, ...] = (enums.PaymentProvider.CLICK.value, enums.PaymentProvider.PAYME.value)
 # Providers whose callbacks (webhooks) are refused while they are fake under the production settings
 # (§2.13.0).
-CALLBACK_PROVIDERS: frozenset[str] = frozenset({"click", "payme", "bts"})
+CALLBACK_PROVIDERS: frozenset[str] = frozenset({"click", "payme", "bts", "yandex"})
+# Home-delivery providers in the order checkout prefers them (plan §3.4: Yandex, else BTS).
+DELIVERY_PROVIDERS: tuple[str, ...] = ("yandex", "bts")
 PRODUCTION_SETTINGS_MODULE = "config.settings.production"
 
 
@@ -88,9 +91,25 @@ def delivery_available() -> bool:
 
 
 def fulfilment_methods() -> list[str]:
-    """``FulfilmentMethod`` literals offered at checkout, ``delivery`` (when available) then ``pickup``."""
+    """``FulfilmentMethod`` literals offered at checkout, ``delivery`` (when available) then ``pickup``.
+
+    ``delivery`` still means BTS (plan §2 decision 12): released clients read this list and know only BTS
+    addresses, so a Yandex-only deployment does not advertise ``delivery`` here — it is announced through
+    :func:`delivery_providers` instead."""
     methods = [enums.FulfilmentMethod.DELIVERY.value] if delivery_available() else []
     return [*methods, enums.FulfilmentMethod.PICKUP.value]
+
+
+def yandex_delivery_available() -> bool:
+    """Yandex courier delivery can be offered unless Yandex is fake under the production settings. Whether a
+    method is actually offered also depends on the warehouse settings (``delivery``), not read here."""
+    return not fake_in_production("yandex")
+
+
+def delivery_providers() -> list[str]:
+    """The home-delivery providers that can take an order now, in preference order (Yandex, then BTS)."""
+    available = {"yandex": yandex_delivery_available(), "bts": delivery_available()}
+    return [provider for provider in DELIVERY_PROVIDERS if available[provider]]
 
 
 def online_sales_enabled() -> bool:

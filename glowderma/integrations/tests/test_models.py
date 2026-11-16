@@ -177,9 +177,9 @@ def test_job_indexes_and_constraints_in_pg_catalog() -> None:
 # --- IntegrationState ------------------------------------------------------------------------------------
 
 
-def test_six_provider_rows_come_from_the_data_migration() -> None:
+def test_the_provider_rows_come_from_the_data_migrations() -> None:
     providers = sorted(IntegrationState.objects.values_list("provider", flat=True))
-    assert providers == ["billz", "bts", "click", "eskiz", "fcm", "payme"]
+    assert providers == ["billz", "bts", "click", "eskiz", "fcm", "payme", "yandex"]
     billz = IntegrationState.objects.get(provider="billz")
     assert billz.last_sync_at is None and billz.consecutive_failures == 0 and billz.data == {}
     assert str(billz) == "Billz: oxirgi sinxronlash hali yo‘q"

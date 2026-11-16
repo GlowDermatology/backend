@@ -17,6 +17,8 @@ from glowderma.core.api.exceptions import AuthFailed
 from glowderma.core.models import IdempotencyRecord
 from glowderma.customers import services
 from glowderma.customers.tests.p1_support import PASSWORD, Signed, password_customer, reset_fakes
+from glowderma.delivery.models import DeliveryQuote
+from glowderma.delivery.tests.factories import DeliveryQuoteFactory
 
 pytestmark = pytest.mark.django_db
 ME = "/api/v1/me/"
@@ -54,6 +56,19 @@ def test_delete_me_removes_the_customers_stored_idempotent_responses() -> None:
     assert response.status_code == 204
     assert not IdempotencyRecord.objects.filter(audience="customer", actor_id=signed.customer.pk).exists()
     assert IdempotencyRecord.objects.filter(audience="admin", actor_id=signed.customer.pk).exists()
+
+
+def test_delete_me_removes_the_unused_delivery_quotes_with_their_address_and_pin() -> None:
+    signed = Signed(password_customer("+998907771004"))
+    unused = DeliveryQuoteFactory.create(customer=signed.customer)
+    used = DeliveryQuoteFactory.create(customer=signed.customer, used_at=unused.created_at)
+    other = DeliveryQuoteFactory.create()  # another customer's quote stays
+    response = signed.client.delete(ME, {"password": PASSWORD})
+    assert response.status_code == 204
+    remaining = set(DeliveryQuote.objects.values_list("pk", flat=True))
+    assert unused.pk not in remaining
+    # a used quote documents an order's fee (the order keeps the address); another customer's stays
+    assert {used.pk, other.pk} <= remaining
 
 
 # --- sid is required

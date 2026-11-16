@@ -231,6 +231,11 @@ def test_shipment_event_factory_defaults_str_ordering_and_protect() -> None:
         "status_received",
         "cancelled",
         "cancel_refused",
+        "claim_requested",
+        "claim_status",
+        "price_review",
+        "return_requested",
+        "returned",
     ]
     later = ShipmentEventFactory.create(
         shipment=shipment,

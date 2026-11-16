@@ -20,7 +20,8 @@ LIVE_BILLZ = {
     "BILLZ_PAYMENT_TYPE_ID": "8d5e2a1c-3f4b-4c7d-8e9f-1a2b3c4d5e6f",
 }
 ALL_LIVE = {
-    f"{name}_MODE": "live" for name in ("OAUTH", "BILLZ", "FCM", "CLICK", "PAYME", "BTS", "ESKIZ", "EMAIL")
+    f"{name}_MODE": "live"
+    for name in ("OAUTH", "BILLZ", "FCM", "CLICK", "PAYME", "BTS", "ESKIZ", "EMAIL", "YANDEX_DELIVERY")
 }
 
 
@@ -52,6 +53,7 @@ def test_live_adapters_without_their_credentials_are_not_configured() -> None:
             "bts": False,
             "eskiz": False,
             "email": False,
+            "yandex": False,
         }
 
 
@@ -71,6 +73,7 @@ LIVE_CREDENTIALS = {
     "ESKIZ_SENDER": "GlowDerma",
     "FCM_PROJECT_ID": "glowderma-prod",
     "SMTP_HOST": "smtp.example.uz",
+    "YANDEX_DELIVERY_TOKEN": "yandex-oauth-token",
 }
 
 

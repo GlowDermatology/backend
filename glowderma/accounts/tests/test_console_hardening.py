@@ -79,6 +79,16 @@ TOPIC_PAYLOADS: dict[str, dict[str, Any]] = {
     "push.session_replaced": {"session_id": "s-1", "sid": "s-1", "fcm_token": "FCM-REPLACED-SECRET"},
     "refund.submit": {"refund_id": 1, "payment_id": 2, "order_id": 25, "provider_txn_id": "t-1", "amount": 9},
     "sms.send": {"sms_code_id": 16, "lang": "uz", "platform": "ios"},
+    "yandex.dispatch": {
+        "order_id": 26,
+        "courier_claim_id": 16,
+        "request_id": "3f2b8c1e-6d4a-4f7b-9a0e-1c2d3e4f5a6b",
+    },
+    "yandex.sync_claim": {
+        "order_id": 27,
+        "claim_id": "7f5c2a9b1d3e4f60a1b2c3d4e5f60718",
+        "updated_ts": "2026-11-15T10:00:00+00:00",
+    },
 }
 
 

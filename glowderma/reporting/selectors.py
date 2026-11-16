@@ -13,6 +13,7 @@ from django.db.models import Count, Q, QuerySet
 from glowderma.accounts.models import Customer
 from glowderma.appointments import selectors as appointment_selectors
 from glowderma.catalog import selectors as catalog_selectors
+from glowderma.commerce import delivery_admin
 from glowderma.commerce import selectors as commerce_selectors
 from glowderma.core import enums, timeutils
 from glowderma.core.models import AuditEntry
@@ -79,10 +80,12 @@ def audit_data(entry: AuditEntry) -> Any:
 
 
 def nav_counts() -> dict[str, int]:
-    """``GET nav-counts/``: all-time ``processing`` orders and the pending-summary count."""
+    """``GET nav-counts/``: all-time ``processing`` orders, the pending-summary count and the open delivery
+    issues (the panel's queue badge)."""
     return {
         "orders_processing": commerce_selectors.processing_count(),
         "appointments_pending": appointment_selectors.pending_summary()["count"],
+        "delivery_issues_open": delivery_selectors.issue_counts()["open"],
     }
 
 
@@ -211,6 +214,9 @@ def dashboard(window: DashboardWindow, now: datetime | None = None) -> dict[str,
             "refunds_needing_action": payment_selectors.refunds_needing_action(),
             "bts_polling_failing": bts_polling_failing(),
             "cashback_policy_missing": loyalty_selectors.cashback_policy_missing(instant),
+            "yandex_failing": delivery_admin.yandex_failing(),
         },
+        # order-state counters as the orders stand now (not windowed by ``range``)
+        "fulfilment": delivery_admin.fulfilment_counts(instant),
         "generated_at": instant,
     }

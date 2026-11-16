@@ -36,14 +36,18 @@ The sections that follow are application knowledge that does not depend on how t
 | `commerce-expire-reservations` | `commerce.expire_reservations` | every minute |
 | `start-due-campaigns` | `notifications.start_due_campaigns` | every minute |
 | `notifications-finalise-stopping` | `notifications.finalise_stopping_campaigns` | every minute (a `stopping` campaign with no open batch) |
+| `commerce-poll-yandex` | `commerce.poll_yandex` | every 60 s (Yandex Delivery `claims/bulk_info`; single flight; no-op while Yandex is fake) |
 | `reap-stale-jobs` | `integrations.reap_stale_jobs` | every 5 minutes |
+| `commerce-review-delivery-issues` | `commerce.review_delivery_issues` | every 5 minutes (Yandex Delivery exception queue, urgent-issue reminders) |
+| `billz-sync-delta` | `catalog.billz_sync_delta` | every `BILLZ_DELTA_SYNC_SECONDS` (300 s; no-op while Billz is fake) |
 | `commerce-poll-bts` | `commerce.poll_bts` | every 10 minutes (no-op while BTS is fake) |
 | `accounts-cleanup-auth` | `accounts.cleanup_auth` | hourly |
 | `delivery-refresh-bts-regions` | `delivery.refresh_bts_regions` | every 6 hours |
-| `billz-sync-delta` | `catalog.billz_sync_delta` | hourly at :07 (no-op while Billz is fake) |
 | `purge-idempotency-records` | `core.purge_idempotency_records` | 03:00 |
 | `core-purge-outbox` | `core.purge_outbox` | 03:20 (done messages older than `OUTBOX_RETENTION_DAYS`) |
 | `integrations-purge-webhook-inbox` | `integrations.purge_webhook_inbox` | 03:25 (`WEBHOOK_INBOX_RETENTION_DAYS`) |
+| `delivery-purge-quotes` | `delivery.purge_quotes` | 03:35 (unused Yandex checkout quotes a day after they expired) |
+| `delivery-blank-courier-details` | `delivery.blank_courier_details` | 03:37 (courier name, vehicle, tracking link 7 days after a claim ended) |
 | `reporting-consistency-report` | `reporting.consistency_report` (K1–K6 + loyalty reconciliation) | 03:40 |
 | `billz-sync-full` | `catalog.billz_sync_full` | 04:23 (no-op while Billz is fake) |
 
@@ -62,12 +66,13 @@ fake never pretends an effect happened:
 | Billz | **No online selling**: `settings/public` says `online_sales_enabled: false`, cart and checkout answer `409 online_sales_unavailable`, the admin import is refused, the beat syncs do nothing, no sale is recorded |
 | Click / Payme | **No money moves**: not offered at checkout (`payment_providers` without them), callbacks refused (`401`, inbox row `fake_mode`); a Click Complete of a transaction prepared while Click was live is accepted and reversed by hand. Never switch live → fake while the provider holds open money (the worker logs ERROR `providers.fake_with_open_money` at start) |
 | BTS | **Pickup only** (no home delivery), callbacks refused, no parcel invented |
+| Yandex Delivery | **No courier**: no Yandex option at checkout (`settings/public` `delivery.providers` without `yandex`), the callback refused (`403`, inbox row `fake_mode`), the poll does nothing, the fake invents no price or claim. Do not switch live → fake while claims are open (§13) |
 | Eskiz | **No SMS delivered**: nobody can register, reset a password or sign in on a new device (the code is never sent) |
 | FCM | **No push reaches a device**: the fake logs ids only and reports the pushes sent; inbox rows are written as usual |
 | OAuth | Social sign-in off for staff and customers (password sign-in works) |
 
 So a fake deployment is a demo/staging posture: real customers need live Billz (selling), live Eskiz (sign-up),
-live Click and/or Payme (payment), live BTS (delivery) and live FCM (pushes). The local/test development switches
+live Click and/or Payme (payment), live BTS and/or live Yandex Delivery (delivery) and live FCM (pushes). The local/test development switches
 (`FAKE_NOW`, `FAKE_PAYMENTS_ENABLED`, `FAKE_SCENARIO_HEADER_ENABLED`, `ESKIZ_FAKE_CODE`, `POS_API_KEYS`) are refused by
 the production settings whatever the modes.
 
@@ -134,6 +139,12 @@ Admin" role, FCM HTTP v1 API enabled; **mount the key** as `/srv/glowderma/secre
 set `FCM_MODE=live`, `FCM_PROJECT_ID`, `FCM_CREDENTIALS_FILE=/run/secrets/glowderma/fcm-service-account.json`; the boot
 check passes in api, worker and beat; a test device receives an order-status push.
 
+**Yandex Delivery** ([yandex-delivery.md](../integrations/yandex-delivery.md) §16; §13 below): contract, token,
+prepaid balance, `auto_accept` off; set `YANDEX_DELIVERY_MODE=live`, `YANDEX_DELIVERY_TOKEN`, the pilot ids; run
+`manage.py yandex_delivery_check`; configure the warehouse and switch one method on in the ops console; the alert
+webhook points at the Telegram bot; one supervised pilot order (§13). Outbound HTTPS to `b2b.taxi.yandex.net` from
+api and worker.
+
 **Social sign-in** (`OAUTH_MODE=live`): Google and Facebook credentials, the two callback URLs of §3.5, and — for Sign
 in with Apple — `APPLE_BUNDLE_IDS`, `APPLE_TEAM_ID`, `APPLE_KEY_ID` and the `.p8` mounted as
 `APPLE_PRIVATE_KEY_FILE=/run/secrets/glowderma/apple-signin.p8`. Customer Google sign-in also needs
@@ -155,3 +166,85 @@ and not in `sandbox`.
 3. **Open questions** Q1–Q10 (§6) answered by the product owner (retention of the audit log, orders, backups …).
 4. **Retention** settings left at their contractual defaults unless decided otherwise (`WEBHOOK_INBOX_RETENTION_DAYS=180`).
 
+## 13. Yandex Delivery release (`feat/yandex-delivery`)
+
+Courier delivery through Yandex Delivery's Express API ([yandex-delivery.md](../integrations/yandex-delivery.md)).
+It ships **off**: with the defaults nothing changes for customers (every Yandex method is switched off in the
+warehouse settings, and fake Yandex under the production settings offers nothing). Infra changes below are reported
+here; they are made in the infra repository.
+
+**Migrations** (additive; the usual release order — api, worker and beat stopped, then `migrate`, then started):
+
+| Migration | What |
+|---|---|
+| `integrations.0006_yandex_provider` | `yandex` in the provider choices of `WebhookInbox` / `IntegrationState`; inserts the `IntegrationState(yandex)` row (reverse deletes it) |
+| `commerce.0013_yandex_delivery` | `Order.address_latitude` / `address_longitude` (nullable, both or neither); the `OrderEvent` checks regenerated (`delivery_failed`, `shipment_returned`; source `yandex` for `handed_to_courier` / `delivered`) — checks only widen |
+| `delivery.0006_yandex_delivery` | new tables `delivery_deliverysettings`, `delivery_warehousehours`, `delivery_warehouseclosure`, `delivery_deliveryquote`, `delivery_courierclaim`, `delivery_deliveryissue`; `Shipment` gains `provider` (database default `bts`), `method`, `stage`, `quote`, `claim`, the parcel and cost columns (nullable or with database defaults); `ShipmentEvent.carrier_status` (database default `""`); constraints and partial indexes (one open claim per shipment, one open issue per order and kind). Depends on `commerce.0013` |
+| `delivery.0007_seed_delivery_settings` | the `DeliverySettings` singleton (also re-ensured on every `migrate`) |
+| `delivery.0008_courierclaim_cancel_sent` | `CourierClaim` gains `cancel_sent_at` (nullable: our `claims/cancel` was sent, never sent again), `cancel_state` (`varchar(16)`, existing rows `''`: the terms it was sent with) and `cancel_price` (nullable: a paid cancel's quoted price, counted as the fee once Yandex shows `cancelled_with_payment`); columns only, no index or constraint. Depends on `delivery.0007` |
+
+**Environment** (Vault `secret/<env>/django`; full list in `.env.example`, rules in the integration doc §7):
+`YANDEX_DELIVERY_MODE` (`live` to go live), `YANDEX_DELIVERY_TOKEN` (**secret**, required when live),
+optionally `YANDEX_DELIVERY_CALLBACK_URL` (`https://API_DOMAIN/api/v1/webhooks/yandex-delivery/`, no query),
+`YANDEX_DELIVERY_PILOT_CUSTOMER_IDS` for the pilot; `YANDEX_DELIVERY_BASE_URL`, `_CURRENCY` (`UZS`), `_LANGUAGE`
+(`ru`), `_SKIP_CONFIRMATION_SOURCE` / `_DESTINATION` (`false`) keep their defaults. Alerts: `ALERT_WEBHOOK_URL`
+(https, the bot's `/hooks/alerts`) and `ALERT_WEBHOOK_SECRET` (≥ 32 characters, the same value as the bot's);
+with Yandex live and no alert URL every process logs a startup WARNING. Frontend (its own repository):
+`NEXT_PUBLIC_MAP_TILE_URL` (the address-pin map; default OpenStreetMap tiles) and its CSP origins.
+
+**Beat** — four new entries (§7): `commerce-poll-yandex` (60 s), `commerce-review-delivery-issues` (5 min),
+`delivery-purge-quotes` (03:35), `delivery-blank-courier-details` (03:37). No new queue, port or system package.
+
+**Network.**
+- Outbound HTTPS (TLS 1.2+) to **`b2b.taxi.yandex.net:443`** from the **api** (checkout price checks, the admin
+  cancel, the ops console «Yandex bilan tekshirish», `manage` runs of `yandex_delivery_check`) and the **worker**
+  (dispatch, callback re-reads, the poll). Beat makes no call.
+- **Callback route at the edge** (only when `YANDEX_DELIVERY_CALLBACK_URL` is set): `POST
+  /api/v1/webhooks/yandex-delivery/` to the api, like the other webhooks. Its query string carries our HMAC order
+  reference (`?ref=…&updated_ts=…&claim_id=…`): **the edge must not log query strings** for it (it logs none for any
+  route today, as for the BTS `token=`); gunicorn logs none and the inbox stores none. Yandex documents no source
+  IPs, so no allow-list is possible.
+
+**Telegram bot (new service, repository `bot`).** Infra item, not built here: a compose service from the bot's
+Dockerfile (non-root, port `BOT_PORT` 8080, health `GET /healthz`), its secrets (`ALERT_WEBHOOK_SECRET` = the
+backend's, `TELEGRAM_BOT_TOKEN` from BotFather, `TELEGRAM_CHAT_ID`; optionally `ADMIN_BASE_URL`,
+`BOT_ENV_ALLOWLIST=production`), outbound HTTPS to `api.telegram.org`, and an https route the backend worker
+reaches for `ALERT_WEBHOOK_URL` (the production settings refuse a non-https alert URL). Find the chat id with
+`python -m glowderma_bot chat-id`; test with any alert (monitoring §1).
+
+**Yandex account (manual, before `live`).** A contract for the Uzbek legal entity; the OAuth token from the business
+cabinet's *Integration* tab (a cabinet password change invalidates it → `yandex.auth_failed`, then
+`delivery.provider_failing`); a **prepaid balance** topped up and watched; **`auto_accept` stays off** — the backend
+never sends it, and every claim must wait for our `claims/accept` after the price check (a WARNING
+`yandex.accepted_without_us` means the cabinet accepted a claim by itself). Staff who edit the warehouse need the
+ops console (`DJANGO_ADMIN_ENABLED=true`, `OPS_DOMAIN`, `OPS_ALLOWED_IPS`, TOTP; `docs/ops/staff-access.md`).
+
+**Pilot order procedure** (staging first, then production; one supervised order before opening to everyone):
+1. Set `YANDEX_DELIVERY_MODE=live`, `YANDEX_DELIVERY_TOKEN`, `YANDEX_DELIVERY_PILOT_CUSTOMER_IDS=<pilot customer
+   ids>` (and the alert webhook); `up -d api worker beat`; `health/?ready=1` → 200 with `yandex` configured.
+2. `scripts/manage.sh <env> django yandex_delivery_check --lat <warehouse lat> --lon <lon> --address "<address>"`:
+   `courier` and `express` listed, prices in `UZS`; exit status 0.
+3. Ops console «Yetkazish sozlamalari»: warehouse name, address, pin, contact (E.164 phone, e-mail), courier
+   comment; «Ombor ish vaqti» (every working weekday) and special days; «Yandex bilan tekshirish»; switch on **one**
+   method (Standard); keep the policy defaults unless decided otherwise.
+4. As a pilot customer: pin an address, `delivery/calculate/` shows the Yandex option with a fee and ETA; check out
+   and pay (a small real amount).
+5. Admin panel: the order is «To‘langan · tayyorlash»; pack it, «Kuryer chaqirish» with the weighed parcel; watch
+   `delivery.stage` and the claim status (`claims/info` via the poll every 60 s) through `performer_found` →
+   `pickuped` → `delivered`; the customer sees the stage, the courier and the tracking link. Note every status,
+   price, VAT and currency Yandex sent (`CourierClaim`, the shipment events) and the final price on the cabinet's
+   bill (`cost_difference`).
+6. A second pilot order cancelled before pickup (free cancel), and — if Yandex agrees — one after pickup (return,
+   confirm return, refund). Record the fees.
+7. Clear `YANDEX_DELIVERY_PILOT_CUSTOMER_IDS` to open Yandex to everyone; switch on Express when decided.
+
+**Restarts during an admin cancel.** An api restart that kills a Yandex order's cancel between Yandex's answer and
+the commit of its "sent" marker loses the marker (a known limit: integration doc §12, residual window; gunicorn
+waits `graceful_timeout`, 30 s, for running requests). Staff who got no answer for a cancel during a deploy should
+let the poll catch up (a claim Yandex cancelled then raises `cancel_incomplete` 10–15 minutes after the first press,
+and repeating the cancel then makes no carrier call) rather than press cancel again at once.
+
+**Switching off.** To stop offering Yandex, switch the methods off in the ops console (or suspend dispatch): open
+claims keep being polled and cancellable. Do **not** set `YANDEX_DELIVERY_MODE=fake` while claims are open: under the
+production settings the fake refuses everything, so the poll stops and an admin cancel of such an order answers
+503.

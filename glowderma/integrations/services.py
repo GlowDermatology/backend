@@ -228,6 +228,17 @@ def update_provider_data(provider: str, changes: dict[str, Any]) -> IntegrationS
         return state
 
 
+def record_success(provider: str) -> bool:
+    """A successful call that is not a sync (a Yandex price check on the customer path): ends the failure
+    run. One ``UPDATE`` that matches no row while the provider is healthy (no row lock, no write); ``True``
+    when a run was ended."""
+    instant = timeutils.now()
+    ended = IntegrationState.objects.filter(provider=provider, consecutive_failures__gt=0).update(
+        last_success_at=instant, consecutive_failures=0, last_error="", updated_at=instant
+    )
+    return ended > 0
+
+
 def record_failure(provider: str, message: str) -> IntegrationState:
     state = get_state(provider)
     instant = timeutils.now()

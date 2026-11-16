@@ -50,6 +50,9 @@ from .base import (
     SMTP_USE_SSL,
     SMTP_USE_TLS,
     SMTP_USER,
+    YANDEX_DELIVERY_BASE_URL,
+    YANDEX_DELIVERY_CALLBACK_URL,
+    YANDEX_DELIVERY_MODE,
     database_config,
     redis_db_url,
 )
@@ -335,6 +338,12 @@ if BTS_MODE == "live":
     if BTS_PICKUP_TYPE == "branch":
         _required("BTS_SENDER_BRANCH_CODE")
     _https_url("BTS_BASE_URL", BTS_BASE_URL)
+# Yandex Delivery: live needs the cabinet's OAuth token (a secret; placeholders refused) and https endpoints.
+if YANDEX_DELIVERY_MODE == "live":
+    _required("YANDEX_DELIVERY_TOKEN")
+    _https_url("YANDEX_DELIVERY_BASE_URL", YANDEX_DELIVERY_BASE_URL)
+if YANDEX_DELIVERY_CALLBACK_URL:
+    _https_url("YANDEX_DELIVERY_CALLBACK_URL", YANDEX_DELIVERY_CALLBACK_URL)
 if ESKIZ_MODE == "live":
     for _name in ("ESKIZ_EMAIL", "ESKIZ_PASSWORD", "ESKIZ_SENDER"):
         _not_an_example(_name, _required(_name))

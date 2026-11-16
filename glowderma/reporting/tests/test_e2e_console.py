@@ -185,3 +185,37 @@ def test_filters_place_a_filter_shown_only_when_applied() -> None:
     assert by_field["order"]["shown"] is False  # the ?order= drill-down of an order's Diagnostika block
     deferred = by_field["deferred_since__isnull"]
     assert (deferred["shown"], deferred["index"], deferred["block"]) == (True, 3, 2)
+
+
+# Tables the e2e stack fills while it runs (not seeded): left empty by seed_demo + seed-coverage here.
+RUNTIME_FILLED = {
+    "accounts.authsession",
+    "accounts.customersocialidentity",
+    "accounts.smscode",
+    "integrations.webhookinbox",
+    "notifications.inboxnotification",
+}
+
+
+@pytest.mark.django_db
+@override_settings(E2E_CONSOLE_ENABLED=True)
+def test_seed_coverage_leaves_no_registered_model_empty() -> None:
+    # The browser suite (e2e_admin/tests/models.spec.ts) searches and opens a row of every registered model:
+    # a model the demo seed and seed-coverage leave empty fails there, so it fails here first.
+    from glowderma.delivery.models import CourierClaim, DeliveryQuote
+
+    call_command("seed_demo", force=True, verbosity=0)
+    first = run("seed-coverage")
+    # Under the test settings a few tables only fill at run time in the e2e stack (sign-ins, SMS codes,
+    # webhooks, inbox pushes); nothing fills the delivery pages but this seed.
+    assert not [label for label in first["still_empty"] if label.startswith("delivery.")]
+    assert set(first["still_empty"]) <= RUNTIME_FILLED
+    quote = DeliveryQuote.objects.filter(order__isnull=False).get()
+    assert quote.latitude is not None and quote.longitude is not None  # the quote's secret columns are filled
+    claim = CourierClaim.objects.get()
+    assert claim.claim_id and claim.shipment.claim_id == claim.pk
+    again = run("seed-coverage")
+    assert not [label for label in again["created"] if label.startswith("delivery.")]
+    rows = {row["label"]: row for row in run("registry")}
+    assert rows["delivery.deliverysettings"]["singleton"] is True
+    assert rows["delivery.deliveryquote"]["singleton"] is False

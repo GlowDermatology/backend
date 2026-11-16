@@ -77,6 +77,7 @@ from glowderma.core.images import ImageError, process_image
 from glowderma.core.media import media_name, url_fields
 from glowderma.core.pii import pii_ref
 from glowderma.customers import selectors
+from glowderma.delivery import services as delivery_services
 from glowderma.integrations.oauth import registry as oauth_registry
 from glowderma.integrations.oauth.ports import AppTokenClaims, OAuthExchangeError
 from glowderma.loyalty import services as loyalty_services
@@ -1572,6 +1573,8 @@ def delete_account(
             for appointment_id in appointment_ids
         )
         commerce_services.delete_cart_lines(customer_id)
+        # unused delivery quotes copy the address text and pin: they go with the saved addresses
+        delivery_services.delete_unused_quotes(customer_id)
         account_services.delete_customer(customer_id)
         result = DeletionResult(orders_cancelled, appointments_cancelled)
         _audit(

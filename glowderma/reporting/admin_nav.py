@@ -16,6 +16,7 @@ from django.http import HttpRequest
 
 from glowderma.core import consistency, timeutils
 from glowderma.core.admin import NAV_CACHE_PREFIX, is_active_staff
+from glowderma.delivery import selectors as delivery_selectors
 from glowderma.integrations import selectors as integration_selectors
 from glowderma.payments import selectors as payment_selectors
 
@@ -65,3 +66,8 @@ def failed_webhooks(request: HttpRequest) -> str | None:
 def refunds_needing_action(request: HttpRequest) -> str | None:
     """Refunds ``failed`` / ``unknown`` / ``manual_required`` (the panel dashboard's attention count)."""
     return _badge(request, "refunds_needing_action", payment_selectors.refunds_needing_action)
+
+
+def delivery_issues_open(request: HttpRequest) -> str | None:
+    """Open delivery issues (the Yandex Delivery exception queue, plan §3.9)."""
+    return _badge(request, "delivery_issues_open", lambda: delivery_selectors.issue_counts()["open"])

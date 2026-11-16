@@ -12,7 +12,7 @@ CONTRACT_TABLE: dict[str, list[str]] = {
     "FulfilmentMethod": ["delivery", "pickup"],
     "OrderChannel": ["ios", "android", "web"],
     "OrderPeriod": ["today", "week", "month", "all"],
-    "EventSource": ["system", "bts", "admin"],
+    "EventSource": ["system", "bts", "admin", "yandex"],
     "OrderEventType": [
         "order_created",
         "reservation_created",
@@ -30,6 +30,8 @@ CONTRACT_TABLE: dict[str, list[str]] = {
         "refund_requested",
         "refund_succeeded",
         "refund_failed",
+        "delivery_failed",
+        "shipment_returned",
     ],
     "CancellationReason": ["reservation_expired", "admin", "customer_request"],
     "ShipmentState": ["not_required", "not_created", "failed", "created"],
@@ -146,6 +148,8 @@ CUSTOMER_TABLE: dict[str, list[str]] = {
         "cancelled",
         "refund_in_progress",
         "refund_succeeded",
+        "delivery_failed",
+        "shipment_returned",
     ],
     "ProgressStep": ["placed", "paid", "with_courier", "delivered", "picked_up", "cancelled"],
     "ProgressState": ["done", "current", "upcoming", "skipped"],
@@ -164,7 +168,47 @@ CUSTOMER_TABLE: dict[str, list[str]] = {
         "email_attached",
     ],
 }
-ALL_TABLES = {**CONTRACT_TABLE, **CUSTOMER_TABLE}
+# Yandex Delivery (plan §3.1; docs/integrations/yandex-delivery.md).
+DELIVERY_TABLE: dict[str, list[str]] = {
+    "DeliveryProvider": ["bts", "yandex"],
+    "DeliveryMethod": ["standard", "express"],
+    "ShipmentStage": [
+        "awaiting_dispatch",
+        "courier_requested",
+        "courier_assigned",
+        "courier_arrived",
+        "in_transit",
+        "at_destination",
+        "delivered",
+        "returning",
+        "returned",
+        "cancelled",
+        "failed",
+    ],
+    "DeliveryIssueKind": [
+        "dispatch_failed",
+        "dispatch_unknown",
+        "dispatch_review",
+        "delivery_failed",
+        "return_pending",
+        "preparation_overdue",
+        "cancel_incomplete",
+        "parcel_unaccounted",
+        "incident",
+    ],
+    "DeliveryIssueState": ["open", "resolved"],
+    "DeliveryUnavailableReason": [
+        "coordinates_required",
+        "provider_unavailable",
+        "out_of_zone",
+        "method_disabled",
+        "too_heavy",
+        "warehouse_closed",
+        "dispatch_suspended",
+        "not_configured",
+    ],
+}
+ALL_TABLES = {**CONTRACT_TABLE, **CUSTOMER_TABLE, **DELIVERY_TABLE}
 
 
 def test_every_contract_enum_has_the_contract_literals() -> None:
@@ -174,7 +218,7 @@ def test_every_contract_enum_has_the_contract_literals() -> None:
         assert issubclass(enum, TextChoices), name
         assert list(enum.values) == literals, name
     assert {enum.__name__ for enum in enums.CONTRACT_ENUMS} == set(ALL_TABLES)
-    assert len(CONTRACT_TABLE["OrderEventType"]) == 16
+    assert len(CONTRACT_TABLE["OrderEventType"]) == 18
 
 
 def test_enum_name_overrides_point_at_values() -> None:

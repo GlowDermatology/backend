@@ -2402,6 +2402,333 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
+  /api/v1/admin/delivery/issues/:
+    get:
+      operationId: admin_delivery_issues_list
+      description: 'The delivery exception queue: open issues first (urgent first,
+        then oldest first); `state=resolved` lists the newest resolved first.'
+      parameters:
+      - in: query
+        name: kind
+        schema:
+          enum:
+          - dispatch_failed
+          - dispatch_unknown
+          - dispatch_review
+          - delivery_failed
+          - return_pending
+          - preparation_overdue
+          - cancel_incomplete
+          - parcel_unaccounted
+          - incident
+          type: string
+          minLength: 1
+        description: |-
+          * `dispatch_failed` - dispatch_failed
+          * `dispatch_unknown` - dispatch_unknown
+          * `dispatch_review` - dispatch_review
+          * `delivery_failed` - delivery_failed
+          * `return_pending` - return_pending
+          * `preparation_overdue` - preparation_overdue
+          * `cancel_incomplete` - cancel_incomplete
+          * `parcel_unaccounted` - parcel_unaccounted
+          * `incident` - incident
+      - in: query
+        name: order
+        schema:
+          type: integer
+          minimum: 1
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          enum:
+          - 20
+          - 50
+      - in: query
+        name: state
+        schema:
+          enum:
+          - open
+          - resolved
+          type: string
+          minLength: 1
+        description: |-
+          * `open` - open
+          * `resolved` - resolved
+      - in: query
+        name: urgent
+        schema:
+          type: boolean
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedDeliveryIssueList'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/delivery/issues/{id}/resolve/:
+    post:
+      operationId: admin_delivery_issues_resolve
+      description: Close an open issue with a note (audited `delivery.issue_resolved`);
+        409 `conflict` when it is resolved already.
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveIssueRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryIssue'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/delivery/suspension/:
+    get:
+      operationId: admin_delivery_suspension_retrieve
+      description: 'Whether courier dispatch is suspended now (`until` passed → `suspended:
+        false`).'
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Suspension'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    post:
+      operationId: admin_delivery_suspension_update
+      description: Suspend courier dispatch (until `until`, or until lifted) or resume
+        it; audited `delivery.suspension_updated`. `until` must be in the future (`in_past`);
+        it is ignored when resuming.
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SuspensionBodyRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Suspension'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/admin/integrations/billz/import/:
     post:
       operationId: admin_billz_import_create
@@ -3962,6 +4289,19 @@ paths:
       operationId: admin_orders_list
       parameters:
       - in: query
+        name: attention
+        schema:
+          enum:
+          - open
+          - urgent
+          type: string
+          minLength: 1
+        description: |-
+          `open`: the order has an open delivery issue; `urgent`: an open urgent one.
+
+          * `open` - open
+          * `urgent` - urgent
+      - in: query
         name: customer
         schema:
           type: integer
@@ -4055,10 +4395,54 @@ paths:
           * `month` - month
           * `all` - all
       - in: query
+        name: provider
+        schema:
+          enum:
+          - bts
+          - yandex
+          type: string
+          minLength: 1
+        description: |-
+          The shipment's carrier.
+
+          * `bts` - bts
+          * `yandex` - yandex
+      - in: query
         name: search
         schema:
           type: string
           maxLength: 64
+      - in: query
+        name: stage
+        schema:
+          enum:
+          - awaiting_dispatch
+          - courier_requested
+          - courier_assigned
+          - courier_arrived
+          - in_transit
+          - at_destination
+          - delivered
+          - returning
+          - returned
+          - cancelled
+          - failed
+          type: string
+          minLength: 1
+        description: |-
+          A Yandex shipment's stage.
+
+          * `awaiting_dispatch` - awaiting_dispatch
+          * `courier_requested` - courier_requested
+          * `courier_assigned` - courier_assigned
+          * `courier_arrived` - courier_arrived
+          * `in_transit` - in_transit
+          * `at_destination` - at_destination
+          * `delivered` - delivered
+          * `returning` - returning
+          * `returned` - returned
+          * `cancelled` - cancelled
+          * `failed` - failed
       - in: query
         name: status
         schema:
@@ -4194,6 +4578,16 @@ paths:
   /api/v1/admin/orders/{id}/cancel/:
     post:
       operationId: admin_orders_cancel
+      description: 'Cancel an order (full refund when paid). A Yandex Delivery order
+        is first made carrier-safe outside the transaction (plan §3.8): an open courier
+        claim is cancelled at Yandex before pickup (free or paid), after pickup a
+        return to the warehouse is requested and the cancel proceeds once Yandex reports
+        it `returning`; a returning / returned parcel needs no call, a delivered order
+        is refused. 409 `not_cancellable` (Yandex refused, delivered, parcel not coming
+        back), 409 `return_requested` (return asked, not confirmed yet: retry later;
+        the order is unchanged), 409 `conflict` (another Yandex operation of the order
+        is running, or Yandex has not shown the cancel yet), 503 `provider_unavailable`
+        (Yandex did not answer; nothing changed).'
       parameters:
       - in: header
         name: Idempotency-Key
@@ -4268,6 +4662,268 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
         '503':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/orders/{id}/confirm-return/:
+    post:
+      operationId: admin_orders_confirm_return
+      description: 'Confirm that the parcel of a Yandex order whose delivery stage
+        is `returning` / `returned` is physically back at the warehouse: stage `returned`,
+        `returned_at`, the open `return_pending` issue resolved (the note is its resolution
+        note), order event `shipment_returned`, audit `order.return_confirmed`. A
+        cancelled order stays cancelled; an open order stays as it is (staff dispatch
+        again or cancel). 409 `invalid_transition` (no returning parcel), 409 `conflict`
+        (confirmed already, or the order is busy).'
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmReturnRequest'
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderDetail'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/orders/{id}/dispatch/:
+    post:
+      operationId: admin_orders_dispatch
+      description: 'Call a Yandex courier for a paid delivery order (plan §3.6): staff
+        confirm they checked the contents and give the parcel weight; `approved_price`
+        accepts the offer of an open price review (`dispatch_review`), `method` switches
+        Standard / Express. The parcel and a new courier claim are stored and the
+        dispatch is queued — nothing is sent to Yandex in the request (202, `delivery.stage`
+        = `courier_requested`); the order''s open `dispatch_failed` / `dispatch_review`
+        / `preparation_overdue` issues are resolved. 409 `invalid_transition` (not
+        a paid, open Yandex delivery waiting for a courier: stage `awaiting_dispatch`
+        / `failed` / `returned`, a `handed_to_courier` order only once its parcel
+        is `returned`), 409 `conflict` (a courier claim is still open — a dispatch
+        is running or a courier may come —, a cancel is in progress, `approved_price`
+        without an open price review, or the order is busy), 409 `coordinates_required`
+        (the address has no map pin), 409 `method_disabled` (the method switched to
+        is turned off), 409 `too_heavy` (the weight is above the method''s class limit:
+        courier 10 kg, express 20 kg), 409 `not_configured` (the warehouse data is
+        incomplete), 409 `suspended` (dispatch is suspended), 409 `closed` (the warehouse
+        is closed now), 409 `after_cutoff` (past today''s dispatch deadline), 409
+        `returns_unavailable` (the warehouse does not take returned parcels now).'
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DispatchRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '202':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderDetail'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/orders/{id}/issues/:
+    post:
+      operationId: admin_orders_issues_create
+      description: 'Staff report a delivery incident of a delivery order (a wrong
+        or missing product…): `kind` must be `incident`. 201 opens the order''s incident
+        issue; 200 refreshes the one already open (note and urgency). Audited `delivery.issue_opened`;
+        an urgent incident alerts staff. A pickup order → 409 `conflict`.'
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenIssueRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryIssue'
+          description: ''
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryIssue'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
           content:
             application/json:
               schema:
@@ -4424,6 +5080,19 @@ paths:
       operationId: admin_orders_status_counts
       parameters:
       - in: query
+        name: attention
+        schema:
+          enum:
+          - open
+          - urgent
+          type: string
+          minLength: 1
+        description: |-
+          `open`: the order has an open delivery issue; `urgent`: an open urgent one.
+
+          * `open` - open
+          * `urgent` - urgent
+      - in: query
         name: customer
         schema:
           type: integer
@@ -4481,10 +5150,54 @@ paths:
           * `month` - month
           * `all` - all
       - in: query
+        name: provider
+        schema:
+          enum:
+          - bts
+          - yandex
+          type: string
+          minLength: 1
+        description: |-
+          The shipment's carrier.
+
+          * `bts` - bts
+          * `yandex` - yandex
+      - in: query
         name: search
         schema:
           type: string
           maxLength: 64
+      - in: query
+        name: stage
+        schema:
+          enum:
+          - awaiting_dispatch
+          - courier_requested
+          - courier_assigned
+          - courier_arrived
+          - in_transit
+          - at_destination
+          - delivered
+          - returning
+          - returned
+          - cancelled
+          - failed
+          type: string
+          minLength: 1
+        description: |-
+          A Yandex shipment's stage.
+
+          * `awaiting_dispatch` - awaiting_dispatch
+          * `courier_requested` - courier_requested
+          * `courier_assigned` - courier_assigned
+          * `courier_arrived` - courier_arrived
+          * `in_transit` - in_transit
+          * `at_destination` - at_destination
+          * `delivered` - delivered
+          * `returning` - returning
+          * `returned` - returned
+          * `cancelled` - cancelled
+          * `failed` - failed
       tags:
       - admin
       security:
@@ -15220,6 +15933,50 @@ paths:
                 type: object
                 additionalProperties: {}
           description: ''
+  /api/v1/webhooks/yandex-delivery/:
+    post:
+      operationId: webhook_yandex_delivery_status
+      description: 'Yandex Delivery claim callback (an unauthenticated hint): `?ref=<order>-<hmac>`
+        (our own reference, registered per claim) plus the `updated_ts` and `claim_id`
+        Yandex appends; answers 200 for a verified ref and re-reads the claim asynchronously.'
+      parameters:
+      - in: query
+        name: claim_id
+        schema:
+          type: string
+      - in: query
+        name: ref
+        schema:
+          type: string
+        required: true
+      - in: query
+        name: updated_ts
+        schema:
+          type: string
+      tags:
+      - webhooks
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
 components:
   schemas:
     Access:
@@ -15657,8 +16414,18 @@ components:
           type: boolean
         retry_shipment:
           type: boolean
+        dispatch:
+          type: boolean
+          description: 'Yandex Delivery: `POST orders/{id}/dispatch/` would be accepted
+            now (false for BTS).'
+        confirm_return:
+          type: boolean
+          description: 'Yandex Delivery: the parcel is returning / returned and its
+            return is not confirmed yet (`POST orders/{id}/confirm-return/`).'
       required:
       - cancel
+      - confirm_return
+      - dispatch
       - retry_shipment
       - transitions
     Banner:
@@ -16807,6 +17574,16 @@ components:
       - phone_mask
       - purpose
       - resend_in
+    ConfirmReturnRequest:
+      type: object
+      description: '``POST orders/{id}/confirm-return/`` (Yandex Delivery plan §3.8):
+        the parcel is physically back.'
+      properties:
+        note:
+          type: string
+          default: ''
+          description: 'Optional (≤ 1000): the parcel''s condition; becomes the `return_pending`
+            resolution note.'
     ConsentRequest:
       type: object
       properties:
@@ -17348,6 +18125,12 @@ components:
           type: string
           default: ''
           maxLength: 300
+        delivery_quote_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: A Yandex `quote_id` from `delivery/calculate/`; without it
+            delivery ships by BTS.
       required:
       - expected_total
       - fulfilment
@@ -17372,10 +18155,97 @@ components:
           type: integer
           minimum: 0
           nullable: true
+        with_options:
+          type: boolean
+          nullable: true
+          description: List every delivery option (Yandex Standard / Express, BTS)
+            with its fee, ETA and quote.
+        delivery_provider:
+          nullable: true
+          description: |-
+            Preferred carrier; the answer falls back to the default option when it is unavailable.
+
+            * `bts` - bts
+            * `yandex` - yandex
+          oneOf:
+          - $ref: '#/components/schemas/DeliveryProviderEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        delivery_method:
+          nullable: true
+          description: |-
+            Preferred Yandex method (implies `delivery_provider=yandex`).
+
+            * `standard` - standard
+            * `express` - express
+          oneOf:
+          - $ref: '#/components/schemas/DeliveryMethodEnum'
+          - $ref: '#/components/schemas/NullEnum'
       required:
       - fulfilment
+    CustomerDeliveryOption:
+      type: object
+      properties:
+        provider:
+          $ref: '#/components/schemas/DeliveryProviderEnum'
+        method:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/DeliveryMethodEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        label:
+          type: string
+        available:
+          type: boolean
+        unavailable_reason:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/DeliveryUnavailableReasonEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        fee:
+          type: integer
+          nullable: true
+          description: so'm; null when unavailable (never invented).
+        eta_from:
+          type: string
+          format: date-time
+          nullable: true
+        eta_to:
+          type: string
+          format: date-time
+          nullable: true
+        scheduled:
+          type: boolean
+          description: The window starts at a later warehouse opening.
+        quote_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Pass to checkout as `delivery_quote_id`.
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        expected_total:
+          type: integer
+          nullable: true
+      required:
+      - available
+      - eta_from
+      - eta_to
+      - expected_total
+      - expires_at
+      - fee
+      - label
+      - method
+      - provider
+      - quote_id
+      - scheduled
+      - unavailable_reason
     CustomerDeliveryQuote:
       type: object
+      description: |-
+        ``DeliveryQuote``: the released keys, plus — only when the request sent ``with_options``,
+        ``delivery_provider`` or ``delivery_method`` — the selected option and every option.
       properties:
         fulfilment:
           $ref: '#/components/schemas/FulfilmentMethodEnum'
@@ -17404,6 +18274,28 @@ components:
           type: integer
         expected_total:
           type: integer
+        provider:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/DeliveryProviderEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        method:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/DeliveryMethodEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        quote_id:
+          type: string
+          format: uuid
+          nullable: true
+        quote_expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        options:
+          type: array
+          items:
+            $ref: '#/components/schemas/CustomerDeliveryOption'
       required:
       - cashback_max
       - cashback_to_use
@@ -17762,6 +18654,57 @@ components:
       - earned
       - earned_state
       - used
+    CustomerOrderDelivery:
+      type: object
+      description: The carrier view of a delivery order (plan §3.4); a BTS order has
+        only ``provider``.
+      properties:
+        provider:
+          $ref: '#/components/schemas/DeliveryProviderEnum'
+        method:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/DeliveryMethodEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        method_label:
+          type: string
+          nullable: true
+        stage:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/ShipmentStageEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        stage_label:
+          type: string
+          nullable: true
+        eta_from:
+          type: string
+          format: date-time
+          nullable: true
+        eta_to:
+          type: string
+          format: date-time
+          nullable: true
+        courier_name:
+          type: string
+          nullable: true
+        courier_vehicle:
+          type: string
+          nullable: true
+        tracking_url:
+          type: string
+          nullable: true
+      required:
+      - courier_name
+      - courier_vehicle
+      - eta_from
+      - eta_to
+      - method
+      - method_label
+      - provider
+      - stage
+      - stage_label
+      - tracking_url
     CustomerOrderDetail:
       type: object
       properties:
@@ -17798,6 +18741,11 @@ components:
         tracking_number:
           type: string
           nullable: true
+        delivery:
+          allOf:
+          - $ref: '#/components/schemas/CustomerOrderDelivery'
+          nullable: true
+          description: null for pickup.
         fulfilment_label:
           type: string
         items:
@@ -17857,6 +18805,7 @@ components:
       - cashback_used
       - created_at
       - customer_note
+      - delivery
       - delivery_fee
       - fulfilment
       - fulfilment_label
@@ -17914,8 +18863,14 @@ components:
         tracking_number:
           type: string
           nullable: true
+        delivery:
+          allOf:
+          - $ref: '#/components/schemas/CustomerOrderDelivery'
+          nullable: true
+          description: null for pickup.
       required:
       - created_at
+      - delivery
       - fulfilment
       - id
       - item_count
@@ -18229,6 +19184,8 @@ components:
           $ref: '#/components/schemas/DashboardStats'
         attention:
           $ref: '#/components/schemas/DashboardAttention'
+        fulfilment:
+          $ref: '#/components/schemas/DashboardFulfilment'
         generated_at:
           type: string
           format: date-time
@@ -18240,6 +19197,7 @@ components:
       - bucket
       - buckets
       - from
+      - fulfilment
       - generated_at
       - previous_period_orders
       - range
@@ -18268,6 +19226,10 @@ components:
           type: boolean
           description: 'No cashback policy version is in force now (none exists, or
             only a future one): purchases earn no cashback until one starts.'
+        yandex_failing:
+          type: boolean
+          description: Yandex Delivery is live and its last status poll or price check
+            failed (always false in fake mode).
       required:
       - bts_failed
       - bts_polling_failing
@@ -18276,6 +19238,7 @@ components:
       - next_appointment_at
       - pending_appointments
       - refunds_needing_action
+      - yandex_failing
     DashboardBucket:
       type: object
       properties:
@@ -18298,6 +19261,42 @@ components:
       description: |-
         * `hour` - hour
         * `day` - day
+    DashboardFulfilment:
+      type: object
+      description: Order-state counters as the orders stand now (not windowed by ``range``).
+      properties:
+        paid_to_prepare:
+          type: integer
+          description: 'Processing orders still to be prepared: Yandex `awaiting_dispatch`
+            (or `failed` / `returned` waiting for a new dispatch), BTS not handed
+            over, pickup.'
+        to_hand_to_courier:
+          type: integer
+          description: Processing Yandex orders whose courier is requested, assigned
+            or arrived.
+        in_delivery:
+          type: integer
+          description: Handed to the courier and not coming back.
+        returning:
+          type: integer
+          description: Yandex `returning` / `returned` while the order is open.
+        completed_today:
+          type: integer
+          description: Delivered today (Asia/Tashkent), pickup included.
+        needs_action:
+          type: integer
+          description: Open delivery issues.
+        urgent:
+          type: integer
+          description: Open urgent delivery issues.
+      required:
+      - completed_today
+      - in_delivery
+      - needs_action
+      - paid_to_prepare
+      - returning
+      - to_hand_to_courier
+      - urgent
     DashboardRangeEnum:
       enum:
       - today
@@ -18368,6 +19367,153 @@ components:
       - appointments
       - date
       - specialists
+    DeliveryIssue:
+      type: object
+      description: |-
+        One row of the exception queue: ``details`` holds ids and amounts only; ``resolved_by`` is ``null``
+        while open or when the system closed it.
+      properties:
+        id:
+          type: integer
+        order_id:
+          type: integer
+        kind:
+          $ref: '#/components/schemas/DeliveryIssueKindEnum'
+        code:
+          type: string
+        urgent:
+          type: boolean
+        details: {}
+        note:
+          type: string
+        state:
+          $ref: '#/components/schemas/DeliveryIssueStateEnum'
+        opened_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        reminded_at:
+          type: string
+          format: date-time
+          nullable: true
+        reminders:
+          type: integer
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolved_by:
+          allOf:
+          - $ref: '#/components/schemas/Actor'
+          nullable: true
+        resolution_note:
+          type: string
+      required:
+      - code
+      - details
+      - id
+      - kind
+      - note
+      - opened_at
+      - order_id
+      - reminded_at
+      - reminders
+      - resolution_note
+      - resolved_at
+      - resolved_by
+      - state
+      - updated_at
+      - urgent
+    DeliveryIssueKindEnum:
+      enum:
+      - dispatch_failed
+      - dispatch_unknown
+      - dispatch_review
+      - delivery_failed
+      - return_pending
+      - preparation_overdue
+      - cancel_incomplete
+      - parcel_unaccounted
+      - incident
+      type: string
+      description: |-
+        * `dispatch_failed` - dispatch_failed
+        * `dispatch_unknown` - dispatch_unknown
+        * `dispatch_review` - dispatch_review
+        * `delivery_failed` - delivery_failed
+        * `return_pending` - return_pending
+        * `preparation_overdue` - preparation_overdue
+        * `cancel_incomplete` - cancel_incomplete
+        * `parcel_unaccounted` - parcel_unaccounted
+        * `incident` - incident
+    DeliveryIssueRef:
+      type: object
+      description: 'One open issue on the order card (the queue has the full row:
+        ``GET delivery/issues/``).'
+      properties:
+        id:
+          type: integer
+        kind:
+          $ref: '#/components/schemas/DeliveryIssueKindEnum'
+        code:
+          type: string
+        urgent:
+          type: boolean
+        opened_at:
+          type: string
+          format: date-time
+      required:
+      - code
+      - id
+      - kind
+      - opened_at
+      - urgent
+    DeliveryIssueStateEnum:
+      enum:
+      - open
+      - resolved
+      type: string
+      description: |-
+        * `open` - open
+        * `resolved` - resolved
+    DeliveryMethodEnum:
+      enum:
+      - standard
+      - express
+      type: string
+      description: |-
+        * `standard` - standard
+        * `express` - express
+    DeliveryProviderEnum:
+      enum:
+      - bts
+      - yandex
+      type: string
+      description: |-
+        * `bts` - bts
+        * `yandex` - yandex
+    DeliveryUnavailableReasonEnum:
+      enum:
+      - coordinates_required
+      - provider_unavailable
+      - out_of_zone
+      - method_disabled
+      - too_heavy
+      - warehouse_closed
+      - dispatch_suspended
+      - not_configured
+      type: string
+      description: |-
+        * `coordinates_required` - coordinates_required
+        * `provider_unavailable` - provider_unavailable
+        * `out_of_zone` - out_of_zone
+        * `method_disabled` - method_disabled
+        * `too_heavy` - too_heavy
+        * `warehouse_closed` - warehouse_closed
+        * `dispatch_suspended` - dispatch_suspended
+        * `not_configured` - not_configured
     DeviceRequest:
       type: object
       properties:
@@ -18417,6 +19563,39 @@ components:
       - os
       - platform
       - push_enabled
+    DispatchRequest:
+      type: object
+      description: '``POST orders/{id}/dispatch/`` (Yandex Delivery plan §3.6): staff
+        checked the parcel and weighed it.'
+      properties:
+        contents_verified:
+          type: boolean
+          description: 'Must be `true`: staff checked the contents.'
+        weight_g:
+          type: integer
+          maximum: 20000
+          minimum: 1
+          description: Grams.
+        approved_price:
+          type: integer
+          maximum: 100000000
+          minimum: 0
+          nullable: true
+          description: 'So''m (VAT-inclusive): the courier price staff approved; only
+            while a `dispatch_review` issue is open.'
+        method:
+          nullable: true
+          description: |-
+            Switch the delivery method (the fee the customer paid never changes).
+
+            * `standard` - standard
+            * `express` - express
+          oneOf:
+          - $ref: '#/components/schemas/DeliveryMethodEnum'
+          - $ref: '#/components/schemas/NullEnum'
+      required:
+      - contents_verified
+      - weight_g
     ErrorEnvelope:
       type: object
       properties:
@@ -18454,11 +19633,13 @@ components:
       - system
       - bts
       - admin
+      - yandex
       type: string
       description: |-
         * `system` - system
         * `bts` - bts
         * `admin` - admin
+        * `yandex` - yandex
     FreeSlots:
       type: object
       properties:
@@ -19447,8 +20628,12 @@ components:
           type: integer
         appointments_pending:
           type: integer
+        delivery_issues_open:
+          type: integer
+          description: Open delivery issues (the exception queue).
       required:
       - appointments_pending
+      - delivery_issues_open
       - orders_processing
     NextStep:
       type: object
@@ -19956,6 +21141,24 @@ components:
       - count
       - last_order_at
       - last_order_id
+    OpenIssueRequest:
+      type: object
+      description: |-
+        ``POST orders/{id}/issues/``: staff open an ``incident`` (a wrong or missing product…); every other
+        kind is opened by the system only.
+      properties:
+        kind:
+          type: string
+          minLength: 1
+          description: '`incident` (the only kind staff may open)'
+        note:
+          type: string
+        urgent:
+          type: boolean
+          default: false
+      required:
+      - kind
+      - note
     OrderCashback:
       type: object
       properties:
@@ -20007,6 +21210,104 @@ components:
         * `ios` - ios
         * `android` - android
         * `web` - web
+    OrderDelivery:
+      type: object
+      description: |-
+        The order's carrier view (``null`` for pickup). BTS: ``provider`` and ``open_issues`` only, every
+        Yandex key ``null``. Amounts in so'm; ``claim_status`` is Yandex's status verbatim; no courier phone.
+      properties:
+        provider:
+          $ref: '#/components/schemas/DeliveryProviderEnum'
+        method:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/DeliveryMethodEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        stage:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/ShipmentStageEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        promised_from:
+          type: string
+          format: date-time
+          nullable: true
+        promised_to:
+          type: string
+          format: date-time
+          nullable: true
+        quote_fee:
+          type: integer
+          nullable: true
+          description: The fee the checkout quote charged.
+        carrier_price:
+          type: integer
+          nullable: true
+          description: Yandex's estimate the checkout quote was computed from.
+        offer_price:
+          type: integer
+          nullable: true
+          description: The binding offer of the current courier claim (VAT included).
+        approved_price:
+          type: integer
+          nullable: true
+        carrier_cost_total:
+          type: integer
+          nullable: true
+          description: Yandex's final prices of every claim of the shipment, summed.
+        cost_difference:
+          type: integer
+          nullable: true
+        parcel_weight_g:
+          type: integer
+          nullable: true
+        prepared_at:
+          type: string
+          format: date-time
+          nullable: true
+        courier_name:
+          type: string
+          nullable: true
+        courier_vehicle:
+          type: string
+          nullable: true
+        tracking_url:
+          type: string
+          nullable: true
+        claim_status:
+          type: string
+          nullable: true
+        claim_number:
+          type: integer
+          nullable: true
+        failure_code:
+          type: string
+          nullable: true
+        open_issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeliveryIssueRef'
+      required:
+      - approved_price
+      - carrier_cost_total
+      - carrier_price
+      - claim_number
+      - claim_status
+      - cost_difference
+      - courier_name
+      - courier_vehicle
+      - failure_code
+      - method
+      - offer_price
+      - open_issues
+      - parcel_weight_g
+      - prepared_at
+      - promised_from
+      - promised_to
+      - provider
+      - quote_fee
+      - stage
+      - tracking_url
     OrderDetail:
       type: object
       description: Contract ``Order`` = ``OrderSummary`` + the detail keys (rendered
@@ -20072,6 +21373,11 @@ components:
             $ref: '#/components/schemas/OrderEvent'
         available_actions:
           $ref: '#/components/schemas/AvailableActions'
+        delivery:
+          allOf:
+          - $ref: '#/components/schemas/OrderDelivery'
+          nullable: true
+          readOnly: true
       required:
       - address
       - available_actions
@@ -20082,6 +21388,7 @@ components:
       - channel
       - created_at
       - customer
+      - delivery
       - delivery_fee
       - fulfilment
       - history
@@ -20145,6 +21452,8 @@ components:
       - refund_requested
       - refund_succeeded
       - refund_failed
+      - delivery_failed
+      - shipment_returned
       type: string
       description: |-
         * `order_created` - order_created
@@ -20163,6 +21472,8 @@ components:
         * `refund_requested` - refund_requested
         * `refund_succeeded` - refund_succeeded
         * `refund_failed` - refund_failed
+        * `delivery_failed` - delivery_failed
+        * `shipment_returned` - shipment_returned
     OrderItem:
       type: object
       properties:
@@ -20265,10 +21576,16 @@ components:
           - $ref: '#/components/schemas/Cancellation'
           nullable: true
           readOnly: true
+        delivery:
+          allOf:
+          - $ref: '#/components/schemas/OrderDelivery'
+          nullable: true
+          readOnly: true
       required:
       - cancellation
       - created_at
       - customer
+      - delivery
       - fulfilment
       - id
       - payment
@@ -20535,6 +21852,27 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CustomerSession'
+    PaginatedDeliveryIssueList:
+      type: object
+      required:
+      - count
+      - page
+      - page_size
+      - page_count
+      - results
+      properties:
+        count:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+        page_count:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeliveryIssue'
     PaginatedHoursOverrideList:
       type: object
       required:
@@ -21909,6 +23247,8 @@ components:
           $ref: '#/components/schemas/IntegrationModeEnum'
         email:
           $ref: '#/components/schemas/IntegrationModeEnum'
+        yandex:
+          $ref: '#/components/schemas/IntegrationModeEnum'
       required:
       - billz
       - bts
@@ -21918,6 +23258,7 @@ components:
       - fcm
       - oauth
       - payme
+      - yandex
     ProviderReadiness:
       type: object
       properties:
@@ -21940,6 +23281,23 @@ components:
       - configured
       - last_sync_age_seconds
       - last_sync_at
+    PublicDelivery:
+      type: object
+      properties:
+        providers:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeliveryProviderEnum'
+          description: Home-delivery carriers that can take an order now, in preference
+            order.
+        default_provider:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/DeliveryProviderEnum'
+          - $ref: '#/components/schemas/NullEnum'
+      required:
+      - default_provider
+      - providers
     PublicSettings:
       type: object
       properties:
@@ -21995,9 +23353,12 @@ components:
           $ref: '#/components/schemas/PlatformValues'
         store_urls:
           $ref: '#/components/schemas/PlatformValues'
+        delivery:
+          $ref: '#/components/schemas/PublicDelivery'
       required:
       - booking_policy
       - cosmetologist_phone
+      - delivery
       - fulfilment_methods
       - instagram_url
       - min_app_version
@@ -22265,6 +23626,13 @@ components:
       required:
       - password
       - verification_token
+    ResolveIssueRequest:
+      type: object
+      properties:
+        note:
+          type: string
+      required:
+      - note
     ResolveQrRequest:
       type: object
       properties:
@@ -22808,6 +24176,32 @@ components:
           description: '`not_required` (pickup)'
       required:
       - state
+    ShipmentStageEnum:
+      enum:
+      - awaiting_dispatch
+      - courier_requested
+      - courier_assigned
+      - courier_arrived
+      - in_transit
+      - at_destination
+      - delivered
+      - returning
+      - returned
+      - cancelled
+      - failed
+      type: string
+      description: |-
+        * `awaiting_dispatch` - awaiting_dispatch
+        * `courier_requested` - courier_requested
+        * `courier_assigned` - courier_assigned
+        * `courier_arrived` - courier_arrived
+        * `in_transit` - in_transit
+        * `at_destination` - at_destination
+        * `delivered` - delivered
+        * `returning` - returning
+        * `returned` - returned
+        * `cancelled` - cancelled
+        * `failed` - failed
     ShipmentViaEnum:
       enum:
       - webhook
@@ -23281,6 +24675,43 @@ components:
       description: |-
         * `in_stock` - in_stock
         * `out_of_stock` - out_of_stock
+    Suspension:
+      type: object
+      description: 'The courier-dispatch switch: ``suspended`` is in effect now (``until``
+        passed → ``false``).'
+      properties:
+        suspended:
+          type: boolean
+        until:
+          type: string
+          format: date-time
+          nullable: true
+        note:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+      required:
+      - note
+      - suspended
+      - until
+      - updated_at
+    SuspensionBodyRequest:
+      type: object
+      description: '``POST delivery/suspension/``: ``until`` (future, optional: until
+        lifted) only while suspending.'
+      properties:
+        suspended:
+          type: boolean
+        until:
+          type: string
+          format: date-time
+          nullable: true
+        note:
+          type: string
+          default: ''
+      required:
+      - suspended
     TemplateStatusEnum:
       enum:
       - processing
@@ -23420,6 +24851,8 @@ components:
       - cancelled
       - refund_in_progress
       - refund_succeeded
+      - delivery_failed
+      - shipment_returned
       type: string
       description: |-
         * `order_created` - order_created
@@ -23431,6 +24864,8 @@ components:
         * `cancelled` - cancelled
         * `refund_in_progress` - refund_in_progress
         * `refund_succeeded` - refund_succeeded
+        * `delivery_failed` - delivery_failed
+        * `shipment_returned` - shipment_returned
     TransitionRequest:
       type: object
       properties:

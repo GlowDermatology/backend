@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 from rest_framework.test import APIClient
 
-from glowderma.commerce import services, topics
+from glowderma.commerce import delivery_admin, services, topics
 from glowderma.commerce.models import Order
 from glowderma.commerce.tests.support import AT, at, deliver, pay, place, product, ship, shopper
 from glowderma.core.media import absolute_media_url, variant_url
@@ -56,6 +56,12 @@ def test_list_shape_ordering_and_paging(staff_client: APIClient) -> None:
         "fulfilment": "delivery",
         "shipment": {"state": "not_created", "pending": False},
         "cancellation": None,
+        # Yandex Delivery (additive): a BTS order names its carrier; every Yandex-only key is null
+        "delivery": {
+            "provider": "bts",
+            **dict.fromkeys(delivery_admin.YANDEX_KEYS),
+            "open_issues": [],
+        },
     }
     assert _ids(staff_client.get(URL, {"ordering": "created_at"}))[:2] == [orders[0].pk, orders[1].pk]
     assert staff_client.get(URL).json()["page_size"] == 10
@@ -198,7 +204,13 @@ def test_detail_404_and_shape_of_a_cancelled_refunded_order(staff_client: APICli
         body["payment"]["status"] == "paid" and body["payment"]["confirmed_at"] == "2026-10-20T12:03:00+05:00"
     )
     assert body["shipment"]["state"] == "created"  # a cancelled parcel renders as created (D-1)
-    assert body["available_actions"] == {"transitions": [], "cancel": False, "retry_shipment": False}
+    assert body["available_actions"] == {
+        "transitions": [],
+        "cancel": False,
+        "retry_shipment": False,
+        "dispatch": False,
+        "confirm_return": False,
+    }
     assert [event["type"] for event in body["history"]][:2] == ["refund_requested", "cancelled"]
     cancelled = body["history"][1]
     assert cancelled["actor"]["display_name"] and cancelled["source"] == "admin"
@@ -253,7 +265,13 @@ def test_detail_of_an_open_order_shows_the_active_hold_and_items(staff_client: A
         "confirmed_at": None,
     }
     assert body["shipment"] == {"state": "not_required"}
-    assert body["available_actions"] == {"transitions": [], "cancel": True, "retry_shipment": False}
+    assert body["available_actions"] == {
+        "transitions": [],
+        "cancel": True,
+        "retry_shipment": False,
+        "dispatch": False,
+        "confirm_return": False,
+    }
     pay(order)
     paid = staff_client.get(f"{URL}{order.pk}/").json()
     assert paid["cashback_hold"] is None

@@ -697,6 +697,45 @@ BTS_POLL_STALE_MINUTES = env_positive_int("BTS_POLL_STALE_MINUTES", 30)
 BTS_POLL_BATCH = env_positive_int("BTS_POLL_BATCH", 100)
 BTS_POLL_MAX_SECONDS = env_positive_int("BTS_POLL_MAX_SECONDS", 300)
 BTS_POLL_MAX_CONSECUTIVE_FAILURES = env_positive_int("BTS_POLL_MAX_CONSECUTIVE_FAILURES", 3)
+# Yandex Delivery (Express API, integrations.yandex_delivery; docs/integrations/yandex-delivery.md):
+# YANDEX_DELIVERY_MODE fake | live (default INTEGRATIONS_MODE). Live sends YANDEX_DELIVERY_TOKEN (the business
+# cabinet's OAuth token) as a bearer header and YANDEX_DELIVERY_LANGUAGE as Accept-Language; every price must
+# come in YANDEX_DELIVERY_CURRENCY or it is refused as unreadable.
+YANDEX_DELIVERY_MODE = env_mode("YANDEX_DELIVERY_MODE")
+YANDEX_DELIVERY_BASE_URL = env_value("YANDEX_DELIVERY_BASE_URL", "https://b2b.taxi.yandex.net").rstrip("/")
+YANDEX_DELIVERY_TOKEN = env_value("YANDEX_DELIVERY_TOKEN", "")
+YANDEX_DELIVERY_CURRENCY = env_value("YANDEX_DELIVERY_CURRENCY", "UZS")
+if not re.fullmatch(r"[A-Z]{3}", YANDEX_DELIVERY_CURRENCY):
+    raise ImproperlyConfigured("YANDEX_DELIVERY_CURRENCY must be a three-letter ISO 4217 code (UZS)")
+YANDEX_DELIVERY_LANGUAGE = env_value("YANDEX_DELIVERY_LANGUAGE", "ru")
+if YANDEX_DELIVERY_LANGUAGE not in {"ru", "en"}:
+    raise ImproperlyConfigured("YANDEX_DELIVERY_LANGUAGE must be 'ru' or 'en'")
+# The status callback's base URL (our webhook, without a query): each claim registers it with its own
+# "?ref=<order>-<hmac>&" appended (Yandex adds updated_ts and claim_id by concatenation). Empty = no callback,
+# the bulk_info poll alone keeps statuses current.
+YANDEX_DELIVERY_CALLBACK_URL = env_value("YANDEX_DELIVERY_CALLBACK_URL", "")
+if YANDEX_DELIVERY_CALLBACK_URL:
+    _callback = urlsplit(YANDEX_DELIVERY_CALLBACK_URL)
+    if (
+        _callback.scheme not in {"http", "https"}
+        or not _callback.netloc
+        or _callback.query
+        or _callback.fragment
+    ):
+        raise ImproperlyConfigured(
+            "YANDEX_DELIVERY_CALLBACK_URL must be an absolute http(s) URL without a query"
+        )
+# skip_confirmation of the warehouse (source) and customer (destination) points: false = the documented
+# default, the handover is confirmed with a code sent by SMS.
+YANDEX_DELIVERY_SKIP_CONFIRMATION_SOURCE = env_bool("YANDEX_DELIVERY_SKIP_CONFIRMATION_SOURCE", False)
+YANDEX_DELIVERY_SKIP_CONFIRMATION_DESTINATION = env_bool(
+    "YANDEX_DELIVERY_SKIP_CONFIRMATION_DESTINATION", False
+)
+# Pilot allow-list: when set, only these customer ids are offered Yandex Delivery (the first real orders).
+_pilot_ids = env_list("YANDEX_DELIVERY_PILOT_CUSTOMER_IDS", [])
+if not all(re.fullmatch(r"[1-9][0-9]{0,17}", value) for value in _pilot_ids):
+    raise ImproperlyConfigured("YANDEX_DELIVERY_PILOT_CUSTOMER_IDS must be comma separated customer ids")
+YANDEX_DELIVERY_PILOT_CUSTOMER_IDS: list[int] = [int(value) for value in _pilot_ids]
 # FCM live adapter (M3): HTTP v1 over httpx with a service-account JWT.
 FCM_PROJECT_ID = env_value("FCM_PROJECT_ID", "")
 FCM_CREDENTIALS_FILE = env_value("FCM_CREDENTIALS_FILE", "")
@@ -728,6 +767,7 @@ SCENARIO_PROVIDER_MODES = {
     "PAYME_MODE": PAYME_MODE,
     "BTS_MODE": BTS_MODE,
     "FCM_MODE": FCM_MODE,
+    "YANDEX_DELIVERY_MODE": YANDEX_DELIVERY_MODE,
 }
 if FAKE_SCENARIO_HEADER_ENABLED and any(mode != "fake" for mode in SCENARIO_PROVIDER_MODES.values()):
     raise ImproperlyConfigured(

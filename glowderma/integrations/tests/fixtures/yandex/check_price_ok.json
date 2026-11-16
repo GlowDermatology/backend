@@ -1,0 +1,16 @@
+{
+  "_source": "documented shape (check-price 200); UZS and the values are ours",
+  "price": "24500.5000",
+  "requirements": {
+    "taxi_class": "courier"
+  },
+  "currency_rules": {
+    "code": "UZS",
+    "template": "$VALUE$ $SIGN$$CURRENCY$",
+    "text": "сум",
+    "sign": "сўм"
+  },
+  "distance_meters": 7241.6,
+  "eta": 24.5,
+  "zone_id": "tashkent"
+}

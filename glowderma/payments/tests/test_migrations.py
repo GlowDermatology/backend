@@ -84,6 +84,6 @@ def test_migrate_zero_and_forward_again() -> None:
         "0006_uz_choice_labels",
         "0007_uz_field_labels",
     }
+    call_command("migrate", verbosity=0)  # re-apply what depends on payments (commerce.0008, the backfill)
     refund = RefundFactory.create(payment=PaymentFactory.create())
     assert refund.pk is not None
-    call_command("migrate", verbosity=0)  # re-apply what depends on payments (commerce.0008, the backfill)

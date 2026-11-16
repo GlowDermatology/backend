@@ -37,7 +37,7 @@ from django.db.models.lookups import Contains
 from glowderma.accounts.models import Customer
 from glowderma.catalog import selectors as catalog_selectors
 from glowderma.catalog.models import Product, ProductStock
-from glowderma.commerce import state, topics
+from glowderma.commerce import delivery_admin, state, topics
 from glowderma.commerce.models import Cart, CartItem, Order, OrderEvent, OrderItem, StockReservation
 from glowderma.core import enums, i18n, integration_modes, timeutils
 from glowderma.core.consistency import Finding, finding
@@ -46,6 +46,7 @@ from glowderma.core.models import OutboxMessage
 from glowderma.core.search import SearchFold
 from glowderma.core.timeutils import TASHKENT
 from glowderma.delivery import selectors as delivery_selectors
+from glowderma.delivery import yandex as delivery_yandex
 from glowderma.delivery.models import Shipment
 from glowderma.loyalty import selectors as loyalty_selectors
 from glowderma.payments import selectors as payment_selectors
@@ -148,6 +149,10 @@ class OrderFilters(TypedDict, total=False):
     date_to: date
     customer: int
     ordering: str
+    # Yandex Delivery (plan §3.10; glowderma.commerce.delivery_admin.filter_delivery)
+    provider: str
+    stage: str
+    attention: str
 
 
 def order_queryset() -> QuerySet[Order]:
@@ -182,6 +187,7 @@ def filter_orders(
         qs = qs.filter(fulfilment=filters["fulfilment"])
     if "customer" in filters:
         qs = qs.filter(customer_id=filters["customer"])
+    qs = delivery_admin.filter_delivery(qs, filters)  # provider / stage / attention
     if "payment" in filters:
         qs = qs.annotate(display_payment_status=payment_selectors.display_status_subquery()).filter(
             display_payment_status=filters["payment"]
@@ -292,6 +298,7 @@ class OrderDetail:
     cashback: list[dict[str, Any]]
     history: list[OrderEvent]
     available_actions: dict[str, Any]
+    delivery: dict[str, Any] | None = None  # Yandex Delivery (delivery_admin.detail_delivery)
 
 
 def _cashback_hold(order_id: int) -> dict[str, Any] | None:
@@ -303,14 +310,87 @@ def _cashback_hold(order_id: int) -> dict[str, Any] | None:
 
 
 def available_actions(order: Order, shipment: Shipment | None) -> dict[str, Any]:
-    """03 §4.2: ``transitions`` (state.py manual rows), ``cancel``, ``retry_shipment``."""
+    """03 §4.2: ``transitions`` (state.py manual rows), ``cancel``, ``retry_shipment``; provider-aware (a
+    Yandex order gets no manual transition but the ``parcel_unaccounted`` exception, and never a retry).
+    Yandex Delivery adds ``dispatch`` (:func:`dispatch_blocker` finds nothing) and ``confirm_return`` (the
+    parcel is returning / back and its return not confirmed yet: ``POST orders/{id}/confirm-return/``)."""
     pending = shipment.is_pending if shipment is not None else False
     shipment_state = delivery_selectors.api_state(shipment, order.fulfilment)
+    provider = shipment.provider if shipment is not None else enums.DeliveryProvider.BTS
+    unaccounted = provider == enums.DeliveryProvider.YANDEX and delivery_selectors.has_open_issue(
+        order.pk, enums.DeliveryIssueKind.PARCEL_UNACCOUNTED
+    )
     return {
-        "transitions": state.manual_transitions(order.status, order.fulfilment),
+        "transitions": state.manual_transitions(
+            order.status, order.fulfilment, provider=provider, parcel_unaccounted=unaccounted
+        ),
         "cancel": state.can_cancel(order.status),
-        "retry_shipment": state.can_retry_shipment(order.fulfilment, order.status, shipment_state, pending),
+        "retry_shipment": state.can_retry_shipment(
+            order.fulfilment, order.status, shipment_state, pending, provider=provider
+        ),
+        "dispatch": provider == enums.DeliveryProvider.YANDEX and dispatch_blocker(order, shipment) is None,
+        "confirm_return": _return_confirmable(shipment),
     }
+
+
+def _return_confirmable(shipment: Shipment | None) -> bool:
+    """``available_actions.confirm_return``: a Yandex parcel returning / back whose return staff have not
+    confirmed yet — the return of the claim that carried it (``delivery.selectors.return_claim``), not of
+    a later re-dispatch that summoned nobody (one query, only at those stages)."""
+    if (
+        shipment is None
+        or shipment.provider != enums.DeliveryProvider.YANDEX
+        or shipment.stage not in delivery_yandex.RETURN_STAGES
+    ):
+        return False
+    carried = delivery_selectors.return_claim(shipment.pk)
+    return carried is not None and not carried.confirmed
+
+
+# --- Yandex Delivery: may staff call a courier? (plan §3.6) -------------------------------------------------
+
+# Why a dispatch is refused (``commerce.services.request_dispatch`` maps each to the API error) — besides the
+# warehouse calendar's ``DispatchRefusal`` codes (``not_configured``, ``suspended``, ``closed``,
+# ``after_cutoff``, ``returns_unavailable``), which are answered as they are.
+DISPATCH_NOT_ALLOWED = "not_dispatchable"  # not a paid, open Yandex delivery at a stage that waits for one
+DISPATCH_CLAIM_OPEN = "claim_open"  # a courier claim is open (a dispatch runs, or a courier may come)
+DISPATCH_CANCEL_REQUESTED = "cancel_requested"  # the carrier-side cancel is in progress
+DISPATCH_NO_PIN = "coordinates_required"  # the order's address has no map pin
+DISPATCH_STAGES = frozenset(
+    {enums.ShipmentStage.AWAITING_DISPATCH, enums.ShipmentStage.FAILED, enums.ShipmentStage.RETURNED}
+)
+
+
+def dispatch_blocker(order: Order, shipment: Shipment | None, *, now: datetime | None = None) -> str | None:
+    """Why staff cannot call a Yandex courier for ``order`` now, or ``None`` (``available_actions.dispatch``
+    and the checks of ``POST orders/{id}/dispatch/``, which repeats them under the Order lock).
+
+    A dispatch needs a paid delivery order that is ``processing`` (or ``handed_to_courier`` with its parcel
+    ``returned``), a Yandex shipment at ``awaiting_dispatch`` / ``failed`` / ``returned`` without an open
+    claim or a cancel in progress, a pinned address and a warehouse that may call a courier now
+    (``WarehouseCalendar.dispatch_refusal``). ``shipment`` is the order's row with its current claim (the
+    only claim that can be open); the calendar is read only when everything else allows the dispatch."""
+    if (
+        order.fulfilment != enums.FulfilmentMethod.DELIVERY
+        or shipment is None
+        or shipment.provider != enums.DeliveryProvider.YANDEX
+        or order.paid_at is None
+        or order.status not in (enums.OrderStatus.PROCESSING, enums.OrderStatus.HANDED_TO_COURIER)
+    ):
+        return DISPATCH_NOT_ALLOWED
+    claim = shipment.claim
+    if claim is not None and claim.ended_at is None:
+        return DISPATCH_CLAIM_OPEN
+    if shipment.cancel_requested_at is not None:
+        return DISPATCH_CANCEL_REQUESTED
+    if shipment.stage not in DISPATCH_STAGES:
+        return DISPATCH_NOT_ALLOWED
+    if order.status == enums.OrderStatus.HANDED_TO_COURIER and shipment.stage != enums.ShipmentStage.RETURNED:
+        return DISPATCH_NOT_ALLOWED
+    if order.address_latitude is None or order.address_longitude is None:
+        return DISPATCH_NO_PIN
+    instant = now or timeutils.now()
+    return delivery_selectors.warehouse_calendar(timeutils.local_date(instant)).dispatch_refusal(instant)
 
 
 def image_url(path: str) -> str | None:
@@ -330,6 +410,9 @@ def order_detail(order_id: int) -> OrderDetail | None:
     if order is None:
         return None
     shipment = _shipment_of(order)
+    if shipment is not None and shipment.provider == enums.DeliveryProvider.YANDEX:
+        # one read of the claim and the quote serves available_actions and the delivery object
+        shipment = delivery_admin.load_yandex_rows(shipment)
     items = [
         {
             "product_id": item.product_id,
@@ -365,6 +448,7 @@ def order_detail(order_id: int) -> OrderDetail | None:
         cashback=cashback,
         history=history,
         available_actions=available_actions(order, shipment),
+        delivery=delivery_admin.detail_delivery(order, shipment),
     )
 
 
@@ -491,6 +575,11 @@ __all__ = [
     "OrderDetail",
     "OrderFilters",
     "available_actions",
+    "DISPATCH_CANCEL_REQUESTED",
+    "DISPATCH_CLAIM_OPEN",
+    "DISPATCH_NOT_ALLOWED",
+    "DISPATCH_NO_PIN",
+    "dispatch_blocker",
     "available_stock",
     "image_url",
     "customer_available_stock",
@@ -892,7 +981,7 @@ def customer_orders(customer_id: int, scope: str = enums.OrderScope.ALL) -> Quer
     if statuses is not None:
         qs = qs.filter(status__in=list(statuses))
     return (
-        qs.select_related("shipment")
+        qs.select_related("shipment", "shipment__quote", "shipment__claim")
         .prefetch_related("payments", "items", "items__product", "items__product__images")
         .order_by("-created_at", "-id")
     )
@@ -931,6 +1020,58 @@ def _shipment(order: Order) -> Shipment | None:
         return None
 
 
+def _is_yandex(shipment: Shipment | None) -> bool:
+    return shipment is not None and shipment.provider == enums.DeliveryProvider.YANDEX
+
+
+def _open_claim(shipment: Shipment) -> Any:
+    """The shipment's current Yandex claim while it is not ended (courier and tracking link come from it)."""
+    if shipment.claim_id is None:
+        return None
+    claim = shipment.claim
+    return claim if claim is not None and claim.ended_at is None else None
+
+
+def delivery_view(order: Order, shipment: Shipment | None, lang: str) -> dict[str, Any] | None:
+    """``delivery`` of ``OrderSummary`` / ``OrderDetail`` (plan §3.4): ``null`` for pickup; a BTS order has
+    only ``provider``; a Yandex order adds its method, stage, the promised window (the quote's until it is
+    paid), the courier's name and vehicle (never a phone) and the tracking link while a claim is open."""
+    if order.fulfilment != enums.FulfilmentMethod.DELIVERY:
+        return None
+    view: dict[str, Any] = {
+        "provider": enums.DeliveryProvider.BTS,
+        "method": None,
+        "method_label": None,
+        "stage": None,
+        "stage_label": None,
+        "eta_from": None,
+        "eta_to": None,
+        "courier_name": None,
+        "courier_vehicle": None,
+        "tracking_url": None,
+    }
+    if shipment is None or not _is_yandex(shipment):
+        return view
+    quote = shipment.quote if shipment.quote_id is not None else None
+    claim = _open_claim(shipment)
+    eta_from, eta_to = shipment.promised_from, shipment.promised_to
+    if eta_from is None and quote is not None:
+        eta_from, eta_to = quote.eta_from, quote.eta_to
+    return {
+        **view,
+        "provider": enums.DeliveryProvider.YANDEX,
+        "method": shipment.method or None,
+        "method_label": i18n.t(f"label.delivery_method.{shipment.method}", lang) if shipment.method else None,
+        "stage": shipment.stage or None,
+        "stage_label": i18n.t(f"label.shipment_stage.{shipment.stage}", lang) if shipment.stage else None,
+        "eta_from": eta_from,
+        "eta_to": eta_to,
+        "courier_name": (claim.courier_name or None) if claim is not None else None,
+        "courier_vehicle": (claim.courier_vehicle or None) if claim is not None else None,
+        "tracking_url": (claim.tracking_url or None) if claim is not None else None,
+    }
+
+
 def order_summary(order: Order, lang: str, now: datetime) -> dict[str, Any]:
     """``OrderSummary``."""
     payment = payment_selectors.pick_display(_payments(order))
@@ -956,7 +1097,11 @@ def order_summary(order: Order, lang: str, now: datetime) -> dict[str, Any]:
             "in_progress": payment_in_progress(order, now),
         },
         "pay_by": order.reservation_expires_at if order.status == _S.AWAITING_PAYMENT else None,
-        "tracking_number": (shipment.tracking_number or None) if shipment is not None else None,
+        # the BTS tracking number only (a Yandex claim id is not a tracking number)
+        "tracking_number": (
+            (shipment.tracking_number or None) if shipment is not None and not _is_yandex(shipment) else None
+        ),
+        "delivery": delivery_view(order, shipment, lang),
     }
 
 
@@ -1011,11 +1156,14 @@ def customer_order_detail(order: Order, lang: str, now: datetime | None = None) 
         )
     delivery = order.fulfilment == enums.FulfilmentMethod.DELIVERY
     shipment = _shipment(order)
-    has_parcel = (
-        shipment is not None
-        and shipment.state in (Shipment.State.CREATED, Shipment.State.CANCELLED)
-        and bool(shipment.tracking_number)
-    )
+    parcel: dict[str, Any] | None = None
+    if shipment is not None and shipment.state in (Shipment.State.CREATED, Shipment.State.CANCELLED):
+        if _is_yandex(shipment):
+            claim = _open_claim(shipment)
+            tracking_url = (claim.tracking_url or None) if claim is not None else None
+            parcel = {"carrier": "Yandex", "tracking_number": "", "tracking_url": tracking_url}
+        elif shipment.tracking_number:
+            parcel = {"carrier": "BTS", "tracking_number": shipment.tracking_number, "tracking_url": None}
     return {
         **summary,
         "fulfilment_label": i18n.t(f"label.fulfilment.{order.fulfilment}", lang),
@@ -1035,11 +1183,7 @@ def customer_order_detail(order: Order, lang: str, now: datetime | None = None) 
             "in_progress_label": i18n.t("label.payment.in_progress", lang) if in_progress else None,
         },
         "refund": _refund_view(order, payment, lang),
-        "shipment": (
-            {"carrier": "BTS", "tracking_number": shipment.tracking_number, "tracking_url": None}
-            if has_parcel and shipment is not None
-            else None
-        ),
+        "shipment": parcel,
         "cashback": _cashback_view(order),
         "cancellation": (
             {
@@ -1076,6 +1220,7 @@ def customer_timeline(order: Order, lang: str) -> list[dict[str, Any]]:
         (int(event.data.get("amount") or 0) for event in events if event.type == _E.CASHBACK_CREDITED), 0
     )
     pickup = order.fulfilment == enums.FulfilmentMethod.PICKUP
+    yandex = _is_yandex(_shipment(order)) if not pickup else False
 
     def n(value: Any) -> str:
         return i18n.format_number(int(value or 0), lang)
@@ -1087,6 +1232,8 @@ def customer_timeline(order: Order, lang: str) -> list[dict[str, Any]]:
     for event in events:
         data = event.data if isinstance(event.data, dict) else {}
         provider = provider_brand(str(data.get("provider") or ""))
+        by_yandex = yandex or event.source == enums.EventSource.YANDEX
+        carrier = label("label.timeline.sub_yandex" if by_yandex else "label.timeline.sub_bts")
         if event.type == _E.ORDER_CREATED:
             entries.append(
                 _entry(
@@ -1127,14 +1274,20 @@ def customer_timeline(order: Order, lang: str) -> list[dict[str, Any]]:
                 )
             )
         elif event.type == _E.SHIPMENT_CREATED:
+            # Yandex: the event's tracking_number is the claim id, never shown; no BTS wording
+            subtitle = (
+                label("label.timeline.sub_yandex")
+                if yandex
+                else label(
+                    "label.timeline.sub_tracking", tracking_number=str(data.get("tracking_number") or "")
+                )
+            )
             entries.append(
                 _entry(
                     enums.TimelineType.SHIPMENT_CREATED,
                     event.at,
                     label("label.timeline.shipment_created"),
-                    label(
-                        "label.timeline.sub_tracking", tracking_number=str(data.get("tracking_number") or "")
-                    ),
+                    subtitle,
                 )
             )
         elif event.type == _E.STATUS_CHANGED and data.get("to") == _S.HANDED_TO_COURIER:
@@ -1155,7 +1308,7 @@ def customer_timeline(order: Order, lang: str) -> list[dict[str, Any]]:
                     enums.TimelineType.HANDED_TO_COURIER,
                     event.at,
                     label("label.timeline.handed_to_courier"),
-                    label("label.timeline.sub_bts"),
+                    carrier,
                 )
             )
         elif event.type == _E.DELIVERED:
@@ -1164,7 +1317,25 @@ def customer_timeline(order: Order, lang: str) -> list[dict[str, Any]]:
                     enums.TimelineType.DELIVERED,
                     event.at,
                     label("label.timeline.delivered"),
-                    label("label.timeline.sub_bts"),
+                    carrier,
+                )
+            )
+        elif event.type == _E.DELIVERY_FAILED:
+            entries.append(
+                _entry(
+                    enums.TimelineType.DELIVERY_FAILED,
+                    event.at,
+                    label("label.timeline.delivery_failed"),
+                    label("label.timeline.sub_delivery_failed"),
+                )
+            )
+        elif event.type == _E.SHIPMENT_RETURNED:
+            entries.append(
+                _entry(
+                    enums.TimelineType.SHIPMENT_RETURNED,
+                    event.at,
+                    label("label.timeline.shipment_returned"),
+                    None,
                 )
             )
         elif event.type == _E.CANCELLED:
@@ -1369,14 +1540,22 @@ def dead_billz_sales(*, limit: int) -> Finding:
 
 def unshipped_paid_orders(paid_before: datetime, *, limit: int) -> Finding:
     """K4: delivery orders still ``processing`` that were paid before ``paid_before`` and have no BTS parcel:
-    no shipment row, or one ``not_created`` / ``failed`` (the dashboard's ``bts_failed`` is a subset).
+    no shipment row, or a BTS one ``not_created`` / ``failed`` (the dashboard's ``bts_failed`` is a subset).
+    A Yandex order waits for staff to dispatch it by design: it is never a K4 finding.
 
     Plan: ``order_status_idx`` range scan on ``status = 'processing'`` (open orders only), the shipment
     through its unique ``order_id``."""
     parcel = Shipment.objects.filter(
         order_id=OuterRef("pk"), state__in=[Shipment.State.CREATED, Shipment.State.CANCELLED]
     )
-    queryset = Order.objects.filter(
-        status=_S.PROCESSING, fulfilment=enums.FulfilmentMethod.DELIVERY, paid_at__lt=paid_before
-    ).exclude(Exists(parcel))
+    other_carrier = Shipment.objects.filter(order_id=OuterRef("pk")).exclude(
+        provider=enums.DeliveryProvider.BTS
+    )
+    queryset = (
+        Order.objects.filter(
+            status=_S.PROCESSING, fulfilment=enums.FulfilmentMethod.DELIVERY, paid_at__lt=paid_before
+        )
+        .exclude(Exists(parcel))
+        .exclude(Exists(other_carrier))
+    )
     return finding(queryset, limit=limit)

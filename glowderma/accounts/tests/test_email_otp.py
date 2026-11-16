@@ -162,6 +162,8 @@ def test_0011_reverse_refuses_while_it_would_lose_phoneless_accounts_or_email_co
     customer = services.create_customer(None, name="Kamola", language="uz")
     with pytest.raises(IrreversibleError, match="1 customer"):
         call_command("migrate", "accounts", "0010", verbosity=0)
+    # the refused migrate already unapplied what depends on accounts (commerce, delivery): restore it
+    call_command("migrate", verbosity=0)
     customer.delete()
     call_command("migrate", "accounts", "0010", verbosity=0)
     call_command("migrate", verbosity=0)

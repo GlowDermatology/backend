@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Version | 1.5.0-draft (2026-10-27, `feat/customer-web`: B-W1 web client — `X-GD-Platform: web`, several sessions at once and the session list §1.9/§2.2.10, `PAYMENT_WEB_RETURN_URL`, website OAuth client ids, slugs and SEO texts §2.3/§2.11 — together with B-W2 hybrid identity — e-mail sign-up, sign-in and reset, phoneless social sign-up, the phone gate and `me/phone/`, `me/email/`; §2.1, §2.2.10, §2.14.4) on top of 1.4.0-draft (2026-10-26, review revision 4 on top of revisions 2–3 and the product-owner decisions of 2026-10-26), milestone M2: the iOS/Android customer app, the website (through its BFF), provider callbacks and the cashier QR endpoint |
+| Version | 1.5.0-draft (2026-10-27, `feat/customer-web`: B-W1 web client — `X-GD-Platform: web`, several sessions at once and the session list §1.9/§2.2.10, `PAYMENT_WEB_RETURN_URL`, website OAuth client ids, slugs and SEO texts §2.3/§2.11 — together with B-W2 hybrid identity — e-mail sign-up, sign-in and reset, phoneless social sign-up, the phone gate and `me/phone/`, `me/email/`; §2.1, §2.2.10, §2.14.4) on top of 1.4.0-draft (2026-10-26, review revision 4 on top of revisions 2–3 and the product-owner decisions of 2026-10-26), milestone M2: the iOS/Android customer app, the website (through its BFF), provider callbacks and the cashier QR endpoint. Yandex Delivery (2026-11-15, `feat/yandex-delivery`; additive, the released app's requests are answered as before): §1.1, §1.2, §1.6, §1.8 (`delivery_quote`), §2.0, §2.4 (`delivery`), §2.6 (delivery options), §2.7.1 (`delivery_quote_id`, `price_changed` / `quote_expired`), §2.8 (`delivery`, Yandex `shipment`), §2.13.4 (the Yandex callback), §2.14.5, §3, §4.1 (`delivery_failed`, `shipment_returned`), §5 and §6 item 20 |
 | Implemented by | the Django 6.1 / DRF 3.18 backend (Codex, packages P0–P3 of `docs/plans/2026-10-26-m2-customer-api.md`); consumed by the native iOS and Android apps (not in this repo) |
 | Source of truth | `docs/specs/2026-10-24-backend-foundation-design.md` (Auth and request security → Customer (M2); Financial integrity; Milestones → M2; Provisional business rules). If this file and the spec disagree, the spec wins and this file gets fixed. |
 | Shared rules | `docs/api/admin-api-v1.md` §1 (envelope, pagination, idempotency, values), §3 (enums), §4 (OrderEvent types), §5.8 (Uzbek labels). This file **references** them and lists only what is different for the customer audience. |
@@ -29,7 +29,7 @@ Everything in admin §1 applies unless a row below says otherwise.
 | `/api/v1/auth/…` | app, before sign-in | none (refresh token in the body where needed) | device headers required (§1.2) |
 | `/api/v1/me/…`, `/api/v1/cart/…`, `/api/v1/orders/…`, `/api/v1/appointments/…`, `/api/v1/delivery/calculate/` | signed-in app | **C**: customer access JWT required | device headers required |
 | `/api/v1/catalog/…`, `/api/v1/settings/public/`, `/api/v1/delivery/regions/`, `/api/v1/specialists/…`, `/api/v1/services/` | anyone | **O**: optional; a present bearer must be valid | device headers optional (the app always sends them) |
-| `/api/v1/webhooks/{click,payme,bts}/…` | payment and delivery providers | provider signature / Basic auth / shared secret (§2.13); a provider whose mode is `fake` under the production settings starts no transaction and honours no capture (§2.13.0) | **not** the error envelope: provider-native bodies |
+| `/api/v1/webhooks/{click,payme,bts,yandex-delivery}/…` | payment and delivery providers | provider signature / Basic auth / shared secret (§2.13); Yandex Delivery signs nothing: our own HMAC order reference in the query, the call is only a hint (§2.13.4); a provider whose mode is `fake` under the production settings starts no transaction and honours no capture (§2.13.0) | **not** the error envelope: provider-native bodies |
 | `/api/v1/pos/…` | in-store cashier terminals | per-device API key (§2.10) | envelope; Uzbek messages only |
 | `/api/v1/dev/…` | developers, local/test settings only | **C** | mounted only when `DEV_FEATURES_ALLOWED` (local/test settings), `FAKE_PAYMENTS_ENABLED=true` **and** `CLICK_MODE` = `PAYME_MODE` = `fake` (§2.15); settings validation refuses the flag with any live payment mode and the production settings refuse it outright |
 
@@ -65,7 +65,7 @@ Everything in admin §1 applies unless a row below says otherwise.
 | `Content-Type` | on bodies | `application/json`; `multipart/form-data` only on `PUT me/image/`; Click webhooks `application/x-www-form-urlencoded` only (§2.13.1). Anything else → 415 (Click: error `-8`). |
 | `X-Request-ID` | ignored from the app | Accepted only with the internal secret (admin §1.2), which the app never has. The server always generates one; the app shows it on error screens ("Xato kodi"). |
 | `X-GD-Client-UA` | website BFF only (B-W1) | The browser's `User-Agent`, honoured only with a valid `X-GD-Internal-Secret` (like `X-GD-Client-IP`); printable characters, ≤512. Names the session in the session list (§2.2.10); never used for any decision. |
-| `X-GD-Fake-Scenario` | local/test settings only | JSON object copied into `Order.metadata["fake"]` at checkout (BTS/Click/Payme switches of plan §6). Honoured only when `DEV_FEATURES_ALLOWED` (local/test settings), `FAKE_SCENARIO_HEADER_ENABLED=true` **and** every provider mode (`ESKIZ_MODE`, `CLICK_MODE`, `PAYME_MODE`, `BTS_MODE`, `FCM_MODE`) is `fake`; settings validation refuses the flag otherwise and the production settings refuse it outright (fake providers in production never read a scenario, §6.14). |
+| `X-GD-Fake-Scenario` | local/test settings only | JSON object copied into `Order.metadata["fake"]` at checkout (BTS/Click/Payme switches of plan §6). Honoured only when `DEV_FEATURES_ALLOWED` (local/test settings), `FAKE_SCENARIO_HEADER_ENABLED=true` **and** every provider mode (`ESKIZ_MODE`, `CLICK_MODE`, `PAYME_MODE`, `BTS_MODE`, `FCM_MODE`, `YANDEX_DELIVERY_MODE`) is `fake` (Yandex switches go under the key `yandex`, `docs/integrations/yandex-delivery.md` §5); settings validation refuses the flag otherwise and the production settings refuse it outright (fake providers in production never read a scenario, §6.14). |
 
 **401 codes and the app's reaction** (customer refresh tokens rotate, so a refresh failure always ends the session):
 
@@ -153,9 +153,10 @@ Codes added for this audience (admin §1.6 codes keep their meaning):
 | 409 | `terms_update_required` | Consent older than the current terms (§2.2.4) on checkout and booking | `{"current_version": str}` |
 | 409 | `OUT_OF_STOCK` | Cart add / checkout stock refusal | cart add: `{"product_id", "available": 0}`; checkout: `{"lines": [...]}` |
 | 409 | `product_unavailable` · `cart_full` · `cart_empty` | Cart and checkout (§2.5, §2.7) | `cart_full`: `{"max_lines": int}` |
-| 409 | `price_changed` | `expected_total` differs (§2.7.1) | `{"total", "items_subtotal", "delivery_fee", "cashback_used", "cart": Cart}` |
+| 409 | `price_changed` | `expected_total` differs (§2.7.1); Yandex Delivery: the re-quoted delivery fee differs from the quote's (§2.7.1, key `error.delivery_price_changed`) | `{"total", "items_subtotal", "delivery_fee", "cashback_used", "cart": Cart}`; the Yandex variant adds `"quote_id"` (the fresh quote) and `"options": DeliveryOption[]` |
+| 409 | `quote_expired` | Yandex Delivery: the `delivery_quote_id` can no longer pay for an order and no equal fresh quote exists (§2.7.1) | `{"options": DeliveryOption[]}` after a re-quote, else null |
 | 409 | `open_order_exists` | An unpaid order already exists (§2.7.1) | `{"order_id": int, "pay_by": datetime}` |
-| 409 | `delivery_unavailable` | BTS does not deliver to the address, or delivery is not offered at all (§2.6: fake BTS under the production settings) | null |
+| 409 | `delivery_unavailable` | BTS does not deliver to the address, or delivery is not offered at all (§2.6: fake BTS under the production settings); with the Yandex keys of §2.6: no delivery option is available | null; the §2.6 options answer: `{"options": DeliveryOption[]}` when providers are offered but none is available |
 | 409 | `online_sales_unavailable` | Online selling is off because the stock source is not live (§2.3: fake Billz under the production settings): cart add/patch and checkout | null |
 | 409 | `not_payable` · `order_expired` · `already_paid` | `orders/{id}/pay/` refusals (§2.7.2) | null |
 | 409 | `payment_in_progress` | A provider transaction of this order is in flight (§2.7.2): pay with the other provider, customer cancel, `DELETE me/` | `{"provider": str, "order_id": int}` |
@@ -221,6 +222,7 @@ high pure-IP ceiling as a backstop; the per-phone rules are the main protection 
 | **`qr`** (new) | customer id | 6/min | `me/qr/` (in addition to `customer`) |
 | `checkout` | customer id | 30/min | `orders/checkout/` (in addition to `customer`) |
 | `pay` | customer id | 30/min | `orders/{id}/pay/` (in addition to `customer`) |
+| **`delivery_quote`** (Yandex Delivery) | customer id, counted only for a request with `with_options`, `delivery_provider` or `delivery_method` | 30/min | `delivery/calculate/` (in addition to `customer`; the released request without those keys is not counted) |
 | `pos` | POS device id (after successful key auth) | 120/min | `pos/*` |
 | POS failed auth (not a DRF throttle; inside `PosKeyAuthentication`, because DRF authenticates before throttling) | client IP, Redis counter | `POS_FAILED_AUTH_PER_IP_PER_MIN` (20); beyond it → 429 `throttled` without a key lookup | `pos/*` |
 | **`public`** (new) | fid when the device header is present, else client IP | 300/min | every **O** route when anonymous (a signed-in caller counts against `customer`) |
@@ -348,6 +350,7 @@ IP per minute, the rest only counted and sampled in the log).
 | 56 | POST | `me/sessions/revoke-others/` | C | | 200 | B-W1 |
 | 57 | GET | `catalog/products/{slug}/` | O | | 200 | B-W1 |
 | 58 | GET | `specialists/{slug}/` | O | | 200 | B-W1 |
+| 59 | POST | `webhooks/yandex-delivery/` (§2.13.4) | – (own HMAC reference in the query) | | 200 | Yandex Delivery |
 
 **Shared shapes.**
 ```jsonc
@@ -1186,7 +1189,9 @@ stable URL; it 301-redirects id URLs to the slug.
  "online_sales_enabled": true,                        // false while Billz is fake in production: stock unknown, nothing can be added to the cart or checked out (§2.3)
  "fulfilment_methods": ["delivery", "pickup"],        // FulfilmentMethod[] offered at checkout; no "delivery" while BTS is fake in production (§2.6)
  "min_app_version": {"ios": "1.0.0", "android": "1.0.0"},
- "store_urls": {"ios": "https://apps.apple.com/…", "android": "https://play.google.com/…"}}
+ "store_urls": {"ios": "https://apps.apple.com/…", "android": "https://play.google.com/…"},
+ "delivery": {"providers": ["yandex", "bts"],          // Yandex Delivery: home-delivery carriers that can take an order now, preferred first
+              "default_provider": "yandex"}}           // | null when none
 ```
 Staff set the phones, links and texts on the ops console settings page `/django-admin/settings/` (2FA; admin §2.11,
 since 2026-11-07 — the admin API routes `settings/` and `settings/terms/publish/` are retired) and publish the terms
@@ -1204,6 +1209,11 @@ callbacks are refused (§2.13.0, §6.14). Checkout and pay refuse a provider out
 §2.7.1 row 1, §2.7.2). With an empty list the app shows the cart without the checkout button.
 `fulfilment_methods` lists `delivery` and `pickup` in this order; `delivery` is omitted while delivery is not offered
 (§2.6: the BTS port is fake under the production settings), and then the app offers pickup only.
+`delivery` (Yandex Delivery, additive) = `core.integration_modes.delivery_providers()`: `yandex` unless its port is fake
+under the production settings, `bts` unless BTS is (§2.6), in that order; computed per request, not cached with the
+rest. Whether a Yandex method is switched on, the warehouse and the pilot list are decided per customer by
+`delivery/calculate/` (§2.6). `fulfilment_methods` keeps meaning BTS for the released app: a Yandex-only deployment
+does not list `delivery` there.
 `online_sales_enabled` = `core.integration_modes.online_sales_enabled()`: false while the Billz port is fake under the
 production settings (§2.3); the app then hides "Savatga" and checkout and shows the catalog for browsing only (the
 server refuses those writes with `online_sales_unavailable` anyway). It does not hide the "To‘lash" button of an order
@@ -1269,7 +1279,8 @@ made-up tracking number for a parcel nobody ships. In that posture `settings/pub
 `fulfilment_methods` (§2.4), `delivery/regions/` answers `{"regions": [], "updated_at": null}`, and
 `delivery/calculate/` and checkout answer **409 `delivery_unavailable`** "Yetkazib berish hozircha mavjud emas. Olib
 ketishni tanlang." (`error.delivery_not_offered`) for `fulfilment = delivery` before any BTS call; pickup works as
-usual. What the fake port does with orders placed before the switch is §2.14.3. Under the local/test settings the
+usual. With the Yandex keys below, delivery is offered while any home-delivery provider is (`settings/public/`
+`delivery.providers`). What the fake port does with orders placed before the switch is §2.14.3. Under the local/test settings the
 fake BTS serves delivery normally.
 
 **`GET delivery/regions/`** (**O**) — the BTS reference list for the address form, from the BTS port
@@ -1321,6 +1332,69 @@ sender city `BTS_SENDER_CITY_CODE`, the receiver region/city, weight `BTS_DEFAUL
 answer's price in so'm is the fee. The quote is informative: checkout quotes again (§2.7.1) and the checkout quote is
 what the order stores.
 
+**Yandex Delivery options** (`feat/yandex-delivery`; `docs/integrations/yandex-delivery.md`). The body may add three
+optional keys: `with_options: bool | null`, `delivery_provider: "yandex" | "bts" | null` and `delivery_method:
+"standard" | "express" | null` (a method alone means Yandex). **With any of them set** the request gets the
+*options answer* below and counts against the `delivery_quote` throttle (§1.8); without them it is answered exactly
+as above (the released app sends none of them).
+
+- **Destination:** `address_id` — a saved address; its map pin (`latitude` / `longitude`, §2.2.7) serves Yandex and
+  its BTS codes serve BTS — or a `region_code` + `city_code` pair (BTS only: the Yandex options then say
+  `coordinates_required`). No BTS codes are required here; each option says what it lacks. The address and cart
+  checks are the released ones, in the same order (`address_id` `required` / `does_not_exist`, then
+  `cart_empty`).
+- **Which options:** Yandex Standard and Yandex Express — each only while the method is switched on in the warehouse
+  settings (a switched-off method is omitted, not listed as unavailable), Yandex is not fake under the production
+  settings and, while `YANDEX_DELIVERY_PILOT_CUSTOMER_IDS` is set, the customer is on that list — then BTS, computed
+  as the released path does (omitted while BTS is not offered).
+- **Why an option is unavailable** (`unavailable_reason`, `DeliveryUnavailableReason`; the first that applies):
+  `not_configured` (the warehouse is not set up), `dispatch_suspended`, `coordinates_required` (the address has no
+  pin), `too_heavy` (the parcel — the configured item weight × the cart quantity — is above the class limit: 10 kg
+  Standard, 20 kg Express), `warehouse_closed` (no opening within 14 days), then Yandex's price check:
+  `provider_unavailable` (Yandex did not answer, or the business account is refused) or `out_of_zone` (Yandex does
+  not serve the address). BTS: `out_of_zone` (no BTS codes, an unknown or unserved route) or
+  `provider_unavailable`. (`method_disabled` exists in the enum but is never sent: a disabled method is omitted.)
+  **An unavailable option never carries a price.**
+- **Quotes:** every available Yandex option is a stored quote (`quote_id`, valid 15 minutes, `expires_at`); the
+  same customer, address, method and weight within that time gets the same quote back. A BTS option has no
+  `quote_id` (a checkout without one ships by BTS, §2.7.1). The fee is Yandex's estimate with the shop's markup,
+  rounded up to 500 so'm; once paid it never changes. `eta_from` / `eta_to` is the promised window (preparation
+  time included); `scheduled: true` when it starts at a later warehouse opening (closed now, or too late today).
+- **Selection:** the requested provider / method when it is available, else the default — Yandex Standard, then
+  Yandex Express, then BTS. The released keys (`delivery_fee`, `weight_g`, `cashback_max`, `cashback_to_use`,
+  `expected_total`, …) describe the selected option; `region_code` / `city_code` are the address's BTS codes or null.
+- **Errors:** no home-delivery provider offered at all → 409 `delivery_unavailable` · `error.delivery_not_offered`
+  (`details: null`); providers offered but no option available → 409 `delivery_unavailable` ·
+  `error.delivery_unavailable` with `details: {"options": DeliveryOption[]}` (the reasons). A Yandex outage is an
+  option's `provider_unavailable`, never a 503 of the request. Pickup with any of the keys → the pickup answer plus
+  `provider`, `method`, `quote_id`, `quote_expires_at` = `null` and `options: []`.
+- The carriers are asked **before** the request's idempotency transaction, which only stores and returns the answer:
+  a replayed `Idempotency-Key` asks nobody.
+
+```jsonc
+// 200 delivery — options answer
+{"fulfilment": "delivery", "delivery_fee": 25000, "region_code": "10", "city_code": "1001", "weight_g": 900,
+ "pickup_address": null, "quoted_at": "2026-11-15T12:00:00+05:00",
+ "items_subtotal": 808000, "cashback_max": 48600, "cashback_to_use": 48600, "expected_total": 784400,
+ "provider": "yandex", "method": "standard",              // DeliveryProvider / DeliveryMethod of the selected option | null
+ "quote_id": "0f9c1e2a-5b7d-4c3e-9a1f-2d8e6b4a7c10",      // | null (BTS): send it to checkout as delivery_quote_id
+ "quote_expires_at": "2026-11-15T12:15:00+05:00",          // | null
+ "options": [                                              // DeliveryOption[]: Yandex Standard, Yandex Express, BTS
+   {"provider": "yandex", "method": "standard", "label": "Yandex Standart", "available": true,
+    "unavailable_reason": null, "fee": 25000,
+    "eta_from": "2026-11-15T13:30:00+05:00", "eta_to": "2026-11-15T15:30:00+05:00", "scheduled": false,
+    "quote_id": "0f9c1e2a-5b7d-4c3e-9a1f-2d8e6b4a7c10", "expires_at": "2026-11-15T12:15:00+05:00",
+    "expected_total": 784400},
+   {"provider": "yandex", "method": "express", "label": "Yandex Ekspress", "available": false,
+    "unavailable_reason": "provider_unavailable", "fee": null, "eta_from": null, "eta_to": null,
+    "scheduled": false, "quote_id": null, "expires_at": null, "expected_total": null},
+   {"provider": "bts", "method": null, "label": "BTS pochta", "available": true, "unavailable_reason": null,
+    "fee": 30000, "eta_from": null, "eta_to": null, "scheduled": false, "quote_id": null, "expires_at": null,
+    "expected_total": 789400}]}
+```
+`label` is server-rendered in the resolved language (`label.delivery_option.yandex_standard`,
+`label.delivery_option.yandex_express`, `label.delivery_option.bts`).
+
 ### 2.7 Checkout, pay, cancel, reorder
 
 **Cashback cap (one formula, used by the cart, `delivery/calculate/` and checkout):**
@@ -1336,7 +1410,8 @@ Body:
  "payment_provider": "click",         // PaymentProvider listed in settings/public payment_providers (§2.4)
  "cashback_to_use": 48600,            // int ≥ 0, default 0
  "expected_total": 784400,            // the total the app showed; required
- "customer_note": "Soat 18:00 dan keyin"}   // ≤300, default ""
+ "customer_note": "Soat 18:00 dan keyin",  // ≤300, default ""
+ "delivery_quote_id": null}            // Yandex Delivery: a quote_id of delivery/calculate/ (§2.6) | null = BTS
 ```
 **Stock freshness before the transaction** (gap X-STOCK-FRESHNESS, open questions GC-5/GC-6). While Billz is live, a
 checkout whose body is valid first re-reads from Billz — **before** the `@idempotent` transaction, holding no lock — the
@@ -1348,6 +1423,29 @@ row 4a (transport error, 5xx, circuit open, or no answer at all within the 4 s);
 or a 429 pause left unread after Billz had answered are *deferred* and go on from the cache (GC-10). Nothing is read for
 a checkout without a well-formed `Idempotency-Key`, for a replayed key, or for lines whose product is not visible. With a
 fake Billz nothing is read (§2.3).
+
+**Yandex Delivery quote** (`delivery_quote_id`, additive). Without it the checkout is the released BTS path,
+unchanged. With it (delivery only: pickup + a quote id → 400 `delivery_quote_id` `invalid`):
+- **Before the transaction** (no lock held) the quote is checked — the customer's own, Yandex, unused, unexpired,
+  for the same saved address (id, text and pin), the cart's weight, a method still switched on with the same class,
+  the warehouse configured, dispatch not suspended, and the same `scheduled` flag now. A quote that no longer fits is
+  re-quoted (Yandex asked again): **the same fee** → the checkout proceeds with the fresh quote; **another fee** →
+  **409 `price_changed`** "Yetkazish narxi o‘zgardi. Yangi narxni tekshiring." (`error.delivery_price_changed`)
+  with `details {total, items_subtotal, delivery_fee, cashback_used, cart, quote_id, options}` (the new total, the
+  fresh quote and options; a `cashback_to_use` the new fee no longer allows answers row 8 instead); **nothing
+  available** → **409 `quote_expired`** "Yetkazish narxi eskirdi. Narxni qayta hisoblang." (`error.quote_expired`)
+  with `details {options}`. An unknown or foreign quote id → 409 `quote_expired`, `details: null`, nobody asked.
+  Nothing is asked for a request the transaction refuses or replays anyway (invalid body, pickup, no address, online
+  selling off, no phone, a provider not payable, outdated consent, no or a replayed `Idempotency-Key`, a foreign
+  address, an empty cart).
+- **Rows 3–4** become: the address must be the customer's own (`does_not_exist`) — no BTS region/city is needed and
+  no BTS quote is asked; the fee is the quote's `customer_fee`.
+- **Inside the transaction**, right after the customer lock, the quote row is locked and checked again against the
+  saved address and the method settings; the cart's weight must still equal the quote's. Anything off (a quote used
+  by a concurrent checkout of the same customer, a cart changed meanwhile) → 409 `quote_expired`, `details: null`.
+- **Side effects** as below, plus: `Order.address_latitude/longitude` = the saved pin, a Yandex `Shipment`
+  (`provider: yandex`, the quote's method, the quote), the quote marked used. Nothing is sent to Yandex at checkout
+  or payment: staff call the courier once the parcel is packed (admin contract §2.18).
 
 **Serialisation.** Two checkouts of one customer (two taps, a retry with a renewed key, two app processes) must not
 both pass the open-order check. Checkout therefore runs, inside the `@idempotent` transaction:
@@ -1535,7 +1633,10 @@ Only orders created at or after the history horizon (§2.2.3).
  "payment": {"status": "paid", "status_label": "To‘langan", "provider": "click",
              "in_progress": false},                  // true while a provider transaction is in flight (§2.7.2)
  "pay_by": null,                                    // reservation_expires_at while awaiting_payment, else null
- "tracking_number": "48213907"}                     // | null
+ "tracking_number": "48213907",                     // | null; the BTS tracking number only (never for Yandex)
+ "delivery": {"provider": "bts", "method": null, "method_label": null, "stage": null, "stage_label": null,
+              "eta_from": null, "eta_to": null, "courier_name": null, "courier_vehicle": null,
+              "tracking_url": null}}               // Yandex Delivery: CustomerOrderDelivery | null (pickup), below
 ```
 **`GET me/orders/{id}/`** → `OrderDetail` (404 for another customer's order or beyond the horizon):
 ```jsonc
@@ -1585,6 +1686,20 @@ Only orders created at or after the history horizon (§2.2.3).
 - Refund mapping: `requested`, `submitting`, `manual_required`, `unknown`, `failed` → `in_progress` "To‘lov
   qaytarilmoqda" (staff resolve the last three); `succeeded` → `completed` "To‘lov qaytarildi".
 - `tracking_url` stays null until BTS confirms a public tracking URL format (verify M3).
+- **`delivery`** (Yandex Delivery, additive; on `OrderSummary` and so on `OrderDetail`): `null` for pickup; a BTS
+  order (or one without a shipment row) has `provider: "bts"` and every other key `null`. A Yandex order:
+  ```jsonc
+  {"provider": "yandex", "method": "express", "method_label": "Ekspress",    // label.delivery_method.*
+   "stage": "in_transit", "stage_label": "Yo‘lda",                             // ShipmentStage, label.shipment_stage.*
+   "eta_from": "2026-11-15T13:00:00+05:00", "eta_to": "2026-11-15T14:00:00+05:00",   // the promised window (the quote's before payment) | null
+   "courier_name": "Aziz", "courier_vehicle": "Chevrolet Cobalt oq 01A777AA",  // while a courier claim is open | null; never a phone
+   "tracking_url": "https://…"}                                                // Yandex's tracking page while a claim is open | null
+  ```
+  The stage labels are written for customers (`failed` reads "Kuryer qayta chaqiriladi": no courier came, the shop
+  calls one again). Clients refresh the order while a Yandex parcel is on its way (the website's order page every 30 s while the
+  tab is visible); pushes still mark `handed_to_courier` and `delivered`.
+- **`shipment`** of a Yandex order (once a courier claim was accepted) = `{"carrier": "Yandex", "tracking_number":
+  "", "tracking_url": <the tracking link while a claim is open | null>}`; BTS unchanged.
 
 ---
 ### 2.9 Loyalty (**C**)
@@ -2265,6 +2380,34 @@ Payme id is `Payment.provider_txn_id`.
     candidate writes nothing (no evidence either way). `consecutive_failures > 0` is shown to staff as admin
     `GET dashboard/` `attention.bts_polling_failing: true` (admin §2.10) until a run tracks a parcel again.
 
+#### 2.13.4 `POST webhooks/yandex-delivery/` (Yandex Delivery status callback)
+- **What Yandex sends** (`claims/create` `callback_properties.callback_url`, documented as deprecated, "a push ahead
+  of polling"): a POST to the URL we registered **for that claim**, with `updated_ts=<ISO-8601>&claim_id=<claim id>`
+  appended by concatenation — no status, no body we rely on (the view never reads it), **no signature**. So the
+  callback is only a hint; the 60 s `claims/bulk_info` poll (`commerce.poll_yandex`) is the reliable path, and a
+  deployment without `YANDEX_DELIVERY_CALLBACK_URL` registers no callback at all.
+- **Our reference.** Each claim registers `YANDEX_DELIVERY_CALLBACK_URL + "?ref=<order_id>-<hmac>&"`: `hmac` = the
+  first 16 lower-case hex characters of `HMAC-SHA256(k, str(order_id))` with `k = HMAC-SHA256(PAYMENT_REF_KEY,
+  "glowderma.yandex.callback.v1")` (domain-separated from the payment reference of §1.4: neither verifies as the
+  other). It is checked in constant time before anything else is read.
+- **Answers** (JSON, not the envelope):
+
+  | Situation | Answer | Stored |
+  |---|---|---|
+  | Yandex fake under the production settings (`callbacks_refused("yandex")`) | 403 `{"ok": false}` | bounded `rejected:` inbox row, `fake_mode` |
+  | `ref` missing, or without a `-` | 400 `{"ok": false}` | bounded `rejected:` row, `bad_ref` |
+  | `ref` that does not verify (wrong HMAC, or malformed with a `-`) | 403 `{"ok": false}` | bounded `rejected:` row, `bad_ref` |
+  | verified, but `claim_id` is no claim of that order | 200 `{"ok": true, "ignored": true}` + WARNING `yandex.webhook_foreign_claim` | `rejected:` row, `foreign_claim` |
+  | verified, `(claim_id, updated_ts)` seen before | 200 `{"ok": true}` | `dup:` row |
+  | verified | 200 `{"ok": true}`; outbox `yandex.sync_claim` (a fresh `claims/info` → `commerce.services.apply_yandex_claim`) | inbox row, event key `"{claim_id}:{updated_ts}"`, payload `{claim_id, updated_ts}`, entity `order:<id>` |
+  | an unexpected error | 500 `{"ok": false}` (everything rolled back; Yandex retries) | — |
+
+- No Yandex call runs in the request. A `claims/info` that still shows an older `updated_ts` than the callback
+  named is re-read for up to 2 minutes (the documentation allows 5–30 s of lag).
+- **The `ref` is a credential-like query string:** gunicorn logs no query string, the edge logs none
+  (`docs/ops/deploy.md`), `WebhookInbox.path` has none and the stored payload holds only `claim_id` and
+  `updated_ts`.
+
 ### 2.14 Outbound provider protocols (what the adapters send)
 
 #### 2.14.1 Eskiz SMS (`integrations/eskiz/`, P1)
@@ -2430,6 +2573,13 @@ the domain in IDNA ASCII (punycode); plus-addressing is kept. One client IP may 
 subject and body `email.notice.<kind>.subject` / `.body`, templates `accounts/email/notice.{txt,html}`; the sealed
 address is blanked after a definitive outcome; a relay that accepted nothing retries.
 
+#### 2.14.5 Yandex Delivery (`integrations/yandex_delivery/`; live adapter, not verified against an account)
+`tariffs`, `check-price`, `claims/create` (idempotent per `request_id`), `claims/info`, `claims/bulk_info`,
+`claims/accept`, `claims/cancel-info`, `claims/cancel`, `claims/return` and `claims/tracking-links` of the Express API
+(`https://b2b.taxi.yandex.net/b2b/cargo/integration/v2/`, bearer token, `Accept-Language`). What each sends —
+including the customer's address text, pin, recipient name and phone in `claims/create` — and how answers and failures
+are read: `docs/integrations/yandex-delivery.md` §2 and §14.
+
 ### 2.15 `POST dev/payments/{order_id}/simulate/` (local/test settings only)
 Mounted only when `DEV_FEATURES_ALLOWED` (local/test settings), `FAKE_PAYMENTS_ENABLED=true` **and** `CLICK_MODE` =
 `PAYME_MODE` = `fake`; settings validation refuses `FAKE_PAYMENTS_ENABLED` together with any live payment mode, and the
@@ -2473,7 +2623,11 @@ gains `refresh_reused` (§2.1.6).
 | **OrderScope** (new) | `active`, `completed`, `cancelled`, `all` | `me/orders/` |
 | **CustomerRefundState** (new) | `in_progress`, `completed` | `OrderDetail.refund` |
 | **CashbackEarnedState** (new) | `none`, `credited`, `reversed` | `OrderDetail.cashback` |
-| **TimelineType** (new) | `order_created`, `payment_confirmed`, `payment_failed`, `shipment_created`, `handed_to_courier`, `delivered`, `cancelled`, `refund_in_progress`, `refund_succeeded` (exactly the shown types of §4.1; hidden and folded event types never appear) | `OrderDetail.timeline` |
+| **TimelineType** (new) | `order_created`, `payment_confirmed`, `payment_failed`, `shipment_created`, `handed_to_courier`, `delivered`, `cancelled`, `refund_in_progress`, `refund_succeeded`, and (Yandex Delivery, appended; released apps tolerate unknown types) `delivery_failed`, `shipment_returned` (exactly the shown types of §4.1; hidden and folded event types never appear) | `OrderDetail.timeline` |
+| **DeliveryProvider** (Yandex Delivery; admin §3.1) | `bts`, `yandex` | `delivery/calculate/` `delivery_provider`, `options[].provider`, `OrderSummary.delivery.provider`, `settings/public/` `delivery` |
+| **DeliveryMethod** | `standard`, `express` | `delivery_method`, `options[].method`, `delivery.method` |
+| **ShipmentStage** | `awaiting_dispatch`, `courier_requested`, `courier_assigned`, `courier_arrived`, `in_transit`, `at_destination`, `delivered`, `returning`, `returned`, `cancelled`, `failed` | `delivery.stage` |
+| **DeliveryUnavailableReason** | `coordinates_required`, `provider_unavailable`, `out_of_zone`, `method_disabled` (reserved, never sent), `too_heavy`, `warehouse_closed`, `dispatch_suspended`, `not_configured` | `options[].unavailable_reason` |
 | **ProgressStep** (new) | `placed`, `paid`, `with_courier`, `delivered`, `picked_up`, `cancelled` | `OrderDetail.progress[].step` |
 | **ProgressState** (new) | `done`, `current`, `upcoming`, `skipped` | `OrderDetail.progress` |
 | **LedgerSource** (new) | `online`, `store`, `admin` | ledger |
@@ -2516,12 +2670,15 @@ failures) never reach the customer. Events of a late-captured payment (§2.13.0)
 | `cashback_credited` | folded into `payment_confirmed` | – | – |
 | `billz_sale_recorded` | hidden | – | – |
 | `payment_failed` | shown | "To‘lov amalga oshmadi" · `label.timeline.payment_failed` | "{provider} · qayta urinib ko‘ring" while `awaiting_payment` (`label.timeline.sub_payment_failed_retry`), else "{provider}" (`label.timeline.sub_provider`) |
-| `shipment_created` | shown | "Yetkazib berish rasmiylashtirildi" · `label.timeline.shipment_created` (the BTS order is created right after payment, live and fake alike — spec "After payment", `docs/integrations/bts.md` — while the order is still `processing`; the label says the delivery is booked, not that the parcel left: that is `handed_to_courier`. Wording changed in `feat/customer-web` from "Yetkazib berishga topshirildi") | "BTS kuzatuv raqami: {tracking_number}" · `label.timeline.sub_tracking` |
+| `shipment_created` | shown (Yandex Delivery: when Yandex accepts the courier claim; subtitle "Yandex Dostavka" · `label.timeline.sub_yandex`, never the claim id) | "Yetkazib berish rasmiylashtirildi" · `label.timeline.shipment_created` (the BTS order is created right after payment, live and fake alike — spec "After payment", `docs/integrations/bts.md` — while the order is still `processing`; the label says the delivery is booked, not that the parcel left: that is `handed_to_courier`. Wording changed in `feat/customer-web` from "Yetkazib berishga topshirildi") | "BTS kuzatuv raqami: {tracking_number}" · `label.timeline.sub_tracking` |
 | `shipment_failed` | hidden (staff retry; the order stays "Tayyorlanmoqda") | – | – |
 | `status_changed` → `handed_to_courier` | shown as `handed_to_courier` | "Kuryerga topshirildi" · `label.timeline.handed_to_courier` | null |
 | `status_changed` → `delivered` | shown as `delivered` | delivery "Yetkazildi" · `label.timeline.delivered`; pickup "Olib ketildi" · `label.timeline.picked_up` | null |
 | `handed_to_courier` (BTS) | shown | "Kuryerga topshirildi" · `label.timeline.handed_to_courier` | "BTS" · `label.timeline.sub_bts` |
 | `delivered` (BTS) | shown | "Yetkazildi" · `label.timeline.delivered` | "BTS" · `label.timeline.sub_bts` |
+| `handed_to_courier`, `delivered` (Yandex Delivery: source `yandex`, or a Yandex shipment) | shown | as the BTS rows | "Yandex Dostavka" · `label.timeline.sub_yandex` |
+| `delivery_failed` (Yandex Delivery) | shown | "Yetkazib bo‘lmadi" · `label.timeline.delivery_failed` | "Buyurtma do‘konga qaytariladi, biz siz bilan bog‘lanamiz" · `label.timeline.sub_delivery_failed` |
+| `shipment_returned` (Yandex Delivery) | shown | "Buyurtma do‘konga qaytdi" · `label.timeline.shipment_returned` | null |
 | `cancelled` (+ folded `refund_requested` with the same `refund_id`) | shown | "Buyurtma bekor qilindi" · `label.timeline.cancelled` | by reason: `admin` "Do‘kon tomonidan bekor qilindi" · `label.timeline.sub_cancelled_admin`; `customer_request` "Siz bekor qildingiz" · `label.timeline.sub_cancelled_customer`; + (refund ? " · to‘lov qaytariladi" · `label.timeline.sub_refund_follows`). The staff `note` is never shown. |
 | `reservation_expired` | shown as `cancelled` | "Buyurtma bekor qilindi" · `label.timeline.cancelled` | "To‘lov muddati tugadi" · `label.timeline.sub_expired` |
 | `refund_requested` (not folded: late capture, staff retry) | shown as `refund_in_progress` | "To‘lov qaytarilmoqda" · `label.timeline.refund_in_progress` | "{amount} so‘m" · `label.timeline.sub_amount` |
@@ -2589,6 +2746,7 @@ A top-level code renders `error.<code>` and a field code `field.<code>`, unless 
 | `OUT_OF_STOCK` | cart add / patch (one product) · checkout (lines) | `error.out_of_stock_one` · `error.OUT_OF_STOCK` |
 | `invalid_transition` | any customer view (a reused service raising `InvalidTransition`) | `error.invalid_transition` |
 | `delivery_unavailable` | BTS refuses the route · delivery not offered (§2.6) | `error.delivery_unavailable` · `error.delivery_not_offered` |
+| `price_changed` | `expected_total` differs · the Yandex delivery fee changed on re-quote (§2.7.1) | `error.price_changed` · `error.delivery_price_changed` |
 | field `otp_invalid` (on `code`) | `auth/verify-code/` | `field.otp_invalid` |
 | field `invalid` | `phone` (every auth body) · `code` (verify) · booking grid | `field.phone_invalid` · `field.otp_format` · `field.booking_grid` |
 | field `does_not_exist` / `min_length` / `max_value` / `in_past` / `out_of_range` / `required` | as named in the endpoint tables (e.g. `field.address_not_found`, `field.name_min`, `field.cashback_max`, `field.booking_too_soon`, `field.booking_horizon`, `field.address_required`) | the key in the table; elsewhere the generic `field.<code>` |
@@ -2648,6 +2806,8 @@ code a customer view can raise to an existing key.
 | `error.cart_empty` | Savat bo‘sh. | Корзина пуста. | Your cart is empty. |
 | `error.delivery_unavailable` | Bu hududga yetkazib berish mavjud emas. | Доставка в этот регион недоступна. | Delivery to this area is not available. |
 | `error.delivery_not_offered` | Yetkazib berish hozircha mavjud emas. Olib ketishni tanlang. | Доставка пока недоступна. Выберите самовывоз. | Delivery is not available right now. Please choose pickup. |
+| `error.quote_expired` | Yetkazish narxi eskirdi. Narxni qayta hisoblang. | Стоимость доставки устарела. Пересчитайте её. | The delivery price has expired. Please recalculate it. |
+| `error.delivery_price_changed` | Yetkazish narxi o‘zgardi. Yangi narxni tekshiring. | Стоимость доставки изменилась. Проверьте новую цену. | The delivery price has changed. Please review the new price. |
 | `error.online_sales_unavailable` | Onlayn buyurtma vaqtincha mavjud emas. Mahsulotlarni do‘konimizdan xarid qilishingiz mumkin. | Онлайн-заказ временно недоступен. Товары можно купить в нашем магазине. | Online ordering is temporarily unavailable. You can buy the products in our store. |
 | `error.open_order_exists` | Sizda to‘lanmagan buyurtma bor (№{order_id}). Avval uni to‘lang yoki bekor qiling. | У вас есть неоплаченный заказ (№{order_id}). Оплатите или отмените его. | You have an unpaid order (№{order_id}). Please pay or cancel it first. |
 | `error.price_changed` | Narxlar yangilandi. Buyurtmani qayta tekshiring. | Цены обновились. Проверьте заказ ещё раз. | Prices have changed. Please review your order. |
@@ -2763,6 +2923,15 @@ code a customer view can raise to an existing key.
 | `label.timeline.sub_amount` | {amount} so‘m | {amount} сум | {amount} so'm |
 | `label.timeline.refund_succeeded` | To‘lov qaytarildi | Деньги возвращены | Payment refunded |
 | `label.timeline.sub_amount_provider` | {amount} so‘m · {provider} | {amount} сум · {provider} | {amount} so'm · {provider} |
+| `label.timeline.sub_yandex` (Yandex Delivery) | Yandex Dostavka | Яндекс Доставка | Yandex Delivery |
+| `label.timeline.delivery_failed` | Yetkazib bo‘lmadi | Не удалось доставить | Delivery failed |
+| `label.timeline.sub_delivery_failed` | Buyurtma do‘konga qaytariladi, biz siz bilan bog‘lanamiz | Заказ вернётся в магазин, мы с вами свяжемся | The order goes back to the shop; we will contact you |
+| `label.timeline.shipment_returned` | Buyurtma do‘konga qaytdi | Заказ вернулся в магазин | The order is back at the shop |
+| `label.delivery_option.yandex_standard` / `.yandex_express` / `.bts` | Yandex Standart / Yandex Ekspress / BTS pochta | Яндекс Стандарт / Яндекс Экспресс / Почта BTS | Yandex Standard / Yandex Express / BTS post |
+| `label.delivery_method.standard` / `.express` | Standart / Ekspress | Стандарт / Экспресс | Standard / Express |
+| `label.shipment_stage.awaiting_dispatch` / `.courier_requested` / `.courier_assigned` / `.courier_arrived` | Jo‘natishga tayyorlanmoqda / Kuryer qidirilmoqda / Kuryer tayinlandi / Kuryer do‘konga keldi | Готовится к отправке / Ищем курьера / Курьер назначен / Курьер прибыл в магазин | Being prepared / Looking for a courier / Courier assigned / The courier is at the shop |
+| `label.shipment_stage.in_transit` / `.at_destination` / `.delivered` | Yo‘lda / Kuryer manzilda / Yetkazildi | В пути / Курьер на месте / Доставлен | On the way / The courier has arrived / Delivered |
+| `label.shipment_stage.returning` / `.returned` / `.cancelled` / `.failed` | Do‘konga qaytarilmoqda / Do‘konga qaytarildi / Yetkazish bekor qilindi / Kuryer qayta chaqiriladi | Возвращается в магазин / Возвращён в магазин / Доставка отменена / Курьер будет вызван повторно | Returning to the shop / Returned to the shop / Delivery cancelled / A courier will be called again |
 | `label.progress.placed` / `.paid` / `.with_courier` / `.delivered` / `.picked_up` / `.cancelled` | Buyurtma berildi / To‘lov qabul qilindi / Kuryerda / Yetkazildi / Olib ketildi / Bekor qilindi | Оформлен / Оплачен / У курьера / Доставлен / Получен / Отменён | Placed / Paid / With courier / Delivered / Picked up / Cancelled |
 | `label.ledger.credit` / `.debit` | Cashback hisoblandi / Cashback ishlatildi | Начислен кешбэк / Списан кешбэк | Cashback earned / Cashback used |
 | `label.ledger.reversal_back` / `.reversal_taken` | Cashback qaytarildi / Cashback bekor qilindi | Кешбэк возвращён / Кешбэк отменён | Cashback returned / Cashback reversed |
@@ -2956,6 +3125,14 @@ code a customer view can raise to an existing key.
     holds, orders and the QR stay with the account they belong to. An e-mail address is unique case-insensitively and
     scrubbed at deletion, at a reactivation backstop and by the dormant reset (the previous holder of a number keeps
     no way in). No address ever reaches a log line or an outbox payload.
+20. **Yandex Delivery.** Checkout never takes a client price: the fee comes from a stored quote the server computed
+    (`delivery_quote_id`), checked again under the customer lock. The status callback is unauthenticated by Yandex's
+    design: it carries only our HMAC order reference (domain-separated from the payment reference) and triggers a
+    server-side re-read, never a state change from its content (§2.13.4). What goes to Yandex (the address text, pin,
+    recipient name and phone of the order; the saved address's text and pin for a price check) is listed in
+    `docs/integrations/yandex-delivery.md` §14 and `docs/ops/compliance.md`; the courier's phone is never read, and
+    the courier's name, vehicle and tracking link are shown only while a claim is open and blanked 7 days after it
+    ended.
 
 ---
 

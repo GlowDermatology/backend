@@ -12,6 +12,7 @@ from django.urls import reverse
 from glowderma.accounts.tests.ops_helpers import ops_login
 from glowderma.core.admin import (
     ReadOnlyAdmin,
+    ServiceBackedAdmin,
     column_field,
     customer_column,
     masked_email_column,
@@ -54,8 +55,8 @@ def test_every_registration_is_read_only_or_service_backed() -> None:
     request = RequestFactory().get("/django-admin/")
     request.user = get_user_model().objects.create_user("root@x.uz", "Saffron!Harbor-Long72", is_staff=True)
     for model, model_admin in admin.site._registry.items():
-        if model._meta.app_label == "professionals":
-            continue  # ServiceBackedAdmin: writes go through professionals.services
+        if model._meta.app_label == "professionals" or isinstance(model_admin, ServiceBackedAdmin):
+            continue  # ServiceBackedAdmin: writes go through the owning module's services
         assert isinstance(model_admin, ReadOnlyAdmin), model
         assert not model_admin.has_add_permission(request), model
         assert not model_admin.has_change_permission(request), model

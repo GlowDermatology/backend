@@ -10,7 +10,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from glowderma.accounts.api.customer_base import PublicAPIView
-from glowderma.core import enums
+from glowderma.core import enums, integration_modes
 from glowderma.core.api.schema import ACCEPT_LANGUAGE_HEADER, OPTIONAL_DEVICE_HEADERS, PUBLIC_CUSTOMER_ERRORS
 from glowderma.site_config import selectors
 
@@ -18,6 +18,22 @@ from glowderma.site_config import selectors
 class PlatformValuesSerializer(serializers.Serializer[dict[str, Any]]):
     ios = serializers.CharField()
     android = serializers.CharField()
+
+
+class PublicDeliverySerializer(serializers.Serializer[dict[str, Any]]):
+    providers = serializers.ListField(
+        child=serializers.ChoiceField(choices=enums.DeliveryProvider.values),
+        help_text="Home-delivery carriers that can take an order now, in preference order.",
+    )
+    default_provider = serializers.ChoiceField(choices=enums.DeliveryProvider.values, allow_null=True)
+
+
+def public_delivery() -> dict[str, Any]:
+    """``delivery`` of ``settings/public/`` (plan §3.4): from ``core.integration_modes`` only (``site_config``
+    sits below ``delivery``). Whether a Yandex method is switched on, the warehouse and the pilot list are
+    decided per customer by ``delivery/calculate/``."""
+    providers = integration_modes.delivery_providers()
+    return {"providers": providers, "default_provider": providers[0] if providers else None}
 
 
 class PublicSettingsSerializer(serializers.Serializer[dict[str, Any]]):
@@ -43,6 +59,7 @@ class PublicSettingsSerializer(serializers.Serializer[dict[str, Any]]):
     )
     min_app_version = PlatformValuesSerializer()
     store_urls = PlatformValuesSerializer()
+    delivery = PublicDeliverySerializer()
 
 
 class PublicSettingsView(PublicAPIView):
@@ -54,4 +71,4 @@ class PublicSettingsView(PublicAPIView):
         responses={200: PublicSettingsSerializer, **PUBLIC_CUSTOMER_ERRORS},
     )
     def get(self, request: Request) -> Response:
-        return Response(selectors.public_settings(self.language))
+        return Response({**selectors.public_settings(self.language), "delivery": public_delivery()})

@@ -31,6 +31,20 @@ app.conf.beat_schedule = {
     "commerce-poll-bts": {"task": "commerce.poll_bts", "schedule": 600.0},
     # M3: BTS's region list is refreshed before it goes stale (24 h), so no customer request pays for it.
     "delivery-refresh-bts-regions": {"task": "delivery.refresh_bts_regions", "schedule": 6 * 3600.0},
+    # Yandex Delivery (plan §3.11): unused checkout quotes are deleted a day after they expired.
+    "delivery-purge-quotes": {"task": "delivery.purge_quotes", "schedule": crontab(hour=3, minute=35)},
+    # Yandex Delivery (plan §3.7): claims/bulk_info over every unsettled claim (the reliable status path;
+    # single flight, a no-op while the fake runs under the production settings).
+    "commerce-poll-yandex": {"task": "commerce.poll_yandex", "schedule": 60.0},
+    # Yandex Delivery (plan §3.9): self-closing delivery issues (preparation deadline in working minutes,
+    # courier search > 30 min, returns while the warehouse is closed, half-done cancels) and reminders of
+    # urgent issues untouched for 30 minutes.
+    "commerce-review-delivery-issues": {"task": "commerce.review_delivery_issues", "schedule": 300.0},
+    # Yandex Delivery (plan §3.1): courier name / vehicle / tracking link blanked 7 days after a claim ended.
+    "delivery-blank-courier-details": {
+        "task": "delivery.blank_courier_details",
+        "schedule": crontab(hour=3, minute=37),
+    },
     # M3 retention (docs/ops/compliance.md): done outbox rows (never dead ones) after OUTBOX_RETENTION_DAYS,
     # raw provider callbacks (WebhookInbox) after WEBHOOK_INBOX_RETENTION_DAYS; batched, at most 5 minutes a
     # night each.

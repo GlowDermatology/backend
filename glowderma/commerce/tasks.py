@@ -59,7 +59,7 @@ from django.db import connection, transaction
 from django.utils.translation import gettext, gettext_lazy
 
 from glowderma.catalog import topics as catalog_topics
-from glowderma.commerce import selectors, services, topics
+from glowderma.commerce import delivery_review, selectors, services, topics, yandex_flow
 from glowderma.commerce.billz_sales import PurchaseJournal, get_sale_port, sale_request
 from glowderma.commerce.models import Order, StockReservation
 from glowderma.core import alerts, audit, enums, integration_modes, outbox, timeutils
@@ -155,8 +155,8 @@ class _CreatePlan:
 
 def _plan_create(payload: dict[str, Any]) -> _CreatePlan | None:
     """Under the Order lock: skip unless the order is ``processing`` (or ``cancelled``: orphan lookup) and the
-    shipment is not created yet, and skip a request BTS already answered (``request_no``) or one superseded by
-    a newer request."""
+    BTS shipment is not created yet (a Yandex shipment never), and skip a request BTS already answered
+    (``request_no``) or one superseded by a newer request."""
     order_id = int(payload["order_id"])
     manual, actor_id = _shipment_source(payload)
     request_no = _request_no(payload)
@@ -165,7 +165,9 @@ def _plan_create(payload: dict[str, Any]) -> _CreatePlan | None:
         if order.fulfilment != enums.FulfilmentMethod.DELIVERY:
             return None
         shipment = delivery_selectors.shipment_info(order_id)
-        if shipment is None or shipment.state in (Shipment.State.CREATED, Shipment.State.CANCELLED):
+        if shipment is None or not shipment.is_bts:
+            return None
+        if shipment.state in (Shipment.State.CREATED, Shipment.State.CANCELLED):
             return None
         if request_no is not None and (
             request_no < shipment.create_requests
@@ -219,7 +221,7 @@ def _record_parcel(plan: _CreatePlan, parcel: Parcel) -> None:
     with transaction.atomic():
         order = services.lock_order(order_id)
         shipment = delivery_selectors.shipment_info(order_id)
-        if shipment is None:
+        if shipment is None or not shipment.is_bts:
             return
         if shipment.state in (Shipment.State.CREATED, Shipment.State.CANCELLED):
             if shipment.tracking_number and shipment.tracking_number != parcel.tracking_number:
@@ -336,9 +338,9 @@ def on_bts_create_dead(message: OutboxMessage) -> None:
         order = services.lock_order(order_id)
         if order.status != enums.OrderStatus.PROCESSING:
             return
-        shipment = Shipment.objects.filter(order_id=order_id).first()
+        shipment = Shipment.objects.bts().filter(order_id=order_id).first()
         if shipment is None or shipment.create_message_id not in (None, message.pk):
-            return  # a newer create request owns the shipment now
+            return  # a Yandex shipment, or a newer create request owns the shipment now
         number = delivery_services.mark_failed(
             order_id,
             error_code=topics.DEAD_LETTER_ERROR_CODE,
@@ -914,6 +916,11 @@ def expire_reservations() -> list[int]:
 
 
 __all__ = [
+    "review_delivery_issues",
+    "dispatch_courier",
+    "on_yandex_dispatch_dead",
+    "poll_yandex",
+    "sync_yandex_claim",
     "create_shipment",
     "expire_reservations",
     "handle_billz_push_sale",
@@ -1126,3 +1133,46 @@ def _report_open_money_at_worker_start(**_kwargs: Any) -> None:
         report_fake_provider_open_money()
     except Exception:  # the check must never keep a worker from starting
         logger.exception("providers.fake_with_open_money check failed")
+
+
+# --- Yandex Delivery (plan §3.6 dispatch, §3.7 status sync) ----------------------------------------------
+
+
+@outbox.register(topics.YANDEX_DISPATCH)
+def dispatch_courier(message: OutboxMessage) -> None:
+    """``yandex.dispatch``: create the claim (same ``request_id`` on every retry), wait for the estimate,
+    apply the pricing policy, accept once (``commerce.yandex_flow.dispatch``; module doc there)."""
+    yandex_flow.dispatch(_payload(message))
+
+
+def on_yandex_dispatch_dead(message: OutboxMessage) -> None:
+    """A dead dispatch (``commerce.yandex_flow.on_dispatch_dead``): a claim whose accept was sent stays open
+    and polled with an urgent ``dispatch_unknown``; any other claim summons nobody and is closed with
+    ``dispatch_failed`` ``dead_letter`` (staff may dispatch again)."""
+    yandex_flow.on_dispatch_dead(_payload(message))
+
+
+@outbox.register(topics.YANDEX_SYNC_CLAIM)
+def sync_yandex_claim(message: OutboxMessage) -> None:
+    """``yandex.sync_claim``: a callback's hint → ``claims/info`` → ``services.apply_yandex_claim``."""
+    yandex_flow.sync_claim(_payload(message), received_at=message.created_at)
+
+
+outbox.on_dead(topics.YANDEX_DISPATCH)(on_yandex_dispatch_dead)
+outbox.register_deferral_window(topics.YANDEX_DISPATCH, lambda: yandex_flow.DISPATCH_DEFERRAL_WINDOW)
+
+
+@shared_task(name="commerce.poll_yandex")  # type: ignore[untyped-decorator]
+def poll_yandex() -> list[int]:
+    """Yandex status polling (beat ``commerce-poll-yandex`` every 60 s, ``claims/bulk_info``; a no-op while
+    the fake runs under the production settings): the order ids whose claim snapshot was applied."""
+    return yandex_flow.run_poll().applied
+
+
+@shared_task(name="commerce.review_delivery_issues")  # type: ignore[untyped-decorator]
+def review_delivery_issues() -> dict[str, int]:
+    """The delivery exception queue's beat (``commerce-review-delivery-issues`` every 5 minutes; plan §3.9):
+    preparation deadlines, slow courier searches, returns while the warehouse is closed, cancels that
+    stopped half-way, reminders of urgent issues (``commerce.delivery_review``). Counts only."""
+    result = delivery_review.review_delivery_issues()
+    return {"opened": len(result.opened), "resolved": len(result.resolved), "reminded": len(result.reminded)}

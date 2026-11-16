@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Version | 1.0.2 (2026-10-26), M1 admin vertical; M2 cross-references from `docs/api/customer-api-v1.md` in §2.1 (staff OAuth under fake OAuth in production), §2.2 (manual Click refunds on cancel), §2.3 (Billz import and product create refused while Billz is fake in production), §2.10 (revenue, `attention.bts_polling_failing`), §2.11 (`integrations.providers`), §2.14 (`billz_fake_mode`), §2.15 (`providers`), §3.1 (`refresh_reused`), §3.2, §4 (`refund_requested.manual_reason`), §5.1/§5.7 (refund lines by provider, BTS polling attention), §6 (refund pending display, live-to-fake switch) and §7 items 3 and 18 (refund state line, refund resolve with a fresh Click status check). Gap closure, settings package (2026-10-27): §1.7, §2.0, §2.10 (`attention.cashback_policy_missing`), §2.11 (contacts, legal texts, `POST settings/terms/publish/`), §2.15 (`cashback_policy_missing`), §3.2 (`settings.terms_published`, the bootstrap policy), §5.7 and §7 item 19. Gap closure, staff package (2026-10-27): §1.6, §1.7 (required keys of the staff writes, stored credentials), §2.0, §2.1 (`Me.is_manager`), §2.6 (`devices`, `device.platform`, `online_orders.all_count`), §2.16 (staff management), §3.2 (`staff.*`), §5.3, §5.8, §6 and §7 items 20–21. Gap closure, catalog package (2026-10-26): §1.4 (folded name search, link URLs), §1.8 (export columns), §2.2–§2.5 (category image, banner `link.url`), §2.6/§2.16 (folded search), §2.8 (notification `link.url`), §2.14 (delta interval), §3 and §7 item 22. Gap closure, specialists and services package (2026-10-27): §1.5, §1.8, §2.0, §2.9 (day board `specialists[].is_active`, booking locks), §2.17 (specialists, services, schedules, clinic location), §3.1 (`ServiceCategory`, `DirectoryOrdering`), §3.2 (`professional.*`, `schedule.*`, `service.*`, `location.*`), §5.6, §5.8 and §6. Settings moved to the ops console (2026-11-07): `settings/` and `settings/terms/publish/` retired; §1.6, §1.7, §2.0, §2.11, §3.1, §3.2 and §7 item 19 |
+| Version | 1.0.2 (2026-10-26), M1 admin vertical; M2 cross-references from `docs/api/customer-api-v1.md` in §2.1 (staff OAuth under fake OAuth in production), §2.2 (manual Click refunds on cancel), §2.3 (Billz import and product create refused while Billz is fake in production), §2.10 (revenue, `attention.bts_polling_failing`), §2.11 (`integrations.providers`), §2.14 (`billz_fake_mode`), §2.15 (`providers`), §3.1 (`refresh_reused`), §3.2, §4 (`refund_requested.manual_reason`), §5.1/§5.7 (refund lines by provider, BTS polling attention), §6 (refund pending display, live-to-fake switch) and §7 items 3 and 18 (refund state line, refund resolve with a fresh Click status check). Gap closure, settings package (2026-10-27): §1.7, §2.0, §2.10 (`attention.cashback_policy_missing`), §2.11 (contacts, legal texts, `POST settings/terms/publish/`), §2.15 (`cashback_policy_missing`), §3.2 (`settings.terms_published`, the bootstrap policy), §5.7 and §7 item 19. Gap closure, staff package (2026-10-27): §1.6, §1.7 (required keys of the staff writes, stored credentials), §2.0, §2.1 (`Me.is_manager`), §2.6 (`devices`, `device.platform`, `online_orders.all_count`), §2.16 (staff management), §3.2 (`staff.*`), §5.3, §5.8, §6 and §7 items 20–21. Gap closure, catalog package (2026-10-26): §1.4 (folded name search, link URLs), §1.8 (export columns), §2.2–§2.5 (category image, banner `link.url`), §2.6/§2.16 (folded search), §2.8 (notification `link.url`), §2.14 (delta interval), §3 and §7 item 22. Gap closure, specialists and services package (2026-10-27): §1.5, §1.8, §2.0, §2.9 (day board `specialists[].is_active`, booking locks), §2.17 (specialists, services, schedules, clinic location), §3.1 (`ServiceCategory`, `DirectoryOrdering`), §3.2 (`professional.*`, `schedule.*`, `service.*`, `location.*`), §5.6, §5.8 and §6. Settings moved to the ops console (2026-11-07): `settings/` and `settings/terms/publish/` retired; §1.6, §1.7, §2.0, §2.11, §3.1, §3.2 and §7 item 19. Yandex Delivery (2026-11-15, `feat/yandex-delivery`; `docs/integrations/yandex-delivery.md`): §1.5, §1.6, §1.7, §2.0, §2.2 (filters `provider` / `stage` / `attention`, `delivery`, `available_actions.dispatch` / `confirm_return`, the carrier-aware cancel), §2.10 (`fulfilment`, `attention.yandex_failing`, `nav-counts.delivery_issues_open`), §2.18 (dispatch, confirm return, the delivery exception queue, dispatch suspension, the dev courier route), §3.1, §3.2 and §4 (`delivery_failed`, `shipment_returned`, source `yandex`) |
 | Implemented by | Django 6.1 / DRF 3.18 backend (Codex) and the Next.js admin data layer (`frontend/src/data/api/*`, Claude) |
 | Source of truth | `docs/specs/2026-10-24-backend-foundation-design.md`. Where this file and the spec disagree, the spec wins and this file is fixed. |
 | Enforced by | drf-spectacular schema (`openapi/schema.yaml`, `--validate --fail-on-warn`), backend contract tests, frontend mapper tests (order №10248, Malika's ledger) |
@@ -81,7 +81,7 @@ Fields owned by slices that have not landed yet return `0`, `null` or `[]`, neve
 | `orders/` | 6, 10, 25, 50 | 10 |
 | `products/` | 8 | 8 |
 | `staff/` | 20, 50, 100 | 50 |
-| Every other paginated list (`customers/`, `categories/`, `banners/`, `notifications/`, `segments/`, `segments/{id}/members/`, `payments/`, `audit-log/`, `specialists/`, `specialists/{id}/overrides/`, `specialists/{id}/blocks/`, `services/`) | 20, 50 | 20 |
+| Every other paginated list (`customers/`, `categories/`, `banners/`, `notifications/`, `segments/`, `segments/{id}/members/`, `payments/`, `audit-log/`, `specialists/`, `specialists/{id}/overrides/`, `specialists/{id}/blocks/`, `services/`, `delivery/issues/`) | 20, 50 | 20 |
 
 Collections embedded in a resource (customer ledger and purchases, order items, history, refunds, cashback) are never paginated.
 
@@ -112,7 +112,9 @@ Collections embedded in a resource (customer ledger and purchases, order items, 
 | 405 | `method_not_allowed` | |
 | 409 | `invalid_transition` | A state machine refuses (order transition, appointment action, retry-shipment precondition) |
 | 409 | `click_not_reversed` | M3: `payments/{id}/refunds/{refund_id}/resolve/` of a failed Click refund without `manual_payout` while Click still shows the payment paid (§7 item 18); the UI then offers "Qo‘lda to‘landi" |
-| 409 | `not_cancellable` | Order cancel refused (§2.2) |
+| 409 | `not_cancellable` | Order cancel refused (§2.2; a Yandex Delivery order also when Yandex refuses, the parcel is delivered or out of sight, §2.18) |
+| 409 | `return_requested` | Yandex Delivery: the cancel of a picked-up order asked Yandex to bring the parcel back (or the request's answer was lost) and Yandex has not shown the return yet; the order is unchanged, retry later — a retry only re-reads, the return is never requested twice (§2.18) |
+| 409 | `coordinates_required` · `method_disabled` · `too_heavy` · `not_configured` · `suspended` · `closed` · `after_cutoff` · `returns_unavailable` | `orders/{id}/dispatch/` refusals: no map pin, the chosen method is off, the parcel is too heavy for the class, the warehouse calendar refuses a courier now (§2.18) |
 | 409 | `conflict` | Other state conflicts (category has products, BTS message in flight, last image of an active product, a manager acting on their own account or removing the last active manager (§2.16), …) |
 | 409 | `request_in_progress` | The same `Idempotency-Key` is still executing; `Retry-After: 1` |
 | 413 | `payload_too_large` | Body > 6 MiB |
@@ -120,7 +122,7 @@ Collections embedded in a resource (customer ledger and purchases, order items, 
 | 422 | `idempotency_key_reused` | Same key, different request fingerprint |
 | 429 | `throttled` | `Retry-After` in seconds |
 | 500 | `server_error` | Unexpected; quote `request_id` |
-| 503 | `provider_unavailable` | A synchronous provider call failed transiently (BTS cancel; the Billz lookup of `POST products/` and of a `PATCH products/{id}/` that changes `billz_id`, §2.3). Safe to retry with the same key. |
+| 503 | `provider_unavailable` | A synchronous provider call failed transiently (BTS cancel; the Yandex carrier cancel of `orders/{id}/cancel/` when nothing can have reached Yandex — a call that may have reached it answers 409 instead, §2.18; the Billz lookup of `POST products/` and of a `PATCH products/{id}/` that changes `billz_id`, §2.3). Safe to retry with the same key. |
 
 Default top-level messages: `not_authenticated` "Avtorizatsiya talab qilinadi." · `SESSION_EXPIRED` "Sessiya tugadi. Qayta kiring." · `SESSION_REPLACED` "Boshqa qurilmadan kirildi." · `invalid_credentials` "Login yoki parol noto‘g‘ri." · `permission_denied` "Ruxsat yo‘q." · `not_found` "Topilmadi." · `request_in_progress` "So‘rov bajarilmoqda. Birozdan so‘ng qayta urinib ko‘ring." · `idempotency_key_reused` "Bu kalit boshqa so‘rov uchun ishlatilgan." · `idempotency_key_required` "Idempotency-Key sarlavhasi kerak." · `throttled` "Juda ko‘p urinish. {n} soniyadan so‘ng qayta urinib ko‘ring." · `payload_too_large` "Fayl juda katta." · `provider_unavailable` "Tashqi xizmat javob bermadi. Qayta urinib ko‘ring." · `server_error` "Kutilmagan xato."
 
@@ -150,7 +152,8 @@ Default top-level messages: `not_authenticated` "Avtorizatsiya talab qilinadi." 
   - `cashback/policy-versions/`;
   - `POST notifications/`;
   - `appointments/{id}/{confirm|reject|attend}/`;
-  - `POST staff/`, `staff/{id}/deactivate/`, `staff/{id}/reset-password/` (§2.16).
+  - `POST staff/`, `staff/{id}/deactivate/`, `staff/{id}/reset-password/` (§2.16);
+  - Yandex Delivery (§2.18): `orders/{id}/dispatch/`, `orders/{id}/confirm-return/`, `orders/{id}/issues/`, `delivery/issues/{id}/resolve/`, `POST delivery/suspension/`.
 - **Optional:** honoured when sent on any other *authenticated* POST, PUT, PATCH or DELETE. `auth/*` endpoints ignore the header: their responses carry credentials or end sessions, so they are never stored.
 - **Scope:** (audience `staff`, actor staff id, method, resolved path including ids, key). The same key on two different orders is two separate records.
 - **Stored credentials:** a response field that carries a credential — `temporary_password` of `POST staff/` and `staff/{id}/reset-password/` (§2.16) — is stored **sealed** (AES-256-GCM under `SECRETBOX_KEY`, bound to the key's scope and the field) and opened for the replay, so the replay shows the same password and the database never holds it in clear. A replay after a `SECRETBOX_KEY` rotation within the key's lifetime carries `null` there (reset the password again). A replay returns the password **as it was issued**: if a later reset replaced it, or the person already changed it, the replayed one no longer signs in (reset again).
@@ -220,6 +223,12 @@ The FE creates one key per form/dialog instance (`crypto.randomUUID()`), reuses 
 | GET | `orders/status-counts/`, `orders/{id}/` | | 200 |
 | POST | `orders/{id}/cancel/`, `orders/{id}/transition/` | I | 200 |
 | POST | `orders/{id}/retry-shipment/` | I | 202 |
+| POST | `orders/{id}/dispatch/` (Yandex Delivery, §2.18) | I | 202 |
+| POST | `orders/{id}/confirm-return/` (§2.18) | I | 200 |
+| POST | `orders/{id}/issues/` (§2.18) | I | 201 / 200 |
+| GET | `delivery/issues/` (§2.18) | P | 200 |
+| POST | `delivery/issues/{id}/resolve/` (§2.18) | I | 200 |
+| GET / POST | `delivery/suspension/` (§2.18) | – / I | 200 |
 | GET | `products/` | P E | 200 |
 | GET | `products/stats/`, `products/{id}/` | | 200 |
 | POST | `products/` | | 201 |
@@ -362,6 +371,9 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 | `period` | `today`, `week`, `month`, `all` | `all` | `today` = current Tashkent day; `week` = rolling `(now−7×24h, now]`; `month` = Tashkent calendar month to date |
 | `date_from`, `date_to` | date | – | Inclusive Tashkent days on `created_at`, ANDed with `period`; `date_from > date_to` → 400, field `date_from`, code `invalid` |
 | `customer` | int | – | Customer id |
+| `provider` | `bts`, `yandex` | – | The shipment's carrier (Yandex Delivery, §2.18); pickup orders never match |
+| `stage` | ShipmentStage | – | A Yandex shipment's stage (§2.18) |
+| `attention` | `open`, `urgent` | – | The order has an open delivery issue / an open urgent one (§2.18) |
 | `ordering` | `-created_at`, `created_at` | `-created_at` | Ties broken by `id` in the same direction |
 | `page`, `page_size`, `export` | §1.5, §1.8 | | |
 
@@ -376,7 +388,8 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
  "fulfilment": "delivery",
  "shipment": {"state": "created", "tracking_number": "48213907", "tariff": 25000,
               "updated_at": "2026-10-23T16:40:00+05:00", "via": "webhook"},
- "cancellation": null}                    // | {"reason": CancellationReason, "note": str | null}
+ "cancellation": null,                    // | {"reason": CancellationReason, "note": str | null}
+ "delivery": {"provider": "bts", "method": null, /* … every Yandex key null … */ "open_issues": []}}   // OrderDelivery | null (pickup), §2.18
 ```
 
 | `shipment.state` | Other keys |
@@ -387,6 +400,8 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 | `created` | `tracking_number: str`, `tariff: int`, `updated_at: datetime`, `via: "webhook"\|"polling"` |
 
 `pending` is true while a BTS create message for the order is queued or in flight.
+
+A Yandex Delivery shipment (§2.18) keeps this union BTS-shaped: `not_created` until a courier claim is accepted, `failed` when a dispatch failed before any acceptance, then `created` with `tracking_number: ""` (the claim id is never a tracking number) and `tariff` = the accepted offer; its progress is `delivery.stage`.
 
 **`GET orders/status-counts/`**: the same params as `orders/` except `status`, `ordering`, `page`, `page_size` and `export`.
 ```jsonc
@@ -420,7 +435,8 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
     "base": 568000, "percent": "1.00", "reverses_id": null}],
  "history": [ /* OrderEvent[], newest first (at desc, id desc); see §4 */ ],
  "available_actions": {"transitions": ["delivered"],   // handed_to_courier (delivery) → ["delivered"]
-                       "cancel": true, "retry_shipment": false}}
+                       "cancel": true, "retry_shipment": false,
+                       "dispatch": false, "confirm_return": false}}   // Yandex Delivery, §2.18
 ```
 ```jsonc
 // Refund
@@ -435,7 +451,10 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 - `available_actions`:
   - `transitions` = the manual transitions (`processing` → `handed_to_courier` for delivery, `delivered` for pickup; `handed_to_courier` → `delivered`).
   - `cancel` = status is `awaiting_payment`, `processing` or `handed_to_courier`.
-  - `retry_shipment` = delivery ∧ `processing` ∧ shipment `failed` ∧ ¬`pending`.
+  - `retry_shipment` = delivery ∧ `processing` ∧ BTS shipment `failed` ∧ ¬`pending` (never for a Yandex shipment).
+  - `dispatch` (Yandex Delivery) = `POST orders/{id}/dispatch/` would be accepted now (§2.18); false for BTS and pickup.
+  - `confirm_return` (Yandex Delivery) = the parcel is `returning` / `returned` and the return of the claim that carried it is not confirmed yet (§2.18).
+  - A Yandex order has **no manual transition**, except `delivered` while a `parcel_unaccounted` issue is open (§2.18).
 
 **`POST orders/{id}/cancel/`** (I). Body `{"reason": str}`, trimmed, 3..500.
 
@@ -445,6 +464,7 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 | `processing` | Cancelled. If paid, a Refund is created. Reversals are posted. If a BTS shipment exists, BTS cancel runs first (synchronously) and must succeed. |
 | `handed_to_courier` | Allowed only if the synchronous BTS cancel succeeds (BTS status 100); otherwise 409 `not_cancellable` |
 | `delivered`, `cancelled` | 409 `not_cancellable` |
+| any status, Yandex Delivery shipment | carrier-aware: Yandex is asked first, outside the transaction (§2.18 "Cancel of a Yandex order") |
 
 - **Effects** (one transaction; lock order Order → Payment → LoyaltyAccount):
   - `status=cancelled`; `cancellation={"reason":"admin","note":reason}`.
@@ -455,8 +475,9 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 - **Response:** 200 `Order`.
 - **Errors:**
   - 400 `reason` (`min_length` "Kamida 3 ta belgi kiriting.", `max_length` "500 belgidan oshmasin."), top-level message "Sababni kiriting.".
-  - 409 `not_cancellable` "Bu buyurtmani bekor qilib bo‘lmaydi." (BTS refusal: "BTS buyurtmani bekor qilmadi: posilka kuryerda.").
-  - 503 `provider_unavailable`.
+  - 409 `not_cancellable` "Bu buyurtmani bekor qilib bo‘lmaydi." (BTS refusal: "BTS buyurtmani bekor qilmadi: posilka kuryerda."; the Yandex messages are in §2.18).
+  - Yandex Delivery only: 409 `return_requested`, 409 `conflict` (another Yandex operation of the order is running, Yandex has not shown the cancel yet — its answer lost included —, or the order stayed busy right after Yandex answered) (§2.18).
+  - 503 `provider_unavailable` (a Yandex order: only when nothing can have reached Yandex, §2.18).
 
 **`POST orders/{id}/transition/`** (I). Body `{"status": OrderStatus}`.
 - The target must be in `available_actions.transitions`, else 409 `invalid_transition` "Bu holatga o‘tib bo‘lmaydi.". A non-OrderStatus value → 400 `invalid_choice`.
@@ -464,13 +485,13 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 - 200 `Order`.
 
 **`POST orders/{id}/retry-shipment/`** (I). Empty body.
-- Precondition: delivery ∧ `processing` ∧ shipment `failed`. Otherwise 409 `invalid_transition` "BTS ga qayta yuborib bo‘lmaydi.".
+- Precondition: delivery ∧ `processing` ∧ BTS shipment `failed`. Otherwise (a Yandex shipment too) 409 `invalid_transition` "BTS ga qayta yuborib bo‘lmaydi.".
 - While `pending` → 409 `conflict` "BTS so‘rovi allaqachon yuborilmoqda.".
 - Effect: an outbox BTS create; the handler looks the order up by `clientId` before creating. Audit `order.shipment_retry_requested`.
 - 202 `Order` with `shipment.pending=true`. The outcome arrives later as `shipment_created` or `shipment_failed` with `manual=true`.
 
 **Shared outcomes of the order actions** (`cancel`, `transition`, `retry-shipment`; the busy-order outcome also covers the refund `retry` / `resolve` of §2.12):
-- **Busy order.** Every action locks the order row first and waits at most `ADMIN_LOCK_WAIT` (5 s; a BTS create holds the row across its bounded calls). When the row stays locked → 409 `conflict` "Buyurtma boshqa amal bilan band. Birozdan so‘ng qayta urinib ko‘ring.". Nothing is written; retry with the same `Idempotency-Key`.
+- **Busy order.** Every action locks the order row first and waits at most `ADMIN_LOCK_WAIT` (5 s; a BTS create holds the row across its bounded calls). A Yandex cancel waits longer (§2.18): recording what Yandex answered waits up to 15 s for the row, then up to 5 s more to write that record without it (answering its own 409), and the Yandex snapshots the cancel applies wait for the row without a limit. When the row stays locked → 409 `conflict` "Buyurtma boshqa amal bilan band. Birozdan so‘ng qayta urinib ko‘ring.". Nothing is written; retry with the same `Idempotency-Key`.
 - **Purchase conflict** (`cancel`, `transition`, `retry-shipment` only; the refund operations never touch the loyalty purchase). When the order's loyalty purchase belongs to another customer (data inconsistency surfaced by `loyalty`) → 409 `conflict` "Buyurtma xaridi boshqa mijozga tegishli. Ma’lumotlarni tekshiring.". Nothing is written.
 
 ### 2.3 Products and Billz
@@ -972,7 +993,10 @@ Templates are editable in the admin UI through `GET` / `PUT` below.
                "new_from_billz": 6,
                "refunds_needing_action": 0,               // refunds in failed|unknown|manual_required (a superseded failed one excluded, below)
                "bts_polling_failing": false,              // M2: the last BTS polling run tracked no parcel or stopped on transport failures (IntegrationState(bts).consecutive_failures > 0)
-               "cashback_policy_missing": false},         // no cashback policy version is in force now: purchases earn nothing
+               "cashback_policy_missing": false,          // no cashback policy version is in force now: purchases earn nothing
+               "yandex_failing": false},                  // Yandex Delivery: live and its last poll / price check failed
+ "fulfilment": {"paid_to_prepare": 4, "to_hand_to_courier": 2, "in_delivery": 2,   // Yandex Delivery: order-state counters, now (not windowed)
+                "returning": 1, "completed_today": 12, "needs_action": 3, "urgent": 1},
  "generated_at": "2026-10-24T12:00:00+05:00"}
 ```
 - `revenue` = Σ `payment.amount` of payments confirmed in the bucket, minus the succeeded refunds of those payments. Refunds are attributed to the payment's bucket, so revenue is never negative. Late-captured payments (M2, customer contract §2.13.0: money taken for an order we did not honour, always refunded) are excluded.
@@ -982,7 +1006,11 @@ Templates are editable in the admin UI through `GET` / `PUT` below.
 
 - `attention.cashback_policy_missing` (gap CB-9.2.4) = no cashback policy version is in force at `generated_at`: none exists, or the only versions are scheduled for later (`state` `scheduled`). Purchases confirmed meanwhile earn no cashback (§2.7, the engine finds no tier). A fresh install is never in this state: migration `loyalty.0006` creates the first version (§3.2) when the policy table is empty; the flag catches a database where it was skipped. Staff fix it in "Cashback sozlamalari" (a new version starts at its `effective_from`, never in the past).
 
-**`GET nav-counts/`** → `{"orders_processing": 41, "appointments_pending": 3}`. These are all-time `processing` orders and the pending-summary count.
+- `attention.yandex_failing` (Yandex Delivery, §2.18) = Yandex is live and `IntegrationState(yandex).consecutive_failures > 0`: the last status poll (`claims/bulk_info`) failed, or a checkout price check met an account failure (401, 403, a payment refusal). It turns false at the next answered poll or price check; always `false` in fake mode. The third failure in a row also alerts `delivery.provider_failing` (`docs/ops/monitoring.md`).
+- `fulfilment` (Yandex Delivery) counts the orders **as they stand now**, whatever `range` says: `paid_to_prepare` = `processing` orders still to prepare (Yandex at `awaiting_dispatch`, or `failed` / `returned` waiting for a new dispatch; BTS orders; pickup orders); `to_hand_to_courier` = `processing` Yandex orders whose courier is requested, assigned or at the warehouse; `in_delivery` = `handed_to_courier` orders not coming back; `returning` = open Yandex orders at `returning` / `returned`; `completed_today` = delivered today (Tashkent), pickup hand-overs included; `needs_action` / `urgent` = open / open urgent delivery issues (§2.18). Each tile links to the filtered order list (`status`, `provider`, `stage`, `attention`) or the issue queue.
+- K4 (`attention.bts_failed`, the nightly `k4_*` checks) stays BTS-only: a Yandex order waiting for its dispatch is never a finding.
+
+**`GET nav-counts/`** → `{"orders_processing": 41, "appointments_pending": 3, "delivery_issues_open": 2}`. These are all-time `processing` orders, the pending-summary count and (Yandex Delivery) the open delivery issues (§2.18, the queue's badge).
 
 ### 2.11 Settings (ops console only)
 **Retired 2026-11-07:** `GET` / `PATCH settings/` and `POST settings/terms/publish/` are no longer routes of this API (an unknown route, 404 `not_found`), and the Next.js settings cards that used them are gone (§7 item 19). The store settings, the contacts and the legal texts are sensitive business data, so staff edit them **only** on the ops console page **`/django-admin/settings/`** («Sozlamalar» in the «Katalog» group; `glowderma/site_config/admin_views.py`, a custom Unfold page, not a ModelAdmin): `is_staff` with TOTP 2FA, the console's network gate and session limits (`docs/ops/staff-access.md`). The console is mounted only with `DJANGO_ADMIN_ENABLED=true` (staging and production also need `OPS_DOMAIN` and `OPS_ALLOWED_IPS`; open questions, decision log 2026-11-07). `SiteSettings` stays a read-only registration in the console (raw inspection). The customer side is unchanged: `GET /api/v1/settings/public/` (customer contract §2.4).
@@ -1309,6 +1337,199 @@ Audit `schedule.hours_updated` (entity `professional`) with the week before and 
 - **`GET location/`** → `ClinicLocation` (the first location by position, then id); 404 until the first PATCH.
 - **`PATCH location/`** → 200 `ClinicLocation`; texts merge leaf by leaf; the first PATCH creates the clinic and then needs `name.uz` (`name.uz` `required`). `phone` E.164 or null (`invalid` "Telefon raqamini to‘g‘ri kiriting."); `latitude` −90..90 and `longitude` −180..180, ≤6 decimals (`max_decimal_places` "Ko‘pi bilan 6 ta kasr raqam."), set or cleared together (the missing one `latlng_pair` "Kenglik va uzunlikni birga kiriting."). The customer API shows it with every specialist and appointment. Audit `location.created` (the new row) / `location.updated` (changed leaves); a PATCH that changes nothing writes nothing.
 
+### 2.18 Yandex Delivery (courier dispatch, returns, exception queue)
+Yandex Delivery is the courier carrier of home delivery next to BTS (`docs/integrations/yandex-delivery.md`). An
+order ships by Yandex when the customer checked out with a Yandex quote (customer contract §2.7.1); its
+`Shipment` then has `provider = "yandex"`, a `method` (`standard` | `express`) and a `stage`. Nothing is sent to
+Yandex at payment: staff prepare the parcel and call the courier here. Every BTS rule of §2.2 stays BTS-only
+(`retry_shipment`, the BTS cancel texts, `attention.bts_failed`, K4). Amounts are so'm; Yandex's prices are
+VAT-inclusive.
+
+**`delivery`** — on every `OrderSummary` (`orders/` rows) and `Order` (`orders/{id}/`); `null` for pickup. A BTS
+order carries `provider: "bts"` and its `open_issues`; every other key is `null` for it. Never a courier phone.
+```jsonc
+// OrderDelivery
+{"provider": "yandex",                                   // DeliveryProvider
+ "method": "standard",                                   // DeliveryMethod | null
+ "stage": "in_transit",                                  // ShipmentStage | null
+ "promised_from": "2026-11-15T15:30:00+05:00",           // | null: the promised window (from paid_at)
+ "promised_to": "2026-11-15T17:30:00+05:00",             // | null
+ "quote_fee": 25000,                                     // | null: the fee the checkout quote charged
+ "carrier_price": 21800,                                 // | null: Yandex's estimate behind that fee
+ "offer_price": 23000,                                   // | null: the current claim's binding offer
+ "approved_price": null,                                 // | null: the price staff approved for the current claim
+ "carrier_cost_total": 0,                                // | null (BTS): Yandex's final prices and paid cancel fees of every claim
+ "cost_difference": null,                                // | null until a cost is recorded: paid fee − carrier_cost_total
+ "parcel_weight_g": 900, "prepared_at": "2026-11-15T14:05:00+05:00",   // | null: set by the dispatch
+ "courier_name": "Aziz", "courier_vehicle": "Chevrolet Cobalt oq 01A777AA",   // | null; blanked 7 days after the claim ended
+ "tracking_url": "https://…",                            // | null: Yandex's link for the recipient
+ "claim_status": "pickuped",                             // | null: Yandex's status of the current claim, verbatim
+ "claim_number": 1,                                      // | null: 1 for the first courier claim, then 2, …
+ "failure_code": null,                                   // | null: why the current claim ended (its error code)
+ "open_issues": [{"id": 77, "kind": "dispatch_failed", "code": "offer_expired", "urgent": false,
+                  "opened_at": "2026-11-15T14:20:00+05:00"}]}   // urgent first, then oldest first
+```
+
+| `stage` | Meaning |
+|---|---|
+| `awaiting_dispatch` | paid; staff prepare the parcel and call a courier |
+| `courier_requested` | a courier claim exists (estimating, waiting for acceptance, or Yandex is searching) |
+| `courier_assigned` · `courier_arrived` | Yandex found a courier · the courier is at the warehouse |
+| `in_transit` · `at_destination` | picked up (the order is `handed_to_courier`) · at the customer |
+| `delivered` | handed over (the order is `delivered`) |
+| `returning` · `returned` | the parcel is on its way back · back at the warehouse (staff confirm it) |
+| `cancelled` | the claim was cancelled (our cancel) |
+| `failed` | no courier came (the claim failed before pickup): staff dispatch again |
+
+**`POST orders/{id}/dispatch/`** (I) — staff checked the parcel and call a courier («Kuryer chaqirish»). Body:
+```jsonc
+{"contents_verified": true,       // required, must be true
+ "weight_g": 900,                 // required, 1..20000 (grams)
+ "approved_price": null,          // optional int 0..100000000 | null: only while a dispatch_review issue is open
+ "method": null}                  // optional DeliveryMethod | null: switch the method (the paid fee never changes)
+```
+→ **202 `Order`** (`delivery.stage = "courier_requested"`, `available_actions.dispatch = false`). Nothing is sent
+to Yandex in the request: a new open courier claim (a fresh `request_id`) is stored and the outbox message
+`yandex.dispatch` does the rest (create → estimate → pricing policy → accept, `docs/integrations/yandex-delivery.md`
+§8–§9). Allowed for a paid Yandex order that is `processing` (or `handed_to_courier` with stage `returned`: a new
+attempt after a return), at stage `awaiting_dispatch` / `failed` / `returned`, with no open claim and no cancel in
+progress, a pinned address and a warehouse that may call a courier now. Resolves the order's open
+`dispatch_failed`, `dispatch_review` and `preparation_overdue` issues. Audit `order.dispatch_requested
+{claim_number, request_id, method, taxi_class, weight_g, approved_price}`.
+
+| Error | Code · message |
+|---|---|
+| body | 400 `validation_error`: `contents_verified` `required` / `invalid` "Jo‘natma tarkibini tekshirganingizni tasdiqlang."; `weight_g` `required` / `min_value` / `max_value`; `method` `invalid_choice`; `approved_price` `min_value` / `max_value` |
+| unknown order | 404 |
+| not a paid open Yandex delivery waiting for a courier (stage `awaiting_dispatch` / `failed` / `returned`; a `handed_to_courier` order only once its parcel is `returned`) | 409 `invalid_transition` "Bu buyurtma uchun kuryer chaqirib bo‘lmaydi." |
+| a courier claim is still open (double click, a dispatch running, a courier may come) | 409 `conflict` "Kuryer allaqachon chaqirilgan." |
+| a carrier cancel is in progress and its claim has ended (the cancel stamp still set, e.g. the claim closed as `cancel_requested` with the order open; while the claim is open the row above answers) | 409 `conflict` "Buyurtma bekor qilinmoqda." |
+| `approved_price` without an open `dispatch_review` | 409 `conflict` "Bu buyurtmada tasdiqlanadigan narx yo‘q." |
+| the order's address has no map pin | 409 `coordinates_required` "Manzilning xaritadagi nuqtasi yo‘q." |
+| the switched-to method is off | 409 `method_disabled` "Bu yetkazish usuli o‘chirilgan." |
+| `weight_g` above the class limit (courier 10 kg, express 20 kg) | 409 `too_heavy` "Jo‘natma bu yetkazish usuli uchun juda og‘ir." |
+| warehouse calendar | 409 `not_configured` "Ombor ma’lumotlari to‘liq kiritilmagan." · `suspended` "Kuryer chaqirish vaqtincha to‘xtatilgan." · `closed` "Ombor hozir yopiq." · `after_cutoff` "Bugun kuryer chaqirish vaqti tugadi." · `returns_unavailable` "Ombor hozir qaytgan jo‘natmalarni qabul qilmaydi." |
+| the order is busy > 5 s | 409 `conflict` (§2.2 shared outcomes) |
+
+The outcome arrives later: the stage moves with Yandex's statuses (`courier_assigned`, … `delivered`), or an issue
+opens (`dispatch_failed`, `dispatch_review` with the offer, the estimate and the limits in `details`,
+`dispatch_unknown`). For a `dispatch_review`, staff dispatch again with `approved_price` (accepted up to that
+amount), with another `method`, or cancel the order. A dispatch that ends without a courier — Yandex refused the
+claim or the accept, the accept is still not visible 15 minutes after it was sent (or, once the offer expired, at
+least 2 minutes after it: `accept_unconfirmed`), the dispatch died with no accept outstanding (`dead_letter`),
+`claims/info` refuses the claim after the accept (`dispatch_unknown` `not_found`) — closes its claim and leaves the stage `failed` (`returned` after a return), so `dispatch` is
+allowed again; only a claim Yandex may still be serving (a dispatch running, an accept whose outcome is not known
+yet, a dead dispatch after the accept: urgent `dispatch_unknown` `dead_letter`) keeps it blocked
+(`docs/integrations/yandex-delivery.md` §9).
+
+**Cancel of a Yandex order** (`POST orders/{id}/cancel/`, body and success as §2.2). Before its idempotent
+transaction the view makes the order carrier-safe (skipped on a replay of the same key), holding the order's Yandex
+advisory lock; then the unchanged cancel runs (full refund when paid).
+
+| Situation | Result |
+|---|---|
+| unpaid, or paid with no open courier claim | as §2.2 (no Yandex call) |
+| a claim whose accept was never sent | the claim is closed here (it summons nobody; best-effort free cancel at Yandex) → 200, cancelled and refunded |
+| claim open, before pickup | Yandex's cancel terms, then its cancel (free or paid) and a re-read showing it cancelled → 200, cancelled and refunded; a paid cancel fee is recorded in `carrier_cost_total` as soon as Yandex answered the cancel 2xx and that answer was recorded under the order lock (also when the 409 below follows) — after a lost answer, or the busy order below, only once Yandex shows `cancelled_with_payment`; the `cancelled` event has `bts_cancelled: true` |
+| Yandex refuses (terms `unavailable`, a conflict) | 409 `not_cancellable` "Yandex kuryer buyurtmasini bekor qilmadi (kuryer posilkani olgan yoki bekor qilish muddati o‘tgan). Holatni tekshirib, qayta urinib ko‘ring." — order unchanged (a refused cancel whose re-read shows the claim cancelled all the same → 200) |
+| nothing can have reached Yandex (Yandex unreachable for the first read or the terms, or the cancel / return answered "not processed") | 503 `provider_unavailable` "Yandex javob bermadi, buyurtma bekor qilinmadi. Qayta urinib ko‘ring." — order unchanged |
+| the cancel was answered 2xx, **or its answer was lost**, and Yandex does not show it yet | 409 `conflict` "Yandex kuryer buyurtmasini bekor qilishni hali tasdiqlamadi. Birozdan so‘ng qayta urinib ko‘ring." — order unchanged |
+| picked up (in transit, at the customer) | Yandex is asked to bring the parcel back: shown `returning…` → 200, cancelled and refunded, issue `return_pending` until staff confirm the parcel back; not shown yet, **or the answer lost** → **409 `return_requested`** "Yandexdan posilkani omborga qaytarish so‘raldi. Buyurtma hali bekor qilinmadi: Yandex qaytarishni tasdiqlagach, bekor qilishni qayta bosing." (order unchanged, `return_pending` open); refused → 409 `not_cancellable` "Yandex posilkani omborga qaytarishni rad etdi. Yandex qo‘llab-quvvatlash xizmatiga murojaat qiling."; not processed → 503 |
+| a retry after 409 `conflict` / `return_requested` | the cancel or return is **never sent again** once it was recorded as sent (Yandex answered 2xx, or the outcome is unknown): Yandex's claim is only read again — shown → 200, cancelled and refunded; not yet, or the read fails → the same 409 (never 503). Without that record (lost in a crash, or ERROR `yandex.carrier_marker_lost` below) a later attempt may send the cancel / return again |
+| the order stays busy (> 15 s) right after Yandex answered the cancel / return 2xx (or its outcome turned unknown) | 409 `conflict` with the pending-cancel / requested-return message (a return without the code `return_requested`); the "sent" record is written without the order lock (up to 5 s more), so a retry only reads — unless that write times out too (ERROR `yandex.carrier_marker_lost`): no record, and a later attempt may send the call again. This step writes no `order.carrier_cancel` audit (log WARNING `yandex.carrier_record_busy`); a paid fee is counted only once Yandex shows `cancelled_with_payment` (never when it shows plain `cancelled`) |
+| stage `returning` / `returned` | no Yandex call → 200, cancelled and refunded; `return_pending` kept / opened (unless the return of the claim that carried the parcel was confirmed) |
+| delivered | 409 `not_cancellable` "Buyurtma mijozga yetkazilgan: uni bekor qilib bo‘lmaydi." |
+| picked up, the claim ended without a return | 409 `not_cancellable` "Posilka kuryerda, Yandex esa uni omborga qaytarayotganini bildirmagan: buyurtmani hozir bekor qilib bo‘lmaydi." |
+| another Yandex operation of the order is running (a dispatch) | 409 `conflict` "Bu buyurtma bo‘yicha Yandex bilan boshqa amal bajarilmoqda (kuryer chaqirilmoqda). Birozdan so‘ng qayta urinib ko‘ring." |
+
+While a sent cancel or return waits for Yandex (409 `conflict` / `return_requested` above) its claim is still
+open, so `orders/{id}/dispatch/` answers 409 `conflict` "Kuryer allaqachon chaqirilgan."; "Buyurtma bekor
+qilinmoqda." (409 `conflict` too) comes only once that claim has ended with the cancel stamp still set (e.g. a
+claim closed as `cancel_requested`). Each carrier outcome is audited `order.carrier_cancel {outcome, claim_number,
+cancel_state?, cancel_fee?, status?, error_code?}` next to `order.cancelled` — except the busy-order step above,
+which writes no audit row (only its WARNING `yandex.carrier_record_busy` / ERROR `yandex.carrier_marker_lost` log
+line). A cancelled Yandex order also resolves its `dispatch_failed`,
+`dispatch_review`, `preparation_overdue`, `delivery_failed` and `cancel_incomplete` issues (`return_pending`,
+`parcel_unaccounted`, `dispatch_unknown` and `incident` stay).
+
+**`POST orders/{id}/confirm-return/`** (I) — the returning / returned parcel is physically back at the warehouse.
+Body `{"note": str ≤1000, optional, default ""}` (its condition; it becomes the `return_pending` resolution note).
+→ **200 `Order`**: stage `returned`, event `shipment_returned` (source `admin`), the open `return_pending`
+resolved by the caller (audit `delivery.issue_resolved`), audit `order.return_confirmed {claim_number,
+order_status, note}`. A cancelled order stays cancelled (its failed-delivery issues close); an open order stays as
+it is (staff dispatch again or cancel). The return confirmed is the one of the claim that **carried the parcel**
+(the highest-numbered claim that picked it up), not of the current claim: `claim_number` and the event's
+`claim_id` are that claim's, and a re-dispatch after a confirmed return that fails or goes to price review (stage
+back at `returned`) offers no second confirmation (`available_actions.confirm_return` false, a further call 409
+`conflict`, a cancel opens no new `return_pending`). Errors: 400 `note` `max_length` "1000 belgidan oshmasin."; 404;
+409 `invalid_transition` "Qaytayotgan posilka yo‘q: qaytishni tasdiqlab bo‘lmaydi." (also when no claim ever
+picked the parcel up); 409 `conflict` "Posilka qaytgani allaqachon tasdiqlangan." (or the order is busy).
+
+**Manual transition.** A Yandex order offers no manual status change, except `delivered` from
+`handed_to_courier` while a `parcel_unaccounted` issue is open (staff know the parcel reached the customer although
+Yandex says otherwise); that transition resolves `parcel_unaccounted` and sets `delivery.stage` to `delivered`
+(a manual shipment event records who confirmed it; the shipment state, the costs and the claim stay as Yandex
+left them), so neither the customer nor staff see the stage Yandex left (`cancelled` / `failed`) on a delivered
+order.
+
+**Delivery issues** — the exception queue. One open row per order and kind; most are opened and closed by the
+system; urgent ones alert staff (alert webhook → Telegram, `docs/ops/monitoring.md` §1) and are reminded every
+30 minutes while nobody touches them.
+```jsonc
+// DeliveryIssue
+{"id": 77, "order_id": 10251, "kind": "dispatch_failed",   // DeliveryIssueKind
+ "code": "offer_expired",                                  // why (Yandex's or our short code)
+ "urgent": false,
+ "details": {"order_id": 10251, "claim_number": 1},        // ids and amounts only
+ "note": "",                                               // staff text (incidents)
+ "state": "open",                                          // DeliveryIssueState: open | resolved
+ "opened_at": "2026-11-15T14:20:00+05:00", "updated_at": "2026-11-15T14:20:00+05:00",
+ "reminded_at": null, "reminders": 0,
+ "resolved_at": null, "resolved_by": null,                 // Actor | null (null while open or when the system closed it)
+ "resolution_note": ""}
+```
+
+| `kind` | Opened when (codes) |
+|---|---|
+| `dispatch_failed` | a dispatch summoned no courier: Yandex's refusal code (of the claim, or the 409 code of a refused accept), `not_configured`, `coordinates_required`, `estimating_timeout`, `offer_expired`, `previous_claim_active` (urgent), `not_found`, a calendar refusal at the accept, `accept_unconfirmed` (the accept still not visible 15 minutes after it was sent, or once the offer expired and at least 2 minutes after it was sent), `dead_letter` (the dispatch died with no accept outstanding); a claim that failed before pickup (`performer_not_found`, `cancelled_by_taxi`, `failed`, …); `courier_search_slow` (urgent: no courier 30 minutes after acceptance) |
+| `dispatch_unknown` | Yandex may have taken our accept: `not_found` (urgent: Yandex refuses to show the claim 15 minutes after the accept; the claim stays polled), `dead_letter` (urgent: the dispatch died after the accept was sent), `unexpected_acceptance` (urgent: a claim we no longer follow shows accepted), `foreign_claim` |
+| `dispatch_review` | the binding offer needs staff: `increase_over_limit`, `loss_over_limit`, `above_approved`, `warnings`, `offer_missing` |
+| `delivery_failed` | Yandex started a return we did not ask for (Yandex's return reason, else the status) |
+| `return_pending` | a parcel is coming / came back: `returning`, `returned`, `return_requested`, `warehouse_closed` (urgent) |
+| `preparation_overdue` | still not dispatched `prep_deadline_minutes` working minutes after payment: `overdue`, `suspended`, `closed`, `not_configured`, `returns_unavailable` |
+| `cancel_incomplete` (urgent) | a carrier cancel stopped half-way for 10 minutes (from its first press) with the order still open: `carrier_cancelled` (Yandex shows the claim cancelled, or the claim was withdrawn for the cancel), `returning` |
+| `parcel_unaccounted` (urgent) | the claim ended after pickup without a return (code = Yandex's status) or Yandex delivered a cancelled order (`delivered_after_cancel`) |
+| `incident` | staff report (`staff_report`) |
+
+- **`GET delivery/issues/`** (P) — query `state` (`open` | `resolved`), `urgent` (bool), `kind`
+  (DeliveryIssueKind), `order` (order id); bad values → 400 `invalid_choice` / `invalid`. Open issues first, urgent
+  first, then oldest first; `state=resolved` lists the newest resolved first. → `Page<DeliveryIssue>`.
+- **`POST orders/{id}/issues/`** (I) — staff report an incident on a delivery order. Body `{"kind": "incident",
+  "note": str 3..1000, "urgent": bool = false}` → **201** the new issue, **200** the open incident refreshed (note,
+  urgency). Audit `delivery.issue_opened`; an urgent incident alerts. Errors: 400 `kind` `invalid_choice` (any
+  other kind), `note` `required` / `min_length` "Kamida 3 ta belgi kiriting." / `max_length` "1000 belgidan
+  oshmasin."; 404; 409 `conflict` "Olib ketiladigan buyurtma uchun yetkazish muammosi ochilmaydi." (a pickup order).
+- **`POST delivery/issues/{id}/resolve/`** (I) — body `{"note": str 3..1000}` → 200 `DeliveryIssue` (audit
+  `delivery.issue_resolved`). 404; 409 `conflict` "Bu muammo allaqachon hal qilingan.".
+
+**Dispatch suspension** — the panel switch over `DeliverySettings.dispatch_suspended` (the warehouse settings
+themselves are edited on the ops console, `/django-admin/delivery/deliverysettings/1/change/`).
+- **`GET delivery/suspension/`** → `{"suspended": bool, "until": datetime | null, "note": str, "updated_at":
+  datetime}`; `suspended` is what is in effect now (an `until` that passed → `false`).
+- **`POST delivery/suspension/`** (I) — body `{"suspended": bool, "until": datetime with an offset | null =
+  until lifted, "note": str ≤300 = ""}` → 200 the same shape; audit `delivery.suspension_updated` (before / after);
+  no change → nothing written. `until` in the past while suspending → 400 `until` `in_past` "Kelajakdagi vaqtni
+  tanlang."; `until` is ignored when resuming; `note` `max_length` "300 belgidan oshmasin.". While suspended, no
+  courier is called (`dispatch` → 409 `suspended`) and checkout lists the Yandex options as unavailable
+  (`dispatch_suspended`).
+
+**Dev only** — `POST /api/v1/admin/dev/yandex/{order_id}/advance/` `{"status": <one of Yandex's 26 claim
+statuses>}` → 200 `Order`: moves the order's current claim in the **fake** Yandex adapter and applies it exactly as
+the poll would (409 `conflict` "Buyurtmada Yandex kuryer buyurtmasi yo‘q." without a claim; 400 `invalid_choice`).
+Mounted only under the local/test settings (`DEV_FEATURES_ALLOWED`) with `YANDEX_DELIVERY_MODE=fake` (404
+otherwise), staff auth, not in the OpenAPI document; the admin panel's mock tools and the e2e suites drive the fake
+courier with it.
+
 ---
 
 ## 3. Enumerations
@@ -1323,11 +1544,17 @@ Audit `schedule.hours_updated` (entity `professional`) with the week before and 
 | FulfilmentMethod | `delivery`, `pickup` | |
 | OrderChannel | `ios`, `android`, `web` | `web` (B-W1): an order placed on the customer website, a website session |
 | OrderPeriod | `today`, `week`, `month`, `all` | `orders/`, `payments/` |
-| EventSource | `system`, `bts`, `admin` | OrderEvent |
-| OrderEventType | 16 values, §4 | OrderEvent |
+| EventSource | `system`, `bts`, `admin`, `yandex` (Yandex Delivery) | OrderEvent |
+| OrderEventType | 18 values, §4 | OrderEvent |
 | CancellationReason | `reservation_expired`, `admin`, `customer_request` | |
 | ShipmentState | `not_required`, `not_created`, `failed`, `created` | |
 | ShipmentVia | `webhook`, `polling` | |
+| DeliveryProvider (Yandex Delivery) | `bts`, `yandex` | `delivery.provider`, `orders/` `provider` |
+| DeliveryMethod | `standard`, `express` | `delivery.method`, `orders/{id}/dispatch/` `method` |
+| ShipmentStage | `awaiting_dispatch`, `courier_requested`, `courier_assigned`, `courier_arrived`, `in_transit`, `at_destination`, `delivered`, `returning`, `returned`, `cancelled`, `failed` | `delivery.stage`, `orders/` `stage` (§2.18) |
+| DeliveryIssueKind | `dispatch_failed`, `dispatch_unknown`, `dispatch_review`, `delivery_failed`, `return_pending`, `preparation_overdue`, `cancel_incomplete`, `parcel_unaccounted`, `incident` | `DeliveryIssue.kind` (§2.18) |
+| DeliveryIssueState | `open`, `resolved` | `DeliveryIssue.state` |
+| DeliveryUnavailableReason | `coordinates_required`, `provider_unavailable`, `out_of_zone`, `method_disabled`, `too_heavy`, `warehouse_closed`, `dispatch_suspended`, `not_configured` | customer `delivery/calculate/` options (customer contract §2.6) |
 | RefundState | `requested`, `submitting`, `succeeded`, `failed`, `manual_required`, `unknown` | |
 | CashbackHoldState | `active`, `captured`, `released` | `cashback_hold` |
 | OrderCashbackKind | `debit`, `credit`, `reversal` | `Order.cashback` |
@@ -1374,6 +1601,7 @@ Audit `schedule.hours_updated` (entity `professional`) with the week before and 
 | Staff (§2.16, gap closure) | `staff.created` (`{email, full_name, is_manager}`), `staff.updated` (before / after of the changed `full_name` / `is_manager`), `staff.deactivated` (before `{is_active: true}`, after `{is_active: false, revoked_count}`), `staff.reactivated` (before `{is_active: false}`, after `{is_active: true}`), `staff.password_reset` (`{revoked_count, generated}`; never the password); every session they revoke adds `auth.session_revoked`. Entity `staff`, id = the account. From the admin API the actor is the manager; from the operator commands it is the `--actor` staff member or `system`, with `reason` "manage.py <command>". They replace M1's `auth.staff_deactivated` / `auth.staff_reactivated`, which were never written (their services had no caller; decision GST-5). |
 | System | `outbox.dead` (`{topic, dedupe_key, attempts, last_error}`), `outbox.requeued` (M3, actor `system`, reason "manage.py requeue_outbox"; before `{status, attempts, last_error}`, after `{topic, dedupe_key, status: "pending"}`), `outbox.resolved` (M3, `requeue_outbox --resolved`: a dead message handled by hand is closed as `done` without running it — a `billz.push_sale` only once its sale is recorded with `billz_mark_recorded`; reason "manage.py requeue_outbox --resolved", before as above, after `{topic, dedupe_key, status: "done"}`); `billz.sale_recorded_by_hand` (M3, entity `order`, actor = the staff member named by `manage.py billz_mark_recorded --actor`, reason "manage.py billz_mark_recorded"; before `{purchase_id, billz_sale_id, billz_pushed_at: null, billz_payment_attempted_at, push_status}`, after `{purchase_id, billz_sale_id, billz_sale_ref, billz_pushed_at}`), `billz.payment_attempt_forgotten` (M3, entity `order`, actor = `requeue_outbox --forget-payment-attempt --actor`, reason "manage.py requeue_outbox --forget-payment-attempt"; before `{purchase_id, billz_sale_id, billz_payment_attempted_at}`, after `{purchase_id, billz_payment_attempted_at: null}`) |
 | Orders | `order.cancelled`, `order.status_changed`, `order.shipment_retry_requested`, `refund.requested`, `refund.state_changed` (system) |
+| Yandex Delivery (§2.18) | `order.dispatch_requested` (`{claim_number, request_id, method, taxi_class, weight_g, approved_price}`), `order.carrier_cancel` (`{outcome, claim_number, cancel_state?, cancel_fee?, status?, error_code?}`; outcomes `withdrawn`, `cancelled`, `already_cancelled`, `already_finished`, `returning`, `already_returning`, `return_requested`, `cancel_pending`, `refused`, `unavailable`, `unavailable_terms`, `return_refused`, `delivered`, `parcel_out`, `no_point`), `order.return_confirmed` (`{claim_number, order_status, note}`) — entity `order`; `delivery.issue_opened` (staff incident), `delivery.issue_resolved` — entity `delivery_issue`; ops console and panel switch: `delivery.settings_updated` (changed columns `{from, to}`; the warehouse address and contacts as `{changed: true}`), `delivery.suspension_updated`, `delivery.hours_saved`, `delivery.hours_deleted`, `delivery.closure_saved`, `delivery.closure_deleted`, `delivery.tariffs_checked` (entity `integration` / `yandex`: mode, classes or error code) |
 | Catalog | `product.created`, `product.updated`, `product.image_added`, `product.image_deleted`, `product.images_reordered`, `billz.import_started`, `billz.import_finished`, `category.created`, `category.updated`, `category.deleted`, `category.reordered`, `banner.created`, `banner.updated`, `banner.deleted`, `banner.reordered`. Gap closure (catalog): the `category.*` snapshot carries `image` (file name or `null`), the `banner.*` snapshot `link.url`, `notification.created` `link_url`; no new action |
 | Loyalty | `cashback.adjusted`, `cashback.policy_version_created`, `cashback.policy_version_superseded`. Gap CB-9.2.4: migration `loyalty.0006` writes one `cashback.policy_version_created` (actor `system`, reason "migration loyalty.0006: first cashback policy with the L1–L3 defaults", the service's data shape) when it creates the install's first policy. That v1's `created_at` (2026-05-20 10:00) and `effective_from` (2026-06-01 00:00, Tashkent) are fixed placeholder instants, not the deploy time (GS-6) |
 | Notifications | `notification.created`, `notification.draft_updated`, `notification.draft_deleted`, `notification.test_sent` (`{revision, tests[]}`), `notification.test_confirmed`, `notification.approved` (`{approved_revision, dispatch_after, …}`), `notification.returned_to_draft`, `notification.cancelled` (M3; before `{state: "scheduled", scheduled_at, dispatch_after}`, after `{state: "cancelled", cancelled_at}`), `notification.send_started` (system), `notification.stop_requested`, `notification.stopped` (system), `notification.failed` (system; a dead `campaign.send_batch`), `test_device.registered`, `test_device.removed`, `notification_template.updated`, `segment.created`, `segment.updated`, `segment.deleted`, `segment.members_added`, `segment.member_removed`, `notification.push_dead` (system; a dead `push.order_status` / `push.appointment` / `campaign.send_batch` message: `{topic, dedupe_key, attempts, last_error, customer_id, campaign_id}`) |
@@ -1405,16 +1633,18 @@ Events are append-only. The API returns all of them; the FE mapper **folds** the
 | `billz_sale_recorded` | system | null | `billz_order_id` (str) | folded into `payment_confirmed`. M3: written once the sale is **paid** in Billz; never for an order cancelled meanwhile (staff refund such a sale in Billz by hand) |
 | `cashback_credited` | system | null | `ledger_entry_id`, `amount`, `base`, `percent`, `policy_version` | folded into `payment_confirmed` |
 | `payment_failed` | system | null | `provider`, `transaction_id` (str\|null), `error_code` (str\|null) | row |
-| `shipment_created` | system or admin | null | `tracking_number`, `tariff`, `manual` (bool) | row |
+| `shipment_created` | system or admin | null | `tracking_number`, `tariff`, `manual` (bool) | row. Yandex Delivery: written once per order when Yandex accepts the first courier claim — `tracking_number: ""` (the claim id is never shown), `tariff` = the accepted offer, `manual` = a claim after the first, actor = the staff member who dispatched |
 | `shipment_failed` | system or admin | null | `attempt` (int), `manual` (bool), `error_code` (str\|null) | row |
 | `status_changed` | admin | `to` | `from`, `to`, `push_sent` (bool) | row (manual transition) |
-| `handed_to_courier` | bts | `handed_to_courier` | `via`, `bts_status` (str), `push_sent` | row |
-| `delivered` | bts | `delivered` | `via`, `bts_status`, `push_sent` | row |
-| `cancelled` | admin (or system for `customer_request`) | `cancelled` | `reason`, `note` (str\|null), `refund_id` (int\|null), `cashback_reversed` (bool), `stock_released` (bool), `bts_cancelled` (bool), `push_sent` | row |
+| `handed_to_courier` | bts or yandex | `handed_to_courier` | `via`, `bts_status` (str: the carrier's status — for Yandex its claim status, e.g. `pickuped`), `push_sent` | row |
+| `delivered` | bts or yandex | `delivered` | `via`, `bts_status`, `push_sent` | row |
+| `cancelled` | admin (or system for `customer_request`) | `cancelled` | `reason`, `note` (str\|null), `refund_id` (int\|null), `cashback_reversed` (bool), `stock_released` (bool), `bts_cancelled` (bool: the carrier shipment was cancelled — the BTS parcel, or the Yandex courier claim), `push_sent` | row |
 | `reservation_expired` | system | `cancelled` | `released_item_count`, `payment_failed` (bool) | row |
 | `refund_requested` | admin or system | null | `refund_id`, `amount`, `provider`, `manual` (bool: the refund was created `manual_required`), `manual_reason` (M2: `"payme"` \| `"no_paydoc"` \| `"fake_mode"` when `manual`, else null; absent on M1 rows, read as `"payme"`) | folded into `cancelled` when `cancelled.data.refund_id` equals it, else a row |
 | `refund_succeeded` | system | null | `refund_id`, `amount`, `provider` | row |
 | `refund_failed` | system | null | `refund_id`, `amount`, `provider`, `state` (`failed`\|`unknown`), `error_code` | row |
+| `delivery_failed` (Yandex Delivery) | yandex | null | `provider` (`yandex`), `carrier_status`, `reason` (Yandex's first `return_reasons` entry or `""`), `claim_id` | row: the courier could not hand the parcel over and is bringing it back (once per courier claim; not for a return staff asked for) |
+| `shipment_returned` (Yandex Delivery) | yandex or admin | null | `provider`, `carrier_status`, `claim_id` | row: Yandex reports the parcel back (source `yandex`) or staff confirmed it (`admin`, §2.18), once per courier claim |
 
 **Order №10248 test vector** (API history, newest first) → the four design rows:
 ```jsonc
@@ -1567,7 +1797,9 @@ Generic mapping applies throughout: snake_case → camelCase; integer ids → `S
 | `stats.*` | `stats.new_customers`, `total_customers`, `deleted_customers`, `out_of_stock` | Camel-case |
 | `attention.*` | `attention.*` | Camel-case; `refundsNeedingAction` is new; `btsPollingFailing` (M2) is new: when true the attention block shows "BTS kuzatuvi ishlamayapti · buyurtma holatlari yangilanmayapti"; `cashbackPolicyMissing` (gap CB-9.2.4) is new: when true it shows "Cashback siyosati yo‘q · xaridlarga cashback yozilmayapti" linking to the cashback settings; "Eng yaqini: …" stays `formatWeekdayShortDateTime` |
 | Recent orders | `orders/?page_size=6` | `results` |
-| Sidebar badges | `nav-counts/` | orders = `orders_processing`; appointments = `appointments_pending` |
+| Sidebar badges | `nav-counts/` | orders = `orders_processing`; appointments = `appointments_pending`; «Muammolar» (Yandex Delivery issue queue) = `delivery_issues_open` |
+| Fulfilment tiles (Yandex Delivery, `features/admin/dashboard/fulfilment-tiles.ts`) | `fulfilment.*` | «To‘langan · tayyorlash» → `orders/?status=processing`; «Kuryerga berish kerak» → `status=processing&provider=yandex`; «Yetkazilmoqda» → `status=handed_to_courier`; «Qaytarilmoqda» → `provider=yandex&stage=returning`; «Bugun yakunlangan» → `status=delivered`; «Harakat kerak» → `attention=open`; «Shoshilinch» → `attention=urgent` (all with `period=all`) |
+| `attention.yandexFailing` (Yandex Delivery) | `attention.yandex_failing` | when true the attention block links to the delivery issue queue |
 | Sidebar user | `auth/me/` | name = `display_name`; secondary = `email`; initials = first letters of the first two words, else the first two letters, uppercased ("Administrator" → "AD") |
 
 ### 5.8 Uzbek labels shared by the UI and exports

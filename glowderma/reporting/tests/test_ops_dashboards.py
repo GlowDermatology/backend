@@ -475,6 +475,9 @@ def test_a_cache_outage_still_renders(monkeypatch: pytest.MonkeyPatch, console: 
 # --- links --------------------------------------------------------------------------------------------------
 
 
+SINGLETON_CHANGELISTS = frozenset({"/django-admin/delivery/deliverysettings/"})
+
+
 def test_every_link_on_every_dashboard_opens_for_staff(console: Client) -> None:
     populate()
     hrefs: set[str] = set()
@@ -486,7 +489,8 @@ def test_every_link_on_every_dashboard_opens_for_staff(console: Client) -> None:
     for href in sorted(hrefs):
         if href.startswith("/django-admin/logout"):
             continue
-        response = console.get(href)
+        # a singleton's list opens its one row (the delivery settings page)
+        response = console.get(href, follow=href in SINGLETON_CHANGELISTS)
         assert response.status_code == 200, (href, response.status_code, response.get("Location"))
 
 

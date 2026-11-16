@@ -76,7 +76,7 @@ def test_seed_integrations_marks_billz_synced_and_is_idempotent() -> None:
     assert synced_at.isoformat() == "2026-10-24T12:03:00+05:00"
     billz = IntegrationState.objects.get(provider="billz")
     assert billz.last_sync_at == synced_at and billz.last_success_at == synced_at
-    assert IntegrationState.objects.exclude(provider="billz").filter(last_sync_at__isnull=True).count() == 5
+    assert IntegrationState.objects.exclude(provider="billz").filter(last_sync_at__isnull=True).count() == 6
     job = Job.objects.get()
     assert job.kind == enums.JobKind.BILLZ_IMPORT and job.state == enums.JobState.SUCCEEDED
     assert job.params == {"mode": "delta"}
@@ -86,7 +86,7 @@ def test_seed_integrations_marks_billz_synced_and_is_idempotent() -> None:
     assert job.created_by == admin_user
     assert billz.updated_at == synced_at
     seeds.seed_integrations(CONTEXT)
-    assert Job.objects.count() == 1 and IntegrationState.objects.count() == 6
+    assert Job.objects.count() == 1 and IntegrationState.objects.count() == 7
     assert Job.objects.get().updated_at == synced_at
 
 
@@ -115,14 +115,14 @@ def test_integrations_migrations_reverse_to_zero_and_forward_again() -> None:
     assert trigger_exists()
     call_command("migrate", "integrations", "0001", verbosity=0)
     assert not trigger_exists()
-    # 0003's reverse deleted the rows; the post_migrate receiver re-inserted them (the table still exists)
-    assert IntegrationState.objects.count() == 6
+    # 0003's / 0006's reverses deleted the rows; post_migrate re-inserted them (the table still exists)
+    assert IntegrationState.objects.count() == 7
     call_command("migrate", "integrations", "zero", verbosity=0)
     assert "integrations_webhookinbox" not in connection.introspection.table_names()
     assert "integrations_integrationstate" not in connection.introspection.table_names()
     call_command("migrate", "integrations", verbosity=0)
     assert trigger_exists()
-    assert IntegrationState.objects.count() == 6
+    assert IntegrationState.objects.count() == 7
     assert "integrations_job" in connection.introspection.table_names()
 
 
@@ -130,20 +130,33 @@ def test_integrations_migrations_reverse_to_zero_and_forward_again() -> None:
 def test_0003_reverse_deletes_the_provider_rows_and_forward_restores_them() -> None:
     module = importlib.import_module("glowderma.integrations.migrations.0003_seed_integration_state")
     module.delete_provider_rows(django_apps, connection.schema_editor)
-    assert IntegrationState.objects.count() == 0
+    assert list(IntegrationState.objects.values_list("provider", flat=True)) == ["yandex"]  # 0006's row
     module.create_provider_rows(django_apps, connection.schema_editor)
     module.create_provider_rows(django_apps, connection.schema_editor)  # idempotent
-    assert sorted(IntegrationState.objects.values_list("provider", flat=True)) == sorted(module.PROVIDERS)
+    assert sorted(IntegrationState.objects.values_list("provider", flat=True)) == sorted(
+        (*module.PROVIDERS, "yandex")
+    )
+
+
+@pytest.mark.django_db
+def test_0006_reverse_deletes_the_yandex_row_and_forward_restores_it() -> None:
+    module = importlib.import_module("glowderma.integrations.migrations.0006_yandex_provider")
+    module.delete_yandex_row(django_apps, connection.schema_editor)
+    assert not IntegrationState.objects.filter(provider="yandex").exists()
+    assert IntegrationState.objects.count() == 6
+    module.create_yandex_row(django_apps, connection.schema_editor)
+    module.create_yandex_row(django_apps, connection.schema_editor)  # idempotent
+    assert IntegrationState.objects.filter(provider="yandex").count() == 1
 
 
 @pytest.mark.django_db(transaction=True)
 def test_flush_keeps_the_provider_rows() -> None:
-    """A transactional test ends with pytest-django's flush; ``post_migrate`` restores the six rows, so later
-    tests (and a ``--reuse-db`` rerun) never see an empty table."""
+    """A transactional test ends with pytest-django's flush; ``post_migrate`` restores the provider rows, so
+    later tests (and a ``--reuse-db`` rerun) never see an empty table."""
     IntegrationState.objects.filter(provider="billz").update(consecutive_failures=3)
     call_command("flush", interactive=False, verbosity=0)
     providers = sorted(IntegrationState.objects.values_list("provider", flat=True))
-    assert providers == ["billz", "bts", "click", "eskiz", "fcm", "payme"]
+    assert providers == ["billz", "bts", "click", "eskiz", "fcm", "payme", "yandex"]
     assert IntegrationState.objects.get(provider="billz").consecutive_failures == 0
     call_command("flush", interactive=False, verbosity=0)  # idempotent
-    assert IntegrationState.objects.count() == 6
+    assert IntegrationState.objects.count() == 7

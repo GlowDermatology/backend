@@ -17,7 +17,9 @@ from glowderma.core.seeding import pinned_clock
 pytestmark = pytest.mark.django_db
 ORDERS = "/api/v1/admin/orders/"
 PAYMENTS = "/api/v1/admin/payments/"
-DETAIL_QUERIES = 8  # the staff user + the detail reads; the same for every order shape
+# the staff user + the detail reads (+ the open delivery issues of a delivery order, Yandex Delivery plan
+# §3.10); the same for every BTS order shape
+DETAIL_QUERIES = 9
 
 
 def _variety(staff_id: int) -> Order:

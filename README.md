@@ -1,7 +1,7 @@
 # Glow Derma — backend
 
 Django 6.1 + Django REST Framework modular monolith for the Glow Derma customer app, admin panel and
-integrations (Billz, BTS, Click, Payme, Eskiz, Firebase).
+integrations (Billz, BTS, Yandex Delivery, Click, Payme, Eskiz, Firebase).
 
 - Design spec: [`docs/specs/2026-10-24-backend-foundation-design.md`](docs/specs/2026-10-24-backend-foundation-design.md)
 - Admin API contract: [`docs/api/admin-api-v1.md`](docs/api/admin-api-v1.md)
@@ -14,7 +14,8 @@ integrations (Billz, BTS, Click, Payme, Eskiz, Firebase).
 - Monitoring, alerts and the nightly consistency report: [`docs/ops/monitoring.md`](docs/ops/monitoring.md)
 - Personal data, hosting in Uzbekistan, retention, database registration: [`docs/ops/compliance.md`](docs/ops/compliance.md)
 - Provider adapters and their go-live checklists: [`docs/integrations/`](docs/integrations/) (Billz, Click, Payme,
-  BTS, Eskiz, FCM)
+  BTS, Yandex Delivery, Eskiz, FCM); urgent alerts reach staff through the Telegram alert bot (repository `bot`,
+  [`docs/ops/monitoring.md`](docs/ops/monitoring.md) §1)
 
 ## Quick start (Docker)
 ```bash

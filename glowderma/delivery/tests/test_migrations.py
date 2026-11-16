@@ -9,9 +9,20 @@ from django.db import connection
 from django.db.migrations.recorder import MigrationRecorder
 
 from glowderma.core.db import append_only_trigger_sql
+from glowderma.delivery.models import DeliverySettings
 from glowderma.delivery.tests.factories import ShipmentEventFactory
 
-DELIVERY_TABLES = {"delivery_shipment", "delivery_shipmentevent"}
+DELIVERY_TABLES = {
+    "delivery_shipment",
+    "delivery_shipmentevent",
+    "delivery_courierclaim",
+    "delivery_deliveryissue",
+    "delivery_deliveryquote",
+    "delivery_deliverysettings",
+    "delivery_warehousehours",
+    "delivery_warehouseclosure",
+}
+BTS_TABLES = {"delivery_shipment", "delivery_shipmentevent"}
 
 
 def table_names() -> set[str]:
@@ -57,6 +68,9 @@ def test_migration_dependencies_as_designed() -> None:
         "0003_uz_verbose_names.py",
         "0004_uz_choice_labels.py",
         "0005_uz_field_labels.py",
+        "0006_yandex_delivery.py",
+        "0007_seed_delivery_settings.py",
+        "0008_courierclaim_cancel_sent.py",
     ]
 
 
@@ -66,8 +80,11 @@ def test_migrate_zero_and_forward_again() -> None:
     # database and leave one behind, so the order of transactional tests does not matter.
     call_command("migrate", verbosity=0)
     assert DELIVERY_TABLES <= table_names() and trigger_exists()
+    call_command("migrate", "delivery", "0005", verbosity=0)
+    assert BTS_TABLES <= table_names() and not (DELIVERY_TABLES - BTS_TABLES) & table_names()
+    assert trigger_exists()
     call_command("migrate", "delivery", "0001", verbosity=0)
-    assert not trigger_exists() and DELIVERY_TABLES <= table_names()
+    assert not trigger_exists() and BTS_TABLES <= table_names()
     call_command("migrate", "delivery", "zero", verbosity=0)
     assert not (DELIVERY_TABLES & table_names())
     assert not MigrationRecorder.Migration.objects.filter(app="delivery").exists()
@@ -85,7 +102,12 @@ def test_migrate_zero_and_forward_again() -> None:
         "0003_uz_verbose_names",
         "0004_uz_choice_labels",
         "0005_uz_field_labels",
+        "0006_yandex_delivery",
+        "0007_seed_delivery_settings",
+        "0008_courierclaim_cancel_sent",
     }
+    assert {"shipment_yandex_stage_idx"} <= index_names("delivery_shipment")
+    assert DeliverySettings.objects.filter(pk=1).exists()  # 0007 (and post_migrate) keep the singleton
     event = ShipmentEventFactory.create()
     assert event.pk is not None
-    call_command("migrate", verbosity=0)  # re-apply any app that depends on delivery (none today)
+    call_command("migrate", verbosity=0)  # re-apply every app that depends on delivery

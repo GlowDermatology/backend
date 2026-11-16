@@ -195,6 +195,8 @@ def registry(data: dict[str, Any]) -> Any:
                 "filters": _filters(model, model_admin),
                 "list_per_page": model_admin.list_per_page,
                 "date_hierarchy": model_admin.date_hierarchy,
+                # a singleton's list redirects to its one change page (the delivery settings)
+                "singleton": bool(getattr(model_admin, "singleton", False)),
             }
         )
     return rows
