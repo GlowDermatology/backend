@@ -5,7 +5,8 @@ from django.conf import settings
 from django.http import HttpRequest, HttpResponse, HttpResponseNotFound, JsonResponse
 from django.http.request import split_domain_port
 
-from glowderma.core.api.exceptions import error_body
+from glowderma.core.api.exceptions import error_body, localize_admin_body
+from glowderma.core.api.language import request_admin_language
 from glowderma.core.clientip import has_internal_secret, peer_ip
 
 # The staff API surfaces: only the Next container (ADMIN_API_ALLOWED_NETS) with the internal secret.
@@ -63,5 +64,6 @@ class AdminNetworkMiddleware:
                 return HttpResponseNotFound(b"")
         elif path.startswith(ADMIN_API_PREFIXES):
             if not passes_admin_gate(request):
-                return JsonResponse(error_body("permission_denied", request), status=403)
+                body = error_body("permission_denied", request)
+                return JsonResponse(localize_admin_body(body, request_admin_language(request)), status=403)
         return self.get_response(request)

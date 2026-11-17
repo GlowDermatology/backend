@@ -18,27 +18,28 @@ from glowderma.core.api.fields import (
     AwareDateTimeField,
     BoundedListField,
     HttpsUrlField,
+    LenientPhoneField,
     PercentField,
-    PhoneField,
 )
 from glowderma.core.api.serializers import ActorSerializer
 from glowderma.core.media import absolute_media_url, optional_variant_url
+from glowderma.core.uzsource import N_
 from glowderma.notifications import selectors, services
 from glowderma.notifications.models import Campaign, CampaignTest, CustomerSegment, StatusTemplate, TestDevice
 
 # A ``{`` that does not open ``{raqam}`` (the DB CHECK uses the same pattern).
 UNKNOWN_PLACEHOLDER = re.compile(r"\{(?!raqam\})")
 MESSAGES = {
-    "title_min": "Sarlavhani kiriting.",
-    "title_max": "60 belgidan oshmasin.",
-    "body_min": "Matnni kiriting.",
-    "body_max": "180 belgidan oshmasin.",
-    "product_not_found": "Mahsulot topilmadi yoki yashirin.",
-    "customer_not_found": "Bu raqam bilan mijoz topilmadi.",
-    "in_past": "Kelajakdagi vaqtni tanlang.",
-    "unknown_placeholder": "Faqat {raqam} o‘rinbosari ishlatiladi.",
-    "label_min": "Qurilma nomini kiriting.",
-    "label_max": "60 belgidan oshmasin.",
+    "title_min": N_("Sarlavhani kiriting."),
+    "title_max": N_("60 belgidan oshmasin."),
+    "body_min": N_("Matnni kiriting."),
+    "body_max": N_("180 belgidan oshmasin."),
+    "product_not_found": N_("Mahsulot topilmadi yoki yashirin."),
+    "customer_not_found": N_("Bu raqam bilan mijoz topilmadi."),
+    "in_past": N_("Kelajakdagi vaqtni tanlang."),
+    "unknown_placeholder": N_("Faqat {raqam} o‘rinbosari ishlatiladi."),
+    "label_min": N_("Qurilma nomini kiriting."),
+    "label_max": N_("60 belgidan oshmasin."),
 }
 TEST_DEVICES_MAX = 10
 
@@ -190,7 +191,7 @@ class TestDeviceSerializer(serializers.Serializer[TestDevice]):
 class TestDeviceCreateSerializer(serializers.Serializer[dict[str, Any]]):
     """``POST notifications/test-devices/``: the customer's phone and a label for the registry."""
 
-    phone = PhoneField()
+    phone = LenientPhoneField()
     # ``allow_blank``: DRF trims first and would answer ``blank``; the contract wants ``min_length`` with
     # its own copy for an empty or whitespace-only label.
     label = serializers.CharField(  # type: ignore[assignment]  # a field, not Field.label
@@ -311,7 +312,7 @@ class NotificationLinkInputSerializer(serializers.Serializer[dict[str, Any]]):
 class NotificationAudienceInputSerializer(serializers.Serializer[dict[str, Any]]):
     type = serializers.ChoiceField(choices=enums.AudienceType.values)
     segment_id = serializers.IntegerField(required=False, allow_null=True)
-    phone = PhoneField(required=False, allow_null=True)
+    phone = LenientPhoneField(required=False, allow_null=True)
 
 
 class NotificationCreateSerializer(serializers.Serializer[dict[str, Any]]):
@@ -529,7 +530,7 @@ class SegmentMembersInputSerializer(serializers.Serializer[dict[str, Any]]):
     customer_ids = CustomerIdsField(
         child=serializers.IntegerField(), max_items=MEMBERS_MAX_ITEMS, required=False
     )
-    phones = CustomerIdsField(child=PhoneField(), max_items=MEMBERS_MAX_ITEMS, required=False)
+    phones = CustomerIdsField(child=LenientPhoneField(), max_items=MEMBERS_MAX_ITEMS, required=False)
 
     def validate_customer_ids(self, value: list[int]) -> list[int]:
         ids = sorted(set(value))

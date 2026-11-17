@@ -29,6 +29,7 @@ from glowderma.core import audit, timeutils
 from glowderma.core.api.exceptions import Conflict, field_error
 from glowderma.core.images import ImageError, process_image
 from glowderma.core.media import media_name
+from glowderma.core.uzsource import N_
 from glowderma.core.variants import delete_with_variants, store_variants
 from glowderma.professionals import bookings, selectors
 from glowderma.professionals.models import (
@@ -345,16 +346,16 @@ STAFF_USER_CONSTRAINT = "professionals_professional_staff_user_id_key"
 OVERRIDE_CONSTRAINT = "hoursoverride_professional_date_unique"
 LOCATION_LOCK = "professionals.location"
 API_MESSAGES = {
-    "location_missing": "Avval klinika manzilini kiriting.",
-    "staff_taken": "Bu xodim boshqa mutaxassisga bog‘langan.",
-    "has_upcoming": (
+    "location_missing": N_("Avval klinika manzilini kiriting."),
+    "staff_taken": N_("Bu xodim boshqa mutaxassisga bog‘langan."),
+    "has_upcoming": N_(
         "Mutaxassisda {n} ta kelgusi qabul bor (kutilayotgan yoki tasdiqlangan). Qabullar o‘zgarmaydi: avval "
         "ularni boshqa vaqtga yoki mutaxassisga ko‘chiring yoki bekor qiling, yoki baribir nofaol qiling."
     ),
-    "override_taken": "Bu sana uchun alohida jadval allaqachon bor.",
-    "block_overlap": "Bu vaqt boshqa band vaqt bilan kesishadi.",
-    "latlng_pair": "Kenglik va uzunlikni birga kiriting.",
-    "slug_taken": "Bu manzil (slug) boshqa mutaxassisda bor.",
+    "override_taken": N_("Bu sana uchun alohida jadval allaqachon bor."),
+    "block_overlap": N_("Bu vaqt boshqa band vaqt bilan kesishadi."),
+    "latlng_pair": N_("Kenglik va uzunlikni birga kiriting."),
+    "slug_taken": N_("Bu manzil (slug) boshqa mutaxassisda bor."),
 }
 
 

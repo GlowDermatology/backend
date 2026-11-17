@@ -67,6 +67,7 @@ from glowderma.core.api.exceptions import (
     not_cancellable,
 )
 from glowderma.core.api.exceptions import OutOfStock as OutOfStockError
+from glowderma.core.uzsource import N_
 from glowderma.delivery import pricing as delivery_pricing
 from glowderma.delivery import quotes as delivery_quotes
 from glowderma.delivery import selectors as delivery_selectors
@@ -96,16 +97,18 @@ from glowderma.payments import services as payment_services
 from glowderma.payments.models import OPEN_REFUND_STATES, Refund
 from glowderma.site_config.models import SiteSettings
 
-MESSAGE_NOT_CANCELLABLE = "Bu buyurtmani bekor qilib bo‘lmaydi."
-MESSAGE_BTS_REFUSED = "BTS buyurtmani bekor qilmadi: {reason}."
-MESSAGE_INVALID_TRANSITION = "Bu holatga o‘tib bo‘lmaydi."
-MESSAGE_RETRY_REFUSED = "BTS ga qayta yuborib bo‘lmaydi."
-MESSAGE_RETRY_PENDING = "BTS so‘rovi allaqachon yuborilmoqda."
-MESSAGE_REFUND_NOT_RESOLVABLE = "Bu qaytarishni yakunlab bo‘lmaydi."
-MESSAGE_REFUND_NOT_RETRYABLE = "Bu qaytarishni qayta yuborib bo‘lmaydi."
-MESSAGE_REFUND_OPEN = "Bu to‘lov uchun qaytarish allaqachon jarayonda."
-MESSAGE_ORDER_BUSY = "Buyurtma boshqa amal bilan band. Birozdan so‘ng qayta urinib ko‘ring."
-MESSAGE_PURCHASE_CONFLICT = "Buyurtma xaridi boshqa mijozga tegishli. Ma’lumotlarni tekshiring."
+MESSAGE_NOT_CANCELLABLE = N_("Bu buyurtmani bekor qilib bo‘lmaydi.")
+MESSAGE_BTS_REFUSED = N_("BTS buyurtmani bekor qilmadi: {reason}.")
+MESSAGE_INVALID_TRANSITION = N_("Bu holatga o‘tib bo‘lmaydi.")
+MESSAGE_RETRY_REFUSED = N_("BTS ga qayta yuborib bo‘lmaydi.")
+MESSAGE_RETRY_PENDING = N_("BTS so‘rovi allaqachon yuborilmoqda.")
+MESSAGE_REFUND_NOT_RESOLVABLE = N_("Bu qaytarishni yakunlab bo‘lmaydi.")
+MESSAGE_REFUND_NOT_RETRYABLE = N_("Bu qaytarishni qayta yuborib bo‘lmaydi.")
+MESSAGE_REFUND_OPEN = N_("Bu to‘lov uchun qaytarish allaqachon jarayonda.")
+MESSAGE_ORDER_BUSY = N_("Buyurtma boshqa amal bilan band. Birozdan so‘ng qayta urinib ko‘ring.")
+# The 409 code of "the order row is held by another change" (admin contract §1.6): transient, retry later.
+CODE_ORDER_BUSY = "order_busy"
+MESSAGE_PURCHASE_CONFLICT = N_("Buyurtma xaridi boshqa mijozga tegishli. Ma’lumotlarni tekshiring.")
 # How long an admin request waits for the order row (a BTS create holds it across two bounded BTS calls).
 ADMIN_LOCK_WAIT = timedelta(seconds=5)
 LOCK_NOT_AVAILABLE = "55P03"  # PostgreSQL SQLSTATE lock_not_available (lock_timeout expired)
@@ -198,7 +201,7 @@ def lock_order(order_id: int, *, skip_locked: bool = False, wait: timedelta | No
     """The order row ``SELECT … FOR UPDATE OF`` itself — the first lock of every flow.
 
     ``wait`` bounds the wait for the row (``SET LOCAL lock_timeout`` inside a savepoint, restored right after
-    the row is locked): the admin paths pass :data:`ADMIN_LOCK_WAIT` and answer 409 ``conflict``
+    the row is locked): the admin paths pass :data:`ADMIN_LOCK_WAIT` and answer 409 ``order_busy``
     (:data:`MESSAGE_ORDER_BUSY`) instead of queueing behind a BTS call without limit.
     """
     qs = Order.objects.select_for_update(of=("self",), skip_locked=skip_locked).filter(pk=order_id)
@@ -216,7 +219,7 @@ def lock_order(order_id: int, *, skip_locked: bool = False, wait: timedelta | No
                 _set_lock_timeout(previous)
         except OperationalError as exc:
             if getattr(exc.__cause__, "sqlstate", None) == LOCK_NOT_AVAILABLE:
-                raise Conflict(MESSAGE_ORDER_BUSY) from exc
+                raise Conflict(MESSAGE_ORDER_BUSY, code=CODE_ORDER_BUSY) from exc
             raise
     if order is None:
         raise OrderNotFound(f"Order {order_id} does not exist")
@@ -989,7 +992,7 @@ def cancel_order(
 
     Effects: ``cancelled`` (reason ``admin``, note, ``cancelled_by``), events ``cancelled`` (+
     ``refund_requested``), push ``cancelled``, audit ``order.cancelled``. The Order lock is awaited at most
-    :data:`ADMIN_LOCK_WAIT` (409 ``conflict``); the reversal instant is :func:`ledger_instant`.
+    :data:`ADMIN_LOCK_WAIT` (409 ``order_busy``); the reversal instant is :func:`ledger_instant`.
     """
     _aware(at, "at")
     note = clean_reason(reason)
@@ -1028,7 +1031,7 @@ def cancel_order(
                     raise ProviderUnavailable() from exc
                 if not outcome.ok:
                     raise NotCancellable(
-                        MESSAGE_BTS_REFUSED.format(reason=outcome.reason or "posilka kuryerda")
+                        MESSAGE_BTS_REFUSED.format(reason=outcome.reason or N_("posilka kuryerda"))
                     )
                 bts_cancelled = True
         refund = None
@@ -1227,20 +1230,20 @@ def retry_shipment(order_id: int, actor_id: int, *, request: Any = None) -> None
 # --- Yandex Delivery: dispatch (plan §3.6) and the claim writer (§3.7) -------------------------------------
 
 AUDIT_DISPATCH_REQUESTED = "order.dispatch_requested"
-MESSAGE_DISPATCH_REFUSED = "Bu buyurtma uchun kuryer chaqirib bo‘lmaydi."
-MESSAGE_DISPATCH_ACTIVE = "Kuryer allaqachon chaqirilgan."
-MESSAGE_DISPATCH_CANCELLING = "Buyurtma bekor qilinmoqda."
-MESSAGE_DISPATCH_NO_PIN = "Manzilning xaritadagi nuqtasi yo‘q."
-MESSAGE_DISPATCH_NO_REVIEW = "Bu buyurtmada tasdiqlanadigan narx yo‘q."
-MESSAGE_DISPATCH_METHOD_DISABLED = "Bu yetkazish usuli o‘chirilgan."
-MESSAGE_DISPATCH_TOO_HEAVY = "Jo‘natma bu yetkazish usuli uchun juda og‘ir."
+MESSAGE_DISPATCH_REFUSED = N_("Bu buyurtma uchun kuryer chaqirib bo‘lmaydi.")
+MESSAGE_DISPATCH_ACTIVE = N_("Kuryer allaqachon chaqirilgan.")
+MESSAGE_DISPATCH_CANCELLING = N_("Buyurtma bekor qilinmoqda.")
+MESSAGE_DISPATCH_NO_PIN = N_("Manzilning xaritadagi nuqtasi yo‘q.")
+MESSAGE_DISPATCH_NO_REVIEW = N_("Bu buyurtmada tasdiqlanadigan narx yo‘q.")
+MESSAGE_DISPATCH_METHOD_DISABLED = N_("Bu yetkazish usuli o‘chirilgan.")
+MESSAGE_DISPATCH_TOO_HEAVY = N_("Jo‘natma bu yetkazish usuli uchun juda og‘ir.")
 # The warehouse calendar's refusals (``delivery.warehouse.DispatchRefusal``), answered with their own code.
 MESSAGE_DISPATCH_REFUSALS: dict[str, str] = {
-    "not_configured": "Ombor ma’lumotlari to‘liq kiritilmagan.",
-    "suspended": "Kuryer chaqirish vaqtincha to‘xtatilgan.",
-    "closed": "Ombor hozir yopiq.",
-    "after_cutoff": "Bugun kuryer chaqirish vaqti tugadi.",
-    "returns_unavailable": "Ombor hozir qaytgan jo‘natmalarni qabul qilmaydi.",
+    "not_configured": N_("Ombor ma’lumotlari to‘liq kiritilmagan."),
+    "suspended": N_("Kuryer chaqirish vaqtincha to‘xtatilgan."),
+    "closed": N_("Ombor hozir yopiq."),
+    "after_cutoff": N_("Bugun kuryer chaqirish vaqti tugadi."),
+    "returns_unavailable": N_("Ombor hozir qaytgan jo‘natmalarni qabul qilmaydi."),
 }
 # A delivered order closes the cases a failed hand-over or an uncertain dispatch had opened.
 DELIVERED_RESOLVES: tuple[str, ...] = (
@@ -1309,7 +1312,7 @@ def request_dispatch(
 ) -> int:
     """``POST orders/{id}/dispatch/`` (plan §3.6): staff checked the contents and weighed the parcel.
 
-    Under the Order lock (awaited at most :data:`ADMIN_LOCK_WAIT`, 409 ``conflict``) every refusal of
+    Under the Order lock (awaited at most :data:`ADMIN_LOCK_WAIT`, 409 ``order_busy``) every refusal of
     :func:`selectors.dispatch_blocker` is answered (409 ``invalid_transition`` / ``conflict`` /
     ``coordinates_required`` / the warehouse calendar's code); a switched ``method`` must be enabled (409
     ``method_disabled``) and its class carry the weight (409 ``too_heavy``); ``approved_price`` needs an open
@@ -1599,35 +1602,35 @@ def apply_yandex_claim(order_id: int, snapshot: Any, *, source: str) -> ClaimApp
 
 AUDIT_CARRIER_CANCEL = "order.carrier_cancel"
 AUDIT_RETURN_CONFIRMED = "order.return_confirmed"
-MESSAGE_YANDEX_DELIVERED = "Buyurtma mijozga yetkazilgan: uni bekor qilib bo‘lmaydi."
-MESSAGE_YANDEX_COURIER_ACTIVE = (
+MESSAGE_YANDEX_DELIVERED = N_("Buyurtma mijozga yetkazilgan: uni bekor qilib bo‘lmaydi.")
+MESSAGE_YANDEX_COURIER_ACTIVE = N_(
     "Yandex kuryeri chaqirilgan: buyurtmani bekor qilishdan oldin kuryer buyurtmasi bekor qilinishi kerak."
 )
-MESSAGE_YANDEX_PARCEL_OUT = (
+MESSAGE_YANDEX_PARCEL_OUT = N_(
     "Posilka kuryerda, Yandex esa uni omborga qaytarayotganini bildirmagan: buyurtmani hozir bekor qilib "
     "bo‘lmaydi."
 )
-MESSAGE_YANDEX_REFUSED = (
+MESSAGE_YANDEX_REFUSED = N_(
     "Yandex kuryer buyurtmasini bekor qilmadi (kuryer posilkani olgan yoki bekor qilish muddati o‘tgan). "
     "Holatni tekshirib, qayta urinib ko‘ring."
 )
-MESSAGE_YANDEX_RETURN_REFUSED = (
+MESSAGE_YANDEX_RETURN_REFUSED = N_(
     "Yandex posilkani omborga qaytarishni rad etdi. Yandex qo‘llab-quvvatlash xizmatiga murojaat qiling."
 )
-MESSAGE_YANDEX_RETURN_REQUESTED = (
+MESSAGE_YANDEX_RETURN_REQUESTED = N_(
     "Yandexdan posilkani omborga qaytarish so‘raldi. Buyurtma hali bekor qilinmadi: Yandex qaytarishni "
     "tasdiqlagach, bekor qilishni qayta bosing."
 )
-MESSAGE_YANDEX_CANCEL_PENDING = (
+MESSAGE_YANDEX_CANCEL_PENDING = N_(
     "Yandex kuryer buyurtmasini bekor qilishni hali tasdiqlamadi. Birozdan so‘ng qayta urinib ko‘ring."
 )
-MESSAGE_YANDEX_BUSY = (
+MESSAGE_YANDEX_BUSY = N_(
     "Bu buyurtma bo‘yicha Yandex bilan boshqa amal bajarilmoqda (kuryer chaqirilmoqda). Birozdan so‘ng "
     "qayta urinib ko‘ring."
 )
-MESSAGE_YANDEX_UNAVAILABLE = "Yandex javob bermadi, buyurtma bekor qilinmadi. Qayta urinib ko‘ring."
-MESSAGE_RETURN_NOT_CONFIRMABLE = "Qaytayotgan posilka yo‘q: qaytishni tasdiqlab bo‘lmaydi."
-MESSAGE_RETURN_CONFIRMED = "Posilka qaytgani allaqachon tasdiqlangan."
+MESSAGE_YANDEX_UNAVAILABLE = N_("Yandex javob bermadi, buyurtma bekor qilinmadi. Qayta urinib ko‘ring.")
+MESSAGE_RETURN_NOT_CONFIRMABLE = N_("Qaytayotgan posilka yo‘q: qaytishni tasdiqlab bo‘lmaydi.")
+MESSAGE_RETURN_CONFIRMED = N_("Posilka qaytgani allaqachon tasdiqlangan.")
 RESOLVED_BY_CANCEL_NOTE = "Buyurtma bekor qilindi."
 RESOLVED_BY_RETURN_NOTE = "Posilka omborga qaytdi."
 RESOLVED_BY_STAFF_DELIVERED_NOTE = "Xodim topshirilganini tasdiqladi."
@@ -2225,20 +2228,24 @@ def confirm_return(order_id: int, actor_id: int, *, note: str = "", request: Any
 
 # --- refunds (handlers, Payme confirmation, staff resolve/retry) --------------------------------------------
 
-MESSAGE_REFUND_STILL_PAID = (
+MESSAGE_REFUND_STILL_PAID = N_(
     "Click to‘lovni qaytarmagan. Avval mijozga qo‘lda to‘lang, so‘ng «qo‘lda to‘landi» belgisi bilan "
     "yakunlang yoki qaytarishni qayta urinib ko‘ring."
 )
-MESSAGE_REFUND_CLICK_FAKE = (
+MESSAGE_REFUND_CLICK_FAKE = N_(
     "Click sinov rejimida: to‘lov holatini tekshirib bo‘lmaydi. Click ulanganidan keyin yakunlang."
 )
-MESSAGE_REFUND_NO_PAYDOC = (
+MESSAGE_REFUND_NO_PAYDOC = N_(
     "Bu to‘lovda Click to‘lov raqami yo‘q, shuning uchun Click’dan holatini tekshirib bo‘lmaydi. Mijozga "
     "qo‘lda to‘lang, so‘ng «qo‘lda to‘landi» belgisi bilan yakunlang."
 )
 # The 409 code of "Click has not reversed the payment" (admin contract §1.6, §7 item 18): the UI offers the
 # manual payout ("Qo‘lda to‘landi") on it.
 CODE_CLICK_NOT_REVERSED = "click_not_reversed"
+# The 409 codes of the two other resolve/retry refusals the Payments board tells apart (admin contract §1.6):
+# no Click payment id (pay out by hand) and Click fake under the production settings (cannot be checked).
+CODE_CLICK_NO_PAYDOC = "click_no_paydoc"
+CODE_CLICK_FAKE_MODE = "click_fake_mode"
 MANUAL_REASON_PAYME = enums.RefundManualReason.PAYME.value
 MANUAL_REASON_NO_PAYDOC = enums.RefundManualReason.NO_PAYDOC.value
 MANUAL_REASON_FAKE_MODE = enums.RefundManualReason.FAKE_MODE.value
@@ -2311,14 +2318,15 @@ def _click_status_for_resolve(row: payment_selectors.RefundRow, manual_payout: b
     """The fresh Click status check of a ``failed`` Click refund's resolve (customer contract §2.13.0), run
     **outside any row lock**: ``True`` when Click reversed the payment (closed without a payout); still paid
     without ``manual_payout`` → 409 ``click_not_reversed`` ``MESSAGE_REFUND_STILL_PAID``; Click down → 503;
-    fake Click under the production settings → 409 ``MESSAGE_REFUND_CLICK_FAKE``. A payment without a Click
-    payment id is never checked (Click cannot be asked about it): without ``manual_payout`` → 409 ``conflict``
-    ``MESSAGE_REFUND_NO_PAYDOC``, never the "Click has not reversed" answer."""
+    fake Click under the production settings → 409 ``click_fake_mode`` ``MESSAGE_REFUND_CLICK_FAKE``. A
+    payment without a Click payment id is never checked (Click cannot be asked about it): without
+    ``manual_payout`` → 409 ``click_no_paydoc`` ``MESSAGE_REFUND_NO_PAYDOC``, never the "Click has not
+    reversed" answer."""
     if integration_modes.callbacks_refused("click"):
-        raise InvalidTransition(MESSAGE_REFUND_CLICK_FAKE)
+        raise InvalidTransition(MESSAGE_REFUND_CLICK_FAKE, code=CODE_CLICK_FAKE_MODE)
     if not row.provider_payment_ref:
         if not manual_payout:
-            raise Conflict(MESSAGE_REFUND_NO_PAYDOC)
+            raise Conflict(MESSAGE_REFUND_NO_PAYDOC, code=CODE_CLICK_NO_PAYDOC)
         return False
     order = Order.objects.get(pk=row.order_id)
     try:
@@ -2364,10 +2372,10 @@ def resolve_refund(
     still ``paid``, no other open or succeeded refund; else 409 ``MESSAGE_REFUND_NOT_RESOLVABLE``, Click never
     asked), then a fresh Click status check outside any lock (``reversed`` → closed; still ``paid`` → only
     with ``manual_payout``, else 409 ``click_not_reversed``; no Click payment id → not checked, only with
-    ``manual_payout``, else 409 ``conflict``; Click down → 503; fake Click under the production settings →
-    409), then the guard again under the Order → Payment locks. The state is checked under the Order lock (two
-    concurrent resolves: the second gets 409 ``invalid_transition``); writes the ``refund_succeeded`` /
-    ``refund_failed`` event; ``manual_payout`` is audited."""
+    ``manual_payout``, else 409 ``click_no_paydoc``; Click down → 503; fake Click under the production
+    settings → 409 ``click_fake_mode``), then the guard again under the Order → Payment locks. The state is
+    checked under the Order lock (two concurrent resolves: the second gets 409 ``invalid_transition``);
+    writes the ``refund_succeeded`` / ``refund_failed`` event; ``manual_payout`` is audited."""
     _aware(at, "at")
     if outcome not in (enums.RefundState.SUCCEEDED, enums.RefundState.FAILED):
         raise ValueError(f"A refund resolves to succeeded or failed, not {outcome!r}")
@@ -2427,15 +2435,16 @@ def retry_refund(
     ``requested`` + outbox, or ``manual_required`` without ``click_paydoc_id``; Payme → ``manual_required``)
     and its ``refund_requested`` event. Refused with the Uzbek messages under the Order lock: the refund is no
     longer ``failed``, its payment is no longer ``paid`` (a later retry already returned the money), another
-    refund of the order is open, or — for Click — the Click port is fake under the production settings
-    (``MESSAGE_REFUND_CLICK_FAKE``: the retry would skip the status check of a later resolve)."""
+    refund of the order is open, or — for Click — the Click port is fake under the production settings (409
+    ``click_fake_mode`` ``MESSAGE_REFUND_CLICK_FAKE``: the retry would skip the status check of a later
+    resolve)."""
     _aware(at, "at")
     with transaction.atomic():
         order, row = _locked_refund_row(refund_id)
         if row.state != enums.RefundState.FAILED:
             raise InvalidTransition(MESSAGE_REFUND_NOT_RETRYABLE)
         if row.provider == enums.PaymentProvider.CLICK and integration_modes.callbacks_refused("click"):
-            raise InvalidTransition(MESSAGE_REFUND_CLICK_FAKE)
+            raise InvalidTransition(MESSAGE_REFUND_CLICK_FAKE, code=CODE_CLICK_FAKE_MODE)
         payment = payment_selectors.get_payment(row.payment_id)
         if payment is None or payment.status != enums.PaymentStatus.PAID:
             raise InvalidTransition(MESSAGE_REFUND_NOT_RETRYABLE)

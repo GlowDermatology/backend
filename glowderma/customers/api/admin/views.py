@@ -19,6 +19,7 @@ from glowderma.core.api.exceptions import ContractValidationError
 from glowderma.core.api.schema import ADMIN_ERRORS, EXPORT_PARAM, IDEMPOTENCY_KEY_HEADER
 from glowderma.core.exports import ExportMixin, format_export_datetime
 from glowderma.core.idempotency import idempotent
+from glowderma.core.uzsource import N_
 from glowderma.customers import selectors, services
 from glowderma.customers.api.admin.serializers import (
     CashbackAdjustmentDirectionSerializer,
@@ -33,7 +34,7 @@ from glowderma.notifications.api.admin.serializers import CustomerListItemSerial
 
 class CustomerViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
     serializer_class = CustomerListItemSerializer
-    export_name = "mijozlar"
+    export_name = N_("mijozlar")
     export_resource = "customers"
     export_headers = labels.CUSTOMER_EXPORT_HEADERS
     export_filter_keys = frozenset(CustomerListQuerySerializer().fields)
@@ -60,7 +61,7 @@ class CustomerViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
                 int(getattr(customer, "lifetime_total", 0)),
                 "" if percent is None else f"{percent:.2f}",
                 int(getattr(customer, "balance", 0)),
-                labels.CUSTOMER_STATUS[customer.status],
+                labels.text(labels.CUSTOMER_STATUS, customer.status),
             )
 
     @extend_schema(

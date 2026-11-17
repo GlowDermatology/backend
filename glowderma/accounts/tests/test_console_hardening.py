@@ -60,6 +60,14 @@ TOPIC_PAYLOADS: dict[str, dict[str, Any]] = {
     "catalog.stock_synced": {"job_id": 5},
     "email.notice": {"to": "sealed-address", "lang": "uz", "kind": "password_changed"},
     "email.send": {"sms_code_id": 6, "lang": "uz", "purpose": "signup"},
+    "email.staff_password_link": {
+        "link_id": 17,
+        "to": "sealed-address",
+        "link": "sealed-link",
+        "name": "sealed-name",
+        "lang": "uz",
+        "purpose": "invite",
+    },
     "job.queued": {"job_id": 7, "kind": "billz_import"},
     "push.account_security": {
         "customer_id": 13,
@@ -181,6 +189,14 @@ def console_reset(manager_client: Client, target: StaffUser) -> Any:
     )
 
 
+def reset_keeping_console(target: StaffUser, manager: StaffUser) -> str:
+    """A manager's panel reset whose temporary password still opens the console (``must_change=False``): the
+    four-eyes rule is about whoever holds that password, and the console refuses a pending forced change."""
+    temporary, _ = account_services.reset_staff_password(target, actor=manager, must_change=False)
+    assert temporary is not None
+    return temporary
+
+
 def refused_reason(user: StaffUser) -> str:
     entry = AuditEntry.objects.filter(action="console.enrol_refused", entity_id=str(user.pk)).last()
     return entry.reason if entry is not None else ""
@@ -232,7 +248,7 @@ def test_grant_opens_a_window_that_expires_and_closes_on_enrolment(monkeypatch: 
     assert entry.after["window_action"] == "ops_access.granted"  # type: ignore[index]
     assert entry.after["window_opened_by"] == "system"  # type: ignore[index]
     # a device lost without a reset (deleted by hand): no new enrolment until a manager resets 2FA
-    twofactor.reset_devices(user)
+    twofactor.reset_devices(user, scope=twofactor.CONSOLE)
     assert enrol_through_forms(Client(), user)["Location"] == LOGIN
 
 
@@ -283,11 +299,11 @@ def test_one_manager_cannot_reset_both_factors_and_enrol(password_first: bool) -
     ops_login(manager_client, manager)
     temporary = ""
     if password_first:
-        temporary, _ = account_services.reset_staff_password(target, actor=manager)
+        temporary = reset_keeping_console(target, manager)
         ops_login(manager_client, manager)
     console_reset(manager_client, target)
     if not password_first:
-        temporary, _ = account_services.reset_staff_password(target, actor=manager)
+        temporary = reset_keeping_console(target, manager)
     answer = enrol_through_forms(Client(), target, temporary)
     assert answer["Location"] == LOGIN
     assert refused_reason(target) == access.SAME_MANAGER
@@ -303,7 +319,7 @@ def test_one_manager_cannot_reset_both_factors_and_enrol(password_first: bool) -
 def test_the_cli_reset_is_not_subject_to_four_eyes() -> None:
     manager = ops_staff("boss@x.uz", is_manager=True)
     target = ops_staff("target@x.uz")
-    temporary, _ = account_services.reset_staff_password(target, actor=manager)
+    temporary = reset_keeping_console(target, manager)
     out = StringIO()
     call_command("ops_access", "reset-2fa", "--email", target.email, "--actor", manager.email, stdout=out)
     assert "console session(s) ended" in out.getvalue()

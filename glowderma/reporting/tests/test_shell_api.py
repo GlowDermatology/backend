@@ -25,6 +25,14 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(timeutils, "now", lambda: ANCHOR)
 
 
+@pytest.fixture
+def superuser(staff: StaffUser) -> StaffUser:
+    """``staff`` as a superuser: the filter tests read every tier (test_audit_tiers.py covers the tiers)."""
+    staff.is_superuser = True
+    staff.save(update_fields=["is_superuser"])
+    return staff
+
+
 def errors(response: Any) -> list[tuple[str | None, str, str]]:
     return [(e["field"], e["code"], e["message"]) for e in response.data["errors"]]
 
@@ -40,7 +48,8 @@ class FakeRequest:
     request_id = "6f1c2a0e9b8d4c37"
 
 
-def test_audit_log_shape_filters_and_ordering(staff_client: APIClient, staff: StaffUser) -> None:
+def test_audit_log_shape_filters_and_ordering(staff_client: APIClient, superuser: StaffUser) -> None:
+    staff = superuser
     other = StaffUserFactory.create(full_name="")
     adjusted = entry(
         datetime(2026, 10, 24, 12, 3, tzinfo=TASHKENT),
@@ -123,7 +132,8 @@ def test_audit_log_query_validation(
     assert response.status_code == 400 and errors(response) == expected
 
 
-def test_audit_log_pagination_and_export(staff_client: APIClient, staff: StaffUser, clock: None) -> None:
+def test_audit_log_pagination_and_export(staff_client: APIClient, superuser: StaffUser, clock: None) -> None:
+    staff = superuser
     for index in range(25):
         entry(
             datetime(2026, 10, 1, 8, index, tzinfo=TASHKENT),

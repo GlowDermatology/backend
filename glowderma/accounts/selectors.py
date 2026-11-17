@@ -24,13 +24,16 @@ from django.db.models import (
 )
 from django.db.models.functions import Cast, Coalesce, Lower, NullIf, TruncDay
 from django.db.models.lookups import Contains
+from django_otp.plugins.otp_totp.models import TOTPDevice
 
+from glowderma.accounts.console import twofactor
 from glowderma.accounts.models import (
     AuthSession,
     Customer,
     CustomerSocialIdentity,
     SmsCode,
     SocialIdentity,
+    StaffPasswordToken,
     StaffUser,
 )
 from glowderma.core import enums, timeutils
@@ -40,8 +43,17 @@ from glowderma.core.timeutils import TASHKENT
 
 # Only the directory columns: never the password hash (or last_login, is_superuser) per row.
 DIRECTORY_COLUMNS = ("id", "full_name", "email", "is_active")
-# The manager's rows add the role and the creation time (``created_at`` = ``date_joined``).
-MEMBER_COLUMNS = (*DIRECTORY_COLUMNS, "is_manager", "date_joined")
+# The manager's rows add the role and the creation time (``created_at`` = ``date_joined``), and the password
+# state (feat/admin-ux).
+MEMBER_COLUMNS = (
+    *DIRECTORY_COLUMNS,
+    "is_manager",
+    "date_joined",
+    "must_change_password",
+    "password_changed_at",
+)
+# The newest password link's columns, annotated as ``invite_<name>`` (:func:`invite_of`).
+INVITE_COLUMNS = ("created_at", "sent_at", "expires_at", "used_at", "revoked_at")
 
 
 class StaffFilters(TypedDict, total=False):
@@ -56,13 +68,57 @@ def _last_sign_in() -> Subquery:
     return Subquery(newest[:1])
 
 
+def _newest_link(column: str) -> Subquery:
+    newest = StaffPasswordToken.objects.filter(staff_id=OuterRef("pk")).order_by("-created_at", "-id")
+    return Subquery(newest.values(column)[:1])
+
+
+@dataclass(frozen=True, slots=True)
+class Invite:
+    """``StaffMember.invite``: the newest password link's state (``StaffInviteState``) and times."""
+
+    state: str
+    sent_at: datetime | None
+    expires_at: datetime | None
+
+
+def invite_of(user: StaffUser) -> Invite:
+    """The ``invite`` of a row read through :func:`with_member_columns`: ``none`` without any link, else the
+    newest link's ``used`` / ``revoked`` / ``expired`` / ``pending`` (open: queued or sent)."""
+    values = {name: getattr(user, f"invite_{name}", None) for name in INVITE_COLUMNS}
+    if values["created_at"] is None:
+        return Invite(enums.StaffInviteState.NONE, None, None)
+    if values["used_at"] is not None:
+        state = enums.StaffInviteState.USED
+    elif values["revoked_at"] is not None:
+        state = enums.StaffInviteState.REVOKED
+    elif values["expires_at"] is not None and values["expires_at"] <= timeutils.now():
+        state = enums.StaffInviteState.EXPIRED
+    else:
+        state = enums.StaffInviteState.PENDING
+    return Invite(state, values["sent_at"], values["expires_at"])
+
+
+def _panel_mfa() -> Exists:
+    """A confirmed admin panel TOTP device (feat/admin-ux; the ops console's devices do not count)."""
+    return Exists(
+        TOTPDevice.objects.filter(user_id=OuterRef("pk"), confirmed=True, name=twofactor.PANEL_DEVICE_NAME)
+    )
+
+
 def with_member_columns(rows: QuerySet[StaffUser]) -> QuerySet[StaffUser]:
-    """``rows`` with what a ``StaffMember`` renders: the role and creation time, ``last_login_at`` (one
-    correlated subquery) and the linked providers (one prefetch query for the whole page, by provider)."""
+    """``rows`` with what a ``StaffMember`` renders: the role, creation time and password state,
+    ``mfa_enabled`` (admin panel TOTP), ``last_login_at`` and the newest password link (correlated
+    subqueries of the same query) and the linked providers (one prefetch query for the whole page, by
+    provider)."""
     identities = SocialIdentity.objects.only("id", "staff_id", "provider").order_by("provider")
     return (
         rows.only(*MEMBER_COLUMNS)
-        .annotate(last_login_at=_last_sign_in())
+        .annotate(
+            last_login_at=_last_sign_in(),
+            **{f"invite_{name}": _newest_link(name) for name in INVITE_COLUMNS},
+            mfa_enabled=_panel_mfa(),
+        )
         .prefetch_related(Prefetch("social_identities", queryset=identities))
     )
 

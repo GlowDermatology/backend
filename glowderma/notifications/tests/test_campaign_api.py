@@ -456,7 +456,7 @@ def test_create_for_one_customer_without_devices_is_a_draft_with_no_reach(
         ({"audience.type": "segment", "audience.segment_id": "999"},
          [("audience.segment_id", "does_not_exist", "Topilmadi.")]),
         ({"audience.type": "customer"}, [("audience.phone", "required", "Majburiy maydon.")]),
-        ({"audience.type": "customer", "audience.phone": "901234567"},
+        ({"audience.type": "customer", "audience.phone": "90123456"},
          [("audience.phone", "invalid", "Telefon raqamini to‘g‘ri kiriting.")]),
         ({"audience.type": "customer", "audience.phone": "+998900000009"},
          [("audience.phone", "customer_not_found", "Bu raqam bilan mijoz topilmadi.")]),

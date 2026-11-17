@@ -41,6 +41,10 @@ def test_defaults_match_contract_1_9() -> None:
         "public",
         "public_ip",
         "public_bff",  # B-W1
+        # feat/admin-ux staff invites
+        "staff_password_token",
+        "staff_password_link",
+        "mfa_verify",  # feat/admin-ux panel MFA
     }
     for rate in DEFAULT_THROTTLE_RATES.values():
         validate_throttle_rates({"login": rate})

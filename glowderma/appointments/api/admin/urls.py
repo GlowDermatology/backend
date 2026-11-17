@@ -10,6 +10,7 @@ from django.urls import URLPattern, URLResolver, path
 from .views import (
     AppointmentActionView,
     AppointmentCancelView,
+    AppointmentRangeView,
     AppointmentRescheduleView,
     AppointmentsMetaView,
     AppointmentsView,
@@ -20,6 +21,7 @@ from .views import (
 urlpatterns: list[URLPattern | URLResolver] = [
     path("appointments/", AppointmentsView.as_view(), name="admin-appointments"),
     path("appointments/meta/", AppointmentsMetaView.as_view(), name="admin-appointments-meta"),
+    path("appointments/range/", AppointmentRangeView.as_view(), name="admin-appointments-range"),
     path(
         "appointments/pending-summary/",
         PendingSummaryView.as_view(),

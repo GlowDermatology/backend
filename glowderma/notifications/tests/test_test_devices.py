@@ -72,7 +72,7 @@ def test_register_by_phone_lists_and_audits(
 @pytest.mark.parametrize(
     ("phone", "label", "expected"),
     [
-        ("901234567", "Telefon", [("phone", "invalid", "Telefon raqamini to‘g‘ri kiriting.")]),
+        ("90123456", "Telefon", [("phone", "invalid", "Telefon raqamini to‘g‘ri kiriting.")]),
         ("+998900000009", "Telefon", [("phone", "customer_not_found", "Bu raqam bilan mijoz topilmadi.")]),
         ("+998901234567", "", [("label", "min_length", "Qurilma nomini kiriting.")]),
         ("+998901234567", "   ", [("label", "min_length", "Qurilma nomini kiriting.")]),

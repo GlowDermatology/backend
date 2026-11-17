@@ -26,7 +26,7 @@ Examples use `jsonc`: `//` comments give types and nullability and are not part 
 | `Authorization: Bearer <access JWT>` | all routes except `auth/login/`, `auth/refresh/`, `auth/logout/` (these identify the session by the refresh token) and `POST auth/oauth/{provider}/` | HS256, `kid` header, claims `iss, aud="staff", sub, sid, iat, exp, jti` (all required). Access TTL 15 min. |
 | `X-GD-Internal-Secret` | sent by Next on every call | Compared in constant time on bytes; an empty configured secret never matches. Required on admin, schema and docs routes in production (403 `permission_denied`). Elsewhere a mismatch is not an error; `X-GD-Client-IP` and `X-Request-ID` are then ignored. |
 | `X-GD-Client-IP` | sent by Next on every call | End-user IP. Honoured only when the internal secret matches; otherwise the client IP is REMOTE_ADDR, or (only when REMOTE_ADDR is in `TRUSTED_PROXIES`) the rightmost `X-Forwarded-For` hop not in `TRUSTED_PROXIES`. Used for throttles and `AuditEntry.ip`. |
-| `Accept-Language` | optional, Next sends `uz` | M1 messages are always Uzbek (`Content-Language: uz`). ru/en catalogs arrive in M2. i18n data fields (`texts`, `name`) always return all three languages. |
+| `Accept-Language` | optional; Next sends the admin panel's language (`gd_admin_language`) | The language of error messages and exports (feat/admin-ux, §1.6, §1.8): the first supported tag in q-order, region ignored (`ru-RU` → `ru`); `q=0`, a malformed `q`, `*`, an unsupported tag or no header → `uz`. Only this header counts — never `StaffUser.language` or a cookie. i18n data fields (`texts`, `name`) always return all three languages. |
 | `Idempotency-Key` | see §1.7 | UUID string (36 chars). |
 | `X-Request-ID` | optional | Accepted only with a valid internal secret, `^[A-Za-z0-9-]{8,64}$`. Otherwise Django generates one. |
 | `Content-Type` | on bodies | `application/json` or `multipart/form-data` (where stated). Anything else → 415. |
@@ -41,7 +41,7 @@ Examples use `jsonc`: `//` comments give types and nullability and are not part 
 | `invalid_credentials` | `auth/login/` only | Show the form error |
 
 ### 1.3 Response headers
-`X-Request-ID` (always) · `Cache-Control: no-store` (always) · `Retry-After` (on 429 and 409 `request_in_progress`) · `Idempotent-Replayed: true` (on a replayed response) · `Content-Disposition` (on exports).
+`X-Request-ID` (always) · `Cache-Control: no-store` (always) · `Content-Language: uz|ru|en` (always: the language chosen from `Accept-Language`, §1.2 — one of the three, never the raw header) with `Vary: Accept-Language` · `Retry-After` (on 429 and 409 `request_in_progress`) · `Idempotent-Replayed: true` (on a replayed response) · `Content-Disposition` (on exports). Other `/api/` paths keep `Content-Language: uz` (customer views set their own).
 
 ### 1.4 Values
 
@@ -56,7 +56,7 @@ Examples use `jsonc`: `//` comments give types and nullability and are not part 
 | Time of day | `"HH:MM"`, Tashkent | `"09:00"` |
 | Percent | Decimal **string**. Responses always have 2 dp. Requests allow ≤2 dp; more → `max_decimal_places`; a JSON number → `invalid` | `"1.00"`, `"0.57"`, req `"1.5"` |
 | Ratio | JSON number in 0..1, ≤4 dp | `0.679` |
-| Phone | E.164 `^\+998\d{9}$` | `"+998901234567"` |
+| Phone | E.164 `^\+998\d{9}$` in every response and stored value. **Requests (feat/admin-ux, phone leniency):** the admin fields that take a phone — `segments/{id}/members/` `phones[]`, `appointments/` `phone`, `notifications/` `audience.phone`, `notifications/test-devices/` `phone`, `location/` `phone` — also accept what staff paste: ASCII digits with spaces (any Unicode space), `-` / Unicode dashes, `.`, `(`, `)`, `/`, an optional `+998`, `998` or `00998` before exactly 9 national digits (`+998 90 123-45-67`, `998901234567`, `(90) 123 45 67`, `90 123 45 67`); they are normalised to E.164 before lookup, deduplication and storage. Anything else (letters, another country code, a wrong digit count, > 32 characters, a JSON number) → `invalid` "Telefon raqamini to‘g‘ri kiriting." (`core.phones.normalize_uz_phone`). The customer API keeps the strict E.164 rule. | `"+998901234567"` |
 | Enums | literals from §3, identical to the frontend unless §7 lists a mapping | `"awaiting_payment"` |
 | i18n text | `{"uz": str, "ru": str, "en": str}`; `""` means not filled, never `null` | |
 | Absent value | Key always present with `null`; lists are `[]`; keys are never omitted | |
@@ -88,7 +88,7 @@ Collections embedded in a resource (customer ledger and purchases, order items, 
 ### 1.6 Errors
 ```jsonc
 {"code": "validation_error",                      // machine code, table below
- "message": "Maydonlarni tekshiring.",            // Uzbek; ActionResult.error = the first errors[] entry with field null, else this message
+ "message": "Maydonlarni tekshiring.",            // in the request language (below); ActionResult.error = the first errors[] entry with field null, else this message
  "errors": [{"field": "texts.uz.name",            // dotted snake_case path | null (non-field)
              "code": "min_length",
              "message": "O‘zbekcha nomni kiriting (kamida 2 belgi)."}],
@@ -98,6 +98,8 @@ Collections embedded in a resource (customer ledger and purchases, order items, 
 - DRF nested errors are flattened server-side. Paths start at the body root; list indexes are numeric segments (`tiers.1.percent`); multipart names map 1:1 (`audience.phone`); query errors use the param name (`page_size`).
 - Order: one entry per (field, code), in validation order. The FE mapper keeps the first message per field.
 - `message` is `"Maydonlarni tekshiring."` unless the endpoint lists a specific message.
+- **Language (feat/admin-ux):** the messages in this document are the Uzbek source texts. The envelope has the same shape and the same `code`s in every language; `message` and each `errors[].message` are rendered in the request's language (§1.2: `uz` / `ru` / `en`). A text the catalog does not know (free text, a provider's own message) stays Uzbek; values inside a message (names, ids, amounts) are never translated, only regrouped (`12 000` → `12,000` in English). This holds for the DRF handler, the admin 404/500 pages, the 413 `payload_too_large` and the 403 of the admin network gate (`/api/v1/schema/` and `/api/v1/docs/` stay Uzbek). The client must branch on `code` and `errors[].code`, never on a message text.
+- **Stored and sent texts never change language:** the API request itself runs in Uzbek; audit entries, outbox payloads, push and inbox notifications, order / appointment events, ledger entries, idempotency records and e-mails are written exactly as before whatever `Accept-Language` says (staff e-mails use the recipient's `StaffUser.language`).
 
 | HTTP | `code` | When |
 |---|---|---|
@@ -112,6 +114,9 @@ Collections embedded in a resource (customer ledger and purchases, order items, 
 | 405 | `method_not_allowed` | |
 | 409 | `invalid_transition` | A state machine refuses (order transition, appointment action, retry-shipment precondition) |
 | 409 | `click_not_reversed` | M3: `payments/{id}/refunds/{refund_id}/resolve/` of a failed Click refund without `manual_payout` while Click still shows the payment paid (§7 item 18); the UI then offers "Qo‘lda to‘landi" |
+| 409 | `click_no_paydoc` | feat/admin-ux (`conflict` before): `…/resolve/` of a failed Click refund without `manual_payout` whose payment has no Click payment id — Click cannot be asked; the UI offers "Qo‘lda to‘landi" (§7 item 18) |
+| 409 | `click_fake_mode` | feat/admin-ux (`invalid_transition` before): `…/resolve/` of a failed Click refund, or `…/retry/` of a failed Click refund, while the Click port is fake under the production settings; nothing written (§7 item 18) |
+| 409 | `order_busy` | feat/admin-ux (`conflict` before): the order row is held by another change for longer than the admin lock wait (5 s; e.g. a BTS / Yandex call in flight) — every admin endpoint that locks an order (cancel, transitions, dispatch, retry-shipment, confirm-return, refund resolve/retry). Transient: retry with the same `Idempotency-Key` "Buyurtma boshqa amal bilan band. Birozdan so‘ng qayta urinib ko‘ring." |
 | 409 | `not_cancellable` | Order cancel refused (§2.2; a Yandex Delivery order also when Yandex refuses, the parcel is delivered or out of sight, §2.18) |
 | 409 | `return_requested` | Yandex Delivery: the cancel of a picked-up order asked Yandex to bring the parcel back (or the request's answer was lost) and Yandex has not shown the return yet; the order is unchanged, retry later — a retry only re-reads, the return is never requested twice (§2.18) |
 | 409 | `coordinates_required` · `method_disabled` · `too_heavy` · `not_configured` · `suspended` · `closed` · `after_cutoff` · `returns_unavailable` | `orders/{id}/dispatch/` refusals: no map pin, the chosen method is off, the parcel is too heavy for the class, the warehouse calendar refuses a courier now (§2.18) |
@@ -172,12 +177,12 @@ The FE creates one key per form/dialog instance (`crypto.randomUUID()`), reuses 
 ### 1.8 Exports (`?export=csv|xlsx`)
 - **Where:** available on every list marked **E** in §2.0.
 - **Rows:** same filters and ordering as the JSON list; `page` and `page_size` are ignored. More than 50 000 rows → 400, field `export`, code `export_too_large` "Juda ko‘p qator. Filtrni toraytiring.".
-- **Response:** 200 with `Content-Disposition: attachment; filename="<name>-YYYYMMDD-HHMM.<ext>"` (Tashkent time).
+- **Response:** 200 with `Content-Disposition: attachment; filename="<name>-YYYYMMDD-HHMM.<ext>"` (Tashkent time) and `Content-Language`. `<name>` is the table's name in the request language (§1.2): `categories-20261117-0412.csv` in English, `kategoriyalar-…` in Uzbek. A name that is not ASCII (Russian) is sent as RFC 6266 / 5987 `attachment; filename="kategorii-….xlsx"; filename*=UTF-8''%D0%BA%D0%B0…-….xlsx`: the `filename` fallback is the Russian name transliterated to ASCII (`товары` → `tovary`, `журнал-действий` → `zhurnal-deystviy`; the Uzbek name only if a character has no Latin spelling), so a client that reads only `filename` still saves a Russian name.
 - **CSV:** `text/csv; charset=utf-8`; UTF-8 **BOM**; `;` separator; CRLF; every cell double-quoted with `"` doubled.
-- **XLSX:** one sheet named `<name>`; text cells typed `s`; money and counts numeric.
-- **Formatting:** Uzbek headers; enums as the Uzbek labels in §5.8; datetimes as text `YYYY-MM-DD HH:MM` (Tashkent); phones as text in E.164; money as plain integers.
+- **XLSX:** one sheet named `<name>` in the request language (Excel-forbidden `\ / ? * [ ] :` removed, at most 31 characters); text cells typed `s`; money and counts numeric.
+- **Formatting:** headers in the request language (the Uzbek ones below are the source; a header or label that reads differently on one list has that list's own rendering — msgctxt `export <resource>`: `Nomi` is "Название"/"Name" on products, categories, services and segments, and a Russian `Faol` / `Nofaol` agrees with the list's noun: «Активна» for categories and services, «Активен» elsewhere); enums as the labels of §5.8 in the request language (also `Ha` / `Yo‘q`, `Faol` / `Nofaol`, the refund state, the weekday short names, `mahsulot #<id>`); data — names, ids, amounts, dates, phones, free text — is never translated; datetimes as text `YYYY-MM-DD HH:MM` (Tashkent); phones as text in E.164; money as plain integers.
 - **Formula safety:** a cell that comes from a string field and starts with `=` `+` `-` `@` TAB or CR gets a leading `'`. Integer cells are exempt, and so is a value that is exactly an E.164 phone (`+` then 7–15 digits, no leading zero): it cannot carry a formula and stays plain E.164 text.
-- **Audit:** every export writes the AuditEntry `export.downloaded` `{resource, filters, row_count, format}`.
+- **Audit:** every export writes the AuditEntry `export.downloaded` `{resource, filters, row_count, format}` (in Uzbek, outside the export's language: the audit text never changes language).
 
 | Resource | `<name>` | Columns |
 |---|---|---|
@@ -203,6 +208,10 @@ The FE creates one key per form/dialog instance (`crypto.randomUUID()`), reuses 
 | `auth/refresh/` and `auth/logout/` per client IP | 600/min (loose ceiling) |
 | `?export=` per staff | 10/min |
 | Everything else per staff | 1200/min |
+| `auth/password-token/check/` and `set/` per client IP (feat/admin-ux, `staff_password_token`) | 30/min |
+| `staff/{id}/send-password-link/` per manager and account, `auth/password-link/` per caller (`staff_password_link`) | 5/hour |
+| `auth/mfa/verify/` per client IP (feat/admin-ux, `mfa_verify`) | 30/min |
+| Admin panel MFA code checks per account (`verify/`, `confirm/`, `disable/`, `recovery-codes/`; LoginGuard scope `panel_otp`) | 5/min, then exponential lockout (1 → 15 min) |
 
 ---
 
@@ -215,8 +224,13 @@ The FE creates one key per form/dialog instance (`crypto.randomUUID()`), reuses 
 |---|---|---|---|
 | POST | `auth/login/`, `auth/refresh/` | | 200 |
 | POST | `auth/logout/` (body `refresh`, `scope`), `auth/change-password/` | | 204 |
-| GET | `auth/me/` | | 200 |
+| GET / PATCH | `auth/me/` (PATCH `language`, feat/admin-ux) | | 200 |
+| POST | `auth/password-link/` (feat/admin-ux; while a change is pending) | | 200 |
+| POST | `auth/password-token/check/` (no bearer), `auth/password-token/set/` (no bearer; 204) (feat/admin-ux) | | 200 / 204 |
 | POST | `auth/oauth/{provider}/` (no bearer; M0b) | | 200 |
+| GET | `auth/mfa/` (feat/admin-ux) | | 200 |
+| POST | `auth/mfa/setup/`, `auth/mfa/confirm/`, `auth/mfa/disable/`, `auth/mfa/recovery-codes/` (feat/admin-ux) | | 200 |
+| POST | `auth/mfa/verify/` (no bearer; feat/admin-ux) | | 200 |
 | POST | `auth/oauth/{provider}/link/` (M0b) | | 200 |
 | DELETE | `auth/oauth/{provider}/` (M0b) | | 204 |
 | GET | `orders/` | P E | 200 |
@@ -266,17 +280,20 @@ The FE creates one key per form/dialog instance (`crypto.randomUUID()`), reuses 
 | GET / PATCH / DELETE | `segments/{id}/` | | 200 / 200 / 204 |
 | GET / POST | `segments/{id}/members/` | P E / – | 200 |
 | DELETE | `segments/{id}/members/{customer_id}/` | | 204 |
-| GET | `appointments/?date=`, `appointments/pending-summary/`, `appointments/meta/` | | 200 |
+| GET | `appointments/?date=`, `appointments/pending-summary/`, `appointments/meta/`, `appointments/range/` (feat/admin-ux) | | 200 |
 | POST | `appointments/{id}/confirm/`, `…/reject/`, `…/attend/` | I | 200 |
 | POST | `appointments/` (admin booking, T10) | I optional | 201 |
 | POST | `appointments/{id}/reschedule/`, `appointments/{id}/cancel/` (T10) | I optional | 200 |
 | GET | `dashboard/`, `nav-counts/` | | 200 |
-| GET | `payments/`, `audit-log/` | P E | 200 |
+| GET | `payments/`, `audit-log/` (tiered, §2.13) | P E | 200 |
+| GET | `audit-log/facets/` (feat/admin-ux, §2.13) | | 200 |
 | POST | `payments/{id}/refunds/{refund_id}/retry/`, `…/resolve/` (§2.12) | I optional | 200 |
 | GET / POST | `staff/` (§2.16; POST manager only) | P / I | 200 / 201 |
 | GET / PATCH | `staff/{id}/` (manager only) | – / I optional | 200 |
 | POST | `staff/{id}/deactivate/`, `staff/{id}/reset-password/` (manager only) | I | 200 |
 | POST | `staff/{id}/reactivate/` (manager only) | I optional | 200 |
+| POST | `staff/{id}/send-password-link/` (manager only; feat/admin-ux) | I optional | 200 |
+| POST | `staff/{id}/reset-mfa/` (manager only; feat/admin-ux) | I optional | 200 |
 | GET / POST | `specialists/` (§2.17) | P E / – | 200 / 201 |
 | GET / PATCH | `specialists/{id}/` | | 200 |
 | PUT / DELETE | `specialists/{id}/photo/` | multipart / – | 200 / 204 |
@@ -303,6 +320,7 @@ Shared shapes: `Actor` = `{"id": int, "display_name": str}`, where `display_name
 - 401 `invalid_credentials`: unknown user, wrong password or inactive staff all give the same response and timing.
 - 429 `throttled`.
 - Audit `auth.login_succeeded` / `auth.login_failed` (`{email, method: "password"}`).
+- feat/admin-ux: for an account with the **admin panel MFA** on (below) a correct password opens **no session**; the 200 is `{"mfa_required": true, "challenge": str, "challenge_expires_at": datetime}` instead (OpenAPI `AdminLoginResult` = one of the two shapes; tell them apart by `mfa_required`) and `auth/mfa/verify/` opens the session. Audit `auth.mfa_challenged` `{email, method}` instead of `auth.login_succeeded`.
 
 **`POST auth/refresh/`** (no bearer). Body `{"refresh": str}`.
 - 200 `{"access", "access_expires_at", "refresh_expires_at"}`. The refresh token is unchanged. `access_expires_at ≤ refresh_expires_at` always (the access JWT `exp` is capped at the session's absolute expiry).
@@ -332,7 +350,7 @@ Body `{"code": str, "code_verifier": str (43..128), "redirect_uri": str (must eq
 | `facebook` | Exchange `code` at `https://graph.facebook.com/v{N}/oauth/access_token` (+ verifier). Check the token with `debug_token` (`app_id` = ours, `is_valid`), then `GET /me?fields=id,email` with `appsecret_proof`. The email is informational only (stored as `email_at_link`). |
 
 Matching: an existing `SocialIdentity(provider, subject)` whose staff user is active → that user. Otherwise → 401 `social_account_not_allowed` "Bu hisob administrator sifatida ro‘yxatdan o‘tmagan." (same response whether or not the email exists). Identities are created only by **`POST auth/oauth/{provider}/link/`** (bearer + the same body; audit `auth.social_linked`), i.e. by a staff member already signed in with email + password: the session records how its sign-in was proven (`AuthSession.auth_method`: `password` for `auth/login/`, the provider for a social sign-in), and `link/` with a bearer of a session opened by a social sign-in (or of a session from before the field existed) → **403 `permission_denied`** "Ruxsat yo‘q." before the provider is called, so a social sign-in can never attach a further identity. Optional Google-only first-use auto-link (`STAFF_GOOGLE_AUTOLINK`, default **off**) applies only when Google is authoritative for the address: `email_verified == true` and either the email ends with `@gmail.com` or the ID token's `hd` equals the email's domain (and matches `GOOGLE_ALLOWED_HD` when set). Facebook never auto-links.
-- 200: same body as `auth/login/`. Audit `auth.login_succeeded` (`{email, method: provider}`) / `auth.login_failed`.
+- 200: same body as `auth/login/`. Audit `auth.login_succeeded` (`{email, method: provider}`) / `auth.login_failed`. With the admin panel MFA on: the challenge answer of `auth/login/` (a first-use Google auto-link is kept), `auth/mfa/verify/` opens the session with `auth_method` = the provider.
 - 400 `oauth_exchange_failed` (bad/expired code, verifier mismatch), 401 `social_account_not_allowed`, 429 `throttled`, 503 `provider_unavailable`.
 - Field errors: `nonce` `required` (Google only); `redirect_uri` `invalid` when it differs from the provider's configured callback — `GOOGLE_OAUTH_REDIRECT_URI` / `FACEBOOK_OAUTH_REDIRECT_URI`, the Next BFF callbacks `/admin/auth/oauth/{provider}/callback` (production with `OAUTH_MODE=live` requires both); the single `OAUTH_REDIRECT_URI` of M0b is **deprecated**, kept for one release as the fallback of a provider whose own value is empty —; `code_verifier` 43..128. An unknown `provider` → 404. The nonce is compared byte-wise against the ID token's `nonce` claim (no Unicode normalisation), so the client sends exactly the string it put in the authorize URL.
 - **Single use across instances:** before the provider is called, the login and `link/` views claim the body's `code_verifier` with an atomic `cache.add("oauth:verifier:<sha256(code_verifier)>", 1, 660)` in the shared Redis; a verifier presented a second time (another tab, a replayed request, another API instance) → 401 `social_account_not_allowed` (the uniform social error) without a provider call. The Next server generates a fresh verifier per authorize redirect, so a legitimate flow never repeats one.
@@ -343,7 +361,8 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 **`DELETE auth/oauth/{provider}/`** (bearer; M0b) → 204. Unlinks the caller's identity for that provider. Audit `auth.social_unlinked`.
 
 **`POST auth/change-password/`**. Body `{"current_password": str, "new_password": str}` → 204.
-- Revokes the user's **other** sessions (`password_changed`). Audit `auth.password_changed`.
+- Revokes the user's **other** sessions (`password_changed`). Audit `auth.password_changed` `{forced}` (feat/admin-ux: `true` when the change cleared a pending `must_change_password`).
+- feat/admin-ux: also clears `must_change_password`, stamps `password_changed_at` and revokes every open password link. Allowed while a change is pending (below).
 - Field errors:
   - `current_password` `password_incorrect` "Joriy parol noto‘g‘ri.".
   - `new_password`: Django validators, min length 12 (`password_too_short` "Kamida 12 ta belgi.", `password_too_common` "Juda oddiy parol.", `password_entirely_numeric` "Faqat raqamlardan iborat bo‘lmasin.", `password_too_similar` "Login bilan juda o‘xshash."), plus `password_unchanged` "Yangi parol eskisidan farq qilsin.".
@@ -358,6 +377,35 @@ Matching: an existing `SocialIdentity(provider, subject)` whose staff user is ac
 ```
 - `is_manager` (gap closure, §2.16) = the caller may manage staff; the UI shows the staff screen ("Xodimlar") only then. It is read from the database on every request, so a removed role applies at once.
 - `auth_method` (M3) = `AuthSession.auth_method` of the caller's session: `password` (`auth/login/`) or the provider of a social sign-in (`google`, `facebook`); `null` for a session opened before the method was recorded (`accounts.0007`). The same `Me` is the `user` of the `auth/login/` and `auth/oauth/{provider}/` answers. Only a `password` session may link an identity (`link/` → 403 otherwise, above), so the UI hides "Bog‘lash" unless `auth_method` is `password`.
+- feat/admin-ux adds `"must_change_password": bool`, `"language": "uz"|"ru"|"en"` (`StaffUser.language`), `"mfa_enabled": bool` (a confirmed admin-panel TOTP device; the ops console's devices do not count) and `"capabilities": {"staff_email_invite": bool}` — `true` when password links can be e-mailed: `ADMIN_PANEL_URL` is set and e-mail does not run its fake adapter under the production settings. When `false` the UI shows the e-mail delivery options disabled with the reason.
+
+**`PATCH auth/me/`** (feat/admin-ux). Body `{"language": "uz"|"ru"|"en"}` → 200 `Me`. Missing or another value → 400 `required` / `invalid_choice`. Not audited (a preference). Allowed while a change is pending.
+
+**Forced password change** (feat/admin-ux, overrides GST-3). `StaffUser.must_change_password` is set for every account whose password someone else chose: a generated temporary password (`POST staff/`, `reset-password/`, `resetstaffpassword` without `--password-stdin`), an account created or reset by e-mail link only, `createstaff` / `resetstaffpassword --password-stdin` with `--must-change`. While it is set, **every** admin route answers **403 `password_change_required`** "Avval parolingizni o‘zgartiring." (checked in `IsActiveStaff`, so it holds for password and social sessions on every device, managers and superusers included) except the allow-list: `GET`/`PATCH auth/me/`, `POST auth/change-password/`, `POST auth/password-link/` (and `auth/logout/`, `auth/refresh/`, which need no bearer). Sign-in itself still succeeds (the UI reads `user.must_change_password` and shows the change screen). The ops console refuses the password step of such an account ("Avval admin panelda o‘z parolingizni o‘rnating, so‘ng konsolga qayta kiring.", audit `console.login_failed` with `reason` `password_change_required`; no lockout counted). Existing accounts are not forced.
+
+**`POST auth/password-link/`** (feat/admin-ux; bearer, allowed while pending). No body → 200 `{"email_masked": "a***@glowderma.uz", "activation": {"sent": true, "expires_at": "…"}}`: e-mails the caller a `reset` link — for an account that must change its password but cannot type the current one (a social sign-in, an e-mail-link account). 409 `conflict` "Parolingiz o‘rnatilgan: …" when no change is pending, "E-pochta orqali yuborish sozlanmagan." when `capabilities.staff_email_invite` is false; 429 after 5/hour (`staff_password_link`). Audit `staff.password_link_sent` `{purpose: "reset", via: "self", expires_at, link_id}`.
+
+**`POST auth/password-token/check/`** (feat/admin-ux; **no bearer**). Body `{"token": str ≤128}` → 200 `{"email_masked", "full_name", "purpose": "invite"|"reset", "expires_at"}` for the admin panel's `/set-password?token=…` page. An unknown, used, revoked or expired link, or one of an inactive account → one uniform **400 `token_invalid`** "Havola yaroqsiz yoki muddati o‘tgan. Menejerdan yangi havola so‘rang." (`errors: []`). 429 after 30/min per client IP (`staff_password_token`).
+
+**`POST auth/password-token/set/`** (feat/admin-ux; **no bearer**). Body `{"token": str, "new_password": str}` → **204** (no session is opened: the person signs in next). Under the staff row lock the link must still be open (else 400 `token_invalid`); `new_password` gets the change-password field errors (validated for the link's account) and `password_unchanged` when it is the current password (the link stays usable after a refused password). On success: the password is set, `must_change_password` cleared, `password_changed_at` stamped, the link used and every other link revoked, **every** session revoked (`password_changed`), the ops console sessions ended and, on commit, the login lockouts lifted. Audit `staff.password_set` `{purpose, link_id, revoked_count[, console_sessions]}` (actor: the person) plus `auth.session_revoked` per session. Same throttle as `check/`.
+
+**Password links** (`StaffPasswordToken`): 32 random bytes (base64url, 43 characters), stored as SHA-256 only, single use, valid `STAFF_INVITE_TTL_HOURS` (default 72, 1..168); issuing one revokes the earlier open links of the account, and a password set through a link or `change-password/`, a temporary-password reset and a deactivation revoke them too. The link is `{ADMIN_PANEL_URL}/set-password?token=<token>` and travels only in the e-mail: outbox topic `email.staff_password_link` with payload `{link_id, lang, purpose, to, link, name}` where `to`, `link` and `name` are sealed (`core.secretbox`, AAD bound to the token id) and blanked once the message is final (sent, refused, superseded, dead). The handler sends only while the link is still open, claims `StaffPasswordToken.sent_at` before the relay call (never sent twice; a relay that accepted nothing un-claims and retries; a refusal clears it), in the account's `language` (texts `email.staff_link.*`, templates `accounts/email/staff_link.{txt,html}`). Done/dead messages of the topic are deleted after 24 h by `accounts.cleanup_auth`.
+
+**Admin panel MFA** (feat/admin-ux; optional TOTP, off by default, each person's own choice — nobody can mandate it). The panel's authenticator entry ("Glow Derma Admin") is **separate from the ops console's** ("Glow Derma Ops"): its devices are namespaced by name (`Admin panel`, recovery codes `Admin panel zaxira kodlar`), so enabling, using, disabling or resetting it never touches a console device and a panel code never opens the console (the console's enrolment window and four-eyes rule stay). TOTP: 30 s steps, 6 digits, ±1 step; a code verifies once (django-otp `last_t`, under the device row lock), an older or repeated code is refused. Recovery codes: ten `xxxxx-xxxxx` codes (case, spaces and dashes ignored), stored only as keyed hashes, each single use. Every code check (sign-in, `confirm/`, `disable/`, `recovery-codes/`) shares the per-account lockout `panel_otp` (5 wrong codes a minute lock 1 → 15 min; and, whatever the pace, every 10th wrong code in a row — no correct code between, none more than 48 h apart — locks 15 min, then 1 h, 4 h, 16 h, 24 h; 429 with `Retry-After`; audit `auth.mfa_locked` `{wait}` and alert on a locked attempt, `{wait, failures}` and alert when the 10-in-a-row lock starts); every password re-check shares the `change_password` lockout. Every route below except `verify/` needs a bearer and answers 403 `password_change_required` while a change is pending. Error codes: **400 `mfa_code_invalid`** "Kod noto‘g‘ri yoki allaqachon ishlatilgan. Ilovadagi yangi kodni kiriting." (wrong, used, malformed, or not this account's panel device; `errors: []`), **400 `mfa_challenge_invalid`** "Kirish muddati tugadi yoki bekor qilindi. Email va parolni qaytadan kiriting." (`verify/` only), `current_password` `password_incorrect` "Joriy parol noto‘g‘ri.".
+
+**`GET auth/mfa/`** → 200 `{"enabled": bool, "recovery_codes_left": int}` (0 while off).
+
+**`POST auth/mfa/setup/`** Body `{"current_password": str}` → 200 `{"device_id": int, "otpauth_uri": "otpauth://totp/Glow%20Derma%20Admin%3A<email>?secret=…&algorithm=SHA1&digits=6&period=30&issuer=Glow%20Derma%20Admin", "manual_key": "ABCD EFGH …"}`: a new **unconfirmed** device (an earlier unconfirmed panel device is replaced); the UI draws the QR code from `otpauth_uri` and shows `manual_key`. 409 `conflict` "Ikki bosqichli himoya allaqachon yoqilgan." when already on. Not audited (nothing is on yet).
+
+**`POST auth/mfa/confirm/`** Body `{"device_id": int, "code": str}` → 200 `{"recovery_codes": [10 × "xxxxx-xxxxx"]}` — **shown once**. Confirms the pending device, removes the account's other panel TOTP devices, issues the recovery codes and marks the current session verified (`AuthSession.mfa_verified_at`). 400 `mfa_code_invalid` for a wrong code or a `device_id` that is not the caller's pending panel device; 409 when already on. Audit `auth.mfa_enabled` `{recovery_codes: 10}`.
+
+**`POST auth/mfa/disable/`** Body `{"current_password": str, "code_or_recovery": str}` (a 6-digit code or one unused recovery code) → 200 `{"enabled": false, "recovery_codes_left": 0}`; the panel devices and codes are deleted (console devices stay). 409 `conflict` "Ikki bosqichli himoya yoqilmagan." when off. Audit `auth.mfa_disabled` `{factor: "totp"|"recovery", totp_devices, recovery_codes}`.
+
+**`POST auth/mfa/recovery-codes/`** Body `{"current_password": str, "code": str}` (a TOTP code) → 200 `{"recovery_codes": [10]}` (shown once; the old codes stop working). 409 when off. Audit `auth.mfa_recovery_codes_regenerated` `{recovery_codes: 10}`.
+
+**`POST auth/mfa/verify/`** (**no bearer**). Body `{"challenge": str ≤128, "code": str}` or `{"challenge", "recovery_code": str}` (exactly one; neither → `code` `required`, both → `code` `invalid`) → 200 the `auth/login/` session answer; the session's `auth_method` is the first step's (`password` or the provider) and `mfa_verified_at` is stamped. The challenge (32 random bytes, base64url; the cache keeps only its SHA-256) lives **5 minutes**, is **single use**, allows **5 attempts**, and dies when the account's password changes, the account is deactivated, its panel MFA is reset or disabled, or (social first step) the provider identity is unlinked → 400 `mfa_challenge_invalid` (sign in again). A wrong code → 400 `mfa_code_invalid` (the challenge stays for its remaining attempts). 429 for the account lockout or after 30/min per client IP (`mfa_verify`). Audit `auth.mfa_succeeded` `{factor, method}`, `auth.login_succeeded` `{email, method, mfa: factor}`, plus `auth.mfa_recovery_used` `{remaining}` for a recovery code; a wrong code `auth.mfa_failed` `{factor, context: login|setup|disable|recovery_codes}`.
+
+**Lost phone:** sign in with a recovery code (then disable and re-enable, or ask for new codes), else a manager's `POST staff/{id}/reset-mfa/` (§2.16) or the operator's `manage.py resetstaffmfa <email>`.
 
 ### 2.2 Orders
 **`GET orders/`** → `Page<OrderSummary>`
@@ -491,7 +539,7 @@ A Yandex Delivery shipment (§2.18) keeps this union BTS-shaped: `not_created` u
 - 202 `Order` with `shipment.pending=true`. The outcome arrives later as `shipment_created` or `shipment_failed` with `manual=true`.
 
 **Shared outcomes of the order actions** (`cancel`, `transition`, `retry-shipment`; the busy-order outcome also covers the refund `retry` / `resolve` of §2.12):
-- **Busy order.** Every action locks the order row first and waits at most `ADMIN_LOCK_WAIT` (5 s; a BTS create holds the row across its bounded calls). A Yandex cancel waits longer (§2.18): recording what Yandex answered waits up to 15 s for the row, then up to 5 s more to write that record without it (answering its own 409), and the Yandex snapshots the cancel applies wait for the row without a limit. When the row stays locked → 409 `conflict` "Buyurtma boshqa amal bilan band. Birozdan so‘ng qayta urinib ko‘ring.". Nothing is written; retry with the same `Idempotency-Key`.
+- **Busy order.** Every action locks the order row first and waits at most `ADMIN_LOCK_WAIT` (5 s; a BTS create holds the row across its bounded calls). A Yandex cancel waits longer (§2.18): recording what Yandex answered waits up to 15 s for the row, then up to 5 s more to write that record without it (answering its own 409), and the Yandex snapshots the cancel applies wait for the row without a limit. When the row stays locked → 409 `order_busy` (feat/admin-ux; `conflict` before) "Buyurtma boshqa amal bilan band. Birozdan so‘ng qayta urinib ko‘ring.". Nothing is written; retry with the same `Idempotency-Key`.
 - **Purchase conflict** (`cancel`, `transition`, `retry-shipment` only; the refund operations never touch the loyalty purchase). When the order's loyalty purchase belongs to another customer (data inconsistency surfaced by `loyalty`) → 409 `conflict` "Buyurtma xaridi boshqa mijozga tegishli. Ma’lumotlarni tekshiring.". Nothing is written.
 
 ### 2.3 Products and Billz
@@ -924,6 +972,28 @@ Templates are editable in the admin UI through `GET` / `PUT` below.
 ```
 **`GET appointments/pending-summary/`** → `{"count": 3, "next_at": "2026-10-26T09:00:00+05:00"}`. Counts the `requested` appointments that still await an answer: `start ≥` the start of **today** (Tashkent midnight) — M3: today's requests whose time has already passed count too, so the header never says every request was reviewed while one of today's is unanswered; requests of earlier days do not count. `next_at` is the earliest of them (it may lie earlier today), or null. The dashboard's `pending_appointments` / `next_appointment_at` and `nav-counts/` `appointments_pending` are the same figures.
 
+**`GET appointments/range/?from=&to=&specialist_id=&detail=counts|full`** (feat/admin-ux: the week and month boards).
+
+| Param | Rule | Field errors (code · message) |
+|---|---|---|
+| `from`, `to` | required dates (Tashkent days, inclusive); `from ≤ to`; span ≤ **42** days with `detail=counts`, ≤ **7** with `detail=full` | `required` · `invalid` · `to` `empty_range` "Oxirgi sana boshlang‘ich sanadan oldin bo‘lmasin." · `to` `out_of_range` "Ko‘pi bilan 42 kunlik davr." / "To‘liq ko‘rinish ko‘pi bilan 7 kunlik davr uchun." |
+| `specialist_id` | optional int ≥ 1, any existing specialist (active or not); narrows `specialists`, counts and `appointments` | `min_value` · `invalid` · `does_not_exist` "Mutaxassis topilmadi." |
+| `detail` | `counts` (default) or `full` (enum `AppointmentRangeDetail`) | `invalid_choice` |
+
+```jsonc
+{"from": "2026-10-26", "to": "2026-11-01",
+ "specialists": [{"id": 1, "name": "Nodira Rahimova", "role": "dermatologist", "is_active": true}],   // the day board's rule over the whole range: active ones + inactive ones with an appointment in it; by position, name
+ "days": [                                                  // one per day from..to, in order
+   {"date": "2026-10-26",
+    "counts": {"requested": 1, "confirmed": 3, "attended": 0, "rejected": 0, "cancelled": 1},   // appointments whose Tashkent start day is this date, every status
+    "total": 5,
+    "working": true,                                        // at least one listed specialist has hours that day (override wins)
+    "hours": {"start": "09:00", "end": "20:00"}}],          // earliest start / latest end of those specialists | null
+ "schedules": null,                                         // detail=full: [{"specialist_id", "date", "working_hours": {start, end} | null, "blocks": [DayBlock]}] for every listed specialist × day (the day board's specialist shape)
+ "appointments": null}                                      // detail=full: the day items (§2.9 shape above) of the range, by start, id
+```
+At most 8 queries whatever the span or the number of specialists (one grouped count `(Tashkent day, status, specialist)`, the specialists, the three schedule tables, the appointments with `detail=full`, plus authentication).
+
 **`POST appointments/{id}/confirm/` · `…/reject/` · `…/attend/`** (I). Empty body.
 - Allowed: `requested` → confirm or reject; `confirmed` → attend. Otherwise 409 `invalid_transition` "Bu amal ushbu holatda mumkin emas.".
 - Effects: an AppointmentEvent; a push through the outbox on confirm and reject; audit `appointment.confirmed|rejected|attended`.
@@ -1078,12 +1148,35 @@ Export `tolovlar` (§1.8): the `Qaytarish` column is the §5.1 refund-state line
 - Both share the busy-order outcome of §2.2.
 
 ### 2.13 Audit log
-**`GET audit-log/`** (P E). Filters `actor` (staff id; the picker lists `GET staff/`, §2.16), `action` (§3.2), `object_type`, `object_id`, `date_from`, `date_to`; `ordering` `-at` (default) or `at`.
+**`GET audit-log/`** (P E). Filters `actor` (staff id; the picker lists `GET staff/`, §2.16), `action` (§3.2), `object_type`, `object_id`, `request_id` (feat/admin-ux: 8–64 characters `[A-Za-z0-9-]`, a **prefix** of the stored request id, case-sensitive; anything else → `invalid` "Noto‘g‘ri qiymat."), `date_from`, `date_to`; `ordering` `-at` (default) or `at`.
 ```jsonc
 {"id": 9001, "at": "2026-10-24T12:03:00+05:00", "actor": {"id": 1, "display_name": "Administrator"},   // null = system
  "action": "cashback.adjusted", "object_type": "customer", "object_id": "5",   // object_id is a string (slugs)
  "data": {"direction": "add", "amount": 2950, "reason": "Kassada QR o‘qilmadi …", "balance_after": 51550},
- "ip": "203.0.113.7", "request_id": "6f1c2a0e9b8d4c37"}
+ "ip": "203.0.113.7", "request_id": "6f1c2a0e9b8d4c37"}   // ip: null for ordinary staff (below)
+```
+**Tiers (feat/admin-ux, `core/audit_scopes.py`).** Each entry gets a scope from its action prefix (the part before the first dot), actor type and object type; the first rule that matches wins:
+
+| # | Rule | Scope | Who sees it |
+|---|---|---|---|
+| 1 | prefixes `console`, `ops`, `ops_access`, `integrations`, `outbox`, `report`, `pos`; actions `billz.sale_recorded_by_hand`, `billz.payment_attempt_forgotten`, `loyalty.reconciliation_completed`, `loyalty.reconciliation_mismatch` | system | superusers |
+| 2 | prefix `staff` | staff admin | managers, superusers |
+| 3 | prefix `auth` written by a staff actor or about object type `staff` / `auth_session`; prefix `export` | staff security | ordinary staff: **their own** only (actor = them, or object `staff` with their id); managers, superusers: all |
+| 4 | prefixes `appointment`, `banner`, `billz`, `blocked_period`, `cashback`, `category`, `customer`, `delivery`, `location`, `loyalty`, `notification`, `notification_template`, `order`, `payment`, `product`, `professional`, `professional_service`, `refund`, `schedule`, `segment`, `service`, `settings`, `test_device`, `working_hours`, `working_hours_override`; `auth.*` written by a customer | business | every staff member |
+| 5 | anything else | system (fail closed) | superusers |
+
+- The list **and** its export apply the tier; a filter on something outside it (an action, object, actor or request id) answers an empty list, never 403. `export.downloaded` rows follow rule 3.
+- Ordinary staff never see network details: `ip` is `null` (and the export's `IP` column is empty) and the `ip`, `last_ip`, `user_agent`, `location` keys of `data` (at any depth) are `null`. Managers and superusers see them. Stored rows are unchanged; the ops console reads the table without tiers.
+- The tier is re-read from the account on every request (removing `is_manager` takes effect at once).
+- A test scans every `audit.record(action=…)` of the code base (wrappers and carried `audit_action`s followed) and fails on an action no rule 1–4 names.
+
+**`GET audit-log/facets/`** (feat/admin-ux) → what the audit screen offers the signed-in member:
+```jsonc
+{"tier": "staff",                      // AuditViewerTier: staff | manager | superuser
+ "ip_visible": false,                  // true for manager and superuser
+ "visible_prefixes": ["appointment", "auth", "banner", "…", "working_hours_override"],   // prefixes with entries this member may see (sorted)
+ "own_only_prefixes": ["auth", "export"],   // subset limited to their own entries (customer-written auth.* stays visible); [] for manager / superuser
+ "hidden_actions": ["billz.payment_attempt_forgotten", "billz.sale_recorded_by_hand", "loyalty.reconciliation_completed", "loyalty.reconciliation_mismatch"]}   // hidden although the prefix is visible; [] for superusers
 ```
 
 ### 2.14 Jobs
@@ -1137,22 +1230,29 @@ Gap closure FND-4 (decisions GST-1..GST-6 in `docs/decisions/open-questions.md`)
 {"id": 7, "display_name": "Nodira Rahimova", "email": "nodira@glowderma.uz", "is_active": true,   // every caller
  "full_name": "Nodira Rahimova", "is_manager": false,                                            // manager only, else null
  "last_login_at": "2026-10-24T18:30:00+05:00", "linked_providers": ["google"],                   // manager only, else null
- "created_at": "2026-10-20T09:00:00+05:00"}                                                      // manager only, else null
+ "created_at": "2026-10-20T09:00:00+05:00",                                                     // manager only, else null
+ "must_change_password": false, "mfa_enabled": false,                                             // feat/admin-ux; manager only, else null
+ "invite": {"state": "none", "sent_at": null, "expires_at": null}}                               // feat/admin-ux; manager only, else null
 ```
-- The first four keys are the directory every caller gets (the audit-log filter uses `id` and `display_name`). The other five are filled only when the **caller** is a manager; for anyone else they are `null` (`linked_providers` too, so "not shown" differs from "none linked", `[]`).
-- `last_login_at` = the start of the member's newest session (every password or social sign-in opens one; staff sessions are never purged); `null` = never signed in. `linked_providers` = the linked social identities (`google`, `facebook`), by provider. `created_at` = when the account was created.
+- The first four keys are the directory every caller gets (the audit-log filter uses `id` and `display_name`). The other eight are filled only when the **caller** is a manager; for anyone else they are `null` (`linked_providers` too, so "not shown" differs from "none linked", `[]`).
+- `last_login_at` = the start of the member's newest session (every password or social sign-in opens one; staff sessions are never purged); `null` = never signed in. `linked_providers` = the linked social identities (`google`, `facebook`), by provider. `created_at` = when the account was created. `mfa_enabled` (feat/admin-ux) = a confirmed admin-panel TOTP device, as on `StaffMember` (the staff screen's badge and its «MFA ni o‘chirish» action).
 - The query count does not grow with the rows (one correlated subquery for `last_login_at`, one prefetch for the providers).
 
 ```jsonc
 // StaffMember — the manager's view of one account; every write below answers with it
 {"id": 7, "display_name": "Nodira Rahimova", "email": "nodira@glowderma.uz", "full_name": "Nodira Rahimova",
  "is_active": true, "is_manager": false, "last_login_at": null,            // null: never signed in
- "linked_providers": [], "created_at": "2026-10-27T10:15:00+05:00"}
+ "linked_providers": [], "created_at": "2026-10-27T10:15:00+05:00",
+ // feat/admin-ux
+ "must_change_password": true, "password_changed_at": null, "mfa_enabled": false,
+ "invite": {"state": "pending", "sent_at": "2026-10-27T10:15:02+05:00", "expires_at": "2026-10-30T10:15:00+05:00"}}
 // StaffCredentials — 201 of POST staff/, 200 of …/reset-password/
-{"staff": { /* StaffMember */ }, "temporary_password": "Kp7m-Qx3r-Wt9z-Hn2v"}
+{"staff": { /* StaffMember */ }, "temporary_password": "Kp7m-Qx3r-Wt9z-Hn2v",   // null for delivery email_link
+ "activation": {"sent": true, "expires_at": "2026-10-30T10:15:00+05:00"}}      // null for delivery temporary_password
 ```
+- `invite` (feat/admin-ux) = the newest password link of the account (§2.1 "Password links"): `state` `none` (never e-mailed one), `pending` (open; `sent_at` = when the handler handed it to the relay, `null` while queued or when the address was refused), `expired`, `used` (the person set a password with it) or `revoked` (replaced by a newer link, a password change, a temporary-password reset or a deactivation). `password_changed_at` = when the person last set their own password (link or `change-password/`). `mfa_enabled` = a confirmed admin-panel TOTP device. `activation.sent` = the e-mail was queued (the outbox delivers it).
 
-**`POST staff/`** (manager; **I**) body `{"email": str, "full_name": str, "is_manager": bool = false}` → **201 `StaffCredentials`**. Creates an active account that signs in with `email` and the temporary password.
+**`POST staff/`** (manager; **I**) body `{"email": str, "full_name": str, "is_manager": bool = false, "delivery": "temporary_password"|"email_link"|"both" = "temporary_password", "language": "uz"|"ru"|"en" = "uz"}` → **201 `StaffCredentials`**. Creates an active account; `delivery` (feat/admin-ux, overrides GST-3): `temporary_password` — a generated password shown once; `email_link` — no usable password, an `invite` link is e-mailed (in `language`); `both`. Either way `must_change_password` is set (§2.1 "Forced password change").
 
 | Check | Field, code and message |
 |---|---|
@@ -1160,9 +1260,11 @@ Gap closure FND-4 (decisions GST-1..GST-6 in `docs/decisions/open-questions.md`)
 | `email` (trimmed, lower-cased) already belongs to an account, active or not (case-insensitive) | `email` `unique` "Bu email bilan xodim allaqachon bor (nofaol bo‘lsa, uni qayta faollashtiring)." |
 | `full_name` missing, or trimmed outside 2..150 | `full_name` `required` / `min_length` "Kamida 2 ta belgi kiriting." / `max_length` "150 belgidan oshmasin." |
 | `is_manager` not a boolean | `is_manager` `invalid` |
+| `delivery` / `language` not one of the values | `delivery` / `language` `invalid_choice` |
+| `delivery` `email_link` or `both` while `Me.capabilities.staff_email_invite` is false | `delivery` `invalid_choice` "E-pochta orqali yuborish sozlanmagan: vaqtinchalik parolni tanlang." |
 
-- **Temporary password**: generated by the server, `xxxx-xxxx-xxxx-xxxx` from letters and digits without look-alikes (no `0 O 1 l I`; ~92 bits), passing the password validators. It is **shown once**: never logged or audited; a replay of the same `Idempotency-Key` returns it again (stored sealed, §1.7 "Stored credentials"). There is no forced change at the first sign-in (decision GST-3): the person changes it under "Parolni o‘zgartirish" (`auth/change-password/`, §2.1); the UI shows the password once with a copy button and tells the manager to hand it over in person.
-- Audit `staff.created` `{email, full_name, is_manager}`.
+- **Temporary password**: generated by the server, `xxxx-xxxx-xxxx-xxxx` from letters and digits without look-alikes (no `0 O 1 l I`; ~92 bits), passing the password validators. It is **shown once**: never logged or audited; a replay of the same `Idempotency-Key` returns it again (stored sealed, §1.7 "Stored credentials"). The person signs in with it and must set their own password first (feat/admin-ux, overrides GST-3: 403 `password_change_required` everywhere else until `auth/change-password/` or a link); the UI shows the password once with a copy button and tells the manager to hand it over in person.
+- Audit `staff.created` `{email, full_name, is_manager, delivery, must_change_password}`, plus `staff.password_link_sent` `{purpose: "invite", via: "create", expires_at, link_id}` for an e-mail delivery (never the link).
 
 **`GET staff/{id}/`** (manager) → `StaffMember`; unknown id → 404.
 
@@ -1179,12 +1281,18 @@ Gap closure FND-4 (decisions GST-1..GST-6 in `docs/decisions/open-questions.md`)
 
 **`POST staff/{id}/reactivate/`** (manager; I optional; empty body) → 200 `StaffMember`. The account signs in again with its password or a linked identity; the sessions revoked at deactivation stay revoked. An active account → 200 unchanged. Audit `staff.reactivated`.
 
-**`POST staff/{id}/reset-password/`** (manager; **I**; empty body) → 200 `StaffCredentials`.
-- Replaces the password with a new temporary one (rules above) and revokes every open session (`password_changed`); linked identities stay. A running login lockout of the account (§1.9; the API and the Django-admin login scopes) ends once the reset commits, from the API and from `resetstaffpassword` alike. Works on an inactive account too.
+**`POST staff/{id}/reset-password/`** (manager; **I**; optional body `{"delivery": … = "temporary_password"}`) → 200 `StaffCredentials`.
+- Replaces the password with a new temporary one (rules above) — or, for `email_link`, makes it unusable and e-mails a `reset` link (`both`: both) — sets `must_change_password`, revokes every earlier link and every open session (`password_changed`); linked identities stay. A running login lockout of the account (§1.9; the API and the Django-admin login scopes) ends once the reset commits, from the API and from `resetstaffpassword` alike. Works on an inactive account too.
 - The caller's own account → 409 `conflict` "O‘z parolingizni «Parolni o‘zgartirish» orqali almashtiring." (`auth/change-password/` asks for the current password, so a stolen session cannot take the account over).
-- Audit `staff.password_reset` `{revoked_count, generated: true}` and one `auth.session_revoked` per revoked session; the password is never recorded.
+- A **superuser's** account with `temporary_password` or `both` (the answer would hand the password to the caller), unless the caller is a superuser too → 409 `conflict` "Superadminga vaqtinchalik parolni faqat superadmin bera oladi. Havolani uning e-pochtasiga yuboring yoki superadmindan so‘rang." (`email_link` stays allowed: the link goes to the superuser's own address). The operator's `manage.py resetstaffpassword` is the break-glass path.
+- Audit `staff.password_reset` `{revoked_count, generated, delivery, must_change_password}` (`generated` false for `email_link`) and one `auth.session_revoked` per revoked session (plus `staff.password_link_sent` `{via: "reset"}` for an e-mail delivery); the password is never recorded.
+- `delivery` e-mail options while `capabilities.staff_email_invite` is false → `delivery` `invalid_choice` (as for `POST staff/`).
 
-**Operator commands** (server shell; decision GST-6) run the same audited services, for when no manager can sign in: `createstaff <email> [--manager] [--superuser] [--full-name] [--password-stdin]` (audited `staff.created` now; `--full-name` trimmed, 2..150 when given, else the display name is the email), `deactivatestaff <email>`, `reactivatestaff <email>`, `resetstaffpassword <email> [--password-stdin]` (prints a temporary password once unless one is read from stdin) and `setstaffmanager <email> [--off]`. Each takes `--actor <email>` (an active staff member who asked for it; default: the system) and audits with `reason` "manage.py <command>". They may act on the actor's own account; the last-active-manager and superuser rules still hold. Runbook: `docs/ops/staff-access.md`.
+**`POST staff/{id}/send-password-link/`** (feat/admin-ux; manager; I optional; no body) → 200 `{"staff": StaffMember, "activation": {"sent": true, "expires_at"}}`. E-mails a new single-use link (`invite` for an account that never signed in nor set a password, else `reset`); the password and the sessions are **not** changed; earlier links are revoked. 409 `conflict` for the caller's own account ("O‘zingizga havola «Parolni o‘zgartirish» sahifasidan so‘raladi."), an inactive account ("Nofaol hisobga havola yuborilmaydi. Avval uni qayta faollashtiring.") or when e-mail links are not available ("E-pochta orqali yuborish sozlanmagan."); 404 unknown id; 429 after 5/hour per manager and account (`staff_password_link`). Audit `staff.password_link_sent` `{purpose, via: "resend", expires_at, link_id}`.
+
+**`POST staff/{id}/reset-mfa/`** (feat/admin-ux; manager; I optional; optional body `{"reason": str}`: trimmed, ≤200, blank allowed, default `""`; longer → 400 `validation_error`, field `reason`, code `max_length`) → 200 `StaffMember` (`mfa_enabled: false`). A lost phone: removes the account's **admin panel** TOTP device and recovery codes (its ops console devices stay — that is `ops_access reset-2fa`), revokes every open session (`admin_revoked`) and ends a running `panel_otp` lockout once it commits; a pending sign-in challenge dies with it. The next sign-in needs the password only and the person may enable MFA again. 409 `conflict` for the caller's own account ("O‘z ikki bosqichli himoyangizni «Sozlamalar»da o‘chiring."), an account without panel MFA ("Bu xodimda ikki bosqichli himoya yoqilmagan.") or a **superuser's** account unless the caller is a superuser too ("Superadminning ikki bosqichli himoyasini faqat superadmin o‘chira oladi."; the operator's `manage.py resetstaffmfa` is the break-glass path); 404 unknown id. Audit `auth.mfa_reset` `{totp_devices, recovery_codes, revoked_count, via: "api"|"cli"}` (actor: the manager; `reason`: the body's `reason`) plus `auth.session_revoked` per session (same `reason`); alerted (`auth.mfa_reset`, docs/ops/monitoring.md), because a manager who also resets the person's password could sign in as them.
+
+**Operator commands** (server shell; decision GST-6) run the same audited services, for when no manager can sign in: `createstaff <email> [--manager] [--superuser] [--full-name] [--password-stdin]` (audited `staff.created` now; `--full-name` trimmed, 2..150 when given, else the display name is the email), `deactivatestaff <email>`, `reactivatestaff <email>`, `resetstaffpassword <email> [--password-stdin]` (prints a temporary password once unless one is read from stdin), `resetstaffmfa <email>` (feat/admin-ux: the admin panel MFA reset above, `via: "cli"`; refused without panel MFA) and `setstaffmanager <email> [--off]`. Each takes `--actor <email>` (an active staff member who asked for it; default: the system) and audits with `reason` "manage.py <command>". They may act on the actor's own account; the last-active-manager and superuser rules still hold. Runbook: `docs/ops/staff-access.md`.
 
 ### 2.17 Mutaxassislar va xizmatlar (specialists, services, schedules, the clinic; FND-1, FND-7)
 Staff manage the bookable side of the clinic here (until now only the disabled Django admin could). Every write is audited (§3.2 "Specialists and services"), honours an optional `Idempotency-Key` (§1.7) and answers the error envelope of §1.6; nothing is ever deleted except a date override, a blocked period, an offer left out of a specialist's set and the photo. The customer catalogue and the free slots (customer contract §2.11) are computed from the same rows on every request — there is no slot cache — so a change is bookable, or no longer offered, at once. Bookings (customer `POST appointments/`, admin `POST appointments/` and `reschedule/`) lock the specialist and, for a new booking, the service `FOR KEY SHARE` before they read the offer (price, duration) and check the slot; every write here holds the specialist (or the service) `FOR UPDATE`, so a booking racing an edit either waits and then sees it (a withdrawn offer, a retired service or a new block is refused; a new price or duration is snapshotted) or is made first and kept like any other booked appointment (PS-1, PS-3, PS-14).
@@ -1595,10 +1703,17 @@ courier with it.
 
 ### 3.2 Audit actions (M1; M2 cross-reference row)
 
+Who reads which of them in the admin panel is decided by the prefix tiers of §2.13 (feat/admin-ux): a **new
+action prefix must be added to `core/audit_scopes.py`** (rule 1, 2, 3 or 4), otherwise it falls into rule 5
+(superusers only) and `core/tests/test_audit_scopes.py::test_every_audited_action_is_classified` fails.
+Ops-console actions (`console.*`, `ops.*`, `ops_access.*`), `outbox.*`, `integrations.*`, `report.*`, `pos.*`
+and the hand-run fixes listed in rule 1 are superuser-only; `staff.*` is manager+; staff `auth.*` and
+`export.downloaded` are own-only for ordinary staff.
+
 | Area | `action` values |
 |---|---|
-| Auth | `auth.login_succeeded`, `auth.login_failed`, `auth.logout` (`{scope, revoked_count}`), `auth.password_changed`, `auth.session_revoked` (`{sid, reason}`), `auth.social_linked`, `auth.social_unlinked` |
-| Staff (§2.16, gap closure) | `staff.created` (`{email, full_name, is_manager}`), `staff.updated` (before / after of the changed `full_name` / `is_manager`), `staff.deactivated` (before `{is_active: true}`, after `{is_active: false, revoked_count}`), `staff.reactivated` (before `{is_active: false}`, after `{is_active: true}`), `staff.password_reset` (`{revoked_count, generated}`; never the password); every session they revoke adds `auth.session_revoked`. Entity `staff`, id = the account. From the admin API the actor is the manager; from the operator commands it is the `--actor` staff member or `system`, with `reason` "manage.py <command>". They replace M1's `auth.staff_deactivated` / `auth.staff_reactivated`, which were never written (their services had no caller; decision GST-5). |
+| Auth | `auth.login_succeeded` (feat/admin-ux: `mfa` after an MFA step), `auth.login_failed`, `auth.logout` (`{scope, revoked_count}`), `auth.password_changed` (feat/admin-ux: `{forced}`), `auth.session_revoked` (`{sid, reason}`), `auth.social_linked`, `auth.social_unlinked`; admin panel MFA (feat/admin-ux, §2.1; entity `staff`, actor the person unless noted): `auth.mfa_challenged` (`{email, method}`), `auth.mfa_succeeded` (`{factor, method}`), `auth.mfa_failed` (`{factor, context}`), `auth.mfa_locked` (`{wait}`; `{wait, failures}` when ten wrong codes in a row start the lock), `auth.mfa_enabled` (`{recovery_codes}`), `auth.mfa_disabled` (`{factor, totp_devices, recovery_codes}`), `auth.mfa_recovery_used` (`{remaining}`), `auth.mfa_recovery_codes_regenerated` (`{recovery_codes}`), `auth.mfa_reset` (`{totp_devices, recovery_codes, revoked_count, via}`, actor the manager or `--actor` / system); never a code, a recovery code, the secret or the challenge |
+| Staff (§2.16, gap closure) | `staff.created` (`{email, full_name, is_manager, delivery, must_change_password}`), `staff.updated` (before / after of the changed `full_name` / `is_manager`), `staff.deactivated` (before `{is_active: true}`, after `{is_active: false, revoked_count}`), `staff.reactivated` (before `{is_active: false}`, after `{is_active: true}`), `staff.password_reset` (`{revoked_count, generated, delivery, must_change_password}`; never the password), feat/admin-ux `staff.password_link_sent` (`{purpose, via: create|reset|resend|self, expires_at, link_id}`; never the link) and `staff.password_set` (`{purpose, link_id, revoked_count[, console_sessions]}`, actor = the person); every session they revoke adds `auth.session_revoked`. Entity `staff`, id = the account. From the admin API the actor is the manager; from the operator commands it is the `--actor` staff member or `system`, with `reason` "manage.py <command>". They replace M1's `auth.staff_deactivated` / `auth.staff_reactivated`, which were never written (their services had no caller; decision GST-5). |
 | System | `outbox.dead` (`{topic, dedupe_key, attempts, last_error}`), `outbox.requeued` (M3, actor `system`, reason "manage.py requeue_outbox"; before `{status, attempts, last_error}`, after `{topic, dedupe_key, status: "pending"}`), `outbox.resolved` (M3, `requeue_outbox --resolved`: a dead message handled by hand is closed as `done` without running it — a `billz.push_sale` only once its sale is recorded with `billz_mark_recorded`; reason "manage.py requeue_outbox --resolved", before as above, after `{topic, dedupe_key, status: "done"}`); `billz.sale_recorded_by_hand` (M3, entity `order`, actor = the staff member named by `manage.py billz_mark_recorded --actor`, reason "manage.py billz_mark_recorded"; before `{purchase_id, billz_sale_id, billz_pushed_at: null, billz_payment_attempted_at, push_status}`, after `{purchase_id, billz_sale_id, billz_sale_ref, billz_pushed_at}`), `billz.payment_attempt_forgotten` (M3, entity `order`, actor = `requeue_outbox --forget-payment-attempt --actor`, reason "manage.py requeue_outbox --forget-payment-attempt"; before `{purchase_id, billz_sale_id, billz_payment_attempted_at}`, after `{purchase_id, billz_payment_attempted_at: null}`) |
 | Orders | `order.cancelled`, `order.status_changed`, `order.shipment_retry_requested`, `refund.requested`, `refund.state_changed` (system) |
 | Yandex Delivery (§2.18) | `order.dispatch_requested` (`{claim_number, request_id, method, taxi_class, weight_g, approved_price}`), `order.carrier_cancel` (`{outcome, claim_number, cancel_state?, cancel_fee?, status?, error_code?}`; outcomes `withdrawn`, `cancelled`, `already_cancelled`, `already_finished`, `returning`, `already_returning`, `return_requested`, `cancel_pending`, `refused`, `unavailable`, `unavailable_terms`, `return_refused`, `delivered`, `parcel_out`, `no_point`), `order.return_confirmed` (`{claim_number, order_status, note}`) — entity `order`; `delivery.issue_opened` (staff incident), `delivery.issue_resolved` — entity `delivery_issue`; ops console and panel switch: `delivery.settings_updated` (changed columns `{from, to}`; the warehouse address and contacts as `{changed: true}`), `delivery.suspension_updated`, `delivery.hours_saved`, `delivery.hours_deleted`, `delivery.closure_saved`, `delivery.closure_deleted`, `delivery.tariffs_checked` (entity `integration` / `yandex`: mode, classes or error code) |
@@ -1913,7 +2028,7 @@ Provisional, configurable rules that shape payloads:
     - `Order.cashback_hold` renders only an `active` hold, else `null`.
     - Orders keep a recipient snapshot (`recipient_name`, `recipient_phone`, `address_text`) taken at checkout, so BTS parcels and exports survive a later customer scrub.
     - Admin appointment creation / rescheduling / cancellation (`requested_via = admin`) add audit actions `appointment.created`, `appointment.rescheduled`, `appointment.cancelled` and pushes on reschedule and cancel (M1d).
-    - Refund operations for the Payments screen (M1c, consumed by F3): `POST payments/{id}/refunds/{refund_id}/retry/` (from `failed`) and `…/resolve/` `{state: succeeded|failed}` (from `unknown` / `manual_required`, audited `refund.state_changed` with the actor). M2 (customer contract §2.13.0): `…/resolve/ {state: succeeded, manual_payout?: bool}` also closes a `failed` **Click** refund (Click refuses reversals of a previous month, of offline/Humo cards, or when UZCARD declines). The server first asks Click for the payment's status (a fresh check through the port, never under a row lock): `reversed` → closed `succeeded` (Click returned the money; do not pay out); still `paid` → 409 **`click_not_reversed`** (M3; `invalid_transition` before) "Click to‘lovni qaytarmagan. Avval mijozga qo‘lda to‘lang, so‘ng «qo‘lda to‘landi» belgisi bilan yakunlang yoki qaytarishni qayta urinib ko‘ring." unless the body carries `manual_payout: true` (staff paid the customer outside Click; then closed `succeeded`, audited with `manual_payout: true`); Click unreachable → 503 `provider_unavailable`; Click fake under the production settings → 409 `invalid_transition` "Click sinov rejimida: to‘lov holatini tekshirib bo‘lmaydi. Click ulanganidan keyin yakunlang."; a payment without a Click payment id is **not checked** (Click cannot be asked about it) and needs `manual_payout: true` — without it 409 `conflict` "Bu to‘lovda Click to‘lov raqami yo‘q, shuning uchun Click’dan holatini tekshirib bo‘lmaydi. Mijozga qo‘lda to‘lang, so‘ng «qo‘lda to‘landi» belgisi bilan yakunlang." (M3: never the "Click to‘lovni qaytarmagan" answer, since Click was not asked). The UI therefore offers "Yakunlash" (no flag) first and, after the 409 `click_not_reversed` (or this `conflict`), "Qo‘lda to‘landi" (`manual_payout: true`) once the payout is done. The close is allowed only while it is the payment's newest refund, the payment is still `paid` and no other refund of the payment is open or succeeded (otherwise 409 `invalid_transition` "Bu qaytarishni yakunlab bo‘lmaydi.", so a refund retried with `…/retry/` cannot be paid out twice); M3: this guard runs **before** the Click status check (a refund that can no longer be closed is refused without asking Click) and again under the row locks. `manual_payout` is ignored for `unknown` / `manual_required` refunds, whose resolve is unchanged. While Click is fake under the production settings, `…/retry/` of a `failed` Click refund also answers 409 `invalid_transition` "Click sinov rejimida: to‘lov holatini tekshirib bo‘lmaydi. Click ulanganidan keyin yakunlang." (nothing written), so a retried refund can never skip the status check.
+    - Refund operations for the Payments screen (M1c, consumed by F3): `POST payments/{id}/refunds/{refund_id}/retry/` (from `failed`) and `…/resolve/` `{state: succeeded|failed}` (from `unknown` / `manual_required`, audited `refund.state_changed` with the actor). M2 (customer contract §2.13.0): `…/resolve/ {state: succeeded, manual_payout?: bool}` also closes a `failed` **Click** refund (Click refuses reversals of a previous month, of offline/Humo cards, or when UZCARD declines). The server first asks Click for the payment's status (a fresh check through the port, never under a row lock): `reversed` → closed `succeeded` (Click returned the money; do not pay out); still `paid` → 409 **`click_not_reversed`** (M3; `invalid_transition` before) "Click to‘lovni qaytarmagan. Avval mijozga qo‘lda to‘lang, so‘ng «qo‘lda to‘landi» belgisi bilan yakunlang yoki qaytarishni qayta urinib ko‘ring." unless the body carries `manual_payout: true` (staff paid the customer outside Click; then closed `succeeded`, audited with `manual_payout: true`); Click unreachable → 503 `provider_unavailable`; Click fake under the production settings → 409 `click_fake_mode` (feat/admin-ux; `invalid_transition` before) "Click sinov rejimida: to‘lov holatini tekshirib bo‘lmaydi. Click ulanganidan keyin yakunlang."; a payment without a Click payment id is **not checked** (Click cannot be asked about it) and needs `manual_payout: true` — without it 409 `click_no_paydoc` (feat/admin-ux; `conflict` before) "Bu to‘lovda Click to‘lov raqami yo‘q, shuning uchun Click’dan holatini tekshirib bo‘lmaydi. Mijozga qo‘lda to‘lang, so‘ng «qo‘lda to‘landi» belgisi bilan yakunlang." (M3: never the "Click to‘lovni qaytarmagan" answer, since Click was not asked). The UI therefore offers "Yakunlash" (no flag) first and, after the 409 `click_not_reversed` (or this `click_no_paydoc`), "Qo‘lda to‘landi" (`manual_payout: true`) once the payout is done. The close is allowed only while it is the payment's newest refund, the payment is still `paid` and no other refund of the payment is open or succeeded (otherwise 409 `invalid_transition` "Bu qaytarishni yakunlab bo‘lmaydi.", so a refund retried with `…/retry/` cannot be paid out twice); M3: this guard runs **before** the Click status check (a refund that can no longer be closed is refused without asking Click) and again under the row locks. `manual_payout` is ignored for `unknown` / `manual_required` refunds, whose resolve is unchanged. While Click is fake under the production settings, `…/retry/` of a `failed` Click refund also answers 409 `click_fake_mode` "Click sinov rejimida: to‘lov holatini tekshirib bo‘lmaydi. Click ulanganidan keyin yakunlang." (nothing written), so a retried refund can never skip the status check.
     - The logout action posts `{refresh: <gd_admin_refresh cookie>, scope: "current"}` and clears both cookies whatever the response (a 401 `SESSION_EXPIRED` counts as logged out). Settings (A1) can offer "others" and "all".
     - The login page, `auth.actions.ts`, cookies and `proxy.ts` follow the spec's "Auth" section.
 19. **Settings: contacts and legal texts (gap closure, settings package; moved to the ops console 2026-11-07).**

@@ -35,11 +35,18 @@ KWARG_VALUES = {
 # The only (route, method) pairs an anonymous caller may use (contract 1.2 and 2.1); everything else under
 # api/v1/admin/ must reject every non-staff credential. ``auth/oauth/<provider>/`` is public for POST only:
 # DELETE on the same route (unlink) and ``.../link/`` need a bearer.
-PUBLIC_METHODS = {
-    (f"/api/v1/admin/auth/{name}/", "post") for name in ("login", "refresh", "logout", "oauth/google")
-}
+# feat/admin-ux: the set-password page's ``password-token/check|set/`` and the MFA step ``mfa/verify/``.
+PUBLIC_NAMES = (
+    "login",
+    "refresh",
+    "logout",
+    "password-token/check",
+    "password-token/set",
+    "mfa/verify",
+)
+PUBLIC_METHODS = {(f"/api/v1/admin/auth/{name}/", "post") for name in (*PUBLIC_NAMES, "oauth/google")}
 # Views without any authentication class answer other methods with 405 (OPTIONS 200) instead of 401.
-UNAUTHENTICATED_VIEWS = {f"/api/v1/admin/auth/{name}/" for name in ("login", "refresh", "logout")}
+UNAUTHENTICATED_VIEWS = {f"/api/v1/admin/auth/{name}/" for name in PUBLIC_NAMES}
 CONVERTER_VALUES = {
     "UUIDConverter": "00000000-0000-4000-8000-000000000001",
     "IntConverter": "1",

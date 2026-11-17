@@ -1,5 +1,5 @@
 """Admin views of `reporting` for the shell: ``GET dashboard/`` and ``GET nav-counts/`` (§2.10), ``GET
-audit-log/`` (§2.13)."""
+audit-log/`` and ``GET audit-log/facets/`` (§2.13)."""
 
 from __future__ import annotations
 
@@ -17,9 +17,11 @@ from glowderma.core import labels, timeutils
 from glowderma.core.api.schema import ADMIN_ERRORS, EXPORT_PARAM
 from glowderma.core.exports import ExportMixin, format_export_datetime
 from glowderma.core.models import AuditEntry
+from glowderma.core.uzsource import N_
 from glowderma.reporting import selectors
 from glowderma.reporting.api.admin.serializers import (
     AuditEntrySerializer,
+    AuditFacetsSerializer,
     AuditLogQuerySerializer,
     DashboardQuerySerializer,
     DashboardSerializer,
@@ -29,7 +31,7 @@ from glowderma.reporting.api.admin.serializers import (
 
 class AuditLogViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
     serializer_class = AuditEntrySerializer
-    export_name = "harakatlar-jurnali"
+    export_name = N_("harakatlar-jurnali")
     export_filter_keys = frozenset(AuditLogQuerySerializer().fields)
     export_resource = "audit-log"
     export_headers = labels.AUDIT_LOG_EXPORT_HEADERS
@@ -37,9 +39,12 @@ class AuditLogViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
     def get_queryset(self) -> QuerySet[AuditEntry]:
         query = AuditLogQuerySerializer(data=self.request.query_params.dict())
         query.is_valid(raise_exception=True)
-        return selectors.audit_log(cast(selectors.AuditLogFilters, dict(query.validated_data)))
+        return selectors.audit_log(
+            cast(selectors.AuditLogFilters, dict(query.validated_data)), self.request.user
+        )
 
     def get_export_rows(self, items: Iterable[AuditEntry]) -> Iterable[Sequence[Any]]:
+        viewer = self.request.user
         for entry in items:
             actor = selectors.audit_actor(entry)
             yield (
@@ -49,7 +54,7 @@ class AuditLogViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
                 entry.action,
                 entry.entity_type,
                 entry.entity_id,
-                entry.ip or "",
+                selectors.audit_ip(entry, viewer) or "",
                 entry.request_id,
             )
 
@@ -60,6 +65,21 @@ class AuditLogViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
     )
     def list(self, request: Request, *args: Any, **kwargs: Any) -> Response:
         return super().list(request, *args, **kwargs)
+
+
+class AuditFacetsView(AdminAPIView):
+    @extend_schema(
+        operation_id="admin_audit_log_facets",
+        description=(
+            "What the audit log shows the signed-in staff member: ordinary staff see business entries and "
+            "their own sign-ins and exports, without IP addresses; managers add staff management and every "
+            "staff sign-in, with IPs; superusers see everything. Entries outside the tier are simply absent "
+            "from `audit-log/` and its export (a filter on them answers an empty list, never 403)."
+        ),
+        responses={200: AuditFacetsSerializer, **ADMIN_ERRORS},
+    )
+    def get(self, request: Request) -> Response:
+        return Response(AuditFacetsSerializer(selectors.audit_facets(request.user)).data)
 
 
 class NavCountsView(AdminAPIView):

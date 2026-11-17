@@ -18,7 +18,18 @@ from glowderma.core.timeutils import TASHKENT
 pytestmark = pytest.mark.django_db
 
 URL = "/api/v1/admin/staff/"
-HIDDEN = dict.fromkeys(("full_name", "is_manager", "last_login_at", "linked_providers", "created_at"))
+HIDDEN = dict.fromkeys(
+    (
+        "full_name",
+        "is_manager",
+        "last_login_at",
+        "linked_providers",
+        "created_at",
+        "must_change_password",
+        "mfa_enabled",
+        "invite",
+    )
+)
 
 
 def errors(response: Any) -> list[tuple[str | None, str, str]]:
@@ -128,6 +139,9 @@ def test_a_manager_gets_the_full_rows(manager_client: APIClient, manager: StaffU
         "last_login_at": "2026-10-24T18:30:00+05:00",
         "linked_providers": ["facebook", "google"],
         "created_at": "2026-10-20T09:00:00+05:00",
+        "must_change_password": False,
+        "mfa_enabled": False,
+        "invite": {"state": "none", "sent_at": None, "expires_at": None},
     }
     assert rows[manager.pk]["is_manager"] is True
     assert rows[manager.pk]["linked_providers"] == []
@@ -166,7 +180,7 @@ def test_the_manager_rows_read_no_password_hash(manager: StaffUser, django_asser
 
     StaffUserFactory.create_batch(3)
     rows = selectors.staff_list({"is_active": True}, members=True)
-    assert "password" not in str(rows.query)
+    assert '"accounts_staffuser"."password"' not in str(rows.query)  # the hash; the password state is read
     with django_assert_num_queries(2):  # the page and one prefetch of the linked providers
         data = StaffListItemSerializer(rows, many=True, context={"manager": True}).data
     assert len(data) == 4

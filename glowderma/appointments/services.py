@@ -30,20 +30,21 @@ from glowderma.core.api.exceptions import (
     field_error,
     not_cancellable,
 )
+from glowderma.core.uzsource import N_
 from glowderma.professionals.models import Professional, ProfessionalService, Service
 from glowderma.professionals.selectors import DAY_END_LABEL, day_schedules
 from glowderma.site_config import selectors as site_config_selectors
 
 SLOT_STEP_MIN = 5  # admin bookings sit on a 5-minute grid (open point A-4: not the professional's slot_step)
 MESSAGES = {
-    "invalid_transition": "Bu amal ushbu holatda mumkin emas.",
-    "slot_taken": "Bu vaqt band.",
-    "outside_working_hours": "Mutaxassis bu vaqtda ishlamaydi.",
-    "in_past": "Kelajakdagi vaqtni tanlang.",
-    "grid": "Vaqt 5 daqiqalik qadamda bo‘lsin.",
-    "service_not_offered": "Mutaxassis bu xizmatni ko‘rsatmaydi.",
-    "specialist_not_found": "Mutaxassis topilmadi.",
-    "service_not_found": "Xizmat topilmadi.",
+    "invalid_transition": N_("Bu amal ushbu holatda mumkin emas."),
+    "slot_taken": N_("Bu vaqt band."),
+    "outside_working_hours": N_("Mutaxassis bu vaqtda ishlamaydi."),
+    "in_past": N_("Kelajakdagi vaqtni tanlang."),
+    "grid": N_("Vaqt 5 daqiqalik qadamda bo‘lsin."),
+    "service_not_offered": N_("Mutaxassis bu xizmatni ko‘rsatmaydi."),
+    "specialist_not_found": N_("Mutaxassis topilmadi."),
+    "service_not_found": N_("Xizmat topilmadi."),
 }
 # ``POST appointments/{id}/{action}/``: allowed source statuses and the resulting status (contract §2.9).
 TRANSITIONS: dict[str, tuple[tuple[str, ...], str]] = {

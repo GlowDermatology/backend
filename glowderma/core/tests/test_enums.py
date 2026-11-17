@@ -208,7 +208,18 @@ DELIVERY_TABLE: dict[str, list[str]] = {
         "not_configured",
     ],
 }
-ALL_TABLES = {**CONTRACT_TABLE, **CUSTOMER_TABLE, **DELIVERY_TABLE}
+# Staff invite and forced password change (admin contract §2.1, §2.16; feat/admin-ux).
+STAFF_TABLE: dict[str, list[str]] = {
+    "StaffPasswordDelivery": ["temporary_password", "email_link", "both"],
+    "StaffPasswordPurpose": ["invite", "reset"],
+    "StaffInviteState": ["none", "pending", "expired", "used", "revoked"],
+}
+# Audit tiers and the appointments range (admin contract §2.13, §2.9; feat/admin-ux).
+AUDIT_RANGE_TABLE: dict[str, list[str]] = {
+    "AuditViewerTier": ["staff", "manager", "superuser"],
+    "AppointmentRangeDetail": ["counts", "full"],
+}
+ALL_TABLES = {**CONTRACT_TABLE, **CUSTOMER_TABLE, **DELIVERY_TABLE, **STAFF_TABLE, **AUDIT_RANGE_TABLE}
 
 
 def test_every_contract_enum_has_the_contract_literals() -> None:

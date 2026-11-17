@@ -46,6 +46,7 @@ from glowderma.core.api.schema import (
 )
 from glowderma.core.exports import ExportMixin, format_export_datetime
 from glowderma.core.idempotency import already_answered, idempotency_key, idempotent
+from glowderma.core.uzsource import N_
 from glowderma.delivery import selectors as delivery_selectors
 from glowderma.delivery import services as delivery_services
 from glowderma.delivery.models import DeliveryIssue
@@ -83,7 +84,7 @@ class OrderViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
     serializer_class = OrderSummarySerializer
     page_size_options = (6, 10, 25, 50)
     default_page_size = 10
-    export_name = "buyurtmalar"
+    export_name = N_("buyurtmalar")
     export_resource = "orders"
     export_headers = labels.ORDER_EXPORT_HEADERS
 
@@ -102,10 +103,10 @@ class OrderViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
                 order.customer.phone or "",
                 format_export_datetime(order.created_at),
                 order.total,
-                labels.PAYMENT_STATUS[payment["status"]],
-                labels.PROVIDER[payment["provider"]],
-                labels.FULFILMENT[order.fulfilment],
-                labels.ORDER_STATUS[order.status],
+                labels.text(labels.PAYMENT_STATUS, payment["status"]),
+                labels.text(labels.PROVIDER, payment["provider"]),
+                labels.text(labels.FULFILMENT, order.fulfilment),
+                labels.text(labels.ORDER_STATUS, order.status),
                 selectors.tracking_number(order),
             )
 
@@ -269,7 +270,7 @@ class OrderConfirmReturnView(AdminAPIView):
         "`return_pending` issue resolved (the note is its resolution note), order event "
         "`shipment_returned`, audit `order.return_confirmed`. A cancelled order stays cancelled; an open "
         "order stays as it is (staff dispatch again or cancel). 409 `invalid_transition` (no returning "
-        "parcel), 409 `conflict` (confirmed already, or the order is busy).",
+        "parcel), 409 `conflict` (confirmed already), 409 `order_busy` (the order is busy).",
         parameters=[IDEMPOTENCY_KEY_HEADER],
         request=ConfirmReturnSerializer,
         responses={200: OrderDetailSerializer, **ADMIN_ERRORS},
@@ -309,7 +310,8 @@ class RefundRetryView(AdminAPIView):
     @extend_schema(
         operation_id="admin_payments_refund_retry",
         description="Retry a `failed` refund: a new refund of the payment (Click `requested`, Payme "
-        "`manual_required`) and its `refund_requested` order event.",
+        "`manual_required`) and its `refund_requested` order event. 409 `click_fake_mode` (Click fake under "
+        "the production settings), 409 `order_busy` (the order is busy; retry).",
         request=None,
         responses={200: PaymentSerializer, **ADMIN_ERRORS},
     )
@@ -330,7 +332,10 @@ class RefundResolveView(AdminAPIView):
         "refund as `succeeded` after a fresh Click status check (`manual_payout: true` when Click still "
         "reports "
         "the payment paid and staff paid the customer by hand; 503 when Click does not answer). Audited "
-        "`refund.state_changed` with the actor; order event `refund_succeeded` / `refund_failed`.",
+        "`refund.state_changed` with the actor; order event `refund_succeeded` / `refund_failed`. 409 "
+        "`click_not_reversed` (Click still shows the payment paid) / `click_no_paydoc` (no Click payment "
+        "id): pay out by hand, then `manual_payout: true`; 409 `click_fake_mode` (Click fake under the "
+        "production settings); 409 `order_busy` (the order is busy; retry).",
         request=ResolveRefundSerializer,
         responses={200: PaymentSerializer, **ACTION_ERRORS},
     )
@@ -354,8 +359,8 @@ class RefundResolveView(AdminAPIView):
 
 # --- delivery exception queue and dispatch suspension (Yandex Delivery plan §3.9) ---------------------------
 
-MESSAGE_PICKUP_ISSUE = "Olib ketiladigan buyurtma uchun yetkazish muammosi ochilmaydi."
-MESSAGE_ISSUE_RESOLVED = "Bu muammo allaqachon hal qilingan."
+MESSAGE_PICKUP_ISSUE = N_("Olib ketiladigan buyurtma uchun yetkazish muammosi ochilmaydi.")
+MESSAGE_ISSUE_RESOLVED = N_("Bu muammo allaqachon hal qilingan.")
 
 
 def _issue_response(issue_id: int, status: int = 200) -> Response:

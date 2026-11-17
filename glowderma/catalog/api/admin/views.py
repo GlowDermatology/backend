@@ -48,6 +48,7 @@ from glowderma.core.api.schema import ADMIN_ERRORS, EXPORT_PARAM, ErrorEnvelopeS
 from glowderma.core.exports import ExportMixin, format_export_datetime
 from glowderma.core.idempotency import idempotent
 from glowderma.core.media import absolute_media_url
+from glowderma.core.uzsource import N_, tr
 from glowderma.integrations import selectors as integration_selectors
 from glowderma.integrations import services as job_services
 from glowderma.integrations.api.admin.serializers import BillzImportSerializer, JobSerializer
@@ -62,7 +63,7 @@ class ProductViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
     serializer_class = ProductSerializer
     page_size_options = (8,)
     default_page_size = 8
-    export_name = "mahsulotlar"
+    export_name = N_("mahsulotlar")
     export_filter_keys = frozenset(ProductListQuerySerializer().fields)
     export_resource = "products"
     export_headers = labels.PRODUCT_EXPORT_HEADERS
@@ -84,7 +85,7 @@ class ProductViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
                 product.price,
                 int(getattr(product, "stock_quantity", 0)),
                 labels.yes_no(product.promo),
-                labels.PRODUCT_STATUS[product.status],
+                labels.text(labels.PRODUCT_STATUS, product.status),
                 labels.yes_no(product.is_new_from_billz),
             )
 
@@ -275,7 +276,7 @@ def _category_image(request: Request) -> Any:
 
 class CategoryViewSet(ExportMixin, mixins.ListModelMixin, ActionParsersViewSet):
     serializer_class = CategorySerializer
-    export_name = "kategoriyalar"
+    export_name = N_("kategoriyalar")
     export_filter_keys = frozenset(CategoryListQuerySerializer().fields)
     export_resource = "categories"
     export_headers = labels.CATEGORY_EXPORT_HEADERS
@@ -475,7 +476,7 @@ BannerPatchFormSerializer = inline_serializer(
 
 class BannerViewSet(ExportMixin, mixins.ListModelMixin, ActionParsersViewSet):
     serializer_class = BannerSerializer
-    export_name = "bannerlar"
+    export_name = N_("bannerlar")
     export_filter_keys = frozenset(BannerListQuerySerializer().fields)
     export_resource = "banners"
     export_headers = labels.BANNER_EXPORT_HEADERS
@@ -501,9 +502,11 @@ class BannerViewSet(ExportMixin, mixins.ListModelMixin, ActionParsersViewSet):
     def get_export_rows(self, items: Iterable[Banner]) -> Iterable[Sequence[Any]]:
         for banner in items:
             if banner.link_kind == enums.BannerLinkKind.PRODUCT and banner.link_product_id:
-                link = f"mahsulot #{banner.link_product_id}"
+                link = tr(N_("mahsulot #%(id)s")) % {"id": banner.link_product_id}
             elif banner.link_kind == enums.BannerLinkKind.CATEGORY and banner.link_category_id:
-                link = f"kategoriya {banner.link_category.slug if banner.link_category else ''}"
+                link = tr(N_("kategoriya %(slug)s")) % {
+                    "slug": banner.link_category.slug if banner.link_category else ""
+                }
             elif banner.link_kind == enums.BannerLinkKind.URL and banner.link_url:
                 link = banner.link_url
             else:

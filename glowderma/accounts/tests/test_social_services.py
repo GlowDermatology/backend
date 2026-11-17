@@ -45,7 +45,8 @@ def login(claims: SocialClaims) -> tuple[AuthSession, str]:
 
 
 def failures() -> list[Any]:
-    return [entry.after for entry in AuditEntry.objects.filter(action="auth.login_failed")]
+    # in insertion order: the audit table has no default ordering, so heap order is not guaranteed
+    return [entry.after for entry in AuditEntry.objects.filter(action="auth.login_failed").order_by("id")]
 
 
 def test_linked_identity_logs_in_and_audits(staff: StaffUser) -> None:

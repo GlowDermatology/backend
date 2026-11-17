@@ -36,6 +36,7 @@ from glowderma.core import audit, enums, integration_modes, timeutils
 from glowderma.core.api.exceptions import Conflict, field_error
 from glowderma.core.images import ImageError, ProcessedImage, process_image
 from glowderma.core.media import media_name
+from glowderma.core.uzsource import N_
 from glowderma.core.variants import delete_with_variants, store_variants
 from glowderma.integrations.billz.ports import BillzListingIncomplete, BillzProduct
 
@@ -45,16 +46,16 @@ MAX_PRODUCT_IMAGES = 8
 MIN_PRICE = 1_000
 TEXT_FIELDS = ("name", "description", "ingredients", "usage")
 LANGUAGES = ("uz", "ru", "en")
-LAST_IMAGE_OF_ACTIVE = "Faol mahsulotda kamida bitta rasm bo‘lsin."
-CATEGORY_HAS_PRODUCTS = "Kategoriyada mahsulotlar bor."
+LAST_IMAGE_OF_ACTIVE = N_("Faol mahsulotda kamida bitta rasm bo‘lsin.")
+CATEGORY_HAS_PRODUCTS = N_("Kategoriyada mahsulotlar bor.")
 CATEGORY_LOCK = "catalog_category_position"
 BANNER_LOCK = "catalog_banner_position"
-BILLZ_ID_TAKEN = "Bu Billz ID bilan mahsulot allaqachon bor."
-PRODUCT_SLUG_TAKEN = "Bu manzil (slug) boshqa mahsulotda bor."
+BILLZ_ID_TAKEN = N_("Bu Billz ID bilan mahsulot allaqachon bor.")
+PRODUCT_SLUG_TAKEN = N_("Bu manzil (slug) boshqa mahsulotda bor.")
 SEO_FIELDS = ("title", "description")
 # Admin contract §2.3/§2.14, customer contract §2.3/§6.14: a fake Billz under the production settings never
 # invents or refreshes Billz fields or stock.
-BILLZ_FAKE_MODE = (
+BILLZ_FAKE_MODE = N_(
     "Billz sinov rejimida: Billz ma’lumotlarini olib bo‘lmaydi. Billz ulanganidan keyin qayta urinib ko‘ring."
 )
 BILLZ_FAKE_MODE_CODE = "billz_fake_mode"
@@ -200,11 +201,13 @@ def _check_active_rule(product: Product, image_count: int) -> None:
         return
     errors: dict[str, list[Any]] = {}
     if product.category_id is None:
-        errors["category"] = [field_error("required_for_active", "Faol mahsulot uchun kategoriyani tanlang.")]
+        errors["category"] = [
+            field_error("required_for_active", N_("Faol mahsulot uchun kategoriyani tanlang."))
+        ]
     if image_count == 0:
         errors["images"] = [field_error("required_for_active", LAST_IMAGE_OF_ACTIVE)]
     if product.price < MIN_PRICE:
-        errors["price"] = [field_error("min_value", "Narx kamida 1 000 so‘m bo‘lsin.")]
+        errors["price"] = [field_error("min_value", N_("Narx kamida 1 000 so‘m bo‘lsin."))]
     if errors:
         raise ValidationError(errors)
 
@@ -378,7 +381,7 @@ def add_image(product_id: int, uploaded: Any, *, actor: Any, request: Any = None
         product = _locked_product(product_id)
         count = product.images.count()
         if count >= MAX_PRODUCT_IMAGES:
-            raise ValidationError({"images": [field_error("max_items", "Ko‘pi bilan 8 ta rasm.")]})
+            raise ValidationError({"images": [field_error("max_items", N_("Ko‘pi bilan 8 ta rasm."))]})
         name = media_name("products", product.pk, processed.content, processed.extension)
         image = ProductImage(
             product=product,

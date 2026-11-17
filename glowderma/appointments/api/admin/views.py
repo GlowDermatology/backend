@@ -16,11 +16,13 @@ from glowderma.appointments.api.admin.serializers import (
     AppointmentCancelSerializer,
     AppointmentCreateSerializer,
     AppointmentItemSerializer,
+    AppointmentRangeSerializer,
     AppointmentRescheduleSerializer,
     AppointmentsMetaSerializer,
     DayQuerySerializer,
     DayScheduleSerializer,
     PendingSummarySerializer,
+    RangeQuerySerializer,
     ScheduleConflictsSerializer,
 )
 from glowderma.appointments.models import Appointment
@@ -81,6 +83,33 @@ class AppointmentsView(AdminAPIView):
             **serializer.validated_data, actor=request.user, request=request
         )
         return Response(_item(appointment), status=201)
+
+
+class AppointmentRangeView(AdminAPIView):
+    @extend_schema(
+        operation_id="admin_appointments_range",
+        description=(
+            "The week and month boards: per Tashkent day of `from`…`to` (inclusive) the status counts of the "
+            "appointments starting that day, whether any listed specialist works and their combined hours. "
+            "`detail=counts` (default) allows up to 42 days; `detail=full` (up to 7 days) adds every "
+            "specialist's day schedule and the appointments in the day-item shape. Specialists follow the "
+            "day board's rule over the whole range (active ones, plus inactive ones with an appointment in "
+            "it); `specialist_id` narrows specialists, counts and appointments to one."
+        ),
+        parameters=[RangeQuerySerializer],
+        responses={200: AppointmentRangeSerializer, **ADMIN_ERRORS},
+    )
+    def get(self, request: Request) -> Response:
+        query = RangeQuerySerializer(data=request.query_params.dict())
+        query.is_valid(raise_exception=True)
+        params = query.validated_data
+        view = selectors.range_view(
+            params["from"],
+            params["to"],
+            specialist_id=params.get("specialist_id"),
+            full=params["detail"] == enums.AppointmentRangeDetail.FULL,
+        )
+        return Response(AppointmentRangeSerializer(view).data)
 
 
 class PendingSummaryView(AdminAPIView):

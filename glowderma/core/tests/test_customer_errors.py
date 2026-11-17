@@ -36,6 +36,7 @@ from glowderma.core.api.exceptions import (
     not_found_view,
 )
 from glowderma.core.api.parsers import JSONParser
+from glowderma.core.uzsource import localize_admin_message
 
 CONTRACT = Path(settings.BASE_DIR) / "docs/api/customer-api-v1.md"
 
@@ -299,13 +300,16 @@ def test_not_found_page_is_customer_shaped_only_on_customer_paths() -> None:
         "details": None,
         "request_id": "",
     }
+    # the admin envelope keeps its shape; its message follows Accept-Language (feat/admin-ux, DESIGN §G)
     admin = not_found_view(factory.get("/api/v1/admin/nope/", HTTP_ACCEPT_LANGUAGE="ru"), Http404())
     assert json.loads(admin.content) == {
         "code": "not_found",
-        "message": "Topilmadi.",
+        "message": localize_admin_message("Topilmadi.", "ru"),
         "errors": [],
         "request_id": "",
     }
+    uzbek = not_found_view(factory.get("/api/v1/admin/nope/"), Http404())
+    assert json.loads(uzbek.content)["message"] == "Topilmadi."
     assert api_exceptions.is_customer_path("/api/v1/me/") and not api_exceptions.is_customer_path(
         "/api/v1/health/"
     )
@@ -406,7 +410,8 @@ def test_not_found_page_without_the_trailing_slash_keeps_the_admin_envelope(path
     page = not_found_view(RequestFactory().get(path, HTTP_ACCEPT_LANGUAGE="ru"), Http404())
     assert json.loads(page.content) == {
         "code": "not_found",
-        "message": "Topilmadi.",
+        # only the admin API answers in Accept-Language (feat/admin-ux)
+        "message": localize_admin_message("Topilmadi.", "ru") if path == "/api/v1/admin" else "Topilmadi.",
         "errors": [],
         "request_id": "",
     }

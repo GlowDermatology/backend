@@ -24,13 +24,14 @@ from glowderma.core.api.exceptions import field_error
 from glowderma.core.api.fields import (
     AwareDateTimeField,
     BoundedListField,
-    PhoneField,
+    LenientPhoneField,
     QueryBooleanField,
     i18n_dict,
     i18n_text,
 )
 from glowderma.core.api.serializers import ActorSerializer
 from glowderma.core.media import absolute_media_url, optional_variant_url
+from glowderma.core.uzsource import N_
 from glowderma.professionals.models import (
     BlockedPeriod,
     Location,
@@ -54,28 +55,28 @@ DB_INT_MAX = 2_147_483_647
 RANGE_LIMIT_DAYS = 3660  # schedule list filters: today ± ~10 years (keeps day_bounds away from date.max)
 CLOCK = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 MESSAGES = {
-    "clock": "Vaqtni SS:DD ko‘rinishida kiriting.",
-    "grid": "Vaqt 5 daqiqalik qadamda bo‘lsin.",
-    "duration_grid": "Davomiylik 5 daqiqaga karrali bo‘lsin.",
-    "end_before_start": "Tugash vaqti boshlanishidan keyin bo‘lsin.",
-    "break_pair": "Tanaffusning boshlanishi va tugashini birga kiriting.",
-    "break_outside": "Tanaffus ish vaqti ichida bo‘lsin.",
-    "hours_pair": "Boshlanish va tugash vaqtini birga kiriting (ikkalasi bo‘sh bo‘lsa, dam olish kuni).",
-    "weekday_twice": "Bu hafta kuni ikki marta berilgan.",
-    "service_twice": "Bu xizmat ro‘yxatda ikki marta berilgan.",
-    "service_not_found": "Xizmat topilmadi.",
-    "location_not_found": "Manzil topilmadi.",
-    "staff_not_found": "Xodim topilmadi.",
-    "staff_taken": "Bu xodim boshqa mutaxassisga bog‘langan.",
-    "slot_step": "Ruxsat etilgan qadamlar: 10, 15, 20, 30 yoki 60 daqiqa.",
-    "price_max": "Narx juda katta.",
-    "override_past": "O‘tgan sanani tanlab bo‘lmaydi.",
-    "override_far": "Ko‘pi bilan bir yil oldinga kiritish mumkin.",
-    "block_past": "Tugagan vaqtni band qilib bo‘lmaydi.",
-    "block_long": "Ko‘pi bilan 366 kunlik davr.",
-    "range": "Oxirgi sana boshlang‘ich sanadan oldin bo‘lmasin.",
-    "range_far": "Sana bugundan ko‘pi bilan 10 yil uzoqlikda bo‘lsin.",
-    "decimals": "Ko‘pi bilan 6 ta kasr raqam.",
+    "clock": N_("Vaqtni SS:DD ko‘rinishida kiriting."),
+    "grid": N_("Vaqt 5 daqiqalik qadamda bo‘lsin."),
+    "duration_grid": N_("Davomiylik 5 daqiqaga karrali bo‘lsin."),
+    "end_before_start": N_("Tugash vaqti boshlanishidan keyin bo‘lsin."),
+    "break_pair": N_("Tanaffusning boshlanishi va tugashini birga kiriting."),
+    "break_outside": N_("Tanaffus ish vaqti ichida bo‘lsin."),
+    "hours_pair": N_("Boshlanish va tugash vaqtini birga kiriting (ikkalasi bo‘sh bo‘lsa, dam olish kuni)."),
+    "weekday_twice": N_("Bu hafta kuni ikki marta berilgan."),
+    "service_twice": N_("Bu xizmat ro‘yxatda ikki marta berilgan."),
+    "service_not_found": N_("Xizmat topilmadi."),
+    "location_not_found": N_("Manzil topilmadi."),
+    "staff_not_found": N_("Xodim topilmadi."),
+    "staff_taken": N_("Bu xodim boshqa mutaxassisga bog‘langan."),
+    "slot_step": N_("Ruxsat etilgan qadamlar: 10, 15, 20, 30 yoki 60 daqiqa."),
+    "price_max": N_("Narx juda katta."),
+    "override_past": N_("O‘tgan sanani tanlab bo‘lmaydi."),
+    "override_far": N_("Ko‘pi bilan bir yil oldinga kiritish mumkin."),
+    "block_past": N_("Tugagan vaqtni band qilib bo‘lmaydi."),
+    "block_long": N_("Ko‘pi bilan 366 kunlik davr."),
+    "range": N_("Oxirgi sana boshlang‘ich sanadan oldin bo‘lmasin."),
+    "range_far": N_("Sana bugundan ko‘pi bilan 10 yil uzoqlikda bo‘lsin."),
+    "decimals": N_("Ko‘pi bilan 6 ta kasr raqam."),
 }
 
 
@@ -287,7 +288,7 @@ class ClinicSpecialistWriteSerializer(serializers.Serializer[dict[str, Any]]):
         if not slugs.is_valid_slug(value, max_length=160):
             raise serializers.ValidationError(
                 field_error(
-                    "invalid", "Faqat lotin kichik harflari, raqamlar va chiziqcha (faqat raqam emas)."
+                    "invalid", N_("Faqat lotin kichik harflari, raqamlar va chiziqcha (faqat raqam emas).")
                 )
             )
         taken = Professional.objects.filter(slug=value)
@@ -296,7 +297,7 @@ class ClinicSpecialistWriteSerializer(serializers.Serializer[dict[str, Any]]):
             taken = taken.exclude(pk=editing)
         if taken.exists():
             raise serializers.ValidationError(
-                field_error("unique", "Bu manzil (slug) boshqa mutaxassisda bor.")
+                field_error("unique", N_("Bu manzil (slug) boshqa mutaxassisda bor."))
             )
         return value
 
@@ -664,6 +665,6 @@ class ClinicLocationPatchSerializer(serializers.Serializer[dict[str, Any]]):
 
     name = LocationNameSerializer(required=False)
     address = LocationAddressSerializer(required=False)
-    phone = PhoneField(allow_null=True, required=False)
+    phone = LenientPhoneField(allow_null=True, required=False)
     latitude = _coordinate(90)
     longitude = _coordinate(180)

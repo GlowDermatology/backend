@@ -15,6 +15,7 @@ from glowderma.accounts.api.base import AdminGenericViewSet
 from glowderma.core import labels
 from glowderma.core.api.schema import ADMIN_ERRORS, EXPORT_PARAM
 from glowderma.core.exports import ExportMixin, format_export_datetime
+from glowderma.core.uzsource import N_
 from glowderma.payments import selectors
 from glowderma.payments.api.admin.serializers import PaymentListQuerySerializer, PaymentSerializer
 from glowderma.payments.models import Payment
@@ -22,7 +23,7 @@ from glowderma.payments.models import Payment
 
 class PaymentViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
     serializer_class = PaymentSerializer
-    export_name = "tolovlar"
+    export_name = N_("tolovlar")
     export_resource = "payments"
     export_headers = labels.PAYMENT_EXPORT_HEADERS
 
@@ -50,8 +51,8 @@ class PaymentViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
                 payment.order_id,
                 customer.name,
                 customer.phone or "",
-                labels.PROVIDER[payment.provider],
-                labels.PAYMENT_STATUS[payment.status],
+                labels.text(labels.PROVIDER, payment.provider),
+                labels.text(labels.PAYMENT_STATUS, payment.status),
                 payment.amount,
                 payment.provider_txn_id,
                 format_export_datetime(payment.created_at),

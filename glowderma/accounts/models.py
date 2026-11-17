@@ -35,6 +35,21 @@ class StaffUser(AbstractBaseUser, PermissionsMixin):
     # password. Every other staff right is the same for everyone (the client's single "admin" role).
     is_manager = models.BooleanField(default=False, verbose_name="menejer")
     date_joined = models.DateTimeField(default=date_joined_default, verbose_name="qo‘shilgan")
+    # feat/admin-ux (admin contract §2.1): an account whose password someone else chose (a generated temporary
+    # password, an e-mail link) must set its own before the admin API answers anything else
+    # (``IsActiveStaff``: 403 ``password_change_required``). db_default: a writer of the previous release.
+    must_change_password = models.BooleanField(
+        default=False, db_default=False, verbose_name="parolni almashtirishi shart"
+    )
+    password_changed_at = models.DateTimeField(null=True, blank=True, verbose_name="parol o‘zgargan")
+    # The admin panel's language (uz / ru / en), set by ``PATCH auth/me/``; the e-mail links use it too.
+    language = models.CharField(
+        max_length=2,
+        choices=enums.ContentLanguage.choices,
+        default=enums.ContentLanguage.UZ,
+        db_default=enums.ContentLanguage.UZ,
+        verbose_name="til",
+    )
     objects = StaffUserManager()
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS: ClassVar[list[str]] = []
@@ -463,6 +478,8 @@ class AuthSession(models.Model):
     location = models.CharField(
         max_length=120, blank=True, default="", db_default="", verbose_name="joylashuv"
     )
+    # Admin panel TOTP (feat/admin-ux): when this staff sign-in's second factor was verified; null = none.
+    mfa_verified_at = models.DateTimeField(null=True, blank=True, verbose_name="MFA tasdiqlangan")
 
     class Meta:
         verbose_name = "sessiya"
@@ -490,6 +507,47 @@ class AuthSession(models.Model):
         return gettext("%(audience)s sessiyasi %(id)s") % {
             "audience": self.get_audience_display(),
             "id": self.pk,
+        }
+
+
+class StaffPasswordToken(models.Model):
+    """A single-use link that lets a staff member set their own password (feat/admin-ux, admin contract
+    §2.1 ``auth/password-token/*``): an invite of a new account or a reset. Only the SHA-256 of the raw token
+    is stored; the raw value exists in the e-mail (and, sealed, in its outbox payload until it is sent).
+    Issuing a new link revokes the open ones; using one, changing the password, a temporary-password reset
+    and a deactivation revoke them too. Not shown in the ops console."""
+
+    staff = models.ForeignKey(
+        "accounts.StaffUser", on_delete=models.CASCADE, related_name="password_tokens", verbose_name="xodim"
+    )
+    purpose = models.CharField(
+        max_length=8, choices=enums.StaffPasswordPurpose.choices, verbose_name="maqsad"
+    )
+    token_hash = models.CharField(max_length=64, unique=True, verbose_name="token xeshi")
+    created_by = models.ForeignKey(
+        "accounts.StaffUser",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name="yaratgan",
+    )
+    created_at = models.DateTimeField(default=timestamp_default, verbose_name="yaratilgan")
+    expires_at = models.DateTimeField(verbose_name="amal qilish muddati")
+    # handed to the e-mail relay by the ``email.staff_password_link`` handler (null: queued, or not sent)
+    sent_at = models.DateTimeField(null=True, blank=True, verbose_name="yuborilgan")
+    used_at = models.DateTimeField(null=True, blank=True, verbose_name="ishlatilgan")
+    revoked_at = models.DateTimeField(null=True, blank=True, verbose_name="bekor qilingan")
+
+    class Meta:
+        verbose_name = "parol havolasi"
+        verbose_name_plural = "parol havolalari"
+        indexes = [models.Index(fields=["staff", "created_at"], name="accounts_pwtoken_staff_created")]
+
+    def __str__(self) -> str:
+        return gettext("%(purpose)s havolasi · xodim #%(staff)s") % {
+            "purpose": self.get_purpose_display(),
+            "staff": self.staff_id,
         }
 
 

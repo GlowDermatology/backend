@@ -9,6 +9,7 @@ from typing import Any
 
 from django.conf import settings
 from django.db.models import Count, Max, Min, Q, QuerySet
+from django.db.models.functions import TruncDate
 
 from glowderma.appointments.models import OPEN_STATUSES, Appointment
 from glowderma.core import enums, timeutils
@@ -52,6 +53,105 @@ def day_view(day: date) -> DayView:
     with_rows = {appointment.professional_id for appointment in appointments}
     professionals = Professional.objects.filter(Q(is_active=True) | Q(pk__in=with_rows))
     return DayView(date=day, specialists=day_schedules(day, professionals), appointments=appointments)
+
+
+# --- GET appointments/range/ (admin contract §2.9, feat/admin-ux: the week and month boards) -------------
+
+RANGE_MAX_DAYS_COUNTS = 42  # six calendar weeks: a month grid
+RANGE_MAX_DAYS_FULL = 7  # one week of columns with every appointment
+
+
+@dataclass(frozen=True, slots=True)
+class RangeDay:
+    date: date
+    counts: dict[str, int]
+    total: int
+    working: bool
+    hours: tuple[str, str] | None  # earliest start and latest end of the listed specialists working that day
+
+
+@dataclass(frozen=True, slots=True)
+class RangeSchedule:
+    specialist_id: int
+    date: date
+    schedule: DaySchedule
+
+
+@dataclass(frozen=True, slots=True)
+class RangeView:
+    first: date
+    last: date
+    specialists: list[Professional]
+    days: list[RangeDay]
+    schedules: list[RangeSchedule] | None  # ``detail=full`` only
+    appointments: list[Appointment] | None  # ``detail=full`` only
+
+
+def range_view(first: date, last: date, *, specialist_id: int | None = None, full: bool = False) -> RangeView:
+    """The days ``first`` … ``last`` (Tashkent, inclusive; the caller bounds the span): per day the status
+    counts of the appointments starting that day, whether any listed specialist works and the union of their
+    hours; with ``full`` also every specialist's day schedule and the appointments themselves.
+
+    Specialists are listed by the rule of :func:`day_view` over the whole range (active ones, plus inactive
+    ones with an appointment in it), narrowed to ``specialist_id`` when given; counts and appointments follow
+    the same narrowing. Five queries (counts, specialists, the three schedule tables), six with ``full``,
+    whatever the span or the number of specialists.
+    """
+    start, _ = timeutils.day_bounds(first)
+    _, end = timeutils.day_bounds(last)
+    in_range = Appointment.objects.filter(start__gte=start, start__lt=end)
+    if specialist_id is not None:
+        in_range = in_range.filter(professional_id=specialist_id)
+    grouped = (
+        in_range.order_by()
+        .annotate(day=TruncDate("start", tzinfo=timeutils.TASHKENT))
+        .values_list("day", "status", "professional_id")
+        .annotate(n=Count("id"))
+    )
+    counts: dict[date, dict[str, int]] = {}
+    with_rows: set[int] = set()
+    for day, status, professional_id, n in grouped:
+        per_day = counts.setdefault(day, dict.fromkeys(enums.AppointmentStatus.values, 0))
+        per_day[str(status)] += int(n)
+        with_rows.add(int(professional_id))
+    listed = Professional.objects.filter(Q(is_active=True) | Q(pk__in=with_rows))
+    if specialist_id is not None:
+        listed = listed.filter(pk=specialist_id)
+    specialists = list(listed.order_by("position", "name", "id"))
+    days = [first + timedelta(days=offset) for offset in range((last - first).days + 1)]
+    schedules = schedules_for_many(specialists, days)
+    result_days = []
+    for day in days:
+        hours: list[tuple[str, str]] = []
+        for professional in specialists:
+            working_hours = schedules[(professional.pk, day)].working_hours
+            if working_hours is not None:
+                hours.append(working_hours)
+        day_counts = counts.get(day, dict.fromkeys(enums.AppointmentStatus.values, 0))
+        result_days.append(
+            RangeDay(
+                date=day,
+                counts=day_counts,
+                total=sum(day_counts.values()),
+                working=bool(hours),
+                # "HH:MM" labels compare as text; "23:59" (a block to midnight) sorts last
+                hours=(min(h[0] for h in hours), max(h[1] for h in hours)) if hours else None,
+            )
+        )
+    if not full:
+        return RangeView(first, last, specialists, result_days, None, None)
+    return RangeView(
+        first,
+        last,
+        specialists,
+        result_days,
+        [
+            RangeSchedule(professional.pk, day, schedules[(professional.pk, day)])
+            for professional in specialists
+            for day in days
+        ],
+        list(in_range.select_related("customer", "service", "professional").order_by("start", "id")),
+    )
 
 
 def pending_summary(now: datetime | None = None) -> dict[str, Any]:

@@ -45,6 +45,7 @@ from rest_framework.exceptions import ErrorDetail
 from glowderma.accounts.models import StaffUser
 from glowderma.core import audit, enums, timeutils
 from glowderma.core.api.exceptions import InvalidTransition, field_error
+from glowderma.core.uzsource import N_
 from glowderma.loyalty import engine, selectors
 from glowderma.loyalty.engine import TierBand
 from glowderma.loyalty.models import (
@@ -66,17 +67,17 @@ ADJUSTMENT_MIN_AMOUNT = 1
 ADJUSTMENT_MAX_AMOUNT = 10_000_000
 REASON_MIN_LENGTH = 3
 REASON_MAX_LENGTH = 300
-MESSAGE_AMOUNT = "Summani kiriting."
-MESSAGE_REASON = "Sababni kiriting."
-MESSAGE_INSUFFICIENT = "Balans manfiy bo‘lib qoladi."
-MESSAGE_INSUFFICIENT_FIELD = "Balansdan ko‘p ayirib bo‘lmaydi."
+MESSAGE_AMOUNT = N_("Summani kiriting.")
+MESSAGE_REASON = N_("Sababni kiriting.")
+MESSAGE_INSUFFICIENT = N_("Balans manfiy bo‘lib qoladi.")
+MESSAGE_INSUFFICIENT_FIELD = N_("Balansdan ko‘p ayirib bo‘lmaydi.")
 # Contract §2.7 policy rules
-MESSAGE_MIN_ITEMS = "Kamida bitta daraja kerak."
-MESSAGE_EMPTY_RANGE = "Yuqori chegara quyi chegaradan katta bo‘lsin."
-MESSAGE_OVERLAP = "Darajalar ustma-ust tushmoqda."
-MESSAGE_OUT_OF_RANGE = "Foiz 0 dan katta va 100 dan oshmasligi kerak."
-MESSAGE_FIELDS = "Maydonlarni tekshiring."
-MESSAGE_IN_PAST = "Kelajakdagi sanani tanlang."
+MESSAGE_MIN_ITEMS = N_("Kamida bitta daraja kerak.")
+MESSAGE_EMPTY_RANGE = N_("Yuqori chegara quyi chegaradan katta bo‘lsin.")
+MESSAGE_OVERLAP = N_("Darajalar ustma-ust tushmoqda.")
+MESSAGE_OUT_OF_RANGE = N_("Foiz 0 dan katta va 100 dan oshmasligi kerak.")
+MESSAGE_FIELDS = N_("Maydonlarni tekshiring.")
+MESSAGE_IN_PAST = N_("Kelajakdagi sanani tanlang.")
 POLICY_ADVISORY_LOCK = "loyalty.cashbackpolicy"
 BILLZ_SALE_ID_MAX_LENGTH = 64  # Purchase.billz_sale_id
 BILLZ_SALE_REF_MAX_LENGTH = 32  # Purchase.billz_sale_ref (also the store credit's source_ref)

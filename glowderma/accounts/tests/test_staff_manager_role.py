@@ -87,7 +87,13 @@ def test_createstaff_first_account_is_a_manager_and_audited() -> None:
         "manage.py createstaff",
         str(owner.pk),
     )
-    assert entry.after == {"email": "owner@x.uz", "full_name": "Owner", "is_manager": True}
+    assert entry.after == {
+        "email": "owner@x.uz",
+        "full_name": "Owner",
+        "is_manager": True,
+        "delivery": "temporary_password",
+        "must_change_password": False,
+    }
     assert PASSWORD not in str(entry.after)
 
 

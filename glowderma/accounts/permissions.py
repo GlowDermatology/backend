@@ -3,21 +3,39 @@ from typing import TYPE_CHECKING
 from rest_framework.permissions import BasePermission
 from rest_framework.request import Request
 
+from glowderma.accounts.errors import PasswordChangeRequired
 from glowderma.accounts.models import Customer, StaffUser
 from glowderma.core import enums
 
 if TYPE_CHECKING:
     from rest_framework.views import APIView
 
+# A view that a staff member who must change their password may still use sets this attribute to ``True``
+# (``auth/me/``, ``auth/change-password/``, ``auth/password-link/``).
+ALLOW_PASSWORD_CHANGE_PENDING = "allow_password_change_pending"  # noqa: S105 - an attribute name
+
 
 class IsActiveStaff(BasePermission):
+    """An active staff member signed in with a staff access token.
+
+    An account with ``must_change_password`` (a generated temporary password, an e-mail link; feat/admin-ux)
+    gets 403 ``password_change_required`` from every view that does not set ``allow_password_change_pending``,
+    whichever way it signed in (password or a social identity) and on every device."""
+
     def has_permission(self, request: Request, view: APIView) -> bool:
-        return (
+        allowed = (
             isinstance(request.user, StaffUser)
             and request.user.is_active
             and isinstance(request.auth, dict)
             and request.auth.get("aud") == "staff"
         )
+        if (
+            allowed
+            and getattr(request.user, "must_change_password", False)
+            and not getattr(view, ALLOW_PASSWORD_CHANGE_PENDING, False)
+        ):
+            raise PasswordChangeRequired
+        return allowed
 
 
 class IsActiveCustomer(BasePermission):

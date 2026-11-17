@@ -18,11 +18,13 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
 from django.db.models import Exists, OuterRef, Q, Sum
-from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
+from rest_framework.exceptions import ErrorDetail, NotFound, PermissionDenied, ValidationError
 
-from glowderma.accounts import tokens, topics
+from glowderma.accounts import mfa, tokens, topics
 from glowderma.accounts.api.guard import LoginGuard, email_hash
 from glowderma.accounts.console import state as console_state
+from glowderma.accounts.console import twofactor
+from glowderma.accounts.errors import MfaChallengeInvalid, PasswordTokenInvalid
 from glowderma.accounts.models import (
     Address,
     AuthSession,
@@ -31,9 +33,10 @@ from glowderma.accounts.models import (
     Device,
     SmsCode,
     SocialIdentity,
+    StaffPasswordToken,
     StaffUser,
 )
-from glowderma.core import alerts, audit, enums, outbox, qr_store, secretbox, timeutils
+from glowderma.core import alerts, audit, enums, integration_modes, outbox, qr_store, secretbox, timeutils
 from glowderma.core.api.exceptions import (
     AuthFailed,
     Conflict,
@@ -58,6 +61,7 @@ from glowderma.core.api.exceptions import (
 from glowderma.core.models import IdempotencyRecord
 from glowderma.core.pii import normalize_email as pii_normalize_email
 from glowderma.core.pii import pii_ref
+from glowderma.core.uzsource import N_
 from glowderma.core.variants import delete_with_variants, store_variants
 from glowderma.integrations.email import registry as email_registry
 from glowderma.integrations.eskiz import registry as eskiz_registry
@@ -65,8 +69,8 @@ from glowderma.integrations.oauth.ports import SocialClaims
 
 logger = logging.getLogger(__name__)
 
-SOCIAL_SUBJECT_LINKED = "Bu ijtimoiy hisob allaqachon bog‘langan."
-SOCIAL_PROVIDER_LINKED = "Bu provayder allaqachon bog‘langan."
+SOCIAL_SUBJECT_LINKED = N_("Bu ijtimoiy hisob allaqachon bog‘langan.")
+SOCIAL_PROVIDER_LINKED = N_("Bu provayder allaqachon bog‘langan.")
 
 
 @transaction.atomic
@@ -195,12 +199,16 @@ def _revoke_user_sessions(
 
 # --- staff management (admin contract §2.16; decisions GST-1..GST-6) ----------------------------------------
 
-STAFF_EMAIL_TAKEN = "Bu email bilan xodim allaqachon bor (nofaol bo‘lsa, uni qayta faollashtiring)."
-STAFF_LAST_MANAGER = "Kamida bitta faol menejer qolishi kerak. Avval boshqa xodimni menejer qiling."
-STAFF_SELF_DEACTIVATE = "O‘z hisobingizni faolsizlantira olmaysiz."
-STAFF_SELF_DEMOTE = "O‘zingizni menejerlikdan chiqara olmaysiz."
-STAFF_SUPERUSER_MANAGER = "Superadmin doim menejer bo‘ladi: uni menejerlikdan chiqarib bo‘lmaydi."
-STAFF_SELF_RESET = "O‘z parolingizni «Parolni o‘zgartirish» orqali almashtiring."
+STAFF_EMAIL_TAKEN = N_("Bu email bilan xodim allaqachon bor (nofaol bo‘lsa, uni qayta faollashtiring).")
+STAFF_LAST_MANAGER = N_("Kamida bitta faol menejer qolishi kerak. Avval boshqa xodimni menejer qiling.")
+STAFF_SELF_DEACTIVATE = N_("O‘z hisobingizni faolsizlantira olmaysiz.")
+STAFF_SELF_DEMOTE = N_("O‘zingizni menejerlikdan chiqara olmaysiz.")
+STAFF_SUPERUSER_MANAGER = N_("Superadmin doim menejer bo‘ladi: uni menejerlikdan chiqarib bo‘lmaydi.")
+STAFF_SELF_RESET = N_("O‘z parolingizni «Parolni o‘zgartirish» orqali almashtiring.")
+STAFF_SUPERUSER_RESET = N_(
+    "Superadminga vaqtinchalik parolni faqat superadmin bera oladi. Havolani uning e-pochtasiga yuboring "
+    "yoki superadmindan so‘rang."
+)
 # Editable through ``PATCH staff/{id}/`` (the email is the sign-in identity and stays as created).
 STAFF_EDITABLE_FIELDS = ("full_name", "is_manager")
 # Login lockout scopes a password reset ends (``LoginView`` and the guarded Django admin login form).
@@ -269,15 +277,25 @@ def create_staff(
     actor: StaffUser | None,
     request: Any = None,
     reason: str = "",
-) -> tuple[StaffUser, str]:
-    """Create an active staff account and return it with its password (admin contract §2.16 ``POST staff/``).
+    delivery: str = enums.StaffPasswordDelivery.TEMPORARY_PASSWORD,
+    language: str = enums.ContentLanguage.UZ,
+    must_change: bool | None = None,
+) -> tuple[StaffUser, str | None]:
+    """Create an active staff account and return it with its temporary password (admin contract §2.16
+    ``POST staff/``), ``None`` when ``delivery`` is ``email_link`` alone.
 
-    ``password=None`` generates a temporary password (:func:`generate_temporary_password`) the caller shows
-    once; ``manage.py createstaff`` passes the operator's validated password. The email is trimmed and
+    ``delivery`` (feat/admin-ux, overriding GST-3): ``temporary_password`` generates a password
+    (:func:`generate_temporary_password`) the caller shows once; ``email_link`` leaves the account without a
+    usable password and e-mails an invite link (:func:`issue_password_link`); ``both`` does both. An e-mail
+    delivery needs :func:`staff_email_invite_available` (else a ``delivery`` field error). Either way the
+    account must set its own password first (``must_change_password``). ``manage.py createstaff`` passes the
+    operator's validated ``password`` (no flag unless ``must_change``). The email is trimmed and
     lower-cased; an existing account with it (active or not, case-insensitive) is a ``unique`` field error.
     The first account of an install without an active manager becomes a manager, so staff management is
-    never left without one (decision GST-1). A superuser is always a manager. Audited ``staff.created``.
+    never left without one (decision GST-1). A superuser is always a manager. Audited ``staff.created``
+    (with ``delivery``), plus ``staff.password_link_sent`` for an e-mail delivery.
     """
+    _check_delivery(delivery)
     email = email.strip().lower()
     if StaffUser.objects.filter(email__iexact=email).exists():
         raise ValidationError({"email": [field_error("unique", STAFF_EMAIL_TAKEN)]})
@@ -286,11 +304,19 @@ def create_staff(
     if not manager and not _lock_active_managers():
         manager = True
     user = StaffUser(email=email, full_name=full_name, is_manager=manager)
-    raw = password if password is not None else generate_temporary_password(user)
+    raw = _new_password(user, password, delivery)
+    flagged = _must_change(password, must_change)
     try:
         with transaction.atomic():
             create = StaffUser.objects.create_superuser if is_superuser else StaffUser.objects.create_user
-            user = create(email, raw, full_name=full_name, is_manager=manager)
+            user = create(
+                email,
+                raw,
+                full_name=full_name,
+                is_manager=manager,
+                must_change_password=flagged,
+                language=language,
+            )
     except IntegrityError as exc:  # lost a race with a concurrent create of the same email
         raise ValidationError({"email": [field_error("unique", STAFF_EMAIL_TAKEN)]}) from exc
     audit.record(
@@ -299,9 +325,19 @@ def create_staff(
         entity_id=str(user.pk),
         actor=actor,
         request=request,
-        after={"email": user.email, "full_name": user.full_name, "is_manager": user.is_manager},
+        after={
+            "email": user.email,
+            "full_name": user.full_name,
+            "is_manager": user.is_manager,
+            "delivery": delivery,
+            "must_change_password": flagged,
+        },
         reason=reason,
     )
+    if delivery != enums.StaffPasswordDelivery.TEMPORARY_PASSWORD:
+        issue_password_link(
+            user, enums.StaffPasswordPurpose.INVITE, actor=actor, request=request, via="create", reason=reason
+        )
     return user, raw
 
 
@@ -388,6 +424,7 @@ def deactivate_staff(
     stored.save(update_fields=["is_active"])
     user.is_active = False
     sessions = _revoke_user_sessions(stored, "deactivated")
+    revoke_password_tokens(stored)
     audit.record(
         action="staff.deactivated",
         entity_type="staff",
@@ -429,6 +466,13 @@ def reactivate_staff(
     return True
 
 
+def _superuser_may_be_taken_by(user: StaffUser, actor: StaffUser | None) -> bool:
+    """Whether ``actor`` may take over a credential of ``user`` (learn its password, strip its MFA):
+    anyone for an ordinary account, only another superuser for a superuser (review SEC-2; the operator's
+    commands are the break-glass path)."""
+    return not user.is_superuser or (actor is not None and actor.is_superuser)
+
+
 def _unlock_on_commit(email: str) -> None:
     """End the login lockouts of ``email`` once the surrounding transaction commits (a rolled-back reset
     leaves them). Best effort: a Redis error logs and never fails the committed reset."""
@@ -454,29 +498,53 @@ def reset_staff_password(
     reason: str = "",
     password: str | None = None,
     refuse_self: bool = True,
-) -> tuple[str, int]:
+    delivery: str = enums.StaffPasswordDelivery.TEMPORARY_PASSWORD,
+    must_change: bool | None = None,
+    protect_superuser: bool = True,
+) -> tuple[str | None, int]:
     """Replace ``user``'s password and revoke every open session (reason ``password_changed``).
 
     ``password=None`` generates a temporary password (returned once, never stored in clear or audited);
-    ``manage.py resetstaffpassword --password-stdin`` passes the operator's validated one. The caller's own
+    ``manage.py resetstaffpassword --password-stdin`` passes the operator's validated one. ``delivery``
+    (feat/admin-ux): ``email_link`` makes the password unusable and e-mails a reset link instead (returns
+    ``None``), ``both`` does both; earlier links are revoked either way. A generated password or a link sets
+    ``must_change_password`` (an operator's typed password only with ``must_change``). The caller's own
     password is refused (``refuse_self``, 409 ``conflict``): staff change it with ``auth/change-password/``,
-    which asks for the current one, so a stolen session cannot take the account over. Social identities stay
-    linked. Works on an inactive account too (prepared before a reactivation). The person's ops console
-    sessions end too, a sign-in pending on the old password included (``console_sessions`` in the audit
-    entry when there were any). Returns ``(password, revoked_count)``; audited ``staff.password_reset`` plus
-    one ``auth.session_revoked`` per session. Once the reset commits, a running login lockout of the account
-    ends (both :data:`STAFF_LOGIN_SCOPES`), for the API and ``manage.py resetstaffpassword`` alike.
+    which asks for the current one, so a stolen session cannot take the account over. A superuser's password
+    is handed (``temporary_password``, ``both``) only to another superuser (``protect_superuser``, 409
+    ``conflict``; review SEC-2): a manager e-mails it the link instead, the operator commands pass ``False``.
+    Social identities stay linked. Works on an inactive account too (prepared before a reactivation). The
+    person's ops console sessions end too, a sign-in pending on the old password included
+    (``console_sessions`` in the audit entry when there were any). Returns ``(password, revoked_count)``;
+    audited ``staff.password_reset`` plus one ``auth.session_revoked`` per session. Once the reset commits, a
+    running login lockout of the account ends (both :data:`STAFF_LOGIN_SCOPES`), for the API and ``manage.py
+    resetstaffpassword`` alike.
     """
     if refuse_self and actor is not None and actor.pk == user.pk:
         raise Conflict(STAFF_SELF_RESET)
+    _check_delivery(delivery)
     stored = StaffUser.objects.select_for_update().get(pk=user.pk)
-    raw = password if password is not None else generate_temporary_password(stored)
+    if (
+        protect_superuser
+        and delivery != enums.StaffPasswordDelivery.EMAIL_LINK
+        and not _superuser_may_be_taken_by(stored, actor)
+    ):
+        raise Conflict(STAFF_SUPERUSER_RESET)
+    raw = _new_password(stored, password, delivery)
     stored.set_password(raw)
-    stored.save(update_fields=["password"])
+    stored.must_change_password = _must_change(password, must_change)
+    stored.save(update_fields=["password", "must_change_password"])
+    user.must_change_password = stored.must_change_password
     sessions = _revoke_user_sessions(stored, "password_changed")
     console_sessions = console_state.end_console_sessions(stored)
+    revoke_password_tokens(stored)
     _unlock_on_commit(stored.email)
-    details: dict[str, Any] = {"revoked_count": len(sessions), "generated": password is None}
+    details: dict[str, Any] = {
+        "revoked_count": len(sessions),
+        "generated": raw is not None and password is None,
+        "delivery": delivery,
+        "must_change_password": stored.must_change_password,
+    }
     if console_sessions:
         details["console_sessions"] = console_sessions
     audit.record(
@@ -489,7 +557,254 @@ def reset_staff_password(
         reason=reason,
     )
     _audit_revoked_sessions(sessions, actor=actor, request=request, reason=reason)
+    if delivery != enums.StaffPasswordDelivery.TEMPORARY_PASSWORD:
+        issue_password_link(
+            stored, enums.StaffPasswordPurpose.RESET, actor=actor, request=request, via="reset", reason=reason
+        )
     return raw, len(sessions)
+
+
+# --- staff invite and forced password change (feat/admin-ux; admin contract §2.1, §2.16; overrides GST-3) ---
+
+STAFF_EMAIL_INVITE_UNAVAILABLE = N_("E-pochta orqali yuborish sozlanmagan: vaqtinchalik parolni tanlang.")
+STAFF_LINK_UNAVAILABLE = N_("E-pochta orqali yuborish sozlanmagan.")
+STAFF_LINK_INACTIVE = N_("Nofaol hisobga havola yuborilmaydi. Avval uni qayta faollashtiring.")
+STAFF_LINK_SELF = N_("O‘zingizga havola «Parolni o‘zgartirish» sahifasidan so‘raladi.")
+STAFF_LINK_NOT_PENDING = N_("Parolingiz o‘rnatilgan: uni «Parolni o‘zgartirish» orqali almashtiring.")
+PASSWORD_UNCHANGED = N_("Yangi parol eskisidan farq qilsin.")
+# The sealed values of an ``email.staff_password_link`` payload open only for their own token id.
+PASSWORD_LINK_AAD = b"email.staff_password_link"
+PASSWORD_TOKEN_MAX_LENGTH = 128
+
+
+def staff_email_invite_available() -> bool:
+    """``Me.capabilities.staff_email_invite``: e-mail links can be sent — ``ADMIN_PANEL_URL`` is set and
+    e-mail does not run its fake adapter under the production settings (C§6.14)."""
+    return bool(settings.ADMIN_PANEL_URL) and not integration_modes.fake_in_production("email")
+
+
+def _check_delivery(delivery: str) -> None:
+    if delivery not in enums.StaffPasswordDelivery.values:
+        raise ValueError(f"Unknown delivery {delivery!r}")
+    if delivery != enums.StaffPasswordDelivery.TEMPORARY_PASSWORD and not staff_email_invite_available():
+        raise ValidationError({"delivery": [field_error("invalid_choice", STAFF_EMAIL_INVITE_UNAVAILABLE)]})
+
+
+def _new_password(user: StaffUser, password: str | None, delivery: str) -> str | None:
+    """The operator's ``password``; else ``None`` (unusable) for an e-mail link alone; else a generated
+    one."""
+    if password is not None:
+        return password
+    if delivery == enums.StaffPasswordDelivery.EMAIL_LINK:
+        return None
+    return generate_temporary_password(user)
+
+
+def _must_change(password: str | None, must_change: bool | None) -> bool:
+    """Someone else chose the password (generated, or none yet): the person sets their own first."""
+    return must_change if must_change is not None else password is None
+
+
+def password_link_url(raw: str) -> str:
+    """The admin panel's set-password page for the raw token (``ADMIN_PANEL_URL``)."""
+    return f"{settings.ADMIN_PANEL_URL}/set-password?token={raw}"
+
+
+def password_link_aad(token_id: int) -> bytes:
+    return PASSWORD_LINK_AAD + b":" + str(token_id).encode()
+
+
+def revoke_password_tokens(user: StaffUser, *, except_id: int | None = None) -> int:
+    """Revoke ``user``'s open (unused, unrevoked) password links; returns how many."""
+    rows = StaffPasswordToken.objects.filter(staff=user, used_at__isnull=True, revoked_at__isnull=True)
+    if except_id is not None:
+        rows = rows.exclude(pk=except_id)
+    return rows.update(revoked_at=timeutils.now())
+
+
+@transaction.atomic
+def issue_password_token(
+    user: StaffUser, purpose: str, *, actor: StaffUser | None
+) -> tuple[StaffPasswordToken, str]:
+    """A new single-use password link of ``user`` (``invite`` or ``reset``), valid
+    ``STAFF_INVITE_TTL_HOURS``; earlier open links are revoked. Returns the row and the raw token (32 random
+    bytes, URL-safe), which exists nowhere else: only its SHA-256 is stored."""
+    if purpose not in enums.StaffPasswordPurpose.values:
+        raise ValueError(f"Unknown password link purpose {purpose!r}")
+    revoke_password_tokens(user)
+    raw = secrets.token_urlsafe(32)
+    row = StaffPasswordToken.objects.create(
+        staff=user,
+        purpose=purpose,
+        token_hash=hash_secret(raw),
+        created_by=actor,
+        expires_at=timeutils.now() + timedelta(hours=int(settings.STAFF_INVITE_TTL_HOURS)),
+    )
+    return row, raw
+
+
+@transaction.atomic
+def issue_password_link(
+    user: StaffUser,
+    purpose: str,
+    *,
+    actor: StaffUser | None,
+    request: Any = None,
+    via: str,
+    reason: str = "",
+) -> StaffPasswordToken:
+    """Issue a password link (:func:`issue_password_token`) and e-mail it to ``user`` in their language
+    through the outbox topic ``email.staff_password_link``: the address, the link and the name travel sealed
+    (``core.secretbox``, bound to the token id) and are blanked once the message is final. Audited
+    ``staff.password_link_sent`` (``purpose``, ``via``: create, reset, resend or self, ``expires_at``,
+    ``link_id`` — never the link). 409 ``conflict`` when e-mail links are not available."""
+    if not staff_email_invite_available():
+        raise Conflict(STAFF_LINK_UNAVAILABLE)
+    row, raw = issue_password_token(user, purpose, actor=actor)
+    aad = password_link_aad(row.pk)
+    outbox.enqueue(
+        topics.STAFF_PASSWORD_LINK,
+        {
+            "link_id": row.pk,
+            "to": secretbox.seal(user.email.encode("utf-8"), aad=aad),
+            "link": secretbox.seal(password_link_url(raw).encode("utf-8"), aad=aad),
+            "name": secretbox.seal(user.full_name.encode("utf-8"), aad=aad),
+            "lang": user.language,
+            "purpose": purpose,
+        },
+        dedupe_key=topics.staff_password_link_key(row.pk),
+    )
+    audit.record(
+        action="staff.password_link_sent",
+        entity_type="staff",
+        entity_id=str(user.pk),
+        actor=actor,
+        request=request,
+        after={"purpose": purpose, "via": via, "expires_at": row.expires_at, "link_id": row.pk},
+        reason=reason,
+    )
+    return row
+
+
+@transaction.atomic
+def send_password_link(
+    user: StaffUser, *, actor: StaffUser | None, request: Any = None, refuse_self: bool = True
+) -> StaffPasswordToken:
+    """A manager (re)sends ``user`` a password link (``POST staff/{id}/send-password-link/``); the password
+    itself is not changed and earlier links are revoked. ``invite`` for an account that has never signed in
+    nor set a password, else ``reset``. 409 ``conflict``: the caller's own account (``refuse_self``), an
+    inactive account, e-mail links not available."""
+    if refuse_self and actor is not None and actor.pk == user.pk:
+        raise Conflict(STAFF_LINK_SELF)
+    stored = StaffUser.objects.select_for_update().get(pk=user.pk)
+    if not stored.is_active:
+        raise Conflict(STAFF_LINK_INACTIVE)
+    fresh = stored.password_changed_at is None and not AuthSession.objects.filter(staff=stored).exists()
+    purpose = enums.StaffPasswordPurpose.INVITE if fresh else enums.StaffPasswordPurpose.RESET
+    return issue_password_link(stored, purpose, actor=actor, request=request, via="resend")
+
+
+@transaction.atomic
+def request_own_password_link(user: StaffUser, *, request: Any = None) -> StaffPasswordToken:
+    """``POST auth/password-link/``: a staff member who must change their password but cannot type the current
+    one (signed in with a social identity, an e-mail-link account) gets a reset link at their own address.
+    409 ``conflict`` when the account need not change its password or e-mail links are not available."""
+    stored = StaffUser.objects.select_for_update().get(pk=user.pk)
+    if not stored.must_change_password:
+        raise Conflict(STAFF_LINK_NOT_PENDING)
+    return issue_password_link(
+        stored, enums.StaffPasswordPurpose.RESET, actor=stored, request=request, via="self"
+    )
+
+
+def _password_token(raw: object) -> StaffPasswordToken | None:
+    if not isinstance(raw, str) or not raw or len(raw) > PASSWORD_TOKEN_MAX_LENGTH:
+        return None
+    return StaffPasswordToken.objects.select_related("staff").filter(token_hash=hash_secret(raw)).first()
+
+
+def _token_usable(row: StaffPasswordToken | None) -> bool:
+    return (
+        row is not None
+        and row.used_at is None
+        and row.revoked_at is None
+        and row.expires_at > timeutils.now()
+        and row.staff.is_active
+    )
+
+
+def password_token(raw: object) -> StaffPasswordToken:
+    """The open password link of ``raw`` with its staff member (``auth/password-token/check/``), else 400
+    ``token_invalid`` — one answer for unknown, used, revoked, expired and an inactive account."""
+    row = _password_token(raw)
+    if row is None or not _token_usable(row):
+        raise PasswordTokenInvalid
+    return row
+
+
+@transaction.atomic
+def set_password_with_token(raw: object, new_password: str, *, request: Any = None) -> StaffUser:
+    """``auth/password-token/set/``: under the staff row lock (then the link's), the link must still be open
+    and the account active (else 400 ``token_invalid``); the password becomes ``new_password`` (validated by
+    the caller against ``AUTH_PASSWORD_VALIDATORS`` for this user; the current one again → 400
+    ``password_unchanged``), ``must_change_password`` is cleared and ``password_changed_at`` stamped, the link
+    is used and every other link revoked, every API session is revoked (``password_changed``) and the ops
+    console sessions end; a running login lockout ends once it commits. No session is opened (the person
+    signs in next). Audited ``staff.password_set`` (actor: the person) plus ``auth.session_revoked``."""
+    found = _password_token(raw)
+    if found is None:
+        raise PasswordTokenInvalid
+    user = StaffUser.objects.select_for_update().get(pk=found.staff_id)
+    row = StaffPasswordToken.objects.select_for_update().get(pk=found.pk)
+    row.staff = user
+    if not _token_usable(row):
+        raise PasswordTokenInvalid
+    if user.has_usable_password() and user.check_password(new_password):
+        raise ValidationError({"new_password": [ErrorDetail(PASSWORD_UNCHANGED, code="password_unchanged")]})
+    instant = timeutils.now()
+    user.set_password(new_password)
+    user.must_change_password = False
+    user.password_changed_at = instant
+    user.save(update_fields=["password", "must_change_password", "password_changed_at"])
+    row.used_at = instant
+    row.save(update_fields=["used_at"])
+    revoke_password_tokens(user, except_id=row.pk)
+    sessions = _revoke_user_sessions(user, "password_changed")
+    console_sessions = console_state.end_console_sessions(user)
+    _unlock_on_commit(user.email)
+    details: dict[str, Any] = {"purpose": row.purpose, "link_id": row.pk, "revoked_count": len(sessions)}
+    if console_sessions:
+        details["console_sessions"] = console_sessions
+    audit.record(
+        action="staff.password_set",
+        entity_type="staff",
+        entity_id=str(user.pk),
+        actor=user,
+        request=request,
+        after=details,
+    )
+    _audit_revoked_sessions(sessions, actor=user, request=request, reason="")
+    return user
+
+
+def record_own_password_change(user: StaffUser) -> bool:
+    """After ``auth/change-password/`` set a new password on the locked ``user`` (not yet saved): clear
+    ``must_change_password``, stamp ``password_changed_at``, save, revoke the open password links. Returns
+    whether the change was forced (the flag was set)."""
+    forced = bool(user.must_change_password)
+    user.must_change_password = False
+    user.password_changed_at = timeutils.now()
+    user.save(update_fields=["password", "must_change_password", "password_changed_at"])
+    revoke_password_tokens(user)
+    return forced
+
+
+def set_staff_language(user: StaffUser, language: str) -> None:
+    """``PATCH auth/me/ {language}``: the admin panel's language of ``user`` (its e-mail links use it too)."""
+    if language not in enums.ContentLanguage.values:
+        raise ValueError(f"Unknown language {language!r}")
+    StaffUser.objects.filter(pk=user.pk).update(language=language)
+    user.language = language
 
 
 def _google_is_authoritative(claims: SocialClaims) -> bool:
@@ -540,6 +855,10 @@ def social_login(
     or (Google only, ``STAFF_GOOGLE_AUTOLINK``) an active staff user must carry the verified email so the
     identity can be linked on first use. Anything else is one uniform ``social_account_not_allowed``,
     whether or not the email belongs to anyone.
+
+    An account with the admin panel MFA on (feat/admin-ux) gets no session here: an automatic link is kept
+    and :class:`~glowderma.accounts.mfa.MfaRequired` is raised with the sign-in challenge
+    (``auth/mfa/verify/`` opens the session).
     """
     identity = (
         SocialIdentity.objects.select_related("staff")
@@ -557,7 +876,9 @@ def social_login(
                     staff=user, provider=provider, subject=claims.subject, email_at_link=claims.email
                 )
                 _record_link(user, provider, claims, auto=True, request=request)
-        if user is not None and identity is not None:
+        if user is not None and identity is not None and mfa.enabled(user):
+            challenge = mfa.issue_challenge(user, provider, identity_id=identity.pk, request=request)
+        elif user is not None and identity is not None:
             session, refresh = start_staff_session(
                 user,
                 device_label=device_label,
@@ -575,6 +896,10 @@ def social_login(
                 after={"email": user.email, "method": provider},
             )
             return session, refresh
+        else:
+            challenge = None
+    if challenge is not None:
+        raise mfa.MfaRequired(challenge)  # after the commit: an automatic link stays
     # Outside the transaction so the audit row survives the 401 (the view's exception handler rolls back).
     audit.record(
         action="auth.login_failed",
@@ -584,6 +909,150 @@ def social_login(
         after={"email": claims.email, "method": provider},
     )
     raise AuthFailed("social_account_not_allowed")
+
+
+# --- admin panel MFA: the sign-in's second step and the manager's reset (feat/admin-ux, accounts.mfa) ---
+
+
+def complete_mfa_login(
+    raw_challenge: object,
+    *,
+    code: str | None = None,
+    recovery_code: str | None = None,
+    device_label: str,
+    request: Any = None,
+) -> tuple[AuthSession, str]:
+    """``auth/mfa/verify/``: the session of a sign-in that answered its challenge with a TOTP ``code`` or a
+    ``recovery_code`` (``auth_method`` = the challenge's first step, ``mfa_verified_at`` stamped).
+
+    400 ``mfa_challenge_invalid`` for an unknown, expired, used-up or exhausted challenge, or one whose
+    account meanwhile changed its password, was deactivated or lost its panel MFA (the challenge is dropped);
+    400 ``mfa_code_invalid`` for a wrong code (the challenge stays for the remaining attempts); 429 while the
+    ``panel_otp`` lockout runs. The challenge is single use: claimed under the staff row lock right before the
+    session opens. Audited ``auth.mfa_succeeded`` and ``auth.login_succeeded`` (``mfa``: the factor), plus
+    ``auth.mfa_recovery_used`` (``remaining``) for a recovery code."""
+    pending = mfa.open_challenge(raw_challenge)
+    if pending is None:
+        raise MfaChallengeInvalid
+    user = StaffUser.objects.filter(pk=pending.staff_id).first()
+    if user is None or not mfa.challenge_matches(pending, user):
+        mfa.drop_challenge(pending)
+        raise MfaChallengeInvalid
+    # a running lockout answers 429 before the challenge's attempts are used
+    mfa.check_attempt(user, request, reserve=False)
+    if not mfa.count_attempt(pending):
+        raise MfaChallengeInvalid
+    used = mfa.use_factor(user, request, code=code, recovery_code=recovery_code, context="login")
+    social = pending.method != AuthSession.AuthMethod.PASSWORD
+    with transaction.atomic():
+        locked = StaffUser.objects.select_for_update().get(pk=user.pk)
+        # a social first step needs its identity still linked (an unlink since kills the challenge)
+        unlinked = social and (
+            pending.identity_id is None
+            or not SocialIdentity.objects.filter(
+                pk=pending.identity_id, staff=locked, provider=pending.method
+            ).exists()
+        )
+        if unlinked:
+            mfa.drop_challenge(pending)
+            raise MfaChallengeInvalid
+        if not mfa.challenge_matches(pending, locked) or not mfa.claim_challenge(pending):
+            raise MfaChallengeInvalid
+        session, refresh = start_staff_session(
+            locked,
+            device_label=device_label,
+            auth_method=pending.method,
+            failure_code="social_account_not_allowed" if social else "invalid_credentials",
+        )
+        instant = timeutils.now()
+        session.mfa_verified_at = instant
+        session.save(update_fields=["mfa_verified_at"])
+        if social and pending.identity_id is not None:
+            SocialIdentity.objects.filter(pk=pending.identity_id, staff=locked).update(last_login_at=instant)
+        audit.record(
+            action="auth.mfa_succeeded",
+            entity_type="staff",
+            entity_id=str(locked.pk),
+            actor=locked,
+            request=request,
+            after={"factor": used.factor, "method": pending.method},
+        )
+        audit.record(
+            action="auth.login_succeeded",
+            entity_type="staff",
+            entity_id=str(locked.pk),
+            actor=locked,
+            request=request,
+            after={"email": locked.email, "method": pending.method, "mfa": used.factor},
+        )
+        if used.recovery_codes_left is not None:
+            audit.record(
+                action="auth.mfa_recovery_used",
+                entity_type="staff",
+                entity_id=str(locked.pk),
+                actor=locked,
+                request=request,
+                after={"remaining": used.recovery_codes_left},
+            )
+    return session, refresh
+
+
+MFA_SELF_RESET = N_("O‘z ikki bosqichli himoyangizni «Sozlamalar»da o‘chiring.")
+MFA_NOT_ENABLED_FOR = N_("Bu xodimda ikki bosqichli himoya yoqilmagan.")
+MFA_SUPERUSER_RESET = N_("Superadminning ikki bosqichli himoyasini faqat superadmin o‘chira oladi.")
+
+
+@transaction.atomic
+def reset_staff_mfa(
+    user: StaffUser,
+    *,
+    actor: StaffUser | None,
+    request: Any = None,
+    reason: str = "",
+    refuse_self: bool = True,
+    via: str = "api",
+    protect_superuser: bool = True,
+) -> dict[str, int]:
+    """A lost phone: delete ``user``'s admin panel TOTP devices and recovery codes (console devices stay),
+    revoke every open session (``admin_revoked``) and end a running ``panel_otp`` lockout once it commits. 409
+    for the caller's own account (``refuse_self``; they disable it in Settings), for an account without panel
+    MFA, and for a superuser unless the caller is one too (``protect_superuser``; review SEC-2 — ``manage.py
+    resetstaffmfa`` passes ``False``). Audited ``auth.mfa_reset`` (``via``: api, cli) plus
+    ``auth.session_revoked`` per session; alerted ``auth.mfa_reset`` (ids only), since a manager who also
+    resets the password could sign in as the person."""
+    if refuse_self and actor is not None and actor.pk == user.pk:
+        raise Conflict(MFA_SELF_RESET)
+    stored = StaffUser.objects.select_for_update().get(pk=user.pk)
+    if protect_superuser and not _superuser_may_be_taken_by(stored, actor):
+        raise Conflict(MFA_SUPERUSER_RESET)
+    panel = twofactor.PANEL
+    if not panel.totp_devices(stored).exists() and not panel.recovery_devices(stored).exists():
+        raise Conflict(MFA_NOT_ENABLED_FOR)
+    removed = twofactor.reset_devices(stored, scope=twofactor.PANEL)
+    sessions = _revoke_user_sessions(stored, "admin_revoked")
+    hashed = email_hash(stored.email)
+
+    def unlock() -> None:
+        try:
+            LoginGuard().unlock(mfa.GUARD_SCOPE, hashed)
+        except Exception:
+            logger.exception("auth.unlock_failed scope=%s", mfa.GUARD_SCOPE)
+
+    transaction.on_commit(unlock, robust=True)
+    details: dict[str, Any] = {**removed, "revoked_count": len(sessions), "via": via}
+    audit.record(
+        action="auth.mfa_reset",
+        entity_type="staff",
+        entity_id=str(stored.pk),
+        actor=actor,
+        request=request,
+        after=details,
+        reason=reason,
+    )
+    _audit_revoked_sessions(sessions, actor=actor, request=request, reason=reason)
+    logger.warning("auth.mfa_reset staff_id=%s via=%s", stored.pk, via)
+    alerts.alert("auth.mfa_reset", {"staff_id": stored.pk, "via": via}, scope=str(stored.pk))
+    return {**removed, "revoked_count": len(sessions)}
 
 
 def require_password_session(session_id: uuid.UUID | str) -> AuthSession:

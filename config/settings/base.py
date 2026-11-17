@@ -177,6 +177,14 @@ AUTH_PASSWORD_VALIDATORS = [
 JWT_ISSUER = "glowderma"
 STAFF_ACCESS_TTL = 900
 STAFF_REFRESH_TTL = 43200
+# Staff invite / password links (feat/admin-ux, admin contract §2.1): the admin panel's base URL (the link is
+# {ADMIN_PANEL_URL}/set-password?token=…; empty = e-mail links are not offered; production requires https) and
+# how long a link stays valid (STAFF_INVITE_TTL_HOURS, below with the e-mail settings).
+ADMIN_PANEL_URL = env_str("ADMIN_PANEL_URL", "").strip().rstrip("/")
+if ADMIN_PANEL_URL:
+    _admin_panel = urlsplit(ADMIN_PANEL_URL)
+    if _admin_panel.scheme not in {"http", "https"} or not _admin_panel.netloc or _admin_panel.query:
+        raise ImproperlyConfigured("ADMIN_PANEL_URL must be an absolute http(s) URL without a query")
 REST_FRAMEWORK = {
     "EXCEPTION_HANDLER": "glowderma.core.api.exceptions.envelope_exception_handler",
     "DEFAULT_PAGINATION_CLASS": "glowderma.core.api.pagination.EnvelopePagination",
@@ -620,6 +628,8 @@ EMAIL_GLOBAL_HOURLY_LIMIT = env_positive_int("EMAIL_GLOBAL_HOURLY_LIMIT", 500)
 # E-mail codes one client IP may request per hour (sign-up, reset, new device, attach) before 429
 # otp_network_limit: no single IP can exhaust EMAIL_GLOBAL_HOURLY_LIMIT.
 EMAIL_OTP_IP_HOURLY_LIMIT = env_positive_int("EMAIL_OTP_IP_HOURLY_LIMIT", 20)
+# Hours a staff invite / password link (ADMIN_PANEL_URL above) stays valid (1..168).
+STAFF_INVITE_TTL_HOURS = env_bounded_int("STAFF_INVITE_TTL_HOURS", 72, minimum=1, maximum=168)
 # Re-authentication waiver of a fresh sign-in (C§2.2.10): attaching a phone or an e-mail within this many
 # seconds of the session's sign-in needs no password or code of the account.
 CUSTOMER_REAUTH_FRESH_SECONDS = env_bounded_int("CUSTOMER_REAUTH_FRESH_SECONDS", 600, minimum=0, maximum=3600)

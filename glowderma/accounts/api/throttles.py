@@ -59,6 +59,31 @@ class OAuthIPThrottle(LoginRateThrottle):
     scope = "oauth"
 
 
+class PasswordTokenIPThrottle(LoginRateThrottle):
+    """``auth/password-token/check/`` and ``set/`` (public) per client IP, 30/min by default."""
+
+    scope = "staff_password_token"
+
+
+class PasswordLinkThrottle(ClientIPThrottle):
+    """E-mail password links per (sender, target): ``staff/{id}/send-password-link/`` keys on the manager
+    and the target id, the self ``auth/password-link/`` on the caller twice; 5/hour by default, so nobody
+    floods a mailbox through the relay."""
+
+    scope = "staff_password_link"
+
+    def get_cache_key(self, request: Request, view: Any) -> str:
+        target = str(getattr(view, "kwargs", {}).get("pk") or request.user.pk)
+        return self.cache_format % {"scope": self.scope, "ident": f"{request.user.pk}:{target}"}
+
+
+class MfaVerifyIPThrottle(LoginRateThrottle):
+    """``auth/mfa/verify/`` (public, the sign-in's second step) per client IP, 30/min by default; the
+    account's ``panel_otp`` lockout and the challenge's attempt cap bound the guessing per account."""
+
+    scope = "mfa_verify"
+
+
 # --- Customer API (customer contract §1.8) ---
 # Carrier-grade NAT puts thousands of app users behind a few IPs, so customer throttles key on the device
 # first (``pii_ref`` of the fid, never the raw value) and keep a high pure-IP ceiling as a backstop.

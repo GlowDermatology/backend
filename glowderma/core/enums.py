@@ -599,6 +599,39 @@ class DeliveryUnavailableReason(TextChoices):
     NOT_CONFIGURED = "not_configured", "Sozlanmagan"
 
 
+# Staff invite and forced password change (admin contract §2.1, §2.16; feat/admin-ux).
+class StaffPasswordDelivery(TextChoices):
+    TEMPORARY_PASSWORD = "temporary_password", "Vaqtinchalik parol"  # noqa: S105 - a delivery mode
+    EMAIL_LINK = "email_link", "E-pochta havolasi"
+    BOTH = "both", "Ikkalasi"
+
+
+class StaffPasswordPurpose(TextChoices):
+    INVITE = "invite", "Taklif"
+    RESET = "reset", "Parolni tiklash"
+
+
+class StaffInviteState(TextChoices):
+    NONE = "none", "Havola yo‘q"
+    PENDING = "pending", "Kutilmoqda"
+    EXPIRED = "expired", "Muddati o‘tgan"
+    USED = "used", "Ishlatilgan"
+    REVOKED = "revoked", "Bekor qilingan"
+
+
+# Audit log tiers (admin contract §2.13 ``audit-log/facets/``; ``core.audit_scopes``; feat/admin-ux).
+class AuditViewerTier(TextChoices):
+    STAFF = "staff", "Oddiy xodim"
+    MANAGER = "manager", "Menejer"
+    SUPERUSER = "superuser", "Superadmin"
+
+
+# ``GET appointments/range/?detail=`` (admin contract §2.9; feat/admin-ux).
+class AppointmentRangeDetail(TextChoices):
+    COUNTS = "counts", "Faqat sonlar"
+    FULL = "full", "To‘liq"
+
+
 CONTRACT_ENUMS: tuple[type[TextChoices], ...] = (
     OrderStatus,
     PaymentStatus,
@@ -676,6 +709,11 @@ CONTRACT_ENUMS: tuple[type[TextChoices], ...] = (
     DeliveryIssueKind,
     DeliveryIssueState,
     DeliveryUnavailableReason,
+    StaffPasswordDelivery,
+    StaffPasswordPurpose,
+    StaffInviteState,
+    AuditViewerTier,
+    AppointmentRangeDetail,
 )
 
 

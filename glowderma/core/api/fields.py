@@ -11,7 +11,9 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.validators import URLValidator
 from rest_framework import serializers
 
+from glowderma.core import phones
 from glowderma.core.api.exceptions import FIELD_MESSAGES, field_error
+from glowderma.core.uzsource import N_
 
 PHONE_PATTERN = r"^\+998\d{9}$"
 SLUG_PATTERN = r"^[a-z0-9-]{2,40}$"
@@ -20,7 +22,7 @@ RESERVED_SLUGS = frozenset({"order", "none"})
 LANGUAGES = ("uz", "ru", "en")
 # Click destinations of banners and campaigns (gaps X-BANNER-URL, ADM-10.1; decision GC-3).
 LINK_URL_MAX_LENGTH = 500
-HTTPS_URL_INVALID = "Havolani https:// bilan to‘liq kiriting."
+HTTPS_URL_INVALID = N_("Havolani https:// bilan to‘liq kiriting.")
 
 
 class AwareDateTimeField(serializers.DateTimeField):
@@ -56,11 +58,14 @@ class PercentField(serializers.DecimalField):
 
     def _range_message(self) -> str:
         if self.exclusive_min is not None and self.inclusive_max is not None:
-            return f"Qiymat {self.exclusive_min} dan katta va {self.inclusive_max} dan oshmasin."
+            return N_("Qiymat %(min)s dan katta va %(max)s dan oshmasin.") % {
+                "min": self.exclusive_min,
+                "max": self.inclusive_max,
+            }
         if self.exclusive_min is not None:
-            return f"Qiymat {self.exclusive_min} dan katta bo‘lsin."
+            return N_("Qiymat %(min)s dan katta bo‘lsin.") % {"min": self.exclusive_min}
         if self.inclusive_max is not None:
-            return f"Qiymat {self.inclusive_max} dan oshmasin."
+            return FIELD_MESSAGES["max_value"].format(limit=self.inclusive_max)
         return FIELD_MESSAGES["invalid"]
 
     def to_internal_value(self, data: Any) -> Decimal:
@@ -77,18 +82,48 @@ class PercentField(serializers.DecimalField):
 class PhoneField(serializers.RegexField):
     """Contract 1.4: phone is E.164 ``^\\+998\\d{9}$``; anything else → ``invalid``."""
 
-    default_error_messages = {"invalid": "Telefon raqamini to‘g‘ri kiriting."}
+    default_error_messages = {"invalid": N_("Telefon raqamini to‘g‘ri kiriting.")}
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(PHONE_PATTERN, **kwargs)
+
+
+class LenientPhoneField(serializers.CharField):
+    """An Uzbek mobile number as staff type or paste it (``+998 90 123-45-67``, ``998901234567``,
+    ``(90) 123 45 67``…), stored and answered as E.164 (``core.phones.normalize_uz_phone``); anything
+    else → ``invalid`` "Telefon raqamini to‘g‘ri kiriting.". Admin serializers only: the customer API keeps
+    the strict :class:`PhoneField`."""
+
+    default_error_messages = {"invalid": N_("Telefon raqamini to‘g‘ri kiriting.")}
+
+    def __init__(self, **kwargs: Any) -> None:
+        # no ``max_length``: an over-long value is ``invalid`` like any other wrong spelling (≤ 32 characters,
+        # ``core.phones.MAX_INPUT_LENGTH``), not ``max_length``
+        kwargs.setdefault(
+            "help_text",
+            "An Uzbek mobile number; separators and a missing +998 are accepted and the value is "
+            "normalised to E.164 (+998XXXXXXXXX).",
+        )
+        super().__init__(**kwargs)
+
+    def to_internal_value(self, data: Any) -> str:
+        if not isinstance(data, str):  # a JSON number loses leading zeros and the "+": never guess
+            self.fail("invalid")
+        value = super().to_internal_value(data)
+        normalized = phones.normalize_uz_phone(value)
+        if normalized is None:
+            self.fail("invalid")
+        return normalized
 
 
 class SlugField(serializers.RegexField):
     """Contract 1.4: a slug matches ``^[a-z0-9-]{2,40}$``; ``order`` is a route segment, never a slug."""
 
     default_error_messages = {
-        "invalid": "Slug faqat kichik lotin harflari, raqamlar va chiziqchadan iborat bo‘lsin (2–40 belgi).",
-        "reserved": "Bu slug band.",
+        "invalid": N_(
+            "Slug faqat kichik lotin harflari, raqamlar va chiziqchadan iborat bo‘lsin (2–40 belgi)."
+        ),
+        "reserved": N_("Bu slug band."),
     }
 
     def __init__(self, **kwargs: Any) -> None:

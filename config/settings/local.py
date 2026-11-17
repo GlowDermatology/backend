@@ -5,6 +5,7 @@ from django.core.exceptions import ImproperlyConfigured
 from config.env import env_bool, env_datetime, env_list, env_networks, env_str
 
 from .base import *  # noqa: F403
+from .base import ADMIN_PANEL_URL as BASE_ADMIN_PANEL_URL
 from .base import SPECTACULAR_SETTINGS as BASE_SPECTACULAR_SETTINGS
 from .base import database_config, logging_config, redis_db_url
 
@@ -20,6 +21,8 @@ INTERNAL_API_SECRET = env_str("INTERNAL_API_SECRET", "local-internal-secret-at-l
 JWT_SIGNING_KEYS = {"dev": b"local-jwt-signing-key-at-least-32-bytes"}
 JWT_ACTIVE_KID = "dev"
 DJANGO_ADMIN_ENABLED = env_bool("DJANGO_ADMIN_ENABLED", True)
+# The Next admin panel of `npm run dev` (staff invite / password links; feat/admin-ux).
+ADMIN_PANEL_URL = BASE_ADMIN_PANEL_URL or "http://localhost:3000/admin"
 ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", ["localhost", "127.0.0.1", "testserver"])
 ADMIN_API_ALLOWED_NETS = env_networks("ADMIN_API_ALLOWED_NETS", ["0.0.0.0/0", "::/0"])
 ADMIN_API_REQUIRE_INTERNAL_SECRET = False

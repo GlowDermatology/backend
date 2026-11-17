@@ -154,7 +154,7 @@ def test_a_pos_sale_committed_during_the_bts_cancel_does_not_fail_the_cancel() -
 
 
 def test_admin_paths_wait_for_the_order_lock_at_most_admin_lock_wait(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A BTS create holding the order row must not block an admin cancel without limit: 409 ``conflict``
+    """A BTS create holding the order row must not block an admin cancel without limit: 409 ``order_busy``
     with the Uzbek message once ``ADMIN_LOCK_WAIT`` runs out, and nothing is written."""
     staff = admin()
     order = pay(place(fulfilment="pickup"))
@@ -178,6 +178,7 @@ def test_admin_paths_wait_for_the_order_lock_at_most_admin_lock_wait(monkeypatch
     holder, outcome = _race(hold_the_row, cancel)
     assert holder is None
     assert isinstance(outcome, Conflict) and str(outcome.detail) == services.MESSAGE_ORDER_BUSY
+    assert outcome.get_codes() == services.CODE_ORDER_BUSY == "order_busy"
     assert Order.objects.get(pk=order.pk).status == "processing" and not Refund.objects.exists()
     # the lock wait is restored after the row is locked: a later statement may wait as usual
     with transaction.atomic():

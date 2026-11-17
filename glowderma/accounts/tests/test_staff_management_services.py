@@ -34,7 +34,7 @@ def test_create_staff_generates_a_valid_temporary_password_and_audits(manager: S
     user, password = services.create_staff(
         email="  Nodira@GlowDerma.uz ", full_name="Nodira Rahimova", actor=manager
     )
-    assert TEMPORARY.fullmatch(password)
+    assert password is not None and TEMPORARY.fullmatch(password)
     assert not set(password) & set("0O1lI")
     user.refresh_from_db()
     assert (user.email, user.full_name, user.is_active, user.is_manager, user.is_superuser) == (
@@ -51,6 +51,8 @@ def test_create_staff_generates_a_valid_temporary_password_and_audits(manager: S
         "email": "nodira@glowderma.uz",
         "full_name": "Nodira Rahimova",
         "is_manager": False,
+        "delivery": "temporary_password",
+        "must_change_password": True,
     }
     assert password not in str(entry.after)
 
@@ -142,7 +144,7 @@ def test_reset_password_revokes_every_session_and_audits(manager: StaffUser, sta
     sessions = [AuthSessionFactory.create(staff=staff) for _ in range(2)]
     SocialIdentity.objects.create(staff=staff, provider="google", subject="g-1", email_at_link=staff.email)
     password, revoked = services.reset_staff_password(staff, actor=manager)
-    assert revoked == 2 and TEMPORARY.fullmatch(password)
+    assert revoked == 2 and password is not None and TEMPORARY.fullmatch(password)
     staff.refresh_from_db()
     assert staff.check_password(password) and not staff.check_password(TEST_PASSWORD)
     assert set(AuthSession.objects.filter(staff=staff).values_list("revoke_reason", flat=True)) == {
@@ -153,7 +155,12 @@ def test_reset_password_revokes_every_session_and_audits(manager: StaffUser, sta
     assert (entry.actor_id, entry.entity_id, entry.after) == (
         manager.pk,
         str(staff.pk),
-        {"revoked_count": 2, "generated": True},
+        {
+            "revoked_count": 2,
+            "generated": True,
+            "delivery": "temporary_password",
+            "must_change_password": True,
+        },
     )
     revoked_rows = AuditEntry.objects.filter(action="auth.session_revoked")
     assert {row.entity_id for row in revoked_rows} == {str(session.pk) for session in sessions}
@@ -177,7 +184,12 @@ def test_reset_password_with_a_given_password_on_an_inactive_account(manager: St
     assert (entry.actor_type, entry.reason, entry.after) == (
         "system",
         "manage.py resetstaffpassword",
-        {"revoked_count": 0, "generated": False},
+        {
+            "revoked_count": 0,
+            "generated": False,
+            "delivery": "temporary_password",
+            "must_change_password": False,
+        },
     )
 
 
