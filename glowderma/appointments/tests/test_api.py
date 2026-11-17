@@ -271,7 +271,7 @@ def test_admin_create_reschedule_cancel_flow(staff_client: APIClient, seeded: No
          [("customer_id", "invalid", "customer_id yoki phone dan faqat bittasini yuboring.")]),
         ({"specialist_id": 1, "service_id": 1, "customer_id": 999999, "start": at("2026-10-26", "10:00")},
          [("customer_id", "does_not_exist", "Mijoz topilmadi.")]),
-        ({"specialist_id": 1, "service_id": 1, "phone": "998901234567", "start": at("2026-10-26", "10:00")},
+        ({"specialist_id": 1, "service_id": 1, "phone": "+79012345678", "start": at("2026-10-26", "10:00")},
          [("phone", "invalid", "Telefon raqamini to‘g‘ri kiriting.")]),
         ({"specialist_id": 1, "service_id": 1, "phone": "+998900000001", "start": at("2026-10-26", "10:00")},
          [("phone", "customer_not_found", "Bu raqam bilan mijoz topilmadi.")]),

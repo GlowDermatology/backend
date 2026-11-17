@@ -415,7 +415,7 @@ def test_members_add_by_phone_errors_name_the_element(staff_client: APIClient) -
         ("phones.2", "customer_not_found", message),  # deleted customers are not resolved
     ]
     malformed = staff_client.post(
-        f"{URL}{segment.pk}/members/", {"phones": ["+998901112233", "998901112233"]}, format="json"
+        f"{URL}{segment.pk}/members/", {"phones": ["+998901112233", "99890111223"]}, format="json"
     )
     assert errors(malformed) == [("phones.1", "invalid", "Telefon raqamini to‘g‘ri kiriting.")]
     too_many = staff_client.post(

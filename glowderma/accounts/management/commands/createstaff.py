@@ -1,10 +1,13 @@
-"""``manage.py createstaff <email> [--full-name NAME] [--manager] [--superuser] [--password-stdin]``.
+"""``manage.py createstaff <email> [--full-name NAME] [--manager] [--superuser] [--password-stdin]
+[--must-change]``.
 
 Creates an active staff account with a validated password (prompted twice, or read from stdin). ``--manager``
 lets the account manage staff (admin contract §2.16); the first account of an install without an active
 manager is made a manager anyway, and a superuser always is one (decision GST-1). Audited ``staff.created``
 (actor ``system``, reason "manage.py createstaff"). ``--full-name`` is trimmed and, when given, needs 2..150
-characters like ``PATCH staff/{id}/``; left out, the account's display name is its email.
+characters like ``PATCH staff/{id}/``; left out, the account's display name is its email. ``--must-change``
+makes the person set their own password in the admin panel before anything else (and refuses the ops console
+until then); without it the typed password is the person's own.
 """
 
 import getpass
@@ -31,6 +34,11 @@ class Command(BaseCommand):
         parser.add_argument("--manager", action="store_true", help="The account may manage staff.")
         parser.add_argument("--full-name", default="")
         parser.add_argument("--password-stdin", action="store_true")
+        parser.add_argument(
+            "--must-change",
+            action="store_true",
+            help="The person must set their own password in the admin panel first.",
+        )
 
     def handle(self, *args: Any, **options: Any) -> None:
         if options["password_stdin"]:
@@ -59,6 +67,7 @@ class Command(BaseCommand):
                 password=password,
                 actor=None,
                 reason=REASON,
+                must_change=bool(options["must_change"]),
             )
         except (ValidationError, ValueError) as exc:
             raise CommandError(str(exc)) from exc

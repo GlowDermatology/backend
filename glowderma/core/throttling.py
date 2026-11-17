@@ -40,6 +40,12 @@ DEFAULT_THROTTLE_RATES: Final[dict[str, str]] = {
     # B-W1: the website's server-side calls made on its own behalf (secret, no forwarded browser IP: cache
     # revalidation, sitemap builds); with a forwarded IP the per-IP scopes key on the browser's IP instead.
     "public_bff": "6000/min",
+    # feat/admin-ux staff invites: the public auth/password-token/check|set/ per client IP, and the e-mail
+    # password links per (sender, target) — staff/{id}/send-password-link/ and the self auth/password-link/.
+    "staff_password_token": "30/min",
+    "staff_password_link": "5/hour",
+    # feat/admin-ux panel MFA: the public auth/mfa/verify/ per client IP.
+    "mfa_verify": "30/min",
 }
 
 # DRF ``SimpleRateThrottle.parse_rate``: "<requests>/<period>" where the period's first letter is one of

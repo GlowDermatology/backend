@@ -257,3 +257,47 @@ and repeating the cancel then makes no carrier call) rather than press cancel ag
 claims keep being polled and cancellable. Do **not** set `YANDEX_DELIVERY_MODE=fake` while claims are open: under the
 production settings the fake refuses everything, so the poll stops and an admin cancel of such an order answers
 503.
+
+## 14. Admin UX release (`feat/admin-ux`)
+
+Staff invites and forced password changes, optional admin panel MFA (TOTP), tiered audit log, the appointments
+week/month view and the admin API in uz / ru / en (`docs/api/admin-api-v1.md` §1.2, §1.6, §1.8, §2.1, §2.9,
+§2.13, §2.16; runbook `docs/ops/staff-access.md`). Everything is additive and off by default for existing staff
+(nobody is forced to change a password, MFA is each person's own choice). Infra changes below are made in the
+infra repository.
+
+**Migrations** (the usual release order — api, worker and beat stopped, then `migrate`, then started):
+
+| Migration | What |
+|---|---|
+| `accounts.0015_staff_invite_password_change` | `StaffUser.must_change_password` (database default `false`), `password_changed_at` (nullable), `language` (`uz` / `ru` / `en`, database default `uz`); `AuthSession.mfa_verified_at` (nullable); new table `accounts_staffpasswordtoken` (SHA-256 token hashes only, unique, index `accounts_pwtoken_staff_created`). Columns with database defaults, so workers of the previous release keep inserting during the rolling deploy; no data rewritten. Ordinary (atomic) migration. |
+| `core.0014_audit_request_id_actor_idx` | two indexes on `core_auditentry`, built **`CREATE INDEX CONCURRENTLY`** (`atomic = False`, `AddIndexConcurrently`): `audit_request_id_like_idx` (`request_id varchar_pattern_ops WHERE request_id <> ''`) and `audit_actor_created_idx` (`actor_type, actor_id, created_at`). Writes to the audit table are not blocked while they build. Needs a direct session to PostgreSQL (no transaction-mode pooler in between; `migrate` runs it outside a transaction by itself); it waits for transactions already open on the table to finish, so do not run it next to a long-running report or `psql` session. If the build is interrupted, PostgreSQL leaves an `INVALID` index of that name and a second `migrate` fails with "already exists": `DROP INDEX CONCURRENTLY IF EXISTS <name>;` then `migrate` again. Valid on PostgreSQL 16 and 18. |
+
+Rollback: `migrate core 0013` drops the two indexes; `migrate accounts 0014` drops the token table and the new
+columns (open invite links stop working; staff keep their passwords).
+
+**Environment** (Vault `secret/<env>/django`; documented in `.env.example`):
+- `ADMIN_PANEL_URL` — the admin panel's base URL, e.g. `https://glowderma.uz/admin` (the production settings
+  require `https`; absolute, no query; a trailing `/` is dropped). The invite link is
+  `{ADMIN_PANEL_URL}/set-password?token=…`. Empty (the default) = e-mail invites are not offered: the panel shows
+  the option disabled and only temporary passwords work.
+- `STAFF_INVITE_TTL_HOURS` — optional, default `72` (1–168): how long an invite / password link stays valid.
+- E-mail invites also need `EMAIL_MODE=smtp` with the `EMAIL_*` relay values (already required for customer
+  e-mail codes, `docs/ops/release-hybrid-identity.md`); with `EMAIL_MODE=fake` under the production settings the
+  option is shown disabled. Messages go through the existing outbox topic `email.staff_password_link` on the
+  worker (no new queue).
+- Nothing else is new: no new secret, throttle rates have defaults (`staff_password_token` 30/min,
+  `staff_password_link` 5/hour, `mfa_verify` 30/min; overridable through `THROTTLE_RATES` as before).
+
+**Services, ports, beat.** None new: no new container, queue, port, system package or beat entry
+(`config/celery.py` unchanged; the existing hourly `accounts-cleanup-auth` also drops the finished
+`email.staff_password_link` outbox rows; token rows stay as the invite history). Outbound traffic is unchanged
+(SMTP to the existing relay only when e-mail invites are used).
+
+**Frontend.** Ship the matching `feat/admin-ux` frontend (it sends `Accept-Language` and handles the
+`password_change_required` / `mfa_required` answers); no new frontend variable. The Next server must be able to
+serve `ADMIN_PANEL_URL/set-password`.
+
+**After the upgrade.** Operator commands: `manage.py resetstaffmfa <email> [--actor EMAIL]` (lost phone, when no
+manager can use `staff/{id}/reset-mfa/`), `createstaff … --must-change`, `resetstaffpassword … --must-change`.
+New alerts: `auth.mfa_locked`, `auth.mfa_reset` (`docs/ops/monitoring.md`).

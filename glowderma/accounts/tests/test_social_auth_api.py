@@ -249,6 +249,10 @@ def test_link_then_me_then_unlink(staff_client: APIClient, staff: StaffUser) -> 
         "linked_providers",
         "session_expires_at",
         "auth_method",
+        "must_change_password",
+        "language",
+        "mfa_enabled",
+        "capabilities",
     }
     assert response.data["auth_method"] == "password"  # the staff_client session signed in with the password
     identity = SocialIdentity.objects.get()

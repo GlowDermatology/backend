@@ -33,7 +33,6 @@ from django.test import RequestFactory
 from django.urls import reverse
 from django.utils.text import capfirst
 from django_otp import DEVICE_ID_SESSION_KEY
-from django_otp.plugins.otp_static.models import StaticToken
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
 from glowderma.accounts.api.guard import email_hash
@@ -305,7 +304,7 @@ def facts(data: dict[str, Any]) -> Any:
 def _new_device(user: StaffUser) -> TOTPDevice:
     key = secrets.token_hex(20)
     return TOTPDevice.objects.create(
-        user=user, name="Ops konsol", key=key, confirmed=True, step=30, tolerance=1, digits=6
+        user=user, name=twofactor.DEVICE_NAME, key=key, confirmed=True, step=30, tolerance=1, digits=6
     )
 
 
@@ -335,7 +334,7 @@ def staff(data: dict[str, Any]) -> Any:
         out["key_hex"] = device.key
         out["key_base32"] = base64.b32encode(device.bin_key).decode().rstrip("=")
         if data.get("recovery"):
-            out["recovery_codes"] = twofactor.issue_recovery_codes(user)
+            out["recovery_codes"] = twofactor.issue_recovery_codes(user, scope=twofactor.CONSOLE)
     elif data.get("enrol_window"):
         until = access.open_enrolment(user, actor=None, reason="e2e")
         out["enrol_until"] = _plain(until)
@@ -359,7 +358,9 @@ def reset_password(data: dict[str, Any]) -> Any:
 
     user = StaffUser.objects.get(email=str(data["email"]).lower())
     actor = StaffUser.objects.get(email=str(data["actor"]).lower())
-    password, revoked = services.reset_staff_password(user, actor=actor)
+    # must_change=False: the suite then signs in to the console with the temporary password itself (the
+    # four-eyes rule under test), which the console refuses while a forced change is pending (feat/admin-ux).
+    password, revoked = services.reset_staff_password(user, actor=actor, must_change=False)
     return {"password": password, "revoked": revoked}
 
 
@@ -373,7 +374,7 @@ def session(data: dict[str, Any]) -> Any:
     store[BACKEND_SESSION_KEY] = state.BACKEND
     store[HASH_SESSION_KEY] = user.get_session_auth_hash()
     if data.get("verified", True):
-        device = TOTPDevice.objects.filter(user=user, confirmed=True).first() or _new_device(user)
+        device = twofactor.CONSOLE.totp_devices(user).filter(confirmed=True).first() or _new_device(user)
         store[DEVICE_ID_SESSION_KEY] = device.persistent_id
     store[state.STARTED] = now
     store[state.SEEN] = now
@@ -584,9 +585,9 @@ def auth_sessions(data: dict[str, Any]) -> Any:
 def two_factor(data: dict[str, Any]) -> Any:
     user = StaffUser.objects.get(email=str(data["email"]).lower())
     return {
-        "confirmed": TOTPDevice.objects.filter(user=user, confirmed=True).count(),
-        "unconfirmed": TOTPDevice.objects.filter(user=user, confirmed=False).count(),
-        "recovery_codes": StaticToken.objects.filter(device__user=user).count(),
+        "confirmed": twofactor.CONSOLE.totp_devices(user).filter(confirmed=True).count(),
+        "unconfirmed": twofactor.CONSOLE.totp_devices(user).filter(confirmed=False).count(),
+        "recovery_codes": twofactor.CONSOLE.recovery_tokens(user).count(),
     }
 
 

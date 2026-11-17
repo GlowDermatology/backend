@@ -26,6 +26,7 @@ from glowderma.core.api.fields import (
 )
 from glowderma.core.api.serializers import ActorSerializer
 from glowderma.core.media import absolute_media_url, optional_variant_url
+from glowderma.core.uzsource import N_
 from glowderma.integrations.billz.ports import BillzError, BillzPort, BillzProduct
 
 BILLZ_ID_PATTERN = r"^\d{6,14}$"
@@ -97,7 +98,7 @@ class ProductUzTextSerializer(ProductTextSerializer):
     def validate_name(self, value: str) -> str:
         if len(value) < UZ_NAME_MIN_LENGTH:
             raise serializers.ValidationError(
-                [field_error("min_length", "O‘zbekcha nomni kiriting (kamida 2 belgi).")]
+                [field_error("min_length", N_("O‘zbekcha nomni kiriting (kamida 2 belgi)."))]
             )
         return value
 
@@ -169,7 +170,11 @@ def validate_product_slug(value: str, *, current: Product | None) -> str:
     value = value.strip()
     if not slugs.is_valid_slug(value, max_length=140):
         raise serializers.ValidationError(
-            [field_error("invalid", "Faqat lotin kichik harflari, raqamlar va chiziqcha (faqat raqam emas).")]
+            [
+                field_error(
+                    "invalid", N_("Faqat lotin kichik harflari, raqamlar va chiziqcha (faqat raqam emas).")
+                )
+            ]
         )
     others = Product.objects.filter(slug=value)
     if current is not None:
@@ -326,13 +331,16 @@ class ProductWriteSerializer(serializers.Serializer[Any]):
 
     billz_id = serializers.RegexField(
         BILLZ_ID_PATTERN,
-        error_messages={"invalid": "Billz ID yoki shtrix-kod 6–14 ta raqamdan iborat bo‘lsin."},
+        error_messages={"invalid": N_("Billz ID yoki shtrix-kod 6–14 ta raqamdan iborat bo‘lsin.")},
     )
     texts = ProductTextsSerializer()
     price = serializers.IntegerField(
         min_value=services.MIN_PRICE,
         max_value=100_000_000,
-        error_messages={"min_value": "Narx kamida 1 000 so‘m bo‘lsin.", "max_value": "Narx juda katta."},
+        error_messages={
+            "min_value": N_("Narx kamida 1 000 so‘m bo‘lsin."),
+            "max_value": N_("Narx juda katta."),
+        },
     )
     category = serializers.CharField(allow_null=True, required=False, max_length=40)
     promo = serializers.BooleanField(required=False, default=False)
@@ -371,7 +379,7 @@ class ProductWriteSerializer(serializers.Serializer[Any]):
             raise ProviderUnavailable() from exc
         if found is None:
             raise serializers.ValidationError(
-                [field_error("billz_not_found", "Billz’da bunday mahsulot topilmadi.")]
+                [field_error("billz_not_found", N_("Billz’da bunday mahsulot topilmadi."))]
             )
         self.billz_product = found
         return value

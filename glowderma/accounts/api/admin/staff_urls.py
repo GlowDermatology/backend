@@ -29,4 +29,14 @@ urlpatterns: list[URLPattern | URLResolver] = [
         StaffViewSet.as_view({"post": "reset_password"}),
         name="admin-staff-reset-password",
     ),
+    path(
+        "staff/<int:pk>/send-password-link/",
+        StaffViewSet.as_view({"post": "send_password_link"}),
+        name="admin-staff-send-password-link",
+    ),
+    path(
+        "staff/<int:pk>/reset-mfa/",
+        StaffViewSet.as_view({"post": "reset_mfa"}),
+        name="admin-staff-reset-mfa",
+    ),
 ]

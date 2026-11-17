@@ -32,6 +32,10 @@ MEMBER_KEYS = {
     "last_login_at",
     "linked_providers",
     "created_at",
+    "must_change_password",
+    "password_changed_at",
+    "mfa_enabled",
+    "invite",
 }
 
 
@@ -97,7 +101,8 @@ def test_create_returns_the_account_and_a_temporary_password_once(
     headers = key()
     response = manager_client.post(URL, body, **headers)
     assert response.status_code == 201, response.data
-    assert set(response.data) == {"staff", "temporary_password"}
+    assert set(response.data) == {"staff", "temporary_password", "activation"}
+    assert response.data["activation"] is None
     staff, password = response.data["staff"], response.data["temporary_password"]
     assert set(staff) == MEMBER_KEYS
     user = StaffUser.objects.get(email="nodira@glowderma.uz")
@@ -111,6 +116,10 @@ def test_create_returns_the_account_and_a_temporary_password_once(
         "last_login_at": None,
         "linked_providers": [],
         "created_at": staff["created_at"],
+        "must_change_password": True,
+        "password_changed_at": None,
+        "mfa_enabled": False,
+        "invite": {"state": "none", "sent_at": None, "expires_at": None},
     }
     assert TEMPORARY.fullmatch(password)
     assert can_sign_in("nodira@glowderma.uz", password)
@@ -308,7 +317,15 @@ def test_reset_password(
     assert not can_sign_in(staff.email, TEST_PASSWORD)
     assert can_sign_in(staff.email, password)  # the earlier lockout ended with the reset
     entry = AuditEntry.objects.get(action="staff.password_reset")
-    assert (entry.actor_id, entry.after) == (manager.pk, {"revoked_count": 1, "generated": True})
+    assert (entry.actor_id, entry.after) == (
+        manager.pk,
+        {
+            "revoked_count": 1,
+            "generated": True,
+            "delivery": "temporary_password",
+            "must_change_password": True,
+        },
+    )
     stored: Any = IdempotencyRecord.objects.get().response_body
     assert password not in str(stored)
     replay = manager_client.post(detail(staff.pk, "reset-password"), **headers)
@@ -373,3 +390,44 @@ def test_a_superuser_without_the_flag_still_manages_staff(manager: StaffUser) ->
     assert client.get(detail(manager.pk)).status_code == 200
     assert client.get(URL).data["results"][0]["is_manager"] is not None
     assert client.get("/api/v1/admin/auth/me/").data["is_manager"] is True
+
+
+# --- review SEC-2: a manager cannot take a superuser's password (nor, in test_panel_mfa, its MFA) -----------
+
+
+@pytest.mark.parametrize("delivery", ["temporary_password", "both"])
+def test_a_manager_cannot_be_handed_a_superusers_password(
+    manager_client: APIClient, delivery: str, settings: Any
+) -> None:
+    settings.ADMIN_PANEL_URL = "https://panel.example.uz/admin"
+    root = StaffUser.objects.create_superuser("root@x.uz", TEST_PASSWORD, full_name="Root")
+    session = AuthSessionFactory.create(staff=root)
+    response = manager_client.post(detail(root.pk, "reset-password"), {"delivery": delivery}, **key())
+    assert response.status_code == 409, response.data
+    assert (response.data["code"], response.data["message"]) == ("conflict", services.STAFF_SUPERUSER_RESET)
+    root.refresh_from_db()
+    session.refresh_from_db()
+    assert root.check_password(TEST_PASSWORD) and session.revoked_at is None
+    assert not AuditEntry.objects.filter(action="staff.password_reset").exists()
+
+
+def test_a_manager_may_email_a_superuser_its_own_link_and_a_superuser_may_reset_it(
+    manager_client: APIClient, settings: Any
+) -> None:
+    settings.ADMIN_PANEL_URL = "https://panel.example.uz/admin"
+    root = StaffUser.objects.create_superuser("root@x.uz", TEST_PASSWORD, full_name="Root")
+    # the link goes to the superuser's own address: the manager learns nothing
+    linked = manager_client.post(detail(root.pk, "reset-password"), {"delivery": "email_link"}, **key())
+    assert linked.status_code == 200 and linked.data["temporary_password"] is None
+    other = StaffUser.objects.create_superuser("root2@x.uz", TEST_PASSWORD, full_name="Root 2")
+    answer = bearer_client(other).post(detail(root.pk, "reset-password"), **key())
+    assert answer.status_code == 200 and TEMPORARY.fullmatch(answer.data["temporary_password"])
+
+
+def test_the_operator_command_still_resets_a_superusers_password() -> None:
+    root = StaffUser.objects.create_superuser("root@x.uz", TEST_PASSWORD, full_name="Root")
+    manager = StaffUserFactory.create(email="boss@x.uz", is_manager=True)
+    password, _ = services.reset_staff_password(
+        root, actor=manager, refuse_self=False, protect_superuser=False
+    )
+    assert password is not None and can_sign_in(root.email, password)

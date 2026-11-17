@@ -88,7 +88,7 @@ def test_patch_merges_and_audits_the_changed_leaves(staff_client: APIClient) -> 
             {"longitude": "-181", "latitude": "0"},
             ("longitude", "min_value", "Qiymat -180 dan kam bo‘lmasin."),
         ),
-        ({"phone": "998712000000"}, ("phone", "invalid", "Telefon raqamini to‘g‘ri kiriting.")),
+        ({"phone": "99871200000"}, ("phone", "invalid", "Telefon raqamini to‘g‘ri kiriting.")),
         ({"name": {"uz": "K"}}, ("name.uz", "min_length", "Kamida 2 ta belgi kiriting.")),
         ({"address": {"uz": "x" * 301}}, ("address.uz", "max_length", "300 belgidan oshmasin.")),
     ],

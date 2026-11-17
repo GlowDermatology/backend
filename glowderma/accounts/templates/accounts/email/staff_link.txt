@@ -1,0 +1,13 @@
+{% autoescape off %}{{ greeting }}{% if name %} {{ name }}!{% endif %}
+
+{{ intro }}
+
+{{ link }}
+
+{{ expiry }}
+{{ ignore }}
+
+--
+Glow Derma
+{{ footer }}
+{% endautoescape %}

@@ -1226,6 +1226,58 @@ CATALOG: Final[dict[str, dict[str, str]]] = {
             "If this wasn't you, contact the seller at once."
         ),
     },
+    # feat/admin-ux: staff invite / password link e-mails (accounts.tasks.send_staff_password_link).
+    "email.staff_link.invite.subject": {
+        "uz": "Glow Derma: admin panelga taklif",
+        "ru": "Glow Derma: приглашение в админ-панель",
+        "en": "Glow Derma: your admin panel invitation",
+    },
+    "email.staff_link.invite.intro": {
+        "uz": (
+            "Sizni Glow Derma admin paneliga xodim sifatida qo‘shishdi. "
+            "Parol o‘rnatish uchun havolani oching."
+        ),
+        "ru": ("Вас добавили сотрудником в админ-панель Glow Derma. Откройте ссылку, чтобы задать пароль."),
+        "en": "You were added as staff to the Glow Derma admin panel. Open the link to set your password.",
+    },
+    "email.staff_link.reset.subject": {
+        "uz": "Glow Derma: admin panel parolini o‘rnating",
+        "ru": "Glow Derma: задайте пароль админ-панели",
+        "en": "Glow Derma: set your admin panel password",
+    },
+    "email.staff_link.reset.intro": {
+        "uz": (
+            "Glow Derma admin paneli uchun yangi parol o‘rnatish so‘raldi. Parol o‘rnatish uchun havolani "
+            "oching."
+        ),
+        "ru": "Для админ-панели Glow Derma запрошен новый пароль. Откройте ссылку, чтобы задать его.",
+        "en": "A new password was requested for the Glow Derma admin panel. Open the link to set it.",
+    },
+    "email.staff_link.greeting": {
+        "uz": "Assalomu alaykum!",
+        "ru": "Здравствуйте!",
+        "en": "Hello!",
+    },
+    "email.staff_link.greeting_named": {
+        "uz": "Assalomu alaykum,",
+        "ru": "Здравствуйте,",
+        "en": "Hello,",
+    },
+    "email.staff_link.button": {
+        "uz": "Parol o‘rnatish",
+        "ru": "Задать пароль",
+        "en": "Set password",
+    },
+    "email.staff_link.expiry": {
+        "uz": "Havola {n} soat amal qiladi va faqat bir marta ishlaydi.",
+        "ru": "Ссылка действует {n} ч и срабатывает только один раз.",
+        "en": "The link is valid for {n} h and works only once.",
+    },
+    "email.staff_link.ignore": {
+        "uz": "Agar buni kutmagan bo‘lsangiz, xatni e’tiborsiz qoldiring va menejeringizga xabar bering.",
+        "ru": "Если вы этого не ожидали, проигнорируйте письмо и сообщите своему менеджеру.",
+        "en": "If you did not expect this, ignore this e-mail and tell your manager.",
+    },
 }
 
 

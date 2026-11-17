@@ -31,6 +31,7 @@ from glowderma.core.api.exceptions import Conflict, InvalidTransition, ProviderU
 from glowderma.core.images import ImageError, process_image
 from glowderma.core.media import absolute_media_url, media_name
 from glowderma.core.models import OutboxMessage
+from glowderma.core.uzsource import N_
 from glowderma.core.variants import delete_with_variants, store_variants
 from glowderma.integrations.fcm.ports import (
     NOT_SENT,
@@ -57,9 +58,9 @@ from glowderma.notifications.models import (
 logger = logging.getLogger(__name__)
 
 MESSAGES = {
-    "segment_in_use": "Rejalashtirilgan xabar bu guruhga yuboriladi.",
-    "rule_member": "Mijoz guruhga qoida orqali kiradi.",
-    "unknown_placeholder": "Faqat {raqam} o‘rinbosari ishlatiladi.",
+    "segment_in_use": N_("Rejalashtirilgan xabar bu guruhga yuboriladi."),
+    "rule_member": N_("Mijoz guruhga qoida orqali kiradi."),
+    "unknown_placeholder": N_("Faqat {raqam} o‘rinbosari ishlatiladi."),
 }
 IMAGE_MESSAGES = {"file_too_large": None, "unsupported_image": None}
 INTERRUPTED = "interrupted"  # a claim left in ``sending`` by a crash: never resent (design 03 §3.6)
@@ -122,21 +123,21 @@ def batch_size() -> int:
 # --- campaigns: drafts, test pushes, approval (admin contract §2.8) --------------------------------------
 
 # Uzbek messages of the approval workflow (409 ``conflict`` unless noted).
-MESSAGE_STALE_REVISION = "Xabar o‘zgartirilgan: sahifani yangilab, qayta urinib ko‘ring."
+MESSAGE_STALE_REVISION = N_("Xabar o‘zgartirilgan: sahifani yangilab, qayta urinib ko‘ring.")
 MESSAGE_NOT_TESTED = state.MESSAGE_NOT_TESTED
-MESSAGE_TEST_STALE = "Bu test eski matn uchun yuborilgan: qayta test yuboring."
-MESSAGE_TEST_UNDELIVERED = "Bu test qurilmaga yetib bormagan: tasdiqlab bo‘lmaydi."
-MESSAGE_NO_TEST_DEVICES = "Push qabul qila oladigan test qurilmasi tanlanmadi."
-MESSAGE_SEGMENT_GONE = "Tanlangan segment o‘chirilgan: auditoriyani qayta tanlang."
-MESSAGE_FCM_DOWN = "Push xizmati javob bermadi: birozdan so‘ng qayta urinib ko‘ring."
+MESSAGE_TEST_STALE = N_("Bu test eski matn uchun yuborilgan: qayta test yuboring.")
+MESSAGE_TEST_UNDELIVERED = N_("Bu test qurilmaga yetib bormagan: tasdiqlab bo‘lmaydi.")
+MESSAGE_NO_TEST_DEVICES = N_("Push qabul qila oladigan test qurilmasi tanlanmadi.")
+MESSAGE_SEGMENT_GONE = N_("Tanlangan segment o‘chirilgan: auditoriyani qayta tanlang.")
+MESSAGE_FCM_DOWN = N_("Push xizmati javob bermadi: birozdan so‘ng qayta urinib ko‘ring.")
 MESSAGE_CANCEL_STARTED = state.MESSAGE_CANCEL_STARTED
 MESSAGE_CANCEL_DRAFT = state.MESSAGE_CANCEL_DRAFT
 MESSAGE_NOT_SENDING = state.MESSAGE_NOT_SENDING
 TEST_DEVICE_MESSAGES = {
-    "customer_not_found": "Bu raqam bilan mijoz topilmadi.",
-    "device_not_pushable": "Bu mijozning push qabul qiladigan qurilmasi yo‘q.",
-    "unique": "Bu qurilma allaqachon ro‘yxatda.",
-    "does_not_exist": "Test qurilmasi topilmadi.",
+    "customer_not_found": N_("Bu raqam bilan mijoz topilmadi."),
+    "device_not_pushable": N_("Bu mijozning push qabul qiladigan qurilmasi yo‘q."),
+    "unique": N_("Bu qurilma allaqachon ro‘yxatda."),
+    "does_not_exist": N_("Test qurilmasi topilmadi."),
 }
 STOPPED = "stopped"  # recipient / inbox error of a push never attempted because the campaign was stopped
 UNAVAILABLE_TEST = "unavailable"  # a test push FCM did not take at all (the provider was down)

@@ -116,10 +116,10 @@ def fill_empty_models() -> dict[str, Any]:
         if customer is not None:
             created.extend(_delivery_rows(customer, owner, now))
         if _empty("otp_totp.totpdevice"):
-            twofactor.enrolment_device(owner, None)
+            twofactor.enrolment_device(owner, None, scope=twofactor.CONSOLE)
             created.append("otp_totp.totpdevice")
         if not StaticDevice.objects.filter(user=owner).exists():
-            twofactor.issue_recovery_codes(owner)
+            twofactor.issue_recovery_codes(owner, scope=twofactor.CONSOLE)
             created.append("otp_static.staticdevice")
         # Secret columns the demo leaves blank: a customer password hash and Apple's sealed refresh token.
         if not Customer.objects.exclude(password="").exists():

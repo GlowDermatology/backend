@@ -64,7 +64,7 @@ def test_grant_with_an_actor_audits_the_actor() -> None:
 
 def test_revoke_removes_access_devices_and_console_sessions() -> None:
     user = ops_staff("ops@x.uz")
-    twofactor.issue_recovery_codes(user)
+    twofactor.issue_recovery_codes(user, scope=twofactor.CONSOLE)
     client = Client()
     login_through_forms(client, "ops@x.uz")
     pending = Client()
@@ -89,7 +89,7 @@ def test_revoke_removes_access_devices_and_console_sessions() -> None:
 
 def test_reset_2fa_deletes_the_devices_so_the_next_login_enrols() -> None:
     user = ops_staff("ops@x.uz")
-    twofactor.issue_recovery_codes(user)
+    twofactor.issue_recovery_codes(user, scope=twofactor.CONSOLE)
     client = Client()
     login_through_forms(client, "ops@x.uz")
     assert "reset" in run("reset-2fa", "--email", "ops@x.uz")
@@ -106,7 +106,7 @@ def test_reset_2fa_deletes_the_devices_so_the_next_login_enrols() -> None:
 
 def test_status_prints_the_access_state() -> None:
     user = ops_staff("ops@x.uz")
-    twofactor.issue_recovery_codes(user)
+    twofactor.issue_recovery_codes(user, scope=twofactor.CONSOLE)
     out = run("status", "--email", "ops@x.uz")
     assert "is_staff: True" in out and "totp_confirmed: True" in out and "recovery_codes_left: 10" in out
     assert not AuditEntry.objects.exists()
@@ -137,7 +137,7 @@ def test_only_managers_see_the_reset_action() -> None:
 def test_the_reset_action_confirms_then_resets_and_audits() -> None:
     manager = ops_staff("boss@x.uz", is_manager=True)
     target = ops_staff("target@x.uz")
-    twofactor.issue_recovery_codes(target)
+    twofactor.issue_recovery_codes(target, scope=twofactor.CONSOLE)
     client = Client()
     ops_login(client, manager)
     confirm = client.post(changelist(), {"action": "reset_two_factor", "_selected_action": [target.pk]})
@@ -172,7 +172,7 @@ def test_a_manager_cannot_reset_their_own_2fa_from_the_console() -> None:
 
 
 def test_recovery_tokens_are_never_shown_in_the_console(ops_client: Client, ops_user: StaffUser) -> None:
-    twofactor.issue_recovery_codes(ops_user)
+    twofactor.issue_recovery_codes(ops_user, scope=twofactor.CONSOLE)
     device = StaticDevice.objects.get(user=ops_user)
     stored = list(StaticToken.objects.filter(device=device).values_list("token", flat=True))
     for url in (

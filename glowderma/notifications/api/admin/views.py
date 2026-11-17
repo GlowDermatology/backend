@@ -30,6 +30,7 @@ from glowderma.core.api.schema import (
 )
 from glowderma.core.exports import ExportMixin, format_export_datetime
 from glowderma.core.idempotency import idempotent
+from glowderma.core.uzsource import N_, tr
 from glowderma.loyalty import selectors as loyalty_selectors
 from glowderma.notifications import selectors, services
 from glowderma.notifications.api.admin.serializers import (
@@ -69,10 +70,10 @@ def format_phone(phone: str) -> str:
 def audience_label(campaign: Campaign) -> str:
     """Contract §5.5 ``audienceLabel``."""
     if campaign.audience_type == enums.AudienceType.ALL:
-        return f"Barcha · {format_number(campaign.recipient_count)}"
+        return tr(N_("Barcha · %(count)s")) % {"count": format_number(campaign.recipient_count)}
     if campaign.audience_type == enums.AudienceType.SEGMENT:
         return f"{campaign.audience_segment_name} · {format_number(campaign.recipient_count)}"
-    return f"Bitta mijoz · {format_phone(campaign.audience_phone)}"
+    return tr(N_("Bitta mijoz · %(phone)s")) % {"phone": format_phone(campaign.audience_phone)}
 
 
 def form_to_nested(data: Any) -> dict[str, Any]:
@@ -189,7 +190,7 @@ def _link_label(campaign: Campaign) -> str:
         return campaign.link_url
     if campaign.link_kind == enums.LinkKind.PRODUCT:
         return (
-            f"mahsulot #{campaign.link_product_id}"
+            tr(N_("mahsulot #%(id)s")) % {"id": campaign.link_product_id}
             if campaign.link_product_id
             else campaign.link_product_label
         )
@@ -202,7 +203,7 @@ def record_body(campaign_id: int) -> Any:
 
 class NotificationViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
     serializer_class = NotificationRecordSerializer
-    export_name = "bildirishnomalar"
+    export_name = N_("bildirishnomalar")
     export_filter_keys = frozenset(NotificationListQuerySerializer().fields)
     export_resource = "notifications"
     export_headers = labels.NOTIFICATION_EXPORT_HEADERS
@@ -228,10 +229,10 @@ class NotificationViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSe
             yield (
                 campaign.pk,
                 format_export_datetime(campaign.scheduled_at or campaign.created_at),
-                labels.NOTIFICATION_KIND[campaign.kind],
+                labels.text(labels.NOTIFICATION_KIND, campaign.kind),
                 campaign.title,
                 audience_label(campaign),
-                labels.NOTIFICATION_STATE[campaign.state],
+                labels.text(labels.NOTIFICATION_STATE, campaign.state),
                 "" if campaign.sent is None else campaign.sent,
                 "" if campaign.delivered is None else campaign.delivered,
                 _link_label(campaign),
@@ -561,7 +562,7 @@ def _segment_or_404(pk: int) -> CustomerSegment:
 
 class SegmentViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
     serializer_class = SegmentSerializer
-    export_name = "guruhlar"
+    export_name = N_("guruhlar")
     export_filter_keys = frozenset[str]()  # no filters
     export_resource = "segments"
     export_headers = labels.SEGMENT_EXPORT_HEADERS
@@ -639,7 +640,7 @@ def _percent_cell(percent: Any) -> str:
 
 class SegmentMembersViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
     serializer_class = CustomerListItemSerializer
-    export_name = "guruh-azolari"
+    export_name = N_("guruh-azolari")
     export_filter_keys = frozenset[str]()  # no filters
     export_resource = "segment_members"
     export_headers = labels.SEGMENT_MEMBER_EXPORT_HEADERS
@@ -665,7 +666,7 @@ class SegmentMembersViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericView
                 int(getattr(customer, "lifetime_total", 0)),
                 _percent_cell(getattr(customer, "percent", None)),
                 int(getattr(customer, "balance", 0)),
-                labels.CUSTOMER_STATUS[customer.status],
+                labels.text(labels.CUSTOMER_STATUS, customer.status),
             )
 
     @extend_schema(

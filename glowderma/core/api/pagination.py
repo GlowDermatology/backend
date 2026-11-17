@@ -6,6 +6,8 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from glowderma.core.uzsource import N_
+
 
 class EnvelopePagination(PageNumberPagination):
     page_size_query_param = "page_size"
@@ -21,7 +23,8 @@ class EnvelopePagination(PageNumberPagination):
         except ValueError, TypeError:
             size = 0
         if size not in options:
-            raise ValidationError({"page_size": [ErrorDetail("Ruxsat etilmagan qiymat.", "invalid_choice")]})
+            message = N_("Ruxsat etilmagan qiymat.")
+            raise ValidationError({"page_size": [ErrorDetail(message, "invalid_choice")]})
         paginator = Paginator(queryset, size)
         try:
             number = int(request.query_params.get("page", "1"))

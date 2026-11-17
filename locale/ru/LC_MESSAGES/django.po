@@ -346,6 +346,10 @@ msgid "%(purchase)s · bekor qilingan"
 msgstr "%(purchase)s · отменена"
 
 #: glowderma/accounts/models.py
+msgid "%(purpose)s havolasi · xodim #%(staff)s"
+msgstr "Ссылка «%(purpose)s» · сотрудник #%(staff)s"
+
+#: glowderma/accounts/models.py
 msgid "%(purpose)s kodi · %(contact)s · %(created)s"
 msgstr "Код: %(purpose)s · %(contact)s · %(created)s"
 
@@ -393,6 +397,14 @@ msgstr "Скачать файлом .txt"
 msgid "10 daqiqada bir qayta hisoblanadi"
 msgstr "пересчитывается раз в 10 минут"
 
+#: glowderma/commerce/api/admin/serializers.py
+msgid "1000 belgidan oshmasin."
+msgstr "Не более 1000 символов."
+
+#: glowderma/notifications/api/admin/serializers.py
+msgid "180 belgidan oshmasin."
+msgstr "Не более 180 символов."
+
 #: glowderma/reporting/dashboards/customers.py
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "24 soat"
@@ -419,6 +431,10 @@ msgstr "Введите один из 10 кодов восстановления,
 msgid "30 kun ichida yangi mijoz yo‘q"
 msgstr "За 30 дней новых клиентов нет"
 
+#: glowderma/commerce/api/admin/serializers.py
+msgid "300 belgidan oshmasin."
+msgstr "Не более 300 символов."
+
 #: glowderma/reporting/templates/reporting/dashboards/money.html
 msgid "36 soatdan ko‘p o‘tdi — beat yoki worker ishlamayotgan bo‘lishi mumkin."
 msgstr "Прошло более 36 часов — возможно, не работает beat или worker."
@@ -426,6 +442,14 @@ msgstr "Прошло более 36 часов — возможно, не раб�
 #: glowderma/site_config/forms.py
 msgid "5 dan 60 gacha daqiqa kiriting."
 msgstr "Введите количество минут от 5 до 60."
+
+#: glowderma/commerce/api/admin/serializers.py
+msgid "500 belgidan oshmasin."
+msgstr "Не более 500 символов."
+
+#: glowderma/notifications/api/admin/serializers.py
+msgid "60 belgidan oshmasin."
+msgstr "Не более 60 символов."
 
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "7 kun"
@@ -477,6 +501,7 @@ msgstr "Контактные данные сохранены"
 msgid "Alt matni nomdan olinadi"
 msgstr "Alt-текст берётся из названия"
 
+#: glowderma.core.labels.AUDIT_LOG_EXPORT_HEADERS
 #: glowderma/accounts/admin.py
 #: glowderma/core/admin.py
 msgid "Amal"
@@ -526,6 +551,10 @@ msgstr "Apple"
 msgid "Audit jurnali"
 msgstr "Журнал действий"
 
+#: glowderma.core.labels.NOTIFICATION_EXPORT_HEADERS
+msgid "Auditoriya"
+msgstr "Аудитория"
+
 #: glowderma/accounts/console/forms.py
 msgid "Autentifikator ilovasidagi 6 xonali kod"
 msgstr "6-значный код из приложения-аутентификатора"
@@ -538,14 +567,40 @@ msgstr "Откройте приложение-аутентификатор (Goog
 msgid "Avtomatik qabul qilinadigan oshish (so‘m)"
 msgstr "Автоматически принимаемое повышение (сум)"
 
+#: glowderma.core.api.exceptions.MESSAGES
+#: glowderma/core/api/exceptions.py
+msgid "Avtorizatsiya talab qilinadi."
+msgstr "Требуется авторизация."
+
+#: glowderma/accounts/api/guard.py
+msgid "Avval admin panelda o‘z parolingizni o‘rnating, so‘ng konsolga qayta kiring."
+msgstr "Сначала задайте свой пароль в админ-панели, затем войдите в консоль снова."
+
+#: glowderma/professionals/services.py
+msgid "Avval klinika manzilini kiriting."
+msgstr "Сначала укажите адрес клиники."
+
 #: glowderma/delivery/admin.py
 msgid "Avval ombor manzilini va xaritadagi nuqtasini saqlang."
 msgstr "Сначала сохраните адрес склада и точку на карте."
+
+#: glowderma/accounts/errors.py
+msgid "Avval parolingizni o‘zgartiring."
+msgstr "Сначала смените пароль."
+
+#: glowderma/notifications/state.py
+msgid "Avval test yuboring va qurilmada ko‘rganingizni tasdiqlang."
+msgstr "Сначала отправьте тест и подтвердите, что увидели его на устройстве."
+
+#: glowderma.core.labels.SEGMENT_EXPORT_HEADERS
+msgid "A’zolar"
+msgstr "Участники"
 
 #: model metadata
 msgid "B nuqta ID"
 msgstr "ID точки B"
 
+#: glowderma.core.labels.ORDER_EXPORT_HEADERS
 #: model metadata
 msgid "BTS"
 msgstr "BTS"
@@ -553,6 +608,14 @@ msgstr "BTS"
 #: model metadata
 msgid "BTS buyurtma ID"
 msgstr "ID заказа в BTS"
+
+#: glowderma/commerce/services.py
+msgid "BTS buyurtmani bekor qilmadi: {reason}."
+msgstr "BTS не отменил заказ: {reason}."
+
+#: glowderma/commerce/services.py
+msgid "BTS ga qayta yuborib bo‘lmaydi."
+msgstr "Повторно отправить в BTS нельзя."
 
 #: glowderma/integrations/admin.py
 msgid "BTS holat so‘rovi navbatga qo‘yildi."
@@ -583,6 +646,10 @@ msgstr "Почта BTS"
 msgid "BTS soxta rejimda ishlayapti: holat so‘rovi o‘chirilgan."
 msgstr "BTS работает в тестовом режиме: запрос статусов отключён."
 
+#: glowderma/commerce/services.py
+msgid "BTS so‘rovi allaqachon yuborilmoqda."
+msgstr "Запрос в BTS уже отправляется."
+
 #: glowderma/delivery/admin.py
 msgid "BTS’da o‘chirilgan"
 msgstr "Удалено в BTS"
@@ -605,6 +672,10 @@ msgstr "Выполняется"
 msgid "Balans"
 msgstr "Баланс"
 
+#: glowderma.core.labels.SEGMENT_MEMBER_EXPORT_HEADERS
+msgid "Balans (so‘m)"
+msgstr "Баланс (сум)"
+
 #: glowderma/reporting/dashboards/money.py
 msgid "Balans = daftar yozuvlari yig‘indisi"
 msgstr "Баланс = сумма записей журнала кешбэка"
@@ -612,6 +683,14 @@ msgstr "Баланс = сумма записей журнала кешбэка"
 #: glowderma/reporting/dashboards/money.py
 msgid "Balans = oxirgi yozuvdan keyingi balans"
 msgstr "Баланс = баланс после последней записи"
+
+#: glowderma/loyalty/services.py
+msgid "Balans manfiy bo‘lib qoladi."
+msgstr "Баланс станет отрицательным."
+
+#: glowderma/loyalty/services.py
+msgid "Balansdan ko‘p ayirib bo‘lmaydi."
+msgstr "Нельзя списать больше, чем есть на балансе."
 
 #: model metadata
 msgid "Band"
@@ -658,6 +737,10 @@ msgstr "Завершить все сеансы"
 msgid "Barcha yangi mijozlar"
 msgstr "Все новые клиенты"
 
+#: glowderma/notifications/api/admin/views.py
+msgid "Barcha · %(count)s"
+msgstr "Все · %(count)s"
+
 #: glowderma/reporting/templates/reporting/dashboards/money.html
 msgid "Beat vazifasi %(task)s har kuni 03:40 da ishlashi kerak."
 msgstr "Задача beat %(task)s должна запускаться ежедневно в 03:40."
@@ -703,9 +786,14 @@ msgstr "Начислено"
 msgid "Billz"
 msgstr "Billz"
 
+#: glowderma.core.labels.PRODUCT_EXPORT_HEADERS
 #: model metadata
 msgid "Billz ID"
 msgstr "Billz ID"
+
+#: glowderma/catalog/api/admin/serializers.py
+msgid "Billz ID yoki shtrix-kod 6–14 ta raqamdan iborat bo‘lsin."
+msgstr "Billz ID или штрихкод должен состоять из 6–14 цифр."
 
 #: model metadata
 msgid "Billz bilan sinxronlangan"
@@ -743,6 +831,7 @@ msgstr "ID товара в Billz"
 msgid "Billz narxi"
 msgstr "Цена в Billz"
 
+#: glowderma.core.labels.PRODUCT_EXPORT_HEADERS
 #: model metadata
 msgid "Billz nomi"
 msgstr "Название в Billz"
@@ -770,6 +859,10 @@ msgstr "Продажа в Billz зарегистрирована"
 #: glowderma/reporting/dashboards/money.py
 msgid "Billz sinov rejimida — tekshirilmadi"
 msgstr "Billz в тестовом режиме — не проверено"
+
+#: glowderma/catalog/services.py
+msgid "Billz sinov rejimida: Billz ma’lumotlarini olib bo‘lmaydi. Billz ulanganidan keyin qayta urinib ko‘ring."
+msgstr "Billz в тестовом режиме: данные Billz получить нельзя. Повторите попытку после подключения Billz."
 
 #: glowderma/reporting/dashboards/sales.py
 msgid "Billz sinov rejimida: qoldiq yangilanmaydi"
@@ -822,6 +915,10 @@ msgstr "Попытка платежа в Billz"
 #: glowderma/commerce/tasks.py
 msgid "Billz’da allaqachon yozilgan: %(when)s (qo‘lda yoki oldingi yuborishda)"
 msgstr "Уже зарегистрировано в Billz: %(when)s (вручную или при предыдущей отправке)"
+
+#: glowderma/catalog/api/admin/serializers.py
+msgid "Billz’da bunday mahsulot topilmadi."
+msgstr "Такой товар в Billz не найден."
 
 #: model metadata
 msgid "Billz’da hisoblangan"
@@ -884,6 +981,10 @@ msgstr "Вес одного товара (г)"
 msgid "Bitta mijoz"
 msgstr "Один клиент"
 
+#: glowderma/notifications/api/admin/views.py
+msgid "Bitta mijoz · %(phone)s"
+msgstr "Один клиент · %(phone)s"
+
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "Bloklangan"
 msgstr "Заблокировано"
@@ -900,7 +1001,12 @@ msgstr "В наличии"
 msgid "Boshlangan"
 msgstr "Запущено"
 
+#: glowderma/professionals/api/admin/serializers.py
+msgid "Boshlanish va tugash vaqtini birga kiriting (ikkalasi bo‘sh bo‘lsa, dam olish kuni)."
+msgstr "Укажите и время начала, и время окончания (если оба пусты — выходной день)."
+
 #: admin history (professionals.WorkingHours)
+#: glowderma.core.labels.BANNER_EXPORT_HEADERS
 msgid "Boshlanishi"
 msgstr "Начало"
 
@@ -916,6 +1022,11 @@ msgstr "В другом разделе есть несохранённые из�
 msgid "Boshqa hisob bilan kirish"
 msgstr "Войти под другой учётной записью"
 
+#: glowderma.core.api.exceptions.MESSAGES
+#: glowderma/core/api/exceptions.py
+msgid "Boshqa qurilmadan kirildi."
+msgstr "В аккаунт вошли с другого устройства."
+
 #: config/settings/ops_admin.py
 #: glowderma/core/admin_site.py
 msgid "Boshqaruv"
@@ -929,9 +1040,33 @@ msgstr "Этап"
 msgid "Bo‘shatildi"
 msgstr "Освобождён"
 
+#: glowderma/catalog/services.py
+msgid "Bu Billz ID bilan mahsulot allaqachon bor."
+msgstr "Товар с таким Billz ID уже существует."
+
+#: glowderma/appointments/services.py
+msgid "Bu amal ushbu holatda mumkin emas."
+msgstr "Это действие недоступно в текущем статусе."
+
+#: glowderma/commerce/services.py
+msgid "Bu buyurtma bo‘yicha Yandex bilan boshqa amal bajarilmoqda (kuryer chaqirilmoqda). Birozdan so‘ng qayta urinib ko‘ring."
+msgstr "По этому заказу выполняется другая операция с Яндексом (вызывается курьер). Повторите попытку чуть позже."
+
 #: glowderma/commerce/templates/admin/commerce/order_diagnostics.html
 msgid "Bu buyurtma bo‘yicha xabar yo‘q"
 msgstr "По этому заказу сообщений нет"
+
+#: glowderma/commerce/services.py
+msgid "Bu buyurtma uchun kuryer chaqirib bo‘lmaydi."
+msgstr "Для этого заказа нельзя вызвать курьера."
+
+#: glowderma/commerce/services.py
+msgid "Bu buyurtmada tasdiqlanadigan narx yo‘q."
+msgstr "В этом заказе нет цены для подтверждения."
+
+#: glowderma/commerce/services.py
+msgid "Bu buyurtmani bekor qilib bo‘lmaydi."
+msgstr "Этот заказ нельзя отменить."
 
 #: glowderma/reporting/templates/reporting/dashboards/sales.html
 msgid "Bu davrda sotuv bo‘lmadi"
@@ -941,17 +1076,141 @@ msgstr "За этот период продаж не было"
 msgid "Bu davrda to‘langan buyurtma yo‘q"
 msgstr "За этот период оплаченных заказов нет"
 
+#: glowderma/accounts/services.py
+msgid "Bu email bilan xodim allaqachon bor (nofaol bo‘lsa, uni qayta faollashtiring)."
+msgstr "Сотрудник с таким email уже есть (если учётная запись неактивна, активируйте её снова)."
+
 #: glowderma/delivery/services.py
 msgid "Bu hafta kuni allaqachon kiritilgan."
 msgstr "Этот день недели уже добавлен."
+
+#: glowderma/professionals/api/admin/serializers.py
+msgid "Bu hafta kuni ikki marta berilgan."
+msgstr "Этот день недели указан дважды."
+
+#: glowderma.core.api.exceptions.MESSAGES
+#: glowderma/core/api/exceptions.py
+msgid "Bu hisob administrator sifatida ro‘yxatdan o‘tmagan."
+msgstr "Этот аккаунт не зарегистрирован как сотрудник."
+
+#: glowderma/commerce/services.py
+msgid "Bu holatga o‘tib bo‘lmaydi."
+msgstr "Перейти в этот статус нельзя."
+
+#: glowderma/accounts/services.py
+msgid "Bu ijtimoiy hisob allaqachon bog‘langan."
+msgstr "Этот аккаунт соцсети уже привязан."
+
+#: glowderma.core.api.exceptions.MESSAGES
+#: glowderma/core/api/exceptions.py
+msgid "Bu kalit boshqa so‘rov uchun ishlatilgan."
+msgstr "Этот ключ уже использован для другого запроса."
 
 #: glowderma/accounts/templates/accounts/console/enrol.html
 msgid "Bu kalitni hech kimga bermang va skrinshot qilib saqlamang."
 msgstr "Никому не передавайте этот ключ и не сохраняйте его в виде снимка экрана."
 
+#: glowderma/catalog/services.py
+msgid "Bu manzil (slug) boshqa mahsulotda bor."
+msgstr "Этот адрес (slug) уже занят другим товаром."
+
+#: glowderma/professionals/api/admin/serializers.py
+#: glowderma/professionals/services.py
+msgid "Bu manzil (slug) boshqa mutaxassisda bor."
+msgstr "Этот адрес (slug) уже занят другим специалистом."
+
+#: glowderma.core.api.exceptions.FIELD_MESSAGES
+#: glowderma/core/api/exceptions.py
+msgid "Bu maydonni o‘zgartirib bo‘lmaydi."
+msgstr "Это поле нельзя изменить."
+
+#: glowderma/notifications/services.py
+msgid "Bu mijozning push qabul qiladigan qurilmasi yo‘q."
+msgstr "У этого клиента нет устройства, принимающего push-уведомления."
+
+#: glowderma/commerce/api/admin/views.py
+msgid "Bu muammo allaqachon hal qilingan."
+msgstr "Эта проблема уже решена."
+
+#: glowderma/accounts/services.py
+msgid "Bu provayder allaqachon bog‘langan."
+msgstr "Этот провайдер уже привязан."
+
+#: glowderma/commerce/services.py
+msgid "Bu qaytarishni qayta yuborib bo‘lmaydi."
+msgstr "Этот возврат нельзя отправить повторно."
+
+#: glowderma/commerce/services.py
+msgid "Bu qaytarishni yakunlab bo‘lmaydi."
+msgstr "Этот возврат нельзя завершить."
+
+#: glowderma.core.api.exceptions.FIELD_MESSAGES
+#: glowderma/core/api/exceptions.py
+msgid "Bu qiymat band."
+msgstr "Это значение уже занято."
+
+#: glowderma/notifications/services.py
+msgid "Bu qurilma allaqachon ro‘yxatda."
+msgstr "Это устройство уже в списке."
+
+#: glowderma/appointments/api/admin/serializers.py
+#: glowderma/notifications/api/admin/serializers.py
+#: glowderma/notifications/services.py
+msgid "Bu raqam bilan mijoz topilmadi."
+msgstr "Клиент с таким номером не найден."
+
 #: glowderma/delivery/services.py
 msgid "Bu sana allaqachon kiritilgan."
 msgstr "Эта дата уже добавлена."
+
+#: glowderma/professionals/services.py
+msgid "Bu sana uchun alohida jadval allaqachon bor."
+msgstr "Отдельное расписание на эту дату уже есть."
+
+#: glowderma/core/api/fields.py
+msgid "Bu slug band."
+msgstr "Этот slug уже занят."
+
+#: glowderma/notifications/services.py
+msgid "Bu test eski matn uchun yuborilgan: qayta test yuboring."
+msgstr "Этот тест отправлен для старого текста: отправьте тест заново."
+
+#: glowderma/notifications/services.py
+msgid "Bu test qurilmaga yetib bormagan: tasdiqlab bo‘lmaydi."
+msgstr "Этот тест не дошёл до устройства: подтвердить его нельзя."
+
+#: glowderma/commerce/services.py
+msgid "Bu to‘lov uchun qaytarish allaqachon jarayonda."
+msgstr "Возврат по этому платежу уже выполняется."
+
+#: glowderma/commerce/services.py
+msgid "Bu to‘lovda Click to‘lov raqami yo‘q, shuning uchun Click’dan holatini tekshirib bo‘lmaydi. Mijozga qo‘lda to‘lang, so‘ng «qo‘lda to‘landi» belgisi bilan yakunlang."
+msgstr "У этого платежа нет номера платежа Click, поэтому проверить его статус в Click нельзя. Выплатите клиенту вручную, затем завершите с отметкой «выплачено вручную»."
+
+#: glowderma/appointments/services.py
+msgid "Bu vaqt band."
+msgstr "Это время уже занято."
+
+#: glowderma/professionals/services.py
+msgid "Bu vaqt boshqa band vaqt bilan kesishadi."
+msgstr "Это время пересекается с другим занятым временем."
+
+#: glowderma/professionals/api/admin/serializers.py
+msgid "Bu xizmat ro‘yxatda ikki marta berilgan."
+msgstr "Эта услуга указана в списке дважды."
+
+#: glowderma/professionals/api/admin/serializers.py
+#: glowderma/professionals/services.py
+msgid "Bu xodim boshqa mutaxassisga bog‘langan."
+msgstr "Этот сотрудник уже привязан к другому специалисту."
+
+#: glowderma/accounts/services.py
+msgid "Bu xodimda ikki bosqichli himoya yoqilmagan."
+msgstr "У этого сотрудника двухфакторная защита не включена."
+
+#: glowderma/commerce/services.py
+msgid "Bu yetkazish usuli o‘chirilgan."
+msgstr "Этот способ доставки отключён."
 
 #: glowderma/professionals/services.py
 msgid "Bu yozuvga boshqa yozuvlar bog‘langan; avval ularni o‘chiring yoki nofaol qiling."
@@ -964,6 +1223,10 @@ msgstr[0] "Сегодня %(count)s запись на приём"
 msgstr[1] "Сегодня %(count)s записи на приём"
 msgstr[2] "Сегодня %(count)s записей на приём"
 msgstr[3] "Сегодня %(count)s записей на приём"
+
+#: glowderma/commerce/services.py
+msgid "Bugun kuryer chaqirish vaqti tugadi."
+msgstr "Время вызова курьера на сегодня истекло."
 
 #: glowderma/reporting/dashboards/customers.py
 msgid "Bugungi qabullar"
@@ -982,10 +1245,22 @@ msgstr "Заказ"
 msgid "Buyurtma bekor qilindi"
 msgstr "Заказ отменён"
 
+#: glowderma/commerce/services.py
+msgid "Buyurtma bekor qilinmoqda."
+msgstr "Заказ отменяется."
+
+#: glowderma/commerce/services.py
+msgid "Buyurtma boshqa amal bilan band. Birozdan so‘ng qayta urinib ko‘ring."
+msgstr "Заказ занят другой операцией. Повторите попытку чуть позже."
+
 #: glowderma/commerce/templates/admin/commerce/order_diagnostics.html
 #: model metadata
 msgid "Buyurtma holati"
 msgstr "Статус заказа"
+
+#: glowderma/commerce/services.py
+msgid "Buyurtma mijozga yetkazilgan: uni bekor qilib bo‘lmaydi."
+msgstr "Заказ доставлен клиенту: отменить его нельзя."
 
 #: config/settings/ops_admin.py
 msgid "Buyurtma qatorlari"
@@ -999,10 +1274,15 @@ msgstr "Введите номер заказа (только цифры, нап�
 msgid "Buyurtma tarixi"
 msgstr "История заказов"
 
+#: glowderma/commerce/services.py
+msgid "Buyurtma xaridi boshqa mijozga tegishli. Ma’lumotlarni tekshiring."
+msgstr "Покупка по заказу принадлежит другому клиенту. Проверьте данные."
+
 #: model metadata
 msgid "Buyurtma yaratildi"
 msgstr "Заказ создан"
 
+#: glowderma.core.labels.PAYMENT_EXPORT_HEADERS
 #: glowderma/reporting/templates/reporting/dashboards/ops.html
 msgid "Buyurtma №"
 msgstr "Заказ №"
@@ -1064,6 +1344,10 @@ msgstr "Сверка журнала кешбэка"
 msgid "Cashback darajalari"
 msgstr "Уровни кешбэка"
 
+#: glowderma.core.labels.SEGMENT_MEMBER_EXPORT_HEADERS
+msgid "Cashback foizi"
+msgstr "Процент кешбэка"
+
 #: model metadata
 msgid "Cashback hisoblandi"
 msgstr "Кешбэк начислен"
@@ -1088,6 +1372,10 @@ msgstr "Кешбэк · 30 дней"
 #: model metadata
 msgid "Celery vazifa ID"
 msgstr "ID задачи Celery"
+
+#: glowderma/professionals/api/admin/views.py
+msgid "Ch"
+msgstr "Ср"
 
 #: model metadata
 msgid "Chiqish"
@@ -1114,6 +1402,14 @@ msgstr "Нет paydoc Click"
 #: model metadata
 msgid "Click sinov rejimida"
 msgstr "Click в тестовом режиме"
+
+#: glowderma/commerce/services.py
+msgid "Click sinov rejimida: to‘lov holatini tekshirib bo‘lmaydi. Click ulanganidan keyin yakunlang."
+msgstr "Click в тестовом режиме: проверить статус платежа нельзя. Завершите после подключения Click."
+
+#: glowderma/commerce/services.py
+msgid "Click to‘lovni qaytarmagan. Avval mijozga qo‘lda to‘lang, so‘ng «qo‘lda to‘landi» belgisi bilan yakunlang yoki qaytarishni qayta urinib ko‘ring."
+msgstr "Click не вернул платёж. Сначала выплатите клиенту вручную, затем завершите с отметкой «выплачено вручную» или повторите возврат."
 
 #: glowderma/reporting/dashboards/report.py
 msgid "Click: paydoc’siz to‘langan to‘lovlar"
@@ -1151,6 +1447,10 @@ msgstr "Уровень — по сумме покупок клиента за в
 msgid "Darajalar bo‘yicha mijozlar"
 msgstr "Клиенты по уровням"
 
+#: glowderma/loyalty/services.py
+msgid "Darajalar ustma-ust tushmoqda."
+msgstr "Уровни пересекаются."
+
 #: glowderma/accounts/templates/accounts/console/csrf_failure.html
 msgid "Davom etish"
 msgstr "Продолжить"
@@ -1160,8 +1460,13 @@ msgid "Davomiyligi"
 msgstr "Длительность"
 
 #: admin history (professionals.ProfessionalService)
+#: glowderma.core.labels.SERVICE_EXPORT_HEADERS
 msgid "Davomiyligi (daq.)"
 msgstr "Длительность (мин.)"
+
+#: glowderma/professionals/api/admin/serializers.py
+msgid "Davomiylik 5 daqiqaga karrali bo‘lsin."
+msgstr "Длительность должна быть кратна 5 минутам."
 
 #: glowderma/reporting/templates/reporting/dashboards/sales.html
 msgid "Davrda yaratilgan %(total)s ta buyurtma hozir qayerda"
@@ -1221,10 +1526,22 @@ msgstr "Телефон магазина"
 msgid "Do‘kon xaridlari (POS)"
 msgstr "Покупки в магазине (POS)"
 
+#: glowderma/professionals/api/admin/views.py
+msgid "Du"
+msgstr "Пн"
+
 #: glowderma.core.labels.WEEKDAYS
 #: model metadata
 msgid "Dushanba"
 msgstr "Понедельник"
+
+#: glowderma/accounts/services.py
+msgid "E-pochta orqali yuborish sozlanmagan."
+msgstr "Отправка по e-mail не настроена."
+
+#: glowderma/accounts/services.py
+msgid "E-pochta orqali yuborish sozlanmagan: vaqtinchalik parolni tanlang."
+msgstr "Отправка по e-mail не настроена: выберите временный пароль."
 
 #: model metadata
 msgid "E-pochtani tasdiqlash"
@@ -1349,9 +1666,52 @@ msgstr "Facebook"
 msgid "Faol"
 msgstr "Активный"
 
+#: glowderma/core/labels.py
+msgctxt "export banners"
+msgid "Faol"
+msgstr "Активен"
+
+#: glowderma/core/labels.py
+msgctxt "export categories"
+msgid "Faol"
+msgstr "Активна"
+
+#: glowderma/core/labels.py
+msgctxt "export customers"
+msgid "Faol"
+msgstr "Активен"
+
+#: glowderma/core/labels.py
+msgctxt "export products"
+msgid "Faol"
+msgstr "Активен"
+
+#: glowderma/core/labels.py
+msgctxt "export segment_members"
+msgid "Faol"
+msgstr "Активен"
+
+#: glowderma/core/labels.py
+msgctxt "export services"
+msgid "Faol"
+msgstr "Активна"
+
+#: glowderma/core/labels.py
+msgctxt "export specialists"
+msgid "Faol"
+msgstr "Активен"
+
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "Faol akkauntlar"
 msgstr "Активные учётные записи"
+
+#: glowderma/catalog/services.py
+msgid "Faol mahsulot uchun kategoriyani tanlang."
+msgstr "Выберите категорию для активного товара."
+
+#: glowderma/catalog/services.py
+msgid "Faol mahsulotda kamida bitta rasm bo‘lsin."
+msgstr "У активного товара должно быть хотя бы одно изображение."
 
 #: glowderma/reporting/dashboards/sales.py
 msgid "Faol mahsuloti yo‘q"
@@ -1365,17 +1725,50 @@ msgstr "Активные, но остаток 0 или нет записи в Bi
 msgid "Faollashtirildi"
 msgstr "Активировано"
 
+#: glowderma.core.api.exceptions.FIELD_MESSAGES
+#: glowderma/core/api/exceptions.py
 #: glowderma/professionals/services.py
 msgid "Faqat JPEG, PNG yoki WebP rasm."
 msgstr "Только изображения JPEG, PNG или WebP."
+
+#: glowderma/catalog/api/admin/serializers.py
+#: glowderma/professionals/api/admin/serializers.py
+msgid "Faqat lotin kichik harflari, raqamlar va chiziqcha (faqat raqam emas)."
+msgstr "Только строчные латинские буквы, цифры и дефис (не только цифры)."
 
 #: glowderma/core/admin_actions.py
 msgid "Faqat menejerlar uchun."
 msgstr "Только для менеджеров."
 
+#: glowderma/notifications/state.py
+msgid "Faqat qoralamani o‘zgartirish mumkin."
+msgstr "Изменять можно только черновик."
+
+#: glowderma/accounts/api/admin/serializers.py
+msgid "Faqat raqamlardan iborat bo‘lmasin."
+msgstr "Пароль не должен состоять только из цифр."
+
+#: glowderma/notifications/state.py
+msgid "Faqat rejalashtirilgan yoki bekor qilingan xabarni qoralamaga qaytarish mumkin."
+msgstr "Вернуть в черновик можно только запланированное или отменённое сообщение."
+
+#: glowderma/notifications/state.py
+msgid "Faqat test tasdiqlangan xabarni yuborishga tasdiqlash mumkin."
+msgstr "Утвердить к отправке можно только сообщение с подтверждённым тестом."
+
 #: glowderma/reporting/dashboards/money.py
 msgid "Faqat tunda"
 msgstr "Только ночью"
+
+#: glowderma/notifications/api/admin/serializers.py
+#: glowderma/notifications/services.py
+msgid "Faqat {raqam} o‘rinbosari ishlatiladi."
+msgstr "Можно использовать только подстановку {raqam}."
+
+#: glowderma.core.api.exceptions.MESSAGES
+#: glowderma/core/api/exceptions.py
+msgid "Fayl juda katta."
+msgstr "Файл слишком большой."
 
 #: admin history (professionals.Professional)
 msgid "Filial"
@@ -1388,6 +1781,10 @@ msgstr "Филиалы"
 #: glowderma/core/templates/admin/ops/applied_filters.html
 msgid "Filtrlarni tozalash"
 msgstr "Сбросить фильтры"
+
+#: glowderma/loyalty/services.py
+msgid "Foiz 0 dan katta va 100 dan oshmasligi kerak."
+msgstr "Процент должен быть больше 0 и не больше 100."
 
 #: config/settings/ops_admin.py
 #: glowderma/reporting/dashboards/ops.py
@@ -1484,10 +1881,19 @@ msgstr "Откройте каждый платёж и проверьте его 
 msgid "Har bir turning oxirgi ishga tushishi; 15 daqiqadan beri yurak urishi yo‘q — osilgan"
 msgstr "Последний запуск каждого типа; нет сигнала активности 15 минут — зависла"
 
+#: glowderma.core.labels.BANNER_EXPORT_HEADERS
+msgid "Havola"
+msgstr "Ссылка"
+
 #: model metadata
 msgid "Havola (URL)"
 msgstr "Ссылка (URL)"
 
+#: glowderma/accounts/errors.py
+msgid "Havola yaroqsiz yoki muddati o‘tgan. Menejerdan yangi havola so‘rang."
+msgstr "Ссылка недействительна или устарела. Попросите менеджера отправить новую ссылку."
+
+#: glowderma/core/api/fields.py
 #: glowderma/site_config/forms.py
 msgid "Havolani https:// bilan to‘liq kiriting."
 msgstr "Введите ссылку полностью, начиная с https://."
@@ -1569,6 +1975,7 @@ msgstr "Событие"
 msgid "Hodisalar"
 msgstr "События"
 
+#: glowderma.core.labels.PRODUCT_EXPORT_HEADERS
 #: glowderma/appointments/admin.py
 #: glowderma/catalog/admin.py
 #: glowderma/commerce/admin.py
@@ -1622,13 +2029,23 @@ msgstr "Документ"
 msgid "Huquqiy matnlar"
 msgstr "Юридические тексты"
 
+#: glowderma.core.labels.PRODUCT_EXPORT_HEADERS
 #: model metadata
 msgid "ID"
 msgstr "ID"
 
+#: glowderma.core.labels.AUDIT_LOG_EXPORT_HEADERS
+msgid "IP"
+msgstr "IP"
+
 #: model metadata
 msgid "IP manzil"
 msgstr "IP-адрес"
+
+#: glowderma.core.api.exceptions.MESSAGES
+#: glowderma/core/api/exceptions.py
+msgid "Idempotency-Key sarlavhasi kerak."
+msgstr "Нужен заголовок Idempotency-Key."
 
 #: config/settings/ops_admin.py
 msgid "Idempotentlik"
@@ -1647,6 +2064,11 @@ msgstr "Входы через соцсети"
 msgid "Ijtimoiy tarmoq"
 msgstr "Соцсеть"
 
+#: glowderma.core.api.exceptions.MESSAGES
+#: glowderma/core/api/exceptions.py
+msgid "Ijtimoiy tarmoq orqali kirish amalga oshmadi."
+msgstr "Не удалось войти через соцсеть."
+
 #: model metadata
 msgid "Ijtimoiy tarmoqni bog‘lash"
 msgstr "Привязка соцсети"
@@ -1655,9 +2077,17 @@ msgstr "Привязка соцсети"
 msgid "Ikkala vaqtni kiriting (maxsus ish vaqti) yoki ikkalasini ham bo‘sh qoldiring (yopiq kun)."
 msgstr "Укажите оба времени (особый режим) или оставьте оба пустыми (выходной)."
 
+#: glowderma/accounts/mfa.py
+msgid "Ikki bosqichli himoya allaqachon yoqilgan."
+msgstr "Двухфакторная защита уже включена."
+
 #: glowderma/accounts/templates/accounts/console/recovery_codes.html
 msgid "Ikki bosqichli himoya yoqildi."
 msgstr "Двухфакторная аутентификация включена."
+
+#: glowderma/accounts/mfa.py
+msgid "Ikki bosqichli himoya yoqilmagan."
+msgstr "Двухфакторная защита не включена."
 
 #: glowderma/accounts/console/views.py
 msgid "Ikki bosqichli himoyani sozlash muddati tugagan yoki ochilmagan. Menejerdan 2FA ni qayta o‘rnatishni so‘rang, so‘ng qaytadan kiring."
@@ -1751,6 +2181,10 @@ msgstr "Интеграции: live"
 msgid "Integratsiyalar: sinov (fake)"
 msgstr "Интеграции: тестовые (fake)"
 
+#: glowderma.core.labels.SPECIALIST_EXPORT_HEADERS
+msgid "Ish kunlari"
+msgstr "Рабочие дни"
+
 #: config/settings/ops_admin.py
 msgid "Ish vaqti"
 msgstr "Рабочее время"
@@ -1781,9 +2215,17 @@ msgstr "Списано"
 msgid "Ishlov xatosi"
 msgstr "Ошибка обработки"
 
+#: glowderma.core.labels.SPECIALIST_EXPORT_HEADERS
+msgid "Ism"
+msgstr "Имя"
+
 #: admin history (professionals.WorkingHoursOverride)
 msgid "Izoh"
 msgstr "Примечание"
+
+#: glowderma/commerce/api/admin/serializers.py
+msgid "Izohni kiriting."
+msgstr "Введите комментарий."
 
 #: glowderma/reporting/templates/reporting/dashboards/ops.html
 msgid "Jadval"
@@ -1800,6 +2242,14 @@ msgstr "Открытые записи на приём, которые после
 msgid "Jami"
 msgstr "Итого"
 
+#: glowderma.core.labels.SEGMENT_MEMBER_EXPORT_HEADERS
+msgid "Jami xaridlar (so‘m)"
+msgstr "Сумма покупок (сум)"
+
+#: glowderma/integrations/services.py
+msgid "Jarayon uzilib qoldi. Qayta urinib ko‘ring."
+msgstr "Процесс прервался. Повторите попытку."
+
 #: glowderma.core.labels.ORDER_STATUS
 #: model metadata
 msgid "Jarayonda"
@@ -1808,6 +2258,11 @@ msgstr "В обработке"
 #: glowderma/reporting/dashboards/__init__.py
 msgid "Jiddiy"
 msgstr "Критично"
+
+#: glowderma/accounts/api/admin/views.py
+#: glowderma/accounts/mfa.py
+msgid "Joriy parol noto‘g‘ri."
+msgstr "Текущий пароль неверен."
 
 #: glowderma/site_config/templates/site_config/console/settings.html
 msgid "Joriy versiya:"
@@ -1833,6 +2288,10 @@ msgstr "Отправление #%(shipment)s, заявка курьеру %(numb
 msgid "Jo‘natma #%(shipment)s: %(event)s · %(at)s"
 msgstr "Отправление #%(shipment)s: %(event)s · %(at)s"
 
+#: glowderma/commerce/services.py
+msgid "Jo‘natma bu yetkazish usuli uchun juda og‘ir."
+msgstr "Отправление слишком тяжёлое для этого способа доставки."
+
 #: glowderma/commerce/diagnostics.py
 msgid "Jo‘natma hali yaratilmagan"
 msgstr "Отправление ещё не создано"
@@ -1845,6 +2304,10 @@ msgstr "Посылка вне учёта"
 msgid "Jo‘natma qaytdi"
 msgstr "Отправление возвращено"
 
+#: glowderma/commerce/api/admin/serializers.py
+msgid "Jo‘natma tarkibini tekshirganingizni tasdiqlang."
+msgstr "Подтвердите, что вы проверили содержимое отправления."
+
 #: model metadata
 msgid "Jo‘natma yaratildi"
 msgstr "Отправление создано"
@@ -1853,6 +2316,22 @@ msgstr "Отправление создано"
 msgid "Jo‘natma yaratilmadi"
 msgstr "Отправление не создано"
 
+#: glowderma/professionals/api/admin/views.py
+msgid "Ju"
+msgstr "Пт"
+
+#: glowderma/core/exports.py
+msgid "Juda ko‘p qator. Filtrni toraytiring."
+msgstr "Слишком много строк. Сузьте фильтр."
+
+#: glowderma/core/api/exceptions.py
+msgid "Juda ko‘p urinish."
+msgstr "Слишком много попыток."
+
+#: glowderma/core/api/exceptions.py
+msgid "Juda ko‘p urinish. %(n)s soniyadan so‘ng qayta urinib ko‘ring."
+msgstr "Слишком много попыток. Повторите через %(n)s с."
+
 #: glowderma/accounts/api/guard.py
 msgid "Juda ko‘p urinish. %(wait)s soniyadan so‘ng qayta urinib ko‘ring."
 msgid_plural "Juda ko‘p urinish. %(wait)s soniyadan so‘ng qayta urinib ko‘ring."
@@ -1860,6 +2339,10 @@ msgstr[0] "Слишком много попыток. Повторите чере
 msgstr[1] "Слишком много попыток. Повторите через %(wait)s секунды."
 msgstr[2] "Слишком много попыток. Повторите через %(wait)s секунд."
 msgstr[3] "Слишком много попыток. Повторите через %(wait)s секунд."
+
+#: glowderma/accounts/api/admin/serializers.py
+msgid "Juda oddiy parol."
+msgstr "Слишком простой пароль."
 
 #: glowderma.core.labels.WEEKDAYS
 #: model metadata
@@ -1881,6 +2364,27 @@ msgstr "Проверки K1–K6 и сверка журнала кешбэка �
 #: glowderma/reporting/templates/reporting/dashboards/sales.html
 msgid "Kamchilik"
 msgstr "Недочёт"
+
+#: glowderma/accounts/api/admin/serializers.py
+msgid "Kamida 12 ta belgi."
+msgstr "Не менее 12 символов."
+
+#: glowderma/commerce/api/admin/serializers.py
+msgid "Kamida 3 ta belgi kiriting."
+msgstr "Введите не менее 3 символов."
+
+#: glowderma/loyalty/services.py
+msgid "Kamida bitta daraja kerak."
+msgstr "Нужен хотя бы один уровень."
+
+#: glowderma/accounts/services.py
+msgid "Kamida bitta faol menejer qolishi kerak. Avval boshqa xodimni menejer qiling."
+msgstr "Должен остаться хотя бы один активный менеджер. Сначала назначьте менеджером другого сотрудника."
+
+#: glowderma.core.api.exceptions.FIELD_MESSAGES
+#: glowderma/core/api/exceptions.py
+msgid "Kamida {limit} ta belgi kiriting."
+msgstr "Введите не менее {limit} символов."
 
 #: model metadata
 msgid "Kampaniya"
@@ -1922,6 +2426,7 @@ msgid "Katalog"
 msgstr "Каталог"
 
 #: admin history (professionals.Service)
+#: glowderma.core.labels.PRODUCT_EXPORT_HEADERS
 #: glowderma/reporting/dashboards/sales.py
 #: model metadata
 msgid "Kategoriya"
@@ -1938,6 +2443,10 @@ msgstr "Категория не выбрана"
 #: glowderma/catalog/admin.py
 msgid "Kategoriya: {obj.name_uz}"
 msgstr "Категория: {obj.name_uz}"
+
+#: glowderma/catalog/services.py
+msgid "Kategoriyada mahsulotlar bor."
+msgstr "В категории есть товары."
 
 #: config/settings/ops_admin.py
 msgid "Kategoriyalar"
@@ -1976,6 +2485,16 @@ msgstr "Отложено"
 msgid "Kechiktirilmagan"
 msgstr "Не отложено"
 
+#: glowderma/loyalty/services.py
+msgid "Kelajakdagi sanani tanlang."
+msgstr "Выберите дату в будущем."
+
+#: glowderma/appointments/services.py
+#: glowderma/commerce/api/admin/serializers.py
+#: glowderma/notifications/api/admin/serializers.py
+msgid "Kelajakdagi vaqtni tanlang."
+msgstr "Выберите время в будущем."
+
 #: model metadata
 msgid "Keldi"
 msgstr "Приём состоялся"
@@ -1985,6 +2504,10 @@ msgstr "Приём состоялся"
 msgid "Kelgan"
 msgstr "Приём состоялся"
 
+#: glowderma.core.labels.SPECIALIST_EXPORT_HEADERS
+msgid "Kelgusi qabullar"
+msgstr "Предстоящие приёмы"
+
 #: admin history (professionals.Location)
 msgid "Kenglik"
 msgstr "Широта"
@@ -1992,6 +2515,10 @@ msgstr "Широта"
 #: glowderma/delivery/services.py
 msgid "Kenglik va uzunlikni birga kiriting yoki ikkalasini ham bo‘sh qoldiring."
 msgstr "Укажите широту и долготу вместе или оставьте обе пустыми."
+
+#: glowderma/professionals/services.py
+msgid "Kenglik va uzunlikni birga kiriting."
+msgstr "Укажите и широту, и долготу."
 
 #: glowderma/core/admin.py
 msgid "Kesh ishlamayapti: hisobotni hozir ishga tushirib bo‘lmaydi."
@@ -2022,6 +2549,10 @@ msgstr "Следующий шаг: код из приложения-аутент
 #: glowderma/customers/admin.py
 msgid "Kirish"
 msgstr "Вход"
+
+#: glowderma/accounts/errors.py
+msgid "Kirish muddati tugadi yoki bekor qilindi. Email va parolni qaytadan kiriting."
+msgstr "Время входа истекло или вход отменён. Введите email и пароль ещё раз."
 
 #: glowderma/accounts/console/views.py
 msgid "Kirish muddati tugadi. Email va parolni qaytadan kiriting."
@@ -2056,6 +2587,7 @@ msgid "Kod 6 ta raqamdan iborat."
 msgstr "Код состоит из 6 цифр."
 
 #: glowderma/accounts/console/views.py
+#: glowderma/accounts/errors.py
 msgid "Kod noto‘g‘ri yoki allaqachon ishlatilgan. Ilovadagi yangi kodni kiriting."
 msgstr "Код неверный или уже использован. Введите новый код из приложения."
 
@@ -2093,6 +2625,36 @@ msgstr "Телефон косметолога"
 msgid "Kosmetologiya"
 msgstr "Косметология"
 
+#: glowderma.core.api.exceptions.FIELD_MESSAGES
+#: glowderma/core/api/exceptions.py
+msgid "Ko‘pi bilan 2 ta kasr raqam."
+msgstr "Не более 2 знаков после запятой."
+
+#: glowderma/professionals/api/admin/serializers.py
+msgid "Ko‘pi bilan 366 kunlik davr."
+msgstr "Период не более 366 дней."
+
+#: glowderma/appointments/api/admin/serializers.py
+msgid "Ko‘pi bilan 42 kunlik davr."
+msgstr "Период не более 42 дней."
+
+#: glowderma/professionals/api/admin/serializers.py
+msgid "Ko‘pi bilan 6 ta kasr raqam."
+msgstr "Не более 6 знаков после запятой."
+
+#: glowderma/catalog/services.py
+msgid "Ko‘pi bilan 8 ta rasm."
+msgstr "Не более 8 изображений."
+
+#: glowderma/professionals/api/admin/serializers.py
+msgid "Ko‘pi bilan bir yil oldinga kiritish mumkin."
+msgstr "Можно указать не более чем на год вперёд."
+
+#: glowderma.core.api.exceptions.FIELD_MESSAGES
+#: glowderma/core/api/exceptions.py
+msgid "Ko‘pi bilan {limit} ta."
+msgstr "Не более {limit}."
+
 #: config/settings/ops_admin.py
 msgid "Kun ish vaqti"
 msgstr "Рабочее время по датам"
@@ -2104,6 +2666,10 @@ msgstr "Дневная выручка по каналам"
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "Kunlik va soatlik limitlar (Redis hisoblagichlari) yozuv qoldirmaydi — bu yerda faqat bazadagi kodlar."
 msgstr "Суточные и часовые лимиты (счётчики Redis) не оставляют записей — здесь только коды из базы данных."
+
+#: glowderma/commerce/services.py
+msgid "Kuryer allaqachon chaqirilgan."
+msgstr "Курьер уже вызван."
 
 #: model metadata
 msgid "Kuryer biriktirildi"
@@ -2125,6 +2691,10 @@ msgstr "Ожидает вызова курьера"
 #: model metadata
 msgid "Kuryer chaqirilmadi"
 msgstr "Курьер не вызван"
+
+#: glowderma/commerce/services.py
+msgid "Kuryer chaqirish vaqtincha to‘xtatilgan."
+msgstr "Вызов курьеров временно приостановлен."
 
 #: model metadata
 msgid "Kuryer chaqiruvi noaniq"
@@ -2163,6 +2733,11 @@ msgstr "У курьера / в пути"
 msgid "Kuryerga topshirildi"
 msgstr "Передано курьеру"
 
+#: glowderma.core.api.exceptions.MESSAGES
+#: glowderma/core/api/exceptions.py
+msgid "Kutilmagan xato."
+msgstr "Непредвиденная ошибка."
+
 #: glowderma.core.labels.PAYMENT_STATUS
 #: model metadata
 msgid "Kutilmoqda"
@@ -2179,6 +2754,19 @@ msgstr "Live — настоящий адаптер; Тест — фиктивн�
 #: glowderma/reporting/templates/reporting/dashboards/ops.html
 msgid "Live, lekin sozlanmagan — jiddiy."
 msgstr "Live, но не настроен — критично."
+
+#: glowderma/accounts/api/admin/serializers.py
+msgid "Login bilan juda o‘xshash."
+msgstr "Слишком похож на логин."
+
+#: glowderma.core.api.exceptions.MESSAGES
+#: glowderma/core/api/exceptions.py
+msgid "Login yoki parol noto‘g‘ri."
+msgstr "Неверный логин или пароль."
+
+#: model metadata
+msgid "MFA tasdiqlangan"
+msgstr "MFA подтверждена"
 
 #: glowderma/reporting/dashboards/sales.py
 #: glowderma/reporting/templates/reporting/dashboards/sales.html
@@ -2198,14 +2786,24 @@ msgstr "Изображение %(position)s товара #%(product_id)s"
 msgid "Mahsulot band qilindi"
 msgstr "Товар зарезервирован"
 
+#: glowderma/notifications/api/admin/serializers.py
+msgid "Mahsulot topilmadi yoki yashirin."
+msgstr "Товар не найден или скрыт."
+
 #: glowderma/catalog/admin.py
 msgid "Mahsulot: {obj}"
 msgstr "Товар: {obj}"
 
 #: config/settings/ops_admin.py
+#: glowderma.core.labels.CATEGORY_EXPORT_HEADERS
 #: glowderma/commerce/admin.py
 msgid "Mahsulotlar"
 msgstr "Товары"
+
+#: glowderma.core.api.exceptions.FIELD_MESSAGES
+#: glowderma/core/api/exceptions.py
+msgid "Majburiy maydon."
+msgstr "Обязательное поле."
 
 #: admin history (professionals.Professional)
 msgid "Malaka (en)"
@@ -2240,10 +2838,18 @@ msgstr "Адрес (ru)"
 msgid "Manzil (uz)"
 msgstr "Адрес (uz)"
 
+#: glowderma/professionals/api/admin/serializers.py
+msgid "Manzil topilmadi."
+msgstr "Адрес не найден."
+
 #: config/settings/ops_admin.py
 #: glowderma/customers/admin.py
 msgid "Manzillar"
 msgstr "Адреса"
+
+#: glowderma/commerce/services.py
+msgid "Manzilning xaritadagi nuqtasi yo‘q."
+msgstr "У адреса нет точки на карте."
 
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "Maqsad"
@@ -2270,6 +2876,10 @@ msgstr "Тексты сохранены"
 msgid "Matnlar yoki versiya siz sahifani ochganingizdan keyin o‘zgargan. Sahifani yangilang, matnlarni tekshiring va qayta e’lon qiling."
 msgstr "Тексты или версия изменились после того, как вы открыли страницу. Обновите страницу, проверьте тексты и опубликуйте снова."
 
+#: glowderma/notifications/api/admin/serializers.py
+msgid "Matnni kiriting."
+msgstr "Введите текст."
+
 #: glowderma/core/admin.py
 #: glowderma/reporting/templates/reporting/dashboards/ops.html
 msgid "Mavzu"
@@ -2295,9 +2905,17 @@ msgstr "Политика конфиденциальности"
 msgid "Maxsus kunlarni tahrirlash"
 msgstr "Изменить особые дни"
 
+#: glowderma.core.api.exceptions.MESSAGES
+#: glowderma/core/api/exceptions.py
+#: glowderma/loyalty/services.py
 #: glowderma/site_config/templates/site_config/console/_form_alert.html
 msgid "Maydonlarni tekshiring."
 msgstr "Проверьте поля."
+
+#: glowderma.core.api.exceptions.FIELD_MESSAGES
+#: glowderma/core/api/exceptions.py
+msgid "Maydonni to‘ldiring."
+msgstr "Заполните поле."
 
 #: glowderma/reporting/dashboards/__init__.py
 #: glowderma/reporting/templates/reporting/dashboards/_tile.html
@@ -2308,6 +2926,7 @@ msgstr "Информация"
 msgid "Mening hisobim"
 msgstr "Моя учётная запись"
 
+#: glowderma.core.labels.ORDER_EXPORT_HEADERS
 #: glowderma/core/admin.py
 #: glowderma/customers/admin.py
 #: glowderma/delivery/admin.py
@@ -2342,6 +2961,10 @@ msgstr "Клиент будет выведен из системы на всех
 msgid "Mijoz bekor qildi"
 msgstr "Отменено клиентом"
 
+#: glowderma/notifications/services.py
+msgid "Mijoz guruhga qoida orqali kiradi."
+msgstr "Клиент входит в группу по правилу."
+
 #: glowderma/accounts/admin.py
 msgid "Mijoz sessiyasini tugatish"
 msgstr "Завершить сеанс клиента"
@@ -2349,6 +2972,10 @@ msgstr "Завершить сеанс клиента"
 #: glowderma/accounts/admin.py
 msgid "Mijoz shu qurilmada tizimdan chiqariladi (sabab: «Admin tugatdi»). Qurilmada boshqa ochiq sessiya qolmasa, unga push xabarlar yuborilmaydi. Mijoz qaytadan kirishi mumkin."
 msgstr "Клиент будет выведен из системы на этом устройстве (причина: «Завершён администратором»). Если на устройстве не останется других открытых сеансов, push-сообщения на него отправляться не будут. Клиент может войти снова."
+
+#: glowderma/appointments/api/admin/serializers.py
+msgid "Mijoz topilmadi."
+msgstr "Клиент не найден."
 
 #: glowderma/delivery/admin.py
 msgid "Mijoz to‘lovi"
@@ -2433,6 +3060,19 @@ msgstr "Специалист #%(professional_id)s · %(day)s %(start)s–%(end)s
 msgid "Mutaxassis #%(professional_id)s · xizmat #%(service_id)s: %(price)s, %(duration)s daqiqa"
 msgstr "Специалист #%(professional_id)s · услуга #%(service_id)s: %(price)s, %(duration)s мин"
 
+#: glowderma/appointments/services.py
+msgid "Mutaxassis bu vaqtda ishlamaydi."
+msgstr "Специалист в это время не работает."
+
+#: glowderma/appointments/services.py
+msgid "Mutaxassis bu xizmatni ko‘rsatmaydi."
+msgstr "Специалист не оказывает эту услугу."
+
+#: glowderma/appointments/api/admin/serializers.py
+#: glowderma/appointments/services.py
+msgid "Mutaxassis topilmadi."
+msgstr "Специалист не найден."
+
 #: config/settings/ops_admin.py
 msgid "Mutaxassis xizmatlari"
 msgstr "Услуги специалистов"
@@ -2445,9 +3085,18 @@ msgstr[1] "У специалиста %(n)s предстоящие записи �
 msgstr[2] "У специалиста %(n)s предстоящих записей на приём (ожидающих или подтверждённых). Сначала перенесите их на другое время или к другому специалисту либо отмените."
 msgstr[3] "У специалиста %(n)s предстоящих записей на приём (ожидающих или подтверждённых). Сначала перенесите их на другое время или к другому специалисту либо отмените."
 
+#: glowderma/professionals/services.py
+msgid "Mutaxassisda {n} ta kelgusi qabul bor (kutilayotgan yoki tasdiqlangan). Qabullar o‘zgarmaydi: avval ularni boshqa vaqtga yoki mutaxassisga ko‘chiring yoki bekor qiling, yoki baribir nofaol qiling."
+msgstr "Предстоящих записей у специалиста (ожидающих или подтверждённых): {n}. Записи не изменятся: сначала перенесите их на другое время или к другому специалисту либо отмените, или всё равно деактивируйте специалиста."
+
 #: config/settings/ops_admin.py
+#: glowderma.core.labels.SERVICE_EXPORT_HEADERS
 msgid "Mutaxassislar"
 msgstr "Специалисты"
+
+#: glowderma.core.labels.SPECIALIST_EXPORT_HEADERS
+msgid "Mutaxassislik"
+msgstr "Специализация"
 
 #: model metadata
 msgid "Muvaffaqiyatli"
@@ -2478,6 +3127,20 @@ msgstr "Примеры"
 #: glowderma/loyalty/admin.py
 msgid "Narx"
 msgstr "Цена"
+
+#: glowderma.core.labels.PRODUCT_EXPORT_HEADERS
+msgid "Narx (so‘m)"
+msgstr "Цена (сум)"
+
+#: glowderma/catalog/api/admin/serializers.py
+#: glowderma/professionals/api/admin/serializers.py
+msgid "Narx juda katta."
+msgstr "Слишком высокая цена."
+
+#: glowderma/catalog/api/admin/serializers.py
+#: glowderma/catalog/services.py
+msgid "Narx kamida 1 000 so‘m bo‘lsin."
+msgstr "Цена должна быть не меньше 1 000 сум."
 
 #: model metadata
 msgid "Narx o‘zgardi"
@@ -2529,6 +3192,24 @@ msgstr "В очереди"
 msgid "Navbatlar, integratsiyalar va tungi tekshiruvlar"
 msgstr "Очереди, интеграции и ночные проверки"
 
+#: glowderma.core.labels.ACTIVE_STATE
+msgid "Nofaol"
+msgstr "Неактивный"
+
+#: glowderma/core/labels.py
+msgctxt "export services"
+msgid "Nofaol"
+msgstr "Неактивна"
+
+#: glowderma/core/labels.py
+msgctxt "export specialists"
+msgid "Nofaol"
+msgstr "Неактивен"
+
+#: glowderma/accounts/services.py
+msgid "Nofaol hisobga havola yuborilmaydi. Avval uni qayta faollashtiring."
+msgstr "Ссылку нельзя отправить на неактивную учётную запись. Сначала активируйте её снова."
+
 #: glowderma/reporting/dashboards/sales.py
 msgid "Nom tarjimasi yo‘q"
 msgstr "Нет перевода названия"
@@ -2538,8 +3219,29 @@ msgid "Noma’lum holat"
 msgstr "Неизвестный статус"
 
 #: admin history (professionals.Professional)
+#: glowderma.core.labels.PRODUCT_EXPORT_HEADERS
 msgid "Nomi"
 msgstr "Имя"
+
+#: glowderma/core/labels.py
+msgctxt "export categories"
+msgid "Nomi"
+msgstr "Название"
+
+#: glowderma/core/labels.py
+msgctxt "export products"
+msgid "Nomi"
+msgstr "Название"
+
+#: glowderma/core/labels.py
+msgctxt "export segments"
+msgid "Nomi"
+msgstr "Название"
+
+#: glowderma/core/labels.py
+msgctxt "export services"
+msgid "Nomi"
+msgstr "Название"
 
 #: admin history (professionals.Location)
 msgid "Nomi (en)"
@@ -2561,6 +3263,11 @@ msgstr "Расхождения"
 msgid "Noto‘g‘ri parol yoki kod, bloklangan urinishlar (API va konsol)"
 msgstr "Неверный пароль или код, заблокированные попытки (API и консоль)"
 
+#: glowderma.core.api.exceptions.FIELD_MESSAGES
+#: glowderma/core/api/exceptions.py
+msgid "Noto‘g‘ri qiymat."
+msgstr "Неверное значение."
+
 #: glowderma/delivery/services.py
 msgid "Nuqta O‘zbekiston hududida bo‘lishi kerak."
 msgstr "Точка должна находиться в Узбекистане."
@@ -2580,6 +3287,14 @@ msgstr "ОС"
 #: glowderma/reporting/dashboards/customers.py
 msgid "OTP · 24 soat"
 msgstr "OTP · 24 часа"
+
+#: glowderma.core.labels.AUDIT_LOG_EXPORT_HEADERS
+msgid "Obyekt"
+msgstr "Объект"
+
+#: glowderma.core.labels.AUDIT_LOG_EXPORT_HEADERS
+msgid "Obyekt ID"
+msgstr "ID объекта"
 
 #: admin history (delivery.WarehouseHours)
 msgid "Ochiladi"
@@ -2629,6 +3344,10 @@ msgstr[3] "Предыдущие %(days)s дней: %(count)s"
 msgid "Oldingi davrga nisbatan"
 msgstr "По сравнению с предыдущим периодом"
 
+#: glowderma/commerce/api/admin/views.py
+msgid "Olib ketiladigan buyurtma uchun yetkazish muammosi ochilmaydi."
+msgstr "Для заказа с самовывозом нельзя открыть проблему доставки."
+
 #: glowderma.core.labels.FULFILMENT
 #: model metadata
 msgid "Olib ketish"
@@ -2638,9 +3357,21 @@ msgstr "Самовывоз"
 msgid "Olib ketish manzili"
 msgstr "Адрес самовывоза"
 
+#: glowderma.core.labels.ORDER_EXPORT_HEADERS
+msgid "Olish usuli"
+msgstr "Способ получения"
+
 #: glowderma/delivery/admin.py
 msgid "Ombor"
 msgstr "Склад"
+
+#: glowderma/commerce/services.py
+msgid "Ombor hozir qaytgan jo‘natmalarni qabul qilmaydi."
+msgstr "Склад сейчас не принимает возвращённые отправления."
+
+#: glowderma/commerce/services.py
+msgid "Ombor hozir yopiq."
+msgstr "Склад сейчас закрыт."
 
 #: config/settings/ops_admin.py
 msgid "Ombor ish vaqti"
@@ -2657,6 +3388,10 @@ msgstr "Адрес склада"
 #: config/settings/ops_admin.py
 msgid "Ombor maxsus kunlari"
 msgstr "Особые дни склада"
+
+#: glowderma/commerce/services.py
+msgid "Ombor ma’lumotlari to‘liq kiritilmagan."
+msgstr "Данные склада заполнены не полностью."
 
 #: admin history (delivery.DeliverySettings)
 msgid "Ombor nomi"
@@ -2743,6 +3478,11 @@ msgstr "Из Billz загружаются изменения с момента �
 msgid "Oxirgi o‘zgarish: %(at)s · %(author)s"
 msgstr "Последнее изменение: %(at)s · %(author)s"
 
+#: glowderma/appointments/api/admin/serializers.py
+#: glowderma/professionals/api/admin/serializers.py
+msgid "Oxirgi sana boshlang‘ich sanadan oldin bo‘lmasin."
+msgstr "Конечная дата не должна быть раньше начальной."
+
 #: glowderma/reporting/dashboards/ops.py
 msgid "Oxirgi sinxron %(ago)s"
 msgstr "Последняя синхронизация %(ago)s"
@@ -2797,6 +3537,10 @@ msgstr "Средний чек"
 msgid "O‘rtacha chek:"
 msgstr "Средний чек:"
 
+#: glowderma/professionals/api/admin/serializers.py
+msgid "O‘tgan sanani tanlab bo‘lmaydi."
+msgstr "Нельзя выбрать прошедшую дату."
+
 #: model metadata
 msgid "O‘tkazib yuborildi"
 msgstr "Пропущено"
@@ -2804,6 +3548,18 @@ msgstr "Пропущено"
 #: glowderma/accounts/admin.py
 msgid "O‘z 2FA ingizni bu yerdan qayta o‘rnatib bo‘lmaydi."
 msgstr "Собственную 2FA здесь сбросить нельзя."
+
+#: glowderma/accounts/services.py
+msgid "O‘z hisobingizni faolsizlantira olmaysiz."
+msgstr "Нельзя деактивировать собственную учётную запись."
+
+#: glowderma/accounts/services.py
+msgid "O‘z ikki bosqichli himoyangizni «Sozlamalar»da o‘chiring."
+msgstr "Свою двухфакторную защиту отключите в разделе «Настройки»."
+
+#: glowderma/accounts/services.py
+msgid "O‘z parolingizni «Parolni o‘zgartirish» orqali almashtiring."
+msgstr "Свой пароль меняйте в разделе «Сменить пароль»."
 
 #: model metadata
 msgid "O‘zbekcha"
@@ -2813,9 +3569,21 @@ msgstr "Узбекский"
 msgid "O‘zbekcha nom yo‘q"
 msgstr "Нет названия на узбекском"
 
+#: glowderma/catalog/api/admin/serializers.py
+msgid "O‘zbekcha nomni kiriting (kamida 2 belgi)."
+msgstr "Введите название на узбекском (не менее 2 символов)."
+
 #: glowderma/site_config/admin_views.py
 msgid "O‘zgarish yo‘q: saqlanadigan narsa topilmadi."
 msgstr "Изменений нет: сохранять нечего."
+
+#: glowderma/accounts/services.py
+msgid "O‘zingizga havola «Parolni o‘zgartirish» sahifasidan so‘raladi."
+msgstr "Ссылку для себя запросите на странице «Сменить пароль»."
+
+#: glowderma/accounts/services.py
+msgid "O‘zingizni menejerlikdan chiqara olmaysiz."
+msgstr "Нельзя снять роль менеджера с самого себя."
 
 #: model metadata
 msgid "POS qurilma"
@@ -2826,6 +3594,10 @@ msgstr "POS-устройство"
 msgid "POS qurilmalar"
 msgstr "POS-устройства"
 
+#: glowderma/professionals/api/admin/views.py
+msgid "Pa"
+msgstr "Чт"
+
 #: model metadata
 msgid "Parol"
 msgstr "Пароль"
@@ -2833,6 +3605,10 @@ msgstr "Пароль"
 #: model metadata
 msgid "Parol o‘zgartirildi"
 msgstr "Пароль изменён"
+
+#: glowderma/accounts/services.py
+msgid "Parolingiz o‘rnatilgan: uni «Parolni o‘zgartirish» orqali almashtiring."
+msgstr "Пароль уже установлен: смените его в разделе «Сменить пароль»."
 
 #: glowderma/accounts/console/views.py
 msgid "Parolingiz va 2FA bir menejer tomonidan tiklangan: xavfsizlik uchun 2FA ni boshqa menejer (yoki server buyrug‘i) qayta o‘rnatishi kerak."
@@ -2861,6 +3637,14 @@ msgstr "Требуется возврат в кабинете Payme"
 msgid "Payshanba"
 msgstr "Четверг"
 
+#: glowderma/commerce/services.py
+msgid "Posilka kuryerda, Yandex esa uni omborga qaytarayotganini bildirmagan: buyurtmani hozir bekor qilib bo‘lmaydi."
+msgstr "Посылка у курьера, а Яндекс не сообщил, что возвращает её на склад: сейчас отменить заказ нельзя."
+
+#: glowderma/commerce/services.py
+msgid "Posilka qaytgani allaqachon tasdiqlangan."
+msgstr "Возврат посылки уже подтверждён."
+
 #: glowderma/reporting/templates/reporting/dashboards/ops.html
 msgid "Provayder"
 msgstr "Провайдер"
@@ -2885,6 +3669,18 @@ msgstr "Сверка денег"
 #: glowderma/notifications/admin.py
 msgid "Push"
 msgstr "Push"
+
+#: glowderma/notifications/services.py
+msgid "Push qabul qila oladigan test qurilmasi tanlanmadi."
+msgstr "Не выбрано ни одного тестового устройства, способного принимать push-уведомления."
+
+#: glowderma.core.labels.SEGMENT_EXPORT_HEADERS
+msgid "Push qurilmalar"
+msgstr "Push-устройства"
+
+#: glowderma/notifications/services.py
+msgid "Push xizmati javob bermadi: birozdan so‘ng qayta urinib ko‘ring."
+msgstr "Push-сервис не ответил: попробуйте ещё раз чуть позже."
 
 #: glowderma/accounts/templates/accounts/console/enrol.html
 msgid "QR kodni skanerlay olmayapsizmi? Kalitni qo‘lda kiriting"
@@ -2965,6 +3761,10 @@ msgstr "Возвращено"
 msgid "Qaytarilmoqda"
 msgstr "Выполняется возврат"
 
+#: glowderma.core.labels.PAYMENT_EXPORT_HEADERS
+msgid "Qaytarish"
+msgstr "Возврат"
+
 #: glowderma/payments/models.py
 msgid "Qaytarish #%(id)s · %(state)s · %(amount)s (to‘lov #%(payment)s)"
 msgstr "Возврат #%(id)s · %(state)s · %(amount)s (платёж #%(payment)s)"
@@ -2986,6 +3786,10 @@ msgstr "Возврат долго остаётся открытым: откро�
 #: glowderma/payments/admin.py
 msgid "Qaytarishlar"
 msgstr "Возвраты"
+
+#: glowderma/commerce/services.py
+msgid "Qaytayotgan posilka yo‘q: qaytishni tasdiqlab bo‘lmaydi."
+msgstr "Возвращающейся посылки нет: подтвердить возврат нельзя."
 
 #: admin history (delivery.DeliverySettings)
 msgid "Qaytgan jo‘natmalar qabul qilinadi"
@@ -3012,9 +3816,21 @@ msgstr "Краткое название (ru)"
 msgid "Qisqa nom (uz)"
 msgstr "Краткое название (uz)"
 
+#: glowderma.core.labels.SERVICE_EXPORT_HEADERS
+msgid "Qisqa nomi"
+msgstr "Краткое название"
+
 #: glowderma/delivery/services.py
 msgid "Qiymat %(low)s dan %(high)s gacha bo‘lishi kerak."
 msgstr "Значение должно быть от %(low)s до %(high)s."
+
+#: glowderma/core/api/fields.py
+msgid "Qiymat %(min)s dan katta bo‘lsin."
+msgstr "Значение должно быть больше %(min)s."
+
+#: glowderma/core/api/fields.py
+msgid "Qiymat %(min)s dan katta va %(max)s dan oshmasin."
+msgstr "Значение должно быть больше %(min)s и не превышать %(max)s."
 
 #: glowderma/site_config/forms.py
 msgid "Qiymat 5 dan kam bo‘lmasin."
@@ -3024,9 +3840,23 @@ msgstr "Значение не должно быть меньше 5."
 msgid "Qiymat 60 dan oshmasin."
 msgstr "Значение не должно превышать 60."
 
+#: glowderma.core.api.exceptions.FIELD_MESSAGES
+#: glowderma/core/api/exceptions.py
+msgid "Qiymat {limit} dan kam bo‘lmasin."
+msgstr "Значение должно быть не меньше {limit}."
+
+#: glowderma.core.api.exceptions.FIELD_MESSAGES
+#: glowderma/core/api/exceptions.py
+msgid "Qiymat {limit} dan oshmasin."
+msgstr "Значение не должно превышать {limit}."
+
 #: glowderma/notifications/admin.py
 msgid "Qoidalar"
 msgstr "Правила"
+
+#: glowderma.core.labels.PRODUCT_EXPORT_HEADERS
+msgid "Qoldiq"
+msgstr "Остаток"
 
 #: config/settings/ops_admin.py
 msgid "Qoldiqlar"
@@ -3040,6 +3870,10 @@ msgstr "Осталось кодов"
 #: model metadata
 msgid "Qoralama"
 msgstr "Черновик"
+
+#: glowderma/notifications/state.py
+msgid "Qoralamani bekor qilish shart emas: uni o‘chiring yoki o‘zgartiring."
+msgstr "Черновик не нужно отменять: удалите или измените его."
 
 #: model metadata
 msgid "Qo‘lda"
@@ -3060,6 +3894,10 @@ msgstr "Телефон поддержки"
 #: glowderma/core/templates/admin/ops/applied_filters.html
 msgid "Qo‘llangan filtrlar:"
 msgstr "Применённые фильтры:"
+
+#: glowderma/notifications/api/admin/serializers.py
+msgid "Qurilma nomini kiriting."
+msgstr "Введите название устройства."
 
 #: model metadata
 msgid "Qurilma yo‘q"
@@ -3092,6 +3930,12 @@ msgstr "Отклонено"
 msgid "Rad etilgan"
 msgstr "Отклонено"
 
+#: glowderma.core.labels.CATEGORY_EXPORT_HEADERS
+msgid "Rasm"
+msgstr "Изображение"
+
+#: glowderma.core.api.exceptions.FIELD_MESSAGES
+#: glowderma/core/api/exceptions.py
 #: glowderma/professionals/services.py
 msgid "Rasm 5 MB dan oshmasin."
 msgstr "Изображение не должно превышать 5 МБ."
@@ -3110,6 +3954,10 @@ msgstr "Изображения"
 msgid "Rejalashtirilgan"
 msgstr "Запланировано"
 
+#: glowderma/notifications/services.py
+msgid "Rejalashtirilgan xabar bu guruhga yuboriladi."
+msgstr "Этой группе будет отправлено запланированное сообщение."
+
 #: glowderma/delivery/admin.py
 #: glowderma/reporting/templates/reporting/dashboards/ops.html
 msgid "Rejim"
@@ -3123,9 +3971,18 @@ msgstr "Роль"
 msgid "Rozilik"
 msgstr "Согласие"
 
+#: glowderma.core.api.exceptions.FIELD_MESSAGES
+#: glowderma/core/api/exceptions.py
+msgid "Ro‘yxat joriy elementlarga mos emas."
+msgstr "Список не совпадает с текущими элементами."
+
 #: glowderma/reporting/dashboards/__init__.py
 msgid "Ro‘yxatda %(shown)s / %(count)s"
 msgstr "В списке %(shown)s / %(count)s"
+
+#: glowderma.core.labels.SEGMENT_MEMBER_EXPORT_HEADERS
+msgid "Ro‘yxatdan o‘tgan"
+msgstr "Зарегистрирован"
 
 #: glowderma/reporting/dashboards/customers.py
 #: model metadata
@@ -3139,6 +3996,22 @@ msgstr "По способу регистрации · 30 дней"
 #: model metadata
 msgid "Ruscha"
 msgstr "Русский"
+
+#: glowderma/professionals/api/admin/serializers.py
+msgid "Ruxsat etilgan qadamlar: 10, 15, 20, 30 yoki 60 daqiqa."
+msgstr "Допустимый шаг: 10, 15, 20, 30 или 60 минут."
+
+#: glowderma.core.api.exceptions.FIELD_MESSAGES
+#: glowderma/core/api/exceptions.py
+#: glowderma/core/api/pagination.py
+#: glowderma/core/exports.py
+msgid "Ruxsat etilmagan qiymat."
+msgstr "Недопустимое значение."
+
+#: glowderma.core.api.exceptions.MESSAGES
+#: glowderma/core/api/exceptions.py
+msgid "Ruxsat yo‘q."
+msgstr "Нет доступа."
 
 #: glowderma/reporting/templates/reporting/dashboards/sales.html
 msgid "SEO kamchiligi topilmadi"
@@ -3209,13 +4082,23 @@ msgstr "SMS-код"
 msgid "SMS kodlar"
 msgstr "SMS-коды"
 
+#: glowderma/commerce/api/admin/serializers.py
+#: glowderma/loyalty/services.py
+msgid "Sababni kiriting."
+msgstr "Укажите причину."
+
 #: glowderma/accounts/console/views.py
 msgid "Sahifa eskirgan yoki sessiya yangilangan, shuning uchun so‘rov qabul qilinmadi. Sahifani qaytadan oching va yana urinib ko‘ring."
 msgstr "Страница устарела или сеанс был обновлён, поэтому запрос не принят. Откройте страницу заново и повторите попытку."
 
 #: admin history (professionals.WorkingHoursOverride)
+#: glowderma.core.labels.NOTIFICATION_EXPORT_HEADERS
 msgid "Sana"
 msgstr "Дата"
+
+#: glowderma/professionals/api/admin/serializers.py
+msgid "Sana bugundan ko‘pi bilan 10 yil uzoqlikda bo‘lsin."
+msgstr "Дата должна быть не дальше 10 лет от сегодняшнего дня."
 
 #: glowderma/site_config/admin_views.py
 msgid "Saqlangan foydalanish shartlari va maxfiylik siyosati (barcha tillarda) yangi versiya sifatida e’lon qilinadi. Mijozlar yangi versiyani qabul qilmaguncha buyurtma bera olmaydi va qabulga yozila olmaydi. Bu amalni qaytarib bo‘lmaydi."
@@ -3240,6 +4123,14 @@ msgstr "Сохранить"
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "Sarflandi"
 msgstr "Списано"
+
+#: glowderma.core.labels.BANNER_EXPORT_HEADERS
+msgid "Sarlavha"
+msgstr "Заголовок"
+
+#: glowderma/notifications/api/admin/serializers.py
+msgid "Sarlavhani kiriting."
+msgstr "Введите заголовок."
 
 #: config/settings/ops_admin.py
 msgid "Savat qatorlari"
@@ -3288,6 +4179,10 @@ msgstr "Сайт"
 msgid "Sayt sozlamalari"
 msgstr "Настройки сайта"
 
+#: glowderma/professionals/api/admin/views.py
+msgid "Se"
+msgstr "Вт"
+
 #: model metadata
 msgid "Segment"
 msgstr "Сегмент"
@@ -3321,6 +4216,11 @@ msgstr "Сеанс уже завершён: ничего не изменено."
 msgid "Sessiya muddati tugadi. Qaytadan kiring."
 msgstr "Срок сеанса истёк. Войдите снова."
 
+#: glowderma.core.api.exceptions.MESSAGES
+#: glowderma/core/api/exceptions.py
+msgid "Sessiya tugadi. Qayta kiring."
+msgstr "Сессия истекла. Войдите снова."
+
 #: glowderma/accounts/admin.py
 msgid "Sessiya tugatildi."
 msgstr "Сеанс завершён."
@@ -3337,6 +4237,10 @@ msgstr "Сеансы"
 #: glowderma/accounts/admin.py
 msgid "Sessiyani tugatish"
 msgstr "Завершить сеанс"
+
+#: glowderma/professionals/api/admin/views.py
+msgid "Sh"
+msgstr "Сб"
 
 #: glowderma/notifications/models.py
 msgid "Shablon «%(status)s»: %(text)s"
@@ -3383,6 +4287,14 @@ msgstr "Вы вышли из консоли."
 #: admin history (professionals.Professional)
 msgid "Slot qadami (daq.)"
 msgstr "Шаг слота (мин.)"
+
+#: glowderma.core.labels.CATEGORY_EXPORT_HEADERS
+msgid "Slug"
+msgstr "Slug"
+
+#: glowderma/core/api/fields.py
+msgid "Slug faqat kichik lotin harflari, raqamlar va chiziqchadan iborat bo‘lsin (2–40 belgi)."
+msgstr "Slug может содержать только строчные латинские буквы, цифры и дефис (2–40 символов)."
 
 #: model metadata
 msgid "Sodiqlik"
@@ -3446,6 +4358,15 @@ msgstr "Запрошено"
 msgid "So‘rov (polling)"
 msgstr "Опрос (polling)"
 
+#: glowderma.core.labels.AUDIT_LOG_EXPORT_HEADERS
+msgid "So‘rov ID"
+msgstr "ID запроса"
+
+#: glowderma.core.api.exceptions.MESSAGES
+#: glowderma/core/api/exceptions.py
+msgid "So‘rov bajarilmoqda. Birozdan so‘ng qayta urinib ko‘ring."
+msgstr "Запрос ещё выполняется. Повторите чуть позже."
+
 #: glowderma/accounts/console/views.py
 msgid "So‘rov qabul qilinmadi"
 msgstr "Запрос не принят"
@@ -3493,6 +4414,10 @@ msgstr "Стандарт: самое раннее (мин)"
 msgid "Summa"
 msgstr "Сумма"
 
+#: glowderma.core.labels.ORDER_EXPORT_HEADERS
+msgid "Summa (so‘m)"
+msgstr "Сумма (сум)"
+
 #: glowderma/loyalty/admin.py
 msgid "Summadan"
 msgstr "От суммы"
@@ -3504,6 +4429,22 @@ msgstr "До суммы"
 #: glowderma/commerce/admin.py
 msgid "Summalar"
 msgstr "Суммы"
+
+#: glowderma/loyalty/services.py
+msgid "Summani kiriting."
+msgstr "Укажите сумму."
+
+#: glowderma/accounts/services.py
+msgid "Superadmin doim menejer bo‘ladi: uni menejerlikdan chiqarib bo‘lmaydi."
+msgstr "Суперадмин всегда является менеджером: эту роль снять нельзя."
+
+#: glowderma/accounts/services.py
+msgid "Superadminga vaqtinchalik parolni faqat superadmin bera oladi. Havolani uning e-pochtasiga yuboring yoki superadmindan so‘rang."
+msgstr "Временный пароль суперадмина может получить только суперадмин. Отправьте ему ссылку на почту или обратитесь к суперадмину."
+
+#: glowderma/accounts/services.py
+msgid "Superadminning ikki bosqichli himoyasini faqat superadmin o‘chira oladi."
+msgstr "Двухэтапную защиту суперадмина может отключить только суперадмин."
 
 #: admin history (professionals.Professional)
 msgid "Surat"
@@ -3518,8 +4459,13 @@ msgid "Tafsilot: %(text)s"
 msgstr "Подробности: %(text)s"
 
 #: admin history (professionals.Professional)
+#: glowderma.core.labels.SPECIALIST_EXPORT_HEADERS
 msgid "Tajriba (yil)"
 msgstr "Опыт (лет)"
+
+#: model metadata
+msgid "Taklif"
+msgstr "Приглашение"
 
 #: glowderma/delivery/admin.py
 msgid "Taklif narxi"
@@ -3537,13 +4483,25 @@ msgstr "Не требуется (самовывоз)"
 msgid "Tanaffus boshlanishi"
 msgstr "Начало перерыва"
 
+#: glowderma/professionals/api/admin/serializers.py
+msgid "Tanaffus ish vaqti ichida bo‘lsin."
+msgstr "Перерыв должен быть в пределах рабочего времени."
+
 #: admin history (professionals.WorkingHours)
 msgid "Tanaffus tugashi"
 msgstr "Конец перерыва"
 
+#: glowderma/professionals/api/admin/serializers.py
+msgid "Tanaffusning boshlanishi va tugashini birga kiriting."
+msgstr "Укажите и начало, и конец перерыва."
+
 #: glowderma/core/admin.py
 msgid "Tanlangan mavzuning o‘lik xabarlari (bir bosishda {limit} tagacha) qayta navbatga qo‘yiladi. Ishi boshqa yo‘l bilan bajarilgan xabarlar o‘tkazib yuboriladi."
 msgstr "«Мёртвые» сообщения выбранной темы (до {limit} за одно нажатие) будут возвращены в очередь. Сообщения, работа которых выполнена другим способом, пропускаются."
+
+#: glowderma/notifications/services.py
+msgid "Tanlangan segment o‘chirilgan: auditoriyani qayta tanlang."
+msgstr "Выбранный сегмент удалён: выберите аудиторию заново."
 
 #: glowderma/commerce/admin.py
 #: glowderma/delivery/admin.py
@@ -3555,6 +4513,7 @@ msgid "Tarix: %(title)s"
 msgstr "История: %(title)s"
 
 #: admin history (professionals.Location)
+#: glowderma.core.labels.CATEGORY_EXPORT_HEADERS
 msgid "Tartib"
 msgstr "Порядок"
 
@@ -3562,6 +4521,7 @@ msgstr "Порядок"
 msgid "Tasdiqlandi"
 msgstr "Подтверждено"
 
+#: glowderma.core.labels.PAYMENT_EXPORT_HEADERS
 #: glowderma/reporting/dashboards/customers.py
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 #: model metadata
@@ -3575,6 +4535,11 @@ msgstr "Подтвердить"
 #: glowderma/accounts/templates/accounts/console/enrol.html
 msgid "Tasdiqlash va yoqish"
 msgstr "Подтвердить и включить"
+
+#: glowderma.core.api.exceptions.MESSAGES
+#: glowderma/core/api/exceptions.py
+msgid "Tashqi xizmat javob bermadi. Qayta urinib ko‘ring."
+msgstr "Внешний сервис не ответил. Повторите попытку."
 
 #: admin history (professionals.Service)
 msgid "Tavsif (en)"
@@ -3629,6 +4594,7 @@ msgid "Tekshiruvlarni bajarib bo‘lmadi (xato yoki vaqt tugadi) — sahifani ya
 msgstr "Не удалось выполнить проверки (ошибка или истекло время ожидания) — обновите страницу"
 
 #: admin history (professionals.Location)
+#: glowderma.core.labels.SEGMENT_MEMBER_EXPORT_HEADERS
 #: glowderma/core/admin.py
 #: glowderma/reporting/dashboards/customers.py
 msgid "Telefon"
@@ -3642,6 +4608,7 @@ msgstr "Добавление телефона"
 msgid "Telefon raqamini +998XXXXXXXXX ko‘rinishida kiriting."
 msgstr "Введите номер телефона в формате +998XXXXXXXXX."
 
+#: glowderma/core/api/fields.py
 #: glowderma/site_config/forms.py
 msgid "Telefon raqamini to‘g‘ri kiriting."
 msgstr "Введите корректный номер телефона."
@@ -3677,6 +4644,10 @@ msgstr "Ссылка на Telegram"
 #: glowderma/site_config/forms.py
 msgid "Telegram havolasi https://t.me/… ko‘rinishida bo‘lsin."
 msgstr "Используйте формат https://t.me/… для ссылки на Telegram."
+
+#: glowderma/notifications/services.py
+msgid "Test qurilmasi topilmadi."
+msgstr "Тестовое устройство не найдено."
 
 #: glowderma/notifications/models.py
 msgid "Test qurilmasi «%(label)s» (%(phone)s)"
@@ -3714,6 +4685,11 @@ msgstr[1] "Топ-%(count)s товара"
 msgstr[2] "Топ-%(count)s товаров"
 msgstr[3] "Топ-%(count)s товаров"
 
+#: glowderma.core.api.exceptions.MESSAGES
+#: glowderma/core/api/exceptions.py
+msgid "Topilmadi."
+msgstr "Не найдено."
+
 #: model metadata
 msgid "Topshirildi"
 msgstr "Вручено"
@@ -3743,6 +4719,11 @@ msgstr "Оплаченные, но не отправленные заказы"
 msgid "To‘lanmagan buyurtma mahsulotlarni shuncha vaqt ushlab turadi (%(min)s–%(max)s)."
 msgstr "Неоплаченный заказ удерживает товары в резерве в течение этого времени (%(min)s–%(max)s)."
 
+#: glowderma/appointments/api/admin/serializers.py
+msgid "To‘liq ko‘rinish ko‘pi bilan 7 kunlik davr uchun."
+msgstr "Полный вид доступен для периода не более 7 дней."
+
+#: glowderma.core.labels.ORDER_EXPORT_HEADERS
 #: glowderma/commerce/templates/admin/commerce/order_diagnostics.html
 #: glowderma/payments/admin.py
 msgid "To‘lov"
@@ -3803,6 +4784,10 @@ msgstr "Приостановлено до"
 msgid "To‘xtatish muddati kelajakda bo‘lishi kerak."
 msgstr "Срок приостановки должен быть в будущем."
 
+#: glowderma.core.labels.PAYMENT_EXPORT_HEADERS
+msgid "Tranzaksiya"
+msgstr "Транзакция"
+
 #: glowderma/catalog/admin.py
 msgid "Tugagan (0 yoki Billz’da yozuvi yo‘q)"
 msgstr "Нет в наличии (0 или нет записи в Billz)"
@@ -3811,7 +4796,16 @@ msgstr "Нет в наличии (0 или нет записи в Billz)"
 msgid "Tugagan mahsulotlar"
 msgstr "Товары не в наличии"
 
+#: glowderma/professionals/api/admin/serializers.py
+msgid "Tugagan vaqtni band qilib bo‘lmaydi."
+msgstr "Нельзя заблокировать уже прошедшее время."
+
+#: glowderma/professionals/api/admin/serializers.py
+msgid "Tugash vaqti boshlanishidan keyin bo‘lsin."
+msgstr "Время окончания должно быть позже времени начала."
+
 #: admin history (professionals.WorkingHours)
+#: glowderma.core.labels.BANNER_EXPORT_HEADERS
 msgid "Tugashi"
 msgstr "Окончание"
 
@@ -3833,6 +4827,7 @@ msgid "Tur"
 msgstr "Тип"
 
 #: admin history (professionals.BlockedPeriod)
+#: glowderma.core.labels.NOTIFICATION_EXPORT_HEADERS
 #: glowderma/loyalty/admin.py
 msgid "Turi"
 msgstr "Тип"
@@ -3877,6 +4872,7 @@ msgstr "Резерв %(amount)s · заказ №%(order)s (%(state)s)"
 msgid "Ustama (%)"
 msgstr "Наценка (%)"
 
+#: glowderma.core.labels.ORDER_EXPORT_HEADERS
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "Usul"
 msgstr "Способ"
@@ -3910,6 +4906,11 @@ msgstr "Долгота"
 msgid "Vaqt"
 msgstr "Время"
 
+#: glowderma/appointments/services.py
+#: glowderma/professionals/api/admin/serializers.py
+msgid "Vaqt 5 daqiqalik qadamda bo‘lsin."
+msgstr "Время должно быть кратно 5 минутам."
+
 #: model metadata
 msgid "Vaqti ko‘chirildi"
 msgstr "Перенесено"
@@ -3917,6 +4918,10 @@ msgstr "Перенесено"
 #: glowderma/commerce/admin.py
 msgid "Vaqtlar"
 msgstr "Даты и время"
+
+#: glowderma/professionals/api/admin/serializers.py
+msgid "Vaqtni SS:DD ko‘rinishida kiriting."
+msgstr "Введите время в формате ЧЧ:ММ."
 
 #: glowderma/reporting/templates/reporting/dashboards/ops.html
 msgid "Vazifa"
@@ -3964,9 +4969,25 @@ msgstr "Сообщение #%(id)s не возвращено в очередь: 
 msgid "Xabar allaqachon yetkazilgan: qayta navbatga qo‘yish kerak emas."
 msgstr "Сообщение уже доставлено: возвращать его в очередь не нужно."
 
+#: glowderma/notifications/state.py
+msgid "Xabar hali yuborishga tayyor emas."
+msgstr "Сообщение ещё не готово к отправке."
+
+#: glowderma/notifications/state.py
+msgid "Xabar hozir yuborilmayapti: to‘xtatadigan narsa yo‘q."
+msgstr "Сообщение сейчас не отправляется: останавливать нечего."
+
 #: glowderma/core/admin.py
 msgid "Xabar navbatda va muddati o‘tmagan: dispetcher uni o‘zi yetkazadi."
 msgstr "Сообщение в очереди и не просрочено: диспетчер доставит его сам."
+
+#: glowderma/notifications/services.py
+msgid "Xabar o‘zgartirilgan: sahifani yangilab, qayta urinib ko‘ring."
+msgstr "Сообщение изменено: обновите страницу и попробуйте ещё раз."
+
+#: glowderma/notifications/state.py
+msgid "Xabar qoralama holatida emas."
+msgstr "Сообщение не является черновиком."
 
 #: glowderma/core/admin.py
 msgid "Xabarni qayta navbatga qo‘yish"
@@ -4046,10 +5067,18 @@ msgstr "Безопасность"
 msgid "Xizmat"
 msgstr "Услуга"
 
+#: glowderma/appointments/api/admin/serializers.py
+#: glowderma/appointments/services.py
+#: glowderma/professionals/api/admin/serializers.py
+msgid "Xizmat topilmadi."
+msgstr "Услуга не найдена."
+
 #: config/settings/ops_admin.py
+#: glowderma.core.labels.SPECIALIST_EXPORT_HEADERS
 msgid "Xizmatlar"
 msgstr "Услуги"
 
+#: glowderma.core.labels.AUDIT_LOG_EXPORT_HEADERS
 #: model metadata
 msgid "Xodim"
 msgstr "Сотрудник"
@@ -4070,6 +5099,10 @@ msgstr "Ошибки входа сотрудников"
 msgid "Xodim sessiyalari bu yerda tugatilmaydi."
 msgstr "Сеансы сотрудников здесь не завершаются."
 
+#: glowderma/professionals/api/admin/serializers.py
+msgid "Xodim topilmadi."
+msgstr "Сотрудник не найден."
+
 #: glowderma/accounts/admin.py
 msgid "Xodim: {obj.email}"
 msgstr "Сотрудник: {obj.email}"
@@ -4077,6 +5110,10 @@ msgstr "Сотрудник: {obj.email}"
 #: config/settings/ops_admin.py
 msgid "Xodimlar"
 msgstr "Сотрудники"
+
+#: glowderma/professionals/api/admin/views.py
+msgid "Ya"
+msgstr "Вс"
 
 #: glowderma.core.labels.WEEKDAYS
 #: model metadata
@@ -4119,6 +5156,10 @@ msgstr "Статус Яндекса"
 msgid "Yandex holati keldi"
 msgstr "Получен статус Яндекса"
 
+#: glowderma/commerce/services.py
+msgid "Yandex javob bermadi, buyurtma bekor qilinmadi. Qayta urinib ko‘ring."
+msgstr "Яндекс не ответил, заказ не отменён. Повторите попытку."
+
 #: model metadata
 msgid "Yandex klassi"
 msgstr "Класс Яндекса"
@@ -4130,6 +5171,18 @@ msgstr "Класс Яндекса должен быть «courier» или «exp
 #: glowderma/delivery/admin.py
 msgid "Yandex klasslari (oxirgi tekshiruv)"
 msgstr "Классы Яндекса (последняя проверка)"
+
+#: glowderma/commerce/services.py
+msgid "Yandex kuryer buyurtmasini bekor qilishni hali tasdiqlamadi. Birozdan so‘ng qayta urinib ko‘ring."
+msgstr "Яндекс ещё не подтвердил отмену заявки курьеру. Повторите попытку чуть позже."
+
+#: glowderma/commerce/services.py
+msgid "Yandex kuryer buyurtmasini bekor qilmadi (kuryer posilkani olgan yoki bekor qilish muddati o‘tgan). Holatni tekshirib, qayta urinib ko‘ring."
+msgstr "Яндекс не отменил заявку курьеру (курьер уже забрал посылку или срок отмены истёк). Проверьте статус и повторите попытку."
+
+#: glowderma/commerce/services.py
+msgid "Yandex kuryeri chaqirilgan: buyurtmani bekor qilishdan oldin kuryer buyurtmasi bekor qilinishi kerak."
+msgstr "Курьер Яндекса вызван: перед отменой заказа нужно отменить заявку курьеру."
 
 #: glowderma/delivery/admin.py
 msgid "Yandex ombor nuqtasida birorta ham klass taklif qilmadi."
@@ -4143,13 +5196,25 @@ msgstr "Классы, которые Яндекс предлагает в точ
 msgid "Yandex ombor nuqtasida «%(taxi_class)s» klassini taklif qilmaydi: usulni yoqib bo‘lmaydi."
 msgstr "Яндекс не предлагает класс «%(taxi_class)s» в точке склада: способ нельзя включить."
 
+#: glowderma/commerce/services.py
+msgid "Yandex posilkani omborga qaytarishni rad etdi. Yandex qo‘llab-quvvatlash xizmatiga murojaat qiling."
+msgstr "Яндекс отказал в возврате посылки на склад. Обратитесь в службу поддержки Яндекса."
+
 #: model metadata
 msgid "Yandex yangilagan"
 msgstr "Обновлено Яндексом"
 
+#: glowderma/commerce/services.py
+msgid "Yandexdan posilkani omborga qaytarish so‘raldi. Buyurtma hali bekor qilinmadi: Yandex qaytarishni tasdiqlagach, bekor qilishni qayta bosing."
+msgstr "Яндекс попросили вернуть посылку на склад. Заказ ещё не отменён: когда Яндекс подтвердит возврат, нажмите «Отменить» ещё раз."
+
 #: glowderma/delivery/admin.py
 msgid "Yandex’dan ombor nuqtasida qaysi yetkazish klasslari (courier, express) mavjudligi so‘raladi. Kuryer chaqirilmaydi va hech narsa buyurtma qilinmaydi. Topilgan klasslar saqlanadi: ishchi rejimda usulni faqat ular bilan yoqish mumkin."
 msgstr "У Яндекса запрашивается, какие классы доставки (courier, express) доступны в точке склада. Курьер не вызывается, ничего не заказывается. Найденные классы сохраняются: в рабочем режиме способ можно включить только с ними."
+
+#: glowderma.core.labels.PRODUCT_EXPORT_HEADERS
+msgid "Yangi"
+msgstr "Новый"
 
 #: glowderma/reporting/dashboards/customers.py
 msgid "Yangi mijozlar · %(days)s kun"
@@ -4158,6 +5223,11 @@ msgstr[0] "Новые клиенты · %(days)s день"
 msgstr[1] "Новые клиенты · %(days)s дня"
 msgstr[2] "Новые клиенты · %(days)s дней"
 msgstr[3] "Новые клиенты · %(days)s дней"
+
+#: glowderma/accounts/api/admin/views.py
+#: glowderma/accounts/services.py
+msgid "Yangi parol eskisidan farq qilsin."
+msgstr "Новый пароль должен отличаться от старого."
 
 #: glowderma/reporting/dashboards/customers.py
 #: model metadata
@@ -4204,6 +5274,7 @@ msgstr "Не удалось создать"
 msgid "Yaratildi"
 msgstr "Создано"
 
+#: glowderma.core.labels.PAYMENT_EXPORT_HEADERS
 #: model metadata
 msgid "Yaratilgan"
 msgstr "Создано"
@@ -4331,6 +5402,14 @@ msgstr "Не отправлено"
 #: model metadata
 msgid "Yuborilmoqda"
 msgstr "Отправляется"
+
+#: glowderma/notifications/state.py
+msgid "Yuborish boshlangan: xabarni bekor qilib bo‘lmaydi."
+msgstr "Отправка уже началась: отменить сообщение нельзя."
+
+#: glowderma/loyalty/services.py
+msgid "Yuqori chegara quyi chegaradan katta bo‘lsin."
+msgstr "Верхняя граница должна быть больше нижней."
 
 #: config/settings/ops_admin.py
 msgid "Zaxira bandlari"
@@ -4480,6 +5559,7 @@ msgstr "занятые периоды"
 msgid "banner"
 msgstr "баннер"
 
+#: glowderma/catalog/api/admin/views.py
 #: model metadata
 msgid "bannerlar"
 msgstr "баннеры"
@@ -4531,6 +5611,10 @@ msgstr "запись отмены"
 #: model metadata
 msgid "bekor qilish yuborilgan"
 msgstr "отмена отправлена"
+
+#: glowderma/notifications/api/admin/views.py
+msgid "bildirishnomalar"
+msgstr "уведомления"
 
 #: model metadata
 msgid "bio (en)"
@@ -4629,6 +5713,7 @@ msgstr "история заказа"
 msgid "buyurtma №%(number)s"
 msgstr "заказ №%(number)s"
 
+#: glowderma/commerce/api/admin/views.py
 #: model metadata
 msgid "buyurtmalar"
 msgstr "заказы"
@@ -4688,6 +5773,10 @@ msgstr "сумма кешбэка"
 #: model metadata
 msgid "chaqirgan"
 msgstr "вызвал"
+
+#: glowderma/appointments/api/admin/serializers.py
+msgid "customer_id yoki phone dan faqat bittasini yuboring."
+msgstr "Передайте только одно из полей: customer_id или phone."
 
 #: glowderma/professionals/models.py
 msgid "dam olish"
@@ -4805,6 +5894,14 @@ msgstr "условия использования (ru)"
 msgid "foydalanish shartlari (uz)"
 msgstr "условия использования (uz)"
 
+#: glowderma/notifications/api/admin/views.py
+msgid "guruh-azolari"
+msgstr "участники-группы"
+
+#: glowderma/notifications/api/admin/views.py
+msgid "guruhlar"
+msgstr "группы"
+
 #: model metadata
 msgid "hafta kuni"
 msgstr "день недели"
@@ -4856,6 +5953,10 @@ msgstr "ежедневно в 03:40"
 #: glowderma/reporting/dashboards/ops.py
 msgid "har kuni 04:23 + qo‘lda"
 msgstr "ежедневно в 04:23 + вручную"
+
+#: glowderma/reporting/api/admin/views.py
+msgid "harakatlar-jurnali"
+msgstr "журнал-действий"
 
 #: model metadata
 msgid "havola"
@@ -5097,6 +6198,11 @@ msgstr "канал"
 msgid "kategoriya"
 msgstr "категория"
 
+#: glowderma/catalog/api/admin/views.py
+msgid "kategoriya %(slug)s"
+msgstr "категория %(slug)s"
+
+#: glowderma/catalog/api/admin/views.py
 #: model metadata
 msgid "kategoriyalar"
 msgstr "категории"
@@ -5219,6 +6325,11 @@ msgstr[1] "товара"
 msgstr[2] "товаров"
 msgstr[3] "товаров"
 
+#: glowderma/catalog/api/admin/views.py
+#: glowderma/notifications/api/admin/views.py
+msgid "mahsulot #%(id)s"
+msgstr "товар #%(id)s"
+
 #: model metadata
 msgid "mahsulot rasmi"
 msgstr "изображение товара"
@@ -5227,6 +6338,7 @@ msgstr "изображение товара"
 msgid "mahsulot rasmlari"
 msgstr "изображения товаров"
 
+#: glowderma/catalog/api/admin/views.py
 #: model metadata
 msgid "mahsulotlar"
 msgstr "товары"
@@ -5391,6 +6503,7 @@ msgstr "примечание клиента"
 msgid "mijoz to‘lovi"
 msgstr "плата клиента"
 
+#: glowderma/customers/api/admin/views.py
 #: model metadata
 msgid "mijozlar"
 msgstr "клиенты"
@@ -5439,6 +6552,7 @@ msgstr "услуга специалиста"
 msgid "mutaxassis xizmatlari"
 msgstr "услуги специалистов"
 
+#: glowderma/professionals/api/admin/views.py
 #: model metadata
 msgid "mutaxassislar"
 msgstr "специалисты"
@@ -5714,12 +6828,28 @@ msgid "parol"
 msgstr "пароль"
 
 #: model metadata
+msgid "parol havolalari"
+msgstr "ссылки для пароля"
+
+#: model metadata
+msgid "parol havolasi"
+msgstr "ссылка для пароля"
+
+#: model metadata
 msgid "parol o‘zgargan"
 msgstr "пароль изменён"
 
 #: model metadata
+msgid "parolni almashtirishi shart"
+msgstr "должен сменить пароль"
+
+#: model metadata
 msgid "platforma"
 msgstr "платформа"
+
+#: glowderma/commerce/services.py
+msgid "posilka kuryerda"
+msgstr "посылка у курьера"
 
 #: model metadata
 msgid "provayder"
@@ -6358,12 +7488,20 @@ msgid "til"
 msgstr "язык"
 
 #: model metadata
+msgid "token xeshi"
+msgstr "хеш токена"
+
+#: model metadata
 msgid "token yangilangan"
 msgstr "токен обновлён"
 
 #: model metadata
 msgid "token yangilanishlari soni"
 msgstr "количество обновлений токена"
+
+#: glowderma/payments/api/admin/views.py
+msgid "tolovlar"
+msgstr "платежи"
 
 #: glowderma/reporting/dashboards/ops.py
 msgid "topilma"
@@ -6555,6 +7693,7 @@ msgstr "время ошибки"
 msgid "xizmat"
 msgstr "услуга"
 
+#: glowderma/professionals/api/admin/views.py
 #: model metadata
 msgid "xizmatlar"
 msgstr "услуги"
@@ -6781,6 +7920,11 @@ msgstr "резервы товара"
 msgid "zaxira muddati (daqiqa)"
 msgstr "срок резерва (минуты)"
 
+#: glowderma.core.api.exceptions.FIELD_MESSAGES
+#: glowderma/core/api/exceptions.py
+msgid "{limit} belgidan oshmasin."
+msgstr "Не более {limit} символов."
+
 #: glowderma/reporting/templates/reporting/dashboards/money.html
 msgid "«Hisobot» — %(when)s dagi tungi natija"
 msgstr "«Отчёт» — ночной результат от %(when)s"
@@ -6800,6 +7944,10 @@ msgstr[0] "… (всего %(count)s)"
 msgstr[1] "… (всего %(count)s)"
 msgstr[2] "… (всего %(count)s)"
 msgstr[3] "… (всего %(count)s)"
+
+#: glowderma.core.labels.ORDER_EXPORT_HEADERS
+msgid "№"
+msgstr "№"
 
 #: glowderma/commerce/admin.py
 msgid "№%(number)s raqamli buyurtma topilmadi."

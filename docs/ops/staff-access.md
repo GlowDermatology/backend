@@ -17,6 +17,32 @@ manage.py createstaff admin@glowderma.uz --manager --full-name "Administrator"
 
 The first account of an install becomes a manager even without `--manager`; a superuser always is one.
 
+## Inviting staff and forced password changes (feat/admin-ux)
+
+In the panel a manager adds a person (or resets a password) with one of three deliveries:
+
+- **Vaqtinchalik parol** — a generated `xxxx-xxxx-xxxx-xxxx` password shown once; hand it over in person.
+- **E-pochta havolasi** — no usable password; the person gets a single-use link
+  `{ADMIN_PANEL_URL}/set-password?token=…` by e-mail (valid `STAFF_INVITE_TTL_HOURS`, default 72 h, in the
+  person's language). «Havolani qayta yuborish» (`staff/{id}/send-password-link/`) sends a new one and voids
+  the old one.
+- **Ikkalasi** — both.
+
+Either way the account is marked **must change password**: after signing in (password or Google/Facebook) the
+panel only lets the person set their own password (every other admin API call answers 403
+`password_change_required`), and the ops console refuses the sign-in until then. A person who signed in with
+Google and has no password asks for a link from the change screen (`auth/password-link/`). Setting the
+password through a link signs every device out; existing accounts are not forced.
+
+E-mail links need `ADMIN_PANEL_URL` (https in production, e.g. `https://glowderma.uz/admin`) and, under the
+production settings, `EMAIL_MODE=smtp` with the `EMAIL_*` values; otherwise the panel shows the e-mail options
+disabled. Check a stuck invite in the console's outbox (topic `email.staff_password_link`; the address and
+the link are stored sealed and blanked once sent) and on the staff card (`invite.state`, `invite.sent_at`).
+
+Operator commands: `createstaff … --must-change` and `resetstaffpassword … --password-stdin --must-change`
+force the change for a typed password; `resetstaffpassword` without `--password-stdin` (a generated password)
+always does.
+
 ## Who approves push campaigns
 
 Test devices, test pushes, approval, cancel and the emergency stop of a campaign (`notifications/…`, admin
@@ -51,8 +77,9 @@ manage.py deactivatestaff leaver@glowderma.uz --actor manager@glowderma.uz
 manage.py resetstaffpassword person@glowderma.uz --actor manager@glowderma.uz
 ```
 
-- Prints a temporary password **once** (`xxxx-xxxx-xxxx-xxxx`); hand it over in person. The person changes it
-  under "Parolni o‘zgartirish" after signing in. `--password-stdin` sets a chosen password instead.
+- Prints a temporary password **once** (`xxxx-xxxx-xxxx-xxxx`); hand it over in person. The person must set
+  their own password right after signing in (the panel allows nothing else; the console refuses the sign-in
+  until then). `--password-stdin` sets a chosen password instead (not forced unless `--must-change`).
 - Revokes every open session (reason `password_changed`) and ends a running login lockout, so the person can
   sign in at once.
 
@@ -65,11 +92,59 @@ manage.py resetstaffpassword successor@glowderma.uz      # if they also lost the
 
 `setstaffmanager <email> --off` removes the role; it is refused for the last active manager and for a superuser.
 
+## Admin panel MFA (TOTP, feat/admin-ux)
+
+Optional and personal: each staff member turns it on in the admin panel's Settings (next to the password
+form) and nobody can require it. It is a **separate authenticator entry** ("Glow Derma Admin") from the ops
+console's ("Glow Derma Ops"): staff with console access have two entries by design, and turning one on, off or
+resetting it never touches the other (the console's enrolment window and four-eyes rule stay as below).
+
+- **Turning it on**: re-enter the password → scan the QR code (or type the key) → type the code → ten recovery
+  codes are shown **once** (`xxxxx-xxxxx`, each works once; only keyed hashes are stored). Turning it off and
+  getting new recovery codes need the password plus a code.
+- **Signing in**: after a correct password (or Google/Facebook) the panel asks for the 6-digit code or a recovery
+  code. The step is valid 5 minutes, allows 5 attempts, works once and dies when the password changes, the
+  account is deactivated or its MFA is reset. Five wrong codes a minute lock the account's code step for 1, 2,
+  4, 8, then 15 minutes; whatever the pace, ten wrong codes in a row (no correct code between, none more than
+  48 hours apart) lock it for 15 minutes, then 1, 4, 16 and 24 hours at each further ten (`auth.mfa_locked`,
+  alerted — the ten-in-a-row lock with `failures` as soon as it starts). A correct code clears the count; so
+  does a manager's MFA reset.
+- **Superusers**: only another superuser can reset a superuser's panel MFA or be handed its temporary password
+  (`reset-password/` with `temporary_password` / `both` → 409; `email_link` still works). The operator's
+  `resetstaffmfa` / `resetstaffpassword` are the break-glass path.
+
+**Lost phone** (in this order):
+
+1. The person signs in with one of their recovery codes, then in Settings turns MFA off and on again with the
+   new phone (or keeps it and asks for new recovery codes).
+2. No recovery code: a manager uses **«MFA ni qayta o‘rnatish»** on the staff screen
+   (`POST staff/{id}/reset-mfa/`; not for oneself). It removes the panel device and recovery codes, signs the
+   person out everywhere and ends a running code lockout; the person signs in with the password and may turn
+   MFA on again. Verify who is asking first (in person or a call back on a known number): together with a
+   password reset it lets the manager sign in as the person. Both steps are audited and the reset is alerted.
+3. No manager can do it (or it is the manager's own account): the operator on the server:
+
+```bash
+manage.py resetstaffmfa person@glowderma.uz --actor manager@glowderma.uz
+```
+
+`resetstaffmfa` is refused when the account has no panel MFA. The ops console's device is reset separately
+(`ops_access reset-2fa`, below).
+
+If a phone was **stolen** rather than lost, also run `resetstaffpassword` (the thief may know the password) and
+check `GET audit-log/?object_type=staff&object_id=<id>` for `auth.mfa_succeeded` / `auth.login_succeeded`
+entries you cannot explain.
+
 ## Checking what happened
 
 Every change is in the admin audit log (`GET audit-log/?object_type=staff`): `staff.created`, `staff.updated`,
-`staff.deactivated`, `staff.reactivated`, `staff.password_reset`, plus `auth.session_revoked` per revoked
-session. Passwords are never recorded.
+`staff.deactivated`, `staff.reactivated`, `staff.password_reset`, `staff.password_link_sent`,
+`staff.password_set` (the person used a link), plus `auth.session_revoked` per revoked session and
+`auth.password_changed` (`forced` when it ended a pending change). Passwords and links are never recorded.
+The admin panel MFA adds `auth.mfa_enabled`, `auth.mfa_disabled`, `auth.mfa_recovery_codes_regenerated`,
+`auth.mfa_challenged` (a correct first step), `auth.mfa_succeeded`, `auth.mfa_failed`, `auth.mfa_locked`,
+`auth.mfa_recovery_used` (`remaining`) and `auth.mfa_reset` (`via` api or cli); codes and secrets are never
+recorded.
 
 ## Ops console access (Unfold, `/django-admin/`, TOTP 2FA)
 
@@ -121,9 +196,11 @@ manage.py ops_access status --email person@glowderma.uz
 The console has a language switcher: three buttons under every sign-in step and the same three entries in the
 user menu (bottom of the sidebar) after sign-in. The choice is kept in the browser (cookie `gd_ops_language`,
 scoped to `/django-admin/`, one year); a browser that has not chosen opens in `OPS_DEFAULT_LANGUAGE` (`en` unless
-the environment sets `ru` or `uz`). Only the console switches: the REST API, the exports, the audit texts and
-everything a worker writes stay Uzbek whatever a browser chose, and records already stored (audit entries,
-notification texts, customer data) are shown as they were written.
+the environment sets `ru` or `uz`). Only the console switches by this cookie. The admin API (and so the admin
+panel's error messages and CSV/XLSX exports) follows the panel's own language through `Accept-Language`
+(`docs/api/admin-api-v1.md` §1.6, §1.8); the audit texts and everything a worker writes or sends stay Uzbek
+whatever a browser chose, and records already stored (audit entries, notification texts, customer data) are
+shown as they were written.
 
 For developers — Uzbek is the source language (`glowderma/core/console_i18n.py`):
 
@@ -131,6 +208,9 @@ For developers — Uzbek is the source language (`glowderma/core/console_i18n.py
   / `{% blocktranslate %}` in templates. Model `verbose_name`, `help_text` and `choices` need no marking (they
   are made lazy at start-up); an enum label or a `core.labels` value shown by the console goes through
   `gettext(value)` where it is rendered.
+- An admin API text a staff member reads (error messages, export headers, `export_name`) is an Uzbek literal
+  marked with `glowderma.core.uzsource.N_` (a no-op, interpolated as `N_("… %(n)s …") % {...}`); the same
+  catalogs translate it at the error envelope and the export renderer only (`AGENTS.md`).
 - `python manage.py console_messages` rewrites `locale/en` and `locale/ru` (`django.po`): new messages appear
   with an empty `msgstr`, obsolete ones are dropped. Translate the empty ones, then
   `python manage.py compile_locale` and commit the `.po` and `.mo` together.
@@ -146,7 +226,9 @@ For developers — Uzbek is the source language (`glowderma/core/console_i18n.py
   codes; encrypting it would mean forking the device model. A database dump alone does not give console access
   (the password is Argon2-hashed and the console is reachable only from `OPS_ALLOWED_IPS` on `OPS_DOMAIN`), but
   whoever holds a dump can compute codes for a known password: after a suspected database leak, run
-  `ops_access reset-2fa` for every console user. Recovery codes are stored as keyed hashes.
+  `ops_access reset-2fa` for every console user. Recovery codes are stored as keyed hashes. The same holds
+  for the admin panel MFA seeds (devices named `Admin panel`): after a suspected leak, `resetstaffmfa` every
+  account that has it (the staff list shows `mfa_enabled`) and ask the people to turn it on again.
 - **The console's CSP allows `'unsafe-eval'`** (`deploy/Caddyfile`, `OPS_DOMAIN` block). Unfold's bundled Alpine.js
   (standard build) evaluates its `x-data` expressions with `new Function`; the CSP build of Alpine would need
   Unfold's templates rewritten. No inline script runs (`script-src 'self'`, no `'unsafe-inline'`), every page is

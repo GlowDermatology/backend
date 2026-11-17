@@ -96,6 +96,15 @@ class AuditEntry(AppendOnlyModel):
             models.Index(fields=["entity_type", "entity_id"]),
             models.Index(fields=["created_at"]),
             models.Index(fields=["action"]),
+            # the admin audit-log ``request_id`` prefix filter (``LIKE 'abc%'``) over the rows that have one,
+            # and the tiered visibility's "own entries" test (core.0014, built concurrently)
+            models.Index(
+                fields=["request_id"],
+                opclasses=["varchar_pattern_ops"],
+                condition=~Q(request_id=""),
+                name="audit_request_id_like_idx",
+            ),
+            models.Index(fields=["actor_type", "actor_id", "created_at"], name="audit_actor_created_idx"),
         ]
 
     def __str__(self) -> str:

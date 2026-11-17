@@ -138,14 +138,30 @@ is no daemon in the cloud session; CI builds the image and the user runs the com
   `settings/terms/publish/` were retired (contract §2.11), so it is not in `config.urls.ADMIN_API_MODULES`.
 - The ops console speaks English, Russian and Uzbek (`glowderma/core/console_i18n.py`, switcher cookie
   `gd_ops_language`, default `OPS_DEFAULT_LANGUAGE`); only `/django-admin/` switches, everything else stays
-  `LANGUAGE_CODE = "uz"`. **Uzbek is the source language**: write a console text in Uzbek and mark it
-  (`gettext_lazy` at import time, `gettext` / `ngettext` with `%(name)s` placeholders in functions,
-  `{% translate %}` / `{% blocktranslate %}` in templates); model `verbose_name` / `help_text` / `choices` need no
-  marking; an enum label or `core.labels` value goes through `gettext(value)` where the console renders it. Never
-  mark what is stored or sent (audit texts, notifications, API messages, exports). After changing a console text
-  run `manage.py console_messages`, translate the new entries of `locale/en` and `locale/ru`, then
-  `manage.py compile_locale`; `console_messages --check` and `test_console_languages.py` fail otherwise. Import
-  `StrOrPromise` / `_StrPromise` only under `TYPE_CHECKING` (django-stubs is a dev dependency).
+  `LANGUAGE_CODE = "uz"`. The admin API answers in uz / ru / en by `Accept-Language`
+  (`docs/api/admin-api-v1.md` §1.2, §1.6, §1.8).
+  **Uzbek is the source language** of the ops console and of the admin API. Console texts: write them in Uzbek
+  and mark them (`gettext_lazy` at import time, `gettext` / `ngettext` with `%(name)s` placeholders in
+  functions, `{% translate %}` / `{% blocktranslate %}` in templates); model `verbose_name` / `help_text` /
+  `choices` need no marking; an enum label or `core.labels` value goes through `gettext(value)` where the
+  console renders it. **Admin API texts** a staff member reads — error messages (`raise`, `field_error`,
+  `ErrorDetail`, `ContractValidationError`, `default_detail`, `default_error_messages`, `MESSAGE*` constants),
+  export headers and `export_name` — are Uzbek literals marked with `glowderma.core.uzsource.N_` (a no-op),
+  interpolated as `N_("… %(n)s …") % {...}` (never an f-string). They are translated only at the edge: the
+  error envelope renders `message` / `errors[].message` in the request's `Accept-Language`
+  (`core.api.language.admin_language`), and `ExportMixin` renders headers, sheet title and file name with
+  `uzsource.tr`, values with `labels.text(mapping, key)`. A header whose translation depends on the list (Russian
+  gender, «Название» vs «Имя») is marked `NC_("export <export_resource>", "<Uzbek>")` in `core/labels.py`
+  `_EXPORT_RENDERINGS` and collected as a `msgctxt` entry. **Never translate what is stored or sent** (audit
+  rows, outbox payloads, notifications, events, e-mail bodies — e-mails use `core.i18n.t` with the
+  recipient's language) and never activate a language around service code; `tr` / `localize_admin_message`
+  are for response rendering only. `core/tests/test_admin_api_languages.py` fails on an unmarked staff-visible
+  Uzbek literal outside `NOT_YET_MARKED` (which only shrinks; it is empty now) and on a stored Cyrillic text.
+  Customer, POS and public views keep `core.i18n` keys. After changing a console text or a marked text run
+  `manage.py console_messages`, translate the new entries of `locale/en` and `locale/ru`, then
+  `manage.py compile_locale`; `console_messages --check`, `compile_locale --check` and
+  `test_console_languages.py` fail otherwise. Import `StrOrPromise` / `_StrPromise` only under `TYPE_CHECKING`
+  (django-stubs is a dev dependency).
 - Provider adapters live in `glowderma/integrations/<provider>/` behind a port (Protocol) with a fake and a live
   implementation chosen by `*_MODE` settings (default `INTEGRATIONS_MODE=fake`); views and services obtain them
   through the module's `registry`. `integrations` cannot host admin views (`AdminAPIView` lives in `accounts`,

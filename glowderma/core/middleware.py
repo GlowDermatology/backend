@@ -3,9 +3,13 @@ import uuid
 from collections.abc import Callable
 
 from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.utils.cache import patch_vary_headers
 
+from glowderma.core.api.exceptions import MESSAGES
+from glowderma.core.api.language import is_admin_path, request_admin_language
 from glowderma.core.clientip import has_internal_secret
 from glowderma.core.logging import bind_request_id, unbind_request_id
+from glowderma.core.uzsource import localize_admin_message
 
 
 class RequestIdMiddleware:
@@ -28,8 +32,13 @@ class RequestIdMiddleware:
         response["X-Request-ID"] = request_id
         if request.path_info.startswith("/api/"):
             response.setdefault("Cache-Control", "no-store")
-            # Customer views set the resolved language themselves (customer contract §1.3); admin stays "uz".
-            response.setdefault("Content-Language", "uz")
+            # Customer views set the resolved language themselves (customer contract §1.3); the admin API
+            # answers its messages and exports in Accept-Language (DESIGN §G); anything else stays "uz".
+            if is_admin_path(request.path_info):
+                response.setdefault("Content-Language", request_admin_language(request))
+                patch_vary_headers(response, ("Accept-Language",))
+            else:
+                response.setdefault("Content-Language", "uz")
         return response
 
     def handle(self, request: HttpRequest, request_id: str) -> HttpResponse:
@@ -41,7 +50,9 @@ class RequestIdMiddleware:
             return JsonResponse(
                 {
                     "code": "payload_too_large",
-                    "message": "Fayl juda katta.",
+                    "message": localize_admin_message(
+                        MESSAGES["payload_too_large"], request_admin_language(request)
+                    ),
                     "errors": [],
                     "request_id": request_id,
                 },

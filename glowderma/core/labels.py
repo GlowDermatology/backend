@@ -5,6 +5,7 @@ end build the models' readable Uzbek ``__str__`` (the ops console's related-obje
 amounts in so‘m, local timestamps and masked customer contacts.
 """
 
+from collections.abc import Mapping
 from datetime import datetime
 
 from django.utils import timezone
@@ -13,6 +14,7 @@ from django.utils.translation import gettext
 from glowderma.core import enums
 from glowderma.core.i18n import format_number
 from glowderma.core.pii import mask_email, mask_phone
+from glowderma.core.uzsource import NC_, tr
 
 ORDER_STATUS: dict[str, str] = {
     enums.OrderStatus.AWAITING_PAYMENT: "To‘lov kutilmoqda",
@@ -81,13 +83,47 @@ SERVICE_CATEGORY: dict[str, str] = {
 }
 
 
+def text(mapping: Mapping[str, str], key: str | None, default: str = "") -> str:
+    """The label of ``key`` in ``mapping`` (``default`` when it has none) in the active language
+    (``core.uzsource.tr``): Uzbek in the API and the workers; the request's language inside the export
+    renderer (``core.exports.ExportMixin``). For what a response shows only — never for a stored text."""
+    label = mapping.get(key, default) if key is not None else default
+    return tr(label)
+
+
 def yes_no(value: bool) -> str:
-    return "Ha" if value else "Yo‘q"
+    """ "Ha" / "Yo‘q" in the active language (see :func:`text`)."""
+    return tr("Ha" if value else "Yo‘q")
+
+
+# ``is_active`` of specialists and services (contract §5.8).
+ACTIVE_STATE: dict[bool, str] = {True: "Faol", False: "Nofaol"}
 
 
 def active_label(value: bool) -> str:
-    """``is_active`` of specialists and services (contract §5.8): "Faol" / "Nofaol"."""
-    return "Faol" if value else "Nofaol"
+    """``is_active`` of specialists and services (contract §5.8): "Faol" / "Nofaol" in the active language."""
+    return tr(ACTIVE_STATE[bool(value)])
+
+
+# Export texts that read differently on one list than the same Uzbek word elsewhere (review F2): "Nomi" is a
+# thing's name in these exports but a person's in the ops console; a Russian adjective agrees with the
+# list's noun. ``core.exports.ExportMixin`` renders each export under ``export <export_resource>``, so these
+# entries come first there and every other text keeps its plain translation.
+_EXPORT_RENDERINGS: tuple[str, ...] = (
+    NC_("export products", "Nomi"),
+    NC_("export products", "Faol"),
+    NC_("export categories", "Nomi"),
+    NC_("export categories", "Faol"),
+    NC_("export banners", "Faol"),
+    NC_("export services", "Nomi"),
+    NC_("export services", "Faol"),
+    NC_("export services", "Nofaol"),
+    NC_("export specialists", "Faol"),
+    NC_("export specialists", "Nofaol"),
+    NC_("export segments", "Nomi"),
+    NC_("export customers", "Faol"),
+    NC_("export segment_members", "Faol"),
+)
 
 
 # Contract 1.8 export columns (Uzbek headers) of the catalog lists.
@@ -187,14 +223,15 @@ REFUND_MANUAL_CLICK = "Mijozga qo‘lda to‘lang, so‘ng «Qaytarildi» deb be
 
 def refund_state_label(state: str, provider: str, manual_reason: str | None = None) -> str:
     """The §5.1 refund-state line of ``state``; ``manual_required`` by its reason and provider — the Payme
-    cabinet line only for a Payme refund (reason ``payme``), the Click line otherwise. Never assumes Payme."""
+    cabinet line only for a Payme refund (reason ``payme``), the Click line otherwise. Never assumes Payme.
+    In the active language (see :func:`text`)."""
     if state != enums.RefundState.MANUAL_REQUIRED:
-        return REFUND_STATE[state]
+        return tr(REFUND_STATE[state])
     if manual_reason == enums.RefundManualReason.PAYME or (
         not manual_reason and provider == enums.PaymentProvider.PAYME
     ):
-        return REFUND_MANUAL_PAYME
-    return REFUND_MANUAL_CLICK
+        return tr(REFUND_MANUAL_PAYME)
+    return tr(REFUND_MANUAL_CLICK)
 
 
 # Contract 1.8 export columns (Uzbek headers) of the orders and payments lists (M1c).

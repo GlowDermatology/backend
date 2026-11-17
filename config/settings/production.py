@@ -16,6 +16,7 @@ from config.env import env_bool, env_int, env_json, env_list, env_networks, env_
 
 from .base import *  # noqa: F403
 from .base import (
+    ADMIN_PANEL_URL,
     APPLE_BUNDLE_IDS,
     APPLE_SERVICES_IDS,
     APPLE_WEB_REDIRECT_URI,
@@ -289,6 +290,8 @@ def _https_url(name: str, value: str) -> None:
 
 
 _https_url("PAYMENT_WEB_RETURN_URL", PAYMENT_WEB_RETURN_URL.format(order_id=1, lang="uz", locale_prefix=""))
+if ADMIN_PANEL_URL:  # staff invite / password links carry a one-time token (feat/admin-ux)
+    _https_url("ADMIN_PANEL_URL", ADMIN_PANEL_URL)
 if OAUTH_MODE == "live" and APPLE_SERVICES_IDS:
     # the website's Sign in with Apple code exchange repeats the redirect URI its authorization used (B-W1)
     _https_url("APPLE_WEB_REDIRECT_URI", APPLE_WEB_REDIRECT_URI)

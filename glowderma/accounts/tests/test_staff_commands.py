@@ -100,7 +100,12 @@ def test_resetstaffpassword_prints_a_temporary_password_once(manager: StaffUser)
     entry = AuditEntry.objects.get(action="staff.password_reset")
     assert (entry.reason, entry.after) == (
         "manage.py resetstaffpassword",
-        {"revoked_count": 1, "generated": True},
+        {
+            "revoked_count": 1,
+            "generated": True,
+            "delivery": "temporary_password",
+            "must_change_password": True,
+        },
     )
     assert match.group(1) not in str(entry.after)
 

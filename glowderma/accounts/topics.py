@@ -15,6 +15,8 @@ from glowderma.core import enums
 SMS_SEND: Final = "sms.send"
 EMAIL_SEND: Final = "email.send"
 EMAIL_NOTICE: Final = "email.notice"
+# feat/admin-ux: a staff invite / password link e-mail ({link_id, lang, purpose}; to, link, name sealed).
+STAFF_PASSWORD_LINK: Final = "email.staff_password_link"  # noqa: S105 - a topic name
 PUSH_SESSION_REPLACED: Final = "push.session_replaced"
 PUSH_ACCOUNT_SECURITY: Final = "push.account_security"
 APPLE_REVOKE: Final = "apple.revoke"
@@ -36,6 +38,10 @@ def sms_send_key(sms_code_id: int) -> str:
 
 def email_send_key(sms_code_id: int) -> str:
     return f"{EMAIL_SEND}:{sms_code_id}"
+
+
+def staff_password_link_key(token_id: int) -> str:
+    return f"{STAFF_PASSWORD_LINK}:{token_id}"
 
 
 def session_replaced_key(session_id: Any) -> str:

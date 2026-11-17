@@ -18,6 +18,12 @@ Customer audience (customer contract §1.6, §5): views whose class carries ``au
 ``details`` key, and every ``message`` (top level and per field) is rendered through ``core.i18n`` in the
 resolved request language. Customer codes are :class:`CustomerError` subclasses carrying their catalog key;
 endpoint-specific field codes take ``field_error(code, message_key="field.…")``. Admin bodies never change.
+
+Admin audience (feat/admin-ux, DESIGN §G): messages are raised as Uzbek source texts marked with
+``core.uzsource.N_`` (interpolated as ``N_("… %(n)s …") % {...}``). For an ``/api/v1/admin/`` request the
+envelope's ``message`` and ``errors[].message`` are rendered in the request's ``Accept-Language``
+(:func:`localize_admin_body`, ``core.uzsource.localize_admin_message``); the shape and the codes are those of
+the Uzbek answer, and a text the catalog does not know stays Uzbek.
 """
 
 import logging
@@ -35,43 +41,45 @@ from rest_framework.response import Response
 from rest_framework.views import exception_handler, set_rollback
 
 from glowderma.core import i18n
+from glowderma.core.api.language import request_admin_language
+from glowderma.core.uzsource import N_, localize_admin_message
 
 logger = logging.getLogger(__name__)
 MESSAGES = {
-    "validation_error": "Maydonlarni tekshiring.",
-    "not_authenticated": "Avtorizatsiya talab qilinadi.",
-    "SESSION_EXPIRED": "Sessiya tugadi. Qayta kiring.",
-    "SESSION_REPLACED": "Boshqa qurilmadan kirildi.",
-    "invalid_credentials": "Login yoki parol noto‘g‘ri.",
-    "permission_denied": "Ruxsat yo‘q.",
-    "not_found": "Topilmadi.",
-    "request_in_progress": "So‘rov bajarilmoqda. Birozdan so‘ng qayta urinib ko‘ring.",
-    "idempotency_key_reused": "Bu kalit boshqa so‘rov uchun ishlatilgan.",
-    "idempotency_key_required": "Idempotency-Key sarlavhasi kerak.",
-    "server_error": "Kutilmagan xato.",
-    "payload_too_large": "Fayl juda katta.",
-    "provider_unavailable": "Tashqi xizmat javob bermadi. Qayta urinib ko‘ring.",
-    "oauth_exchange_failed": "Ijtimoiy tarmoq orqali kirish amalga oshmadi.",
-    "social_account_not_allowed": "Bu hisob administrator sifatida ro‘yxatdan o‘tmagan.",
+    "validation_error": N_("Maydonlarni tekshiring."),
+    "not_authenticated": N_("Avtorizatsiya talab qilinadi."),
+    "SESSION_EXPIRED": N_("Sessiya tugadi. Qayta kiring."),
+    "SESSION_REPLACED": N_("Boshqa qurilmadan kirildi."),
+    "invalid_credentials": N_("Login yoki parol noto‘g‘ri."),
+    "permission_denied": N_("Ruxsat yo‘q."),
+    "not_found": N_("Topilmadi."),
+    "request_in_progress": N_("So‘rov bajarilmoqda. Birozdan so‘ng qayta urinib ko‘ring."),
+    "idempotency_key_reused": N_("Bu kalit boshqa so‘rov uchun ishlatilgan."),
+    "idempotency_key_required": N_("Idempotency-Key sarlavhasi kerak."),
+    "server_error": N_("Kutilmagan xato."),
+    "payload_too_large": N_("Fayl juda katta."),
+    "provider_unavailable": N_("Tashqi xizmat javob bermadi. Qayta urinib ko‘ring."),
+    "oauth_exchange_failed": N_("Ijtimoiy tarmoq orqali kirish amalga oshmadi."),
+    "social_account_not_allowed": N_("Bu hisob administrator sifatida ro‘yxatdan o‘tmagan."),
 }
 FIELD_MESSAGES = {
-    "required": "Majburiy maydon.",
-    "null": "Majburiy maydon.",
-    "blank": "Maydonni to‘ldiring.",
-    "invalid": "Noto‘g‘ri qiymat.",
-    "invalid_choice": "Ruxsat etilmagan qiymat.",
-    "min_length": "Kamida {limit} ta belgi kiriting.",
-    "max_length": "{limit} belgidan oshmasin.",
-    "min_value": "Qiymat {limit} dan kam bo‘lmasin.",
-    "max_value": "Qiymat {limit} dan oshmasin.",
-    "max_decimal_places": "Ko‘pi bilan 2 ta kasr raqam.",
-    "unique": "Bu qiymat band.",
-    "does_not_exist": "Topilmadi.",
-    "read_only": "Bu maydonni o‘zgartirib bo‘lmaydi.",
-    "file_too_large": "Rasm 5 MB dan oshmasin.",
-    "unsupported_image": "Faqat JPEG, PNG yoki WebP rasm.",
-    "max_items": "Ko‘pi bilan {limit} ta.",
-    "mismatch": "Ro‘yxat joriy elementlarga mos emas.",
+    "required": N_("Majburiy maydon."),
+    "null": N_("Majburiy maydon."),
+    "blank": N_("Maydonni to‘ldiring."),
+    "invalid": N_("Noto‘g‘ri qiymat."),
+    "invalid_choice": N_("Ruxsat etilmagan qiymat."),
+    "min_length": N_("Kamida {limit} ta belgi kiriting."),
+    "max_length": N_("{limit} belgidan oshmasin."),
+    "min_value": N_("Qiymat {limit} dan kam bo‘lmasin."),
+    "max_value": N_("Qiymat {limit} dan oshmasin."),
+    "max_decimal_places": N_("Ko‘pi bilan 2 ta kasr raqam."),
+    "unique": N_("Bu qiymat band."),
+    "does_not_exist": N_("Topilmadi."),
+    "read_only": N_("Bu maydonni o‘zgartirib bo‘lmaydi."),
+    "file_too_large": N_("Rasm 5 MB dan oshmasin."),
+    "unsupported_image": N_("Faqat JPEG, PNG yoki WebP rasm."),
+    "max_items": N_("Ko‘pi bilan {limit} ta."),
+    "mismatch": N_("Ro‘yxat joriy elementlarga mos emas."),
 }
 # Raised by views with the explicit message of the endpoint's contract table (see the module docstring).
 ENDPOINT_FIELD_CODES = frozenset(
@@ -694,7 +702,7 @@ def error_body(
 ) -> dict[str, Any]:
     return {
         "code": code,
-        "message": MESSAGES.get(code, "Maydonlarni tekshiring.") if message is None else message,
+        "message": MESSAGES.get(code, MESSAGES["validation_error"]) if message is None else message,
         "errors": errors or [],
         "request_id": getattr(request, "request_id", ""),
     }
@@ -718,9 +726,35 @@ def _uses_default_detail(exc: exceptions.APIException) -> bool:
     return False
 
 
+def localize_admin_body(body: Any, lang: str) -> Any:
+    """The admin envelope ``body`` with ``message`` and every ``errors[].message`` in ``lang``
+    (``core.uzsource.localize_admin_message``); codes, fields and the request id are untouched. Anything that
+    is not an envelope is returned as it is."""
+    if lang == i18n.DEFAULT_LANGUAGE or not isinstance(body, dict) or "message" not in body:
+        return body
+    localized = {**body, "message": localize_admin_message(body["message"], lang)}
+    errors = body.get("errors")
+    if isinstance(errors, list):
+        localized["errors"] = [
+            {**item, "message": localize_admin_message(item["message"], lang)}
+            if isinstance(item, dict) and isinstance(item.get("message"), str)
+            else item
+            for item in errors
+        ]
+    return localized
+
+
 def envelope_exception_handler(exc: Exception, context: dict[str, Any]) -> Response:
+    """The admin envelope (customer audiences: :func:`customer_exception_handler`). Built in Uzbek, then —
+    for an ``/api/v1/admin/`` request only — rendered in the request's ``Accept-Language`` (DESIGN §G)."""
     if getattr(context.get("view"), "audience", None) in CUSTOMER_AUDIENCES:
         return customer_exception_handler(exc, context)
+    response = _admin_exception_response(exc, context)
+    response.data = localize_admin_body(response.data, request_admin_language(context.get("request")))
+    return response
+
+
+def _admin_exception_response(exc: Exception, context: dict[str, Any]) -> Response:
     response = exception_handler(exc, context)
     request = context.get("request")
     if isinstance(exc, SuspiciousOperation):
@@ -771,9 +805,9 @@ def envelope_exception_handler(exc: Exception, context: dict[str, Any]) -> Respo
         code = "throttled"
         wait = getattr(exc, "wait", None)
         message = (
-            "Juda ko‘p urinish."
+            N_("Juda ko‘p urinish.")
             if wait is None
-            else f"Juda ko‘p urinish. {wait} soniyadan so‘ng qayta urinib ko‘ring."
+            else N_("Juda ko‘p urinish. %(n)s soniyadan so‘ng qayta urinib ko‘ring.") % {"n": wait}
         )
     response.data = error_body(code, request, message=message, errors=errors)
     return response
@@ -984,7 +1018,8 @@ def _customer_page(request: HttpRequest, code: str, status: int) -> JsonResponse
 def not_found_view(request: HttpRequest, exception: Exception) -> JsonResponse:
     if is_customer_path(request.path):
         return _customer_page(request, "not_found", 404)
-    return JsonResponse(error_body("not_found", request), status=404)
+    lang = request_admin_language(request)
+    return JsonResponse(localize_admin_body(error_body("not_found", request), lang), status=404)
 
 
 def server_error_view(request: HttpRequest) -> JsonResponse:
@@ -993,4 +1028,5 @@ def server_error_view(request: HttpRequest) -> JsonResponse:
     )
     if is_customer_path(request.path):
         return _customer_page(request, "server_error", 500)
-    return JsonResponse(error_body("server_error", request), status=500)
+    lang = request_admin_language(request)
+    return JsonResponse(localize_admin_body(error_body("server_error", request), lang), status=500)

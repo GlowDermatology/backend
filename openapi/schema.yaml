@@ -467,9 +467,111 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
+  /api/v1/admin/appointments/range/:
+    get:
+      operationId: admin_appointments_range
+      description: 'The week and month boards: per Tashkent day of `from`…`to` (inclusive)
+        the status counts of the appointments starting that day, whether any listed
+        specialist works and their combined hours. `detail=counts` (default) allows
+        up to 42 days; `detail=full` (up to 7 days) adds every specialist''s day schedule
+        and the appointments in the day-item shape. Specialists follow the day board''s
+        rule over the whole range (active ones, plus inactive ones with an appointment
+        in it); `specialist_id` narrows specialists, counts and appointments to one.'
+      parameters:
+      - in: query
+        name: detail
+        schema:
+          enum:
+          - counts
+          - full
+          type: string
+          default: counts
+          minLength: 1
+        description: |-
+          * `counts` - counts
+          * `full` - full
+      - in: query
+        name: from
+        schema:
+          type: string
+          format: date
+        required: true
+      - in: query
+        name: specialist_id
+        schema:
+          type: integer
+          minimum: 1
+      - in: query
+        name: to
+        schema:
+          type: string
+          format: date
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentRange'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/admin/audit-log/:
     get:
       operationId: admin_audit_log_list
+      description: |-
+        ``?export=csv|xlsx`` of an admin list (contract 1.8).
+
+        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
+        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
+        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
+        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
+        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
+        written in Uzbek outside that scope.
       parameters:
       - in: query
         name: action
@@ -538,6 +640,13 @@ paths:
           enum:
           - 20
           - 50
+      - in: query
+        name: request_id
+        schema:
+          type: string
+          minLength: 1
+        description: 'The start of a request id (8–64 characters `A-Z a-z 0-9 -`):
+          entries whose stored request id begins with it.'
       tags:
       - admin
       security:
@@ -548,6 +657,68 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PaginatedAuditEntryList'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/audit-log/facets/:
+    get:
+      operationId: admin_audit_log_facets
+      description: 'What the audit log shows the signed-in staff member: ordinary
+        staff see business entries and their own sign-ins and exports, without IP
+        addresses; managers add staff management and every staff sign-in, with IPs;
+        superusers see everything. Entries outside the tier are simply absent from
+        `audit-log/` and its export (a filter on them answers an empty list, never
+        403).'
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditFacets'
           description: ''
         '400':
           content:
@@ -628,6 +799,9 @@ paths:
   /api/v1/admin/auth/login/:
     post:
       operationId: admin_auth_login
+      description: 'Email + password sign-in. With the admin panel MFA on (feat/admin-ux)
+        a correct password opens no session: the answer is `{mfa_required: true, challenge,
+        challenge_expires_at}` and `auth/mfa/verify/` opens it.'
       tags:
       - admin
       requestBody:
@@ -641,7 +815,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/LoginResponse'
+                $ref: '#/components/schemas/AdminLoginResult'
           description: ''
         '400':
           content:
@@ -725,12 +899,437 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
+    patch:
+      operationId: admin_auth_me_update
+      description: Change the caller's admin panel language (`uz`, `ru`, `en`); returns
+        Me. Allowed while a password change is pending.
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedMeUpdateRequest'
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Me'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/auth/mfa/:
+    get:
+      operationId: admin_auth_mfa_status
+      description: 'The caller''s admin panel MFA: on or off, and the unused recovery
+        codes.'
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MfaStatus'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/auth/mfa/confirm/:
+    post:
+      operationId: admin_auth_mfa_confirm
+      description: 'Confirm the pending device with its first code: MFA is on, the
+        current session counts as verified, and the ten recovery codes are returned
+        once. Wrong code or not the caller''s pending device → 400 `mfa_code_invalid`;
+        already on → 409; 429 while the code lockout runs.'
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MfaConfirmRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MfaRecoveryCodes'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/auth/mfa/disable/:
+    post:
+      operationId: admin_auth_mfa_disable
+      description: 'Turn the admin panel MFA off: the current password plus a code
+        or a recovery code. Wrong password → 400 `password_incorrect`; wrong code
+        → 400 `mfa_code_invalid`; off → 409.'
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MfaDisableRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MfaStatus'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/auth/mfa/recovery-codes/:
+    post:
+      operationId: admin_auth_mfa_recovery_codes
+      description: 'Ten new recovery codes (the old ones stop working), returned once:
+        the current password plus a TOTP code. Errors as `auth/mfa/disable/`.'
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MfaRegenerateRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MfaRecoveryCodes'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/auth/mfa/setup/:
+    post:
+      operationId: admin_auth_mfa_setup
+      description: 'Start enabling the admin panel MFA (re-enter the current password):
+        a new pending TOTP device (an earlier pending one is replaced) as an `otpauth://`
+        URI for the QR code and a manual key. Wrong password → 400 `password_incorrect`
+        on `current_password` (the change-password lockout); already on → 409 `conflict`.'
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MfaPasswordRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MfaSetup'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/auth/mfa/verify/:
+    post:
+      operationId: admin_auth_mfa_verify
+      description: 'Public (no bearer): the sign-in''s second step. The challenge
+        of `auth/login/` or `auth/oauth/{provider}/` plus exactly one of `code` /
+        `recovery_code` → the normal sign-in answer (session `auth_method` = the first
+        step''s). Wrong code → 400 `mfa_code_invalid` (5 attempts per challenge);
+        unknown, expired (5 min), used or exhausted challenge, or a password change
+        / deactivation / MFA reset since → 400 `mfa_challenge_invalid` (sign in again);
+        429 while the account''s code lockout runs or for the per-IP limit.'
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MfaVerifyRequest'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/admin/auth/oauth/{provider}/:
     post:
       operationId: admin_auth_oauth_login
       description: 'Staff social sign-in, allow-list only: Django exchanges the authorization
         code with the provider and signs in the staff member whose identity is already
-        linked. Same response as auth/login/.'
+        linked. Same response as auth/login/ (with the admin panel MFA on: the challenge
+        for auth/mfa/verify/).'
       parameters:
       - in: path
         name: provider
@@ -753,7 +1352,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/LoginResponse'
+                $ref: '#/components/schemas/AdminLoginResult'
           description: ''
         '400':
           content:
@@ -925,6 +1524,143 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
+  /api/v1/admin/auth/password-link/:
+    post:
+      operationId: admin_auth_password_link
+      description: E-mail the caller a single-use link to set their password, for
+        an account that must change it but cannot type the current one (signed in
+        with a social identity, an e-mail-link account). 409 `conflict` when no change
+        is pending or e-mail links are not available (`capabilities.staff_email_invite`);
+        5/hour.
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnPasswordLink'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/auth/password-token/check/:
+    post:
+      operationId: admin_auth_password_token_check
+      description: 'Public (no bearer): whose password link this is, for the set-password
+        page. An unknown, used, revoked or expired link, or one of an inactive account
+        → one uniform 400 `token_invalid`.'
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordTokenRequest'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PasswordTokenInfo'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/auth/password-token/set/:
+    post:
+      operationId: admin_auth_password_token_set
+      description: 'Public (no bearer): set the password with a link (single use).
+        The password is validated for the link''s account (the change-password codes,
+        `password_unchanged` for the current one); every session of the account is
+        revoked and no new one is opened — the person signs in next. A bad link →
+        400 `token_invalid`.'
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordTokenSetRequest'
+        required: true
+      responses:
+        '204':
+          description: No response body
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/admin/auth/refresh/:
     post:
       operationId: admin_auth_refresh
@@ -964,6 +1700,15 @@ paths:
   /api/v1/admin/banners/:
     get:
       operationId: admin_banners_list
+      description: |-
+        ``?export=csv|xlsx`` of an admin list (contract 1.8).
+
+        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
+        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
+        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
+        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
+        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
+        written in Uzbek outside that scope.
       parameters:
       - in: query
         name: export
@@ -1110,6 +1855,15 @@ paths:
   /api/v1/admin/banners/{id}/:
     get:
       operationId: admin_banners_retrieve
+      description: |-
+        ``?export=csv|xlsx`` of an admin list (contract 1.8).
+
+        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
+        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
+        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
+        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
+        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
+        written in Uzbek outside that scope.
       parameters:
       - in: path
         name: id
@@ -1171,6 +1925,15 @@ paths:
           description: ''
     patch:
       operationId: admin_banners_partial_update
+      description: |-
+        ``?export=csv|xlsx`` of an admin list (contract 1.8).
+
+        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
+        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
+        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
+        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
+        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
+        written in Uzbek outside that scope.
       parameters:
       - in: path
         name: id
@@ -1240,6 +2003,15 @@ paths:
           description: ''
     delete:
       operationId: admin_banners_destroy
+      description: |-
+        ``?export=csv|xlsx`` of an admin list (contract 1.8).
+
+        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
+        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
+        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
+        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
+        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
+        written in Uzbek outside that scope.
       parameters:
       - in: path
         name: id
@@ -1298,6 +2070,15 @@ paths:
   /api/v1/admin/banners/order/:
     put:
       operationId: admin_banners_reorder
+      description: |-
+        ``?export=csv|xlsx`` of an admin list (contract 1.8).
+
+        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
+        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
+        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
+        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
+        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
+        written in Uzbek outside that scope.
       tags:
       - admin
       requestBody:
@@ -1493,6 +2274,15 @@ paths:
   /api/v1/admin/categories/:
     get:
       operationId: admin_categories_list
+      description: |-
+        ``?export=csv|xlsx`` of an admin list (contract 1.8).
+
+        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
+        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
+        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
+        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
+        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
+        written in Uzbek outside that scope.
       parameters:
       - in: query
         name: export
@@ -1643,6 +2433,15 @@ paths:
   /api/v1/admin/categories/{slug}/:
     get:
       operationId: admin_categories_retrieve
+      description: |-
+        ``?export=csv|xlsx`` of an admin list (contract 1.8).
+
+        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
+        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
+        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
+        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
+        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
+        written in Uzbek outside that scope.
       parameters:
       - in: path
         name: slug
@@ -1776,6 +2575,15 @@ paths:
           description: ''
     delete:
       operationId: admin_categories_destroy
+      description: |-
+        ``?export=csv|xlsx`` of an admin list (contract 1.8).
+
+        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
+        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
+        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
+        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
+        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
+        written in Uzbek outside that scope.
       parameters:
       - in: path
         name: slug
@@ -1834,6 +2642,15 @@ paths:
   /api/v1/admin/categories/order/:
     put:
       operationId: admin_categories_reorder
+      description: |-
+        ``?export=csv|xlsx`` of an admin list (contract 1.8).
+
+        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
+        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
+        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
+        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
+        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
+        written in Uzbek outside that scope.
       tags:
       - admin
       requestBody:
@@ -3162,6 +3979,15 @@ paths:
   /api/v1/admin/notifications/:
     get:
       operationId: admin_notifications_list
+      description: |-
+        ``?export=csv|xlsx`` of an admin list (contract 1.8).
+
+        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
+        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
+        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
+        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
+        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
+        written in Uzbek outside that scope.
       parameters:
       - in: query
         name: export
@@ -3351,6 +4177,15 @@ paths:
   /api/v1/admin/notifications/{id}/:
     get:
       operationId: admin_notifications_retrieve
+      description: |-
+        ``?export=csv|xlsx`` of an admin list (contract 1.8).
+
+        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
+        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
+        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
+        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
+        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
+        written in Uzbek outside that scope.
       parameters:
       - in: path
         name: id
@@ -4287,6 +5122,15 @@ paths:
   /api/v1/admin/orders/:
     get:
       operationId: admin_orders_list
+      description: |-
+        ``?export=csv|xlsx`` of an admin list (contract 1.8).
+
+        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
+        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
+        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
+        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
+        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
+        written in Uzbek outside that scope.
       parameters:
       - in: query
         name: attention
@@ -4516,6 +5360,15 @@ paths:
   /api/v1/admin/orders/{id}/:
     get:
       operationId: admin_orders_retrieve
+      description: |-
+        ``?export=csv|xlsx`` of an admin list (contract 1.8).
+
+        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
+        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
+        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
+        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
+        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
+        written in Uzbek outside that scope.
       parameters:
       - in: path
         name: id
@@ -4676,7 +5529,7 @@ paths:
         note), order event `shipment_returned`, audit `order.return_confirmed`. A
         cancelled order stays cancelled; an open order stays as it is (staff dispatch
         again or cancel). 409 `invalid_transition` (no returning parcel), 409 `conflict`
-        (confirmed already, or the order is busy).'
+        (confirmed already), 409 `order_busy` (the order is busy).'
       parameters:
       - in: header
         name: Idempotency-Key
@@ -5254,6 +6107,15 @@ paths:
   /api/v1/admin/payments/:
     get:
       operationId: admin_payments_list
+      description: |-
+        ``?export=csv|xlsx`` of an admin list (contract 1.8).
+
+        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
+        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
+        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
+        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
+        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
+        written in Uzbek outside that scope.
       parameters:
       - in: query
         name: date_from
@@ -5425,7 +6287,11 @@ paths:
         or a `failed` Click refund as `succeeded` after a fresh Click status check
         (`manual_payout: true` when Click still reports the payment paid and staff
         paid the customer by hand; 503 when Click does not answer). Audited `refund.state_changed`
-        with the actor; order event `refund_succeeded` / `refund_failed`.'
+        with the actor; order event `refund_succeeded` / `refund_failed`. 409 `click_not_reversed`
+        (Click still shows the payment paid) / `click_no_paydoc` (no Click payment
+        id): pay out by hand, then `manual_payout: true`; 409 `click_fake_mode` (Click
+        fake under the production settings); 409 `order_busy` (the order is busy;
+        retry).'
       parameters:
       - in: path
         name: id
@@ -5506,7 +6372,9 @@ paths:
     post:
       operationId: admin_payments_refund_retry
       description: 'Retry a `failed` refund: a new refund of the payment (Click `requested`,
-        Payme `manual_required`) and its `refund_requested` order event.'
+        Payme `manual_required`) and its `refund_requested` order event. 409 `click_fake_mode`
+        (Click fake under the production settings), 409 `order_busy` (the order is
+        busy; retry).'
       parameters:
       - in: path
         name: id
@@ -5574,6 +6442,15 @@ paths:
   /api/v1/admin/products/:
     get:
       operationId: admin_products_list
+      description: |-
+        ``?export=csv|xlsx`` of an admin list (contract 1.8).
+
+        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
+        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
+        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
+        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
+        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
+        written in Uzbek outside that scope.
       parameters:
       - in: query
         name: category
@@ -5698,6 +6575,15 @@ paths:
           description: ''
     post:
       operationId: admin_products_create
+      description: |-
+        ``?export=csv|xlsx`` of an admin list (contract 1.8).
+
+        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
+        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
+        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
+        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
+        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
+        written in Uzbek outside that scope.
       tags:
       - admin
       requestBody:
@@ -5766,6 +6652,15 @@ paths:
   /api/v1/admin/products/{id}/:
     get:
       operationId: admin_products_retrieve
+      description: |-
+        ``?export=csv|xlsx`` of an admin list (contract 1.8).
+
+        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
+        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
+        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
+        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
+        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
+        written in Uzbek outside that scope.
       parameters:
       - in: path
         name: id
@@ -5827,6 +6722,15 @@ paths:
           description: ''
     patch:
       operationId: admin_products_partial_update
+      description: |-
+        ``?export=csv|xlsx`` of an admin list (contract 1.8).
+
+        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
+        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
+        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
+        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
+        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
+        written in Uzbek outside that scope.
       parameters:
       - in: path
         name: id
@@ -6157,6 +7061,15 @@ paths:
   /api/v1/admin/segments/:
     get:
       operationId: admin_segments_list
+      description: |-
+        ``?export=csv|xlsx`` of an admin list (contract 1.8).
+
+        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
+        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
+        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
+        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
+        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
+        written in Uzbek outside that scope.
       parameters:
       - in: query
         name: export
@@ -6235,6 +7148,15 @@ paths:
           description: ''
     post:
       operationId: admin_segments_create
+      description: |-
+        ``?export=csv|xlsx`` of an admin list (contract 1.8).
+
+        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
+        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
+        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
+        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
+        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
+        written in Uzbek outside that scope.
       tags:
       - admin
       requestBody:
@@ -6297,6 +7219,15 @@ paths:
   /api/v1/admin/segments/{id}/:
     get:
       operationId: admin_segments_retrieve
+      description: |-
+        ``?export=csv|xlsx`` of an admin list (contract 1.8).
+
+        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
+        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
+        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
+        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
+        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
+        written in Uzbek outside that scope.
       parameters:
       - in: path
         name: id
@@ -6427,6 +7358,15 @@ paths:
           description: ''
     delete:
       operationId: admin_segments_destroy
+      description: |-
+        ``?export=csv|xlsx`` of an admin list (contract 1.8).
+
+        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
+        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
+        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
+        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
+        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
+        written in Uzbek outside that scope.
       parameters:
       - in: path
         name: id
@@ -6485,6 +7425,15 @@ paths:
   /api/v1/admin/segments/{id}/members/:
     get:
       operationId: admin_segment_members_list
+      description: |-
+        ``?export=csv|xlsx`` of an admin list (contract 1.8).
+
+        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
+        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
+        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
+        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
+        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
+        written in Uzbek outside that scope.
       parameters:
       - in: query
         name: export
@@ -6701,6 +7650,15 @@ paths:
   /api/v1/admin/services/:
     get:
       operationId: admin_services_list
+      description: |-
+        ``?export=csv|xlsx`` of an admin list (contract 1.8).
+
+        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
+        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
+        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
+        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
+        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
+        written in Uzbek outside that scope.
       parameters:
       - in: query
         name: category
@@ -6816,6 +7774,15 @@ paths:
           description: ''
     post:
       operationId: admin_services_create
+      description: |-
+        ``?export=csv|xlsx`` of an admin list (contract 1.8).
+
+        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
+        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
+        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
+        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
+        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
+        written in Uzbek outside that scope.
       tags:
       - admin
       requestBody:
@@ -6878,6 +7845,15 @@ paths:
   /api/v1/admin/services/{id}/:
     get:
       operationId: admin_services_retrieve
+      description: |-
+        ``?export=csv|xlsx`` of an admin list (contract 1.8).
+
+        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
+        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
+        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
+        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
+        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
+        written in Uzbek outside that scope.
       parameters:
       - in: path
         name: id
@@ -7009,6 +7985,15 @@ paths:
   /api/v1/admin/specialists/:
     get:
       operationId: admin_specialists_list
+      description: |-
+        ``?export=csv|xlsx`` of an admin list (contract 1.8).
+
+        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
+        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
+        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
+        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
+        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
+        written in Uzbek outside that scope.
       parameters:
       - in: query
         name: export
@@ -7189,6 +8174,15 @@ paths:
   /api/v1/admin/specialists/{id}/:
     get:
       operationId: admin_specialists_retrieve
+      description: |-
+        ``?export=csv|xlsx`` of an admin list (contract 1.8).
+
+        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
+        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
+        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
+        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
+        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
+        written in Uzbek outside that scope.
       parameters:
       - in: path
         name: id
@@ -8095,8 +9089,9 @@ paths:
     get:
       operationId: admin_staff_list
       description: 'Every staff member: the directory behind the audit-log actor filter.
-        A manager''s rows also carry `full_name`, `is_manager`, `last_login_at`, `linked_providers`
-        and `created_at`; for anyone else these keys are `null`.'
+        A manager''s rows also carry `full_name`, `is_manager`, `last_login_at`, `linked_providers`,
+        `created_at` and (feat/admin-ux) `must_change_password`, `mfa_enabled` and
+        `invite`; for anyone else these keys are `null`.'
       parameters:
       - in: query
         name: is_active
@@ -8178,9 +9173,13 @@ paths:
           description: ''
     post:
       operationId: admin_staff_create
-      description: Manager only (403 `permission_denied` otherwise). Creates an active
-        staff account with a generated temporary password, shown once in the answer.
-        `email` already used by any account → `unique`.
+      description: 'Manager only (403 `permission_denied` otherwise). Creates an active
+        staff account. `delivery`: `temporary_password` (generated, shown once in
+        the answer), `email_link` (an invite link e-mailed to the account; no usable
+        password until it is used) or `both`; either way the person must set their
+        own password first (`must_change_password`). `email` already used by any account
+        → `unique`; an e-mail delivery while `capabilities.staff_email_invite` is
+        false → `delivery` `invalid_choice`.'
       parameters:
       - in: header
         name: Idempotency-Key
@@ -8536,13 +9535,100 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
+  /api/v1/admin/staff/{id}/reset-mfa/:
+    post:
+      operationId: admin_staff_reset_mfa
+      description: 'Manager only (403 `permission_denied` otherwise). A lost phone:
+        removes the account''s admin panel MFA (TOTP device and recovery codes; ops
+        console devices stay) and revokes every open session (`admin_revoked`). The
+        caller''s own account, an account without panel MFA, or a superuser''s account
+        unless the caller is a superuser too (`manage.py resetstaffmfa` stays the
+        break-glass path) → 409 `conflict`. Optional body `reason` (trimmed, at most
+        200 characters, blank allowed) is kept on the audit entry. Audited `auth.mfa_reset`
+        and alerted.'
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Optional client-generated UUID; when sent, a retry with the
+          same body returns the stored 2xx response with `Idempotent-Replayed: true`
+          and another body answers 422 `idempotency_key_reused`.'
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffResetMfaRequest'
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffMember'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/admin/staff/{id}/reset-password/:
     post:
       operationId: admin_staff_reset_password
-      description: Manager only (403 `permission_denied` otherwise). Replaces the
-        password with a generated temporary one (shown once) and revokes every open
-        session (`password_changed`); linked identities stay. The caller's own account
-        → 409 `conflict` (use `auth/change-password/`).
+      description: 'Manager only (403 `permission_denied` otherwise). Replaces the
+        password and revokes every open session (`password_changed`) and every earlier
+        link; linked identities stay. `delivery` (optional body, default `temporary_password`):
+        a generated temporary password (shown once), `email_link` (the password becomes
+        unusable and a reset link is e-mailed) or `both`; the person must then set
+        their own password. The caller''s own account → 409 `conflict` (use `auth/change-password/`);
+        a superuser''s account with `temporary_password` or `both`, unless the caller
+        is a superuser too → 409 `conflict` (send `email_link`).'
       parameters:
       - in: header
         name: Idempotency-Key
@@ -8559,6 +9645,11 @@ paths:
         required: true
       tags:
       - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffResetPasswordRequest'
       security:
       - StaffJWT: []
       responses:
@@ -8567,6 +9658,82 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/StaffCredentials'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/staff/{id}/send-password-link/:
+    post:
+      operationId: admin_staff_send_password_link
+      description: Manager only (403 `permission_denied` otherwise). E-mails the account
+        a new single-use link to set its password (invite for an account that never
+        signed in nor set one, else reset); the password and the sessions are not
+        changed, earlier links are revoked. The caller's own account, an inactive
+        account, or e-mail links not available → 409 `conflict`; 5/hour per manager
+        and account.
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Optional client-generated UUID; when sent, a retry with the
+          same body returns the stored 2xx response with `Idempotent-Replayed: true`
+          and another body answers 422 `idempotency_key_reused`.'
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffLinkSent'
           description: ''
         '400':
           content:
@@ -16014,6 +17181,20 @@ components:
           maxItems: 50
       required:
       - inbox_ids
+    Activation:
+      type: object
+      description: 'An e-mailed password link: queued for the person''s address (``sent``),
+        valid until ``expires_at``.'
+      properties:
+        sent:
+          type: boolean
+          description: The e-mail was queued (delivered by the outbox).
+        expires_at:
+          type: string
+          format: date-time
+      required:
+      - expires_at
+      - sent
     Actor:
       type: object
       description: |-
@@ -16103,6 +17284,10 @@ components:
       - location
       - platform
       - updated_at
+    AdminLoginResult:
+      oneOf:
+      - $ref: '#/components/schemas/LoginResponse'
+      - $ref: '#/components/schemas/MfaChallenge'
     AppointmentCancelRequest:
       type: object
       description: '``POST appointments/{id}/cancel/``: optional ``reason`` (≤ 300),
@@ -16134,7 +17319,8 @@ components:
         phone:
           type: string
           minLength: 1
-          pattern: ^\+998\d{9}$
+          description: An Uzbek mobile number; separators and a missing +998 are accepted
+            and the value is normalised to E.164 (+998XXXXXXXXX).
         start:
           type: string
           format: date-time
@@ -16210,6 +17396,43 @@ components:
       - address
       - name
       - phone
+    AppointmentRange:
+      type: object
+      description: |-
+        ``GET appointments/range/``: ``schedules`` and ``appointments`` are present (non-null) only with
+        ``detail=full``.
+      properties:
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        specialists:
+          type: array
+          items:
+            $ref: '#/components/schemas/RangeSpecialist'
+        days:
+          type: array
+          items:
+            $ref: '#/components/schemas/RangeDay'
+        schedules:
+          type: array
+          items:
+            $ref: '#/components/schemas/RangeSchedule'
+          nullable: true
+        appointments:
+          type: array
+          items:
+            $ref: '#/components/schemas/AppointmentItem'
+          nullable: true
+      required:
+      - appointments
+      - days
+      - from
+      - schedules
+      - specialists
+      - to
     AppointmentRescheduleRequest:
       type: object
       description: '``POST appointments/{id}/reschedule/``: ``start`` (same slot rules),
@@ -16344,6 +17567,9 @@ components:
         ip:
           type: string
           nullable: true
+          readOnly: true
+          description: Client IP; null for system rows and always null for ordinary
+            staff (managers and superusers see it).
         request_id:
           type: string
       required:
@@ -16356,6 +17582,51 @@ components:
       - object_id
       - object_type
       - request_id
+    AuditFacets:
+      type: object
+      description: '``GET audit-log/facets/``: what the audit log shows the signed-in
+        staff member.'
+      properties:
+        tier:
+          $ref: '#/components/schemas/AuditViewerTierEnum'
+        ip_visible:
+          type: boolean
+          description: Whether `ip` (and network keys in `data`) are shown.
+        visible_prefixes:
+          type: array
+          items:
+            type: string
+          description: Action prefixes (the part before the first dot) this viewer
+            sees entries of.
+        own_only_prefixes:
+          type: array
+          items:
+            type: string
+          description: The visible prefixes limited to the viewer's own entries (staff
+            sign-ins, exports); `auth` entries written by customers stay visible to
+            everyone.
+        hidden_actions:
+          type: array
+          items:
+            type: string
+          description: Actions hidden although their prefix is visible (operator-only
+            fixes).
+      required:
+      - hidden_actions
+      - ip_visible
+      - own_only_prefixes
+      - tier
+      - visible_prefixes
+    AuditViewerTierEnum:
+      enum:
+      - staff
+      - manager
+      - superuser
+      type: string
+      description: |-
+        * `staff` - staff
+        * `manager` - manager
+        * `superuser` - superuser
     AuthMethodEnum:
       enum:
       - password
@@ -16835,6 +18106,17 @@ components:
         * `reservation_expired` - reservation_expired
         * `admin` - admin
         * `customer_request` - customer_request
+    Capabilities:
+      type: object
+      properties:
+        staff_email_invite:
+          type: boolean
+          description: 'Password links can be e-mailed (`delivery` `email_link` /
+            `both`, `staff/{id}/send-password-link/`, `auth/password-link/`); `false`
+            when the admin panel URL is not configured or e-mail is not live under
+            the production settings: the UI shows the option disabled.'
+      required:
+      - staff_email_invite
     CartLineStatusEnum:
       enum:
       - ok
@@ -20465,14 +21747,37 @@ components:
           oneOf:
           - $ref: '#/components/schemas/AuthMethodEnum'
           - $ref: '#/components/schemas/NullEnum'
+        must_change_password:
+          type: boolean
+          description: 'The account must set its own password first: every admin route
+            but `auth/me/`, `auth/change-password/`, `auth/password-link/` and `auth/logout/`
+            answers 403 `password_change_required` until it does.'
+        language:
+          allOf:
+          - $ref: '#/components/schemas/ContentLanguageEnum'
+          description: |-
+            The admin panel's language (`PATCH auth/me/`).
+
+            * `uz` - uz
+            * `ru` - ru
+            * `en` - en
+        mfa_enabled:
+          type: boolean
+          description: The account has a confirmed admin panel TOTP device.
+        capabilities:
+          $ref: '#/components/schemas/Capabilities'
       required:
       - auth_method
+      - capabilities
       - display_name
       - email
       - id
       - is_manager
       - is_superuser
+      - language
       - linked_providers
+      - mfa_enabled
+      - must_change_password
       - session_expires_at
     MeEmailCodeRequest:
       type: object
@@ -20621,6 +21926,155 @@ components:
       - id
       - name
       - size
+    MfaChallenge:
+      type: object
+      description: |-
+        The 200 of ``auth/login/`` and ``auth/oauth/{provider}/`` for an account with the panel MFA on: no
+        session yet, answer the challenge at ``auth/mfa/verify/``.
+      properties:
+        mfa_required:
+          type: boolean
+          description: Always `true` (tells this answer from a session).
+        challenge:
+          type: string
+          description: Opaque, single use; send it to `auth/mfa/verify/`.
+        challenge_expires_at:
+          type: string
+          format: date-time
+          description: 5 minutes after the first step.
+      required:
+      - challenge
+      - challenge_expires_at
+      - mfa_required
+    MfaConfirmRequest:
+      type: object
+      description: '``POST auth/mfa/confirm/`` body.'
+      properties:
+        device_id:
+          type: integer
+          minimum: 1
+        code:
+          type: string
+          writeOnly: true
+          minLength: 1
+          description: The 6-digit code the authenticator shows now.
+          maxLength: 16
+      required:
+      - code
+      - device_id
+    MfaDisableRequest:
+      type: object
+      description: '``POST auth/mfa/disable/`` body.'
+      properties:
+        current_password:
+          type: string
+          writeOnly: true
+          minLength: 1
+          maxLength: 128
+        code_or_recovery:
+          type: string
+          writeOnly: true
+          minLength: 1
+          description: The authenticator's 6-digit code or one unused recovery code.
+          maxLength: 32
+      required:
+      - code_or_recovery
+      - current_password
+    MfaPasswordRequest:
+      type: object
+      description: '``POST auth/mfa/setup/`` body.'
+      properties:
+        current_password:
+          type: string
+          writeOnly: true
+          minLength: 1
+          maxLength: 128
+      required:
+      - current_password
+    MfaRecoveryCodes:
+      type: object
+      description: '``auth/mfa/confirm/`` and ``auth/mfa/recovery-codes/`` (200):
+        shown once, never again.'
+      properties:
+        recovery_codes:
+          type: array
+          items:
+            type: string
+          description: Ten `xxxxx-xxxxx` codes.
+      required:
+      - recovery_codes
+    MfaRegenerateRequest:
+      type: object
+      description: '``POST auth/mfa/recovery-codes/`` body.'
+      properties:
+        current_password:
+          type: string
+          writeOnly: true
+          minLength: 1
+          maxLength: 128
+        code:
+          type: string
+          writeOnly: true
+          minLength: 1
+          description: The 6-digit code the authenticator shows now.
+          maxLength: 16
+      required:
+      - code
+      - current_password
+    MfaSetup:
+      type: object
+      description: '``POST auth/mfa/setup/`` (200): the pending device to scan (QR
+        of ``otpauth_uri``) or type.'
+      properties:
+        device_id:
+          type: integer
+        otpauth_uri:
+          type: string
+          description: '`otpauth://totp/…`, issuer "Glow Derma Admin".'
+        manual_key:
+          type: string
+          description: The secret in base32, in groups of four.
+      required:
+      - device_id
+      - manual_key
+      - otpauth_uri
+    MfaStatus:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          description: A confirmed admin panel TOTP device (= `me.mfa_enabled`).
+        recovery_codes_left:
+          type: integer
+          description: Unused recovery codes (0 while off).
+      required:
+      - enabled
+      - recovery_codes_left
+    MfaVerifyRequest:
+      type: object
+      description: '``POST auth/mfa/verify/`` body: the challenge and exactly one
+        of ``code`` / ``recovery_code``.'
+      properties:
+        challenge:
+          type: string
+          writeOnly: true
+          minLength: 1
+          maxLength: 128
+        code:
+          type: string
+          writeOnly: true
+          minLength: 1
+          description: The authenticator's 6-digit code.
+          maxLength: 16
+        recovery_code:
+          type: string
+          writeOnly: true
+          minLength: 1
+          description: One unused recovery code instead of `code` (`xxxxx-xxxxx`;
+            case and dashes are ignored).
+          maxLength: 32
+      required:
+      - challenge
     NavCounts:
       type: object
       properties:
@@ -21621,6 +23075,18 @@ components:
         * `link_social` - link_social
         * `verify_email` - verify_email
         * `attach_phone` - attach_phone
+    OwnPasswordLink:
+      type: object
+      description: '``POST auth/password-link/`` (200): where the link went (masked)
+        and until when it is valid.'
+      properties:
+        email_masked:
+          type: string
+        activation:
+          $ref: '#/components/schemas/Activation'
+      required:
+      - activation
+      - email_masked
     PaginatedAdminCustomerSessionList:
       type: object
       required:
@@ -22086,6 +23552,53 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/StaffListItem'
+    PasswordTokenInfo:
+      type: object
+      description: '``POST auth/password-token/check/`` (200): whose link it is, for
+        the set-password page.'
+      properties:
+        email_masked:
+          type: string
+          description: The account's e-mail, masked (`a***@glowderma.uz`).
+        full_name:
+          type: string
+        purpose:
+          $ref: '#/components/schemas/StaffPasswordPurposeEnum'
+        expires_at:
+          type: string
+          format: date-time
+      required:
+      - email_masked
+      - expires_at
+      - full_name
+      - purpose
+    PasswordTokenRequest:
+      type: object
+      description: '``POST auth/password-token/check/`` body.'
+      properties:
+        token:
+          type: string
+          minLength: 1
+          maxLength: 128
+      required:
+      - token
+    PasswordTokenSetRequest:
+      type: object
+      description: '``POST auth/password-token/set/`` body (the password is validated
+        for the link''s account).'
+      properties:
+        token:
+          type: string
+          minLength: 1
+          maxLength: 128
+        new_password:
+          type: string
+          writeOnly: true
+          minLength: 1
+          maxLength: 128
+      required:
+      - new_password
+      - token
     PatchedAddressWriteRequest:
       type: object
       description: |-
@@ -22256,7 +23769,8 @@ components:
           type: string
           nullable: true
           minLength: 1
-          pattern: ^\+998\d{9}$
+          description: An Uzbek mobile number; separators and a missing +998 are accepted
+            and the value is normalised to E.164 (+998XXXXXXXXX).
         latitude:
           type: number
           format: double
@@ -22370,6 +23884,12 @@ components:
           $ref: '#/components/schemas/ContentLanguageEnum'
         push_enabled:
           type: boolean
+    PatchedMeUpdateRequest:
+      type: object
+      description: '``PATCH auth/me/`` body: ``language`` (uz, ru, en).'
+      properties:
+        language:
+          $ref: '#/components/schemas/ContentLanguageEnum'
     PatchedNotificationPatchFormRequest:
       type: object
       properties:
@@ -23440,6 +24960,89 @@ components:
       - refresh_in_seconds
       - token
       - ttl_seconds
+    RangeDay:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        counts:
+          $ref: '#/components/schemas/RangeStatusCounts'
+        total:
+          type: integer
+        working:
+          type: boolean
+          description: At least one listed specialist works that day.
+        hours:
+          allOf:
+          - $ref: '#/components/schemas/WorkingHours'
+          nullable: true
+          description: Earliest start and latest end of the listed specialists working
+            that day; null when nobody works.
+          readOnly: true
+      required:
+      - counts
+      - date
+      - hours
+      - total
+      - working
+    RangeSchedule:
+      type: object
+      properties:
+        specialist_id:
+          type: integer
+        date:
+          type: string
+          format: date
+        working_hours:
+          allOf:
+          - $ref: '#/components/schemas/WorkingHours'
+          nullable: true
+          readOnly: true
+        blocks:
+          type: array
+          items:
+            $ref: '#/components/schemas/DayBlock'
+      required:
+      - blocks
+      - date
+      - specialist_id
+      - working_hours
+    RangeSpecialist:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        role:
+          $ref: '#/components/schemas/SpecialistRoleEnum'
+        is_active:
+          type: boolean
+      required:
+      - id
+      - is_active
+      - name
+      - role
+    RangeStatusCounts:
+      type: object
+      properties:
+        requested:
+          type: integer
+        confirmed:
+          type: integer
+        attended:
+          type: integer
+        rejected:
+          type: integer
+        cancelled:
+          type: integer
+      required:
+      - attended
+      - cancelled
+      - confirmed
+      - rejected
+      - requested
     RateBasisEnum:
       enum:
       - before_purchase
@@ -23761,7 +25364,8 @@ components:
           items:
             type: string
             minLength: 1
-            pattern: ^\+998\d{9}$
+            description: An Uzbek mobile number; separators and a missing +998 are
+              accepted and the value is normalised to E.164 (+998XXXXXXXXX).
           maxItems: 500
     SegmentRules:
       type: object
@@ -24496,7 +26100,8 @@ components:
       type: object
       description: |-
         ``POST staff/`` body: ``email`` (trimmed, lower-cased, unique), ``full_name`` (trimmed 2..150),
-        ``is_manager`` (default ``false``).
+        ``is_manager`` (default ``false``), ``delivery`` (default ``temporary_password``), ``language`` (the
+        person's panel and e-mail language, default ``uz``).
       properties:
         email:
           type: string
@@ -24510,25 +26115,103 @@ components:
         is_manager:
           type: boolean
           default: false
+        delivery:
+          allOf:
+          - $ref: '#/components/schemas/StaffPasswordDeliveryEnum'
+          default: temporary_password
+          description: |-
+            `temporary_password` (shown once in the answer), `email_link` (a single-use link to the account's e-mail; no usable password until it is used) or `both`. The e-mail options need `Me.capabilities.staff_email_invite` (else `invalid_choice`).
+
+            * `temporary_password` - temporary_password
+            * `email_link` - email_link
+            * `both` - both
+        language:
+          allOf:
+          - $ref: '#/components/schemas/ContentLanguageEnum'
+          default: uz
       required:
       - email
       - full_name
     StaffCredentials:
       type: object
       description: |-
-        ``POST staff/`` (201) and ``POST staff/{id}/reset-password/`` (200): the account and its temporary
-        password, shown once.
+        ``POST staff/`` (201) and ``POST staff/{id}/reset-password/`` (200): the account, its temporary
+        password (shown once) and/or the e-mailed link.
       properties:
         staff:
           $ref: '#/components/schemas/StaffMember'
         temporary_password:
           type: string
-          description: Shown once; the person signs in with it and changes it under
-            «Parolni o‘zgartirish». A replay of the same `Idempotency-Key` returns
-            it again (stored sealed, §1.7).
+          nullable: true
+          description: Shown once (`delivery` `temporary_password` or `both`, else
+            `null`); the person signs in with it and must then set their own password.
+            A replay of the same `Idempotency-Key` returns it again (stored sealed,
+            §1.7).
+        activation:
+          allOf:
+          - $ref: '#/components/schemas/Activation'
+          nullable: true
+          description: The e-mailed link (`delivery` `email_link` or `both`), else
+            `null`.
       required:
+      - activation
       - staff
       - temporary_password
+    StaffInvite:
+      type: object
+      description: '``StaffMember.invite``: the newest password link (invite or reset)
+        of the account.'
+      properties:
+        state:
+          allOf:
+          - $ref: '#/components/schemas/StaffInviteStateEnum'
+          description: |-
+            `none` (never e-mailed a link), `pending` (open: queued or sent), `expired`, `used` (the person set a password with it), `revoked` (replaced by a newer link, a password change, a temporary-password reset or a deactivation).
+
+            * `none` - none
+            * `pending` - pending
+            * `expired` - expired
+            * `used` - used
+            * `revoked` - revoked
+        sent_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the e-mail went to the relay; `null` while queued or when
+            not sent.
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+      - expires_at
+      - sent_at
+      - state
+    StaffInviteStateEnum:
+      enum:
+      - none
+      - pending
+      - expired
+      - used
+      - revoked
+      type: string
+      description: |-
+        * `none` - none
+        * `pending` - pending
+        * `expired` - expired
+        * `used` - used
+        * `revoked` - revoked
+    StaffLinkSent:
+      type: object
+      description: '``POST staff/{id}/send-password-link/`` (200).'
+      properties:
+        staff:
+          $ref: '#/components/schemas/StaffMember'
+        activation:
+          $ref: '#/components/schemas/Activation'
+      required:
+      - activation
+      - staff
     StaffListItem:
       type: object
       description: |-
@@ -24572,16 +26255,35 @@ components:
           format: date-time
           nullable: true
           description: Manager only, else `null`.
+        must_change_password:
+          type: boolean
+          nullable: true
+          description: Manager only, else `null`.
+        mfa_enabled:
+          type: boolean
+          nullable: true
+          readOnly: true
+          description: A confirmed admin panel TOTP device (the staff screen's badge
+            and «MFA ni o‘chirish»). Manager only, else `null`.
+        invite:
+          allOf:
+          - $ref: '#/components/schemas/StaffInvite'
+          nullable: true
+          readOnly: true
+          description: Manager only, else `null`.
       required:
       - created_at
       - display_name
       - email
       - full_name
       - id
+      - invite
       - is_active
       - is_manager
       - last_login_at
       - linked_providers
+      - mfa_enabled
+      - must_change_password
     StaffMember:
       type: object
       description: '``StaffMember`` (§2.16): a staff account as managers see it; every
@@ -24614,16 +26316,81 @@ components:
         created_at:
           type: string
           format: date-time
+        must_change_password:
+          type: boolean
+          description: The person must set their own password before using the admin
+            panel.
+        password_changed_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: 'When the person last set their own password (a link or `auth/change-password/`);
+            `null`: never since this was recorded.'
+        mfa_enabled:
+          type: boolean
+          readOnly: true
+          description: A confirmed admin panel TOTP device.
+        invite:
+          allOf:
+          - $ref: '#/components/schemas/StaffInvite'
+          readOnly: true
       required:
       - created_at
       - display_name
       - email
       - full_name
       - id
+      - invite
       - is_active
       - is_manager
       - last_login_at
       - linked_providers
+      - mfa_enabled
+      - must_change_password
+      - password_changed_at
+    StaffPasswordDeliveryEnum:
+      enum:
+      - temporary_password
+      - email_link
+      - both
+      type: string
+      description: |-
+        * `temporary_password` - temporary_password
+        * `email_link` - email_link
+        * `both` - both
+    StaffPasswordPurposeEnum:
+      enum:
+      - invite
+      - reset
+      type: string
+      description: |-
+        * `invite` - invite
+        * `reset` - reset
+    StaffResetMfaRequest:
+      type: object
+      description: |-
+        ``POST staff/{id}/reset-mfa/`` body (optional): ``reason`` (trimmed, up to 200 characters), kept on
+        the ``auth.mfa_reset`` audit entry.
+      properties:
+        reason:
+          type: string
+          default: ''
+          maxLength: 200
+    StaffResetPasswordRequest:
+      type: object
+      description: '``POST staff/{id}/reset-password/`` body (optional): ``delivery``
+        (default ``temporary_password``).'
+      properties:
+        delivery:
+          allOf:
+          - $ref: '#/components/schemas/StaffPasswordDeliveryEnum'
+          default: temporary_password
+          description: |-
+            `temporary_password` (shown once in the answer), `email_link` (a single-use link to the account's e-mail; no usable password until it is used) or `both`. The e-mail options need `Me.capabilities.staff_email_invite` (else `invalid_choice`).
+
+            * `temporary_password` - temporary_password
+            * `email_link` - email_link
+            * `both` - both
     StatusCounts:
       type: object
       properties:
@@ -24809,7 +26576,8 @@ components:
         phone:
           type: string
           minLength: 1
-          pattern: ^\+998\d{9}$
+          description: An Uzbek mobile number; separators and a missing +998 are accepted
+            and the value is normalised to E.164 (+998XXXXXXXXX).
         label:
           type: string
           maxLength: 60

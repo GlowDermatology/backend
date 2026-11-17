@@ -27,6 +27,7 @@ from glowderma.core.api.exceptions import field_error
 from glowderma.core.api.schema import ADMIN_ERRORS, EXPORT_PARAM
 from glowderma.core.exports import ExportMixin
 from glowderma.core.idempotency import idempotent
+from glowderma.core.uzsource import N_, tr
 from glowderma.professionals import bookings, selectors, services
 from glowderma.professionals.api.admin.serializers import (
     BlockedPeriodCreateSerializer,
@@ -55,7 +56,8 @@ from glowderma.professionals.models import (
     WorkingHoursOverride,
 )
 
-WEEKDAY_SHORT = ("Du", "Se", "Ch", "Pa", "Ju", "Sh", "Ya")
+# Export column "Ish kunlari" (rendered with ``tr`` in the export's language).
+WEEKDAY_SHORT = (N_("Du"), N_("Se"), N_("Ch"), N_("Pa"), N_("Ju"), N_("Sh"), N_("Ya"))
 
 
 def query_params(request: Request) -> dict[str, str]:
@@ -89,7 +91,7 @@ def _professional_or_404(pk: int) -> Professional:
 class SpecialistViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
     serializer_class = ClinicSpecialistSerializer
     queryset = Professional.objects.none()  # the schema's model; rows come from get_queryset
-    export_name = "mutaxassislar"
+    export_name = N_("mutaxassislar")
     export_resource = "specialists"
     export_headers = labels.SPECIALIST_EXPORT_HEADERS
     export_filter_keys = frozenset(SpecialistListQuerySerializer().fields)
@@ -119,10 +121,10 @@ class SpecialistViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet)
             yield (
                 professional.pk,
                 professional.name,
-                labels.SPECIALIST_ROLE[professional.role],
+                labels.text(labels.SPECIALIST_ROLE, professional.role),
                 "" if professional.experience_years is None else professional.experience_years,
                 ", ".join(offered),
-                ", ".join(WEEKDAY_SHORT[row.weekday] for row in week),
+                ", ".join(tr(WEEKDAY_SHORT[row.weekday]) for row in week),
                 upcoming[professional.pk],
                 labels.active_label(professional.is_active),
             )
@@ -349,7 +351,7 @@ class SpecialistBlockViewSet(mixins.ListModelMixin, AdminGenericViewSet):
 class ServiceViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
     serializer_class = ClinicServiceSerializer
     queryset = Service.objects.none()  # the schema's model; rows come from get_queryset
-    export_name = "xizmatlar"
+    export_name = N_("xizmatlar")
     export_resource = "services"
     export_headers = labels.SERVICE_EXPORT_HEADERS
     export_filter_keys = frozenset(ServiceListQuerySerializer().fields)
@@ -365,7 +367,7 @@ class ServiceViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
                 service.pk,
                 service.name_uz,
                 service.short_name_uz,
-                labels.SERVICE_CATEGORY[service.category],
+                labels.text(labels.SERVICE_CATEGORY, service.category),
                 service.default_duration_min,
                 "" if service.default_price is None else service.default_price,
                 int(getattr(service, "specialist_count", 0)),

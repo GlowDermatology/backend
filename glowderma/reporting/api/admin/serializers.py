@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from drf_spectacular.utils import extend_schema_field
@@ -22,8 +23,15 @@ class AuditEntrySerializer(serializers.Serializer[AuditEntry]):
     object_type = serializers.CharField(source="entity_type")
     object_id = serializers.CharField(source="entity_id")
     data = serializers.SerializerMethodField()  # type: ignore[assignment]  # a field, not Serializer.data
-    ip = serializers.IPAddressField(allow_null=True)
+    ip = serializers.SerializerMethodField(
+        help_text="Client IP; null for system rows and always null for ordinary staff (managers and "
+        "superusers see it)."
+    )
     request_id = serializers.CharField()
+
+    def _viewer(self) -> Any:
+        request = self.context.get("request")
+        return getattr(request, "user", None)
 
     @extend_schema_field(ActorSerializer(allow_null=True))
     def get_actor(self, obj: AuditEntry) -> dict[str, Any] | None:
@@ -31,7 +39,15 @@ class AuditEntrySerializer(serializers.Serializer[AuditEntry]):
 
     @extend_schema_field(serializers.JSONField(allow_null=True))
     def get_data(self, obj: AuditEntry) -> Any:
-        return selectors.audit_data(obj)
+        # without a request (no viewer) the data is masked like for ordinary staff: fail closed
+        return selectors.audit_data(obj, self._viewer() or object())
+
+    @extend_schema_field(serializers.IPAddressField(allow_null=True))
+    def get_ip(self, obj: AuditEntry) -> str | None:
+        return selectors.audit_ip(obj, self._viewer() or object())
+
+
+REQUEST_ID_PATTERN = re.compile(r"[A-Za-z0-9-]{8,64}")
 
 
 class AuditLogQuerySerializer(serializers.Serializer[dict[str, Any]]):
@@ -39,9 +55,39 @@ class AuditLogQuerySerializer(serializers.Serializer[dict[str, Any]]):
     action = serializers.CharField(required=False, max_length=100)
     object_type = serializers.CharField(required=False, max_length=100)
     object_id = serializers.CharField(required=False, max_length=254)
+    request_id = serializers.CharField(
+        required=False,
+        help_text="The start of a request id (8–64 characters `A-Z a-z 0-9 -`): entries whose stored "
+        "request id begins with it.",
+    )
     date_from = serializers.DateField(required=False)
     date_to = serializers.DateField(required=False)
     ordering = serializers.ChoiceField(choices=["-at", "at"], required=False, default="-at")
+
+    def validate_request_id(self, value: str) -> str:
+        if REQUEST_ID_PATTERN.fullmatch(value) is None:
+            raise serializers.ValidationError([field_error("invalid")])
+        return value
+
+
+class AuditFacetsSerializer(serializers.Serializer[dict[str, Any]]):
+    """``GET audit-log/facets/``: what the audit log shows the signed-in staff member."""
+
+    tier = serializers.ChoiceField(choices=enums.AuditViewerTier.values)
+    ip_visible = serializers.BooleanField(help_text="Whether `ip` (and network keys in `data`) are shown.")
+    visible_prefixes = serializers.ListField(
+        child=serializers.CharField(),
+        help_text="Action prefixes (the part before the first dot) this viewer sees entries of.",
+    )
+    own_only_prefixes = serializers.ListField(
+        child=serializers.CharField(),
+        help_text="The visible prefixes limited to the viewer's own entries (staff sign-ins, exports); "
+        "`auth` entries written by customers stay visible to everyone.",
+    )
+    hidden_actions = serializers.ListField(
+        child=serializers.CharField(),
+        help_text="Actions hidden although their prefix is visible (operator-only fixes).",
+    )
 
 
 class NavCountsSerializer(serializers.Serializer[dict[str, int]]):

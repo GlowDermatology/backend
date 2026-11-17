@@ -7,12 +7,17 @@ collects the console's messages itself and keeps ``locale/en`` and ``locale/ru``
 A console message is an **Uzbek** msgid from one of four places:
 
 * a marked literal in Python — the first argument of ``_`` / ``gettext`` / ``gettext_lazy`` /
-  ``gettext_noop`` / ``ngettext`` / ``pgettext`` … (:func:`python_messages`, by ``ast``);
+  ``gettext_noop`` / ``ngettext`` / ``pgettext`` … (:func:`python_messages`, by ``ast``), and of ``N_``
+  (``core.uzsource``: the admin API's Uzbek source texts, rendered in the admin panel's language by the
+  error envelope and the export renderer), and of ``NC_`` (its second argument, with the first as the
+  ``msgctxt``: a list-specific export rendering);
 * a ``{% translate %}`` / ``{% blocktranslate %}`` or a ``_("…")`` argument of a template
   (:func:`template_messages`, through Django's own ``templatize``);
 * model metadata made lazy at start-up (``console_i18n.metadata_texts``);
 * a label the console translates when it renders it: the mappings of :mod:`glowderma.core.labels`
-  (:func:`dynamic_texts`) and the field names Django's admin history stores (:func:`history_texts`).
+  (:func:`dynamic_texts`, export headers included: the admin API's exports render them in the panel's
+  language), the admin API's generic messages (``core.api.exceptions.MESSAGES`` / ``FIELD_MESSAGES``,
+  :func:`message_texts`) and the field names Django's admin history stores (:func:`history_texts`).
 
 ``locale/en`` translates exactly these. ``locale/ru`` translates these **and** every English string of Unfold
 and the Django admin that ``locale/uz`` translates (:func:`foreign_messages`): Django falls back from Russian
@@ -51,15 +56,15 @@ PLURAL_FORMS: Final[dict[str, tuple[int, str]]] = {
         "(n % 100 >= 11 && n % 100 <= 14) ? 2 : 3);",
     ),
 }
-SINGULAR: Final = frozenset({"_", "gettext", "gettext_lazy", "gettext_noop"})
+SINGULAR: Final = frozenset({"_", "gettext", "gettext_lazy", "gettext_noop", "N_"})
 PLURAL: Final = frozenset({"ngettext", "ngettext_lazy"})
-CONTEXT: Final = frozenset({"pgettext", "pgettext_lazy"})
+CONTEXT: Final = frozenset({"pgettext", "pgettext_lazy", "NC_"})
 CONTEXT_PLURAL: Final = frozenset({"npgettext", "npgettext_lazy"})
 SKIPPED_PARTS: Final = frozenset({"tests", "migrations", "__pycache__"})
 # Python outside the package that carries console text.
 EXTRA_PYTHON: Final[tuple[str, ...]] = ("config/settings/ops_admin.py",)
-# ``core.labels`` names that never reach a console page (the exports' column headers stay Uzbek).
-UNTRANSLATED_LABELS: Final = re.compile(r"_EXPORT_HEADERS$")
+# The admin API's message tables read as catalog sources (whatever marks their values).
+MESSAGE_TABLES: Final[tuple[str, ...]] = ("MESSAGES", "FIELD_MESSAGES")
 _TEMPLATE_CALL: Final = re.compile(
     r"(?<![\w.])(?P<name>n?p?gettext|_)\(\s*(?P<args>(?:u?(?:'(?:[^'\\]|\\.)*'|\"(?:[^\"\\]|\\.)*\")\s*,?\s*)+)"
 )
@@ -183,7 +188,7 @@ def dynamic_texts() -> dict[str, str]:
     some spell like an interface string ("All", "Order") and would take its catalog entry."""
     found: dict[str, str] = {}
     for name, value in vars(labels).items():
-        if name.startswith("_") or UNTRANSLATED_LABELS.search(name):
+        if name.startswith("_"):
             continue
         source = f"{labels.__name__}.{name}"
         if isinstance(value, dict):
@@ -197,6 +202,20 @@ def dynamic_texts() -> dict[str, str]:
         for text in texts:
             if isinstance(text, str) and text:
                 found.setdefault(text, source)
+    return found
+
+
+def message_texts() -> dict[str, str]:
+    """The admin API's generic messages (``core.api.exceptions.MESSAGES`` and ``FIELD_MESSAGES``), each with
+    where it is defined: the error envelope renders them in the admin panel's language
+    (``core.uzsource.localize_admin_message``)."""
+    from glowderma.core.api import exceptions
+
+    found: dict[str, str] = {}
+    for table in MESSAGE_TABLES:
+        for text in getattr(exceptions, table).values():
+            if isinstance(text, str) and text:
+                found.setdefault(text, f"{exceptions.__name__}.{table}")
     return found
 
 
@@ -237,6 +256,8 @@ def collect() -> Catalog:
     for text in sorted(console_i18n.metadata_texts()):
         catalog.add(Message(text), "model metadata")
     for text, source in dynamic_texts().items():
+        catalog.add(Message(text), source)
+    for text, source in message_texts().items():
         catalog.add(Message(text), source)
     for text, source in history_texts().items():
         catalog.add(Message(text), source)

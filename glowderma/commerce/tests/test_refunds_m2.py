@@ -8,6 +8,8 @@ from typing import Any
 from unittest import mock
 
 import pytest
+from django.db import OperationalError
+from django.db.models.query import QuerySet
 from django.test import override_settings
 from rest_framework.test import APIClient
 
@@ -170,6 +172,8 @@ def test_fake_click_in_production_refuses_resolve_and_retry(staff_client: APICli
         )
     assert resolve.status_code == 409 and resolve.json()["message"] == services.MESSAGE_REFUND_CLICK_FAKE
     assert retry.status_code == 409 and retry.json()["message"] == services.MESSAGE_REFUND_CLICK_FAKE
+    # feat/admin-ux: its own code (``invalid_transition`` before), so the Payments board keeps the dialog open
+    assert resolve.json()["code"] == retry.json()["code"] == "click_fake_mode"
     assert Refund.objects.filter(payment__order=order).count() == 1 and len(fake_click.calls) == calls
 
 
@@ -205,19 +209,23 @@ def test_without_a_paydoc_no_check_and_the_flag_is_required() -> None:
         services.resolve_refund(refund.pk, "succeeded", admin().pk)
     # M3: Click was never asked, so the answer never says "Click has not reversed the payment"
     assert refused.value.detail == services.MESSAGE_REFUND_NO_PAYDOC
+    assert refused.value.get_codes() == services.CODE_CLICK_NO_PAYDOC == "click_no_paydoc"
     assert services.MESSAGE_REFUND_NO_PAYDOC != services.MESSAGE_REFUND_STILL_PAID
     services.resolve_refund(refund.pk, "succeeded", admin().pk, manual_payout=True)
     assert len(fake_click.calls) == calls
 
 
-def test_without_a_paydoc_the_api_answers_409_conflict_with_its_own_message(staff_client: APIClient) -> None:
+def test_without_a_paydoc_the_api_answers_409_click_no_paydoc_with_its_own_message(
+    staff_client: APIClient,
+) -> None:
+    """feat/admin-ux: its own code (``conflict`` before), so the Payments board offers the manual payout."""
     order, refund = _failed()
     Payment.objects.filter(order=order).update(provider_state={})
     calls = len(fake_click.calls)
     response = staff_client.post(_resolve_url(refund), {"state": "succeeded"}, format="json")
     assert response.status_code == 409
     assert (response.json()["code"], response.json()["message"]) == (
-        "conflict",
+        "click_no_paydoc",
         services.MESSAGE_REFUND_NO_PAYDOC,
     )
     assert len(fake_click.calls) == calls
@@ -416,3 +424,74 @@ def test_the_backfill_places_the_reason_of_existing_refunds() -> None:
     assert reasons[recheck.pk] == "fake_mode"
     assert reasons[sent_refund.pk] == ""
     assert payme_order.pk and no_paydoc_order.pk and sent_order.pk
+
+
+class _LockNotAvailable(Exception):
+    sqlstate = services.LOCK_NOT_AVAILABLE
+
+
+@pytest.mark.parametrize(
+    ("language", "busy", "no_paydoc", "fake_mode"),
+    [
+        (
+            "en",
+            "The order is busy with another operation. Try again shortly.",
+            "This payment has no Click payment number, so its status cannot be checked with Click.",
+            "Click is in test mode: the payment status cannot be checked. Resolve once Click is connected.",
+        ),
+        (
+            "ru",
+            "Заказ занят другой операцией. Повторите попытку чуть позже.",
+            "У этого платежа нет номера платежа Click, поэтому проверить его статус в Click нельзя.",
+            "Click в тестовом режиме: проверить статус платежа нельзя. Завершите после подключения Click.",
+        ),
+    ],
+)
+def test_the_payments_board_refusals_have_their_own_codes_in_every_language(
+    staff_client: APIClient, language: str, busy: str, no_paydoc: str, fake_mode: str
+) -> None:
+    """feat/admin-ux: the Payments board branches on ``code`` only — ``order_busy`` (transient),
+    ``click_no_paydoc`` / ``click_not_reversed`` (payout step), ``click_fake_mode`` (dialog stays open); the
+    committed catalogs translate the four messages, HTTP 409 and the Uzbek source text are unchanged."""
+    order, refund = _failed()
+    real_first = QuerySet.first
+
+    def first(self: QuerySet[Any]) -> Any:
+        if self.model is Order and self.query.select_for_update:
+            raise OperationalError("lock timeout") from _LockNotAvailable()
+        return real_first(self)
+
+    with mock.patch.object(QuerySet, "first", first):
+        busy_answer = staff_client.post(
+            _resolve_url(refund),
+            {"state": "succeeded", "manual_payout": True},
+            format="json",
+            HTTP_ACCEPT_LANGUAGE=language,
+        )
+    assert busy_answer.status_code == 409
+    assert (busy_answer.json()["code"], busy_answer.json()["message"]) == ("order_busy", busy)
+    with override_settings(**PROD_FAKE_CLICK):
+        fake = staff_client.post(
+            _resolve_url(refund), {"state": "succeeded"}, format="json", HTTP_ACCEPT_LANGUAGE=language
+        )
+    assert fake.status_code == 409
+    assert (fake.json()["code"], fake.json()["message"]) == ("click_fake_mode", fake_mode)
+    _set_status(order, "paid")
+    still_paid = staff_client.post(
+        _resolve_url(refund), {"state": "succeeded"}, format="json", HTTP_ACCEPT_LANGUAGE=language
+    )
+    assert still_paid.status_code == 409 and still_paid.json()["code"] == "click_not_reversed"
+    assert still_paid.json()["message"] != services.MESSAGE_REFUND_STILL_PAID  # translated
+    Payment.objects.filter(order=order).update(provider_state={})
+    paydoc = staff_client.post(
+        _resolve_url(refund), {"state": "succeeded"}, format="json", HTTP_ACCEPT_LANGUAGE=language
+    )
+    assert paydoc.status_code == 409 and paydoc.json()["code"] == "click_no_paydoc"
+    assert paydoc.json()["message"].startswith(no_paydoc)
+    uzbek = staff_client.post(_resolve_url(refund), {"state": "succeeded"}, format="json")
+    assert (uzbek.json()["code"], uzbek.json()["message"]) == (
+        "click_no_paydoc",
+        services.MESSAGE_REFUND_NO_PAYDOC,
+    )
+    refund.refresh_from_db()
+    assert refund.state == "failed"

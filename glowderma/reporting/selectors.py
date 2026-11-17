@@ -15,7 +15,7 @@ from glowderma.appointments import selectors as appointment_selectors
 from glowderma.catalog import selectors as catalog_selectors
 from glowderma.commerce import delivery_admin
 from glowderma.commerce import selectors as commerce_selectors
-from glowderma.core import enums, timeutils
+from glowderma.core import audit_scopes, enums, timeutils
 from glowderma.core.models import AuditEntry
 from glowderma.core.timeutils import TASHKENT
 from glowderma.delivery import selectors as delivery_selectors
@@ -29,15 +29,22 @@ class AuditLogFilters(TypedDict, total=False):
     action: str
     object_type: str
     object_id: str
+    request_id: str
     date_from: date
     date_to: date
     ordering: str
 
 
-def audit_log(filters: AuditLogFilters) -> QuerySet[AuditEntry]:
-    """``GET audit-log/``: filters ``actor`` (staff id), ``action``, ``object_type``, ``object_id``,
-    ``date_from`` / ``date_to`` (Tashkent days, inclusive); ordering ``-at`` (default) or ``at``."""
+def audit_log(filters: AuditLogFilters, viewer: Any) -> QuerySet[AuditEntry]:
+    """``GET audit-log/`` and its export: the entries ``viewer`` may read (``core.audit_scopes``: tiers by
+    action, ordinary staff see staff sign-ins and exports only when they are their own), filtered by
+    ``actor`` (staff id), ``action``, ``object_type``, ``object_id``, ``request_id`` (prefix of a stored
+    request id), ``date_from`` / ``date_to`` (Tashkent days, inclusive); ordering ``-at`` (default) or ``at``.
+    A filter on something the viewer may not read simply matches nothing."""
     qs = AuditEntry.objects.all()
+    visible = audit_scopes.visible_q(viewer)
+    if visible is not None:
+        qs = qs.filter(visible)
     if "actor" in filters:
         qs = qs.filter(actor_type="staff", actor_id=filters["actor"])
     if "action" in filters:
@@ -46,6 +53,9 @@ def audit_log(filters: AuditLogFilters) -> QuerySet[AuditEntry]:
         qs = qs.filter(entity_type=filters["object_type"])
     if "object_id" in filters:
         qs = qs.filter(entity_id=filters["object_id"])
+    if "request_id" in filters:
+        # ``<> ''`` restates the partial index predicate (core.0014) so the planner may use it
+        qs = qs.filter(~Q(request_id=""), request_id__startswith=filters["request_id"])
     if "date_from" in filters:
         qs = qs.filter(created_at__gte=timeutils.day_bounds(filters["date_from"])[0])
     if "date_to" in filters:
@@ -74,9 +84,24 @@ def audit_actor(entry: AuditEntry) -> dict[str, Any] | None:
     return {"id": entry.actor_id, "display_name": entry.actor_label}
 
 
-def audit_data(entry: AuditEntry) -> Any:
-    """The ``after`` image, else the ``before`` image (contract §7 item 18); ``null`` when neither exists."""
-    return entry.after if entry.after is not None else entry.before
+def audit_data(entry: AuditEntry, viewer: Any = None) -> Any:
+    """The ``after`` image, else the ``before`` image (contract §7 item 18); ``null`` when neither exists.
+    For a viewer who may not see network details its ``ip`` / ``user_agent`` / ``location`` keys are
+    masked (``core.audit_scopes.mask_network``)."""
+    data = entry.after if entry.after is not None else entry.before
+    if viewer is not None and not audit_scopes.ip_visible(viewer):
+        return audit_scopes.mask_network(data)
+    return data
+
+
+def audit_ip(entry: AuditEntry, viewer: Any) -> str | None:
+    """The client IP of the entry, or ``None`` for a viewer who may not see it (ordinary staff)."""
+    return entry.ip if audit_scopes.ip_visible(viewer) else None
+
+
+def audit_facets(viewer: Any) -> dict[str, Any]:
+    """``GET audit-log/facets/``: what the audit log offers ``viewer`` (``core.audit_scopes.facets``)."""
+    return audit_scopes.facets(viewer)
 
 
 def nav_counts() -> dict[str, int]:

@@ -13,14 +13,15 @@ from glowderma.core import enums, timeutils
 from glowderma.core.api.exceptions import field_error
 from glowderma.core.api.fields import AwareDateTimeField, QueryBooleanField
 from glowderma.core.api.serializers import ActorSerializer, CustomerRefSerializer
+from glowderma.core.uzsource import N_
 from glowderma.delivery.models import DeliveryIssue
 from glowderma.payments.api.admin.serializers import PeriodQuerySerializer, RefundSerializer
 
 REASON_MIN_LENGTH = 3
 REASON_MAX_LENGTH = 500
-MESSAGE_REASON = "Sababni kiriting."
-MESSAGE_REASON_MIN = "Kamida 3 ta belgi kiriting."
-MESSAGE_REASON_MAX = "500 belgidan oshmasin."
+MESSAGE_REASON = N_("Sababni kiriting.")
+MESSAGE_REASON_MIN = N_("Kamida 3 ta belgi kiriting.")
+MESSAGE_REASON_MAX = N_("500 belgidan oshmasin.")
 
 # --- shipment union (contract §2.2 table) -------------------------------------------------------------------
 
@@ -322,7 +323,7 @@ class TransitionSerializer(serializers.Serializer[dict[str, Any]]):
     status = serializers.ChoiceField(choices=enums.OrderStatus.values)
 
 
-MESSAGE_CONTENTS_UNVERIFIED = "Jo‘natma tarkibini tekshirganingizni tasdiqlang."
+MESSAGE_CONTENTS_UNVERIFIED = N_("Jo‘natma tarkibini tekshirganingizni tasdiqlang.")
 DISPATCH_WEIGHT_MAX_G = 20_000
 DISPATCH_PRICE_MAX = 100_000_000
 
@@ -382,10 +383,10 @@ class ResolveRefundSerializer(serializers.Serializer[dict[str, Any]]):
 ISSUE_NOTE_MIN_LENGTH = 3
 ISSUE_NOTE_MAX_LENGTH = 1000
 SUSPENSION_NOTE_MAX_LENGTH = 300
-MESSAGE_NOTE = "Izohni kiriting."
-MESSAGE_NOTE_MAX = "1000 belgidan oshmasin."
-MESSAGE_SUSPENSION_NOTE_MAX = "300 belgidan oshmasin."
-MESSAGE_UNTIL_PAST = "Kelajakdagi vaqtni tanlang."
+MESSAGE_NOTE = N_("Izohni kiriting.")
+MESSAGE_NOTE_MAX = N_("1000 belgidan oshmasin.")
+MESSAGE_SUSPENSION_NOTE_MAX = N_("300 belgidan oshmasin.")
+MESSAGE_UNTIL_PAST = N_("Kelajakdagi vaqtni tanlang.")
 
 
 class DeliveryIssueSerializer(serializers.Serializer[DeliveryIssue]):

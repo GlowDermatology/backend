@@ -19,6 +19,7 @@ from django.db.models import F, Q
 
 from glowderma.core import audit, enums, outbox, timeutils
 from glowderma.core.db import PURGEABLE_TABLES, purge_window
+from glowderma.core.uzsource import N_
 from glowderma.integrations.models import IntegrationState, Job, WebhookInbox
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,7 @@ JOB_QUEUED_TOPIC = "job.queued"
 # never wedges the import button.
 STALE_JOB_AFTER = timedelta(minutes=15)
 WORKER_LOST_CODE = "worker_lost"
-WORKER_LOST_MESSAGE = "Jarayon uzilib qoldi. Qayta urinib ko‘ring."
+WORKER_LOST_MESSAGE = N_("Jarayon uzilib qoldi. Qayta urinib ko‘ring.")
 
 
 class JobNotActive(RuntimeError):

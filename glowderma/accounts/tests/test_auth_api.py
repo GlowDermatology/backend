@@ -38,6 +38,10 @@ def test_login_success_returns_tokens_and_audits(user: StaffUser) -> None:
         "linked_providers",
         "session_expires_at",
         "auth_method",
+        "must_change_password",
+        "language",
+        "mfa_enabled",
+        "capabilities",
     }
     assert response.data["user"]["display_name"] == "Administrator"
     assert response.data["user"]["auth_method"] == "password"
@@ -187,7 +191,8 @@ def test_change_password_revokes_other_sessions(
     [
         ("wrong", "Juniper!Harbor-73-new", "current_password", "password_incorrect"),
         (PASSWORD, PASSWORD, "new_password", "password_unchanged"),
-        (PASSWORD, "12", "new_password", "password_too_short"),
+        # never "12": the factory e-mail "staff12@x.uz" makes it "too similar" first
+        (PASSWORD, "Qw", "new_password", "password_too_short"),
     ],
 )
 def test_change_password_field_errors(

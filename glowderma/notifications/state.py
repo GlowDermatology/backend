@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from glowderma.core.api.exceptions import InvalidTransition
+from glowderma.core.uzsource import N_
 from glowderma.notifications.models import Campaign
 
 _S = Campaign.State
@@ -38,15 +39,15 @@ class Transition:
     idempotent_in: frozenset[str] = frozenset()  # repeat → 200 unchanged, no audit
 
 
-MESSAGE_NOT_EDITABLE = "Faqat qoralamani o‘zgartirish mumkin."
-MESSAGE_NOT_DRAFT = "Xabar qoralama holatida emas."
-MESSAGE_NOT_TESTED = "Avval test yuboring va qurilmada ko‘rganingizni tasdiqlang."
-MESSAGE_NOT_APPROVABLE = "Faqat test tasdiqlangan xabarni yuborishga tasdiqlash mumkin."
-MESSAGE_NOT_RETURNABLE = "Faqat rejalashtirilgan yoki bekor qilingan xabarni qoralamaga qaytarish mumkin."
-MESSAGE_CANCEL_DRAFT = "Qoralamani bekor qilish shart emas: uni o‘chiring yoki o‘zgartiring."
-MESSAGE_CANCEL_STARTED = "Yuborish boshlangan: xabarni bekor qilib bo‘lmaydi."
-MESSAGE_NOT_SENDING = "Xabar hozir yuborilmayapti: to‘xtatadigan narsa yo‘q."
-MESSAGE_NOT_DUE = "Xabar hali yuborishga tayyor emas."
+MESSAGE_NOT_EDITABLE = N_("Faqat qoralamani o‘zgartirish mumkin.")
+MESSAGE_NOT_DRAFT = N_("Xabar qoralama holatida emas.")
+MESSAGE_NOT_TESTED = N_("Avval test yuboring va qurilmada ko‘rganingizni tasdiqlang.")
+MESSAGE_NOT_APPROVABLE = N_("Faqat test tasdiqlangan xabarni yuborishga tasdiqlash mumkin.")
+MESSAGE_NOT_RETURNABLE = N_("Faqat rejalashtirilgan yoki bekor qilingan xabarni qoralamaga qaytarish mumkin.")
+MESSAGE_CANCEL_DRAFT = N_("Qoralamani bekor qilish shart emas: uni o‘chiring yoki o‘zgartiring.")
+MESSAGE_CANCEL_STARTED = N_("Yuborish boshlangan: xabarni bekor qilib bo‘lmaydi.")
+MESSAGE_NOT_SENDING = N_("Xabar hozir yuborilmayapti: to‘xtatadigan narsa yo‘q.")
+MESSAGE_NOT_DUE = N_("Xabar hali yuborishga tayyor emas.")
 
 TRANSITIONS: dict[str, Transition] = {
     transition.name: transition
