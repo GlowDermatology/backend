@@ -524,9 +524,15 @@ class CustomerProductImageSerializer(serializers.Serializer[dict[str, Any]]):
     thumbnail_url = serializers.URLField(help_text="400 px WebP variant.")
     medium_url = serializers.URLField(help_text="1000 px WebP variant.")
     position = serializers.IntegerField()
+    alt = serializers.CharField(
+        help_text="Alt text in this language (else Uzbek); without one, the product name."
+    )
 
 
 class ProductDetailSerializer(ProductCardSerializer):
+    short_description = serializers.CharField(
+        help_text='One-paragraph summary in this language (else Uzbek); "" = none.'
+    )
     description = serializers.CharField()
     ingredients = serializers.CharField()
     usage = serializers.CharField()

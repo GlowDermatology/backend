@@ -1,0 +1,9 @@
+{% load i18n %}
+<table class="gd-ai-table" data-testid="ai-budgets">
+    <thead><tr><th>{% translate "Davr" %}</th><th class="num">{% translate "Sarflangan (USD)" %}</th><th class="num">{% translate "Chegara (USD)" %}</th><th class="num">%</th></tr></thead>
+    <tbody>
+        <tr{% if usage.budgets.day.exceeded %} class="gd-ai-over"{% endif %}><td>{% translate "Bugun" %}</td><td class="num">{{ usage.budgets.day.spent|floatformat:4 }}</td><td class="num">{{ usage.budgets.day.limit|floatformat:2 }}</td><td class="num">{{ usage.budgets.day.percent }}</td></tr>
+        <tr{% if usage.budgets.month.exceeded %} class="gd-ai-over"{% endif %}><td>{% translate "Shu oy" %}</td><td class="num">{{ usage.budgets.month.spent|floatformat:4 }}</td><td class="num">{{ usage.budgets.month.limit|floatformat:2 }}</td><td class="num">{{ usage.budgets.month.percent }}</td></tr>
+    </tbody>
+</table>
+<p class="gd-ai-muted">{% blocktranslate trimmed with n=usage.budgets.per_user_daily_jobs %}Bir xodim kuniga {{ n }} tagacha so‘rov yuborishi mumkin.{% endblocktranslate %}</p>

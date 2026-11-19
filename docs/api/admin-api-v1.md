@@ -120,6 +120,12 @@ Collections embedded in a resource (customer ledger and purchases, order items, 
 | 409 | `not_cancellable` | Order cancel refused (§2.2; a Yandex Delivery order also when Yandex refuses, the parcel is delivered or out of sight, §2.18) |
 | 409 | `return_requested` | Yandex Delivery: the cancel of a picked-up order asked Yandex to bring the parcel back (or the request's answer was lost) and Yandex has not shown the return yet; the order is unchanged, retry later — a retry only re-reads, the return is never requested twice (§2.18) |
 | 409 | `coordinates_required` · `method_disabled` · `too_heavy` · `not_configured` · `suspended` · `closed` · `after_cutoff` · `returns_unavailable` | `orders/{id}/dispatch/` refusals: no map pin, the chosen method is off, the parcel is too heavy for the class, the warehouse calendar refuses a courier now (§2.18) |
+| 409 | `product_changed` | feat/ai-assistant, server-internal: applying AI suggestions found a product value changed since the suggestions were generated (§2.3); nothing written — `assistant/jobs/{id}/apply/` never answers it, it lists such keys in `conflicts` (§2.19) "Mahsulot boshqa joyda o‘zgartirildi: sahifani yangilab, qayta urinib ko‘ring." |
+| 409 | `assistant_disabled` | feat/ai-assistant (§2.19): the AI assistant is switched off "AI yordamchi o‘chirilgan." |
+| 409 | `ai_not_configured` | §2.19: the AI provider is disabled or has no active key "AI yordamchi hali sozlanmagan. Administratorga murojaat qiling." |
+| 409 | `assistant_budget_exceeded` | §2.19: today's or this month's AI budget is spent "AI uchun ajratilgan byudjet tugadi. Administratorga murojaat qiling." |
+| 409 | `assistant_job_not_ready` | §2.19: the suggestions are not ready or were already applied / discarded "Bu takliflar hali tayyor emas yoki allaqachon ko‘rib chiqilgan." |
+| 429 | `assistant_daily_limit` | §2.19: the staff member's AI jobs today reached the limit "Bugungi AI so‘rovlari chegarasiga yetdingiz. Ertaga qayta urinib ko‘ring." |
 | 409 | `conflict` | Other state conflicts (category has products, BTS message in flight, last image of an active product, a manager acting on their own account or removing the last active manager (§2.16), …) |
 | 409 | `request_in_progress` | The same `Idempotency-Key` is still executing; `Retry-After: 1` |
 | 413 | `payload_too_large` | Body > 6 MiB |
@@ -211,6 +217,7 @@ The FE creates one key per form/dialog instance (`crypto.randomUUID()`), reuses 
 | `auth/password-token/check/` and `set/` per client IP (feat/admin-ux, `staff_password_token`) | 30/min |
 | `staff/{id}/send-password-link/` per manager and account, `auth/password-link/` per caller (`staff_password_link`) | 5/hour |
 | `auth/mfa/verify/` per client IP (feat/admin-ux, `mfa_verify`) | 30/min |
+| `products/{id}/assistant/jobs/` per staff (feat/ai-assistant, `assistant_generate`) | 30/hour |
 | Admin panel MFA code checks per account (`verify/`, `confirm/`, `disable/`, `recovery-codes/`; LoginGuard scope `panel_otp`) | 5/min, then exponential lockout (1 → 15 min) |
 
 ---
@@ -248,6 +255,7 @@ The FE creates one key per form/dialog instance (`crypto.randomUUID()`), reuses 
 | POST | `products/` | | 201 |
 | PATCH | `products/{id}/` | | 200 |
 | POST | `products/{id}/images/` | multipart | 201 |
+| PATCH | `products/{id}/images/{image_id}/` (feat/ai-assistant: alt text) | | 200 |
 | DELETE | `products/{id}/images/{image_id}/` | | 204 |
 | PUT | `products/{id}/images/order/` | | 200 |
 | POST | `integrations/billz/import/` | | 202 |
@@ -304,6 +312,10 @@ The FE creates one key per form/dialog instance (`crypto.randomUUID()`), reuses 
 | GET / POST | `services/` | P E / – | 200 / 201 |
 | GET / PATCH | `services/{id}/` | | 200 |
 | GET / PATCH | `location/` | | 200 |
+| GET | `assistant/status/` (feat/ai-assistant, §2.19) | | 200 |
+| POST | `products/{id}/assistant/jobs/` (§2.19; throttle `assistant_generate`) | I optional | 202 / 200 |
+| GET | `assistant/jobs/{id}/` (§2.19) | | 200 |
+| POST | `assistant/jobs/{id}/apply/`, `assistant/jobs/{id}/discard/` (§2.19) | I optional | 200 |
 | GET | `/api/v1/health/` | no auth | 200 / 503 |
 
 Shared shapes: `Actor` = `{"id": int, "display_name": str}`, where `display_name` is the staff full name, else the email. `null` actor means system. `CustomerRef` = `{"id": int, "name": str, "phone": str | null, "email": str | null}`; `name` is `""` once the customer is deleted (scrubbed); `phone` is null only for an account without a phone yet (hybrid identity: never on orders and payments, which are phone-gated; a staff booking may name one); `email` (additive, `feat/customer-web`) is the verified e-mail address, null without one or once deleted — show it (or the name) instead of "—" for a phoneless customer. Both are single OpenAPI components (`Actor`, `CustomerRef`) used by every module (orders, payments, appointments).
@@ -550,15 +562,17 @@ A Yandex Delivery shipment (§2.18) keeps this union BTS-shaped: `not_created` u
  "price": 185000, "billz_price": 185000,     // price = admin (authoritative); billz_price read-only | null
  "stock": 12,                                // Billz-owned, read-only
  "promo": false, "status": "active", "is_new_from_billz": false,
- "texts": {"uz": {"name": "Gialuron kislotali serum", "description": "…", "ingredients": "…", "usage": "…"},
-           "ru": {"name": "…", "description": "…", "ingredients": "…", "usage": "…"},
-           "en": {"name": "", "description": "", "ingredients": "", "usage": ""}},
+ "texts": {"uz": {"name": "Gialuron kislotali serum", "short_description": "…",   // feat/ai-assistant: short_description
+                  "description": "…", "ingredients": "…", "usage": "…"},
+           "ru": {"name": "…", "short_description": "…", "description": "…", "ingredients": "…", "usage": "…"},
+           "en": {"name": "", "short_description": "", "description": "", "ingredients": "", "usage": ""}},
  "main_image_url": "https://media.example.uz/products/1/9f2c.webp",   // = images[0].url | null
  "main_image_thumbnail_url": "https://media.example.uz/products/1/9f2c_400.webp",   // §1.4 image variants
  "main_image_medium_url": "https://media.example.uz/products/1/9f2c_1000.webp",
  "images": [{"id": 31, "url": "https://media.example.uz/products/1/9f2c.webp",
              "thumbnail_url": "https://media.example.uz/products/1/9f2c_400.webp",
-             "medium_url": "https://media.example.uz/products/1/9f2c_1000.webp", "position": 0}],
+             "medium_url": "https://media.example.uz/products/1/9f2c_1000.webp", "position": 0,
+             "alt": {"uz": "", "ru": "", "en": ""}}],   // feat/ai-assistant: alt text ≤160 per language; "" = the product name
  "last_change": {"at": "2026-10-22T18:04:00+05:00", "actor": {"id": 1, "display_name": "Administrator"},
                  "kind": "price_changed", "old_price": 175000, "new_price": 185000},   // null if never edited
  "slug": "gialuron-kislotali-serum",          // B-W1: the website URL segment (unique, never only digits)
@@ -596,6 +610,7 @@ A Yandex Delivery shipment (§2.18) keeps this union BTS-shaped: `not_created` u
 | `billz_id` | Required on create. `^\d{6,14}$` (`invalid` "Billz ID yoki shtrix-kod 6–14 ta raqamdan iborat bo‘lsin."); `unique` "Bu Billz ID bilan mahsulot allaqachon bor."; must exist in Billz (`billz_not_found` "Billz’da bunday mahsulot topilmadi."). Setting or changing it refreshes `billz_name`, `volume` (only when Billz provides one: with live Billz and no `BILLZ_VOLUME_FIELD` the stored volume is kept), `stock` and `billz_price`. M3: the create, and a PATCH that sets or changes `billz_id`, ask live Billz for the product (bounded to about 25 s); when Billz, its shared cache or the answer fails → 503 `provider_unavailable` "Tashqi xizmat javob bermadi. Qayta urinib ko‘ring." and nothing is written (safe to retry with the same `Idempotency-Key`); every other PATCH never calls Billz. M2: while the Billz port is fake under the production settings (customer contract §2.3, §6.14) a create, or a PATCH that sets or changes `billz_id`, answers 409 `conflict` "Billz sinov rejimida: Billz ma’lumotlarini olib bo‘lmaydi. Billz ulanganidan keyin qayta urinib ko‘ring." (nothing written; a fake must never invent Billz fields or stock); every other PATCH works as usual. |
 | `texts.uz.name` | Trimmed 2..120 (`min_length` "O‘zbekcha nomni kiriting (kamida 2 belgi).", `max_length` "120 belgidan oshmasin.") |
 | `texts.*.description`, `texts.*.ingredients` / `texts.*.usage` / `texts.ru.name`, `texts.en.name` | ≤2000 / ≤1000 / ≤120 ("{n} belgidan oshmasin."). Missing on create → `""`. |
+| `texts.*.short_description` (feat/ai-assistant) | ≤300 (`max_length`); missing on create → `""`. A one-paragraph summary under the name; the customer API shows it in `ProductDetail.short_description` |
 | `price` | int 1000..100000000 (`min_value` "Narx kamida 1 000 so‘m bo‘lsin.", `max_value` "Narx juda katta.") |
 | `category` | slug or `null`; an unknown slug → `does_not_exist` |
 | `promo` | bool, default `false` |
@@ -607,8 +622,9 @@ A Yandex Delivery shipment (§2.18) keeps this union BTS-shaped: `not_created` u
 - Every successful create or PATCH sets `is_new_from_billz=false`.
 - Responses of `POST products/` and `PATCH products/{id}/`: 201/200 `Product`, 400 `validation_error`, 404 (PATCH), 409 `conflict` (fake Billz in production), 503 `provider_unavailable` (the Billz lookup above).
 - `last_change.kind` is chosen by priority: `created` > `price_changed` > `activated`/`hidden` > `promo_added`/`promo_removed` > `updated`. Image calls do not change `last_change`.
-- Audit `product.created` / `product.updated` (field diff; B-W1 adds `slug` and `seo.<lang>.<title|description>` leaves).
-- **«SEO holati» checklist** (B-W1, `catalog.seo`, server-computed on every Product, no extra query): errors — `name_missing` (uz), `description_missing` (uz), `images_missing`; warnings — `name_translation_missing` (ru/en), `description_missing` (ru/en), `description_short` (<80), `alt_text_fallback` (images but no uz name: alt text falls back to the Billz name), `category_missing`, `seo_title_short` (<15) / `seo_title_long` (>60), `seo_description_short` (<50) / `seo_description_long` (>160); hints (`info`) — `seo_title_missing`, `seo_description_missing` (the website builds a fallback). Messages are Uzbek; ordered errors → warnings → hints.
+- Audit `product.created` / `product.updated` (field diff; B-W1 adds `slug` and `seo.<lang>.<title|description>` leaves; feat/ai-assistant adds `texts.<lang>.short_description` and `images.<image_id>.alt.<lang>` leaves).
+- **Concurrent change (feat/ai-assistant, server-internal):** the AI assistant's apply (§2.19) writes through the same service with the values it read at generation time; under the product row lock any of them that changed meanwhile → 409 `product_changed` "Mahsulot boshqa joyda o‘zgartirildi: sahifani yangilab, qayta urinib ko‘ring." and nothing is written. A plain `PATCH products/{id}/` never answers it.
+- **«SEO holati» checklist** (B-W1, `catalog.seo`, server-computed on every Product, no extra query): errors — `name_missing` (uz), `description_missing` (uz), `images_missing`; warnings — `name_translation_missing` (ru/en), `description_missing` (ru/en), `description_short` (<80), `alt_text_fallback` (an image without its own uz alt text and no uz name: alt text falls back to the Billz name), `category_missing`, `seo_title_short` (<15) / `seo_title_long` (>60), `seo_description_short` (<50) / `seo_description_long` (>160); hints (`info`) — `seo_title_missing`, `seo_description_missing` (the website builds a fallback). Messages are Uzbek; ordered errors → warnings → hints.
 
 - PATCH request shape: every field optional and `texts` merged leaf by leaf — any subset of languages and leaves (OpenAPI `PatchedProductPatchRequest`).
 
@@ -618,6 +634,8 @@ A Yandex Delivery shipment (§2.18) keeps this union BTS-shaped: `not_created` u
 - Limits: ≤5 MiB (field `file`, `file_too_large`); must decode in Pillow as JPEG, PNG or WebP (field `file`, `unsupported_image`; a missing part → `file` `required`); ≤8 images per product (field `images`, `max_items` "Ko‘pi bilan 8 ta rasm.").
 - The file is re-encoded in the same format, EXIF stripped, longest side ≤2400 px, and appended last.
 - Audit `product.image_added`.
+
+**`PATCH products/{id}/images/{image_id}/`** (feat/ai-assistant; JSON) Body `{"alt": {"uz"?: str, "ru"?: str, "en"?: str}}` — each leaf ≤160 (`max_length`), trimmed, merged leaf by leaf; `""` clears it (the website then uses the product name) → 200 `ProductImage`. 404 if the image belongs to another product. Like the other image calls it moves `updated_at` but not `last_change`. Audit `product.image_updated` (changed `images.<image_id>.alt.<lang>` leaves; nothing changed → no row).
 
 **`DELETE products/{id}/images/{image_id}/`** → 204; positions are compacted. 409 `conflict` "Faol mahsulotda kamida bitta rasm bo‘lsin." for the last image of an active product. 404 if the image belongs to another product.
 
@@ -1638,6 +1656,115 @@ Mounted only under the local/test settings (`DEV_FEATURES_ALLOWED`) with `YANDEX
 otherwise), staff auth, not in the OpenAPI document; the admin panel's mock tools and the e2e suites drive the fake
 courier with it.
 
+### 2.19 AI assistant (feat/ai-assistant)
+The product editor's "✨ AI yordamchi": suggestions for missing or chosen product texts, SEO and image alt texts in
+uz / ru / en, generated asynchronously and **never written until a person applies them**. Any active staff member
+(the people who may edit products) may use it; the provider, model, API key (Vault KV v2), prompts, budgets and
+limits are managed by superusers in the ops console only. Responses never carry tokens, costs, model ids, prompts,
+provider errors or the key.
+
+**Keys.** Every target is a product snapshot key (§2.3 audit vocabulary): `texts.<lang>.<field>` (`name`,
+`short_description`, `description`, `ingredients`, `usage`), `seo.<lang>.<title|description>` and
+`images.<image_id>.alt.<lang>`. Nothing else can be targeted or written (never `slug`, price, status, promo,
+category, Billz fields, volume or stock).
+
+**`GET assistant/status/`** → `{"enabled": bool, "max_images": int}` — `enabled` = switched on in the console
+and its provider ready; the editor shows the button only then.
+
+**`POST products/{id}/assistant/jobs/`** (optional `Idempotency-Key`; throttle `assistant_generate`, §1.9)
+```jsonc
+{"mode": "fill_missing",          // AssistantMode: fill_missing (default) | languages | improve | photos ("test" → 400)
+ "languages": ["uz", "ru", "en"], // optional, default all three
+ "keys": [],                      // optional: narrows the automatic choice; required (non-empty keys) for improve
+ "goal": "professional",          // AssistantImproveGoal, improve only (default professional)
+ "image_ids": []}                 // photos only: the product's images to read (default: the first max_images)
+```
+Modes: **fill_missing** — only empty keys; `name`, `ingredients` and `usage` only when the same field is filled in
+another language (translated, never invented); the rest written from the product data. **languages** — only
+empty keys whose field is filled in another language (localisation). **improve** — only the chosen keys that are
+filled; suggestions never replace anything by themselves. **photos** — `name`, `ingredients`, `usage` of the chosen
+languages read from the packaging; every suggestion starts unchecked with warning `confirm_packaging`; the brand and
+volume read are information only (`result.warnings` item `{"code": "extracted", "brand"?, "volume"?}`).
+- 202 `{"nothing_to_fill": false, "job": AssistantJob}` — queued.
+- 200 `{"nothing_to_fill": false, "job": AssistantJob}` — the product already has a queued/running job (one per
+  product); it is returned instead of a second one.
+- 200 `{"nothing_to_fill": true, "job": null}` — the mode found no key to suggest (no job, no cost).
+- 400 `validation_error`: `mode` `invalid_choice` ("Bu rejim faqat boshqaruv konsolida ishlatiladi." for `test`),
+  `languages.<i>` `invalid_choice`, `keys.<i>` `invalid` "Bu maydonni AI to‘ldira olmaydi.", `keys` `required` /
+  `invalid` "Yaxshilash uchun kamida bitta to‘ldirilgan maydonni tanlang." (improve), `image_ids` `invalid`
+  "Mahsulotda rasm yo‘q." (photos without an image) or `invalid` (an image of another product), `goal`
+  `invalid_choice`.
+- 404 unknown product. 409 `assistant_disabled` "AI yordamchi o‘chirilgan."; 409 `ai_not_configured` "AI yordamchi
+  hali sozlanmagan. Administratorga murojaat qiling." (provider disabled or no active key); 409
+  `assistant_budget_exceeded` "AI uchun ajratilgan byudjet tugadi. Administratorga murojaat qiling." (today's or this
+  month's spend reached the console budget, Tashkent days); 429 `assistant_daily_limit` "Bugungi AI so‘rovlari
+  chegarasiga yetdingiz. Ertaga qayta urinib ko‘ring." (the person's jobs today reached the console limit); 429
+  `throttled`.
+
+**`GET assistant/jobs/{id}/`** → `AssistantJob` (poll like §2.14: `state` `queued|running|succeeded|failed`)
+```jsonc
+{"id": 41, "product_id": 12, "mode": "fill_missing", "languages": ["uz", "ru", "en"],
+ "keys": ["texts.ru.name", "seo.ru.title"],        // the job's target keys
+ "goal": "", "image_ids": [],
+ "state": "succeeded", "outcome": "pending",        // AssistantJobOutcome: pending | applied | partial | discarded
+ "progress": null,                                  // always null
+ "result": {                                        // null unless succeeded
+   "suggestions": [
+     {"key": "texts.ru.name", "current": "", "suggested": "Сыворотка с гиалуроновой кислотой",
+      "warnings": [],               // unsupported_claim | inci_mismatch | confirm_packaging | seo_title_long | seo_description_long
+      "origin": "ai",               // ai | image (photos)
+      "checked": true,              // pre-selected in the review; false for photos and unsupported_claim
+      "max_length": 120}],
+   "warnings": [{"code": "rejected", "key": "texts.ru.description", "reason": "unsupported_number"},
+                {"code": "dropped", "count": 1}]},  // reasons: too_long | unsupported_number | unsupported_spf | empty
+ "error": null,                                     // failed: {"code", "message"} (table below), message in the request language
+ "applied_keys": [],
+ "created_at": "…", "started_at": "…", "finished_at": "…",
+ "created_by": {"id": 1, "display_name": "Administrator"}}
+```
+- Only keys with a suggestion are listed; a suggestion equal to the current value is not. A value with a number,
+  percentage or SPF that the product data does not contain is **rejected** (listed in `result.warnings`, never
+  suggested; photos excepted, they read new facts from the label); a certification / clinical / medical term the
+  data does not contain is **flagged** (`unsupported_claim`, unchecked).
+- 404 unknown id (ops-console prompt tests are not served here).
+
+| `error.code` | `error.message` | When |
+|---|---|---|
+| `provider_unavailable` | "Tashqi xizmat javob bermadi. Qayta urinib ko‘ring." | The provider timed out / 429 / 5xx after its bounded retries, or the run ran out of time (90 s) |
+| `ai_bad_output` | "AI javobini tushunib bo‘lmadi. Qayta urinib ko‘ring." | The answer was malformed twice (one retry) |
+| `ai_refused` | "AI bu so‘rovni bajarmadi. Ma’lumotlarni tekshirib, qayta urinib ko‘ring." | The provider refused the request (safety block, invalid request) |
+| `ai_not_configured` | "AI yordamchi hali sozlanmagan. Administratorga murojaat qiling." | No active key, the key was rejected, the stored version is gone, or the provider was disabled |
+| `vault_unavailable` | "AI xizmati vaqtincha ishlamayapti. Birozdan so‘ng qayta urinib ko‘ring." | The key could not be read from Vault |
+| `assistant_disabled` | "AI yordamchi o‘chirilgan." | Switched off after the job was queued |
+| `not_found` | "Topilmadi." | The product was deleted before the run |
+| `worker_lost` | "Jarayon uzilib qoldi. Qayta urinib ko‘ring." | No heartbeat for 5 minutes, or still queued 5 minutes after creation (beat `assistant.reap_stale_jobs`, every 2 minutes) |
+| `server_error` | "Kutilmagan xato." | An unexpected error in the worker |
+
+**`POST assistant/jobs/{id}/apply/`** (optional `Idempotency-Key`) Body
+`{"items": [{"key": "texts.ru.name", "value": "Сыворотка"}, …]}` (1–120 items; `value` may be the edited
+suggestion) → 200
+```jsonc
+{"job": AssistantJob,                  // outcome applied (no conflict) | partial (some conflicts) | pending (nothing applied)
+ "applied": ["texts.ru.name"],
+ "conflicts": ["texts.en.name"],       // the product value changed since the generation: not written
+ "product": Product}                   // §2.3, after the write (re-base the editor on it)
+```
+- Each value is trimmed, Uzbek apostrophes normalised (o‘ / g‘ U+2018, tutuq belgisi U+2019) and checked again:
+  400 `items.<i>.value` `max_length` (the field's §2.3 limit), `blank`, or `invalid` "Mahsulot ma’lumotlarida yo‘q
+  raqam yoki da’vo bor: matnni tekshiring."; `items.<i>.key` `invalid` "Bu maydon uchun taklif yo‘q." (not one of
+  the job's suggestions); `items` `max_items` / empty.
+- Written through `PATCH products/{id}/`'s service in one transaction with the values seen at generation as the
+  expectation (§2.3 "Concurrent change"): changed keys become `conflicts`, the others are written (one
+  `product.updated` audit row) — never a silent overwrite.
+- 409 `assistant_job_not_ready` "Bu takliflar hali tayyor emas yoki allaqachon ko‘rib chiqilgan." unless the job
+  succeeded and its outcome is `pending` (a review is applied or discarded once). 404 unknown id.
+
+**`POST assistant/jobs/{id}/discard/`** (optional `Idempotency-Key`, no body) → 200 `AssistantJob` (outcome
+`discarded`); 409 `assistant_job_not_ready` as above.
+
+Audit: `assistant.suggestions_applied` (entity `product`; `{job_id, applied, conflicts}`) and
+`assistant.suggestions_discarded` (`{job_id, suggestions}`), plus the usual `product.updated` of the write.
+
 ---
 
 ## 3. Enumerations
@@ -1694,6 +1821,9 @@ courier with it.
 | DashboardRange / Bucket | `today`, `week`, `month`, `custom` / `hour`, `day` | |
 | JobKind / JobState | `billz_import` / `queued`, `running`, `succeeded`, `failed` | |
 | BillzImportMode | `delta`, `full` | |
+| AssistantMode (feat/ai-assistant) | `fill_missing`, `languages`, `improve`, `photos`, `test` (`test` = an ops-console prompt test; refused by the admin API) | §2.19 |
+| AssistantJobOutcome | `pending`, `applied`, `partial`, `discarded` | §2.19 |
+| AssistantImproveGoal | `professional`, `clear`, `natural`, `seo`, `shorter` | §2.19 `goal` |
 | SessionRevokeReason | `logout`, `expired`, `password_changed`, `deactivated`, `replaced`, `admin_revoked`, `refresh_reused` (M2: a customer refresh token came back after its rotation, customer contract §2.1.6) | AuthSession, audit |
 | LogoutScope | `current`, `others`, `all` | `auth/logout/` |
 | ExportFormat | `csv`, `xlsx` | |
@@ -1717,7 +1847,8 @@ and the hand-run fixes listed in rule 1 are superuser-only; `staff.*` is manager
 | System | `outbox.dead` (`{topic, dedupe_key, attempts, last_error}`), `outbox.requeued` (M3, actor `system`, reason "manage.py requeue_outbox"; before `{status, attempts, last_error}`, after `{topic, dedupe_key, status: "pending"}`), `outbox.resolved` (M3, `requeue_outbox --resolved`: a dead message handled by hand is closed as `done` without running it — a `billz.push_sale` only once its sale is recorded with `billz_mark_recorded`; reason "manage.py requeue_outbox --resolved", before as above, after `{topic, dedupe_key, status: "done"}`); `billz.sale_recorded_by_hand` (M3, entity `order`, actor = the staff member named by `manage.py billz_mark_recorded --actor`, reason "manage.py billz_mark_recorded"; before `{purchase_id, billz_sale_id, billz_pushed_at: null, billz_payment_attempted_at, push_status}`, after `{purchase_id, billz_sale_id, billz_sale_ref, billz_pushed_at}`), `billz.payment_attempt_forgotten` (M3, entity `order`, actor = `requeue_outbox --forget-payment-attempt --actor`, reason "manage.py requeue_outbox --forget-payment-attempt"; before `{purchase_id, billz_sale_id, billz_payment_attempted_at}`, after `{purchase_id, billz_payment_attempted_at: null}`) |
 | Orders | `order.cancelled`, `order.status_changed`, `order.shipment_retry_requested`, `refund.requested`, `refund.state_changed` (system) |
 | Yandex Delivery (§2.18) | `order.dispatch_requested` (`{claim_number, request_id, method, taxi_class, weight_g, approved_price}`), `order.carrier_cancel` (`{outcome, claim_number, cancel_state?, cancel_fee?, status?, error_code?}`; outcomes `withdrawn`, `cancelled`, `already_cancelled`, `already_finished`, `returning`, `already_returning`, `return_requested`, `cancel_pending`, `refused`, `unavailable`, `unavailable_terms`, `return_refused`, `delivered`, `parcel_out`, `no_point`), `order.return_confirmed` (`{claim_number, order_status, note}`) — entity `order`; `delivery.issue_opened` (staff incident), `delivery.issue_resolved` — entity `delivery_issue`; ops console and panel switch: `delivery.settings_updated` (changed columns `{from, to}`; the warehouse address and contacts as `{changed: true}`), `delivery.suspension_updated`, `delivery.hours_saved`, `delivery.hours_deleted`, `delivery.closure_saved`, `delivery.closure_deleted`, `delivery.tariffs_checked` (entity `integration` / `yandex`: mode, classes or error code) |
-| Catalog | `product.created`, `product.updated`, `product.image_added`, `product.image_deleted`, `product.images_reordered`, `billz.import_started`, `billz.import_finished`, `category.created`, `category.updated`, `category.deleted`, `category.reordered`, `banner.created`, `banner.updated`, `banner.deleted`, `banner.reordered`. Gap closure (catalog): the `category.*` snapshot carries `image` (file name or `null`), the `banner.*` snapshot `link.url`, `notification.created` `link_url`; no new action |
+| Catalog | `product.created`, `product.updated`, `product.image_added`, `product.image_deleted`, `product.images_reordered`, `product.image_updated` (feat/ai-assistant: alt texts), `billz.import_started`, `billz.import_finished`, `category.created`, `category.updated`, `category.deleted`, `category.reordered`, `banner.created`, `banner.updated`, `banner.deleted`, `banner.reordered`. Gap closure (catalog): the `category.*` snapshot carries `image` (file name or `null`), the `banner.*` snapshot `link.url`, `notification.created` `link_url`; no new action |
+| AI assistant (feat/ai-assistant, §2.19; prefix `assistant`, business tier) | Admin API: `assistant.suggestions_applied` (entity `product`; `{job_id, applied, conflicts}`), `assistant.suggestions_discarded` (`{job_id, suggestions}`). Ops console (superusers; metadata only, never a key): `assistant.settings_updated`, `assistant.provider_updated`, `assistant.credential_pending`, `assistant.credential_rotated`, `assistant.credential_rejected`, `assistant.credential_tested`, `assistant.credential_rolled_back`, `assistant.prompt_draft_created`, `assistant.prompt_draft_updated`, `assistant.prompt_test_started`, `assistant.prompt_activated`, `assistant.prompt_rolled_back` |
 | Loyalty | `cashback.adjusted`, `cashback.policy_version_created`, `cashback.policy_version_superseded`. Gap CB-9.2.4: migration `loyalty.0006` writes one `cashback.policy_version_created` (actor `system`, reason "migration loyalty.0006: first cashback policy with the L1–L3 defaults", the service's data shape) when it creates the install's first policy. That v1's `created_at` (2026-05-20 10:00) and `effective_from` (2026-06-01 00:00, Tashkent) are fixed placeholder instants, not the deploy time (GS-6) |
 | Notifications | `notification.created`, `notification.draft_updated`, `notification.draft_deleted`, `notification.test_sent` (`{revision, tests[]}`), `notification.test_confirmed`, `notification.approved` (`{approved_revision, dispatch_after, …}`), `notification.returned_to_draft`, `notification.cancelled` (M3; before `{state: "scheduled", scheduled_at, dispatch_after}`, after `{state: "cancelled", cancelled_at}`), `notification.send_started` (system), `notification.stop_requested`, `notification.stopped` (system), `notification.failed` (system; a dead `campaign.send_batch`), `test_device.registered`, `test_device.removed`, `notification_template.updated`, `segment.created`, `segment.updated`, `segment.deleted`, `segment.members_added`, `segment.member_removed`, `notification.push_dead` (system; a dead `push.order_status` / `push.appointment` / `campaign.send_batch` message: `{topic, dedupe_key, attempts, last_error, customer_id, campaign_id}`) |
 | Appointments | `appointment.confirmed`, `appointment.rejected`, `appointment.attended`, `appointment.created`, `appointment.rescheduled` (`{…, from_start, from_end, reschedule_no}`), `appointment.cancelled` (`{…, reason}`) |

@@ -46,6 +46,8 @@ DEFAULT_THROTTLE_RATES: Final[dict[str, str]] = {
     "staff_password_link": "5/hour",
     # feat/admin-ux panel MFA: the public auth/mfa/verify/ per client IP.
     "mfa_verify": "30/min",
+    # feat/ai-assistant: products/{id}/assistant/jobs/ per staff (each call may reach the paid AI provider)
+    "assistant_generate": "30/hour",
 }
 
 # DRF ``SimpleRateThrottle.parse_rate``: "<requests>/<period>" where the period's first letter is one of

@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     "glowderma.delivery",
     "glowderma.commerce",
     "glowderma.appointments",
+    "glowderma.assistant",
     "glowderma.notifications",
     "glowderma.customers",
     "glowderma.reporting",
@@ -305,6 +306,11 @@ def logging_config(app_level: str) -> dict[str, Any]:
             # GET /v1/client?phone_number=…), so its request lines never reach the logs.
             "httpx": {"level": "WARNING"},
             "httpcore": {"level": "WARNING"},
+            # google-genai logs each retry at INFO with the provider's error body (it can echo request
+            # content); only its warnings and errors reach the logs (AI assistant)
+            "google_genai": {"level": "WARNING"},
+            "httpx2": {"level": "WARNING"},
+            "httpcore2": {"level": "WARNING"},
         },
     }
 
@@ -750,6 +756,31 @@ _pilot_ids = env_list("YANDEX_DELIVERY_PILOT_CUSTOMER_IDS", [])
 if not all(re.fullmatch(r"[1-9][0-9]{0,17}", value) for value in _pilot_ids):
     raise ImproperlyConfigured("YANDEX_DELIVERY_PILOT_CUSTOMER_IDS must be comma separated customer ids")
 YANDEX_DELIVERY_PILOT_CUSTOMER_IDS: list[int] = [int(value) for value in _pilot_ids]
+# AI product content assistant (glowderma.assistant; docs/ops/ai-assistant.md). AI_MODE fake | live selects
+# the content-model adapter (integrations.llm; live = Google Gemini through google-genai, the model and its
+# parameters live in the ops console). VAULT_MODE fake | live selects the KV v2 store of the provider API
+# keys (integrations.vault): live calls a local Vault Agent api_proxy at VAULT_PROXY_URL that adds its own
+# token (Django never holds one). Keys live at <VAULT_KV_MOUNT>/data/<VAULT_AI_PREFIX>/<provider>; a worker
+# caches the active key version for AI_KEY_CACHE_SECONDS (the version number is the cache key, so a rotation
+# is seen by every worker on its next job). Both modes default to fake (not INTEGRATIONS_MODE: a deployment
+# without the Vault agents keeps booting); their fakes are refused when used under the production settings
+# (ai_not_configured), so the assistant stays unavailable there until both are live.
+AI_MODE = env_str("AI_MODE", "fake").strip()
+VAULT_MODE = env_str("VAULT_MODE", "fake").strip()
+for _name, _value in (("AI_MODE", AI_MODE), ("VAULT_MODE", VAULT_MODE)):
+    if _value not in {"fake", "live"}:
+        raise ImproperlyConfigured(f"{_name} must be 'fake' or 'live'")
+VAULT_PROXY_URL = env_value("VAULT_PROXY_URL", "").rstrip("/")
+if VAULT_PROXY_URL:
+    _vault = urlsplit(VAULT_PROXY_URL)
+    if _vault.scheme not in {"http", "https"} or not _vault.netloc or _vault.query or _vault.fragment:
+        raise ImproperlyConfigured("VAULT_PROXY_URL must be an absolute http(s) URL without a query")
+VAULT_KV_MOUNT = env_value("VAULT_KV_MOUNT", "secret").strip("/")
+VAULT_AI_PREFIX = env_value("VAULT_AI_PREFIX", "local/ai").strip("/")
+for _name, _value in (("VAULT_KV_MOUNT", VAULT_KV_MOUNT), ("VAULT_AI_PREFIX", VAULT_AI_PREFIX)):
+    if not re.fullmatch(r"[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*", _value):
+        raise ImproperlyConfigured(f"{_name} must be a Vault path of letters, digits, '_', '-' and '/'")
+AI_KEY_CACHE_SECONDS = env_bounded_int("AI_KEY_CACHE_SECONDS", 300, minimum=0, maximum=3600)
 # FCM live adapter (M3): HTTP v1 over httpx with a service-account JWT.
 FCM_PROJECT_ID = env_value("FCM_PROJECT_ID", "")
 FCM_CREDENTIALS_FILE = env_value("FCM_CREDENTIALS_FILE", "")

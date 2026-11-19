@@ -1,0 +1,39 @@
+{% extends "assistant/console/base.html" %}
+{% load i18n %}
+
+{% block page %}
+<div class="gd-ai-headrow">
+    <h2 class="gd-ai-h">{% blocktranslate with id=job.pk %}So‘rov #{{ id }}{% endblocktranslate %}</h2>
+    <a class="gd-ai-link" href="{% url 'admin:assistant_jobs' %}">{% translate "Barcha so‘rovlar" %}</a>
+</div>
+<div class="gd-ai-grid">
+    <section class="gd-ai-card">
+        <dl class="gd-ai-dl">
+            <dt>{% translate "Rejim" %}</dt><dd>{{ mode_label }}</dd>
+            <dt>{% translate "Holat" %}</dt><dd>{{ state_label }}{% if job.error_code %} · <code>{{ job.error_code }}</code>{% endif %}</dd>
+            <dt>{% translate "Natija" %}</dt><dd>{{ outcome_label }}</dd>
+            <dt>{% translate "Xodim" %}</dt><dd>{{ created_by }}</dd>
+            <dt>{% translate "Mahsulot" %}</dt><dd>{% if job.product_id %}<a class="gd-ai-link" href="{% url 'admin:catalog_product_change' job.product_id %}">#{{ job.product_id }}</a>{% else %}-{% endif %}</dd>
+            <dt>{% translate "Tillar" %}</dt><dd>{{ job.languages|join:", "|default:"-" }}</dd>
+            <dt>{% translate "Yaratilgan" %}</dt><dd>{{ job.created_at|date:"d.m.Y H:i:s" }}</dd>
+            <dt>{% translate "Tugagan" %}</dt><dd>{% if job.finished_at %}{{ job.finished_at|date:"d.m.Y H:i:s" }}{% else %}-{% endif %}</dd>
+            <dt>{% translate "Qo‘llagan" %}</dt><dd>{% if job.applied_at %}{{ job.applied_at|date:"d.m.Y H:i" }} · {{ applied_by }}{% else %}-{% endif %}</dd>
+        </dl>
+    </section>
+    <section class="gd-ai-card">
+        <dl class="gd-ai-dl">
+            <dt>{% translate "Provayder" %}</dt><dd>{{ job.provider|default:"-" }}</dd>
+            <dt>{% translate "Model" %}</dt><dd><code>{{ job.model_id|default:"-" }}</code></dd>
+            <dt>{% translate "Kirish tokenlari" %}</dt><dd>{{ job.input_tokens }}</dd>
+            <dt>{% translate "Chiqish tokenlari" %}</dt><dd>{{ job.output_tokens }}</dd>
+            <dt>{% translate "Narx (USD)" %}</dt><dd>{{ job.cost_usd|floatformat:6 }}</dd>
+            <dt>{% translate "Urinishlar" %}</dt><dd>{{ job.attempts }}</dd>
+            <dt>{% translate "Qoidalar versiyasi" %}</dt><dd>{{ job.rules_version|default:"-" }}</dd>
+            <dt>{% translate "Prompt versiyalari" %}</dt><dd>{% for version in prompt_versions %}<a class="gd-ai-link" href="{% url 'admin:assistant_prompt_version' version.template.purpose version.number %}">{% translate version.template.get_purpose_display %} v{{ version.number }}</a>{% if not forloop.last %}, {% endif %}{% empty %}-{% endfor %}</dd>
+        </dl>
+    </section>
+</div>
+{% for title, document in documents %}
+    <section class="gd-ai-card"><h2 class="gd-ai-card__title">{{ title }}</h2><pre class="gd-json">{{ document }}</pre></section>
+{% endfor %}
+{% endblock %}

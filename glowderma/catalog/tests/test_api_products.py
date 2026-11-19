@@ -106,9 +106,21 @@ def test_list_item_shape(staff_client: APIClient, staff: StaffUser) -> None:
         "status": "active",
         "is_new_from_billz": False,
         "texts": {
-            "uz": {"name": "Gialuron kislotali serum", "description": "", "ingredients": "", "usage": ""},
-            "ru": {"name": "Сыворотка", "description": "", "ingredients": "", "usage": ""},
-            "en": {"name": "", "description": "", "ingredients": "", "usage": ""},
+            "uz": {
+                "name": "Gialuron kislotali serum",
+                "short_description": "",
+                "description": "",
+                "ingredients": "",
+                "usage": "",
+            },
+            "ru": {
+                "name": "Сыворотка",
+                "short_description": "",
+                "description": "",
+                "ingredients": "",
+                "usage": "",
+            },
+            "en": {"name": "", "short_description": "", "description": "", "ingredients": "", "usage": ""},
         },
         "main_image_url": url,
         "main_image_thumbnail_url": variant_url(str(image.file.name), "thumbnail"),
@@ -120,6 +132,7 @@ def test_list_item_shape(staff_client: APIClient, staff: StaffUser) -> None:
                 "thumbnail_url": variant_url(str(image.file.name), "thumbnail"),
                 "medium_url": variant_url(str(image.file.name), "medium"),
                 "position": 0,
+                "alt": {"uz": "", "ru": "", "en": ""},
             }
         ],
         "last_change": {
@@ -437,12 +450,19 @@ def test_create_happy_path_full_shape(staff_client: APIClient, staff: StaffUser)
         "texts": {
             "uz": {
                 "name": "Gialuron kislotali serum",
+                "short_description": "",
                 "description": "Tavsif",
                 "ingredients": "Aqua",
                 "usage": "Kuniga",
             },
-            "ru": {"name": "Сыворотка", "description": "", "ingredients": "", "usage": ""},
-            "en": {"name": "", "description": "", "ingredients": "", "usage": ""},
+            "ru": {
+                "name": "Сыворотка",
+                "short_description": "",
+                "description": "",
+                "ingredients": "",
+                "usage": "",
+            },
+            "en": {"name": "", "short_description": "", "description": "", "ingredients": "", "usage": ""},
         },
         "main_image_url": None,
         "main_image_thumbnail_url": None,
@@ -503,7 +523,7 @@ def test_create_defaults_status_hidden_and_promo_false(staff_client: APIClient) 
         ),
         ({"texts": {"uz": {"name": "x" * 121}}}, "texts.uz.name", "max_length", "120 belgidan oshmasin."),
         (
-            {"texts": {"uz": {"name": "Serum", "description": "x" * 2001}}},
+            {"texts": {"uz": {"name": "Serum", "short_description": "", "description": "x" * 2001}}},
             "texts.uz.description",
             "max_length",
             "2000 belgidan oshmasin.",
@@ -709,9 +729,21 @@ def test_patch_merges_texts_at_leaf_level(staff_client: APIClient) -> None:
     )
     assert response.status_code == 200, response.json()
     assert response.json()["texts"] == {
-        "uz": {"name": "Serum", "description": "Tavsif", "ingredients": "", "usage": ""},
-        "ru": {"name": "Новая", "description": "", "ingredients": "", "usage": "Утром"},
-        "en": {"name": "", "description": "", "ingredients": "", "usage": "AM"},
+        "uz": {
+            "name": "Serum",
+            "short_description": "",
+            "description": "Tavsif",
+            "ingredients": "",
+            "usage": "",
+        },
+        "ru": {
+            "name": "Новая",
+            "short_description": "",
+            "description": "",
+            "ingredients": "",
+            "usage": "Утром",
+        },
+        "en": {"name": "", "short_description": "", "description": "", "ingredients": "", "usage": "AM"},
     }
     assert response.json()["is_new_from_billz"] is False
     assert response.json()["last_change"]["kind"] == "updated"

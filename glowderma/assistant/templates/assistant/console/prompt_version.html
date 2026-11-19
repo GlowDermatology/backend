@@ -1,0 +1,60 @@
+{% extends "assistant/console/base.html" %}
+{% load i18n %}
+
+{% block page %}
+<div class="gd-ai-headrow">
+    <h2 class="gd-ai-h">{{ label }} · v{{ version.number }} <span class="gd-ai-badge gd-ai-badge--{{ version.status }}" data-testid="ai-version-status">{{ status_label }}</span></h2>
+    <a class="gd-ai-link" href="{% url 'admin:assistant_prompt' template.purpose %}">{% translate "Barcha versiyalar" %}</a>
+</div>
+<div class="gd-ai-grid">
+    <section class="gd-ai-card" aria-labelledby="ai-text-title">
+        <h2 id="ai-text-title" class="gd-ai-card__title">{% translate "Ko‘rsatmalar" %}</h2>
+        {% if editable %}
+            <form method="post" novalidate data-testid="ai-instructions-form">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="save">
+                {% include "assistant/console/_errors.html" with form=edit_form %}
+                {% include "assistant/console/_field.html" with field=edit_form.instructions %}
+                <div class="gd-ai-foot"><span></span><button type="submit" class="gd-ai-button">{% translate "Qoralamani saqlash" %}</button></div>
+            </form>
+        {% else %}
+            <pre class="gd-ai-pre" data-testid="ai-instructions">{{ version.instructions }}</pre>
+            <p class="gd-ai-muted">{% translate "Faol va arxivdagi versiyalar o‘zgarmaydi: o‘zgartirish uchun yangi qoralama yarating." %}</p>
+        {% endif %}
+        <p class="gd-ai-muted">{% blocktranslate trimmed with at=version.created_at|date:"d.m.Y H:i" author=created_by %}Yaratilgan: {{ at }} · {{ author }}{% endblocktranslate %}{% if version.activated_at %} · {% blocktranslate trimmed with at=version.activated_at|date:"d.m.Y H:i" author=activated_by %}Faollashtirilgan: {{ at }} · {{ author }}{% endblocktranslate %}{% endif %}</p>
+    </section>
+    <section class="gd-ai-card" aria-labelledby="ai-test-title">
+        <h2 id="ai-test-title" class="gd-ai-card__title">{% translate "Sinov va faollashtirish" %}</h2>
+        {% if editable %}
+            <form method="post" novalidate data-testid="ai-test-form">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="test">
+                {% include "assistant/console/_errors.html" with form=test_form %}
+                {% include "assistant/console/_field.html" with field=test_form.product %}
+                <datalist id="gd-ai-products">{% for product in sample_products %}<option value="{{ product.id }}">{{ product.name }}</option>{% endfor %}</datalist>
+                <div class="gd-ai-foot"><span class="gd-ai-muted">{% translate "Sinov natijasi mahsulotga yozilmaydi." %}</span><button type="submit" class="gd-ai-button gd-ai-button--ghost" data-testid="ai-run-test">{% translate "Namuna mahsulotda sinash" %}</button></div>
+            </form>
+        {% endif %}
+        {% if test_job %}
+            <dl class="gd-ai-dl" data-testid="ai-last-test">
+                <dt>{% translate "Oxirgi sinov" %}</dt><dd><a class="gd-ai-link" href="{% url 'admin:assistant_job' test_job.pk %}">#{{ test_job.pk }}</a> · {{ test_job_state }}{% if test_job.error_code %} · <code>{{ test_job.error_code }}</code>{% endif %}</dd>
+                <dt>{% translate "Narx (USD)" %}</dt><dd>{{ test_job.cost_usd|floatformat:6 }}</dd>
+            </dl>
+            {% if test_suggestions %}<details><summary>{% translate "Takliflar" %}</summary><pre class="gd-ai-pre">{{ test_suggestions }}</pre></details>{% endif %}
+        {% endif %}
+        {% if activatable %}
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="activate">
+                <input type="hidden" name="confirm" value="True">
+                <p class="gd-ai-muted">{% if rollback %}{% translate "Bu versiya avval faol bo‘lgan: uni qayta faollashtirish joriy versiyani arxivga o‘tkazadi." %}{% else %}{% translate "Faollashtirilgach keyingi barcha so‘rovlar shu versiyadan foydalanadi." %}{% endif %}</p>
+                <button type="submit" class="gd-ai-button" data-testid="ai-activate">
+                    {% if rollback %}{% translate "Shu versiyaga qaytish" %}{% else %}{% translate "Faollashtirish" %}{% endif %}
+                </button>
+            </form>
+        {% elif editable %}
+            <p class="gd-ai-muted">{% translate "Faollashtirish uchun avval namuna mahsulotda muvaffaqiyatli sinang." %}</p>
+        {% endif %}
+    </section>
+</div>
+{% endblock %}

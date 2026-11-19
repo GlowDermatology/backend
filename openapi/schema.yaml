@@ -560,6 +560,259 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
+  /api/v1/admin/assistant/jobs/{id}/:
+    get:
+      operationId: admin_assistant_jobs_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantJob'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/assistant/jobs/{id}/apply/:
+    post:
+      operationId: admin_assistant_jobs_apply_create
+      description: Apply the selected suggestions (values may be edited; they are
+        checked again). A key whose product value changed since the generation is
+        returned in `conflicts` and not written.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssistantApplyRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantApplyResult'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/assistant/jobs/{id}/discard/:
+    post:
+      operationId: admin_assistant_jobs_discard_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantJob'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/assistant/status/:
+    get:
+      operationId: admin_assistant_status_retrieve
+      description: Whether the product editor shows the AI assistant (switched on
+        and its provider ready).
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantStatus'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/admin/audit-log/:
     get:
       operationId: admin_audit_log_list
@@ -6872,6 +7125,77 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
   /api/v1/admin/products/{id}/images/{image_id}/:
+    patch:
+      operationId: admin_product_images_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: image_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedImagePatchRequest'
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProductImage'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
     delete:
       operationId: admin_product_images_destroy
       parameters:
@@ -6959,6 +7283,82 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ImagesResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/products/{product_id}/assistant/jobs/:
+    post:
+      operationId: admin_assistant_jobs_create
+      description: 'Queue an AI generation for the product (202), or return its queued/running
+        job (200), or `nothing_to_fill: true` with `job: null` (200) when the mode
+        finds no key to suggest. Poll `assistant/jobs/{id}/`.'
+      parameters:
+      - in: path
+        name: product_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssistantJobCreateRequest'
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantStart'
+          description: ''
+        '202':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantStart'
           description: ''
         '400':
           content:
@@ -17532,6 +17932,287 @@ components:
           minimum: 1
       required:
       - expected_revision
+    AssistantApplyItemRequest:
+      type: object
+      properties:
+        key:
+          type: string
+          minLength: 1
+          maxLength: 64
+        value:
+          type: string
+          maxLength: 4000
+      required:
+      - key
+      - value
+    AssistantApplyRequest:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssistantApplyItemRequest'
+          maxItems: 120
+      required:
+      - items
+    AssistantApplyResult:
+      type: object
+      properties:
+        job:
+          $ref: '#/components/schemas/AssistantJob'
+        applied:
+          type: array
+          items:
+            type: string
+        conflicts:
+          type: array
+          items:
+            type: string
+        product:
+          $ref: '#/components/schemas/Product'
+      required:
+      - applied
+      - conflicts
+      - job
+      - product
+    AssistantImproveGoalEnum:
+      enum:
+      - professional
+      - clear
+      - natural
+      - seo
+      - shorter
+      type: string
+      description: |-
+        * `professional` - professional
+        * `clear` - clear
+        * `natural` - natural
+        * `seo` - seo
+        * `shorter` - shorter
+    AssistantJob:
+      type: object
+      description: 'The poller-compatible job: ``state`` / ``error`` like ``Job``
+        (§2.14), plus the review fields.'
+      properties:
+        id:
+          type: integer
+        product_id:
+          type: integer
+          nullable: true
+        mode:
+          $ref: '#/components/schemas/AssistantModeEnum'
+        languages:
+          type: array
+          items:
+            type: string
+        keys:
+          type: array
+          items:
+            type: string
+        goal:
+          type: string
+        image_ids:
+          type: array
+          items:
+            type: integer
+        state:
+          $ref: '#/components/schemas/JobStateEnum'
+        outcome:
+          $ref: '#/components/schemas/AssistantJobOutcomeEnum'
+        progress:
+          nullable: true
+          description: Always null (no progress steps).
+          readOnly: true
+        result:
+          allOf:
+          - $ref: '#/components/schemas/AssistantJobResult'
+          nullable: true
+          readOnly: true
+        error:
+          allOf:
+          - $ref: '#/components/schemas/AssistantJobError'
+          nullable: true
+          readOnly: true
+        applied_keys:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_by:
+          $ref: '#/components/schemas/Actor'
+      required:
+      - applied_keys
+      - created_at
+      - created_by
+      - error
+      - finished_at
+      - goal
+      - id
+      - image_ids
+      - keys
+      - languages
+      - mode
+      - outcome
+      - product_id
+      - progress
+      - result
+      - started_at
+      - state
+    AssistantJobCreateRequest:
+      type: object
+      properties:
+        mode:
+          allOf:
+          - $ref: '#/components/schemas/AssistantModeEnum'
+          default: fill_missing
+          description: |-
+            `test` is refused (ops console only).
+
+            * `fill_missing` - fill_missing
+            * `languages` - languages
+            * `improve` - improve
+            * `photos` - photos
+            * `test` - test
+        languages:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContentLanguageEnum'
+          description: Target languages; omitted or empty = all three.
+          maxItems: 3
+        keys:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 64
+          description: 'Snapshot keys (`texts.<lang>.<field>`, `seo.<lang>.<title|description>`,
+            `images.<id>.alt.<lang>`): narrows the automatic choice; required for
+            `improve`.'
+          maxItems: 120
+        goal:
+          allOf:
+          - $ref: '#/components/schemas/AssistantImproveGoalEnum'
+          default: professional
+        image_ids:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+          maxItems: 8
+    AssistantJobError:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+      required:
+      - code
+      - message
+    AssistantJobOutcomeEnum:
+      enum:
+      - pending
+      - applied
+      - partial
+      - discarded
+      type: string
+      description: |-
+        * `pending` - pending
+        * `applied` - applied
+        * `partial` - partial
+        * `discarded` - discarded
+    AssistantJobResult:
+      type: object
+      properties:
+        suggestions:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssistantSuggestion'
+        warnings:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+      required:
+      - suggestions
+      - warnings
+    AssistantModeEnum:
+      enum:
+      - fill_missing
+      - languages
+      - improve
+      - photos
+      - test
+      type: string
+      description: |-
+        * `fill_missing` - fill_missing
+        * `languages` - languages
+        * `improve` - improve
+        * `photos` - photos
+        * `test` - test
+    AssistantStart:
+      type: object
+      properties:
+        nothing_to_fill:
+          type: boolean
+        job:
+          allOf:
+          - $ref: '#/components/schemas/AssistantJob'
+          nullable: true
+      required:
+      - job
+      - nothing_to_fill
+    AssistantStatus:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          description: The editor shows the AI assistant button.
+        max_images:
+          type: integer
+          description: Photos sent with a `photos` request (at most).
+      required:
+      - enabled
+      - max_images
+    AssistantSuggestion:
+      type: object
+      properties:
+        key:
+          type: string
+        current:
+          type: string
+        suggested:
+          type: string
+        warnings:
+          type: array
+          items:
+            type: string
+        origin:
+          type: string
+          description: '`ai`, or `image` (read from the photos).'
+        checked:
+          type: boolean
+          description: Pre-selected in the review (photo suggestions never are).
+        max_length:
+          type: integer
+      required:
+      - checked
+      - current
+      - key
+      - max_length
+      - origin
+      - suggested
+      - warnings
     AudienceTypeEnum:
       enum:
       - all
@@ -20223,7 +20904,12 @@ components:
           description: 1000 px WebP variant.
         position:
           type: integer
+        alt:
+          type: string
+          description: Alt text in this language (else Uzbek); without one, the product
+            name.
       required:
+      - alt
       - id
       - medium_url
       - position
@@ -21198,6 +21884,36 @@ components:
             type: integer
       required:
       - ids
+    ImageAlt:
+      type: object
+      description: |-
+        ``alt`` of a product image, ``{uz, ru, en}`` ≤160 each; ``""`` = the website uses the product name.
+        On write every leaf is optional (merged leaf by leaf).
+      properties:
+        uz:
+          type: string
+          maxLength: 160
+        ru:
+          type: string
+          maxLength: 160
+        en:
+          type: string
+          maxLength: 160
+    ImageAltRequest:
+      type: object
+      description: |-
+        ``alt`` of a product image, ``{uz, ru, en}`` ≤160 each; ``""`` = the website uses the product name.
+        On write every leaf is optional (merged leaf by leaf).
+      properties:
+        uz:
+          type: string
+          maxLength: 160
+        ru:
+          type: string
+          maxLength: 160
+        en:
+          type: string
+          maxLength: 160
     ImageOrderRequest:
       type: object
       description: Body of ``PUT products/{id}/images/order/``.
@@ -23874,6 +24590,13 @@ components:
           type: integer
           maximum: 99
           minimum: 1
+    PatchedImagePatchRequest:
+      type: object
+      description: 'Body of ``PATCH products/{id}/images/{image_id}/``: ``{alt: {uz?,
+        ru?, en?}}``.'
+      properties:
+        alt:
+          $ref: '#/components/schemas/ImageAltRequest'
     PatchedMePatchRequest:
       type: object
       properties:
@@ -24445,6 +25168,9 @@ components:
           type: string
           format: date-time
           description: Last change of the product page (sitemap `lastmod`).
+        short_description:
+          type: string
+          description: One-paragraph summary in this language (else Uzbek); "" = none.
         description:
           type: string
         ingredients:
@@ -24481,6 +25207,7 @@ components:
       - promo
       - seo_description
       - seo_title
+      - short_description
       - sku
       - slug
       - stock_status
@@ -24490,7 +25217,7 @@ components:
     ProductImage:
       type: object
       description: Contract §2.3 ``ProductImage = {id, url, thumbnail_url, medium_url,
-        position}``.
+        position, alt}``.
       properties:
         id:
           type: integer
@@ -24507,7 +25234,13 @@ components:
           description: 1000 px WebP variant.
         position:
           type: integer
+        alt:
+          allOf:
+          - $ref: '#/components/schemas/ImageAlt'
+          readOnly: true
+          description: Alt text per language; "" = the product name is used.
       required:
+      - alt
       - id
       - medium_url
       - position
@@ -24554,12 +25287,15 @@ components:
         * `hidden` - hidden
     ProductText:
       type: object
-      description: 'One language of ``texts``: ``{name, description, ingredients,
-        usage}``.'
+      description: 'One language of ``texts``: ``{name, short_description, description,
+        ingredients, usage}``.'
       properties:
         name:
           type: string
           maxLength: 120
+        short_description:
+          type: string
+          maxLength: 300
         description:
           type: string
           maxLength: 2000
@@ -24571,12 +25307,15 @@ components:
           maxLength: 1000
     ProductTextRequest:
       type: object
-      description: 'One language of ``texts``: ``{name, description, ingredients,
-        usage}``.'
+      description: 'One language of ``texts``: ``{name, short_description, description,
+        ingredients, usage}``.'
       properties:
         name:
           type: string
           maxLength: 120
+        short_description:
+          type: string
+          maxLength: 300
         description:
           type: string
           maxLength: 2000
@@ -24631,6 +25370,9 @@ components:
         name:
           type: string
           maxLength: 120
+        short_description:
+          type: string
+          maxLength: 300
         description:
           type: string
           maxLength: 2000
@@ -24650,6 +25392,9 @@ components:
         name:
           type: string
           maxLength: 120
+        short_description:
+          type: string
+          maxLength: 300
         description:
           type: string
           maxLength: 2000
@@ -24667,6 +25412,9 @@ components:
         name:
           type: string
           maxLength: 120
+        short_description:
+          type: string
+          maxLength: 300
         description:
           type: string
           maxLength: 2000
@@ -24769,7 +25517,12 @@ components:
           $ref: '#/components/schemas/IntegrationModeEnum'
         yandex:
           $ref: '#/components/schemas/IntegrationModeEnum'
+        ai:
+          $ref: '#/components/schemas/IntegrationModeEnum'
+        vault:
+          $ref: '#/components/schemas/IntegrationModeEnum'
       required:
+      - ai
       - billz
       - bts
       - click
@@ -24778,6 +25531,7 @@ components:
       - fcm
       - oauth
       - payme
+      - vault
       - yandex
     ProviderReadiness:
       type: object

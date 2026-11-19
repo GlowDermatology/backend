@@ -56,7 +56,8 @@ container (`/tmp/celerybeat-schedule`), so a recreated beat simply resumes the c
 
 ## 8. Fake-mode posture
 
-Every provider has a `*_MODE` (`fake` | `live`, default `INTEGRATIONS_MODE`). Fake adapters are allowed under the
+Every provider has a `*_MODE` (`fake` | `live`, default `INTEGRATIONS_MODE`; `AI_MODE` and `VAULT_MODE` of the AI
+assistant default to `fake`, [ai-assistant.md](ai-assistant.md)). Fake adapters are allowed under the
 production settings (product-owner decision 2026-10-26, customer contract §6.14): the processes log one WARNING at start
 (`integrations running in fake mode in production: …`), and `health/?ready=1` lists the modes to the admin network. A
 fake never pretends an effect happened:
@@ -70,6 +71,7 @@ fake never pretends an effect happened:
 | Eskiz | **No SMS delivered**: nobody can register, reset a password or sign in on a new device (the code is never sent) |
 | FCM | **No push reaches a device**: the fake logs ids only and reports the pushes sent; inbox rows are written as usual |
 | OAuth | Social sign-in off for staff and customers (password sign-in works) |
+| AI (`AI_MODE`) / Vault (`VAULT_MODE`) | **No AI assistant**: generation and key rotation answer `ai_not_configured`; product editing works as usual ([ai-assistant.md](ai-assistant.md)) |
 
 So a fake deployment is a demo/staging posture: real customers need live Billz (selling), live Eskiz (sign-up),
 live Click and/or Payme (payment), live BTS and/or live Yandex Delivery (delivery) and live FCM (pushes). The local/test development switches
@@ -153,6 +155,11 @@ prepaid balance, `auto_accept` off; set `YANDEX_DELIVERY_MODE=live`, `YANDEX_DEL
 `manage.py yandex_delivery_check`; configure the warehouse and switch one method on in the ops console; the alert
 webhook points at the Telegram bot; one supervised pilot order (§13). Outbound HTTPS to `b2b.taxi.yandex.net` from
 api and worker.
+
+**AI product content assistant** ([ai-assistant.md](ai-assistant.md)): the infra Vault Agents (`feat/ai-vault`), then
+`VAULT_MODE=live`, `VAULT_PROXY_URL` (api → writer agent, worker → reader agent), `VAULT_AI_PREFIX=<env>/ai`,
+`AI_MODE=live`; outbound HTTPS to `generativelanguage.googleapis.com` from the worker. A superuser then enters the key
+in the ops console, tests it and switches the assistant on.
 
 **Social sign-in** (`OAUTH_MODE=live`): Google and Facebook credentials, the two callback URLs of §3.5, and — for Sign
 in with Apple — `APPLE_BUNDLE_IDS`, `APPLE_TEAM_ID`, `APPLE_KEY_ID` and the `.p8` mounted as

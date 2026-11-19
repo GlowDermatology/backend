@@ -7,7 +7,7 @@ type = layers
 layers =
     glowderma.reporting | glowderma.customers
     glowderma.notifications
-    glowderma.commerce | glowderma.appointments
+    glowderma.commerce | glowderma.appointments | glowderma.assistant
     glowderma.payments | glowderma.delivery | glowderma.loyalty | glowderma.catalog | glowderma.professionals
     glowderma.site_config
     glowderma.accounts

@@ -56,6 +56,8 @@ SECURITY_ENTITY_TYPES: Final = frozenset({"staff", "auth_session"})
 BUSINESS_PREFIXES: Final = frozenset(
     {
         "appointment",
+        # the AI assistant (suggestions applied/discarded, console settings, prompts, credential rotations)
+        "assistant",
         "banner",
         "billz",
         "blocked_period",

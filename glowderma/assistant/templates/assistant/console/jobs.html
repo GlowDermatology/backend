@@ -1,0 +1,63 @@
+{% extends "assistant/console/base.html" %}
+{% load i18n %}
+
+{% block page %}
+<div class="gd-ai-grid">
+    <section class="gd-ai-card"><h2 class="gd-ai-card__title">{% translate "Byudjet" %}</h2>{% include "assistant/console/_budgets.html" %}</section>
+</div>
+<div class="gd-ai-grid">
+    {% for period in periods %}
+        <section class="gd-ai-card" data-testid="ai-usage-{{ period.totals.key }}">
+            <h2 class="gd-ai-card__title">{{ period.title }}</h2>
+            <p class="gd-ai-muted">{% blocktranslate trimmed with jobs=period.totals.overall.jobs failed=period.totals.overall.failed cost=period.totals.overall.cost|floatformat:4 %}{{ jobs }} ta so‘rov, {{ failed }} tasi xato · {{ cost }} USD{% endblocktranslate %}</p>
+            <table class="gd-ai-table">
+                <thead><tr><th>{% translate "Model" %}</th><th class="num">{% translate "So‘rovlar" %}</th><th class="num">{% translate "Kirish tokenlari" %}</th><th class="num">{% translate "Chiqish tokenlari" %}</th><th class="num">USD</th></tr></thead>
+                <tbody>{% for row in period.totals.by_model %}<tr><td><code>{{ row.model_id|default:"-" }}</code></td><td class="num">{{ row.jobs }}</td><td class="num">{{ row.input_tokens }}</td><td class="num">{{ row.output_tokens }}</td><td class="num">{{ row.cost|floatformat:4 }}</td></tr>{% empty %}<tr><td colspan="5" class="gd-ai-muted">{% translate "So‘rovlar yo‘q" %}</td></tr>{% endfor %}</tbody>
+            </table>
+            <table class="gd-ai-table">
+                <thead><tr><th>{% translate "Xodim" %}</th><th class="num">{% translate "So‘rovlar" %}</th><th class="num">{% translate "Xato" %}</th><th class="num">USD</th></tr></thead>
+                <tbody>{% for row in period.totals.by_user %}<tr><td>{{ row.user }}</td><td class="num">{{ row.jobs }}</td><td class="num">{{ row.failed }}</td><td class="num">{{ row.cost|floatformat:4 }}</td></tr>{% empty %}<tr><td colspan="4" class="gd-ai-muted">{% translate "So‘rovlar yo‘q" %}</td></tr>{% endfor %}</tbody>
+            </table>
+        </section>
+    {% endfor %}
+</div>
+<section class="gd-ai-card">
+    <form method="get" class="gd-ai-filters" data-testid="ai-job-filters">
+        <label>{% translate "Holat" %}<select name="state"><option value="">—</option>{% for value, label in states %}<option value="{{ value }}"{% if params.state == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+        <label>{% translate "Rejim" %}<select name="mode"><option value="">—</option>{% for value, label in modes %}<option value="{{ value }}"{% if params.mode == value %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+        <label>{% translate "Model" %}<select name="model"><option value="">—</option>{% for value in models %}<option value="{{ value }}"{% if params.model == value %} selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+        <label>{% translate "Xodim" %}<select name="user"><option value="">—</option>{% for value, label in users %}<option value="{{ value }}"{% if params.user == value|stringformat:"s" %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+        <label>{% translate "Sanadan" %}<input type="date" name="date_from" value="{{ params.date_from }}"></label>
+        <label>{% translate "Sanagacha" %}<input type="date" name="date_to" value="{{ params.date_to }}"></label>
+        <button type="submit" class="gd-ai-button">{% translate "Qo‘llash" %}</button>
+    </form>
+    <table class="gd-ai-table" data-testid="ai-jobs">
+        <thead><tr><th>#</th><th>{% translate "Yaratilgan" %}</th><th>{% translate "Xodim" %}</th><th>{% translate "Mahsulot" %}</th><th>{% translate "Rejim" %}</th><th>{% translate "Holat" %}</th><th>{% translate "Model" %}</th><th class="num">{% translate "Tokenlar" %}</th><th class="num">USD</th><th>{% translate "Xato" %}</th></tr></thead>
+        <tbody>
+        {% for job in page %}
+            <tr>
+                <td><a class="gd-ai-link" href="{% url 'admin:assistant_job' job.pk %}">{{ job.pk }}</a></td>
+                <td>{{ job.created_at|date:"d.m.Y H:i" }}</td>
+                <td>{{ job.created_by.full_name|default:job.created_by.email }}</td>
+                <td>{% if job.product_id %}#{{ job.product_id }}{% else %}-{% endif %}</td>
+                <td>{% translate job.get_mode_display %}</td>
+                <td>{% translate job.get_state_display %}</td>
+                <td><code>{{ job.model_id|default:"-" }}</code></td>
+                <td class="num">{{ job.input_tokens }} / {{ job.output_tokens }}</td>
+                <td class="num">{{ job.cost_usd|floatformat:4 }}</td>
+                <td>{% if job.error_code %}<code>{{ job.error_code }}</code>{% endif %}</td>
+            </tr>
+        {% empty %}
+            <tr><td colspan="10" class="gd-ai-muted">{% translate "So‘rovlar yo‘q" %}</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% if page.has_other_pages %}
+        <nav class="gd-ai-pages">
+            {% if page.has_previous %}<a class="gd-ai-link" href="?{{ query }}&p={{ page.previous_page_number }}">{% translate "Oldingi" %}</a>{% endif %}
+            <span>{{ page.number }} / {{ page.paginator.num_pages }}</span>
+            {% if page.has_next %}<a class="gd-ai-link" href="?{{ query }}&p={{ page.next_page_number }}">{% translate "Keyingi" %}</a>{% endif %}
+        </nav>
+    {% endif %}
+</section>
+{% endblock %}

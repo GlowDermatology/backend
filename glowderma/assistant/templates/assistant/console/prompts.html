@@ -1,0 +1,26 @@
+{% extends "assistant/console/base.html" %}
+{% load i18n %}
+
+{% block page %}
+<p class="gd-ai-lead">
+    {% blocktranslate trimmed %}
+        Har bir vazifa uchun uslub ko‘rsatmalari. Majburiy xavfsizlik qoidalari kodda va ularni o‘zgartirib bo‘lmaydi.
+        Yangi versiya avval qoralama bo‘ladi: namuna mahsulotda sinang, keyin faollashtiring.
+    {% endblocktranslate %}
+</p>
+<section class="gd-ai-card">
+    <table class="gd-ai-table" data-testid="ai-prompts">
+        <thead><tr><th>{% translate "Vazifa" %}</th><th>{% translate "Faol versiya" %}</th><th>{% translate "Qoralama" %}</th><th class="num">{% translate "Versiyalar" %}</th></tr></thead>
+        <tbody>
+        {% for item in rows %}
+            <tr>
+                <td><a class="gd-ai-link" href="{% url 'admin:assistant_prompt' item.template.purpose %}">{{ item.label }}</a></td>
+                <td>{% if item.active %}v{{ item.active.number }}{% else %}-{% endif %}</td>
+                <td>{% if item.draft %}<a class="gd-ai-link" href="{% url 'admin:assistant_prompt_version' item.template.purpose item.draft.number %}">v{{ item.draft.number }}</a>{% else %}-{% endif %}</td>
+                <td class="num">{{ item.count }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endblock %}

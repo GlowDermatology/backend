@@ -1,0 +1,22 @@
+{% extends "assistant/console/base.html" %}
+{% load i18n %}
+
+{% block page %}
+<section class="gd-ai-card gd-ai-narrow" aria-labelledby="ai-rotate-title">
+    <h2 id="ai-rotate-title" class="gd-ai-card__title">{% blocktranslate with name=provider_title %}{{ name }}: yangi API kalit{% endblocktranslate %}</h2>
+    <ol class="gd-ai-steps">
+        <li>{% translate "Kalit Vault’ga yangi, hali faol bo‘lmagan versiya sifatida yoziladi." %}</li>
+        <li>{% translate "Ishchi jarayon shu versiyani provayderda tekshiradi." %}</li>
+        <li>{% translate "Tekshiruvdan o‘tsa u faol bo‘ladi, joriy kalit esa oldingi versiya sifatida saqlanadi." %}</li>
+    </ol>
+    <form method="post" novalidate autocomplete="off" data-testid="ai-rotate-form">
+        {% csrf_token %}
+        {% include "assistant/console/_errors.html" %}
+        {% for field in form %}{% include "assistant/console/_field.html" %}{% endfor %}
+        <div class="gd-ai-foot">
+            <a class="gd-ai-link" href="{% url 'admin:assistant_provider' row.provider %}">{% translate "Bekor qilish" %}</a>
+            <button type="submit" class="gd-ai-button">{% translate "Saqlash va tekshirish" %}</button>
+        </div>
+    </form>
+</section>
+{% endblock %}

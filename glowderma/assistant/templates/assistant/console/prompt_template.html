@@ -1,0 +1,28 @@
+{% extends "assistant/console/base.html" %}
+{% load i18n %}
+
+{% block page %}
+<div class="gd-ai-headrow">
+    <h2 class="gd-ai-h">{{ label }}</h2>
+    <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="new_draft">
+        <button type="submit" class="gd-ai-button" data-testid="ai-new-draft">{% translate "Yangi qoralama" %}</button>
+    </form>
+</div>
+<section class="gd-ai-card">
+    <table class="gd-ai-table" data-testid="ai-versions">
+        <thead><tr><th>{% translate "Versiya" %}</th><th>{% translate "Holat" %}</th><th>{% translate "Yaratilgan" %}</th><th>{% translate "Faollashtirilgan" %}</th></tr></thead>
+        <tbody>
+        {% for item in versions %}
+            <tr>
+                <td><a class="gd-ai-link" href="{% url 'admin:assistant_prompt_version' template.purpose item.version.number %}">v{{ item.version.number }}</a></td>
+                <td><span class="gd-ai-badge gd-ai-badge--{{ item.version.status }}">{{ item.status_label }}</span></td>
+                <td>{{ item.version.created_at|date:"d.m.Y H:i" }} · {{ item.created_by }}</td>
+                <td>{% if item.version.activated_at %}{{ item.version.activated_at|date:"d.m.Y H:i" }}{% else %}-{% endif %}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endblock %}

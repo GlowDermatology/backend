@@ -34,6 +34,7 @@ ADMIN_API_MODULES = (
     "professionals",
     "commerce",
     "appointments",
+    "assistant",
     "notifications",
     "customers",
     "reporting",

@@ -28,6 +28,8 @@ PROVIDER_MODE_SETTINGS: dict[str, str] = {
     "eskiz": "ESKIZ_MODE",
     "email": "EMAIL_MODE",
     "yandex": "YANDEX_DELIVERY_MODE",
+    "ai": "AI_MODE",  # the AI assistant's content model (integrations.llm)
+    "vault": "VAULT_MODE",  # KV v2 store of the AI provider keys (integrations.vault)
 }
 # Setting values that name the live adapter of a provider with its own vocabulary (``EMAIL_MODE=smtp``).
 LIVE_MODE_ALIASES: dict[str, str] = {"smtp": "live"}

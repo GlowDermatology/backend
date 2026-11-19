@@ -27,6 +27,8 @@ if TYPE_CHECKING:
     from django_stubs_ext import StrOrPromise
 
 STAFF_ONLY = "glowderma.core.admin.is_active_staff"
+SUPERUSER_ONLY = "glowderma.assistant.console.access.is_superuser"
+AI_VIEWS = "glowderma.assistant.console.views"
 NAV_BADGES = "glowderma.reporting.admin_nav"
 
 
@@ -160,6 +162,30 @@ SIDEBAR_NAVIGATION: list[dict[str, Any]] = [
         ],
     },
     {
+        # The AI product content assistant (glowderma.assistant.console): superusers only.
+        "title": _("AI yordamchi"),
+        "separator": True,
+        "collapsible": True,
+        "items": [
+            {
+                **_dashboard(_("AI sozlamalari"), "auto_awesome", "admin:assistant_settings"),
+                "permission": SUPERUSER_ONLY,
+            },
+            {
+                **_dashboard(_("AI provayderlar"), "hub", "admin:assistant_providers"),
+                "permission": SUPERUSER_ONLY,
+            },
+            {
+                **_dashboard(_("AI promptlar"), "edit_note", "admin:assistant_prompts"),
+                "permission": SUPERUSER_ONLY,
+            },
+            {
+                **_dashboard(_("AI so‘rovlari"), "receipt_long", "admin:assistant_jobs"),
+                "permission": SUPERUSER_ONLY,
+            },
+        ],
+    },
+    {
         "title": _("Integratsiyalar va navbatlar"),
         "separator": True,
         "collapsible": False,
@@ -259,5 +285,24 @@ UNFOLD: dict[str, Any] = {
         ("dashboards/customers/", "reporting_customers", f"{DASHBOARD_VIEWS}.CustomersDashboardView"),
         # The store settings, contacts and legal texts (moved here from the Next.js admin: 2FA-protected).
         ("settings/", "site_config_settings", "glowderma.site_config.admin_views.SettingsConsoleView"),
+        # The AI assistant (glowderma.assistant.console.views): superusers only.
+        ("ai/", "assistant_settings", f"{AI_VIEWS}.SettingsView"),
+        ("ai/providers/", "assistant_providers", f"{AI_VIEWS}.ProvidersView"),
+        ("ai/providers/<slug:provider>/", "assistant_provider", f"{AI_VIEWS}.ProviderView"),
+        ("ai/providers/<slug:provider>/key/", "assistant_provider_key", f"{AI_VIEWS}.RotateKeyView"),
+        (
+            "ai/providers/<slug:provider>/rollback/",
+            "assistant_provider_rollback",
+            f"{AI_VIEWS}.RollbackKeyView",
+        ),
+        ("ai/prompts/", "assistant_prompts", f"{AI_VIEWS}.PromptsView"),
+        ("ai/prompts/<slug:purpose>/", "assistant_prompt", f"{AI_VIEWS}.PromptTemplateView"),
+        (
+            "ai/prompts/<slug:purpose>/<int:number>/",
+            "assistant_prompt_version",
+            f"{AI_VIEWS}.PromptVersionView",
+        ),
+        ("ai/jobs/", "assistant_jobs", f"{AI_VIEWS}.JobsView"),
+        ("ai/jobs/<int:pk>/", "assistant_job", f"{AI_VIEWS}.JobView"),
     ],
 }

@@ -272,14 +272,22 @@ def seo_backlog(*, limit: int) -> SeoBacklog:
             *SEO_TEXT_FIELDS,
             *(f"description_{language}" for language in seo.LANGUAGES),
         )
-        .annotate(image_count=Count("images"))
+        .annotate(
+            image_count=Count("images"), images_without_alt=Count("images", filter=Q(images__alt_uz=""))
+        )
         .order_by("id")
     )
     checked = with_errors = with_warnings = 0
     for product in products:
         checked += 1
         error, warning = add(
-            "product", product.pk, seo.product_issues(product, image_count=int(product.image_count))
+            "product",
+            product.pk,
+            seo.product_issues(
+                product,
+                image_count=int(product.image_count),
+                images_without_alt=int(product.images_without_alt),
+            ),
         )
         with_errors += int(error)
         with_warnings += int(warning and not error)

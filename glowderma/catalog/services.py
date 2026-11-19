@@ -44,8 +44,21 @@ logger = logging.getLogger(__name__)
 
 MAX_PRODUCT_IMAGES = 8
 MIN_PRICE = 1_000
-TEXT_FIELDS = ("name", "description", "ingredients", "usage")
+TEXT_FIELDS = ("name", "short_description", "description", "ingredients", "usage")
 LANGUAGES = ("uz", "ru", "en")
+# Admin contract §2.3 length limits (characters) of the editable texts; the serializers and the AI assistant's
+# validation read them from here.
+TEXT_MAX_LENGTHS = {
+    "name": 120,
+    "short_description": 300,
+    "description": 2000,
+    "ingredients": 1000,
+    "usage": 1000,
+}
+SEO_MAX_LENGTHS = {"title": 120, "description": 300}
+ALT_MAX_LENGTH = 160
+PRODUCT_CHANGED = N_("Mahsulot boshqa joyda o‘zgartirildi: sahifani yangilab, qayta urinib ko‘ring.")
+PRODUCT_CHANGED_CODE = "product_changed"
 LAST_IMAGE_OF_ACTIVE = N_("Faol mahsulotda kamida bitta rasm bo‘lsin.")
 CATEGORY_HAS_PRODUCTS = N_("Kategoriyada mahsulotlar bor.")
 CATEGORY_LOCK = "catalog_category_position"
@@ -146,6 +159,25 @@ class ProductInput:
     status: str | None = None
     slug: str | None = None  # B-W1: an edited website URL segment (None = keep / derive on create)
     seo: dict[str, dict[str, str]] | None = None  # B-W1: language-first {title, description}, leaf merge
+    # image id → {language: alt} leaves (the AI assistant's apply; the API edits alt via the image PATCH)
+    image_alt: dict[int, dict[str, str]] | None = None
+    # snapshot key (``product_snapshot``) → the value the caller last saw; checked under the row lock, any
+    # difference is 409 ``product_changed`` and nothing is written (the AI assistant's apply)
+    expected: dict[str, Any] | None = None
+
+
+class ProductChanged(Conflict):
+    """409 ``product_changed``: a key of ``ProductInput.expected`` no longer has the expected value.
+
+    ``keys`` lists the differing snapshot keys (for in-process callers; the response carries only the
+    envelope)."""
+
+    default_code = PRODUCT_CHANGED_CODE
+    default_detail = PRODUCT_CHANGED
+
+    def __init__(self, keys: Sequence[str]) -> None:
+        super().__init__(PRODUCT_CHANGED, code=PRODUCT_CHANGED_CODE)
+        self.keys = list(keys)
 
 
 def _apply_seo(obj: Any, seo: dict[str, dict[str, str]] | None) -> None:
@@ -163,8 +195,9 @@ def _seo_snapshot(obj: Any) -> dict[str, Any]:
     }
 
 
-def product_snapshot(product: Product) -> dict[str, Any]:
-    """The admin-owned fields as flat dotted keys (the audit diff of ``product.updated``)."""
+def product_snapshot(product: Product, images: Iterable[ProductImage] | None = None) -> dict[str, Any]:
+    """The admin-owned fields as flat dotted keys (the audit diff of ``product.updated``); the image alt texts
+    are ``images.{id}.alt.{language}`` (``images`` = the loaded rows, else read)."""
     snapshot: dict[str, Any] = {
         "billz_id": product.billz_id,
         "price": product.price,
@@ -177,7 +210,43 @@ def product_snapshot(product: Product) -> dict[str, Any]:
             snapshot[f"texts.{language}.{field}"] = getattr(product, f"{field}_{language}")
     snapshot["slug"] = product.slug
     snapshot.update(_seo_snapshot(product))
+    if images is None:
+        images = product.images.all() if product.pk is not None else ()
+    for image in images:
+        snapshot.update(_image_alt_snapshot(image))
     return snapshot
+
+
+def _image_alt_snapshot(image: ProductImage) -> dict[str, str]:
+    return {f"images.{image.pk}.alt.{language}": getattr(image, f"alt_{language}") for language in LANGUAGES}
+
+
+def _check_expected(snapshot: dict[str, Any], expected: dict[str, Any] | None) -> None:
+    """``ProductInput.expected`` against the locked row's snapshot: a missing key (an image deleted since)
+    or another value is ``ProductChanged``."""
+    if not expected:
+        return
+    changed = [key for key, value in expected.items() if key not in snapshot or snapshot[key] != value]
+    if changed:
+        raise ProductChanged(changed)
+
+
+def _apply_image_alt(
+    images: Sequence[ProductImage], image_alt: dict[int, dict[str, str]] | None
+) -> list[ProductImage]:
+    """Set the alt leaves on the loaded ``images`` (404 for an image of another product); the changed rows."""
+    if not image_alt:
+        return []
+    by_id = {image.pk: image for image in images}
+    changed: list[ProductImage] = []
+    for image_id, leaves in image_alt.items():
+        image = by_id.get(image_id)
+        if image is None:
+            raise NotFound
+        for language, value in leaves.items():
+            setattr(image, f"alt_{language}", value.strip())
+        changed.append(image)
+    return changed
 
 
 def _apply_billz(product: Product, row: BillzProduct) -> None:
@@ -302,7 +371,9 @@ def update_product(product_id: int, data: ProductInput, *, actor: Any, request: 
         )
         if product is None:
             raise NotFound
-        before = product_snapshot(product)
+        images = list(product.images.order_by("position", "id"))
+        before = product_snapshot(product, images)
+        _check_expected(before, data.expected)
         if data.billz_product is not None and data.billz_product.billz_id != product.billz_id:
             require_live_billz()
             _apply_billz(product, data.billz_product)
@@ -320,11 +391,14 @@ def update_product(product_id: int, data: ProductInput, *, actor: Any, request: 
         if data.slug:
             product.slug = data.slug
         _apply_seo(product, data.seo)
-        _check_active_rule(product, image_count=product.images.count())
-        after = product_snapshot(product)
+        changed_images = _apply_image_alt(images, data.image_alt)
+        _check_active_rule(product, image_count=len(images))
+        after = product_snapshot(product, images)
         product.is_new_from_billz = False
         _set_last_change(product, _change_kind(before, after), actor, before)
         _save_product(product)
+        for image in changed_images:
+            image.save(update_fields=[*(f"alt_{language}" for language in LANGUAGES), "updated_at"])
         diff_before, diff_after = _diff(before, after)
         audit.record(
             action="product.updated",
@@ -409,6 +483,37 @@ def add_image(product_id: int, uploaded: Any, *, actor: Any, request: Any = None
             request=request,
             after={"image_id": image.pk, "position": image.position, "sha256": image.sha256},
         )
+    return image
+
+
+def update_image(
+    product_id: int, image_id: int, *, alt: dict[str, str], actor: Any, request: Any = None
+) -> ProductImage:
+    """``PATCH products/{id}/images/{image_id}/``: merge the ``alt`` leaves; 404 for another product's image.
+
+    A gallery change: ``updated_at`` of the product moves, ``last_change`` does not; audit
+    ``product.image_updated`` with the changed ``images.{id}.alt.{language}`` keys."""
+    with transaction.atomic():
+        product = _locked_product(product_id)
+        image = product.images.filter(pk=image_id).first()
+        if image is None:
+            raise NotFound
+        before = _image_alt_snapshot(image)
+        for language, value in alt.items():
+            setattr(image, f"alt_{language}", value.strip())
+        diff_before, diff_after = _diff(before, _image_alt_snapshot(image))
+        if diff_after:
+            image.save(update_fields=[*(f"alt_{language}" for language in LANGUAGES), "updated_at"])
+            _touch_product(product.pk)
+            audit.record(
+                action="product.image_updated",
+                entity_type="product",
+                entity_id=str(product.pk),
+                actor=actor,
+                request=request,
+                before=diff_before,
+                after=diff_after,
+            )
     return image
 
 

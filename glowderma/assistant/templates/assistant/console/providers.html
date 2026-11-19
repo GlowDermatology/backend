@@ -1,0 +1,21 @@
+{% extends "assistant/console/base.html" %}
+{% load i18n %}
+
+{% block page %}
+<section class="gd-ai-card">
+    <table class="gd-ai-table">
+        <thead><tr><th>{% translate "Provayder" %}</th><th>{% translate "Model" %}</th><th>{% translate "Yoqilgan" %}</th><th>{% translate "Kalit" %}</th><th>{% translate "Tekshiruv" %}</th></tr></thead>
+        <tbody>
+        {% for item in rows %}
+            <tr>
+                <td><a class="gd-ai-link" href="{% url 'admin:assistant_provider' item.row.provider %}">{{ item.row.get_provider_display }}</a>{% if item.row.provider == active_provider %} <span class="gd-ai-badge gd-ai-badge--ok">{% translate "Faol" %}</span>{% endif %}</td>
+                <td><code>{{ item.row.model_id }}</code></td>
+                <td>{% if item.row.enabled %}{% translate "Ha" %}{% else %}{% translate "Yo‘q" %}{% endif %}</td>
+                <td>{% if item.credential.configured %}{% blocktranslate with v=item.credential.active_version %}{{ v }}-versiya{% endblocktranslate %}{% else %}{% translate "Sozlanmagan" %}{% endif %}</td>
+                <td>{{ item.credential.test_status_label }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endblock %}

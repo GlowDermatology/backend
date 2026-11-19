@@ -47,6 +47,12 @@ TOPOLOGY_KEYS = frozenset(
         "FORWARDED_ALLOW_IPS",
         "USE_S3",
         "S3_LOCATION",
+        # Per service (api: the writer agent, worker: the reader agent); a copy in the shared file would give
+        # every service the same Vault Agent.
+        "VAULT_MODE",
+        "VAULT_PROXY_URL",
+        "VAULT_KV_MOUNT",
+        "VAULT_AI_PREFIX",
     }
 )
 # Key files rendered next to the secrets file by the same agent; any other *_FILE path is the deployment's.

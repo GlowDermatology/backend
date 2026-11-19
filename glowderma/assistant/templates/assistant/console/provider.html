@@ -1,0 +1,39 @@
+{% extends "assistant/console/base.html" %}
+{% load i18n %}
+
+{% block page %}
+<h2 class="gd-ai-h">{{ provider_title }}</h2>
+<div class="gd-ai-grid">
+    <section class="gd-ai-card" aria-labelledby="ai-params-title">
+        <h2 id="ai-params-title" class="gd-ai-card__title">{% translate "Model va parametrlar" %}</h2>
+        <form method="post" novalidate data-testid="ai-provider-form">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="params">
+            {% include "assistant/console/_errors.html" %}
+            {% for field in form %}{% include "assistant/console/_field.html" %}{% endfor %}
+            <div class="gd-ai-foot">
+                <span class="gd-ai-muted">{% blocktranslate trimmed with at=row.updated_at|date:"d.m.Y H:i" author=updated_by %}Oxirgi o‘zgarish: {{ at }} · {{ author }}{% endblocktranslate %}</span>
+                <button type="submit" class="gd-ai-button">{% translate "Saqlash" %}</button>
+            </div>
+        </form>
+    </section>
+    <section class="gd-ai-card" aria-labelledby="ai-key-title">
+        <h2 id="ai-key-title" class="gd-ai-card__title">{% translate "API kalit" %}</h2>
+        <p class="gd-ai-muted">{% translate "Kalit faqat Vault’da saqlanadi; bu yerda faqat uning versiyalari va holati ko‘rinadi." %}</p>
+        {% include "assistant/console/_credential.html" %}
+        <div class="gd-ai-actions">
+            <a class="gd-ai-button" href="{% url 'admin:assistant_provider_key' row.provider %}" data-testid="ai-rotate-link">{% translate "Kalitni almashtirish" %}</a>
+            {% if credential.configured %}
+                <form method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="test_key">
+                    <button type="submit" class="gd-ai-button gd-ai-button--ghost" data-testid="ai-test-key">{% translate "Faol kalitni tekshirish" %}</button>
+                </form>
+            {% endif %}
+            {% if credential.previous_version %}
+                <a class="gd-ai-button gd-ai-button--ghost" href="{% url 'admin:assistant_provider_rollback' row.provider %}" data-testid="ai-rollback-link">{% translate "Oldingi kalitga qaytish" %}</a>
+            {% endif %}
+        </div>
+    </section>
+</div>
+{% endblock %}
