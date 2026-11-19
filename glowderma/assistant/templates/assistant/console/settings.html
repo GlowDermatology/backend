@@ -1,0 +1,33 @@
+{% extends "assistant/console/base.html" %}
+{% load i18n %}
+
+{% block page %}
+<p class="gd-ai-lead">
+    {% blocktranslate trimmed %}
+        Mahsulot matnlari uchun AI yordamchi: yoqish, byudjetlar va cheklovlar. Har bir o‘zgarish audit jurnaliga
+        yoziladi va keyingi so‘rovdan boshlab ishlaydi (qayta ishga tushirish shart emas).
+    {% endblocktranslate %}
+</p>
+<div class="gd-ai-grid">
+    <section class="gd-ai-card" aria-labelledby="ai-settings-title">
+        <h2 id="ai-settings-title" class="gd-ai-card__title">{% translate "Sozlamalar" %}</h2>
+        <form method="post" novalidate data-testid="ai-settings-form">
+            {% csrf_token %}
+            {% include "assistant/console/_errors.html" %}
+            {% for field in form %}{% include "assistant/console/_field.html" %}{% endfor %}
+            <div class="gd-ai-foot">
+                <span class="gd-ai-muted">{% blocktranslate trimmed with at=row.updated_at|date:"d.m.Y H:i" author=updated_by %}Oxirgi o‘zgarish: {{ at }} · {{ author }}{% endblocktranslate %}</span>
+                <button type="submit" class="gd-ai-button">{% translate "Saqlash" %}</button>
+            </div>
+        </form>
+    </section>
+    <section class="gd-ai-card" aria-labelledby="ai-budget-title">
+        <h2 id="ai-budget-title" class="gd-ai-card__title">{% translate "Byudjet" %}</h2>
+        {% include "assistant/console/_budgets.html" %}
+        <dl class="gd-ai-dl">
+            <dt>{% translate "AI rejimi" %}</dt><dd><code>{{ modes.ai }}</code></dd>
+            <dt>{% translate "Vault rejimi" %}</dt><dd><code>{{ modes.vault }}</code></dd>
+        </dl>
+    </section>
+</div>
+{% endblock %}

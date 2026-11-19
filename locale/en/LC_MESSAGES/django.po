@@ -201,6 +201,10 @@ msgstr "%(hours)s h %(minutes)s min"
 msgid "%(job)s hali ishga tushirilmagan"
 msgstr "%(job)s has not been run yet"
 
+#: glowderma/assistant/templates/assistant/console/jobs.html
+msgid "%(jobs)s ta so‘rov, %(failed)s tasi xato · %(cost)s USD"
+msgstr "%(jobs)s requests, %(failed)s failed · %(cost)s USD"
+
 #: glowderma/professionals/models.py
 msgid "%(kind)s %(start)s–%(end)s (mutaxassis #%(professional_id)s)"
 msgstr "%(kind)s %(start)s–%(end)s (specialist #%(professional_id)s)"
@@ -259,13 +263,25 @@ msgstr "%(name)s × %(quantity)s @ %(price)s (order №%(order)s)"
 msgid "%(name)s × %(quantity)s @ %(price)s (xarid #%(purchase)s)"
 msgstr "%(name)s × %(quantity)s @ %(price)s (purchase #%(purchase)s)"
 
+#: glowderma/assistant/templates/assistant/console/rotate_key.html
+msgid "%(name)s: yangi API kalit"
+msgstr "%(name)s: new API key"
+
 #: glowderma/professionals/templates/admin/professionals/submit_line.html
 msgid "%(name)sni o‘chirish"
 msgstr "Delete %(name)s"
 
+#: glowderma/assistant/console/views.py
+msgid "%(number)s-versiya faollashtirildi: keyingi so‘rovlar undan foydalanadi."
+msgstr "Version %(number)s activated: the next requests use it."
+
 #: glowderma/accounts/models.py
 msgid "%(platform)s %(model)s · mijoz #%(customer)s"
 msgstr "%(platform)s %(model)s · customer #%(customer)s"
+
+#: glowderma/assistant/templates/assistant/console/rollback_key.html
+msgid "%(previous)s-versiya yana faol bo‘ladi, %(active)s-versiya esa oldingi versiya sifatida qoladi. Keyingi so‘rovlar darhol eski kalitdan foydalanadi; u qayta tekshiriladi."
+msgstr "Version %(previous)s becomes active again and version %(active)s stays as the previous one. The next requests use the old key right away; it is tested again."
 
 #: glowderma/reporting/templates/reporting/dashboards/sales.html
 msgid "%(products)s faol mahsulot va %(categories)s kategoriya tekshirildi"
@@ -318,6 +334,14 @@ msgstr[1] "%(topic)s: no messages to requeue (%(count)s skipped)."
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "%(total)s ta ochiq mijoz sessiyasi"
 msgstr "Open customer sessions: %(total)s"
+
+#: glowderma/assistant/templates/assistant/console/providers.html
+msgid "%(v)s-versiya"
+msgstr "version %(v)s"
+
+#: glowderma/assistant/console/views.py
+msgid "%(version)s-versiya yana faol. U qayta tekshirilmoqda."
+msgstr "Version %(version)s is active again. It is being tested again."
 
 #: glowderma/reporting/dashboards/money.py
 msgid "%(when)s dan"
@@ -393,6 +417,96 @@ msgstr "7 days"
 msgid "7 kun ichida kod yuborilmagan"
 msgstr "No codes sent in the last 7 days"
 
+#: glowderma/assistant/services.py
+msgid "AI bu so‘rovni bajarmadi. Ma’lumotlarni tekshirib, qayta urinib ko‘ring."
+msgstr "The AI did not complete this request. Check the data and try again."
+
+#: glowderma/assistant/services.py
+msgid "AI javobini tushunib bo‘lmadi. Qayta urinib ko‘ring."
+msgstr "The AI answer could not be understood. Try again."
+
+#: config/settings/ops_admin.py
+msgid "AI promptlar"
+msgstr "AI prompts"
+
+#: glowderma/assistant/console/views.py
+#: model metadata
+msgid "AI provayder"
+msgstr "AI provider"
+
+#: config/settings/ops_admin.py
+#: model metadata
+msgid "AI provayderlar"
+msgstr "AI providers"
+
+#: glowderma/assistant/templates/assistant/console/settings.html
+msgid "AI rejimi"
+msgstr "AI mode"
+
+#: config/settings/ops_admin.py
+msgid "AI sozlamalari"
+msgstr "AI settings"
+
+#: glowderma/assistant/console/views.py
+#: model metadata
+msgid "AI so‘rovi"
+msgstr "AI request"
+
+#: config/settings/ops_admin.py
+#: model metadata
+msgid "AI so‘rovlari"
+msgstr "AI requests"
+
+#: glowderma/assistant/console/views.py
+msgid "AI so‘rovlari va xarajat"
+msgstr "AI requests and cost"
+
+#: glowderma/assistant/services.py
+msgid "AI uchun ajratilgan byudjet tugadi. Administratorga murojaat qiling."
+msgstr "The AI budget is used up. Contact an administrator."
+
+#: glowderma/assistant/services.py
+msgid "AI xizmati vaqtincha ishlamayapti. Birozdan so‘ng qayta urinib ko‘ring."
+msgstr "The AI service is temporarily unavailable. Try again shortly."
+
+#: config/settings/ops_admin.py
+#: glowderma/assistant/console/views.py
+#: model metadata
+msgid "AI yordamchi"
+msgstr "AI assistant"
+
+#: glowderma/assistant/services.py
+msgid "AI yordamchi hali sozlanmagan. Administratorga murojaat qiling."
+msgstr "The AI assistant is not set up yet. Contact an administrator."
+
+#: glowderma/assistant/services.py
+msgid "AI yordamchi o‘chirilgan."
+msgstr "The AI assistant is turned off."
+
+#: model metadata
+msgid "AI yordamchi sozlamalari"
+msgstr "AI assistant settings"
+
+#: glowderma/assistant/console/views.py
+msgid "AI yordamchi: promptlar"
+msgstr "AI assistant: prompts"
+
+#: glowderma/assistant/console/views.py
+msgid "AI yordamchi: provayderlar"
+msgstr "AI assistant: providers"
+
+#: glowderma/assistant/console/views.py
+msgid "AI yordamchi: sozlamalar"
+msgstr "AI assistant: settings"
+
+#: glowderma/assistant/templates/assistant/console/provider.html
+msgid "API kalit"
+msgstr "API key"
+
+#: glowderma/assistant/console/views.py
+msgid "API kalitni almashtirish"
+msgstr "Rotate the API key"
+
 #: model metadata
 msgid "Admin"
 msgstr "Admin"
@@ -419,6 +533,7 @@ msgstr "Promotion removed"
 msgid "Aksiya qo‘shildi"
 msgstr "Promotion added"
 
+#: glowderma/assistant/templates/assistant/console/_credential.html
 #: glowderma/loyalty/admin.py
 msgid "Almashtirilgan"
 msgstr "Superseded"
@@ -440,6 +555,10 @@ msgstr "Alt text falls back to the name"
 #: glowderma/core/admin.py
 msgid "Amal"
 msgstr "Action"
+
+#: glowderma/assistant/console/views.py
+msgid "Amal bajarilmadi (kod: %(code)s)."
+msgstr "The action failed (code: %(code)s)."
 
 #: glowderma/core/admin_actions.py
 msgid "Amal bajarilmadi: kutilmagan xato. Tafsilotlar server jurnalida."
@@ -480,6 +599,10 @@ msgstr "Android"
 #: model metadata
 msgid "Apple"
 msgstr "Apple"
+
+#: model metadata
+msgid "Arxivda"
+msgstr "Retired"
 
 #: config/settings/ops_admin.py
 msgid "Audit jurnali"
@@ -667,6 +790,14 @@ msgstr "All customers will be asked to accept the terms again."
 msgid "Barcha sessiyalarni tugatish"
 msgstr "End all sessions"
 
+#: glowderma/assistant/templates/assistant/console/job.html
+msgid "Barcha so‘rovlar"
+msgstr "All requests"
+
+#: glowderma/assistant/templates/assistant/console/prompt_version.html
+msgid "Barcha versiyalar"
+msgstr "All versions"
+
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "Barcha yangi mijozlar"
 msgstr "All new customers"
@@ -694,6 +825,8 @@ msgid "Bekor qilingan (reversal)"
 msgstr "Cancelled (reversal)"
 
 #: glowderma/accounts/templates/accounts/console/reset_2fa_confirmation.html
+#: glowderma/assistant/templates/assistant/console/rollback_key.html
+#: glowderma/assistant/templates/assistant/console/rotate_key.html
 #: glowderma/core/templates/admin/ops/confirm_action.html
 #: glowderma/site_config/templates/site_config/console/settings.html
 msgid "Bekor qilish"
@@ -895,6 +1028,10 @@ msgstr "Bio (uz)"
 msgid "Bir martalik kodlar (OTP)"
 msgstr "One-time codes (OTP)"
 
+#: glowderma/assistant/templates/assistant/console/_budgets.html
+msgid "Bir xodim kuniga %(n)s tagacha so‘rov yuborishi mumkin."
+msgstr "A staff member may send up to %(n)s requests a day."
+
 #: glowderma/core/admin.py
 msgid "Birinchi %(count)s tasi ko‘rildi."
 msgid_plural "Birinchi %(count)s tasi ko‘rildi."
@@ -917,6 +1054,10 @@ msgstr "Single customer"
 msgid "Bitta mijoz · %(phone)s"
 msgstr "One customer · %(phone)s"
 
+#: glowderma/assistant/console/forms.py
+msgid "Bitta urinish uchun, 5–20 soniya. Butun so‘rov 90 soniyada to‘xtatiladi: kutish vaqti qayta urinishlar bilan birga shu chegaraga sig‘ishi kerak."
+msgstr "Per attempt, 5–20 seconds. The whole request is stopped after 90 seconds: the timeout, together with the retries, must fit within that limit."
+
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "Bloklangan"
 msgstr "Locked"
@@ -932,6 +1073,10 @@ msgstr "In stock"
 #: glowderma/reporting/templates/reporting/dashboards/ops.html
 msgid "Boshlangan"
 msgstr "Started"
+
+#: glowderma/assistant/console/views.py
+msgid "Boshlang‘ich qiymatlar"
+msgstr "Initial values"
 
 #: glowderma/professionals/api/admin/serializers.py
 msgid "Boshlanish va tugash vaqtini birga kiriting (ikkalasi bo‘sh bo‘lsa, dam olish kuni)."
@@ -967,6 +1112,10 @@ msgstr "Dashboards"
 #: glowderma/delivery/admin.py
 msgid "Bosqich"
 msgstr "Stage"
+
+#: model metadata
+msgid "Bo‘sh maydonlarni to‘ldirish"
+msgstr "Fill empty fields"
 
 #: model metadata
 msgid "Bo‘shatildi"
@@ -1051,6 +1200,14 @@ msgstr "This address (slug) is already used by another product."
 msgid "Bu manzil (slug) boshqa mutaxassisda bor."
 msgstr "This address (slug) is already used by another specialist."
 
+#: glowderma/assistant/services.py
+msgid "Bu maydon uchun taklif yo‘q."
+msgstr "There is no suggestion for this field."
+
+#: glowderma/assistant/services.py
+msgid "Bu maydonni AI to‘ldira olmaydi."
+msgstr "The AI cannot fill this field."
+
 #: glowderma.core.api.exceptions.FIELD_MESSAGES
 #: glowderma/core/api/exceptions.py
 msgid "Bu maydonni o‘zgartirib bo‘lmaydi."
@@ -1091,6 +1248,10 @@ msgstr "This device is already on the list."
 msgid "Bu raqam bilan mijoz topilmadi."
 msgstr "No customer was found with this number."
 
+#: glowderma/assistant/services.py
+msgid "Bu rejim faqat boshqaruv konsolida ishlatiladi."
+msgstr "This mode is used only in the ops console."
+
 #: glowderma/delivery/services.py
 msgid "Bu sana allaqachon kiritilgan."
 msgstr "This date has already been entered."
@@ -1102,6 +1263,10 @@ msgstr "A separate schedule for this date already exists."
 #: glowderma/core/api/fields.py
 msgid "Bu slug band."
 msgstr "This slug is already taken."
+
+#: glowderma/assistant/services.py
+msgid "Bu takliflar hali tayyor emas yoki allaqachon ko‘rib chiqilgan."
+msgstr "These suggestions are not ready yet or were already reviewed."
 
 #: glowderma/notifications/services.py
 msgid "Bu test eski matn uchun yuborilgan: qayta test yuboring."
@@ -1127,6 +1292,10 @@ msgstr "This time is already taken."
 msgid "Bu vaqt boshqa band vaqt bilan kesishadi."
 msgstr "This time overlaps another blocked time."
 
+#: glowderma/assistant/templates/assistant/console/prompt_version.html
+msgid "Bu versiya avval faol bo‘lgan: uni qayta faollashtirish joriy versiyani arxivga o‘tkazadi."
+msgstr "This version was active before: activating it again retires the current version."
+
 #: glowderma/professionals/api/admin/serializers.py
 msgid "Bu xizmat ro‘yxatda ikki marta berilgan."
 msgstr "This service appears twice in the list."
@@ -1148,6 +1317,11 @@ msgstr "This delivery method is turned off."
 msgid "Bu yozuvga boshqa yozuvlar bog‘langan; avval ularni o‘chiring yoki nofaol qiling."
 msgstr "Other records are linked to this one; delete or deactivate them first."
 
+#: glowderma/assistant/console/views.py
+#: glowderma/assistant/templates/assistant/console/_budgets.html
+msgid "Bugun"
+msgstr "Today"
+
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "Bugun %(count)s ta qabul"
 msgid_plural "Bugun %(count)s ta qabul"
@@ -1158,9 +1332,21 @@ msgstr[1] "%(count)s appointments today"
 msgid "Bugun kuryer chaqirish vaqti tugadi."
 msgstr "The time for calling a courier today is over."
 
+#: glowderma/assistant/services.py
+msgid "Bugungi AI so‘rovlari chegarasiga yetdingiz. Ertaga qayta urinib ko‘ring."
+msgstr "You have reached today's AI request limit. Try again tomorrow."
+
 #: glowderma/reporting/dashboards/customers.py
 msgid "Bugungi qabullar"
 msgstr "Today’s appointments"
+
+#: glowderma/assistant/console/forms.py
+msgid "Bugungi xarajat shu chegaraga yetganda yangi so‘rovlar to‘xtatiladi."
+msgstr "New requests stop once today's spending reaches this limit."
+
+#: glowderma/assistant/console/forms.py
+msgid "Bunday mahsulot topilmadi."
+msgstr "No such product."
 
 #: glowderma/commerce/admin.py
 #: glowderma/delivery/admin.py
@@ -1250,6 +1436,11 @@ msgstr "Order statuses"
 msgid "Buyurtmani ochish"
 msgstr "Open order"
 
+#: glowderma/assistant/templates/assistant/console/jobs.html
+#: glowderma/assistant/templates/assistant/console/settings.html
+msgid "Byudjet"
+msgstr "Budget"
+
 #: glowderma/customers/admin.py
 #: glowderma/loyalty/admin.py
 #: glowderma/reporting/templates/reporting/dashboards/money.html
@@ -1303,13 +1494,26 @@ msgstr "Cashback · 30 days"
 msgid "Celery vazifa ID"
 msgstr "Celery task ID"
 
+#: model metadata
+msgid "Celery vazifasi"
+msgstr "Celery task"
+
 #: glowderma/professionals/api/admin/views.py
 msgid "Ch"
 msgstr "Wed"
 
+#: glowderma/assistant/templates/assistant/console/_budgets.html
+msgid "Chegara (USD)"
+msgstr "Limit (USD)"
+
 #: model metadata
 msgid "Chiqish"
 msgstr "Sign-out"
+
+#: glowderma/assistant/templates/assistant/console/job.html
+#: glowderma/assistant/templates/assistant/console/jobs.html
+msgid "Chiqish tokenlari"
+msgstr "Output tokens"
 
 #: glowderma.core.labels.WEEKDAYS
 #: model metadata
@@ -1397,6 +1601,10 @@ msgstr "Duration (min.)"
 #: glowderma/professionals/api/admin/serializers.py
 msgid "Davomiylik 5 daqiqaga karrali bo‘lsin."
 msgstr "The duration must be a multiple of 5 minutes."
+
+#: glowderma/assistant/templates/assistant/console/_budgets.html
+msgid "Davr"
+msgstr "Period"
 
 #: glowderma/reporting/templates/reporting/dashboards/sales.html
 msgid "Davrda yaratilgan %(total)s ta buyurtma hozir qayerda"
@@ -1592,6 +1800,7 @@ msgstr "Facebook"
 
 #: admin history (professionals.Location)
 #: glowderma.core.labels.PRODUCT_STATUS
+#: glowderma/assistant/templates/assistant/console/providers.html
 #: model metadata
 msgid "Faol"
 msgstr "Active"
@@ -1635,6 +1844,18 @@ msgstr "Active"
 msgid "Faol akkauntlar"
 msgstr "Active accounts"
 
+#: glowderma/assistant/console/views.py
+msgid "Faol kalit tekshiruvga yuborildi. Natija shu sahifada ko‘rinadi."
+msgstr "The active key was sent for a test. The result appears on this page."
+
+#: glowderma/assistant/console/views.py
+msgid "Faol kalit yo‘q yoki provayder kalitni qabul qilmadi."
+msgstr "There is no active key, or the provider did not accept the key."
+
+#: glowderma/assistant/templates/assistant/console/provider.html
+msgid "Faol kalitni tekshirish"
+msgstr "Test the active key"
+
 #: glowderma/catalog/services.py
 msgid "Faol mahsulot uchun kategoriyani tanlang."
 msgstr "Select a category for an active product."
@@ -1647,6 +1868,15 @@ msgstr "An active product must have at least one image."
 msgid "Faol mahsuloti yo‘q"
 msgstr "No active products"
 
+#: glowderma/assistant/templates/assistant/console/prompt_version.html
+msgid "Faol va arxivdagi versiyalar o‘zgarmaydi: o‘zgartirish uchun yangi qoralama yarating."
+msgstr "Active and retired versions do not change: create a new draft to make changes."
+
+#: glowderma/assistant/templates/assistant/console/_credential.html
+#: glowderma/assistant/templates/assistant/console/prompts.html
+msgid "Faol versiya"
+msgstr "Active version"
+
 #: glowderma/reporting/dashboards/sales.py
 msgid "Faol, lekin qoldig‘i 0 yoki Billz’da yozuvi yo‘q"
 msgstr "Active, but stock is 0 or there is no Billz record"
@@ -1654,6 +1884,26 @@ msgstr "Active, but stock is 0 or there is no Billz record"
 #: model metadata
 msgid "Faollashtirildi"
 msgstr "Activated"
+
+#: glowderma/assistant/templates/assistant/console/prompt_version.html
+msgid "Faollashtirilgach keyingi barcha so‘rovlar shu versiyadan foydalanadi."
+msgstr "Once activated, every following request uses this version."
+
+#: glowderma/assistant/templates/assistant/console/prompt_template.html
+msgid "Faollashtirilgan"
+msgstr "Activated"
+
+#: glowderma/assistant/templates/assistant/console/prompt_version.html
+msgid "Faollashtirilgan: %(at)s · %(author)s"
+msgstr "Activated: %(at)s · %(author)s"
+
+#: glowderma/assistant/templates/assistant/console/prompt_version.html
+msgid "Faollashtirish"
+msgstr "Activate"
+
+#: glowderma/assistant/templates/assistant/console/prompt_version.html
+msgid "Faollashtirish uchun avval namuna mahsulotda muvaffaqiyatli sinang."
+msgstr "To activate, first test it successfully on a sample product."
 
 #: glowderma.core.api.exceptions.FIELD_MESSAGES
 #: glowderma/core/api/exceptions.py
@@ -1670,6 +1920,10 @@ msgstr "Only lowercase Latin letters, digits and hyphens (not digits only)."
 msgid "Faqat menejerlar uchun."
 msgstr "Managers only."
 
+#: glowderma/assistant/console/views.py
+msgid "Faqat qoralama versiyani tahrirlash va sinash mumkin."
+msgstr "Only a draft version can be edited and tested."
+
 #: glowderma/notifications/state.py
 msgid "Faqat qoralamani o‘zgartirish mumkin."
 msgstr "Only a draft can be edited."
@@ -1681,6 +1935,10 @@ msgstr "It must not consist of digits only."
 #: glowderma/notifications/state.py
 msgid "Faqat rejalashtirilgan yoki bekor qilingan xabarni qoralamaga qaytarish mumkin."
 msgstr "Only a scheduled or cancelled message can be returned to draft."
+
+#: glowderma/assistant/console/views.py
+msgid "Faqat sinovdan o‘tgan (yoki avval faol bo‘lgan) versiyani faollashtirish mumkin."
+msgstr "Only a tested (or previously active) version can be activated."
 
 #: glowderma/notifications/state.py
 msgid "Faqat test tasdiqlangan xabarni yuborishga tasdiqlash mumkin."
@@ -1741,6 +1999,10 @@ msgstr "Glow Derma Ops — recovery codes"
 msgid "Google"
 msgstr "Google"
 
+#: model metadata
+msgid "Google Gemini"
+msgstr "Google Gemini"
+
 #: glowderma/integrations/admin.py
 msgid "HTTP javob"
 msgstr "HTTP response"
@@ -1749,6 +2011,8 @@ msgstr "HTTP response"
 msgid "HTTP sarlavhalari"
 msgstr "HTTP headers"
 
+#: glowderma/assistant/templates/assistant/console/_credential.html
+#: glowderma/assistant/templates/assistant/console/providers.html
 #: glowderma/core/templatetags/ops_admin.py
 #: glowderma/reporting/dashboards/ops.py
 msgid "Ha"
@@ -1757,6 +2021,10 @@ msgstr "Yes"
 #: glowderma/accounts/templates/accounts/console/reset_2fa_confirmation.html
 msgid "Ha, 2FA ni qayta o‘rnatish"
 msgstr "Yes, reset 2FA"
+
+#: glowderma/assistant/templates/assistant/console/rollback_key.html
+msgid "Ha, qaytish"
+msgstr "Yes, roll back"
 
 #: admin history (professionals.WorkingHours)
 #: glowderma/delivery/admin.py
@@ -1810,6 +2078,10 @@ msgstr "Open each payment and check its status by transaction ID in the provider
 #: glowderma/reporting/templates/reporting/dashboards/ops.html
 msgid "Har bir turning oxirgi ishga tushishi; 15 daqiqadan beri yurak urishi yo‘q — osilgan"
 msgstr "Latest run of each type; no heartbeat for 15 minutes — stuck"
+
+#: glowderma/assistant/templates/assistant/console/prompts.html
+msgid "Har bir vazifa uchun uslub ko‘rsatmalari. Majburiy xavfsizlik qoidalari kodda va ularni o‘zgartirib bo‘lmaydi. Yangi versiya avval qoralama bo‘ladi: namuna mahsulotda sinang, keyin faollashtiring."
+msgstr "Style guidance for each task. The mandatory safety rules are in the code and cannot be changed. A new version starts as a draft: test it on a sample product, then activate it."
 
 #: glowderma.core.labels.BANNER_EXPORT_HEADERS
 msgid "Havola"
@@ -1907,6 +2179,9 @@ msgstr "Events"
 
 #: glowderma.core.labels.PRODUCT_EXPORT_HEADERS
 #: glowderma/appointments/admin.py
+#: glowderma/assistant/templates/assistant/console/job.html
+#: glowderma/assistant/templates/assistant/console/jobs.html
+#: glowderma/assistant/templates/assistant/console/prompt_template.html
 #: glowderma/catalog/admin.py
 #: glowderma/commerce/admin.py
 #: glowderma/core/admin.py
@@ -2127,6 +2402,10 @@ msgstr "Opening hours and special days"
 msgid "Ish vaqtini tahrirlash"
 msgstr "Edit opening hours"
 
+#: glowderma/assistant/templates/assistant/console/rotate_key.html
+msgid "Ishchi jarayon shu versiyani provayderda tekshiradi."
+msgstr "A worker tests this version with the provider."
+
 #: glowderma/core/admin.py
 #: glowderma/integrations/admin.py
 msgid "Ishga tushirish"
@@ -2140,6 +2419,10 @@ msgstr "Running"
 #: model metadata
 msgid "Ishlatildi"
 msgstr "Spent"
+
+#: model metadata
+msgid "Ishlayapti"
+msgstr "Working"
 
 #: glowderma/integrations/admin.py
 msgid "Ishlov xatosi"
@@ -2288,6 +2571,46 @@ msgstr "K1–K6 checks"
 #: glowderma/core/admin.py
 msgid "K1–K6 tekshiruvlari va cashback daftari solishtiruvi navbatga qo‘yiladi. Natija audit jurnaliga «report.consistency» yozuvi bo‘lib tushadi; nomuvofiqlik bo‘lsa, ogohlantirish yuboriladi. Hisobot 10 daqiqada bir martadan ko‘p ishga tushirilmaydi."
 msgstr "The K1–K6 checks and the cashback ledger reconciliation will be queued. The result is written to the audit log as a “report.consistency” entry; if a discrepancy is found, a warning is sent. The report can be run at most once every 10 minutes."
+
+#: glowderma/assistant/templates/assistant/console/providers.html
+msgid "Kalit"
+msgstr "Key"
+
+#: glowderma/assistant/templates/assistant/console/rotate_key.html
+msgid "Kalit Vault’ga yangi, hali faol bo‘lmagan versiya sifatida yoziladi."
+msgstr "The key is written to Vault as a new, not yet active version."
+
+#: glowderma/assistant/console/views.py
+msgid "Kalit bo‘sh."
+msgstr "The key is empty."
+
+#: glowderma/assistant/templates/assistant/console/provider.html
+msgid "Kalit faqat Vault’da saqlanadi; bu yerda faqat uning versiyalari va holati ko‘rinadi."
+msgstr "The key is stored only in Vault; only its versions and state are shown here."
+
+#: glowderma/assistant/console/forms.py
+msgid "Kalit faqat Vault’ga yoziladi va hech qayerda ko‘rsatilmaydi. Ishchi jarayon uni tekshiradi; tekshiruvdan o‘tsa faol bo‘ladi, aks holda eski kalit ishlashda davom etadi."
+msgstr "The key is written only to Vault and is never shown. A worker tests it; if it passes it becomes active, otherwise the old key keeps working."
+
+#: glowderma/assistant/console/views.py
+msgid "Kalit noto‘g‘ri ko‘rinishda."
+msgstr "The key has an invalid format."
+
+#: glowderma/assistant/templates/assistant/console/_credential.html
+msgid "Kalit sozlangan"
+msgstr "Key configured"
+
+#: glowderma/assistant/console/views.py
+msgid "Kalit versiyasi Vault’da topilmadi."
+msgstr "The key version was not found in Vault."
+
+#: glowderma/assistant/console/forms.py
+msgid "Kalitda bo‘sh joy bo‘lmasligi kerak."
+msgstr "The key must not contain spaces."
+
+#: glowderma/assistant/templates/assistant/console/provider.html
+msgid "Kalitni almashtirish"
+msgstr "Rotate key"
 
 #: glowderma/reporting/templates/reporting/dashboards/sales.html
 msgid "Kamchilik"
@@ -2462,6 +2785,10 @@ msgstr "No consecutive errors"
 msgid "Keyin telefon qo‘shgan"
 msgstr "Added a phone later"
 
+#: glowderma/assistant/templates/assistant/console/jobs.html
+msgid "Keyingi"
+msgstr "Next"
+
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "Keyingi 14 kunda jadval ziddiyati yo‘q"
 msgstr "No schedule conflicts in the next 14 days"
@@ -2483,6 +2810,11 @@ msgstr "The sign-in has expired or was cancelled. Enter your email and password 
 #: glowderma/accounts/console/views.py
 msgid "Kirish muddati tugadi. Email va parolni qaytadan kiriting."
 msgstr "The sign-in has expired. Enter your email and password again."
+
+#: glowderma/assistant/templates/assistant/console/job.html
+#: glowderma/assistant/templates/assistant/console/jobs.html
+msgid "Kirish tokenlari"
+msgstr "Input tokens"
 
 #: admin history (delivery.WarehouseClosure)
 msgid "Kiritgan"
@@ -2580,6 +2912,15 @@ msgstr "You can enter it at most one year ahead."
 #: glowderma/core/api/exceptions.py
 msgid "Ko‘pi bilan {limit} ta."
 msgstr "At most {limit}."
+
+#: model metadata
+msgid "Ko‘rib chiqilmoqda"
+msgstr "Under review"
+
+#: glowderma/assistant/console/forms.py
+#: glowderma/assistant/templates/assistant/console/prompt_version.html
+msgid "Ko‘rsatmalar"
+msgstr "Instructions"
 
 #: config/settings/ops_admin.py
 msgid "Kun ish vaqti"
@@ -2694,6 +3035,8 @@ msgstr "Wrong e-mail or password."
 msgid "MFA tasdiqlangan"
 msgstr "MFA verified"
 
+#: glowderma/assistant/templates/assistant/console/job.html
+#: glowderma/assistant/templates/assistant/console/jobs.html
 #: glowderma/reporting/dashboards/sales.py
 #: glowderma/reporting/templates/reporting/dashboards/sales.html
 #: model metadata
@@ -2712,6 +3055,18 @@ msgstr "Product #%(product_id)s image %(position)s"
 msgid "Mahsulot band qilindi"
 msgstr "Product reserved"
 
+#: glowderma/catalog/services.py
+msgid "Mahsulot boshqa joyda o‘zgartirildi: sahifani yangilab, qayta urinib ko‘ring."
+msgstr "The product was changed elsewhere: refresh the page and try again."
+
+#: glowderma/assistant/templates/assistant/console/settings.html
+msgid "Mahsulot matnlari uchun AI yordamchi: yoqish, byudjetlar va cheklovlar. Har bir o‘zgarish audit jurnaliga yoziladi va keyingi so‘rovdan boshlab ishlaydi (qayta ishga tushirish shart emas)."
+msgstr "The AI assistant for product texts: on/off, budgets and limits. Every change is written to the audit log and applies from the next request (no restart needed)."
+
+#: glowderma/assistant/services.py
+msgid "Mahsulot ma’lumotlarida yo‘q raqam yoki da’vo bor: matnni tekshiring."
+msgstr "The text has a number or claim that is not in the product data: check it."
+
 #: glowderma/notifications/api/admin/serializers.py
 msgid "Mahsulot topilmadi yoki yashirin."
 msgstr "The product was not found or is hidden."
@@ -2719,6 +3074,10 @@ msgstr "The product was not found or is hidden."
 #: glowderma/catalog/admin.py
 msgid "Mahsulot: {obj}"
 msgstr "Product: {obj}"
+
+#: glowderma/assistant/services.py
+msgid "Mahsulotda rasm yo‘q."
+msgstr "The product has no images."
 
 #: config/settings/ops_admin.py
 #: glowderma.core.labels.CATEGORY_EXPORT_HEADERS
@@ -2781,6 +3140,10 @@ msgstr "The address has no map pin."
 msgid "Maqsad"
 msgstr "Purpose"
 
+#: glowderma/assistant/console/forms.py
+msgid "Masalan: gemini-2.5-flash-lite. Keyingi so‘rovdan boshlab ishlatiladi."
+msgstr "For example: gemini-2.5-flash-lite. Used from the next request."
+
 #: admin history (delivery.DeliverySettings)
 msgid "Mas’ul e-pochtasi"
 msgstr "Contact e-mail"
@@ -2806,6 +3169,10 @@ msgstr "The texts or the version have changed since you opened the page. Refresh
 msgid "Matnni kiriting."
 msgstr "Enter the text."
 
+#: model metadata
+msgid "Matnni yaxshilash"
+msgstr "Text improvement"
+
 #: glowderma/core/admin.py
 #: glowderma/reporting/templates/reporting/dashboards/ops.html
 msgid "Mavzu"
@@ -2830,6 +3197,10 @@ msgstr "Privacy policy"
 #: glowderma/delivery/admin.py
 msgid "Maxsus kunlarni tahrirlash"
 msgstr "Edit special days"
+
+#: glowderma/assistant/console/views.py
+msgid "Maydonlar"
+msgstr "Fields"
 
 #: glowderma.core.api.exceptions.MESSAGES
 #: glowderma/core/api/exceptions.py
@@ -2949,6 +3320,20 @@ msgstr "The customer has no open sessions."
 msgid "Mijozning ochiq sessiyasi yo‘q: hech narsa o‘zgarmadi."
 msgstr "The customer has no open sessions: nothing changed."
 
+#: glowderma/assistant/templates/assistant/console/job.html
+#: glowderma/assistant/templates/assistant/console/jobs.html
+#: glowderma/assistant/templates/assistant/console/providers.html
+msgid "Model"
+msgstr "Model"
+
+#: glowderma/assistant/console/forms.py
+msgid "Model nomi faqat kichik lotin harflari, raqamlar, nuqta va chiziqchadan iborat bo‘ladi."
+msgstr "A model name has only lowercase Latin letters, digits, dots and hyphens."
+
+#: glowderma/assistant/templates/assistant/console/provider.html
+msgid "Model va parametrlar"
+msgstr "Model and parameters"
+
 #: glowderma/core/admin.py
 msgid "Moliyaviy muvofiqlik hisobotini hozir ishga tushirish"
 msgstr "Run the financial consistency report now"
@@ -3043,6 +3428,14 @@ msgstr "The consistency report has been queued. The result will appear in the au
 msgid "Namuna"
 msgstr "Samples"
 
+#: glowderma/assistant/console/forms.py
+msgid "Namuna mahsulot (ID)"
+msgstr "Sample product (ID)"
+
+#: glowderma/assistant/templates/assistant/console/prompt_version.html
+msgid "Namuna mahsulotda sinash"
+msgstr "Test on a sample product"
+
 #: admin history (professionals.ProfessionalService)
 #: glowderma/appointments/admin.py
 #: glowderma/catalog/admin.py
@@ -3052,9 +3445,18 @@ msgstr "Samples"
 msgid "Narx"
 msgstr "Price"
 
+#: glowderma/assistant/templates/assistant/console/job.html
+#: glowderma/assistant/templates/assistant/console/prompt_version.html
+msgid "Narx (USD)"
+msgstr "Cost (USD)"
+
 #: glowderma.core.labels.PRODUCT_EXPORT_HEADERS
 msgid "Narx (so‘m)"
 msgstr "Price (UZS)"
+
+#: glowderma/assistant/console/forms.py
+msgid "Narx hisoblash uchun: provayder narxlar sahifasidan oling."
+msgstr "Used for cost estimates: take it from the provider's pricing page."
 
 #: glowderma/catalog/api/admin/serializers.py
 #: glowderma/professionals/api/admin/serializers.py
@@ -3094,6 +3496,7 @@ msgstr "Price sent for review"
 msgid "Narxni tasdiqlash kerak"
 msgstr "Price needs approval"
 
+#: glowderma/assistant/templates/assistant/console/job.html
 #: glowderma/integrations/admin.py
 msgid "Natija"
 msgstr "Result"
@@ -3256,6 +3659,14 @@ msgstr "Warning (%(topic)s): %(text)s"
 msgid "Ogohlantirish: %(text)s"
 msgstr "Warning: %(text)s"
 
+#: glowderma/assistant/console/views.py
+msgid "Ogohlantirishlar"
+msgstr "Warnings"
+
+#: glowderma/assistant/templates/assistant/console/jobs.html
+msgid "Oldingi"
+msgstr "Previous"
+
 #: glowderma/reporting/dashboards/sales.py
 msgid "Oldingi %(days)s kun: %(count)s"
 msgid_plural "Oldingi %(days)s kun: %(count)s"
@@ -3265,6 +3676,23 @@ msgstr[1] "Previous %(days)s days: %(count)s"
 #: glowderma/reporting/templates/reporting/dashboards/_tile.html
 msgid "Oldingi davrga nisbatan"
 msgstr "Compared with the previous period"
+
+#: glowderma/assistant/console/views.py
+msgid "Oldingi kalit hali tekshirilmoqda. Bir necha daqiqadan keyin qayta urinib ko‘ring."
+msgstr "The previous key is still being tested. Try again in a few minutes."
+
+#: glowderma/assistant/templates/assistant/console/rollback_key.html
+msgid "Oldingi kalitga qaytasizmi?"
+msgstr "Roll back to the previous key?"
+
+#: glowderma/assistant/console/views.py
+#: glowderma/assistant/templates/assistant/console/provider.html
+msgid "Oldingi kalitga qaytish"
+msgstr "Roll back to the previous key"
+
+#: glowderma/assistant/templates/assistant/console/_credential.html
+msgid "Oldingi versiya"
+msgstr "Previous version"
 
 #: glowderma/commerce/api/admin/views.py
 msgid "Olib ketiladigan buyurtma uchun yetkazish muammosi ochilmaydi."
@@ -3396,6 +3824,8 @@ msgstr "Last success"
 msgid "Oxirgi muvaffaqiyatli sinxronlashdan keyingi o‘zgarishlar (delta) Billz’dan olinadi: narxlar va qoldiqlar yangilanadi. Import allaqachon ishlayotgan bo‘lsa, yangisi boshlanmaydi."
 msgstr "Changes since the last successful sync (delta) are fetched from Billz: prices and stock are updated. If an import is already running, a new one is not started."
 
+#: glowderma/assistant/templates/assistant/console/provider.html
+#: glowderma/assistant/templates/assistant/console/settings.html
 #: glowderma/site_config/templates/site_config/console/settings.html
 msgid "Oxirgi o‘zgarish: %(at)s · %(author)s"
 msgstr "Last change: %(at)s · %(author)s"
@@ -3404,6 +3834,10 @@ msgstr "Last change: %(at)s · %(author)s"
 #: glowderma/professionals/api/admin/serializers.py
 msgid "Oxirgi sana boshlang‘ich sanadan oldin bo‘lmasin."
 msgstr "The end date must not be before the start date."
+
+#: glowderma/assistant/templates/assistant/console/prompt_version.html
+msgid "Oxirgi sinov"
+msgstr "Last test"
 
 #: glowderma/reporting/dashboards/ops.py
 msgid "Oxirgi sinxron %(ago)s"
@@ -3425,10 +3859,18 @@ msgstr "Last error"
 msgid "Oxirgi xato: %(error)s"
 msgstr "Last error: %(error)s"
 
+#: glowderma/assistant/console/forms.py
+msgid "Oy boshidan beri xarajat chegarasi."
+msgstr "Spending limit since the start of the month."
+
 #: glowderma.core.labels.CUSTOMER_STATUS
 #: model metadata
 msgid "O‘chirilgan"
 msgstr "Deleted"
+
+#: glowderma/assistant/console/forms.py
+msgid "O‘chirilganda admin panelda yangi so‘rov yuborilmaydi."
+msgstr "When off, the admin panel sends no new requests."
 
 #: glowderma/reporting/templates/reporting/dashboards/ops.html
 #: model metadata
@@ -3495,6 +3937,7 @@ msgstr "No Uzbek name"
 msgid "O‘zbekcha nomni kiriting (kamida 2 belgi)."
 msgstr "Enter the Uzbek name (at least 2 characters)."
 
+#: glowderma/assistant/console/views.py
 #: glowderma/site_config/admin_views.py
 msgid "O‘zgarish yo‘q: saqlanadigan narsa topilmadi."
 msgstr "No changes: nothing to save."
@@ -3567,6 +4010,28 @@ msgstr "The parcel is with the courier and Yandex has not reported that it is be
 msgid "Posilka qaytgani allaqachon tasdiqlangan."
 msgstr "The parcel's return has already been confirmed."
 
+#: model metadata
+msgid "Professionalroq"
+msgstr "More professional"
+
+#: glowderma/assistant/console/views.py
+msgid "Prompt shabloni"
+msgstr "Prompt template"
+
+#: glowderma/assistant/templates/assistant/console/job.html
+msgid "Prompt versiyalari"
+msgstr "Prompt versions"
+
+#: glowderma/assistant/console/views.py
+msgid "Prompt versiyasi"
+msgstr "Prompt version"
+
+#: glowderma/assistant/console/views.py
+msgid "Promptlar"
+msgstr "Prompts"
+
+#: glowderma/assistant/templates/assistant/console/job.html
+#: glowderma/assistant/templates/assistant/console/providers.html
 #: glowderma/reporting/templates/reporting/dashboards/ops.html
 msgid "Provayder"
 msgstr "Provider"
@@ -3574,6 +4039,22 @@ msgstr "Provider"
 #: glowderma/commerce/templates/admin/commerce/order_diagnostics.html
 msgid "Provayder chaqiruvi yo‘q"
 msgstr "No provider callbacks"
+
+#: glowderma/assistant/console/views.py
+msgid "Provayder noto‘g‘ri javob qaytardi."
+msgstr "The provider returned an invalid answer."
+
+#: glowderma/assistant/console/views.py
+msgid "Provayder so‘rovni rad etdi."
+msgstr "The provider refused the request."
+
+#: glowderma/assistant/console/views.py
+msgid "Provayder vaqtincha javob bermadi."
+msgstr "The provider did not answer for now."
+
+#: glowderma/assistant/console/views.py
+msgid "Provayderlar"
+msgstr "Providers"
 
 #: glowderma/reporting/templates/reporting/dashboards/ops.html
 msgid "Provayderlar tayyorligi"
@@ -3668,6 +4149,11 @@ msgstr "Requeue"
 msgid "Qaytarib bo‘lmadi"
 msgstr "Refund failed"
 
+#: glowderma/assistant/console/views.py
+#: glowderma/assistant/templates/assistant/console/rollback_key.html
+msgid "Qaytariladigan oldingi kalit yo‘q."
+msgstr "There is no previous key to roll back to."
+
 #: glowderma.core.labels.LEDGER_KIND
 #: model metadata
 msgid "Qaytarildi"
@@ -3721,6 +4207,10 @@ msgstr "Returned parcels accepted"
 msgid "Qaytish kutilmoqda"
 msgstr "Return pending"
 
+#: model metadata
+msgid "Qisman qo‘llandi"
+msgstr "Partly applied"
+
 #: glowderma.core.labels.NOTIFICATION_STATE
 #: model metadata
 msgid "Qisman yuborildi"
@@ -3741,6 +4231,10 @@ msgstr "Short name (uz)"
 #: glowderma.core.labels.SERVICE_EXPORT_HEADERS
 msgid "Qisqa nomi"
 msgstr "Short name"
+
+#: model metadata
+msgid "Qisqaroq"
+msgstr "Shorter"
 
 #: glowderma/delivery/services.py
 msgid "Qiymat %(low)s dan %(high)s gacha bo‘lishi kerak."
@@ -3776,6 +4270,10 @@ msgstr "The value must not exceed {limit}."
 msgid "Qoidalar"
 msgstr "Rules"
 
+#: glowderma/assistant/templates/assistant/console/job.html
+msgid "Qoidalar versiyasi"
+msgstr "Rules version"
+
 #: glowderma.core.labels.PRODUCT_EXPORT_HEADERS
 msgid "Qoldiq"
 msgstr "Stock"
@@ -3789,6 +4287,7 @@ msgid "Qolgan kodlar"
 msgstr "Codes left"
 
 #: glowderma.core.labels.NOTIFICATION_STATE
+#: glowderma/assistant/templates/assistant/console/prompts.html
 #: model metadata
 msgid "Qoralama"
 msgstr "Draft"
@@ -3796,6 +4295,10 @@ msgstr "Draft"
 #: glowderma/notifications/state.py
 msgid "Qoralamani bekor qilish shart emas: uni o‘chiring yoki o‘zgartiring."
 msgstr "A draft does not need to be cancelled: delete or edit it instead."
+
+#: glowderma/assistant/templates/assistant/console/prompt_version.html
+msgid "Qoralamani saqlash"
+msgstr "Save draft"
 
 #: model metadata
 msgid "Qo‘lda"
@@ -3813,9 +4316,21 @@ msgstr "Manual adjustment"
 msgid "Qo‘llab-quvvatlash telefoni"
 msgstr "Support phone"
 
+#: glowderma/assistant/templates/assistant/console/job.html
+msgid "Qo‘llagan"
+msgstr "Applied by"
+
+#: model metadata
+msgid "Qo‘llandi"
+msgstr "Applied"
+
 #: glowderma/core/templates/admin/ops/applied_filters.html
 msgid "Qo‘llangan filtrlar:"
 msgstr "Applied filters:"
+
+#: glowderma/assistant/templates/assistant/console/jobs.html
+msgid "Qo‘llash"
+msgstr "Apply"
 
 #: glowderma/notifications/api/admin/serializers.py
 msgid "Qurilma nomini kiriting."
@@ -3862,13 +4377,25 @@ msgstr "Image"
 msgid "Rasm 5 MB dan oshmasin."
 msgstr "The image must not exceed 5 MB."
 
+#: glowderma/assistant/console/forms.py
+msgid "Rasm bilan ishlash rejimida modelga yuboriladigan rasmlar soni (8 tagacha)."
+msgstr "How many images the photo mode sends to the model (up to 8)."
+
 #: glowderma/reporting/dashboards/sales.py
 msgid "Rasm yo‘q"
 msgstr "No images"
 
+#: model metadata
+msgid "Rasmdan ma’lumot olish"
+msgstr "Image information extraction"
+
 #: config/settings/ops_admin.py
 msgid "Rasmlar"
 msgstr "Images"
+
+#: model metadata
+msgid "Rasmlardan ma’lumot"
+msgstr "From photos"
 
 #: glowderma.core.labels.NOTIFICATION_STATE
 #: glowderma/loyalty/admin.py
@@ -3880,6 +4407,8 @@ msgstr "Scheduled"
 msgid "Rejalashtirilgan xabar bu guruhga yuboriladi."
 msgstr "A scheduled message is going to be sent to this group."
 
+#: glowderma/assistant/templates/assistant/console/job.html
+#: glowderma/assistant/templates/assistant/console/jobs.html
 #: glowderma/delivery/admin.py
 #: glowderma/reporting/templates/reporting/dashboards/ops.html
 msgid "Rejim"
@@ -3943,6 +4472,10 @@ msgstr "No SEO issues found"
 msgid "SEO kamchiliklari"
 msgstr "SEO issues"
 
+#: model metadata
+msgid "SEO matnlari"
+msgstr "SEO texts"
+
 #: glowderma/catalog/admin.py
 msgid "SEO muammosi"
 msgstr "SEO issue"
@@ -3987,6 +4520,10 @@ msgstr "SEO description is short"
 msgid "SEO tavsif uzun"
 msgstr "SEO description is long"
 
+#: model metadata
+msgid "SEO uchun"
+msgstr "For SEO"
+
 #: glowderma/reporting/dashboards/sales.py
 msgid "SEO xatolari"
 msgstr "SEO errors"
@@ -4022,6 +4559,18 @@ msgstr "Date"
 msgid "Sana bugundan ko‘pi bilan 10 yil uzoqlikda bo‘lsin."
 msgstr "The date must be within 10 years of today."
 
+#: glowderma/assistant/templates/assistant/console/jobs.html
+msgid "Sanadan"
+msgstr "From date"
+
+#: glowderma/assistant/templates/assistant/console/jobs.html
+msgid "Sanagacha"
+msgstr "To date"
+
+#: glowderma/assistant/console/views.py
+msgid "Saqlandi."
+msgstr "Saved."
+
 #: glowderma/site_config/admin_views.py
 msgid "Saqlangan foydalanish shartlari va maxfiylik siyosati (barcha tillarda) yangi versiya sifatida e’lon qilinadi. Mijozlar yangi versiyani qabul qilmaguncha buyurtma bera olmaydi va qabulga yozila olmaydi. Bu amalni qaytarib bo‘lmaydi."
 msgstr "The saved terms of use and privacy policy (in all languages) will be published as a new version. Customers will not be able to place orders or book appointments until they accept the new version. This action cannot be undone."
@@ -4038,13 +4587,23 @@ msgstr "There are unsaved changes"
 msgid "Saqlanmoqda…"
 msgstr "Saving…"
 
+#: glowderma/assistant/templates/assistant/console/provider.html
+#: glowderma/assistant/templates/assistant/console/settings.html
 #: glowderma/site_config/templates/site_config/console/_save_button.html
 msgid "Saqlash"
 msgstr "Save"
 
+#: glowderma/assistant/templates/assistant/console/rotate_key.html
+msgid "Saqlash va tekshirish"
+msgstr "Save and test"
+
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "Sarflandi"
 msgstr "Spent"
+
+#: glowderma/assistant/templates/assistant/console/_budgets.html
+msgid "Sarflangan (USD)"
+msgstr "Spent (USD)"
 
 #: glowderma.core.labels.BANNER_EXPORT_HEADERS
 msgid "Sarlavha"
@@ -4181,7 +4740,17 @@ msgstr "Terms published: %(version)s."
 msgid "Shartlarning yangi versiyasini e’lon qilasizmi?"
 msgstr "Publish a new version of the terms?"
 
+#: glowderma/assistant/console/views.py
+#: glowderma/assistant/templates/assistant/console/_budgets.html
+msgid "Shu oy"
+msgstr "This month"
+
+#: glowderma/assistant/templates/assistant/console/prompt_version.html
+msgid "Shu versiyaga qaytish"
+msgstr "Roll back to this version"
+
 #: glowderma/reporting/dashboards/ops.py
+#: model metadata
 msgid "Sinov"
 msgstr "Test"
 
@@ -4193,10 +4762,30 @@ msgstr "Test (prod)"
 msgid "Sinov adapteri"
 msgstr "Test adapter"
 
+#: glowderma/assistant/console/views.py
+msgid "Sinov boshlandi (so‘rov #%(job)s). Natijani ko‘rish uchun sahifani yangilang."
+msgstr "Test started (request #%(job)s). Refresh the page to see the result."
+
+#: glowderma/assistant/console/views.py
+msgid "Sinov ishga tushmadi."
+msgstr "The test did not start."
+
+#: glowderma/assistant/templates/assistant/console/prompt_version.html
+msgid "Sinov natijasi mahsulotga yozilmaydi."
+msgstr "The test result is not written to the product."
+
 #: glowderma/reporting/dashboards/ops.py
 #: glowderma/reporting/dashboards/sales.py
 msgid "Sinov rejimi"
 msgstr "Test mode"
+
+#: glowderma/assistant/templates/assistant/console/prompt_version.html
+msgid "Sinov va faollashtirish"
+msgstr "Test and activation"
+
+#: model metadata
+msgid "Sinovdan o‘tgan"
+msgstr "Tested"
 
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "Siyosat v%(version)s"
@@ -4240,6 +4829,8 @@ msgid "Sotuvga aylandi"
 msgstr "Converted to sale"
 
 #: config/settings/ops_admin.py
+#: glowderma/assistant/console/views.py
+#: glowderma/assistant/templates/assistant/console/settings.html
 #: glowderma/site_config/admin_views.py
 msgid "Sozlamalar"
 msgstr "Settings"
@@ -4256,6 +4847,7 @@ msgstr "Settings saved"
 msgid "Sozlangan"
 msgstr "Configured"
 
+#: glowderma/assistant/templates/assistant/console/providers.html
 #: glowderma/reporting/dashboards/ops.py
 msgid "Sozlanmagan"
 msgstr "Not configured"
@@ -4276,6 +4868,10 @@ msgstr "Poll"
 msgid "So‘rov"
 msgstr "Requested"
 
+#: glowderma/assistant/templates/assistant/console/job.html
+msgid "So‘rov #%(id)s"
+msgstr "Request #%(id)s"
+
 #: model metadata
 msgid "So‘rov (polling)"
 msgstr "Request (polling)"
@@ -4293,9 +4889,22 @@ msgstr "The request is still being processed. Try again in a moment."
 msgid "So‘rov qabul qilinmadi"
 msgstr "Request not accepted"
 
+#: glowderma/assistant/console/views.py
 #: glowderma/site_config/admin_views.py
 msgid "So‘rov tushunarsiz. Sahifani yangilang va qayta urinib ko‘ring."
 msgstr "The request was not understood. Refresh the page and try again."
+
+#: glowderma/assistant/templates/assistant/console/jobs.html
+msgid "So‘rovlar"
+msgstr "Requests"
+
+#: glowderma/assistant/console/views.py
+msgid "So‘rovlar va xarajat"
+msgstr "Requests and cost"
+
+#: glowderma/assistant/templates/assistant/console/jobs.html
+msgid "So‘rovlar yo‘q"
+msgstr "No requests"
 
 #: model metadata
 msgid "Standart"
@@ -4376,6 +4985,10 @@ msgstr "Photo"
 msgid "TOTP QR kod"
 msgstr "TOTP QR code"
 
+#: model metadata
+msgid "Tabiiyroq"
+msgstr "More natural"
+
 #: glowderma/core/admin.py
 msgid "Tafsilot: %(text)s"
 msgstr "Details: %(text)s"
@@ -4392,6 +5005,11 @@ msgstr "Invitation"
 #: glowderma/delivery/admin.py
 msgid "Taklif narxi"
 msgstr "Offer price"
+
+#: glowderma/assistant/console/views.py
+#: glowderma/assistant/templates/assistant/console/prompt_version.html
+msgid "Takliflar"
+msgstr "Suggestions"
 
 #: glowderma/integrations/admin.py
 msgid "Takroriy"
@@ -4416,6 +5034,10 @@ msgstr "Break end"
 #: glowderma/professionals/api/admin/serializers.py
 msgid "Tanaffusning boshlanishi va tugashini birga kiriting."
 msgstr "Enter both the start and the end of the break."
+
+#: model metadata
+msgid "Tanlangan matnlarni yaxshilash"
+msgstr "Improve selected texts"
 
 #: glowderma/core/admin.py
 msgid "Tanlangan mavzuning o‘lik xabarlari (bir bosishda {limit} tagacha) qayta navbatga qo‘yiladi. Ishi boshqa yo‘l bilan bajarilgan xabarlar o‘tkazib yuboriladi."
@@ -4479,6 +5101,10 @@ msgstr "Description (uz)"
 msgid "Tavsif juda qisqa"
 msgstr "Description is too short"
 
+#: model metadata
+msgid "Tavsif yozish"
+msgstr "Description writing"
+
 #: glowderma/reporting/dashboards/sales.py
 msgid "Tavsif yo‘q"
 msgstr "No description"
@@ -4499,17 +5125,35 @@ msgstr "Preparation deadline (working minutes)"
 msgid "Tayyorlash vaqti (daqiqa)"
 msgstr "Preparation time (minutes)"
 
+#: glowderma/assistant/templates/assistant/console/_credential.html
+msgid "Tekshirilayotgan versiya"
+msgstr "Version under test"
+
 #: glowderma/delivery/admin.py
 msgid "Tekshirilgan"
 msgstr "Checked"
+
+#: model metadata
+msgid "Tekshirilmagan"
+msgstr "Not tested"
+
+#: model metadata
+msgid "Tekshirilmoqda"
+msgstr "Testing"
 
 #: glowderma/delivery/admin.py
 msgid "Tekshirish"
 msgstr "Check"
 
+#: glowderma/assistant/templates/assistant/console/_credential.html
+#: glowderma/assistant/templates/assistant/console/providers.html
 #: glowderma/reporting/templates/reporting/dashboards/money.html
 msgid "Tekshiruv"
 msgstr "Check"
+
+#: glowderma/assistant/templates/assistant/console/rotate_key.html
+msgid "Tekshiruvdan o‘tsa u faol bo‘ladi, joriy kalit esa oldingi versiya sifatida saqlanadi."
+msgstr "If it passes, it becomes active and the current key is kept as the previous version."
 
 #: glowderma/reporting/dashboards/money.py
 msgid "Tekshiruvlarni bajarib bo‘lmadi (xato yoki vaqt tugadi) — sahifani yangilang"
@@ -4594,10 +5238,22 @@ msgstr "Recovery codes"
 msgid "Til"
 msgstr "Language"
 
+#: glowderma/assistant/templates/assistant/console/job.html
+msgid "Tillar"
+msgstr "Languages"
+
+#: model metadata
+msgid "Tillarga moslashtirish"
+msgstr "Localisation"
+
 #: glowderma/site_config/admin_views.py
 #: model metadata
 msgid "Tizim"
 msgstr "System"
+
+#: glowderma/assistant/templates/assistant/console/jobs.html
+msgid "Tokenlar"
+msgstr "Tokens"
 
 #: glowderma/reporting/templates/reporting/dashboards/sales.html
 msgid "Top %(count)s mahsulot"
@@ -4708,6 +5364,10 @@ msgstr "The suspension end must be in the future."
 msgid "Tranzaksiya"
 msgstr "Transaction"
 
+#: glowderma/assistant/templates/assistant/console/job.html
+msgid "Tugagan"
+msgstr "Finished"
+
 #: glowderma/catalog/admin.py
 msgid "Tugagan (0 yoki Billz’da yozuvi yo‘q)"
 msgstr "Out of stock (0 or no record in Billz)"
@@ -4760,6 +5420,10 @@ msgstr "Revenue"
 msgid "Tushum bo‘yicha · bekor qilinganlarsiz"
 msgstr "By revenue · excluding cancelled"
 
+#: model metadata
+msgid "Tushunarliroq"
+msgstr "Clearer"
+
 #: glowderma.core.labels.LEDGER_KIND
 #: model metadata
 msgid "Tuzatish"
@@ -4769,6 +5433,10 @@ msgstr "Adjustment"
 #: model metadata
 msgid "URL nomi (slug)"
 msgstr "URL name (slug)"
+
+#: glowderma/assistant/console/forms.py
+msgid "Ulanish uzilsa yoki provayder band bo‘lsa qo‘shimcha urinishlar soni (0–2)."
+msgstr "Extra attempts when the connection drops or the provider is busy (0–2)."
 
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 #: glowderma/reporting/templates/reporting/dashboards/sales.html
@@ -4784,9 +5452,17 @@ msgstr "Lifetime purchases"
 msgid "Umumiy"
 msgstr "General"
 
+#: glowderma/assistant/templates/assistant/console/job.html
+msgid "Urinishlar"
+msgstr "Attempts"
+
 #: glowderma/loyalty/models.py
 msgid "Ushlab turish %(amount)s · buyurtma №%(order)s (%(state)s)"
 msgstr "Hold %(amount)s · order №%(order)s (%(state)s)"
+
+#: glowderma/assistant/console/forms.py
+msgid "Uslub, ohang, atamalar, SEO va uzunlik bo‘yicha ko‘rsatmalar. Majburiy qoidalar (o‘ylab topilgan tarkib, SPF, sertifikat va tibbiy da’volar taqiqi, JSON sxemasi) kodda va ularni bekor qilib bo‘lmaydi."
+msgstr "Guidance on style, tone, terminology, SEO and length. The mandatory rules (no invented ingredients, SPF, certifications or medical claims; the JSON schema) are in the code and cannot be overridden."
 
 #: admin history (delivery.DeliverySettings)
 msgid "Ustama (%)"
@@ -4843,6 +5519,24 @@ msgstr "Timestamps"
 msgid "Vaqtni SS:DD ko‘rinishida kiriting."
 msgstr "Enter the time as HH:MM."
 
+#: glowderma/assistant/templates/assistant/console/settings.html
+msgid "Vault rejimi"
+msgstr "Vault mode"
+
+#: glowderma/assistant/console/views.py
+msgid "Vault sozlanmagan: kalitni saqlab bo‘lmaydi."
+msgstr "Vault is not configured: the key cannot be saved."
+
+#: glowderma/assistant/console/views.py
+msgid "Vault vaqtincha ishlamayapti: hech narsa o‘zgarmadi. Keyinroq qayta urinib ko‘ring."
+msgstr "Vault is temporarily unavailable: nothing changed. Try again later."
+
+#: glowderma/assistant/templates/assistant/console/_credential.html
+#: model metadata
+msgid "Vault yo‘li"
+msgstr "Vault path"
+
+#: glowderma/assistant/templates/assistant/console/prompts.html
 #: glowderma/reporting/templates/reporting/dashboards/ops.html
 msgid "Vazifa"
 msgstr "Job"
@@ -4853,6 +5547,14 @@ msgstr "Job"
 #: model metadata
 msgid "Veb-sayt"
 msgstr "Website"
+
+#: glowderma/assistant/templates/assistant/console/prompt_template.html
+msgid "Versiya"
+msgstr "Version"
+
+#: glowderma/assistant/templates/assistant/console/prompts.html
+msgid "Versiyalar"
+msgstr "Versions"
 
 #: model metadata
 msgid "Webhook"
@@ -4950,6 +5652,7 @@ msgstr "Amount before the purchase"
 msgid "Xaridlar"
 msgstr "Purchases"
 
+#: glowderma/assistant/templates/assistant/console/jobs.html
 #: glowderma/reporting/dashboards/money.py
 #: glowderma/reporting/dashboards/ops.py
 #: glowderma/reporting/dashboards/sales.py
@@ -4978,6 +5681,10 @@ msgstr "Error · will retry"
 msgid "Xatolar"
 msgstr "Errors"
 
+#: glowderma/assistant/templates/assistant/console/_errors.html
+msgid "Xatolarni tuzating."
+msgstr "Fix the errors."
+
 #: config/settings/ops_admin.py
 msgid "Xavfsizlik"
 msgstr "Security"
@@ -4999,6 +5706,8 @@ msgid "Xizmatlar"
 msgstr "Services"
 
 #: glowderma.core.labels.AUDIT_LOG_EXPORT_HEADERS
+#: glowderma/assistant/templates/assistant/console/job.html
+#: glowderma/assistant/templates/assistant/console/jobs.html
 #: model metadata
 msgid "Xodim"
 msgstr "Staff member"
@@ -5136,6 +5845,14 @@ msgstr "Yandex is asked which delivery classes (courier, express) the warehouse 
 msgid "Yangi"
 msgstr "New"
 
+#: glowderma/assistant/console/forms.py
+msgid "Yangi API kalit"
+msgstr "New API key"
+
+#: glowderma/assistant/console/views.py
+msgid "Yangi kalit Vault’ga %(version)s-versiya sifatida yozildi va tekshirilmoqda. Tekshiruvdan o‘tsa faol bo‘ladi; o‘tmasa eski kalit ishlashda davom etadi."
+msgstr "The new key was written to Vault as version %(version)s and is being tested. If it passes it becomes active; otherwise the old key keeps working."
+
 #: glowderma/reporting/dashboards/customers.py
 msgid "Yangi mijozlar · %(days)s kun"
 msgid_plural "Yangi mijozlar · %(days)s kun"
@@ -5146,6 +5863,10 @@ msgstr[1] "New customers · %(days)s days"
 #: glowderma/accounts/services.py
 msgid "Yangi parol eskisidan farq qilsin."
 msgstr "The new password must differ from the old one."
+
+#: glowderma/assistant/templates/assistant/console/prompt_template.html
+msgid "Yangi qoralama"
+msgstr "New draft"
 
 #: glowderma/reporting/dashboards/customers.py
 #: model metadata
@@ -5193,9 +5914,16 @@ msgid "Yaratildi"
 msgstr "Created"
 
 #: glowderma.core.labels.PAYMENT_EXPORT_HEADERS
+#: glowderma/assistant/templates/assistant/console/job.html
+#: glowderma/assistant/templates/assistant/console/jobs.html
+#: glowderma/assistant/templates/assistant/console/prompt_template.html
 #: model metadata
 msgid "Yaratilgan"
 msgstr "Created"
+
+#: glowderma/assistant/templates/assistant/console/prompt_version.html
+msgid "Yaratilgan: %(at)s · %(author)s"
+msgstr "Created: %(at)s · %(author)s"
 
 #: model metadata
 msgid "Yaratilmagan"
@@ -5214,6 +5942,10 @@ msgstr "Hidden"
 msgid "Yaxshi"
 msgstr "OK"
 
+#: glowderma/assistant/services.py
+msgid "Yaxshilash uchun kamida bitta to‘ldirilgan maydonni tanlang."
+msgstr "To improve, choose at least one filled-in field."
+
 #: model metadata
 msgid "Yechildi"
 msgstr "Captured"
@@ -5221,6 +5953,10 @@ msgstr "Captured"
 #: glowderma/reporting/dashboards/money.py
 msgid "Yechilgan band ↔ sarflash yozuvi"
 msgstr "Captured reservation ↔ spend entry"
+
+#: model metadata
+msgid "Yetishmayotgan tillar"
+msgstr "Missing languages"
 
 #: config/settings/ops_admin.py
 #: glowderma.core.labels.FULFILMENT
@@ -5284,6 +6020,10 @@ msgstr "Closes"
 msgid "Yopilishdan oldin oxirgi chaqiruv (daqiqa)"
 msgstr "Last dispatch before closing (minutes)"
 
+#: glowderma/assistant/templates/assistant/console/providers.html
+msgid "Yoqilgan"
+msgstr "Enabled"
+
 #: admin history (professionals.BlockedPeriod)
 msgid "Yorliq"
 msgstr "Label"
@@ -5300,6 +6040,8 @@ msgstr "Entry chain (balance after each entry)"
 msgid "Yo‘lda"
 msgstr "In transit"
 
+#: glowderma/assistant/templates/assistant/console/_credential.html
+#: glowderma/assistant/templates/assistant/console/providers.html
 #: glowderma/core/templatetags/ops_admin.py
 #: glowderma/reporting/dashboards/money.py
 #: glowderma/reporting/dashboards/ops.py
@@ -5382,6 +6124,18 @@ msgstr "promotional products excluded"
 #: model metadata
 msgid "aksiya summasi"
 msgstr "promotion amount"
+
+#: model metadata
+msgid "alt matni (en)"
+msgstr "alt text (en)"
+
+#: model metadata
+msgid "alt matni (ru)"
+msgstr "alt text (ru)"
+
+#: model metadata
+msgid "alt matni (uz)"
+msgstr "alt text (uz)"
 
 #: model metadata
 msgid "amal"
@@ -5545,6 +6299,14 @@ msgid "bio (uz)"
 msgstr "bio (uz)"
 
 #: model metadata
+msgid "bir so‘rovdagi rasmlar soni"
+msgstr "images per request"
+
+#: model metadata
+msgid "bir xodim uchun kunlik so‘rovlar"
+msgstr "daily requests per staff member"
+
+#: model metadata
 msgid "birlik narxi"
 msgstr "unit price"
 
@@ -5567,6 +6329,10 @@ msgstr "related object"
 #: model metadata
 msgid "boshlangan"
 msgstr "started at"
+
+#: model metadata
+msgid "boshlang‘ich qiymatlar"
+msgstr "initial values"
 
 #: glowderma/core/otp_apps.py
 msgid "boshlang‘ich vaqt (t0)"
@@ -5690,6 +6456,14 @@ msgstr "cashback amount"
 msgid "chaqirgan"
 msgstr "requested by"
 
+#: model metadata
+msgid "chiqish narxi (1M token, USD)"
+msgstr "output price (1M tokens, USD)"
+
+#: model metadata
+msgid "chiqish tokenlari"
+msgstr "output tokens"
+
 #: glowderma/appointments/api/admin/serializers.py
 msgid "customer_id yoki phone dan faqat bittasini yuboring."
 msgstr "Send only one of customer_id or phone."
@@ -5748,9 +6522,25 @@ msgid_plural "faol akkaunt"
 msgstr[0] "active account"
 msgstr[1] "active accounts"
 
+#: model metadata
+msgid "faol kalit versiyasi"
+msgstr "active key version"
+
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "faol mijozlar, umrbod xarid bo‘yicha"
 msgstr "active customers, by lifetime purchases"
+
+#: model metadata
+msgid "faol provayder"
+msgstr "active provider"
+
+#: model metadata
+msgid "faollashtirgan"
+msgstr "activated by"
+
+#: model metadata
+msgid "faollashtirilgan"
+msgstr "activated"
 
 #: model metadata
 msgid "farq (so‘m)"
@@ -6045,6 +6835,10 @@ msgid "javob tanasi"
 msgstr "response body"
 
 #: model metadata
+msgid "javob tokenlari chegarasi"
+msgstr "output token limit"
+
+#: model metadata
 msgid "joriy kuryer buyurtmasi"
 msgstr "current courier claim"
 
@@ -6077,12 +6871,20 @@ msgid "kalit"
 msgstr "key"
 
 #: model metadata
+msgid "kalit almashtirilgan"
+msgstr "key rotated"
+
+#: model metadata
 msgid "kalit prefiksi"
 msgstr "key prefix"
 
 #: model metadata
 msgid "kalit xeshi"
 msgstr "key hash"
+
+#: model metadata
+msgid "kalitni almashtirgan"
+msgstr "key rotated by"
 
 #: model metadata
 msgid "kampaniya"
@@ -6151,6 +6953,14 @@ msgid "keyingi holat"
 msgstr "status after"
 
 #: model metadata
+msgid "kirish narxi (1M token, USD)"
+msgstr "input price (1M tokens, USD)"
+
+#: model metadata
+msgid "kirish tokenlari"
+msgstr "input tokens"
+
+#: model metadata
 msgid "kirish usuli"
 msgstr "sign-in method"
 
@@ -6188,6 +6998,10 @@ msgid_plural "ko‘rib chiqilmagan"
 msgstr[0] "unreviewed"
 msgstr[1] "unreviewed"
 
+#: model metadata
+msgid "ko‘rsatmalar"
+msgstr "instructions"
+
 #: glowderma/professionals/models.py
 msgid "kun %(weekday)s"
 msgstr "day %(weekday)s"
@@ -6199,6 +7013,10 @@ msgstr "working hours for a date"
 #: model metadata
 msgid "kun ish vaqtlari"
 msgstr "working hours by date"
+
+#: model metadata
+msgid "kunlik byudjet (USD)"
+msgstr "daily budget (USD)"
 
 #: model metadata
 msgid "kuryer"
@@ -6219,6 +7037,10 @@ msgstr "comment for the courier"
 #: model metadata
 msgid "kuryerga berilgan"
 msgstr "handed to courier"
+
+#: model metadata
+msgid "kutish vaqti (soniya)"
+msgstr "timeout (seconds)"
 
 #: model metadata
 msgid "kuzatish havolasi"
@@ -6382,6 +7204,10 @@ msgid "maxfiylik siyosati (uz)"
 msgstr "privacy policy (uz)"
 
 #: model metadata
+msgid "maydonlar"
+msgstr "fields"
+
+#: model metadata
 msgid "ma’lumot"
 msgstr "payload"
 
@@ -6472,6 +7298,10 @@ msgid "narx"
 msgstr "price"
 
 #: model metadata
+msgid "narx (USD)"
+msgstr "cost (USD)"
+
+#: model metadata
 msgid "narx taklifi"
 msgstr "quote"
 
@@ -6538,6 +7368,10 @@ msgstr "weight (g)"
 #: model metadata
 msgid "oldin"
 msgstr "before"
+
+#: model metadata
+msgid "oldingi kalit versiyasi"
+msgstr "previous key version"
 
 #: model metadata
 msgid "oldingi refresh token xeshi"
@@ -6664,6 +7498,10 @@ msgid "oxirgi signal"
 msgstr "last heartbeat"
 
 #: model metadata
+msgid "oxirgi sinov"
+msgstr "last test"
+
+#: model metadata
 msgid "oxirgi sinxronlash"
 msgstr "last sync"
 
@@ -6696,6 +7534,10 @@ msgstr "last failed attempt"
 #: model metadata
 msgid "oxirgi xato vaqti"
 msgstr "last error time"
+
+#: model metadata
+msgid "oylik byudjet (USD)"
+msgstr "monthly budget (USD)"
 
 #: model metadata
 msgid "o‘chirilgan"
@@ -6750,6 +7592,22 @@ msgstr "platform"
 #: glowderma/commerce/services.py
 msgid "posilka kuryerda"
 msgstr "the parcel is with the courier"
+
+#: model metadata
+msgid "prompt shabloni"
+msgstr "prompt template"
+
+#: model metadata
+msgid "prompt shablonlari"
+msgstr "prompt templates"
+
+#: model metadata
+msgid "prompt versiyalari"
+msgstr "prompt versions"
+
+#: model metadata
+msgid "prompt versiyasi"
+msgstr "prompt version"
 
 #: model metadata
 msgid "provayder"
@@ -6850,6 +7708,10 @@ msgid "qayta faollashgan"
 msgstr "reactivated at"
 
 #: model metadata
+msgid "qayta urinishlar"
+msgstr "retries"
+
+#: model metadata
 msgid "qaytarilgan"
 msgstr "refunded at"
 
@@ -6885,6 +7747,22 @@ msgstr "short name (ru)"
 msgid "qisqa nom (uz)"
 msgstr "short name (uz)"
 
+#: model metadata
+msgid "qisqa tavsif (en)"
+msgstr "short description (en)"
+
+#: model metadata
+msgid "qisqa tavsif (ru)"
+msgstr "short description (ru)"
+
+#: model metadata
+msgid "qisqa tavsif (uz)"
+msgstr "short description (uz)"
+
+#: model metadata
+msgid "qoidalar versiyasi"
+msgstr "rules version"
+
 #: glowderma/catalog/admin.py
 #: model metadata
 msgid "qoldiq"
@@ -6909,6 +7787,18 @@ msgstr "reason for manual entry"
 #: model metadata
 msgid "qo‘llab-quvvatlash telefoni"
 msgstr "support phone"
+
+#: model metadata
+msgid "qo‘llagan"
+msgstr "applied by"
+
+#: model metadata
+msgid "qo‘llangan"
+msgstr "applied"
+
+#: model metadata
+msgid "qo‘llangan maydonlar"
+msgstr "applied fields"
 
 #: model metadata
 msgid "qo‘llash (en)"
@@ -6967,12 +7857,20 @@ msgid "rasm havolasi"
 msgstr "image link"
 
 #: model metadata
+msgid "rasmlar"
+msgstr "images"
+
+#: model metadata
 msgid "refresh token xeshi"
 msgstr "refresh token hash"
 
 #: model metadata
 msgid "rejalashtirilgan"
 msgstr "scheduled"
+
+#: model metadata
+msgid "rejim"
+msgstr "mode"
 
 #: model metadata
 msgid "rol"
@@ -7078,6 +7976,10 @@ msgid "sessiyalar"
 msgstr "sessions"
 
 #: model metadata
+msgid "shablon"
+msgstr "template"
+
+#: model metadata
 msgid "shablon holati"
 msgstr "template status"
 
@@ -7096,6 +7998,10 @@ msgstr "terms updated at"
 #: model metadata
 msgid "shoshilinch"
 msgstr "urgent"
+
+#: model metadata
+msgid "sinovdan o‘tgan"
+msgstr "tested"
 
 #: model metadata
 msgid "sinxronlangan"
@@ -7225,6 +8131,10 @@ msgid "taklif narxi"
 msgstr "offer price"
 
 #: model metadata
+msgid "takliflar"
+msgstr "suggestions"
+
+#: model metadata
 msgid "takrorlanmaslik kaliti"
 msgstr "deduplication key"
 
@@ -7342,8 +8252,28 @@ msgid "tayyorlash vaqti (daqiqa)"
 msgstr "preparation time (minutes)"
 
 #: model metadata
+msgid "tekshirilayotgan kalit versiyasi"
+msgstr "key version under test"
+
+#: model metadata
+msgid "tekshirilgan"
+msgstr "tested"
+
+#: model metadata
+msgid "tekshiruv holati"
+msgstr "test status"
+
+#: model metadata
+msgid "tekshiruv xatosi"
+msgstr "test error"
+
+#: model metadata
 msgid "telefon"
 msgstr "phone"
+
+#: model metadata
+msgid "temperatura"
+msgstr "temperature"
 
 #: model metadata
 msgid "test qurilmalari"
@@ -7376,6 +8306,10 @@ msgstr "recovery code sets"
 #: model metadata
 msgid "til"
 msgstr "language"
+
+#: model metadata
+msgid "tillar"
+msgstr "languages"
 
 #: model metadata
 msgid "token xeshi"
@@ -7506,6 +8440,10 @@ msgstr "longitude"
 #: model metadata
 msgid "vaqt"
 msgstr "time"
+
+#: model metadata
+msgid "vazifa"
+msgstr "purpose"
 
 #: model metadata
 msgid "va’da qilingan (dan)"
@@ -7733,6 +8671,10 @@ msgstr "last dispatch before closing (minutes)"
 #: glowderma/delivery/admin.py
 msgid "yopiq"
 msgstr "closed"
+
+#: model metadata
+msgid "yoqilgan"
+msgstr "enabled"
 
 #: model metadata
 msgid "yorliq"

@@ -62,14 +62,32 @@ class BannerTitlePatchSerializer(BannerTitleSerializer):
     en = serializers.CharField(max_length=80, allow_blank=True, required=False)
 
 
+class ImageAltSerializer(serializers.Serializer[dict[str, str]]):
+    """``alt`` of a product image, ``{uz, ru, en}`` ≤160 each; ``""`` = the website uses the product name.
+    On write every leaf is optional (merged leaf by leaf)."""
+
+    uz = serializers.CharField(max_length=services.ALT_MAX_LENGTH, allow_blank=True, required=False)
+    ru = serializers.CharField(max_length=services.ALT_MAX_LENGTH, allow_blank=True, required=False)
+    en = serializers.CharField(max_length=services.ALT_MAX_LENGTH, allow_blank=True, required=False)
+
+
+def image_alt(image: ProductImage) -> dict[str, str]:
+    return {language: getattr(image, f"alt_{language}") or "" for language in services.LANGUAGES}
+
+
 class ProductImageSerializer(serializers.Serializer[ProductImage]):
-    """Contract §2.3 ``ProductImage = {id, url, thumbnail_url, medium_url, position}``."""
+    """Contract §2.3 ``ProductImage = {id, url, thumbnail_url, medium_url, position, alt}``."""
 
     id = serializers.IntegerField()
     url = serializers.SerializerMethodField()
     thumbnail_url = serializers.SerializerMethodField(help_text="400 px WebP variant.")
     medium_url = serializers.SerializerMethodField(help_text="1000 px WebP variant.")
     position = serializers.IntegerField()
+    alt = serializers.SerializerMethodField(help_text='Alt text per language; "" = the product name is used.')
+
+    @extend_schema_field(ImageAltSerializer())
+    def get_alt(self, obj: ProductImage) -> dict[str, str]:
+        return image_alt(obj)
 
     def get_url(self, obj: ProductImage) -> str:
         return absolute_media_url(obj.file.name or "")
@@ -81,19 +99,25 @@ class ProductImageSerializer(serializers.Serializer[ProductImage]):
         return optional_variant_url(obj.file.name, "medium") or ""
 
 
-class ProductTextSerializer(serializers.Serializer[dict[str, str]]):
-    """One language of ``texts``: ``{name, description, ingredients, usage}``."""
+_TEXT = services.TEXT_MAX_LENGTHS
 
-    name = serializers.CharField(max_length=120, allow_blank=True, required=False)
-    description = serializers.CharField(max_length=2000, allow_blank=True, required=False)
-    ingredients = serializers.CharField(max_length=1000, allow_blank=True, required=False)
-    usage = serializers.CharField(max_length=1000, allow_blank=True, required=False)
+
+class ProductTextSerializer(serializers.Serializer[dict[str, str]]):
+    """One language of ``texts``: ``{name, short_description, description, ingredients, usage}``."""
+
+    name = serializers.CharField(max_length=_TEXT["name"], allow_blank=True, required=False)
+    short_description = serializers.CharField(
+        max_length=_TEXT["short_description"], allow_blank=True, required=False
+    )
+    description = serializers.CharField(max_length=_TEXT["description"], allow_blank=True, required=False)
+    ingredients = serializers.CharField(max_length=_TEXT["ingredients"], allow_blank=True, required=False)
+    usage = serializers.CharField(max_length=_TEXT["usage"], allow_blank=True, required=False)
 
 
 class ProductUzTextSerializer(ProductTextSerializer):
     """The Uzbek texts: ``name`` is mandatory on create and, whenever sent, trimmed 2..120 characters."""
 
-    name = serializers.CharField(max_length=120, allow_blank=True)
+    name = serializers.CharField(max_length=_TEXT["name"], allow_blank=True)
 
     def validate_name(self, value: str) -> str:
         if len(value) < UZ_NAME_MIN_LENGTH:
@@ -114,7 +138,7 @@ class ProductTextsSerializer(serializers.Serializer[dict[str, Any]]):
 class ProductUzTextPatchSerializer(ProductUzTextSerializer):
     """PATCH leaf merge: every Uzbek leaf is optional; a sent ``name`` keeps the 2..120 rule."""
 
-    name = serializers.CharField(max_length=120, allow_blank=True, required=False)
+    name = serializers.CharField(max_length=_TEXT["name"], allow_blank=True, required=False)
 
 
 class ProductTextsPatchSerializer(ProductTextsSerializer):
@@ -127,8 +151,12 @@ class SeoTextSerializer(serializers.Serializer[dict[str, str]]):
     """One language of ``seo`` (B-W1): the page ``title`` (≤120) and meta ``description`` (≤300); ``""`` =
     the website builds one from the name and description."""
 
-    title = serializers.CharField(max_length=120, allow_blank=True, required=False)
-    description = serializers.CharField(max_length=300, allow_blank=True, required=False)
+    title = serializers.CharField(
+        max_length=services.SEO_MAX_LENGTHS["title"], allow_blank=True, required=False
+    )
+    description = serializers.CharField(
+        max_length=services.SEO_MAX_LENGTHS["description"], allow_blank=True, required=False
+    )
 
 
 class SeoTextsSerializer(serializers.Serializer[dict[str, Any]]):
@@ -234,7 +262,14 @@ class ProductSerializer(serializers.Serializer[Product]):
 
     @extend_schema_field(SeoStatusSerializer())
     def get_seo_status(self, obj: Product) -> dict[str, Any]:
-        return seo.status_payload(seo.product_issues(obj, image_count=len(self._images(obj))))
+        images = self._images(obj)
+        return seo.status_payload(
+            seo.product_issues(
+                obj,
+                image_count=len(images),
+                images_without_alt=sum(1 for image in images if not image.alt_uz),
+            )
+        )
 
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_category(self, obj: Product) -> str | None:
@@ -427,6 +462,12 @@ class ImageOrderSerializer(serializers.Serializer[dict[str, Any]]):
     # ``[]`` is a valid body: it is the exact current set of a product without images (200, no-op); for a
     # non-empty set the service answers ``mismatch`` — never DRF's untranslated ``empty``.
     image_ids = serializers.ListField(child=serializers.IntegerField())
+
+
+class ImagePatchSerializer(serializers.Serializer[dict[str, Any]]):
+    """Body of ``PATCH products/{id}/images/{image_id}/``: ``{alt: {uz?, ru?, en?}}``."""
+
+    alt = ImageAltSerializer()
 
 
 class ImagesResponseSerializer(serializers.Serializer[dict[str, Any]]):

@@ -619,11 +619,19 @@ def product_detail(product: Product, lang: str, customer_id: int | None = None) 
     images = ProductImage.objects.filter(product_id=product.pk).order_by("position", "id")
     return {
         **card,
+        "short_description": localized_field(product, "short_description", lang),
         "description": localized_field(product, "description", lang),
         "ingredients": localized_field(product, "ingredients", lang),
         "usage": localized_field(product, "usage", lang),
         "images": [
-            {"id": image.pk, **media_urls("", image.file), "position": image.position} for image in images
+            {
+                "id": image.pk,
+                **media_urls("", image.file),
+                "position": image.position,
+                # the image's own alt text (this language, else Uzbek), else the product name
+                "alt": localized_field(image, "alt", lang) or card["name"],
+            }
+            for image in images
         ],
         "max_quantity": min(card["available"], int(settings.CART_MAX_QTY_PER_LINE)),
         **seo_payload(product, lang),

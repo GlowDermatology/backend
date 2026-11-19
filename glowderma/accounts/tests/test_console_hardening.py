@@ -53,6 +53,8 @@ TOPIC_PAYLOADS: dict[str, dict[str, Any]] = {
         "client_id": "uz.glowderma.app",
         "sealed_token": "APPLE-SEALED-SECRET",
     },
+    "assistant.credential_test": {"config_id": 1, "version": 2, "actor_id": 5},
+    "assistant.job_queued": {"job_id": 31},
     "billz.push_sale": {"purchase_id": 3, "order_id": 21, "billz_order_uuid": "8f0e…"},
     "billz.stock_reread": {"order_id": 22, "product_ids": [1, 2]},
     "bts.create_shipment": {"order_id": 23, "manual": False, "request_no": 1, "actor_id": None},

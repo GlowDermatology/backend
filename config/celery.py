@@ -8,6 +8,8 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.production")
 app = Celery("glowderma")
 app.config_from_object("django.conf:settings", namespace="CELERY")
 app.autodiscover_tasks()
+# The AI assistant's key test (glowderma/assistant/credential_tasks.py): ids only, run by the worker.
+app.autodiscover_tasks(related_name="credential_tasks")
 app.conf.beat_schedule = {
     "dispatch-outbox": {"task": "core.dispatch_outbox", "schedule": 10.0},
     "purge-idempotency-records": {
@@ -16,6 +18,8 @@ app.conf.beat_schedule = {
     },
     # design 01 §2.2: fail running jobs with no heartbeat for 15 min (worker lost), unwedging single-flight
     "reap-stale-jobs": {"task": "integrations.reap_stale_jobs", "schedule": 300.0},
+    # feat/ai-assistant: fail AI generation jobs whose worker was lost (no heartbeat for 5 min)
+    "assistant-reap-stale-jobs": {"task": "assistant.reap_stale_jobs", "schedule": 120.0},
     # Scheduled campaigns start when due (design 03 §3.4 / §5: every minute).
     "start-due-campaigns": {"task": "notifications.start_due_campaigns", "schedule": 60.0},
     # Campaign approval workflow: a stopped campaign with no open batch left is finalised (every minute).

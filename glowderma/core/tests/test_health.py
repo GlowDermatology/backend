@@ -67,6 +67,8 @@ def test_health_ready_lists_every_provider_mode() -> None:
         "eskiz": "fake",
         "email": "fake",
         "yandex": "fake",
+        "ai": "fake",
+        "vault": "fake",
     }
     assert set(body) == {
         "status",
@@ -162,6 +164,8 @@ def test_provider_modes_serializer_follows_the_settings_map(monkeypatch: pytest.
         "eskiz",
         "email",
         "yandex",
+        "ai",
+        "vault",
         "sms",
     ]
 

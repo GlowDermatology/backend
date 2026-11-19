@@ -318,6 +318,58 @@ class JobState(TextChoices):
     FAILED = "failed", "Xato bilan tugadi"
 
 
+# --- AI product content assistant (glowderma.assistant) ---
+
+
+class AssistantMode(TextChoices):
+    FILL_MISSING = "fill_missing", "Bo‘sh maydonlarni to‘ldirish"
+    LANGUAGES = "languages", "Yetishmayotgan tillar"
+    IMPROVE = "improve", "Tanlangan matnlarni yaxshilash"
+    PHOTOS = "photos", "Rasmlardan ma’lumot"
+    TEST = "test", "Sinov"  # a prompt test from the ops console (never one of the admin panel's jobs)
+
+
+class AssistantJobOutcome(TextChoices):
+    PENDING = "pending", "Ko‘rib chiqilmoqda"
+    APPLIED = "applied", "Qo‘llandi"
+    PARTIAL = "partial", "Qisman qo‘llandi"
+    DISCARDED = "discarded", "Bekor qilindi"
+
+
+class AssistantImproveGoal(TextChoices):
+    PROFESSIONAL = "professional", "Professionalroq"
+    CLEAR = "clear", "Tushunarliroq"
+    NATURAL = "natural", "Tabiiyroq"
+    SEO = "seo", "SEO uchun"
+    SHORTER = "shorter", "Qisqaroq"
+
+
+class AssistantProvider(TextChoices):
+    GEMINI = "gemini", "Google Gemini"
+
+
+class PromptPurpose(TextChoices):
+    DESCRIBE = "describe", "Tavsif yozish"
+    TRANSLATE = "translate", "Tillarga moslashtirish"
+    IMPROVE = "improve", "Matnni yaxshilash"
+    SEO = "seo", "SEO matnlari"
+    IMAGE_EXTRACT = "image_extract", "Rasmdan ma’lumot olish"
+
+
+class PromptVersionStatus(TextChoices):
+    DRAFT = "draft", "Qoralama"
+    TESTED = "tested", "Sinovdan o‘tgan"
+    ACTIVE = "active", "Faol"
+    RETIRED = "retired", "Arxivda"
+
+
+class CredentialTestStatus(TextChoices):
+    UNKNOWN = "unknown", "Tekshirilmagan"
+    PENDING = "pending", "Tekshirilmoqda"
+    OK = "ok", "Ishlayapti"
+    FAILED = "failed", "Xato"
+
+
 class BillzImportMode(TextChoices):
     DELTA = "delta"
     FULL = "full"
@@ -676,6 +728,9 @@ CONTRACT_ENUMS: tuple[type[TextChoices], ...] = (
     DashboardBucket,
     JobKind,
     JobState,
+    AssistantMode,
+    AssistantJobOutcome,
+    AssistantImproveGoal,
     BillzImportMode,
     SessionRevokeReason,
     LogoutScope,

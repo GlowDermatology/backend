@@ -126,6 +126,16 @@ class Product(TimeStampedModel):
     name_uz = models.CharField(max_length=120, blank=True, verbose_name="nomi (uz)")
     name_ru = models.CharField(max_length=120, blank=True, verbose_name="nomi (ru)")
     name_en = models.CharField(max_length=120, blank=True, verbose_name="nomi (en)")
+    # ≤300 (serializer): the one-paragraph summary under the name (AI assistant, owner decision)
+    short_description_uz = models.TextField(
+        blank=True, default="", db_default="", verbose_name="qisqa tavsif (uz)"
+    )
+    short_description_ru = models.TextField(
+        blank=True, default="", db_default="", verbose_name="qisqa tavsif (ru)"
+    )
+    short_description_en = models.TextField(
+        blank=True, default="", db_default="", verbose_name="qisqa tavsif (en)"
+    )
     description_uz = models.TextField(blank=True, verbose_name="tavsif (uz)")  # ≤2000 (serializer)
     description_ru = models.TextField(blank=True, verbose_name="tavsif (ru)")
     description_en = models.TextField(blank=True, verbose_name="tavsif (en)")
@@ -329,6 +339,16 @@ class ProductImage(TimeStampedModel):
     )  # of the stored (re-encoded) bytes; also the file stem
     uploaded_by = models.ForeignKey(
         "accounts.StaffUser", null=True, on_delete=models.SET_NULL, related_name="+", verbose_name="yuklagan"
+    )
+    # the image's alt text per language ("" = the website uses the product name)
+    alt_uz = models.CharField(
+        max_length=160, blank=True, default="", db_default="", verbose_name="alt matni (uz)"
+    )
+    alt_ru = models.CharField(
+        max_length=160, blank=True, default="", db_default="", verbose_name="alt matni (ru)"
+    )
+    alt_en = models.CharField(
+        max_length=160, blank=True, default="", db_default="", verbose_name="alt matni (en)"
     )
 
     class Meta:

@@ -30,6 +30,7 @@ from glowderma.catalog.api.admin.serializers import (
     CategoryWriteSerializer,
     IdOrderSerializer,
     ImageOrderSerializer,
+    ImagePatchSerializer,
     ImagesResponseSerializer,
     ProductImageSerializer,
     ProductListQuerySerializer,
@@ -192,6 +193,20 @@ class ProductImagesView(AdminAPIView):
 
 
 class ProductImageDetailView(AdminAPIView):
+    @extend_schema(
+        operation_id="admin_product_images_partial_update",
+        request=ImagePatchSerializer,
+        responses={200: ProductImageSerializer, **ADMIN_ERRORS},
+    )
+    @idempotent(required=False)
+    def patch(self, request: Request, pk: int, image_id: int) -> Response:
+        serializer = ImagePatchSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        image = services.update_image(
+            pk, image_id, alt=serializer.validated_data["alt"], actor=request.user, request=request
+        )
+        return Response(ProductImageSerializer(image).data)
+
     @extend_schema(operation_id="admin_product_images_destroy", responses={204: None, **ADMIN_ERRORS})
     @idempotent(required=False)
     def delete(self, request: Request, pk: int, image_id: int) -> Response:

@@ -1127,9 +1127,12 @@ the fake Billz serves stock normally.
  "updated_at": "2026-10-22T18:04:00+05:00"}         // B-W1: last change of the product page (texts, price, status,
                                                     // gallery) — the sitemap lastmod
 // ProductDetail = ProductCard + 
-{"description": "…", "ingredients": "…", "usage": "…",             // resolved language, "" when empty
+{"short_description": "…",                          // feat/ai-assistant: ≤300 chars; resolved language, "" when empty
+ "description": "…", "ingredients": "…", "usage": "…",             // resolved language, "" when empty
  "images": [{"id": 31, "url": "https://…/9f2c.webp", "thumbnail_url": "https://…/9f2c_400.webp",
-             "medium_url": "https://…/9f2c_1000.webp", "position": 0}],
+             "medium_url": "https://…/9f2c_1000.webp", "position": 0,
+             "alt": "…"}],                          // feat/ai-assistant: the image's alt text (resolved language,
+                                                    // else uz), else the product name — never empty
  "max_quantity": 10,                                 // min(available, CART_MAX_QTY_PER_LINE); 0 = cannot be added
  "seo_title": "",                                    // B-W1: staff-written page title in the resolved language ONLY
  "seo_description": ""}                              // (never another language's text); "" = the website builds one

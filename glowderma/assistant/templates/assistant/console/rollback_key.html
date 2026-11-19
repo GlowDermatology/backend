@@ -1,0 +1,24 @@
+{% extends "assistant/console/base.html" %}
+{% load i18n %}
+
+{% block page %}
+<section class="gd-ai-card gd-ai-narrow" aria-labelledby="ai-rollback-title">
+    <h2 id="ai-rollback-title" class="gd-ai-card__title">{% translate "Oldingi kalitga qaytasizmi?" %}</h2>
+    {% if credential.previous_version %}
+        <p>{% blocktranslate trimmed with previous=credential.previous_version active=credential.active_version %}
+            {{ previous }}-versiya yana faol bo‘ladi, {{ active }}-versiya esa oldingi versiya sifatida qoladi. Keyingi so‘rovlar
+            darhol eski kalitdan foydalanadi; u qayta tekshiriladi.
+        {% endblocktranslate %}</p>
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="confirm" value="True">
+            <div class="gd-ai-foot">
+                <a class="gd-ai-link" href="{% url 'admin:assistant_provider' row.provider %}">{% translate "Bekor qilish" %}</a>
+                <button type="submit" class="gd-ai-button gd-ai-button--danger" data-testid="ai-rollback-confirm">{% translate "Ha, qaytish" %}</button>
+            </div>
+        </form>
+    {% else %}
+        <p>{% translate "Qaytariladigan oldingi kalit yo‘q." %}</p>
+    {% endif %}
+</section>
+{% endblock %}

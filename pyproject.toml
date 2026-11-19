@@ -24,6 +24,7 @@ dependencies = [
  "django-otp==1.7.5",
  "segno==1.6.6",
  "django-storages[s3]==1.14.6",
+ "google-genai==3.5.0",
 ]
 
 [dependency-groups]
@@ -38,6 +39,9 @@ dev = [
 cache-dir = ".uv-cache"
 # The Dockerfile and CI use this uv; older ones may write a different uv.lock.
 required-version = ">=0.13.7"
+# google-genai (owner-approved, AI assistant) caps tenacity below 9.2; the stack pins tenacity 9.2.1, whose API
+# the SDK's retry wrapper uses unchanged (Retrying, stop/wait/retry predicates).
+override-dependencies = ["tenacity==9.2.1"]
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "config.settings.test"

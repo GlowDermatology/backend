@@ -51,6 +51,8 @@ from .base import (
     SMTP_USE_SSL,
     SMTP_USE_TLS,
     SMTP_USER,
+    VAULT_AI_PREFIX,
+    VAULT_MODE,
     YANDEX_DELIVERY_BASE_URL,
     YANDEX_DELIVERY_CALLBACK_URL,
     YANDEX_DELIVERY_MODE,
@@ -347,6 +349,11 @@ if YANDEX_DELIVERY_MODE == "live":
     _https_url("YANDEX_DELIVERY_BASE_URL", YANDEX_DELIVERY_BASE_URL)
 if YANDEX_DELIVERY_CALLBACK_URL:
     _https_url("YANDEX_DELIVERY_CALLBACK_URL", YANDEX_DELIVERY_CALLBACK_URL)
+# AI assistant: a live Vault needs the agent proxy URL and the environment's key prefix (no default "local").
+if VAULT_MODE == "live":
+    _required("VAULT_PROXY_URL")
+    if VAULT_AI_PREFIX.startswith("local"):
+        raise ImproperlyConfigured("VAULT_AI_PREFIX must name the environment (e.g. production/ai)")
 if ESKIZ_MODE == "live":
     for _name in ("ESKIZ_EMAIL", "ESKIZ_PASSWORD", "ESKIZ_SENDER"):
         _not_an_example(_name, _required(_name))

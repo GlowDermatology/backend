@@ -1,0 +1,9 @@
+{% load i18n %}
+{% if form.non_field_errors or error %}
+    <div class="gd-ai-alert gd-ai-alert--danger" role="alert" data-testid="ai-error">
+        {% if error %}<p>{{ error }}</p>{% endif %}
+        {% for message in form.non_field_errors %}<p>{{ message }}</p>{% endfor %}
+    </div>
+{% elif form.errors %}
+    <div class="gd-ai-alert gd-ai-alert--danger" role="alert" data-testid="ai-error"><p>{% translate "Xatolarni tuzating." %}</p></div>
+{% endif %}

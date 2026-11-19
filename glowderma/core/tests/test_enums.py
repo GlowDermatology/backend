@@ -219,7 +219,20 @@ AUDIT_RANGE_TABLE: dict[str, list[str]] = {
     "AuditViewerTier": ["staff", "manager", "superuser"],
     "AppointmentRangeDetail": ["counts", "full"],
 }
-ALL_TABLES = {**CONTRACT_TABLE, **CUSTOMER_TABLE, **DELIVERY_TABLE, **STAFF_TABLE, **AUDIT_RANGE_TABLE}
+# AI product content assistant (admin contract §2.19, §3.1; feat/ai-assistant).
+ASSISTANT_TABLE: dict[str, list[str]] = {
+    "AssistantMode": ["fill_missing", "languages", "improve", "photos", "test"],
+    "AssistantJobOutcome": ["pending", "applied", "partial", "discarded"],
+    "AssistantImproveGoal": ["professional", "clear", "natural", "seo", "shorter"],
+}
+ALL_TABLES = {
+    **CONTRACT_TABLE,
+    **CUSTOMER_TABLE,
+    **DELIVERY_TABLE,
+    **STAFF_TABLE,
+    **AUDIT_RANGE_TABLE,
+    **ASSISTANT_TABLE,
+}
 
 
 def test_every_contract_enum_has_the_contract_literals() -> None:

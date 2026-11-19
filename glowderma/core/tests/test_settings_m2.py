@@ -341,7 +341,7 @@ def test_production_process_with_every_provider_fake_boots_and_warns(
         result.stdout + result.stderr
     )
     assert (
-        "MODES ['billz', 'bts', 'click', 'email', 'eskiz', 'fcm', 'oauth', 'payme', 'yandex']"
+        "MODES ['ai', 'billz', 'bts', 'click', 'email', 'eskiz', 'fcm', 'oauth', 'payme', 'vault', 'yandex']"
         in result.stdout
     )
 

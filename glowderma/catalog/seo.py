@@ -109,8 +109,11 @@ def _sorted(issues: list[SeoIssue]) -> list[SeoIssue]:
     return sorted(issues, key=lambda issue: SEVERITY_ORDER.get(enums.SeoSeverity(issue.severity), 3))
 
 
-def product_issues(product: Any, *, image_count: int) -> list[SeoIssue]:
-    """The checklist of one product (``image_count`` from the loaded images)."""
+def product_issues(
+    product: Any, *, image_count: int, images_without_alt: int | None = None
+) -> list[SeoIssue]:
+    """The checklist of one product (``image_count`` from the loaded images; ``images_without_alt`` = how many
+    have no Uzbek alt text, ``None`` = all of them)."""
     issues: list[SeoIssue] = []
     if not _text(product, "name", "uz"):
         issues.append(
@@ -156,7 +159,10 @@ def product_issues(product: Any, *, image_count: int) -> list[SeoIssue]:
         issues.append(
             _issue(enums.SeoIssueCode.IMAGES_MISSING, enums.SeoSeverity.ERROR, "Mahsulotda rasm yo‘q.")
         )
-    elif not _text(product, "name", "uz"):
+    elif (image_count if images_without_alt is None else images_without_alt) and not _text(
+        product, "name", "uz"
+    ):
+        # an image with its own alt text needs no fallback; the others take the product name
         issues.append(
             _issue(
                 enums.SeoIssueCode.ALT_TEXT_FALLBACK,
