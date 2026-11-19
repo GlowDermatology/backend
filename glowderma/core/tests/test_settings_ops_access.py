@@ -68,6 +68,22 @@ def test_an_enabled_console_boots_with_its_host_nets_and_host_only_cookies(
     )
 
 
+@pytest.mark.parametrize("allowlist", ["0.0.0.0", "91.212.1.10/32 0.0.0.0 185.74.5.0/28"])  # noqa: S104
+def test_bare_wildcard_opens_the_console_network_gate(
+    console_env: pytest.MonkeyPatch, load_fresh_production: Loader, allowlist: str
+) -> None:
+    console_env.setenv("OPS_ALLOWED_IPS", allowlist)
+    production = load_fresh_production()
+    assert production.OPS_ADMIN_ALLOWED_NETS == (ip_network("0.0.0.0/0"), ip_network("::/0"))
+    assert production.OPS_REQUIRE_2FA is True
+
+    console_env.setenv("OPS_ALLOWED_IPS", "91.212.1.10/32 0.0.0.0/32")
+    assert load_fresh_production().OPS_ADMIN_ALLOWED_NETS == (
+        ip_network("91.212.1.10/32"),
+        ip_network("0.0.0.0/32"),
+    )
+
+
 @pytest.mark.parametrize(
     ("variable", "value", "message"),
     [

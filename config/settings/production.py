@@ -451,7 +451,8 @@ if OPS_ENVIRONMENT_LABEL not in {"PRODUCTION", "STAGING"}:
 # --- Ops console access (docs/ops/deploy.md "Ops console") ---
 # The console answers on its own host (OPS_DOMAIN, the edge's site block) and only to browsers in
 # OPS_ADMIN_ALLOWED_NETS (the edge allows OPS_ALLOWED_IPS first; Django checks again behind it). Its client
-# address is the one the edge forwards, so the edge must be the trusted proxy and never be allowed itself.
+# address is the one the edge forwards, so the edge must be the trusted proxy. In restricted mode, the edge
+# address must be outside the configured networks.
 # RFC 5737 / RFC 3849 example ranges (placeholders in documentation and tests use them).
 DOCUMENTATION_NETS = tuple(
     ipaddress.ip_network(network)
@@ -467,7 +468,7 @@ if "," in _ops_allowed_ips:
         "OPS_ALLOWED_IPS must be separated by spaces, not commas (Caddy's remote_ip list): "
         "OPS_ALLOWED_IPS=203.0.113.10/32 198.51.100.0/28"
     )
-# Default: the edge's own allow-list (OPS_ALLOWED_IPS reaches the backend containers through env_file).
+# Default: the edge's own allow-list, passed to the backend by Compose.
 OPS_ADMIN_ALLOWED_NETS = (
     env_networks("OPS_ADMIN_ALLOWED_NETS")
     if os.environ.get("OPS_ADMIN_ALLOWED_NETS")
@@ -494,6 +495,9 @@ if DJANGO_ADMIN_ENABLED:
     ALLOWED_HOSTS.append(OPS_DOMAIN)
     # TLS ends at the edge (request.is_secure() is false here), so the HTTPS origin is trusted explicitly.
     CSRF_TRUSTED_ORIGINS = [f"https://{OPS_DOMAIN}"]
+    # Expand the explicit opt-in after validating the configured networks.
+    if "0.0.0.0" in _ops_allowed_ips.split():  # noqa: S104 - an allow-list token
+        OPS_ADMIN_ALLOWED_NETS = (ipaddress.ip_network("0.0.0.0/0"), ipaddress.ip_network("::/0"))
 # __Host- cookies: Secure, path /, never a Domain attribute (no other subdomain can set or read them).
 SESSION_COOKIE_NAME = "__Host-gd_session"
 CSRF_COOKIE_NAME = "__Host-gd_csrftoken"
