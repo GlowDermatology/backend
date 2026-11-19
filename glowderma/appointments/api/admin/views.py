@@ -159,6 +159,7 @@ class AppointmentRescheduleView(AdminAPIView):
             pk,
             start=serializer.validated_data["start"],
             professional=serializer.validated_data.get("specialist_id"),
+            location_id=serializer.validated_data["location_id"],
             actor=request.user,
             request=request,
         )

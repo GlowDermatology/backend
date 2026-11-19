@@ -133,6 +133,7 @@ def _seed_hours(professionals: dict[int, Professional]) -> None:
                 professional=professional,
                 weekday=weekday,
                 defaults={
+                    "location_id": professional.location_id,
                     "start": DAY_START,
                     "end": DAY_END,
                     "break_start": break_start,

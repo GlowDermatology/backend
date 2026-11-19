@@ -31,8 +31,8 @@ from glowderma.core.api.exceptions import (
     not_cancellable,
 )
 from glowderma.core.uzsource import N_
-from glowderma.professionals.models import Professional, ProfessionalService, Service
-from glowderma.professionals.selectors import DAY_END_LABEL, day_schedules
+from glowderma.professionals.models import Location, Professional, ProfessionalService, Service
+from glowderma.professionals.selectors import DAY_END_LABEL, day_schedules, has_location
 from glowderma.site_config import selectors as site_config_selectors
 
 SLOT_STEP_MIN = 5  # admin bookings sit on a 5-minute grid (open point A-4: not the professional's slot_step)
@@ -96,7 +96,12 @@ def _clock(day: date, label: str) -> datetime:
 
 
 def check_slot(
-    professional: Professional, start: datetime, end: datetime, *, exclude_pk: int | None = None
+    professional: Professional,
+    start: datetime,
+    end: datetime,
+    *,
+    location_id: int | None = None,
+    exclude_pk: int | None = None,
 ) -> None:
     """Admin slot rules: 5-minute grid, not in the past, inside the day's hours (override wins), not
     overlapping a blocked period (incl. the recurring break) nor another open appointment of the
@@ -110,6 +115,8 @@ def check_slot(
     [schedule] = day_schedules(day, Professional.objects.filter(pk=professional.pk))
     if schedule.working_hours is None:
         raise _start_error("outside_working_hours", MESSAGES["outside_working_hours"])
+    if location_id is not None and (schedule.location is None or schedule.location.pk != location_id):
+        raise _wrong_visit_location()
     hours_start, hours_end = (_clock(day, label) for label in schedule.working_hours)
     if start < hours_start or end > hours_end:
         raise _start_error("outside_working_hours", MESSAGES["outside_working_hours"])
@@ -125,7 +132,7 @@ def check_slot(
         raise _start_error("slot_unavailable", MESSAGES["slot_taken"])
 
 
-def _hold_row(model: type[Professional] | type[Service], pk: int) -> bool:
+def _hold_row(model: type[Professional] | type[Service] | type[Location], pk: int) -> bool:
     """Lock a row ``FOR KEY SHARE`` for the rest of the transaction and re-read its ``is_active``."""
     table = connection.ops.quote_name(model._meta.db_table)
     with connection.cursor() as cursor:
@@ -158,6 +165,17 @@ def _hold_active_specialist(professional_id: int) -> bool:
     bookings therefore read the link and check the slot only once they hold it.
     """
     return _hold_row(Professional, professional_id)
+
+
+def _visit_location(professional: Professional, location_id: int) -> int:
+    # Archive locks the same row before checking upcoming visits.
+    if not _hold_row(Location, location_id) or not has_location(professional, location_id):
+        raise _field("location_id", "does_not_exist", "field.booking_location_not_assigned")
+    return location_id
+
+
+def _wrong_visit_location() -> ValidationError:
+    return _field("location_id", "invalid", "field.booking_wrong_location")
 
 
 def _specialist_gone() -> ValidationError:
@@ -217,6 +235,7 @@ def _audit(appointment: Appointment, action: str, *, actor: Any, request: Any, *
             "professional_id": appointment.professional_id,
             "customer_id": appointment.customer_id,
             "service_id": appointment.service_id,
+            "location_id": appointment.location_id,
             "start": timeutils.isoformat(appointment.start),
             "end": timeutils.isoformat(appointment.end),
             **extra,
@@ -233,6 +252,7 @@ def _range_data(appointment: Appointment) -> dict[str, Any]:
         "start": timeutils.isoformat(appointment.start),
         "end": timeutils.isoformat(appointment.end),
         "service_id": appointment.service_id,
+        "location_id": appointment.location_id,
         "professional_id": appointment.professional_id,
         "price": appointment.price,
         "duration_min": appointment.duration_min,
@@ -283,6 +303,7 @@ def create_by_admin(
     service: Service,
     customer: Customer,
     start: datetime,
+    location_id: int | None = None,
     note: str = "",
     actor: Any,
     request: Any = None,
@@ -301,12 +322,17 @@ def create_by_admin(
                     {"service_id": [field_error("does_not_exist", MESSAGES["service_not_found"])]}
                 )
             link = active_link(professional, service)
+            professional.refresh_from_db(fields=["location"])
+            clinic_id = _visit_location(
+                professional, professional.location_id if location_id is None else location_id
+            )
             end = start + timedelta(minutes=link.duration_min)
-            check_slot(professional, start, end)
+            check_slot(professional, start, end, location_id=clinic_id)
             _before_write()
             now = timeutils.now()
             appointment = Appointment.objects.create(
                 professional=professional,
+                location_id=clinic_id,
                 service=service,
                 customer=customer,
                 start=start,
@@ -350,6 +376,7 @@ def reschedule(
     *,
     start: datetime,
     professional: Professional | None = None,
+    location_id: int | None = None,
     actor: Any,
     request: Any = None,
 ) -> Appointment:
@@ -369,22 +396,37 @@ def reschedule(
             raise _specialist_gone()
         link = active_link(target, appointment.service)
         duration, price = link.duration_min, link.price
+    target.refresh_from_db(fields=["location"])
+    default_location_id = (
+        appointment.location_id if target.pk == appointment.professional_id else target.location_id
+    )
+    clinic_id = _visit_location(target, default_location_id if location_id is None else location_id)
     end = start + timedelta(minutes=duration)
-    check_slot(target, start, end, exclude_pk=appointment.pk)
+    check_slot(target, start, end, location_id=clinic_id, exclude_pk=appointment.pk)
     _before_write()
     before = {
         "from_start": timeutils.isoformat(appointment.start),
         "from_end": timeutils.isoformat(appointment.end),
+        "from_location_id": appointment.location_id,
     }
     from_professional = appointment.professional_id
     appointment.professional = target
+    appointment.location_id = clinic_id
     appointment.start, appointment.end = start, end
     appointment.duration_min, appointment.price = duration, price
     appointment.reschedule_count += 1
     try:
         with transaction.atomic():
             appointment.save(
-                update_fields=["professional", "start", "end", "duration_min", "price", "reschedule_count"]
+                update_fields=[
+                    "professional",
+                    "location",
+                    "start",
+                    "end",
+                    "duration_min",
+                    "price",
+                    "reschedule_count",
+                ]
             )
     except (IntegrityError, OperationalError) as exc:
         if not _lost_the_slot(exc):
@@ -401,6 +443,7 @@ def reschedule(
             "to_end": timeutils.isoformat(end),
             "from_professional_id": from_professional,
             "to_professional_id": target.pk,
+            "to_location_id": clinic_id,
             "by": "admin",
             "push_sent": _pushable(appointment.customer_id),
         },
@@ -412,6 +455,7 @@ def reschedule(
         actor=actor,
         request=request,
         **before,
+        to_location_id=clinic_id,
         reschedule_no=appointment.reschedule_count,
     )
     return appointment
@@ -460,7 +504,12 @@ def _field(name: str, code: str, key: str, **params: Any) -> ValidationError:
 
 
 def _check_customer_slot(
-    professional: Professional, customer_id: int, start: datetime, duration_min: int, now: datetime
+    professional: Professional,
+    customer_id: int,
+    start: datetime,
+    duration_min: int,
+    now: datetime,
+    location_id: int,
 ) -> datetime:
     """The ``start`` rows of the C§2.11 booking table, in order (after the customer lock and the count);
     returns the end of the slot.
@@ -488,6 +537,8 @@ def _check_customer_slot(
     frame = selectors.day_frame(professional.pk, day)
     if frame.hours is None:
         raise _field("start", "outside_working_hours", "field.outside_working_hours")
+    if frame.location_id != location_id:
+        raise _wrong_visit_location()
     if not selectors.on_grid(professional, frame, start):
         raise _field("start", "invalid", "field.booking_grid", n=professional.slot_step_min)
     if start < frame.hours[0] or end > frame.hours[1]:
@@ -507,6 +558,7 @@ def request_by_customer(
     start: datetime,
     note: str = "",
     *,
+    location_id: int | None = None,
     request: Any = None,
 ) -> Appointment:
     """``POST appointments/`` (C§2.11): the checks of the booking table in order, then a ``requested``
@@ -543,17 +595,22 @@ def request_by_customer(
     link = selectors.offered_link(professional.pk, service_id) if _hold_active_service(service_id) else None
     if link is None:
         raise _field("service_id", "does_not_exist", "field.service_not_offered")
+    professional.refresh_from_db(fields=["location", "slot_step_min"])
+    clinic_id = _visit_location(
+        professional, professional.location_id if location_id is None else location_id
+    )
     _check_consent(customer)
     now = timeutils.now()
     limit = int(settings.BOOKING_MAX_OPEN_PER_CUSTOMER)
     if selectors.customer_open_future_count(customer.pk, now) >= limit:
         raise BookingLimit(params={"limit": limit}, details={"limit": limit})
-    end = _check_customer_slot(professional, customer.pk, start, link.duration_min, now)
+    end = _check_customer_slot(professional, customer.pk, start, link.duration_min, now, clinic_id)
     _before_write()
     try:
         with transaction.atomic():
             appointment = Appointment.objects.create(
                 professional=professional,
+                location_id=clinic_id,
                 service_id=link.service_id,
                 customer=customer,
                 start=start,

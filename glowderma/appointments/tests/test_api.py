@@ -18,7 +18,7 @@ from glowderma.core.models import AuditEntry, IdempotencyRecord, OutboxMessage
 from glowderma.core.seeding import SeedContext, reset_sequences
 from glowderma.core.timeutils import TASHKENT
 from glowderma.professionals import seeds as professionals_seeds
-from glowderma.professionals.models import Professional
+from glowderma.professionals.models import Location, Professional
 from glowderma.professionals.tests.factories import ProfessionalServiceFactory, WorkingHoursFactory
 
 pytestmark = pytest.mark.django_db
@@ -53,12 +53,15 @@ def test_day_schedule_equals_the_design(staff_client: APIClient, seeded: None) -
     assert body["date"] == "2026-10-26"
     assert [s["name"] for s in body["specialists"]] == ["Nodira Rahimova", "Jasur Aliyev", "Dilnoza Yusupova"]
     nodira, jasur, dilnoza = body["specialists"]
+    clinic = Location.objects.get(pk=1)
+    location = {"id": clinic.pk, "name": clinic.name_uz, "address": clinic.address_uz}
     assert nodira == {
         "id": 1,
         "name": "Nodira Rahimova",
         "role": "dermatologist",
         "is_active": True,
         "working_hours": {"start": "09:00", "end": "18:00"},
+        "location": location,
         "blocks": [{"start": "16:00", "end": "16:30", "kind": "busy", "label": "Band qilingan"}],
     }
     assert jasur["blocks"] == [{"start": "13:00", "end": "14:00", "kind": "off", "label": None}]
@@ -68,6 +71,7 @@ def test_day_schedule_equals_the_design(staff_client: APIClient, seeded: None) -
     assert body["appointments"][0] == {
         "id": 1,
         "specialist_id": 1,
+        "location": location,
         "customer": {"id": 8, "name": "Kamola Nazarova", "phone": "+998909741823", "email": None},
         "service_id": 1,
         "service_name": "Dermatolog konsultatsiyasi",
@@ -147,8 +151,8 @@ def test_confirm_reject_attend_and_409(
     assert confirm.status_code == 200, confirm.data
     assert confirm.data["status"] == "confirmed" and confirm.data["id"] == 1
     assert set(confirm.data) == {
-        "id", "specialist_id", "customer", "service_id", "service_name", "service_short_name", "duration_min",
-        "start", "end", "price", "status", "requested_at", "requested_via",
+        "id", "specialist_id", "location", "customer", "service_id", "service_name", "service_short_name",
+        "duration_min", "start", "end", "price", "status", "requested_at", "requested_via",
     }  # fmt: skip
     message = OutboxMessage.objects.get(dedupe_key="push.appointment:1:confirmed")
     assert message.payload["customer_id"] == 8 and message.payload["action"] == "confirmed"
@@ -195,6 +199,7 @@ def test_admin_create_reschedule_cancel_flow(staff_client: APIClient, seeded: No
     body = {
         "specialist_id": 1,
         "service_id": 2,
+        "location_id": 1,
         "phone": "+998901234567",  # Malika
         "start": at("2026-10-26", "10:00"),
         "note": "Telefon orqali",
@@ -216,19 +221,27 @@ def test_admin_create_reschedule_cancel_flow(staff_client: APIClient, seeded: No
 
     by_id = staff_client.post(
         BASE,
-        {"specialist_id": 2, "service_id": 1, "customer_id": 5, "start": at("2026-10-27", "11:00")},
+        {
+            "specialist_id": 2,
+            "service_id": 1,
+            "location_id": 1,
+            "customer_id": 5,
+            "start": at("2026-10-27", "11:00"),
+        },
         format="json",
     )
     assert by_id.status_code == 201 and by_id.data["price"] == 120000
 
     moved = staff_client.post(
-        f"{BASE}{row.pk}/reschedule/", {"start": at("2026-10-26", "12:00")}, format="json"
+        f"{BASE}{row.pk}/reschedule/", {"start": at("2026-10-26", "12:00"), "location_id": 1}, format="json"
     )
     assert moved.status_code == 200 and moved.data["start"] == at("2026-10-26", "12:00")
     assert moved.data["status"] == "confirmed" and moved.data["end"] == at("2026-10-26", "12:20")
     assert OutboxMessage.objects.filter(dedupe_key=f"push.appointment:{row.pk}:rescheduled:1").exists()
     to_jasur = staff_client.post(
-        f"{BASE}{row.pk}/reschedule/", {"start": at("2026-10-26", "12:00"), "specialist_id": 2}, format="json"
+        f"{BASE}{row.pk}/reschedule/",
+        {"start": at("2026-10-26", "12:00"), "specialist_id": 2, "location_id": 1},
+        format="json",
     )
     assert (
         to_jasur.status_code == 200
@@ -258,6 +271,7 @@ def test_admin_create_reschedule_cancel_flow(staff_client: APIClient, seeded: No
         ({}, [
             ("specialist_id", "required", "Majburiy maydon."),
             ("service_id", "required", "Majburiy maydon."),
+            ("location_id", "required", "Majburiy maydon."),
             ("start", "required", "Majburiy maydon."),
         ]),
         ({"specialist_id": 99, "service_id": 1, "customer_id": 5, "start": at("2026-10-26", "10:00")},
@@ -299,7 +313,8 @@ def test_admin_create_reschedule_cancel_flow(staff_client: APIClient, seeded: No
 def test_create_validation_table(
     staff_client: APIClient, seeded: None, body: dict[str, Any], expected: list[Any]
 ) -> None:
-    response = staff_client.post(BASE, body, format="json")
+    request = {"location_id": 1, **body} if body else body
+    response = staff_client.post(BASE, request, format="json")
     assert response.status_code == 400, response.data
     assert response.data["code"] == "validation_error" and errors(response) == expected
     assert Appointment.objects.count() == 45
@@ -311,14 +326,26 @@ def test_create_refuses_deleted_customers_and_inactive_specialists(
     deleted = Customer.objects.get(pk=427)
     response = staff_client.post(
         BASE,
-        {"specialist_id": 1, "service_id": 1, "customer_id": deleted.pk, "start": at("2026-10-26", "10:00")},
+        {
+            "specialist_id": 1,
+            "service_id": 1,
+            "location_id": 1,
+            "customer_id": deleted.pk,
+            "start": at("2026-10-26", "10:00"),
+        },
         format="json",
     )
     assert errors(response) == [("customer_id", "does_not_exist", "Mijoz topilmadi.")]
     Professional.objects.filter(pk=1).update(is_active=False)
     response = staff_client.post(
         BASE,
-        {"specialist_id": 1, "service_id": 1, "customer_id": 5, "start": at("2026-10-26", "10:00")},
+        {
+            "specialist_id": 1,
+            "service_id": 1,
+            "location_id": 1,
+            "customer_id": 5,
+            "start": at("2026-10-26", "10:00"),
+        },
         format="json",
     )
     assert errors(response) == [("specialist_id", "does_not_exist", "Mutaxassis topilmadi.")]
@@ -336,16 +363,18 @@ def test_reschedule_validation_and_404(staff_client: APIClient, clock: Any) -> N
         professional=link.professional, service=link.service, start=datetime(2026, 10, 26, 9, tzinfo=TASHKENT)
     )
     missing = staff_client.post(f"{BASE}{appointment.pk}/reschedule/", {}, format="json")
-    assert errors(missing) == [("start", "required", "Majburiy maydon.")]
+    assert {field for field, code, _ in errors(missing) if code == "required"} == {"start", "location_id"}
     bad = staff_client.post(
         f"{BASE}{appointment.pk}/reschedule/",
-        {"start": at("2026-10-26", "10:00"), "specialist_id": 999},
+        {"start": at("2026-10-26", "10:00"), "specialist_id": 999, "location_id": appointment.location_id},
         format="json",
     )
     assert errors(bad) == [("specialist_id", "does_not_exist", "Mutaxassis topilmadi.")]
     assert (
         staff_client.post(
-            f"{BASE}999999/reschedule/", {"start": at("2026-10-26", "10:00")}, format="json"
+            f"{BASE}999999/reschedule/",
+            {"start": at("2026-10-26", "10:00"), "location_id": appointment.location_id},
+            format="json",
         ).status_code
         == 404
     )
@@ -433,7 +462,13 @@ def test_create_without_note_and_cancel_without_reason_use_the_empty_default(
 ) -> None:
     created = staff_client.post(
         BASE,
-        {"specialist_id": 2, "service_id": 1, "customer_id": 5, "start": at("2026-10-27", "11:00")},
+        {
+            "specialist_id": 2,
+            "service_id": 1,
+            "location_id": 1,
+            "customer_id": 5,
+            "start": at("2026-10-27", "11:00"),
+        },
         format="json",
     )
     assert created.status_code == 201, created.data

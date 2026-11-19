@@ -13,6 +13,8 @@ from decimal import Decimal, InvalidOperation
 from string import Formatter
 from typing import Any, Final
 
+from django.utils.translation import gettext_noop
+
 LANGUAGES: Final[tuple[str, ...]] = ("uz", "ru", "en")
 DEFAULT_LANGUAGE: Final = "uz"
 NBSP: Final = " "
@@ -562,6 +564,16 @@ CATALOG: Final[dict[str, dict[str, str]]] = {
         "uz": "Manzilni to‘liq kiriting.",
         "ru": "Введите полный адрес.",
         "en": "Please enter the full address.",
+    },
+    "field.booking_location_not_assigned": {
+        "uz": gettext_noop("Mutaxassis ushbu filialda qabul qilmaydi."),
+        "ru": "Специалист не принимает в этом филиале.",
+        "en": "This specialist does not see patients at this clinic.",
+    },
+    "field.booking_wrong_location": {
+        "uz": gettext_noop("Mutaxassis bu vaqtda tanlangan filialda ishlamaydi."),
+        "ru": "Специалист в это время работает в другом филиале.",
+        "en": "This specialist is scheduled at a different clinic for this time.",
     },
     "field.latlng_pair": {
         "uz": "Joylashuvni qayta tanlang.",

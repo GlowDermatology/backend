@@ -604,6 +604,10 @@ msgstr "Apple"
 msgid "Arxivda"
 msgstr "Retired"
 
+#: glowderma/professionals/services.py
+msgid "Asosiy filial biriktirilgan filiallar orasida bo‘lishi kerak."
+msgstr "The primary clinic must be one of the assigned clinics."
+
 #: config/settings/ops_admin.py
 msgid "Audit jurnali"
 msgstr "Audit log"
@@ -632,10 +636,6 @@ msgstr "Please sign in."
 #: glowderma/accounts/api/guard.py
 msgid "Avval admin panelda o‘z parolingizni o‘rnating, so‘ng konsolga qayta kiring."
 msgstr "Set your own password in the admin panel first, then sign in to the console again."
-
-#: glowderma/professionals/services.py
-msgid "Avval klinika manzilini kiriting."
-msgstr "Enter the clinic address first."
 
 #: glowderma/delivery/admin.py
 msgid "Avval ombor manzilini va xaritadagi nuqtasini saqlang."
@@ -1094,6 +1094,10 @@ msgstr "Other"
 #: glowderma/site_config/templates/site_config/console/settings.html
 msgid "Boshqa bo‘limda saqlanmagan o‘zgarishlar bor: sahifa yangilanganda ular yo‘qoladi. Davom etasizmi?"
 msgstr "Another section has unsaved changes: they will be lost when the page reloads. Continue?"
+
+#: admin history (professionals.Professional)
+msgid "Boshqa filiallar"
+msgstr "Additional clinics"
 
 #: glowderma/accounts/templates/accounts/console/_cancel.html
 msgid "Boshqa hisob bilan kirish"
@@ -1844,6 +1848,14 @@ msgstr "Active"
 msgid "Faol akkauntlar"
 msgstr "Active accounts"
 
+#: glowderma/professionals/services.py
+msgid "Faol filial topilmadi."
+msgstr "Active clinic not found."
+
+#: glowderma/professionals/services.py
+msgid "Faol filialni ushbu mutaxassisga biriktiring."
+msgstr "Assign this specialist to an active clinic before scheduling there."
+
 #: glowderma/assistant/console/views.py
 msgid "Faol kalit tekshiruvga yuborildi. Natija shu sahifada ko‘rinadi."
 msgstr "The active key was sent for a test. The result appears on this page."
@@ -1965,6 +1977,14 @@ msgstr "Branch"
 #: config/settings/ops_admin.py
 msgid "Filiallar"
 msgstr "Branches"
+
+#: glowderma/professionals/services.py
+msgid "Filialni ajratishdan oldin ish jadvalidagi filialni o‘zgartiring."
+msgstr "Change the clinic in the work schedule before removing it from the specialist."
+
+#: glowderma/professionals/services.py
+msgid "Filialni nofaol qilishdan oldin faol mutaxassislarni ajrating va kelgusi qabullarni ko‘chiring yoki bekor qiling."
+msgstr "Reassign active specialists and reschedule or cancel upcoming appointments before deactivating this clinic."
 
 #: glowderma/core/templates/admin/ops/applied_filters.html
 msgid "Filtrlarni tozalash"
@@ -3338,6 +3358,18 @@ msgstr "Model and parameters"
 msgid "Moliyaviy muvofiqlik hisobotini hozir ishga tushirish"
 msgstr "Run the financial consistency report now"
 
+#: admin history (professionals.Location)
+msgid "Mo‘ljal (en)"
+msgstr "Directions (en)"
+
+#: admin history (professionals.Location)
+msgid "Mo‘ljal (ru)"
+msgstr "Directions (ru)"
+
+#: admin history (professionals.Location)
+msgid "Mo‘ljal (uz)"
+msgstr "Directions (uz)"
+
 #: glowderma/delivery/admin.py
 msgid "Muddati o‘tgan"
 msgstr "Expired"
@@ -3375,6 +3407,10 @@ msgstr "Specialist #%(professional_id)s · service #%(service_id)s: %(price)s, %
 msgid "Mutaxassis bu vaqtda ishlamaydi."
 msgstr "The specialist does not work at this time."
 
+#: glowderma/core/i18n.py
+msgid "Mutaxassis bu vaqtda tanlangan filialda ishlamaydi."
+msgstr "This specialist is scheduled at a different clinic for this time."
+
 #: glowderma/appointments/services.py
 msgid "Mutaxassis bu xizmatni ko‘rsatmaydi."
 msgstr "The specialist does not offer this service."
@@ -3383,6 +3419,10 @@ msgstr "The specialist does not offer this service."
 #: glowderma/appointments/services.py
 msgid "Mutaxassis topilmadi."
 msgstr "Specialist not found."
+
+#: glowderma/core/i18n.py
+msgid "Mutaxassis ushbu filialda qabul qilmaydi."
+msgstr "This specialist does not see patients at this clinic."
 
 #: config/settings/ops_admin.py
 msgid "Mutaxassis xizmatlari"
@@ -6347,6 +6387,10 @@ msgid "boshlanishi:"
 msgstr "starts with:"
 
 #: model metadata
+msgid "boshqa filiallar"
+msgstr "additional clinics"
+
+#: model metadata
 msgid "bosqich"
 msgstr "stage"
 
@@ -7267,6 +7311,18 @@ msgstr "B"
 #: model metadata
 msgid "model"
 msgstr "model"
+
+#: model metadata
+msgid "mo‘ljal (en)"
+msgstr "directions (en)"
+
+#: model metadata
+msgid "mo‘ljal (ru)"
+msgstr "directions (ru)"
+
+#: model metadata
+msgid "mo‘ljal (uz)"
+msgstr "directions (uz)"
 
 #: model metadata
 msgid "muallif"

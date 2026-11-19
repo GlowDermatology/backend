@@ -254,6 +254,8 @@ def test_reschedule_keeps_status_writes_event_and_pushes(staff: StaffUser, clock
         "to_end": "2026-10-26T11:30:00+05:00",
         "from_professional_id": link.professional_id,
         "to_professional_id": link.professional_id,
+        "from_location_id": link.professional.location_id,
+        "to_location_id": link.professional.location_id,
         "by": "admin",
         "push_sent": True,
     }

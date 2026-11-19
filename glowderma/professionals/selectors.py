@@ -50,6 +50,7 @@ class DaySchedule:
     professional: Professional
     working_hours: tuple[str, str] | None  # ("09:00", "18:00") | None = not working
     blocks: list[DayBlock] = field(default_factory=list)
+    location: Location | None = None
 
 
 def _clip(block: BlockedPeriod, day_start: datetime, day_end: datetime) -> DayBlock:
@@ -73,6 +74,7 @@ def _schedule(
     ``WorkingHours``.
     """
     hours: tuple[str, str] | None
+    location: Location | None = None
     day_blocks = list(blocks)
     if override is not None:
         hours = (
@@ -80,10 +82,12 @@ def _schedule(
             if override.start is None or override.end is None
             else (format_clock(override.start), format_clock(override.end))
         )
+        location = override.location
     elif week is None:
         hours = None
     else:
         hours = (format_clock(week.start), format_clock(week.end))
+        location = week.location
         if week.break_start is not None and week.break_end is not None:
             day_blocks.append(
                 DayBlock(
@@ -94,7 +98,9 @@ def _schedule(
                 )
             )
     day_blocks.sort(key=lambda b: (b.start, b.end))
-    return DaySchedule(professional=professional, working_hours=hours, blocks=day_blocks)
+    if location is None or not location.is_active:
+        hours, location = None, None
+    return DaySchedule(professional=professional, working_hours=hours, blocks=day_blocks, location=location)
 
 
 def day_schedules(day: date, professionals: QuerySet[Professional] | None = None) -> list[DaySchedule]:
@@ -108,11 +114,16 @@ def day_schedules(day: date, professionals: QuerySet[Professional] | None = None
     rows = list(professionals.order_by("position", "name", "id"))
     ids = [row.pk for row in rows]
     overrides = {
-        o.professional_id: o for o in WorkingHoursOverride.objects.filter(professional_id__in=ids, date=day)
+        o.professional_id: o
+        for o in WorkingHoursOverride.objects.select_related("location").filter(
+            professional_id__in=ids, date=day
+        )
     }
     weekly = {
         w.professional_id: w
-        for w in WorkingHours.objects.filter(professional_id__in=ids, weekday=day.weekday())
+        for w in WorkingHours.objects.select_related("location").filter(
+            professional_id__in=ids, weekday=day.weekday()
+        )
     }
     day_start, day_end = timeutils.day_bounds(day)
     blocks: dict[int, list[DayBlock]] = defaultdict(list)
@@ -139,9 +150,15 @@ def schedules_for_days(professional: Professional, days: Collection[date]) -> di
     if not wanted:
         return {}
     overrides = {
-        o.date: o for o in WorkingHoursOverride.objects.filter(professional=professional, date__in=wanted)
+        o.date: o
+        for o in WorkingHoursOverride.objects.select_related("location").filter(
+            professional=professional, date__in=wanted
+        )
     }
-    weekly = {w.weekday: w for w in WorkingHours.objects.filter(professional=professional)}
+    weekly = {
+        w.weekday: w
+        for w in WorkingHours.objects.select_related("location").filter(professional=professional)
+    }
     span_start, _ = timeutils.day_bounds(wanted[0])
     _, span_end = timeutils.day_bounds(wanted[-1])
     raw_blocks = list(
@@ -173,9 +190,14 @@ def schedules_for_many(
     ids = [row.pk for row in rows]
     overrides = {
         (o.professional_id, o.date): o
-        for o in WorkingHoursOverride.objects.filter(professional_id__in=ids, date__in=wanted)
+        for o in WorkingHoursOverride.objects.select_related("location").filter(
+            professional_id__in=ids, date__in=wanted
+        )
     }
-    weekly = {(w.professional_id, w.weekday): w for w in WorkingHours.objects.filter(professional_id__in=ids)}
+    weekly = {
+        (w.professional_id, w.weekday): w
+        for w in WorkingHours.objects.select_related("location").filter(professional_id__in=ids)
+    }
     span_start, _ = timeutils.day_bounds(wanted[0])
     _, span_end = timeutils.day_bounds(wanted[-1])
     raw_blocks: dict[int, list[BlockedPeriod]] = defaultdict(list)
@@ -214,8 +236,18 @@ def booking_catalogue() -> QuerySet[Professional]:
     )
     return (
         Professional.objects.filter(is_active=True)
+        .filter(Q(location__is_active=True) | Q(additional_locations__is_active=True))
+        .distinct()
         .order_by("position", "name", "id")
-        .prefetch_related(Prefetch("services", queryset=links, to_attr="bookable_links"))
+        .select_related("location")
+        .prefetch_related(
+            Prefetch("services", queryset=links, to_attr="bookable_links"),
+            Prefetch(
+                "additional_locations",
+                queryset=Location.objects.filter(is_active=True),
+                to_attr="clinic_rows",
+            ),
+        )
     )
 
 
@@ -225,20 +257,36 @@ SEARCH_MAX_LENGTH = 64
 CI_COLLATION = "glowderma_ci"  # the ICU case-insensitive collation of core.0007 (decision T12)
 
 
-def the_location() -> Location | None:
-    """The clinic (decision P4: one location): the first row by position, then id; ``None`` before staff
-    entered it."""
-    return Location.objects.order_by("position", "id").first()
+def assigned_locations(professional: Professional, *, active_only: bool = False) -> list[Location]:
+    """Primary clinic first, then additional clinics in display order."""
+    additional = getattr(professional, "clinic_rows", None)
+    if additional is None:
+        additional = professional.additional_locations.all()
+    return [
+        location for location in (professional.location, *additional) if not active_only or location.is_active
+    ]
+
+
+def assigned_location_ids(professional: Professional) -> list[int]:
+    return [location.pk for location in assigned_locations(professional)]
+
+
+def has_location(professional: Professional, location_id: int) -> bool:
+    return (
+        professional.location_id == location_id
+        or professional.additional_locations.filter(pk=location_id).exists()
+    )
 
 
 def specialist_queryset() -> QuerySet[Professional]:
-    """Professionals with everything the admin ``Specialist`` shape needs, in three queries for any page:
+    """Professionals with everything the admin ``Specialist`` shape needs, in four queries for any page:
     the rows with the linked staff account, the offered services (``offered_links``, by service position
     then name) and the weekly hours (``week_rows``, by weekday)."""
     links = ProfessionalService.objects.select_related("service").order_by(
         "service__position", "service__name_uz", "service_id"
     )
-    return Professional.objects.select_related("staff_user").prefetch_related(
+    return Professional.objects.select_related("staff_user", "location").prefetch_related(
+        Prefetch("additional_locations", to_attr="clinic_rows"),
         Prefetch("services", queryset=links, to_attr="offered_links"),
         Prefetch("working_hours", queryset=WorkingHours.objects.order_by("weekday"), to_attr="week_rows"),
     )

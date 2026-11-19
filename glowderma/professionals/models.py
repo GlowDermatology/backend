@@ -27,7 +27,7 @@ def professional_slug_base(name: str) -> str:
 
 
 class Location(TimeStampedModel):
-    """A branch/clinic address (one row today, several supported)."""
+    """A clinic branch and its customer-facing address."""
 
     name_uz = models.CharField(max_length=120, verbose_name="nomi (uz)")
     name_ru = models.CharField(max_length=120, blank=True, verbose_name="nomi (ru)")
@@ -35,6 +35,15 @@ class Location(TimeStampedModel):
     address_uz = models.CharField(max_length=300, blank=True, verbose_name="manzil (uz)")
     address_ru = models.CharField(max_length=300, blank=True, verbose_name="manzil (ru)")
     address_en = models.CharField(max_length=300, blank=True, verbose_name="manzil (en)")
+    directions_uz = models.CharField(
+        max_length=500, blank=True, default="", db_default="", verbose_name="mo‘ljal (uz)"
+    )
+    directions_ru = models.CharField(
+        max_length=500, blank=True, default="", db_default="", verbose_name="mo‘ljal (ru)"
+    )
+    directions_en = models.CharField(
+        max_length=500, blank=True, default="", db_default="", verbose_name="mo‘ljal (en)"
+    )
     phone = models.CharField(max_length=13, blank=True, verbose_name="telefon")
     latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, verbose_name="kenglik")
     longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, verbose_name="uzunlik")
@@ -69,6 +78,12 @@ class Professional(TimeStampedModel):
         on_delete=models.PROTECT,
         related_name="professionals",
         verbose_name="filial",
+    )
+    additional_locations = models.ManyToManyField(
+        "professionals.Location",
+        blank=True,
+        related_name="additional_professionals",
+        verbose_name="boshqa filiallar",
     )
     name = models.CharField(max_length=150, verbose_name="nomi")  # shown as-is in every language
     # dermatologist | cosmetologist
@@ -251,6 +266,9 @@ class WorkingHours(models.Model):
         related_name="working_hours",
         verbose_name="mutaxassis",
     )
+    location = models.ForeignKey(
+        "professionals.Location", on_delete=models.PROTECT, related_name="+", verbose_name="filial"
+    )
     # 0 = Monday … 6 = Sunday (Python date.weekday())
     weekday = models.PositiveSmallIntegerField(choices=WEEKDAY_CHOICES, verbose_name="hafta kuni")
     start = models.TimeField(verbose_name="boshlanishi")  # Tashkent wall-clock
@@ -303,6 +321,14 @@ class WorkingHoursOverride(models.Model):
         related_name="hours_overrides",
         verbose_name="mutaxassis",
     )
+    location = models.ForeignKey(
+        "professionals.Location",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+        verbose_name="filial",
+    )
     date = models.DateField(verbose_name="sana")  # Tashkent calendar day
     start = models.TimeField(null=True, verbose_name="boshlanishi")
     end = models.TimeField(null=True, verbose_name="tugashi")
@@ -323,6 +349,11 @@ class WorkingHoursOverride(models.Model):
                 condition=Q(start__isnull=True, end__isnull=True)
                 | Q(start__isnull=False, end__isnull=False, start__lt=F("end")),
                 name="hoursoverride_both_or_none",
+            ),
+            models.CheckConstraint(
+                condition=Q(start__isnull=True, location__isnull=True)
+                | Q(start__isnull=False, location__isnull=False),
+                name="hoursoverride_location_matches_hours",
             ),
         ]
         ordering = ["date"]

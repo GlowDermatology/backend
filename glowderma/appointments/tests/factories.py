@@ -23,6 +23,7 @@ class AppointmentFactory(DjangoModelFactory[Appointment]):
         model = Appointment
 
     professional = SubFactory(ProfessionalFactory)  # type: ignore[no-untyped-call]
+    location = LazyAttribute(lambda o: o.professional.location)  # type: ignore[no-untyped-call]
     service = SubFactory(ServiceFactory)  # type: ignore[no-untyped-call]
     customer = SubFactory(CustomerFactory)  # type: ignore[no-untyped-call]
     start = DESIGN_DAY_START

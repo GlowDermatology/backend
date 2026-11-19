@@ -21,6 +21,7 @@ from glowderma.core.api.exceptions import field_error
 from glowderma.core.api.fields import AwareDateTimeField
 from glowderma.core.media import absolute_media_url, optional_variant_url
 from glowderma.professionals.models import Location, Professional, ProfessionalService
+from glowderma.professionals.selectors import assigned_locations
 
 
 def pick(obj: Any, prefix: str, lang: str) -> str:
@@ -44,6 +45,7 @@ class LocationSerializer(serializers.Serializer[Location]):
     id = serializers.IntegerField()
     name = serializers.SerializerMethodField()
     address = serializers.SerializerMethodField()
+    directions = serializers.SerializerMethodField()
     phone = serializers.SerializerMethodField()
     latitude = serializers.SerializerMethodField()
     longitude = serializers.SerializerMethodField()
@@ -53,6 +55,9 @@ class LocationSerializer(serializers.Serializer[Location]):
 
     def get_address(self, obj: Location) -> str:
         return pick(obj, "address", _lang(self))
+
+    def get_directions(self, obj: Location) -> str:
+        return pick(obj, "directions", _lang(self))
 
     def get_phone(self, obj: Location) -> str | None:
         return obj.phone or None
@@ -96,7 +101,7 @@ class SpecialistSerializer(serializers.Serializer[Professional]):
     bio = serializers.SerializerMethodField()
     qualifications = serializers.SerializerMethodField()
     experience_years = serializers.IntegerField(allow_null=True)
-    location = LocationSerializer()
+    locations = serializers.SerializerMethodField()
     services = serializers.SerializerMethodField()
     slot_step_min = serializers.IntegerField()
     updated_at = AwareDateTimeField(help_text="Last change of the specialist (sitemap `lastmod`).")
@@ -125,6 +130,12 @@ class SpecialistSerializer(serializers.Serializer[Professional]):
 
     def get_qualifications(self, obj: Professional) -> str:
         return pick(obj, "qualifications", _lang(self))
+
+    @extend_schema_field(LocationSerializer(many=True))
+    def get_locations(self, obj: Professional) -> list[dict[str, Any]]:
+        items = assigned_locations(obj, active_only=True)
+        serializer = LocationSerializer(items, many=True, context=self.context)  # type: ignore[arg-type]
+        return list(serializer.data)
 
     @extend_schema_field(SpecialistServiceSerializer(many=True))
     def get_services(self, obj: Professional) -> list[dict[str, Any]]:
@@ -169,6 +180,7 @@ class ServiceListSerializer(serializers.Serializer[Any]):
 
 
 class SlotsQuerySerializer(serializers.Serializer[dict[str, Any]]):
+    location_id = serializers.IntegerField(min_value=1, max_value=2_147_483_647)
     date = serializers.DateField(help_text="Tashkent calendar day, today … today + BOOKING_HORIZON_DAYS.")
     service_id = serializers.IntegerField(min_value=1, max_value=2_147_483_647)
 
@@ -188,6 +200,7 @@ class FreeSlotsSerializer(serializers.Serializer[Any]):
     date = serializers.DateField()
     specialist_id = serializers.IntegerField()
     service_id = serializers.IntegerField()
+    location_id = serializers.IntegerField()
     duration_min = serializers.IntegerField()
     price = serializers.IntegerField()
     slot_step_min = serializers.IntegerField()
@@ -206,6 +219,7 @@ class AnyOffsetDateTimeField(serializers.DateTimeField):
 class BookingSerializer(serializers.Serializer[dict[str, Any]]):
     specialist_id = serializers.IntegerField(min_value=1, max_value=2_147_483_647)
     service_id = serializers.IntegerField(min_value=1, max_value=2_147_483_647)
+    location_id = serializers.IntegerField(min_value=1, max_value=2_147_483_647)
     start = AnyOffsetDateTimeField()
     note = serializers.CharField(max_length=300, allow_null=True, allow_blank=True, required=False)
 
@@ -257,21 +271,6 @@ class AppointmentServiceSerializer(serializers.Serializer[Any]):
         return pick(obj, "short_name", _lang(self))
 
 
-class AppointmentLocationSerializer(serializers.Serializer[Location]):
-    name = serializers.SerializerMethodField()
-    address = serializers.SerializerMethodField()
-    phone = serializers.SerializerMethodField()
-
-    def get_name(self, obj: Location) -> str:
-        return pick(obj, "name", _lang(self))
-
-    def get_address(self, obj: Location) -> str:
-        return pick(obj, "address", _lang(self))
-
-    def get_phone(self, obj: Location) -> str | None:
-        return obj.phone or None
-
-
 class CustomerAppointmentSerializer(serializers.Serializer[Appointment]):
     """C§2.11 ``Appointment`` of the customer audience (``note`` is the customer's own note)."""
 
@@ -280,7 +279,7 @@ class CustomerAppointmentSerializer(serializers.Serializer[Appointment]):
     status_label = serializers.SerializerMethodField()
     specialist = AppointmentSpecialistSerializer(source="professional")
     service = AppointmentServiceSerializer()
-    location = AppointmentLocationSerializer(source="professional.location")
+    location = LocationSerializer()
     start = serializers.DateTimeField()
     end = serializers.DateTimeField()
     duration_min = serializers.IntegerField()

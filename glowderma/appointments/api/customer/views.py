@@ -44,7 +44,7 @@ from glowderma.core.api.schema import (
     PUBLIC_CUSTOMER_ERRORS,
 )
 from glowderma.core.idempotency import idempotent
-from glowderma.professionals.selectors import format_clock
+from glowderma.professionals.selectors import assigned_locations, format_clock
 
 HEADERS = [*DEVICE_HEADERS, ACCEPT_LANGUAGE_HEADER]
 PUBLIC_HEADERS = [*OPTIONAL_DEVICE_HEADERS, ACCEPT_LANGUAGE_HEADER]
@@ -124,6 +124,7 @@ class SpecialistSlotsView(PublicAPIView):
             *PUBLIC_HEADERS,
             OpenApiParameter("date", str, OpenApiParameter.QUERY, required=True, description="YYYY-MM-DD"),
             OpenApiParameter("service_id", int, OpenApiParameter.QUERY, required=True),
+            OpenApiParameter("location_id", int, OpenApiParameter.QUERY, required=True),
         ],
         responses={200: FreeSlotsSerializer, **PUBLIC_CUSTOMER_ERRORS},
     )
@@ -152,12 +153,22 @@ class SpecialistSlotsView(PublicAPIView):
             raise ValidationError(
                 {"service_id": [field_error("does_not_exist", message_key="field.service_not_offered")]}
             )
-        free = selectors.free_slots(professional, link, day, now)
+        location_id = query.validated_data["location_id"]
+        if location_id not in {item.pk for item in assigned_locations(professional, active_only=True)}:
+            raise ValidationError(
+                {
+                    "location_id": [
+                        field_error("does_not_exist", message_key="field.booking_location_not_assigned")
+                    ]
+                }
+            )
+        free = selectors.free_slots(professional, link, day, now, location_id=location_id)
         duration = timedelta(minutes=free.duration_min)
         payload: dict[str, Any] = {
             "date": free.day,
             "specialist_id": free.professional_id,
             "service_id": free.service_id,
+            "location_id": free.location_id,
             "duration_min": free.duration_min,
             "price": free.price,
             "slot_step_min": free.slot_step_min,
@@ -215,6 +226,7 @@ class AppointmentCreateView(CustomerAPIView):
             data["service_id"],
             data["start"],
             data.get("note") or "",
+            location_id=data["location_id"],
             request=request,
         )
         return _appointment_response(request, self, appointment.pk, status=201)

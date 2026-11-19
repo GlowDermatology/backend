@@ -74,9 +74,19 @@ def audits(action: str) -> list[AuditEntry]:
 # --- create -------------------------------------------------------------------------------------------------
 
 
-def test_create_defaults_to_the_clinic_and_inactive(staff_client: APIClient, staff: StaffUser) -> None:
+def test_create_with_an_explicit_clinic_defaults_to_inactive(
+    staff_client: APIClient, staff: StaffUser
+) -> None:
     location = LocationFactory.create()
-    response = staff_client.post(BASE, {"name": "  Malika Usmonova ", "role": "cosmetologist"})
+    response = staff_client.post(
+        BASE,
+        {
+            "name": "  Malika Usmonova ",
+            "role": "cosmetologist",
+            "location_id": location.pk,
+            "location_ids": [location.pk],
+        },
+    )
     assert response.status_code == 201, response.json()
     professional = Professional.objects.get()
     assert response.json()["slug"]
@@ -91,6 +101,7 @@ def test_create_defaults_to_the_clinic_and_inactive(staff_client: APIClient, sta
         "photo_thumbnail_url": None,
         "photo_medium_url": None,
         "location_id": location.pk,
+        "location_ids": [location.pk],
         "staff_user": None,
         "slot_step_min": 30,
         "position": 0,
@@ -112,7 +123,7 @@ def test_create_defaults_to_the_clinic_and_inactive(staff_client: APIClient, sta
 
 
 def test_create_with_every_field(staff_client: APIClient) -> None:
-    LocationFactory.create()
+    first = LocationFactory.create()
     other = LocationFactory.create()
     doctor = StaffUserFactory.create(full_name="Nodira Rahimova")
     ProfessionalFactory.create(position=4)
@@ -124,6 +135,7 @@ def test_create_with_every_field(staff_client: APIClient) -> None:
         "experience_years": 8,
         "slot_step_min": 15,
         "location_id": other.pk,
+        "location_ids": [other.pk, first.pk],
         "staff_user_id": doctor.pk,
         "is_active": True,
     }
@@ -139,7 +151,10 @@ def test_create_with_every_field(staff_client: APIClient) -> None:
 
 def test_create_without_a_clinic_asks_for_the_location(staff_client: APIClient) -> None:
     response = staff_client.post(BASE, {"name": "Malika Usmonova", "role": "cosmetologist"})
-    assert errors(response) == [("location_id", "required", "Avval klinika manzilini kiriting.")]
+    assert {field for field, code, _ in errors(response) if code == "required"} == {
+        "location_id",
+        "location_ids",
+    }
     assert not Professional.objects.exists() and not AuditEntry.objects.exists()
 
 
@@ -167,18 +182,29 @@ def test_create_without_a_clinic_asks_for_the_location(staff_client: APIClient) 
 def test_create_validation(
     staff_client: APIClient, change: dict[str, Any], expected: tuple[str, str, str]
 ) -> None:
-    LocationFactory.create()
-    body = {"name": "Malika Usmonova", "role": "cosmetologist", **change}
+    location = LocationFactory.create()
+    body = {
+        "name": "Malika Usmonova",
+        "role": "cosmetologist",
+        "location_id": location.pk,
+        "location_ids": [location.pk],
+        **change,
+    }
     assert errors(staff_client.post(BASE, body)) == [expected]
     assert not Professional.objects.exists()
 
 
 def test_staff_link_must_be_active_and_free(staff_client: APIClient) -> None:
-    LocationFactory.create()
+    location = LocationFactory.create()
     inactive = StaffUserFactory.create(is_active=False)
     linked = StaffUserFactory.create()
     holder = ProfessionalFactory.create(staff_user=linked)
-    body = {"name": "Malika Usmonova", "role": "cosmetologist"}
+    body = {
+        "name": "Malika Usmonova",
+        "role": "cosmetologist",
+        "location_id": location.pk,
+        "location_ids": [location.pk],
+    }
     response = staff_client.post(BASE, {**body, "staff_user_id": inactive.pk})
     assert errors(response) == [("staff_user_id", "does_not_exist", "Xodim topilmadi.")]
     response = staff_client.post(BASE, {**body, "staff_user_id": linked.pk})
@@ -190,9 +216,14 @@ def test_staff_link_must_be_active_and_free(staff_client: APIClient) -> None:
 
 
 def test_create_is_idempotent(staff_client: APIClient) -> None:
-    LocationFactory.create()
+    location = LocationFactory.create()
     key = str(uuid.uuid4())
-    body = {"name": "Malika Usmonova", "role": "cosmetologist"}
+    body = {
+        "name": "Malika Usmonova",
+        "role": "cosmetologist",
+        "location_id": location.pk,
+        "location_ids": [location.pk],
+    }
     first = staff_client.post(BASE, body, HTTP_IDEMPOTENCY_KEY=key)
     replay = staff_client.post(BASE, body, HTTP_IDEMPOTENCY_KEY=key)
     assert first.status_code == replay.status_code == 201
@@ -296,8 +327,22 @@ def test_retrieve_and_404(staff_client: APIClient) -> None:
         }
     ]
     assert body["working_hours"] == [
-        {"weekday": 0, "start": "09:00", "end": "18:00", "break_start": None, "break_end": None},
-        {"weekday": 2, "start": "09:00", "end": "18:00", "break_start": "13:00", "break_end": "14:00"},
+        {
+            "weekday": 0,
+            "start": "09:00",
+            "end": "18:00",
+            "break_start": None,
+            "break_end": None,
+            "location_id": professional.location_id,
+        },
+        {
+            "weekday": 2,
+            "start": "09:00",
+            "end": "18:00",
+            "break_start": "13:00",
+            "break_end": "14:00",
+            "location_id": professional.location_id,
+        },
     ]
     missing = staff_client.get(f"{BASE}999999/")
     assert missing.status_code == 404 and missing.json()["code"] == "not_found"
@@ -555,20 +600,50 @@ def test_working_week_put(staff_client: APIClient) -> None:
     professional = ProfessionalFactory.create()
     WorkingHoursFactory.create(professional=professional, weekday=6)  # Sunday, dropped by the PUT
     days = [
-        {"weekday": 0, "start": "09:00", "end": "18:00", "break_start": "13:00", "break_end": "14:00"},
-        {"weekday": 2, "start": "10:30", "end": "16:00"},
+        {
+            "weekday": 0,
+            "start": "09:00",
+            "end": "18:00",
+            "break_start": "13:00",
+            "break_end": "14:00",
+            "location_id": professional.location_id,
+        },
+        {"weekday": 2, "start": "10:30", "end": "16:00", "location_id": professional.location_id},
     ]
     response = staff_client.put(url(professional, "working-hours/"), {"days": days})
     assert response.status_code == 200, response.json()
     assert response.json()["working_hours"] == [
-        {"weekday": 0, "start": "09:00", "end": "18:00", "break_start": "13:00", "break_end": "14:00"},
-        {"weekday": 2, "start": "10:30", "end": "16:00", "break_start": None, "break_end": None},
+        {
+            "weekday": 0,
+            "start": "09:00",
+            "end": "18:00",
+            "break_start": "13:00",
+            "break_end": "14:00",
+            "location_id": professional.location_id,
+        },
+        {
+            "weekday": 2,
+            "start": "10:30",
+            "end": "16:00",
+            "break_start": None,
+            "break_end": None,
+            "location_id": professional.location_id,
+        },
     ]
     assert list(WorkingHours.objects.values_list("weekday", flat=True).order_by("weekday")) == [0, 2]
     [entry] = audits("schedule.hours_updated")
     assert entry.entity_type == "professional" and entry.entity_id == str(professional.pk)
     assert entry.before == {
-        "days": [{"weekday": 6, "start": "09:00", "end": "18:00", "break_start": None, "break_end": None}]
+        "days": [
+            {
+                "weekday": 6,
+                "start": "09:00",
+                "end": "18:00",
+                "break_start": None,
+                "break_end": None,
+                "location_id": professional.location_id,
+            }
+        ]
     }
     assert entry.after is not None and [d["weekday"] for d in entry.after["days"]] == [0, 2]
     assert staff_client.put(url(professional, "working-hours/"), {"days": days}).status_code == 200
@@ -604,14 +679,18 @@ def test_working_day_validation(
     staff_client: APIClient, day: dict[str, Any], expected: tuple[str, str, str]
 ) -> None:
     professional = ProfessionalFactory.create()
-    body = {"days": [{"weekday": 0, "start": "09:00", "end": "18:00", **day}]}
+    body = {
+        "days": [
+            {"weekday": 0, "start": "09:00", "end": "18:00", "location_id": professional.location_id, **day}
+        ]
+    }
     assert errors(staff_client.put(url(professional, "working-hours/"), body)) == [expected]
     assert not WorkingHours.objects.exists()
 
 
 def test_working_week_refuses_a_weekday_twice_and_eight_days(staff_client: APIClient) -> None:
     professional = ProfessionalFactory.create()
-    day = {"weekday": 1, "start": "09:00", "end": "18:00"}
+    day = {"weekday": 1, "start": "09:00", "end": "18:00", "location_id": professional.location_id}
     assert errors(staff_client.put(url(professional, "working-hours/"), {"days": [day, day]})) == [
         ("days.1.weekday", "unique", "Bu hafta kuni ikki marta berilgan.")
     ]
@@ -637,11 +716,15 @@ def test_overrides_list_create_delete(staff_client: APIClient, staff: StaffUser)
         "start": None,
         "end": None,
         "day_off": True,
+        "location_id": None,
         "note": "Ta’til",
         "created_by": {"id": staff.pk, "display_name": staff.full_name or staff.email},
         "created_at": timeutils.isoformat(ANCHOR),
     }
-    short = staff_client.post(target, {"date": "2026-10-24", "start": "10:00", "end": "14:00"})
+    short = staff_client.post(
+        target,
+        {"date": "2026-10-24", "start": "10:00", "end": "14:00", "location_id": professional.location_id},
+    )
     assert short.status_code == 201 and short.json()["day_off"] is False
     listed = staff_client.get(target).json()
     assert [r["date"] for r in listed["results"]] == ["2026-10-24", "2026-10-27"]  # from today by default
@@ -667,6 +750,7 @@ def test_overrides_list_create_delete(staff_client: APIClient, staff: StaffUser)
         "date": "2026-10-27",
         "start": None,
         "end": None,
+        "location_id": None,
         "note": "Ta’til",
     }
     assert staff_client.get(f"{BASE}999999/overrides/").status_code == 404
@@ -704,7 +788,8 @@ def test_one_override_per_date(staff_client: APIClient) -> None:
     professional = ProfessionalFactory.create()
     assert staff_client.post(url(professional, "overrides/"), {"date": "2026-10-27"}).status_code == 201
     duplicate = staff_client.post(
-        url(professional, "overrides/"), {"date": "2026-10-27", "start": "09:00", "end": "10:00"}
+        url(professional, "overrides/"),
+        {"date": "2026-10-27", "start": "09:00", "end": "10:00", "location_id": professional.location_id},
     )
     assert errors(duplicate) == [("date", "unique", "Bu sana uchun alohida jadval allaqachon bor.")]
 
@@ -821,7 +906,13 @@ def test_a_lost_race_for_a_staff_account_is_a_unique_error(staff: StaffUser) -> 
     the loser answers 400 ``staff_user_id`` ``unique`` (not a 500)."""
     location = LocationFactory.create()
     holder = ProfessionalFactory.create(staff_user=StaffUserFactory.create())
-    data = {"name": "Malika", "role": "cosmetologist", "staff_user": holder.staff_user, "location": location}
+    data = {
+        "name": "Malika",
+        "role": "cosmetologist",
+        "staff_user": holder.staff_user,
+        "location_id": location.pk,
+        "location_ids": [location.pk],
+    }
     with pytest.raises(ValidationError) as caught:
         services.create_specialist(data, actor=staff)
     assert caught.value.get_codes() == {"staff_user_id": ["unique"]}

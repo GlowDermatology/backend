@@ -7,7 +7,8 @@ Every route name is prefixed ``admin-`` and unique across modules; the auth matr
 from django.urls import URLPattern, URLResolver, path
 
 from .views import (
-    LocationView,
+    ClinicsView,
+    ClinicView,
     ServiceViewSet,
     SpecialistBlockViewSet,
     SpecialistOverrideViewSet,
@@ -48,5 +49,6 @@ urlpatterns: list[URLPattern | URLResolver] = [
     path("specialists/<int:pk>/blocks/<int:block_id>/", block, name="admin-specialists-block-detail"),
     path("services/", services, name="admin-services-list"),
     path("services/<int:pk>/", service, name="admin-services-detail"),
-    path("location/", LocationView.as_view(), name="admin-location"),
+    path("clinics/", ClinicsView.as_view(), name="admin-clinics-list"),
+    path("clinics/<int:pk>/", ClinicView.as_view(), name="admin-clinics-detail"),
 ]

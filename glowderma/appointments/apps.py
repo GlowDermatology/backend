@@ -12,3 +12,4 @@ class AppointmentsConfig(AppConfig):
         from glowderma.professionals import bookings
 
         bookings.register(selectors.upcoming_counts_by_professional)
+        bookings.register_location_upcoming(selectors.location_has_upcoming)

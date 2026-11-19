@@ -40,6 +40,9 @@ class Appointment(TimeStampedModel):
         related_name="appointments",
         verbose_name="mutaxassis",
     )
+    location = models.ForeignKey(
+        "professionals.Location", on_delete=models.PROTECT, related_name="appointments", verbose_name="filial"
+    )
     service = models.ForeignKey(
         "professionals.Service", on_delete=models.PROTECT, related_name="appointments", verbose_name="xizmat"
     )

@@ -17,7 +17,10 @@ from django.core.exceptions import ImproperlyConfigured
 
 type UpcomingCounter = Callable[[Collection[int], datetime], dict[int, int]]
 
+type LocationUpcoming = Callable[[int, datetime], bool]
+
 _counter: UpcomingCounter | None = None
+_location_upcoming: LocationUpcoming | None = None
 
 
 def register(counter: UpcomingCounter) -> None:
@@ -35,3 +38,14 @@ def upcoming_counts(professional_ids: Collection[int], instant: datetime) -> dic
         raise ImproperlyConfigured("appointments did not register the upcoming-appointments counter")
     counts = _counter(ids, instant)
     return {pk: int(counts.get(pk, 0)) for pk in ids}
+
+
+def register_location_upcoming(check: LocationUpcoming) -> None:
+    global _location_upcoming  # noqa: PLW0603
+    _location_upcoming = check
+
+
+def location_has_upcoming(location_id: int, instant: datetime) -> bool:
+    if _location_upcoming is None:
+        raise ImproperlyConfigured("appointments did not register the clinic booking check")
+    return _location_upcoming(location_id, instant)

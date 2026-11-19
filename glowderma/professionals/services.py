@@ -166,12 +166,32 @@ def save_row(obj: models.Model, *, actor: Any, request: Any = None) -> models.Mo
     before: dict[str, Any] | None = None
     if obj.pk is not None:
         rows = model._default_manager.filter(pk=obj.pk)
-        if isinstance(obj, Professional):
+        if isinstance(obj, (Professional, Location)):
             rows = rows.select_for_update()  # serialises with bookings like ``update_specialist`` (PS-2)
         current = rows.first()
         before = snapshot(current) if current is not None else None
     if isinstance(obj, Professional) and before is not None and before["is_active"] and not obj.is_active:
         _refuse_deactivation_with_upcoming(obj)
+    if isinstance(obj, Location) and before is not None and before["is_active"] and not obj.is_active:
+        if _clinic_in_use(obj.pk):
+            raise ValidationError({"is_active": gettext_lazy(API_MESSAGES["clinic_in_use"])})
+    if isinstance(obj, Professional) and obj.location_id is not None:
+        existing = (
+            {before["location_id"], *obj.additional_locations.values_list("pk", flat=True)}
+            if before
+            else set()
+        )
+        target = {obj.location_id, *(existing - {before["location_id"]} if before else ())}
+        _check_clinic_assignments(obj, target, existing, form=True)
+    if isinstance(obj, (WorkingHours, WorkingHoursOverride)) and obj.professional_id is not None:
+        professional = Professional.objects.select_for_update().get(pk=obj.professional_id)
+        if obj.location_id is not None:
+            try:
+                _schedule_location_id(professional, obj.location_id)
+            except ApiValidationError as exc:
+                raise ValidationError(
+                    {"location": gettext_lazy(API_MESSAGES["clinic_not_assigned"])}
+                ) from exc
     pending_photo = None
     if isinstance(obj, Professional) and obj.photo and not getattr(obj.photo, "_committed", True):
         # The content-addressed name needs the row id: validate the bytes now, store them after the insert.
@@ -179,6 +199,8 @@ def save_row(obj: models.Model, *, actor: Any, request: Any = None) -> models.Mo
         obj.photo = None if before is None else before.get("photo") or None
     _validate(obj)
     obj.save()
+    if isinstance(obj, Professional):
+        obj.additional_locations.remove(obj.location_id)
     if pending_photo is not None:
         _store_photo(obj, pending_photo)  # type: ignore[arg-type]
     audit.record(
@@ -199,6 +221,8 @@ def delete_row(obj: models.Model, *, actor: Any, request: Any = None) -> None:
     name = entity_name(type(obj))
     before = snapshot(obj)
     pk = obj.pk
+    if isinstance(obj, (WorkingHours, WorkingHoursOverride)):
+        Professional.objects.select_for_update().get(pk=obj.professional_id)
     try:
         obj.delete()
     except ProtectedError as exc:
@@ -256,7 +280,7 @@ def set_working_hours(
             delete_row(row, actor=actor, request=request)
         return None
     if row is None:
-        row = WorkingHours(professional=professional, weekday=weekday)
+        row = WorkingHours(professional=professional, weekday=weekday, location_id=professional.location_id)
     row.start, row.end, row.break_start, row.break_end = start, end, break_start, break_end
     save_row(row, actor=actor, request=request)
     return row
@@ -277,6 +301,7 @@ def add_override(
     if row is None:
         row = WorkingHoursOverride(professional=professional, date=date, created_by=actor)
     row.start, row.end, row.note = start, end, note
+    row.location_id = (row.location_id or professional.location_id) if start is not None else None
     save_row(row, actor=actor, request=request)
     return row
 
@@ -346,7 +371,14 @@ STAFF_USER_CONSTRAINT = "professionals_professional_staff_user_id_key"
 OVERRIDE_CONSTRAINT = "hoursoverride_professional_date_unique"
 LOCATION_LOCK = "professionals.location"
 API_MESSAGES = {
-    "location_missing": N_("Avval klinika manzilini kiriting."),
+    "clinic_not_assigned": N_("Faol filialni ushbu mutaxassisga biriktiring."),
+    "clinic_not_found": N_("Faol filial topilmadi."),
+    "clinic_primary_required": N_("Asosiy filial biriktirilgan filiallar orasida bo‘lishi kerak."),
+    "clinic_scheduled": N_("Filialni ajratishdan oldin ish jadvalidagi filialni o‘zgartiring."),
+    "clinic_in_use": N_(
+        "Filialni nofaol qilishdan oldin faol mutaxassislarni ajrating va kelgusi qabullarni ko‘chiring "
+        "yoki bekor qiling."
+    ),
     "staff_taken": N_("Bu xodim boshqa mutaxassisga bog‘langan."),
     "has_upcoming": N_(
         "Mutaxassisda {n} ta kelgusi qabul bor (kutilayotgan yoki tasdiqlangan). Qabullar o‘zgarmaydi: avval "
@@ -387,7 +419,7 @@ def _diff(before: dict[str, Any], after: dict[str, Any]) -> tuple[dict[str, Any]
     return {key: before.get(key) for key in changed}, {key: after[key] for key in changed}
 
 
-def _next_position(model: type[Professional] | type[Service]) -> int:
+def _next_position(model: type[Professional] | type[Service] | type[Location]) -> int:
     last = model.objects.order_by("-position").values_list("position", flat=True).first()
     return 0 if last is None else int(last) + 1
 
@@ -421,7 +453,56 @@ def _save_specialist(professional: Professional) -> None:
     _save_unique(save, STAFF_USER_CONSTRAINT, "staff_user_id", API_MESSAGES["staff_taken"])
 
 
-def _specialist_state(professional: Professional) -> dict[str, Any]:
+def _checked_clinics(professional: Professional, data: dict[str, Any], current_ids: set[int]) -> set[int]:
+    ids = set(data.get("location_ids", current_ids))
+    if professional.location_id not in ids:
+        raise ApiValidationError(
+            {"location_ids": [field_error("invalid", API_MESSAGES["clinic_primary_required"])]}
+        )
+    _check_clinic_assignments(professional, ids, current_ids)
+    return ids
+
+
+def _check_clinic_assignments(
+    professional: Professional, ids: set[int], current_ids: set[int], *, form: bool = False
+) -> None:
+    # Match the booking lock order: the specialist is already locked, then clinics in PK order.
+    clinics = dict(
+        Location.objects.select_for_update().filter(pk__in=ids).order_by("pk").values_list("pk", "is_active")
+    )
+    if ids != set(clinics) or any(
+        not is_active and (professional.is_active or pk not in current_ids)
+        for pk, is_active in clinics.items()
+    ):
+        if form:
+            raise ValidationError({"location": gettext_lazy(API_MESSAGES["clinic_not_found"])})
+        raise ApiValidationError(
+            {"location_ids": [field_error("does_not_exist", API_MESSAGES["clinic_not_found"])]}
+        )
+    removed = current_ids - ids
+    if removed and (
+        professional.working_hours.filter(location_id__in=removed).exists()
+        or professional.hours_overrides.filter(
+            location_id__in=removed, date__gte=timeutils.local_date(timeutils.now())
+        ).exists()
+    ):
+        if form:
+            raise ValidationError({"location": gettext_lazy(API_MESSAGES["clinic_scheduled"])})
+        raise Conflict(API_MESSAGES["clinic_scheduled"])
+
+
+def _schedule_location_id(professional: Professional, location_id: int) -> int:
+    if (
+        not selectors.has_location(professional, location_id)
+        or not Location.objects.filter(pk=location_id, is_active=True).exists()
+    ):
+        raise ApiValidationError(
+            {"location_id": [field_error("does_not_exist", API_MESSAGES["clinic_not_assigned"])]}
+        )
+    return location_id
+
+
+def _specialist_state(professional: Professional, location_ids: set[int]) -> dict[str, Any]:
     return {
         "name": professional.name,
         "role": professional.role,
@@ -430,6 +511,7 @@ def _specialist_state(professional: Professional) -> dict[str, Any]:
         "experience_years": professional.experience_years,
         "slot_step_min": professional.slot_step_min,
         "location_id": professional.location_id,
+        "location_ids": sorted(location_ids),
         "staff_user_id": professional.staff_user_id,
         "position": professional.position,
         "is_active": professional.is_active,
@@ -444,8 +526,8 @@ def _apply_specialist(professional: Professional, data: dict[str, Any]) -> None:
     for key in SPECIALIST_SCALARS:
         if key in data:
             setattr(professional, key, data[key])
-    if "location" in data:
-        professional.location = data["location"]
+    if "location_id" in data:
+        professional.location_id = data["location_id"]
     if "staff_user" in data:
         professional.staff_user = data["staff_user"]
     if data.get("slug"):
@@ -455,24 +537,20 @@ def _apply_specialist(professional: Professional, data: dict[str, Any]) -> None:
 
 
 def create_specialist(data: dict[str, Any], *, actor: Any, request: Any = None) -> Professional:
-    """``POST specialists/``: the location defaults to the clinic's (decision P4); appended last unless a
-    ``position`` is given; audit ``professional.created``."""
+    """Create a specialist with an explicit primary clinic and list of assigned clinics."""
     with transaction.atomic():
-        location = data.get("location") or selectors.the_location()
-        if location is None:
-            raise ApiValidationError(
-                {"location_id": [field_error("required", API_MESSAGES["location_missing"])]}
-            )
-        professional = Professional(location=location, position=_next_position(Professional))
-        _apply_specialist(professional, {**data, "location": location})
+        professional = Professional(position=_next_position(Professional))
+        _apply_specialist(professional, data)
+        location_ids = _checked_clinics(professional, data, set())
         _save_specialist(professional)
+        professional.additional_locations.set(location_ids - {professional.location_id})
         audit.record(
             action="professional.created",
             entity_type="professional",
             entity_id=str(professional.pk),
             actor=actor,
             request=request,
-            after=_specialist_state(professional),
+            after=_specialist_state(professional, location_ids),
         )
     return professional
 
@@ -486,9 +564,17 @@ def update_specialist(
     the other changed fields), else ``professional.updated``; nothing changed → no write, no audit."""
     with transaction.atomic():
         professional = _locked_professional(professional_id)
-        before = _specialist_state(professional)
+        current_ids = set(selectors.assigned_location_ids(professional))
+        before = _specialist_state(professional, current_ids)
         _apply_specialist(professional, data)
-        after = _specialist_state(professional)
+        location_ids = current_ids
+        if (
+            "location_id" in data
+            or "location_ids" in data
+            or (professional.is_active and not before["is_active"])
+        ):
+            location_ids = _checked_clinics(professional, data, current_ids)
+        after = _specialist_state(professional, location_ids)
         if after == before:
             return professional
         extra: dict[str, Any] = {}
@@ -501,6 +587,8 @@ def update_specialist(
                 raise Conflict(API_MESSAGES["has_upcoming"].format(n=upcoming))
             extra = {"upcoming_appointments": upcoming, "forced": bool(upcoming)}
         _save_specialist(professional)
+        if before["location_id"] != professional.location_id or location_ids != current_ids:
+            professional.additional_locations.set(location_ids - {professional.location_id})
         diff_before, diff_after = _diff(before, after)
         audit.record(
             action=action,
@@ -647,6 +735,7 @@ def _week_state(professional: Professional) -> list[dict[str, Any]]:
     return [
         {
             "weekday": row.weekday,
+            "location_id": row.location_id,
             "start": _clock(row.start),
             "end": _clock(row.end),
             "break_start": _clock(row.break_start),
@@ -671,6 +760,9 @@ def set_working_week(
                 professional=professional, weekday=day["weekday"]
             )
             values = {key: day.get(key) for key in ("start", "end", "break_start", "break_end")}
+            values["location_id"] = _schedule_location_id(
+                professional, day.get("location_id", professional.location_id)
+            )
             if row.pk is not None and all(getattr(row, key) == value for key, value in values.items()):
                 continue
             for key, value in values.items():
@@ -695,6 +787,7 @@ def _override_state(row: WorkingHoursOverride) -> dict[str, Any]:
     return {
         "override_id": row.pk,
         "date": row.date.isoformat(),
+        "location_id": row.location_id,
         "start": _clock(row.start),
         "end": _clock(row.end),
         "note": row.note,
@@ -715,6 +808,11 @@ def create_override(
             date=data["date"],
             start=data.get("start"),
             end=data.get("end"),
+            location_id=(
+                _schedule_location_id(professional, data.get("location_id", professional.location_id))
+                if data.get("start") is not None
+                else None
+            ),
             note=data.get("note", ""),
             created_by=actor,
         )
@@ -885,46 +983,60 @@ def _location_state(location: Location) -> dict[str, Any]:
     return {
         **_i18n_state(location, "name"),
         **_i18n_state(location, "address"),
+        **_i18n_state(location, "directions"),
+        "is_active": location.is_active,
         "phone": location.phone or None,
         "latitude": None if location.latitude is None else str(location.latitude),
         "longitude": None if location.longitude is None else str(location.longitude),
     }
 
 
-def update_location(data: dict[str, Any], *, actor: Any, request: Any = None) -> Location:
-    """``PATCH location/``: the clinic (decision P4), created by the first PATCH (``name.uz`` then
-    required). Coordinates are a pair. Audit ``location.created`` / ``location.updated``."""
-    with transaction.atomic():
-        _advisory_lock(LOCATION_LOCK)  # two first PATCHes must not create two clinics
-        location = Location.objects.select_for_update().order_by("position", "id").first()
-        created = location is None
-        if location is None:
-            if not (data.get("name") or {}).get("uz"):
-                raise ApiValidationError({"name.uz": [field_error("required")]})
-            location = Location()
-        before = {} if created else _location_state(location)
-        _set_i18n(location, "name", data.get("name"))
-        _set_i18n(location, "address", data.get("address"))
-        if "phone" in data:
-            location.phone = data["phone"] or ""
-        for key in ("latitude", "longitude"):
-            if key in data:
-                setattr(location, key, data[key])
-        if (location.latitude is None) != (location.longitude is None):
-            missing = "latitude" if location.latitude is None else "longitude"
-            raise ApiValidationError({missing: [field_error("latlng_pair", API_MESSAGES["latlng_pair"])]})
-        after = _location_state(location)
-        if not created and after == before:
-            return location
-        location.save()
-        diff_before, diff_after = (None, after) if created else _diff(before, after)
-        audit.record(
-            action="location.created" if created else "location.updated",
-            entity_type="location",
-            entity_id=str(location.pk),
-            actor=actor,
-            request=request,
-            before=diff_before,
-            after=diff_after,
-        )
+def _clinic_in_use(location_id: int) -> bool:
+    return Professional.objects.filter(is_active=True).filter(
+        models.Q(location_id=location_id) | models.Q(additional_locations=location_id)
+    ).exists() or bookings.location_has_upcoming(location_id, timeutils.now())
+
+
+@transaction.atomic
+def create_location(data: dict[str, Any], *, actor: Any, request: Any = None) -> Location:
+    _advisory_lock(LOCATION_LOCK)
+    return _write_location(Location(position=_next_position(Location)), data, actor=actor, request=request)
+
+
+@transaction.atomic
+def update_location(location_id: int, data: dict[str, Any], *, actor: Any, request: Any = None) -> Location:
+    location = Location.objects.select_for_update().filter(pk=location_id).first()
+    if location is None:
+        raise NotFound
+    return _write_location(location, data, actor=actor, request=request)
+
+
+def _write_location(location: Location, data: dict[str, Any], *, actor: Any, request: Any) -> Location:
+    before = _location_state(location) if location.pk is not None else None
+    for field in ("name", "address", "directions"):
+        _set_i18n(location, field, data.get(field))
+    if "phone" in data:
+        location.phone = data["phone"] or ""
+    for key in ("latitude", "longitude", "is_active"):
+        if key in data:
+            setattr(location, key, data[key])
+    if (location.latitude is None) != (location.longitude is None):
+        missing = "latitude" if location.latitude is None else "longitude"
+        raise ApiValidationError({missing: [field_error("latlng_pair", API_MESSAGES["latlng_pair"])]})
+    after = _location_state(location)
+    if after == before:
+        return location
+    if before and before["is_active"] and not location.is_active and _clinic_in_use(location.pk):
+        raise Conflict(API_MESSAGES["clinic_in_use"])
+    location.save()
+    diff_before, diff_after = (None, after) if before is None else _diff(before, after)
+    audit.record(
+        action="location.created" if before is None else "location.updated",
+        entity_type="location",
+        entity_id=str(location.pk),
+        actor=actor,
+        request=request,
+        before=diff_before,
+        after=diff_after,
+    )
     return location

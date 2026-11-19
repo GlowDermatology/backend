@@ -25,7 +25,7 @@ from glowderma.professionals.selectors import (
 
 
 def appointment_queryset() -> QuerySet[Appointment]:
-    return Appointment.objects.select_related("customer", "service", "professional")
+    return Appointment.objects.select_related("customer", "service", "professional", "location")
 
 
 def get_appointment(pk: int) -> Appointment | None:
@@ -150,7 +150,9 @@ def range_view(first: date, last: date, *, specialist_id: int | None = None, ful
             for professional in specialists
             for day in days
         ],
-        list(in_range.select_related("customer", "service", "professional").order_by("start", "id")),
+        list(
+            in_range.select_related("customer", "service", "professional", "location").order_by("start", "id")
+        ),
     )
 
 
@@ -181,6 +183,12 @@ def upcoming_counts_by_professional(professional_ids: Collection[int], instant: 
     return {int(row["professional_id"]): int(row["n"]) for row in rows}
 
 
+def location_has_upcoming(location_id: int, instant: datetime) -> bool:
+    return Appointment.objects.filter(
+        location_id=location_id, status__in=OPEN_STATUSES, start__gte=instant
+    ).exists()
+
+
 def schedule_conflicts(professional: Professional, now: datetime | None = None) -> list[Appointment]:
     """``GET specialists/{id}/conflicts/``: the specialist's open appointments starting now or later that its
     current schedule no longer covers — a day without hours (day off, no weekly row), a range outside that
@@ -201,7 +209,7 @@ def schedule_conflicts(professional: Professional, now: datetime | None = None) 
 
 def _conflicts(row: Appointment, schedule: DaySchedule) -> bool:
     """Whether ``schedule`` (the day of ``row.start``) no longer covers the appointment."""
-    if schedule.working_hours is None:
+    if schedule.working_hours is None or schedule.location is None or schedule.location.pk != row.location_id:
         return True
     day = timeutils.local_date(row.start)
     hours_start, hours_end = (clock(day, label) for label in schedule.working_hours)
@@ -309,14 +317,15 @@ class DayFrame:
 
     hours: tuple[datetime, datetime] | None
     hours_labels: tuple[str, str] | None
+    location_id: int | None
     busy: list[tuple[datetime, datetime]]
     blocks: list[tuple[datetime, datetime]]
 
 
 def day_frame(professional_id: int, day: date, *, exclude_pk: int | None = None) -> DayFrame:
     [schedule] = day_schedules(day, Professional.objects.filter(pk=professional_id))
-    if schedule.working_hours is None:
-        return DayFrame(hours=None, hours_labels=None, busy=[], blocks=[])
+    if schedule.working_hours is None or schedule.location is None:
+        return DayFrame(hours=None, hours_labels=None, location_id=None, busy=[], blocks=[])
     hours = (clock(day, schedule.working_hours[0]), clock(day, schedule.working_hours[1]))
     blocks = [(clock(day, block.start), clock(day, block.end)) for block in schedule.blocks]
     day_start, day_end = timeutils.day_bounds(day)
@@ -326,7 +335,13 @@ def day_frame(professional_id: int, day: date, *, exclude_pk: int | None = None)
     if exclude_pk is not None:
         appointments = appointments.exclude(pk=exclude_pk)
     busy = [*blocks, *appointments.values_list("start", "end")]
-    return DayFrame(hours=hours, hours_labels=schedule.working_hours, busy=busy, blocks=blocks)
+    return DayFrame(
+        hours=hours,
+        hours_labels=schedule.working_hours,
+        location_id=schedule.location.pk,
+        busy=busy,
+        blocks=blocks,
+    )
 
 
 def _overlaps(start: datetime, end: datetime, ranges: list[tuple[datetime, datetime]]) -> bool:
@@ -341,6 +356,7 @@ class FreeSlots:
     day: date
     professional_id: int
     service_id: int
+    location_id: int
     duration_min: int
     price: int
     slot_step_min: int
@@ -349,7 +365,12 @@ class FreeSlots:
 
 
 def free_slots(
-    professional: Professional, link: ProfessionalService, day: date, now: datetime | None = None
+    professional: Professional,
+    link: ProfessionalService,
+    day: date,
+    now: datetime | None = None,
+    *,
+    location_id: int | None = None,
 ) -> FreeSlots:
     """The C§2.11 algorithm: candidates ``t = hours.start + k·step`` with ``t + duration ≤ hours.end``; drop
     ``t < now + BOOKING_MIN_LEAD_MINUTES`` and any overlap of ``[t, t + duration)`` with blocked periods, the
@@ -357,10 +378,12 @@ def free_slots(
     the slot)."""
     instant = timeutils.now() if now is None else now
     frame = day_frame(professional.pk, day)
+    selected_location = professional.location_id if location_id is None else location_id
+    matching_location = frame.location_id == selected_location
     step = timedelta(minutes=professional.slot_step_min)
     duration = timedelta(minutes=link.duration_min)
     slots: list[datetime] = []
-    if frame.hours is not None:
+    if matching_location and frame.hours is not None:
         earliest = instant + lead_time()
         candidate, hours_end = frame.hours
         while candidate + duration <= hours_end:
@@ -371,10 +394,11 @@ def free_slots(
         day=day,
         professional_id=professional.pk,
         service_id=link.service_id,
+        location_id=selected_location,
         duration_min=link.duration_min,
         price=link.price,
         slot_step_min=professional.slot_step_min,
-        working_hours=frame.hours_labels,
+        working_hours=frame.hours_labels if matching_location else None,
         slots=slots,
     )
 
@@ -408,7 +432,7 @@ def _horizon_filter(qs: QuerySet[Appointment], horizon: datetime | None) -> Quer
 
 
 def customer_appointment_queryset() -> QuerySet[Appointment]:
-    return Appointment.objects.select_related("service", "professional", "professional__location")
+    return Appointment.objects.select_related("service", "professional", "location")
 
 
 def customer_appointments(
@@ -448,17 +472,17 @@ def bookable_links(professional: Professional) -> list[ProfessionalService]:
 
 def specialists() -> list[Professional]:
     """Active professionals by position, name, with their bookable links and location."""
-    return list(booking_catalogue().select_related("location"))
+    return list(booking_catalogue())
 
 
 def specialist(pk: int) -> Professional | None:
-    return booking_catalogue().select_related("location").filter(pk=pk).first()
+    return booking_catalogue().filter(pk=pk).first()
 
 
 def specialist_by_slug(slug: str) -> Professional | None:
     """B-W1: the website addresses a specialist by slug (never only digits, so ``specialists/{id}/`` and
     ``specialists/{slug}/`` cannot collide)."""
-    return booking_catalogue().select_related("location").filter(slug=slug).first()
+    return booking_catalogue().filter(slug=slug).first()
 
 
 def offered_link(professional_id: int, service_id: int) -> ProfessionalService | None:
@@ -489,8 +513,14 @@ def service_offers() -> list[ServiceOffer]:
     name, with the price range and the specialist ids."""
     links = (
         ProfessionalService.objects.filter(
-            is_active=True, service__is_active=True, professional__is_active=True
+            is_active=True,
+            service__is_active=True,
+            professional__is_active=True,
         )
+        .filter(
+            Q(professional__location__is_active=True) | Q(professional__additional_locations__is_active=True)
+        )
+        .distinct()
         .select_related("service")
         .order_by(
             "service__position", "service__name_uz", "service_id", "professional__position", "professional_id"

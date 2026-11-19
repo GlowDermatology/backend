@@ -53,7 +53,8 @@ class WorkingHoursInline(OpsTabularInline):
 
     model = WorkingHours
     extra = 0
-    fields = ("weekday", "start", "end", "break_start", "break_end")
+    fields = ("weekday", "location", "start", "end", "break_start", "break_end")
+    autocomplete_fields = ("location",)
     show_title = False
 
     def formfield_for_dbfield(self, db_field: Any, request: HttpRequest, **kwargs: Any) -> Any:
@@ -83,6 +84,9 @@ class LocationAdmin(ServiceBackedAdmin):
     search_fields = ("name_uz", "name_ru", "name_en", "address_uz")
     ordering = ("position", "id")
 
+    def has_delete_permission(self, request: HttpRequest, obj: models.Model | None = None) -> bool:
+        return False
+
 
 @admin.register(Professional)
 class ProfessionalAdmin(ServiceBackedAdmin):
@@ -91,6 +95,7 @@ class ProfessionalAdmin(ServiceBackedAdmin):
     search_fields = ("name",)
     ordering = ("position", "name", "id")
     autocomplete_fields = ("location",)
+    exclude = ("additional_locations",)
     inlines = (WorkingHoursInline,)
 
 
@@ -121,11 +126,11 @@ class ProfessionalServiceAdmin(ServiceBackedAdmin):
 
 @admin.register(WorkingHours)
 class WorkingHoursAdmin(ServiceBackedAdmin):
-    list_display = ("id", "professional", "weekday", "start", "end", "break_start", "break_end")
+    list_display = ("id", "professional", "weekday", "location", "start", "end", "break_start", "break_end")
     list_filter = ("weekday",)
     search_fields = ("professional__name",)
     ordering = ("professional_id", "weekday")
-    autocomplete_fields = ("professional",)
+    autocomplete_fields = ("professional", "location")
 
 
 @admin.register(BlockedPeriod)
@@ -146,10 +151,10 @@ class BlockedPeriodAdmin(ServiceBackedAdmin):
 class WorkingHoursOverrideAdmin(ServiceBackedAdmin):
     """A date's own hours (both empty = day off); one row per professional and date (T13)."""
 
-    list_display = ("id", "professional", "date", "start", "end", "created_by")
+    list_display = ("id", "professional", "date", "location", "start", "end", "created_by")
     search_fields = ("professional__name",)
     ordering = ("-date", "id")
-    autocomplete_fields = ("professional",)
+    autocomplete_fields = ("professional", "location")
 
     def save_model(self, request: HttpRequest, obj: models.Model, form: Any, change: bool) -> None:
         if not change:

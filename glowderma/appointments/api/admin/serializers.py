@@ -22,8 +22,8 @@ from glowderma.core.api.exceptions import field_error
 from glowderma.core.api.fields import AwareDateTimeField, LenientPhoneField
 from glowderma.core.api.serializers import CustomerRefSerializer
 from glowderma.core.uzsource import N_
-from glowderma.professionals.models import Professional, Service
-from glowderma.professionals.selectors import DaySchedule
+from glowderma.professionals.models import Location, Professional, Service
+from glowderma.professionals.selectors import DaySchedule, assigned_locations
 
 MESSAGES = {
     "specialist_not_found": N_("Mutaxassis topilmadi."),
@@ -32,6 +32,12 @@ MESSAGES = {
     "customer_id_not_found": N_("Mijoz topilmadi."),
     "one_customer_ref": N_("customer_id yoki phone dan faqat bittasini yuboring."),
 }
+
+
+class AppointmentClinicSerializer(serializers.Serializer[Location]):
+    id = serializers.IntegerField()
+    name = serializers.CharField(source="name_uz")
+    address = serializers.CharField(source="address_uz", allow_blank=True)
 
 
 class AppointmentItemSerializer(serializers.Serializer[Appointment]):
@@ -43,6 +49,7 @@ class AppointmentItemSerializer(serializers.Serializer[Appointment]):
     service_id = serializers.IntegerField()
     service_name = serializers.CharField(source="service.name_uz")
     service_short_name = serializers.CharField(source="service.short_name_uz")
+    location = AppointmentClinicSerializer()
     duration_min = serializers.IntegerField()
     start = serializers.DateTimeField()
     end = serializers.DateTimeField()
@@ -71,6 +78,7 @@ class SpecialistDaySerializer(serializers.Serializer[DaySchedule]):
     # false for a deactivated specialist still listed for the appointments it has that day
     is_active = serializers.BooleanField(source="professional.is_active")
     working_hours = serializers.SerializerMethodField()
+    location = AppointmentClinicSerializer(allow_null=True)
     blocks = DayBlockSerializer(many=True)
 
     @extend_schema_field(WorkingHoursSerializer(allow_null=True))
@@ -109,6 +117,7 @@ class AppointmentCreateSerializer(serializers.Serializer[dict[str, Any]]):
 
     specialist_id = serializers.IntegerField()
     service_id = serializers.IntegerField()
+    location_id = serializers.IntegerField(min_value=1, max_value=2_147_483_647)
     customer_id = serializers.IntegerField(required=False)
     phone = LenientPhoneField(required=False)
     start = AwareDateTimeField()
@@ -160,6 +169,7 @@ class AppointmentRescheduleSerializer(serializers.Serializer[dict[str, Any]]):
     """``POST appointments/{id}/reschedule/``: ``start`` (same slot rules), optional ``specialist_id``."""
 
     start = AwareDateTimeField()
+    location_id = serializers.IntegerField(min_value=1, max_value=2_147_483_647)
     specialist_id = serializers.IntegerField(required=False)
 
     def validate_specialist_id(self, value: int) -> Professional:
@@ -196,6 +206,13 @@ class BookingSpecialistSerializer(serializers.Serializer[Any]):
     name = serializers.CharField()
     role = serializers.ChoiceField(choices=enums.SpecialistRole.values)
     services = BookingServiceSerializer(many=True, source="bookable_links")
+    locations = serializers.SerializerMethodField()
+
+    @extend_schema_field(AppointmentClinicSerializer(many=True))
+    def get_locations(self, obj: Professional) -> list[dict[str, Any]]:
+        items = assigned_locations(obj, active_only=True)
+        serializer = AppointmentClinicSerializer(items, many=True)  # type: ignore[arg-type]
+        return list(serializer.data)
 
 
 class AppointmentsMetaSerializer(serializers.Serializer[dict[str, Any]]):
@@ -293,6 +310,7 @@ class RangeScheduleSerializer(serializers.Serializer[RangeSchedule]):
     date = serializers.DateField()
     working_hours = serializers.SerializerMethodField()
     blocks = DayBlockSerializer(many=True, source="schedule.blocks")
+    location = AppointmentClinicSerializer(source="schedule.location", allow_null=True)
 
     @extend_schema_field(WorkingHoursSerializer(allow_null=True))
     def get_working_hours(self, obj: RangeSchedule) -> dict[str, str] | None:

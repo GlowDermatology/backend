@@ -150,10 +150,12 @@ def test_full_detail(staff_client: APIClient, board: dict[str, Professional]) ->
     nodira, jasur = board["nodira"].pk, board["jasur"].pk
     schedules = {(s["specialist_id"], s["date"]): s for s in body["schedules"]}
     assert len(body["schedules"]) == 3 * 3  # Ketgan is listed: it has an appointment on Wednesday
+    clinic = board["nodira"].location
     assert schedules[(nodira, "2026-10-26")] == {
         "specialist_id": nodira,
         "date": "2026-10-26",
         "working_hours": {"start": "09:00", "end": "18:00"},
+        "location": {"id": clinic.pk, "name": clinic.name_uz, "address": clinic.address_uz},
         "blocks": [{"start": "16:00", "end": "16:30", "kind": "busy", "label": "Band qilingan"}],
     }
     assert schedules[(nodira, "2026-10-27")]["blocks"] == [

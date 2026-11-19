@@ -63,6 +63,7 @@ class WorkingHoursFactory(DjangoModelFactory[WorkingHours]):
         model = WorkingHours
 
     professional = SubFactory(ProfessionalFactory)  # type: ignore[no-untyped-call]
+    location = LazyAttribute(lambda o: o.professional.location)  # type: ignore[no-untyped-call]
     weekday = LazyAttribute(lambda o: o.professional.working_hours.count())  # type: ignore[no-untyped-call]
     start = time(9, 0)
     end = time(18, 0)
@@ -76,6 +77,7 @@ class WorkingHoursOverrideFactory(DjangoModelFactory[WorkingHoursOverride]):
     date = Sequence(lambda n: datetime(2026, 11, 2, tzinfo=TASHKENT).date() + timedelta(days=n))  # type: ignore[no-untyped-call]
     start = time(10, 0)
     end = time(16, 0)
+    location = LazyAttribute(lambda o: o.professional.location if o.start is not None else None)  # type: ignore[no-untyped-call]
 
 
 class BlockedPeriodFactory(DjangoModelFactory[BlockedPeriod]):

@@ -56,7 +56,7 @@ Examples use `jsonc`: `//` comments give types and nullability and are not part 
 | Time of day | `"HH:MM"`, Tashkent | `"09:00"` |
 | Percent | Decimal **string**. Responses always have 2 dp. Requests allow ≤2 dp; more → `max_decimal_places`; a JSON number → `invalid` | `"1.00"`, `"0.57"`, req `"1.5"` |
 | Ratio | JSON number in 0..1, ≤4 dp | `0.679` |
-| Phone | E.164 `^\+998\d{9}$` in every response and stored value. **Requests (feat/admin-ux, phone leniency):** the admin fields that take a phone — `segments/{id}/members/` `phones[]`, `appointments/` `phone`, `notifications/` `audience.phone`, `notifications/test-devices/` `phone`, `location/` `phone` — also accept what staff paste: ASCII digits with spaces (any Unicode space), `-` / Unicode dashes, `.`, `(`, `)`, `/`, an optional `+998`, `998` or `00998` before exactly 9 national digits (`+998 90 123-45-67`, `998901234567`, `(90) 123 45 67`, `90 123 45 67`); they are normalised to E.164 before lookup, deduplication and storage. Anything else (letters, another country code, a wrong digit count, > 32 characters, a JSON number) → `invalid` "Telefon raqamini to‘g‘ri kiriting." (`core.phones.normalize_uz_phone`). The customer API keeps the strict E.164 rule. | `"+998901234567"` |
+| Phone | E.164 `^\+998\d{9}$` in every response and stored value. **Requests (feat/admin-ux, phone leniency):** the admin fields that take a phone — `segments/{id}/members/` `phones[]`, `appointments/` `phone`, `notifications/` `audience.phone`, `notifications/test-devices/` `phone`, `clinics/` and `clinics/{id}/` `phone` — also accept what staff paste: ASCII digits with spaces (any Unicode space), `-` / Unicode dashes, `.`, `(`, `)`, `/`, an optional `+998`, `998` or `00998` before exactly 9 national digits (`+998 90 123-45-67`, `998901234567`, `(90) 123 45 67`, `90 123 45 67`); they are normalised to E.164 before lookup, deduplication and storage. Anything else (letters, another country code, a wrong digit count, > 32 characters, a JSON number) → `invalid` "Telefon raqamini to‘g‘ri kiriting." (`core.phones.normalize_uz_phone`). The customer API keeps the strict E.164 rule. | `"+998901234567"` |
 | Enums | literals from §3, identical to the frontend unless §7 lists a mapping | `"awaiting_payment"` |
 | i18n text | `{"uz": str, "ru": str, "en": str}`; `""` means not filled, never `null` | |
 | Absent value | Key always present with `null`; lists are `[]`; keys are never omitted | |
@@ -311,7 +311,8 @@ The FE creates one key per form/dialog instance (`crypto.randomUUID()`), reuses 
 | GET | `specialists/{id}/conflicts/` | | 200 |
 | GET / POST | `services/` | P E / – | 200 / 201 |
 | GET / PATCH | `services/{id}/` | | 200 |
-| GET / PATCH | `location/` | | 200 |
+| GET / POST | `clinics/` | | 200 / 201 |
+| GET / PATCH | `clinics/{id}/` | | 200 |
 | GET | `assistant/status/` (feat/ai-assistant, §2.19) | | 200 |
 | POST | `products/{id}/assistant/jobs/` (§2.19; throttle `assistant_generate`) | I optional | 202 / 200 |
 | GET | `assistant/jobs/{id}/` (§2.19) | | 200 |
@@ -977,12 +978,13 @@ Templates are editable in the admin UI through `GET` / `PUT` below.
  "specialists": [                                           // active professionals (+ inactive ones with an appointment that day), by position then name
    {"id": 1, "name": "Nodira Rahimova", "role": "dermatologist",
     "is_active": true,                                      // false: deactivated (§2.17) but still has appointments that day
+    "location": {"id": 1, "name": "Yunusobod", "address": "…"}, // scheduled clinic | null
     "working_hours": {"start": "09:00", "end": "18:00"},    // that weekday's hours (date override wins) | null = not working
     "blocks": [{"start": "16:00", "end": "16:30", "kind": "busy", "label": "Band qilingan"}]},   // label str | null; clipped to the day
    {"id": 2, "name": "Jasur Aliyev", "role": "dermatologist", "is_active": true, "working_hours": {"start": "09:00", "end": "18:00"},
     "blocks": [{"start": "13:00", "end": "14:00", "kind": "off", "label": null}]}],
  "appointments": [                                          // Tashkent date of start = date; all statuses; by start
-   {"id": 1, "specialist_id": 1, "customer": {"id": 8, "name": "Kamola Nazarova", "phone": "+998909741823"},
+   {"id": 1, "specialist_id": 1, "location": {"id": 1, "name": "Yunusobod", "address": "…"}, "customer": {"id": 8, "name": "Kamola Nazarova", "phone": "+998909741823"},
     "service_id": 1, "service_name": "Dermatolog konsultatsiyasi", "service_short_name": "Konsultatsiya",
     "duration_min": 30, "start": "2026-10-26T09:00:00+05:00", "end": "2026-10-26T09:30:00+05:00",
     "price": 150000,                                        // snapshot at booking
@@ -1007,7 +1009,7 @@ Templates are editable in the admin UI through `GET` / `PUT` below.
     "total": 5,
     "working": true,                                        // at least one listed specialist has hours that day (override wins)
     "hours": {"start": "09:00", "end": "20:00"}}],          // earliest start / latest end of those specialists | null
- "schedules": null,                                         // detail=full: [{"specialist_id", "date", "working_hours": {start, end} | null, "blocks": [DayBlock]}] for every listed specialist × day (the day board's specialist shape)
+ "schedules": null,                                         // detail=full: [{"specialist_id", "date", "working_hours": {start, end} | null, "location": {id, name, address} | null, "blocks": [DayBlock]}] for every listed specialist × day (the day board's specialist shape)
  "appointments": null}                                      // detail=full: the day items (§2.9 shape above) of the range, by start, id
 ```
 At most 8 queries whatever the span or the number of specialists (one grouped count `(Tashkent day, status, specialist)`, the specialists, the three schedule tables, the appointments with `detail=full`, plus authentication).
@@ -1038,6 +1040,7 @@ At most 8 queries whatever the span or the number of specialists (one grouped co
 |---|---|---|
 | `specialist_id` | int, an **active** professional | `required` · `does_not_exist` "Mutaxassis topilmadi." |
 | `service_id` | int, an **active** service the specialist offers (duration and price are snapshotted from that link) | `required` · `does_not_exist` "Xizmat topilmadi." · `does_not_exist` "Mutaxassis bu xizmatni ko‘rsatmaydi." |
+| `location_id` | required; active clinic scheduled for the specialist on the selected Tashkent date | An unavailable or mismatched clinic returns a field error. |
 | `customer_id` \| `phone` | exactly one; the customer must be `active` | both missing → `customer_id` `required`; both sent → `customer_id` `invalid` "customer_id yoki phone dan faqat bittasini yuboring."; unknown/deleted id → `customer_id` `does_not_exist` "Mijoz topilmadi."; `phone` not E.164 → `invalid` "Telefon raqamini to‘g‘ri kiriting."; no active customer → `phone` `customer_not_found` "Bu raqam bilan mijoz topilmadi." |
 | `start` | aware datetime, 5-minute grid, not in the past, inside that day's working hours (date override wins; `end = start + duration` must fit), outside blocked periods and the recurring break, not overlapping another `requested`/`confirmed` appointment of the specialist | `required` · `invalid` "Noto‘g‘ri qiymat." (naive) · `invalid` "Vaqt 5 daqiqalik qadamda bo‘lsin." · `in_past` "Kelajakdagi vaqtni tanlang." · `outside_working_hours` "Mutaxassis bu vaqtda ishlamaydi." · `slot_unavailable` "Bu vaqt band." |
 | `note` | optional (omitted = `""`; not required and without a `default` in the OpenAPI schema), ≤300 (staff note) | `max_length` "300 belgidan oshmasin." |
@@ -1046,7 +1049,7 @@ At most 8 queries whatever the span or the number of specialists (one grouped co
 - FND-1: the booking locks the specialist's row `FOR KEY SHARE` and re-reads `is_active`, so a specialist deactivated meanwhile (§2.17) answers `specialist_id` `does_not_exist` "Mutaxassis topilmadi." with nothing written; the same holds for `reschedule/` to another specialist.
 - Effects: events `requested {via: "admin", …}` + `confirmed {push_sent: false}`; audit `appointment.created`. No push (the customer is on the phone).
 
-**`POST appointments/{id}/reschedule/`** `{"start", "specialist_id"?}` → 200 day-item, status unchanged. Same `start` rules (the appointment itself is excluded from the overlap check). Changing the specialist re-snapshots duration and price from that specialist's link (`specialist_id` `does_not_exist`, or `service_id` `does_not_exist` "Mutaxassis bu xizmatni ko‘rsatmaydi."). 409 `invalid_transition` "Bu amal ushbu holatda mumkin emas." unless `requested`/`confirmed`; 409 `conflict` "Bu vaqt band." on the race. Effects: event `rescheduled {from_start, from_end, to_start, to_end, from_professional_id, to_professional_id, by: "admin", push_sent}`, push `rescheduled`, audit `appointment.rescheduled`.
+**`POST appointments/{id}/reschedule/`** `{"start", "location_id", "specialist_id"?}` → 200 day-item, status unchanged. Same `start` rules (the appointment itself is excluded from the overlap check). Changing the specialist re-snapshots duration and price from that specialist's link (`specialist_id` `does_not_exist`, or `service_id` `does_not_exist` "Mutaxassis bu xizmatni ko‘rsatmaydi."). 409 `invalid_transition` "Bu amal ushbu holatda mumkin emas." unless `requested`/`confirmed`; 409 `conflict` "Bu vaqt band." on the race. Effects: event `rescheduled {from_start, from_end, to_start, to_end, from_professional_id, to_professional_id, from_location_id, to_location_id, by: "admin", push_sent}`, push `rescheduled`, audit `appointment.rescheduled`.
 
 **`POST appointments/{id}/cancel/`** `{"reason"?: str ≤300}` (omitted = `""`; optional in the OpenAPI schema too) → 200 day-item with `status: "cancelled"`. 409 `invalid_transition` unless `requested`/`confirmed`. Effects: event `cancelled {by: "admin", reason, push_sent}`, push `cancelled`, audit `appointment.cancelled`; the slot is free again.
 
@@ -1328,6 +1331,7 @@ Staff manage the bookable side of the clinic here (until now only the disabled D
  "photo_url": "https://media.example.uz/professionals/3/9f2c1b7a0d4e8c61.webp", // | null
  "photo_thumbnail_url": "…", "photo_medium_url": "…",                           // §1.4 image variants | null
  "location_id": 1,
+ "location_ids": [1, 2],
  "staff_user": {"id": 4, "display_name": "Dilnoza Yusupova"},                  // Actor | null: the linked staff account (informational)
  "slot_step_min": 30, "position": 2, "is_active": true,
  "services": [                                                                 // OfferedService[], by service position then Uzbek name
@@ -1361,7 +1365,7 @@ Staff manage the bookable side of the clinic here (until now only the disabled D
 | `qualifications.*`, `bio.*` | ≤2000 each; missing on create → `""` | `max_length` "2000 belgidan oshmasin." |
 | `experience_years` | int 0..80 or null | `min_value` · `max_value` "Qiymat 80 dan oshmasin." |
 | `slot_step_min` | 10, 15, 20, 30 or 60; default 30 | `invalid_choice` "Ruxsat etilgan qadamlar: 10, 15, 20, 30 yoki 60 daqiqa." |
-| `location_id` | an existing location; default the clinic (`GET location/`, decision P4) | `does_not_exist` "Manzil topilmadi."; no clinic yet → `required` "Avval klinika manzilini kiriting." (create only) |
+| `location_id`, `location_ids` | Primary clinic and all assigned clinic IDs. Both are required on create. The set must contain the primary clinic. Update the schedule before removing a clinic used by recurring hours or a current or future override. | Field validation rejects unavailable or inconsistent assignments. |
 | `staff_user_id` | an **active** staff user not linked to another specialist, or null; the account already linked to this specialist is accepted back unchanged even once deactivated (a resent form) | `does_not_exist` "Xodim topilmadi." · `unique` "Bu xodim boshqa mutaxassisga bog‘langan." (also when a concurrent request linked it first) |
 | `position` | int 0..100000; default: appended last | `min_value` · `max_value` |
 | `is_active` | bool; **default `false` on create** (decision PS-6: add the offer and the hours, then activate) | |
@@ -1385,7 +1389,7 @@ Staff manage the bookable side of the clinic here (until now only the disabled D
 
 Audit `professional.services_updated` with the whole set before and after (`[{service_id, price, duration_min, is_active}]`), only when it changed.
 
-**`PUT specialists/{id}/working-hours/`** `{"days": [{"weekday", "start", "end", "break_start"?, "break_end"?}]}` → 200 `ClinicSpecialist`. The whole week: a weekday left out is not a working day; one interval per weekday plus at most one recurring break (rendered as an `off` block with label null on the day board).
+**`PUT specialists/{id}/working-hours/`** `{"days": [{"weekday", "start", "end", "location_id", "break_start"?, "break_end"?}]}` → 200 `ClinicSpecialist`. The whole week: a weekday left out is not a working day; one interval at one assigned clinic per weekday plus at most one recurring break (rendered as an `off` block with label null on the day board).
 
 | Field | Rule | Field errors |
 |---|---|---|
@@ -1404,7 +1408,7 @@ Audit `schedule.hours_updated` (entity `professional`) with the week before and 
  "created_at": "…"}
 ```
 - **`GET specialists/{id}/overrides/`** (P; 20, 50) `?date_from=&date_to=` (dates; `date_from` default today in Tashkent, `date_to` optional and inclusive; `date_to < date_from` → `date_to` `invalid` "Oxirgi sana boshlang‘ich sanadan oldin bo‘lmasin."; either date more than 3660 days (≈10 years) from today → that field `out_of_range` "Sana bugundan ko‘pi bilan 10 yil uzoqlikda bo‘lsin.") → `Page<HoursOverride>` by date.
-- **`POST specialists/{id}/overrides/`** `{"date", "start"?, "end"?, "note"?}` → 201 `HoursOverride`. `date`: today … today + 365 (`in_past` "O‘tgan sanani tanlab bo‘lmaydi." · `out_of_range` "Ko‘pi bilan bir yil oldinga kiritish mumkin."), one per date (`unique` "Bu sana uchun alohida jadval allaqachon bor." — delete the old one first); `start` / `end` both set (`"HH:MM"`, 5-minute grid, `start < end`) or both null / omitted (the missing one `required` "Boshlanish va tugash vaqtini birga kiriting (ikkalasi bo‘sh bo‘lsa, dam olish kuni)."); `note` ≤120. Audit `schedule.override_created` (entity `professional`, `{override_id, date, start, end, note}`).
+- **`POST specialists/{id}/overrides/`** `{"date", "start"?, "end"?, "location_id"?, "note"?}` → 201 `HoursOverride`. `date`: today … today + 365 (`in_past` "O‘tgan sanani tanlab bo‘lmaydi." · `out_of_range` "Ko‘pi bilan bir yil oldinga kiritish mumkin."), one per date (`unique` "Bu sana uchun alohida jadval allaqachon bor." — delete the old one first); `start` / `end` both set (`"HH:MM"`, 5-minute grid, `start < end`) or both null / omitted (the missing one `required` "Boshlanish va tugash vaqtini birga kiriting (ikkalasi bo‘sh bo‘lsa, dam olish kuni)."); working hours require an assigned active `location_id`; a day off has no location. `note` ≤120. Audit `schedule.override_created` (entity `professional`, `{override_id, date, start, end, location_id, note}`).
 - **`DELETE specialists/{id}/overrides/{override_id}/`** → 204; the date falls back to the weekly hours; 404 for another specialist's override. Audit `schedule.override_deleted` (the deleted row).
 
 **Blocked periods** (absolute busy / off ranges, e.g. a meeting or a leave; they remove free slots).
@@ -1419,7 +1423,7 @@ Audit `schedule.hours_updated` (entity `professional`) with the week before and 
 - **`POST specialists/{id}/blocks/`** `{"start", "end", "kind", "label"?}` → 201 `BlockedPeriod`. `start` / `end` aware datetimes (naive → `invalid`) on the 5-minute grid in Tashkent time — zero seconds and microseconds, minutes a multiple of 5 (that field `invalid` "Vaqt 5 daqiqalik qadamda bo‘lsin.", checked `start` first; the slot engine reads blocks as `HH:MM`, so an off-grid edge would leave a bookable slot inside the block) — `end > start` (`end` `invalid` "Tugash vaqti boshlanishidan keyin bo‘lsin."), `end` in the future (`end` `in_past` "Tugagan vaqtni band qilib bo‘lmaydi."), at most 366 days long (`end` `out_of_range` "Ko‘pi bilan 366 kunlik davr."), not overlapping another block of the specialist (touching is fine; `start` `overlap` "Bu vaqt boshqa band vaqt bilan kesishadi."); `label` ≤80, trimmed, `""` / null = none. Appointments inside the block are kept (they appear in `conflicts/`). Audit `schedule.block_created` (entity `professional`, `{block_id, start, end, kind, label}`).
 - **`DELETE specialists/{id}/blocks/{block_id}/`** → 204; 404 for another specialist's block. Audit `schedule.block_deleted`.
 
-**`GET specialists/{id}/conflicts/`** (declared by `appointments`) → `{"results": [day-item…]}` (the §2.9 appointment shape): the specialist's `requested` / `confirmed` appointments starting now or later that the current schedule no longer covers — a day without hours (a day-off override, or no weekly row), a range not inside that day's hours, or an overlap with a blocked period or the recurring break — by start; `[]` when every booking still fits; 404 for an unknown specialist. Four queries whatever the number of days.
+**`GET specialists/{id}/conflicts/`** (declared by `appointments`) → `{"results": [day-item…]}` (the §2.9 appointment shape): the specialist's `requested` / `confirmed` appointments starting now or later that the current schedule no longer covers — a clinic that differs from the scheduled clinic, a day without hours (a day-off override, or no weekly row), a range not inside that day's hours, or an overlap with a blocked period or the recurring break — by start; `[]` when every booking still fits; 404 for an unknown specialist. Four queries whatever the number of days.
 
 **Services** (bookable offerings; prices live on each specialist's offer).
 ```jsonc
@@ -1451,17 +1455,19 @@ Audit `schedule.hours_updated` (entity `professional`) with the week before and 
 - A deactivated service leaves the customer catalogue (`services/`, the specialists' `services[]`, the slots) and the admin booking dialog (`appointments/meta/`) at once; its appointments are kept and stay manageable. Names are not snapshotted on appointments (a rename shows on past appointments too); prices and durations are.
 - Audit `service.created`, `service.updated` (changed fields), `service.deactivated`, `service.activated`; a PATCH that changes nothing writes nothing.
 
-**The clinic** (decision P4: one location; the model supports several and `location_id` is accepted on specialists).
+**Clinics**
 ```jsonc
 // ClinicLocation
 {"id": 1, "name": {"uz": "Glow Derma klinikasi", "ru": "", "en": ""},           // i18n, uz 2..120
  "address": {"uz": "Toshkent, Chilonzor tumani, …", "ru": "", "en": ""},        // i18n, ≤300 each
+ "directions": {"uz": "Ikkinchi qavat", "ru": "", "en": ""},                        // i18n, ≤500 each
+ "is_active": true,
  "phone": "+998712000000",                                                      // E.164 | null
  "latitude": 41.311081, "longitude": 69.240562,                                 // number (≤6 dp) | null, a pair
  "updated_at": "…"}
 ```
-- **`GET location/`** → `ClinicLocation` (the first location by position, then id); 404 until the first PATCH.
-- **`PATCH location/`** → 200 `ClinicLocation`; texts merge leaf by leaf; the first PATCH creates the clinic and then needs `name.uz` (`name.uz` `required`). `phone` E.164 or null (`invalid` "Telefon raqamini to‘g‘ri kiriting."); `latitude` −90..90 and `longitude` −180..180, ≤6 decimals (`max_decimal_places` "Ko‘pi bilan 6 ta kasr raqam."), set or cleared together (the missing one `latlng_pair` "Kenglik va uzunlikni birga kiriting."). The customer API shows it with every specialist and appointment. Audit `location.created` (the new row) / `location.updated` (changed leaves); a PATCH that changes nothing writes nothing.
+- **`GET clinics/`** returns `{"results": [ClinicLocation…]}` including archived clinics. **`GET clinics/{id}/`** retrieves one clinic.
+- **`POST clinics/`** creates a clinic (201) and requires `name.uz` and `address.uz`. **`PATCH clinics/{id}/`** updates one clinic (200) and merges translated fields leaf by leaf. `phone` E.164 or null (`invalid` "Telefon raqamini to‘g‘ri kiriting."); `latitude` −90..90 and `longitude` −180..180, ≤6 decimals (`max_decimal_places` "Ko‘pi bilan 6 ta kasr raqam."), set or cleared together (the missing one `latlng_pair` "Kenglik va uzunlikni birga kiriting."). Set `is_active` to `false` to archive and `true` to restore. Archiving returns 409 when the clinic has an active specialist assignment or an upcoming requested or confirmed visit. Historical visits keep their clinic. Audit `location.created` (the new row) / `location.updated` (changed leaves); a PATCH that changes nothing writes nothing.
 
 ### 2.18 Yandex Delivery (courier dispatch, returns, exception queue)
 Yandex Delivery is the courier carrier of home delivery next to BTS (`docs/integrations/yandex-delivery.md`). An
@@ -1854,7 +1860,7 @@ and the hand-run fixes listed in rule 1 are superuser-only; `staff.*` is manager
 | Appointments | `appointment.confirmed`, `appointment.rejected`, `appointment.attended`, `appointment.created`, `appointment.rescheduled` (`{…, from_start, from_end, reschedule_no}`), `appointment.cancelled` (`{…, reason}`) |
 | Shell | `settings.updated` (changed leaves only, each `{from, to}`; legal-text leaves as `{changed, old_len, new_len, sha256}`, §2.11), `settings.terms_published` (`{from, to, sha256}`, §2.11) — both written by the ops console settings page since 2026-11-07, `export.downloaded` |
 | M2 (customer API) | The customer, payment and POS actions listed in `docs/api/customer-api-v1.md` §3 ("Audit actions added in M2"): `customer.*` (B-W1 adds `customer.session_revoked`, also by staff from §2.6, and `customer.sessions_revoked`), `auth.device_mismatch`, `appointment.requested`, `appointment.cancelled` (`by: "customer"`), `payment.late_capture`, `pos.*`. The `audit-log/` filters accept them unchanged. |
-| Specialists and services (admin API, §2.17) | `professional.created` (the new row), `professional.updated` (changed fields `{field: old}` / `{field: new}`), `professional.deactivated` (changed fields + `upcoming_appointments`, `forced`), `professional.activated`, `professional.photo_updated` (`{photo}` / `{photo, sha256}`), `professional.photo_deleted`, `professional.services_updated` (`{services: [{service_id, price, duration_min, is_active}]}` before / after), `schedule.hours_updated` (`{days: [WorkingDay]}` before / after), `schedule.override_created`, `schedule.override_deleted` (`{override_id, date, start, end, note}`), `schedule.block_created`, `schedule.block_deleted` (`{block_id, start, end, kind, label}`) — all with object type `professional` and the specialist's id, so `audit-log/?object_type=professional&object_id=…` is one specialist's history; `service.created`, `service.updated`, `service.deactivated`, `service.activated` (object type `service`); `location.created`, `location.updated` (object type `location`). One row per operation, none when nothing changed. |
+| Specialists and services (admin API, §2.17) | `professional.created` (the new row), `professional.updated` (changed fields `{field: old}` / `{field: new}`), `professional.deactivated` (changed fields + `upcoming_appointments`, `forced`), `professional.activated`, `professional.photo_updated` (`{photo}` / `{photo, sha256}`), `professional.photo_deleted`, `professional.services_updated` (`{services: [{service_id, price, duration_min, is_active}]}` before / after), `schedule.hours_updated` (`{days: [WorkingDay]}` before / after), `schedule.override_created`, `schedule.override_deleted` (`{override_id, date, start, end, location_id, note}`), `schedule.block_created`, `schedule.block_deleted` (`{block_id, start, end, kind, label}`) — all with object type `professional` and the specialist's id, so `audit-log/?object_type=professional&object_id=…` is one specialist's history; `service.created`, `service.updated`, `service.deactivated`, `service.activated` (object type `service`); `location.created`, `location.updated` (object type `location`). One row per operation, none when nothing changed. |
 | Django admin (editable models) | `<model>.created`, `<model>.updated`, `<model>.deleted` for `location`, `professional`, `service`, `professional_service`, `working_hours`, `blocked_period`; `working_hours_override.created`, `working_hours_override.updated`, `working_hours_override.deleted` (the override is the seventh editable model, T13) |
 
 ---
@@ -2086,7 +2092,7 @@ Provisional, configurable rules that shape payloads:
 - **Production media storage.** Open; URLs are always absolute from `PUBLIC_MEDIA_BASE_URL`.
 - **Staff management (GST-1..GST-6).** One role plus the manager flag: only managers manage staff; at least one active manager remains; a manager never deactivates, demotes or resets the password of their own account through the API; temporary passwords are shown once (sealed for the idempotent replay) with no forced change at the first sign-in; operator commands exist for when no manager can sign in.
 - **Customer devices on the card (GST-7).** At most 20 installations, active first; never a token, key or installation id.
-- **Specialists and services (FND-1 / FND-7, decisions PS-1 … PS-13).** Catalogue and schedule changes never alter booked appointments (`specialists/{id}/conflicts/` lists the ones left outside the schedule); deactivating a specialist with appointments ahead needs `force`; services are retired, never deleted; one clinic location (P4); new specialists start inactive.
+- **Specialists and services (FND-1 / FND-7, decisions PS-1 … PS-13).** Catalogue and schedule changes never alter booked appointments (`specialists/{id}/conflicts/` lists the ones left outside the schedule); deactivating a specialist with appointments ahead needs `force`; services and clinics can be archived, and new specialists start inactive.
 
 ---
 

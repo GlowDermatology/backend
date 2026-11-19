@@ -81,6 +81,7 @@ def test_conflicts_list_the_open_future_appointments_the_schedule_no_longer_cove
     assert set(results[0]) == {
         "id",
         "specialist_id",
+        "location",
         "customer",
         "service_id",
         "service_name",
@@ -147,6 +148,7 @@ def test_an_admin_booking_of_a_specialist_deactivated_meanwhile_is_refused(
         {
             "specialist_id": link.professional_id,
             "service_id": link.service_id,
+            "location_id": link.professional.location_id,
             "customer_id": customer.pk,
             "start": at(MONDAY, 10).isoformat(),
         },
