@@ -240,10 +240,11 @@ class ClinicSpecialistSerializer(serializers.Serializer[Professional]):
     created_at = serializers.DateTimeField()
     updated_at = serializers.DateTimeField()
 
-    @extend_schema_field(i18n_text(2000))
+    @extend_schema_field(serializers.ListField(child=serializers.IntegerField()))
     def get_location_ids(self, obj: Professional) -> list[int]:
         return selectors.assigned_location_ids(obj)
 
+    @extend_schema_field(i18n_text(2000))
     def get_qualifications(self, obj: Professional) -> dict[str, str]:
         return i18n_dict(obj, "qualifications")
 

@@ -19578,9 +19578,8 @@ components:
         role:
           $ref: '#/components/schemas/SpecialistRoleEnum'
         qualifications:
-          type: object
-          additionalProperties:
-            type: string
+          allOf:
+          - $ref: '#/components/schemas/I18nText2000'
           readOnly: true
         bio:
           allOf:
@@ -19609,8 +19608,9 @@ components:
         location_id:
           type: integer
         location_ids:
-          allOf:
-          - $ref: '#/components/schemas/I18nText2000'
+          type: array
+          items:
+            type: integer
           readOnly: true
         staff_user:
           allOf:
