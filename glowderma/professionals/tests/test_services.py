@@ -198,6 +198,7 @@ def test_snapshot_renders_times_and_foreign_keys() -> None:
     assert services.snapshot(hours) == {
         "id": hours.pk,
         "professional_id": hours.professional_id,
+        "location_id": hours.location_id,
         "weekday": 2,
         "start": "09:00:00",
         "end": "18:00:00",

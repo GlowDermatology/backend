@@ -117,9 +117,14 @@ test("delete a professional with appointments: refused in Uzbek, nothing deleted
 
 test("weekly hours inline: an invalid row is refused on the form, a valid one is saved and audited", async ({ page, staff }) => {
   void staff;
-  const { id } = await django<{ id: number }>("professional", { fresh: true });
+  const { id, location } = await django<{ id: number; location: string }>("professional", { fresh: true });
   await page.goto(`/django-admin/professionals/professional/${id}/change/`);
   await page.locator("a.add-row").click();
+  // every weekly row names its clinic (multi-clinic): the professional's own one
+  const clinic = page.locator('select[name^="working_hours-"][name$="-location"]:not([name*="__prefix__"])').last();
+  await clinic.locator("xpath=following-sibling::span[contains(@class,'select2')]").first().click();
+  await page.locator(".select2-search__field").last().fill(location);
+  await page.locator(".select2-results__option", { hasText: location }).first().click();
   const field = (name: string) => page.locator(`input[name^="working_hours-"][name$="-${name}"]:not([name*="__prefix__"])`).last();
   // the weekday is a select of Uzbek day names (the value stays 0–6)
   const weekday = page.locator('select[name^="working_hours-"][name$="-weekday"]:not([name*="__prefix__"])').last();

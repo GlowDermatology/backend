@@ -328,7 +328,14 @@ def test_slots_validation(clock: None, public_client: APIClient) -> None:
         ("service_id", "required"),
         ("location_id", "required"),
     }
-    bad_date = public_client.get(url, {"date": "02.11.2026", "service_id": str(link.service_id)})
+    bad_date = public_client.get(
+        url,
+        {
+            "date": "02.11.2026",
+            "service_id": str(link.service_id),
+            "location_id": str(link.professional.location_id),
+        },
+    )
     assert field_errors(bad_date)[0][:2] == ("date", "invalid")
     for day in (MONDAY - timedelta(days=1), MONDAY + timedelta(days=31)):
         errors = field_errors(slots(public_client, link, day))

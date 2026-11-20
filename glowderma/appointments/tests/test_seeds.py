@@ -128,6 +128,7 @@ def test_seed_reproduces_the_design_and_is_idempotent(monkeypatch: pytest.Monkey
         "end": "2026-10-26T09:30:00+05:00",
         "service_id": 1,
         "professional_id": 1,
+        "location_id": kamola.location_id,
         "price": 150_000,
         "duration_min": 30,
     }

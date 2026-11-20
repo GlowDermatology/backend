@@ -640,7 +640,7 @@ def professional(data: dict[str, Any]) -> Any:
             role="cosmetologist",
         )
         services.save_row(row, actor=None)
-        return {"id": row.pk, "name": row.name}
+        return {"id": row.pk, "name": row.name, "location": str(row.location)}
     active = list(Professional.objects.filter(is_active=True).values_list("pk", flat=True))
     counts = bookings.upcoming_counts(active, timeutils.now())
     for pk, upcoming in sorted(counts.items()):

@@ -145,6 +145,7 @@ def test_create_by_admin_happy_path(staff: StaffUser, clock: Any) -> None:
         "end": "2026-10-26T10:35:00+05:00",
         "service_id": link.service_id,
         "professional_id": link.professional_id,
+        "location_id": appointment.location_id,
         "price": 150_000,
         "duration_min": 30,
     }
