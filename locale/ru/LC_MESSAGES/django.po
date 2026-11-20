@@ -2704,6 +2704,10 @@ msgstr "Нужен хотя бы один уровень."
 msgid "Kamida bitta faol menejer qolishi kerak. Avval boshqa xodimni menejer qiling."
 msgstr "Должен остаться хотя бы один активный менеджер. Сначала назначьте менеджером другого сотрудника."
 
+#: glowderma/assistant/services.py
+msgid "Kamida bitta maydonni tanlang."
+msgstr "Выберите хотя бы одно поле."
+
 #: glowderma.core.api.exceptions.FIELD_MESSAGES
 #: glowderma/core/api/exceptions.py
 msgid "Kamida {limit} ta belgi kiriting."
@@ -5120,6 +5124,10 @@ msgstr "Улучшить выбранные тексты"
 #: glowderma/core/admin.py
 msgid "Tanlangan mavzuning o‘lik xabarlari (bir bosishda {limit} tagacha) qayta navbatga qo‘yiladi. Ishi boshqa yo‘l bilan bajarilgan xabarlar o‘tkazib yuboriladi."
 msgstr "«Мёртвые» сообщения выбранной темы (до {limit} за одно нажатие) будут возвращены в очередь. Сообщения, работа которых выполнена другим способом, пропускаются."
+
+#: glowderma/assistant/services.py
+msgid "Tanlangan maydonlarga AI yoza olmaydi: maydon tanlangan tilda bo‘lsin; bo‘sh nom, tarkib va qo‘llash usuli faqat boshqa tildagi matndan tarjima qilinadi."
+msgstr "ИИ не может заполнить выбранные поля: поле должно быть на выбранном языке; пустые название, состав и способ применения только переводятся с другого языка."
 
 #: glowderma/notifications/services.py
 msgid "Tanlangan segment o‘chirilgan: auditoriyani qayta tanlang."
@@ -8009,6 +8017,10 @@ msgstr "причина"
 #: model metadata
 msgid "sana"
 msgstr "дата"
+
+#: model metadata
+msgid "saqlanmagan qiymatlar"
+msgstr "несохранённые значения"
 
 #: model metadata
 msgid "sarlavha"

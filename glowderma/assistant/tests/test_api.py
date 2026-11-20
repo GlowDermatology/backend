@@ -13,8 +13,9 @@ from glowderma.assistant.api.admin.views import AssistantGenerateThrottle
 from glowderma.assistant.models import AssistantSettings, GenerationJob
 from glowderma.assistant.tests.factories import GenerationJobFactory
 from glowderma.catalog.models import Product
-from glowderma.catalog.tests.factories import ProductFactory
+from glowderma.catalog.tests.factories import ProductFactory, ProductImageFactory
 from glowderma.core import enums
+from glowderma.core.models import AuditEntry
 from glowderma.core.throttling import DEFAULT_THROTTLE_RATES
 from glowderma.integrations.llm.fake import FakeContentModel
 from glowderma.integrations.llm.ports import GenerationResult
@@ -240,3 +241,81 @@ def test_anonymous_is_refused(anon_client: APIClient) -> None:
 def test_generate_throttle_scope() -> None:
     assert AssistantGenerateThrottle.scope == "assistant_generate"
     assert DEFAULT_THROTTLE_RATES["assistant_generate"] == "30/hour"
+
+
+@pytest.mark.usefixtures("assistant_on")
+def test_generate_with_the_unsaved_draft(
+    staff_client: APIClient, django_capture_on_commit_callbacks: Any, fake_llm: FakeContentModel
+) -> None:
+    product = make_product(name_ru="Сыворотка")
+    body = {"languages": ["ru"], "draft": {"texts.ru.name": "", "texts.ru.description": "Черновик"}}
+    response = generate(staff_client, product, django_capture_on_commit_callbacks, body)
+    assert response.status_code == 202, response.content
+    keys = response.json()["job"]["keys"]
+    assert "texts.ru.name" in keys and "texts.ru.description" not in keys
+    polled = staff_client.get(job_url(response.json()["job"]["id"])).json()
+    name = next(s for s in polled["result"]["suggestions"] if s["key"] == "texts.ru.name")
+    assert name["current"] == ""
+    assert "Черновик" in fake_llm.calls[-1].prompt
+
+
+@pytest.mark.usefixtures("assistant_on")
+def test_invalid_drafts(staff_client: APIClient) -> None:
+    product = make_product()
+    other = ProductImageFactory.create()
+    cases: list[tuple[Any, str]] = [
+        ({"slug": "x"}, "draft.slug"),
+        ({"texts.uz.name": "x" * 121}, "draft.texts.uz.name"),
+        ({f"images.{other.pk}.alt.uz": "x"}, f"draft.images.{other.pk}.alt.uz"),
+        ({f"texts.uz.k{i}": "" for i in range(151)}, "draft"),
+        (["texts.uz.name"], "draft"),
+        ({"texts.uz.name": None}, "draft.texts.uz.name"),
+    ]
+    for draft, field in cases:
+        response = staff_client.post(jobs_url(product), {"draft": draft}, format="json")
+        assert response.status_code == 400, (field, response.content)
+        assert field in [error["field"] for error in response.json()["errors"]], response.json()
+    assert not GenerationJob.objects.exists()
+
+
+@pytest.mark.usefixtures("assistant_on")
+def test_accept(
+    staff_client: APIClient, django_capture_on_commit_callbacks: Any, fake_llm: FakeContentModel
+) -> None:
+    product = make_product()
+    fake_llm.push(
+        GenerationResult(
+            data={"suggestions": [{"key": "texts.ru.name", "value": "Сыворотка"},
+                                  {"key": "texts.en.name", "value": "Serum"}]},
+            input_tokens=1, output_tokens=1, model="m",
+        )
+    )  # fmt: skip
+    job_id = generate(staff_client, product, django_capture_on_commit_callbacks).json()["job"]["id"]
+    bad = staff_client.post(job_url(job_id, "accept"), {"keys": ["texts.uz.usage"]}, format="json")
+    assert bad.status_code == 400 and bad.json()["errors"][0]["field"] == "keys.0"
+    missing = staff_client.post(job_url(job_id, "accept"), {}, format="json")
+    assert missing.status_code == 400 and missing.json()["errors"][0]["field"] == "keys"
+    response = staff_client.post(job_url(job_id, "accept"), {"keys": ["texts.ru.name"]}, format="json")
+    assert response.status_code == 200, response.content
+    body = response.json()
+    assert set(body) == {"job"}
+    assert body["job"]["outcome"] == "partial" and body["job"]["applied_keys"] == ["texts.ru.name"]
+    product.refresh_from_db()
+    assert product.name_ru == "" and product.name_en == ""  # the product is never written
+    again = staff_client.post(job_url(job_id, "accept"), {"keys": []}, format="json")
+    assert again.status_code == 409 and again.json()["code"] == "assistant_job_not_ready"
+    assert AuditEntry.objects.filter(action="assistant.suggestions_accepted").count() == 1
+
+
+@pytest.mark.usefixtures("assistant_on")
+def test_accept_none_is_discarded(
+    staff_client: APIClient, django_capture_on_commit_callbacks: Any, fake_llm: FakeContentModel
+) -> None:
+    job_id = generate(staff_client, make_product(), django_capture_on_commit_callbacks).json()["job"]["id"]
+    response = staff_client.post(job_url(job_id, "accept"), {"keys": []}, format="json")
+    assert response.status_code == 200 and response.json()["job"]["outcome"] == "discarded"
+
+
+def test_accept_of_a_console_test_job_is_a_404(staff_client: APIClient) -> None:
+    job = GenerationJobFactory.create(mode=enums.AssistantMode.TEST)
+    assert staff_client.post(job_url(job.pk, "accept"), {"keys": []}, format="json").status_code == 404

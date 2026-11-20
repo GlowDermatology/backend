@@ -2,15 +2,21 @@
 
 * :func:`start_job` — the admin panel's "Generate": checks the switch, the provider, the person's daily
   limit and the day / month budgets, picks the target keys of the mode (``fill_missing`` only empty keys,
-  ``languages`` only translations into empty keys, ``improve`` only the chosen non-empty keys, ``photos``
-  the label fields), and queues one job per product (an active job is returned instead of a second one).
-  Nothing to fill → no job.
+  ``languages`` only translations into empty keys, ``improve`` the chosen keys, ``photos`` the label
+  fields), and queues one job per product (an active job is returned instead of a second one). Nothing to
+  fill → no job. The request may carry the admin's unsaved form values (``draft``): a key's **working
+  value** is its draft value when sent, else the saved one, and target selection, the suggestions'
+  ``current``, the product data and the claims lint all read working values; placeholder / test input
+  (``validation.is_placeholder``) counts as empty. ``input_snapshot`` keeps the saved values (the
+  conflict check of :func:`apply_job`).
 * :func:`run_job` — the worker: claims the job, reads the key (``assistant.credentials``, never stored),
   composes the prompt, calls the content model (one retry on a malformed answer), validates the answer and
   stores the suggestions, the usage and the cost. The product is never touched.
 * :func:`apply_job` — a person's selection (values may be edited; they are checked again) written through
   ``catalog.services.update_product`` with ``expected`` = the values seen at generation: a key changed
   meanwhile is a conflict and is not written.
+* :func:`accept_job` — the person took the chosen suggestions into their (unsaved) form: records the outcome
+  and an audit row; the product is not written (the person saves the form themselves).
 * :func:`discard_job`, :func:`reap_stale_jobs`, :func:`start_test_job` (the ops console's prompt test).
 
 Every job error is a stable ``error_code``; the message is rendered from :data:`ERROR_MESSAGES` when a
@@ -107,7 +113,17 @@ ERROR_MESSAGES: dict[str, str] = {
     SERVER_ERROR_CODE: MESSAGES["server_error"],
 }
 
-MODE_REQUIRED_FIELDS = N_("Yaxshilash uchun kamida bitta to‘ldirilgan maydonni tanlang.")
+MODE_REQUIRED_FIELDS = N_("Yaxshilash uchun kamida bitta to‘ldirilgan maydonni tanlang.")  # prompt tests
+IMPROVE_KEYS_REQUIRED = N_("Kamida bitta maydonni tanlang.")
+IMPROVE_NOTHING_TO_WRITE = N_(
+    "Tanlangan maydonlarga AI yoza olmaydi: maydon tanlangan tilda bo‘lsin; bo‘sh nom, tarkib va qo‘llash "
+    "usuli faqat boshqa tildagi matndan tarjima qilinadi."
+)
+MAX_DRAFT_ENTRIES = 150
+# the answer budget: a target's character limit at about 2.5 characters per token, plus the JSON around it
+CHARS_PER_TOKEN = Decimal("2.5")
+ANSWER_OVERHEAD_TOKENS = 512
+MAX_ANSWER_TOKENS = 16384
 NO_IMAGES = N_("Mahsulotda rasm yo‘q.")
 UNKNOWN_FIELD = N_("Bu maydonni AI to‘ldira olmaydi.")
 TEST_MODE_REFUSED = N_("Bu rejim faqat boshqaruv konsolida ishlatiladi.")
@@ -247,10 +263,27 @@ def _in_language(key: str, language: str) -> str:
     return ".".join(parts)
 
 
+def _filled(values: dict[str, Any], key: str) -> bool:
+    """The working value of ``key`` is real content (not empty, not placeholder / test input)."""
+    return not validation.is_placeholder(values.get(key))
+
+
+def working_values(saved: dict[str, Any], draft: dict[str, str] | None) -> dict[str, Any]:
+    """The saved snapshot with the admin's unsaved draft values on top."""
+    return {**saved, **(draft or {})}
+
+
+SOURCE_ONLY_FIELDS = ("name", "ingredients", "usage")  # never written from nothing: translated only
+
+
+def _text_field(key: str) -> str:
+    return key.split(".")[2] if key.startswith("texts.") else ""
+
+
 def _translatable(key: str, snapshot: dict[str, Any]) -> bool:
     """The same field is filled in another language (a source to translate from)."""
     language = prompts.key_language(key)
-    return any(snapshot.get(_in_language(key, other)) for other in LANGUAGES if other != language)
+    return any(_filled(snapshot, _in_language(key, other)) for other in LANGUAGES if other != language)
 
 
 def select_targets(
@@ -262,25 +295,36 @@ def select_targets(
     image_ids: Sequence[int],
 ) -> list[str]:
     """The keys a job of ``mode`` asks for (see the module docstring); ``fields`` narrows the automatic
-    choice (``fill_missing`` / ``languages`` / ``photos``) or is the choice (``improve``)."""
+    choice (``fill_missing`` / ``languages`` / ``photos``) or is the choice (``improve``: a chosen key that
+    is empty or a placeholder is written from the facts, except a name / ingredients / usage with nothing to
+    translate from). ``snapshot`` holds the working values."""
     all_image_ids = sorted(
         {int(key.split(".")[1]) for key in snapshot if key.startswith("images.")},
     )
     universe = _universe(languages, all_image_ids)
     chosen = set(fields)
     if mode == enums.AssistantMode.IMPROVE:
-        return [key for key in universe if key in chosen and snapshot.get(key)]
+        # an empty / placeholder name, ingredients or usage is translated only, never written from nothing
+        return [
+            key
+            for key in universe
+            if key in chosen
+            and (
+                _filled(snapshot, key)
+                or _text_field(key) not in SOURCE_ONLY_FIELDS
+                or _translatable(key, snapshot)
+            )
+        ]
     if mode == enums.AssistantMode.PHOTOS:
         label_fields = ("name", "ingredients", "usage")
         keys = [_text_key(language, name) for language in languages for name in label_fields]
         return [key for key in keys if not chosen or key in chosen]
     targets: list[str] = []
-    has_name = any(snapshot.get(_text_key(language, "name")) for language in LANGUAGES)
+    has_name = any(_filled(snapshot, _text_key(language, "name")) for language in LANGUAGES)
     for key in universe:
-        if snapshot.get(key) or (chosen and key not in chosen):
+        if _filled(snapshot, key) or (chosen and key not in chosen):
             continue
-        field = key.split(".")[2] if key.startswith("texts.") else ""
-        if mode == enums.AssistantMode.LANGUAGES or field in ("name", "ingredients", "usage"):
+        if mode == enums.AssistantMode.LANGUAGES or _text_field(key) in SOURCE_ONLY_FIELDS:
             # translate only: these are never written from nothing
             if _translatable(key, snapshot):
                 targets.append(key)
@@ -295,6 +339,25 @@ def _validate_fields(fields: Sequence[str]) -> None:
         raise ValidationError(
             {f"keys.{index}": [field_error("invalid", UNKNOWN_FIELD)] for index, _key in errors}
         )
+
+
+def _check_draft(draft: dict[str, Any], images: Sequence[ProductImage]) -> None:
+    """Each draft key is an assistant key (an image key names an image of this product), each value a string
+    within that key's limit; else a 400 on ``draft.<key>``."""
+    if len(draft) > MAX_DRAFT_ENTRIES:
+        raise ValidationError({"draft": [field_error("max_items", limit=MAX_DRAFT_ENTRIES)]})
+    own = {image.pk for image in images}
+    errors: dict[str, list[Any]] = {}
+    for key, value in draft.items():
+        parsed = validation.parse_key(key)
+        if parsed is None or (parsed[3] is not None and parsed[3] not in own):
+            errors[f"draft.{key}"] = [field_error("invalid", UNKNOWN_FIELD)]
+        elif not isinstance(value, str):
+            errors[f"draft.{key}"] = [field_error("invalid")]
+        elif len(value) > validation.max_length(key):
+            errors[f"draft.{key}"] = [field_error("max_length", limit=validation.max_length(key))]
+    if errors:
+        raise ValidationError(errors)
 
 
 def _product_images(product: Product) -> list[ProductImage]:
@@ -339,10 +402,11 @@ def start_job(
     fields: Sequence[str] = (),
     goal: str = "",
     image_ids: Sequence[int] = (),
+    draft: dict[str, str] | None = None,
     actor: Any,
 ) -> StartResult:
     """Queue a generation for the product (``created``) or return its active job; ``job=None`` when the
-    mode finds nothing to do."""
+    mode finds nothing to do. ``draft`` = the admin's unsaved form values (see the module docstring)."""
     if mode == enums.AssistantMode.TEST:
         raise ValidationError({"mode": [field_error("invalid_choice", TEST_MODE_REFUSED)]})
     assistant = get_settings()
@@ -356,16 +420,20 @@ def start_job(
     if product is None:
         raise NotFound
     images = _product_images(product)
+    draft = dict(draft or {})
+    _check_draft(draft, images)
     snapshot = catalog_services.product_snapshot(product, images)
     chosen_images: list[int] = []
     if mode == enums.AssistantMode.PHOTOS:
         chosen_images = _pick_images(images, image_ids, assistant.max_images)
     if mode == enums.AssistantMode.IMPROVE and not fields:
-        raise ValidationError({"keys": [field_error("required", MODE_REQUIRED_FIELDS)]})
-    targets = select_targets(mode, snapshot, languages=languages, fields=fields, image_ids=chosen_images)
+        raise ValidationError({"keys": [field_error("required", IMPROVE_KEYS_REQUIRED)]})
+    targets = select_targets(
+        mode, working_values(snapshot, draft), languages=languages, fields=fields, image_ids=chosen_images
+    )
     if not targets:
         if mode == enums.AssistantMode.IMPROVE:
-            raise ValidationError({"keys": [field_error("invalid", MODE_REQUIRED_FIELDS)]})
+            raise ValidationError({"keys": [field_error("invalid", IMPROVE_NOTHING_TO_WRITE)]})
         return StartResult(job=None, created=False)
     active = _active_job(product.pk)
     if active is not None:
@@ -384,6 +452,7 @@ def start_job(
                 goal=goal if mode == enums.AssistantMode.IMPROVE else "",
                 image_ids=chosen_images,
                 input_snapshot={key: snapshot.get(key) for key in targets},
+                draft=draft,
                 provider=config.provider,
                 model_id=config.model_id,
                 rules_version=prompts.RULES_VERSION,
@@ -596,6 +665,14 @@ def _limits(targets: Sequence[str]) -> dict[str, int]:
     return {key: validation.max_length(key) for key in targets}
 
 
+def answer_budget(targets: Sequence[str], configured: int) -> int:
+    """``max_output_tokens`` of a request: the configured value, raised to what the targets' character
+    limits need (capped at :data:`MAX_ANSWER_TOKENS`) so a many-key answer is not cut off."""
+    chars = sum(validation.max_length(key) for key in targets)
+    estimate = int(Decimal(chars) / CHARS_PER_TOKEN) + ANSWER_OVERHEAD_TOKENS
+    return max(configured, min(estimate, MAX_ANSWER_TOKENS))
+
+
 def _generate(
     model: Any,
     request: GenerationRequest,
@@ -659,7 +736,8 @@ def run_job(job_id: int) -> GenerationJob | None:
         mode = _task_mode(job)
         guidance, used = _guidance(job, _purposes(job))
         GenerationJob.objects.filter(pk=job.pk).update(prompt_versions=used, model_id=config.model_id)
-        data = prompts.product_data(product, images)
+        draft = job.draft or {}
+        data = prompts.product_data(product, images, draft)
         parts = tuple(image_part(image) for image in images if image.pk in set(job.image_ids))
         request = GenerationRequest(
             model=config.model_id,
@@ -675,7 +753,7 @@ def run_job(job_id: int) -> GenerationJob | None:
             response_schema=prompts.response_schema(targets, mode=mode),
             images=parts,
             temperature=float(config.temperature),
-            max_output_tokens=config.max_output_tokens,
+            max_output_tokens=answer_budget(targets, config.max_output_tokens),
             timeout_seconds=config.timeout_seconds,
             max_retries=config.max_retries,
         )
@@ -684,8 +762,18 @@ def run_job(job_id: int) -> GenerationJob | None:
         heartbeat(job)
         values, dropped, answer = _generate(model, request, key, targets, usage, deadline)
         suggestions, warnings = validation.build_suggestions(
-            values, targets=targets, snapshot=job.input_snapshot, facts=validation.Facts.of(data), mode=mode
+            values,
+            targets=targets,
+            snapshot=working_values(job.input_snapshot, draft),
+            facts=validation.Facts.of(data),
+            mode=mode,
         )
+        skipped = validation.parse_skipped(answer, targets, values)
+        reported = set(values) | {item["key"] for item in skipped}
+        skipped += [
+            {"code": "skipped", "key": key, "reason": "no answer"} for key in targets if key not in reported
+        ]
+        warnings += skipped
         if dropped:
             warnings.append({"code": "dropped", "count": dropped})
         if mode == enums.AssistantMode.PHOTOS and (info := validation.extracted_info(answer)):
@@ -801,7 +889,7 @@ def _product_input(items: Sequence[ApplyItem], snapshot: dict[str, Any]) -> cata
 def _checked_items(job: GenerationJob, items: Sequence[ApplyItem], product: Product) -> list[ApplyItem]:
     """Each item must be one of the job's suggestions; an edited value is normalised and linted again."""
     suggested = {s["key"] for s in job.suggestions}
-    facts = validation.Facts.of(prompts.product_data(product, _product_images(product)))
+    facts = validation.Facts.of(prompts.product_data(product, _product_images(product), job.draft or {}))
     errors: dict[str, list[Any]] = {}
     checked: list[ApplyItem] = []
     mode = _task_mode(job)
@@ -817,7 +905,7 @@ def _checked_items(job: GenerationJob, items: Sequence[ApplyItem], product: Prod
             ]
         elif verdict.rejected == validation.R_EMPTY:
             errors[f"items.{index}.value"] = [field_error("blank")]
-        elif verdict.rejected:
+        elif verdict.rejected and verdict.rejected != validation.R_POS_LABEL:  # a person may choose it
             errors[f"items.{index}.value"] = [field_error("invalid", VALUE_REJECTED)]
         checked.append(ApplyItem(key=item.key, value=value))
     if errors:
@@ -872,6 +960,44 @@ def apply_job(job_id: int, items: Sequence[ApplyItem], *, actor: Any, request: A
         if not applied:
             product = catalog_selectors.get_product(product.pk) or product
     return ApplyResult(job=job, product=product, applied=applied, conflicts=conflicts)
+
+
+def accept_job(job_id: int, keys: Sequence[str], *, actor: Any, request: Any = None) -> GenerationJob:
+    """Record that the person took ``keys`` (each one of the job's suggestions) into their form. The product
+    is not written: the outcome is ``applied`` (every suggestion), ``partial`` (some) or ``discarded``
+    (none), with an ``assistant.suggestions_accepted`` audit row; a reviewed job is a 409."""
+    with transaction.atomic():
+        job = _locked_reviewable(job_id)
+        suggested = [suggestion["key"] for suggestion in job.suggestions]
+        errors = {
+            f"keys.{index}": [field_error("invalid", NOT_SUGGESTED)]
+            for index, key in enumerate(keys)
+            if key not in suggested
+        }
+        if errors:
+            raise ValidationError(errors)
+        chosen = set(keys)
+        accepted = [key for key in suggested if key in chosen]
+        if not accepted:
+            job.outcome = enums.AssistantJobOutcome.DISCARDED
+        elif len(accepted) == len(suggested):
+            job.outcome = enums.AssistantJobOutcome.APPLIED
+        else:
+            job.outcome = enums.AssistantJobOutcome.PARTIAL
+        job.applied_keys = accepted
+        if accepted:
+            job.applied_at = timeutils.now()
+            job.applied_by = actor
+        job.save(update_fields=["outcome", "applied_keys", "applied_at", "applied_by", "updated_at"])
+        audit.record(
+            action="assistant.suggestions_accepted",
+            entity_type="product",
+            entity_id=str(job.product_id),
+            actor=actor,
+            request=request,
+            after={"job_id": job.pk, "accepted": accepted, "suggestions": len(suggested)},
+        )
+    return job
 
 
 def discard_job(job_id: int, *, actor: Any, request: Any = None) -> GenerationJob:

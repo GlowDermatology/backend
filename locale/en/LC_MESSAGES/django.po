@@ -2632,6 +2632,10 @@ msgstr "At least one tier is required."
 msgid "Kamida bitta faol menejer qolishi kerak. Avval boshqa xodimni menejer qiling."
 msgstr "At least one active manager must remain. Make another staff member a manager first."
 
+#: glowderma/assistant/services.py
+msgid "Kamida bitta maydonni tanlang."
+msgstr "Choose at least one field."
+
 #: glowderma.core.api.exceptions.FIELD_MESSAGES
 #: glowderma/core/api/exceptions.py
 msgid "Kamida {limit} ta belgi kiriting."
@@ -5042,6 +5046,10 @@ msgstr "Improve selected texts"
 #: glowderma/core/admin.py
 msgid "Tanlangan mavzuning o‘lik xabarlari (bir bosishda {limit} tagacha) qayta navbatga qo‘yiladi. Ishi boshqa yo‘l bilan bajarilgan xabarlar o‘tkazib yuboriladi."
 msgstr "Dead messages of the selected topic (up to {limit} per click) will be requeued. Messages whose work has been done another way are skipped."
+
+#: glowderma/assistant/services.py
+msgid "Tanlangan maydonlarga AI yoza olmaydi: maydon tanlangan tilda bo‘lsin; bo‘sh nom, tarkib va qo‘llash usuli faqat boshqa tildagi matndan tarjima qilinadi."
+msgstr "The AI cannot write the chosen fields: the field must be in a chosen language; an empty name, ingredients or directions for use are only translated from another language."
 
 #: glowderma/notifications/services.py
 msgid "Tanlangan segment o‘chirilgan: auditoriyani qayta tanlang."
@@ -7907,6 +7915,10 @@ msgstr "reason"
 #: model metadata
 msgid "sana"
 msgstr "date"
+
+#: model metadata
+msgid "saqlanmagan qiymatlar"
+msgstr "unsaved values"
 
 #: model metadata
 msgid "sarlavha"

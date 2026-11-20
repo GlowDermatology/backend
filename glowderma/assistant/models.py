@@ -85,7 +85,7 @@ class ProviderConfig(TimeStampedModel):
     temperature = models.DecimalField(
         max_digits=3, decimal_places=2, default=Decimal("0.40"), verbose_name="temperatura"
     )
-    max_output_tokens = models.PositiveIntegerField(default=4096, verbose_name="javob tokenlari chegarasi")
+    max_output_tokens = models.PositiveIntegerField(default=8192, verbose_name="javob tokenlari chegarasi")
     timeout_seconds = models.PositiveSmallIntegerField(default=20, verbose_name="kutish vaqti (soniya)")
     max_retries = models.PositiveSmallIntegerField(default=2, verbose_name="qayta urinishlar")
     price_input_per_mtok_usd = models.DecimalField(
@@ -273,6 +273,9 @@ class GenerationJob(TimeStampedModel):
     image_ids = models.JSONField(default=list, blank=True, verbose_name="rasmlar")
     # target key → the product value when the job was created (apply compares it under the row lock)
     input_snapshot = models.JSONField(default=dict, blank=True, verbose_name="boshlang‘ich qiymatlar")
+    # the admin's unsaved form values sent with the request ({key: value}, any assistant key): a key's working
+    # value is its draft value when present, else the saved one (input_snapshot keeps the saved values)
+    draft = models.JSONField(default=dict, blank=True, verbose_name="saqlanmagan qiymatlar")
     state = models.CharField(
         max_length=16,
         choices=enums.JobState.choices,

@@ -170,7 +170,7 @@ def provider_data(**values: str) -> dict[str, str]:
         "enabled": "on",
         "model_id": "gemini-2.5-flash-lite",
         "temperature": "0.40",
-        "max_output_tokens": "4096",
+        "max_output_tokens": "8192",
         "timeout_seconds": "20",
         "max_retries": "2",
         "price_input_per_mtok_usd": "0.10",

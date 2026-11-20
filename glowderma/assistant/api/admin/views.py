@@ -1,4 +1,4 @@
-"""Admin views of `assistant` (contract §2.19): status, start, poll, apply, discard.
+"""Admin views of `assistant` (contract §2.19): status, start, poll, accept, apply, discard.
 
 Any active staff member may use them (the people who may edit products); providers, keys, prompts and
 budgets are managed only in the ops console. Responses never carry tokens, costs, prompts or provider
@@ -18,6 +18,8 @@ from glowderma.accounts.api.base import AdminAPIView
 from glowderma.accounts.api.throttles import StaffRateThrottle
 from glowderma.assistant import selectors, services
 from glowderma.assistant.api.admin.serializers import (
+    AssistantAcceptResultSerializer,
+    AssistantAcceptSerializer,
     AssistantApplyResultSerializer,
     AssistantApplySerializer,
     AssistantJobCreateSerializer,
@@ -73,6 +75,7 @@ class AssistantJobStartView(AdminAPIView):
             fields=data.get("keys") or [],
             goal=data["goal"],
             image_ids=data.get("image_ids") or [],
+            draft=data.get("draft") or {},
             actor=request.user,
         )
         body: dict[str, Any] = {
@@ -94,6 +97,27 @@ class AssistantJobDetailView(AdminAPIView):
         if job is None:
             raise NotFound
         return Response(AssistantJobSerializer(job, context={"request": request}).data)
+
+
+class AssistantJobAcceptView(AdminAPIView):
+    @extend_schema(
+        operation_id="admin_assistant_jobs_accept_create",
+        description=(
+            "Record which suggestions the person took into the (unsaved) product form. The product is not "
+            "written — the person saves the form. `outcome` becomes `applied` (every suggestion), `partial` "
+            "(some) or `discarded` (none); each key must be one of the job's suggestions. A job that is not "
+            "a pending, succeeded one is a 409."
+        ),
+        request=AssistantAcceptSerializer,
+        responses={200: AssistantAcceptResultSerializer, **ADMIN_ERRORS},
+    )
+    @idempotent(required=False)
+    def post(self, request: Request, pk: int) -> Response:
+        serializer = AssistantAcceptSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        job = services.accept_job(pk, serializer.validated_data["keys"], actor=request.user, request=request)
+        job = selectors.get_job(job.pk) or job
+        return Response({"job": AssistantJobSerializer(job, context={"request": request}).data})
 
 
 class AssistantJobApplyView(AdminAPIView):

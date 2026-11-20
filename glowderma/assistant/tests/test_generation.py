@@ -18,7 +18,7 @@ from django.conf import settings
 from rest_framework.exceptions import NotFound, ValidationError
 
 from glowderma.accounts.tests.factories import StaffUserFactory
-from glowderma.assistant import prompts, services
+from glowderma.assistant import prompts, services, validation
 from glowderma.assistant.models import AssistantSettings, GenerationJob, PromptTemplate, ProviderConfig
 from glowderma.assistant.tests.factories import GenerationJobFactory, PromptVersionFactory
 from glowderma.catalog import services as catalog_services
@@ -136,26 +136,53 @@ def test_languages_mode_only_translates_into_empty_keys() -> None:
     ]
 
 
-def test_improve_targets_only_selected_filled_keys(fake_llm: FakeContentModel) -> None:
-    product = make_product(description_ru="Описание")
+def test_improve_targets_the_selected_keys_even_empty_or_placeholder(fake_llm: FakeContentModel) -> None:
+    product = make_product(description_ru="Описание", description_en="Test", usage_ru="Утром и вечером")
     job = start(
         product,
         enums.AssistantMode.IMPROVE,
-        fields=["texts.uz.description", "texts.ru.description", "texts.en.description"],
+        fields=["texts.uz.description", "texts.ru.description", "texts.en.description", "texts.en.usage"],
         goal=enums.AssistantImproveGoal.SHORTER,
+        languages=["uz", "ru", "en"],
     )
-    assert job.fields == ["texts.uz.description", "texts.ru.description"]
+    # a placeholder or empty key is written from the facts
+    assert job.fields == [
+        "texts.uz.description",
+        "texts.ru.description",
+        "texts.en.description",
+        "texts.en.usage",
+    ]
     assert job.goal == "shorter"
-    run(job)
-    assert "make the texts shorter" in fake_llm.calls[-1].prompt
+    done = run(job)
+    call = fake_llm.calls[-1]
+    assert "make the texts shorter" in call.prompt
+    assert '"Test"' not in call.prompt  # the placeholder is not a fact
+    assert set(done.prompt_versions) == {"improve", "describe", "seo"}
+    for purpose in ("improve", "describe", "seo"):
+        version = PromptTemplate.objects.get(purpose=purpose).versions.get(status="active")
+        assert version.instructions.strip() in call.system_instruction
 
 
-def test_improve_needs_a_filled_key() -> None:
+def test_improve_needs_a_chosen_key() -> None:
     product = make_product()
     with pytest.raises(ValidationError):
         start(product, enums.AssistantMode.IMPROVE)
-    with pytest.raises(ValidationError):
-        start(product, enums.AssistantMode.IMPROVE, fields=["texts.ru.description"])
+    with pytest.raises(ValidationError):  # chosen, but not in the requested languages
+        start(product, enums.AssistantMode.IMPROVE, fields=["texts.ru.description"], languages=["uz"])
+
+
+def test_improve_never_writes_an_empty_name_ingredients_or_usage_from_nothing() -> None:
+    product = make_product(name_uz="", ingredients_uz="Test")
+    chosen = ["texts.uz.name", "texts.uz.ingredients", "texts.uz.usage", "texts.ru.ingredients"]
+    with pytest.raises(ValidationError) as caught:
+        start(product, enums.AssistantMode.IMPROVE, fields=chosen)
+    detail: Any = caught.value.detail
+    assert str(detail["keys"][0]) == services.IMPROVE_NOTHING_TO_WRITE
+    product.ingredients_en = "Aqua, Glycerin"
+    product.save()
+    job = start(product, enums.AssistantMode.IMPROVE, fields=[*chosen, "texts.uz.description"])
+    # ingredients have a source to translate from; the name and usage have none
+    assert job.fields == ["texts.uz.description", "texts.uz.ingredients", "texts.ru.ingredients"]
 
 
 def test_unknown_keys_are_refused() -> None:
@@ -202,7 +229,155 @@ def test_image_alt_is_suggested_and_applied(fake_llm: FakeContentModel) -> None:
     assert image.alt_uz == "Serum shishasi"
 
 
+# --- placeholders and the unsaved draft ---------------------------------------------------------------------
+
+
+def test_placeholders_count_as_empty_for_fill_missing() -> None:
+    product = make_product(name_ru="Test", short_description_uz="...", description_en="asdf")
+    job = start(product)
+    assert {"texts.ru.name", "texts.uz.short_description", "texts.en.description"} <= set(job.fields)
+    assert job.input_snapshot["texts.ru.name"] == "Test"  # the saved value (apply's conflict check)
+
+
+def test_a_placeholder_name_is_no_source_to_translate_from() -> None:
+    product = make_product(name_uz="Test", description_uz="", ingredients_uz="")
+    result = services.start_job(product.pk, mode=FILL, languages=ALL, actor=StaffUserFactory.create())
+    assert result.job is None  # no real name anywhere: nothing can be written truthfully
+
+
+def test_the_draft_is_the_working_value(fake_llm: FakeContentModel) -> None:
+    product = make_product(name_ru="Сыворотка")
+    draft = {
+        "texts.ru.name": "",  # cleared in the form → a target
+        "texts.ru.description": "Увлажняющая сыворотка, 50 мл.",  # typed in the form → not a target
+        "texts.en.name": "Test",  # a placeholder → still a target
+    }
+    job = start(product, languages=["ru", "en"], draft=draft)
+    assert job.draft == draft
+    assert "texts.ru.name" in job.fields and "texts.en.name" in job.fields
+    assert "texts.ru.description" not in job.fields
+    assert job.input_snapshot["texts.ru.name"] == "Сыворотка"  # saved values, not the draft
+    fake_llm.push(
+        answer(
+            ("texts.ru.name", "Сыворотка Glow"),
+            ("texts.en.name", "Serum"),
+            ("texts.en.description", "Moisturising serum, 50 ml."),  # 50 is a fact of the draft only
+        )
+    )
+    done = run(job)
+    by_key = {s["key"]: s for s in done.suggestions}
+    assert by_key["texts.ru.name"]["current"] == ""  # what the person sees in the form
+    assert by_key["texts.en.name"]["current"] == "Test"
+    assert by_key["texts.en.description"]["warnings"] == []
+    prompt = fake_llm.calls[-1].prompt
+    assert "Увлажняющая сыворотка, 50 мл." in prompt
+    assert '"name": "Сыворотка"' not in prompt and '"Test"' not in prompt
+
+
+def test_the_draft_is_checked() -> None:
+    product = make_product()
+    own = ProductImageFactory.create(product=product)
+    other = ProductImageFactory.create()
+    cases: list[tuple[dict[str, Any], str]] = [
+        ({"slug": "x"}, "draft.slug"),
+        ({"texts.uz.price": "x"}, "draft.texts.uz.price"),
+        ({f"images.{other.pk}.alt.uz": "x"}, f"draft.images.{other.pk}.alt.uz"),
+        ({"texts.uz.name": "x" * 121}, "draft.texts.uz.name"),
+        ({f"images.{own.pk}.alt.ru": "x" * 161}, f"draft.images.{own.pk}.alt.ru"),
+        ({"texts.uz.name": 5}, "draft.texts.uz.name"),
+        ({f"texts.uz.x{i}": "" for i in range(151)}, "draft"),
+    ]
+    for draft, field in cases:
+        with pytest.raises(ValidationError) as caught:
+            start(product, draft=draft)
+        detail: Any = caught.value.detail
+        assert field in detail, (field, detail)
+    job = start(product, draft={f"images.{own.pk}.alt.ru": "x" * 160, "texts.uz.name": "x" * 120})
+    assert job.draft[f"images.{own.pk}.alt.ru"] == "x" * 160
+
+
+def test_apply_checks_edited_values_against_the_draft_facts(fake_llm: FakeContentModel) -> None:
+    job = start(make_product(), languages=["ru"], draft={"texts.uz.usage": "Kuniga 3 marta, 75 ml"})
+    fake_llm.push(answer(("texts.ru.name", "Сыворотка")))
+    done = run(job)
+    result = services.apply_job(
+        done.pk, [services.ApplyItem("texts.ru.name", "Сыворотка 75 мл")], actor=done.created_by
+    )
+    assert result.applied == ["texts.ru.name"]
+
+
+def test_the_pos_stock_label_is_rejected(fake_llm: FakeContentModel) -> None:
+    product = make_product(billz_name="NEW TONER 200ML", name_uz="", description_uz="", ingredients_uz="")
+    product.name_ru = "Тоник"
+    product.save()
+    job = start(product, languages=["uz"])
+    assert "texts.uz.name" in job.fields
+    fake_llm.push(answer(("texts.uz.name", "NEW TONER 200ML"), ("texts.uz.description", "Tonik.")))
+    done = run(job)
+    assert [s["key"] for s in done.suggestions] == ["texts.uz.description"]
+    assert {"code": "rejected", "key": "texts.uz.name", "reason": "pos_label"} in done.warnings
+    prompt = fake_llm.calls[-1].prompt
+    assert '"pos_stock_label": "NEW TONER 200ML"' in prompt and "billz_name" not in prompt
+
+
+def test_skipped_and_unchanged_keys_are_reported(fake_llm: FakeContentModel) -> None:
+    product = make_product(description_ru="Описание", usage_ru="Утром")
+    job = start(
+        product,
+        enums.AssistantMode.IMPROVE,
+        fields=["texts.uz.description", "texts.ru.description", "texts.en.usage"],
+    )
+    fake_llm.push(
+        answer(
+            ("texts.uz.description", "Namlovchi serum, 30 ml."),  # equal to the current text
+            ("texts.ru.description", "Увлажняющая сыворотка."),
+            skipped=[
+                {"key": "texts.en.usage", "reason": "No directions for use in the data."},
+                {"key": "texts.ru.description", "reason": "answered as well: ignored"},
+            ],
+        )
+    )
+    done = run(job)
+    assert [s["key"] for s in done.suggestions] == ["texts.ru.description"]
+    assert done.warnings == [
+        {"code": "unchanged", "key": "texts.uz.description"},
+        {"code": "skipped", "key": "texts.en.usage", "reason": "No directions for use in the data."},
+    ]
+
+
+def test_a_key_without_an_answer_is_reported_as_skipped(fake_llm: FakeContentModel) -> None:
+    job = start(make_product(), languages=["ru"])
+    fake_llm.push(answer(("texts.ru.name", "Сыворотка")))
+    done = run(job)
+    missing = [key for key in done.fields if key != "texts.ru.name"]
+    assert missing
+    assert [w for w in done.warnings if w["code"] == "skipped"] == [
+        {"code": "skipped", "key": key, "reason": "no answer"} for key in missing
+    ]
+
+
+def test_the_fake_model_answers_every_key_and_skips_none(fake_llm: FakeContentModel) -> None:
+    done = run(start(make_product()))
+    assert {s["key"] for s in done.suggestions} == set(done.fields)
+    assert not [w for w in done.warnings if w["code"] in ("skipped", "unchanged", "rejected")]
+
+
 # --- the run ------------------------------------------------------------------------------------------------
+
+
+def test_the_answer_budget_grows_with_the_targets(fake_llm: FakeContentModel) -> None:
+    assert services.answer_budget(["texts.uz.name"], 8192) == 8192
+    assert services.answer_budget(["texts.uz.description"] * 20, 8192) == 16384  # capped
+    assert services.answer_budget(["texts.uz.description"] * 5, 4096) == 4512  # 10000 / 2.5 + 512
+    assert services.answer_budget(["texts.uz.description"] * 5, 20000) == 20000  # the configured value wins
+    job = start(make_product())
+    run(job)
+    expected = int(sum(validation.max_length(key) for key in job.fields) / 2.5) + 512
+    assert fake_llm.calls[-1].max_output_tokens == max(8192, min(expected, 16384))
+
+
+def test_a_new_provider_row_defaults_to_8192_output_tokens() -> None:
+    assert ProviderConfig.objects.get(provider="gemini").max_output_tokens == 8192
 
 
 def test_run_records_usage_cost_versions_and_rules(fake_llm: FakeContentModel) -> None:
@@ -652,3 +827,60 @@ def test_unfinished_and_failed_jobs_cannot_be_reviewed(fake_llm: FakeContentMode
         services.apply_job(failed.pk, [services.ApplyItem("texts.ru.name", "a")], actor=failed.created_by)
     with pytest.raises(NotFound):
         services.discard_job(999_999, actor=failed.created_by)
+
+
+# --- accept (the suggestions go into the unsaved form) ------------------------------------------------------
+
+
+def test_accept_records_the_outcome_without_writing_the_product(fake_llm: FakeContentModel) -> None:
+    job = generated(fake_llm)
+    before = catalog_services.product_snapshot(product_of(job))
+    actor = StaffUserFactory.create()
+    accepted = services.accept_job(job.pk, ["texts.ru.description"], actor=actor)
+    assert accepted.outcome == enums.AssistantJobOutcome.PARTIAL
+    assert accepted.applied_keys == ["texts.ru.description"] and accepted.applied_by == actor
+    assert accepted.applied_at is not None
+    assert catalog_services.product_snapshot(product_of(job)) == before
+    assert not AuditEntry.objects.filter(action="product.updated").exists()
+    entry = AuditEntry.objects.get(action="assistant.suggestions_accepted")
+    assert entry.entity_type == "product" and entry.entity_id == str(job.product_id)
+    assert entry.after == {"job_id": job.pk, "accepted": ["texts.ru.description"], "suggestions": 2}
+    with pytest.raises(services.JobNotReviewable):  # a second call
+        services.accept_job(job.pk, [], actor=actor)
+
+
+@pytest.mark.parametrize(
+    ("keys", "outcome", "applied"),
+    [
+        (["texts.ru.description", "texts.ru.name", "texts.ru.name"], "applied",
+         ["texts.ru.name", "texts.ru.description"]),
+        (["texts.ru.name"], "partial", ["texts.ru.name"]),
+        ([], "discarded", []),
+    ],
+)  # fmt: skip
+def test_accept_outcomes(
+    keys: list[str], outcome: str, applied: list[str], fake_llm: FakeContentModel
+) -> None:
+    job = generated(fake_llm)
+    accepted = services.accept_job(job.pk, keys, actor=job.created_by)
+    assert accepted.outcome == outcome and accepted.applied_keys == applied
+    assert (accepted.applied_at is None) is (not applied)
+
+
+def test_accept_refuses_keys_that_were_not_suggested(fake_llm: FakeContentModel) -> None:
+    job = generated(fake_llm)
+    with pytest.raises(ValidationError) as caught:
+        services.accept_job(job.pk, ["texts.ru.name", "texts.uz.usage"], actor=job.created_by)
+    detail: Any = caught.value.detail
+    assert list(detail) == ["keys.1"]
+    job.refresh_from_db()
+    assert job.outcome == enums.AssistantJobOutcome.PENDING
+
+
+def test_accept_needs_a_pending_succeeded_job(fake_llm: FakeContentModel) -> None:
+    queued = start(make_product())
+    with pytest.raises(services.JobNotReviewable):
+        services.accept_job(queued.pk, [], actor=queued.created_by)
+    test_job = GenerationJobFactory.create(mode=enums.AssistantMode.TEST)
+    with pytest.raises(NotFound):
+        services.accept_job(test_job.pk, [], actor=queued.created_by)

@@ -11,6 +11,7 @@ from glowderma.assistant import services
 from glowderma.assistant.models import GenerationJob
 from glowderma.catalog.api.admin.serializers import ProductSerializer
 from glowderma.core import enums
+from glowderma.core.api.exceptions import field_error
 from glowderma.core.api.fields import BoundedListField
 from glowderma.core.api.language import admin_language
 from glowderma.core.api.serializers import ActorSerializer
@@ -48,6 +49,21 @@ class AssistantJobCreateSerializer(serializers.Serializer[dict[str, Any]]):
         choices=enums.AssistantImproveGoal.values, default=enums.AssistantImproveGoal.PROFESSIONAL
     )
     image_ids = BoundedListField(child=serializers.IntegerField(min_value=1), max_items=8, required=False)
+    draft = serializers.DictField(
+        child=serializers.CharField(allow_blank=True, trim_whitespace=False, max_length=4000),
+        required=False,
+        help_text=(
+            'The admin\'s current (unsaved) form values: assistant key → value (`""` allowed), at most '
+            f"{services.MAX_DRAFT_ENTRIES} entries. An image key must name an image of this product and each "
+            "value fits its key's limit. A key's working value is its draft value when sent, else the saved "
+            "one: the targets, each suggestion's `current` and the facts the model sees use working values."
+        ),
+    )
+
+    def validate_draft(self, value: dict[str, str]) -> dict[str, str]:
+        if len(value) > services.MAX_DRAFT_ENTRIES:
+            raise serializers.ValidationError(field_error("max_items", limit=services.MAX_DRAFT_ENTRIES))
+        return value
 
     def validate_languages(self, value: list[str]) -> list[str]:
         chosen = set(value)
@@ -58,7 +74,11 @@ class AssistantSuggestionSerializer(serializers.Serializer[Any]):
     key = serializers.CharField()
     current = serializers.CharField(allow_blank=True)
     suggested = serializers.CharField()
-    warnings = serializers.ListField(child=serializers.CharField())
+    warnings = serializers.ListField(
+        child=serializers.CharField(),
+        help_text="`unsupported_claim`, `inci_mismatch`, `confirm_packaging`, `seo_title_long`, "
+        "`seo_description_long`, `unverified_number` (a small count the data does not state).",
+    )
     origin = serializers.CharField(help_text="`ai`, or `image` (read from the photos).")
     checked = serializers.BooleanField(help_text="Pre-selected in the review (photo suggestions never are).")
     max_length = serializers.IntegerField()
@@ -66,7 +86,15 @@ class AssistantSuggestionSerializer(serializers.Serializer[Any]):
 
 class AssistantJobResultSerializer(serializers.Serializer[Any]):
     suggestions = AssistantSuggestionSerializer(many=True)
-    warnings = serializers.ListField(child=serializers.DictField())
+    warnings = serializers.ListField(
+        child=serializers.DictField(),
+        help_text=(
+            "Job-level notes by `code`: `rejected` {key, reason} (reason `too_long`, `unsupported_number`, "
+            "`unsupported_spf`, `empty`, `pos_label`), `skipped` {key, reason} (the model could not write "
+            "the key truthfully; short English reason), `unchanged` {key} (the suggestion equals the current "
+            "value), `dropped` {count}, `extracted` {brand, volume} (photos)."
+        ),
+    )
 
 
 class AssistantJobErrorSerializer(serializers.Serializer[Any]):
@@ -129,6 +157,19 @@ class AssistantApplyItemSerializer(serializers.Serializer[dict[str, Any]]):
 
 class AssistantApplySerializer(serializers.Serializer[dict[str, Any]]):
     items = BoundedListField(child=AssistantApplyItemSerializer(), max_items=MAX_ITEMS, allow_empty=False)
+
+
+class AssistantAcceptSerializer(serializers.Serializer[dict[str, Any]]):
+    keys = BoundedListField(
+        child=serializers.CharField(max_length=64),
+        max_items=MAX_ITEMS,
+        allow_empty=True,
+        help_text="The suggestion keys the person took into the form ([] = none).",
+    )
+
+
+class AssistantAcceptResultSerializer(serializers.Serializer[Any]):
+    job = AssistantJobSerializer()
 
 
 class AssistantApplyResultSerializer(serializers.Serializer[Any]):

@@ -131,3 +131,31 @@ def test_job_state_constraints() -> None:
     )
     job.refresh_from_db()
     assert not job.is_active and str(job) == f"#{job.pk} Bo‘sh maydonlarni to‘ldirish"
+
+
+def test_improve_guidance_v1_is_upgraded_only_when_untouched() -> None:
+    import importlib
+
+    from django.db import connection
+
+    from glowderma.assistant.models import PromptTemplate, PromptVersion
+
+    migration = importlib.import_module("glowderma.assistant.migrations.0004_improve_guidance_v2")
+
+    class Editor:
+        pass
+
+    editor = Editor()
+    editor.connection = connection  # type: ignore[attr-defined]
+    template = PromptTemplate.objects.get(purpose="improve")
+    v1 = template.versions.get()
+    assert v1.instructions == defaults.INSTRUCTIONS["improve"]  # a fresh database seeds the new text
+    migration.upgrade(global_apps, editor)
+    assert template.versions.count() == 1  # nothing to upgrade
+    PromptVersion.objects.filter(pk=v1.pk).update(instructions=migration.OLD_IMPROVE_V1)
+    migration.upgrade(global_apps, editor)
+    versions = {v.number: v for v in template.versions.all()}
+    assert versions[1].status == "retired" and versions[2].status == "active"
+    assert versions[2].instructions == defaults.INSTRUCTIONS["improve"]
+    migration.upgrade(global_apps, editor)  # idempotent: an already versioned template stays as it is
+    assert template.versions.count() == 2

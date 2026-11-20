@@ -72,9 +72,68 @@ def test_unsupported_number_and_percentage_are_rejected() -> None:
     assert validation.check("texts.ru.description", "5% ниацинамида", data, mode=FILL).rejected == (
         validation.R_UNSUPPORTED_NUMBER
     )
-    assert validation.check("texts.en.description", "Lasts 24 hours", data, mode=FILL).rejected == (
+    assert validation.check("texts.en.description", "Lasts 48 hours", data, mode=FILL).rejected == (
         validation.R_UNSUPPORTED_NUMBER
     )
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["Наносите 1–2 раза в день", "24 soat davomida namlaydi", "Apply 2 times a day", "Шаг 3"],
+)
+def test_a_small_bare_count_is_only_flagged(text: str) -> None:
+    verdict = validation.check("texts.ru.usage", text, facts(), mode=FILL)
+    assert verdict.rejected is None
+    assert verdict.warnings == [validation.W_UNVERIFIED_NUMBER]
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["5 мл на лицо", "2% кислоты", "10mg", "3 g", "pH 5", "Lasts 25 hours", "0.5 часа", "1,5 раза"],
+)
+def test_quantities_and_bigger_numbers_stay_rejected(text: str) -> None:
+    verdict = validation.check("texts.en.usage", text, facts(), mode=FILL)
+    assert verdict.rejected == validation.R_UNSUPPORTED_NUMBER
+
+
+def test_an_spf_value_the_data_does_not_state_is_rejected_even_when_small() -> None:
+    sunscreen = facts(description="Quyoshdan himoya SPF 50")
+    verdict = validation.check("texts.en.description", "SPF 15 sunscreen", sunscreen, mode=FILL)
+    assert verdict.rejected == validation.R_UNSUPPORTED_NUMBER
+
+
+def test_a_known_number_is_not_flagged() -> None:
+    verdict = validation.check("texts.ru.description", "Объём 30 мл", facts(), mode=FILL)
+    assert verdict.rejected is None and verdict.warnings == []
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["", "   ", None, "Test", " TEST ", "test123", "Тест", "тест2", "asdf", "asddff", "qwerty", "qwe",
+     "Lorem ipsum dolor sit amet", "xxx", "XXXX", "todo", "TBD", "placeholder", "Sample", "example",
+     "пример", "Образец", "namuna", "...", "---", "???", "123", "1 2 3", "!!!", "—"],
+)  # fmt: skip
+def test_placeholders(value: object) -> None:
+    assert validation.is_placeholder(value) is True
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["Krem", "Test cream", "Testosterone-free", "Сыворотка", "Glow 30 ml", "lorem", "x", "Пример ухода"],
+)
+def test_real_content_is_not_a_placeholder(value: str) -> None:
+    assert validation.is_placeholder(value) is False
+
+
+def test_the_pos_stock_label_is_never_a_suggestion() -> None:
+    data = Facts.of({"pos_stock_label": "NEW TONER 200ML", "texts": {}})
+    for text in ("NEW TONER 200ML", "  new   toner 200ml ", "New Toner 200 ml", "New toner, 200ML"):
+        assert validation.check("texts.uz.name", text, data, mode=FILL).rejected == validation.R_POS_LABEL
+    assert validation.check("texts.uz.name", "New toner", data, mode=FILL).rejected is None
+    assert validation.check("texts.uz.name", "NEW TONER 200ML", data, mode=PHOTOS).rejected == (
+        validation.R_POS_LABEL
+    )
+    assert Facts.of({"texts": {}}).pos_label == ""
 
 
 def test_spf_is_rejected_unless_the_data_says_it() -> None:
@@ -169,7 +228,7 @@ def test_build_suggestions_keeps_target_order_and_reports_rejections() -> None:
         facts=facts(),
         mode=FILL,
     )
-    assert [s["key"] for s in suggestions] == ["texts.ru.name", "seo.uz.title"]  # en unchanged → dropped
+    assert [s["key"] for s in suggestions] == ["texts.ru.name", "seo.uz.title"]  # en unchanged → a warning
     assert suggestions[0] == {
         "key": "texts.ru.name",
         "current": "",
@@ -179,7 +238,56 @@ def test_build_suggestions_keeps_target_order_and_reports_rejections() -> None:
         "checked": True,
         "max_length": 120,
     }
-    assert warnings == [{"code": "rejected", "key": "texts.ru.description", "reason": "unsupported_number"}]
+    assert warnings == [
+        {"code": "unchanged", "key": "texts.en.name"},
+        {"code": "rejected", "key": "texts.ru.description", "reason": "unsupported_number"},
+    ]
+
+
+def test_unchanged_compares_the_normalised_values() -> None:
+    suggestions, warnings = validation.build_suggestions(
+        {"texts.uz.name": " Yog'li krem "},
+        targets=["texts.uz.name"],
+        snapshot={"texts.uz.name": "Yog‘li krem"},
+        facts=facts(),
+        mode=FILL,
+    )
+    assert suggestions == [] and warnings == [{"code": "unchanged", "key": "texts.uz.name"}]
+
+
+def test_an_unverified_count_starts_unchecked() -> None:
+    suggestions, warnings = validation.build_suggestions(
+        {"texts.ru.usage": "Наносите 1–2 раза в день"},
+        targets=["texts.ru.usage"],
+        snapshot={},
+        facts=facts(),
+        mode=FILL,
+    )
+    assert warnings == []
+    assert suggestions[0]["warnings"] == [validation.W_UNVERIFIED_NUMBER]
+    assert suggestions[0]["checked"] is False
+
+
+def test_parse_skipped() -> None:
+    targets = ["texts.ru.name", "texts.en.name", "texts.uz.usage"]
+    answer = {
+        "suggestions": [],
+        "skipped": [
+            {"key": "texts.uz.usage", "reason": "  No directions\n in the data. "},
+            {"key": "texts.uz.usage", "reason": "again"},
+            {"key": "texts.ru.name", "reason": "answered anyway"},
+            {"key": "slug", "reason": "not a target"},
+            {"key": "texts.en.name", "reason": "x" * 500},
+            {"key": "texts.en.name"},
+            "junk",
+        ],
+    }
+    assert validation.parse_skipped(answer, targets, ["texts.ru.name"]) == [
+        {"code": "skipped", "key": "texts.uz.usage", "reason": "No directions in the data."},
+        {"code": "skipped", "key": "texts.en.name", "reason": "x" * validation.SKIP_REASON_MAX},
+    ]
+    assert validation.parse_skipped({"skipped": "nope"}, targets, []) == []
+    assert validation.parse_skipped(None, targets, []) == []
 
 
 def test_flagged_and_photo_suggestions_start_unchecked() -> None:

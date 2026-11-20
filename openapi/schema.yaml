@@ -622,6 +622,79 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
+  /api/v1/admin/assistant/jobs/{id}/accept/:
+    post:
+      operationId: admin_assistant_jobs_accept_create
+      description: Record which suggestions the person took into the (unsaved) product
+        form. The product is not written — the person saves the form. `outcome` becomes
+        `applied` (every suggestion), `partial` (some) or `discarded` (none); each
+        key must be one of the job's suggestions. A job that is not a pending, succeeded
+        one is a 409.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssistantAcceptRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantAcceptResult'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/admin/assistant/jobs/{id}/apply/:
     post:
       operationId: admin_assistant_jobs_apply_create
@@ -17932,6 +18005,26 @@ components:
           minimum: 1
       required:
       - expected_revision
+    AssistantAcceptRequest:
+      type: object
+      properties:
+        keys:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 64
+          description: The suggestion keys the person took into the form ([] = none).
+          maxItems: 120
+      required:
+      - keys
+    AssistantAcceptResult:
+      type: object
+      properties:
+        job:
+          $ref: '#/components/schemas/AssistantJob'
+      required:
+      - job
     AssistantApplyItemRequest:
       type: object
       properties:
@@ -18109,6 +18202,16 @@ components:
             type: integer
             minimum: 1
           maxItems: 8
+        draft:
+          type: object
+          additionalProperties:
+            type: string
+            maxLength: 4000
+          description: 'The admin''s current (unsaved) form values: assistant key
+            → value (`""` allowed), at most 150 entries. An image key must name an
+            image of this product and each value fits its key''s limit. A key''s working
+            value is its draft value when sent, else the saved one: the targets, each
+            suggestion''s `current` and the facts the model sees use working values.'
     AssistantJobError:
       type: object
       properties:
@@ -18143,6 +18246,11 @@ components:
           items:
             type: object
             additionalProperties: {}
+          description: 'Job-level notes by `code`: `rejected` {key, reason} (reason
+            `too_long`, `unsupported_number`, `unsupported_spf`, `empty`, `pos_label`),
+            `skipped` {key, reason} (the model could not write the key truthfully;
+            short English reason), `unchanged` {key} (the suggestion equals the current
+            value), `dropped` {count}, `extracted` {brand, volume} (photos).'
       required:
       - suggestions
       - warnings
@@ -18197,6 +18305,9 @@ components:
           type: array
           items:
             type: string
+          description: '`unsupported_claim`, `inci_mismatch`, `confirm_packaging`,
+            `seo_title_long`, `seo_description_long`, `unverified_number` (a small
+            count the data does not state).'
         origin:
           type: string
           description: '`ai`, or `image` (read from the photos).'

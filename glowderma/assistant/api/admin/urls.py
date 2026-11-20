@@ -14,6 +14,11 @@ urlpatterns: list[URLPattern | URLResolver] = [
     ),
     path("assistant/jobs/<int:pk>/", views.AssistantJobDetailView.as_view(), name="admin-assistant-job"),
     path(
+        "assistant/jobs/<int:pk>/accept/",
+        views.AssistantJobAcceptView.as_view(),
+        name="admin-assistant-job-accept",
+    ),
+    path(
         "assistant/jobs/<int:pk>/apply/",
         views.AssistantJobApplyView.as_view(),
         name="admin-assistant-job-apply",

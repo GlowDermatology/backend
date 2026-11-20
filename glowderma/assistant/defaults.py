@@ -14,10 +14,12 @@ from typing import Any
 
 SETTINGS_PK = 1
 GEMINI = "gemini"
+DEFAULT_MAX_OUTPUT_TOKENS = 8192
 GEMINI_DEFAULTS: dict[str, Any] = {
     "model_id": "gemini-2.5-flash-lite",
     "price_input_per_mtok_usd": Decimal("0.10"),
     "price_output_per_mtok_usd": Decimal("0.40"),
+    "max_output_tokens": DEFAULT_MAX_OUTPUT_TOKENS,
     "vault_path": GEMINI,
 }
 
@@ -50,14 +52,16 @@ INSTRUCTIONS: dict[str, str] = {
         "reader."
     ),
     "improve": (
-        "Rewrite only the selected texts to meet the requested goal while keeping every fact unchanged.\n"
+        "Rewrite the selected texts to meet the requested goal. The result must be clearly better than "
+        "the current text, not a light paraphrase; when the current text is short, empty or poor, write it "
+        "fully from the facts in every language's texts, the category and the volume.\n"
         "- professional: precise, calm, expert wording; remove filler and slang.\n"
         "- clear: short sentences, simple words, the most important information first.\n"
         "- natural: fluent, idiomatic phrasing a native speaker would write.\n"
         "- seo: work in the product type and the main use naturally once or twice; never stuff keywords.\n"
         "- shorter: cut length by roughly a third without losing facts.\n"
-        "Never add new claims, ingredients or benefits, and keep names, numbers and units exactly as "
-        "given."
+        "Never add claims, ingredients or benefits the data does not state, and keep brand names, INCI "
+        "names, numbers and units exactly as given."
     ),
     "seo": (
         "Write the search snippet for the product page in each requested language, natively for that "
