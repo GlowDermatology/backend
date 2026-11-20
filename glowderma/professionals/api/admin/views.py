@@ -32,8 +32,10 @@ from glowderma.professionals import bookings, selectors, services
 from glowderma.professionals.api.admin.serializers import (
     BlockedPeriodCreateSerializer,
     BlockedPeriodSerializer,
+    ClinicLocationCreateSerializer,
     ClinicLocationPatchSerializer,
     ClinicLocationSerializer,
+    ClinicLocationsSerializer,
     ClinicServiceSerializer,
     ClinicServiceWriteSerializer,
     ClinicSpecialistPatchSerializer,
@@ -49,6 +51,7 @@ from glowderma.professionals.api.admin.serializers import (
 )
 from glowderma.professionals.models import (
     BlockedPeriod,
+    Location,
     Professional,
     ProfessionalService,
     Service,
@@ -140,7 +143,7 @@ class SpecialistViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet)
     @extend_schema(
         operation_id="admin_specialists_create",
         description=(
-            "Create a specialist (inactive unless `is_active: true`; the location defaults to the clinic). "
+            "Create a specialist with an explicit primary clinic and assigned clinics. "
             "Add the offered services and the working hours, then activate."
         ),
         request=ClinicSpecialistWriteSerializer,
@@ -429,29 +432,51 @@ class ServiceViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
 # --- the location -------------------------------------------------------------------------------------------
 
 
-class LocationView(AdminAPIView):
+class ClinicsView(AdminAPIView):
     @extend_schema(
-        operation_id="admin_location_retrieve",
-        description="The clinic (one location, decision P4); 404 until the first PATCH entered it.",
-        responses={200: ClinicLocationSerializer, **ADMIN_ERRORS},
+        operation_id="admin_clinics_list",
+        responses={200: ClinicLocationsSerializer, **ADMIN_ERRORS},
     )
     def get(self, request: Request) -> Response:
-        location = selectors.the_location()
+        return Response(ClinicLocationsSerializer({"results": Location.objects.all()}).data)
+
+    @extend_schema(
+        operation_id="admin_clinics_create",
+        request=ClinicLocationCreateSerializer,
+        responses={201: ClinicLocationSerializer, **ADMIN_ERRORS},
+    )
+    @idempotent(required=False)
+    def post(self, request: Request) -> Response:
+        serializer = ClinicLocationCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        location = services.create_location(
+            dict(serializer.validated_data), actor=request.user, request=request
+        )
+        return Response(ClinicLocationSerializer(location).data, status=201)
+
+
+class ClinicView(AdminAPIView):
+    @extend_schema(
+        operation_id="admin_clinics_retrieve",
+        responses={200: ClinicLocationSerializer, **ADMIN_ERRORS},
+    )
+    def get(self, request: Request, pk: int) -> Response:
+        location = Location.objects.filter(pk=pk).first()
         if location is None:
             raise NotFound
         return Response(ClinicLocationSerializer(location).data)
 
     @extend_schema(
-        operation_id="admin_location_partial_update",
-        description="Texts merge leaf by leaf; the first PATCH creates the clinic and needs `name.uz`.",
+        operation_id="admin_clinics_partial_update",
+        description="Deactivate after reassigning active specialists and resolving upcoming visits.",
         request=ClinicLocationPatchSerializer,
         responses={200: ClinicLocationSerializer, **ADMIN_ERRORS},
     )
     @idempotent(required=False)
-    def patch(self, request: Request) -> Response:
+    def patch(self, request: Request, pk: int) -> Response:
         serializer = ClinicLocationPatchSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         location = services.update_location(
-            dict(serializer.validated_data), actor=request.user, request=request
+            pk, dict(serializer.validated_data), actor=request.user, request=request
         )
         return Response(ClinicLocationSerializer(location).data)

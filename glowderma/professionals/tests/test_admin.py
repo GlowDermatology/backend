@@ -55,7 +55,7 @@ def test_editable_models_use_the_service_backed_admin(model: type[models.Model])
     assert model_admin.has_view_permission(request)
     assert model_admin.has_add_permission(request)
     assert model_admin.has_change_permission(request)
-    assert model_admin.has_delete_permission(request)
+    assert model_admin.has_delete_permission(request) == (model is not Location)
     assert model_admin.check() == []
     request.user = StaffUserFactory.create(is_staff=False)
     assert not model_admin.has_change_permission(request)
@@ -64,7 +64,15 @@ def test_editable_models_use_the_service_backed_admin(model: type[models.Model])
 def test_override_is_editable_through_the_services() -> None:
     model_admin = admin.site._registry[WorkingHoursOverride]
     assert isinstance(model_admin, ServiceBackedAdmin)
-    assert model_admin.list_display == ("id", "professional", "date", "start", "end", "created_by")
+    assert model_admin.list_display == (
+        "id",
+        "professional",
+        "date",
+        "location",
+        "start",
+        "end",
+        "created_by",
+    )
     assert admin.site._registry[Professional].list_filter == ("role", "is_active")
 
 
@@ -195,6 +203,7 @@ def test_working_hours_inline_is_saved_through_the_services() -> None:
         "working_hours-0-id": existing.pk,
         "working_hours-0-professional": professional.pk,
         "working_hours-0-weekday": 0,
+        "working_hours-0-location": professional.location_id,
         "working_hours-0-start": "10:00",
         "working_hours-0-end": "17:00",
         "working_hours-0-break_start": "",
@@ -202,6 +211,7 @@ def test_working_hours_inline_is_saved_through_the_services() -> None:
         "working_hours-1-id": "",
         "working_hours-1-professional": professional.pk,
         "working_hours-1-weekday": 1,
+        "working_hours-1-location": professional.location_id,
         "working_hours-1-start": "09:00",
         "working_hours-1-end": "18:00",
         "working_hours-1-break_start": "13:00",
@@ -362,6 +372,7 @@ def test_a_refused_inline_row_rolls_back_the_whole_change(monkeypatch: pytest.Mo
             "working_hours-0-id": "",
             "working_hours-0-professional": professional.pk,
             "working_hours-0-weekday": 2,
+            "working_hours-0-location": professional.location_id,
             "working_hours-0-start": "09:00",
             "working_hours-0-end": "18:00",
             "working_hours-0-break_start": "",
@@ -411,7 +422,14 @@ def test_override_add_and_delete_are_audited() -> None:
     professional = ProfessionalFactory.create()
     response = client.post(
         reverse("admin:professionals_workinghoursoverride_add"),
-        {"professional": professional.pk, "date": "2026-11-02", "start": "10:00", "end": "15:00", "note": ""},
+        {
+            "professional": professional.pk,
+            "location": professional.location_id,
+            "date": "2026-11-02",
+            "start": "10:00",
+            "end": "15:00",
+            "note": "",
+        },
     )
     assert response.status_code == 302, response.content
     row = WorkingHoursOverride.objects.get(professional=professional, date=date(2026, 11, 2))

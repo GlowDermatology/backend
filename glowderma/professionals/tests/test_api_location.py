@@ -1,5 +1,4 @@
-"""Contract "Mutaxassislar va xizmatlar" — ``location/``: the clinic (decision P4), read and PATCHed (the
-first PATCH creates it), audited."""
+"""Clinics can be created and edited independently, with audited localized fields."""
 
 from decimal import Decimal
 from typing import Any
@@ -16,16 +15,14 @@ from glowderma.professionals.tests.factories import LocationFactory
 
 pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("clock")]
 
-URL = "/api/v1/admin/location/"
+URL = "/api/v1/admin/clinics/"
 
 
-def test_the_first_patch_creates_the_clinic(staff_client: APIClient, staff: StaffUser) -> None:
-    missing = staff_client.get(URL)
-    assert missing.status_code == 404 and missing.json()["code"] == "not_found"
-    assert errors(staff_client.patch(URL, {"phone": "+998712000000"})) == [
-        ("name.uz", "required", "Majburiy maydon.")
-    ]
-    response = staff_client.patch(
+def test_staff_create_and_retrieve_a_clinic(staff_client: APIClient, staff: StaffUser) -> None:
+    assert staff_client.get(URL).json() == {"results": []}
+    assert staff_client.get(URL + "999999/").status_code == 404
+    assert staff_client.post(URL, {"phone": "+998712000000"}).status_code == 400
+    response = staff_client.post(
         URL,
         {
             "name": {"uz": "Glow Derma klinikasi", "ru": "Клиника Glow Derma"},
@@ -35,12 +32,14 @@ def test_the_first_patch_creates_the_clinic(staff_client: APIClient, staff: Staf
             "longitude": 69.240562,
         },
     )
-    assert response.status_code == 200, response.json()
+    assert response.status_code == 201, response.json()
     location = Location.objects.get()
     assert response.json() == {
         "id": location.pk,
         "name": {"uz": "Glow Derma klinikasi", "ru": "Клиника Glow Derma", "en": ""},
         "address": {"uz": "Toshkent, Chilonzor", "ru": "", "en": ""},
+        "directions": {"uz": "", "ru": "", "en": ""},
+        "is_active": True,
         "phone": "+998712000000",
         "latitude": 41.311081,
         "longitude": 69.240562,
@@ -50,16 +49,25 @@ def test_the_first_patch_creates_the_clinic(staff_client: APIClient, staff: Staf
     [entry] = AuditEntry.objects.filter(action="location.created")
     assert (entry.entity_type, entry.entity_id, entry.actor_id) == ("location", str(location.pk), staff.pk)
     assert entry.before is None and entry.after is not None and entry.after["latitude"] == "41.311081"
-    assert staff_client.get(URL).json() == response.json()
-    # a specialist created now is placed there
-    created = staff_client.post("/api/v1/admin/specialists/", {"name": "Nodira", "role": "dermatologist"})
+    assert staff_client.get(f"{URL}{location.pk}/").json() == response.json()
+    assert staff_client.get(URL).json() == {"results": [response.json()]}
+    created = staff_client.post(
+        "/api/v1/admin/specialists/",
+        {
+            "name": "Nodira",
+            "role": "dermatologist",
+            "location_id": location.pk,
+            "location_ids": [location.pk],
+        },
+    )
     assert created.json()["location_id"] == location.pk == Professional.objects.get().location_id
 
 
 def test_patch_merges_and_audits_the_changed_leaves(staff_client: APIClient) -> None:
     location = LocationFactory.create(name_uz="Klinika", address_uz="Eski manzil", phone="+998712000000")
-    LocationFactory.create(name_uz="Ikkinchi", position=5)  # P4: the clinic is the first by position
-    response = staff_client.patch(URL, {"address": {"ru": "Новый адрес"}, "phone": None})
+    other = LocationFactory.create(name_uz="Ikkinchi", position=5)
+    url = f"{URL}{location.pk}/"
+    response = staff_client.patch(url, {"address": {"ru": "Новый адрес"}, "phone": None})
     assert response.status_code == 200, response.json()
     body = response.json()
     assert body["id"] == location.pk and body["address"] == {
@@ -68,10 +76,11 @@ def test_patch_merges_and_audits_the_changed_leaves(staff_client: APIClient) -> 
         "en": "",
     }
     assert body["phone"] is None
+    assert staff_client.get(f"{URL}{other.pk}/").json()["address"]["ru"] == ""
     [entry] = AuditEntry.objects.filter(action="location.updated")
     assert entry.before == {"address.ru": "", "phone": "+998712000000"}
     assert entry.after == {"address.ru": "Новый адрес", "phone": None}
-    assert staff_client.patch(URL, {"phone": None}).status_code == 200  # nothing changed: no audit
+    assert staff_client.patch(url, {"phone": None}).status_code == 200  # nothing changed: no audit
     assert AuditEntry.objects.filter(action="location.updated").count() == 1
 
 
@@ -96,15 +105,17 @@ def test_patch_merges_and_audits_the_changed_leaves(staff_client: APIClient) -> 
 def test_patch_validation(
     staff_client: APIClient, body: dict[str, Any], expected: tuple[str, str, str]
 ) -> None:
-    LocationFactory.create(name_uz="Klinika", phone="")
-    assert errors(staff_client.patch(URL, body)) == [expected]
+    location = LocationFactory.create(name_uz="Klinika", phone="")
+    url = f"{URL}{location.pk}/"
+    assert errors(staff_client.patch(url, body)) == [expected]
     assert not AuditEntry.objects.exists()
 
 
 def test_clearing_one_coordinate_needs_the_other(staff_client: APIClient) -> None:
-    LocationFactory.create(latitude=Decimal("41.3"), longitude=Decimal("69.2"))
-    assert errors(staff_client.patch(URL, {"latitude": None})) == [
+    location = LocationFactory.create(latitude=Decimal("41.3"), longitude=Decimal("69.2"))
+    url = f"{URL}{location.pk}/"
+    assert errors(staff_client.patch(url, {"latitude": None})) == [
         ("latitude", "latlng_pair", "Kenglik va uzunlikni birga kiriting.")
     ]
-    response = staff_client.patch(URL, {"latitude": None, "longitude": None})
+    response = staff_client.patch(url, {"latitude": None, "longitude": None})
     assert response.status_code == 200 and response.json()["latitude"] is None

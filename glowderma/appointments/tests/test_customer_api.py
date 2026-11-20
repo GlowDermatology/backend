@@ -102,7 +102,13 @@ def book(client: APIClient, body: dict[str, Any], key: str | None = None) -> Any
 
 def body_for(link: ProfessionalService, start: datetime | str, **extra: Any) -> dict[str, Any]:
     value = start if isinstance(start, str) else start.isoformat()
-    return {"specialist_id": link.professional_id, "service_id": link.service_id, "start": value, **extra}
+    return {
+        "specialist_id": link.professional_id,
+        "service_id": link.service_id,
+        "location_id": link.professional.location_id,
+        "start": value,
+        **extra,
+    }
 
 
 def field_errors(response: Any) -> list[tuple[str, str, str]]:
@@ -133,14 +139,17 @@ def test_specialists_list_and_detail(public_client: APIClient) -> None:
         "bio": "Tajribali dermatolog",
         "qualifications": "",
         "experience_years": 8,
-        "location": {
-            "id": link.professional.location_id,
-            "name": "Glow Derma Yunusobod",
-            "address": "Toshkent, Chilonzor tumani",
-            "phone": "+998712000000",
-            "latitude": 41.36,
-            "longitude": 69.28,
-        },
+        "locations": [
+            {
+                "id": link.professional.location_id,
+                "name": "Glow Derma Yunusobod",
+                "address": "Toshkent, Chilonzor tumani",
+                "directions": "",
+                "phone": "+998712000000",
+                "latitude": 41.36,
+                "longitude": 69.28,
+            }
+        ],
         "services": [
             {
                 "id": link.service_id,
@@ -213,7 +222,12 @@ def test_services_list_with_price_range(public_client: APIClient) -> None:
 
 
 def slots(client: APIClient, link: ProfessionalService, day: date, **params: Any) -> Any:
-    query = {"date": day.isoformat(), "service_id": link.service_id, **params}
+    query = {
+        "date": day.isoformat(),
+        "service_id": link.service_id,
+        "location_id": link.professional.location_id,
+        **params,
+    }
     return client.get(f"/api/v1/specialists/{link.professional_id}/slots/", query)
 
 
@@ -230,6 +244,7 @@ def test_slots_weekly_hours_with_break_and_lead_time(clock: None, public_client:
         "date": "2026-11-02",
         "specialist_id": link.professional_id,
         "service_id": link.service_id,
+        "location_id": link.professional.location_id,
         "duration_min": 30,
         "price": 150_000,
         "slot_step_min": 30,
@@ -311,6 +326,7 @@ def test_slots_validation(clock: None, public_client: APIClient) -> None:
     assert {(f, c) for f, c, _m in field_errors(public_client.get(url))} == {
         ("date", "required"),
         ("service_id", "required"),
+        ("location_id", "required"),
     }
     bad_date = public_client.get(url, {"date": "02.11.2026", "service_id": str(link.service_id)})
     assert field_errors(bad_date)[0][:2] == ("date", "invalid")
@@ -322,7 +338,13 @@ def test_slots_validation(clock: None, public_client: APIClient) -> None:
     errors = field_errors(slots(public_client, link, MONDAY, service_id=other.pk))
     assert errors == [("service_id", "does_not_exist", "Mutaxassis bu xizmatni ko‘rsatmaydi.")]
     en = public_client.get(
-        url, {"date": MONDAY.isoformat(), "service_id": str(other.pk)}, HTTP_ACCEPT_LANGUAGE="en"
+        url,
+        {
+            "date": MONDAY.isoformat(),
+            "service_id": str(other.pk),
+            "location_id": str(link.professional.location_id),
+        },
+        HTTP_ACCEPT_LANGUAGE="en",
     )
     assert en.json()["errors"][0]["message"] == "The specialist does not offer this service."
     inactive = ProfessionalFactory.create(is_active=False)
@@ -357,9 +379,13 @@ def test_booking_happy_path(clock: None, customer: Customer, customer_client: AP
             "short_name": "Konsultatsiya",
         },
         "location": {
+            "id": link.professional.location_id,
             "name": "Glow Derma Yunusobod",
             "address": "Toshkent, Chilonzor tumani",
+            "directions": "",
             "phone": "+998712000000",
+            "latitude": 41.36,
+            "longitude": 69.28,
         },
         "start": "2026-11-02T10:00:00+05:00",
         "end": "2026-11-02T10:30:00+05:00",
@@ -385,6 +411,7 @@ def test_booking_happy_path(clock: None, customer: Customer, customer_client: AP
         "end": "2026-11-02T10:30:00+05:00",
         "service_id": link.service_id,
         "professional_id": link.professional_id,
+        "location_id": link.professional.location_id,
         "price": 150_000,
         "duration_min": 30,
     }

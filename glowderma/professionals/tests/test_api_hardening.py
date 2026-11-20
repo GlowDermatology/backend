@@ -78,7 +78,8 @@ def test_a_block_on_the_grid_removes_every_overlapping_slot(
     body = {"start": at(10), "end": at(10, 35), "kind": "busy"}
     assert staff_client.post(url(professional, "blocks/"), body, format="json").status_code == 201
     response = public_client.get(
-        f"/api/v1/specialists/{professional.pk}/slots/", {"date": str(MONDAY), "service_id": str(service.pk)}
+        f"/api/v1/specialists/{professional.pk}/slots/",
+        {"date": str(MONDAY), "service_id": str(service.pk), "location_id": str(professional.location_id)},
     )
     starts = [slot["start"] for slot in response.json()["slots"]]
     assert starts == ["09:00", "09:30", "11:00", "11:30"]

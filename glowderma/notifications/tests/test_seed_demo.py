@@ -44,8 +44,10 @@ def test_seed_demo_runs_both_seeders_after_the_lower_layers_and_is_idempotent(
     assert counts() == first
     # sequences re-synced: the next rows continue after the seeded ids
     anchor = datetime.fromisoformat(seeding.DEFAULT_ANCHOR)
+    professional = Professional.objects.get(pk=1)
     created = Appointment.objects.create(
-        professional=Professional.objects.get(pk=1),
+        professional=professional,
+        location_id=professional.location_id,
         service_id=1,
         customer=Customer.objects.get(pk=1),
         start=datetime(2026, 11, 2, 9, 0, tzinfo=TASHKENT),

@@ -332,7 +332,7 @@ IP per minute, the rest only counted and sampled in the log).
 | 38 | GET | `me/qr/` | C | | 200 | P3 |
 | 39 | POST | `pos/cashback/resolve-qr/` | K | | 200 | P3 |
 | 40 | GET | `specialists/`, `specialists/{id}/`, `services/` | O | | 200 | P3 |
-| 41 | GET | `specialists/{id}/slots/?date=&service_id=` | O | | 200 | P3 |
+| 41 | GET | `specialists/{id}/slots/?date=&service_id=&location_id=` | O | | 200 | P3 |
 | 42 | POST | `appointments/` | C | I | 201 | P3 |
 | 43 | GET | `me/appointments/` | C | P | 200 | P3 |
 | 44 | GET | `me/appointments/{id}/` | C | | 200 | P3 |
@@ -1842,8 +1842,8 @@ links to active services (`professionals.selectors.booking_catalogue`).
  "photo_url": null, "photo_thumbnail_url": null, "photo_medium_url": null, "bio": "…",
  "qualifications": "…",                                // FND-7: diplomas, certificates (localized like bio; "" = none)
  "experience_years": 8,
- "location": {"id": 1, "name": "Glow Derma Yunusobod", "address": "…", "phone": "+998712000000",
-              "latitude": 41.36, "longitude": 69.28},
+ "locations": [{"id": 1, "name": "Glow Derma Yunusobod", "address": "…", "directions": "…",
+                "phone": "+998712000000", "latitude": 41.36, "longitude": 69.28}],
  "services": [{"id": 1, "name": "Dermatolog konsultatsiyasi", "short_name": "Konsultatsiya",
                "duration_min": 30, "price": 150000}],
  "slot_step_min": 30,
@@ -1851,7 +1851,7 @@ links to active services (`professionals.selectors.booking_catalogue`).
  "updated_at": "2026-10-20T09:00:00+05:00"}            // B-W1: sitemap lastmod
 ```
 **`GET specialists/{id}/`** → `Specialist` (404 when inactive). **`GET specialists/{slug}/`** (B-W1) → the same by slug
-(404 when unknown or inactive); slots and booking keep using the id. **`GET services/`** (**O**) →
+(404 when unknown or inactive); slots and booking keep using the id. `locations` lists active assigned clinics, primary first. Each doctor offers the same services at each clinic where they work. **`GET services/`** (**O**) →
 `{"results": [{"id", "name", "short_name", "description", "category" /* ServiceCategory, FND-7 */,
 "category_label", "duration_min" /* default */, "price_from", "price_to", "specialist_ids": [int]}]}` (active services
 offered by ≥1 active specialist). Staff manage all of it in the admin API (admin §2.17); the catalogue and the slots
@@ -1859,12 +1859,15 @@ are read from the database on every request (no cache), so a change is visible a
 answers 404 here and on `slots/`, a deactivated service or offer disappears, a new price applies to the next
 booking (booked appointments keep their snapshots).
 
-**`GET specialists/{id}/slots/?date=YYYY-MM-DD&service_id=`** (**O**) — free start times.
+**`GET specialists/{id}/slots/?date=YYYY-MM-DD&service_id=&location_id=`** (**O**) — free start times.
 
 | Param | Rule · code · message (uz) · key |
 |---|---|
 | `date` | required, ISO date; `today ≤ date ≤ today + BOOKING_HORIZON_DAYS` (30) · `invalid` / `out_of_range` "Faqat {n} kun ichidagi sanani tanlash mumkin." · `field.booking_horizon` |
 | `service_id` | required; an active service the specialist offers · `does_not_exist` "Mutaxassis bu xizmatni ko‘rsatmaydi." · `field.service_not_offered` |
+| `location_id` | required; an active clinic assigned to the specialist |
+
+Select a clinic before requesting slots. A valid assigned clinic on a day the specialist works elsewhere returns empty `slots` and `working_hours: null`.
 
 Algorithm (`appointments.selectors.free_slots`, P3): hours = that day's `WorkingHoursOverride` else `WorkingHours`
 (none → no slots); step = `Professional.slot_step_min`; duration = the link's `duration_min`; candidates
@@ -1872,12 +1875,12 @@ Algorithm (`appointments.selectors.free_slots`, P3): hours = that day's `Working
 overlap of `[t, t + duration)` with blocked periods, the recurring break and `requested`/`confirmed` appointments of
 the specialist (pending requests hold the slot, P1).
 ```jsonc
-{"date": "2026-10-28", "specialist_id": 1, "service_id": 1, "duration_min": 30, "price": 150000, "slot_step_min": 30,
+{"date": "2026-10-28", "specialist_id": 1, "service_id": 1, "location_id": 1, "duration_min": 30, "price": 150000, "slot_step_min": 30,
  "working_hours": {"start": "09:00", "end": "18:00"},    // | null (not working)
  "slots": [{"start": "09:00", "end": "09:30", "start_at": "2026-10-28T09:00:00+05:00"}]}
 ```
 
-**`POST appointments/`** (**C**, **I**). Body `{"specialist_id": int, "service_id": int, "start": datetime, "note": str ≤300 | null}`.
+**`POST appointments/`** (**C**, **I**). Body `{"specialist_id": int, "service_id": int, "location_id": int, "start": datetime, "note": str ≤300 | null}`.
 
 | Check (in order) | Code · message (uz) · key |
 |---|---|
@@ -1890,6 +1893,7 @@ the specialist (pending requests hold the slot, P1).
 | `start ≥ now + BOOKING_MIN_LEAD_MINUTES` | `in_past` "Kamida {n} daqiqa oldin yoziling." · `field.booking_too_soon` |
 | within the horizon | `out_of_range` · `field.booking_horizon` |
 | on the specialist's grid (`(start − hours.start) mod slot_step_min = 0`, seconds 0) | `invalid` "Vaqt {n} daqiqalik qadamda bo‘lsin." · `field.booking_grid` |
+| `location_id` is active, assigned and scheduled for the selected day | A wrong or unavailable clinic returns a field error on `location_id`. |
 | inside the day's hours, `end` fits | `outside_working_hours` "Mutaxassis bu vaqtda ishlamaydi." · `field.outside_working_hours` |
 | not overlapping blocks, the break or an open appointment of the specialist | `slot_unavailable` "Bu vaqt band." · `field.slot_unavailable` |
 | not overlapping another open appointment **of this customer** | `slot_unavailable` "Sizda bu vaqtda boshqa qabul bor." · `field.own_overlap` |
@@ -1898,7 +1902,7 @@ the specialist (pending requests hold the slot, P1).
 → **201 `Appointment`** with `status: requested`. Side effects (`appointments.services.request_by_customer`, P3; it
 locks the Customer row first, then counts open appointments and checks the own overlap):
 `Appointment(requested_via="app", created_by=null, duration_min/price snapshotted from the link, customer_note)`;
-event `requested {via: "app", start, end, service_id, professional_id, price, duration_min}` with `source =
+event `requested {via: "app", start, end, service_id, professional_id, location_id, price, duration_min}` with `source =
 customer`; audit `appointment.requested` (actor_type `customer`). No push (the customer did it); staff see it in
 `appointments/pending-summary/`.
 
@@ -1908,7 +1912,8 @@ customer`; audit `appointment.requested` (actor_type `customer`). No push (the c
  "specialist": {"id": 1, "name": "Nodira Rahimova", "role": "dermatologist", "role_label": "Dermatolog", "photo_url": null,
                 "photo_thumbnail_url": null, "photo_medium_url": null},
  "service": {"id": 1, "name": "Dermatolog konsultatsiyasi", "short_name": "Konsultatsiya"},
- "location": {"name": "Glow Derma Yunusobod", "address": "…", "phone": "+998712000000"},
+ "location": {"id": 1, "name": "Glow Derma Yunusobod", "address": "…", "directions": "…",
+              "phone": "+998712000000", "latitude": 41.36, "longitude": 69.28},
  "start": "2026-10-28T09:00:00+05:00", "end": "2026-10-28T09:30:00+05:00",
  "duration_min": 30, "price": 150000,                  // snapshots
  "note": null,                                          // the customer's own note | null
@@ -1916,6 +1921,8 @@ customer`; audit `appointment.requested` (actor_type `customer`). No push (the c
  "cancelled_by": null,                                  // "customer" | "admin" | null
  "can_cancel": true}                                    // open ∧ start − now ≥ BOOKING_CANCEL_MIN_LEAD_MINUTES
 ```
+The appointment carries its booked clinic through history and specialist schedule edits. A staff reschedule can change the booked clinic.
+
 **`GET me/appointments/?scope=upcoming|past`** → `Page<Appointment>`: `upcoming` (default) = `start ≥ now` ∧ status
 `requested`/`confirmed`, ascending by start; `past` = the rest, descending; both limited to the history horizon
 (§2.2.3). **`GET me/appointments/{id}/`** → `Appointment` (404 for another customer's or beyond the horizon).

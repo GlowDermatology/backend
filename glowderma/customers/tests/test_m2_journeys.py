@@ -574,7 +574,12 @@ def slot(day: date, hour: int, minute: int = 0) -> datetime:
 
 
 def book(app: App, link: ProfessionalService, start: datetime) -> Any:
-    body = {"specialist_id": link.professional_id, "service_id": link.service_id, "start": start.isoformat()}
+    body = {
+        "specialist_id": link.professional_id,
+        "service_id": link.service_id,
+        "location_id": link.professional.location_id,
+        "start": start.isoformat(),
+    }
     return app.post("appointments/", body, idem=True)
 
 
@@ -1287,7 +1292,12 @@ def test_journey_6_booking_race_confirm_push_ack_and_delivered_counter(
         sign_up(app, phone)
         register_push(app, f"fcm-{app.fid}")
     free = apps[0].get(
-        f"specialists/{link.professional_id}/slots/", {"date": day.isoformat(), "service_id": link.service_id}
+        f"specialists/{link.professional_id}/slots/",
+        {
+            "date": day.isoformat(),
+            "service_id": link.service_id,
+            "location_id": link.professional.location_id,
+        },
     )
     assert free.status_code == 200 and "10:00" in [s["start"] for s in free.json()["slots"]]
 
@@ -1326,7 +1336,12 @@ def test_journey_6_booking_race_confirm_push_ack_and_delivered_counter(
     assert (appointment["status"], appointment["status_label"]) == ("requested", "Tasdiqlanishi kutilmoqda")
     assert Appointment.objects.count() == 1
     taken = apps[loser].get(
-        f"specialists/{link.professional_id}/slots/", {"date": day.isoformat(), "service_id": link.service_id}
+        f"specialists/{link.professional_id}/slots/",
+        {
+            "date": day.isoformat(),
+            "service_id": link.service_id,
+            "location_id": link.professional.location_id,
+        },
     )
     assert "10:00" not in [s["start"] for s in taken.json()["slots"]]
     assert apps[loser].get("me/appointments/").json()["results"] == []
@@ -1489,7 +1504,11 @@ def test_journey_7_delete_account_then_reregister_keeps_balance_behind_the_horiz
     # the slot is free again and the hold and stock are back
     free = app.get(
         f"specialists/{link.professional_id}/slots/",
-        {"date": day.isoformat(), "service_id": link.service_id},
+        {
+            "date": day.isoformat(),
+            "service_id": link.service_id,
+            "location_id": link.professional.location_id,
+        },
         auth=False,
     )
     assert "11:00" in [s["start"] for s in free.json()["slots"]]

@@ -3036,6 +3036,253 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
+  /api/v1/admin/clinics/:
+    get:
+      operationId: admin_clinics_list
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClinicLocations'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    post:
+      operationId: admin_clinics_create
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClinicLocationCreateRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClinicLocation'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/clinics/{id}/:
+    get:
+      operationId: admin_clinics_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClinicLocation'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    patch:
+      operationId: admin_clinics_partial_update
+      description: Deactivate after reassigning active specialists and resolving upcoming
+        visits.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedClinicLocationPatchRequest'
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClinicLocation'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/admin/customers/:
     get:
       operationId: admin_customers_list
@@ -3954,126 +4201,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Job'
-          description: ''
-        '400':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '401':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '403':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '404':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '409':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '429':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-  /api/v1/admin/location/:
-    get:
-      operationId: admin_location_retrieve
-      description: The clinic (one location, decision P4); 404 until the first PATCH
-        entered it.
-      tags:
-      - admin
-      security:
-      - StaffJWT: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ClinicLocation'
-          description: ''
-        '400':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '401':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '403':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '404':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '409':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '429':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-    patch:
-      operationId: admin_location_partial_update
-      description: Texts merge leaf by leaf; the first PATCH creates the clinic and
-        needs `name.uz`.
-      tags:
-      - admin
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PatchedClinicLocationPatchRequest'
-      security:
-      - StaffJWT: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ClinicLocation'
           description: ''
         '400':
           content:
@@ -8582,9 +8709,8 @@ paths:
           description: ''
     post:
       operationId: admin_specialists_create
-      description: 'Create a specialist (inactive unless `is_active: true`; the location
-        defaults to the clinic). Add the offered services and the working hours, then
-        activate.'
+      description: Create a specialist with an explicit primary clinic and assigned
+        clinics. Add the offered services and the working hours, then activate.
       tags:
       - admin
       requestBody:
@@ -17310,6 +17436,11 @@ paths:
           type: integer
         required: true
       - in: query
+        name: location_id
+        schema:
+          type: integer
+        required: true
+      - in: query
         name: service_id
         schema:
           type: integer
@@ -17777,6 +17908,19 @@ components:
       description: |-
         * `customer` - customer
         * `admin` - admin
+    AppointmentClinic:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        address:
+          type: string
+      required:
+      - address
+      - id
+      - name
     AppointmentCreateRequest:
       type: object
       description: |-
@@ -17787,6 +17931,10 @@ components:
           type: integer
         service_id:
           type: integer
+        location_id:
+          type: integer
+          maximum: 2147483647
+          minimum: 1
         customer_id:
           type: integer
         phone:
@@ -17801,6 +17949,7 @@ components:
           type: string
           maxLength: 300
       required:
+      - location_id
       - service_id
       - specialist_id
       - start
@@ -17821,6 +17970,8 @@ components:
           type: string
         service_short_name:
           type: string
+        location:
+          $ref: '#/components/schemas/AppointmentClinic'
         duration_min:
           type: integer
         start:
@@ -17843,6 +17994,7 @@ components:
       - duration_min
       - end
       - id
+      - location
       - price
       - requested_at
       - requested_via
@@ -17852,23 +18004,6 @@ components:
       - specialist_id
       - start
       - status
-    AppointmentLocation:
-      type: object
-      properties:
-        name:
-          type: string
-          readOnly: true
-        address:
-          type: string
-          readOnly: true
-        phone:
-          type: string
-          nullable: true
-          readOnly: true
-      required:
-      - address
-      - name
-      - phone
     AppointmentRange:
       type: object
       description: |-
@@ -17914,9 +18049,14 @@ components:
         start:
           type: string
           format: date-time
+        location_id:
+          type: integer
+          maximum: 2147483647
+          minimum: 1
         specialist_id:
           type: integer
       required:
+      - location_id
       - start
     AppointmentService:
       type: object
@@ -18765,6 +18905,10 @@ components:
           type: integer
           maximum: 2147483647
           minimum: 1
+        location_id:
+          type: integer
+          maximum: 2147483647
+          minimum: 1
         start:
           type: string
           format: date-time
@@ -18773,6 +18917,7 @@ components:
           nullable: true
           maxLength: 300
       required:
+      - location_id
       - service_id
       - specialist_id
       - start
@@ -18810,8 +18955,14 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/BookingService'
+        locations:
+          type: array
+          items:
+            $ref: '#/components/schemas/AppointmentClinic'
+          readOnly: true
       required:
       - id
+      - locations
       - name
       - role
       - services
@@ -19346,8 +19497,7 @@ components:
       - name
     ClinicLocation:
       type: object
-      description: 'The clinic (decision P4: one location), shown to customers with
-        every specialist.'
+      description: An admin-managed clinic branch.
       properties:
         id:
           type: integer
@@ -19359,6 +19509,12 @@ components:
           allOf:
           - $ref: '#/components/schemas/I18nText300'
           readOnly: true
+        directions:
+          allOf:
+          - $ref: '#/components/schemas/I18nText500'
+          readOnly: true
+        is_active:
+          type: boolean
         phone:
           type: string
           nullable: true
@@ -19378,12 +19534,56 @@ components:
           format: date-time
       required:
       - address
+      - directions
       - id
+      - is_active
       - latitude
       - longitude
       - name
       - phone
       - updated_at
+    ClinicLocationCreateRequest:
+      type: object
+      description: Texts merge leaf by leaf. Coordinates must be set or cleared together.
+      properties:
+        name:
+          $ref: '#/components/schemas/LocationCreateNameRequest'
+        address:
+          $ref: '#/components/schemas/LocationCreateAddressRequest'
+        directions:
+          $ref: '#/components/schemas/LocationDirectionsRequest'
+        phone:
+          type: string
+          nullable: true
+          minLength: 1
+          description: An Uzbek mobile number; separators and a missing +998 are accepted
+            and the value is normalised to E.164 (+998XXXXXXXXX).
+        latitude:
+          type: number
+          format: double
+          maximum: 90
+          minimum: -90
+          nullable: true
+        longitude:
+          type: number
+          format: double
+          maximum: 180
+          minimum: -180
+          nullable: true
+        is_active:
+          type: boolean
+      required:
+      - address
+      - name
+    ClinicLocations:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClinicLocation'
+      required:
+      - results
     ClinicService:
       type: object
       description: |-
@@ -19518,6 +19718,11 @@ components:
           description: 1000 px WebP variant.
         location_id:
           type: integer
+        location_ids:
+          type: array
+          items:
+            type: integer
+          readOnly: true
         staff_user:
           allOf:
           - $ref: '#/components/schemas/Actor'
@@ -19552,6 +19757,7 @@ components:
       - id
       - is_active
       - location_id
+      - location_ids
       - name
       - photo_medium_url
       - photo_thumbnail_url
@@ -19572,7 +19778,7 @@ components:
         Body of ``POST specialists/`` and (``partial``, see the subclass) ``PATCH specialists/{id}/``.
 
         ``context["professional_id"]`` is the edited specialist (a staff account already linked to it is not a
-        conflict with itself). The validated data carries ``location`` and ``staff_user`` instances.
+        conflict with itself). The validated data carries a staff user instance when supplied.
       properties:
         name:
           type: string
@@ -19597,7 +19803,13 @@ components:
           type: integer
           maximum: 2147483647
           minimum: 1
-          description: 'Default: the clinic (GET location/).'
+          description: The primary clinic, which must be included in location_ids.
+        location_ids:
+          type: array
+          items:
+            type: integer
+            maximum: 2147483647
+            minimum: 1
         staff_user_id:
           type: integer
           maximum: 2147483647
@@ -19617,6 +19829,8 @@ components:
           description: Optional on create (derived from the name).
           maxLength: 160
       required:
+      - location_id
+      - location_ids
       - name
       - role
     CodeIssue:
@@ -19766,7 +19980,7 @@ components:
         service:
           $ref: '#/components/schemas/AppointmentService'
         location:
-          $ref: '#/components/schemas/AppointmentLocation'
+          $ref: '#/components/schemas/Location'
         start:
           type: string
           format: date-time
@@ -21729,6 +21943,8 @@ components:
           type: integer
         service_id:
           type: integer
+        location_id:
+          type: integer
         duration_min:
           type: integer
         price:
@@ -21746,6 +21962,7 @@ components:
       required:
       - date
       - duration_min
+      - location_id
       - price
       - service_id
       - slot_step_min
@@ -21823,6 +22040,9 @@ components:
         date:
           type: string
           format: date
+        location_id:
+          type: integer
+          nullable: true
         start:
           type: string
           format: time
@@ -21850,6 +22070,7 @@ components:
       - day_off
       - end
       - id
+      - location_id
       - note
       - start
     HoursOverrideCreateRequest:
@@ -21862,6 +22083,12 @@ components:
           type: string
           format: date
           description: Tashkent calendar day, today … today + 365.
+        location_id:
+          type: integer
+          maximum: 2147483647
+          minimum: 1
+          nullable: true
+          description: Required when working; null on a day off.
         start:
           type: string
           format: time
@@ -21945,6 +22172,24 @@ components:
         en:
           type: string
           maxLength: 40
+      required:
+      - en
+      - ru
+      - uz
+    I18nText500:
+      type: object
+      description: 'Contract 1.4: i18n text is {"uz", "ru", "en"}; "" means not filled,
+        never null.'
+      properties:
+        uz:
+          type: string
+          maxLength: 500
+        ru:
+          type: string
+          maxLength: 500
+        en:
+          type: string
+          maxLength: 500
       required:
       - en
       - ru
@@ -22421,6 +22666,9 @@ components:
         address:
           type: string
           readOnly: true
+        directions:
+          type: string
+          readOnly: true
         phone:
           type: string
           nullable: true
@@ -22437,6 +22685,7 @@ components:
           readOnly: true
       required:
       - address
+      - directions
       - id
       - latitude
       - longitude
@@ -22444,10 +22693,11 @@ components:
       - phone
     LocationAddressRequest:
       type: object
-      description: '``address``: ``{uz, ru, en}``, each ≤ 300, optional.'
+      description: Translated street address.
       properties:
         uz:
           type: string
+          minLength: 1
           maxLength: 300
         ru:
           type: string
@@ -22455,10 +22705,53 @@ components:
         en:
           type: string
           maxLength: 300
+    LocationCreateAddressRequest:
+      type: object
+      description: Translated street address.
+      properties:
+        uz:
+          type: string
+          minLength: 1
+          maxLength: 300
+        ru:
+          type: string
+          maxLength: 300
+        en:
+          type: string
+          maxLength: 300
+      required:
+      - uz
+    LocationCreateNameRequest:
+      type: object
+      description: Translated clinic display name.
+      properties:
+        uz:
+          type: string
+          minLength: 2
+          maxLength: 120
+        ru:
+          type: string
+          maxLength: 120
+        en:
+          type: string
+          maxLength: 120
+      required:
+      - uz
+    LocationDirectionsRequest:
+      type: object
+      properties:
+        uz:
+          type: string
+          maxLength: 500
+        ru:
+          type: string
+          maxLength: 500
+        en:
+          type: string
+          maxLength: 500
     LocationNameRequest:
       type: object
-      description: '``name``: ``uz`` trimmed 2..120 (required by the first PATCH);
-        ``ru`` / ``en`` ≤ 120.'
+      description: Translated clinic display name.
       properties:
         uz:
           type: string
@@ -24584,14 +24877,14 @@ components:
           default: false
     PatchedClinicLocationPatchRequest:
       type: object
-      description: |-
-        Body of ``PATCH location/`` (validated with ``partial=True``; texts merge leaf by leaf). The first
-        PATCH creates the clinic and then needs ``name.uz``; ``latitude`` and ``longitude`` are a pair.
+      description: Texts merge leaf by leaf. Coordinates must be set or cleared together.
       properties:
         name:
           $ref: '#/components/schemas/LocationNameRequest'
         address:
           $ref: '#/components/schemas/LocationAddressRequest'
+        directions:
+          $ref: '#/components/schemas/LocationDirectionsRequest'
         phone:
           type: string
           nullable: true
@@ -24610,6 +24903,8 @@ components:
           maximum: 180
           minimum: -180
           nullable: true
+        is_active:
+          type: boolean
     PatchedClinicServiceWriteRequest:
       type: object
       description: Body of ``POST services/`` and (``partial``) ``PATCH services/{id}/``
@@ -24670,7 +24965,13 @@ components:
           type: integer
           maximum: 2147483647
           minimum: 1
-          description: 'Default: the clinic (GET location/).'
+          description: The primary clinic, which must be included in location_ids.
+        location_ids:
+          type: array
+          items:
+            type: integer
+            maximum: 2147483647
+            minimum: 1
         staff_user_id:
           type: integer
           maximum: 2147483647
@@ -25868,9 +26169,14 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DayBlock'
+        location:
+          allOf:
+          - $ref: '#/components/schemas/AppointmentClinic'
+          nullable: true
       required:
       - blocks
       - date
+      - location
       - specialist_id
       - working_hours
     RangeSpecialist:
@@ -26840,8 +27146,11 @@ components:
         experience_years:
           type: integer
           nullable: true
-        location:
-          $ref: '#/components/schemas/Location'
+        locations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Location'
+          readOnly: true
         services:
           type: array
           items:
@@ -26858,7 +27167,7 @@ components:
       - content_language
       - experience_years
       - id
-      - location
+      - locations
       - name
       - photo_medium_url
       - photo_thumbnail_url
@@ -26886,6 +27195,10 @@ components:
           - $ref: '#/components/schemas/WorkingHours'
           nullable: true
           readOnly: true
+        location:
+          allOf:
+          - $ref: '#/components/schemas/AppointmentClinic'
+          nullable: true
         blocks:
           type: array
           items:
@@ -26894,6 +27207,7 @@ components:
       - blocks
       - id
       - is_active
+      - location
       - name
       - role
       - working_hours
@@ -27558,9 +27872,9 @@ components:
       - purpose
     WorkingDay:
       type: object
-      description: One working weekday (0 = Monday … 6 = Sunday) with its optional
-        recurring break.
       properties:
+        location_id:
+          type: integer
         weekday:
           type: integer
         start:
@@ -27581,11 +27895,16 @@ components:
       - break_end
       - break_start
       - end
+      - location_id
       - start
       - weekday
     WorkingDayInputRequest:
       type: object
       properties:
+        location_id:
+          type: integer
+          maximum: 2147483647
+          minimum: 1
         weekday:
           type: integer
           maximum: 6
@@ -27611,6 +27930,7 @@ components:
           description: '"HH:MM", Tashkent, minutes a multiple of 5.'
       required:
       - end
+      - location_id
       - start
       - weekday
     WorkingHours:

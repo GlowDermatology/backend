@@ -15,6 +15,7 @@ pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("clock")]  # Saturd
 
 ADMIN = "/api/v1/admin/"
 MONDAY = "2026-10-26"
+TUESDAY = "2026-10-27"
 
 
 def ok(response: Any, status: int = 200) -> dict[str, Any]:
@@ -22,10 +23,13 @@ def ok(response: Any, status: int = 200) -> dict[str, Any]:
     return dict(response.json())
 
 
-def slot_starts(client: APIClient, specialist_id: int, service_id: int) -> list[str]:
+def slot_starts(
+    client: APIClient, specialist_id: int, service_id: int, clinic_id: int, day: str = MONDAY
+) -> list[str]:
     body = ok(
         client.get(
-            f"/api/v1/specialists/{specialist_id}/slots/", {"date": MONDAY, "service_id": str(service_id)}
+            f"/api/v1/specialists/{specialist_id}/slots/",
+            {"date": day, "service_id": str(service_id), "location_id": str(clinic_id)},
         )
     )
     return [slot["start"] for slot in body["slots"]]
@@ -35,7 +39,21 @@ def test_a_specialist_set_up_by_staff_is_bookable_in_the_app(
     staff_client: APIClient, customer_client: APIClient, public_client: APIClient
 ) -> None:
     # staff: the clinic, a service, the specialist, its offer and its hours
-    ok(staff_client.patch(f"{ADMIN}location/", {"name": {"uz": "Glow Derma"}, "address": {"uz": "Toshkent"}}))
+    primary = ok(
+        staff_client.post(f"{ADMIN}clinics/", {"name": {"uz": "Glow Derma"}, "address": {"uz": "Toshkent"}}),
+        201,
+    )["id"]
+    second = ok(
+        staff_client.post(
+            f"{ADMIN}clinics/",
+            {
+                "name": {"uz": "Chilonzor filiali"},
+                "address": {"uz": "Toshkent, Chilonzor 9-mavze"},
+                "directions": {"uz": "Ikkinchi qavat"},
+            },
+        ),
+        201,
+    )["id"]
     service = ok(
         staff_client.post(
             f"{ADMIN}services/",
@@ -49,6 +67,8 @@ def test_a_specialist_set_up_by_staff_is_bookable_in_the_app(
             {
                 "name": "Malika Usmonova",
                 "role": "cosmetologist",
+                "location_id": primary,
+                "location_ids": [primary, second],
                 "qualifications": {"uz": "Kosmetolog diplomi"},
             },
         ),
@@ -57,14 +77,20 @@ def test_a_specialist_set_up_by_staff_is_bookable_in_the_app(
     pk, service_id = specialist["id"], service["id"]
     offer = {"services": [{"service_id": service_id, "price": 175_000, "duration_min": 45}]}
     ok(staff_client.put(f"{ADMIN}specialists/{pk}/services/", offer))
-    week = {"days": [{"weekday": 0, "start": "09:00", "end": "13:00"}]}
+    week = {
+        "days": [
+            {"weekday": 0, "start": "09:00", "end": "13:00", "location_id": primary},
+            {"weekday": 1, "start": "10:00", "end": "13:00", "location_id": second},
+        ]
+    }
     ok(staff_client.put(f"{ADMIN}specialists/{pk}/working-hours/", week))
 
     # created inactive: not offered to customers yet
     assert ok(public_client.get("/api/v1/specialists/"))["results"] == []
     assert (
         public_client.get(
-            f"/api/v1/specialists/{pk}/slots/", {"date": MONDAY, "service_id": service_id}
+            f"/api/v1/specialists/{pk}/slots/",
+            {"date": MONDAY, "service_id": str(service_id), "location_id": str(primary)},
         ).status_code
         == 404
     )
@@ -86,28 +112,38 @@ def test_a_specialist_set_up_by_staff_is_bookable_in_the_app(
             "price": 175_000,
         }
     ]
-    assert listed["location"]["name"] == "Glow Derma" and listed["slot_step_min"] == 15
+    assert [clinic["name"] for clinic in listed["locations"]] == ["Glow Derma", "Chilonzor filiali"]
+    assert listed["slot_step_min"] == 15
+    assert slot_starts(public_client, pk, service_id, second) == []
+    assert slot_starts(public_client, pk, service_id, primary, TUESDAY) == []
+    assert slot_starts(public_client, pk, service_id, second, TUESDAY)[0] == "10:00"
     [offered] = ok(public_client.get("/api/v1/services/"))["results"]
     assert (offered["category"], offered["price_from"], offered["specialist_ids"]) == (
         "cosmetology",
         175_000,
         [pk],
     )
-    starts = slot_starts(public_client, pk, service_id)
+    starts = slot_starts(public_client, pk, service_id, primary)
     assert starts[0] == "09:00" and starts[-1] == "12:15" and len(starts) == 14  # 15-minute grid, 45 minutes
 
     # the customer books
     booked = ok(
         customer_client.post(
             "/api/v1/appointments/",
-            {"specialist_id": pk, "service_id": service_id, "start": f"{MONDAY}T10:00:00+05:00"},
+            {
+                "specialist_id": pk,
+                "service_id": service_id,
+                "location_id": primary,
+                "start": f"{MONDAY}T10:00:00+05:00",
+            },
             HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
         ),
         201,
     )
     assert (booked["status"], booked["price"], booked["duration_min"]) == ("requested", 175_000, 45)
     assert booked["end"] == f"{MONDAY}T10:45:00+05:00"
-    after = slot_starts(public_client, pk, service_id)
+    assert booked["location"]["id"] == primary
+    after = slot_starts(public_client, pk, service_id, primary)
     assert "10:00" not in after and "09:30" not in after and "09:15" in after and "10:45" in after
     board = ok(staff_client.get(f"{ADMIN}appointments/", {"date": MONDAY}))
     assert [(s["id"], s["working_hours"]) for s in board["specialists"]] == [
@@ -119,12 +155,12 @@ def test_a_specialist_set_up_by_staff_is_bookable_in_the_app(
     # a block removes slots and leaves the booking alone; shrinking the hours turns it into a conflict
     block = {"start": f"{MONDAY}T11:00:00+05:00", "end": f"{MONDAY}T12:00:00+05:00", "kind": "busy"}
     ok(staff_client.post(f"{ADMIN}specialists/{pk}/blocks/", block), 201)
-    assert not {"10:15", "11:00", "11:30"} & set(slot_starts(public_client, pk, service_id))
+    assert not {"10:15", "11:00", "11:30"} & set(slot_starts(public_client, pk, service_id, primary))
     assert ok(staff_client.get(f"{ADMIN}specialists/{pk}/conflicts/"))["results"] == []
     ok(
         staff_client.put(
             f"{ADMIN}specialists/{pk}/working-hours/",
-            {"days": [{"weekday": 0, "start": "09:00", "end": "10:00"}]},
+            {"days": [{"weekday": 0, "start": "09:00", "end": "10:00", "location_id": second}]},
         )
     )
     conflicts = ok(staff_client.get(f"{ADMIN}specialists/{pk}/conflicts/"))["results"]
@@ -136,11 +172,13 @@ def test_a_specialist_set_up_by_staff_is_bookable_in_the_app(
     assert refused.status_code == 409 and "1 ta kelgusi qabul" in refused.json()["message"]
     ok(staff_client.patch(f"{ADMIN}specialists/{pk}/", {"is_active": False, "force": True}))
     assert public_client.get(f"/api/v1/specialists/{pk}/").status_code == 404
-    assert ok(customer_client.get(f"/api/v1/me/appointments/{booked['id']}/"))["status"] == "requested"
+    history = ok(customer_client.get(f"/api/v1/me/appointments/{booked['id']}/"))
+    assert history["status"] == "requested" and history["location"]["id"] == primary
     board = ok(staff_client.get(f"{ADMIN}appointments/", {"date": MONDAY}))
     assert [(s["id"], s["is_active"]) for s in board["specialists"]] == [(pk, False)]
     actions = list(AuditEntry.objects.order_by("id").values_list("action", flat=True))
     assert actions == [
+        "location.created",
         "location.created",
         "service.created",
         "professional.created",

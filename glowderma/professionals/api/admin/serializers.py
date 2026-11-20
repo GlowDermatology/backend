@@ -32,6 +32,7 @@ from glowderma.core.api.fields import (
 from glowderma.core.api.serializers import ActorSerializer
 from glowderma.core.media import absolute_media_url, optional_variant_url
 from glowderma.core.uzsource import N_
+from glowderma.professionals import selectors
 from glowderma.professionals.models import (
     BlockedPeriod,
     Location,
@@ -65,7 +66,6 @@ MESSAGES = {
     "weekday_twice": N_("Bu hafta kuni ikki marta berilgan."),
     "service_twice": N_("Bu xizmat ro‘yxatda ikki marta berilgan."),
     "service_not_found": N_("Xizmat topilmadi."),
-    "location_not_found": N_("Manzil topilmadi."),
     "staff_not_found": N_("Xodim topilmadi."),
     "staff_taken": N_("Bu xodim boshqa mutaxassisga bog‘langan."),
     "slot_step": N_("Ruxsat etilgan qadamlar: 10, 15, 20, 30 yoki 60 daqiqa."),
@@ -154,7 +154,7 @@ class ServiceDescriptionSerializer(serializers.Serializer[dict[str, str]]):
 
 
 class LocationNameSerializer(serializers.Serializer[dict[str, str]]):
-    """``name``: ``uz`` trimmed 2..120 (required by the first PATCH); ``ru`` / ``en`` ≤ 120."""
+    """Translated clinic display name."""
 
     uz = serializers.CharField(min_length=2, max_length=120, required=False)
     ru = serializers.CharField(max_length=120, allow_blank=True, required=False)
@@ -162,11 +162,25 @@ class LocationNameSerializer(serializers.Serializer[dict[str, str]]):
 
 
 class LocationAddressSerializer(serializers.Serializer[dict[str, str]]):
-    """``address``: ``{uz, ru, en}``, each ≤ 300, optional."""
+    """Translated street address."""
 
-    uz = serializers.CharField(max_length=300, allow_blank=True, required=False)
+    uz = serializers.CharField(max_length=300, required=False)
     ru = serializers.CharField(max_length=300, allow_blank=True, required=False)
     en = serializers.CharField(max_length=300, allow_blank=True, required=False)
+
+
+class LocationDirectionsSerializer(serializers.Serializer[dict[str, str]]):
+    uz = serializers.CharField(max_length=500, allow_blank=True, required=False)
+    ru = serializers.CharField(max_length=500, allow_blank=True, required=False)
+    en = serializers.CharField(max_length=500, allow_blank=True, required=False)
+
+
+class LocationCreateNameSerializer(LocationNameSerializer):
+    uz = serializers.CharField(min_length=2, max_length=120)
+
+
+class LocationCreateAddressSerializer(LocationAddressSerializer):
+    uz = serializers.CharField(max_length=300)
 
 
 # --- specialists --------------------------------------------------------------------------------------------
@@ -187,6 +201,7 @@ class OfferedServiceSerializer(serializers.Serializer[ProfessionalService]):
 
 
 class WorkingDaySerializer(serializers.Serializer[WorkingHours]):
+    location_id = serializers.IntegerField()
     """One working weekday (0 = Monday … 6 = Sunday) with its optional recurring break."""
 
     weekday = serializers.IntegerField()
@@ -214,6 +229,7 @@ class ClinicSpecialistSerializer(serializers.Serializer[Professional]):
     photo_thumbnail_url = serializers.SerializerMethodField(help_text="400 px WebP variant.")
     photo_medium_url = serializers.SerializerMethodField(help_text="1000 px WebP variant.")
     location_id = serializers.IntegerField()
+    location_ids = serializers.SerializerMethodField()
     staff_user = ActorSerializer(allow_null=True)
     slot_step_min = serializers.IntegerField()
     position = serializers.IntegerField()
@@ -223,6 +239,10 @@ class ClinicSpecialistSerializer(serializers.Serializer[Professional]):
     upcoming_appointments = serializers.SerializerMethodField()
     created_at = serializers.DateTimeField()
     updated_at = serializers.DateTimeField()
+
+    @extend_schema_field(serializers.ListField(child=serializers.IntegerField()))
+    def get_location_ids(self, obj: Professional) -> list[int]:
+        return selectors.assigned_location_ids(obj)
 
     @extend_schema_field(i18n_text(2000))
     def get_qualifications(self, obj: Professional) -> dict[str, str]:
@@ -263,7 +283,7 @@ class ClinicSpecialistWriteSerializer(serializers.Serializer[dict[str, Any]]):
     """Body of ``POST specialists/`` and (``partial``, see the subclass) ``PATCH specialists/{id}/``.
 
     ``context["professional_id"]`` is the edited specialist (a staff account already linked to it is not a
-    conflict with itself). The validated data carries ``location`` and ``staff_user`` instances.
+    conflict with itself). The validated data carries a staff user instance when supplied.
     """
 
     name = serializers.CharField(min_length=2, max_length=150)
@@ -274,7 +294,8 @@ class ClinicSpecialistWriteSerializer(serializers.Serializer[dict[str, Any]]):
     slot_step_min = serializers.IntegerField(
         required=False, help_text="The customer slot grid in minutes: 10, 15, 20, 30 (default) or 60."
     )
-    location_id = _int(required=False, help_text="Default: the clinic (GET location/).")
+    location_id = _int(help_text="The primary clinic, which must be included in location_ids.")
+    location_ids = serializers.ListField(child=_int(), allow_empty=False)
     staff_user_id = _int(required=False, allow_null=True, help_text="An active staff account, or null.")
     position = serializers.IntegerField(min_value=0, max_value=MAX_POSITION, required=False)
     is_active = serializers.BooleanField(required=False, default=False)
@@ -306,11 +327,15 @@ class ClinicSpecialistWriteSerializer(serializers.Serializer[dict[str, Any]]):
             raise serializers.ValidationError(field_error("invalid_choice", MESSAGES["slot_step"]))
         return value
 
-    def validate_location_id(self, value: int) -> Location:
-        location = Location.objects.filter(pk=value).first()
-        if location is None:
-            raise serializers.ValidationError(field_error("does_not_exist", MESSAGES["location_not_found"]))
-        return location
+    def validate_location_id(self, location_id: int) -> int:
+        if not Location.objects.filter(pk=location_id).exists():
+            raise serializers.ValidationError(field_error("does_not_exist", N_("Manzil topilmadi.")))
+        return location_id
+
+    def validate_location_ids(self, ids: list[int]) -> list[int]:
+        if len(ids) != len(set(ids)):
+            raise serializers.ValidationError(field_error("unique"))
+        return ids
 
     def validate_staff_user_id(self, value: int | None) -> StaffUser | None:
         if value is None:
@@ -337,8 +362,6 @@ class ClinicSpecialistWriteSerializer(serializers.Serializer[dict[str, Any]]):
         return staff
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
-        if "location_id" in attrs:
-            attrs["location"] = attrs.pop("location_id")
         if "staff_user_id" in attrs:
             attrs["staff_user"] = attrs.pop("staff_user_id")
         return attrs
@@ -393,6 +416,7 @@ class OfferedServicesSerializer(serializers.Serializer[dict[str, Any]]):
 
 
 class WorkingDayInputSerializer(serializers.Serializer[dict[str, Any]]):
+    location_id = _int()
     weekday = serializers.IntegerField(min_value=0, max_value=6, help_text="0 = Monday … 6 = Sunday.")
     start = ClockField()
     end = ClockField()
@@ -437,6 +461,7 @@ class HoursOverrideSerializer(serializers.Serializer[WorkingHoursOverride]):
 
     id = serializers.IntegerField()
     date = serializers.DateField()
+    location_id = serializers.IntegerField(allow_null=True)
     start = serializers.TimeField(format="%H:%M", allow_null=True)
     end = serializers.TimeField(format="%H:%M", allow_null=True)
     day_off = serializers.SerializerMethodField()
@@ -453,6 +478,7 @@ class HoursOverrideCreateSerializer(serializers.Serializer[dict[str, Any]]):
     both null / omitted (a day off)."""
 
     date = serializers.DateField(help_text="Tashkent calendar day, today … today + 365.")
+    location_id = _int(allow_null=True, required=False, help_text="Required when working; null on a day off.")
     start = ClockField(allow_null=True, required=False)
     end = ClockField(allow_null=True, required=False)
     note = serializers.CharField(max_length=120, allow_blank=True, required=False)
@@ -471,6 +497,11 @@ class HoursOverrideCreateSerializer(serializers.Serializer[dict[str, Any]]):
             raise _error("start" if start is None else "end", "required", MESSAGES["hours_pair"])
         if start is not None and end is not None and end <= start:
             raise _error("end", "invalid", MESSAGES["end_before_start"])
+        location_id = attrs.get("location_id")
+        if start is not None and location_id is None:
+            raise _error("location_id", "required")
+        if start is None and location_id is not None:
+            raise _error("location_id", "invalid")
         return {**attrs, "start": start, "end": end, "note": attrs.get("note", "")}
 
 
@@ -615,11 +646,13 @@ class ClinicServiceWriteSerializer(serializers.Serializer[dict[str, Any]]):
 
 
 class ClinicLocationSerializer(serializers.Serializer[Location]):
-    """The clinic (decision P4: one location), shown to customers with every specialist."""
+    """An admin-managed clinic branch."""
 
     id = serializers.IntegerField()
     name = serializers.SerializerMethodField()
     address = serializers.SerializerMethodField()
+    directions = serializers.SerializerMethodField()
+    is_active = serializers.BooleanField()
     phone = serializers.SerializerMethodField()
     latitude = serializers.SerializerMethodField()
     longitude = serializers.SerializerMethodField()
@@ -633,6 +666,10 @@ class ClinicLocationSerializer(serializers.Serializer[Location]):
     def get_address(self, obj: Location) -> dict[str, str]:
         return i18n_dict(obj, "address")
 
+    @extend_schema_field(i18n_text(500))
+    def get_directions(self, obj: Location) -> dict[str, str]:
+        return i18n_dict(obj, "directions")
+
     @extend_schema_field(serializers.CharField(allow_null=True))
     def get_phone(self, obj: Location) -> str | None:
         return obj.phone or None
@@ -644,6 +681,10 @@ class ClinicLocationSerializer(serializers.Serializer[Location]):
     @extend_schema_field(serializers.FloatField(allow_null=True))
     def get_longitude(self, obj: Location) -> float | None:
         return None if obj.longitude is None else round(float(obj.longitude), 6)
+
+
+class ClinicLocationsSerializer(serializers.Serializer[dict[str, Any]]):
+    results = ClinicLocationSerializer(many=True)
 
 
 def _coordinate(limit: int) -> serializers.DecimalField:
@@ -660,11 +701,17 @@ def _coordinate(limit: int) -> serializers.DecimalField:
 
 
 class ClinicLocationPatchSerializer(serializers.Serializer[dict[str, Any]]):
-    """Body of ``PATCH location/`` (validated with ``partial=True``; texts merge leaf by leaf). The first
-    PATCH creates the clinic and then needs ``name.uz``; ``latitude`` and ``longitude`` are a pair."""
+    """Texts merge leaf by leaf. Coordinates must be set or cleared together."""
 
     name = LocationNameSerializer(required=False)
     address = LocationAddressSerializer(required=False)
+    directions = LocationDirectionsSerializer(required=False)
     phone = LenientPhoneField(allow_null=True, required=False)
     latitude = _coordinate(90)
     longitude = _coordinate(180)
+    is_active = serializers.BooleanField(required=False)
+
+
+class ClinicLocationCreateSerializer(ClinicLocationPatchSerializer):
+    name = LocationCreateNameSerializer()
+    address = LocationCreateAddressSerializer()
