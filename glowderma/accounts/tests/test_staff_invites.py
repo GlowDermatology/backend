@@ -144,7 +144,7 @@ def test_email_delivery_is_a_field_error_without_the_capability(manager: StaffUs
     body = {"email": "a@x.uz", "full_name": "Aziza", "delivery": delivery}
     with override_settings(ADMIN_PANEL_URL=""):
         response = client.post(STAFF, body, **key())
-        assert client.get(ME).data["capabilities"] == {"staff_email_invite": False}
+        assert client.get(ME).data["capabilities"]["staff_email_invite"] is False
     assert response.status_code == 400
     [error] = response.data["errors"]
     assert (error["field"], error["code"]) == ("delivery", "invalid_choice")
@@ -444,7 +444,7 @@ def test_me_and_login_carry_the_new_fields(staff: StaffUser) -> None:
     assert login.status_code == 200
     user = login.data["user"]
     assert (user["must_change_password"], user["language"], user["mfa_enabled"]) == (False, "uz", False)
-    assert user["capabilities"] == {"staff_email_invite": True}
+    assert user["capabilities"]["staff_email_invite"] is True
 
 
 def test_patch_me_validates_the_language(staff_client: APIClient, staff: StaffUser) -> None:

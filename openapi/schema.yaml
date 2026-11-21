@@ -8582,6 +8582,887 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
+  /api/v1/admin/specialist/availability/:
+    get:
+      operationId: specialist_availability
+      parameters:
+      - in: query
+        name: date_from
+        schema:
+          type: string
+          format: date
+      - in: query
+        name: date_to
+        schema:
+          type: string
+          format: date
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpecialistAvailability'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialist/blocks/:
+    post:
+      operationId: specialist_block_create
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BlockedPeriodCreateRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '204':
+          description: No response body
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialist/blocks/{id}/:
+    put:
+      operationId: specialist_block_update
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BlockedPeriodCreateRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '204':
+          description: No response body
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    delete:
+      operationId: specialist_block_delete
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '204':
+          description: No response body
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialist/bookings/{id}/{action}/:
+    post:
+      operationId: specialist_booking_action
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: action
+        schema:
+          type: string
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '204':
+          description: No response body
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialist/bookings/{id}/cancel/:
+    post:
+      operationId: specialist_booking_cancel
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppointmentCancelRequest'
+      security:
+      - StaffJWT: []
+      responses:
+        '204':
+          description: No response body
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialist/bookings/{id}/reschedule/:
+    post:
+      operationId: specialist_booking_reschedule
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SpecialistRescheduleRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '204':
+          description: No response body
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialist/calendar/:
+    get:
+      operationId: specialist_calendar
+      parameters:
+      - in: query
+        name: from
+        schema:
+          type: string
+          format: date
+        required: true
+      - in: query
+        name: to
+        schema:
+          type: string
+          format: date
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpecialistCalendar'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialist/conflicts/:
+    get:
+      operationId: specialist_conflicts
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpecialistConflicts'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialist/overrides/:
+    post:
+      operationId: specialist_override_create
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HoursOverrideCreateRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '204':
+          description: No response body
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialist/overrides/{id}/:
+    put:
+      operationId: specialist_override_update
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HoursOverrideCreateRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '204':
+          description: No response body
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    delete:
+      operationId: specialist_override_delete
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '204':
+          description: No response body
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialist/weekly-hours/:
+    put:
+      operationId: specialist_weekly_hours_update
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkingWeekRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '204':
+          description: No response body
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/admin/specialists/:
     get:
       operationId: admin_specialists_list
@@ -8867,6 +9748,154 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ClinicSpecialist'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialists/{id}/access/convert/:
+    post:
+      operationId: admin_specialist_convert
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaffConversionRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '204':
+          description: No response body
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialists/{id}/access/invite/:
+    post:
+      operationId: admin_specialist_invite
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkforceInviteRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffCredentials'
           description: ''
         '400':
           content:
@@ -19052,6 +20081,8 @@ components:
     Capabilities:
       type: object
       properties:
+        specialist_provisioning:
+          type: boolean
         staff_email_invite:
           type: boolean
           description: 'Password links can be e-mailed (`delivery` `email_link` /
@@ -19727,6 +20758,11 @@ components:
           allOf:
           - $ref: '#/components/schemas/Actor'
           nullable: true
+        staff_user_role:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/StaffRoleEnum'
+          - $ref: '#/components/schemas/NullEnum'
         slot_step_min:
           type: integer
         position:
@@ -22842,6 +23878,8 @@ components:
           format: email
         display_name:
           type: string
+        role:
+          $ref: '#/components/schemas/StaffRoleEnum'
         is_superuser:
           type: boolean
         is_manager:
@@ -22898,6 +23936,7 @@ components:
       - linked_providers
       - mfa_enabled
       - must_change_password
+      - role
       - session_expires_at
     MeEmailCodeRequest:
       type: object
@@ -26472,6 +27511,19 @@ components:
           minimum: 0
       required:
       - revoked
+    ScheduleClinic:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        address:
+          type: string
+      required:
+      - address
+      - id
+      - name
     ScheduleConflicts:
       type: object
       description: '``GET specialists/{id}/conflicts/``: open future appointments
@@ -27179,6 +28231,87 @@ components:
       - slot_step_min
       - slug
       - updated_at
+    SpecialistAvailability:
+      type: object
+      properties:
+        clinics:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScheduleClinic'
+        working_hours:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkingDay'
+        overrides:
+          type: array
+          items:
+            $ref: '#/components/schemas/HoursOverride'
+        blocks:
+          type: array
+          items:
+            $ref: '#/components/schemas/BlockedPeriod'
+      required:
+      - blocks
+      - clinics
+      - overrides
+      - working_hours
+    SpecialistBooking:
+      type: object
+      properties:
+        id:
+          type: integer
+        customer_name:
+          type: string
+        customer_phone:
+          type: string
+          nullable: true
+        customer_note:
+          type: string
+        service:
+          type: string
+        location:
+          $ref: '#/components/schemas/ScheduleClinic'
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/AppointmentStatusEnum'
+      required:
+      - customer_name
+      - customer_note
+      - customer_phone
+      - end
+      - id
+      - location
+      - service
+      - start
+      - status
+    SpecialistCalendar:
+      type: object
+      properties:
+        schedules:
+          type: array
+          items:
+            $ref: '#/components/schemas/RangeSchedule'
+        appointments:
+          type: array
+          items:
+            $ref: '#/components/schemas/SpecialistBooking'
+      required:
+      - appointments
+      - schedules
+    SpecialistConflicts:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SpecialistBooking'
+      required:
+      - results
     SpecialistDay:
       type: object
       properties:
@@ -27228,6 +28361,21 @@ components:
           format: binary
       required:
       - file
+    SpecialistRescheduleRequest:
+      type: object
+      properties:
+        start:
+          type: string
+          format: date-time
+        location_id:
+          type: integer
+          maximum: 2147483647
+          minimum: 1
+        customer_agreed:
+          type: boolean
+          default: false
+      required:
+      - start
     SpecialistRoleEnum:
       enum:
       - dermatologist
@@ -27275,12 +28423,17 @@ components:
           type: string
           default: ''
           maxLength: 2000
+    StaffConversionRequest:
+      type: object
+      properties:
+        staff_user_id:
+          type: integer
+          minimum: 1
+      required:
+      - staff_user_id
     StaffCreateRequest:
       type: object
-      description: |-
-        ``POST staff/`` body: ``email`` (trimmed, lower-cased, unique), ``full_name`` (trimmed 2..150),
-        ``is_manager`` (default ``false``), ``delivery`` (default ``temporary_password``), ``language`` (the
-        person's panel and e-mail language, default ``uz``).
+      description: Create a staff account, optionally granting the manager role.
       properties:
         email:
           type: string
@@ -27291,9 +28444,6 @@ components:
           type: string
           minLength: 2
           maxLength: 150
-        is_manager:
-          type: boolean
-          default: false
         delivery:
           allOf:
           - $ref: '#/components/schemas/StaffPasswordDeliveryEnum'
@@ -27308,6 +28458,9 @@ components:
           allOf:
           - $ref: '#/components/schemas/ContentLanguageEnum'
           default: uz
+        is_manager:
+          type: boolean
+          default: false
       required:
       - email
       - full_name
@@ -27416,6 +28569,11 @@ components:
           type: boolean
           nullable: true
           description: Manager only, else `null`.
+        role:
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/StaffRoleEnum'
+          - $ref: '#/components/schemas/NullEnum'
         last_login_at:
           type: string
           format: date-time
@@ -27463,6 +28621,7 @@ components:
       - linked_providers
       - mfa_enabled
       - must_change_password
+      - role
     StaffMember:
       type: object
       description: '``StaffMember`` (§2.16): a staff account as managers see it; every
@@ -27482,6 +28641,8 @@ components:
           type: boolean
         is_manager:
           type: boolean
+        role:
+          $ref: '#/components/schemas/StaffRoleEnum'
         last_login_at:
           type: string
           format: date-time
@@ -27527,6 +28688,7 @@ components:
       - mfa_enabled
       - must_change_password
       - password_changed_at
+      - role
     StaffPasswordDeliveryEnum:
       enum:
       - temporary_password
@@ -27570,6 +28732,14 @@ components:
             * `temporary_password` - temporary_password
             * `email_link` - email_link
             * `both` - both
+    StaffRoleEnum:
+      enum:
+      - admin
+      - specialist
+      type: string
+      description: |-
+        * `admin` - admin
+        * `specialist` - specialist
     StatusCounts:
       type: object
       properties:
@@ -27870,6 +29040,39 @@ components:
       required:
       - code
       - purpose
+    WorkforceInviteRequest:
+      type: object
+      description: |-
+        ``POST staff/`` body: ``email`` (trimmed, lower-cased, unique), ``full_name`` (trimmed 2..150),
+        ``is_manager`` (default ``false``), ``delivery`` (default ``temporary_password``), ``language`` (the
+        person's panel and e-mail language, default ``uz``).
+      properties:
+        email:
+          type: string
+          format: email
+          minLength: 1
+          maxLength: 254
+        full_name:
+          type: string
+          minLength: 2
+          maxLength: 150
+        delivery:
+          allOf:
+          - $ref: '#/components/schemas/StaffPasswordDeliveryEnum'
+          default: temporary_password
+          description: |-
+            `temporary_password` (shown once in the answer), `email_link` (a single-use link to the account's e-mail; no usable password until it is used) or `both`. The e-mail options need `Me.capabilities.staff_email_invite` (else `invalid_choice`).
+
+            * `temporary_password` - temporary_password
+            * `email_link` - email_link
+            * `both` - both
+        language:
+          allOf:
+          - $ref: '#/components/schemas/ContentLanguageEnum'
+          default: uz
+      required:
+      - email
+      - full_name
     WorkingDay:
       type: object
       properties:

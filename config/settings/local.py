@@ -21,6 +21,7 @@ INTERNAL_API_SECRET = env_str("INTERNAL_API_SECRET", "local-internal-secret-at-l
 JWT_SIGNING_KEYS = {"dev": b"local-jwt-signing-key-at-least-32-bytes"}
 JWT_ACTIVE_KID = "dev"
 DJANGO_ADMIN_ENABLED = env_bool("DJANGO_ADMIN_ENABLED", True)
+SPECIALIST_PROVISIONING_ENABLED = env_bool("SPECIALIST_PROVISIONING_ENABLED", True)
 # The Next admin panel of `npm run dev` (staff invite / password links; feat/admin-ux).
 ADMIN_PANEL_URL = BASE_ADMIN_PANEL_URL or "http://localhost:3000/admin"
 ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", ["localhost", "127.0.0.1", "testserver"])

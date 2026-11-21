@@ -249,10 +249,10 @@ def collect() -> Catalog:
     root = base_dir()
     for path in python_files():
         for message in python_messages(path.read_text(encoding="utf-8")):
-            catalog.add(message, str(path.relative_to(root)))
+            catalog.add(message, path.relative_to(root).as_posix())
     for path in template_files():
         for message in template_messages(path.read_text(encoding="utf-8")):
-            catalog.add(message, str(path.relative_to(root)))
+            catalog.add(message, path.relative_to(root).as_posix())
     for text in sorted(console_i18n.metadata_texts()):
         catalog.add(Message(text), "model metadata")
     for text, source in dynamic_texts().items():

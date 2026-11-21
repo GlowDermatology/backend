@@ -1134,6 +1134,10 @@ msgstr "Заблокировано"
 msgid "Bloklangan = noto‘g‘ri urinishlar chegarasiga yetgan kod · 7 kun"
 msgstr "Заблокировано = код, достигший лимита неверных попыток · 7 дней"
 
+#: glowderma/professionals/services.py
+msgid "Bog‘langan xodim hisobi o‘zgardi. Sahifani yangilang."
+msgstr "Привязанный аккаунт сотрудника изменился. Обновите страницу."
+
 #: glowderma/catalog/admin.py
 msgid "Bor"
 msgstr "В наличии"
@@ -1200,6 +1204,10 @@ msgstr "Товар с таким Billz ID уже существует."
 #: glowderma/appointments/services.py
 msgid "Bu amal ushbu holatda mumkin emas."
 msgstr "Это действие недоступно в текущем статусе."
+
+#: glowderma/appointments/services.py
+msgid "Bu amalni qabulning ushbu vaqtida bajarib bo‘lmaydi."
+msgstr "Это действие недоступно на данном этапе приёма."
 
 #: glowderma/commerce/services.py
 msgid "Bu buyurtma bo‘yicha Yandex bilan boshqa amal bajarilmoqda (kuryer chaqirilmoqda). Birozdan so‘ng qayta urinib ko‘ring."
@@ -1292,6 +1300,10 @@ msgstr "У этого клиента нет устройства, принима
 #: glowderma/commerce/api/admin/views.py
 msgid "Bu muammo allaqachon hal qilingan."
 msgstr "Эта проблема уже решена."
+
+#: glowderma/professionals/services.py
+msgid "Bu mutaxassisga hisob allaqachon bog‘langan."
+msgstr "К этому специалисту уже привязан аккаунт."
 
 #: glowderma/accounts/services.py
 msgid "Bu provayder allaqachon bog‘langan."
@@ -1992,6 +2004,10 @@ msgstr "Чтобы активировать, сначала успешно пр�
 #: glowderma/professionals/services.py
 msgid "Faqat JPEG, PNG yoki WebP rasm."
 msgstr "Только изображения JPEG, PNG или WebP."
+
+#: glowderma/accounts/services.py
+msgid "Faqat faol oddiy xodim hisobini mutaxassisga o‘tkazish mumkin."
+msgstr "Перевести в специалисты можно только активный аккаунт обычного сотрудника."
 
 #: glowderma/catalog/api/admin/serializers.py
 #: glowderma/professionals/api/admin/serializers.py
@@ -3376,6 +3392,10 @@ msgstr "Клиент не найден."
 msgid "Mijoz to‘lovi"
 msgstr "Оплата клиента"
 
+#: glowderma/appointments/services.py
+msgid "Mijoz yangi filialga rozi bo‘lganini tasdiqlang."
+msgstr "Подтвердите, что клиент согласился на новый филиал."
+
 #: glowderma.core.labels.REFUND_MANUAL_CLICK
 msgid "Mijozga qo‘lda to‘lang, so‘ng «Qaytarildi» deb belgilang"
 msgstr "Выплатите клиенту вручную, затем отметьте как «Возвращено»"
@@ -3466,6 +3486,7 @@ msgstr "Срок истёк"
 
 #: admin history (professionals.WorkingHours)
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
+#: model metadata
 msgid "Mutaxassis"
 msgstr "Специалист"
 
@@ -3492,6 +3513,22 @@ msgstr "Специалист в это время работает в друго
 #: glowderma/appointments/services.py
 msgid "Mutaxassis bu xizmatni ko‘rsatmaydi."
 msgstr "Специалист не оказывает эту услугу."
+
+#: glowderma/professionals/services.py
+msgid "Mutaxassis hisobi faqat taklif yoki hisobni o‘tkazish orqali bog‘lanadi."
+msgstr "Чтобы привязать аккаунт специалиста, отправьте приглашение или переведите аккаунт сотрудника."
+
+#: glowderma/accounts/services.py
+msgid "Mutaxassis hisobi menejer bo‘la olmaydi."
+msgstr "Аккаунт специалиста не может стать аккаунтом менеджера."
+
+#: glowderma/accounts/console/access.py
+msgid "Mutaxassis hisobiga konsolga kirish huquqini berib bo‘lmaydi."
+msgstr "Аккаунту специалиста нельзя предоставить доступ к консоли."
+
+#: glowderma/professionals/api/specialist.py
+msgid "Mutaxassis jadvali hozir mavjud emas."
+msgstr "Расписание специалиста сейчас недоступно."
 
 #: glowderma/appointments/api/admin/serializers.py
 #: glowderma/appointments/services.py

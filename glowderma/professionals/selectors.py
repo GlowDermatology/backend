@@ -257,6 +257,18 @@ SEARCH_MAX_LENGTH = 64
 CI_COLLATION = "glowderma_ci"  # the ICU case-insensitive collation of core.0007 (decision T12)
 
 
+def active_specialist_account(user_id: int, *, lock: bool = False) -> Professional | None:
+    rows = Professional.objects.filter(
+        staff_user_id=user_id,
+        staff_user__role=enums.StaffRole.SPECIALIST,
+        staff_user__is_active=True,
+        is_active=True,
+    )
+    if lock:
+        rows = rows.select_for_update(of=("self",))
+    return rows.first()
+
+
 def assigned_locations(professional: Professional, *, active_only: bool = False) -> list[Location]:
     """Primary clinic first, then additional clinics in display order."""
     additional = getattr(professional, "clinic_rows", None)

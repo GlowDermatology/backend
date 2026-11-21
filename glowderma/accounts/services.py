@@ -280,6 +280,7 @@ def create_staff(
     delivery: str = enums.StaffPasswordDelivery.TEMPORARY_PASSWORD,
     language: str = enums.ContentLanguage.UZ,
     must_change: bool | None = None,
+    role: enums.StaffRole = enums.StaffRole.ADMIN,
 ) -> tuple[StaffUser, str | None]:
     """Create an active staff account and return it with its temporary password (admin contract §2.16
     ``POST staff/``), ``None`` when ``delivery`` is ``email_link`` alone.
@@ -300,8 +301,10 @@ def create_staff(
     if StaffUser.objects.filter(email__iexact=email).exists():
         raise ValidationError({"email": [field_error("unique", STAFF_EMAIL_TAKEN)]})
     manager = is_manager or is_superuser
+    if role == enums.StaffRole.SPECIALIST and manager:
+        raise ValueError("Specialist accounts cannot receive admin privileges")
     # Locked so two concurrent first accounts (or a concurrent demotion) see one another's result.
-    if not manager and not _lock_active_managers():
+    if role == enums.StaffRole.ADMIN and not manager and not _lock_active_managers():
         manager = True
     user = StaffUser(email=email, full_name=full_name, is_manager=manager)
     raw = _new_password(user, password, delivery)
@@ -314,6 +317,7 @@ def create_staff(
                 raw,
                 full_name=full_name,
                 is_manager=manager,
+                role=role,
                 must_change_password=flagged,
                 language=language,
             )
@@ -329,6 +333,7 @@ def create_staff(
             "email": user.email,
             "full_name": user.full_name,
             "is_manager": user.is_manager,
+            "role": user.role,
             "delivery": delivery,
             "must_change_password": flagged,
         },
@@ -339,6 +344,33 @@ def create_staff(
             user, enums.StaffPasswordPurpose.INVITE, actor=actor, request=request, via="create", reason=reason
         )
     return user, raw
+
+
+@transaction.atomic
+def convert_staff_to_specialist(user_id: int, *, actor: StaffUser, request: Any = None) -> StaffUser:
+    user = StaffUser.objects.select_for_update().get(pk=user_id)
+    if (
+        not user.is_active
+        or user.role != enums.StaffRole.ADMIN
+        or user.is_manager
+        or user.is_superuser
+        or user.is_staff
+    ):
+        raise Conflict(N_("Faqat faol oddiy xodim hisobini mutaxassisga o‘tkazish mumkin."))
+    user.role = enums.StaffRole.SPECIALIST
+    user.save(update_fields=["role"])
+    sessions = _revoke_user_sessions(user, enums.SessionRevokeReason.ADMIN_REVOKED)
+    audit.record(
+        action="staff.role_changed",
+        entity_type="staff",
+        entity_id=str(user.pk),
+        actor=actor,
+        request=request,
+        before={"role": enums.StaffRole.ADMIN},
+        after={"role": user.role, "revoked_count": len(sessions)},
+    )
+    _audit_revoked_sessions(sessions, actor=actor, request=request, reason="")
+    return user
 
 
 @transaction.atomic
@@ -369,6 +401,8 @@ def update_staff(
     for name, value in changes.items():
         if getattr(stored, name) != value:
             before[name], after[name] = getattr(stored, name), value
+    if after.get("is_manager") is True and stored.role == enums.StaffRole.SPECIALIST:
+        raise Conflict(N_("Mutaxassis hisobi menejer bo‘la olmaydi."))
     if after.get("is_manager") is False:
         if stored.is_superuser:
             raise Conflict(STAFF_SUPERUSER_MANAGER)

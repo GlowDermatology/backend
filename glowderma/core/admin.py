@@ -42,7 +42,7 @@ from unfold.contrib.filters.admin import (
 from unfold.decorators import display as unfold_display
 from unfold.utils import display_for_label
 
-from glowderma.core import consistency, outbox, timeutils
+from glowderma.core import consistency, enums, outbox, timeutils
 from glowderma.core.admin_actions import (
     ActionResult,
     ActionVariant,
@@ -381,7 +381,7 @@ class TitledObject:
 def is_active_staff(request: HttpRequest) -> bool:
     """The one predicate behind every view grant of the read-only admin (and its inlines)."""
     user = request.user
-    return bool(user.is_active and user.is_staff)
+    return bool(user.is_active and user.is_staff and user.role == enums.StaffRole.ADMIN)
 
 
 _is_active_staff = is_active_staff

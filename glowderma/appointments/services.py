@@ -14,7 +14,7 @@ from typing import Any
 
 from django.conf import settings
 from django.db import IntegrityError, OperationalError, connection, transaction
-from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 
 from glowderma.accounts.models import Customer, Device
 from glowderma.appointments import selectors, topics
@@ -32,7 +32,12 @@ from glowderma.core.api.exceptions import (
 )
 from glowderma.core.uzsource import N_
 from glowderma.professionals.models import Location, Professional, ProfessionalService, Service
-from glowderma.professionals.selectors import DAY_END_LABEL, day_schedules, has_location
+from glowderma.professionals.selectors import (
+    DAY_END_LABEL,
+    active_specialist_account,
+    day_schedules,
+    has_location,
+)
 from glowderma.site_config import selectors as site_config_selectors
 
 SLOT_STEP_MIN = 5  # admin bookings sit on a 5-minute grid (open point A-4: not the professional's slot_step)
@@ -247,6 +252,27 @@ def _locked(appointment_id: int) -> Appointment:
     return Appointment.objects.select_for_update().get(pk=appointment_id)
 
 
+def _locked_for_action(appointment_id: int, action: str, specialist_account_id: int | None) -> Appointment:
+    if specialist_account_id is None:
+        return _locked(appointment_id)
+    appointment = (
+        Appointment.objects.select_for_update(of=("self",))
+        .filter(pk=appointment_id, professional__staff_user_id=specialist_account_id)
+        .first()
+    )
+    if appointment is None:
+        raise NotFound
+    professional = active_specialist_account(specialist_account_id, lock=True)
+    if professional is None:
+        raise PermissionDenied
+    if professional.pk != appointment.professional_id:
+        raise NotFound
+    started = appointment.start <= timeutils.now()
+    if started != (action == enums.AppointmentAction.ATTEND):
+        raise InvalidTransition(N_("Bu amalni qabulning ushbu vaqtida bajarib bo‘lmaydi."))
+    return appointment
+
+
 def _range_data(appointment: Appointment) -> dict[str, Any]:
     return {
         "start": timeutils.isoformat(appointment.start),
@@ -263,10 +289,17 @@ def _range_data(appointment: Appointment) -> dict[str, Any]:
 
 
 @transaction.atomic
-def transition(appointment_id: int, action: str, *, actor: Any, request: Any = None) -> Appointment:
+def transition(
+    appointment_id: int,
+    action: str,
+    *,
+    actor: Any,
+    request: Any = None,
+    specialist_account_id: int | None = None,
+) -> Appointment:
     """``confirm`` / ``reject`` / ``attend``; any other source status → 409 ``invalid_transition``."""
     allowed_from, target = TRANSITIONS[action]
-    appointment = _locked(appointment_id)
+    appointment = _locked_for_action(appointment_id, action, specialist_account_id)
     if appointment.status not in allowed_from:
         raise InvalidTransition(MESSAGES["invalid_transition"])
     now = timeutils.now()
@@ -379,13 +412,17 @@ def reschedule(
     location_id: int | None = None,
     actor: Any,
     request: Any = None,
+    specialist_account_id: int | None = None,
+    customer_agreed: bool = False,
 ) -> Appointment:
     """Move an open appointment (status unchanged). A new specialist re-snapshots duration and price from
     that specialist's service link; the same specialist keeps the booked duration and price."""
-    appointment = _locked(appointment_id)
+    appointment = _locked_for_action(appointment_id, "reschedule", specialist_account_id)
     if appointment.status not in OPEN_STATUSES:
         raise InvalidTransition(MESSAGES["invalid_transition"])
     target = professional or appointment.professional
+    if specialist_account_id is not None and target.pk != appointment.professional_id:
+        raise PermissionDenied
     duration, price = appointment.duration_min, appointment.price
     # Always lock the target specialist before the slot check, so a concurrent hours / override / block
     # change is seen or waits. The same (possibly deactivated, PS-2) specialist keeps its appointment
@@ -401,6 +438,16 @@ def reschedule(
         appointment.location_id if target.pk == appointment.professional_id else target.location_id
     )
     clinic_id = _visit_location(target, default_location_id if location_id is None else location_id)
+    specialist_clinic_move = specialist_account_id is not None and clinic_id != appointment.location_id
+    if specialist_clinic_move and not customer_agreed:
+        raise ValidationError(
+            {
+                "customer_agreed": [
+                    field_error("required", N_("Mijoz yangi filialga rozi bo‘lganini tasdiqlang."))
+                ]
+            }
+        )
+    agreement = {"customer_agreed": True} if specialist_clinic_move else {}
     end = start + timedelta(minutes=duration)
     check_slot(target, start, end, location_id=clinic_id, exclude_pk=appointment.pk)
     _before_write()
@@ -444,6 +491,7 @@ def reschedule(
             "from_professional_id": from_professional,
             "to_professional_id": target.pk,
             "to_location_id": clinic_id,
+            **agreement,
             "by": "admin",
             "push_sent": _pushable(appointment.customer_id),
         },
@@ -457,14 +505,22 @@ def reschedule(
         **before,
         to_location_id=clinic_id,
         reschedule_no=appointment.reschedule_count,
+        **agreement,
     )
     return appointment
 
 
 @transaction.atomic
-def cancel(appointment_id: int, *, reason: str = "", actor: Any, request: Any = None) -> Appointment:
-    """Admin cancellation of an open appointment; the slot is freed and the customer is pushed."""
-    appointment = _locked(appointment_id)
+def cancel(
+    appointment_id: int,
+    *,
+    reason: str = "",
+    actor: Any,
+    request: Any = None,
+    specialist_account_id: int | None = None,
+) -> Appointment:
+    """Cancel an open appointment, free the slot and notify the customer."""
+    appointment = _locked_for_action(appointment_id, "cancel", specialist_account_id)
     if appointment.status not in OPEN_STATUSES:
         raise InvalidTransition(MESSAGES["invalid_transition"])
     appointment.status = enums.AppointmentStatus.CANCELLED

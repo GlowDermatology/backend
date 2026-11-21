@@ -3,6 +3,7 @@ import uuid
 from collections.abc import Sequence
 from typing import Any, cast
 
+from django.conf import settings
 from django.contrib.auth import authenticate
 from django.core.cache import cache
 from django.db import transaction
@@ -54,7 +55,7 @@ from glowderma.accounts.api.admin.serializers import (
     StaffUpdateSerializer,
     validated_new_password,
 )
-from glowderma.accounts.api.base import AdminAPIView, AdminGenericViewSet
+from glowderma.accounts.api.base import AdminGenericViewSet, WorkforceAPIView
 from glowderma.accounts.api.guard import LoginGuard, email_hash
 from glowderma.accounts.api.throttles import (
     AuthClientIPThrottle,
@@ -96,6 +97,7 @@ def _me(user: StaffUser, session: AuthSession) -> dict[str, Any]:
         "id": user.pk,
         "email": user.email,
         "display_name": user.full_name or user.email,
+        "role": user.role,
         "is_superuser": user.is_superuser,
         "is_manager": user.is_manager or user.is_superuser,
         "linked_providers": list(
@@ -108,7 +110,10 @@ def _me(user: StaffUser, session: AuthSession) -> dict[str, Any]:
         "must_change_password": user.must_change_password,
         "language": user.language,
         "mfa_enabled": mfa.enabled(user),
-        "capabilities": {"staff_email_invite": services.staff_email_invite_available()},
+        "capabilities": {
+            "staff_email_invite": services.staff_email_invite_available(),
+            "specialist_provisioning": settings.SPECIALIST_PROVISIONING_ENABLED,
+        },
     }
 
 
@@ -258,7 +263,7 @@ class LogoutView(PublicAuthAPIView):
         return Response(status=204)
 
 
-class MeView(AdminAPIView):
+class MeView(WorkforceAPIView):
     allow_password_change_pending = True
 
     @extend_schema(operation_id="admin_auth_me", responses={200: MeSerializer, **ERRORS})
@@ -282,7 +287,7 @@ class MeView(AdminAPIView):
         return Response(_me(user, session))
 
 
-class ChangePasswordView(AdminAPIView):
+class ChangePasswordView(WorkforceAPIView):
     parser_classes = [JSONParser]
     allow_password_change_pending = True
 
@@ -386,7 +391,7 @@ class PasswordTokenSetView(PublicAuthAPIView):
         return Response(status=204)
 
 
-class OwnPasswordLinkView(AdminAPIView):
+class OwnPasswordLinkView(WorkforceAPIView):
     allow_password_change_pending = True
     throttle_classes = [StaffRateThrottle, PasswordLinkThrottle]
 
@@ -417,7 +422,7 @@ def _session_id(request: Request) -> Any:
     return cast(dict[str, Any], request.auth)["sid"]
 
 
-class MfaStatusView(AdminAPIView):
+class MfaStatusView(WorkforceAPIView):
     @extend_schema(
         operation_id="admin_auth_mfa_status",
         description="The caller's admin panel MFA: on or off, and the unused recovery codes.",
@@ -427,7 +432,7 @@ class MfaStatusView(AdminAPIView):
         return Response(_status(cast(StaffUser, request.user)))
 
 
-class MfaSetupView(AdminAPIView):
+class MfaSetupView(WorkforceAPIView):
     @extend_schema(
         operation_id="admin_auth_mfa_setup",
         description="Start enabling the admin panel MFA (re-enter the current password): a new pending "
@@ -449,7 +454,7 @@ class MfaSetupView(AdminAPIView):
         )
 
 
-class MfaConfirmView(AdminAPIView):
+class MfaConfirmView(WorkforceAPIView):
     @extend_schema(
         operation_id="admin_auth_mfa_confirm",
         description="Confirm the pending device with its first code: MFA is on, the current session counts "
@@ -471,7 +476,7 @@ class MfaConfirmView(AdminAPIView):
         return Response({"recovery_codes": codes})
 
 
-class MfaDisableView(AdminAPIView):
+class MfaDisableView(WorkforceAPIView):
     @extend_schema(
         operation_id="admin_auth_mfa_disable",
         description="Turn the admin panel MFA off: the current password plus a code or a recovery code. "
@@ -489,7 +494,7 @@ class MfaDisableView(AdminAPIView):
         return Response(_status(user))
 
 
-class MfaRecoveryCodesView(AdminAPIView):
+class MfaRecoveryCodesView(WorkforceAPIView):
     @extend_schema(
         operation_id="admin_auth_mfa_recovery_codes",
         description="Ten new recovery codes (the old ones stop working), returned once: the current password "
@@ -575,7 +580,7 @@ def _exchange(request: Request, provider: str) -> SocialClaims:
         raise OAuthExchangeFailed from exc
 
 
-class OAuthProviderView(AdminAPIView):
+class OAuthProviderView(WorkforceAPIView):
     """``auth/oauth/{provider}/``: POST signs in without a bearer (public, per-IP throttle), DELETE unlinks
     the caller's identity and is an ordinary admin call. The two methods share one route, so authentication,
     permission and throttling are chosen per request method."""
@@ -636,7 +641,7 @@ class OAuthProviderView(AdminAPIView):
         return Response(status=204)
 
 
-class OAuthLinkView(AdminAPIView):
+class OAuthLinkView(WorkforceAPIView):
     @extend_schema(
         operation_id="admin_auth_oauth_link",
         description=(
@@ -668,6 +673,11 @@ def _member(staff_id: int) -> dict[str, Any]:
     if user is None:  # pragma: no cover - the write just locked the row
         raise NotFound
     return dict(StaffMemberSerializer(user).data)
+
+
+def staff_credentials(user: StaffUser, password: str | None, delivery: str) -> dict[str, Any]:
+    link = _open_link(user) if delivery != enums.StaffPasswordDelivery.TEMPORARY_PASSWORD else None
+    return {"staff": _member(user.pk), TEMPORARY_PASSWORD: password, "activation": _activation(link)}
 
 
 class StaffViewSet(mixins.ListModelMixin, AdminGenericViewSet):
@@ -748,13 +758,7 @@ class StaffViewSet(mixins.ListModelMixin, AdminGenericViewSet):
             delivery=data["delivery"],
             language=data["language"],
         )
-        link = (
-            _open_link(user) if data["delivery"] != enums.StaffPasswordDelivery.TEMPORARY_PASSWORD else None
-        )
-        return Response(
-            {"staff": _member(user.pk), TEMPORARY_PASSWORD: password, "activation": _activation(link)},
-            status=201,
-        )
+        return Response(staff_credentials(user, password, data["delivery"]), status=201)
 
     @extend_schema(
         operation_id="admin_staff_retrieve",

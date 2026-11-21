@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 ALLOW_PASSWORD_CHANGE_PENDING = "allow_password_change_pending"  # noqa: S105 - an attribute name
 
 
-class IsActiveStaff(BasePermission):
+class IsActiveWorkforceAccount(BasePermission):
     """An active staff member signed in with a staff access token.
 
     An account with ``must_change_password`` (a generated temporary password, an e-mail link; feat/admin-ux)
@@ -36,6 +36,20 @@ class IsActiveStaff(BasePermission):
         ):
             raise PasswordChangeRequired
         return allowed
+
+
+class IsActiveStaff(IsActiveWorkforceAccount):
+    def has_permission(self, request: Request, view: APIView) -> bool:
+        return getattr(request.user, "role", None) == enums.StaffRole.ADMIN and super().has_permission(
+            request, view
+        )
+
+
+class IsSpecialist(IsActiveWorkforceAccount):
+    def has_permission(self, request: Request, view: APIView) -> bool:
+        return getattr(request.user, "role", None) == enums.StaffRole.SPECIALIST and super().has_permission(
+            request, view
+        )
 
 
 class IsActiveCustomer(BasePermission):

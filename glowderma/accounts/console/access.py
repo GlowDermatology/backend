@@ -38,8 +38,10 @@ from django.http import HttpRequest
 
 from glowderma.accounts.console import state, twofactor
 from glowderma.accounts.models import StaffUser
-from glowderma.core import audit, timeutils
+from glowderma.core import audit, enums, timeutils
+from glowderma.core.api.exceptions import Conflict
 from glowderma.core.models import AuditEntry
+from glowderma.core.uzsource import N_
 
 # ``via`` of a window opener: the console's manager action, or the operator's command on the server.
 VIA_CONSOLE = "console"
@@ -80,7 +82,10 @@ def grant(
 ) -> bool:
     """Give ``user`` console access and open the enrolment window; ``False`` when it already had access
     (nothing written)."""
-    if user.is_staff:
+    stored = StaffUser.objects.select_for_update().get(pk=user.pk)
+    if stored.role == enums.StaffRole.SPECIALIST:
+        raise Conflict(N_("Mutaxassis hisobiga konsolga kirish huquqini berib bo‘lmaydi."))
+    if stored.is_staff:
         return False
     user.is_staff = True
     user.save(update_fields=["is_staff"])
