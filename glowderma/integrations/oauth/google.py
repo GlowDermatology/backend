@@ -15,7 +15,7 @@ import jwt
 from jwt.exceptions import PyJWKClientConnectionError, PyJWKClientError
 
 from . import http
-from .ports import ID_TOKEN, AppTokenClaims, OAuthExchangeError, SocialClaims
+from .ports import ID_TOKEN, AppTokenClaims, OAuthExchangeError, SocialClaims, google_email_trusted
 
 logger = logging.getLogger(__name__)
 TOKEN_URL = "https://oauth2.googleapis.com/token"  # noqa: S105 - an endpoint URL, not a secret
@@ -169,7 +169,8 @@ def optional_email(claims: dict[str, Any]) -> str:
 class GoogleAppTokenVerifier:
     """Google ID tokens of the customer app: ``aud`` ∈ ``GOOGLE_APP_CLIENT_IDS`` (the iOS client id and the
     web/server client id the Android SDK asks for), ``nonce`` equal to the raw server nonce; ``email`` is
-    optional and ``email_verified`` ignored (the phone is the customer's identity, unlike the staff path)."""
+    optional. ``trusted_email`` follows :func:`google_email_trusted` (``email_verified`` and a Gmail or
+    ``hd`` address): only then may the address match an existing account."""
 
     name = "google"
 
@@ -191,6 +192,12 @@ class GoogleAppTokenVerifier:
         if not isinstance(token_nonce, str) or nonce is None or not nonces_match(token_nonce, nonce):
             raise OAuthExchangeError("invalid_token", "nonce mismatch")
         audience = claims["aud"] if isinstance(claims["aud"], str) else str(claims["aud"][0])
+        email = optional_email(claims)
         return AppTokenClaims(
-            self.name, str(claims["sub"]), optional_email(claims), audience, int(claims["exp"])
+            self.name,
+            str(claims["sub"]),
+            email,
+            audience,
+            int(claims["exp"]),
+            trusted_email=google_email_trusted(email, claims.get("email_verified"), claims.get("hd")),
         )
