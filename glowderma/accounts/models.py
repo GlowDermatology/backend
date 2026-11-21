@@ -28,7 +28,9 @@ def date_joined_default() -> datetime:
 class StaffUser(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(max_length=254, unique=True, verbose_name="email")
     full_name = models.CharField(max_length=150, blank=True, verbose_name="to‘liq ism")
-    role = models.CharField(max_length=10, choices=[("admin", "Admin")], default="admin", verbose_name="rol")
+    role = models.CharField(
+        max_length=10, choices=enums.StaffRole.choices, default=enums.StaffRole.ADMIN, verbose_name="rol"
+    )
     is_active = models.BooleanField(default=True, verbose_name="faol")
     is_staff = models.BooleanField(default=False, verbose_name="konsolga kirish")
     # Admin contract §2.16: only a manager creates, edits, deactivates, reactivates staff or resets their
@@ -57,7 +59,14 @@ class StaffUser(AbstractBaseUser, PermissionsMixin):
     class Meta:
         verbose_name = "xodim"
         verbose_name_plural = "xodimlar"
-        constraints = [models.UniqueConstraint(Lower("email"), name="staffuser_email_ci_unique")]
+        constraints = [
+            models.UniqueConstraint(Lower("email"), name="staffuser_email_ci_unique"),
+            models.CheckConstraint(
+                condition=~Q(role=enums.StaffRole.SPECIALIST)
+                | Q(is_manager=False, is_superuser=False, is_staff=False),
+                name="staffuser_specialist_has_no_admin_flags",
+            ),
+        ]
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         self.email = self.email.strip().lower()

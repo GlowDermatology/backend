@@ -34,6 +34,7 @@ def test_login_success_returns_tokens_and_audits(user: StaffUser) -> None:
         "email",
         "display_name",
         "is_superuser",
+        "role",
         "is_manager",
         "linked_providers",
         "session_expires_at",
@@ -45,6 +46,7 @@ def test_login_success_returns_tokens_and_audits(user: StaffUser) -> None:
     }
     assert response.data["user"]["display_name"] == "Administrator"
     assert response.data["user"]["auth_method"] == "password"
+    assert response.data["user"]["role"] == "admin"
     assert response.data["access_expires_at"].endswith("+05:00")
     assert AuditEntry.objects.get(action="auth.login_succeeded").after == {
         "email": user.email,

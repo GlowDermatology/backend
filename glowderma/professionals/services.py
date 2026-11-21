@@ -25,7 +25,9 @@ from django.utils.translation import gettext_lazy, ngettext
 from rest_framework.exceptions import NotFound
 from rest_framework.exceptions import ValidationError as ApiValidationError
 
-from glowderma.core import audit, timeutils
+from glowderma.accounts import services as account_services
+from glowderma.accounts.models import StaffUser
+from glowderma.core import audit, enums, timeutils
 from glowderma.core.api.exceptions import Conflict, field_error
 from glowderma.core.images import ImageError, process_image
 from glowderma.core.media import media_name
@@ -45,6 +47,7 @@ from glowderma.professionals.models import (
 
 PHOTO_KIND = "professionals"
 # Audit entity names (contract §3.2); the override is audited the same way (design 03 open point S-3 / T13).
+SPECIALIST_LINK_ERROR = N_("Mutaxassis hisobi faqat taklif yoki hisobni o‘tkazish orqali bog‘lanadi.")
 ENTITY_NAMES: dict[type[models.Model], str] = {
     Location: "location",
     Professional: "professional",
@@ -170,6 +173,10 @@ def save_row(obj: models.Model, *, actor: Any, request: Any = None) -> models.Mo
             rows = rows.select_for_update()  # serialises with bookings like ``update_specialist`` (PS-2)
         current = rows.first()
         before = snapshot(current) if current is not None else None
+    if isinstance(obj, Professional) and _changes_specialist_login(
+        before["staff_user_id"] if before else None, obj.staff_user_id
+    ):
+        raise ValidationError({"staff_user": gettext_lazy(SPECIALIST_LINK_ERROR)})
     if isinstance(obj, Professional) and before is not None and before["is_active"] and not obj.is_active:
         _refuse_deactivation_with_upcoming(obj)
     if isinstance(obj, Location) and before is not None and before["is_active"] and not obj.is_active:
@@ -502,6 +509,13 @@ def _schedule_location_id(professional: Professional, location_id: int) -> int:
     return location_id
 
 
+def _changes_specialist_login(old_id: int | None, new_id: int | None) -> bool:
+    return (
+        old_id != new_id
+        and StaffUser.objects.filter(pk__in=[old_id, new_id], role=enums.StaffRole.SPECIALIST).exists()
+    )
+
+
 def _specialist_state(professional: Professional, location_ids: set[int]) -> dict[str, Any]:
     return {
         "name": professional.name,
@@ -541,6 +555,8 @@ def create_specialist(data: dict[str, Any], *, actor: Any, request: Any = None) 
     with transaction.atomic():
         professional = Professional(position=_next_position(Professional))
         _apply_specialist(professional, data)
+        if _changes_specialist_login(None, professional.staff_user_id):
+            raise Conflict(SPECIALIST_LINK_ERROR)
         location_ids = _checked_clinics(professional, data, set())
         _save_specialist(professional)
         professional.additional_locations.set(location_ids - {professional.location_id})
@@ -567,6 +583,8 @@ def update_specialist(
         current_ids = set(selectors.assigned_location_ids(professional))
         before = _specialist_state(professional, current_ids)
         _apply_specialist(professional, data)
+        if _changes_specialist_login(before["staff_user_id"], professional.staff_user_id):
+            raise Conflict(SPECIALIST_LINK_ERROR)
         location_ids = current_ids
         if (
             "location_id" in data
@@ -600,6 +618,39 @@ def update_specialist(
             after={**diff_after, **extra},
         )
     return professional
+
+
+@transaction.atomic
+def invite_specialist(
+    professional_id: int, data: dict[str, Any], *, actor: StaffUser, request: Any = None
+) -> tuple[StaffUser, str | None]:
+    professional = _locked_professional(professional_id)
+    if professional.staff_user_id is not None:
+        raise Conflict(N_("Bu mutaxassisga hisob allaqachon bog‘langan."))
+    user, password = account_services.create_staff(
+        **data, role=enums.StaffRole.SPECIALIST, actor=actor, request=request
+    )
+    professional.staff_user = user
+    professional.save(update_fields=["staff_user", "updated_at"])
+    audit.record(
+        action="professional.specialist_invited",
+        entity_type="professional",
+        entity_id=str(professional.pk),
+        actor=actor,
+        request=request,
+        after={"staff_user_id": user.pk},
+    )
+    return user, password
+
+
+@transaction.atomic
+def convert_specialist_account(
+    professional_id: int, staff_user_id: int, *, actor: StaffUser, request: Any = None
+) -> None:
+    professional = _locked_professional(professional_id)
+    if professional.staff_user_id != staff_user_id:
+        raise Conflict(N_("Bog‘langan xodim hisobi o‘zgardi. Sahifani yangilang."))
+    account_services.convert_staff_to_specialist(staff_user_id, actor=actor, request=request)
 
 
 def set_specialist_photo(
@@ -795,34 +846,45 @@ def _override_state(row: WorkingHoursOverride) -> dict[str, Any]:
 
 
 def create_override(
-    professional_id: int, data: dict[str, Any], *, actor: Any, request: Any = None
+    professional_id: int,
+    data: dict[str, Any],
+    *,
+    actor: Any,
+    request: Any = None,
+    override_id: int | None = None,
 ) -> WorkingHoursOverride:
     """``POST specialists/{id}/overrides/``: one date's own hours (both ``None`` = day off); one per date
     (400 ``date`` ``unique``). Audit ``schedule.override_created``."""
     with transaction.atomic():
         professional = _locked_professional(professional_id)
-        if WorkingHoursOverride.objects.filter(professional=professional, date=data["date"]).exists():
+        rows = WorkingHoursOverride.objects.filter(professional=professional)
+        row = rows.filter(pk=override_id).first() if override_id is not None else None
+        if override_id is not None and row is None:
+            raise NotFound
+        if row is not None:
+            rows = rows.exclude(pk=row.pk)
+        if rows.filter(date=data["date"]).exists():
             raise ApiValidationError({"date": [field_error("unique", API_MESSAGES["override_taken"])]})
-        row = WorkingHoursOverride(
-            professional=professional,
-            date=data["date"],
-            start=data.get("start"),
-            end=data.get("end"),
-            location_id=(
-                _schedule_location_id(professional, data.get("location_id", professional.location_id))
-                if data.get("start") is not None
-                else None
-            ),
-            note=data.get("note", ""),
-            created_by=actor,
+        before = _override_state(row) if row else None
+        if row is None:
+            row = WorkingHoursOverride(professional=professional, created_by=actor)
+        row.date = data["date"]
+        row.start = data.get("start")
+        row.end = data.get("end")
+        row.location_id = (
+            _schedule_location_id(professional, data.get("location_id", professional.location_id))
+            if row.start is not None
+            else None
         )
+        row.note = data.get("note", "")
         _save_unique(row.save, OVERRIDE_CONSTRAINT, "date", API_MESSAGES["override_taken"])
         audit.record(
-            action="schedule.override_created",
+            action="schedule.override_updated" if before else "schedule.override_created",
             entity_type="professional",
             entity_id=str(professional.pk),
             actor=actor,
             request=request,
+            before=before,
             after=_override_state(row),
         )
     return row
@@ -859,7 +921,12 @@ def _block_state(block: BlockedPeriod) -> dict[str, Any]:
 
 
 def create_block(
-    professional_id: int, data: dict[str, Any], *, actor: Any, request: Any = None
+    professional_id: int,
+    data: dict[str, Any],
+    *,
+    actor: Any,
+    request: Any = None,
+    block_id: int | None = None,
 ) -> BlockedPeriod:
     """``POST specialists/{id}/blocks/``: an absolute busy / off range that overlaps none of the
     specialist's other blocks (400 ``start`` ``overlap``). Appointments inside it are kept (they show up in
@@ -867,22 +934,28 @@ def create_block(
     with transaction.atomic():
         professional = _locked_professional(professional_id)
         start, end = data["start"], data["end"]
-        if BlockedPeriod.objects.filter(professional=professional, start__lt=end, end__gt=start).exists():
+        rows = BlockedPeriod.objects.filter(professional=professional)
+        block = rows.filter(pk=block_id).first() if block_id is not None else None
+        if block_id is not None and block is None:
+            raise NotFound
+        if block is not None:
+            rows = rows.exclude(pk=block.pk)
+        if rows.filter(start__lt=end, end__gt=start).exists():
             raise ApiValidationError({"start": [field_error("overlap", API_MESSAGES["block_overlap"])]})
-        block = BlockedPeriod.objects.create(
-            professional=professional,
-            start=start,
-            end=end,
-            kind=data["kind"],
-            label=data.get("label") or "",
-            created_by=actor,
-        )
+        before = _block_state(block) if block else None
+        if block is None:
+            block = BlockedPeriod(professional=professional, created_by=actor)
+        block.start, block.end = start, end
+        block.kind = data["kind"]
+        block.label = data.get("label") or ""
+        block.save()
         audit.record(
-            action="schedule.block_created",
+            action="schedule.block_updated" if before else "schedule.block_created",
             entity_type="professional",
             entity_id=str(professional.pk),
             actor=actor,
             request=request,
+            before=before,
             after=_block_state(block),
         )
     return block

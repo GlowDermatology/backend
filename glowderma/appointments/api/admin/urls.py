@@ -7,6 +7,13 @@ attend, contract §2.9) so they are never read as an action.
 
 from django.urls import URLPattern, URLResolver, path
 
+from ..specialist import (
+    BookingActionView,
+    BookingCancelView,
+    BookingRescheduleView,
+    CalendarView,
+    ConflictsView,
+)
 from .views import (
     AppointmentActionView,
     AppointmentCancelView,
@@ -19,6 +26,21 @@ from .views import (
 )
 
 urlpatterns: list[URLPattern | URLResolver] = [
+    path("specialist/calendar/", CalendarView.as_view(), name="specialist-calendar"),
+    path("specialist/conflicts/", ConflictsView.as_view(), name="specialist-conflicts"),
+    path(
+        "specialist/bookings/<int:pk>/reschedule/",
+        BookingRescheduleView.as_view(),
+        name="specialist-booking-reschedule",
+    ),
+    path(
+        "specialist/bookings/<int:pk>/cancel/", BookingCancelView.as_view(), name="specialist-booking-cancel"
+    ),
+    path(
+        "specialist/bookings/<int:pk>/<str:action>/",
+        BookingActionView.as_view(),
+        name="specialist-booking-action",
+    ),
     path("appointments/", AppointmentsView.as_view(), name="admin-appointments"),
     path("appointments/meta/", AppointmentsMetaView.as_view(), name="admin-appointments-meta"),
     path("appointments/range/", AppointmentRangeView.as_view(), name="admin-appointments-range"),

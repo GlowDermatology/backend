@@ -6,11 +6,14 @@ Every route name is prefixed ``admin-`` and unique across modules; the auth matr
 
 from django.urls import URLPattern, URLResolver, path
 
+from ..specialist import AvailabilityView, BlocksView, OverridesView, WeeklyHoursView
 from .views import (
     ClinicsView,
     ClinicView,
     ServiceViewSet,
     SpecialistBlockViewSet,
+    SpecialistConvertView,
+    SpecialistInviteView,
     SpecialistOverrideViewSet,
     SpecialistPhotoView,
     SpecialistServicesView,
@@ -28,8 +31,38 @@ services = ServiceViewSet.as_view({"get": "list", "post": "create"})
 service = ServiceViewSet.as_view({"get": "retrieve", "patch": "partial_update"})
 
 urlpatterns: list[URLPattern | URLResolver] = [
+    path("specialist/availability/", AvailabilityView.as_view(), name="specialist-availability"),
+    path("specialist/weekly-hours/", WeeklyHoursView.as_view(), name="specialist-weekly-hours"),
+    path(
+        "specialist/overrides/",
+        OverridesView.as_view(http_method_names=["post", "options"]),
+        name="specialist-overrides",
+    ),
+    path(
+        "specialist/overrides/<int:pk>/",
+        OverridesView.as_view(http_method_names=["put", "delete", "options"]),
+        name="specialist-override",
+    ),
+    path(
+        "specialist/blocks/",
+        BlocksView.as_view(http_method_names=["post", "options"]),
+        name="specialist-blocks",
+    ),
+    path(
+        "specialist/blocks/<int:pk>/",
+        BlocksView.as_view(http_method_names=["put", "delete", "options"]),
+        name="specialist-block",
+    ),
     path("specialists/", specialists, name="admin-specialists-list"),
     path("specialists/<int:pk>/", specialist, name="admin-specialists-detail"),
+    path(
+        "specialists/<int:pk>/access/invite/", SpecialistInviteView.as_view(), name="admin-specialist-invite"
+    ),
+    path(
+        "specialists/<int:pk>/access/convert/",
+        SpecialistConvertView.as_view(),
+        name="admin-specialist-convert",
+    ),
     path("specialists/<int:pk>/photo/", SpecialistPhotoView.as_view(), name="admin-specialists-photo"),
     path(
         "specialists/<int:pk>/services/", SpecialistServicesView.as_view(), name="admin-specialists-services"

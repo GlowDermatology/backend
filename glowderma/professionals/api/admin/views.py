@@ -11,8 +11,9 @@ a change is bookable — or no longer offered — at once. ``specialists/{id}/co
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from typing import Any
+from typing import Any, cast
 
+from django.conf import settings
 from django.db.models import QuerySet
 from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework import mixins, serializers
@@ -20,11 +21,16 @@ from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.parsers import MultiPartParser
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
+from glowderma.accounts.api.admin.serializers import StaffCredentialsSerializer, WorkforceInviteSerializer
+from glowderma.accounts.api.admin.views import staff_credentials
 from glowderma.accounts.api.base import AdminAPIView, AdminGenericViewSet
+from glowderma.accounts.models import StaffUser
+from glowderma.accounts.permissions import IsManager
 from glowderma.core import labels, timeutils
 from glowderma.core.api.exceptions import field_error
-from glowderma.core.api.schema import ADMIN_ERRORS, EXPORT_PARAM
+from glowderma.core.api.schema import ADMIN_ERRORS, EXPORT_PARAM, IDEMPOTENCY_KEY_HEADER
 from glowderma.core.exports import ExportMixin
 from glowderma.core.idempotency import idempotent
 from glowderma.core.uzsource import N_, tr
@@ -237,6 +243,53 @@ class SpecialistServicesView(AdminAPIView):
             pk, serializer.validated_data["services"], actor=request.user, request=request
         )
         return Response(specialist_body(pk))
+
+
+class CanProvisionSpecialist(IsManager):
+    def has_permission(self, request: Request, view: APIView) -> bool:
+        return bool(settings.SPECIALIST_PROVISIONING_ENABLED) and super().has_permission(request, view)
+
+
+class SpecialistInviteView(AdminAPIView):
+    permission_classes = [CanProvisionSpecialist]
+
+    @extend_schema(
+        operation_id="admin_specialist_invite",
+        parameters=[IDEMPOTENCY_KEY_HEADER],
+        request=WorkforceInviteSerializer,
+        responses={201: StaffCredentialsSerializer, **ADMIN_ERRORS},
+    )
+    @idempotent(sealed=("temporary_password",))
+    def post(self, request: Request, pk: int) -> Response:
+        body = WorkforceInviteSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        user, password = services.invite_specialist(
+            pk, dict(body.validated_data), actor=cast(StaffUser, request.user), request=request
+        )
+        return Response(staff_credentials(user, password, body.validated_data["delivery"]), status=201)
+
+
+class StaffConversionSerializer(serializers.Serializer[dict[str, Any]]):
+    staff_user_id = serializers.IntegerField(min_value=1)
+
+
+class SpecialistConvertView(AdminAPIView):
+    permission_classes = [CanProvisionSpecialist]
+
+    @extend_schema(
+        operation_id="admin_specialist_convert",
+        parameters=[IDEMPOTENCY_KEY_HEADER],
+        request=StaffConversionSerializer,
+        responses={204: None, **ADMIN_ERRORS},
+    )
+    @idempotent()
+    def post(self, request: Request, pk: int) -> Response:
+        body = StaffConversionSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        services.convert_specialist_account(
+            pk, body.validated_data["staff_user_id"], actor=cast(StaffUser, request.user), request=request
+        )
+        return Response(status=204)
 
 
 class SpecialistWorkingHoursView(AdminAPIView):

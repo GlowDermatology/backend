@@ -375,6 +375,11 @@ class BillzImportMode(TextChoices):
     FULL = "full"
 
 
+class StaffRole(TextChoices):
+    ADMIN = "admin", "Admin"
+    SPECIALIST = "specialist", "Mutaxassis"
+
+
 class SessionRevokeReason(TextChoices):
     LOGOUT = "logout", "Chiqish"
     EXPIRED = "expired", "Muddati tugadi"
@@ -732,6 +737,7 @@ CONTRACT_ENUMS: tuple[type[TextChoices], ...] = (
     AssistantJobOutcome,
     AssistantImproveGoal,
     BillzImportMode,
+    StaffRole,
     SessionRevokeReason,
     LogoutScope,
     ExportFormat,

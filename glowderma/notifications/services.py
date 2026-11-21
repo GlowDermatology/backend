@@ -1426,7 +1426,15 @@ def deliver_appointment(payload: dict[str, Any]) -> InboxNotification | None:
         return None
     customer = appointment.customer
     reschedule_no = payload.get("reschedule_no")
-    title, body, language = texts.appointment_text(action, customer.language, appointment.start)
+    clinic = ""
+    if action == "rescheduled":
+        location = appointment.location
+        name = getattr(location, f"name_{customer.language}", "") or location.name_uz
+        address = getattr(location, f"address_{customer.language}", "") or location.address_uz
+        clinic = ", ".join(part for part in (name, address) if part)
+    title, body, language = texts.appointment_text(
+        action, customer.language, appointment.start, clinic=clinic
+    )
     return _deliver(
         customer,
         dedupe_key=topics.appointment_inbox_key(

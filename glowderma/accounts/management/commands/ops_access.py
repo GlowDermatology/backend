@@ -19,6 +19,7 @@ from django.core.management.base import BaseCommand, CommandError, CommandParser
 
 from glowderma.accounts.console import access
 from glowderma.accounts.management import staffops
+from glowderma.core.api.exceptions import Conflict
 
 REASON = "manage.py ops_access"
 
@@ -46,7 +47,11 @@ class Command(BaseCommand):
         if operation == "grant":
             if not user.is_active:
                 raise CommandError(f"{user.email} is deactivated; reactivate the account first")
-            if access.grant(user, actor=actor, reason=REASON, via=access.VIA_CLI):
+            try:
+                granted = access.grant(user, actor=actor, reason=REASON, via=access.VIA_CLI)
+            except Conflict as exc:
+                raise CommandError(str(exc.detail)) from exc
+            if granted:
                 window = access.enrolment_window(user)
                 until = window.until.isoformat(timespec="minutes") if window is not None else "-"
                 self.stdout.write(

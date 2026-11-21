@@ -46,10 +46,21 @@ APPOINTMENT_TEXTS: dict[str, dict[str, tuple[str, str]]] = {
 }
 
 
-def appointment_text(action: str, language: str, start: datetime) -> tuple[str, str, str]:
+RESCHEDULED_CLINIC = {
+    "uz": " Yangi qabul joyi: {clinic}.",
+    "ru": " Место приёма: {clinic}.",
+    "en": " Clinic: {clinic}.",
+}
+
+
+def appointment_text(
+    action: str, language: str, start: datetime, *, clinic: str = ""
+) -> tuple[str, str, str]:
     """``(title, body, language used)`` for an appointment push; unknown actions are a programming error."""
     by_language = APPOINTMENT_TEXTS[action]
     used = language if language in by_language else "uz"
     title, body = by_language[used]
     when = start.astimezone(timeutils.TASHKENT).strftime(TIME_FORMAT)
+    if action == "rescheduled" and clinic:
+        body += RESCHEDULED_CLINIC[used].format(clinic=clinic)
     return title, body.replace("{vaqt}", when), used

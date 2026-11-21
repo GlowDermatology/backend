@@ -231,6 +231,9 @@ class ClinicSpecialistSerializer(serializers.Serializer[Professional]):
     location_id = serializers.IntegerField()
     location_ids = serializers.SerializerMethodField()
     staff_user = ActorSerializer(allow_null=True)
+    staff_user_role = serializers.ChoiceField(
+        source="staff_user.role", choices=enums.StaffRole.values, allow_null=True, default=None
+    )
     slot_step_min = serializers.IntegerField()
     position = serializers.IntegerField()
     is_active = serializers.BooleanField()

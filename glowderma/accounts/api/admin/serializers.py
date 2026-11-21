@@ -67,6 +67,7 @@ class ChangePasswordSerializer(serializers.Serializer[dict[str, Any]]):
 
 
 class CapabilitiesSerializer(serializers.Serializer[dict[str, Any]]):
+    specialist_provisioning = serializers.BooleanField(required=False)
     staff_email_invite = serializers.BooleanField(
         help_text="Password links can be e-mailed (`delivery` `email_link` / `both`, "
         "`staff/{id}/send-password-link/`, `auth/password-link/`); `false` when the admin panel URL is not "
@@ -78,6 +79,7 @@ class MeSerializer(serializers.Serializer[dict[str, Any]]):
     id = serializers.IntegerField()
     email = serializers.EmailField()
     display_name = serializers.CharField()
+    role = serializers.ChoiceField(choices=enums.StaffRole.values)
     is_superuser = serializers.BooleanField()
     is_manager = serializers.BooleanField(
         help_text="May manage staff (`staff/` writes, §2.16); the UI shows the staff screen only then."
@@ -182,6 +184,7 @@ STAFF_FULL_NAME_MAX_LENGTH = 150
 MANAGER_ONLY_KEYS = (
     "full_name",
     "is_manager",
+    "role",
     "last_login_at",
     "linked_providers",
     "created_at",
@@ -224,6 +227,7 @@ class StaffListItemSerializer(ActorSerializer):
     is_active = serializers.BooleanField()
     full_name = serializers.CharField(allow_null=True, help_text="Manager only, else `null`.")
     is_manager = serializers.BooleanField(allow_null=True, help_text="Manager only, else `null`.")
+    role = serializers.ChoiceField(choices=enums.StaffRole.values, allow_null=True)
     last_login_at = serializers.DateTimeField(
         allow_null=True, help_text="Manager only, else `null`; `null` for a manager too when never signed in."
     )
@@ -272,6 +276,7 @@ class StaffMemberSerializer(ActorSerializer):
     full_name = serializers.CharField(allow_blank=True)
     is_active = serializers.BooleanField()
     is_manager = serializers.BooleanField()
+    role = serializers.ChoiceField(choices=enums.StaffRole.values)
     last_login_at = serializers.DateTimeField(allow_null=True, help_text="`null`: never signed in.")
     linked_providers = serializers.SerializerMethodField()
     created_at = serializers.DateTimeField(source="date_joined")
@@ -376,14 +381,13 @@ def _delivery_field() -> serializers.ChoiceField:
     )
 
 
-class StaffCreateSerializer(serializers.Serializer[dict[str, Any]]):
+class WorkforceInviteSerializer(serializers.Serializer[dict[str, Any]]):
     """``POST staff/`` body: ``email`` (trimmed, lower-cased, unique), ``full_name`` (trimmed 2..150),
     ``is_manager`` (default ``false``), ``delivery`` (default ``temporary_password``), ``language`` (the
     person's panel and e-mail language, default ``uz``)."""
 
     email = serializers.EmailField(max_length=254)
     full_name = _full_name_field(required=True)
-    is_manager = serializers.BooleanField(required=False, default=False)
     delivery = _delivery_field()
     language = serializers.ChoiceField(
         choices=enums.ContentLanguage.values, required=False, default=enums.ContentLanguage.UZ
@@ -391,6 +395,12 @@ class StaffCreateSerializer(serializers.Serializer[dict[str, Any]]):
 
     def validate_email(self, value: str) -> str:
         return value.strip().lower()
+
+
+class StaffCreateSerializer(WorkforceInviteSerializer):
+    """Create a staff account, optionally granting the manager role."""
+
+    is_manager = serializers.BooleanField(required=False, default=False)
 
 
 class StaffResetPasswordSerializer(serializers.Serializer[dict[str, Any]]):

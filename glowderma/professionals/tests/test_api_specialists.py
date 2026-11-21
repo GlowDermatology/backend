@@ -103,6 +103,7 @@ def test_create_with_an_explicit_clinic_defaults_to_inactive(
         "location_id": location.pk,
         "location_ids": [location.pk],
         "staff_user": None,
+        "staff_user_role": None,
         "slot_step_min": 30,
         "position": 0,
         "is_active": False,
