@@ -109,7 +109,7 @@ def social_phoneless(world: World, app: App, subject: str) -> dict[str, Any]:
     nonce = app.get("auth/social/nonce/", auth=False).json()["nonce"]
     step = app.post(
         "auth/social/",
-        {"provider": "google", "token": f"fake:{subject}:{subject}@gmail.com", "nonce": nonce},
+        {"provider": "google", "token": f"fake-unverified:{subject}:{subject}@gmail.com", "nonce": nonce},
         auth=False,
     )
     assert step.status_code == 200 and step.json()["next_step"] == "verify_phone", step.content

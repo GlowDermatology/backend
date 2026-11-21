@@ -56,6 +56,8 @@ class AppTokenClaims:
     ``email`` is optional (``""``: the phone is the identity; Apple may send a private relay address);
     ``audience`` is the client the token was issued for (Apple: the bundle id, the ``client_id`` of the code
     exchange and the revocation); ``expires_at`` (epoch seconds) bounds the replay cache entry.
+    ``trusted_email`` says the provider vouches that the signer owns ``email`` (Google only: see
+    :func:`google_email_trusted`); a trusted address may match the account of the same address.
     """
 
     provider: str
@@ -63,6 +65,23 @@ class AppTokenClaims:
     email: str
     audience: str
     expires_at: int
+    trusted_email: bool = False
+
+
+GOOGLE_CONSUMER_DOMAINS = frozenset({"gmail.com", "googlemail.com"})
+
+
+def google_email_trusted(email: object, email_verified: object, hd: object) -> bool:
+    """Google's rule for using an ID token's address as an identity (Sign in with Google: authenticate with a
+    backend server): ``email_verified`` must be ``true`` and the address a Gmail one or one of the token's
+    Google Workspace domain (``hd``). Any other verified address only proves it was verified once, not that
+    the signer still holds the mailbox."""
+    if email_verified is not True or not isinstance(email, str) or email.count("@") != 1:
+        return False
+    domain = email.rsplit("@", 1)[1].lower()
+    if domain in GOOGLE_CONSUMER_DOMAINS:
+        return True
+    return isinstance(hd, str) and bool(hd) and domain == hd.lower()
 
 
 class AppTokenVerifier(Protocol):

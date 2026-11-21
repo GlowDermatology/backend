@@ -24,7 +24,7 @@ from django.conf import settings
 
 from glowderma.core import integration_modes, timeutils
 
-from .ports import AppTokenClaims, OAuthExchangeError, SocialClaims
+from .ports import AppTokenClaims, OAuthExchangeError, SocialClaims, google_email_trusted
 
 CODE_VERIFIER_MIN = 43
 CODE_VERIFIER_MAX = 128
@@ -119,7 +119,7 @@ class FakeGoogleApp:
     name = "google"
 
     def verify_app_token(self, token: str, token_type: str, nonce: str | None) -> AppTokenClaims:
-        subject, email, _ = _parse_app_token(token, frozenset({"fake", "fake-unverified"}))
+        subject, email, hd = _parse_app_token(token, frozenset({"fake", "fake-unverified"}))
         audience = _first(
             [
                 *getattr(settings, "GOOGLE_APP_CLIENT_IDS", []),
@@ -127,7 +127,17 @@ class FakeGoogleApp:
             ],
             FAKE_GOOGLE_CLIENT_ID,
         )
-        return AppTokenClaims(self.name, subject, email, audience, _now() + FAKE_TOKEN_LIFETIME_SECONDS)
+        # ``fake:`` vouches for the address like a verified Google token (``fake-unverified:`` does not); the
+        # optional fourth part is the ``hd`` claim. Trust then follows the live rule (Gmail or ``hd``).
+        verified = not token.startswith("fake-unverified:")
+        return AppTokenClaims(
+            self.name,
+            subject,
+            email,
+            audience,
+            _now() + FAKE_TOKEN_LIFETIME_SECONDS,
+            trusted_email=google_email_trusted(email, verified, hd),
+        )
 
 
 class FakeFacebookApp:

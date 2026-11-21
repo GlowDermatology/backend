@@ -671,7 +671,7 @@ The fakes' `*` nonce wildcard exists only under the local/test settings. `author
 
 | Provider | Server-side verification (P1 extends the OAuth port with `verify_app_token(token, token_type, nonce)`) |
 |---|---|
-| `google` (`id_token`) | RS256 against Google's JWKS (cached by `kid`); `iss` ∈ {`https://accounts.google.com`, `accounts.google.com`}; `aud` ∈ `GOOGLE_APP_CLIENT_IDS` (the iOS client id and the web/server client id the Android SDK requests tokens for) ∪ `GOOGLE_WEB_CLIENT_IDS` (the website, B-W1); required claims `iss, aud, exp, iat, sub, nonce`; `nonce` equal to the raw nonce (`compare_digest`). `email` is optional and `email_verified` ignored (the phone is the identity; the staff adapter's required `email` does not apply to customers). |
+| `google` (`id_token`) | RS256 against Google's JWKS (cached by `kid`); `iss` ∈ {`https://accounts.google.com`, `accounts.google.com`}; `aud` ∈ `GOOGLE_APP_CLIENT_IDS` (the iOS client id and the web/server client id the Android SDK requests tokens for) ∪ `GOOGLE_WEB_CLIENT_IDS` (the website, B-W1); required claims `iss, aud, exp, iat, sub, nonce`; `nonce` equal to the raw nonce (`compare_digest`). `email` is optional (the staff adapter's required `email` does not apply to customers). The address is **trusted** only when `email_verified` is `true` **and** it is a Gmail address (`gmail.com`, `googlemail.com`) or its domain equals the token's `hd` (Google Workspace) — Google's rule for using the address as an identity; any other verified address proves only that it was verified once. |
 | `apple` (`id_token`) | RS256 against `https://appleid.apple.com/auth/keys` (cached by `kid`); `iss = https://appleid.apple.com`, `aud` ∈ `APPLE_BUNDLE_IDS` ∪ `APPLE_SERVICES_IDS` (the website, B-W1); required claims `iss, aud, exp, iat, sub, nonce`; `nonce == sha256(raw_nonce.encode("utf-8")).hexdigest()` (lowercase hex) **(verify M3)**; `sub` is the subject; `email` optional (may be a private relay address); `email_verified` ignored (Apple may send it as the string `"true"`). Apple's token has no `jti`. |
 | `facebook` (`access_token`) | `debug_token` with the app token `app_id|app_secret` in the `Authorization` header and the user's `input_token` in a **form-encoded POST body** to `https://graph.facebook.com/{FACEBOOK_GRAPH_VERSION}/debug_token` **(verify M3** that Graph accepts the POST form; if it does not, the GET is the documented exception: the httpx/httpcore request loggers of the OAuth client are set to WARNING so no URL with `input_token=` is logged, and no egress proxy logs query strings**)**: `is_valid`, `app_id == FACEBOOK_APP_ID`; then `GET /me?fields=id,email` with the user token in the `Authorization` header and `appsecret_proof`. No nonce (the token is bound to our app id). P1 changes the staff adapter's `_debug_token` the same way (it passes `input_token` as a query parameter today). |
 | `facebook` (`id_token`, iOS Limited Login) | RS256 against Facebook's OIDC JWKS; `iss = https://www.facebook.com`, `aud = FACEBOOK_APP_ID`; required claims `iss, aud, exp, iat, sub, nonce`; `nonce` equal to the raw nonce **(verify M3)**; `email` optional |
@@ -708,8 +708,15 @@ The fakes' `*` nonce wildcard exists only under the local/test settings. `author
   `M2-A10`): an identity can only be linked by proving the account's strongest factor — at completion the SMS code
   **and** the password when the account has one (§2.1.9); from a signed-in session the password, or an SMS code when
   the account has no password (§2.2.8), never the bearer token alone — so it is at least as strong as the A2 path.
-- Unknown identity → **200 `NextStep`** `verify_phone` with a `social_ticket` = `TimestampSigner(salt="gd.social")`
-  over `{provider, subject, email, jti, fid: pii_ref(fid)}`, 10 min, where `jti` is a **server-generated** 128-bit id
+- **One mailbox, one account.** Unknown identity with a **trusted** address (Google only, row above) and an active
+  customer whose `email` is that (normalised) address, holding no identity of this provider → the identity is linked
+  to that customer and signs in: **200 `AuthTokens`**, `issue_device_key=True`, no ticket, code or password (whoever
+  holds the mailbox can already reset that account's password by e-mail; every account address was proven by a code,
+  so no one can pre-register another person's address). `push.account_security` `social_linked`; audit
+  `customer.social_linked {provider, method: "verified_email"}` and `customer.login_succeeded {method: provider}`.
+  Untrusted addresses (unverified, other domains, Facebook, Apple) never match an account.
+- Otherwise an unknown identity → **200 `NextStep`** `verify_phone` with a `social_ticket` =
+  `TimestampSigner(salt="gd.social")` over `{provider, subject, email, jti, fid: pii_ref(fid), trusted}`, 10 min, where `jti` is a **server-generated** 128-bit id
   (`secrets.token_hex(16)`), never a token claim; it keys `gd:social:otp:{sms_code_id}` (§2.1.1) and, for Apple, the
   sealed refresh token waiting for completion (`gd:social:apple:{jti}`, 10 min; Apple's authorization code is valid
   for 5 minutes only, so it is exchanged now). Single use is durable: completing consumes a verification token
@@ -728,8 +735,9 @@ Body `{"social_ticket": str, "verification_token": str (purpose link_social) | n
 (`send-code` `link_social` with `email`) — and complete with that `verification_token` (the table below, with "phone"
 read as "phone or e-mail"; the dormant rule applies to phones only), or (b) **skip** it and complete with
 `verification_token: null`, `name` (2..150) and `terms_version`: a **new account without a phone** is created
-(→ **201**, `is_new_customer: true`, `Me.phone: null`, `Me.email: null`; the provider's e-mail stays on the identity
-only, never on the account). Nothing is merged: (b) never links to an existing account. The phone is asked at the
+(→ **201**, `is_new_customer: true`, `Me.phone: null`; `Me.email` is the ticket's address when it is **trusted**
+(§2.1.8) and no account holds it, else `null` and the provider's e-mail stays on the identity only). Nothing is
+merged: (b) never links to an existing account (a trusted address of an existing account signed in at §2.1.8). The phone is asked at the
 first checkout, payment, booking or QR (§2.2.10).
 The phone is the one the verification token is bound to. Checks: ticket valid and its `fid` = `X-GD-Device-Id` (400
 `social_ticket_invalid`); the token's `SmsCode` row was requested with **this** ticket (`gd:social:otp:{sms_code_id}`

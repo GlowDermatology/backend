@@ -720,6 +720,10 @@ def social_sign_in(
             return signed
         # The identity was unlinked (reset, dormant rule, unlink) or the account deleted meanwhile: it is an
         # unknown identity now and gets the verify_phone ticket (an Apple code already exchanged is reused).
+    if claims.trusted_email:
+        signed = _sign_in_by_trusted_email(provider, claims, device=device, request=request)
+        if signed is not None:
+            return signed
     jti = secrets.token_hex(16)
     ttl = int(settings.SOCIAL_TICKET_TTL_SECONDS)
     if provider == enums.CustomerSocialProvider.APPLE:
@@ -733,9 +737,59 @@ def social_sign_in(
             "email": claims.email,
             "jti": jti,
             "fid": pii_ref(device.fid),
+            "trusted": claims.trusted_email,
         }
     )
     return PhoneStep(ticket, provider, claims.email, ttl)
+
+
+def _sign_in_by_trusted_email(
+    provider: str, claims: AppTokenClaims, *, device: DeviceContext, request: Any
+) -> SignIn | None:
+    """One mailbox, one account: an unknown identity whose provider vouches for its address
+    (``trusted_email``, Google's verified Gmail / Workspace rule) is linked to the active account holding
+    that address and signs in, with no ticket, code or password — whoever holds the mailbox can already
+    reset that account's password by e-mail. Every account address was proven by a code, so no one can
+    pre-register someone else's address. ``None`` (the ticket flow runs) when no active account holds the
+    address or that account already has an identity of this provider; nothing is written then.
+    Lock order Customer → identity → devices → sessions (C§2.7.1)."""
+    email = account_services.normalize_email(claims.email)
+    candidate = account_services.active_customer_by_email(email)
+    if candidate is None:
+        return None
+    with transaction.atomic():
+        customer = account_services.lock_customer(candidate.pk)
+        if customer.status != enums.CustomerStatus.ACTIVE or customer.email != email:
+            return None
+        if CustomerSocialIdentity.objects.filter(customer_id=customer.pk, provider=provider).exists():
+            return None
+        if CustomerSocialIdentity.objects.filter(provider=provider, subject=claims.subject).exists():
+            return None
+        try:
+            account_services.link_customer_identity(
+                customer.pk, provider=provider, subject=claims.subject, email=email, signed_in=True
+            )
+        except IntegrityError:
+            return None
+        started = account_services.start_customer_session(
+            customer.pk,
+            device.fid,
+            device.platform,
+            device.app_version,
+            issue_device_key=True,
+            auth_method=provider,
+        )
+        _account_security(
+            customer.pk,
+            enums.AccountSecurityEvent.SOCIAL_LINKED,
+            provider=provider,
+            farewell_tokens=started.farewell_tokens,
+        )
+        _audit(
+            "customer.social_linked", customer, request, {"provider": provider, "method": "verified_email"}
+        )
+        _audit("customer.login_succeeded", customer, request, {"method": provider})
+        return SignIn(started, customer.pk)
 
 
 def _sign_in_linked(
@@ -776,6 +830,7 @@ class SocialTicket:
     subject: str
     email: str
     jti: str
+    trusted: bool = False
 
 
 def read_social_ticket(ticket: str, *, fid: str) -> SocialTicket:
@@ -797,7 +852,13 @@ def read_social_ticket(ticket: str, *, fid: str) -> SocialTicket:
     jti = str(data.get("jti") or "")
     if not jti or cache.get(SOCIAL_TICKET_USED_KEY.format(jti=jti)) is not None:
         raise SocialTicketInvalid()
-    return SocialTicket(str(data["provider"]), str(data["subject"]), str(data.get("email") or ""), jti)
+    return SocialTicket(
+        str(data["provider"]),
+        str(data["subject"]),
+        str(data.get("email") or ""),
+        jti,
+        trusted=data.get("trusted") is True,
+    )
 
 
 def complete_social(
@@ -906,6 +967,19 @@ def _best_effort(operation: Any, *args: Any) -> None:
         logger.warning("cache cleanup failed: %s", getattr(operation, "__name__", operation), exc_info=True)
 
 
+def _trusted_signup_email(social: SocialTicket, identifier: str) -> str | None:
+    """The address a sign-up without a verification token keeps: the provider-vouched one of the ticket
+    (``trusted``), unless another account holds it (it would have signed in by it, so that account appeared
+    meanwhile: the new account keeps no address rather than failing). ``None`` with a verified phone (its
+    account is created with the phone) or an untrusted ticket."""
+    if identifier or not social.trusted or not social.email:
+        return None
+    email = account_services.normalize_email(social.email)
+    if Customer.objects.filter(email=email).exists():
+        return None
+    return email
+
+
 def _complete_social(
     social: SocialTicket,
     verification_token: str,
@@ -945,15 +1019,16 @@ def _complete_social(
             if active:  # deleted meanwhile
                 raise VerificationInvalid()
             if customer is None:
+                email = identifier if is_email(identifier) else _trusted_signup_email(social, identifier)
                 try:
                     customer = account_services.create_customer(
                         identifier if identifier and not is_email(identifier) else None,
-                        email=identifier if is_email(identifier) else None,
+                        email=email,
                         name=(name or "").strip(),
                         language=language or device.lang,
                     )
                 except IntegrityError as exc:
-                    raise (EmailRegistered() if is_email(identifier) else PhoneRegistered()) from exc
+                    raise (EmailRegistered() if email else PhoneRegistered()) from exc
                 created = True
             elif is_email(identifier):  # reactivation is by phone only (A1)
                 raise EmailRegistered()
