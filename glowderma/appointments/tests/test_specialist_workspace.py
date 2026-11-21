@@ -52,47 +52,6 @@ def visit(hour: int) -> datetime:
     return datetime.combine(monday, time(hour), tzinfo=timeutils.TASHKENT)
 
 
-def test_only_manager_invites_and_converts(staff_client: APIClient) -> None:
-    manager = panel_client(StaffUserFactory.create(is_manager=True))
-    doctor = ProfessionalFactory.create()
-    endpoint = f"{ADMIN}specialists/{doctor.pk}/access/invite/"
-    body = {"email": "specialist@clinic.example", "full_name": "Amina Doctor", "is_manager": True}
-    assert staff_client.post(endpoint, body, **write_headers()).status_code == 403
-    headers = write_headers()
-    result = manager.post(endpoint, body, **headers)
-    assert result.status_code == 201, result.data
-    doctor.refresh_from_db()
-    assert result.data["staff"]["id"] == doctor.staff_user_id
-    assert result.data["staff"]["role"] == "specialist"
-    assert result.data["staff"]["is_manager"] is False
-    assert manager.post(endpoint, body, **headers).data == result.data
-    assert doctor.staff_user is not None and doctor.staff_user.must_change_password
-
-    existing = StaffUserFactory.create()
-    old_session = panel_client(existing)
-    doctor = ProfessionalFactory.create(staff_user=existing)
-    convert_url = f"{ADMIN}specialists/{doctor.pk}/access/convert/"
-    assert manager.post(convert_url, {"staff_user_id": existing.pk + 1}, **write_headers()).status_code == 409
-    result = manager.post(convert_url, {"staff_user_id": existing.pk}, **write_headers())
-    assert result.status_code == 204, result.data
-    assert old_session.get(ADMIN + "auth/me/").status_code == 401
-    assert panel_client(existing).get(ADMIN + "auth/me/").data["role"] == "specialist"
-    assert panel_client(existing).get(ADMIN + "orders/").status_code == 403
-
-
-@pytest.mark.parametrize("flag", ["is_manager", "is_superuser", "is_staff"])
-def test_privileged_staff_accounts_cannot_convert(flag: str) -> None:
-    manager = panel_client(StaffUserFactory.create(is_manager=True))
-    target = StaffUserFactory.create(**{flag: True})
-    doctor = ProfessionalFactory.create(staff_user=target)
-    result = manager.post(
-        f"{ADMIN}specialists/{doctor.pk}/access/convert/", {"staff_user_id": target.pk}, **write_headers()
-    )
-    assert result.status_code == 409, result.data
-    target.refresh_from_db()
-    assert target.role == "admin"
-
-
 def test_isolation_after_transfer_and_deactivation(staff_client: APIClient) -> None:
     doctor, client = specialist()
     other, _ = specialist()
@@ -118,8 +77,9 @@ def test_isolation_after_transfer_and_deactivation(staff_client: APIClient) -> N
 
     foreign_override = WorkingHoursOverride.objects.create(professional=other, date=visit(10).date())
     assert client.delete(f"{ROOT}overrides/{foreign_override.pk}/", **write_headers()).status_code == 404
-    changed = staff_client.patch(f"{ADMIN}specialists/{doctor.pk}/", {"staff_user_id": None}, format="json")
-    assert changed.status_code == 409
+    staff_client.patch(f"{ADMIN}specialists/{doctor.pk}/", {"staff_user_id": None}, format="json")
+    doctor.refresh_from_db()
+    assert doctor.staff_user_id is not None  # the owner account is not part of the profile body
     headers = write_headers()
     action_url = f"{ROOT}bookings/{own.pk}/confirm/"
     assert client.post(action_url, {}, **headers).status_code == 204
@@ -128,8 +88,9 @@ def test_isolation_after_transfer_and_deactivation(staff_client: APIClient) -> N
     assert client.get(calendar).data["appointments"] == []
     assert client.post(action_url, {}, **headers).status_code == 404
     type(doctor).objects.filter(pk=doctor.pk).update(is_active=False)
+    assert client.get(ROOT + "availability/").status_code == 200  # an unpublished profile stays editable
+    type(doctor.staff_user).objects.filter(pk=doctor.staff_user_id).update(role=enums.StaffRole.ADMIN)
     assert client.get(ROOT + "availability/").status_code == 403
-    assert client.get(ADMIN + "auth/me/").status_code == 200
 
 
 def test_availability_keeps_bookings_and_changes_free_slots(staff_client: APIClient) -> None:

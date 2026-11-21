@@ -23,7 +23,12 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from glowderma.accounts.api.admin.serializers import StaffCredentialsSerializer, WorkforceInviteSerializer
+from glowderma.accounts import selectors as account_selectors
+from glowderma.accounts.api.admin.serializers import (
+    StaffCredentialsSerializer,
+    StaffMemberSerializer,
+    WorkforceInviteSerializer,
+)
 from glowderma.accounts.api.admin.views import staff_credentials
 from glowderma.accounts.api.base import AdminAPIView, AdminGenericViewSet
 from glowderma.accounts.models import StaffUser
@@ -46,7 +51,6 @@ from glowderma.professionals.api.admin.serializers import (
     ClinicServiceWriteSerializer,
     ClinicSpecialistPatchSerializer,
     ClinicSpecialistSerializer,
-    ClinicSpecialistWriteSerializer,
     HoursOverrideCreateSerializer,
     HoursOverrideSerializer,
     OfferedServicesSerializer,
@@ -147,24 +151,6 @@ class SpecialistViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet)
         return super().list(request, *args, **kwargs)
 
     @extend_schema(
-        operation_id="admin_specialists_create",
-        description=(
-            "Create a specialist with an explicit primary clinic and assigned clinics. "
-            "Add the offered services and the working hours, then activate."
-        ),
-        request=ClinicSpecialistWriteSerializer,
-        responses={201: ClinicSpecialistSerializer, **ADMIN_ERRORS},
-    )
-    @idempotent(required=False)
-    def create(self, request: Request) -> Response:
-        serializer = ClinicSpecialistWriteSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        professional = services.create_specialist(
-            dict(serializer.validated_data), actor=request.user, request=request
-        )
-        return Response(specialist_body(professional.pk), status=201)
-
-    @extend_schema(
         operation_id="admin_specialists_retrieve", responses={200: ClinicSpecialistSerializer, **ADMIN_ERRORS}
     )
     def retrieve(self, request: Request, pk: int) -> Response:
@@ -250,46 +236,90 @@ class CanProvisionSpecialist(IsManager):
         return bool(settings.SPECIALIST_PROVISIONING_ENABLED) and super().has_permission(request, view)
 
 
+class SpecialistInviteCredentialsSerializer(StaffCredentialsSerializer):
+    specialist_id = serializers.IntegerField(help_text="The draft profile created with the account.")
+
+
 class SpecialistInviteView(AdminAPIView):
     permission_classes = [CanProvisionSpecialist]
 
     @extend_schema(
         operation_id="admin_specialist_invite",
+        description=(
+            "Staff → Add employee → Specialist: creates the Specialist account and its private draft profile "
+            "together (the profile is named after the account; the public name can be changed later). An "
+            "email already in use → 400 `unique` on `email`, nothing is created. Resend the invitation with "
+            "`staff/{id}/send-password-link/` or `staff/{id}/reset-password/`: same account, same profile."
+        ),
         parameters=[IDEMPOTENCY_KEY_HEADER],
         request=WorkforceInviteSerializer,
-        responses={201: StaffCredentialsSerializer, **ADMIN_ERRORS},
+        responses={201: SpecialistInviteCredentialsSerializer, **ADMIN_ERRORS},
     )
     @idempotent(sealed=("temporary_password",))
-    def post(self, request: Request, pk: int) -> Response:
+    def post(self, request: Request) -> Response:
         body = WorkforceInviteSerializer(data=request.data)
         body.is_valid(raise_exception=True)
-        user, password = services.invite_specialist(
-            pk, dict(body.validated_data), actor=cast(StaffUser, request.user), request=request
+        user, password, professional = services.invite_specialist(
+            dict(body.validated_data), actor=cast(StaffUser, request.user), request=request
         )
-        return Response(staff_credentials(user, password, body.validated_data["delivery"]), status=201)
+        credentials = staff_credentials(user, password, body.validated_data["delivery"])
+        return Response({**credentials, "specialist_id": professional.pk}, status=201)
 
 
-class StaffConversionSerializer(serializers.Serializer[dict[str, Any]]):
-    staff_user_id = serializers.IntegerField(min_value=1)
+class SpecialistRoleChangeSerializer(serializers.Serializer[dict[str, Any]]):
+    role = serializers.ChoiceField(choices=("staff", "specialist"))
+    confirmed = serializers.BooleanField(help_text="Must be `true`: the role change is a confirmed action.")
+
+    def validate_confirmed(self, value: bool) -> bool:
+        if not value:
+            raise serializers.ValidationError(field_error("required"))
+        return value
 
 
-class SpecialistConvertView(AdminAPIView):
+class SpecialistRoleChangeResultSerializer(serializers.Serializer[dict[str, Any]]):
+    account = StaffMemberSerializer()
+    specialist_id = serializers.IntegerField(
+        allow_null=True, help_text="The profile the account owns; `null` for an account that never had one."
+    )
+    upcoming_appointments = serializers.IntegerField(
+        help_text="→ staff: requested/confirmed visits ahead on the paused profile, for staff to handle."
+    )
+
+
+class SpecialistAccountRoleView(AdminAPIView):
     permission_classes = [CanProvisionSpecialist]
 
     @extend_schema(
-        operation_id="admin_specialist_convert",
+        operation_id="admin_staff_specialist_role",
+        description=(
+            "Staff → Edit: `specialist` converts an eligible Staff or Manager account (its draft profile is "
+            "created, or the profile it already owns is reused unpublished); `staff` ends specialist access "
+            "and unpublishes the profile, keeping it and its appointments on the account. Sessions are "
+            "revoked on a change; the role the account already has changes nothing. The caller's own "
+            "account, an inactive account, a superuser, operations-console access or the last active "
+            "manager → 409 `conflict`."
+        ),
         parameters=[IDEMPOTENCY_KEY_HEADER],
-        request=StaffConversionSerializer,
-        responses={204: None, **ADMIN_ERRORS},
+        request=SpecialistRoleChangeSerializer,
+        responses={200: SpecialistRoleChangeResultSerializer, **ADMIN_ERRORS},
     )
     @idempotent()
     def post(self, request: Request, pk: int) -> Response:
-        body = StaffConversionSerializer(data=request.data)
+        body = SpecialistRoleChangeSerializer(data=request.data)
         body.is_valid(raise_exception=True)
-        services.convert_specialist_account(
-            pk, body.validated_data["staff_user_id"], actor=cast(StaffUser, request.user), request=request
+        _, profile, upcoming = services.set_specialist_account_role(
+            pk, body.validated_data["role"], actor=cast(StaffUser, request.user), request=request
         )
-        return Response(status=204)
+        member = account_selectors.staff_member(pk)
+        if member is None:  # pragma: no cover - the service just locked the row
+            raise NotFound
+        return Response(
+            {
+                "account": StaffMemberSerializer(member).data,
+                "specialist_id": None if profile is None else profile.pk,
+                "upcoming_appointments": upcoming,
+            }
+        )
 
 
 class SpecialistWorkingHoursView(AdminAPIView):

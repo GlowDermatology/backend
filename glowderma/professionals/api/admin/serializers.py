@@ -18,7 +18,6 @@ from typing import Any, cast
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
-from glowderma.accounts.models import StaffUser
 from glowderma.core import enums, slugs, timeutils
 from glowderma.core.api.exceptions import field_error
 from glowderma.core.api.fields import (
@@ -211,6 +210,17 @@ class WorkingDaySerializer(serializers.Serializer[WorkingHours]):
     break_end = serializers.TimeField(format="%H:%M", allow_null=True)
 
 
+PUBLISH_BLOCKERS = ("account", "name", "discipline", "bio", "photo", "clinic", "service", "availability")
+
+
+class SpecialistAccountSerializer(ActorSerializer):
+    """The owner account of a profile: its login, its current role and whether it may sign in."""
+
+    email = serializers.EmailField()
+    role = serializers.ChoiceField(choices=enums.StaffRole.values)
+    is_active = serializers.BooleanField()
+
+
 class ClinicSpecialistSerializer(serializers.Serializer[Professional]):
     """The admin ``ClinicSpecialist``; instances come from ``selectors.specialist_queryset()``.
 
@@ -221,18 +231,23 @@ class ClinicSpecialistSerializer(serializers.Serializer[Professional]):
     id = serializers.IntegerField()
     slug = serializers.CharField(help_text="The website URL segment (B-W1): unique, editable.")
     name = serializers.CharField()
-    role = serializers.ChoiceField(choices=enums.SpecialistRole.values)
+    role = serializers.ChoiceField(
+        choices=enums.SpecialistRole.values, allow_blank=True, help_text='`""` while a draft has none.'
+    )
     qualifications = serializers.SerializerMethodField()
     bio = serializers.SerializerMethodField()
     experience_years = serializers.IntegerField(allow_null=True)
     photo_url = serializers.SerializerMethodField()
     photo_thumbnail_url = serializers.SerializerMethodField(help_text="400 px WebP variant.")
     photo_medium_url = serializers.SerializerMethodField(help_text="1000 px WebP variant.")
-    location_id = serializers.IntegerField()
+    location_id = serializers.IntegerField(allow_null=True, help_text="`null` while a draft has no clinic.")
     location_ids = serializers.SerializerMethodField()
-    staff_user = ActorSerializer(allow_null=True)
-    staff_user_role = serializers.ChoiceField(
-        source="staff_user.role", choices=enums.StaffRole.values, allow_null=True, default=None
+    account = SpecialistAccountSerializer(source="staff_user", help_text="The account that owns the profile.")
+    publish_blockers = serializers.SerializerMethodField(
+        help_text=(
+            "What keeps the profile from being published (`[]` = ready): account, name, discipline, bio, "
+            "photo, clinic, service, availability."
+        )
     )
     slot_step_min = serializers.IntegerField()
     position = serializers.IntegerField()
@@ -270,6 +285,10 @@ class ClinicSpecialistSerializer(serializers.Serializer[Professional]):
     def get_upcoming_appointments(self, obj: Professional) -> int:
         return int(self.context.get("upcoming", {}).get(obj.pk, 0))
 
+    @extend_schema_field(serializers.ListField(child=serializers.ChoiceField(choices=PUBLISH_BLOCKERS)))
+    def get_publish_blockers(self, obj: Professional) -> list[str]:
+        return selectors.publish_blockers(obj)
+
 
 class SpecialistListQuerySerializer(serializers.Serializer[dict[str, Any]]):
     """Query of ``GET specialists/``; ``search`` is trimmed and cut to 64 characters."""
@@ -283,10 +302,10 @@ class SpecialistListQuerySerializer(serializers.Serializer[dict[str, Any]]):
 
 
 class ClinicSpecialistWriteSerializer(serializers.Serializer[dict[str, Any]]):
-    """Body of ``POST specialists/`` and (``partial``, see the subclass) ``PATCH specialists/{id}/``.
+    """Fields staff edit on a profile (validated ``partial``, see the subclass ``PATCH specialists/{id}/``).
 
-    ``context["professional_id"]`` is the edited specialist (a staff account already linked to it is not a
-    conflict with itself). The validated data carries a staff user instance when supplied.
+    ``context["professional_id"]`` is the edited specialist. The owner account is never part of the body: a
+    profile is created with its account and stays attached to it.
     """
 
     name = serializers.CharField(min_length=2, max_length=150)
@@ -299,9 +318,11 @@ class ClinicSpecialistWriteSerializer(serializers.Serializer[dict[str, Any]]):
     )
     location_id = _int(help_text="The primary clinic, which must be included in location_ids.")
     location_ids = serializers.ListField(child=_int(), allow_empty=False)
-    staff_user_id = _int(required=False, allow_null=True, help_text="An active staff account, or null.")
     position = serializers.IntegerField(min_value=0, max_value=MAX_POSITION, required=False)
-    is_active = serializers.BooleanField(required=False, default=False)
+    is_active = serializers.BooleanField(
+        required=False,
+        help_text="Published: listed on the website and bookable. Publishing needs a complete profile.",
+    )
     slug = serializers.CharField(
         max_length=160, required=False, help_text="Optional on create (derived from the name)."
     )
@@ -339,35 +360,6 @@ class ClinicSpecialistWriteSerializer(serializers.Serializer[dict[str, Any]]):
         if len(ids) != len(set(ids)):
             raise serializers.ValidationError(field_error("unique"))
         return ids
-
-    def validate_staff_user_id(self, value: int | None) -> StaffUser | None:
-        if value is None:
-            return None
-        editing = self.context.get("professional_id")
-        if editing is not None:
-            # The link already stored on this specialist is accepted back unchanged, even once that account
-            # is deactivated: a client resending the whole form must not be refused for a field it kept.
-            current = (
-                Professional.objects.select_related("staff_user")
-                .filter(pk=editing, staff_user_id=value)
-                .first()
-            )
-            if current is not None and current.staff_user is not None:
-                return current.staff_user
-        staff = StaffUser.objects.filter(pk=value, is_active=True).first()
-        if staff is None:
-            raise serializers.ValidationError(field_error("does_not_exist", MESSAGES["staff_not_found"]))
-        taken = Professional.objects.filter(staff_user=staff)
-        if editing is not None:
-            taken = taken.exclude(pk=editing)
-        if taken.exists():
-            raise serializers.ValidationError(field_error("unique", MESSAGES["staff_taken"]))
-        return staff
-
-    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
-        if "staff_user_id" in attrs:
-            attrs["staff_user"] = attrs.pop("staff_user_id")
-        return attrs
 
 
 class ClinicSpecialistPatchSerializer(ClinicSpecialistWriteSerializer):

@@ -73,8 +73,11 @@ class Location(TimeStampedModel):
 class Professional(TimeStampedModel):
     """A bookable specialist."""
 
+    # The primary clinic; ``null`` while a draft profile has no clinic assigned yet.
     location = models.ForeignKey(
         "professionals.Location",
+        null=True,
+        blank=True,
         on_delete=models.PROTECT,
         related_name="professionals",
         verbose_name="filial",
@@ -87,7 +90,10 @@ class Professional(TimeStampedModel):
     )
     name = models.CharField(max_length=150, verbose_name="nomi")  # shown as-is in every language
     # dermatologist | cosmetologist
-    role = models.CharField(max_length=16, choices=enums.SpecialistRole.choices, verbose_name="rol")
+    # "" while a draft profile has no discipline yet; required to publish.
+    role = models.CharField(
+        max_length=16, choices=enums.SpecialistRole.choices, blank=True, default="", verbose_name="rol"
+    )
     photo = models.ImageField(
         upload_to=media.professional_photo_path, blank=True, max_length=255, verbose_name="surat"
     )
@@ -100,19 +106,19 @@ class Professional(TimeStampedModel):
     qualifications_ru = models.TextField(blank=True, default="", db_default="", verbose_name="malaka (ru)")
     qualifications_en = models.TextField(blank=True, default="", db_default="", verbose_name="malaka (en)")
     experience_years = models.PositiveSmallIntegerField(null=True, verbose_name="tajriba (yil)")
-    # The specialist's own staff account, if any (FND-7): informational, grants nothing by itself.
+    # The workforce account that owns this profile for its whole lifetime: created together with the
+    # account (specialist invite) or on its first conversion to the Specialist role, never relinked.
     staff_user = models.OneToOneField(
         "accounts.StaffUser",
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="+",
+        on_delete=models.PROTECT,
+        related_name="specialist_profile",
         verbose_name="xodim hisobi",
     )
     # slot grid used by M2 /slots
     slot_step_min = models.PositiveSmallIntegerField(default=30, verbose_name="slot qadami (daq.)")
     position = models.PositiveIntegerField(default=0, verbose_name="tartib")
-    is_active = models.BooleanField(default=True, verbose_name="faol")
+    # Published: visible on the website and bookable. A new profile starts as a private draft.
+    is_active = models.BooleanField(default=False, verbose_name="e’lon qilingan")
     # B-W1 SEO (admin contract §2.17): the website's URL segment, set once from the name when the row is
     # created, unique, never only digits, edited only by staff (stable URLs).
     slug = models.CharField(
@@ -147,6 +153,13 @@ class Professional(TimeStampedModel):
 
     def slug_base(self) -> str:
         return professional_slug_base(self.name)
+
+    @property
+    def clinic_id(self) -> int:
+        """The primary clinic of a profile that has one (seed and demo code; published profiles do)."""
+        if self.location_id is None:
+            raise ValueError(f"Specialist profile {self.pk} has no primary clinic yet")
+        return self.location_id
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         """A new row without a slug gets the first free one derived from the name (B-W1)."""

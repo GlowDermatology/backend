@@ -356,7 +356,7 @@ class FreeSlots:
     day: date
     professional_id: int
     service_id: int
-    location_id: int
+    location_id: int | None
     duration_min: int
     price: int
     slot_step_min: int

@@ -630,16 +630,22 @@ def count(data: dict[str, Any]) -> Any:
 def professional(data: dict[str, Any]) -> Any:
     """An active professional with upcoming appointments (``upcoming``), or a new one without any rows that
     point to it (``fresh``)."""
-    from glowderma.professionals import bookings, services
+    from glowderma.professionals import bookings
     from glowderma.professionals.models import Location, Professional
 
     if data.get("fresh"):
-        row = Professional(
+        from glowderma.accounts.models import StaffUser
+
+        suffix = secrets.token_hex(3)
+        account = StaffUser.objects.create_user(
+            f"e2e-specialist-{suffix}@x.uz", None, full_name=f"E2E Mutaxassis {suffix}", role="specialist"
+        )
+        row = Professional.objects.create(
+            staff_user=account,
             location=Location.objects.order_by("pk").first(),
-            name=f"E2E Mutaxassis {secrets.token_hex(3)}",
+            name=account.full_name,
             role="cosmetologist",
         )
-        services.save_row(row, actor=None)
         return {"id": row.pk, "name": row.name, "location": str(row.location)}
     active = list(Professional.objects.filter(is_active=True).values_list("pk", flat=True))
     counts = bookings.upcoming_counts(active, timeutils.now())

@@ -6,10 +6,14 @@ import uuid
 from typing import Any
 
 import pytest
+from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APIClient
 
+from glowderma.accounts.tests.factories import StaffUserFactory
 from glowderma.appointments.models import Appointment
+from glowderma.catalog.tests.factories import image_bytes
 from glowderma.core.models import AuditEntry
+from glowderma.professionals import services
 
 pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("clock")]  # Saturday 24 Oct 2026 12:05
 
@@ -33,6 +37,18 @@ def slot_starts(
         )
     )
     return [slot["start"] for slot in body["slots"]]
+
+
+def specialist_profile(name: str) -> int:
+    """A manager's invite (the Specialist account and its draft profile), then the photo publishing needs."""
+    manager = StaffUserFactory.create(is_manager=True)
+    _, _, profile = services.invite_specialist(
+        {"email": "malika@clinic.example", "full_name": name, "delivery": "temporary_password"}, actor=manager
+    )
+    services.set_specialist_photo(
+        profile.pk, SimpleUploadedFile("me.png", image_bytes("PNG"), content_type="image/png"), actor=manager
+    )
+    return profile.pk
 
 
 def test_a_specialist_set_up_by_staff_is_bookable_in_the_app(
@@ -61,20 +77,21 @@ def test_a_specialist_set_up_by_staff_is_bookable_in_the_app(
         ),
         201,
     )
-    specialist = ok(
-        staff_client.post(
-            f"{ADMIN}specialists/",
+    # the specialist's account and draft profile come from the manager's invite
+    pk = specialist_profile(name="Malika Usmonova")
+    ok(
+        staff_client.patch(
+            f"{ADMIN}specialists/{pk}/",
             {
-                "name": "Malika Usmonova",
                 "role": "cosmetologist",
                 "location_id": primary,
                 "location_ids": [primary, second],
                 "qualifications": {"uz": "Kosmetolog diplomi"},
+                "bio": {"uz": "Lazer muolajalari"},
             },
-        ),
-        201,
+        )
     )
-    pk, service_id = specialist["id"], service["id"]
+    service_id = service["id"]
     offer = {"services": [{"service_id": service_id, "price": 175_000, "duration_min": 45}]}
     ok(staff_client.put(f"{ADMIN}specialists/{pk}/services/", offer))
     week = {
@@ -181,7 +198,10 @@ def test_a_specialist_set_up_by_staff_is_bookable_in_the_app(
         "location.created",
         "location.created",
         "service.created",
+        "staff.created",
         "professional.created",
+        "professional.photo_updated",
+        "professional.updated",
         "professional.services_updated",
         "schedule.hours_updated",
         "professional.activated",

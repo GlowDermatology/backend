@@ -3,7 +3,6 @@ export, query count), create, retrieve, PATCH with the deactivation guard, the p
 the weekly hours, the date overrides and the blocked periods. Every write is audited and idempotent."""
 
 import csv
-import uuid
 from collections.abc import Callable
 from datetime import datetime, time, timedelta
 from io import StringIO
@@ -12,11 +11,9 @@ from typing import Any
 import pytest
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
-from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIClient
 
 from glowderma.accounts.models import StaffUser
-from glowderma.accounts.tests.factories import StaffUserFactory
 from glowderma.appointments.models import Appointment
 from glowderma.appointments.tests.factories import AppointmentFactory
 from glowderma.catalog.tests.helpers import upload
@@ -25,7 +22,6 @@ from glowderma.core.images import MAX_BYTES
 from glowderma.core.media import absolute_media_url
 from glowderma.core.models import AuditEntry
 from glowderma.core.timeutils import TASHKENT
-from glowderma.professionals import services
 from glowderma.professionals.models import (
     BlockedPeriod,
     Professional,
@@ -36,7 +32,6 @@ from glowderma.professionals.models import (
 from glowderma.professionals.tests.conftest import ANCHOR, errors
 from glowderma.professionals.tests.factories import (
     BlockedPeriodFactory,
-    LocationFactory,
     ProfessionalFactory,
     ProfessionalServiceFactory,
     ServiceFactory,
@@ -74,169 +69,9 @@ def audits(action: str) -> list[AuditEntry]:
 # --- create -------------------------------------------------------------------------------------------------
 
 
-def test_create_with_an_explicit_clinic_defaults_to_inactive(
-    staff_client: APIClient, staff: StaffUser
-) -> None:
-    location = LocationFactory.create()
-    response = staff_client.post(
-        BASE,
-        {
-            "name": "  Malika Usmonova ",
-            "role": "cosmetologist",
-            "location_id": location.pk,
-            "location_ids": [location.pk],
-        },
-    )
-    assert response.status_code == 201, response.json()
-    professional = Professional.objects.get()
-    assert response.json()["slug"]
-    assert without_bw1(response.json(), frozenset({"updated_at"})) == {
-        "id": professional.pk,
-        "name": "Malika Usmonova",
-        "role": "cosmetologist",
-        "qualifications": EMPTY,
-        "bio": EMPTY,
-        "experience_years": None,
-        "photo_url": None,
-        "photo_thumbnail_url": None,
-        "photo_medium_url": None,
-        "location_id": location.pk,
-        "location_ids": [location.pk],
-        "staff_user": None,
-        "staff_user_role": None,
-        "slot_step_min": 30,
-        "position": 0,
-        "is_active": False,
-        "services": [],
-        "working_hours": [],
-        "upcoming_appointments": 0,
-        "created_at": timeutils.isoformat(ANCHOR),
-        "updated_at": timeutils.isoformat(ANCHOR),
-    }
-    [entry] = audits("professional.created")
-    assert (entry.entity_type, entry.entity_id, entry.actor_id) == (
-        "professional",
-        str(professional.pk),
-        staff.pk,
-    )
-    assert entry.after is not None and entry.after["name"] == "Malika Usmonova"
-    assert entry.after["is_active"] is False and entry.after["location_id"] == location.pk
-
-
-def test_create_with_every_field(staff_client: APIClient) -> None:
-    first = LocationFactory.create()
-    other = LocationFactory.create()
-    doctor = StaffUserFactory.create(full_name="Nodira Rahimova")
-    ProfessionalFactory.create(position=4)
-    body = {
-        "name": "Nodira Rahimova",
-        "role": "dermatologist",
-        "qualifications": {"uz": "Toshkent tibbiyot akademiyasi", "ru": "ТМА"},
-        "bio": {"uz": "Tajribali dermatolog", "en": "Experienced"},
-        "experience_years": 8,
-        "slot_step_min": 15,
-        "location_id": other.pk,
-        "location_ids": [other.pk, first.pk],
-        "staff_user_id": doctor.pk,
-        "is_active": True,
-    }
-    response = staff_client.post(BASE, body)
-    assert response.status_code == 201, response.json()
-    data = response.json()
-    assert data["qualifications"] == {"uz": "Toshkent tibbiyot akademiyasi", "ru": "ТМА", "en": ""}
-    assert data["bio"] == {"uz": "Tajribali dermatolog", "ru": "", "en": "Experienced"}
-    assert (data["experience_years"], data["slot_step_min"], data["location_id"]) == (8, 15, other.pk)
-    assert data["staff_user"] == {"id": doctor.pk, "display_name": "Nodira Rahimova"}
-    assert data["is_active"] is True and data["position"] == 5  # appended last
-
-
-def test_create_without_a_clinic_asks_for_the_location(staff_client: APIClient) -> None:
-    response = staff_client.post(BASE, {"name": "Malika Usmonova", "role": "cosmetologist"})
-    assert {field for field, code, _ in errors(response) if code == "required"} == {
-        "location_id",
-        "location_ids",
-    }
-    assert not Professional.objects.exists() and not AuditEntry.objects.exists()
-
-
-@pytest.mark.parametrize(
-    ("change", "expected"),
-    [
-        ({"name": None}, ("name", "null", "Majburiy maydon.")),
-        ({"name": " a "}, ("name", "min_length", "Kamida 2 ta belgi kiriting.")),
-        ({"name": "a" * 151}, ("name", "max_length", "150 belgidan oshmasin.")),
-        ({"role": "surgeon"}, ("role", "invalid_choice", "Ruxsat etilmagan qiymat.")),
-        (
-            {"slot_step_min": 25},
-            ("slot_step_min", "invalid_choice", "Ruxsat etilgan qadamlar: 10, 15, 20, 30 yoki 60 daqiqa."),
-        ),
-        ({"experience_years": 81}, ("experience_years", "max_value", "Qiymat 80 dan oshmasin.")),
-        ({"location_id": 999_999}, ("location_id", "does_not_exist", "Manzil topilmadi.")),
-        ({"staff_user_id": 999_999}, ("staff_user_id", "does_not_exist", "Xodim topilmadi.")),
-        (
-            {"qualifications": {"uz": "x" * 2001}},
-            ("qualifications.uz", "max_length", "2000 belgidan oshmasin."),
-        ),
-        ({"position": -1}, ("position", "min_value", "Qiymat 0 dan kam bo‘lmasin.")),
-    ],
-)
-def test_create_validation(
-    staff_client: APIClient, change: dict[str, Any], expected: tuple[str, str, str]
-) -> None:
-    location = LocationFactory.create()
-    body = {
-        "name": "Malika Usmonova",
-        "role": "cosmetologist",
-        "location_id": location.pk,
-        "location_ids": [location.pk],
-        **change,
-    }
-    assert errors(staff_client.post(BASE, body)) == [expected]
-    assert not Professional.objects.exists()
-
-
-def test_staff_link_must_be_active_and_free(staff_client: APIClient) -> None:
-    location = LocationFactory.create()
-    inactive = StaffUserFactory.create(is_active=False)
-    linked = StaffUserFactory.create()
-    holder = ProfessionalFactory.create(staff_user=linked)
-    body = {
-        "name": "Malika Usmonova",
-        "role": "cosmetologist",
-        "location_id": location.pk,
-        "location_ids": [location.pk],
-    }
-    response = staff_client.post(BASE, {**body, "staff_user_id": inactive.pk})
-    assert errors(response) == [("staff_user_id", "does_not_exist", "Xodim topilmadi.")]
-    response = staff_client.post(BASE, {**body, "staff_user_id": linked.pk})
-    assert errors(response) == [("staff_user_id", "unique", "Bu xodim boshqa mutaxassisga bog‘langan.")]
-    # the holder may keep (re-send) its own link, and unlink it
-    assert staff_client.patch(url(holder), {"staff_user_id": linked.pk}).status_code == 200
-    response = staff_client.patch(url(holder), {"staff_user_id": None})
-    assert response.status_code == 200 and response.json()["staff_user"] is None
-
-
-def test_create_is_idempotent(staff_client: APIClient) -> None:
-    location = LocationFactory.create()
-    key = str(uuid.uuid4())
-    body = {
-        "name": "Malika Usmonova",
-        "role": "cosmetologist",
-        "location_id": location.pk,
-        "location_ids": [location.pk],
-    }
-    first = staff_client.post(BASE, body, HTTP_IDEMPOTENCY_KEY=key)
-    replay = staff_client.post(BASE, body, HTTP_IDEMPOTENCY_KEY=key)
-    assert first.status_code == replay.status_code == 201
-    assert replay["Idempotent-Replayed"] == "true" and replay.json() == first.json()
-    assert Professional.objects.count() == 1 and len(audits("professional.created")) == 1
-    reused = staff_client.post(BASE, {**body, "name": "Boshqa"}, HTTP_IDEMPOTENCY_KEY=key)
-    assert reused.status_code == 422 and reused.json()["code"] == "idempotency_key_reused"
-
-
 def test_anonymous_and_customer_callers_are_refused(anon_client: APIClient) -> None:
     assert anon_client.get(BASE).status_code == 401
-    assert anon_client.post(BASE, {"name": "X", "role": "dermatologist"}).status_code == 401
+    assert anon_client.post(BASE, {"name": "X", "role": "dermatologist"}).status_code in {401, 405}
 
 
 # --- list, retrieve, export ---------------------------------------------------------------------------------
@@ -285,7 +120,7 @@ def test_list_search_filters_ordering_and_upcoming_counts(staff_client: APIClien
 
 def _populate(count: int) -> None:
     for _ in range(count):
-        professional = ProfessionalFactory.create(staff_user=StaffUserFactory.create())
+        professional = ProfessionalFactory.create()
         for _service in range(2):
             ProfessionalServiceFactory.create(professional=professional)
         for weekday in range(3):
@@ -449,8 +284,10 @@ def test_deactivation_with_upcoming_appointments_needs_force(staff_client: APICl
     # the appointments are kept as they were
     assert [Appointment.objects.get(pk=a.pk).status for a in kept] == ["requested", "confirmed"]
 
+    # republishing needs a complete profile (this one has no bio, photo, service or hours)
     reactivated = staff_client.patch(url(professional), {"is_active": True})
-    assert reactivated.status_code == 200 and len(audits("professional.activated")) == 1
+    assert reactivated.status_code == 409 and "surat" in reactivated.json()["message"]
+    assert not audits("professional.activated") and not Professional.objects.get().is_active
 
 
 def test_deactivation_without_upcoming_appointments_is_not_forced(staff_client: APIClient) -> None:
@@ -900,24 +737,6 @@ def test_adjacent_blocks_do_not_overlap(staff_client: APIClient) -> None:
         "kind": enums.BlockKind.OFF,
     }
     assert staff_client.post(url(professional, "blocks/"), body).status_code == 201
-
-
-def test_a_lost_race_for_a_staff_account_is_a_unique_error(staff: StaffUser) -> None:
-    """The serializer pre-checks the link; two requests that both pass it meet the one-to-one constraint, and
-    the loser answers 400 ``staff_user_id`` ``unique`` (not a 500)."""
-    location = LocationFactory.create()
-    holder = ProfessionalFactory.create(staff_user=StaffUserFactory.create())
-    data = {
-        "name": "Malika",
-        "role": "cosmetologist",
-        "staff_user": holder.staff_user,
-        "location_id": location.pk,
-        "location_ids": [location.pk],
-    }
-    with pytest.raises(ValidationError) as caught:
-        services.create_specialist(data, actor=staff)
-    assert caught.value.get_codes() == {"staff_user_id": ["unique"]}
-    assert Professional.objects.count() == 1
 
 
 def test_search_is_folded_like_every_name_search(staff_client: APIClient) -> None:

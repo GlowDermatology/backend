@@ -1,12 +1,14 @@
 from typing import Any
 
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework import serializers
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.parsers import MultiPartParser
 from rest_framework.request import Request
 from rest_framework.response import Response
 
 from glowderma.accounts.api.base import SpecialistAPIView
+from glowderma.core.api.exceptions import field_error
 from glowderma.core.api.schema import ADMIN_ERRORS, IDEMPOTENCY_KEY_HEADER
 from glowderma.core.idempotency import idempotent
 from glowderma.core.uzsource import N_
@@ -14,16 +16,21 @@ from glowderma.professionals import selectors, services
 from glowderma.professionals.api.admin.serializers import (
     BlockedPeriodCreateSerializer,
     BlockedPeriodSerializer,
+    ClinicSpecialistSerializer,
     HoursOverrideCreateSerializer,
     HoursOverrideSerializer,
     ScheduleRangeQuerySerializer,
+    SpecialistTextSerializer,
     WorkingDaySerializer,
     WorkingWeekSerializer,
 )
+from glowderma.professionals.api.admin.views import specialist_body
 from glowderma.professionals.models import Location, Professional
 
 
 def require_active_profile(user_id: int, *, lock: bool = False) -> Professional:
+    """The caller's own profile (draft or published). Every ``specialist/`` route resolves the profile from
+    the signed-in account only, so a specialist can never address another specialist's rows."""
     professional = selectors.active_specialist_account(user_id, lock=lock)
     if professional is None:
         raise PermissionDenied(N_("Mutaxassis jadvali hozir mavjud emas."))
@@ -177,4 +184,65 @@ class BlocksView(SpecialistProfileAPIView):
     def delete(self, request: Request, pk: int) -> Response:
         professional = require_active_profile(self.account_id, lock=True)
         services.delete_block(professional.pk, pk, actor=request.user, request=request)
+        return Response(status=204)
+
+
+class OwnProfileSerializer(serializers.Serializer[dict[str, Any]]):
+    """``PATCH specialist/profile/``: the public name and the bio (languages merge one by one). Clinics,
+    services, discipline and publication stay with staff."""
+
+    name = serializers.CharField(min_length=2, max_length=150, required=False)
+    bio = SpecialistTextSerializer(required=False, partial=True)
+
+
+class OwnProfileView(SpecialistProfileAPIView):
+    @extend_schema(
+        operation_id="specialist_profile", responses={200: ClinicSpecialistSerializer, **ADMIN_ERRORS}
+    )
+    def get(self, request: Request) -> Response:
+        return Response(specialist_body(self.professional.pk))
+
+    @extend_schema(
+        operation_id="specialist_profile_update",
+        request=OwnProfileSerializer,
+        parameters=[IDEMPOTENCY_KEY_HEADER],
+        responses={200: ClinicSpecialistSerializer, **ADMIN_ERRORS},
+    )
+    @idempotent(required=False)
+    def patch(self, request: Request) -> Response:
+        body = OwnProfileSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        data = dict(body.validated_data)
+        if "bio" in data:
+            sent = request.data.get("bio") if isinstance(request.data, dict) else None
+            data["bio"] = {key: value for key, value in data["bio"].items() if key in (sent or {})}
+        services.update_own_profile(self.professional.pk, data, actor=request.user, request=request)
+        return Response(specialist_body(self.professional.pk))
+
+
+class OwnPhotoView(SpecialistProfileAPIView):
+    parser_classes = [MultiPartParser]
+
+    @extend_schema(
+        operation_id="specialist_profile_photo_update",
+        description="One multipart part `file` (JPEG, PNG or WebP, ≤ 5 MiB); replaces the current photo.",
+        request={
+            "multipart/form-data": inline_serializer(
+                name="OwnPhotoUpload", fields={"file": serializers.FileField()}
+            )
+        },
+        responses={200: ClinicSpecialistSerializer, **ADMIN_ERRORS},
+    )
+    @idempotent(required=False)
+    def put(self, request: Request) -> Response:
+        upload = request.FILES.get("file")
+        if upload is None:
+            raise ValidationError({"file": [field_error("required")]})
+        services.set_specialist_photo(self.professional.pk, upload, actor=request.user, request=request)
+        return Response(specialist_body(self.professional.pk))
+
+    @extend_schema(operation_id="specialist_profile_photo_destroy", responses={204: None, **ADMIN_ERRORS})
+    @idempotent(required=False)
+    def delete(self, request: Request) -> Response:
+        services.delete_specialist_photo(self.professional.pk, actor=request.user, request=request)
         return Response(status=204)

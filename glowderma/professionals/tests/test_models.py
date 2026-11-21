@@ -56,10 +56,12 @@ def test_location_str_defaults_and_checks() -> None:
 
 def test_location_with_professionals_is_protected() -> None:
     professional = ProfessionalFactory.create()
+    location = professional.location
+    assert location is not None
     with pytest.raises(ProtectedError):
-        professional.location.delete()
+        location.delete()
     professional.delete()
-    professional.location.delete()
+    location.delete()
     assert not Location.objects.exists()
 
 

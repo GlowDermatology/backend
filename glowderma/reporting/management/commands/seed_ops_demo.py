@@ -412,7 +412,7 @@ class Command(BaseCommand):
             start = day_start + timedelta(hours=hour)
             Appointment.objects.create(
                 professional=link.professional,
-                location_id=link.professional.location_id,
+                location_id=link.professional.clinic_id,
                 service=link.service,
                 customer=customers[index % len(customers)],
                 start=start,
@@ -431,7 +431,7 @@ class Command(BaseCommand):
         start = day_start + timedelta(days=3, hours=15)
         Appointment.objects.create(
             professional=link.professional,
-            location_id=link.professional.location_id,
+            location_id=link.professional.clinic_id,
             service=link.service,
             customer=customers[-1],
             start=start,

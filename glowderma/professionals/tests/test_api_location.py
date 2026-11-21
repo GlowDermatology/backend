@@ -9,9 +9,9 @@ from rest_framework.test import APIClient
 from glowderma.accounts.models import StaffUser
 from glowderma.core import timeutils
 from glowderma.core.models import AuditEntry
-from glowderma.professionals.models import Location, Professional
+from glowderma.professionals.models import Location
 from glowderma.professionals.tests.conftest import ANCHOR, errors
-from glowderma.professionals.tests.factories import LocationFactory
+from glowderma.professionals.tests.factories import LocationFactory, ProfessionalFactory
 
 pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("clock")]
 
@@ -51,16 +51,8 @@ def test_staff_create_and_retrieve_a_clinic(staff_client: APIClient, staff: Staf
     assert entry.before is None and entry.after is not None and entry.after["latitude"] == "41.311081"
     assert staff_client.get(f"{URL}{location.pk}/").json() == response.json()
     assert staff_client.get(URL).json() == {"results": [response.json()]}
-    created = staff_client.post(
-        "/api/v1/admin/specialists/",
-        {
-            "name": "Nodira",
-            "role": "dermatologist",
-            "location_id": location.pk,
-            "location_ids": [location.pk],
-        },
-    )
-    assert created.json()["location_id"] == location.pk == Professional.objects.get().location_id
+    doctor = ProfessionalFactory.create(location=location)
+    assert staff_client.get(f"/api/v1/admin/specialists/{doctor.pk}/").json()["location_id"] == location.pk
 
 
 def test_patch_merges_and_audits_the_changed_leaves(staff_client: APIClient) -> None:

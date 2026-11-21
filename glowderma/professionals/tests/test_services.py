@@ -9,6 +9,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from PIL import Image
 
 from glowderma.accounts.models import StaffUser
+from glowderma.accounts.tests.factories import StaffUserFactory
 from glowderma.core import enums
 from glowderma.core.models import AuditEntry
 from glowderma.core.timeutils import TASHKENT
@@ -42,45 +43,46 @@ def actions() -> list[tuple[str, str, str]]:
     return list(AuditEntry.objects.order_by("id").values_list("action", "entity_type", "entity_id"))
 
 
-def test_create_update_deactivate_professional_are_audited(staff: StaffUser) -> None:
+def test_update_and_deactivate_professional_are_audited(staff: StaffUser) -> None:
     location = LocationFactory.create()
-    professional = services.create_professional(
-        location=location, name="Nodira Rahimova", role=enums.SpecialistRole.DERMATOLOGIST, actor=staff
-    )
-    assert professional.pk is not None and professional.is_active
+    professional = ProfessionalFactory.create(location=location, name="Nodira Rahimova")
     services.update_professional(professional, actor=staff, experience_years=12)
     services.deactivate_professional(professional, actor=staff)
     stored = Professional.objects.get(pk=professional.pk)
     assert stored.experience_years == 12 and stored.is_active is False
     pk = str(professional.pk)
     assert actions() == [
-        ("professional.created", "professional", pk),
         ("professional.updated", "professional", pk),
         ("professional.updated", "professional", pk),
     ]
-    created, updated, deactivated = AuditEntry.objects.order_by("id")
-    assert created.before is None and created.actor_id == staff.pk
-    assert created.after is not None and updated.before is not None and updated.after is not None
+    updated, deactivated = AuditEntry.objects.order_by("id")
+    assert updated.actor_id == staff.pk
+    assert updated.before is not None and updated.after is not None
     assert deactivated.before is not None and deactivated.after is not None
-    assert created.after["name"] == "Nodira Rahimova"
     assert updated.before["experience_years"] is None and updated.after["experience_years"] == 12
     assert deactivated.before["is_active"] is True and deactivated.after["is_active"] is False
-    assert created.after["location_id"] == location.pk and created.after["photo"] == ""
+    assert updated.after["location_id"] == location.pk and updated.after["photo"] == ""
+
+
+def test_a_profile_cannot_be_relinked_to_another_account(staff: StaffUser) -> None:
+    professional = ProfessionalFactory.create()
+    professional.staff_user = StaffUserFactory.create(role=enums.StaffRole.SPECIALIST)
+    with pytest.raises(ValidationError):
+        services.save_row(professional, actor=staff)
 
 
 def test_professional_photo_is_processed_and_content_addressed(staff: StaffUser) -> None:
-    professional = services.create_professional(
-        location=LocationFactory.create(),
-        name="Dilnoza",
-        role=enums.SpecialistRole.COSMETOLOGIST,
+    professional = ProfessionalFactory.create(role=enums.SpecialistRole.COSMETOLOGIST)
+    services.update_professional(
+        professional,
         actor=staff,
         photo=SimpleUploadedFile("me.png", image_bytes("PNG"), content_type="image/png"),
     )
     professional.refresh_from_db()
     name = professional.photo.name or ""
     assert name.startswith(f"professionals/{professional.pk}/") and name.endswith(".png")
-    created = AuditEntry.objects.get(action="professional.created")
-    assert created.after is not None and created.after["photo"] == name
+    updated = AuditEntry.objects.get(action="professional.updated")
+    assert updated.after is not None and updated.after["photo"] == name
     with pytest.raises(ValidationError, match="JPEG, PNG yoki WebP"):
         services.update_professional(
             professional, actor=staff, photo=SimpleUploadedFile("x.txt", b"not an image")

@@ -79,8 +79,25 @@ def _seed_professionals(location: Location) -> dict[int, Professional]:
     for position, (pk, name, role) in enumerate(PROFESSIONALS):
         professional = Professional.objects.filter(name=name).first()
         if professional is None:
+            # Every profile is owned by a Specialist account; demo accounts stay inactive without a password
+            # until staff change the login email and send an invitation.
+            account, _ = StaffUser.objects.get_or_create(
+                email=f"specialist-{pk}@demo.glowderma.invalid",
+                defaults={
+                    "full_name": name,
+                    "role": enums.StaffRole.SPECIALIST,
+                    "is_active": False,
+                    "password": "!",  # noqa: S106 - unusable
+                },
+            )
             professional = Professional.objects.create(
-                id=pk, location=location, name=name, role=role, position=position
+                id=pk,
+                location=location,
+                staff_user=account,
+                name=name,
+                role=role,
+                position=position,
+                is_active=True,
             )
         rows[pk] = professional
     return rows
@@ -133,7 +150,7 @@ def _seed_hours(professionals: dict[int, Professional]) -> None:
                 professional=professional,
                 weekday=weekday,
                 defaults={
-                    "location_id": professional.location_id,
+                    "location_id": professional.clinic_id,
                     "start": DAY_START,
                     "end": DAY_END,
                     "break_start": break_start,

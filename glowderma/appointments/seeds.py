@@ -212,7 +212,7 @@ def _insert(spec: AppointmentSpec, lookup: _Lookup) -> bool:
     with pinned_clock(spec.requested_at):
         appointment = Appointment(
             professional=professional,
-            location_id=professional.location_id,
+            location_id=professional.clinic_id,
             service=service,
             customer=customer,
             start=spec.start,
@@ -238,7 +238,7 @@ def _insert(spec: AppointmentSpec, lookup: _Lookup) -> bool:
             "end": timeutils.isoformat(end),
             "service_id": service.pk,
             "professional_id": professional.pk,
-            "location_id": professional.location_id,
+            "location_id": professional.clinic_id,
             "price": price,
             "duration_min": duration,
         },

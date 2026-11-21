@@ -53,7 +53,8 @@ def test_editable_models_use_the_service_backed_admin(model: type[models.Model])
     request = RequestFactory().get("/django-admin/")
     request.user = StaffUserFactory.create(is_staff=True)
     assert model_admin.has_view_permission(request)
-    assert model_admin.has_add_permission(request)
+    # a profile is created only with its Specialist account (admin panel invite)
+    assert model_admin.has_add_permission(request) == (model is not Professional)
     assert model_admin.has_change_permission(request)
     assert model_admin.has_delete_permission(request) == (model is not Location)
     assert model_admin.check() == []
@@ -86,7 +87,7 @@ def test_changelists_and_change_pages_render() -> None:
     client = staff_client()
     link = ProfessionalServiceFactory.create()
     rows = [
-        link.professional.location,
+        LocationFactory.create(),
         link.professional,
         link.service,
         link,
@@ -291,7 +292,7 @@ def flashed(response: object) -> list[tuple[str, str]]:
     return [(m.level_tag, str(m)) for m in get_messages(response.wsgi_request)]  # type: ignore[attr-defined]
 
 
-def test_an_oversized_photo_re_renders_the_add_form_without_a_success_message() -> None:
+def test_an_oversized_photo_re_renders_the_change_form_without_a_success_message() -> None:
     import io
     import os
 
@@ -304,15 +305,17 @@ def test_an_oversized_photo_re_renders_the_add_form_without_a_success_message() 
     assert buffer.tell() > 5 * 1024 * 1024  # passes the ModelForm's ImageField, fails process_image
     upload = SimpleUploadedFile("big.png", buffer.getvalue(), content_type="image/png")
     client = staff_client()
-    location = LocationFactory.create()
+    professional = ProfessionalFactory.create()
     response = client.post(
-        reverse("admin:professionals_professional_add"), professional_form(location.pk, photo=upload)
+        reverse("admin:professionals_professional_change", args=[professional.pk]),
+        professional_form(professional.clinic_id, photo=upload),
     )
     assert response.status_code == 200  # the bound form again, not a redirect
     assert response.context["adminform"].form.errors["photo"] == ["Rasm 5 MB dan oshmasin."]
     assert "Probe Doctor" in response.content.decode()  # the input is kept
-    assert flashed(response) == []  # no "was added successfully"
-    assert not Professional.objects.exists()
+    assert flashed(response) == []  # no "was changed successfully"
+    professional.refresh_from_db()
+    assert not professional.photo
     assert not AuditEntry.objects.filter(action="professional.created").exists()
     from django.contrib.admin.models import LogEntry
 
@@ -365,7 +368,7 @@ def test_a_refused_inline_row_rolls_back_the_whole_change(monkeypatch: pytest.Mo
 
     monkeypatch.setattr(services, "save_row", refuse_hours)
     data = professional_form(
-        professional.location_id,
+        professional.clinic_id,
         name="Yangi nom",
         **{
             "working_hours-TOTAL_FORMS": 1,

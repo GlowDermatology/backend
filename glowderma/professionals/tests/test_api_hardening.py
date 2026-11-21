@@ -130,28 +130,6 @@ def test_the_export_leaves_out_offers_of_a_retired_service(staff_client: APIClie
 # --- the staff link already stored is accepted back ---------------------------------------------------------
 
 
-def test_a_patch_resending_the_linked_staff_account_after_its_deactivation_is_accepted(
-    staff_client: APIClient,
-) -> None:
-    doctor = StaffUserFactory.create()
-    professional = ProfessionalFactory.create(staff_user=doctor)
-    doctor.is_active = False
-    doctor.save(update_fields=["is_active"])
-    response = staff_client.patch(
-        url(professional), {"name": "Nodira Rahimova", "staff_user_id": doctor.pk}, format="json"
-    )
-    assert response.status_code == 200, response.json()
-    assert response.json()["staff_user"]["id"] == doctor.pk
-    # a different inactive account is still refused
-    other = StaffUserFactory.create(is_active=False)
-    assert errors(staff_client.patch(url(professional), {"staff_user_id": other.pk}, format="json")) == [
-        ("staff_user_id", "does_not_exist", "Xodim topilmadi.")
-    ]
-
-
-# --- the Django admin path keeps the deactivation guard (PS-2) ----------------------------------------------
-
-
 def test_the_django_admin_path_refuses_deactivating_a_specialist_with_appointments_ahead() -> None:
     staff = StaffUserFactory.create()
     professional = ProfessionalFactory.create(is_active=True)

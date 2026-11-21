@@ -258,22 +258,66 @@ CI_COLLATION = "glowderma_ci"  # the ICU case-insensitive collation of core.0007
 
 
 def active_specialist_account(user_id: int, *, lock: bool = False) -> Professional | None:
+    """The profile owned by an active Specialist account, published or still a draft (the specialist
+    completes a draft themselves); ``None`` for any other account."""
     rows = Professional.objects.filter(
         staff_user_id=user_id,
         staff_user__role=enums.StaffRole.SPECIALIST,
         staff_user__is_active=True,
-        is_active=True,
     )
     if lock:
         rows = rows.select_for_update(of=("self",))
     return rows.first()
 
 
+def publish_blockers(professional: Professional) -> list[str]:
+    """What keeps ``professional`` from being published, in display order (``[]`` = publishable): the owner
+    account must be a Specialist, and the profile needs its public name, discipline, Uzbek bio, photo, an
+    active primary clinic, an active offered service and weekly hours at an active assigned clinic."""
+    missing: list[str] = []
+    if professional.staff_user.role != enums.StaffRole.SPECIALIST:
+        missing.append("account")
+    if not professional.name.strip():
+        missing.append("name")
+    if not professional.role:
+        missing.append("discipline")
+    if not professional.bio_uz.strip():
+        missing.append("bio")
+    if not professional.photo:
+        missing.append("photo")
+    if professional.location is None or not professional.location.is_active:
+        missing.append("clinic")
+    links = getattr(professional, "offered_links", None)  # prefetched by ``specialist_queryset``
+    if links is not None:
+        offers = any(link.is_active and link.service.is_active for link in links)
+    else:
+        offers = (
+            professional.pk is not None
+            and professional.services.filter(is_active=True, service__is_active=True).exists()
+        )
+    if not offers:
+        missing.append("service")
+    active_ids = {location.pk for location in assigned_locations(professional, active_only=True)}
+    week = getattr(professional, "week_rows", None)
+    if week is not None:
+        scheduled = any(row.location_id in active_ids for row in week)
+    else:
+        scheduled = (
+            professional.pk is not None
+            and professional.working_hours.filter(location_id__in=active_ids).exists()
+        )
+    if not scheduled:
+        missing.append("availability")
+    return missing
+
+
 def assigned_locations(professional: Professional, *, active_only: bool = False) -> list[Location]:
-    """Primary clinic first, then additional clinics in display order."""
+    """Primary clinic first, then additional clinics in display order (none while a draft has no clinic)."""
+    if professional.location is None:
+        return []
     additional = getattr(professional, "clinic_rows", None)
     if additional is None:
-        additional = professional.additional_locations.all()
+        additional = professional.additional_locations.all() if professional.pk else []
     return [
         location for location in (professional.location, *additional) if not active_only or location.is_active
     ]

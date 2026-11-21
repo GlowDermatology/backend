@@ -210,7 +210,7 @@ STAFF_SUPERUSER_RESET = N_(
     "yoki superadmindan so‘rang."
 )
 # Editable through ``PATCH staff/{id}/`` (the email is the sign-in identity and stays as created).
-STAFF_EDITABLE_FIELDS = ("full_name", "is_manager")
+STAFF_EDITABLE_FIELDS = ("full_name", "is_manager", "email")
 # Login lockout scopes a password reset ends (``LoginView`` and the guarded Django admin login form).
 STAFF_LOGIN_SCOPES = ("login", "django_admin_login")
 # A temporary password: four groups of four characters without look-alikes (0/O, 1/l/I), ~92 bits.
@@ -347,18 +347,39 @@ def create_staff(
 
 
 @transaction.atomic
-def convert_staff_to_specialist(user_id: int, *, actor: StaffUser, request: Any = None) -> StaffUser:
-    user = StaffUser.objects.select_for_update().get(pk=user_id)
-    if (
-        not user.is_active
-        or user.role != enums.StaffRole.ADMIN
-        or user.is_manager
-        or user.is_superuser
-        or user.is_staff
-    ):
-        raise Conflict(N_("Faqat faol oddiy xodim hisobini mutaxassisga o‘tkazish mumkin."))
-    user.role = enums.StaffRole.SPECIALIST
-    user.save(update_fields=["role"])
+def change_specialist_role(
+    user_id: int,
+    role: enums.StaffRole,
+    *,
+    actor: StaffUser,
+    request: Any = None,
+) -> StaffUser:
+    """Switch one account between the Staff (``admin``) and Specialist roles; a Manager converted to
+    Specialist loses the manager flag. Refused (409) for the caller's own account, an inactive account, a
+    superuser, an account with operations-console access and the last active manager. The role the account
+    already has is a no-op (a retried request), else the account's sessions are revoked and the change is
+    audited ``staff.role_changed``. Only ``professionals`` calls this: it owns the specialist profile."""
+    managers = _lock_active_managers() if role == enums.StaffRole.SPECIALIST else []
+    user = StaffUser.objects.select_for_update().filter(pk=user_id).first()
+    if user is None:
+        raise NotFound
+    if user.pk == actor.pk:
+        raise Conflict(N_("O‘z hisobingiz rolini o‘zgartira olmaysiz."))
+    if user.role == role:
+        return user
+    if not user.is_active:
+        raise Conflict(N_("Rolni o‘zgartirishdan oldin hisobni faollashtiring."))
+    if user.is_superuser:
+        raise Conflict(N_("Superadmin hisobining rolini o‘zgartirib bo‘lmaydi."))
+    if user.is_staff:
+        raise Conflict(N_("Avval bu hisobning operatsiyalar konsoliga kirish huquqini olib tashlang."))
+    if user.is_manager and not any(manager_id != user.pk for manager_id in managers):
+        raise Conflict(STAFF_LAST_MANAGER)
+    previous_role = user.role
+    was_manager = user.is_manager
+    user.role = role
+    user.is_manager = False
+    user.save(update_fields=["role", "is_manager"])
     sessions = _revoke_user_sessions(user, enums.SessionRevokeReason.ADMIN_REVOKED)
     audit.record(
         action="staff.role_changed",
@@ -366,8 +387,8 @@ def convert_staff_to_specialist(user_id: int, *, actor: StaffUser, request: Any 
         entity_id=str(user.pk),
         actor=actor,
         request=request,
-        before={"role": enums.StaffRole.ADMIN},
-        after={"role": user.role, "revoked_count": len(sessions)},
+        before={"role": previous_role, "is_manager": was_manager},
+        after={"role": user.role, "is_manager": False, "revoked_count": len(sessions)},
     )
     _audit_revoked_sessions(sessions, actor=actor, request=request, reason="")
     return user
@@ -398,6 +419,10 @@ def update_staff(
     stored = StaffUser.objects.select_for_update().get(pk=user.pk)
     before: dict[str, Any] = {}
     after: dict[str, Any] = {}
+    if "email" in changes:
+        changes = {**changes, "email": changes["email"].strip().lower()}
+        if StaffUser.objects.filter(email__iexact=changes["email"]).exclude(pk=stored.pk).exists():
+            raise ValidationError({"email": [field_error("unique", STAFF_EMAIL_TAKEN)]})
     for name, value in changes.items():
         if getattr(stored, name) != value:
             before[name], after[name] = getattr(stored, name), value
@@ -414,7 +439,15 @@ def update_staff(
         return stored
     for name, value in after.items():
         setattr(stored, name, value)
-    stored.save(update_fields=list(after))
+    try:
+        with transaction.atomic():
+            stored.save(update_fields=list(after))
+    except IntegrityError as exc:  # lost a race with another account taking the same email
+        raise ValidationError({"email": [field_error("unique", STAFF_EMAIL_TAKEN)]}) from exc
+    if "email" in after:
+        # A link e-mailed to the previous login address no longer opens the account; the account keeps
+        # its id, role, sessions and (for a specialist) its profile.
+        revoke_password_tokens(stored)
     audit.record(
         action="staff.updated",
         entity_type="staff",

@@ -182,6 +182,8 @@ STAFF_FULL_NAME_MIN_LENGTH = 2
 STAFF_FULL_NAME_MAX_LENGTH = 150
 # Keys a ``StaffListItem`` fills only for a manager (``null`` for everyone else, §2.16).
 MANAGER_ONLY_KEYS = (
+    "is_superuser",
+    "has_ops_console_access",
     "full_name",
     "is_manager",
     "role",
@@ -227,6 +229,8 @@ class StaffListItemSerializer(ActorSerializer):
     is_active = serializers.BooleanField()
     full_name = serializers.CharField(allow_null=True, help_text="Manager only, else `null`.")
     is_manager = serializers.BooleanField(allow_null=True, help_text="Manager only, else `null`.")
+    is_superuser = serializers.BooleanField(allow_null=True, required=False)
+    has_ops_console_access = serializers.BooleanField(source="is_staff", allow_null=True, required=False)
     role = serializers.ChoiceField(choices=enums.StaffRole.values, allow_null=True)
     last_login_at = serializers.DateTimeField(
         allow_null=True, help_text="Manager only, else `null`; `null` for a manager too when never signed in."
@@ -277,6 +281,8 @@ class StaffMemberSerializer(ActorSerializer):
     is_active = serializers.BooleanField()
     is_manager = serializers.BooleanField()
     role = serializers.ChoiceField(choices=enums.StaffRole.values)
+    is_superuser = serializers.BooleanField(required=False)
+    has_ops_console_access = serializers.BooleanField(source="is_staff", required=False)
     last_login_at = serializers.DateTimeField(allow_null=True, help_text="`null`: never signed in.")
     linked_providers = serializers.SerializerMethodField()
     created_at = serializers.DateTimeField(source="date_joined")
@@ -418,15 +424,19 @@ class StaffResetMfaSerializer(serializers.Serializer[dict[str, Any]]):
 
 # Keys of a staff account that ``PATCH staff/{id}/`` refuses with ``read_only`` (the email is the sign-in
 # identity; the state and the password have their own actions).
-STAFF_READ_ONLY_KEYS = ("email", "is_active", "password")
+STAFF_READ_ONLY_KEYS = ("is_active", "password")
 
 
 class StaffUpdateSerializer(serializers.Serializer[dict[str, Any]]):
-    """``PATCH staff/{id}/`` body: ``full_name`` and/or ``is_manager``; ``email``, ``is_active`` and
-    ``password`` → ``read_only``."""
+    """``PATCH staff/{id}/`` body: ``full_name``, ``is_manager`` and/or ``email`` (the login address: the
+    same account, open password links are revoked); ``is_active`` and ``password`` → ``read_only``."""
 
     full_name = _full_name_field(required=False)
     is_manager = serializers.BooleanField(required=False)
+    email = serializers.EmailField(max_length=254, required=False)
+
+    def validate_email(self, value: str) -> str:
+        return value.strip().lower()
 
     def to_internal_value(self, data: Any) -> dict[str, Any]:
         body = data if isinstance(data, dict) else {}

@@ -637,6 +637,10 @@ msgstr "Please sign in."
 msgid "Avval admin panelda o‘z parolingizni o‘rnating, so‘ng konsolga qayta kiring."
 msgstr "Set your own password in the admin panel first, then sign in to the console again."
 
+#: glowderma/accounts/services.py
+msgid "Avval bu hisobning operatsiyalar konsoliga kirish huquqini olib tashlang."
+msgstr "Revoke this account’s operations console access first."
+
 #: glowderma/delivery/admin.py
 msgid "Avval ombor manzilini va xaritadagi nuqtasini saqlang."
 msgstr "Save the warehouse address and its map pin first."
@@ -1066,10 +1070,6 @@ msgstr "Locked"
 msgid "Bloklangan = noto‘g‘ri urinishlar chegarasiga yetgan kod · 7 kun"
 msgstr "Locked = a code that reached the wrong-attempt limit · 7 days"
 
-#: glowderma/professionals/services.py
-msgid "Bog‘langan xodim hisobi o‘zgardi. Sahifani yangilang."
-msgstr "The linked staff account changed. Refresh the page."
-
 #: glowderma/catalog/admin.py
 msgid "Bor"
 msgstr "In stock"
@@ -1232,10 +1232,6 @@ msgstr "This customer has no device that can receive push notifications."
 #: glowderma/commerce/api/admin/views.py
 msgid "Bu muammo allaqachon hal qilingan."
 msgstr "This issue has already been resolved."
-
-#: glowderma/professionals/services.py
-msgid "Bu mutaxassisga hisob allaqachon bog‘langan."
-msgstr "This specialist already has a linked account."
 
 #: glowderma/accounts/services.py
 msgid "Bu provayder allaqachon bog‘langan."
@@ -1766,6 +1762,10 @@ msgstr "Stale: %(ago)s"
 msgid "Eskiz"
 msgstr "Eskiz"
 
+#: admin history (professionals.Professional)
+msgid "E’lon qilingan"
+msgstr "Published"
+
 #: glowderma/site_config/templates/site_config/console/settings.html
 msgid "E’lon qilinmagan"
 msgstr "Not published"
@@ -1934,10 +1934,6 @@ msgstr "To activate, first test it successfully on a sample product."
 #: glowderma/professionals/services.py
 msgid "Faqat JPEG, PNG yoki WebP rasm."
 msgstr "JPEG, PNG or WebP images only."
-
-#: glowderma/accounts/services.py
-msgid "Faqat faol oddiy xodim hisobini mutaxassisga o‘tkazish mumkin."
-msgstr "Only an active regular staff account can be converted to Specialist."
 
 #: glowderma/catalog/api/admin/serializers.py
 #: glowderma/professionals/api/admin/serializers.py
@@ -3440,10 +3436,6 @@ msgstr "This specialist is scheduled at a different clinic for this time."
 msgid "Mutaxassis bu xizmatni ko‘rsatmaydi."
 msgstr "The specialist does not offer this service."
 
-#: glowderma/professionals/services.py
-msgid "Mutaxassis hisobi faqat taklif yoki hisobni o‘tkazish orqali bog‘lanadi."
-msgstr "Use an invitation or account conversion to link a Specialist login."
-
 #: glowderma/accounts/services.py
 msgid "Mutaxassis hisobi menejer bo‘la olmaydi."
 msgstr "A Specialist account cannot become a manager."
@@ -3455,6 +3447,10 @@ msgstr "A Specialist account cannot be granted console access."
 #: glowderma/professionals/api/specialist.py
 msgid "Mutaxassis jadvali hozir mavjud emas."
 msgstr "The specialist schedule is currently unavailable."
+
+#: glowderma/professionals/services.py
+msgid "Mutaxassis profili o‘z hisobiga butun umri davomida bog‘langan."
+msgstr "A specialist profile stays attached to its own account for its whole lifetime."
 
 #: glowderma/appointments/api/admin/serializers.py
 #: glowderma/appointments/services.py
@@ -3995,6 +3991,10 @@ msgid "O‘z 2FA ingizni bu yerdan qayta o‘rnatib bo‘lmaydi."
 msgstr "You cannot reset your own 2FA here."
 
 #: glowderma/accounts/services.py
+msgid "O‘z hisobingiz rolini o‘zgartira olmaysiz."
+msgstr "You can’t change your own account role."
+
+#: glowderma/accounts/services.py
 msgid "O‘z hisobingizni faolsizlantira olmaysiz."
 msgstr "You cannot deactivate your own account."
 
@@ -4094,6 +4094,10 @@ msgstr "The parcel's return has already been confirmed."
 #: model metadata
 msgid "Professionalroq"
 msgstr "More professional"
+
+#: glowderma/professionals/services.py
+msgid "Profilni e’lon qilib bo‘lmaydi. Yetishmayapti: %(missing)s."
+msgstr "The profile can’t be published yet. Missing: %(missing)s."
 
 #: glowderma/assistant/console/views.py
 msgid "Prompt shabloni"
@@ -4498,6 +4502,10 @@ msgstr "Mode"
 #: admin history (professionals.Professional)
 msgid "Rol"
 msgstr "Role"
+
+#: glowderma/accounts/services.py
+msgid "Rolni o‘zgartirishdan oldin hisobni faollashtiring."
+msgstr "Reactivate the account before changing its role."
 
 #: glowderma/customers/admin.py
 msgid "Rozilik"
@@ -5049,6 +5057,10 @@ msgstr "Enter an amount."
 #: glowderma/accounts/services.py
 msgid "Superadmin doim menejer bo‘ladi: uni menejerlikdan chiqarib bo‘lmaydi."
 msgstr "A superadmin is always a manager: the manager role cannot be removed."
+
+#: glowderma/accounts/services.py
+msgid "Superadmin hisobining rolini o‘zgartirib bo‘lmaydi."
+msgstr "The superuser role is protected."
 
 #: glowderma/accounts/services.py
 msgid "Superadminga vaqtinchalik parolni faqat superadmin bera oladi. Havolani uning e-pochtasiga yuboring yoki superadmindan so‘rang."
@@ -6375,6 +6387,10 @@ msgstr "notifications"
 msgid "bio (en)"
 msgstr "bio (en)"
 
+#: glowderma/professionals/services.py
+msgid "bio (o‘zbekcha)"
+msgstr "bio (Uzbek)"
+
 #: model metadata
 msgid "bio (ru)"
 msgstr "bio (ru)"
@@ -6597,6 +6613,10 @@ msgstr "reminded"
 msgid "eslatmalar"
 msgstr "reminders"
 
+#: model metadata
+msgid "e’lon qilingan"
+msgstr "published"
+
 #: glowderma/site_config/templates/site_config/console/settings.html
 msgid "e’lon qilingan <time datetime=\"%(iso)s\">%(at)s</time>"
 msgstr "published <time datetime=\"%(iso)s\">%(at)s</time>"
@@ -6611,6 +6631,10 @@ msgid_plural "faol akkaunt"
 msgstr[0] "active account"
 msgstr[1] "active accounts"
 
+#: glowderma/professionals/services.py
+msgid "faol asosiy filial"
+msgstr "an active primary clinic"
+
 #: model metadata
 msgid "faol kalit versiyasi"
 msgstr "active key version"
@@ -6622,6 +6646,10 @@ msgstr "active customers, by lifetime purchases"
 #: model metadata
 msgid "faol provayder"
 msgstr "active provider"
+
+#: glowderma/professionals/services.py
+msgid "faol xizmat"
+msgstr "an active service"
 
 #: model metadata
 msgid "faollashtirgan"
@@ -6781,6 +6809,10 @@ msgstr "never"
 msgid "hisob"
 msgstr "account"
 
+#: glowderma/professionals/services.py
+msgid "hisob Mutaxassis rolida emas"
+msgstr "the account is not in the Specialist role"
+
 #: model metadata
 msgid "hisob asosi"
 msgstr "calculation basis"
@@ -6877,6 +6909,7 @@ msgstr "integration status"
 msgid "integratsiya holatlari"
 msgstr "integration statuses"
 
+#: glowderma/professionals/services.py
 #: model metadata
 msgid "ish vaqti"
 msgstr "working hours"
@@ -7529,6 +7562,10 @@ msgstr "warehouse longitude"
 #: model metadata
 msgid "omborga qaytgan"
 msgstr "returned to the warehouse"
+
+#: glowderma/professionals/services.py
+msgid "ommaviy ism"
+msgstr "public name"
 
 #: glowderma/notifications/admin.py
 msgid "onlayn buyurtmalar %(orders)s · umrbod xarid %(amount)s"
@@ -8196,6 +8233,7 @@ msgstr "from amount"
 msgid "summagacha"
 msgstr "to amount"
 
+#: glowderma/professionals/services.py
 #: model metadata
 msgid "surat"
 msgstr "photo"
@@ -8800,6 +8838,10 @@ msgstr "appointment policy (uz)"
 #: model metadata
 msgid "yo‘l"
 msgstr "path"
+
+#: glowderma/professionals/services.py
+msgid "yo‘nalish"
+msgstr "discipline"
 
 #: glowderma/notifications/admin.py
 msgid "yo‘q"

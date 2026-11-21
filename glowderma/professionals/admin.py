@@ -96,7 +96,11 @@ class ProfessionalAdmin(ServiceBackedAdmin):
     ordering = ("position", "name", "id")
     autocomplete_fields = ("location",)
     exclude = ("additional_locations",)
+    readonly_fields = ("staff_user",)  # owned by its account for life (created by the specialist invite)
     inlines = (WorkingHoursInline,)
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False  # a profile is created only with its Specialist account (admin panel invite)
 
 
 @admin.register(Service)

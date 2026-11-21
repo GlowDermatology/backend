@@ -9,6 +9,7 @@ from django.core.management import call_command
 from django.db import connection
 from django.db.migrations.recorder import MigrationRecorder
 
+from glowderma.accounts.tests.factories import StaffUserFactory
 from glowderma.core import enums
 from glowderma.professionals.models import Location, Service
 from glowderma.professionals.services import OVERRIDE_CONSTRAINT, STAFF_USER_CONSTRAINT
@@ -149,13 +150,15 @@ def test_the_previous_release_can_still_insert_rows() -> None:
             "'', '', '', '', '', 30, 0, true) RETURNING category"
         )
         assert cursor.fetchone() == ("dermatology",)
+        account = StaffUserFactory.create(role="specialist")
         cursor.execute(
-            "INSERT INTO professionals_professional (created_at, updated_at, location_id, name, role, photo, "
-            "bio_uz, bio_ru, bio_en, slot_step_min, position, is_active) VALUES (now(), now(), %s, 'Eski', "
-            "'dermatologist', '', '', '', '', 30, 0, true) RETURNING qualifications_uz, staff_user_id",
-            [location.pk],
+            "INSERT INTO professionals_professional (created_at, updated_at, location_id, staff_user_id, "
+            "name, role, photo, bio_uz, bio_ru, bio_en, slot_step_min, position, is_active) VALUES (now(), "
+            "now(), %s, %s, 'Eski', 'dermatologist', '', '', '', '', 30, 0, true) RETURNING "
+            "qualifications_uz, slug",
+            [location.pk, account.pk],
         )
-        assert cursor.fetchone() == ("", None)
+        assert cursor.fetchone() == ("", "")
 
 
 @pytest.mark.django_db

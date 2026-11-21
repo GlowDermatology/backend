@@ -9396,6 +9396,246 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
+  /api/v1/admin/specialist/profile/:
+    get:
+      operationId: specialist_profile
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClinicSpecialist'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    patch:
+      operationId: specialist_profile_update
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedOwnProfileRequest'
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClinicSpecialist'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialist/profile/photo/:
+    put:
+      operationId: specialist_profile_photo_update
+      description: One multipart part `file` (JPEG, PNG or WebP, ≤ 5 MiB); replaces
+        the current photo.
+      tags:
+      - admin
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/OwnPhotoUploadRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClinicSpecialist'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    delete:
+      operationId: specialist_profile_photo_destroy
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '204':
+          description: No response body
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/admin/specialist/weekly-hours/:
     put:
       operationId: specialist_weekly_hours_update
@@ -9588,69 +9828,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
-    post:
-      operationId: admin_specialists_create
-      description: Create a specialist with an explicit primary clinic and assigned
-        clinics. Add the offered services and the working hours, then activate.
-      tags:
-      - admin
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ClinicSpecialistWriteRequest'
-        required: true
-      security:
-      - StaffJWT: []
-      responses:
-        '201':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ClinicSpecialist'
-          description: ''
-        '400':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '401':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '403':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '404':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '409':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '429':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
   /api/v1/admin/specialists/{id}/:
     get:
       operationId: admin_specialists_retrieve
@@ -9748,154 +9925,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ClinicSpecialist'
-          description: ''
-        '400':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '401':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '403':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '404':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '409':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '429':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-  /api/v1/admin/specialists/{id}/access/convert/:
-    post:
-      operationId: admin_specialist_convert
-      parameters:
-      - in: header
-        name: Idempotency-Key
-        schema:
-          type: string
-          format: uuid
-        description: 'Client-generated UUID; replays return the stored response with
-          `Idempotent-Replayed: true`.'
-        required: true
-      - in: path
-        name: id
-        schema:
-          type: integer
-        required: true
-      tags:
-      - admin
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/StaffConversionRequest'
-        required: true
-      security:
-      - StaffJWT: []
-      responses:
-        '204':
-          description: No response body
-        '400':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '401':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '403':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '404':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '409':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '429':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-  /api/v1/admin/specialists/{id}/access/invite/:
-    post:
-      operationId: admin_specialist_invite
-      parameters:
-      - in: header
-        name: Idempotency-Key
-        schema:
-          type: string
-          format: uuid
-        description: 'Client-generated UUID; replays return the stored response with
-          `Idempotent-Replayed: true`.'
-        required: true
-      - in: path
-        name: id
-        schema:
-          type: integer
-        required: true
-      tags:
-      - admin
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/WorkforceInviteRequest'
-        required: true
-      security:
-      - StaffJWT: []
-      responses:
-        '201':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/StaffCredentials'
           description: ''
         '400':
           content:
@@ -10713,6 +10742,82 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
+  /api/v1/admin/specialists/invite/:
+    post:
+      operationId: admin_specialist_invite
+      description: 'Staff → Add employee → Specialist: creates the Specialist account
+        and its private draft profile together (the profile is named after the account;
+        the public name can be changed later). An email already in use → 400 `unique`
+        on `email`, nothing is created. Resend the invitation with `staff/{id}/send-password-link/`
+        or `staff/{id}/reset-password/`: same account, same profile.'
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkforceInviteRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpecialistInviteCredentials'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/admin/staff/:
     get:
       operationId: admin_staff_list
@@ -11362,6 +11467,89 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/StaffLinkSent'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/staff/{id}/specialist-role/:
+    post:
+      operationId: admin_staff_specialist_role
+      description: 'Staff → Edit: `specialist` converts an eligible Staff or Manager
+        account (its draft profile is created, or the profile it already owns is reused
+        unpublished); `staff` ends specialist access and unpublishes the profile,
+        keeping it and its appointments on the account. Sessions are revoked on a
+        change; the role the account already has changes nothing. The caller''s own
+        account, an inactive account, a superuser, operations-console access or the
+        last active manager → 409 `conflict`.'
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SpecialistRoleChangeRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpecialistRoleChangeResult'
           description: ''
         '400':
           content:
@@ -19861,6 +20049,9 @@ components:
       required:
       - connected
       - last_sync_at
+    BlankEnum:
+      enum:
+      - ''
     BlockKindEnum:
       enum:
       - busy
@@ -20718,7 +20909,14 @@ components:
         name:
           type: string
         role:
-          $ref: '#/components/schemas/SpecialistRoleEnum'
+          description: |-
+            `""` while a draft has none.
+
+            * `dermatologist` - dermatologist
+            * `cosmetologist` - cosmetologist
+          oneOf:
+          - $ref: '#/components/schemas/SpecialistRoleEnum'
+          - $ref: '#/components/schemas/BlankEnum'
         qualifications:
           allOf:
           - $ref: '#/components/schemas/I18nText2000'
@@ -20749,20 +20947,24 @@ components:
           description: 1000 px WebP variant.
         location_id:
           type: integer
+          nullable: true
+          description: '`null` while a draft has no clinic.'
         location_ids:
           type: array
           items:
             type: integer
           readOnly: true
-        staff_user:
+        account:
           allOf:
-          - $ref: '#/components/schemas/Actor'
-          nullable: true
-        staff_user_role:
-          nullable: true
-          oneOf:
-          - $ref: '#/components/schemas/StaffRoleEnum'
-          - $ref: '#/components/schemas/NullEnum'
+          - $ref: '#/components/schemas/SpecialistAccount'
+          description: The account that owns the profile.
+        publish_blockers:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublishBlockersEnum'
+          readOnly: true
+          description: 'What keeps the profile from being published (`[]` = ready):
+            account, name, discipline, bio, photo, clinic, service, availability.'
         slot_step_min:
           type: integer
         position:
@@ -20787,6 +20989,7 @@ components:
           type: string
           format: date-time
       required:
+      - account
       - bio
       - created_at
       - experience_years
@@ -20799,76 +21002,15 @@ components:
       - photo_thumbnail_url
       - photo_url
       - position
+      - publish_blockers
       - qualifications
       - role
       - services
       - slot_step_min
       - slug
-      - staff_user
       - upcoming_appointments
       - updated_at
       - working_hours
-    ClinicSpecialistWriteRequest:
-      type: object
-      description: |-
-        Body of ``POST specialists/`` and (``partial``, see the subclass) ``PATCH specialists/{id}/``.
-
-        ``context["professional_id"]`` is the edited specialist (a staff account already linked to it is not a
-        conflict with itself). The validated data carries a staff user instance when supplied.
-      properties:
-        name:
-          type: string
-          minLength: 2
-          maxLength: 150
-        role:
-          $ref: '#/components/schemas/SpecialistRoleEnum'
-        qualifications:
-          $ref: '#/components/schemas/SpecialistTextRequest'
-        bio:
-          $ref: '#/components/schemas/SpecialistTextRequest'
-        experience_years:
-          type: integer
-          maximum: 80
-          minimum: 0
-          nullable: true
-        slot_step_min:
-          type: integer
-          description: 'The customer slot grid in minutes: 10, 15, 20, 30 (default)
-            or 60.'
-        location_id:
-          type: integer
-          maximum: 2147483647
-          minimum: 1
-          description: The primary clinic, which must be included in location_ids.
-        location_ids:
-          type: array
-          items:
-            type: integer
-            maximum: 2147483647
-            minimum: 1
-        staff_user_id:
-          type: integer
-          maximum: 2147483647
-          minimum: 1
-          nullable: true
-          description: An active staff account, or null.
-        position:
-          type: integer
-          maximum: 100000
-          minimum: 0
-        is_active:
-          type: boolean
-          default: false
-        slug:
-          type: string
-          minLength: 1
-          description: Optional on create (derived from the name).
-          maxLength: 160
-      required:
-      - location_id
-      - location_ids
-      - name
-      - role
     CodeIssue:
       type: object
       properties:
@@ -25246,6 +25388,14 @@ components:
       required:
       - activation
       - email_masked
+    OwnPhotoUploadRequest:
+      type: object
+      properties:
+        file:
+          type: string
+          format: binary
+      required:
+      - file
     PaginatedAdminCustomerSessionList:
       type: object
       required:
@@ -26011,19 +26161,14 @@ components:
             type: integer
             maximum: 2147483647
             minimum: 1
-        staff_user_id:
-          type: integer
-          maximum: 2147483647
-          minimum: 1
-          nullable: true
-          description: An active staff account, or null.
         position:
           type: integer
           maximum: 100000
           minimum: 0
         is_active:
           type: boolean
-          default: false
+          description: 'Published: listed on the website and bookable. Publishing
+            needs a complete profile.'
         slug:
           type: string
           minLength: 1
@@ -26104,6 +26249,18 @@ components:
           type: string
           format: date-time
           nullable: true
+    PatchedOwnProfileRequest:
+      type: object
+      description: |-
+        ``PATCH specialist/profile/``: the public name and the bio (languages merge one by one). Clinics,
+        services, discipline and publication stay with staff.
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 150
+        bio:
+          $ref: '#/components/schemas/PatchedSpecialistTextRequest'
     PatchedProductPatchRequest:
       type: object
       description: |-
@@ -26152,11 +26309,29 @@ components:
           maxLength: 60
         rules:
           $ref: '#/components/schemas/SegmentRulesRequest'
+    PatchedSpecialistTextRequest:
+      type: object
+      description: |-
+        ``qualifications`` / ``bio``: ``{uz, ru, en}``, each ≤ 2000, every language optional (missing on
+        create → ``""``; a PATCH changes only the languages sent).
+      properties:
+        uz:
+          type: string
+          default: ''
+          maxLength: 2000
+        ru:
+          type: string
+          default: ''
+          maxLength: 2000
+        en:
+          type: string
+          default: ''
+          maxLength: 2000
     PatchedStaffUpdateRequest:
       type: object
       description: |-
-        ``PATCH staff/{id}/`` body: ``full_name`` and/or ``is_manager``; ``email``, ``is_active`` and
-        ``password`` → ``read_only``.
+        ``PATCH staff/{id}/`` body: ``full_name``, ``is_manager`` and/or ``email`` (the login address: the
+        same account, open password links are revoked); ``is_active`` and ``password`` → ``read_only``.
       properties:
         full_name:
           type: string
@@ -26164,6 +26339,11 @@ components:
           maxLength: 150
         is_manager:
           type: boolean
+        email:
+          type: string
+          format: email
+          minLength: 1
+          maxLength: 254
     Payment:
       type: object
       description: One ``GET payments/`` row; ``refunds`` come from the view's per-page
@@ -27100,6 +27280,26 @@ components:
       - terms_updated_at
       - terms_version
       - website_url
+    PublishBlockersEnum:
+      enum:
+      - account
+      - name
+      - discipline
+      - bio
+      - photo
+      - clinic
+      - service
+      - availability
+      type: string
+      description: |-
+        * `account` - account
+        * `name` - name
+        * `discipline` - discipline
+        * `bio` - bio
+        * `photo` - photo
+        * `clinic` - clinic
+        * `service` - service
+        * `availability` - availability
     Purchase:
       type: object
       description: Contract §2.6 ``Purchase``.
@@ -28231,6 +28431,29 @@ components:
       - slot_step_min
       - slug
       - updated_at
+    SpecialistAccount:
+      type: object
+      description: 'The owner account of a profile: its login, its current role and
+        whether it may sign in.'
+      properties:
+        id:
+          type: integer
+        display_name:
+          type: string
+          readOnly: true
+        email:
+          type: string
+          format: email
+        role:
+          $ref: '#/components/schemas/StaffRoleEnum'
+        is_active:
+          type: boolean
+      required:
+      - display_name
+      - email
+      - id
+      - is_active
+      - role
     SpecialistAvailability:
       type: object
       properties:
@@ -28344,6 +28567,35 @@ components:
       - name
       - role
       - working_hours
+    SpecialistInviteCredentials:
+      type: object
+      description: |-
+        ``POST staff/`` (201) and ``POST staff/{id}/reset-password/`` (200): the account, its temporary
+        password (shown once) and/or the e-mailed link.
+      properties:
+        staff:
+          $ref: '#/components/schemas/StaffMember'
+        temporary_password:
+          type: string
+          nullable: true
+          description: Shown once (`delivery` `temporary_password` or `both`, else
+            `null`); the person signs in with it and must then set their own password.
+            A replay of the same `Idempotency-Key` returns it again (stored sealed,
+            §1.7).
+        activation:
+          allOf:
+          - $ref: '#/components/schemas/Activation'
+          nullable: true
+          description: The e-mailed link (`delivery` `email_link` or `both`), else
+            `null`.
+        specialist_id:
+          type: integer
+          description: The draft profile created with the account.
+      required:
+      - activation
+      - specialist_id
+      - staff
+      - temporary_password
     SpecialistList:
       type: object
       properties:
@@ -28376,6 +28628,43 @@ components:
           default: false
       required:
       - start
+    SpecialistRoleChangeRequest:
+      type: object
+      properties:
+        role:
+          $ref: '#/components/schemas/SpecialistRoleChangeRoleEnum'
+        confirmed:
+          type: boolean
+          description: 'Must be `true`: the role change is a confirmed action.'
+      required:
+      - confirmed
+      - role
+    SpecialistRoleChangeResult:
+      type: object
+      properties:
+        account:
+          $ref: '#/components/schemas/StaffMember'
+        specialist_id:
+          type: integer
+          nullable: true
+          description: The profile the account owns; `null` for an account that never
+            had one.
+        upcoming_appointments:
+          type: integer
+          description: '→ staff: requested/confirmed visits ahead on the paused profile,
+            for staff to handle.'
+      required:
+      - account
+      - specialist_id
+      - upcoming_appointments
+    SpecialistRoleChangeRoleEnum:
+      enum:
+      - staff
+      - specialist
+      type: string
+      description: |-
+        * `staff` - staff
+        * `specialist` - specialist
     SpecialistRoleEnum:
       enum:
       - dermatologist
@@ -28423,14 +28712,6 @@ components:
           type: string
           default: ''
           maxLength: 2000
-    StaffConversionRequest:
-      type: object
-      properties:
-        staff_user_id:
-          type: integer
-          minimum: 1
-      required:
-      - staff_user_id
     StaffCreateRequest:
       type: object
       description: Create a staff account, optionally granting the manager role.
@@ -28569,6 +28850,12 @@ components:
           type: boolean
           nullable: true
           description: Manager only, else `null`.
+        is_superuser:
+          type: boolean
+          nullable: true
+        has_ops_console_access:
+          type: boolean
+          nullable: true
         role:
           nullable: true
           oneOf:
@@ -28643,6 +28930,10 @@ components:
           type: boolean
         role:
           $ref: '#/components/schemas/StaffRoleEnum'
+        is_superuser:
+          type: boolean
+        has_ops_console_access:
+          type: boolean
         last_login_at:
           type: string
           format: date-time

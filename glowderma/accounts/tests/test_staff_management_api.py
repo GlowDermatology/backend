@@ -23,6 +23,8 @@ URL = "/api/v1/admin/staff/"
 LOGIN = "/api/v1/admin/auth/login/"
 TEMPORARY = re.compile(r"^[A-Za-z2-9]{4}(-[A-Za-z2-9]{4}){3}$")
 MEMBER_KEYS = {
+    "is_superuser",
+    "has_ops_console_access",
     "id",
     "display_name",
     "email",
@@ -115,6 +117,8 @@ def test_create_returns_the_account_and_a_temporary_password_once(
         "is_active": True,
         "is_manager": False,
         "role": "admin",
+        "is_superuser": False,
+        "has_ops_console_access": False,
         "last_login_at": None,
         "linked_providers": [],
         "created_at": staff["created_at"],
@@ -221,7 +225,6 @@ def test_update_refuses_read_only_keys(manager_client: APIClient, staff: StaffUs
     assert response.status_code == 400
     assert errors(response) == [
         ("full_name", "min_length", "Kamida 2 ta belgi kiriting."),
-        ("email", "read_only", "Bu maydonni o‘zgartirib bo‘lmaydi."),
         ("is_active", "read_only", "Bu maydonni o‘zgartirib bo‘lmaydi."),
         ("password", "read_only", "Bu maydonni o‘zgartirib bo‘lmaydi."),
     ]

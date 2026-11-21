@@ -172,9 +172,13 @@ def _hold_active_specialist(professional_id: int) -> bool:
     return _hold_row(Professional, professional_id)
 
 
-def _visit_location(professional: Professional, location_id: int) -> int:
-    # Archive locks the same row before checking upcoming visits.
-    if not _hold_row(Location, location_id) or not has_location(professional, location_id):
+def _visit_location(professional: Professional, location_id: int | None) -> int:
+    # Archive locks the same row before checking upcoming visits. ``None``: a draft without a clinic.
+    if (
+        location_id is None
+        or not _hold_row(Location, location_id)
+        or not has_location(professional, location_id)
+    ):
         raise _field("location_id", "does_not_exist", "field.booking_location_not_assigned")
     return location_id
 

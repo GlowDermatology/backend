@@ -21,7 +21,7 @@ from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.db import IntegrityError, connection, models, transaction
 from django.db.models.deletion import ProtectedError
-from django.utils.translation import gettext_lazy, ngettext
+from django.utils.translation import gettext, gettext_lazy, ngettext
 from rest_framework.exceptions import NotFound
 from rest_framework.exceptions import ValidationError as ApiValidationError
 
@@ -47,7 +47,7 @@ from glowderma.professionals.models import (
 
 PHOTO_KIND = "professionals"
 # Audit entity names (contract §3.2); the override is audited the same way (design 03 open point S-3 / T13).
-SPECIALIST_LINK_ERROR = N_("Mutaxassis hisobi faqat taklif yoki hisobni o‘tkazish orqali bog‘lanadi.")
+SPECIALIST_LINK_ERROR = N_("Mutaxassis profili o‘z hisobiga butun umri davomida bog‘langan.")
 ENTITY_NAMES: dict[type[models.Model], str] = {
     Location: "location",
     Professional: "professional",
@@ -173,12 +173,19 @@ def save_row(obj: models.Model, *, actor: Any, request: Any = None) -> models.Mo
             rows = rows.select_for_update()  # serialises with bookings like ``update_specialist`` (PS-2)
         current = rows.first()
         before = snapshot(current) if current is not None else None
-    if isinstance(obj, Professional) and _changes_specialist_login(
-        before["staff_user_id"] if before else None, obj.staff_user_id
-    ):
+    if isinstance(obj, Professional) and (before is None or before["staff_user_id"] != obj.staff_user_id):
         raise ValidationError({"staff_user": gettext_lazy(SPECIALIST_LINK_ERROR)})
     if isinstance(obj, Professional) and before is not None and before["is_active"] and not obj.is_active:
         _refuse_deactivation_with_upcoming(obj)
+    if isinstance(obj, Professional) and obj.is_active and not (before and before["is_active"]):
+        missing = selectors.publish_blockers(obj)
+        if missing:
+            raise ValidationError(
+                {
+                    "is_active": gettext(PUBLISH_BLOCKED)
+                    % {"missing": ", ".join(gettext(PUBLISH_BLOCKER_MESSAGES[key]) for key in missing)}
+                }
+            )
     if isinstance(obj, Location) and before is not None and before["is_active"] and not obj.is_active:
         if _clinic_in_use(obj.pk):
             raise ValidationError({"is_active": gettext_lazy(API_MESSAGES["clinic_in_use"])})
@@ -206,7 +213,7 @@ def save_row(obj: models.Model, *, actor: Any, request: Any = None) -> models.Mo
         obj.photo = None if before is None else before.get("photo") or None
     _validate(obj)
     obj.save()
-    if isinstance(obj, Professional):
+    if isinstance(obj, Professional) and obj.location_id is not None:
         obj.additional_locations.remove(obj.location_id)
     if pending_photo is not None:
         _store_photo(obj, pending_photo)  # type: ignore[arg-type]
@@ -247,14 +254,6 @@ def delete_row(obj: models.Model, *, actor: Any, request: Any = None) -> None:
 # --- named helpers ----------------------------------------------------------------------------------------
 
 
-def create_professional(
-    *, location: Location, name: str, role: str, actor: Any, request: Any = None, **fields: Any
-) -> Professional:
-    professional = Professional(location=location, name=name, role=role, **fields)
-    save_row(professional, actor=actor, request=request)
-    return professional
-
-
 def update_professional(
     professional: Professional, *, actor: Any, request: Any = None, **fields: Any
 ) -> Professional:
@@ -287,7 +286,11 @@ def set_working_hours(
             delete_row(row, actor=actor, request=request)
         return None
     if row is None:
-        row = WorkingHours(professional=professional, weekday=weekday, location_id=professional.location_id)
+        row = WorkingHours(
+            professional=professional,
+            weekday=weekday,
+            location_id=_schedule_location_id(professional, professional.location_id),
+        )
     row.start, row.end, row.break_start, row.break_end = start, end, break_start, break_end
     save_row(row, actor=actor, request=request)
     return row
@@ -498,22 +501,16 @@ def _check_clinic_assignments(
         raise Conflict(API_MESSAGES["clinic_scheduled"])
 
 
-def _schedule_location_id(professional: Professional, location_id: int) -> int:
+def _schedule_location_id(professional: Professional, location_id: int | None) -> int:
     if (
-        not selectors.has_location(professional, location_id)
+        location_id is None
+        or not selectors.has_location(professional, location_id)
         or not Location.objects.filter(pk=location_id, is_active=True).exists()
     ):
         raise ApiValidationError(
             {"location_id": [field_error("does_not_exist", API_MESSAGES["clinic_not_assigned"])]}
         )
     return location_id
-
-
-def _changes_specialist_login(old_id: int | None, new_id: int | None) -> bool:
-    return (
-        old_id != new_id
-        and StaffUser.objects.filter(pk__in=[old_id, new_id], role=enums.StaffRole.SPECIALIST).exists()
-    )
 
 
 def _specialist_state(professional: Professional, location_ids: set[int]) -> dict[str, Any]:
@@ -534,6 +531,19 @@ def _specialist_state(professional: Professional, location_ids: set[int]) -> dic
 
 
 SPECIALIST_SCALARS = ("name", "role", "experience_years", "slot_step_min", "position", "is_active")
+# What a specialist may edit on their own profile (``specialist/profile/``).
+OWN_PROFILE_KEYS = frozenset({"name", "bio"})
+PUBLISH_BLOCKER_MESSAGES = {
+    "account": N_("hisob Mutaxassis rolida emas"),
+    "name": N_("ommaviy ism"),
+    "discipline": N_("yo‘nalish"),
+    "bio": N_("bio (o‘zbekcha)"),
+    "photo": N_("surat"),
+    "clinic": N_("faol asosiy filial"),
+    "service": N_("faol xizmat"),
+    "availability": N_("ish vaqti"),
+}
+PUBLISH_BLOCKED = N_("Profilni e’lon qilib bo‘lmaydi. Yetishmayapti: %(missing)s.")
 
 
 def _apply_specialist(professional: Professional, data: dict[str, Any]) -> None:
@@ -542,55 +552,56 @@ def _apply_specialist(professional: Professional, data: dict[str, Any]) -> None:
             setattr(professional, key, data[key])
     if "location_id" in data:
         professional.location_id = data["location_id"]
-    if "staff_user" in data:
-        professional.staff_user = data["staff_user"]
     if data.get("slug"):
         professional.slug = data["slug"]  # B-W1: staff edit the website URL segment
     _set_i18n(professional, "qualifications", data.get("qualifications"))
     _set_i18n(professional, "bio", data.get("bio"))
 
 
-def create_specialist(data: dict[str, Any], *, actor: Any, request: Any = None) -> Professional:
-    """Create a specialist with an explicit primary clinic and list of assigned clinics."""
-    with transaction.atomic():
-        professional = Professional(position=_next_position(Professional))
-        _apply_specialist(professional, data)
-        if _changes_specialist_login(None, professional.staff_user_id):
-            raise Conflict(SPECIALIST_LINK_ERROR)
-        location_ids = _checked_clinics(professional, data, set())
-        _save_specialist(professional)
-        professional.additional_locations.set(location_ids - {professional.location_id})
-        audit.record(
-            action="professional.created",
-            entity_type="professional",
-            entity_id=str(professional.pk),
-            actor=actor,
-            request=request,
-            after=_specialist_state(professional, location_ids),
+def _refuse_unpublishable(professional: Professional) -> None:
+    missing = selectors.publish_blockers(professional)
+    if missing:
+        raise Conflict(
+            PUBLISH_BLOCKED % {"missing": ", ".join(str(PUBLISH_BLOCKER_MESSAGES[key]) for key in missing)}
         )
+
+
+def _create_draft_profile(user: StaffUser, *, actor: Any, request: Any) -> Professional:
+    """The private draft profile owned by ``user`` for its lifetime: named after the account, no clinic,
+    service or availability yet, not published (staff publish it once it is complete)."""
+    professional = Professional(
+        staff_user=user, name=user.full_name, position=_next_position(Professional), is_active=False
+    )
+    _save_specialist(professional)
+    audit.record(
+        action="professional.created",
+        entity_type="professional",
+        entity_id=str(professional.pk),
+        actor=actor,
+        request=request,
+        after=_specialist_state(professional, set()),
+    )
     return professional
 
 
 def update_specialist(
     professional_id: int, data: dict[str, Any], *, force: bool = False, actor: Any, request: Any = None
 ) -> Professional:
-    """``PATCH specialists/{id}/``. Deactivating a specialist with ``requested`` / ``confirmed`` appointments
-    ahead is refused (409 ``conflict`` naming the count) unless ``force``; the appointments are kept either
-    way. Audit ``professional.deactivated`` / ``professional.activated`` when ``is_active`` flips (with
-    the other changed fields), else ``professional.updated``; nothing changed → no write, no audit."""
+    """``PATCH specialists/{id}/`` (staff) and ``PATCH specialist/profile/`` (the owner, ``name`` / ``bio``).
+
+    ``is_active`` is publication: publishing needs the owner account in the Specialist role and a complete
+    profile (:func:`selectors.publish_blockers`, else 409 naming what is missing). Unpublishing a
+    profile with ``requested`` / ``confirmed`` appointments ahead is refused (409 naming the count) unless
+    ``force``; the appointments are kept either way. Audit ``professional.deactivated`` /
+    ``professional.activated`` when ``is_active`` flips (with the other changed fields), else
+    ``professional.updated``; nothing changed → no write, no audit."""
     with transaction.atomic():
         professional = _locked_professional(professional_id)
         current_ids = set(selectors.assigned_location_ids(professional))
         before = _specialist_state(professional, current_ids)
         _apply_specialist(professional, data)
-        if _changes_specialist_login(before["staff_user_id"], professional.staff_user_id):
-            raise Conflict(SPECIALIST_LINK_ERROR)
         location_ids = current_ids
-        if (
-            "location_id" in data
-            or "location_ids" in data
-            or (professional.is_active and not before["is_active"])
-        ):
+        if "location_id" in data or "location_ids" in data:
             location_ids = _checked_clinics(professional, data, current_ids)
         after = _specialist_state(professional, location_ids)
         if after == before:
@@ -607,6 +618,9 @@ def update_specialist(
         _save_specialist(professional)
         if before["location_id"] != professional.location_id or location_ids != current_ids:
             professional.additional_locations.set(location_ids - {professional.location_id})
+        if action == "professional.activated":
+            # Checked after the write (the clinics are part of it); the 409 rolls the whole change back.
+            _refuse_unpublishable(professional)
         diff_before, diff_after = _diff(before, after)
         audit.record(
             action=action,
@@ -620,37 +634,73 @@ def update_specialist(
     return professional
 
 
+def update_own_profile(
+    professional_id: int, data: dict[str, Any], *, actor: Any, request: Any = None
+) -> Professional:
+    """A specialist edits their public name and bio; any other key is a programming error."""
+    unknown = set(data) - OWN_PROFILE_KEYS
+    if unknown:
+        raise ValueError(f"Not editable by the specialist: {sorted(unknown)}")
+    return update_specialist(professional_id, data, actor=actor, request=request)
+
+
 @transaction.atomic
 def invite_specialist(
-    professional_id: int, data: dict[str, Any], *, actor: StaffUser, request: Any = None
-) -> tuple[StaffUser, str | None]:
-    professional = _locked_professional(professional_id)
-    if professional.staff_user_id is not None:
-        raise Conflict(N_("Bu mutaxassisga hisob allaqachon bog‘langan."))
+    data: dict[str, Any], *, actor: StaffUser, request: Any = None
+) -> tuple[StaffUser, str | None, Professional]:
+    """Staff → Add employee → Specialist: create the Specialist account and its draft profile together.
+
+    An email already in use is the usual ``unique`` field error, so a duplicate invite never creates a second
+    account or profile; resending the invitation goes through the account's own password routes."""
     user, password = account_services.create_staff(
         **data, role=enums.StaffRole.SPECIALIST, actor=actor, request=request
     )
-    professional.staff_user = user
-    professional.save(update_fields=["staff_user", "updated_at"])
-    audit.record(
-        action="professional.specialist_invited",
-        entity_type="professional",
-        entity_id=str(professional.pk),
-        actor=actor,
-        request=request,
-        after={"staff_user_id": user.pk},
-    )
-    return user, password
+    professional = _create_draft_profile(user, actor=actor, request=request)
+    return user, password, professional
 
 
 @transaction.atomic
-def convert_specialist_account(
-    professional_id: int, staff_user_id: int, *, actor: StaffUser, request: Any = None
-) -> None:
-    professional = _locked_professional(professional_id)
-    if professional.staff_user_id != staff_user_id:
-        raise Conflict(N_("Bog‘langan xodim hisobi o‘zgardi. Sahifani yangilang."))
-    account_services.convert_staff_to_specialist(staff_user_id, actor=actor, request=request)
+def set_specialist_account_role(
+    staff_user_id: int, role: str, *, actor: StaffUser, request: Any = None
+) -> tuple[StaffUser, Professional | None, int]:
+    """Staff → Edit: the confirmed ``staff`` ↔ ``specialist`` role change of one account.
+
+    → ``specialist``: an eligible Staff or Manager account becomes a Specialist; its draft profile is created
+    if it never had one, else the profile it already owns is reused as it is (unpublished since it left the
+    role: staff review it before republishing). → ``staff``: specialist access ends and the profile is
+    unpublished (no new bookings); the profile and its appointments stay attached to the account and the
+    count of outstanding visits is returned for staff to handle. The accounts service keeps the protections
+    (own account, inactive, superuser, operations-console access, last active manager) and revokes the
+    account's sessions on a change. Asking for the role the account already has changes nothing, so a retry
+    never creates a second profile. Returns ``(account, profile, upcoming appointments)``."""
+    profile = Professional.objects.select_for_update().filter(staff_user_id=staff_user_id).first()
+    to_specialist = role == enums.StaffRole.SPECIALIST
+    user = account_services.change_specialist_role(
+        staff_user_id,
+        enums.StaffRole.SPECIALIST if to_specialist else enums.StaffRole.ADMIN,
+        actor=actor,
+        request=request,
+    )
+    if to_specialist:
+        if profile is None:
+            profile = _create_draft_profile(user, actor=actor, request=request)
+        return user, profile, 0
+    if profile is None:
+        return user, None, 0
+    upcoming = bookings.upcoming_counts([profile.pk], timeutils.now())[profile.pk]
+    if profile.is_active:
+        profile.is_active = False
+        profile.save(update_fields=["is_active", "updated_at"])
+        audit.record(
+            action="professional.deactivated",
+            entity_type="professional",
+            entity_id=str(profile.pk),
+            actor=actor,
+            request=request,
+            before={"is_active": True},
+            after={"is_active": False, "upcoming_appointments": upcoming, "reason": "role_changed"},
+        )
+    return user, profile, upcoming
 
 
 def set_specialist_photo(

@@ -5,6 +5,7 @@ from datetime import datetime, time, timedelta
 from factory.declarations import LazyAttribute, Sequence, SubFactory
 from factory.django import DjangoModelFactory
 
+from glowderma.accounts.tests.factories import StaffUserFactory
 from glowderma.core import enums
 from glowderma.core.timeutils import TASHKENT
 from glowderma.professionals.models import (
@@ -32,9 +33,11 @@ class ProfessionalFactory(DjangoModelFactory[Professional]):
         model = Professional
 
     location = SubFactory(LocationFactory)  # type: ignore[no-untyped-call]
+    staff_user = SubFactory(StaffUserFactory, role=enums.StaffRole.SPECIALIST)  # type: ignore[no-untyped-call]
     name = Sequence(lambda n: f"Mutaxassis {n + 1}")  # type: ignore[no-untyped-call]
     role = enums.SpecialistRole.DERMATOLOGIST
     position = Sequence(lambda n: n)  # type: ignore[no-untyped-call]
+    is_active = True  # most tests exercise a published profile
 
 
 class ServiceFactory(DjangoModelFactory[Service]):

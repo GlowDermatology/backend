@@ -151,6 +151,7 @@ def test_full_detail(staff_client: APIClient, board: dict[str, Professional]) ->
     schedules = {(s["specialist_id"], s["date"]): s for s in body["schedules"]}
     assert len(body["schedules"]) == 3 * 3  # Ketgan is listed: it has an appointment on Wednesday
     clinic = board["nodira"].location
+    assert clinic is not None
     assert schedules[(nodira, "2026-10-26")] == {
         "specialist_id": nodira,
         "date": "2026-10-26",
