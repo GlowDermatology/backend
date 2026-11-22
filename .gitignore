@@ -7,6 +7,7 @@ __pycache__/
 .ruff_cache/
 .pytest_cache/
 .coverage
+.coverage.*
 htmlcov/
 
 # Env and local data
