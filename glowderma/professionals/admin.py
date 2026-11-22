@@ -13,6 +13,8 @@ from typing import Any
 from django.contrib import admin
 from django.db import models
 from django.http import HttpRequest
+from django.utils.text import capfirst
+from django.utils.translation import gettext
 from unfold.widgets import UnfoldAdminTimeWidget
 
 from glowderma.core.admin import OpsTabularInline, ServiceRefused, is_active_staff
@@ -62,7 +64,12 @@ class WorkingHoursInline(OpsTabularInline):
             kwargs.setdefault("required", False)
         if isinstance(db_field, models.TimeField):
             kwargs["widget"] = UnfoldAdminTimeWidget(format=TIME_FORMAT)
-        return super().formfield_for_dbfield(db_field, request, **kwargs)
+        field = super().formfield_for_dbfield(db_field, request, **kwargs)
+        if field is not None:
+            # A table row has no <label> per cell: name every control after its column for screen readers.
+            widget: Any = getattr(field.widget, "widget", None) or field.widget  # a related-field wrapper
+            widget.attrs.setdefault("aria-label", capfirst(gettext(str(db_field.verbose_name))))
+        return field
 
     def has_view_permission(self, request: HttpRequest, obj: models.Model | None = None) -> bool:
         return is_active_staff(request)

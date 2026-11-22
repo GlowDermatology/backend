@@ -444,3 +444,22 @@ def test_override_add_and_delete_are_audited() -> None:
     assert response.status_code == 302
     assert not WorkingHoursOverride.objects.filter(pk=row.pk).exists()
     assert AuditEntry.objects.filter(action="working_hours_override.deleted", entity_id=str(row.pk)).exists()
+
+
+def test_weekly_hours_inline_controls_have_accessible_names() -> None:
+    """A table row has no <label> per cell: every control of the inline is named after its column."""
+    professional = ProfessionalFactory.create()
+    WorkingHoursFactory.create(professional=professional, weekday=0)
+    page = staff_client().get(reverse("admin:professionals_professional_change", args=[professional.pk]))
+    assert page.status_code == 200
+    html = page.content.decode()
+    for field, name in (
+        ("weekday", "Hafta kuni"),
+        ("start", "Boshlanishi"),
+        ("end", "Tugashi"),
+        ("break_start", "Tanaffus boshlanishi"),
+        ("break_end", "Tanaffus tugashi"),
+    ):
+        tag = html.split(f'id="id_working_hours-0-{field}"')[0].rsplit("<", 1)[1]
+        tag += html.split(f'id="id_working_hours-0-{field}"')[1].split(">", 1)[0]
+        assert f'aria-label="{name}"' in tag, (field, tag)
