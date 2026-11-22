@@ -305,8 +305,10 @@ jobs:
           set -euo pipefail
           # Split by the committed durations and record this shard's measured ones next to them (job tests merges).
           if [ -f .test_durations ]; then cp .test_durations "$RUNNER_TEMP/durations.json"; else echo '{}' > "$RUNNER_TEMP/durations.json"; fi
-          uv run coverage run -m pytest -n auto --splits 4 --group "$GROUP" --splitting-algorithm least_duration \
-            --durations-path "$RUNNER_TEMP/durations.json" --store-durations --durations=15
+          # Plugin options take their value after `=`: pytest picks its rootdir and config file before it knows
+          # them, and a separate value (a path) would be read as a test path (rootdir $RUNNER_TEMP, no settings).
+          uv run coverage run -m pytest -n auto --splits=4 --group="$GROUP" --splitting-algorithm=least_duration \
+            --durations-path="$RUNNER_TEMP/durations.json" --store-durations --durations=15
           uv run coverage combine
           mkdir -p "$RUNNER_TEMP/shard"
           mv .coverage "$RUNNER_TEMP/shard/coverage-$GROUP"
