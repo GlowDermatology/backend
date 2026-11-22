@@ -4286,6 +4286,10 @@ msgstr "Правила записи на приём появляются в пр
 msgid "Qabul tarixi"
 msgstr "История записей на приём"
 
+#: glowderma/appointments/services.py
+msgid "Qabul yaratish uchun profil e’lon qilingan bo‘lishi kerak."
+msgstr "Чтобы создать запись, профиль должен быть опубликован."
+
 #: config/settings/ops_admin.py
 #: glowderma/customers/admin.py
 msgid "Qabullar"

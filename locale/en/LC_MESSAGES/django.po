@@ -4208,6 +4208,10 @@ msgstr "The appointment policy appears in the app as soon as it is saved (it is 
 msgid "Qabul tarixi"
 msgstr "Appointment history"
 
+#: glowderma/appointments/services.py
+msgid "Qabul yaratish uchun profil e’lon qilingan bo‘lishi kerak."
+msgstr "Publish your profile to book appointments."
+
 #: config/settings/ops_admin.py
 #: glowderma/customers/admin.py
 msgid "Qabullar"

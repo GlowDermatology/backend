@@ -14,6 +14,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from glowderma.appointments import selectors, services
+from glowderma.appointments.api.admin.serializers import MESSAGES as ADMIN_MESSAGES
 from glowderma.appointments.api.admin.serializers import (
     AppointmentCancelSerializer,
     AppointmentItemSerializer,
@@ -23,15 +24,18 @@ from glowderma.appointments.api.admin.serializers import (
     DayScheduleSerializer,
     PendingSummarySerializer,
     RangeQuerySerializer,
+    customer_by_phone,
 )
 from glowderma.appointments.api.admin.views import ACTION_PARAM
 from glowderma.appointments.models import Appointment
 from glowderma.core import enums, timeutils
-from glowderma.core.api.fields import AwareDateTimeField
+from glowderma.core.api.exceptions import field_error
+from glowderma.core.api.fields import AwareDateTimeField, LenientPhoneField
 from glowderma.core.api.schema import ADMIN_ERRORS, IDEMPOTENCY_KEY_HEADER
 from glowderma.core.idempotency import idempotent
 from glowderma.professionals import selectors as professionals_selectors
 from glowderma.professionals.api.specialist import SpecialistProfileAPIView
+from glowderma.professionals.models import Professional, Service
 
 
 class SpecialistCustomerRefSerializer(serializers.Serializer[Any]):
@@ -88,6 +92,40 @@ class SpecialistConflictsSerializer(serializers.Serializer[dict[str, Any]]):
     results = SpecialistAppointmentItemSerializer(many=True)
 
 
+class SpecialistAppointmentCreateSerializer(serializers.Serializer[dict[str, Any]]):
+    """``POST specialist/appointments/``: a booking in the caller's own calendar. No ``customer_id`` (a
+    specialist cannot address customers by id) and no note (the staff note is never shown to a specialist).
+    A ``phone`` no customer holds books a walk-in: ``name`` is then required and the customer is created with
+    the booking (no password, no consent: they sign in later with an SMS code to that phone)."""
+
+    service_id = serializers.IntegerField(help_text="One of the caller's own active services.")
+    location_id = serializers.IntegerField(
+        min_value=1, max_value=2_147_483_647, help_text="One of the caller's active assigned clinics."
+    )
+    phone = LenientPhoneField()
+    name = serializers.CharField(
+        min_length=2,
+        max_length=150,
+        required=False,
+        help_text="The new customer's name, required when no customer has the phone (a walk-in).",
+    )
+    start = AwareDateTimeField()
+
+    def validate_service_id(self, value: int) -> Service:
+        professional: Professional = self.context["professional"]
+        service = professional.services.filter(pk=value, is_active=True).first()
+        if service is None:
+            raise serializers.ValidationError(
+                [field_error("does_not_exist", ADMIN_MESSAGES["service_not_found"])]
+            )
+        return service
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        attrs["customer"] = customer_by_phone(attrs.pop("phone"), attrs.pop("name", ""))
+        attrs["service"] = attrs.pop("service_id")
+        return attrs
+
+
 class SpecialistRescheduleSerializer(serializers.Serializer[dict[str, Any]]):
     start = AwareDateTimeField()
     location_id = serializers.IntegerField(required=False, min_value=1, max_value=2_147_483_647)
@@ -115,6 +153,32 @@ class SpecialistAppointmentsView(SpecialistProfileAPIView):
         day = query.validated_data.get("date") or timeutils.local_date(timeutils.now())
         view = selectors.specialist_day_view(self.professional, day)
         return Response(SpecialistAppointmentDaySerializer(view, context=_context()).data)
+
+    @extend_schema(
+        operation_id="specialist_appointments_create",
+        description=(
+            "Book a visit in the caller's own calendar (a phone call or a walk-in), created directly as "
+            "confirmed: one of the caller's active services at one of their active clinics, with the staff "
+            "slot rules (5-minute grid, future, inside the hours of that day and clinic, outside blocked "
+            "periods, no overlap: a concurrent booking of the slot answers 409 conflict). A phone no "
+            "customer holds creates the customer from `phone` and `name`. The profile must be published (409 "
+            "conflict otherwise). Recorded like a staff booking (`requested_via=admin`) with the specialist "
+            "as the actor."
+        ),
+        request=SpecialistAppointmentCreateSerializer,
+        parameters=[IDEMPOTENCY_KEY_HEADER],
+        responses={201: SpecialistAppointmentItemSerializer, **ADMIN_ERRORS},
+    )
+    @idempotent()
+    def post(self, request: Request) -> Response:
+        body = SpecialistAppointmentCreateSerializer(
+            data=request.data, context={"professional": self.professional}
+        )
+        body.is_valid(raise_exception=True)
+        appointment = services.create_by_specialist(
+            professional=self.professional, **body.validated_data, actor=request.user, request=request
+        )
+        return Response(_item(appointment.pk), status=201)
 
 
 class SpecialistAppointmentRangeView(SpecialistProfileAPIView):

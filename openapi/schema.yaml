@@ -8312,6 +8312,84 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
+    post:
+      operationId: specialist_appointments_create
+      description: 'Book a visit in the caller''s own calendar (a phone call or a
+        walk-in), created directly as confirmed: one of the caller''s active services
+        at one of their active clinics, with the staff slot rules (5-minute grid,
+        future, inside the hours of that day and clinic, outside blocked periods,
+        no overlap: a concurrent booking of the slot answers 409 conflict). A phone
+        no customer holds creates the customer from `phone` and `name`. The profile
+        must be published (409 conflict otherwise). Recorded like a staff booking
+        (`requested_via=admin`) with the specialist as the actor.'
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SpecialistAppointmentCreateRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpecialistAppointmentItem'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/admin/specialist/appointments/{id}/{action}/:
     post:
       operationId: specialist_appointments_action
@@ -28676,6 +28754,41 @@ components:
       - id
       - is_active
       - role
+    SpecialistAppointmentCreateRequest:
+      type: object
+      description: |-
+        ``POST specialist/appointments/``: a booking in the caller's own calendar. No ``customer_id`` (a
+        specialist cannot address customers by id) and no note (the staff note is never shown to a specialist).
+        A ``phone`` no customer holds books a walk-in: ``name`` is then required and the customer is created with
+        the booking (no password, no consent: they sign in later with an SMS code to that phone).
+      properties:
+        service_id:
+          type: integer
+          description: One of the caller's own active services.
+        location_id:
+          type: integer
+          maximum: 2147483647
+          minimum: 1
+          description: One of the caller's active assigned clinics.
+        phone:
+          type: string
+          minLength: 1
+          description: An Uzbek mobile number; separators and a missing +998 are accepted
+            and the value is normalised to E.164 (+998XXXXXXXXX).
+        name:
+          type: string
+          minLength: 2
+          description: The new customer's name, required when no customer has the
+            phone (a walk-in).
+          maxLength: 150
+        start:
+          type: string
+          format: date-time
+      required:
+      - location_id
+      - phone
+      - service_id
+      - start
     SpecialistAppointmentDay:
       type: object
       description: '``GET specialist/appointments/?date=``: the admin day shape with

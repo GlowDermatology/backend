@@ -155,31 +155,35 @@ class AppointmentCreateSerializer(serializers.Serializer[dict[str, Any]]):
             code = "required" if not has_id else "invalid"
             message = None if not has_id else MESSAGES["one_customer_ref"]
             raise serializers.ValidationError({"customer_id": [field_error(code, message)]})
-        active = Customer.objects.filter(status=enums.CustomerStatus.ACTIVE)
         customer: Customer | WalkIn | None
         if has_id:
+            active = Customer.objects.filter(status=enums.CustomerStatus.ACTIVE)
             customer = active.filter(pk=attrs.pop("customer_id")).first()
             if customer is None:
                 raise serializers.ValidationError(
                     {"customer_id": [field_error("does_not_exist", MESSAGES["customer_id_not_found"])]}
                 )
         else:
-            phone = attrs.pop("phone")
-            customer = active.filter(phone=phone).first()
-            if customer is None and Customer.objects.filter(phone=phone).exists():
-                raise serializers.ValidationError(
-                    {"phone": [field_error("customer_not_found", MESSAGES["customer_inactive"])]}
-                )
-            if customer is None:
-                if not name:
-                    raise serializers.ValidationError(
-                        {"name": [field_error("required", MESSAGES["walk_in_name"])]}
-                    )
-                customer = WalkIn(phone=phone, name=name)
+            customer = customer_by_phone(attrs.pop("phone"), name)
         attrs["customer"] = customer
         attrs["professional"] = attrs.pop("specialist_id")
         attrs["service"] = attrs.pop("service_id")
         return attrs
+
+
+def customer_by_phone(phone: str, name: str) -> Customer | WalkIn:
+    """The active customer holding ``phone``, else a :class:`WalkIn` to create with the booking (``name``
+    required then: 400 ``name``). A phone held only by a blocked or deleted account is 400 ``phone``."""
+    customer = Customer.objects.filter(status=enums.CustomerStatus.ACTIVE, phone=phone).first()
+    if customer is not None:
+        return customer
+    if Customer.objects.filter(phone=phone).exists():
+        raise serializers.ValidationError(
+            {"phone": [field_error("customer_not_found", MESSAGES["customer_inactive"])]}
+        )
+    if not name:
+        raise serializers.ValidationError({"name": [field_error("required", MESSAGES["walk_in_name"])]})
+    return WalkIn(phone=phone, name=name)
 
 
 def _active_service(pk: int) -> Service:

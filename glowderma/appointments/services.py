@@ -53,6 +53,7 @@ MESSAGES = {
     "specialist_not_found": N_("Mutaxassis topilmadi."),
     "service_not_found": N_("Xizmat topilmadi."),
     "customer_inactive": N_("Bu raqamdagi mijoz hisobi faol emas."),
+    "specialist_unpublished": N_("Qabul yaratish uchun profil e’lon qilingan bo‘lishi kerak."),
 }
 # ``POST appointments/{id}/{action}/``: allowed source statuses and the resulting status (contract §2.9).
 TRANSITIONS: dict[str, tuple[tuple[str, ...], str]] = {
@@ -423,10 +424,65 @@ def create_by_admin(
     The specialist and the service are locked first (``FOR KEY SHARE``); the service, the snapshot and the
     slot are read under those locks, so a concurrent schedule or service change is either seen or waits for
     this booking."""
+    return _create_confirmed(
+        professional=professional,
+        service=service,
+        customer=customer,
+        start=start,
+        location_id=location_id,
+        note=note,
+        unpublished=_specialist_gone,
+        actor=actor,
+        request=request,
+    )
+
+
+def create_by_specialist(
+    *,
+    professional: Professional,
+    service: Service,
+    customer: Customer | WalkIn,
+    start: datetime,
+    location_id: int,
+    actor: Any,
+    request: Any = None,
+) -> Appointment:
+    """A confirmed booking a specialist makes in their own calendar (a phone call or a walk-in): the staff
+    booking with the same slot rules and locks, of one of their own active services at one of their active
+    clinics. The profile must be published (409 ``conflict`` otherwise, also when it was unpublished
+    concurrently). The visit is recorded like a staff booking (``requested_via = admin``, events of source
+    ``admin``) with the specialist as the actor."""
+    return _create_confirmed(
+        professional=professional,
+        service=service,
+        customer=customer,
+        start=start,
+        location_id=location_id,
+        note="",
+        unpublished=lambda: Conflict(MESSAGES["specialist_unpublished"]),
+        actor=actor,
+        request=request,
+    )
+
+
+def _create_confirmed(
+    *,
+    professional: Professional,
+    service: Service,
+    customer: Customer | WalkIn,
+    start: datetime,
+    location_id: int | None,
+    note: str,
+    unpublished: Callable[[], Exception],
+    actor: Any,
+    request: Any,
+) -> Appointment:
+    """:func:`create_by_admin` and :func:`create_by_specialist`; ``unpublished`` is the error when the
+    specialist is not (or no longer) published under the lock."""
     try:
         with transaction.atomic():
-            if not _hold_active_specialist(professional.pk):  # deactivated since the serializer read it
-                raise _specialist_gone()
+            if not _hold_active_specialist(professional.pk):  # unpublished since the caller read it
+                raise unpublished()
             if not _hold_active_service(service.pk):  # retired since the serializer read it
                 raise ValidationError(
                     {"service_id": [field_error("does_not_exist", MESSAGES["service_not_found"])]}
