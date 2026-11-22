@@ -364,7 +364,7 @@ const GUARDED_PAGES = [
   "/django-admin/dashboards/customers/",
   "/django-admin/core/outboxmessage/",
   "/django-admin/accounts/staffuser/",
-  "/django-admin/professionals/professional/add/",
+  "/django-admin/professionals/professional/1/change/",
   "/django-admin/core/auditentry/1/change/",
   "/django-admin/password_change/",
 ];

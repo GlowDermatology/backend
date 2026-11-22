@@ -123,7 +123,7 @@ const STAFF_PAGES = [
   "/django-admin/core/outboxmessage/",
   "/django-admin/accounts/staffuser/",
   "/django-admin/otp_totp/totpdevice/",
-  "/django-admin/professionals/professional/add/",
+  "/django-admin/professionals/professional/1/change/",
   "/django-admin/integrations/job/bts-poll/",
 ];
 

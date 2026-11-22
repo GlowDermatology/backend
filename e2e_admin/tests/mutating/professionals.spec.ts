@@ -1,10 +1,9 @@
 /**
  * The only editable models of the console (glowderma.professionals.admin, every write through
- * professionals.services): create, edit, a service refusal shown on the form (nothing saved), delete with
- * and without protected rows, the weekly-hours inline, and every editable model's add form.
+ * professionals.services): no create for professionals (a profile is created with its Specialist account),
+ * edit, a service refusal shown on the form (nothing saved), delete with and without protected rows, the
+ * weekly-hours inline, and the add form of every other editable model.
  */
-import type { Page } from "@playwright/test";
-
 import { django } from "../../lib/django";
 import { expect, test } from "../../lib/fixtures";
 
@@ -15,34 +14,18 @@ const audit = (after_id: number, action: string) => django<AuditRow[]>("audit", 
 const professionalRow = (id: number) =>
   django<Record<string, unknown> | null>("row", { model: "professionals.professional", filter: { pk: id } });
 
-async function chooseAutocomplete(page: Page, field: string, text: string): Promise<void> {
-  await page.locator(`#id_${field}`).locator("xpath=following-sibling::span[contains(@class,'select2')]").first().click();
-  await page.locator(".select2-search__field").last().fill(text);
-  await page.locator(".select2-results__option", { hasText: text }).first().click();
-}
-
 const SAVED = /muvaffaqiyatli (qo‘shildi|o‘zgartirildi)/;
 // …and the whole message is Uzbek (Django's own uz catalog lacks the "You may edit it again below" forms).
 const ENGLISH_MESSAGE = /successfully|You may|below/;
 
-test("create a professional: saved through the service and audited", async ({ page, staff }) => {
+test("a professional is never created in the console: profiles come with their Specialist account", async ({ page, staff }) => {
   void staff;
   const since = await auditMax();
-  const name = `E2E Yangi ${Date.now()}`;
-  await page.goto("/django-admin/professionals/professional/add/");
-  await page.locator("#id_name").fill(name);
-  await page.locator("#id_role").selectOption("dermatologist");
-  await chooseAutocomplete(page, "location", "");
-  await page.locator("#id_slot_step_min").fill("20");
-  await page.locator("[name=_save]").first().click();
-  await page.waitForLoadState("domcontentloaded");
-  await expect(page).toHaveURL(/\/professionals\/professional\/$/);
-  await expect(page.getByText(SAVED)).toBeVisible();
-  const created = await audit(since, "professional.created");
-  expect(created).toHaveLength(1);
-  const row = await professionalRow(Number(created[0].entity_id));
-  expect(row).toMatchObject({ name, role: "dermatologist", slot_step_min: 20, is_active: true });
-  expect(created[0].after).toMatchObject({ name });
+  const response = await page.goto("/django-admin/professionals/professional/add/");
+  expect(response?.status()).toBe(403);
+  await page.goto("/django-admin/professionals/professional/");
+  await expect(page.locator('a[href$="/professionals/professional/add/"]')).toHaveCount(0);
+  expect(await audit(since, "professional.created")).toEqual([]);
 });
 
 test("edit a professional: the change is saved and audited with before/after", async ({ page, staff }) => {
@@ -152,7 +135,6 @@ test("weekly hours inline: an invalid row is refused on the form, a valid one is
 // admin URL name → the services' audit entity (professionals.services.ENTITY_NAMES)
 const EDITABLE: Record<string, string> = {
   location: "location",
-  professional: "professional",
   service: "service",
   professionalservice: "professional_service",
   workinghours: "working_hours",

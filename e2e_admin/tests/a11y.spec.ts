@@ -109,7 +109,7 @@ for (const [name, url] of [
   ["Mijozlar va kirish", "/django-admin/dashboards/customers/"],
   ["changelist (orders, filters open)", "/django-admin/commerce/order/"],
   ["changelist (outbox)", "/django-admin/core/outboxmessage/"],
-  ["editable form (new professional)", "/django-admin/professionals/professional/add/"],
+  ["editable form (a professional)", "/django-admin/professionals/professional/1/change/"],
 ] as const) {
   test(`${name}`, async ({ page, staff }) => {
     void staff;
