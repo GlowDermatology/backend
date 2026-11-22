@@ -10,6 +10,7 @@ sequences.
 from datetime import datetime, time
 
 from django.db import transaction
+from django.db.models import Max
 
 from glowderma.accounts.models import StaffUser
 from glowderma.core import enums
@@ -81,9 +82,12 @@ def _seed_professionals(location: Location) -> dict[int, Professional]:
         if professional is None:
             # Every profile is owned by a Specialist account; demo accounts stay inactive without a password
             # until staff change the login email and send an invitation.
+            # Explicit ids: earlier seeders insert fixed ids and the sequences are re-synced only at the end.
+            next_id = (StaffUser.objects.aggregate(top=Max("id"))["top"] or 0) + 1
             account, _ = StaffUser.objects.get_or_create(
                 email=f"specialist-{pk}@demo.glowderma.invalid",
                 defaults={
+                    "id": next_id,
                     "full_name": name,
                     "role": enums.StaffRole.SPECIALIST,
                     "is_active": False,

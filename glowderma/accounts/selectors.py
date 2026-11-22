@@ -43,11 +43,14 @@ from glowderma.core.timeutils import TASHKENT
 
 # Only the directory columns: never the password hash (or last_login, is_superuser) per row.
 DIRECTORY_COLUMNS = ("id", "full_name", "email", "is_active")
-# The manager's rows add the role and the creation time (``created_at`` = ``date_joined``), and the password
-# state (feat/admin-ux).
+# The manager's rows add the role (manager flag, Staff/Specialist, superuser, ops console), the creation time
+# (``created_at`` = ``date_joined``) and the password state (feat/admin-ux).
 MEMBER_COLUMNS = (
     *DIRECTORY_COLUMNS,
     "is_manager",
+    "role",
+    "is_superuser",
+    "is_staff",
     "date_joined",
     "must_change_password",
     "password_changed_at",

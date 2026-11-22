@@ -246,6 +246,7 @@ def test_link_then_me_then_unlink(staff_client: APIClient, staff: StaffUser) -> 
         "display_name",
         "is_superuser",
         "is_manager",
+        "role",
         "linked_providers",
         "session_expires_at",
         "auth_method",

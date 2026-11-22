@@ -51,6 +51,7 @@ def test_create_staff_generates_a_valid_temporary_password_and_audits(manager: S
         "email": "nodira@glowderma.uz",
         "full_name": "Nodira Rahimova",
         "is_manager": False,
+        "role": "admin",
         "delivery": "temporary_password",
         "must_change_password": True,
     }
@@ -88,8 +89,8 @@ def test_update_writes_and_audits_only_what_changed(manager: StaffUser) -> None:
         {"full_name": "Eski ism", "is_manager": False},
         {"full_name": "Yangi ism", "is_manager": True},
     )
-    with pytest.raises(ValueError, match="email"):
-        services.update_staff(target, {"email": "x@x.uz"}, actor=manager)
+    with pytest.raises(ValueError, match="is_active"):
+        services.update_staff(target, {"is_active": False}, actor=manager)
 
 
 @pytest.mark.django_db

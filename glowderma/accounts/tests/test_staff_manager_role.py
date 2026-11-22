@@ -91,6 +91,7 @@ def test_createstaff_first_account_is_a_manager_and_audited() -> None:
         "email": "owner@x.uz",
         "full_name": "Owner",
         "is_manager": True,
+        "role": "admin",
         "delivery": "temporary_password",
         "must_change_password": False,
     }

@@ -20,6 +20,9 @@ pytestmark = pytest.mark.django_db
 URL = "/api/v1/admin/staff/"
 HIDDEN = dict.fromkeys(
     (
+        "is_superuser",
+        "has_ops_console_access",
+        "role",
         "full_name",
         "is_manager",
         "last_login_at",
@@ -136,6 +139,9 @@ def test_a_manager_gets_the_full_rows(manager_client: APIClient, manager: StaffU
         "is_active": True,
         "full_name": "Nodira",
         "is_manager": False,
+        "is_superuser": False,
+        "has_ops_console_access": False,
+        "role": "admin",
         "last_login_at": "2026-10-24T18:30:00+05:00",
         "linked_providers": ["facebook", "google"],
         "created_at": "2026-10-20T09:00:00+05:00",
