@@ -11,7 +11,7 @@ Contract of the file:
 - a JSON object whose keys are environment variable names (``[A-Z_][A-Z0-9_]*``) and whose values are strings;
   a JSON object or array value (for example ``JWT_SIGNING_KEYS``) is accepted and re-serialised to JSON text;
 - quotes, backslashes, Unicode and newlines are preserved exactly (it is JSON, never parsed by a shell);
-- keys owned by the Compose topology (hosts, networks, database location, the ``USE_S3`` media switch and
+- keys owned by the Compose topology (hosts, networks, database location, the retired ``USE_S3`` key and
   ``S3_LOCATION``) are refused, so a typo in Vault can never re-route the application; the S3 provider
   settings and ``PUBLIC_MEDIA_BASE_URL`` may come from the file;
 - the file wins over a variable of the same name already in the environment (Vault is the source of truth).

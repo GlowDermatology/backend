@@ -1,6 +1,6 @@
 # Local object storage (development only)
 
-`s3.json` is the SeaweedFS identities file for the optional `object-storage` compose profile.
+`s3.json` is the SeaweedFS identities file for the bundled `object-storage` Compose service.
 **Its keys are dummy development values, committed on purpose. Never use them, or this file, in production**
 (production keys come from Vault in the infra repository).
 

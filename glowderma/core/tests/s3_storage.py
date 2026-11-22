@@ -21,7 +21,6 @@ BUCKET = "glowderma-test"
 @pytest.fixture
 def s3_storage(monkeypatch: pytest.MonkeyPatch) -> Iterator[Any]:
     for key, value in {
-        "USE_S3": "true",
         "S3_BUCKET_NAME": BUCKET,
         "S3_ACCESS_KEY_ID": "test-access-key",
         "S3_SECRET_ACCESS_KEY": "test-secret-key",  # noqa: S105 - test-only

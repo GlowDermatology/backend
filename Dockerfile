@@ -58,12 +58,9 @@ RUN chmod 0755 /app/entrypoint.sh && python -m compileall -q -j 0 /app/config /a
 # One line: glowderma/core/tests/test_ci_production_check.py runs this exact RUN command.
 RUN DJANGO_SETTINGS_MODULE=config.settings.build python manage.py collectstatic --noinput
 
-# Unprivileged runtime user. /app/media is the only application directory it may write (mounted from the host
-# in production); /tmp is a tmpfs in production (read-only root filesystem).
+# Unprivileged runtime user. Uploads use S3 and /tmp is a tmpfs in production.
 RUN groupadd --system --gid 10001 app \
-    && useradd --system --uid 10001 --gid app --no-create-home --home-dir /tmp --shell /usr/sbin/nologin app \
-    && mkdir -p /app/media \
-    && chown app:app /app/media
+    && useradd --system --uid 10001 --gid app --no-create-home --home-dir /tmp --shell /usr/sbin/nologin app
 
 USER 10001:10001
 EXPOSE 8000

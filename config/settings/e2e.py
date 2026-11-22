@@ -27,6 +27,7 @@ from .local import *  # noqa: F403
 from .local import BASE_DIR, logging_config
 
 DEBUG = False
+PUBLIC_MEDIA_BASE_URL = env_str("PUBLIC_MEDIA_BASE_URL", "http://127.0.0.1:8000/media/")
 E2E_CONSOLE_ENABLED = True
 ROOT_URLCONF = "config.urls_e2e"
 ALLOWED_HOSTS = ["localhost", "127.0.0.1"]

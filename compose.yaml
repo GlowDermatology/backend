@@ -8,10 +8,11 @@ x-app: &app
     dockerfile: Dockerfile.local
   volumes:
     - .:/app
-    - media:/app/media
   env_file: .env
   environment: &environment
     DJANGO_SETTINGS_MODULE: config.settings.local
+    S3_ENDPOINT_URL: ${S3_COMPOSE_ENDPOINT_URL:-http://object-storage:8333}
+    PUBLIC_MEDIA_BASE_URL: ${PUBLIC_MEDIA_BASE_URL:-http://127.0.0.1:8333/glowderma-media/media/}
     POSTGRES_NAME: ${POSTGRES_NAME:-glowderma}
     POSTGRES_USER: ${POSTGRES_USER:-glowderma}
     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-glowderma}
@@ -22,6 +23,8 @@ x-app: &app
     # local settings default to eager (inline) tasks for a bare runserver; compose runs a real worker.
     CELERY_TASK_ALWAYS_EAGER: "false"
   depends_on:
+    object-storage-init:
+      condition: service_completed_successfully
     postgres:
       condition: service_healthy
     redis:
@@ -78,10 +81,9 @@ services:
       timeout: 5s
       retries: 10
 
-  # Optional local S3 (SeaweedFS): docker compose --profile object-storage up -d object-storage object-storage-init
+  # Local S3 (SeaweedFS).
   # docker/object-storage/s3.json holds DEV-ONLY dummy keys, not for production.
   object-storage:
-    profiles: ["object-storage"]
     image: chrislusf/seaweedfs:4.53@sha256:ccad23e18639c8b98cee17e7100b95830a06077b56d8e5b006d6dcf8ec5e94a0
     command: server -dir=/data -s3 -s3.config=/etc/seaweedfs/s3.json -ip.bind=0.0.0.0
     ports: ["127.0.0.1:8333:8333"]
@@ -94,7 +96,6 @@ services:
       timeout: 5s
       retries: 10
   object-storage-init:
-    profiles: ["object-storage"]
     image: amazon/aws-cli:2.40.3@sha256:33a16c53ea442e918b58df67301ad76a8fb57082c39f7e78753b898c3f3e87c2
     depends_on:
       object-storage:
@@ -114,5 +115,4 @@ services:
 
 volumes:
   pgdata:
-  media:
   objectdata:

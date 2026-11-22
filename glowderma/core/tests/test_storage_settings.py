@@ -13,7 +13,6 @@ from glowderma.core.tests.test_settings import (  # noqa: F401 - fixtures shared
 )
 
 S3_KEYS = (
-    "USE_S3",
     "S3_ENDPOINT_URL",
     "S3_BUCKET_NAME",
     "S3_ACCESS_KEY_ID",
@@ -33,18 +32,13 @@ def clean_s3_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def s3_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("USE_S3", "true")
     monkeypatch.setenv("S3_BUCKET_NAME", "glowderma-media")
     monkeypatch.setenv("S3_ACCESS_KEY_ID", "AK")
     monkeypatch.setenv("S3_SECRET_ACCESS_KEY", "SK")
     monkeypatch.setenv("S3_ENDPOINT_URL", "http://minio:9000")
 
 
-def test_default_is_filesystem() -> None:
-    assert media_storage() == {"BACKEND": "django.core.files.storage.FileSystemStorage"}
-
-
-def test_use_s3_builds_s3_options(s3_env: None) -> None:
+def test_builds_s3_options(s3_env: None) -> None:
     cfg = media_storage()
     assert cfg["BACKEND"] == S3_BACKEND == "storages.backends.s3.S3Storage"
     assert cfg["OPTIONS"] == {
@@ -93,7 +87,7 @@ def test_bad_addressing_style_refused(s3_env: None, monkeypatch: pytest.MonkeyPa
         media_storage()
 
 
-def test_production_keeps_switch(
+def test_production_always_uses_s3(
     load_fresh_production: Callable[[], ModuleType],  # noqa: F811
     s3_env: None,
     production_env: None,  # noqa: F811

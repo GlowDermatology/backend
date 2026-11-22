@@ -13,6 +13,7 @@ from cryptography.hazmat.primitives.asymmetric import ec, rsa
 from django.core.exceptions import ImproperlyConfigured
 
 from config.env import env_bool, env_int, env_json, env_list, env_networks, env_str
+from config.storage import media_storage
 
 from .base import *  # noqa: F403
 from .base import (
@@ -504,6 +505,6 @@ CSRF_COOKIE_NAME = "__Host-gd_csrftoken"
 # Hashed, pre-compressed static files (the console's Unfold assets are cache-busted by name); collectstatic in
 # the Dockerfile writes the manifest. Local and test settings keep the plain storage.
 STORAGES = {
-    **STORAGES,  # noqa: F405 - the default (media) entry comes from base
+    "default": media_storage(),
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
 }

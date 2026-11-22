@@ -49,17 +49,15 @@ def test_sync_apply_lists_each_upload_at_verbosity_2(s3_storage: Any, media_file
 
 
 def test_sync_refuses_when_default_storage_is_disk(media_file: str) -> None:
-    with pytest.raises(CommandError, match="USE_S3"):
+    with pytest.raises(CommandError, match="S3 default storage"):
         call_command("sync_media_to_s3", "--apply")
 
 
-def test_use_s3_in_one_process_environment_switches_only_that_process() -> None:
-    """The deployed `sync-media` runs `exec -e USE_S3=true` in the running API container (still on the disk):
-    USE_S3 is read when the settings are imported, so that one process gets the S3 default storage."""
+def test_local_settings_use_s3() -> None:
+    """Local development uses S3 while the test settings keep filesystem media."""
     env = {
         **os.environ,
-        "DJANGO_SETTINGS_MODULE": "config.settings.test",
-        "USE_S3": "true",
+        "DJANGO_SETTINGS_MODULE": "config.settings.local",
         "S3_BUCKET_NAME": "bucket",
         "S3_ACCESS_KEY_ID": "access",
         "S3_SECRET_ACCESS_KEY": "secret",

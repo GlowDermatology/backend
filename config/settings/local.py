@@ -3,13 +3,27 @@ import re
 from django.core.exceptions import ImproperlyConfigured
 
 from config.env import env_bool, env_datetime, env_list, env_networks, env_str
+from config.storage import media_storage
 
 from .base import *  # noqa: F403
 from .base import ADMIN_PANEL_URL as BASE_ADMIN_PANEL_URL
 from .base import SPECTACULAR_SETTINGS as BASE_SPECTACULAR_SETTINGS
+from .base import STORAGES as BASE_STORAGES
 from .base import database_config, logging_config, redis_db_url
 
 DEBUG = True
+PUBLIC_MEDIA_BASE_URL = env_str("PUBLIC_MEDIA_BASE_URL", "http://127.0.0.1:8333/glowderma-media/media/")
+STORAGES = {
+    **BASE_STORAGES,
+    "default": media_storage(
+        {
+            "S3_ENDPOINT_URL": "http://127.0.0.1:8333",
+            "S3_BUCKET_NAME": "glowderma-media",
+            "S3_ACCESS_KEY_ID": "glowderma",
+            "S3_SECRET_ACCESS_KEY": "glowderma-dev-secret",
+        }
+    ),
+}
 FAKE_NOW = env_datetime("FAKE_NOW", None)
 SPECTACULAR_SETTINGS = {
     **BASE_SPECTACULAR_SETTINGS,

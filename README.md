@@ -26,14 +26,16 @@ docker compose exec api python manage.py createstaff admin@glowderma.uz --manage
 API: http://localhost:8000/api/v1/ · OpenAPI docs: http://localhost:8000/api/v1/docs/ (local only)
 
 `compose.yaml` is the local development stack (local settings, ports on 127.0.0.1; the api container migrates on
-start). Production runs the image built by CI from the infra repository; see [`docs/ops/deploy.md`](docs/ops/deploy.md).
+start). For a host-run Django server, start SeaweedFS with `docker compose up -d object-storage object-storage-init` first.
+Production runs the image built by CI from the infra repository; see [`docs/ops/deploy.md`](docs/ops/deploy.md).
 
 ## Container image
 
 | | |
 |---|---|
 | Build | `Dockerfile`: multi-stage, `uv sync --locked --no-dev`, Python 3.14 slim, no package manager in the runtime |
-| Runs as | uid 10001, read-only source, writable `/app/media` and `/tmp` only |
+| Runs as | uid 10001, read-only source, writable `/tmp` only |
+| Media | S3-compatible storage. Local Compose starts SeaweedFS and initializes its bucket. |
 | Entrypoint | `entrypoint.sh api\|worker\|beat\|migrate\|manage\|shell` (waits for secrets and the database) |
 | Static files | collected at build (`config.settings.build`), served by WhiteNoise |
 | Secrets | `DJANGO_SECRETS_FILE` (JSON from Vault Agent), loaded by `config/secrets.py` before the settings |

@@ -93,5 +93,8 @@ if settings.DJANGO_ADMIN_ENABLED:
     # The console's language switcher (before and after sign-in).
     urlpatterns.append(path("django-admin/language/", console_i18n.set_language, name="ops_set_language"))
     urlpatterns.append(path("django-admin/", admin.site.urls))
-if settings.DEBUG:
+if (
+    settings.DEBUG
+    and settings.STORAGES["default"]["BACKEND"] == "django.core.files.storage.FileSystemStorage"
+):
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

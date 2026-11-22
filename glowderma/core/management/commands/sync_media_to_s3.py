@@ -26,11 +26,7 @@ class Command(BaseCommand):
 
     def handle(self, *args: Any, **options: Any) -> None:
         if settings.STORAGES["default"]["BACKEND"] != S3_BACKEND:
-            # USE_S3 is read at settings import, so it can be given to this one process while the app stays on
-            # the disk (the infra's `scripts/manage.sh <env> sync-media` runs it with USE_S3=true).
-            raise CommandError(
-                "The default storage is the local disk: run this command with USE_S3=true and the S3_* keys."
-            )
+            raise CommandError("Configure an S3 default storage before importing media.")
         source = FileSystemStorage(location=settings.MEDIA_ROOT)
         # every image has two variant files beside it: one line per file only when asked for (-v 2)
         listing = options["verbosity"] >= 2

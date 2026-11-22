@@ -1,6 +1,13 @@
 from config.env import env_str
 
 from .local import *  # noqa: F403
+from .local import STORAGES as LOCAL_STORAGES
+
+PUBLIC_MEDIA_BASE_URL = env_str("PUBLIC_MEDIA_BASE_URL", "http://127.0.0.1:8000/media/")
+STORAGES = {
+    **LOCAL_STORAGES,
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+}
 
 # Parallel workers (git worktrees) each run the suite against their own test database.
 DATABASES["default"]["TEST"] = {"NAME": env_str("TEST_DB_NAME", "test_glowderma")}  # noqa: F405

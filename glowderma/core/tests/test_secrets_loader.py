@@ -125,6 +125,9 @@ def production_secrets() -> dict[str, str]:
         "CLICK_SECRET_KEY": secrets.token_hex(16),
         "PAYME_KEY": secrets.token_hex(16),
         "POSTGRES_PASSWORD": secrets.token_hex(24),
+        "S3_BUCKET_NAME": "test-bucket",
+        "S3_ACCESS_KEY_ID": "test-access",
+        "S3_SECRET_ACCESS_KEY": secrets.token_hex(24),
         "REDIS_URL": "redis://:pw@redis:6379/0",
         # Read by config/settings/base.py at import time: proves the loader runs before base.py.
         "GOOGLE_OAUTH_CLIENT_SECRET": "google-secret-from-vault",
@@ -133,7 +136,7 @@ def production_secrets() -> dict[str, str]:
 
 
 def boot_production(secrets_file: Path | None) -> subprocess.CompletedProcess[str]:
-    keep = ("PATH", "HOME", "LANG", "SSL_CERT_FILE", "TMPDIR")
+    keep = ("PATH", "HOME", "LANG", "SSL_CERT_FILE", "TMPDIR", "SYSTEMROOT")
     env = {name: os.environ[name] for name in keep if name in os.environ}
     env.update(
         {

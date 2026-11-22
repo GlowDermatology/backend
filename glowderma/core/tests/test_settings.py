@@ -25,6 +25,9 @@ REQUIRED = (
     "ALLOWED_HOSTS",
     "ADMIN_API_ALLOWED_NETS",
     "PUBLIC_MEDIA_BASE_URL",
+    "S3_BUCKET_NAME",
+    "S3_ACCESS_KEY_ID",
+    "S3_SECRET_ACCESS_KEY",
 )
 
 
@@ -60,6 +63,9 @@ def production_env(monkeypatch: pytest.MonkeyPatch) -> None:
         ALLOWED_HOSTS="localhost",
         ADMIN_API_ALLOWED_NETS="127.0.0.0/8",
         PUBLIC_MEDIA_BASE_URL="https://media.example.uz/",
+        S3_BUCKET_NAME="test-bucket",
+        S3_ACCESS_KEY_ID="test-access",
+        S3_SECRET_ACCESS_KEY="test-secret",  # noqa: S106 - test-only credentials
         # M2 customer API keys (plan §7)
         SMS_CODE_HMAC_KEY="valid-sms-code-hmac-key-at-least-32-chars",
         LOG_PII_KEY="valid-log-pii-key-at-least-32-characters",
@@ -352,6 +358,9 @@ DEPLOY_ENV = {
     # Preload is an explicit opt-in (never implied by SECURE_HSTS_SECONDS); CI sets it the same way.
     "SECURE_HSTS_PRELOAD": "true",
     "PUBLIC_MEDIA_BASE_URL": "https://media.example.uz/media/",
+    "S3_BUCKET_NAME": "test-bucket",
+    "S3_ACCESS_KEY_ID": "test-access",
+    "S3_SECRET_ACCESS_KEY": "test-secret",
     "ALLOWED_HOSTS": "api.example.uz",
     "ADMIN_API_ALLOWED_NETS": "10.0.0.0/8",
 }

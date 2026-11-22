@@ -23,7 +23,7 @@ What this repository provides to it:
 - **Migrations run once per release**, in the `migrate` container; `api` never migrates in production
   (`MIGRATE_ON_START` is for local development).
 - **Static files** (Django admin, Unfold, DRF) are collected into the image at build time and served by
-  WhiteNoise. Media is a directory the edge serves at `/media/`.
+  WhiteNoise. Uploads use S3-compatible storage. Bundled SeaweedFS is served by the edge at `/media/`.
 
 Commands below use infra's `scripts/manage.sh <env> …` (run on the server, in `/opt/glowderma/infra`).
 The sections that follow are application knowledge that does not depend on how the stack is deployed.

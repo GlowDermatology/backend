@@ -241,6 +241,9 @@ jobs:
           ALLOWED_HOSTS: api.example.uz
           ADMIN_API_ALLOWED_NETS: 10.0.0.0/8
           PUBLIC_MEDIA_BASE_URL: https://media.example.uz/media/
+          S3_BUCKET_NAME: ci-only
+          S3_ACCESS_KEY_ID: ci-only
+          S3_SECRET_ACCESS_KEY: ci-only
           SECURE_SSL_REDIRECT: "true"
           SECURE_HSTS_SECONDS: "31536000"
           SECURE_HSTS_PRELOAD: "true"

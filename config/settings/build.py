@@ -68,6 +68,9 @@ os.environ.setdefault(
     "127.0.0.0/8",
 )
 
+for key in ("S3_BUCKET_NAME", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"):
+    os.environ.setdefault(key, "build-only")
+
 # Import production settings after configuring
 # the build-only environment.
 from .production import *  # noqa: E402, F401, F403
