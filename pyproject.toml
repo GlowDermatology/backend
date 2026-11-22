@@ -29,10 +29,18 @@ dependencies = [
 
 [dependency-groups]
 dev = [
- "ruff==0.17.2", "mypy==2.3.1", "django-stubs[compatible-mypy]==6.1.2",
- "djangorestframework-stubs[compatible-mypy]==3.18.1", "pytest==9.1.1",
- "pytest-django==4.14.0", "factory-boy==3.3.3", "coverage", "import-linter",
+ "ruff==0.17.2",
+ "mypy==2.3.1",
+ "django-stubs[compatible-mypy]==6.1.2",
+ "djangorestframework-stubs[compatible-mypy]==3.18.1",
+ "pytest==9.1.1",
+ "pytest-django==4.14.0",
+ "factory-boy==3.3.3",
+ "coverage",
+ "import-linter",
  "moto[s3]==5.2.5",
+ "pytest-xdist==3.8.0",
+ "pytest-split==0.11.0",
 ]
 
 [tool.uv]
@@ -65,6 +73,10 @@ django_settings_module = "config.settings.test"
 [tool.coverage.run]
 source = ["glowderma"]
 branch = true
+# `pytest -n` (xdist) runs the tests in worker subprocesses: coverage starts in every Python subprocess and each
+# writes its own .coverage.<host>.<pid>.<random> file; `coverage combine` merges them before `coverage report`.
+parallel = true
+patch = ["subprocess"]
 
 [tool.ruff]
 line-length = 110

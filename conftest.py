@@ -1,10 +1,14 @@
 import hashlib
 from collections.abc import Iterator
+from typing import Any
 
 import pytest
 from django.conf import settings
 from django.core.cache import cache
+from django.db.backends.base.base import BaseDatabaseWrapper
 from django.test import Client, override_settings
+from pytest_django import DjangoDbBlocker
+from pytest_django.plugin import blocking_manager_key
 from rest_framework.test import APIClient
 
 from glowderma.accounts import tokens
@@ -54,6 +58,116 @@ def media_root(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
     """Image factories and the demo seeders write real files: keep them out of the repository's MEDIA_ROOT."""
     with override_settings(MEDIA_ROOT=tmp_path_factory.mktemp("media")):
         yield
+
+
+# --- pytest-xdist: migrate once per run, clone for every worker
+#
+# Under `pytest -n N` pytest-django gives each worker its own test database (`<TEST NAME>_gw0`, `_gw1`, …)
+# and would build every one of them from the migrations (minutes each, all at once against one server).
+# Instead the first worker to need a database migrates `<TEST NAME>_template` once for this run, under a
+# PostgreSQL advisory lock, and every worker copies it with `CREATE DATABASE … TEMPLATE` (seconds). Django
+# then opens the copy as a kept database: its `migrate` finds nothing to apply. A plain `pytest`,
+# `--reuse-db` reruns and `--nomigrations` keep pytest-django's behaviour unchanged.
+
+
+def _clones_from_template(config: pytest.Config) -> bool:
+    """An xdist worker whose database is built from migrations in this run (not a `--reuse-db` rerun)."""
+    if getattr(config, "workerinput", None) is None:
+        return False
+    reuses = config.getvalue("reuse_db") and not config.getvalue("create_db")
+    return not reuses and not config.getvalue("nomigrations")
+
+
+def _template_name(test_name: str) -> str:
+    return f"{test_name}_template"
+
+
+def _build_template(connection: BaseDatabaseWrapper, template: str) -> None:
+    """Migrate a fresh ``template`` database through Django's own test-database creation."""
+    test_settings = connection.settings_dict["TEST"]
+    worker_name, server_name = test_settings["NAME"], connection.settings_dict["NAME"]
+    test_settings["NAME"] = template
+    try:
+        connection.creation.create_test_db(verbosity=0, autoclobber=True)
+    finally:
+        # CREATE DATABASE … TEMPLATE refuses a template that has open sessions.
+        connection.close()
+        connection.close_pool()  # type: ignore[attr-defined]  # PostgreSQL backend
+        test_settings["NAME"] = worker_name
+        connection.settings_dict["NAME"] = server_name
+        settings.DATABASES[connection.alias]["NAME"] = server_name
+
+
+def _clone_run_template(connection: BaseDatabaseWrapper, template: str, target: str, run_id: str) -> None:
+    quote = connection.ops.quote_name
+    with connection._nodb_cursor() as cursor:
+        # One worker builds the template while the others wait; clones also take turns (a template being
+        # copied must not be in use).
+        cursor.execute("SELECT pg_advisory_lock(hashtext(%s))", [template])
+        try:
+            cursor.execute(
+                "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = %s", [template]
+            )
+            row = cursor.fetchone()
+            if row is None or row[0] != run_id:  # absent, or left over from an earlier run
+                _build_template(connection, template)
+                cursor.execute(f"COMMENT ON DATABASE {quote(template)} IS %s", [run_id])
+            cursor.execute(f"DROP DATABASE IF EXISTS {quote(target)} WITH (FORCE)")
+            cursor.execute(f"CREATE DATABASE {quote(target)} TEMPLATE {quote(template)}")
+        finally:
+            cursor.execute("SELECT pg_advisory_unlock(hashtext(%s))", [template])
+
+
+@pytest.fixture(scope="session")
+def _xdist_database_clone(
+    request: pytest.FixtureRequest,
+    django_db_modify_db_settings: None,
+    django_db_blocker: DjangoDbBlocker,
+) -> Iterator[bool]:
+    """True once this xdist worker's test database is a fresh copy of the run's migrated template."""
+    config = request.config
+    if not _clones_from_template(config):
+        yield False
+        return
+    from django.db import connection, connections
+
+    workerinput: dict[str, Any] = config.workerinput  # type: ignore[attr-defined]
+    worker_db = str(connection.settings_dict["TEST"]["NAME"])  # pytest-django's `<TEST NAME>_gw<n>`
+    template = _template_name(worker_db.removesuffix(f"_{workerinput['workerid']}"))
+    with django_db_blocker.unblock():
+        _clone_run_template(connection, template, worker_db, str(workerinput["testrunuid"]))
+    yield True
+    if config.getvalue("reuse_db"):  # `--reuse-db --create-db`: keep the new database for the next rerun
+        return
+    with django_db_blocker.unblock():
+        connections.close_all()
+        with connection._nodb_cursor() as cursor:
+            cursor.execute(f"DROP DATABASE IF EXISTS {connection.ops.quote_name(worker_db)} WITH (FORCE)")
+
+
+@pytest.fixture(scope="session")
+def django_db_keepdb(request: pytest.FixtureRequest, _xdist_database_clone: bool) -> bool:
+    """pytest-django's ``--reuse-db``, and also true for a cloned worker database (its teardown is the clone
+    fixture's): Django opens it as it is instead of dropping it and migrating anew."""
+    return bool(request.config.getvalue("reuse_db")) or _xdist_database_clone
+
+
+@pytest.fixture(scope="session")
+def django_db_createdb(request: pytest.FixtureRequest, _xdist_database_clone: bool) -> bool:
+    """pytest-django's ``--create-db``; the clone already is the new database."""
+    return bool(request.config.getvalue("create_db")) and not _xdist_database_clone
+
+
+def pytest_sessionfinish(session: pytest.Session) -> None:
+    """The xdist controller drops the run's template once every worker has finished."""
+    config = session.config
+    if getattr(config, "workerinput", None) is not None or not getattr(config.option, "numprocesses", None):
+        return
+    from django.db import connection
+
+    template = _template_name(str(connection.settings_dict.get("TEST", {}).get("NAME") or ""))
+    with config.stash[blocking_manager_key].unblock(), connection._nodb_cursor() as cursor:
+        cursor.execute(f"DROP DATABASE IF EXISTS {connection.ops.quote_name(template)} WITH (FORCE)")
 
 
 def _json_client() -> APIClient:

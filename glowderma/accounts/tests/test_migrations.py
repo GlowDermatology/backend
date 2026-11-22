@@ -59,6 +59,7 @@ def test_authsession_rows_survive_0005() -> None:
     session = AuthSession.objects.get(pk=sid)
     assert session.staff_id == staff_id and session.customer_id is None
     assert session.previous_refresh_hash == "" and session.rotated_at is None and session.device_id is None
+    call_command("migrate", verbosity=0)  # the apps that depend on accounts, unapplied by the step back
 
 
 @pytest.mark.django_db(transaction=True)
@@ -79,6 +80,7 @@ def test_0005_precheck_refuses_a_stray_customer_id() -> None:
         cursor.execute("DELETE FROM accounts_authsession")
     call_command("migrate", "accounts", verbosity=0)
     assert column_is_foreign_key("accounts_authsession", "customer_id")
+    call_command("migrate", verbosity=0)  # the apps that depend on accounts, unapplied by the step back
 
 
 def customer_indexes() -> dict[str, str]:
