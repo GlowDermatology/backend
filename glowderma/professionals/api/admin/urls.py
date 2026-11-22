@@ -12,6 +12,8 @@ from ..specialist import (
     OverridesView,
     OwnPhotoView,
     OwnProfileView,
+    OwnServicesView,
+    OwnServiceView,
     WeeklyHoursView,
 )
 from .views import (
@@ -45,6 +47,8 @@ urlpatterns: list[URLPattern | URLResolver] = [
     path("specialist/profile/photo/", OwnPhotoView.as_view(), name="specialist-profile-photo"),
     path("specialist/availability/", AvailabilityView.as_view(), name="specialist-availability"),
     path("specialist/weekly-hours/", WeeklyHoursView.as_view(), name="specialist-weekly-hours"),
+    path("specialist/services/", OwnServicesView.as_view(), name="specialist-services"),
+    path("specialist/services/<int:pk>/", OwnServiceView.as_view(), name="specialist-service"),
     path(
         "specialist/overrides/",
         OverridesView.as_view(http_method_names=["post", "options"]),

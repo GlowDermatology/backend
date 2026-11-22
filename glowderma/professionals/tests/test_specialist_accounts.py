@@ -2,10 +2,10 @@
 
 One staff sign-in page, three roles (Staff, Manager, Specialist). A manager invites a Specialist: the account
 and its private draft profile are created together. The specialist signs in on the shared login, completes
-their public name, photo and bio and sets availability for the clinics staff assigned; staff publish once the
-profile is complete and customers can book. Staff → Edit changes the role explicitly (sessions revoked, the
-profile reused, appointments never moved). Every ``specialist/`` route resolves the profile from the signed-in
-account only.
+their profile, services and availability for the clinics staff assigned, and publishes (as staff may) once
+the profile is complete; then customers can book. Staff → Edit changes the role explicitly (sessions revoked,
+the profile reused, appointments never moved). Every ``specialist/`` route resolves the profile from the
+signed-in account only.
 """
 
 import uuid
@@ -155,7 +155,7 @@ def test_profiles_are_never_created_or_relinked_by_hand(staff_client: APIClient)
     assert doctor.staff_user_id != other.pk
 
 
-# --- 2. the specialist completes the draft; staff publish ---------------------------------------------------
+# --- 2. the specialist completes and publishes the draft ----------------------------------------------------
 
 
 def test_full_flow_from_invitation_to_customer_booking(
@@ -203,36 +203,44 @@ def test_full_flow_from_invitation_to_customer_booking(
     ok(client.patch(OWN + "profile/", {"bio": {"ru": "Дерматолог"}}, **keyed()))
     assert Professional.objects.get(pk=pk).bio_uz == "Teri shifokori"  # languages merge one by one
     ok(client.put(OWN + "profile/photo/", {"file": photo()}, format="multipart"))
-    # a specialist cannot publish, assign clinics or services through their own route
-    ok(client.patch(OWN + "profile/", {"is_active": True, "location_id": 1}, **keyed()))
+    # the specialist sets the discipline; clinics and the site order stay with staff (ignored when sent)
+    own = ok(
+        client.patch(
+            OWN + "profile/",
+            {"role": "dermatologist", "location_id": 1, "location_ids": [1], "position": 0},
+            **keyed(),
+        )
+    )
+    assert own["role"] == "dermatologist" and own["clinics"] == [] and own["location_id"] is None
+    # publishing an incomplete profile is refused, naming what is missing
+    early = client.patch(OWN + "profile/", {"is_active": True}, **keyed())
+    assert early.status_code == 409 and "ish vaqti" in str(early.data["message"])
     assert Professional.objects.get(pk=pk).is_active is False
 
-    # staff assign the clinic, the discipline and a service
+    # staff assign the clinic; the specialist adds their own service
     clinic = LocationFactory.create()
     ok(
         staff_client.patch(
             f"{ADMIN}specialists/{pk}/",
-            {"role": "dermatologist", "location_id": clinic.pk, "location_ids": [clinic.pk]},
+            {"location_id": clinic.pk, "location_ids": [clinic.pk]},
             format="json",
         )
     )
     offer = {"name": {"uz": "Konsultatsiya"}, "price": 150_000, "duration_min": 30}
-    created_service = staff_client.post(f"{ADMIN}specialists/{pk}/services/", offer, format="json")
-    assert created_service.status_code == 201, created_service.data
+    with_service = ok(client.post(OWN + "services/", offer, **keyed()), 201)
     [service] = Service.objects.filter(professional_id=pk)
-    blocked = staff_client.patch(f"{ADMIN}specialists/{pk}/", {"is_active": True}, format="json")
-    assert blocked.status_code == 409 and "ish vaqti" in str(blocked.data["message"])
+    assert [row["id"] for row in with_service["services"]] == [service.pk]
+    assert [row["id"] for row in with_service["clinics"]] == [clinic.pk]
 
     # the specialist sets availability, only at their assigned clinics
     other_clinic = LocationFactory.create()
     foreign = {"days": [{"weekday": 0, "start": "09:00", "end": "13:00", "location_id": other_clinic.pk}]}
     assert client.put(OWN + "weekly-hours/", foreign, **keyed()).status_code == 400
     week = {"days": [{"weekday": 0, "start": "09:00", "end": "13:00", "location_id": clinic.pk}]}
-    assert client.put(OWN + "weekly-hours/", week, **keyed()).status_code == 204
-    assert ok(client.get(OWN + "profile/"))["publish_blockers"] == []
+    assert ok(client.put(OWN + "weekly-hours/", week, **keyed()))["publish_blockers"] == []
 
     # publication is separate from login activation
-    published = ok(staff_client.patch(f"{ADMIN}specialists/{pk}/", {"is_active": True}, format="json"))
+    published = ok(client.patch(OWN + "profile/", {"is_active": True}, **keyed()))
     assert published["is_active"] is True and published["account"]["is_active"] is True
     [listed] = ok(public_client.get("/api/v1/specialists/"))["results"]
     assert listed["id"] == pk and listed["name"] == "Dr. Amina"
@@ -325,7 +333,7 @@ def test_specialist_to_staff_pauses_bookings_and_keeps_history(staff_client: API
     refused = staff_client.patch(f"{ADMIN}specialists/{doctor.pk}/", {"is_active": True}, format="json")
     assert refused.status_code == 409
 
-    # back to Specialist: the same profile, still unpublished until staff review it
+    # back to Specialist: the same profile, still unpublished until staff or the specialist publish it
     returned = ok(role(boss, account.pk, "specialist"))
     assert returned["specialist_id"] == doctor.pk
     assert Professional.objects.filter(staff_user=account).count() == 1
@@ -333,6 +341,7 @@ def test_specialist_to_staff_pauses_bookings_and_keeps_history(staff_client: API
     assert doctor.is_active is False
     review = ok(staff_client.get(f"{ADMIN}specialists/{doctor.pk}/"))
     assert "account" not in review["publish_blockers"]
+    assert ok(panel(account).get(OWN + "profile/"))["is_active"] is False
 
 
 @pytest.mark.parametrize(

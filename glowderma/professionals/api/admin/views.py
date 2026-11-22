@@ -77,13 +77,16 @@ def _upcoming(professionals: Iterable[Professional]) -> dict[int, int]:
     return bookings.upcoming_counts([professional.pk for professional in professionals], timeutils.now())
 
 
-def specialist_body(professional_id: int) -> dict[str, Any]:
-    """The ``ClinicSpecialist`` of a fresh read (writes return it)."""
+def specialist_body(
+    professional_id: int, *, serializer: type[ClinicSpecialistSerializer] = ClinicSpecialistSerializer
+) -> dict[str, Any]:
+    """The ``ClinicSpecialist`` (or a subclass such as ``SpecialistOwnProfile``) of a fresh read (writes
+    return it)."""
     professional = selectors.get_specialist(professional_id)
     if professional is None:  # pragma: no cover - the write just locked the row
         raise NotFound
     context = {"upcoming": _upcoming([professional])}
-    return dict(ClinicSpecialistSerializer(professional, context=context).data)
+    return dict(serializer(professional, context=context).data)
 
 
 def _professional_or_404(pk: int) -> Professional:

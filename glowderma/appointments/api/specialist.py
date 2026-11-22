@@ -17,7 +17,14 @@ from glowderma.core import enums
 from glowderma.core.api.fields import AwareDateTimeField
 from glowderma.core.api.schema import ADMIN_ERRORS, IDEMPOTENCY_KEY_HEADER
 from glowderma.core.idempotency import idempotent
-from glowderma.professionals.api.specialist import ScheduleClinicSerializer, SpecialistProfileAPIView
+from glowderma.professionals.api.specialist import SpecialistProfileAPIView
+from glowderma.professionals.models import Location
+
+
+class ScheduleClinicSerializer(serializers.Serializer[Location]):
+    id = serializers.IntegerField()
+    name = serializers.CharField(source="name_uz")
+    address = serializers.CharField(source="address_uz", allow_blank=True)
 
 
 class SpecialistBookingSerializer(serializers.Serializer[Appointment]):

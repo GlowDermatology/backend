@@ -8338,8 +8338,12 @@ paths:
       security:
       - StaffJWT: []
       responses:
-        '204':
-          description: No response body
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlockedPeriod'
+          description: ''
         '400':
           content:
             application/json:
@@ -8410,8 +8414,12 @@ paths:
       security:
       - StaffJWT: []
       responses:
-        '204':
-          description: No response body
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlockedPeriod'
+          description: ''
         '400':
           content:
             application/json:
@@ -8881,8 +8889,12 @@ paths:
       security:
       - StaffJWT: []
       responses:
-        '204':
-          description: No response body
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HoursOverride'
+          description: ''
         '400':
           content:
             application/json:
@@ -8953,8 +8965,12 @@ paths:
       security:
       - StaffJWT: []
       responses:
-        '204':
-          description: No response body
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HoursOverride'
+          description: ''
         '400':
           content:
             application/json:
@@ -9074,7 +9090,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ClinicSpecialist'
+                $ref: '#/components/schemas/SpecialistOwnProfile'
           description: ''
         '400':
           content:
@@ -9120,6 +9136,11 @@ paths:
           description: ''
     patch:
       operationId: specialist_profile_update
+      description: 'Every field optional; texts merge leaf by leaf; `location_id`,
+        `location_ids` and `position` are ignored. `is_active: true` with `publish_blockers`
+        left answers 409 `conflict` naming them; `is_active: false` with requested/confirmed
+        appointments ahead answers 409 unless `force: true` (the appointments are
+        kept either way).'
       parameters:
       - in: header
         name: Idempotency-Key
@@ -9143,7 +9164,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ClinicSpecialist'
+                $ref: '#/components/schemas/SpecialistOwnProfile'
           description: ''
         '400':
           content:
@@ -9207,7 +9228,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ClinicSpecialist'
+                $ref: '#/components/schemas/SpecialistOwnProfile'
           description: ''
         '400':
           content:
@@ -9302,9 +9323,231 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
+  /api/v1/admin/specialist/services/:
+    post:
+      operationId: specialist_services_create
+      description: A new own service with the price and duration a booking snapshots;
+        appended after the others. A name already used answers 400 `unique`; at most
+        50 services.
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClinicServiceWriteRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpecialistOwnProfile'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialist/services/{id}/:
+    patch:
+      operationId: specialist_services_partial_update
+      description: 'Every field optional; texts merge leaf by leaf. `is_active: false`
+        stops offering the service at once; booked appointments keep their price and
+        duration. Another specialist''s service is 404.'
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedClinicServiceWriteRequest'
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpecialistOwnProfile'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    delete:
+      operationId: specialist_services_destroy
+      description: 'Delete an own service that was never booked. One with appointments
+        (any status) answers 409 `conflict`: deactivate it instead (`is_active: false`).'
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '204':
+          description: No response body
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/admin/specialist/weekly-hours/:
     put:
       operationId: specialist_weekly_hours_update
+      description: 'The whole week at the assigned clinics: a weekday left out is
+        not a working day. Appointments already booked outside the new hours are kept
+        (see `specialist/conflicts/`).'
       parameters:
       - in: header
         name: Idempotency-Key
@@ -9325,8 +9568,12 @@ paths:
       security:
       - StaffJWT: []
       responses:
-        '204':
-          description: No response body
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpecialistOwnProfile'
+          description: ''
         '400':
           content:
             application/json:
@@ -25994,15 +26241,44 @@ components:
     PatchedOwnProfileRequest:
       type: object
       description: |-
-        ``PATCH specialist/profile/``: the public name and the bio (languages merge one by one). Clinics,
-        services, discipline and publication stay with staff.
+        ``PATCH specialist/profile/`` (validated ``partial``): the staff profile fields without the clinics
+        and the site order, which stay with staff (sent anyway, they are ignored). Texts merge leaf by leaf;
+        ``is_active`` publishes or unpublishes under the staff rules (``force`` confirms an unpublish despite
+        upcoming visits).
       properties:
         name:
           type: string
           minLength: 2
           maxLength: 150
+        role:
+          $ref: '#/components/schemas/SpecialistRoleEnum'
+        qualifications:
+          $ref: '#/components/schemas/SpecialistTextRequest'
         bio:
-          $ref: '#/components/schemas/PatchedSpecialistTextRequest'
+          $ref: '#/components/schemas/SpecialistTextRequest'
+        experience_years:
+          type: integer
+          maximum: 80
+          minimum: 0
+          nullable: true
+        slot_step_min:
+          type: integer
+          description: 'The customer slot grid in minutes: 10, 15, 20, 30 (default)
+            or 60.'
+        is_active:
+          type: boolean
+          description: 'Published: listed on the website and bookable. Publishing
+            needs a complete profile.'
+        slug:
+          type: string
+          minLength: 1
+          description: Optional on create (derived from the name).
+          maxLength: 160
+        force:
+          type: boolean
+          default: false
+          description: 'With is_active=false: deactivate even with requested/confirmed
+            appointments ahead.'
     PatchedProductPatchRequest:
       type: object
       description: |-
@@ -26051,24 +26327,6 @@ components:
           maxLength: 60
         rules:
           $ref: '#/components/schemas/SegmentRulesRequest'
-    PatchedSpecialistTextRequest:
-      type: object
-      description: |-
-        ``qualifications`` / ``bio``: ``{uz, ru, en}``, each ≤ 2000, every language optional (missing on
-        create → ``""``; a PATCH changes only the languages sent).
-      properties:
-        uz:
-          type: string
-          default: ''
-          maxLength: 2000
-        ru:
-          type: string
-          default: ''
-          maxLength: 2000
-        en:
-          type: string
-          default: ''
-          maxLength: 2000
     PatchedStaffUpdateRequest:
       type: object
       description: |-
@@ -28205,7 +28463,8 @@ components:
         clinics:
           type: array
           items:
-            $ref: '#/components/schemas/ScheduleClinic'
+            $ref: '#/components/schemas/ClinicLocation'
+          description: Assigned clinics, primary first, inactive ones included (`is_active`).
         working_hours:
           type: array
           items:
@@ -28350,6 +28609,130 @@ components:
             $ref: '#/components/schemas/Specialist'
       required:
       - results
+    SpecialistOwnProfile:
+      type: object
+      description: |-
+        ``SpecialistOwnProfile``: the ``ClinicSpecialist`` of the signed-in specialist plus the clinics staff
+        assigned (read-only for the specialist).
+      properties:
+        id:
+          type: integer
+        slug:
+          type: string
+          description: 'The website URL segment (B-W1): unique, editable.'
+        name:
+          type: string
+        role:
+          description: |-
+            `""` while a draft has none.
+
+            * `dermatologist` - dermatologist
+            * `cosmetologist` - cosmetologist
+          oneOf:
+          - $ref: '#/components/schemas/SpecialistRoleEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        qualifications:
+          allOf:
+          - $ref: '#/components/schemas/I18nText2000'
+          readOnly: true
+        bio:
+          allOf:
+          - $ref: '#/components/schemas/I18nText2000'
+          readOnly: true
+        experience_years:
+          type: integer
+          nullable: true
+        photo_url:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
+        photo_thumbnail_url:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
+          description: 400 px WebP variant.
+        photo_medium_url:
+          type: string
+          format: uri
+          nullable: true
+          readOnly: true
+          description: 1000 px WebP variant.
+        location_id:
+          type: integer
+          nullable: true
+          description: '`null` while a draft has no clinic.'
+        location_ids:
+          type: array
+          items:
+            type: integer
+          readOnly: true
+        account:
+          allOf:
+          - $ref: '#/components/schemas/SpecialistAccount'
+          description: The account that owns the profile.
+        publish_blockers:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublishBlockersEnum'
+          readOnly: true
+          description: 'What keeps the profile from being published (`[]` = ready):
+            account, name, discipline, bio, photo, clinic, service, availability.'
+        slot_step_min:
+          type: integer
+        position:
+          type: integer
+        is_active:
+          type: boolean
+        services:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClinicService'
+          description: Every own service, inactive ones included, by position.
+        working_hours:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkingDay'
+        upcoming_appointments:
+          type: integer
+          readOnly: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        clinics:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClinicLocation'
+          readOnly: true
+          description: Assigned clinics, primary first, inactive ones included (`is_active`).
+      required:
+      - account
+      - bio
+      - clinics
+      - created_at
+      - experience_years
+      - id
+      - is_active
+      - location_id
+      - location_ids
+      - name
+      - photo_medium_url
+      - photo_thumbnail_url
+      - photo_url
+      - position
+      - publish_blockers
+      - qualifications
+      - role
+      - services
+      - slot_step_min
+      - slug
+      - upcoming_appointments
+      - updated_at
+      - working_hours
     SpecialistPhotoUploadRequest:
       type: object
       properties:

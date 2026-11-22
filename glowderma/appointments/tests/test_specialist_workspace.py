@@ -101,7 +101,8 @@ def test_availability_keeps_bookings_and_changes_free_slots(staff_client: APICli
     own = AppointmentFactory.create(professional=doctor, start=visit(10))
     assert visit(11) in selectors.free_slots(doctor, offer, day, location_id=doctor.location_id).slots
     response = client.post(ROOT + "overrides/", {"date": day.isoformat()}, **write_headers())
-    assert response.status_code == 204, response.data
+    assert response.status_code == 201, response.data
+    assert response.data["date"] == day.isoformat()
     own.refresh_from_db()
     assert own.start == visit(10)
     assert [a["id"] for a in client.get(ROOT + "conflicts/").data["results"]] == [own.pk]
@@ -120,16 +121,16 @@ def test_availability_keeps_bookings_and_changes_free_slots(staff_client: APICli
         },
         **write_headers(),
     )
-    assert response.status_code == 204, response.data
+    assert response.status_code == 200, response.data
     assert client.get(ROOT + "conflicts/").data["results"] == []
     body = {"start": visit(11).isoformat(), "end": visit(12).isoformat(), "kind": "busy"}
-    assert client.post(ROOT + "blocks/", body, **write_headers()).status_code == 204
+    assert client.post(ROOT + "blocks/", body, **write_headers()).status_code == 201
     block = BlockedPeriod.objects.get(professional=doctor)
     assert (
         client.put(
             f"{ROOT}blocks/{block.pk}/", {**body, "end": visit(13).isoformat()}, **write_headers()
         ).status_code
-        == 204
+        == 200
     )
     assert client.delete(f"{ROOT}blocks/{block.pk}/", **write_headers()).status_code == 204
 

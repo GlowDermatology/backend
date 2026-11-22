@@ -514,7 +514,10 @@ def _specialist_state(professional: Professional, location_ids: set[int]) -> dic
 
 SPECIALIST_SCALARS = ("name", "role", "experience_years", "slot_step_min", "position", "is_active")
 # What a specialist may edit on their own profile (``specialist/profile/``).
-OWN_PROFILE_KEYS = frozenset({"name", "bio"})
+# Clinics, the site order and the owner account stay with staff.
+OWN_PROFILE_KEYS = frozenset(
+    {"name", "role", "qualifications", "bio", "experience_years", "slot_step_min", "slug", "is_active"}
+)
 PUBLISH_BLOCKER_MESSAGES = {
     "account": N_("hisob Mutaxassis rolida emas"),
     "name": N_("ommaviy ism"),
@@ -569,7 +572,7 @@ def _create_draft_profile(user: StaffUser, *, actor: Any, request: Any) -> Profe
 def update_specialist(
     professional_id: int, data: dict[str, Any], *, force: bool = False, actor: Any, request: Any = None
 ) -> Professional:
-    """``PATCH specialists/{id}/`` (staff) and ``PATCH specialist/profile/`` (the owner, ``name`` / ``bio``).
+    """``PATCH specialists/{id}/`` (staff) and ``PATCH specialist/profile/`` (the owner, no clinics).
 
     ``is_active`` is publication: publishing needs the owner account in the Specialist role and a complete
     profile (:func:`selectors.publish_blockers`, else 409 naming what is missing). Unpublishing a
@@ -617,13 +620,14 @@ def update_specialist(
 
 
 def update_own_profile(
-    professional_id: int, data: dict[str, Any], *, actor: Any, request: Any = None
+    professional_id: int, data: dict[str, Any], *, force: bool = False, actor: Any, request: Any = None
 ) -> Professional:
-    """A specialist edits their public name and bio; any other key is a programming error."""
+    """A specialist edits their own profile (:data:`OWN_PROFILE_KEYS`), publication included, under the
+    same rules as staff (:func:`update_specialist`); any other key is a programming error."""
     unknown = set(data) - OWN_PROFILE_KEYS
     if unknown:
         raise ValueError(f"Not editable by the specialist: {sorted(unknown)}")
-    return update_specialist(professional_id, data, actor=actor, request=request)
+    return update_specialist(professional_id, data, force=force, actor=actor, request=request)
 
 
 @transaction.atomic
