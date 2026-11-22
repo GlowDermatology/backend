@@ -18,8 +18,9 @@ const SAVED = /muvaffaqiyatli (qo‘shildi|o‘zgartirildi)/;
 // …and the whole message is Uzbek (Django's own uz catalog lacks the "You may edit it again below" forms).
 const ENGLISH_MESSAGE = /successfully|You may|below/;
 
-test("a professional is never created in the console: profiles come with their Specialist account", async ({ page, staff }) => {
+test("a professional is never created in the console: profiles come with their Specialist account", async ({ page, staff, expected }) => {
   void staff;
+  expected.status(403, /\/professionals\/professional\/add\/$/);
   const since = await auditMax();
   const response = await page.goto("/django-admin/professionals/professional/add/");
   expect(response?.status()).toBe(403);
