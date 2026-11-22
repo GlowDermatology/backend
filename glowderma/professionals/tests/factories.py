@@ -12,7 +12,6 @@ from glowderma.professionals.models import (
     BlockedPeriod,
     Location,
     Professional,
-    ProfessionalService,
     Service,
     WorkingHours,
     WorkingHoursOverride,
@@ -41,24 +40,17 @@ class ProfessionalFactory(DjangoModelFactory[Professional]):
 
 
 class ServiceFactory(DjangoModelFactory[Service]):
+    """One service of one specialist (a new specialist unless ``professional`` is given)."""
+
     class Meta:
         model = Service
 
+    professional = SubFactory(ProfessionalFactory)  # type: ignore[no-untyped-call]
     name_uz = Sequence(lambda n: f"Xizmat {n + 1}")  # type: ignore[no-untyped-call]
     short_name_uz = Sequence(lambda n: f"X{n + 1}")  # type: ignore[no-untyped-call]
-    default_duration_min = 30
-    default_price = 150_000
-    position = Sequence(lambda n: n)  # type: ignore[no-untyped-call]
-
-
-class ProfessionalServiceFactory(DjangoModelFactory[ProfessionalService]):
-    class Meta:
-        model = ProfessionalService
-
-    professional = SubFactory(ProfessionalFactory)  # type: ignore[no-untyped-call]
-    service = SubFactory(ServiceFactory)  # type: ignore[no-untyped-call]
+    duration_min = 30
     price = 150_000
-    duration_min = LazyAttribute(lambda o: o.service.default_duration_min)  # type: ignore[no-untyped-call]
+    position = Sequence(lambda n: n)  # type: ignore[no-untyped-call]
 
 
 class WorkingHoursFactory(DjangoModelFactory[WorkingHours]):

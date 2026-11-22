@@ -11,7 +11,7 @@ from django.db.models import F, Q
 from django.utils.translation import gettext
 
 from glowderma.core import enums, slugs
-from glowderma.core.labels import WEEKDAYS, som_text, stamp
+from glowderma.core.labels import WEEKDAYS, stamp
 from glowderma.core.models import TimeStampedModel, timestamp_default
 from glowderma.professionals import media
 
@@ -19,6 +19,7 @@ SLUG_MAX_LENGTH = 160
 # The weekday column (0 = Monday … 6 = Sunday) as the console shows it: Uzbek day names, the value stays 0–6.
 WEEKDAY_CHOICES = list(enumerate(WEEKDAYS))
 PROFESSIONAL_SLUG_CONSTRAINT = "professional_slug_unique"
+SERVICE_NAME_CONSTRAINT = "service_professional_name_unique"
 
 
 def professional_slug_base(name: str) -> str:
@@ -178,8 +179,16 @@ class Professional(TimeStampedModel):
 
 
 class Service(TimeStampedModel):
-    """A bookable service type with a default duration; prices live on the professional link."""
+    """A service one specialist performs, at that specialist's price and duration (both snapshotted at
+    booking). Every service belongs to exactly one specialist; the customer catalogue lists one row per
+    specialist's service."""
 
+    professional = models.ForeignKey(
+        "professionals.Professional",
+        on_delete=models.CASCADE,
+        related_name="services",
+        verbose_name="mutaxassis",
+    )
     name_uz = models.CharField(max_length=120, verbose_name="nomi (uz)")
     name_ru = models.CharField(max_length=120, blank=True, verbose_name="nomi (ru)")
     name_en = models.CharField(max_length=120, blank=True, verbose_name="nomi (en)")
@@ -189,7 +198,7 @@ class Service(TimeStampedModel):
     description_uz = models.TextField(blank=True, verbose_name="tavsif (uz)")
     description_ru = models.TextField(blank=True, verbose_name="tavsif (ru)")
     description_en = models.TextField(blank=True, verbose_name="tavsif (en)")
-    # The discipline (FND-7); the admin API requires it on create, the default keeps older writers working.
+    # The discipline (FND-7); defaults from the specialist's role when the admin API omits it.
     category = models.CharField(
         max_length=16,
         choices=enums.ServiceCategory.choices,
@@ -197,10 +206,9 @@ class Service(TimeStampedModel):
         db_default=enums.ServiceCategory.DERMATOLOGY,
         verbose_name="kategoriya",
     )
-    default_duration_min = models.PositiveSmallIntegerField(verbose_name="standart davomiylik (daq.)")
-    # suggested when assigning to a professional
-    default_price = models.BigIntegerField(null=True, verbose_name="standart narx")
-    position = models.PositiveIntegerField(default=0, verbose_name="tartib")
+    duration_min = models.PositiveSmallIntegerField(verbose_name="davomiyligi (daq.)")
+    price = models.BigIntegerField(verbose_name="narx")
+    position = models.PositiveIntegerField(default=0, verbose_name="tartib")  # within the specialist
     is_active = models.BooleanField(default=True, verbose_name="faol")
 
     class Meta:
@@ -211,63 +219,18 @@ class Service(TimeStampedModel):
                 condition=~Q(name_uz="") & ~Q(short_name_uz=""), name="service_names_uz_required"
             ),
             models.CheckConstraint(
-                condition=Q(default_duration_min__gte=5, default_duration_min__lte=480),
-                name="service_duration_5_480",
+                condition=Q(duration_min__gte=5, duration_min__lte=480), name="service_duration_5_480"
             ),
-            models.CheckConstraint(
-                condition=Q(default_price__isnull=True) | Q(default_price__gte=0),
-                name="service_default_price_non_negative",
-            ),
+            models.CheckConstraint(condition=Q(price__gte=0), name="service_price_non_negative"),
+            models.UniqueConstraint(fields=["professional", "name_uz"], name=SERVICE_NAME_CONSTRAINT),
         ]
-        ordering = ["position", "id"]
+        indexes = [
+            models.Index(fields=["professional", "is_active", "position"], name="prof_service_owner_pos")
+        ]
+        ordering = ["professional_id", "position", "id"]
 
     def __str__(self) -> str:
         return self.name_uz
-
-
-class ProfessionalService(models.Model):
-    """Which services a professional performs, at what price and duration (snapshotted at booking)."""
-
-    professional = models.ForeignKey(
-        "professionals.Professional",
-        on_delete=models.CASCADE,
-        related_name="services",
-        verbose_name="mutaxassis",
-    )
-    service = models.ForeignKey(
-        "professionals.Service",
-        on_delete=models.PROTECT,
-        related_name="professional_links",
-        verbose_name="xizmat",
-    )
-    price = models.BigIntegerField(verbose_name="narx")
-    duration_min = models.PositiveSmallIntegerField(verbose_name="davomiyligi (daq.)")
-    is_active = models.BooleanField(default=True, verbose_name="faol")
-    created_at = models.DateTimeField(default=timestamp_default, editable=False, verbose_name="yaratilgan")
-    updated_at = models.DateTimeField(default=timestamp_default, verbose_name="yangilangan")
-
-    class Meta:
-        verbose_name = "mutaxassis xizmati"
-        verbose_name_plural = "mutaxassis xizmatlari"
-        constraints = [
-            models.UniqueConstraint(fields=["professional", "service"], name="professionalservice_unique"),
-            models.CheckConstraint(condition=Q(price__gte=0), name="professionalservice_price_non_negative"),
-            models.CheckConstraint(
-                condition=Q(duration_min__gte=5, duration_min__lte=480),
-                name="professionalservice_duration_5_480",
-            ),
-        ]
-        ordering = ["professional_id", "service_id"]
-
-    def __str__(self) -> str:
-        return gettext(
-            "Mutaxassis #%(professional_id)s · xizmat #%(service_id)s: %(price)s, %(duration)s daqiqa"
-        ) % {
-            "professional_id": self.professional_id,
-            "service_id": self.service_id,
-            "price": som_text(self.price),
-            "duration": self.duration_min,
-        }
 
 
 class WorkingHours(models.Model):

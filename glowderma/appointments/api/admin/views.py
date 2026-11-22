@@ -145,7 +145,8 @@ class AppointmentRescheduleView(AdminAPIView):
         operation_id="admin_appointments_reschedule",
         description=(
             "Move an open (requested|confirmed) appointment; the status is kept. Same slot rules as the "
-            "creation. A new specialist re-snapshots duration and price from that specialist's service link."
+            "creation. Moving to another specialist needs `service_id`, one of that specialist's active "
+            "services; a changed service re-snapshots duration and price."
         ),
         request=AppointmentRescheduleSerializer,
         responses={200: AppointmentItemSerializer, **ADMIN_ERRORS},
@@ -159,6 +160,7 @@ class AppointmentRescheduleView(AdminAPIView):
             pk,
             start=serializer.validated_data["start"],
             professional=serializer.validated_data.get("specialist_id"),
+            service=serializer.validated_data.get("service_id"),
             location_id=serializer.validated_data["location_id"],
             actor=request.user,
             request=request,

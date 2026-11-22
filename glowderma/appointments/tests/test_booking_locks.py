@@ -1,9 +1,10 @@
 """Bookings read the offer and the schedule only under the specialist's (and the service's) row lock.
 
-The specialists admin API writes hours, overrides, blocks and the offered services under the specialist's
-``FOR UPDATE`` and a service's status under the service's ``FOR UPDATE``; a booking takes both rows
-``FOR KEY SHARE`` first and reads the link, its price / duration and the day's schedule afterwards, so a
-change that committed meanwhile is always seen (fix pass of the FND-1 package, findings 1-4)."""
+The specialists admin API writes hours, overrides, blocks and the specialist's services under the
+specialist's ``FOR UPDATE`` (a service write then takes the service's ``FOR UPDATE``); a booking takes
+both rows ``FOR KEY SHARE`` first and reads the service, its price / duration and the day's schedule
+afterwards, so a change that committed meanwhile is always seen (fix pass of the FND-1 package, findings
+1-4)."""
 
 import threading
 from collections.abc import Callable
@@ -20,8 +21,8 @@ from glowderma.appointments.models import Appointment
 from glowderma.appointments.tests.factories import AppointmentFactory
 from glowderma.core.timeutils import TASHKENT
 from glowderma.professionals import services as professionals_services
-from glowderma.professionals.models import BlockedPeriod, ProfessionalService, Service
-from glowderma.professionals.tests.factories import ProfessionalServiceFactory, WorkingHoursFactory
+from glowderma.professionals.models import BlockedPeriod, Service
+from glowderma.professionals.tests.factories import ServiceFactory, WorkingHoursFactory
 
 pytestmark = pytest.mark.django_db
 
@@ -33,10 +34,10 @@ def at(day: date, hour: int, minute: int = 0) -> datetime:
     return datetime.combine(day, time(hour, minute), tzinfo=TASHKENT)
 
 
-def bookable() -> ProfessionalService:
-    link = ProfessionalServiceFactory.create(price=150_000, duration_min=30)
-    WorkingHoursFactory.create(professional=link.professional, weekday=0)
-    return link
+def bookable() -> Service:
+    service = ServiceFactory.create(price=150_000, duration_min=30)
+    WorkingHoursFactory.create(professional=service.professional, weekday=0)
+    return service
 
 
 def committed_before_the_lock(monkeypatch: pytest.MonkeyPatch, change: Callable[[], object]) -> None:
@@ -54,14 +55,14 @@ def committed_before_the_lock(monkeypatch: pytest.MonkeyPatch, change: Callable[
 # --- customer booking: the offer is re-read under the lock --------------------------------------------------
 
 
-def test_a_customer_booking_of_an_offer_withdrawn_meanwhile_is_refused(
+def test_a_customer_booking_of_a_service_deleted_meanwhile_is_refused(
     clock: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    link = bookable()
+    service = bookable()
     customer = CustomerFactory.create()
-    committed_before_the_lock(monkeypatch, lambda: ProfessionalService.objects.filter(pk=link.pk).delete())
+    committed_before_the_lock(monkeypatch, lambda: Service.objects.filter(pk=service.pk).delete())
     with pytest.raises(ValidationError) as caught:
-        services.request_by_customer(customer.pk, link.professional_id, link.service_id, at(MONDAY, 10))
+        services.request_by_customer(customer.pk, service.professional_id, service.pk, at(MONDAY, 10))
     assert caught.value.get_codes() == {"service_id": ["does_not_exist"]}
     assert not Appointment.objects.exists()
 
@@ -69,14 +70,14 @@ def test_a_customer_booking_of_an_offer_withdrawn_meanwhile_is_refused(
 def test_a_customer_booking_snapshots_the_price_and_duration_changed_meanwhile(
     clock: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    link = bookable()
+    service = bookable()
     customer = CustomerFactory.create()
     committed_before_the_lock(
         monkeypatch,
-        lambda: ProfessionalService.objects.filter(pk=link.pk).update(price=99_000, duration_min=60),
+        lambda: Service.objects.filter(pk=service.pk).update(price=99_000, duration_min=60),
     )
     appointment = services.request_by_customer(
-        customer.pk, link.professional_id, link.service_id, at(MONDAY, 10)
+        customer.pk, service.professional_id, service.pk, at(MONDAY, 10)
     )
     assert (appointment.price, appointment.duration_min) == (99_000, 60)
     assert appointment.end == at(MONDAY, 11)
@@ -85,35 +86,35 @@ def test_a_customer_booking_snapshots_the_price_and_duration_changed_meanwhile(
 def test_a_customer_booking_of_a_service_retired_meanwhile_is_refused(
     clock: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    link = bookable()
+    service = bookable()
     customer = CustomerFactory.create()
     committed_before_the_lock(
-        monkeypatch, lambda: Service.objects.filter(pk=link.service_id).update(is_active=False)
+        monkeypatch, lambda: Service.objects.filter(pk=service.pk).update(is_active=False)
     )
     with pytest.raises(ValidationError) as caught:
-        services.request_by_customer(customer.pk, link.professional_id, link.service_id, at(MONDAY, 10))
+        services.request_by_customer(customer.pk, service.professional_id, service.pk, at(MONDAY, 10))
     assert caught.value.get_codes() == {"service_id": ["does_not_exist"]}
     assert not Appointment.objects.exists()
 
 
-# --- admin booking and reschedule: link and slot are checked under the lock --------------------------------
+# --- admin booking and reschedule: service and slot are checked under the lock -----------------------------
 
 
 def test_an_admin_booking_into_a_block_created_meanwhile_is_refused(
     clock: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    link = bookable()
+    service = bookable()
     staff = StaffUserFactory.create()
     committed_before_the_lock(
         monkeypatch,
         lambda: BlockedPeriod.objects.create(
-            professional_id=link.professional_id, start=at(MONDAY, 9), end=at(MONDAY, 12), kind="busy"
+            professional_id=service.professional_id, start=at(MONDAY, 9), end=at(MONDAY, 12), kind="busy"
         ),
     )
     with pytest.raises(ValidationError) as caught:
         services.create_by_admin(
-            professional=link.professional,
-            service=link.service,
+            professional=service.professional,
+            service=service,
             customer=CustomerFactory.create(),
             start=at(MONDAY, 10),
             actor=staff,
@@ -122,30 +123,31 @@ def test_an_admin_booking_into_a_block_created_meanwhile_is_refused(
     assert not Appointment.objects.exists()
 
 
-def test_an_admin_booking_of_an_offer_withdrawn_or_a_service_retired_meanwhile_is_refused(
+def test_an_admin_booking_of_a_service_retired_or_moved_meanwhile_is_refused(
     clock: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    link = bookable()
+    service = bookable()
     staff = StaffUserFactory.create()
 
     def book() -> Appointment:
         return services.create_by_admin(
-            professional=link.professional,
-            service=link.service,
+            professional=service.professional,
+            service=service,
             customer=CustomerFactory.create(),
             start=at(MONDAY, 10),
             actor=staff,
         )
 
+    other = ServiceFactory.create().professional
     committed_before_the_lock(
-        monkeypatch, lambda: ProfessionalService.objects.filter(pk=link.pk).update(is_active=False)
+        monkeypatch, lambda: Service.objects.filter(pk=service.pk).update(professional=other)
     )
-    with pytest.raises(ValidationError) as withdrawn:
+    with pytest.raises(ValidationError) as moved:
         book()
-    assert withdrawn.value.get_codes() == {"service_id": ["does_not_exist"]}
-    ProfessionalService.objects.filter(pk=link.pk).update(is_active=True)
+    assert moved.value.get_codes() == {"service_id": ["does_not_exist"]}
+    Service.objects.filter(pk=service.pk).update(professional=service.professional)
     committed_before_the_lock(
-        monkeypatch, lambda: Service.objects.filter(pk=link.service_id).update(is_active=False)
+        monkeypatch, lambda: Service.objects.filter(pk=service.pk).update(is_active=False)
     )
     with pytest.raises(ValidationError) as retired:
         book()
@@ -156,9 +158,9 @@ def test_an_admin_booking_of_an_offer_withdrawn_or_a_service_retired_meanwhile_i
 def test_a_reschedule_with_the_same_specialist_checks_the_slot_under_the_lock(
     clock: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    link = bookable()
+    service = bookable()
     appointment = AppointmentFactory.create(
-        professional=link.professional, service=link.service, start=at(MONDAY, 10)
+        professional=service.professional, service=service, start=at(MONDAY, 10)
     )
     locked: list[int] = []
     hold = services._hold_active_specialist
@@ -173,7 +175,7 @@ def test_a_reschedule_with_the_same_specialist_checks_the_slot_under_the_lock(
     monkeypatch.setattr(services, "_hold_active_specialist", spy)
     with pytest.raises(ValidationError) as caught:
         services.reschedule(appointment.pk, start=at(MONDAY, 15), actor=StaffUserFactory.create())
-    assert locked == [link.professional_id]
+    assert locked == [service.professional_id]
     assert caught.value.get_codes() == {"start": ["slot_unavailable"]}
     assert Appointment.objects.get(pk=appointment.pk).start == at(MONDAY, 10)
 
@@ -181,12 +183,12 @@ def test_a_reschedule_with_the_same_specialist_checks_the_slot_under_the_lock(
 def test_a_reschedule_of_a_deactivated_specialists_appointment_on_the_same_specialist_still_works(
     clock: Any,
 ) -> None:
-    link = bookable()
+    service = bookable()
     appointment = AppointmentFactory.create(
-        professional=link.professional, service=link.service, start=at(MONDAY, 10)
+        professional=service.professional, service=service, start=at(MONDAY, 10)
     )
-    link.professional.is_active = False
-    link.professional.save(update_fields=["is_active"])
+    service.professional.is_active = False
+    service.professional.save(update_fields=["is_active"])
     moved = services.reschedule(appointment.pk, start=at(MONDAY, 11), actor=StaffUserFactory.create())
     assert moved.start == at(MONDAY, 11)
 
@@ -244,23 +246,26 @@ def _race(
 
 
 @pytest.mark.django_db(transaction=True)
-def test_a_customer_booking_waits_for_put_services_and_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_customer_booking_waits_for_a_price_change_and_snapshots_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr("glowderma.core.timeutils.now", lambda: ANCHOR)
-    link = bookable()
+    service = bookable()
     customer, staff = CustomerFactory.create(), StaffUserFactory.create()
-    inside, release = _held_on_second_call(monkeypatch, professionals_services, "_links_state")
+    inside, release = _held_on_second_call(monkeypatch, professionals_services, "_service_state")
     outcomes = _race(
-        lambda: professionals_services.set_offered_services(link.professional_id, [], actor=staff),
+        lambda: professionals_services.update_specialist_service(
+            service.professional_id, service.pk, {"price": 99_000, "duration_min": 60}, actor=staff
+        ),
         lambda: services.request_by_customer(
-            customer.pk, link.professional_id, link.service_id, at(MONDAY, 10)
+            customer.pk, service.professional_id, service.pk, at(MONDAY, 10)
         ),
         inside,
         release,
     )
-    refused = outcomes["booking"]
-    assert isinstance(refused, ValidationError), outcomes
-    assert refused.get_codes() == {"service_id": ["does_not_exist"]}
-    assert not Appointment.objects.exists()
+    booked = outcomes["booking"]
+    assert isinstance(booked, Appointment), outcomes
+    assert (booked.price, booked.duration_min, booked.end) == (99_000, 60, at(MONDAY, 11))
 
 
 @pytest.mark.django_db(transaction=True)
@@ -268,13 +273,15 @@ def test_a_customer_booking_waits_for_a_service_deactivation_and_is_refused(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("glowderma.core.timeutils.now", lambda: ANCHOR)
-    link = bookable()
+    service = bookable()
     customer, staff = CustomerFactory.create(), StaffUserFactory.create()
     inside, release = _held_on_second_call(monkeypatch, professionals_services, "_service_state")
     outcomes = _race(
-        lambda: professionals_services.update_service(link.service_id, {"is_active": False}, actor=staff),
+        lambda: professionals_services.update_specialist_service(
+            service.professional_id, service.pk, {"is_active": False}, actor=staff
+        ),
         lambda: services.request_by_customer(
-            customer.pk, link.professional_id, link.service_id, at(MONDAY, 10)
+            customer.pk, service.professional_id, service.pk, at(MONDAY, 10)
         ),
         inside,
         release,
@@ -289,7 +296,7 @@ def test_a_customer_booking_waits_for_a_service_deactivation_and_is_refused(
 @pytest.mark.django_db(transaction=True)
 def test_an_admin_booking_waits_for_a_block_and_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("glowderma.core.timeutils.now", lambda: ANCHOR)
-    link = bookable()
+    service = bookable()
     customer, staff = CustomerFactory.create(), StaffUserFactory.create()
     inside, release = threading.Event(), threading.Event()
     state = professionals_services._block_state
@@ -302,13 +309,13 @@ def test_an_admin_booking_waits_for_a_block_and_is_refused(monkeypatch: pytest.M
     monkeypatch.setattr(professionals_services, "_block_state", held)
     outcomes = _race(
         lambda: professionals_services.create_block(
-            link.professional_id,
+            service.professional_id,
             {"start": at(MONDAY, 9), "end": at(MONDAY, 12), "kind": "busy"},
             actor=staff,
         ),
         lambda: services.create_by_admin(
-            professional=link.professional,
-            service=link.service,
+            professional=service.professional,
+            service=service,
             customer=customer,
             start=at(MONDAY, 10),
             actor=staff,
@@ -326,15 +333,15 @@ def test_an_admin_booking_waits_for_a_block_and_is_refused(monkeypatch: pytest.M
 @pytest.mark.django_db(transaction=True)
 def test_a_reschedule_waits_for_an_hours_change_and_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("glowderma.core.timeutils.now", lambda: ANCHOR)
-    link = bookable()
+    service = bookable()
     staff = StaffUserFactory.create()
     appointment = AppointmentFactory.create(
-        professional=link.professional, service=link.service, start=at(MONDAY, 10)
+        professional=service.professional, service=service, start=at(MONDAY, 10)
     )
     inside, release = _held_on_second_call(monkeypatch, professionals_services, "_week_state")
     outcomes = _race(
         lambda: professionals_services.set_working_week(
-            link.professional_id, [{"weekday": 0, "start": time(9), "end": time(12)}], actor=staff
+            service.professional_id, [{"weekday": 0, "start": time(9), "end": time(12)}], actor=staff
         ),
         lambda: services.reschedule(appointment.pk, start=at(MONDAY, 15), actor=staff),
         inside,

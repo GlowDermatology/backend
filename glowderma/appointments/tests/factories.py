@@ -6,7 +6,7 @@ exclusion; tests that want a collision pass the same ``professional`` and ``star
 
 from datetime import datetime, timedelta
 
-from factory.declarations import LazyAttribute, SubFactory
+from factory.declarations import LazyAttribute, SelfAttribute, SubFactory
 from factory.django import DjangoModelFactory
 
 from glowderma.accounts.tests.factories import CustomerFactory
@@ -24,7 +24,7 @@ class AppointmentFactory(DjangoModelFactory[Appointment]):
 
     professional = SubFactory(ProfessionalFactory)  # type: ignore[no-untyped-call]
     location = LazyAttribute(lambda o: o.professional.location)  # type: ignore[no-untyped-call]
-    service = SubFactory(ServiceFactory)  # type: ignore[no-untyped-call]
+    service = SubFactory(ServiceFactory, professional=SelfAttribute("..professional"))  # type: ignore[no-untyped-call]
     customer = SubFactory(CustomerFactory)  # type: ignore[no-untyped-call]
     start = DESIGN_DAY_START
     duration_min = 30

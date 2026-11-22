@@ -19,7 +19,7 @@ from glowderma.core.seeding import SeedContext, reset_sequences
 from glowderma.core.timeutils import TASHKENT
 from glowderma.professionals import seeds as professionals_seeds
 from glowderma.professionals.models import Location, Professional
-from glowderma.professionals.tests.factories import ProfessionalServiceFactory, WorkingHoursFactory
+from glowderma.professionals.tests.factories import ServiceFactory, WorkingHoursFactory
 
 pytestmark = pytest.mark.django_db
 
@@ -223,7 +223,7 @@ def test_admin_create_reschedule_cancel_flow(staff_client: APIClient, seeded: No
         BASE,
         {
             "specialist_id": 2,
-            "service_id": 1,
+            "service_id": 6,  # Jasur's own consultation
             "location_id": 1,
             "customer_id": 5,
             "start": at("2026-10-27", "11:00"),
@@ -240,7 +240,7 @@ def test_admin_create_reschedule_cancel_flow(staff_client: APIClient, seeded: No
     assert OutboxMessage.objects.filter(dedupe_key=f"push.appointment:{row.pk}:rescheduled:1").exists()
     to_jasur = staff_client.post(
         f"{BASE}{row.pk}/reschedule/",
-        {"start": at("2026-10-26", "12:00"), "specialist_id": 2, "location_id": 1},
+        {"start": at("2026-10-26", "12:00"), "specialist_id": 2, "location_id": 1, "service_id": 7},
         format="json",
     )
     assert (
@@ -288,7 +288,10 @@ def test_admin_create_reschedule_cancel_flow(staff_client: APIClient, seeded: No
         ({"specialist_id": 1, "service_id": 1, "phone": "+79012345678", "start": at("2026-10-26", "10:00")},
          [("phone", "invalid", "Telefon raqamini to‘g‘ri kiriting.")]),
         ({"specialist_id": 1, "service_id": 1, "phone": "+998900000001", "start": at("2026-10-26", "10:00")},
-         [("phone", "customer_not_found", "Bu raqam bilan mijoz topilmadi.")]),
+         [("name", "required", "Bu raqam bilan mijoz topilmadi: yangi mijozning ismini kiriting.")]),
+        ({"specialist_id": 1, "service_id": 1, "phone": "+998900000001", "name": "A",
+          "start": at("2026-10-26", "10:00")},
+         [("name", "min_length", "Kamida 2 ta belgi kiriting.")]),
         ({"specialist_id": 1, "service_id": 1, "customer_id": 5, "start": "2026-10-26T10:00:00"},
          [("start", "invalid", "Noto‘g‘ri qiymat.")]),
         ({"specialist_id": 1, "service_id": 3, "customer_id": 5, "start": at("2026-10-26", "10:00")},
@@ -297,7 +300,7 @@ def test_admin_create_reschedule_cancel_flow(staff_client: APIClient, seeded: No
          [("start", "slot_unavailable", "Bu vaqt band.")]),
         ({"specialist_id": 1, "service_id": 1, "customer_id": 5, "start": at("2026-10-26", "16:00")},
          [("start", "slot_unavailable", "Bu vaqt band.")]),
-        ({"specialist_id": 2, "service_id": 1, "customer_id": 5, "start": at("2026-10-26", "13:30")},
+        ({"specialist_id": 2, "service_id": 6, "customer_id": 5, "start": at("2026-10-26", "13:30")},
          [("start", "slot_unavailable", "Bu vaqt band.")]),
         ({"specialist_id": 1, "service_id": 1, "customer_id": 5, "start": at("2026-10-26", "18:00")},
          [("start", "outside_working_hours", "Mutaxassis bu vaqtda ishlamaydi.")]),
@@ -357,10 +360,10 @@ def test_create_refuses_deleted_customers_and_inactive_specialists(
 
 
 def test_reschedule_validation_and_404(staff_client: APIClient, clock: Any) -> None:
-    link = ProfessionalServiceFactory.create()
-    WorkingHoursFactory.create(professional=link.professional, weekday=0)
+    service = ServiceFactory.create()
+    WorkingHoursFactory.create(professional=service.professional, weekday=0)
     appointment = AppointmentFactory.create(
-        professional=link.professional, service=link.service, start=datetime(2026, 10, 26, 9, tzinfo=TASHKENT)
+        professional=service.professional, service=service, start=datetime(2026, 10, 26, 9, tzinfo=TASHKENT)
     )
     missing = staff_client.post(f"{BASE}{appointment.pk}/reschedule/", {}, format="json")
     assert {field for field, code, _ in errors(missing) if code == "required"} == {"start", "location_id"}
@@ -417,25 +420,23 @@ def test_meta_lists_active_specialists_with_their_bookable_services(
     assert jasur["role"] == "dermatologist"
     consultation = next(s for s in jasur["services"] if s["short_name"] == "Konsultatsiya")
     assert consultation == {
-        "id": consultation["id"],
+        "id": 6,  # Jasur's own service
         "name": "Dermatolog konsultatsiyasi",
         "short_name": "Konsultatsiya",
         "duration_min": 30,
         "price": 120_000,
     }
-    # Inactive links, inactive services and inactive specialists are not offered (the seeders insert explicit
-    # ids, so re-sync the sequences before the factories add rows).
+    assert [s["id"] for s in body["specialists"][0]["services"]] == [1, 2]  # Nodira's, by position
+    # Inactive services and inactive specialists are not offered (the seeders insert explicit ids, so re-sync
+    # the sequences before the factories add rows).
     reset_sequences()
     jasur_row = Professional.objects.get(name="Jasur Aliyev")
-    link = ProfessionalServiceFactory.create(professional=jasur_row)
-    link.service.is_active = False
-    link.service.save()
-    inactive = ProfessionalServiceFactory.create(professional=jasur_row, is_active=False)
+    inactive = ServiceFactory.create(professional=jasur_row, is_active=False)
     Professional.objects.filter(name="Dilnoza Yusupova").update(is_active=False)
     body = staff_client.get(f"{BASE}meta/").json()
     assert [s["name"] for s in body["specialists"]] == ["Nodira Rahimova", "Jasur Aliyev"]
     offered = {s["id"] for specialist in body["specialists"] for s in specialist["services"]}
-    assert link.service_id not in offered and inactive.service_id not in offered
+    assert inactive.pk not in offered and offered == {1, 2, 6, 7}
 
 
 def test_meta_runs_in_a_bounded_number_of_queries(
@@ -443,6 +444,91 @@ def test_meta_runs_in_a_bounded_number_of_queries(
 ) -> None:
     with django_assert_max_num_queries(8):
         assert staff_client.get(f"{BASE}meta/").status_code == 200
+
+
+def test_admin_books_a_walk_in_by_phone_and_name(
+    staff_client: APIClient, seeded: None, staff: StaffUser
+) -> None:
+    """A phone no customer holds: ``name`` is required, then the customer is created with the booking (no
+    password, no consent) and audited; a failed booking keeps nothing."""
+    reset_sequences()  # the seeders insert explicit ids: the new customer row takes the next free one
+    body = {
+        "specialist_id": 1,
+        "service_id": 1,
+        "location_id": 1,
+        "phone": "+998 90 000 00 01",
+        "start": at("2026-10-26", "10:00"),
+    }
+    assert errors(staff_client.post(BASE, body, format="json")) == [
+        ("name", "required", "Bu raqam bilan mijoz topilmadi: yangi mijozning ismini kiriting.")
+    ]
+    taken = staff_client.post(
+        BASE, {**body, "name": "Yangi Mijoz", "start": at("2026-10-26", "09:10")}, format="json"
+    )
+    assert errors(taken) == [("start", "slot_unavailable", "Bu vaqt band.")]
+    assert not Customer.objects.filter(phone="+998900000001").exists()  # rolled back with the booking
+    created = staff_client.post(
+        BASE, {**body, "name": "Yangi Mijoz"}, format="json", HTTP_IDEMPOTENCY_KEY=KEY
+    )
+    assert created.status_code == 201, created.data
+    customer = Customer.objects.get(phone="+998900000001")
+    assert (customer.name, customer.language, customer.status) == ("Yangi Mijoz", "uz", "active")
+    assert (customer.password, customer.terms_version, customer.consent_at) == ("", "", None)
+    assert created.data["customer"] == {
+        "id": customer.pk,
+        "name": "Yangi Mijoz",
+        "phone": "+998900000001",
+        "email": None,
+    }
+    [entry] = AuditEntry.objects.filter(action="customer.created_by_staff")
+    assert (entry.entity_id, entry.actor_id, entry.after) == (
+        str(customer.pk),
+        staff.pk,
+        {"source": "appointment"},
+    )
+    # the same phone again is the existing customer: no second row, the name is not needed
+    again = staff_client.post(BASE, {**body, "start": at("2026-10-26", "12:00")}, format="json")
+    assert again.status_code == 201 and again.data["customer"]["id"] == customer.pk, again.data
+    assert Customer.objects.filter(phone="+998900000001").count() == 1
+    # a phone held by a deleted account is refused (never revived or duplicated by staff)
+    deleted = Customer.objects.get(pk=427)
+    refused = staff_client.post(
+        BASE,
+        {**body, "phone": deleted.phone, "name": "Boshqa", "start": at("2026-10-26", "12:00")},
+        format="json",
+    )
+    assert errors(refused) == [("phone", "customer_not_found", "Bu raqamdagi mijoz hisobi faol emas.")]
+
+
+def test_reschedule_to_another_specialist_needs_one_of_its_services(
+    staff_client: APIClient, seeded: None
+) -> None:
+    row = Appointment.objects.get(pk=1)  # Nodira's consultation (service 1)
+    target = f"{BASE}{row.pk}/reschedule/"
+    move = {"start": at("2026-10-27", "15:00"), "specialist_id": 2, "location_id": 1}
+    assert errors(staff_client.post(target, move, format="json")) == [
+        ("service_id", "does_not_exist", "Mutaxassis bu xizmatni ko‘rsatmaydi.")
+    ]
+    nodira_service = staff_client.post(target, {**move, "service_id": 2}, format="json")
+    assert errors(nodira_service) == [
+        ("service_id", "does_not_exist", "Mutaxassis bu xizmatni ko‘rsatmaydi.")
+    ]
+    assert errors(staff_client.post(target, {**move, "service_id": 999}, format="json")) == [
+        ("service_id", "does_not_exist", "Xizmat topilmadi.")
+    ]
+    moved = staff_client.post(target, {**move, "service_id": 6}, format="json")
+    assert moved.status_code == 200, moved.data
+    assert (moved.data["specialist_id"], moved.data["service_id"], moved.data["price"]) == (2, 6, 120_000)
+    event = row.events.get(type="rescheduled")
+    assert (event.data["from_service_id"], event.data["to_service_id"]) == (1, 6)
+    # the same specialist with another of its services re-snapshots too
+    shorter = staff_client.post(
+        target, {"start": at("2026-10-27", "15:00"), "location_id": 1, "service_id": 7}, format="json"
+    )
+    assert shorter.status_code == 200 and (shorter.data["duration_min"], shorter.data["price"]) == (
+        20,
+        90_000,
+    )
 
 
 def test_optional_note_and_reason_are_optional_in_the_schema() -> None:
@@ -464,7 +550,7 @@ def test_create_without_note_and_cancel_without_reason_use_the_empty_default(
         BASE,
         {
             "specialist_id": 2,
-            "service_id": 1,
+            "service_id": 6,
             "location_id": 1,
             "customer_id": 5,
             "start": at("2026-10-27", "11:00"),

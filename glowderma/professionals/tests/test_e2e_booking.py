@@ -54,7 +54,7 @@ def specialist_profile(name: str) -> int:
 def test_a_specialist_set_up_by_staff_is_bookable_in_the_app(
     staff_client: APIClient, customer_client: APIClient, public_client: APIClient
 ) -> None:
-    # staff: the clinic, a service, the specialist, its offer and its hours
+    # staff: the clinic, the specialist, its own service and its hours
     primary = ok(
         staff_client.post(f"{ADMIN}clinics/", {"name": {"uz": "Glow Derma"}, "address": {"uz": "Toshkent"}}),
         201,
@@ -70,13 +70,6 @@ def test_a_specialist_set_up_by_staff_is_bookable_in_the_app(
         ),
         201,
     )["id"]
-    service = ok(
-        staff_client.post(
-            f"{ADMIN}services/",
-            {"name": {"uz": "Lazer epilyatsiya"}, "category": "cosmetology", "default_duration_min": 30},
-        ),
-        201,
-    )
     # the specialist's account and draft profile come from the manager's invite
     pk = specialist_profile(name="Malika Usmonova")
     ok(
@@ -91,9 +84,10 @@ def test_a_specialist_set_up_by_staff_is_bookable_in_the_app(
             },
         )
     )
+    offer = {"name": {"uz": "Lazer epilyatsiya"}, "price": 175_000, "duration_min": 45}
+    [service] = ok(staff_client.post(f"{ADMIN}specialists/{pk}/services/", offer), 201)["services"]
+    assert (service["category"], service["specialist_id"]) == ("cosmetology", pk)  # from the role
     service_id = service["id"]
-    offer = {"services": [{"service_id": service_id, "price": 175_000, "duration_min": 45}]}
-    ok(staff_client.put(f"{ADMIN}specialists/{pk}/services/", offer))
     week = {
         "days": [
             {"weekday": 0, "start": "09:00", "end": "13:00", "location_id": primary},
@@ -197,12 +191,11 @@ def test_a_specialist_set_up_by_staff_is_bookable_in_the_app(
     assert actions == [
         "location.created",
         "location.created",
-        "service.created",
         "staff.created",
         "professional.created",
         "professional.photo_updated",
         "professional.updated",
-        "professional.services_updated",
+        "service.created",
         "schedule.hours_updated",
         "professional.activated",
         "appointment.requested",

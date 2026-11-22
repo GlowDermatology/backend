@@ -10,6 +10,7 @@ from PIL import Image
 
 from glowderma.accounts.models import StaffUser
 from glowderma.accounts.tests.factories import StaffUserFactory
+from glowderma.appointments.tests.factories import AppointmentFactory
 from glowderma.core import enums
 from glowderma.core.models import AuditEntry
 from glowderma.core.timeutils import TASHKENT
@@ -17,7 +18,7 @@ from glowderma.professionals import services
 from glowderma.professionals.models import (
     BlockedPeriod,
     Professional,
-    ProfessionalService,
+    Service,
     WorkingHours,
     WorkingHoursOverride,
 )
@@ -25,7 +26,6 @@ from glowderma.professionals.tests.factories import (
     BlockedPeriodFactory,
     LocationFactory,
     ProfessionalFactory,
-    ProfessionalServiceFactory,
     ServiceFactory,
     WorkingHoursFactory,
 )
@@ -139,9 +139,8 @@ def test_set_working_hours_upserts_and_removes(staff: StaffUser) -> None:
     assert deleted.after is None
 
 
-def test_override_blocks_and_links(staff: StaffUser) -> None:
+def test_override_blocks_and_services(staff: StaffUser) -> None:
     professional = ProfessionalFactory.create()
-    service = ServiceFactory.create(default_duration_min=45)
     override = services.add_override(professional, date(2026, 11, 2), None, None, note="Ta’til", actor=staff)
     assert override.created_by == staff and override.start is None
     services.add_override(professional, date(2026, 11, 2), time(10, 0), time(14, 0), actor=staff)
@@ -161,31 +160,51 @@ def test_override_blocks_and_links(staff: StaffUser) -> None:
     services.remove_blocked_period(block, actor=staff)
     assert not BlockedPeriod.objects.filter(pk=block.pk).exists()
 
-    link = services.link_service(professional, service, price=150_000, actor=staff)
-    assert (link.duration_min, link.is_active) == (45, True)
-    relinked = services.link_service(professional, service, price=160_000, duration_min=30, actor=staff)
-    assert relinked.pk == link.pk and ProfessionalService.objects.get(pk=link.pk).duration_min == 30
-    with pytest.raises(ValidationError):
-        services.link_service(professional, service, price=-1, actor=staff)
-    services.unlink_service(relinked, actor=staff)
+    service = Service(
+        professional=professional,
+        name_uz="Konsultatsiya",
+        short_name_uz="Konsultatsiya",
+        duration_min=45,
+        price=1,
+    )
+    services.save_row(service, actor=staff)
+    service.price = 160_000
+    services.save_row(service, actor=staff)
+    assert Service.objects.get(pk=service.pk).price == 160_000
+    with pytest.raises(ValidationError):  # the console form path validates the CHECKs
+        services.save_row(
+            Service(professional=professional, name_uz="X", short_name_uz="X", duration_min=4, price=1),
+            actor=staff,
+        )
+    with pytest.raises(ValidationError):  # a name the specialist already uses
+        services.save_row(
+            Service(
+                professional=professional,
+                name_uz="Konsultatsiya",
+                short_name_uz="K",
+                duration_min=30,
+                price=1,
+            ),
+            actor=staff,
+        )
+    services.delete_row(service, actor=staff)
     assert [a for a, _, _ in actions()] == [
         "working_hours_override.created",
         "working_hours_override.updated",
         "blocked_period.created",
         "blocked_period.deleted",
-        "professional_service.created",
-        "professional_service.updated",
-        "professional_service.deleted",
+        "service.created",
+        "service.updated",
+        "service.deleted",
     ]
 
 
 def test_delete_protected_row_is_a_friendly_error(staff: StaffUser) -> None:
-    link = ProfessionalServiceFactory.create()
+    appointment = AppointmentFactory.create()
     with pytest.raises(ValidationError, match="bog‘langan"):
-        services.delete_row(link.service, actor=staff)
+        services.delete_row(appointment.service, actor=staff)
     assert not AuditEntry.objects.filter(action="service.deleted").exists()
-    services.delete_row(link, actor=staff)
-    services.delete_row(link.service, actor=staff)
+    services.delete_row(ServiceFactory.create(), actor=staff)
     assert AuditEntry.objects.filter(action="service.deleted").exists()
 
 

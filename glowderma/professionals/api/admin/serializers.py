@@ -1,9 +1,9 @@
 """Admin serializers of `professionals` (contract "Mutaxassislar va xizmatlar", FND-1 / FND-7).
 
 Write serializers validate shapes and the value rules of the contract tables and resolve references
-(``location_id``, ``staff_user_id``, ``service_id``); the services own the state rules (uniqueness against
-stored rows, overlaps, the deactivation guard). Read serializers render instances of the selectors'
-querysets (``specialist_queryset`` prefetches ``offered_links`` and ``week_rows``).
+(``location_id``, ``staff_user_id``); the services own the state rules (uniqueness against stored rows,
+overlaps, the deactivation guard). Read serializers render instances of the selectors' querysets
+(``specialist_queryset`` prefetches ``service_rows`` and ``week_rows``).
 
 OpenAPI components are prefixed ``Clinic`` (``ClinicSpecialist``, ``ClinicService``, ``ClinicLocation``)
 because the customer API already owns ``Specialist`` and ``Location``.
@@ -36,7 +36,6 @@ from glowderma.professionals.models import (
     BlockedPeriod,
     Location,
     Professional,
-    ProfessionalService,
     Service,
     WorkingHours,
     WorkingHoursOverride,
@@ -50,7 +49,6 @@ from glowderma.professionals.services import (
 
 SLOT_STEPS = (10, 15, 20, 30, 60)  # the CHECK ``professional_slot_step_allowed``
 MAX_POSITION = 100_000
-MAX_OFFERED_SERVICES = 50
 DB_INT_MAX = 2_147_483_647
 RANGE_LIMIT_DAYS = 3660  # schedule list filters: today ± ~10 years (keeps day_bounds away from date.max)
 CLOCK = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
@@ -63,8 +61,6 @@ MESSAGES = {
     "break_outside": N_("Tanaffus ish vaqti ichida bo‘lsin."),
     "hours_pair": N_("Boshlanish va tugash vaqtini birga kiriting (ikkalasi bo‘sh bo‘lsa, dam olish kuni)."),
     "weekday_twice": N_("Bu hafta kuni ikki marta berilgan."),
-    "service_twice": N_("Bu xizmat ro‘yxatda ikki marta berilgan."),
-    "service_not_found": N_("Xizmat topilmadi."),
     "staff_not_found": N_("Xodim topilmadi."),
     "staff_taken": N_("Bu xodim boshqa mutaxassisga bog‘langan."),
     "slot_step": N_("Ruxsat etilgan qadamlar: 10, 15, 20, 30 yoki 60 daqiqa."),
@@ -185,20 +181,6 @@ class LocationCreateAddressSerializer(LocationAddressSerializer):
 # --- specialists --------------------------------------------------------------------------------------------
 
 
-class OfferedServiceSerializer(serializers.Serializer[ProfessionalService]):
-    """One service the specialist offers: the price and duration a booking snapshots (``is_active`` = the
-    link; ``service_is_active`` = the service itself; bookable only when both are true)."""
-
-    service_id = serializers.IntegerField()
-    name = serializers.CharField(source="service.name_uz")
-    short_name = serializers.CharField(source="service.short_name_uz")
-    category = serializers.ChoiceField(choices=enums.ServiceCategory.values, source="service.category")
-    price = serializers.IntegerField()
-    duration_min = serializers.IntegerField()
-    is_active = serializers.BooleanField()
-    service_is_active = serializers.BooleanField(source="service.is_active")
-
-
 class WorkingDaySerializer(serializers.Serializer[WorkingHours]):
     location_id = serializers.IntegerField()
     """One working weekday (0 = Monday … 6 = Sunday) with its optional recurring break."""
@@ -208,6 +190,73 @@ class WorkingDaySerializer(serializers.Serializer[WorkingHours]):
     end = serializers.TimeField(format="%H:%M")
     break_start = serializers.TimeField(format="%H:%M", allow_null=True)
     break_end = serializers.TimeField(format="%H:%M", allow_null=True)
+
+
+class ClinicServiceSerializer(serializers.Serializer[Service]):
+    """The admin ``ClinicService``: one service of one specialist, with the price and duration a booking
+    snapshots (``is_active: false`` = not offered to customers or in the booking dialogs)."""
+
+    id = serializers.IntegerField()
+    specialist_id = serializers.IntegerField(source="professional_id")
+    name = serializers.SerializerMethodField()
+    short_name = serializers.SerializerMethodField()
+    description = serializers.SerializerMethodField()
+    category = serializers.ChoiceField(choices=enums.ServiceCategory.values)
+    price = serializers.IntegerField()
+    duration_min = serializers.IntegerField()
+    position = serializers.IntegerField()
+    is_active = serializers.BooleanField()
+    created_at = serializers.DateTimeField()
+    updated_at = serializers.DateTimeField()
+
+    @extend_schema_field(i18n_text(120))
+    def get_name(self, obj: Service) -> dict[str, str]:
+        return i18n_dict(obj, "name")
+
+    @extend_schema_field(i18n_text(40))
+    def get_short_name(self, obj: Service) -> dict[str, str]:
+        return i18n_dict(obj, "short_name")
+
+    @extend_schema_field(i18n_text(2000))
+    def get_description(self, obj: Service) -> dict[str, str]:
+        return i18n_dict(obj, "description")
+
+
+class ClinicServiceWriteSerializer(serializers.Serializer[dict[str, Any]]):
+    """Body of ``POST …/services/`` and (``partial``) ``PATCH …/services/{id}/`` of one specialist (texts
+    merge leaf by leaf). ``category`` defaults from the specialist's role on create."""
+
+    name = ServiceNameSerializer()
+    short_name = ServiceShortNameSerializer(required=False)
+    description = ServiceDescriptionSerializer(required=False)
+    category = serializers.ChoiceField(
+        choices=enums.ServiceCategory.values,
+        required=False,
+        help_text="Defaults from the specialist's role on create.",
+    )
+    price = _price_field(help_text="So'm, 0 … 100 000 000; snapshotted by every booking.")
+    duration_min = serializers.IntegerField(
+        min_value=5, max_value=480, help_text="Minutes, a multiple of 5 (5 … 480)."
+    )
+    position = serializers.IntegerField(
+        min_value=0,
+        max_value=MAX_POSITION,
+        required=False,
+        help_text="Order within the specialist's services; appended last on create.",
+    )
+    is_active = serializers.BooleanField(required=False, default=True)
+
+    def validate_duration_min(self, value: int) -> int:
+        return cast(int, _validate_duration(value))
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        if self.partial:
+            return attrs
+        short = dict(attrs.get("short_name") or {})
+        if not short.get("uz"):
+            short["uz"] = attrs["name"]["uz"][:40].strip()
+        attrs["short_name"] = {"ru": "", "en": "", **short}
+        return attrs
 
 
 PUBLISH_BLOCKERS = ("account", "name", "discipline", "bio", "photo", "clinic", "service", "availability")
@@ -252,7 +301,9 @@ class ClinicSpecialistSerializer(serializers.Serializer[Professional]):
     slot_step_min = serializers.IntegerField()
     position = serializers.IntegerField()
     is_active = serializers.BooleanField()
-    services = OfferedServiceSerializer(many=True, source="offered_links")
+    services = ClinicServiceSerializer(
+        many=True, source="service_rows", help_text="Every own service, inactive ones included, by position."
+    )
     working_hours = WorkingDaySerializer(many=True, source="week_rows")
     upcoming_appointments = serializers.SerializerMethodField()
     created_at = serializers.DateTimeField()
@@ -371,43 +422,6 @@ class ClinicSpecialistPatchSerializer(ClinicSpecialistWriteSerializer):
         default=False,
         help_text="With is_active=false: deactivate even with requested/confirmed appointments ahead.",
     )
-
-
-class OfferedServiceInputSerializer(serializers.Serializer[dict[str, Any]]):
-    service_id = _int()
-    price = _price_field(help_text="So'm, 0 … 100 000 000.")
-    duration_min = serializers.IntegerField(
-        min_value=5,
-        max_value=480,
-        allow_null=True,
-        required=False,
-        help_text="Minutes, a multiple of 5; omitted or null = the service's default duration.",
-    )
-    is_active = serializers.BooleanField(required=False, default=True)
-
-    def validate_duration_min(self, value: int | None) -> int | None:
-        return _validate_duration(value)
-
-
-class OfferedServicesSerializer(serializers.Serializer[dict[str, Any]]):
-    """Body of ``PUT specialists/{id}/services/``: the exact set (``[]`` = offers nothing)."""
-
-    services = BoundedListField(child=OfferedServiceInputSerializer(), max_items=MAX_OFFERED_SERVICES)
-
-    def validate_services(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        errors: dict[int, dict[str, list[Any]]] = {}
-        seen: set[int] = set()
-        for index, item in enumerate(items):
-            if item["service_id"] in seen:
-                errors[index] = {"service_id": [field_error("unique", MESSAGES["service_twice"])]}
-            seen.add(item["service_id"])
-        found = {service.pk: service for service in Service.objects.filter(pk__in=seen)}
-        for index, item in enumerate(items):
-            if item["service_id"] not in found and index not in errors:
-                errors[index] = {"service_id": [field_error("does_not_exist", MESSAGES["service_not_found"])]}
-        if errors:
-            raise serializers.ValidationError(cast(Any, errors))
-        return [{**item, "service": found[item["service_id"]]} for item in items]
 
 
 class WorkingDayInputSerializer(serializers.Serializer[dict[str, Any]]):
@@ -562,79 +576,6 @@ class ScheduleRangeQuerySerializer(serializers.Serializer[dict[str, Any]]):
         if date_to is not None and date_to < date_from:
             raise _error("date_to", "invalid", MESSAGES["range"])
         return {"date_from": date_from, "date_to": date_to}
-
-
-# --- services -----------------------------------------------------------------------------------------------
-
-
-class ClinicServiceSerializer(serializers.Serializer[Service]):
-    """The admin ``ClinicService``; instances come from ``selectors.service_queryset()``
-    (``specialist_count`` = active specialists offering it through an active link)."""
-
-    id = serializers.IntegerField()
-    name = serializers.SerializerMethodField()
-    short_name = serializers.SerializerMethodField()
-    description = serializers.SerializerMethodField()
-    category = serializers.ChoiceField(choices=enums.ServiceCategory.values)
-    default_duration_min = serializers.IntegerField()
-    default_price = serializers.IntegerField(allow_null=True)
-    position = serializers.IntegerField()
-    is_active = serializers.BooleanField()
-    specialist_count = serializers.IntegerField()
-    created_at = serializers.DateTimeField()
-    updated_at = serializers.DateTimeField()
-
-    @extend_schema_field(i18n_text(120))
-    def get_name(self, obj: Service) -> dict[str, str]:
-        return i18n_dict(obj, "name")
-
-    @extend_schema_field(i18n_text(40))
-    def get_short_name(self, obj: Service) -> dict[str, str]:
-        return i18n_dict(obj, "short_name")
-
-    @extend_schema_field(i18n_text(2000))
-    def get_description(self, obj: Service) -> dict[str, str]:
-        return i18n_dict(obj, "description")
-
-
-class ServiceListQuerySerializer(serializers.Serializer[dict[str, Any]]):
-    """Query of ``GET services/``; ``search`` is trimmed and cut to 64 characters."""
-
-    search = serializers.CharField(required=False, allow_blank=True, trim_whitespace=False)
-    is_active = QueryBooleanField(required=False)
-    category = serializers.ChoiceField(choices=enums.ServiceCategory.values, required=False)
-    ordering = serializers.ChoiceField(
-        choices=enums.DirectoryOrdering.values, required=False, default=enums.DirectoryOrdering.POSITION
-    )
-
-
-class ClinicServiceWriteSerializer(serializers.Serializer[dict[str, Any]]):
-    """Body of ``POST services/`` and (``partial``) ``PATCH services/{id}/`` (texts merge leaf by leaf)."""
-
-    name = ServiceNameSerializer()
-    short_name = ServiceShortNameSerializer(required=False)
-    description = ServiceDescriptionSerializer(required=False)
-    category = serializers.ChoiceField(choices=enums.ServiceCategory.values)
-    default_duration_min = serializers.IntegerField(
-        min_value=5, max_value=480, help_text="Minutes, a multiple of 5 (5 … 480)."
-    )
-    default_price = _price_field(
-        allow_null=True, required=False, help_text="Suggested price when offering it; null = none."
-    )
-    position = serializers.IntegerField(min_value=0, max_value=MAX_POSITION, required=False)
-    is_active = serializers.BooleanField(required=False, default=True)
-
-    def validate_default_duration_min(self, value: int) -> int:
-        return cast(int, _validate_duration(value))
-
-    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
-        if self.partial:
-            return attrs
-        short = dict(attrs.get("short_name") or {})
-        if not short.get("uz"):
-            short["uz"] = attrs["name"]["uz"][:40].strip()
-        attrs["short_name"] = {"ru": "", "en": "", **short}
-        return attrs
 
 
 # --- the location -------------------------------------------------------------------------------------------

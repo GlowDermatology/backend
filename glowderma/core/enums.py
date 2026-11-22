@@ -214,7 +214,7 @@ class ServiceCategory(TextChoices):
 
 
 class DirectoryOrdering(TextChoices):
-    """``ordering`` of the admin ``specialists/`` and ``services/`` lists (default ``position``)."""
+    """``ordering`` of the admin ``specialists/`` list (default ``position``)."""
 
     POSITION = "position"
     NAME = "name"

@@ -137,7 +137,6 @@ test("weekly hours inline: an invalid row is refused on the form, a valid one is
 const EDITABLE: Record<string, string> = {
   location: "location",
   service: "service",
-  professionalservice: "professional_service",
   workinghours: "working_hours",
   workinghoursoverride: "working_hours_override",
   blockedperiod: "blocked_period",

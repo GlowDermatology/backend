@@ -52,7 +52,7 @@ def test_a_russian_stem_falls_back_to_its_transliteration() -> None:
 
 def test_every_export_name_has_an_ascii_russian_fallback() -> None:
     views = export_views()
-    assert len(views) >= 12
+    assert len(views) >= 11  # noqa: PLR2004 - the services catalogue export is gone (per-specialist services)
     for view in views:
         russian = uzsource.tr(view.export_name, "ru")
         assert russian != view.export_name, view
@@ -106,13 +106,10 @@ def test_category_headers_read_as_the_category_list(staff_client: APIClient) -> 
     ("resource", "text", "russian", "english"),
     [
         ("products", "Nomi", "Название", "Name"),
-        ("services", "Nomi", "Название", "Name"),
         ("segments", "Nomi", "Название", "Name"),
         ("categories", "Faol", "Активна", "Active"),
         ("banners", "Faol", "Активен", "Active"),
         ("products", "Faol", "Активен", "Active"),
-        ("services", "Faol", "Активна", "Active"),
-        ("services", "Nofaol", "Неактивна", "Inactive"),
         ("specialists", "Faol", "Активен", "Active"),
         ("specialists", "Nofaol", "Неактивен", "Inactive"),
         ("customers", "Faol", "Активен", "Active"),

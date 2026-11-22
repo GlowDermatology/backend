@@ -17,13 +17,13 @@ from ..specialist import (
 from .views import (
     ClinicsView,
     ClinicView,
-    ServiceViewSet,
     SpecialistAccountRoleView,
     SpecialistBlockViewSet,
     SpecialistInviteView,
     SpecialistOverrideViewSet,
     SpecialistPhotoView,
     SpecialistServicesView,
+    SpecialistServiceView,
     SpecialistViewSet,
     SpecialistWorkingHoursView,
 )
@@ -34,8 +34,6 @@ overrides = SpecialistOverrideViewSet.as_view({"get": "list", "post": "create"})
 override = SpecialistOverrideViewSet.as_view({"delete": "destroy"})
 blocks = SpecialistBlockViewSet.as_view({"get": "list", "post": "create"})
 block = SpecialistBlockViewSet.as_view({"delete": "destroy"})
-services = ServiceViewSet.as_view({"get": "list", "post": "create"})
-service = ServiceViewSet.as_view({"get": "retrieve", "patch": "partial_update"})
 
 urlpatterns: list[URLPattern | URLResolver] = [
     path(
@@ -75,6 +73,11 @@ urlpatterns: list[URLPattern | URLResolver] = [
         "specialists/<int:pk>/services/", SpecialistServicesView.as_view(), name="admin-specialists-services"
     ),
     path(
+        "specialists/<int:pk>/services/<int:service_id>/",
+        SpecialistServiceView.as_view(),
+        name="admin-specialists-service-detail",
+    ),
+    path(
         "specialists/<int:pk>/working-hours/",
         SpecialistWorkingHoursView.as_view(),
         name="admin-specialists-working-hours",
@@ -87,8 +90,6 @@ urlpatterns: list[URLPattern | URLResolver] = [
     ),
     path("specialists/<int:pk>/blocks/", blocks, name="admin-specialists-blocks"),
     path("specialists/<int:pk>/blocks/<int:block_id>/", block, name="admin-specialists-block-detail"),
-    path("services/", services, name="admin-services-list"),
-    path("services/<int:pk>/", service, name="admin-services-detail"),
     path("clinics/", ClinicsView.as_view(), name="admin-clinics-list"),
     path("clinics/<int:pk>/", ClinicView.as_view(), name="admin-clinics-detail"),
 ]

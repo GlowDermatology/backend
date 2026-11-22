@@ -63,11 +63,10 @@ from glowderma.loyalty.tests.support import seed_policies
 from glowderma.notifications import services as notification_services
 from glowderma.notifications.models import Campaign
 from glowderma.payments.models import Payment, Refund
-from glowderma.professionals.models import ProfessionalService
+from glowderma.professionals.models import Service
 from glowderma.professionals.tests.factories import (
     LocationFactory,
     ProfessionalFactory,
-    ProfessionalServiceFactory,
     ServiceFactory,
     WorkingHoursFactory,
 )
@@ -547,11 +546,13 @@ def outbox_clean() -> None:
     assert broken == [], broken
 
 
-def specialist(day: date) -> ProfessionalService:
+def specialist(day: date) -> Service:
     """A dermatologist working 09:00–18:00 (break 13–14) on ``day``'s weekday, one 30-minute service."""
     location = LocationFactory.create(name_uz="Glow Derma Yunusobod")
     professional = ProfessionalFactory.create(location=location, name="Nodira Rahimova", slot_step_min=30)
-    service = ServiceFactory.create(name_uz="Dermatolog konsultatsiyasi", default_duration_min=30)
+    service = ServiceFactory.create(
+        professional=professional, name_uz="Dermatolog konsultatsiyasi", duration_min=30, price=150_000
+    )
     WorkingHoursFactory.create(
         professional=professional,
         weekday=day.weekday(),
@@ -560,9 +561,7 @@ def specialist(day: date) -> ProfessionalService:
         break_start=time(13, 0),
         break_end=time(14, 0),
     )
-    return ProfessionalServiceFactory.create(
-        professional=professional, service=service, price=150_000, duration_min=30
-    )
+    return service
 
 
 def booking_day() -> date:
@@ -573,10 +572,10 @@ def slot(day: date, hour: int, minute: int = 0) -> datetime:
     return datetime.combine(day, time(hour, minute), tzinfo=TASHKENT)
 
 
-def book(app: App, link: ProfessionalService, start: datetime) -> Any:
+def book(app: App, link: Service, start: datetime) -> Any:
     body = {
         "specialist_id": link.professional_id,
-        "service_id": link.service_id,
+        "service_id": link.pk,
         "location_id": link.professional.location_id,
         "start": start.isoformat(),
     }
@@ -1295,7 +1294,7 @@ def test_journey_6_booking_race_confirm_push_ack_and_delivered_counter(
         f"specialists/{link.professional_id}/slots/",
         {
             "date": day.isoformat(),
-            "service_id": link.service_id,
+            "service_id": link.pk,
             "location_id": link.professional.location_id,
         },
     )
@@ -1339,7 +1338,7 @@ def test_journey_6_booking_race_confirm_push_ack_and_delivered_counter(
         f"specialists/{link.professional_id}/slots/",
         {
             "date": day.isoformat(),
-            "service_id": link.service_id,
+            "service_id": link.pk,
             "location_id": link.professional.location_id,
         },
     )
@@ -1506,7 +1505,7 @@ def test_journey_7_delete_account_then_reregister_keeps_balance_behind_the_horiz
         f"specialists/{link.professional_id}/slots/",
         {
             "date": day.isoformat(),
-            "service_id": link.service_id,
+            "service_id": link.pk,
             "location_id": link.professional.location_id,
         },
         auth=False,

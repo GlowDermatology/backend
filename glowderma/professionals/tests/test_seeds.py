@@ -13,7 +13,6 @@ from glowderma.professionals.models import (
     BlockedPeriod,
     Location,
     Professional,
-    ProfessionalService,
     Service,
     WorkingHours,
 )
@@ -31,7 +30,6 @@ def counts() -> tuple[int, ...]:
         Location.objects.count(),
         Professional.objects.count(),
         Service.objects.count(),
-        ProfessionalService.objects.count(),
         WorkingHours.objects.count(),
         BlockedPeriod.objects.count(),
     )
@@ -40,9 +38,9 @@ def counts() -> tuple[int, ...]:
 def test_seed_is_idempotent_and_reproduces_the_design() -> None:
     admin = StaffUserFactory.create(email=seeds.SEED_ADMIN_EMAIL)
     seed_professionals(CONTEXT)
-    assert counts() == (1, 3, 5, 7, 18, 1)
+    assert counts() == (1, 3, 7, 18, 1)
     seed_professionals(CONTEXT)
-    assert counts() == (1, 3, 5, 7, 18, 1)
+    assert counts() == (1, 3, 7, 18, 1)
 
     location = Location.objects.get(pk=1)
     assert location.name_uz == "Glow Derma klinikasi" and location.address_uz.startswith(
@@ -54,35 +52,21 @@ def test_seed_is_idempotent_and_reproduces_the_design() -> None:
         (3, "Dilnoza Yusupova", enums.SpecialistRole.COSMETOLOGIST, 2),
     ]
     assert all(p.location_id == 1 for p in Professional.objects.all())
-    assert list(Service.objects.values_list("id", "name_uz", "short_name_uz", "default_duration_min")) == [
-        (1, "Dermatolog konsultatsiyasi", "Konsultatsiya", 30),
-        (2, "Qayta ko‘rik", "Qayta ko‘rik", 20),
-        (3, "Yuzni chuqur tozalash", "Yuzni chuqur tozalash", 75),
-        (4, "Kimyoviy pilling", "Kimyoviy pilling", 60),
-        (5, "Namlantiruvchi parvarish", "Namlantiruvchi parvarish", 60),
+    service_rows = Service.objects.order_by("id").values_list(
+        "id", "professional_id", "name_uz", "short_name_uz", "duration_min", "price", "category", "position"
+    )
+    derm, cosm = enums.ServiceCategory.DERMATOLOGY, enums.ServiceCategory.COSMETOLOGY
+    assert list(
+        service_rows
+    ) == [  # every service belongs to one specialist (Jasur's are copies with his prices)
+        (1, 1, "Dermatolog konsultatsiyasi", "Konsultatsiya", 30, 150_000, derm, 0),
+        (2, 1, "Qayta ko‘rik", "Qayta ko‘rik", 20, 100_000, derm, 1),
+        (3, 3, "Yuzni chuqur tozalash", "Yuzni chuqur tozalash", 75, 320_000, cosm, 0),
+        (4, 3, "Kimyoviy pilling", "Kimyoviy pilling", 60, 380_000, cosm, 1),
+        (5, 3, "Namlantiruvchi parvarish", "Namlantiruvchi parvarish", 60, 260_000, cosm, 2),
+        (6, 2, "Dermatolog konsultatsiyasi", "Konsultatsiya", 30, 120_000, derm, 0),
+        (7, 2, "Qayta ko‘rik", "Qayta ko‘rik", 20, 90_000, derm, 1),
     ]
-    assert list(Service.objects.values_list("category", flat=True)) == [
-        enums.ServiceCategory.DERMATOLOGY,
-        enums.ServiceCategory.DERMATOLOGY,
-        enums.ServiceCategory.COSMETOLOGY,
-        enums.ServiceCategory.COSMETOLOGY,
-        enums.ServiceCategory.COSMETOLOGY,
-    ]
-    links = {
-        (pid, sid): (price, duration)
-        for pid, sid, price, duration in ProfessionalService.objects.values_list(
-            "professional_id", "service_id", "price", "duration_min"
-        )
-    }
-    assert links == {
-        (1, 1): (150_000, 30),
-        (1, 2): (100_000, 20),
-        (2, 1): (120_000, 30),
-        (2, 2): (90_000, 20),
-        (3, 3): (320_000, 75),
-        (3, 4): (380_000, 60),
-        (3, 5): (260_000, 60),
-    }
     for professional_id in (1, 2, 3):
         rows = list(WorkingHours.objects.filter(professional_id=professional_id))
         assert [r.weekday for r in rows] == [0, 1, 2, 3, 4, 5]  # Mon–Sat, no Sunday

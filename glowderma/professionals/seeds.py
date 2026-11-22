@@ -1,10 +1,9 @@
-"""Demo specialists (design 03 §7.6): a location, three professionals (placeholder photos), five services,
-prices, hours, a block.
+"""Demo specialists (design 03 §7.6): a location, three professionals (placeholder photos), their own
+services with prices, hours, a block.
 
-Idempotent by natural keys: location ``name_uz``, professional ``name``, service ``name_uz``, link
-``(professional, service)``, hours ``(professional, weekday)``, block ``(professional, start)``. Design rows
-take their mock ids (professionals 1–3, services 1–5, location 1) explicitly; ``seed_demo`` re-syncs the
-sequences.
+Idempotent by natural keys: location ``name_uz``, professional ``name``, service ``(professional,
+name_uz)``, hours ``(professional, weekday)``, block ``(professional, start)``. Design rows take their mock
+ids (professionals 1–3, services 1–7, location 1) explicitly; ``seed_demo`` re-syncs the sequences.
 """
 
 from datetime import datetime, time
@@ -21,7 +20,6 @@ from glowderma.professionals.models import (
     BlockedPeriod,
     Location,
     Professional,
-    ProfessionalService,
     Service,
     WorkingHours,
 )
@@ -41,20 +39,17 @@ PROFESSIONALS: tuple[tuple[int, str, str], ...] = (
     (3, "Dilnoza Yusupova", enums.SpecialistRole.COSMETOLOGIST),
 )
 DERMATOLOGY, COSMETOLOGY = enums.ServiceCategory.DERMATOLOGY, enums.ServiceCategory.COSMETOLOGY
-# id, name_uz, short_name_uz, default duration, category (FND-7)
-SERVICES: tuple[tuple[int, str, str, int, str], ...] = (
-    (1, "Dermatolog konsultatsiyasi", "Konsultatsiya", 30, DERMATOLOGY),
-    (2, "Qayta ko‘rik", "Qayta ko‘rik", 20, DERMATOLOGY),
-    (3, "Yuzni chuqur tozalash", "Yuzni chuqur tozalash", 75, COSMETOLOGY),
-    (4, "Kimyoviy pilling", "Kimyoviy pilling", 60, COSMETOLOGY),
-    (5, "Namlantiruvchi parvarish", "Namlantiruvchi parvarish", 60, COSMETOLOGY),
+# id, professional id, name_uz, short_name_uz, duration, category (FND-7), price: every service belongs to
+# one specialist (Nodira 1–2, Dilnoza 3–5, Jasur 6–7)
+SERVICES: tuple[tuple[int, int, str, str, int, str, int], ...] = (
+    (1, 1, "Dermatolog konsultatsiyasi", "Konsultatsiya", 30, DERMATOLOGY, 150_000),
+    (2, 1, "Qayta ko‘rik", "Qayta ko‘rik", 20, DERMATOLOGY, 100_000),
+    (3, 3, "Yuzni chuqur tozalash", "Yuzni chuqur tozalash", 75, COSMETOLOGY, 320_000),
+    (4, 3, "Kimyoviy pilling", "Kimyoviy pilling", 60, COSMETOLOGY, 380_000),
+    (5, 3, "Namlantiruvchi parvarish", "Namlantiruvchi parvarish", 60, COSMETOLOGY, 260_000),
+    (6, 2, "Dermatolog konsultatsiyasi", "Konsultatsiya", 30, DERMATOLOGY, 120_000),
+    (7, 2, "Qayta ko‘rik", "Qayta ko‘rik", 20, DERMATOLOGY, 90_000),
 )
-# professional id → {service id: price}
-PRICES: dict[int, dict[int, int]] = {
-    1: {1: 150_000, 2: 100_000},
-    2: {1: 120_000, 2: 90_000},
-    3: {3: 320_000, 4: 380_000, 5: 260_000},
-}
 WORKING_DAYS = range(6)  # Monday–Saturday; the mock skips Sundays
 DAY_START, DAY_END = time(9, 0), time(18, 0)
 JASUR_BREAK = (time(13, 0), time(14, 0))  # renders as the ``off`` block with label null (contract §5.6)
@@ -117,33 +112,27 @@ def _seed_photos(professionals: dict[int, Professional]) -> None:
             )
 
 
-def _seed_services() -> dict[int, Service]:
+def _seed_services(professionals: dict[int, Professional]) -> dict[int, Service]:
     rows: dict[int, Service] = {}
-    for position, (pk, name_uz, short_name_uz, duration, category) in enumerate(SERVICES):
-        service = Service.objects.filter(name_uz=name_uz).first()
+    positions: dict[int, int] = {}
+    for pk, owner, name_uz, short_name_uz, duration, category, price in SERVICES:
+        professional = professionals[owner]
+        position = positions.get(owner, 0)
+        positions[owner] = position + 1
+        service = Service.objects.filter(professional=professional, name_uz=name_uz).first()
         if service is None:
             service = Service.objects.create(
                 id=pk,
+                professional=professional,
                 name_uz=name_uz,
                 short_name_uz=short_name_uz,
-                default_duration_min=duration,
+                duration_min=duration,
+                price=price,
                 category=category,
                 position=position,
             )
         rows[pk] = service
     return rows
-
-
-def _seed_links(professionals: dict[int, Professional], services: dict[int, Service]) -> None:
-    for professional_key, prices in PRICES.items():
-        professional = professionals[professional_key]
-        for service_key, price in prices.items():
-            service = services[service_key]
-            ProfessionalService.objects.get_or_create(
-                professional=professional,
-                service=service,
-                defaults={"price": price, "duration_min": service.default_duration_min},
-            )
 
 
 def _seed_hours(professionals: dict[int, Professional]) -> None:
@@ -181,7 +170,6 @@ def seed_professionals(context: SeedContext) -> None:
         location = _seed_location()
         professionals = _seed_professionals(location)
         _seed_photos(professionals)
-        services = _seed_services()
-        _seed_links(professionals, services)
+        _seed_services(professionals)
         _seed_hours(professionals)
         _seed_blocks(professionals, admin, context.anchor)

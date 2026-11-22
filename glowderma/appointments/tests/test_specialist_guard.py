@@ -20,11 +20,11 @@ from glowderma.core.api.exceptions import Conflict
 from glowderma.core.timeutils import TASHKENT
 from glowderma.professionals import bookings
 from glowderma.professionals import services as professionals_services
-from glowderma.professionals.models import Professional, ProfessionalService
+from glowderma.professionals.models import Professional, Service
 from glowderma.professionals.tests.factories import (
     BlockedPeriodFactory,
     ProfessionalFactory,
-    ProfessionalServiceFactory,
+    ServiceFactory,
     WorkingHoursFactory,
     WorkingHoursOverrideFactory,
 )
@@ -124,8 +124,8 @@ def test_the_counter_is_registered_and_counts_open_future_appointments(clock: An
 # --- the booking guard --------------------------------------------------------------------------------------
 
 
-def bookable() -> ProfessionalService:
-    link = ProfessionalServiceFactory.create(price=150_000, duration_min=30)
+def bookable() -> Service:
+    link = ServiceFactory.create(price=150_000, duration_min=30)
     WorkingHoursFactory.create(professional=link.professional, weekday=0)
     return link
 
@@ -147,7 +147,7 @@ def test_an_admin_booking_of_a_specialist_deactivated_meanwhile_is_refused(
         "/api/v1/admin/appointments/",
         {
             "specialist_id": link.professional_id,
-            "service_id": link.service_id,
+            "service_id": link.pk,
             "location_id": link.professional.location_id,
             "customer_id": customer.pk,
             "start": at(MONDAY, 10).isoformat(),
@@ -164,14 +164,16 @@ def test_an_admin_booking_of_a_specialist_deactivated_meanwhile_is_refused(
 def test_a_reschedule_to_a_deactivated_specialist_is_refused(clock: Any) -> None:
     link = bookable()
     appointment = AppointmentFactory.create(
-        professional=link.professional, service=link.service, start=at(MONDAY, 10)
+        professional=link.professional, service=link, start=at(MONDAY, 10)
     )
-    target = ProfessionalServiceFactory.create(
-        service=link.service, professional__is_active=False
-    ).professional
+    offer = ServiceFactory.create(professional__is_active=False)
     with pytest.raises(ValidationError) as caught:
         services.reschedule(
-            appointment.pk, start=at(MONDAY, 11), professional=target, actor=StaffUserFactory.create()
+            appointment.pk,
+            start=at(MONDAY, 11),
+            professional=offer.professional,
+            service=offer,
+            actor=StaffUserFactory.create(),
         )
     assert caught.value.get_codes() == {"specialist_id": ["does_not_exist"]}
     assert Appointment.objects.get(pk=appointment.pk).professional_id == link.professional_id
@@ -218,9 +220,7 @@ def test_a_booking_waits_for_a_deactivation_and_is_refused(monkeypatch: pytest.M
     booking = _run(
         outcomes,
         "booking",
-        lambda: services.request_by_customer(
-            customer.pk, link.professional_id, link.service_id, at(MONDAY, 10)
-        ),
+        lambda: services.request_by_customer(customer.pk, link.professional_id, link.pk, at(MONDAY, 10)),
     )
     booking.join(timeout=1)
     assert booking.is_alive()  # waits on the specialist's row lock
@@ -251,9 +251,7 @@ def test_a_deactivation_waits_for_a_booking_and_counts_it(monkeypatch: pytest.Mo
     booking = _run(
         outcomes,
         "booking",
-        lambda: services.request_by_customer(
-            customer.pk, link.professional_id, link.service_id, at(MONDAY, 10)
-        ),
+        lambda: services.request_by_customer(customer.pk, link.professional_id, link.pk, at(MONDAY, 10)),
     )
     assert inside.wait(10)  # checked, holds the specialist FOR KEY SHARE, not yet written
     deactivation = _run(

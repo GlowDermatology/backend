@@ -51,9 +51,9 @@ class Appointment(TimeStampedModel):
     )
     start = models.DateTimeField(verbose_name="boshlanishi")
     end = models.DateTimeField(verbose_name="tugashi")
-    # snapshot of ProfessionalService.duration_min
+    # snapshot of Service.duration_min
     duration_min = models.PositiveSmallIntegerField(verbose_name="davomiyligi (daq.)")
-    price = models.BigIntegerField(verbose_name="narx")  # snapshot of ProfessionalService.price
+    price = models.BigIntegerField(verbose_name="narx")  # snapshot of Service.price
     # requested|confirmed|rejected|attended|cancelled (T3)
     status = models.CharField(
         max_length=16,

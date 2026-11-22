@@ -17,7 +17,6 @@ from glowderma.core.timeutils import TASHKENT
 from glowderma.professionals.tests.conftest import ANCHOR
 from glowderma.professionals.tests.factories import (
     ProfessionalFactory,
-    ProfessionalServiceFactory,
     ServiceFactory,
     WorkingHoursFactory,
 )
@@ -80,13 +79,12 @@ def _csv(content: bytes) -> list[list[str]]:
     return list(csv.reader(StringIO(content.decode("utf-8-sig")), delimiter=";"))
 
 
-def test_the_specialist_and_service_exports_follow_the_language(staff_client: APIClient) -> None:
+def test_the_specialist_export_follows_the_language(staff_client: APIClient) -> None:
     # the committed catalog (no overlay): the file name, headers, role / category / weekday / state labels
     nodira = ProfessionalFactory.create(name="Nodira", experience_years=8, role="dermatologist")
-    service = ServiceFactory.create(
-        name_uz="Konsultatsiya", short_name_uz="Konsultatsiya", category="dermatology"
+    ServiceFactory.create(
+        professional=nodira, name_uz="Konsultatsiya", short_name_uz="Konsultatsiya", category="dermatology"
     )
-    ProfessionalServiceFactory.create(professional=nodira, service=service)
     for weekday in (0, 6):
         WorkingHoursFactory.create(professional=nodira, weekday=weekday)
     english = staff_client.get("/api/v1/admin/specialists/", {"export": "csv"}, HTTP_ACCEPT_LANGUAGE="en")
@@ -105,11 +103,6 @@ def test_the_specialist_and_service_exports_follow_the_language(staff_client: AP
         ],
         [str(nodira.pk), "Nodira", "Dermatologist", "8", "Konsultatsiya", "Mon, Sun", "0", "Active"],
     ]
-    russian = staff_client.get("/api/v1/admin/services/", {"export": "csv"}, HTTP_ACCEPT_LANGUAGE="ru")
-    assert russian["Content-Disposition"].startswith('attachment; filename="uslugi-')
-    assert "filename*=UTF-8''%D1%83%D1%81%D0%BB%D1%83%D0%B3%D0%B8-" in russian["Content-Disposition"]
-    # a service is feminine in Russian (review F2: the services export's own rendering)
-    assert _csv(russian.content)[1][3] == "Дерматология" and _csv(russian.content)[1][-1] == "Активна"
     uzbek = staff_client.get("/api/v1/admin/specialists/", {"export": "csv"})
     assert uzbek["Content-Disposition"].startswith('attachment; filename="mutaxassislar-')
     assert _csv(uzbek.content)[1][2:] == ["Dermatolog", "8", "Konsultatsiya", "Du, Ya", "0", "Faol"]

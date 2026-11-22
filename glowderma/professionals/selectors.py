@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from typing import Any
 
-from django.db.models import Count, F, Model, Prefetch, Q, QuerySet, Value
+from django.db.models import F, Model, Prefetch, Q, QuerySet, Value
 from django.db.models.functions import Collate
 from django.db.models.lookups import Contains
 
@@ -22,7 +22,6 @@ from glowderma.professionals.models import (
     BlockedPeriod,
     Location,
     Professional,
-    ProfessionalService,
     Service,
     WorkingHours,
     WorkingHoursOverride,
@@ -224,16 +223,12 @@ def schedules_for_many(
 
 
 def booking_catalogue() -> QuerySet[Professional]:
-    """Active professionals (by position, then name) with their active, bookable services prefetched.
+    """Active professionals (by position, then name) with their active services prefetched.
 
-    ``bookable_links`` holds the professional's active ``ProfessionalService`` rows whose service is active,
-    ordered by the service position then name — what the admin booking dialog offers (contract §2.9 meta).
+    ``bookable_services`` holds the professional's active ``Service`` rows by position then name — what the
+    admin booking dialog and the customer catalogue offer (contract §2.9 meta, customer §2.11).
     """
-    links = (
-        ProfessionalService.objects.filter(is_active=True, service__is_active=True)
-        .select_related("service")
-        .order_by("service__position", "service__name_uz", "service_id")
-    )
+    bookable = Service.objects.filter(is_active=True).order_by("position", "name_uz", "id")
     return (
         Professional.objects.filter(is_active=True)
         .filter(Q(location__is_active=True) | Q(additional_locations__is_active=True))
@@ -241,7 +236,7 @@ def booking_catalogue() -> QuerySet[Professional]:
         .order_by("position", "name", "id")
         .select_related("location")
         .prefetch_related(
-            Prefetch("services", queryset=links, to_attr="bookable_links"),
+            Prefetch("services", queryset=bookable, to_attr="bookable_services"),
             Prefetch(
                 "additional_locations",
                 queryset=Location.objects.filter(is_active=True),
@@ -273,7 +268,7 @@ def active_specialist_account(user_id: int, *, lock: bool = False) -> Profession
 def publish_blockers(professional: Professional) -> list[str]:
     """What keeps ``professional`` from being published, in display order (``[]`` = publishable): the owner
     account must be a Specialist, and the profile needs its public name, discipline, Uzbek bio, photo, an
-    active primary clinic, an active offered service and weekly hours at an active assigned clinic."""
+    active primary clinic, an active service of its own and weekly hours at an active assigned clinic."""
     missing: list[str] = []
     if professional.staff_user.role != enums.StaffRole.SPECIALIST:
         missing.append("account")
@@ -287,14 +282,11 @@ def publish_blockers(professional: Professional) -> list[str]:
         missing.append("photo")
     if professional.location is None or not professional.location.is_active:
         missing.append("clinic")
-    links = getattr(professional, "offered_links", None)  # prefetched by ``specialist_queryset``
-    if links is not None:
-        offers = any(link.is_active and link.service.is_active for link in links)
+    rows = getattr(professional, "service_rows", None)  # prefetched by ``specialist_queryset``
+    if rows is not None:
+        offers = any(service.is_active for service in rows)
     else:
-        offers = (
-            professional.pk is not None
-            and professional.services.filter(is_active=True, service__is_active=True).exists()
-        )
+        offers = professional.pk is not None and professional.services.filter(is_active=True).exists()
     if not offers:
         missing.append("service")
     active_ids = {location.pk for location in assigned_locations(professional, active_only=True)}
@@ -336,14 +328,12 @@ def has_location(professional: Professional, location_id: int) -> bool:
 
 def specialist_queryset() -> QuerySet[Professional]:
     """Professionals with everything the admin ``Specialist`` shape needs, in four queries for any page:
-    the rows with the linked staff account, the offered services (``offered_links``, by service position
-    then name) and the weekly hours (``week_rows``, by weekday)."""
-    links = ProfessionalService.objects.select_related("service").order_by(
-        "service__position", "service__name_uz", "service_id"
-    )
+    the rows with the linked staff account, every own service, inactive ones included (``service_rows``, by
+    position then name) and the weekly hours (``week_rows``, by weekday)."""
+    rows = Service.objects.order_by("position", "name_uz", "id")
     return Professional.objects.select_related("staff_user", "location").prefetch_related(
         Prefetch("additional_locations", to_attr="clinic_rows"),
-        Prefetch("services", queryset=links, to_attr="offered_links"),
+        Prefetch("services", queryset=rows, to_attr="service_rows"),
         Prefetch("working_hours", queryset=WorkingHours.objects.order_by("weekday"), to_attr="week_rows"),
     )
 
@@ -387,36 +377,6 @@ def filter_specialists(qs: QuerySet[Professional], filters: dict[str, Any]) -> Q
     if "role" in filters:
         qs = qs.filter(role=filters["role"])
     return _order(qs, filters.get("ordering", ""), "name", ("position", "name", "id"))
-
-
-def service_queryset() -> QuerySet[Service]:
-    """Services with ``specialist_count``: the active specialists offering them through an active link (what
-    the booking catalogue offers)."""
-    offered = Q(professional_links__is_active=True, professional_links__professional__is_active=True)
-    return Service.objects.annotate(
-        specialist_count=Count("professional_links", filter=offered, distinct=True)
-    )
-
-
-def get_service(pk: int) -> Service | None:
-    return service_queryset().filter(pk=pk).first()
-
-
-def filter_services(qs: QuerySet[Service], filters: dict[str, Any]) -> QuerySet[Service]:
-    """``GET services/``: ``search`` (name or short name in any language contains, folded), ``is_active``,
-    ``category`` and ``ordering`` (``position`` = position, Uzbek name, id)."""
-    term = _search_term(filters.get("search", ""))
-    if term:
-        condition = Q()
-        for language in ("uz", "ru", "en"):
-            condition |= _folded_contains(f"name_{language}", term)
-            condition |= _folded_contains(f"short_name_{language}", term)
-        qs = qs.filter(condition)
-    if "is_active" in filters:
-        qs = qs.filter(is_active=filters["is_active"])
-    if "category" in filters:
-        qs = qs.filter(category=filters["category"])
-    return _order(qs, filters.get("ordering", ""), "name_uz", ("position", "name_uz", "id"))
 
 
 def overrides_of(

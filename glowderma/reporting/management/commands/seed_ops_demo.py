@@ -32,7 +32,7 @@ from glowderma.integrations.models import IntegrationState, Job, WebhookInbox
 from glowderma.loyalty.models import Purchase
 from glowderma.notifications.models import Campaign
 from glowderma.payments.models import Payment
-from glowderma.professionals.models import BlockedPeriod, ProfessionalService
+from glowderma.professionals.models import BlockedPeriod, Service
 from glowderma.reporting.tasks import run_consistency_report
 
 KEY = "ops-demo"
@@ -400,25 +400,25 @@ class Command(BaseCommand):
     def _appointments(self, now: datetime) -> int:
         if Appointment.objects.filter(staff_note__startswith=KEY).exists():
             return 0
-        links = list(ProfessionalService.objects.select_related("professional").order_by("id")[:3])
+        offered = list(Service.objects.select_related("professional").order_by("id")[:3])
         customers = list(Customer.objects.filter(phone__isnull=False).order_by("id")[:6])
-        if not links or not customers:
+        if not offered or not customers:
             return 0
         day_start, _ = timeutils.day_bounds(timeutils.local_date(now))
         made = 0
         plan = [(10, "attended"), (11, "attended"), (14, "confirmed"), (15, "confirmed"), (17, "requested")]
         for index, (hour, status) in enumerate(plan):
-            link = links[index % len(links)]
+            service = offered[index % len(offered)]
             start = day_start + timedelta(hours=hour)
             Appointment.objects.create(
-                professional=link.professional,
-                location_id=link.professional.clinic_id,
-                service=link.service,
+                professional=service.professional,
+                location_id=service.professional.clinic_id,
+                service=service,
                 customer=customers[index % len(customers)],
                 start=start,
-                end=start + timedelta(minutes=link.duration_min),
-                duration_min=link.duration_min,
-                price=link.price,
+                end=start + timedelta(minutes=service.duration_min),
+                duration_min=service.duration_min,
+                price=service.price,
                 status=status,
                 requested_via="app",
                 confirmed_at=start - timedelta(days=1) if status in ("confirmed", "attended") else None,
@@ -427,24 +427,24 @@ class Command(BaseCommand):
             )
             made += 1
         # a confirmed visit in three days, then the specialist blocks that afternoon: a schedule conflict
-        link = links[0]
+        service = offered[0]
         start = day_start + timedelta(days=3, hours=15)
         Appointment.objects.create(
-            professional=link.professional,
-            location_id=link.professional.clinic_id,
-            service=link.service,
+            professional=service.professional,
+            location_id=service.professional.clinic_id,
+            service=service,
             customer=customers[-1],
             start=start,
-            end=start + timedelta(minutes=link.duration_min),
-            duration_min=link.duration_min,
-            price=link.price,
+            end=start + timedelta(minutes=service.duration_min),
+            duration_min=service.duration_min,
+            price=service.price,
             status="confirmed",
             requested_via="app",
             confirmed_at=now,
             staff_note=f"{KEY}: conflict",
         )
         BlockedPeriod.objects.create(
-            professional=link.professional,
+            professional=service.professional,
             start=day_start + timedelta(days=3, hours=14),
             end=day_start + timedelta(days=3, hours=18),
             kind="off",

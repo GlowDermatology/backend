@@ -49,7 +49,14 @@ from glowderma.core.timeutils import TASHKENT
         ("auth.device_mismatch", "customer", "customer", audit_scopes.BUSINESS),
         ("auth.something", "system", "customer", audit_scopes.SYSTEM),  # no rule names it: fail closed
         ("cashback.adjusted", "staff", "customer", audit_scopes.BUSINESS),
-        ("professional_service.updated", "staff", "professional_service", audit_scopes.BUSINESS),
+        ("service.deleted", "staff", "service", audit_scopes.BUSINESS),
+        (
+            "professional_service.updated",
+            "staff",
+            "professional_service",
+            audit_scopes.SYSTEM,
+        ),  # retired link
+        ("customer.created_by_staff", "staff", "customer", audit_scopes.BUSINESS),
         ("working_hours_override.deleted", "staff", "working_hours_override", audit_scopes.BUSINESS),
         ("customer.sessions_revoked", "customer", "customer", audit_scopes.BUSINESS),
         ("brand_new.thing", "staff", "x", audit_scopes.SYSTEM),
@@ -264,7 +271,7 @@ class Module:
 
     @property
     def rel(self) -> str:
-        return str(self.path.relative_to(REPO))
+        return self.path.relative_to(REPO).as_posix()
 
 
 def _production_files() -> Iterator[Path]:
@@ -559,7 +566,8 @@ def test_every_audited_action_is_classified() -> None:
         "ops_access.granted",
         "ops.outbox_requeued",
         "notification.draft_deleted",
-        "professional_service.deleted",
+        "service.deleted",
+        "customer.created_by_staff",
         "customer.logout",
         "pos.qr_resolved",
         "appointment.*",

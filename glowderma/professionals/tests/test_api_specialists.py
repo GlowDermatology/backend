@@ -1,5 +1,5 @@
 """Contract "Mutaxassislar va xizmatlar" — ``specialists/``: list (pagination, search, filters, ordering,
-export, query count), create, retrieve, PATCH with the deactivation guard, the photo, the offered services,
+export, query count), create, retrieve, PATCH with the deactivation guard, the photo, the own services,
 the weekly hours, the date overrides and the blocked periods. Every write is audited and idempotent."""
 
 import csv
@@ -25,7 +25,6 @@ from glowderma.core.timeutils import TASHKENT
 from glowderma.professionals.models import (
     BlockedPeriod,
     Professional,
-    ProfessionalService,
     WorkingHours,
     WorkingHoursOverride,
 )
@@ -33,7 +32,6 @@ from glowderma.professionals.tests.conftest import ANCHOR, errors
 from glowderma.professionals.tests.factories import (
     BlockedPeriodFactory,
     ProfessionalFactory,
-    ProfessionalServiceFactory,
     ServiceFactory,
     WorkingHoursFactory,
     WorkingHoursOverrideFactory,
@@ -122,7 +120,7 @@ def _populate(count: int) -> None:
     for _ in range(count):
         professional = ProfessionalFactory.create()
         for _service in range(2):
-            ProfessionalServiceFactory.create(professional=professional)
+            ServiceFactory.create(professional=professional)
         for weekday in range(3):
             WorkingHoursFactory.create(professional=professional, weekday=weekday)
         AppointmentFactory.create(professional=professional, start=at(MONDAY, 10))
@@ -144,23 +142,30 @@ def test_list_runs_a_constant_number_of_queries(staff_client: APIClient) -> None
 
 def test_retrieve_and_404(staff_client: APIClient) -> None:
     professional = ProfessionalFactory.create()
-    link = ProfessionalServiceFactory.create(professional=professional, price=90_000)
+    service = ServiceFactory.create(professional=professional, price=90_000)
+    retired = ServiceFactory.create(professional=professional, is_active=False, position=service.position + 1)
     WorkingHoursFactory.create(
         professional=professional, weekday=2, break_start=time(13, 0), break_end=time(14, 0)
     )
     WorkingHoursFactory.create(professional=professional, weekday=0)
     body = staff_client.get(url(professional)).json()
-    assert body["services"] == [
-        {
-            "service_id": link.service_id,
-            "name": link.service.name_uz,
-            "short_name": link.service.short_name_uz,
-            "category": "dermatology",
-            "price": 90_000,
-            "duration_min": 30,
-            "is_active": True,
-            "service_is_active": True,
-        }
+    assert body["services"][0] == {
+        "id": service.pk,
+        "specialist_id": professional.pk,
+        "name": {"uz": service.name_uz, "ru": "", "en": ""},
+        "short_name": {"uz": service.short_name_uz, "ru": "", "en": ""},
+        "description": {"uz": "", "ru": "", "en": ""},
+        "category": "dermatology",
+        "price": 90_000,
+        "duration_min": 30,
+        "position": service.position,
+        "is_active": True,
+        "created_at": body["services"][0]["created_at"],
+        "updated_at": body["services"][0]["updated_at"],
+    }
+    assert [(row["id"], row["is_active"]) for row in body["services"]] == [
+        (service.pk, True),
+        (retired.pk, False),
     ]
     assert body["working_hours"] == [
         {
@@ -186,13 +191,11 @@ def test_retrieve_and_404(staff_client: APIClient) -> None:
 
 def test_export_csv_and_xlsx(staff_client: APIClient) -> None:
     nodira = ProfessionalFactory.create(name="=Nodira", experience_years=8, position=0)
-    consult = ServiceFactory.create(short_name_uz="Konsultatsiya", position=0)
-    paused = ServiceFactory.create(short_name_uz="Pilling", position=1)
-    ProfessionalServiceFactory.create(professional=nodira, service=consult)
-    ProfessionalServiceFactory.create(professional=nodira, service=paused, is_active=False)
+    consultation = ServiceFactory.create(professional=nodira, short_name_uz="Konsultatsiya", position=0)
+    ServiceFactory.create(professional=nodira, short_name_uz="Pilling", position=1, is_active=False)
     for weekday in (0, 2, 5):
         WorkingHoursFactory.create(professional=nodira, weekday=weekday)
-    AppointmentFactory.create(professional=nodira, start=at(MONDAY, 10))
+    AppointmentFactory.create(professional=nodira, service=consultation, start=at(MONDAY, 10))
     ProfessionalFactory.create(name="Dilnoza", role="cosmetologist", is_active=False, position=1)
     response = staff_client.get(BASE, {"export": "csv", "is_active": "true", "page": "3"})
     assert response.status_code == 200
@@ -356,79 +359,19 @@ def test_photo_validation(staff_client: APIClient) -> None:
     assert not AuditEntry.objects.exists()
 
 
-# --- offered services ---------------------------------------------------------------------------------------
-
-
-def test_offered_services_put_the_exact_set(staff_client: APIClient, staff: StaffUser) -> None:
-    professional = ProfessionalFactory.create()
-    consult = ServiceFactory.create(default_duration_min=30, position=1)
-    peel = ServiceFactory.create(default_duration_min=60, position=0)
-    old = ServiceFactory.create(position=2)
-    ProfessionalServiceFactory.create(professional=professional, service=old, price=50_000)
-    body = {
-        "services": [
-            {"service_id": consult.pk, "price": 150_000},
-            {"service_id": peel.pk, "price": 0, "duration_min": 45, "is_active": False},
-        ]
-    }
-    response = staff_client.put(url(professional, "services/"), body)
-    assert response.status_code == 200, response.json()
-    offered = [
-        (s["service_id"], s["price"], s["duration_min"], s["is_active"]) for s in response.json()["services"]
-    ]
-    assert offered == [(peel.pk, 0, 45, False), (consult.pk, 150_000, 30, True)]  # by service position
-    assert not ProfessionalService.objects.filter(service=old).exists()
-    [entry] = audits("professional.services_updated")
-    assert entry.before == {
-        "services": [{"service_id": old.pk, "price": 50_000, "duration_min": 30, "is_active": True}]
-    }
-    assert entry.after is not None and len(entry.after["services"]) == 2 and entry.actor_id == staff.pk
-    # the same set again: no audit row
-    assert staff_client.put(url(professional, "services/"), body).status_code == 200
-    assert len(audits("professional.services_updated")) == 1
-    response = staff_client.put(url(professional, "services/"), {"services": []})
-    assert response.status_code == 200 and response.json()["services"] == []
+# --- own services (the per-specialist editor: test_api_specialist_services.py) ----------------------------
 
 
 def test_a_price_change_keeps_the_booked_snapshot(staff_client: APIClient) -> None:
-    link = ProfessionalServiceFactory.create(price=150_000)
+    service = ServiceFactory.create(price=150_000)
     appointment = AppointmentFactory.create(
-        professional=link.professional, service=link.service, start=at(MONDAY, 10), price=150_000
+        professional=service.professional, service=service, start=at(MONDAY, 10), price=150_000
     )
-    body = {"services": [{"service_id": link.service_id, "price": 200_000, "duration_min": 60}]}
-    assert staff_client.put(url(link.professional, "services/"), body).status_code == 200
+    body = {"price": 200_000, "duration_min": 60}
+    target = url(service.professional, f"services/{service.pk}/")
+    assert staff_client.patch(target, body).status_code == 200
     stored = Appointment.objects.get(pk=appointment.pk)
     assert (stored.price, stored.duration_min, stored.end) == (150_000, 30, at(MONDAY, 10, 30))
-
-
-def test_offered_services_validation(staff_client: APIClient) -> None:
-    professional = ProfessionalFactory.create()
-    service = ServiceFactory.create()
-    target = url(professional, "services/")
-
-    def put(*items: dict[str, Any]) -> list[tuple[str | None, str, str]]:
-        return errors(staff_client.put(target, {"services": list(items)}))
-
-    item = {"service_id": service.pk, "price": 1000}
-    assert put(item, item) == [
-        ("services.1.service_id", "unique", "Bu xizmat ro‘yxatda ikki marta berilgan.")
-    ]
-    assert put({**item, "service_id": 999_999}) == [
-        ("services.0.service_id", "does_not_exist", "Xizmat topilmadi.")
-    ]
-    assert put({**item, "price": -1}) == [("services.0.price", "min_value", "Qiymat 0 dan kam bo‘lmasin.")]
-    assert put({**item, "price": 100_000_001}) == [("services.0.price", "max_value", "Narx juda katta.")]
-    assert put({**item, "duration_min": 7}) == [
-        ("services.0.duration_min", "invalid", "Davomiylik 5 daqiqaga karrali bo‘lsin.")
-    ]
-    assert put({**item, "duration_min": 485}) == [
-        ("services.0.duration_min", "max_value", "Qiymat 480 dan oshmasin.")
-    ]
-    assert put({"price": 1000}) == [("services.0.service_id", "required", "Majburiy maydon.")]
-    too_many = errors(staff_client.put(target, {"services": [item] * 51}))
-    assert too_many == [("services", "max_items", "Ko‘pi bilan 50 ta.")]
-    assert errors(staff_client.put(target, {}))[0][:2] == ("services", "required")
-    assert not ProfessionalService.objects.exists() and not AuditEntry.objects.exists()
 
 
 # --- weekly hours -------------------------------------------------------------------------------------------

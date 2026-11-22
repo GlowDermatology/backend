@@ -9,6 +9,7 @@ the last line of defence against a concurrent booking (``IntegrityError`` → 40
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
@@ -16,6 +17,7 @@ from django.conf import settings
 from django.db import IntegrityError, OperationalError, connection, transaction
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 
+from glowderma.accounts import services as account_services
 from glowderma.accounts.models import Customer, Device
 from glowderma.appointments import selectors, topics
 from glowderma.appointments.models import OPEN_STATUSES, Appointment, AppointmentEvent
@@ -31,7 +33,7 @@ from glowderma.core.api.exceptions import (
     not_cancellable,
 )
 from glowderma.core.uzsource import N_
-from glowderma.professionals.models import Location, Professional, ProfessionalService, Service
+from glowderma.professionals.models import Location, Professional, Service
 from glowderma.professionals.selectors import (
     DAY_END_LABEL,
     active_specialist_account,
@@ -50,6 +52,7 @@ MESSAGES = {
     "service_not_offered": N_("Mutaxassis bu xizmatni ko‘rsatmaydi."),
     "specialist_not_found": N_("Mutaxassis topilmadi."),
     "service_not_found": N_("Xizmat topilmadi."),
+    "customer_inactive": N_("Bu raqamdagi mijoz hisobi faol emas."),
 }
 # ``POST appointments/{id}/{action}/``: allowed source statuses and the resulting status (contract §2.9).
 TRANSITIONS: dict[str, tuple[tuple[str, ...], str]] = {
@@ -148,9 +151,10 @@ def _hold_row(model: type[Professional] | type[Service] | type[Location], pk: in
 
 
 def _hold_active_service(service_id: int) -> bool:
-    """Lock the service's row ``FOR KEY SHARE`` and re-read ``is_active``: ``PATCH services/{id}/`` takes the
-    row ``FOR UPDATE``, so a booking either waits for a deactivation and then sees it (refused), or the
-    deactivation waits for the booking (which is then kept, PS-3)."""
+    """Lock the service's row ``FOR KEY SHARE`` and re-read ``is_active``: a service write (``PATCH
+    …/services/{id}/``, after the specialist) takes the row ``FOR UPDATE``, so a booking either waits for a
+    deactivation and then sees it (refused), or the deactivation waits for the booking (which is then kept,
+    PS-3)."""
     return _hold_row(Service, service_id)
 
 
@@ -164,10 +168,10 @@ def _hold_active_specialist(professional_id: int) -> bool:
     key of the new appointment cannot serve: Django creates it ``DEFERRABLE INITIALLY DEFERRED``, so its
     check runs only at commit, after the guard.
 
-    Every schedule and offer write of the admin specialists API (hours, overrides, blocks,
-    ``PUT …/services/``) holds the same row ``FOR UPDATE``, so whatever a booking reads *after* this lock
-    (the offered link, its price and duration, the day's hours and blocks) is the committed state: the
-    bookings therefore read the link and check the slot only once they hold it.
+    Every schedule and service write of the admin and specialist APIs (hours, overrides, blocks, the
+    specialist's services) holds the same row ``FOR UPDATE``, so whatever a booking reads *after* this lock
+    (the service, its price and duration, the day's hours and blocks) is the committed state: the bookings
+    therefore read the service and check the slot only once they hold it.
     """
     return _hold_row(Professional, professional_id)
 
@@ -193,15 +197,56 @@ def _specialist_gone() -> ValidationError:
     )
 
 
-def active_link(professional: Professional, service: Service) -> ProfessionalService:
-    link = ProfessionalService.objects.filter(
-        professional=professional, service=service, is_active=True
-    ).first()
-    if link is None:
-        raise ValidationError(
-            {"service_id": [field_error("does_not_exist", MESSAGES["service_not_offered"])]}
+def _service_not_offered() -> ValidationError:
+    return ValidationError({"service_id": [field_error("does_not_exist", MESSAGES["service_not_offered"])]})
+
+
+def owned_active_service(professional: Professional, service: Service) -> Service:
+    """``service`` re-read under the caller's locks (specialist, then service): it must belong to
+    ``professional`` and be active, else 400 ``service_id``. Its price and duration are the snapshot."""
+    service.refresh_from_db(fields=["professional", "price", "duration_min", "is_active"])
+    if service.professional_id != professional.pk or not service.is_active:
+        raise _service_not_offered()
+    return service
+
+
+@dataclass(frozen=True, slots=True)
+class WalkIn:
+    """A booking for a phone no customer holds yet (the staff booking dialog): the customer is created with
+    the booking, without a password or consent. They sign in later with an SMS code to that phone into this
+    same row (``auth/send-code/`` ``reset_password`` then ``auth/reset-password/``), which sets the password,
+    and accept the terms through ``me/consent/`` (``me/`` reports the consent as ``update_required``)."""
+
+    phone: str
+    name: str
+
+
+def customer_for_booking(customer: Customer | WalkIn, *, actor: Any, request: Any = None) -> Customer:
+    """The booked customer: ``customer`` itself, or the walk-in created now (Uzbek, the default language) and
+    audited ``customer.created_by_staff``. A concurrent registration of the phone wins: its active row is
+    used; a phone held by a blocked or deleted account is 400 ``phone``."""
+    if isinstance(customer, Customer):
+        return customer
+    try:
+        created = account_services.create_customer(
+            customer.phone, name=customer.name, language=enums.ContentLanguage.UZ
         )
-    return link
+    except IntegrityError:
+        existing = account_services.active_customer_by_phone(customer.phone)
+        if existing is None:
+            raise ValidationError(
+                {"phone": [field_error("customer_not_found", MESSAGES["customer_inactive"])]}
+            ) from None
+        return existing
+    audit.record(
+        action="customer.created_by_staff",
+        entity_type="customer",
+        entity_id=str(created.pk),
+        actor=actor,
+        request=request,
+        after={"source": "appointment"},
+    )
+    return created
 
 
 def _pushable(customer_id: int) -> bool:
@@ -338,18 +383,19 @@ def create_by_admin(
     *,
     professional: Professional,
     service: Service,
-    customer: Customer,
+    customer: Customer | WalkIn,
     start: datetime,
     location_id: int | None = None,
     note: str = "",
     actor: Any,
     request: Any = None,
 ) -> Appointment:
-    """A confirmed booking made by staff: ``requested_via = admin``, events ``requested`` + ``confirmed``.
+    """A confirmed booking made by staff: ``requested_via = admin``, events ``requested`` + ``confirmed``; a
+    :class:`WalkIn` customer is created in the same transaction (nothing is kept when the booking fails).
 
-    The specialist and the service are locked first (``FOR KEY SHARE``); the offered link, the snapshot and
-    the slot are read under those locks, so a concurrent schedule, offer or service change is either seen
-    or waits for this booking."""
+    The specialist and the service are locked first (``FOR KEY SHARE``); the service, the snapshot and the
+    slot are read under those locks, so a concurrent schedule or service change is either seen or waits for
+    this booking."""
     try:
         with transaction.atomic():
             if not _hold_active_specialist(professional.pk):  # deactivated since the serializer read it
@@ -358,24 +404,25 @@ def create_by_admin(
                 raise ValidationError(
                     {"service_id": [field_error("does_not_exist", MESSAGES["service_not_found"])]}
                 )
-            link = active_link(professional, service)
+            owned_active_service(professional, service)
             professional.refresh_from_db(fields=["location"])
             clinic_id = _visit_location(
                 professional, professional.location_id if location_id is None else location_id
             )
-            end = start + timedelta(minutes=link.duration_min)
+            end = start + timedelta(minutes=service.duration_min)
             check_slot(professional, start, end, location_id=clinic_id)
+            booked = customer_for_booking(customer, actor=actor, request=request)
             _before_write()
             now = timeutils.now()
             appointment = Appointment.objects.create(
                 professional=professional,
                 location_id=clinic_id,
                 service=service,
-                customer=customer,
+                customer=booked,
                 start=start,
                 end=end,
-                duration_min=link.duration_min,
-                price=link.price,
+                duration_min=service.duration_min,
+                price=service.price,
                 status=enums.AppointmentStatus.CONFIRMED,
                 requested_via=enums.RequestedVia.ADMIN,
                 requested_at=now,
@@ -413,14 +460,17 @@ def reschedule(
     *,
     start: datetime,
     professional: Professional | None = None,
+    service: Service | None = None,
     location_id: int | None = None,
     actor: Any,
     request: Any = None,
     specialist_account_id: int | None = None,
     customer_agreed: bool = False,
 ) -> Appointment:
-    """Move an open appointment (status unchanged). A new specialist re-snapshots duration and price from
-    that specialist's service link; the same specialist keeps the booked duration and price."""
+    """Move an open appointment (status unchanged). Every service belongs to one specialist, so a move to
+    another specialist needs ``service``, one of that specialist's active services (400 ``service_id``
+    otherwise); a changed service re-snapshots duration and price from it. The booked service kept keeps the
+    booked duration and price (even if it was deactivated since)."""
     appointment = _locked_for_action(appointment_id, "reschedule", specialist_account_id)
     if appointment.status not in OPEN_STATUSES:
         raise InvalidTransition(MESSAGES["invalid_transition"])
@@ -432,11 +482,16 @@ def reschedule(
     # change is seen or waits. The same (possibly deactivated, PS-2) specialist keeps its appointment
     # movable; a different one must be active.
     target_active = _hold_active_specialist(target.pk)
-    if target.pk != appointment.professional_id:
-        if not target_active:  # deactivated since the serializer read it
-            raise _specialist_gone()
-        link = active_link(target, appointment.service)
-        duration, price = link.duration_min, link.price
+    if target.pk != appointment.professional_id and not target_active:  # deactivated since the serializer
+        raise _specialist_gone()
+    new_service = appointment.service if service is None else service
+    if new_service.professional_id != target.pk:
+        raise _service_not_offered()
+    service_changed = new_service.pk != appointment.service_id
+    if service_changed:
+        _hold_active_service(new_service.pk)
+        owned_active_service(target, new_service)
+        duration, price = new_service.duration_min, new_service.price
     target.refresh_from_db(fields=["location"])
     default_location_id = (
         appointment.location_id if target.pk == appointment.professional_id else target.location_id
@@ -461,7 +516,9 @@ def reschedule(
         "from_location_id": appointment.location_id,
     }
     from_professional = appointment.professional_id
+    from_service = appointment.service_id
     appointment.professional = target
+    appointment.service = new_service
     appointment.location_id = clinic_id
     appointment.start, appointment.end = start, end
     appointment.duration_min, appointment.price = duration, price
@@ -471,6 +528,7 @@ def reschedule(
             appointment.save(
                 update_fields=[
                     "professional",
+                    "service",
                     "location",
                     "start",
                     "end",
@@ -495,6 +553,7 @@ def reschedule(
             "from_professional_id": from_professional,
             "to_professional_id": target.pk,
             "to_location_id": clinic_id,
+            **({"from_service_id": from_service, "to_service_id": new_service.pk} if service_changed else {}),
             **agreement,
             "by": "admin",
             "push_sent": _pushable(appointment.customer_id),
@@ -622,7 +681,8 @@ def request_by_customer(
     request: Any = None,
 ) -> Appointment:
     """``POST appointments/`` (C§2.11): the checks of the booking table in order, then a ``requested``
-    appointment (``requested_via=app``, duration and price snapshotted from the link, the customer's note).
+    appointment (``requested_via=app``, duration and price snapshotted from the service, the customer's
+    note).
 
     The customer row is locked first (``FOR NO KEY UPDATE``, C§2.7.1) before the open-appointment count and
     the own-overlap check, so concurrent bookings of one customer serialise; a concurrent booking of the slot
@@ -634,8 +694,7 @@ def request_by_customer(
     professional = Professional.objects.filter(pk=professional_id, is_active=True).first()
     if professional is None:
         raise _field("specialist_id", "does_not_exist", "field.specialist_not_found")
-    link = selectors.offered_link(professional.pk, service_id)
-    if link is None:
+    if selectors.offered_service(professional.pk, service_id) is None:
         raise _field("service_id", "does_not_exist", "field.service_not_offered")
     customer = (
         Customer.objects.select_for_update(no_key=True)
@@ -649,11 +708,13 @@ def request_by_customer(
         raise AuthFailed("SESSION_EXPIRED")
     if not _hold_active_specialist(professional.pk):  # deactivated while this booking was being checked
         raise _field("specialist_id", "does_not_exist", "field.specialist_not_found")
-    # Re-read the offer under the specialist and service locks: ``PUT specialists/{id}/services/`` (specialist
-    # row ``FOR UPDATE``) or ``PATCH services/{id}/`` (service row ``FOR UPDATE``) that committed meanwhile
-    # is seen here — a withdrawn offer or a retired service is refused, a new price / duration is snapshotted.
-    link = selectors.offered_link(professional.pk, service_id) if _hold_active_service(service_id) else None
-    if link is None:
+    # Re-read the service under the specialist and service locks: a service write (specialist row, then
+    # service row ``FOR UPDATE``) that committed meanwhile is seen here — a retired service is refused, a new
+    # price / duration is snapshotted.
+    offer = (
+        selectors.offered_service(professional.pk, service_id) if _hold_active_service(service_id) else None
+    )
+    if offer is None:
         raise _field("service_id", "does_not_exist", "field.service_not_offered")
     professional.refresh_from_db(fields=["location", "slot_step_min"])
     clinic_id = _visit_location(
@@ -664,19 +725,19 @@ def request_by_customer(
     limit = int(settings.BOOKING_MAX_OPEN_PER_CUSTOMER)
     if selectors.customer_open_future_count(customer.pk, now) >= limit:
         raise BookingLimit(params={"limit": limit}, details={"limit": limit})
-    end = _check_customer_slot(professional, customer.pk, start, link.duration_min, now, clinic_id)
+    end = _check_customer_slot(professional, customer.pk, start, offer.duration_min, now, clinic_id)
     _before_write()
     try:
         with transaction.atomic():
             appointment = Appointment.objects.create(
                 professional=professional,
                 location_id=clinic_id,
-                service_id=link.service_id,
+                service_id=offer.pk,
                 customer=customer,
                 start=start,
                 end=end,
-                duration_min=link.duration_min,
-                price=link.price,
+                duration_min=offer.duration_min,
+                price=offer.price,
                 status=enums.AppointmentStatus.REQUESTED,
                 requested_via=enums.RequestedVia.APP,
                 requested_at=now,

@@ -36,10 +36,10 @@ from glowderma.core.variants import delete_with_variants, store_variants
 from glowderma.professionals import bookings, selectors
 from glowderma.professionals.models import (
     PROFESSIONAL_SLUG_CONSTRAINT,
+    SERVICE_NAME_CONSTRAINT,
     BlockedPeriod,
     Location,
     Professional,
-    ProfessionalService,
     Service,
     WorkingHours,
     WorkingHoursOverride,
@@ -52,7 +52,6 @@ ENTITY_NAMES: dict[type[models.Model], str] = {
     Location: "location",
     Professional: "professional",
     Service: "service",
-    ProfessionalService: "professional_service",
     WorkingHours: "working_hours",
     BlockedPeriod: "blocked_period",
     WorkingHoursOverride: "working_hours_override",
@@ -197,6 +196,8 @@ def save_row(obj: models.Model, *, actor: Any, request: Any = None) -> models.Mo
         )
         target = {obj.location_id, *(existing - {before["location_id"]} if before else ())}
         _check_clinic_assignments(obj, target, existing, form=True)
+    if isinstance(obj, Service) and obj.professional_id is not None:
+        Professional.objects.select_for_update().get(pk=obj.professional_id)  # specialist → service order
     if isinstance(obj, (WorkingHours, WorkingHoursOverride)) and obj.professional_id is not None:
         professional = Professional.objects.select_for_update().get(pk=obj.professional_id)
         if obj.location_id is not None:
@@ -235,7 +236,7 @@ def delete_row(obj: models.Model, *, actor: Any, request: Any = None) -> None:
     name = entity_name(type(obj))
     before = snapshot(obj)
     pk = obj.pk
-    if isinstance(obj, (WorkingHours, WorkingHoursOverride)):
+    if isinstance(obj, (WorkingHours, WorkingHoursOverride, Service)):
         Professional.objects.select_for_update().get(pk=obj.professional_id)
     try:
         obj.delete()
@@ -337,31 +338,6 @@ def remove_blocked_period(block: BlockedPeriod, *, actor: Any, request: Any = No
     delete_row(block, actor=actor, request=request)
 
 
-def link_service(
-    professional: Professional,
-    service: Service,
-    *,
-    price: int,
-    duration_min: int | None = None,
-    is_active: bool = True,
-    actor: Any,
-    request: Any = None,
-) -> ProfessionalService:
-    """Make ``professional`` perform ``service`` at ``price`` / ``duration_min`` (upsert of the link)."""
-    link = ProfessionalService.objects.filter(professional=professional, service=service).first()
-    if link is None:
-        link = ProfessionalService(professional=professional, service=service)
-    link.price = price
-    link.duration_min = service.default_duration_min if duration_min is None else duration_min
-    link.is_active = is_active
-    save_row(link, actor=actor, request=request)
-    return link
-
-
-def unlink_service(link: ProfessionalService, *, actor: Any, request: Any = None) -> None:
-    delete_row(link, actor=actor, request=request)
-
-
 # --- admin API (FND-1): specialists, services, schedules and the location ----------------------------------
 # Writes of ``api/admin/`` (contract "Mutaxassislar va xizmatlar"). The serializers validate shapes and
 # value rules and resolve references; these functions own the state rules (uniqueness, overlaps, the
@@ -398,7 +374,13 @@ API_MESSAGES = {
     "block_overlap": N_("Bu vaqt boshqa band vaqt bilan kesishadi."),
     "latlng_pair": N_("Kenglik va uzunlikni birga kiriting."),
     "slug_taken": N_("Bu manzil (slug) boshqa mutaxassisda bor."),
+    "service_name_taken": N_("Bu mutaxassisda shu nomdagi xizmat allaqachon bor."),
+    "service_limit": N_("Bitta mutaxassisda ko‘pi bilan %(n)s ta xizmat bo‘lishi mumkin."),
+    "service_booked": N_(
+        "Bu xizmatga qabullar yozilgan, uni o‘chirib bo‘lmaydi. Uning o‘rniga nofaol qiling."
+    ),
 }
+MAX_SERVICES_PER_SPECIALIST = 50
 
 
 def _advisory_lock(key: str) -> None:
@@ -775,63 +757,6 @@ def _remove_file_on_commit(storage: Any, name: str) -> None:
     transaction.on_commit(lambda: delete_with_variants(storage, name))
 
 
-def _links_state(professional: Professional) -> list[dict[str, Any]]:
-    return [
-        {
-            "service_id": link.service_id,
-            "price": link.price,
-            "duration_min": link.duration_min,
-            "is_active": link.is_active,
-        }
-        for link in ProfessionalService.objects.filter(professional=professional).order_by("service_id")
-    ]
-
-
-def set_offered_services(
-    professional_id: int, items: list[dict[str, Any]], *, actor: Any, request: Any = None
-) -> Professional:
-    """``PUT specialists/{id}/services/``: the exact set of offered services (``service`` resolved by the
-    serializer, ``price``, ``duration_min`` — default the service's — and ``is_active``). A link missing from
-    the set is removed. Bookings already made keep their snapshots. Audit ``professional.services_updated``
-    (the before / after sets) when the set changed."""
-    with transaction.atomic():
-        professional = _locked_professional(professional_id)
-        before = _links_state(professional)
-        current = {
-            link.service_id: link for link in ProfessionalService.objects.filter(professional=professional)
-        }
-        now = timeutils.now()
-        for item in items:
-            service: Service = item["service"]
-            link = current.pop(service.pk, None) or ProfessionalService(
-                professional=professional, service=service
-            )
-            values = {
-                "price": item["price"],
-                "duration_min": item.get("duration_min") or service.default_duration_min,
-                "is_active": item.get("is_active", True),
-            }
-            if link.pk is not None and all(getattr(link, key) == value for key, value in values.items()):
-                continue
-            for key, value in values.items():
-                setattr(link, key, value)
-            link.updated_at = now
-            link.save()
-        ProfessionalService.objects.filter(pk__in=[link.pk for link in current.values()]).delete()
-        after = _links_state(professional)
-        if after != before:
-            audit.record(
-                action="professional.services_updated",
-                entity_type="professional",
-                entity_id=str(professional.pk),
-                actor=actor,
-                request=request,
-                before={"services": before},
-                after={"services": after},
-            )
-    return professional
-
-
 def _week_state(professional: Professional) -> list[dict[str, Any]]:
     return [
         {
@@ -1033,18 +958,19 @@ def delete_block(professional_id: int, block_id: int, *, actor: Any, request: An
 
 def _service_state(service: Service) -> dict[str, Any]:
     return {
+        "professional_id": service.professional_id,
         **_i18n_state(service, "name"),
         **_i18n_state(service, "short_name"),
         **_i18n_state(service, "description"),
         "category": service.category,
-        "default_duration_min": service.default_duration_min,
-        "default_price": service.default_price,
+        "price": service.price,
+        "duration_min": service.duration_min,
         "position": service.position,
         "is_active": service.is_active,
     }
 
 
-SERVICE_SCALARS = ("category", "default_duration_min", "default_price", "position", "is_active")
+SERVICE_SCALARS = ("category", "price", "duration_min", "position", "is_active")
 
 
 def _apply_service(service: Service, data: dict[str, Any]) -> None:
@@ -1055,12 +981,50 @@ def _apply_service(service: Service, data: dict[str, Any]) -> None:
         _set_i18n(service, prefix, data.get(prefix))
 
 
-def create_service(data: dict[str, Any], *, actor: Any, request: Any = None) -> Service:
-    """``POST services/``: appended last unless a ``position`` is given; audit ``service.created``."""
+def _save_service(service: Service) -> None:
+    """Save with the per-specialist name race (``service_professional_name_unique``) as 400 ``unique``."""
+    _save_unique(service.save, SERVICE_NAME_CONSTRAINT, "name", API_MESSAGES["service_name_taken"])
+
+
+def _owned_service(professional_id: int, service_id: int) -> Service:
+    """Lock the specialist, then its service (the booking order: specialist → service); another
+    specialist's service is 404."""
+    professional = _locked_professional(professional_id)
+    service = (
+        Service.objects.select_for_update().filter(pk=service_id, professional_id=professional.pk).first()
+    )
+    if service is None:
+        raise NotFound
+    return service
+
+
+def default_service_category(professional: Professional) -> str:
+    """A new service's discipline when none is given: the specialist's own (dermatology for a draft)."""
+    if professional.role == enums.SpecialistRole.COSMETOLOGIST:
+        return str(enums.ServiceCategory.COSMETOLOGY)
+    return str(enums.ServiceCategory.DERMATOLOGY)
+
+
+def create_specialist_service(
+    professional_id: int, data: dict[str, Any], *, actor: Any, request: Any = None
+) -> Service:
+    """``POST specialists/{id}/services/`` (staff) and ``specialist/services/`` (the owner): a new service of
+    that specialist, appended after its others unless a ``position`` is given; the category defaults from
+    the specialist's role. A repeated name of the same specialist is 400 ``unique``; more than
+    :data:`MAX_SERVICES_PER_SPECIALIST` is 409. Audit ``service.created``."""
     with transaction.atomic():
-        service = Service(position=_next_position(Service))
+        professional = _locked_professional(professional_id)
+        owned = Service.objects.filter(professional=professional)
+        if owned.count() >= MAX_SERVICES_PER_SPECIALIST:
+            raise Conflict(API_MESSAGES["service_limit"] % {"n": MAX_SERVICES_PER_SPECIALIST})
+        last = owned.order_by("-position").values_list("position", flat=True).first()
+        service = Service(
+            professional=professional,
+            position=0 if last is None else int(last) + 1,
+            category=default_service_category(professional),
+        )
         _apply_service(service, data)
-        service.save()
+        _save_service(service)
         audit.record(
             action="service.created",
             entity_type="service",
@@ -1072,14 +1036,15 @@ def create_service(data: dict[str, Any], *, actor: Any, request: Any = None) -> 
     return service
 
 
-def update_service(service_id: int, data: dict[str, Any], *, actor: Any, request: Any = None) -> Service:
-    """``PATCH services/{id}/`` (no delete: ``is_active: false`` retires a service). A deactivated service
-    leaves the customer catalogue and the booking dialogs at once; its appointments are kept. Audit
-    ``service.deactivated`` / ``service.activated`` when ``is_active`` flips, else ``service.updated``."""
+def update_specialist_service(
+    professional_id: int, service_id: int, data: dict[str, Any], *, actor: Any, request: Any = None
+) -> Service:
+    """``PATCH …/services/{id}/``: ``is_active: false`` takes a service out of the customer catalogue and the
+    booking dialogs at once; booked appointments keep their price and duration snapshots. Audit
+    ``service.deactivated`` / ``service.activated`` when ``is_active`` flips, else ``service.updated``;
+    nothing changed → no write, no audit."""
     with transaction.atomic():
-        service = Service.objects.select_for_update().filter(pk=service_id).first()
-        if service is None:
-            raise NotFound
+        service = _owned_service(professional_id, service_id)
         before = _service_state(service)
         _apply_service(service, data)
         after = _service_state(service)
@@ -1088,7 +1053,7 @@ def update_service(service_id: int, data: dict[str, Any], *, actor: Any, request
         action = "service.updated"
         if before["is_active"] != after["is_active"]:
             action = "service.activated" if after["is_active"] else "service.deactivated"
-        service.save()
+        _save_service(service)
         diff_before, diff_after = _diff(before, after)
         audit.record(
             action=action,
@@ -1096,10 +1061,35 @@ def update_service(service_id: int, data: dict[str, Any], *, actor: Any, request
             entity_id=str(service.pk),
             actor=actor,
             request=request,
-            before=diff_before,
-            after=diff_after,
+            before={"professional_id": service.professional_id, **diff_before},
+            after={"professional_id": service.professional_id, **diff_after},
         )
     return service
+
+
+def delete_specialist_service(
+    professional_id: int, service_id: int, *, actor: Any, request: Any = None
+) -> None:
+    """``DELETE …/services/{id}/``: only a service that was never booked (``Appointment.service`` is
+    ``PROTECT``); one with appointments, past or cancelled included, is 409 (deactivate it instead).
+    Audit ``service.deleted``."""
+    with transaction.atomic():
+        service = _owned_service(professional_id, service_id)
+        state = _service_state(service)
+        pk = service.pk
+        try:
+            with transaction.atomic():
+                service.delete()
+        except ProtectedError as exc:
+            raise Conflict(API_MESSAGES["service_booked"]) from exc
+        audit.record(
+            action="service.deleted",
+            entity_type="service",
+            entity_id=str(pk),
+            actor=actor,
+            request=request,
+            before=state,
+        )
 
 
 def _location_state(location: Location) -> dict[str, Any]:

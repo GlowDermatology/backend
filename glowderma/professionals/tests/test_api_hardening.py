@@ -23,7 +23,6 @@ from glowderma.professionals.models import BlockedPeriod, Professional
 from glowderma.professionals.tests.conftest import ANCHOR, errors
 from glowderma.professionals.tests.factories import (
     ProfessionalFactory,
-    ProfessionalServiceFactory,
     ServiceFactory,
     WorkingHoursFactory,
 )
@@ -72,8 +71,7 @@ def test_a_block_on_the_grid_removes_every_overlapping_slot(
     staff_client: APIClient, public_client: APIClient
 ) -> None:
     professional = ProfessionalFactory.create(is_active=True, slot_step_min=30)
-    service = ServiceFactory.create(default_duration_min=30)
-    ProfessionalServiceFactory.create(professional=professional, service=service, duration_min=30, price=1)
+    service = ServiceFactory.create(professional=professional, duration_min=30, price=1)
     WorkingHoursFactory.create(professional=professional, weekday=0, start=time(9), end=time(12))
     body = {"start": at(10), "end": at(10, 35), "kind": "busy"}
     assert staff_client.post(url(professional, "blocks/"), body, format="json").status_code == 201
@@ -113,15 +111,13 @@ def test_a_schedule_range_within_ten_years_is_listed(staff_client: APIClient, su
     assert response.status_code == 200, response.json()
 
 
-# --- the export lists only offers the catalogue offers ------------------------------------------------------
+# --- the export lists only the services the catalogue offers ------------------------------------------------
 
 
-def test_the_export_leaves_out_offers_of_a_retired_service(staff_client: APIClient) -> None:
+def test_the_export_leaves_out_a_retired_service(staff_client: APIClient) -> None:
     professional = ProfessionalFactory.create()
-    live = ServiceFactory.create(short_name_uz="Konsultatsiya", position=0)
-    retired = ServiceFactory.create(short_name_uz="Pilling", position=1, is_active=False)
-    ProfessionalServiceFactory.create(professional=professional, service=live)
-    ProfessionalServiceFactory.create(professional=professional, service=retired)
+    ServiceFactory.create(professional=professional, short_name_uz="Konsultatsiya", position=0)
+    ServiceFactory.create(professional=professional, short_name_uz="Pilling", position=1, is_active=False)
     response = staff_client.get(BASE, {"export": "csv"})
     rows = list(csv.reader(StringIO(response.content.decode("utf-8-sig")), delimiter=";"))
     assert rows[1][4] == "Konsultatsiya"

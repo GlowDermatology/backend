@@ -285,8 +285,9 @@ paths:
     post:
       operationId: admin_appointments_reschedule
       description: Move an open (requested|confirmed) appointment; the status is kept.
-        Same slot rules as the creation. A new specialist re-snapshots duration and
-        price from that specialist's service link.
+        Same slot rules as the creation. Moving to another specialist needs `service_id`,
+        one of that specialist's active services; a changed service re-snapshots duration
+        and price.
       parameters:
       - in: path
         name: id
@@ -8247,341 +8248,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
-  /api/v1/admin/services/:
-    get:
-      operationId: admin_services_list
-      description: |-
-        ``?export=csv|xlsx`` of an admin list (contract 1.8).
-
-        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
-        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
-        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
-        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
-        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
-        written in Uzbek outside that scope.
-      parameters:
-      - in: query
-        name: category
-        schema:
-          enum:
-          - dermatology
-          - cosmetology
-          type: string
-          minLength: 1
-        description: |-
-          * `dermatology` - dermatology
-          * `cosmetology` - cosmetology
-      - in: query
-        name: export
-        schema:
-          type: string
-          enum:
-          - csv
-          - xlsx
-        description: Download the filtered list as a file instead of the JSON page.
-      - in: query
-        name: is_active
-        schema:
-          type: boolean
-      - in: query
-        name: ordering
-        schema:
-          enum:
-          - position
-          - name
-          - -name
-          - created_at
-          - -created_at
-          type: string
-          default: position
-          minLength: 1
-        description: |-
-          * `position` - position
-          * `name` - name
-          * `-name` - -name
-          * `created_at` - created_at
-          * `-created_at` - -created_at
-      - name: page
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 1
-      - name: page_size
-        in: query
-        required: false
-        schema:
-          type: integer
-          enum:
-          - 20
-          - 50
-      - in: query
-        name: search
-        schema:
-          type: string
-      tags:
-      - admin
-      security:
-      - StaffJWT: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PaginatedClinicServiceList'
-          description: ''
-        '400':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '401':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '403':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '404':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '409':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '429':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-    post:
-      operationId: admin_services_create
-      description: |-
-        ``?export=csv|xlsx`` of an admin list (contract 1.8).
-
-        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
-        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
-        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
-        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
-        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
-        written in Uzbek outside that scope.
-      tags:
-      - admin
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ClinicServiceWriteRequest'
-        required: true
-      security:
-      - StaffJWT: []
-      responses:
-        '201':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ClinicService'
-          description: ''
-        '400':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '401':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '403':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '404':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '409':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '429':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-  /api/v1/admin/services/{id}/:
-    get:
-      operationId: admin_services_retrieve
-      description: |-
-        ``?export=csv|xlsx`` of an admin list (contract 1.8).
-
-        ``export_name`` (the file name stem and the sheet title) and ``export_headers`` are Uzbek source texts:
-        they are rendered with ``core.uzsource.tr`` in the request's ``Accept-Language``
-        (``core.api.language.admin_language``), and ``get_export_rows`` runs with that language active, so the
-        values it takes from ``core.labels.text`` (and ``yes_no``, ``active_label``, ``refund_state_label``)
-        follow it. Data (names, ids, amounts, dates) is never translated; the ``export.downloaded`` audit row is
-        written in Uzbek outside that scope.
-      parameters:
-      - in: path
-        name: id
-        schema:
-          type: integer
-        required: true
-      tags:
-      - admin
-      security:
-      - StaffJWT: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ClinicService'
-          description: ''
-        '400':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '401':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '403':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '404':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '409':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '429':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-    patch:
-      operationId: admin_services_partial_update
-      description: 'Every field optional; texts merge leaf by leaf. There is no delete:
-        `is_active: false` retires a service (it leaves the customer catalogue at
-        once; its appointments are kept).'
-      parameters:
-      - in: path
-        name: id
-        schema:
-          type: integer
-        required: true
-      tags:
-      - admin
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PatchedClinicServiceWriteRequest'
-      security:
-      - StaffJWT: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ClinicService'
-          description: ''
-        '400':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '401':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '403':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '404':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '409':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '429':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
   /api/v1/admin/specialist/availability/:
     get:
       operationId: specialist_availability
@@ -10602,11 +10268,11 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
   /api/v1/admin/specialists/{id}/services/:
-    put:
-      operationId: admin_specialists_services_update
-      description: The exact set of offered services with the price and duration a
-        booking snapshots; a service left out stops being offered. Existing appointments
-        keep their snapshots.
+    post:
+      operationId: admin_specialists_services_create
+      description: A new service of this specialist with the price and duration a
+        booking snapshots; appended after its others. A name the specialist already
+        uses answers 400 `unique`; at most 50 services.
       parameters:
       - in: path
         name: id
@@ -10619,8 +10285,83 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/OfferedServicesRequest'
+              $ref: '#/components/schemas/ClinicServiceWriteRequest'
         required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClinicSpecialist'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialists/{id}/services/{service_id}/:
+    patch:
+      operationId: admin_specialists_services_partial_update
+      description: 'Every field optional; texts merge leaf by leaf. `is_active: false`
+        stops offering the service at once; booked appointments keep their price and
+        duration. Another specialist''s service is 404.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: service_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedClinicServiceWriteRequest'
       security:
       - StaffJWT: []
       responses:
@@ -10630,6 +10371,70 @@ paths:
               schema:
                 $ref: '#/components/schemas/ClinicSpecialist'
           description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+    delete:
+      operationId: admin_specialists_services_destroy
+      description: 'Delete a service that was never booked. One with appointments
+        (any status) answers 409 `conflict`: deactivate it instead (`is_active: false`).'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: service_id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '204':
+          description: No response body
         '400':
           content:
             application/json:
@@ -19141,8 +18946,10 @@ components:
     AppointmentCreateRequest:
       type: object
       description: |-
-        ``POST appointments/`` (T10): ``specialist_id``, ``service_id``, ``customer_id`` | ``phone`` (E.164 of
-        an active customer), ``start`` (aware, 5-minute grid, inside working hours), ``note`` (≤ 300).
+        ``POST appointments/`` (T10): ``specialist_id``, ``service_id`` (one of that specialist's active
+        services), ``customer_id`` | ``phone``, ``start`` (aware, 5-minute grid, inside working hours), ``note``
+        (≤ 300). A ``phone`` no customer holds books a walk-in: ``name`` is then required and the customer is
+        created with the booking (no password, no consent: they sign in later with an SMS code to that phone).
       properties:
         specialist_id:
           type: integer
@@ -19159,6 +18966,12 @@ components:
           minLength: 1
           description: An Uzbek mobile number; separators and a missing +998 are accepted
             and the value is normalised to E.164 (+998XXXXXXXXX).
+        name:
+          type: string
+          minLength: 2
+          description: The new customer's name, required when no customer has the
+            phone (a walk-in).
+          maxLength: 150
         start:
           type: string
           format: date-time
@@ -19260,8 +19073,9 @@ components:
       - to
     AppointmentRescheduleRequest:
       type: object
-      description: '``POST appointments/{id}/reschedule/``: ``start`` (same slot rules),
-        optional ``specialist_id``.'
+      description: |-
+        ``POST appointments/{id}/reschedule/``: ``start`` (same slot rules), optional ``specialist_id`` and
+        ``service_id`` (required with another specialist: every service belongs to one specialist).
       properties:
         start:
           type: string
@@ -19272,6 +19086,11 @@ components:
           minimum: 1
         specialist_id:
           type: integer
+        service_id:
+          type: integer
+          description: One of the target specialist's active services; required when
+            moving to another specialist, omitted = keep the booked service (and its
+            duration and price).
       required:
       - location_id
       - start
@@ -20807,10 +20626,12 @@ components:
     ClinicService:
       type: object
       description: |-
-        The admin ``ClinicService``; instances come from ``selectors.service_queryset()``
-        (``specialist_count`` = active specialists offering it through an active link).
+        The admin ``ClinicService``: one service of one specialist, with the price and duration a booking
+        snapshots (``is_active: false`` = not offered to customers or in the booking dialogs).
       properties:
         id:
+          type: integer
+        specialist_id:
           type: integer
         name:
           allOf:
@@ -20826,17 +20647,14 @@ components:
           readOnly: true
         category:
           $ref: '#/components/schemas/ServiceCategoryEnum'
-        default_duration_min:
+        price:
           type: integer
-        default_price:
+        duration_min:
           type: integer
-          nullable: true
         position:
           type: integer
         is_active:
           type: boolean
-        specialist_count:
-          type: integer
         created_at:
           type: string
           format: date-time
@@ -20846,20 +20664,21 @@ components:
       required:
       - category
       - created_at
-      - default_duration_min
-      - default_price
       - description
+      - duration_min
       - id
       - is_active
       - name
       - position
+      - price
       - short_name
-      - specialist_count
+      - specialist_id
       - updated_at
     ClinicServiceWriteRequest:
       type: object
-      description: Body of ``POST services/`` and (``partial``) ``PATCH services/{id}/``
-        (texts merge leaf by leaf).
+      description: |-
+        Body of ``POST …/services/`` and (``partial``) ``PATCH …/services/{id}/`` of one specialist (texts
+        merge leaf by leaf). ``category`` defaults from the specialist's role on create.
       properties:
         name:
           $ref: '#/components/schemas/ServiceNameRequest'
@@ -20868,29 +20687,35 @@ components:
         description:
           $ref: '#/components/schemas/ServiceDescriptionRequest'
         category:
-          $ref: '#/components/schemas/ServiceCategoryEnum'
-        default_duration_min:
+          allOf:
+          - $ref: '#/components/schemas/ServiceCategoryEnum'
+          description: |-
+            Defaults from the specialist's role on create.
+
+            * `dermatology` - dermatology
+            * `cosmetology` - cosmetology
+        price:
+          type: integer
+          maximum: 100000000
+          minimum: 0
+          description: So'm, 0 … 100 000 000; snapshotted by every booking.
+        duration_min:
           type: integer
           maximum: 480
           minimum: 5
           description: Minutes, a multiple of 5 (5 … 480).
-        default_price:
-          type: integer
-          maximum: 100000000
-          minimum: 0
-          nullable: true
-          description: Suggested price when offering it; null = none.
         position:
           type: integer
           maximum: 100000
           minimum: 0
+          description: Order within the specialist's services; appended last on create.
         is_active:
           type: boolean
           default: true
       required:
-      - category
-      - default_duration_min
+      - duration_min
       - name
+      - price
     ClinicSpecialist:
       type: object
       description: |-
@@ -20972,7 +20797,8 @@ components:
         services:
           type: array
           items:
-            $ref: '#/components/schemas/OfferedService'
+            $ref: '#/components/schemas/ClinicService'
+          description: Every own service, inactive ones included, by position.
         working_hours:
           type: array
           items:
@@ -24803,74 +24629,6 @@ components:
       - code
       - code_verifier
       - redirect_uri
-    OfferedService:
-      type: object
-      description: |-
-        One service the specialist offers: the price and duration a booking snapshots (``is_active`` = the
-        link; ``service_is_active`` = the service itself; bookable only when both are true).
-      properties:
-        service_id:
-          type: integer
-        name:
-          type: string
-        short_name:
-          type: string
-        category:
-          $ref: '#/components/schemas/ServiceCategoryEnum'
-        price:
-          type: integer
-        duration_min:
-          type: integer
-        is_active:
-          type: boolean
-        service_is_active:
-          type: boolean
-      required:
-      - category
-      - duration_min
-      - is_active
-      - name
-      - price
-      - service_id
-      - service_is_active
-      - short_name
-    OfferedServiceInputRequest:
-      type: object
-      properties:
-        service_id:
-          type: integer
-          maximum: 2147483647
-          minimum: 1
-        price:
-          type: integer
-          maximum: 100000000
-          minimum: 0
-          description: So'm, 0 … 100 000 000.
-        duration_min:
-          type: integer
-          maximum: 480
-          minimum: 5
-          nullable: true
-          description: Minutes, a multiple of 5; omitted or null = the service's default
-            duration.
-        is_active:
-          type: boolean
-          default: true
-      required:
-      - price
-      - service_id
-    OfferedServicesRequest:
-      type: object
-      description: 'Body of ``PUT specialists/{id}/services/``: the exact set (``[]``
-        = offers nothing).'
-      properties:
-        services:
-          type: array
-          items:
-            $ref: '#/components/schemas/OfferedServiceInputRequest'
-          maxItems: 50
-      required:
-      - services
     OnlineOrders:
       type: object
       properties:
@@ -25499,27 +25257,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Category'
-    PaginatedClinicServiceList:
-      type: object
-      required:
-      - count
-      - page
-      - page_size
-      - page_count
-      - results
-      properties:
-        count:
-          type: integer
-        page:
-          type: integer
-        page_size:
-          type: integer
-        page_count:
-          type: integer
-        results:
-          type: array
-          items:
-            $ref: '#/components/schemas/ClinicService'
     PaginatedClinicSpecialistList:
       type: object
       required:
@@ -26094,8 +25831,9 @@ components:
           type: boolean
     PatchedClinicServiceWriteRequest:
       type: object
-      description: Body of ``POST services/`` and (``partial``) ``PATCH services/{id}/``
-        (texts merge leaf by leaf).
+      description: |-
+        Body of ``POST …/services/`` and (``partial``) ``PATCH …/services/{id}/`` of one specialist (texts
+        merge leaf by leaf). ``category`` defaults from the specialist's role on create.
       properties:
         name:
           $ref: '#/components/schemas/ServiceNameRequest'
@@ -26104,22 +25842,28 @@ components:
         description:
           $ref: '#/components/schemas/ServiceDescriptionRequest'
         category:
-          $ref: '#/components/schemas/ServiceCategoryEnum'
-        default_duration_min:
+          allOf:
+          - $ref: '#/components/schemas/ServiceCategoryEnum'
+          description: |-
+            Defaults from the specialist's role on create.
+
+            * `dermatology` - dermatology
+            * `cosmetology` - cosmetology
+        price:
+          type: integer
+          maximum: 100000000
+          minimum: 0
+          description: So'm, 0 … 100 000 000; snapshotted by every booking.
+        duration_min:
           type: integer
           maximum: 480
           minimum: 5
           description: Minutes, a multiple of 5 (5 … 480).
-        default_price:
-          type: integer
-          maximum: 100000000
-          minimum: 0
-          nullable: true
-          description: Suggested price when offering it; null = none.
         position:
           type: integer
           maximum: 100000
           minimum: 0
+          description: Order within the specialist's services; appended last on create.
         is_active:
           type: boolean
           default: true
@@ -28061,15 +27805,18 @@ components:
           readOnly: true
         duration_min:
           type: integer
-          description: Default duration.
+          description: Duration in minutes.
         price_from:
           type: integer
+          description: The specialist's price (equal to `price_to`).
         price_to:
           type: integer
+          description: The specialist's price (equal to `price_from`).
         specialist_ids:
           type: array
           items:
             type: integer
+          description: The one specialist who offers this service.
       required:
       - category
       - category_label

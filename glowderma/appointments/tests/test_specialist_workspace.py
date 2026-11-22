@@ -18,7 +18,7 @@ from glowderma.professionals.models import BlockedPeriod, WorkingHoursOverride
 from glowderma.professionals.tests.factories import (
     LocationFactory,
     ProfessionalFactory,
-    ProfessionalServiceFactory,
+    ServiceFactory,
     WorkingHoursFactory,
 )
 
@@ -95,7 +95,7 @@ def test_isolation_after_transfer_and_deactivation(staff_client: APIClient) -> N
 
 def test_availability_keeps_bookings_and_changes_free_slots(staff_client: APIClient) -> None:
     doctor, client = specialist()
-    offer = ProfessionalServiceFactory.create(professional=doctor)
+    offer = ServiceFactory.create(professional=doctor)
     day = visit(10).date()
     WorkingHoursFactory.create(professional=doctor, weekday=day.weekday(), start=time(9), end=time(18))
     own = AppointmentFactory.create(professional=doctor, start=visit(10))

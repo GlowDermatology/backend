@@ -144,7 +144,7 @@ def test_seed_reproduces_the_design_and_is_idempotent(monkeypatch: pytest.Monkey
     assert OutboxMessage.objects.filter(dedupe_key="push.appointment:3:confirmed").exists()
     assert OutboxMessage.objects.filter(topic="push.appointment").count() == 6 + 36
 
-    # generated rows: ids from 1000, past days attended, future days confirmed, link snapshots
+    # generated rows: ids from 1000, past days attended, future days confirmed, service snapshots
     generated = Appointment.objects.filter(pk__gte=1000).order_by("pk")
     assert generated.count() == 36 and generated.first().pk == 1000  # type: ignore[union-attr]
     past = generated.filter(start__lt=ANCHOR)
@@ -162,7 +162,7 @@ def test_seed_reproduces_the_design_and_is_idempotent(monkeypatch: pytest.Monkey
         ("attended", "admin"),
     ]
     jasur = generated.get(start=at("2026-10-27", "10:00"), professional_id=2)
-    assert (jasur.service_id, jasur.price, jasur.duration_min) == (1, 120_000, 30)  # the link's snapshot
+    assert (jasur.service_id, jasur.price, jasur.duration_min) == (6, 120_000, 30)  # his own service
     assert not Appointment.objects.filter(start__week_day=1).exists()  # Sundays are skipped
     assert not Appointment.objects.filter(customer_id__lt=13, pk__gte=1000).exists()
 

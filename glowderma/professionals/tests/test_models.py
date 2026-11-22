@@ -8,13 +8,13 @@ import pytest
 from django.db import IntegrityError, transaction
 from django.db.models import ProtectedError
 
+from glowderma.appointments.tests.factories import AppointmentFactory
 from glowderma.core import enums
 from glowderma.core.timeutils import TASHKENT
 from glowderma.professionals.models import (
     BlockedPeriod,
     Location,
     Professional,
-    ProfessionalService,
     Service,
     WorkingHours,
     WorkingHoursOverride,
@@ -23,7 +23,6 @@ from glowderma.professionals.tests.factories import (
     BlockedPeriodFactory,
     LocationFactory,
     ProfessionalFactory,
-    ProfessionalServiceFactory,
     ServiceFactory,
     WorkingHoursFactory,
     WorkingHoursOverrideFactory,
@@ -82,16 +81,16 @@ def test_professional_str_ordering_and_checks() -> None:
         assert ProfessionalFactory.create(slot_step_min=allowed).slot_step_min == allowed
 
 
-def test_professional_delete_cascades_links_hours_and_blocks() -> None:
+def test_professional_delete_cascades_services_hours_and_blocks() -> None:
     professional = ProfessionalFactory.create()
-    ProfessionalServiceFactory.create(professional=professional)
+    ServiceFactory.create(professional=professional)
     WorkingHoursFactory.create(professional=professional)
     WorkingHoursOverrideFactory.create(professional=professional)
     BlockedPeriodFactory.create(professional=professional)
+    other = ServiceFactory.create()
     professional.delete()
-    assert not ProfessionalService.objects.exists() and not WorkingHours.objects.exists()
+    assert list(Service.objects.all()) == [other] and not WorkingHours.objects.exists()
     assert not WorkingHoursOverride.objects.exists() and not BlockedPeriod.objects.exists()
-    assert Service.objects.count() == 1  # the service itself survives
 
 
 # --- Service ------------------------------------------------------------------------------------------------
@@ -100,42 +99,43 @@ def test_professional_delete_cascades_links_hours_and_blocks() -> None:
 def test_service_str_and_checks() -> None:
     service = ServiceFactory.create(name_uz="Dermatolog konsultatsiyasi", short_name_uz="Konsultatsiya")
     assert str(service) == "Dermatolog konsultatsiyasi"
+    assert service.is_active and service.created_at is not None and service.updated_at is not None
     violates("service_names_uz_required", ServiceFactory.create, name_uz="")
     violates("service_names_uz_required", ServiceFactory.create, short_name_uz="")
-    violates("service_duration_5_480", ServiceFactory.create, default_duration_min=4)
-    violates("service_duration_5_480", ServiceFactory.create, default_duration_min=481)
-    violates("service_default_price_non_negative", ServiceFactory.create, default_price=-1)
-    assert ServiceFactory.create(default_duration_min=5, default_price=None).default_price is None
-    assert ServiceFactory.create(default_duration_min=480).default_duration_min == 480
+    violates("service_duration_5_480", ServiceFactory.create, duration_min=4)
+    violates("service_duration_5_480", ServiceFactory.create, duration_min=481)
+    violates("service_price_non_negative", ServiceFactory.create, price=-1)
+    assert ServiceFactory.create(duration_min=5, price=0).price == 0
+    assert ServiceFactory.create(duration_min=480).duration_min == 480
 
 
-def test_service_with_links_is_protected() -> None:
-    link = ProfessionalServiceFactory.create()
-    with pytest.raises(ProtectedError):
-        link.service.delete()
-
-
-# --- ProfessionalService ------------------------------------------------------------------------------------
-
-
-def test_professional_service_str_unique_and_checks() -> None:
-    link = ProfessionalServiceFactory.create(price=150_000, duration_min=30)
-    assert (
-        str(link)
-        == f"Mutaxassis #{link.professional_id} · xizmat #{link.service_id}: 150\u00a0000 so‘m, 30 daqiqa"
-    )
-    assert link.is_active and link.created_at is not None and link.updated_at is not None
+def test_a_service_name_is_unique_within_one_specialist() -> None:
+    service = ServiceFactory.create(name_uz="Konsultatsiya")
     violates(
-        "professionalservice_unique",
-        ProfessionalServiceFactory.create,
-        professional=link.professional,
-        service=link.service,
+        "service_professional_name_unique",
+        ServiceFactory.create,
+        professional=service.professional,
+        name_uz="Konsultatsiya",
     )
-    violates("professionalservice_price_non_negative", ProfessionalServiceFactory.create, price=-1)
-    violates("professionalservice_duration_5_480", ProfessionalServiceFactory.create, duration_min=4)
-    violates("professionalservice_duration_5_480", ProfessionalServiceFactory.create, duration_min=481)
-    assert ProfessionalServiceFactory.create(price=0, duration_min=5).price == 0
-    assert list(ProfessionalService.objects.all())[0] == link  # professional_id, service_id
+    other = ServiceFactory.create(name_uz="Konsultatsiya")  # another specialist may use the same name
+    assert other.professional_id != service.professional_id
+
+
+def test_services_order_by_specialist_then_position() -> None:
+    first = ProfessionalFactory.create()
+    second = ProfessionalFactory.create()
+    b = ServiceFactory.create(professional=second, position=0)
+    a2 = ServiceFactory.create(professional=first, position=2)
+    a1 = ServiceFactory.create(professional=first, position=1)
+    assert list(Service.objects.all()) == sorted([a1, a2, b], key=lambda s: (s.professional_id, s.position))
+    assert list(first.services.all()) == [a1, a2]  # the reverse accessor of the owner
+
+
+def test_a_booked_service_is_protected() -> None:
+    appointment = AppointmentFactory.create()
+    assert appointment.service.professional_id == appointment.professional_id
+    with pytest.raises(ProtectedError):
+        appointment.service.delete()
 
 
 # --- WorkingHours -------------------------------------------------------------------------------------------

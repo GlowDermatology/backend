@@ -148,8 +148,8 @@ class SpecialistSlotsView(PublicAPIView):
                     ]
                 }
             )
-        link = selectors.offered_link(professional.pk, query.validated_data["service_id"])
-        if link is None:
+        service = selectors.offered_service(professional.pk, query.validated_data["service_id"])
+        if service is None:
             raise ValidationError(
                 {"service_id": [field_error("does_not_exist", message_key="field.service_not_offered")]}
             )
@@ -162,7 +162,7 @@ class SpecialistSlotsView(PublicAPIView):
                     ]
                 }
             )
-        free = selectors.free_slots(professional, link, day, now, location_id=location_id)
+        free = selectors.free_slots(professional, service, day, now, location_id=location_id)
         duration = timedelta(minutes=free.duration_min)
         payload: dict[str, Any] = {
             "date": free.day,

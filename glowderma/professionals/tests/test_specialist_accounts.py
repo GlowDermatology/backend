@@ -26,11 +26,10 @@ from glowderma.accounts.tests.factories import TEST_PASSWORD, StaffUserFactory
 from glowderma.appointments.models import Appointment
 from glowderma.appointments.tests.factories import AppointmentFactory
 from glowderma.core import enums, timeutils
-from glowderma.professionals.models import Professional, WorkingHours
+from glowderma.professionals.models import Professional, Service, WorkingHours
 from glowderma.professionals.tests.factories import (
     LocationFactory,
     ProfessionalFactory,
-    ServiceFactory,
     WorkingHoursFactory,
 )
 
@@ -210,7 +209,6 @@ def test_full_flow_from_invitation_to_customer_booking(
 
     # staff assign the clinic, the discipline and a service
     clinic = LocationFactory.create()
-    service = ServiceFactory.create()
     ok(
         staff_client.patch(
             f"{ADMIN}specialists/{pk}/",
@@ -218,8 +216,10 @@ def test_full_flow_from_invitation_to_customer_booking(
             format="json",
         )
     )
-    offer = {"services": [{"service_id": service.pk, "price": 150_000}]}
-    ok(staff_client.put(f"{ADMIN}specialists/{pk}/services/", offer, format="json"))
+    offer = {"name": {"uz": "Konsultatsiya"}, "price": 150_000, "duration_min": 30}
+    created_service = staff_client.post(f"{ADMIN}specialists/{pk}/services/", offer, format="json")
+    assert created_service.status_code == 201, created_service.data
+    [service] = Service.objects.filter(professional_id=pk)
     blocked = staff_client.patch(f"{ADMIN}specialists/{pk}/", {"is_active": True}, format="json")
     assert blocked.status_code == 409 and "ish vaqti" in str(blocked.data["message"])
 

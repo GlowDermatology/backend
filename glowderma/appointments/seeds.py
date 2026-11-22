@@ -11,7 +11,7 @@ actor staff ``admin@glowderma.uz``); a past generated row is ``attended`` at its
 when the pushes are delivered.
 
 Idempotent by ``(professional, start)``; design rows take their ids explicitly, generated rows take ids from
-1000 (the sequence is parked at 999 first). A missing lower-layer row (professional, service, link, customer,
+1000 (the sequence is parked at 999 first). A missing lower-layer row (professional, service, customer,
 admin) skips the affected row or event; a generated slot that collides with a pinned one (exclusion
 ``IntegrityError``) is dropped. Every ``created_at``/``updated_at`` is pinned to a design instant.
 """
@@ -31,7 +31,7 @@ from glowderma.appointments.models import Appointment, AppointmentEvent
 from glowderma.core import enums, timeutils
 from glowderma.core.seeding import MockRandom, SeedContext, pinned_clock, register_seeder
 from glowderma.core.timeutils import TASHKENT
-from glowderma.professionals.models import Professional, ProfessionalService, Service
+from glowderma.professionals.models import Professional, Service
 from glowderma.professionals.seeds import PROFESSIONALS, SERVICES
 
 SEED_ADMIN_EMAIL = "admin@glowderma.uz"
@@ -43,8 +43,10 @@ SURROUNDING_OFFSETS = (-3, -2, -1, 1, 2, 3, 4)
 SLOT_CHOICES = ("09:00", "10:00", "11:30", "14:30", "16:00")
 GENERATED_REQUEST_CLOCK = time(18, 20)
 GENERATED_CUSTOMER_IDS = range(13, 433)  # ``CUSTOMERS.slice(12)``: the 420 generated customers
-CONSULTATION, FOLLOW_UP = 1, 2  # service ids of professionals.seed
-COSMETOLOGY = (3, 4, 5)  # ``COSMETOLOGY`` in the mock, by service id
+# The mock's service kinds, by the design id of the kind's first row in professionals.seed; a row books the
+# kind as its specialist's own service of that name (Jasur's consultation is service 6, not 1).
+CONSULTATION, FOLLOW_UP = 1, 2
+COSMETOLOGY = (3, 4, 5)  # ``COSMETOLOGY`` in the mock
 
 
 def _at(day: date, clock: str) -> datetime:
@@ -57,9 +59,9 @@ class AppointmentSpec:
     pk: int | None  # explicit id for the design rows, None for the generated ones
     professional_id: int  # design id (professionals.seed)
     customer_id: int  # design id (accounts.seed)
-    service_id: int  # design id (professionals.seed)
+    service_id: int  # design service kind (the professionals.seed id of the kind's first row)
     start: datetime
-    price: int | None  # design price; None = the professional's link price
+    price: int | None  # design price; None = the specialist's service price
     status: str
     requested_at: datetime
     requested_via: str = enums.RequestedVia.APP
@@ -158,16 +160,20 @@ class _Lookup:
             p.name: p for p in Professional.objects.filter(name__in=[name for _, name, _ in PROFESSIONALS])
         }
         self.professionals = {pk: by_name.get(name) for pk, name, _ in PROFESSIONALS}
-        by_name_uz = {s.name_uz: s for s in Service.objects.filter(name_uz__in=[row[1] for row in SERVICES])}
-        self.services = {pk: by_name_uz.get(name_uz) for pk, name_uz, *_ in SERVICES}
-        self.phones = {pk: phone for pk, _, phone in all_customers()}
-        self._customers: dict[int, Customer | None] = {}
-        self.links = {
-            (link.professional_id, link.service_id): link
-            for link in ProfessionalService.objects.filter(
+        self.kinds = {pk: name_uz for pk, _, name_uz, *_ in SERVICES}
+        self.services = {
+            (service.professional_id, service.name_uz): service
+            for service in Service.objects.filter(
                 professional__in=[p for p in self.professionals.values() if p is not None]
             )
         }
+        self.phones = {pk: phone for pk, _, phone in all_customers()}
+        self._customers: dict[int, Customer | None] = {}
+
+    def service(self, professional: Professional, kind: int) -> Service | None:
+        """The specialist's own service of the design kind ``kind``."""
+        name_uz = self.kinds.get(kind)
+        return None if name_uz is None else self.services.get((professional.pk, name_uz))
 
     def customer(self, design_id: int) -> Customer | None:
         if design_id not in self._customers:
@@ -195,19 +201,18 @@ def _event(
 def _insert(spec: AppointmentSpec, lookup: _Lookup) -> bool:
     """Insert one appointment with its events; ``False`` when a lower-layer row is missing."""
     professional = lookup.professionals.get(spec.professional_id)
-    service = lookup.services.get(spec.service_id)
     customer = lookup.customer(spec.customer_id)
-    if professional is None or service is None or customer is None:
+    if professional is None or customer is None:
         return False
-    link = lookup.links.get((professional.pk, service.pk))
-    if link is None:
+    service = lookup.service(professional, spec.service_id)
+    if service is None:
         return False
     by_admin = spec.requested_via == enums.RequestedVia.ADMIN
     admin = lookup.admin
     if by_admin and admin is None:
         return False  # appointment_created_by_via needs the actor
-    price = link.price if spec.price is None else spec.price
-    duration = link.duration_min
+    price = service.price if spec.price is None else spec.price
+    duration = service.duration_min
     end = spec.start + timedelta(minutes=duration)
     with pinned_clock(spec.requested_at):
         appointment = Appointment(

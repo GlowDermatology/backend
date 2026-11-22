@@ -20,12 +20,11 @@ from glowderma.appointments.tests.factories import AppointmentFactory
 from glowderma.core.api.exceptions import AuthFailed, BookingLimit, CustomerError, SlotTaken
 from glowderma.core.models import AuditEntry
 from glowderma.core.timeutils import TASHKENT
-from glowderma.professionals.models import ProfessionalService
+from glowderma.professionals.models import Service
 from glowderma.professionals.tests.factories import (
     BlockedPeriodFactory,
     LocationFactory,
     ProfessionalFactory,
-    ProfessionalServiceFactory,
     ServiceFactory,
     WorkingHoursFactory,
     WorkingHoursOverrideFactory,
@@ -60,7 +59,8 @@ def clock(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> No
     monkeypatch.setattr("glowderma.core.timeutils.now", lambda: ANCHOR)
 
 
-def setup_link(*, step: int = 30, weekday: int = 0, start: time = time(9, 0)) -> ProfessionalService:
+def setup_link(*, step: int = 30, weekday: int = 0, start: time = time(9, 0)) -> Service:
+    """A published specialist working ``weekday`` with one bookable service (150 000 so‘m, 30 minutes)."""
     location = LocationFactory.create(
         name_uz="Glow Derma Yunusobod",
         name_ru="Глоу Дерма Юнусабад",
@@ -76,10 +76,12 @@ def setup_link(*, step: int = 30, weekday: int = 0, start: time = time(9, 0)) ->
         experience_years=8,
     )
     service = ServiceFactory.create(
+        professional=professional,
         name_uz="Dermatolog konsultatsiyasi",
         name_ru="Консультация дерматолога",
         short_name_uz="Konsultatsiya",
-        default_duration_min=30,
+        duration_min=30,
+        price=150_000,
     )
     WorkingHoursFactory.create(
         professional=professional,
@@ -89,9 +91,7 @@ def setup_link(*, step: int = 30, weekday: int = 0, start: time = time(9, 0)) ->
         break_start=time(13, 0),
         break_end=time(14, 0),
     )
-    return ProfessionalServiceFactory.create(
-        professional=professional, service=service, price=150_000, duration_min=30
-    )
+    return service
 
 
 def book(client: APIClient, body: dict[str, Any], key: str | None = None) -> Any:
@@ -100,11 +100,11 @@ def book(client: APIClient, body: dict[str, Any], key: str | None = None) -> Any
     )
 
 
-def body_for(link: ProfessionalService, start: datetime | str, **extra: Any) -> dict[str, Any]:
+def body_for(link: Service, start: datetime | str, **extra: Any) -> dict[str, Any]:
     value = start if isinstance(start, str) else start.isoformat()
     return {
         "specialist_id": link.professional_id,
-        "service_id": link.service_id,
+        "service_id": link.pk,
         "location_id": link.professional.location_id,
         "start": value,
         **extra,
@@ -122,7 +122,7 @@ def field_errors(response: Any) -> list[tuple[str, str, str]]:
 def test_specialists_list_and_detail(public_client: APIClient) -> None:
     link = setup_link()
     inactive = ProfessionalFactory.create(is_active=False)
-    ProfessionalServiceFactory.create(professional=link.professional, is_active=False)
+    ServiceFactory.create(professional=link.professional, is_active=False)
     body = public_client.get("/api/v1/specialists/").json()
     assert [row["id"] for row in body["results"]] == [link.professional_id]
     specialist = body["results"][0]
@@ -152,7 +152,7 @@ def test_specialists_list_and_detail(public_client: APIClient) -> None:
         ],
         "services": [
             {
-                "id": link.service_id,
+                "id": link.pk,
                 "name": "Dermatolog konsultatsiyasi",
                 "short_name": "Konsultatsiya",
                 "duration_min": 30,
@@ -187,33 +187,39 @@ def test_specialists_list_and_detail(public_client: APIClient) -> None:
     assert public_client.get("/api/v1/specialists/999999/").json()["code"] == "not_found"
 
 
-def test_services_list_with_price_range(public_client: APIClient) -> None:
+def test_services_list_has_one_row_per_specialist_service(public_client: APIClient) -> None:
     link = setup_link()
-    other = ProfessionalFactory.create()
-    ProfessionalServiceFactory.create(professional=other, service=link.service, price=200_000)
-    lonely = ServiceFactory.create()  # offered by nobody
-    ProfessionalServiceFactory.create(
-        professional=ProfessionalFactory.create(is_active=False), service=lonely
+    other = ProfessionalFactory.create(name="Jasur Aliyev", position=link.professional.position + 1)
+    copy = ServiceFactory.create(
+        professional=other, name_uz="Dermatolog konsultatsiyasi", short_name_uz="Konsultatsiya", price=200_000
     )
+    ServiceFactory.create(professional=other, is_active=False)  # retired
+    ServiceFactory.create(
+        professional=ProfessionalFactory.create(is_active=False)
+    )  # an unpublished specialist
     body = public_client.get("/api/v1/services/").json()
+    row = {
+        "name": "Dermatolog konsultatsiyasi",
+        "short_name": "Konsultatsiya",
+        "description": "",
+        "category": "dermatology",
+        "category_label": "Dermatologiya",
+        "duration_min": 30,
+    }
     assert body == {
-        "results": [
+        "results": [  # the same response shape: one specialist and price_from == price_to per row
             {
-                "id": link.service_id,
-                "name": "Dermatolog konsultatsiyasi",
-                "short_name": "Konsultatsiya",
-                "description": "",
-                "category": "dermatology",
-                "category_label": "Dermatologiya",
-                "duration_min": 30,
+                "id": link.pk,
+                **row,
                 "price_from": 150_000,
-                "price_to": 200_000,
-                "specialist_ids": [link.professional_id, other.pk],
-            }
+                "price_to": 150_000,
+                "specialist_ids": [link.professional_id],
+            },
+            {"id": copy.pk, **row, "price_from": 200_000, "price_to": 200_000, "specialist_ids": [other.pk]},
         ]
     }
-    link.service.category = "cosmetology"
-    link.service.save()
+    link.category = "cosmetology"
+    link.save()
     ru = public_client.get("/api/v1/services/", HTTP_ACCEPT_LANGUAGE="ru").json()["results"][0]
     assert (ru["category"], ru["category_label"]) == ("cosmetology", "Косметология")
 
@@ -221,10 +227,10 @@ def test_services_list_with_price_range(public_client: APIClient) -> None:
 # --- free slots -------------------------------------------------------------------------------------------
 
 
-def slots(client: APIClient, link: ProfessionalService, day: date, **params: Any) -> Any:
+def slots(client: APIClient, link: Service, day: date, **params: Any) -> Any:
     query = {
         "date": day.isoformat(),
-        "service_id": link.service_id,
+        "service_id": link.pk,
         "location_id": link.professional.location_id,
         **params,
     }
@@ -243,7 +249,7 @@ def test_slots_weekly_hours_with_break_and_lead_time(clock: None, public_client:
     assert {k: v for k, v in body.items() if k != "slots"} == {
         "date": "2026-11-02",
         "specialist_id": link.professional_id,
-        "service_id": link.service_id,
+        "service_id": link.pk,
         "location_id": link.professional.location_id,
         "duration_min": 30,
         "price": 150_000,
@@ -301,17 +307,17 @@ def test_slots_blocked_period_across_midnight(clock: None, public_client: APICli
 
 def test_slots_open_appointments_hold_and_rejected_free(clock: None, public_client: APIClient) -> None:
     link = setup_link()
-    AppointmentFactory.create(professional=link.professional, service=link.service, start=at(MONDAY, 10))
+    AppointmentFactory.create(professional=link.professional, service=link, start=at(MONDAY, 10))
     AppointmentFactory.create(
         professional=link.professional,
-        service=link.service,
+        service=link,
         start=at(MONDAY, 11),
         status="confirmed",
         confirmed_at=ANCHOR,
     )
     AppointmentFactory.create(
         professional=link.professional,
-        service=link.service,
+        service=link,
         start=at(MONDAY, 12),
         status="rejected",
         rejected_at=ANCHOR,
@@ -332,7 +338,7 @@ def test_slots_validation(clock: None, public_client: APIClient) -> None:
         url,
         {
             "date": "02.11.2026",
-            "service_id": str(link.service_id),
+            "service_id": str(link.pk),
             "location_id": str(link.professional.location_id),
         },
     )
@@ -341,7 +347,7 @@ def test_slots_validation(clock: None, public_client: APIClient) -> None:
         errors = field_errors(slots(public_client, link, day))
         assert errors == [("date", "out_of_range", "Faqat 30 kun ichidagi sanani tanlash mumkin.")]
     assert starts(slots(public_client, link, MONDAY + timedelta(days=28))) != []  # day 30 is still in range
-    other = ServiceFactory.create()
+    other = ServiceFactory.create()  # another specialist's service
     errors = field_errors(slots(public_client, link, MONDAY, service_id=other.pk))
     assert errors == [("service_id", "does_not_exist", "Mutaxassis bu xizmatni ko‘rsatmaydi.")]
     en = public_client.get(
@@ -381,7 +387,7 @@ def test_booking_happy_path(clock: None, customer: Customer, customer_client: AP
             "photo_medium_url": None,
         },
         "service": {
-            "id": link.service_id,
+            "id": link.pk,
             "name": "Dermatolog konsultatsiyasi",
             "short_name": "Konsultatsiya",
         },
@@ -416,7 +422,7 @@ def test_booking_happy_path(clock: None, customer: Customer, customer_client: AP
         "via": "app",
         "start": "2026-11-02T10:00:00+05:00",
         "end": "2026-11-02T10:30:00+05:00",
-        "service_id": link.service_id,
+        "service_id": link.pk,
         "professional_id": link.professional_id,
         "location_id": link.professional.location_id,
         "price": 150_000,
@@ -494,7 +500,7 @@ def test_booking_busy_slot_and_own_overlap(
     clock: None, customer: Customer, customer_client: APIClient
 ) -> None:
     link = setup_link()
-    AppointmentFactory.create(professional=link.professional, service=link.service, start=at(MONDAY, 10))
+    AppointmentFactory.create(professional=link.professional, service=link, start=at(MONDAY, 10))
     assert field_errors(book(customer_client, body_for(link, at(MONDAY, 10)))) == [
         ("start", "slot_unavailable", "Bu vaqt band.")
     ]
@@ -557,7 +563,7 @@ def test_two_customers_book_the_same_slot(monkeypatch: pytest.MonkeyPatch) -> No
     def run(index: int) -> None:
         try:
             outcomes[index] = services.request_by_customer(
-                customers[index].pk, link.professional_id, link.service_id, at(MONDAY, 10)
+                customers[index].pk, link.professional_id, link.pk, at(MONDAY, 10)
             )
         except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
             outcomes[index] = exc
@@ -588,7 +594,7 @@ def test_a_deadlock_is_the_same_lost_race(
 
     monkeypatch.setattr(Appointment.objects, "create", raise_deadlock)
     with pytest.raises(SlotTaken):
-        services.request_by_customer(customer.pk, link.professional_id, link.service_id, at(MONDAY, 10))
+        services.request_by_customer(customer.pk, link.professional_id, link.pk, at(MONDAY, 10))
     other = OperationalError("server closed the connection")
     other.__cause__ = psycopg.OperationalError("closed")
 
@@ -597,7 +603,7 @@ def test_a_deadlock_is_the_same_lost_race(
 
     monkeypatch.setattr(Appointment.objects, "create", raise_other)
     with pytest.raises(OperationalError):
-        services.request_by_customer(customer.pk, link.professional_id, link.service_id, at(MONDAY, 10))
+        services.request_by_customer(customer.pk, link.professional_id, link.pk, at(MONDAY, 10))
 
 
 def test_slot_taken_through_the_api(
@@ -606,7 +612,7 @@ def test_slot_taken_through_the_api(
     link = setup_link()
 
     def someone_else_wins() -> None:
-        AppointmentFactory.create(professional=link.professional, service=link.service, start=at(MONDAY, 10))
+        AppointmentFactory.create(professional=link.professional, service=link, start=at(MONDAY, 10))
 
     monkeypatch.setattr(services, "_before_write", someone_else_wins)
     response = book(customer_client, body_for(link, at(MONDAY, 10)))
@@ -638,7 +644,7 @@ def test_one_customer_books_two_slots_concurrently_at_the_limit(monkeypatch: pyt
     def run(index: int, hour: int) -> None:
         try:
             outcomes[index] = services.request_by_customer(
-                customer.pk, link.professional_id, link.service_id, at(MONDAY, hour)
+                customer.pk, link.professional_id, link.pk, at(MONDAY, hour)
             )
         except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
             outcomes[index] = exc
@@ -833,14 +839,14 @@ def test_booking_after_the_customer_was_deleted_answers_session_expired(
     clock: None, customer: Customer, customer_client: APIClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     link = setup_link()
-    real = selectors.offered_link
+    real = selectors.offered_service
 
     def deleted_meanwhile(*args: Any, **kwargs: Any) -> Any:
         # DELETE me/ commits between the authentication and the customer lock
         Customer.objects.filter(pk=customer.pk).update(status="deleted", deleted_at=ANCHOR)
         return real(*args, **kwargs)
 
-    monkeypatch.setattr(selectors, "offered_link", deleted_meanwhile)
+    monkeypatch.setattr(selectors, "offered_service", deleted_meanwhile)
     response = book(customer_client, body_for(link, at(MONDAY, 10)))
     assert response.status_code == 401, response.content
     assert response.json()["code"] == "SESSION_EXPIRED"
@@ -871,7 +877,7 @@ def test_booking_races_with_the_account_deletion(monkeypatch: pytest.MonkeyPatch
     def book_slot() -> None:
         try:
             outcomes["booking"] = services.request_by_customer(
-                customer.pk, link.professional_id, link.service_id, at(MONDAY, 10)
+                customer.pk, link.professional_id, link.pk, at(MONDAY, 10)
             )
         except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
             outcomes["booking"] = exc
@@ -906,7 +912,7 @@ def test_only_the_no_overlap_exclusion_is_a_lost_slot(
 
     monkeypatch.setattr(Appointment.objects, "create", raise_check)
     with pytest.raises(IntegrityError):
-        services.request_by_customer(customer.pk, link.professional_id, link.service_id, at(MONDAY, 10))
+        services.request_by_customer(customer.pk, link.professional_id, link.pk, at(MONDAY, 10))
     assert services._lost_the_slot(check) is False
     plain = IntegrityError("no cause")
     assert services._lost_the_slot(plain) is False

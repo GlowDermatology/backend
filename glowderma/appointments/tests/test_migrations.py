@@ -82,19 +82,24 @@ def test_migrate_zero_and_forward_again() -> None:
         "0005_uz_field_labels",
         "0006_appointment_clinic",
     }
+    # going below 0006 also unapplied professionals.0011+ (the service split depends on our 0006): a plain
+    # ``migrate`` restores them, so the next test's flush finds the current tables
+    call_command("migrate", verbosity=0)
+    assert "professionals_professionalservice" not in table_names()
 
 
 @pytest.mark.django_db(transaction=True)
 def test_dependency_migrate_zero_cascades_and_a_full_migrate_restores_us() -> None:
     """Regression: a sibling's ``migrate professionals zero`` unapplies appointments too (0001 depends on
-    professionals.0001) and ``migrate professionals`` alone does not re-apply us; only a plain ``migrate``
-    does. Sibling migration tests therefore end with ``call_command("migrate")``."""
+    professionals.0001). ``migrate professionals`` re-applies us only because professionals.0011 (the
+    per-specialist service split, which repoints appointments) depends on our 0006; sibling migration tests
+    still end with a plain ``call_command("migrate")``."""
     call_command("migrate", verbosity=0)
     call_command("migrate", "professionals", "zero", verbosity=0)
     assert not (TABLES & table_names())
     assert not MigrationRecorder.Migration.objects.filter(app="appointments").exists()
     call_command("migrate", "professionals", verbosity=0)
-    assert not (TABLES & table_names())  # the forward migrate of the dependency leaves us unapplied
+    assert TABLES <= table_names()  # professionals.0011 needs appointments.0006
     call_command("migrate", verbosity=0)
     assert TABLES <= table_names()
     assert trigger_exists()

@@ -1,6 +1,6 @@
 """Django admin for the professionals models (design 01 §11, 03 §8).
 
-The seven models ``Location``, ``Professional``, ``Service``, ``ProfessionalService``, ``WorkingHours``,
+The six models ``Location``, ``Professional``, ``Service`` (owned by one specialist), ``WorkingHours``,
 ``WorkingHoursOverride`` (decision T13) and ``BlockedPeriod`` are the only editable ones in the whole Django
 admin; every write goes through :mod:`glowderma.professionals.services` (``save_model`` / ``delete_model`` /
 the weekly-hours inline on a professional), which validates and audits ``<model>.created|updated|deleted``.
@@ -24,7 +24,6 @@ from glowderma.professionals.models import (
     BlockedPeriod,
     Location,
     Professional,
-    ProfessionalService,
     Service,
     WorkingHours,
     WorkingHoursOverride,
@@ -114,25 +113,18 @@ class ProfessionalAdmin(ServiceBackedAdmin):
 class ServiceAdmin(ServiceBackedAdmin):
     list_display = (
         "id",
+        "professional",
         "name_uz",
         "short_name_uz",
-        "default_duration_min",
-        "default_price",
+        "duration_min",
+        "price",
         "position",
         "is_active",
     )
-    list_filter = ("is_active",)
-    search_fields = ("name_uz", "name_ru", "name_en", "short_name_uz")
-    ordering = ("position", "id")
-
-
-@admin.register(ProfessionalService)
-class ProfessionalServiceAdmin(ServiceBackedAdmin):
-    list_display = ("id", "professional", "service", "price", "duration_min", "is_active")
-    list_filter = ("is_active",)
-    search_fields = ("professional__name", "service__name_uz")
-    ordering = ("professional_id", "service_id")
-    autocomplete_fields = ("professional", "service")
+    list_filter = ("is_active", "category")
+    search_fields = ("name_uz", "name_ru", "name_en", "short_name_uz", "professional__name")
+    ordering = ("professional_id", "position", "id")
+    autocomplete_fields = ("professional",)
 
 
 @admin.register(WorkingHours)

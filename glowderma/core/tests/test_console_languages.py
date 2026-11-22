@@ -437,18 +437,16 @@ def test_the_admin_history_names_changed_fields_in_the_viewers_language() -> Non
     from glowderma.professionals.models import Service
 
     labels = console_catalog.history_texts()
-    assert "Standart davomiylik (daq.)" in labels
-    entry = LogEntry(
-        action_flag=CHANGE, change_message='[{"changed": {"fields": ["Standart davomiylik (daq.)"]}}]'
-    )
+    assert "Davomiyligi (daq.)" in labels
+    entry = LogEntry(action_flag=CHANGE, change_message='[{"changed": {"fields": ["Davomiyligi (daq.)"]}}]')
     with translation.override("uz"):
-        assert "Standart davomiylik (daq.)" in entry.get_change_message()
+        assert "Davomiyligi (daq.)" in entry.get_change_message()
     with translation.override("ru"):
-        assert "Standart davomiylik" not in entry.get_change_message()
+        assert "Davomiyligi" not in entry.get_change_message()
         assert CYRILLIC.search(entry.get_change_message())
     with translation.override("en"):
-        assert "Default duration (min.)" in entry.get_change_message()
-    assert str(Service._meta.get_field("default_duration_min").verbose_name) != ""
+        assert "Duration (min.)" in entry.get_change_message()
+    assert str(Service._meta.get_field("duration_min").verbose_name) != ""
 
 
 @pytest.mark.django_db

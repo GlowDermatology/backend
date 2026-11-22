@@ -22,7 +22,7 @@ from glowderma.core.timeutils import TASHKENT
 from glowderma.professionals.tests.factories import (
     BlockedPeriodFactory,
     ProfessionalFactory,
-    ProfessionalServiceFactory,
+    ServiceFactory,
     WorkingHoursFactory,
     WorkingHoursOverrideFactory,
 )
@@ -38,7 +38,7 @@ def at(day: date, hour: int, minute: int = 0) -> datetime:
 
 def booking_setup(**link_kwargs: Any) -> Any:
     """A specialist working Mon–Sat 09–18 with a 13–14 break, one 30-minute service at 150 000."""
-    link = ProfessionalServiceFactory.create(**{"price": 150_000, "duration_min": 30, **link_kwargs})
+    link = ServiceFactory.create(**{"price": 150_000, "duration_min": 30, **link_kwargs})
     for weekday in range(6):
         WorkingHoursFactory.create(
             professional=link.professional, weekday=weekday, break_start=time(13, 0), break_end=time(14, 0)
@@ -120,7 +120,7 @@ def test_create_by_admin_happy_path(staff: StaffUser, clock: Any) -> None:
     customer = CustomerFactory.create()
     appointment = services.create_by_admin(
         professional=link.professional,
-        service=link.service,
+        service=link,
         customer=customer,
         start=at(MONDAY, 10, 5),
         note="Telefon orqali",
@@ -143,7 +143,7 @@ def test_create_by_admin_happy_path(staff: StaffUser, clock: Any) -> None:
         "via": "admin",
         "start": "2026-10-26T10:05:00+05:00",
         "end": "2026-10-26T10:35:00+05:00",
-        "service_id": link.service_id,
+        "service_id": link.pk,
         "professional_id": link.professional_id,
         "location_id": appointment.location_id,
         "price": 150_000,
@@ -187,7 +187,7 @@ def test_slot_validation_table(
     with pytest.raises(ValidationError) as info:
         services.create_by_admin(
             professional=professional,
-            service=link.service,
+            service=link,
             customer=CustomerFactory.create(),
             start=start,
             actor=staff,
@@ -211,7 +211,7 @@ def test_slot_rules_ignore_closed_rows_and_honour_override_hours(staff: StaffUse
     for start in (at(MONDAY, 9), at(date(2026, 10, 27), 7, 30), at(MONDAY, 17, 30)):
         services.create_by_admin(
             professional=professional,
-            service=link.service,
+            service=link,
             customer=CustomerFactory.create(),
             start=start,
             actor=staff,
@@ -221,24 +221,30 @@ def test_slot_rules_ignore_closed_rows_and_honour_override_hours(staff: StaffUse
 
 def test_service_must_be_offered_by_the_specialist(staff: StaffUser, clock: Any) -> None:
     link = booking_setup()
-    other = ProfessionalServiceFactory.create(professional=link.professional, is_active=False)
-    with pytest.raises(ValidationError) as info:
-        services.create_by_admin(
-            professional=link.professional,
-            service=other.service,
-            customer=CustomerFactory.create(),
-            start=at(MONDAY, 10),
-            actor=staff,
-        )
-    detail: Any = cast(Any, info.value.detail)["service_id"][0]
-    assert (detail.code, str(detail)) == ("does_not_exist", "Mutaxassis bu xizmatni ko‘rsatmaydi.")
+    retired = ServiceFactory.create(professional=link.professional, is_active=False)
+    cases = (
+        (retired, "Xizmat topilmadi."),
+        (ServiceFactory.create(), "Mutaxassis bu xizmatni ko‘rsatmaydi."),  # another specialist's
+    )
+    for other, message in cases:
+        with pytest.raises(ValidationError) as info:
+            services.create_by_admin(
+                professional=link.professional,
+                service=other,
+                customer=CustomerFactory.create(),
+                start=at(MONDAY, 10),
+                actor=staff,
+            )
+        detail: Any = cast(Any, info.value.detail)["service_id"][0]
+        assert (detail.code, str(detail)) == ("does_not_exist", message)
+    assert not Appointment.objects.exists()
 
 
 def test_reschedule_keeps_status_writes_event_and_pushes(staff: StaffUser, clock: Any) -> None:
     link = booking_setup()
     appointment = AppointmentFactory.create(
         professional=link.professional,
-        service=link.service,
+        service=link,
         start=at(MONDAY, 9),
         duration_min=30,
         price=150_000,
@@ -267,7 +273,7 @@ def test_reschedule_keeps_status_writes_event_and_pushes(staff: StaffUser, clock
     # the old slot is free again, the new one is taken
     services.create_by_admin(
         professional=link.professional,
-        service=link.service,
+        service=link,
         customer=CustomerFactory.create(),
         start=at(MONDAY, 9),
         actor=staff,
@@ -281,26 +287,37 @@ def test_reschedule_keeps_status_writes_event_and_pushes(staff: StaffUser, clock
     )
 
 
-def test_reschedule_to_another_specialist_resnapshots_the_link(staff: StaffUser, clock: Any) -> None:
+def test_reschedule_to_another_specialist_takes_one_of_its_services(staff: StaffUser, clock: Any) -> None:
     link = booking_setup()
-    other = booking_setup(service=link.service, price=90_000, duration_min=20)
+    other = booking_setup(price=90_000, duration_min=20)
     appointment = AppointmentFactory.create(
         professional=link.professional,
-        service=link.service,
+        service=link,
         start=at(MONDAY, 9),
         duration_min=30,
         price=150_000,
     )
+    with pytest.raises(ValidationError) as kept:  # the booked service belongs to the first specialist
+        services.reschedule(appointment.pk, start=at(MONDAY, 9), professional=other.professional, actor=staff)
+    assert "service_id" in kept.value.detail
     moved = services.reschedule(
-        appointment.pk, start=at(MONDAY, 9), professional=other.professional, actor=staff
+        appointment.pk, start=at(MONDAY, 9), professional=other.professional, service=other, actor=staff
     )
-    assert moved.professional == other.professional
+    assert (moved.professional, moved.service) == (other.professional, other)
     assert (moved.duration_min, moved.price, moved.end) == (20, 90_000, at(MONDAY, 9, 20))
-    assert appointment.events.get().data["to_professional_id"] == other.professional_id
+    event = appointment.events.get()
+    assert event.data["to_professional_id"] == other.professional_id
+    assert (event.data["from_service_id"], event.data["to_service_id"]) == (link.pk, other.pk)
     third = ProfessionalFactory.create()
-    with pytest.raises(ValidationError) as info:  # the third specialist does not offer the service
-        services.reschedule(appointment.pk, start=at(MONDAY, 10), professional=third, actor=staff)
+    with pytest.raises(ValidationError) as info:  # the third specialist does not offer that service
+        services.reschedule(
+            appointment.pk, start=at(MONDAY, 10), professional=third, service=other, actor=staff
+        )
     assert "service_id" in info.value.detail
+    other.is_active = False
+    other.save(update_fields=["is_active"])  # the booked service, retired since, still moves with the visit
+    kept_snapshot = services.reschedule(appointment.pk, start=at(MONDAY, 10), actor=staff)
+    assert (kept_snapshot.service_id, kept_snapshot.price) == (other.pk, 90_000)
 
 
 def test_reschedule_and_cancel_refuse_closed_rows(staff: StaffUser, clock: Any) -> None:
@@ -315,7 +332,7 @@ def test_cancel_frees_the_slot_and_pushes(staff: StaffUser, clock: Any) -> None:
     link = booking_setup()
     appointment = AppointmentFactory.create(
         professional=link.professional,
-        service=link.service,
+        service=link,
         start=at(MONDAY, 9),
         status="confirmed",
         confirmed_at=ANCHOR,
@@ -338,7 +355,7 @@ def test_cancel_frees_the_slot_and_pushes(staff: StaffUser, clock: Any) -> None:
     assert audit.after is not None and audit.after["reason"] == "Mijoz so‘radi"
     services.create_by_admin(
         professional=link.professional,
-        service=link.service,
+        service=link,
         customer=CustomerFactory.create(),
         start=at(MONDAY, 9),
         actor=staff,
@@ -371,7 +388,7 @@ def test_concurrent_bookings_of_one_slot_yield_one_row_and_one_conflict(
         try:
             outcomes[index] = services.create_by_admin(
                 professional=link.professional,
-                service=link.service,
+                service=link,
                 customer=customers[index],
                 start=at(MONDAY, 10),
                 actor=staff,
@@ -444,7 +461,7 @@ def test_a_deadlock_on_the_exclusion_check_is_the_same_lost_race(monkeypatch: py
     staff = StaffUserFactory.create()
     kwargs: dict[str, Any] = {
         "professional": link.professional,
-        "service": link.service,
+        "service": link,
         "customer": CustomerFactory.create(),
         "start": at(MONDAY, 10),
         "actor": staff,
@@ -462,9 +479,7 @@ def test_a_deadlock_on_the_exclusion_check_is_the_same_lost_race(monkeypatch: py
         services.create_by_admin(**kwargs)
     monkeypatch.undo()
     monkeypatch.setattr("glowderma.core.timeutils.now", lambda: ANCHOR)
-    booked = AppointmentFactory.create(
-        professional=link.professional, service=link.service, start=at(MONDAY, 15)
-    )
+    booked = AppointmentFactory.create(professional=link.professional, service=link, start=at(MONDAY, 15))
     monkeypatch.setattr(Appointment, "save", _raising(deadlock))
     with pytest.raises(Conflict):
         services.reschedule(booked.pk, start=at(MONDAY, 11), actor=staff)

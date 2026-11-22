@@ -328,7 +328,6 @@ MONEY_FIELD_NAMES = frozenset(
         "cashback_amount",
         "cashback_paid",
         "cashback_used",
-        "default_price",
         "delivery_fee",
         "from_amount",
         "items_subtotal",

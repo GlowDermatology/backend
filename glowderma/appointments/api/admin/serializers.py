@@ -17,6 +17,7 @@ from glowderma.appointments.selectors import (
     RangeSchedule,
     RangeView,
 )
+from glowderma.appointments.services import WalkIn
 from glowderma.core import enums
 from glowderma.core.api.exceptions import field_error
 from glowderma.core.api.fields import AwareDateTimeField, LenientPhoneField
@@ -29,6 +30,8 @@ MESSAGES = {
     "specialist_not_found": N_("Mutaxassis topilmadi."),
     "service_not_found": N_("Xizmat topilmadi."),
     "customer_not_found": N_("Bu raqam bilan mijoz topilmadi."),
+    "walk_in_name": N_("Bu raqam bilan mijoz topilmadi: yangi mijozning ismini kiriting."),
+    "customer_inactive": N_("Bu raqamdagi mijoz hisobi faol emas."),
     "customer_id_not_found": N_("Mijoz topilmadi."),
     "one_customer_ref": N_("customer_id yoki phone dan faqat bittasini yuboring."),
 }
@@ -112,14 +115,22 @@ class PendingSummarySerializer(serializers.Serializer[dict[str, Any]]):
 
 
 class AppointmentCreateSerializer(serializers.Serializer[dict[str, Any]]):
-    """``POST appointments/`` (T10): ``specialist_id``, ``service_id``, ``customer_id`` | ``phone`` (E.164 of
-    an active customer), ``start`` (aware, 5-minute grid, inside working hours), ``note`` (≤ 300)."""
+    """``POST appointments/`` (T10): ``specialist_id``, ``service_id`` (one of that specialist's active
+    services), ``customer_id`` | ``phone``, ``start`` (aware, 5-minute grid, inside working hours), ``note``
+    (≤ 300). A ``phone`` no customer holds books a walk-in: ``name`` is then required and the customer is
+    created with the booking (no password, no consent: they sign in later with an SMS code to that phone)."""
 
     specialist_id = serializers.IntegerField()
     service_id = serializers.IntegerField()
     location_id = serializers.IntegerField(min_value=1, max_value=2_147_483_647)
     customer_id = serializers.IntegerField(required=False)
     phone = LenientPhoneField(required=False)
+    name = serializers.CharField(
+        min_length=2,
+        max_length=150,
+        required=False,
+        help_text="The new customer's name, required when no customer has the phone (a walk-in).",
+    )
     start = AwareDateTimeField()
     # Optional in the contract: no schema ``default`` (a generator would type the key as always present);
     # ``validate`` supplies the runtime default "".
@@ -134,19 +145,18 @@ class AppointmentCreateSerializer(serializers.Serializer[dict[str, Any]]):
         return professional
 
     def validate_service_id(self, value: int) -> Service:
-        service = Service.objects.filter(pk=value, is_active=True).first()
-        if service is None:
-            raise serializers.ValidationError([field_error("does_not_exist", MESSAGES["service_not_found"])])
-        return service
+        return _active_service(value)
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         attrs.setdefault("note", "")
+        name = attrs.pop("name", "")
         has_id, has_phone = "customer_id" in attrs, "phone" in attrs
         if has_id == has_phone:
             code = "required" if not has_id else "invalid"
             message = None if not has_id else MESSAGES["one_customer_ref"]
             raise serializers.ValidationError({"customer_id": [field_error(code, message)]})
         active = Customer.objects.filter(status=enums.CustomerStatus.ACTIVE)
+        customer: Customer | WalkIn | None
         if has_id:
             customer = active.filter(pk=attrs.pop("customer_id")).first()
             if customer is None:
@@ -154,23 +164,48 @@ class AppointmentCreateSerializer(serializers.Serializer[dict[str, Any]]):
                     {"customer_id": [field_error("does_not_exist", MESSAGES["customer_id_not_found"])]}
                 )
         else:
-            customer = active.filter(phone=attrs.pop("phone")).first()
-            if customer is None:
+            phone = attrs.pop("phone")
+            customer = active.filter(phone=phone).first()
+            if customer is None and Customer.objects.filter(phone=phone).exists():
                 raise serializers.ValidationError(
-                    {"phone": [field_error("customer_not_found", MESSAGES["customer_not_found"])]}
+                    {"phone": [field_error("customer_not_found", MESSAGES["customer_inactive"])]}
                 )
+            if customer is None:
+                if not name:
+                    raise serializers.ValidationError(
+                        {"name": [field_error("required", MESSAGES["walk_in_name"])]}
+                    )
+                customer = WalkIn(phone=phone, name=name)
         attrs["customer"] = customer
         attrs["professional"] = attrs.pop("specialist_id")
         attrs["service"] = attrs.pop("service_id")
         return attrs
 
 
+def _active_service(pk: int) -> Service:
+    service = Service.objects.filter(pk=pk, is_active=True).first()
+    if service is None:
+        raise serializers.ValidationError([field_error("does_not_exist", MESSAGES["service_not_found"])])
+    return service
+
+
 class AppointmentRescheduleSerializer(serializers.Serializer[dict[str, Any]]):
-    """``POST appointments/{id}/reschedule/``: ``start`` (same slot rules), optional ``specialist_id``."""
+    """``POST appointments/{id}/reschedule/``: ``start`` (same slot rules), optional ``specialist_id`` and
+    ``service_id`` (required with another specialist: every service belongs to one specialist)."""
 
     start = AwareDateTimeField()
     location_id = serializers.IntegerField(min_value=1, max_value=2_147_483_647)
     specialist_id = serializers.IntegerField(required=False)
+    service_id = serializers.IntegerField(
+        required=False,
+        help_text=(
+            "One of the target specialist's active services; required when moving to another specialist, "
+            "omitted = keep the booked service (and its duration and price)."
+        ),
+    )
+
+    def validate_service_id(self, value: int) -> Service:
+        return _active_service(value)
 
     def validate_specialist_id(self, value: int) -> Professional:
         professional = Professional.objects.filter(pk=value, is_active=True).first()
@@ -194,9 +229,9 @@ class AppointmentCancelSerializer(serializers.Serializer[dict[str, Any]]):
 class BookingServiceSerializer(serializers.Serializer[Any]):
     """One bookable service of a specialist: the snapshot an admin booking would take (contract §2.9 meta)."""
 
-    id = serializers.IntegerField(source="service.pk")
-    name = serializers.CharField(source="service.name_uz")
-    short_name = serializers.CharField(source="service.short_name_uz")
+    id = serializers.IntegerField()
+    name = serializers.CharField(source="name_uz")
+    short_name = serializers.CharField(source="short_name_uz")
     duration_min = serializers.IntegerField()
     price = serializers.IntegerField()
 
@@ -205,7 +240,7 @@ class BookingSpecialistSerializer(serializers.Serializer[Any]):
     id = serializers.IntegerField()
     name = serializers.CharField()
     role = serializers.ChoiceField(choices=enums.SpecialistRole.values)
-    services = BookingServiceSerializer(many=True, source="bookable_links")
+    services = BookingServiceSerializer(many=True, source="bookable_services")
     locations = serializers.SerializerMethodField()
 
     @extend_schema_field(AppointmentClinicSerializer(many=True))

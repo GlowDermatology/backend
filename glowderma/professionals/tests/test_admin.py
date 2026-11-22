@@ -10,13 +10,13 @@ from django.urls import reverse
 
 from glowderma.accounts.tests.factories import StaffUserFactory
 from glowderma.accounts.tests.ops_helpers import ops_login
+from glowderma.appointments.tests.factories import AppointmentFactory
 from glowderma.core.models import AuditEntry
 from glowderma.professionals.admin import ServiceBackedAdmin
 from glowderma.professionals.models import (
     BlockedPeriod,
     Location,
     Professional,
-    ProfessionalService,
     Service,
     WorkingHours,
     WorkingHoursOverride,
@@ -25,7 +25,6 @@ from glowderma.professionals.tests.factories import (
     BlockedPeriodFactory,
     LocationFactory,
     ProfessionalFactory,
-    ProfessionalServiceFactory,
     ServiceFactory,
     WorkingHoursFactory,
     WorkingHoursOverrideFactory,
@@ -37,7 +36,6 @@ EDITABLE = [
     Location,
     Professional,
     Service,
-    ProfessionalService,
     WorkingHours,
     WorkingHoursOverride,
     BlockedPeriod,
@@ -85,15 +83,14 @@ def staff_client() -> Client:
 
 def test_changelists_and_change_pages_render() -> None:
     client = staff_client()
-    link = ProfessionalServiceFactory.create()
+    service = ServiceFactory.create()
     rows = [
         LocationFactory.create(),
-        link.professional,
-        link.service,
-        link,
-        WorkingHoursFactory.create(professional=link.professional),
-        WorkingHoursOverrideFactory.create(professional=link.professional),
-        BlockedPeriodFactory.create(professional=link.professional),
+        service.professional,
+        service,
+        WorkingHoursFactory.create(professional=service.professional),
+        WorkingHoursOverrideFactory.create(professional=service.professional),
+        BlockedPeriodFactory.create(professional=service.professional),
         LocationFactory.create(),
         ServiceFactory.create(),
         ProfessionalFactory.create(),
@@ -105,15 +102,19 @@ def test_changelists_and_change_pages_render() -> None:
         assert change.status_code == 200
     # T13: the override is editable; an empty add form is re-rendered with errors, not refused.
     assert client.post(reverse("admin:professionals_workinghoursoverride_add"), {}).status_code == 200
-    search = client.get(reverse("admin:professionals_professional_changelist"), {"q": link.professional.name})
-    assert search.status_code == 200 and link.professional.name.encode() in search.content
+    search = client.get(
+        reverse("admin:professionals_professional_changelist"), {"q": service.professional.name}
+    )
+    assert search.status_code == 200 and service.professional.name.encode() in search.content
 
 
 def test_add_change_and_delete_go_through_the_services() -> None:
     client = staff_client()
+    owner = ProfessionalFactory.create()
     response = client.post(
         reverse("admin:professionals_service_add"),
         {
+            "professional": owner.pk,
             "name_uz": "Lazer epilyatsiya",
             "name_ru": "",
             "name_en": "",
@@ -124,8 +125,8 @@ def test_add_change_and_delete_go_through_the_services() -> None:
             "description_ru": "",
             "description_en": "",
             "category": "cosmetology",
-            "default_duration_min": 40,
-            "default_price": 500000,
+            "duration_min": 40,
+            "price": 500000,
             "position": 7,
             "is_active": "on",
         },
@@ -136,6 +137,7 @@ def test_add_change_and_delete_go_through_the_services() -> None:
     assert created.entity_id == str(service.pk) and created.actor_type == "staff" and created.ip
     change_url = reverse("admin:professionals_service_change", args=[service.pk])
     data = {
+        "professional": owner.pk,
         "name_uz": "Lazer epilyatsiya",
         "name_ru": "",
         "name_en": "",
@@ -146,18 +148,22 @@ def test_add_change_and_delete_go_through_the_services() -> None:
         "description_ru": "",
         "description_en": "",
         "category": "cosmetology",
-        "default_duration_min": 50,
-        "default_price": 500000,
+        "duration_min": 50,
+        "price": 500000,
         "position": 7,
         "is_active": "on",
     }
     assert client.post(change_url, data).status_code == 302
     updated = AuditEntry.objects.get(action="service.updated")
     assert updated.before is not None and updated.after is not None
-    assert updated.before["default_duration_min"] == 40 and updated.after["default_duration_min"] == 50
+    assert updated.before["duration_min"] == 40 and updated.after["duration_min"] == 50
     # an invariant breach is a form error, never a 500 or a silent write
-    bad = client.post(change_url, {**data, "default_duration_min": 2})
-    assert bad.status_code == 200 and Service.objects.get(pk=service.pk).default_duration_min == 50
+    bad = client.post(change_url, {**data, "duration_min": 2})
+    assert bad.status_code == 200 and Service.objects.get(pk=service.pk).duration_min == 50
+    # a name the specialist already uses is a form error too (the per-specialist unique constraint)
+    ServiceFactory.create(professional=owner, name_uz="Pilling")
+    taken = client.post(change_url, {**data, "name_uz": "Pilling"})
+    assert taken.status_code == 200 and Service.objects.get(pk=service.pk).name_uz == "Lazer epilyatsiya"
     assert (
         client.post(
             reverse("admin:professionals_service_delete", args=[service.pk]), {"post": "yes"}
@@ -171,14 +177,12 @@ def test_add_change_and_delete_go_through_the_services() -> None:
 
 def test_delete_of_a_referenced_service_is_refused_by_the_admin() -> None:
     client = staff_client()
-    link = ProfessionalServiceFactory.create()
-    response = client.post(
-        reverse("admin:professionals_service_delete", args=[link.service.pk]), {"post": "yes"}
-    )
+    booked = AppointmentFactory.create().service
+    response = client.post(reverse("admin:professionals_service_delete", args=[booked.pk]), {"post": "yes"})
     assert (
         response.status_code == 200
     )  # Django's "cannot delete" page: the PROTECT is explained, nothing changes
-    assert Service.objects.filter(pk=link.service.pk).exists()
+    assert Service.objects.filter(pk=booked.pk).exists()
     assert not AuditEntry.objects.filter(action="service.deleted").exists()
 
 
@@ -336,11 +340,12 @@ def test_a_refused_save_rolls_back_and_shows_the_errors_on_the_form(monkeypatch:
     response = client.post(
         reverse("admin:professionals_service_add"),
         {
+            "professional": ProfessionalFactory.create().pk,
             "name_uz": "Yangi",
             "short_name_uz": "Yangi",
             "category": "dermatology",
-            "default_duration_min": 30,
-            "default_price": 100000,
+            "duration_min": 30,
+            "price": 100000,
             "position": 1,
             "is_active": "on",
         },

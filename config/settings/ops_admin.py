@@ -141,7 +141,6 @@ SIDEBAR_NAVIGATION: list[dict[str, Any]] = [
             _item(_("Qabul tarixi"), "event_note", "appointments", "appointmentevent"),
             _item(_("Mutaxassislar"), "medical_services", "professionals", "professional"),
             _item(_("Xizmatlar"), "spa", "professionals", "service"),
-            _item(_("Mutaxassis xizmatlari"), "assignment_ind", "professionals", "professionalservice"),
             _item(_("Ish vaqti"), "schedule", "professionals", "workinghours"),
             _item(_("Kun ish vaqti"), "calendar_month", "professionals", "workinghoursoverride"),
             _item(_("Band vaqtlar"), "block", "professionals", "blockedperiod"),

@@ -73,8 +73,6 @@ BUSINESS_PREFIXES: Final = frozenset(
         "payment",
         "product",
         "professional",
-        # the Django-admin edits of a specialist's service link (``professional_service.*``, contract §3.2)
-        "professional_service",
         "refund",
         "schedule",
         "segment",

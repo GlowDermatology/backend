@@ -13,7 +13,7 @@ from django.db.models.functions import TruncDate
 
 from glowderma.appointments.models import OPEN_STATUSES, Appointment
 from glowderma.core import enums, timeutils
-from glowderma.professionals.models import Professional, ProfessionalService, Service
+from glowderma.professionals.models import Professional, Service
 from glowderma.professionals.selectors import (
     DAY_END_LABEL,
     DaySchedule,
@@ -350,7 +350,7 @@ def _overlaps(start: datetime, end: datetime, ranges: list[tuple[datetime, datet
 
 @dataclass(frozen=True, slots=True)
 class FreeSlots:
-    """``GET specialists/{id}/slots/`` (C§2.11): the link's duration and price, the grid step, the day's
+    """``GET specialists/{id}/slots/`` (C§2.11): the service's duration and price, the grid step, the day's
     hours and the free start times."""
 
     day: date
@@ -366,7 +366,7 @@ class FreeSlots:
 
 def free_slots(
     professional: Professional,
-    link: ProfessionalService,
+    service: Service,
     day: date,
     now: datetime | None = None,
     *,
@@ -381,7 +381,7 @@ def free_slots(
     selected_location = professional.location_id if location_id is None else location_id
     matching_location = frame.location_id == selected_location
     step = timedelta(minutes=professional.slot_step_min)
-    duration = timedelta(minutes=link.duration_min)
+    duration = timedelta(minutes=service.duration_min)
     slots: list[datetime] = []
     if matching_location and frame.hours is not None:
         earliest = instant + lead_time()
@@ -393,10 +393,10 @@ def free_slots(
     return FreeSlots(
         day=day,
         professional_id=professional.pk,
-        service_id=link.service_id,
+        service_id=service.pk,
         location_id=selected_location,
-        duration_min=link.duration_min,
-        price=link.price,
+        duration_min=service.duration_min,
+        price=service.price,
         slot_step_min=professional.slot_step_min,
         working_hours=frame.hours_labels if matching_location else None,
         slots=slots,
@@ -465,13 +465,13 @@ def can_cancel(appointment: Appointment, now: datetime | None = None) -> bool:
 # --- the public booking catalogue (C§2.11: specialists and services) ---
 
 
-def bookable_links(professional: Professional) -> list[ProfessionalService]:
-    """The active links to active services prefetched by ``booking_catalogue``."""
-    return list(getattr(professional, "bookable_links", []))
+def bookable_services(professional: Professional) -> list[Service]:
+    """The specialist's active services prefetched by ``booking_catalogue``."""
+    return list(getattr(professional, "bookable_services", []))
 
 
 def specialists() -> list[Professional]:
-    """Active professionals by position, name, with their bookable links and location."""
+    """Active professionals by position, name, with their bookable services and location."""
     return list(booking_catalogue())
 
 
@@ -485,15 +485,14 @@ def specialist_by_slug(slug: str) -> Professional | None:
     return booking_catalogue().filter(slug=slug).first()
 
 
-def offered_link(professional_id: int, service_id: int) -> ProfessionalService | None:
-    """The active link of an active service of an active professional, else ``None``."""
+def offered_service(professional_id: int, service_id: int) -> Service | None:
+    """The active service ``service_id`` of the active professional ``professional_id``, else ``None``."""
     return (
-        ProfessionalService.objects.select_related("service", "professional")
+        Service.objects.select_related("professional")
         .filter(
+            pk=service_id,
             professional_id=professional_id,
             professional__is_active=True,
-            service_id=service_id,
-            service__is_active=True,
             is_active=True,
         )
         .first()
@@ -509,35 +508,19 @@ class ServiceOffer:
 
 
 def service_offers() -> list[ServiceOffer]:
-    """Active services offered by at least one active specialist through an active link, by position and
-    name, with the price range and the specialist ids."""
-    links = (
-        ProfessionalService.objects.filter(
-            is_active=True,
-            service__is_active=True,
-            professional__is_active=True,
-        )
+    """Every active service of an active specialist with an active clinic: one offer per specialist's
+    service (``price_from == price_to``, one specialist id), by specialist (position, name) then the
+    service's position and name."""
+    rows = (
+        Service.objects.filter(is_active=True, professional__is_active=True)
         .filter(
             Q(professional__location__is_active=True) | Q(professional__additional_locations__is_active=True)
         )
         .distinct()
-        .select_related("service")
         .order_by(
-            "service__position", "service__name_uz", "service_id", "professional__position", "professional_id"
+            "professional__position", "professional__name", "professional_id", "position", "name_uz", "id"
         )
     )
-    offers: dict[int, ServiceOffer] = {}
-    for link in links:
-        offer = offers.get(link.service_id)
-        if offer is None:
-            offers[link.service_id] = ServiceOffer(
-                link.service, link.price, link.price, [link.professional_id]
-            )
-            continue
-        offers[link.service_id] = ServiceOffer(
-            offer.service,
-            min(offer.price_from, link.price),
-            max(offer.price_to, link.price),
-            [*offer.specialist_ids, link.professional_id],
-        )
-    return list(offers.values())
+    return [
+        ServiceOffer(service, service.price, service.price, [service.professional_id]) for service in rows
+    ]

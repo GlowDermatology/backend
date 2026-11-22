@@ -1126,6 +1126,10 @@ msgstr "Один клиент"
 msgid "Bitta mijoz · %(phone)s"
 msgstr "Один клиент · %(phone)s"
 
+#: glowderma/professionals/services.py
+msgid "Bitta mutaxassisda ko‘pi bilan %(n)s ta xizmat bo‘lishi mumkin."
+msgstr "У одного специалиста может быть не более %(n)s услуг."
+
 #: glowderma/assistant/console/forms.py
 msgid "Bitta urinish uchun, 5–20 soniya. Butun so‘rov 90 soniyada to‘xtatiladi: kutish vaqti qayta urinishlar bilan birga shu chegaraga sig‘ishi kerak."
 msgstr "На одну попытку, 5–20 секунд. Весь запрос останавливается через 90 секунд: время ожидания вместе с повторными попытками должно укладываться в этот предел."
@@ -1301,6 +1305,10 @@ msgstr "У этого клиента нет устройства, принима
 msgid "Bu muammo allaqachon hal qilingan."
 msgstr "Эта проблема уже решена."
 
+#: glowderma/professionals/services.py
+msgid "Bu mutaxassisda shu nomdagi xizmat allaqachon bor."
+msgstr "У этого специалиста уже есть услуга с таким названием."
+
 #: glowderma/accounts/services.py
 msgid "Bu provayder allaqachon bog‘langan."
 msgstr "Этот провайдер уже привязан."
@@ -1327,6 +1335,15 @@ msgstr "Это устройство уже в списке."
 #: glowderma/notifications/services.py
 msgid "Bu raqam bilan mijoz topilmadi."
 msgstr "Клиент с таким номером не найден."
+
+#: glowderma/appointments/api/admin/serializers.py
+msgid "Bu raqam bilan mijoz topilmadi: yangi mijozning ismini kiriting."
+msgstr "Клиент с этим номером не найден: введите имя нового клиента."
+
+#: glowderma/appointments/api/admin/serializers.py
+#: glowderma/appointments/services.py
+msgid "Bu raqamdagi mijoz hisobi faol emas."
+msgstr "Учётная запись клиента с этим номером неактивна."
 
 #: glowderma/assistant/services.py
 msgid "Bu rejim faqat boshqaruv konsolida ishlatiladi."
@@ -1376,9 +1393,9 @@ msgstr "Это время пересекается с другим заняты�
 msgid "Bu versiya avval faol bo‘lgan: uni qayta faollashtirish joriy versiyani arxivga o‘tkazadi."
 msgstr "Эта версия уже была активной: её повторная активация отправит текущую версию в архив."
 
-#: glowderma/professionals/api/admin/serializers.py
-msgid "Bu xizmat ro‘yxatda ikki marta berilgan."
-msgstr "Эта услуга указана в списке дважды."
+#: glowderma/professionals/services.py
+msgid "Bu xizmatga qabullar yozilgan, uni o‘chirib bo‘lmaydi. Uning o‘rniga nofaol qiling."
+msgstr "На эту услугу есть записи, её нельзя удалить. Вместо этого деактивируйте её."
 
 #: glowderma/professionals/api/admin/serializers.py
 #: glowderma/professionals/services.py
@@ -1675,8 +1692,7 @@ msgstr "Продолжить"
 msgid "Davomiyligi"
 msgstr "Длительность"
 
-#: admin history (professionals.ProfessionalService)
-#: glowderma.core.labels.SERVICE_EXPORT_HEADERS
+#: admin history (professionals.Service)
 msgid "Davomiyligi (daq.)"
 msgstr "Длительность (мин.)"
 
@@ -1915,11 +1931,6 @@ msgstr "Активен"
 msgctxt "export segment_members"
 msgid "Faol"
 msgstr "Активен"
-
-#: glowderma/core/labels.py
-msgctxt "export services"
-msgid "Faol"
-msgstr "Активна"
 
 #: glowderma/core/labels.py
 msgctxt "export specialists"
@@ -3494,10 +3505,6 @@ msgstr "Специалист #%(professional_id)s · %(date)s: %(hours)s"
 msgid "Mutaxassis #%(professional_id)s · %(day)s %(start)s–%(end)s"
 msgstr "Специалист #%(professional_id)s · %(day)s %(start)s–%(end)s"
 
-#: glowderma/professionals/models.py
-msgid "Mutaxassis #%(professional_id)s · xizmat #%(service_id)s: %(price)s, %(duration)s daqiqa"
-msgstr "Специалист #%(professional_id)s · услуга #%(service_id)s: %(price)s, %(duration)s мин"
-
 #: glowderma/appointments/services.py
 msgid "Mutaxassis bu vaqtda ishlamaydi."
 msgstr "Специалист в это время не работает."
@@ -3535,10 +3542,6 @@ msgstr "Специалист не найден."
 msgid "Mutaxassis ushbu filialda qabul qilmaydi."
 msgstr "Специалист не принимает в этом филиале."
 
-#: config/settings/ops_admin.py
-msgid "Mutaxassis xizmatlari"
-msgstr "Услуги специалистов"
-
 #: glowderma/professionals/services.py
 msgid "Mutaxassisda %(n)s ta kelgusi qabul bor (kutilayotgan yoki tasdiqlangan). Avval ularni boshqa vaqtga yoki mutaxassisga ko‘chiring yoki bekor qiling."
 msgid_plural "Mutaxassisda %(n)s ta kelgusi qabul bor (kutilayotgan yoki tasdiqlangan). Avval ularni boshqa vaqtga yoki mutaxassisga ko‘chiring yoki bekor qiling."
@@ -3552,7 +3555,6 @@ msgid "Mutaxassisda {n} ta kelgusi qabul bor (kutilayotgan yoki tasdiqlangan). Q
 msgstr "Предстоящих записей у специалиста (ожидающих или подтверждённых): {n}. Записи не изменятся: сначала перенесите их на другое время или к другому специалисту либо отмените, или всё равно деактивируйте специалиста."
 
 #: config/settings/ops_admin.py
-#: glowderma.core.labels.SERVICE_EXPORT_HEADERS
 msgid "Mutaxassislar"
 msgstr "Специалисты"
 
@@ -3589,7 +3591,7 @@ msgstr "Пример товара (ID)"
 msgid "Namuna mahsulotda sinash"
 msgstr "Проверить на примере товара"
 
-#: admin history (professionals.ProfessionalService)
+#: admin history (professionals.Service)
 #: glowderma/appointments/admin.py
 #: glowderma/catalog/admin.py
 #: glowderma/commerce/admin.py
@@ -3677,11 +3679,6 @@ msgid "Nofaol"
 msgstr "Неактивный"
 
 #: glowderma/core/labels.py
-msgctxt "export services"
-msgid "Nofaol"
-msgstr "Неактивна"
-
-#: glowderma/core/labels.py
 msgctxt "export specialists"
 msgid "Nofaol"
 msgstr "Неактивен"
@@ -3715,11 +3712,6 @@ msgstr "Название"
 
 #: glowderma/core/labels.py
 msgctxt "export segments"
-msgid "Nomi"
-msgstr "Название"
-
-#: glowderma/core/labels.py
-msgctxt "export services"
 msgid "Nomi"
 msgstr "Название"
 
@@ -4390,10 +4382,6 @@ msgstr "Краткое название (ru)"
 #: admin history (professionals.Service)
 msgid "Qisqa nom (uz)"
 msgstr "Краткое название (uz)"
-
-#: glowderma.core.labels.SERVICE_EXPORT_HEADERS
-msgid "Qisqa nomi"
-msgstr "Краткое название"
 
 #: model metadata
 msgid "Qisqaroq"
@@ -5076,14 +5064,6 @@ msgstr "Запросов нет"
 #: model metadata
 msgid "Standart"
 msgstr "Стандарт"
-
-#: admin history (professionals.Service)
-msgid "Standart davomiylik (daq.)"
-msgstr "Длительность по умолчанию (мин.)"
-
-#: admin history (professionals.Service)
-msgid "Standart narx"
-msgstr "Цена по умолчанию"
 
 #: admin history (delivery.DeliverySettings)
 #: model metadata
@@ -5866,14 +5846,12 @@ msgstr "Исправьте ошибки."
 msgid "Xavfsizlik"
 msgstr "Безопасность"
 
-#: admin history (professionals.ProfessionalService)
 #: glowderma/reporting/templates/reporting/dashboards/customers.html
 msgid "Xizmat"
 msgstr "Услуга"
 
 #: glowderma/appointments/api/admin/serializers.py
 #: glowderma/appointments/services.py
-#: glowderma/professionals/api/admin/serializers.py
 msgid "Xizmat topilmadi."
 msgstr "Услуга не найдена."
 
@@ -7504,14 +7482,6 @@ msgstr "автор"
 msgid "mutaxassis"
 msgstr "специалист"
 
-#: model metadata
-msgid "mutaxassis xizmati"
-msgstr "услуга специалиста"
-
-#: model metadata
-msgid "mutaxassis xizmatlari"
-msgstr "услуги специалистов"
-
 #: glowderma/professionals/api/admin/views.py
 #: model metadata
 msgid "mutaxassislar"
@@ -8314,14 +8284,6 @@ msgid "so‘rov xeshi"
 msgstr "хеш запроса"
 
 #: model metadata
-msgid "standart davomiylik (daq.)"
-msgstr "длительность по умолчанию (мин.)"
-
-#: model metadata
-msgid "standart narx"
-msgstr "цена по умолчанию"
-
-#: model metadata
 msgid "subyekt"
 msgstr "субъект"
 
@@ -8774,7 +8736,6 @@ msgstr "время ошибки"
 msgid "xizmat"
 msgstr "услуга"
 
-#: glowderma/professionals/api/admin/views.py
 #: model metadata
 msgid "xizmatlar"
 msgstr "услуги"

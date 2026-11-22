@@ -96,12 +96,12 @@ def yes_no(value: bool) -> str:
     return tr("Ha" if value else "Yo‘q")
 
 
-# ``is_active`` of specialists and services (contract §5.8).
+# ``is_active`` of specialists (contract §5.8).
 ACTIVE_STATE: dict[bool, str] = {True: "Faol", False: "Nofaol"}
 
 
 def active_label(value: bool) -> str:
-    """``is_active`` of specialists and services (contract §5.8): "Faol" / "Nofaol" in the active language."""
+    """``is_active`` of specialists (contract §5.8): "Faol" / "Nofaol" in the active language."""
     return tr(ACTIVE_STATE[bool(value)])
 
 
@@ -115,9 +115,6 @@ _EXPORT_RENDERINGS: tuple[str, ...] = (
     NC_("export categories", "Nomi"),
     NC_("export categories", "Faol"),
     NC_("export banners", "Faol"),
-    NC_("export services", "Nomi"),
-    NC_("export services", "Faol"),
-    NC_("export services", "Nofaol"),
     NC_("export specialists", "Faol"),
     NC_("export specialists", "Nofaol"),
     NC_("export segments", "Nomi"),
@@ -158,16 +155,6 @@ SPECIALIST_EXPORT_HEADERS: tuple[str, ...] = (
     "Xizmatlar",
     "Ish kunlari",
     "Kelgusi qabullar",
-    "Holat",
-)
-SERVICE_EXPORT_HEADERS: tuple[str, ...] = (
-    "ID",
-    "Nomi",
-    "Qisqa nomi",
-    "Kategoriya",
-    "Davomiyligi (daq.)",
-    "Narx (so‘m)",
-    "Mutaxassislar",
     "Holat",
 )
 # Contract 1.8 export columns (Uzbek headers) of the notifications, segments and audit-log lists (M1d).

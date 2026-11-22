@@ -20,7 +20,7 @@ from glowderma.core import enums, i18n, timeutils
 from glowderma.core.api.exceptions import field_error
 from glowderma.core.api.fields import AwareDateTimeField
 from glowderma.core.media import absolute_media_url, optional_variant_url
-from glowderma.professionals.models import Location, Professional, ProfessionalService
+from glowderma.professionals.models import Location, Professional, Service
 from glowderma.professionals.selectors import assigned_locations
 
 
@@ -69,18 +69,18 @@ class LocationSerializer(serializers.Serializer[Location]):
         return _coordinate(obj.longitude)
 
 
-class SpecialistServiceSerializer(serializers.Serializer[ProfessionalService]):
-    id = serializers.IntegerField(source="service_id")
+class SpecialistServiceSerializer(serializers.Serializer[Service]):
+    id = serializers.IntegerField()
     name = serializers.SerializerMethodField()
     short_name = serializers.SerializerMethodField()
     duration_min = serializers.IntegerField()
     price = serializers.IntegerField()
 
-    def get_name(self, obj: ProfessionalService) -> str:
-        return pick(obj.service, "name", _lang(self))
+    def get_name(self, obj: Service) -> str:
+        return pick(obj, "name", _lang(self))
 
-    def get_short_name(self, obj: ProfessionalService) -> str:
-        return pick(obj.service, "short_name", _lang(self))
+    def get_short_name(self, obj: Service) -> str:
+        return pick(obj, "short_name", _lang(self))
 
 
 class SpecialistSerializer(serializers.Serializer[Professional]):
@@ -139,8 +139,8 @@ class SpecialistSerializer(serializers.Serializer[Professional]):
 
     @extend_schema_field(SpecialistServiceSerializer(many=True))
     def get_services(self, obj: Professional) -> list[dict[str, Any]]:
-        links = selectors.bookable_links(obj)
-        serializer: Any = SpecialistServiceSerializer(links, many=True, context=self.context)  # type: ignore[arg-type]
+        rows = selectors.bookable_services(obj)
+        serializer: Any = SpecialistServiceSerializer(rows, many=True, context=self.context)  # type: ignore[arg-type]
         return list(serializer.data)
 
 
@@ -155,12 +155,12 @@ class ServiceOfferSerializer(serializers.Serializer[selectors.ServiceOffer]):
     description = serializers.SerializerMethodField()
     category = serializers.ChoiceField(choices=enums.ServiceCategory.values, source="service.category")
     category_label = serializers.SerializerMethodField()
-    duration_min = serializers.IntegerField(
-        source="service.default_duration_min", help_text="Default duration."
+    duration_min = serializers.IntegerField(source="service.duration_min", help_text="Duration in minutes.")
+    price_from = serializers.IntegerField(help_text="The specialist's price (equal to `price_to`).")
+    price_to = serializers.IntegerField(help_text="The specialist's price (equal to `price_from`).")
+    specialist_ids = serializers.ListField(
+        child=serializers.IntegerField(), help_text="The one specialist who offers this service."
     )
-    price_from = serializers.IntegerField()
-    price_to = serializers.IntegerField()
-    specialist_ids = serializers.ListField(child=serializers.IntegerField())
 
     def get_name(self, obj: selectors.ServiceOffer) -> str:
         return pick(obj.service, "name", _lang(self))

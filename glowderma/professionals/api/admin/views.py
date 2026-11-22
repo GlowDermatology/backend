@@ -1,7 +1,8 @@
 """Admin views of `professionals` (contract "Mutaxassislar va xizmatlar"; gaps FND-1 and FND-7).
 
-Specialists (list / create / retrieve / PATCH, photo, offered services, weekly hours, date overrides, blocked
-periods), services (list / create / retrieve / PATCH; never deleted) and the clinic location. Every write
+Specialists (list / retrieve / PATCH, photo, their own services, weekly hours, date overrides, blocked
+periods) and the clinic locations. Every service belongs to one specialist (there is no global catalogue);
+a service is deleted only if it was never booked, else deactivated. Every write
 goes through :mod:`glowderma.professionals.services` (audited) and honours an optional ``Idempotency-Key``.
 The customer catalogue and the free slots read the same rows on every request (there is no slot cache), so
 a change is bookable — or no longer offered — at once. ``specialists/{id}/conflicts/`` is declared by
@@ -45,15 +46,12 @@ from glowderma.professionals.api.admin.serializers import (
     ClinicLocationPatchSerializer,
     ClinicLocationSerializer,
     ClinicLocationsSerializer,
-    ClinicServiceSerializer,
     ClinicServiceWriteSerializer,
     ClinicSpecialistPatchSerializer,
     ClinicSpecialistSerializer,
     HoursOverrideCreateSerializer,
     HoursOverrideSerializer,
-    OfferedServicesSerializer,
     ScheduleRangeQuerySerializer,
-    ServiceListQuerySerializer,
     SpecialistListQuerySerializer,
     WorkingWeekSerializer,
 )
@@ -61,7 +59,6 @@ from glowderma.professionals.models import (
     BlockedPeriod,
     Location,
     Professional,
-    ProfessionalService,
     Service,
     WorkingHours,
     WorkingHoursOverride,
@@ -124,11 +121,9 @@ class SpecialistViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet)
         rows = list(items)
         upcoming = _upcoming(rows)
         for professional in rows:
-            links: list[ProfessionalService] = getattr(professional, "offered_links", [])
+            owned: list[Service] = getattr(professional, "service_rows", [])
             week: list[WorkingHours] = getattr(professional, "week_rows", [])
-            offered = [
-                link.service.short_name_uz for link in links if link.is_active and link.service.is_active
-            ]
+            offered = [service.short_name_uz for service in owned if service.is_active]
             yield (
                 professional.pk,
                 professional.name,
@@ -210,23 +205,58 @@ class SpecialistPhotoView(AdminAPIView):
 
 class SpecialistServicesView(AdminAPIView):
     @extend_schema(
-        operation_id="admin_specialists_services_update",
+        operation_id="admin_specialists_services_create",
         description=(
-            "The exact set of offered services with the price and duration a booking snapshots; a service "
-            "left out stops being offered. Existing appointments keep their snapshots."
+            "A new service of this specialist with the price and duration a booking snapshots; appended "
+            "after its others. A name the specialist already uses answers 400 `unique`; at most 50 services."
         ),
-        request=OfferedServicesSerializer,
+        request=ClinicServiceWriteSerializer,
+        responses={201: ClinicSpecialistSerializer, **ADMIN_ERRORS},
+    )
+    @idempotent(required=False)
+    def post(self, request: Request, pk: int) -> Response:
+        _professional_or_404(pk)
+        serializer = ClinicServiceWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        services.create_specialist_service(
+            pk, dict(serializer.validated_data), actor=request.user, request=request
+        )
+        return Response(specialist_body(pk), status=201)
+
+
+class SpecialistServiceView(AdminAPIView):
+    @extend_schema(
+        operation_id="admin_specialists_services_partial_update",
+        description=(
+            "Every field optional; texts merge leaf by leaf. `is_active: false` stops offering the service "
+            "at once; booked appointments keep their price and duration. Another specialist's service is 404."
+        ),
+        request=ClinicServiceWriteSerializer,
         responses={200: ClinicSpecialistSerializer, **ADMIN_ERRORS},
     )
     @idempotent(required=False)
-    def put(self, request: Request, pk: int) -> Response:
+    def patch(self, request: Request, pk: int, service_id: int) -> Response:
         _professional_or_404(pk)
-        serializer = OfferedServicesSerializer(data=request.data)
+        serializer = ClinicServiceWriteSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        services.set_offered_services(
-            pk, serializer.validated_data["services"], actor=request.user, request=request
+        services.update_specialist_service(
+            pk, service_id, dict(serializer.validated_data), actor=request.user, request=request
         )
         return Response(specialist_body(pk))
+
+    @extend_schema(
+        operation_id="admin_specialists_services_destroy",
+        description=(
+            "Delete a service that was never booked. One with appointments (any status) answers 409 "
+            "`conflict`: deactivate it instead (`is_active: false`)."
+        ),
+        responses={204: None, **ADMIN_ERRORS},
+    )
+    @idempotent(required=False)
+    def delete(self, request: Request, pk: int, service_id: int) -> Response:
+        _professional_or_404(pk)
+        services.delete_specialist_service(pk, service_id, actor=request.user, request=request)
+        return Response(status=204)
 
 
 class SpecialistInviteCredentialsSerializer(StaffCredentialsSerializer):
@@ -422,87 +452,6 @@ class SpecialistBlockViewSet(mixins.ListModelMixin, AdminGenericViewSet):
         _professional_or_404(pk)
         services.delete_block(pk, block_id, actor=request.user, request=request)
         return Response(status=204)
-
-
-# --- services -----------------------------------------------------------------------------------------------
-
-
-class ServiceViewSet(ExportMixin, mixins.ListModelMixin, AdminGenericViewSet):
-    serializer_class = ClinicServiceSerializer
-    queryset = Service.objects.none()  # the schema's model; rows come from get_queryset
-    export_name = N_("xizmatlar")
-    export_resource = "services"
-    export_headers = labels.SERVICE_EXPORT_HEADERS
-    export_filter_keys = frozenset(ServiceListQuerySerializer().fields)
-
-    def get_queryset(self) -> QuerySet[Service]:
-        query = ServiceListQuerySerializer(data=query_params(self.request))
-        query.is_valid(raise_exception=True)
-        return selectors.filter_services(selectors.service_queryset(), dict(query.validated_data))
-
-    def get_export_rows(self, items: Iterable[Service]) -> Iterable[Sequence[Any]]:
-        for service in items:
-            yield (
-                service.pk,
-                service.name_uz,
-                service.short_name_uz,
-                labels.text(labels.SERVICE_CATEGORY, service.category),
-                service.default_duration_min,
-                "" if service.default_price is None else service.default_price,
-                int(getattr(service, "specialist_count", 0)),
-                labels.active_label(service.is_active),
-            )
-
-    def _service(self, pk: int) -> Service:
-        service = selectors.get_service(pk)
-        if service is None:
-            raise NotFound
-        return service
-
-    @extend_schema(
-        operation_id="admin_services_list",
-        parameters=[ServiceListQuerySerializer, EXPORT_PARAM],
-        responses={200: ClinicServiceSerializer(many=True), **ADMIN_ERRORS},
-    )
-    def list(self, request: Request, *args: Any, **kwargs: Any) -> Response:
-        return super().list(request, *args, **kwargs)
-
-    @extend_schema(
-        operation_id="admin_services_create",
-        request=ClinicServiceWriteSerializer,
-        responses={201: ClinicServiceSerializer, **ADMIN_ERRORS},
-    )
-    @idempotent(required=False)
-    def create(self, request: Request) -> Response:
-        serializer = ClinicServiceWriteSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        service = services.create_service(
-            dict(serializer.validated_data), actor=request.user, request=request
-        )
-        return Response(ClinicServiceSerializer(self._service(service.pk)).data, status=201)
-
-    @extend_schema(
-        operation_id="admin_services_retrieve", responses={200: ClinicServiceSerializer, **ADMIN_ERRORS}
-    )
-    def retrieve(self, request: Request, pk: int) -> Response:
-        return Response(ClinicServiceSerializer(self._service(pk)).data)
-
-    @extend_schema(
-        operation_id="admin_services_partial_update",
-        description=(
-            "Every field optional; texts merge leaf by leaf. There is no delete: `is_active: false` retires "
-            "a service (it leaves the customer catalogue at once; its appointments are kept)."
-        ),
-        request=ClinicServiceWriteSerializer,
-        responses={200: ClinicServiceSerializer, **ADMIN_ERRORS},
-    )
-    @idempotent(required=False)
-    def partial_update(self, request: Request, pk: int) -> Response:
-        self._service(pk)
-        serializer = ClinicServiceWriteSerializer(data=request.data, partial=True)
-        serializer.is_valid(raise_exception=True)
-        services.update_service(pk, dict(serializer.validated_data), actor=request.user, request=request)
-        return Response(ClinicServiceSerializer(self._service(pk)).data)
 
 
 # --- the location -------------------------------------------------------------------------------------------

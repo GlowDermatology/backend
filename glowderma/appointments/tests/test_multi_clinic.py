@@ -19,7 +19,7 @@ from glowderma.professionals import services as professional_services
 from glowderma.professionals.models import WorkingHours, WorkingHoursOverride
 from glowderma.professionals.tests.factories import (
     LocationFactory,
-    ProfessionalServiceFactory,
+    ServiceFactory,
     WorkingHoursFactory,
 )
 
@@ -31,7 +31,7 @@ def monday(hour: int = 10) -> datetime:
 
 
 def test_a_doctor_has_slots_only_at_the_scheduled_clinic(clock: Any) -> None:
-    link = ProfessionalServiceFactory.create()
+    link = ServiceFactory.create()
     doctor = link.professional
     second = LocationFactory.create()
     doctor.additional_locations.add(second)
@@ -42,12 +42,12 @@ def test_a_doctor_has_slots_only_at_the_scheduled_clinic(clock: Any) -> None:
     customer = CustomerFactory.create()
     with pytest.raises(ValidationError) as wrong_clinic:
         services.request_by_customer(
-            customer.pk, doctor.pk, link.service_id, monday(), location_id=doctor.location_id
+            customer.pk, doctor.pk, link.pk, monday(), location_id=doctor.location_id
         )
     assert wrong_clinic.value.get_codes() == {"location_id": ["invalid"]}
 
     appointment = services.request_by_customer(
-        customer.pk, doctor.pk, link.service_id, monday(), location_id=second.pk
+        customer.pk, doctor.pk, link.pk, monday(), location_id=second.pk
     )
     actor = StaffUserFactory.create()
     professional_services.set_working_week(
@@ -64,7 +64,7 @@ def test_a_doctor_has_slots_only_at_the_scheduled_clinic(clock: Any) -> None:
 
 
 def test_an_active_assignment_prevents_archive_even_without_a_visit() -> None:
-    link = ProfessionalServiceFactory.create()
+    link = ServiceFactory.create()
     doctor = link.professional
     second = LocationFactory.create()
     doctor.additional_locations.add(second)
