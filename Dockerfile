@@ -38,8 +38,11 @@ ENV DJANGO_SETTINGS_MODULE=config.settings.production \
 
 # Debian security updates the pinned base image does not carry yet (image-scan: Trivy and Grype fail on a fixed
 # HIGH/CRITICAL), and no pip: the app runs from /app/.venv, and pip's vendored urllib3/msgpack are only scan
-# findings here.
-RUN apt-get -o Acquire::Retries=5 update \
+# findings here. CI passes the build day as OS_PATCH_DATE: the cached upgrade layer is rebuilt once a day, so a
+# security update Debian just published (a glibc fix, say) reaches the image without a base-image bump.
+ARG OS_PATCH_DATE=unset
+RUN echo "OS patches of ${OS_PATCH_DATE}" \
+    && apt-get -o Acquire::Retries=5 update \
     && apt-get -o Acquire::Retries=5 upgrade -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* \
