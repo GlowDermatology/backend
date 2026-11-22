@@ -3,7 +3,6 @@ import uuid
 from collections.abc import Sequence
 from typing import Any, cast
 
-from django.conf import settings
 from django.contrib.auth import authenticate
 from django.core.cache import cache
 from django.db import transaction
@@ -112,7 +111,6 @@ def _me(user: StaffUser, session: AuthSession) -> dict[str, Any]:
         "mfa_enabled": mfa.enabled(user),
         "capabilities": {
             "staff_email_invite": services.staff_email_invite_available(),
-            "specialist_provisioning": settings.SPECIALIST_PROVISIONING_ENABLED,
         },
     }
 

@@ -20272,8 +20272,6 @@ components:
     Capabilities:
       type: object
       properties:
-        specialist_provisioning:
-          type: boolean
         staff_email_invite:
           type: boolean
           description: 'Password links can be e-mailed (`delivery` `email_link` /

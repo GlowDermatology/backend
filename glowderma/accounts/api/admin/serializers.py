@@ -67,7 +67,6 @@ class ChangePasswordSerializer(serializers.Serializer[dict[str, Any]]):
 
 
 class CapabilitiesSerializer(serializers.Serializer[dict[str, Any]]):
-    specialist_provisioning = serializers.BooleanField(required=False)
     staff_email_invite = serializers.BooleanField(
         help_text="Password links can be e-mailed (`delivery` `email_link` / `both`, "
         "`staff/{id}/send-password-link/`, `auth/password-link/`); `false` when the admin panel URL is not "

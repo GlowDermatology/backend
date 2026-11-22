@@ -182,8 +182,6 @@ STAFF_REFRESH_TTL = 43200
 # {ADMIN_PANEL_URL}/set-password?token=…; empty = e-mail links are not offered; production requires https) and
 # how long a link stays valid (STAFF_INVITE_TTL_HOURS, below with the e-mail settings).
 ADMIN_PANEL_URL = env_str("ADMIN_PANEL_URL", "").strip().rstrip("/")
-# Enable provisioning after every API instance enforces the Specialist permission boundary.
-SPECIALIST_PROVISIONING_ENABLED = env_bool("SPECIALIST_PROVISIONING_ENABLED", False)
 if ADMIN_PANEL_URL:
     _admin_panel = urlsplit(ADMIN_PANEL_URL)
     if _admin_panel.scheme not in {"http", "https"} or not _admin_panel.netloc or _admin_panel.query:

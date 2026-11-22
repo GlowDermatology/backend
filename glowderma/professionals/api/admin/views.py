@@ -13,7 +13,6 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from typing import Any, cast
 
-from django.conf import settings
 from django.db.models import QuerySet
 from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework import mixins, serializers
@@ -21,7 +20,6 @@ from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.parsers import MultiPartParser
 from rest_framework.request import Request
 from rest_framework.response import Response
-from rest_framework.views import APIView
 
 from glowderma.accounts import selectors as account_selectors
 from glowderma.accounts.api.admin.serializers import (
@@ -231,17 +229,12 @@ class SpecialistServicesView(AdminAPIView):
         return Response(specialist_body(pk))
 
 
-class CanProvisionSpecialist(IsManager):
-    def has_permission(self, request: Request, view: APIView) -> bool:
-        return bool(settings.SPECIALIST_PROVISIONING_ENABLED) and super().has_permission(request, view)
-
-
 class SpecialistInviteCredentialsSerializer(StaffCredentialsSerializer):
     specialist_id = serializers.IntegerField(help_text="The draft profile created with the account.")
 
 
 class SpecialistInviteView(AdminAPIView):
-    permission_classes = [CanProvisionSpecialist]
+    permission_classes = [IsManager]
 
     @extend_schema(
         operation_id="admin_specialist_invite",
@@ -287,7 +280,7 @@ class SpecialistRoleChangeResultSerializer(serializers.Serializer[dict[str, Any]
 
 
 class SpecialistAccountRoleView(AdminAPIView):
-    permission_classes = [CanProvisionSpecialist]
+    permission_classes = [IsManager]
 
     @extend_schema(
         operation_id="admin_staff_specialist_role",
