@@ -8248,6 +8248,505 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
+  /api/v1/admin/specialist/appointments/:
+    get:
+      operationId: specialist_appointments_day
+      description: The caller's schedule and own appointments of `date` (default today,
+        Tashkent).
+      parameters:
+      - in: query
+        name: date
+        schema:
+          type: string
+          format: date
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpecialistAppointmentDay'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialist/appointments/{id}/{action}/:
+    post:
+      operationId: specialist_appointments_action
+      description: confirm / reject (a requested visit, before its start) or attend
+        (a confirmed visit, from its start on); otherwise 409 invalid_transition.
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: action
+        schema:
+          type: string
+          enum:
+          - attend
+          - confirm
+          - reject
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpecialistAppointmentItem'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialist/appointments/{id}/cancel/:
+    post:
+      operationId: specialist_appointments_cancel
+      description: Cancel an own open appointment before its start; the customer is
+        notified.
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AppointmentCancelRequest'
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpecialistAppointmentItem'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialist/appointments/{id}/reschedule/:
+    post:
+      operationId: specialist_appointments_reschedule
+      description: Move an own open appointment before its start (same slot rules
+        as staff). Moving it to another clinic needs `customer_agreed`.
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+          format: uuid
+        description: 'Client-generated UUID; replays return the stored response with
+          `Idempotent-Replayed: true`.'
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - admin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SpecialistRescheduleRequest'
+        required: true
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpecialistAppointmentItem'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialist/appointments/meta/:
+    get:
+      operationId: specialist_appointments_meta
+      description: 'The admin booking-dialog meta for the caller only: their active
+        services and active clinics. `specialists` is empty while the profile is unpublished.'
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentsMeta'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialist/appointments/pending-summary/:
+    get:
+      operationId: specialist_appointments_pending_summary
+      description: The admin pending summary over the caller's own requested appointments.
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PendingSummary'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+  /api/v1/admin/specialist/appointments/range/:
+    get:
+      operationId: specialist_appointments_range
+      description: 'The caller''s week and month boards in the admin range shape:
+        `detail=counts` (default) up to 42 days, `detail=full` up to 7 days. The caller''s
+        profile is always listed, even as a draft.'
+      parameters:
+      - in: query
+        name: detail
+        schema:
+          enum:
+          - counts
+          - full
+          type: string
+          default: counts
+          minLength: 1
+        description: |-
+          * `counts` - counts
+          * `full` - full
+      - in: query
+        name: from
+        schema:
+          type: string
+          format: date
+        required: true
+      - in: query
+        name: to
+        schema:
+          type: string
+          format: date
+        required: true
+      tags:
+      - admin
+      security:
+      - StaffJWT: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpecialistAppointmentRange'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+          description: ''
   /api/v1/admin/specialist/availability/:
     get:
       operationId: specialist_availability
@@ -8527,292 +9026,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
           description: ''
-  /api/v1/admin/specialist/bookings/{id}/{action}/:
-    post:
-      operationId: specialist_booking_action
-      parameters:
-      - in: header
-        name: Idempotency-Key
-        schema:
-          type: string
-          format: uuid
-        description: 'Client-generated UUID; replays return the stored response with
-          `Idempotent-Replayed: true`.'
-        required: true
-      - in: path
-        name: action
-        schema:
-          type: string
-        required: true
-      - in: path
-        name: id
-        schema:
-          type: integer
-        required: true
-      tags:
-      - admin
-      security:
-      - StaffJWT: []
-      responses:
-        '204':
-          description: No response body
-        '400':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '401':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '403':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '404':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '409':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '429':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-  /api/v1/admin/specialist/bookings/{id}/cancel/:
-    post:
-      operationId: specialist_booking_cancel
-      parameters:
-      - in: header
-        name: Idempotency-Key
-        schema:
-          type: string
-          format: uuid
-        description: 'Client-generated UUID; replays return the stored response with
-          `Idempotent-Replayed: true`.'
-        required: true
-      - in: path
-        name: id
-        schema:
-          type: integer
-        required: true
-      tags:
-      - admin
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AppointmentCancelRequest'
-      security:
-      - StaffJWT: []
-      responses:
-        '204':
-          description: No response body
-        '400':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '401':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '403':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '404':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '409':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '429':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-  /api/v1/admin/specialist/bookings/{id}/reschedule/:
-    post:
-      operationId: specialist_booking_reschedule
-      parameters:
-      - in: header
-        name: Idempotency-Key
-        schema:
-          type: string
-          format: uuid
-        description: 'Client-generated UUID; replays return the stored response with
-          `Idempotent-Replayed: true`.'
-        required: true
-      - in: path
-        name: id
-        schema:
-          type: integer
-        required: true
-      tags:
-      - admin
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/SpecialistRescheduleRequest'
-        required: true
-      security:
-      - StaffJWT: []
-      responses:
-        '204':
-          description: No response body
-        '400':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '401':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '403':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '404':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '409':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '429':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-  /api/v1/admin/specialist/calendar/:
-    get:
-      operationId: specialist_calendar
-      parameters:
-      - in: query
-        name: from
-        schema:
-          type: string
-          format: date
-        required: true
-      - in: query
-        name: to
-        schema:
-          type: string
-          format: date
-        required: true
-      tags:
-      - admin
-      security:
-      - StaffJWT: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SpecialistCalendar'
-          description: ''
-        '400':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '401':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '403':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '404':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '409':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '422':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
-        '429':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-          description: ''
   /api/v1/admin/specialist/conflicts/:
     get:
       operationId: specialist_conflicts
+      description: The caller's open future appointments their current schedule no
+        longer covers, by start; reschedule or cancel them through specialist/appointments/{id}/reschedule|cancel/.
       tags:
       - admin
       security:
@@ -19161,6 +19379,20 @@ components:
       oneOf:
       - $ref: '#/components/schemas/LoginResponse'
       - $ref: '#/components/schemas/MfaChallenge'
+    AllowedActionsEnum:
+      enum:
+      - confirm
+      - reject
+      - attend
+      - reschedule
+      - cancel
+      type: string
+      description: |-
+        * `confirm` - confirm
+        * `reject` - reject
+        * `attend` - attend
+        * `reschedule` - reschedule
+        * `cancel` - cancel
     AppointmentCancelRequest:
       type: object
       description: '``POST appointments/{id}/cancel/``: optional ``reason`` (≤ 300),
@@ -27711,19 +27943,6 @@ components:
           minimum: 0
       required:
       - revoked
-    ScheduleClinic:
-      type: object
-      properties:
-        id:
-          type: integer
-        name:
-          type: string
-        address:
-          type: string
-      required:
-      - address
-      - id
-      - name
     ScheduleConflicts:
       type: object
       description: '``GET specialists/{id}/conflicts/``: open future appointments
@@ -28457,6 +28676,126 @@ components:
       - id
       - is_active
       - role
+    SpecialistAppointmentDay:
+      type: object
+      description: '``GET specialist/appointments/?date=``: the admin day shape with
+        ``specialists`` = the caller.'
+      properties:
+        date:
+          type: string
+          format: date
+        specialists:
+          type: array
+          items:
+            $ref: '#/components/schemas/SpecialistDay'
+        appointments:
+          type: array
+          items:
+            $ref: '#/components/schemas/SpecialistAppointmentItem'
+      required:
+      - appointments
+      - date
+      - specialists
+    SpecialistAppointmentItem:
+      type: object
+      description: |-
+        ``SpecialistAppointmentItem``: the admin day item with ``customer`` reduced to ``{id, name, phone}``,
+        plus ``customer_note`` and ``allowed_actions``.
+      properties:
+        id:
+          type: integer
+        specialist_id:
+          type: integer
+        customer:
+          $ref: '#/components/schemas/SpecialistCustomerRef'
+        service_id:
+          type: integer
+        service_name:
+          type: string
+        service_short_name:
+          type: string
+        location:
+          $ref: '#/components/schemas/AppointmentClinic'
+        duration_min:
+          type: integer
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+        price:
+          type: integer
+        status:
+          $ref: '#/components/schemas/AppointmentStatusEnum'
+        requested_at:
+          type: string
+          format: date-time
+        requested_via:
+          $ref: '#/components/schemas/RequestedViaEnum'
+        customer_note:
+          type: string
+        allowed_actions:
+          type: array
+          items:
+            $ref: '#/components/schemas/AllowedActionsEnum'
+          description: 'What the specialist may do now: confirm / reject / reschedule
+            / cancel before the start (as the status allows), attend from the start
+            on.'
+          readOnly: true
+      required:
+      - allowed_actions
+      - customer
+      - customer_note
+      - duration_min
+      - end
+      - id
+      - location
+      - price
+      - requested_at
+      - requested_via
+      - service_id
+      - service_name
+      - service_short_name
+      - specialist_id
+      - start
+      - status
+    SpecialistAppointmentRange:
+      type: object
+      description: '``GET specialist/appointments/range/``: the admin range shape
+        of the caller''s own board.'
+      properties:
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        specialists:
+          type: array
+          items:
+            $ref: '#/components/schemas/RangeSpecialist'
+        days:
+          type: array
+          items:
+            $ref: '#/components/schemas/RangeDay'
+        schedules:
+          type: array
+          items:
+            $ref: '#/components/schemas/RangeSchedule'
+          nullable: true
+        appointments:
+          type: array
+          items:
+            $ref: '#/components/schemas/SpecialistAppointmentItem'
+          nullable: true
+      required:
+      - appointments
+      - days
+      - from
+      - schedules
+      - specialists
+      - to
     SpecialistAvailability:
       type: object
       properties:
@@ -28482,63 +28821,31 @@ components:
       - clinics
       - overrides
       - working_hours
-    SpecialistBooking:
-      type: object
-      properties:
-        id:
-          type: integer
-        customer_name:
-          type: string
-        customer_phone:
-          type: string
-          nullable: true
-        customer_note:
-          type: string
-        service:
-          type: string
-        location:
-          $ref: '#/components/schemas/ScheduleClinic'
-        start:
-          type: string
-          format: date-time
-        end:
-          type: string
-          format: date-time
-        status:
-          $ref: '#/components/schemas/AppointmentStatusEnum'
-      required:
-      - customer_name
-      - customer_note
-      - customer_phone
-      - end
-      - id
-      - location
-      - service
-      - start
-      - status
-    SpecialistCalendar:
-      type: object
-      properties:
-        schedules:
-          type: array
-          items:
-            $ref: '#/components/schemas/RangeSchedule'
-        appointments:
-          type: array
-          items:
-            $ref: '#/components/schemas/SpecialistBooking'
-      required:
-      - appointments
-      - schedules
     SpecialistConflicts:
       type: object
       properties:
         results:
           type: array
           items:
-            $ref: '#/components/schemas/SpecialistBooking'
+            $ref: '#/components/schemas/SpecialistAppointmentItem'
       required:
       - results
+    SpecialistCustomerRef:
+      type: object
+      description: '``CustomerRef`` without the e-mail: a specialist sees who comes
+        and how to call them.'
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        phone:
+          type: string
+          nullable: true
+      required:
+      - id
+      - name
+      - phone
     SpecialistDay:
       type: object
       properties:

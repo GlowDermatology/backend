@@ -8,11 +8,14 @@ attend, contract §2.9) so they are never read as an action.
 from django.urls import URLPattern, URLResolver, path
 
 from ..specialist import (
-    BookingActionView,
-    BookingCancelView,
-    BookingRescheduleView,
-    CalendarView,
     ConflictsView,
+    SpecialistAppointmentActionView,
+    SpecialistAppointmentCancelView,
+    SpecialistAppointmentRangeView,
+    SpecialistAppointmentRescheduleView,
+    SpecialistAppointmentsMetaView,
+    SpecialistAppointmentsView,
+    SpecialistPendingSummaryView,
 )
 from .views import (
     AppointmentActionView,
@@ -26,21 +29,39 @@ from .views import (
 )
 
 urlpatterns: list[URLPattern | URLResolver] = [
-    path("specialist/calendar/", CalendarView.as_view(), name="specialist-calendar"),
+    # The specialist's own board: the static routes come before ``<int:pk>``.
+    path("specialist/appointments/", SpecialistAppointmentsView.as_view(), name="specialist-appointments"),
+    path(
+        "specialist/appointments/meta/",
+        SpecialistAppointmentsMetaView.as_view(),
+        name="specialist-appointments-meta",
+    ),
+    path(
+        "specialist/appointments/range/",
+        SpecialistAppointmentRangeView.as_view(),
+        name="specialist-appointments-range",
+    ),
+    path(
+        "specialist/appointments/pending-summary/",
+        SpecialistPendingSummaryView.as_view(),
+        name="specialist-appointments-pending-summary",
+    ),
+    path(
+        "specialist/appointments/<int:pk>/reschedule/",
+        SpecialistAppointmentRescheduleView.as_view(),
+        name="specialist-appointments-reschedule",
+    ),
+    path(
+        "specialist/appointments/<int:pk>/cancel/",
+        SpecialistAppointmentCancelView.as_view(),
+        name="specialist-appointments-cancel",
+    ),
+    path(
+        "specialist/appointments/<int:pk>/<str:action>/",
+        SpecialistAppointmentActionView.as_view(),
+        name="specialist-appointments-action",
+    ),
     path("specialist/conflicts/", ConflictsView.as_view(), name="specialist-conflicts"),
-    path(
-        "specialist/bookings/<int:pk>/reschedule/",
-        BookingRescheduleView.as_view(),
-        name="specialist-booking-reschedule",
-    ),
-    path(
-        "specialist/bookings/<int:pk>/cancel/", BookingCancelView.as_view(), name="specialist-booking-cancel"
-    ),
-    path(
-        "specialist/bookings/<int:pk>/<str:action>/",
-        BookingActionView.as_view(),
-        name="specialist-booking-action",
-    ),
     path("appointments/", AppointmentsView.as_view(), name="admin-appointments"),
     path("appointments/meta/", AppointmentsMetaView.as_view(), name="admin-appointments-meta"),
     path("appointments/range/", AppointmentRangeView.as_view(), name="admin-appointments-range"),

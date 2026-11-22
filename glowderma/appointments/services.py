@@ -301,6 +301,34 @@ def _locked(appointment_id: int) -> Appointment:
     return Appointment.objects.select_for_update().get(pk=appointment_id)
 
 
+# What a specialist may do with an own visit, in display order (``allowed_actions`` on their board).
+SPECIALIST_ACTIONS: tuple[str, ...] = (
+    enums.AppointmentAction.CONFIRM,
+    enums.AppointmentAction.REJECT,
+    enums.AppointmentAction.ATTEND,
+    "reschedule",
+    "cancel",
+)
+
+
+def _specialist_time_allows(appointment: Appointment, action: str, now: datetime) -> bool:
+    """A specialist answers, moves and cancels a visit before it starts and marks it attended from its start
+    on (staff are not bound by the clock)."""
+    return (appointment.start <= now) == (action == enums.AppointmentAction.ATTEND)
+
+
+def specialist_allowed_actions(appointment: Appointment, now: datetime | None = None) -> list[str]:
+    """The :data:`SPECIALIST_ACTIONS` the visit's status and the clock allow right now — the same rule the
+    specialist writes enforce (:func:`_locked_for_action` and the status checks of each write)."""
+    instant = timeutils.now() if now is None else now
+    return [
+        action
+        for action in SPECIALIST_ACTIONS
+        if appointment.status in (TRANSITIONS[action][0] if action in TRANSITIONS else OPEN_STATUSES)
+        and _specialist_time_allows(appointment, action, instant)
+    ]
+
+
 def _locked_for_action(appointment_id: int, action: str, specialist_account_id: int | None) -> Appointment:
     if specialist_account_id is None:
         return _locked(appointment_id)
@@ -316,8 +344,7 @@ def _locked_for_action(appointment_id: int, action: str, specialist_account_id: 
         raise PermissionDenied
     if professional.pk != appointment.professional_id:
         raise NotFound
-    started = appointment.start <= timeutils.now()
-    if started != (action == enums.AppointmentAction.ATTEND):
+    if not _specialist_time_allows(appointment, action, timeutils.now()):
         raise InvalidTransition(N_("Bu amalni qabulning ushbu vaqtida bajarib bo‘lmaydi."))
     return appointment
 

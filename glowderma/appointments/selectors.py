@@ -55,6 +55,16 @@ def day_view(day: date) -> DayView:
     return DayView(date=day, specialists=day_schedules(day, professionals), appointments=appointments)
 
 
+def specialist_day_view(professional: Professional, day: date) -> DayView:
+    """``GET specialist/appointments/?date=``: the :func:`day_view` of one specialist — their schedule
+    (listed even while the profile is a draft) and their own appointments of the day."""
+    return DayView(
+        date=day,
+        specialists=day_schedules(day, Professional.objects.filter(pk=professional.pk)),
+        appointments=list(day_appointments(day).filter(professional=professional)),
+    )
+
+
 # --- GET appointments/range/ (admin contract §2.9, feat/admin-ux: the week and month boards) -------------
 
 RANGE_MAX_DAYS_COUNTS = 42  # six calendar weeks: a month grid
@@ -87,15 +97,24 @@ class RangeView:
     appointments: list[Appointment] | None  # ``detail=full`` only
 
 
-def range_view(first: date, last: date, *, specialist_id: int | None = None, full: bool = False) -> RangeView:
+def range_view(
+    first: date,
+    last: date,
+    *,
+    specialist_id: int | None = None,
+    full: bool = False,
+    always_list: bool = False,
+) -> RangeView:
     """The days ``first`` … ``last`` (Tashkent, inclusive; the caller bounds the span): per day the status
     counts of the appointments starting that day, whether any listed specialist works and the union of their
     hours; with ``full`` also every specialist's day schedule and the appointments themselves.
 
     Specialists are listed by the rule of :func:`day_view` over the whole range (active ones, plus inactive
     ones with an appointment in it), narrowed to ``specialist_id`` when given; counts and appointments follow
-    the same narrowing. Five queries (counts, specialists, the three schedule tables), six with ``full``,
-    whatever the span or the number of specialists.
+    the same narrowing. ``always_list`` (with ``specialist_id``: the specialist's own board) lists that
+    profile whether or not it is published or has appointments in the range. Five queries (counts,
+    specialists, the three schedule tables), six with ``full``, whatever the span or the number of
+    specialists.
     """
     start, _ = timeutils.day_bounds(first)
     _, end = timeutils.day_bounds(last)
@@ -116,7 +135,7 @@ def range_view(first: date, last: date, *, specialist_id: int | None = None, ful
         with_rows.add(int(professional_id))
     listed = Professional.objects.filter(Q(is_active=True) | Q(pk__in=with_rows))
     if specialist_id is not None:
-        listed = listed.filter(pk=specialist_id)
+        listed = (Professional.objects if always_list else listed).filter(pk=specialist_id)
     specialists = list(listed.order_by("position", "name", "id"))
     days = [first + timedelta(days=offset) for offset in range((last - first).days + 1)]
     schedules = schedules_for_many(specialists, days)
@@ -156,16 +175,18 @@ def range_view(first: date, last: date, *, specialist_id: int | None = None, ful
     )
 
 
-def pending_summary(now: datetime | None = None) -> dict[str, Any]:
+def pending_summary(now: datetime | None = None, *, professional_id: int | None = None) -> dict[str, Any]:
     """``{"count", "next_at"}`` of the ``requested`` appointments that still await an answer (contract §2.9):
     those starting today (Tashkent) or later — today's requests whose time has already passed included, so
     the header never says "all reviewed" while one of them is unanswered; requests of earlier days are not
-    counted. ``next_at`` is the earliest of them (it may lie earlier today)."""
+    counted. ``next_at`` is the earliest of them (it may lie earlier today). ``professional_id`` narrows it
+    to one specialist's appointments (their own workspace)."""
     instant = timeutils.now() if now is None else now
     today_start, _ = timeutils.day_bounds(timeutils.local_date(instant))
-    summary = Appointment.objects.filter(
-        status=enums.AppointmentStatus.REQUESTED, start__gte=today_start
-    ).aggregate(count=Count("id"), next_at=Min("start"))
+    rows = Appointment.objects.filter(status=enums.AppointmentStatus.REQUESTED, start__gte=today_start)
+    if professional_id is not None:
+        rows = rows.filter(professional_id=professional_id)
+    summary = rows.aggregate(count=Count("id"), next_at=Min("start"))
     return {"count": int(summary["count"] or 0), "next_at": summary["next_at"]}
 
 

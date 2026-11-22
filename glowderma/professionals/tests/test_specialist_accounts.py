@@ -257,7 +257,7 @@ def test_full_flow_from_invitation_to_customer_booking(
         HTTP_IDEMPOTENCY_KEY=str(uuid.uuid4()),
     )
     assert booked.status_code == 201, booked.data
-    calendar = ok(client.get(OWN + "calendar/", {"from": monday, "to": monday}))
+    calendar = ok(client.get(OWN + "appointments/range/", {"from": monday, "to": monday, "detail": "full"}))
     assert [row["id"] for row in calendar["appointments"]] == [booked.data["id"]]
 
 
@@ -409,9 +409,9 @@ def test_a_specialist_reaches_only_their_own_profile_and_appointments() -> None:
     ok(client.patch(OWN + "profile/", {"name": "Still me", "id": theirs.pk}, **keyed()))
     theirs.refresh_from_db()
     assert theirs.name != "Still me"
-    confirm = client.post(f"{OWN}bookings/{foreign_visit.pk}/confirm/", {}, **keyed())
+    confirm = client.post(f"{OWN}appointments/{foreign_visit.pk}/confirm/", {}, **keyed())
     assert confirm.status_code == 404
-    assert client.post(f"{OWN}bookings/{own_visit.pk}/confirm/", {}, **keyed()).status_code == 204
+    assert client.post(f"{OWN}appointments/{own_visit.pk}/confirm/", {}, **keyed()).status_code == 200
 
 
 def test_a_deactivated_login_closes_the_workspace_but_keeps_the_profile() -> None:
