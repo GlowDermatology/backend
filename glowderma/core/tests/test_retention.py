@@ -120,9 +120,10 @@ def test_the_partial_indexes_of_the_checks_exist() -> None:
 @pytest.mark.django_db
 def test_the_dispatcher_claim_can_read_the_unfinished_index_in_order() -> None:
     """core.0010 serves the claim (``ORDER BY available_at, id LIMIT 1 FOR UPDATE SKIP LOCKED`` over the open
-    statuses) without a sort: its predicate is implied by the claim's status filter and its key is the
-    claim's order. Sequential and bitmap scans are disabled so a tiny, unanalysed test table cannot hide a
-    mismatch (an index the claim cannot read in order would leave a Sort above it)."""
+    statuses) without a sort: its predicate is implied by the claim's status filter and its key is the claim's
+    order. Sequential and bitmap scans and sorts are disabled so neither a tiny, unanalysed test table nor
+    rows other tests left can hide a mismatch (an index the claim cannot read in order would leave a Sort
+    above it)."""
     from django.db import connection, transaction
     from django.db.models import Q
 
@@ -139,6 +140,10 @@ def test_the_dispatcher_claim_can_read_the_unfinished_index_in_order() -> None:
     with transaction.atomic(), connection.cursor() as cursor:
         cursor.execute("SET LOCAL enable_seqscan = off")
         cursor.execute("SET LOCAL enable_bitmapscan = off")
+        # Rows left by earlier tests on the same worker can make another index plus a (incremental) sort look
+        # cheaper; with sorts priced out only an index read in the claim's order avoids one.
+        cursor.execute("SET LOCAL enable_sort = off")
+        cursor.execute("SET LOCAL enable_incremental_sort = off")
         cursor.execute("EXPLAIN " + sql, params)
         plan = "\n".join(row[0] for row in cursor.fetchall())
     assert "Index Scan using outbox_unfinished_idx" in plan, plan
