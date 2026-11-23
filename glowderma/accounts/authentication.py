@@ -7,7 +7,7 @@ from django.core.cache import cache
 from rest_framework.authentication import BaseAuthentication, get_authorization_header
 from rest_framework.request import Request
 
-from glowderma.accounts import services, sessions, tokens
+from glowderma.accounts import request_facts, services, tokens
 from glowderma.accounts.models import AuthSession, Customer, Device, StaffUser
 from glowderma.core import audit, enums, timeutils
 from glowderma.core.api.exceptions import AppUpdateRequired, AuthFailed, DeviceRequired, PasswordChanged
@@ -231,8 +231,8 @@ class CustomerJWTAuthentication(BaseAuthentication):
             Device.objects.filter(sessions__pk=sid).update(
                 last_active_at=timeutils.now(), app_version=device.app_version, updated_at=timeutils.now()
             )
-            user_agent, ip = sessions.activity_facts(request, platform=device.platform)
-            sessions.touch_session(sid, user_agent=user_agent, ip=ip)
+            user_agent, ip = request_facts.activity_facts(request, platform=device.platform)
+            services.touch_session(sid, user_agent=user_agent, ip=ip)
         return customer, claims
 
     @staticmethod

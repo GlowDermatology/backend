@@ -11,8 +11,8 @@ from rest_framework.exceptions import NotFound
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from glowderma.accounts import request_facts as account_request_facts
 from glowderma.accounts import services as account_services
-from glowderma.accounts import sessions as account_sessions
 from glowderma.accounts import tokens
 from glowderma.accounts.api.customer_base import CustomerAuthAPIView
 from glowderma.accounts.api.throttles import (
@@ -68,8 +68,8 @@ def auth_tokens(sign_in: services.SignIn, *, fid: str, request: Request) -> dict
     for the session list (B-W1, §2.2.10)."""
     session = sign_in.started.session
     platform = session.device.platform if session.device is not None else ""
-    user_agent, ip = account_sessions.activity_facts(request, platform=platform)
-    account_sessions.stamp_session(session.pk, user_agent=user_agent, ip=ip)
+    user_agent, ip = account_request_facts.activity_facts(request, platform=platform)
+    account_services.stamp_session(session.pk, user_agent=user_agent, ip=ip)
     access, expires = tokens.issue_access(session)
     customer = Customer.objects.get(pk=sign_in.customer_id)
     return {

@@ -13,7 +13,8 @@ from rest_framework.exceptions import NotFound
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from glowderma.accounts import sessions as account_sessions
+from glowderma.accounts import selectors as account_selectors
+from glowderma.accounts import services as account_services
 from glowderma.accounts.api.base import AdminAPIView, AdminGenericViewSet
 from glowderma.core import enums
 from glowderma.core.api.fields import AwareDateTimeField
@@ -36,7 +37,7 @@ class AdminCustomerSessionSerializer(serializers.Serializer[Any]):
 
 
 def _payload(session: Any) -> dict[str, Any]:
-    view = account_sessions.session_view(session, language=enums.ContentLanguage.UZ, current_sid=None)
+    view = account_selectors.session_view(session, language=enums.ContentLanguage.UZ, current_sid=None)
     return {
         "id": view.id,
         "device": view.device,
@@ -63,7 +64,7 @@ class CustomerSessionsViewSet(mixins.ListModelMixin, AdminGenericViewSet):
         customer_id = int(kwargs["pk"])
         if not selectors.customer_exists(customer_id):
             raise NotFound()
-        page = self.paginate_queryset(account_sessions.open_sessions(customer_id))
+        page = self.paginate_queryset(account_selectors.open_sessions(customer_id))
         rows = [_payload(session) for session in page or []]
         return self.get_paginated_response(AdminCustomerSessionSerializer(rows, many=True).data)
 
@@ -84,9 +85,9 @@ class CustomerSessionDetailView(AdminAPIView):
         if not selectors.customer_exists(int(pk)):
             raise NotFound()
         try:
-            account_sessions.revoke_session(
+            account_services.revoke_open_customer_session(
                 int(pk), str(session_id), actor=request.user, actor_type="staff", request=request
             )
-        except account_sessions.SessionNotFound as exc:
+        except account_services.SessionNotFound as exc:
             raise NotFound() from exc
         return Response(status=204)

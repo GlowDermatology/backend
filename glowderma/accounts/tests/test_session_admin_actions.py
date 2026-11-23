@@ -1,5 +1,5 @@
 """Ops console session actions: revoke one customer session (AuthSession page and row) and every session of a
-customer (the customer page) through ``accounts.sessions``."""
+customer (the customer page) through ``accounts.services``."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from datetime import timedelta
 import pytest
 from django.urls import reverse
 
-from glowderma.accounts import sessions
+from glowderma.accounts import selectors, services
 from glowderma.accounts.models import AuthSession, Device
 from glowderma.accounts.tests.factories import (
     AuthSessionFactory,
@@ -122,7 +122,7 @@ def test_revoke_all_permission_matrix(role: str) -> None:
     customer = CustomerFactory.create()
     CustomerSessionFactory.create_batch(2, customer=customer)
     response = confirm(console_client(role), revoke_all_url(customer.pk))
-    remaining = sessions.open_sessions(customer.pk).count()
+    remaining = selectors.open_sessions(customer.pk).count()
     if role in ("anon", "customer_like"):
         assert denied(response)
         assert remaining == 2
@@ -165,7 +165,7 @@ def test_revoke_all_without_open_sessions_is_unavailable_and_safe_to_repeat() ->
     again = confirm(client, revoke_all_url(customer.pk))
     assert messages_of(again)[-1] == ("warning", "Mijozning ochiq sessiyasi yo‘q.")
     assert AuditEntry.objects.filter(action="customer.sessions_revoked").count() == 1
-    assert sessions.revoke_all_sessions(customer.pk, actor=None) == 0
+    assert services.revoke_all_customer_sessions(customer.pk, actor=None) == 0
 
 
 def test_unknown_customer_is_404() -> None:

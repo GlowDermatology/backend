@@ -5,7 +5,7 @@ account, appointments) as inline tabs, so it is registered here, in the top laye
 ``Customer.password`` is excluded, and the device/session inlines list no token or hash column.
 
 Safe audited action (glowderma.core.admin_actions): «Barcha sessiyalarni tugatish» signs the customer out
-everywhere through ``accounts.sessions.revoke_all_sessions`` (reason ``admin_revoked``).
+everywhere through ``accounts.services.revoke_all_customer_sessions`` (reason ``admin_revoked``).
 """
 
 from typing import Any, cast
@@ -16,7 +16,8 @@ from django.http import HttpRequest
 from django.utils.translation import gettext, ngettext
 from django.utils.translation import gettext_lazy as _
 
-from glowderma.accounts import sessions
+from glowderma.accounts import selectors as account_selectors
+from glowderma.accounts import services as account_services
 from glowderma.accounts.models import Address, AuthSession, Customer, CustomerSocialIdentity, Device
 from glowderma.appointments.models import Appointment
 from glowderma.commerce.admin import ORDER_STATUS_VARIANTS
@@ -119,7 +120,11 @@ class CustomerSocialInline(ReadOnlyTabularInline):
 
 
 def _no_open_session(model_admin: Any, request: HttpRequest, customer: Customer) -> str:
-    return "" if sessions.open_sessions(customer.pk).exists() else gettext("Mijozning ochiq sessiyasi yo‘q.")
+    return (
+        ""
+        if account_selectors.open_sessions(customer.pk).exists()
+        else gettext("Mijozning ochiq sessiyasi yo‘q.")
+    )
 
 
 class CustomerAdmin(OpsActionsMixin, ReadOnlyAdmin):
@@ -207,7 +212,9 @@ class CustomerAdmin(OpsActionsMixin, ReadOnlyAdmin):
     def revoke_all_sessions(
         self, request: HttpRequest, customer: Customer, form: ConfirmForm
     ) -> ActionResult:
-        count = sessions.revoke_all_sessions(customer.pk, actor=request.user, request=request)
+        count = account_services.revoke_all_customer_sessions(
+            customer.pk, actor=request.user, request=request
+        )
         if not count:
             return refused(gettext("Mijozning ochiq sessiyasi yo‘q: hech narsa o‘zgarmadi."))
         forget_cached_counts("dash:customers")

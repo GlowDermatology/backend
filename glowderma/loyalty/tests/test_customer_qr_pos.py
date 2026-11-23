@@ -15,7 +15,6 @@ from django.test import override_settings
 from rest_framework.test import APIClient
 
 from glowderma.accounts import services as account_services
-from glowderma.accounts import sessions as account_sessions
 from glowderma.accounts.models import AuthSession, Customer
 from glowderma.accounts.tests.factories import CustomerFactory, StaffUserFactory, start_test_session
 from glowderma.core import qr_store, timeutils
@@ -111,7 +110,7 @@ def test_tokens_are_revoked_on_logout_replace_and_delete(
         elif how == "replaced":
             start_test_session(customer)  # the same install signs in again: its old session ends
         elif how == "session_revoked":
-            account_sessions.revoke_session(
+            account_services.revoke_open_customer_session(
                 customer.pk, str(customer_session[0].pk), actor=customer, actor_type="customer"
             )
         else:

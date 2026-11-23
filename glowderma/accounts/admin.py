@@ -17,8 +17,9 @@ Writes on these pages (each confirmed and audited):
 - the manager-only "2FA ni qayta o‘rnatish" action on the staff list
   (``glowderma.accounts.console.access.reset_two_factor``);
 - «Sessiyani tugatish» (glowderma.core.admin_actions) signs one open customer session out through
-  ``accounts.sessions.revoke_session`` — the same service as ``DELETE admin/customers/{id}/sessions/{sid}/``
-  (reason ``admin_revoked``) — from the session's change page or its row on the list.
+  ``accounts.services.revoke_open_customer_session`` — the same service as
+  ``DELETE admin/customers/{id}/sessions/{sid}/`` (reason ``admin_revoked``) — from the session's change page
+  or its row on the list.
 """
 
 from typing import Any
@@ -37,7 +38,7 @@ from django.utils.translation import gettext_lazy as _
 from django_otp.plugins.otp_static.models import StaticDevice
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
-from glowderma.accounts import sessions
+from glowderma.accounts import services
 from glowderma.accounts.console import access
 from glowderma.accounts.models import (
     Address,
@@ -218,10 +219,10 @@ class AuthSessionAdmin(OpsActionsMixin, ReadOnlyAdmin):
     def revoke(self, request: HttpRequest, session: AuthSession, form: ConfirmForm) -> ActionResult:
         customer_id = int(session.customer_id or 0)
         try:
-            sessions.revoke_session(
+            services.revoke_open_customer_session(
                 customer_id, str(session.pk), actor=request.user, actor_type="staff", request=request
             )
-        except sessions.SessionNotFound:
+        except services.SessionNotFound:
             return refused(gettext("Sessiya allaqachon tugagan: hech narsa o‘zgarmadi."))
         forget_cached_counts("dash:customers")
         return done(

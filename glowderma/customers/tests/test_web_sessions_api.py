@@ -12,7 +12,9 @@ from django.conf import settings
 from django.core.cache import cache
 from rest_framework.test import APIClient
 
-from glowderma.accounts import sessions as account_sessions
+from glowderma.accounts import request_facts as account_request_facts
+from glowderma.accounts import selectors as account_selectors
+from glowderma.accounts import services as account_services
 from glowderma.accounts import tokens
 from glowderma.accounts.models import AuthSession, Customer, Device
 from glowderma.accounts.tests.factories import (
@@ -142,9 +144,9 @@ def test_the_session_list_names_devices_places_and_the_current_one() -> None:
     customer = CustomerFactory.create()
     app = start_test_session(customer)
     Device.objects.filter(sessions=app.session).update(model="iPhone 15", os="iOS 18.1")
-    account_sessions.stamp_session(app.session.pk, user_agent="okhttp/4.12", ip="185.139.137.1")
+    account_services.stamp_session(app.session.pk, user_agent="okhttp/4.12", ip="185.139.137.1")
     web = start_test_session(customer, fid=WEB_FID, platform="web", app_version="")
-    account_sessions.stamp_session(web.session.pk, user_agent=CHROME_WINDOWS, ip="84.54.70.10")
+    account_services.stamp_session(web.session.pk, user_agent=CHROME_WINDOWS, ip="84.54.70.10")
     old = timeutils.now().replace(year=2025)
     AuthSession.objects.filter(pk=app.session.pk).update(last_used_at=old)
     stranger = start_test_session(CustomerFactory.create(), fid="fid-stranger-01")
@@ -175,7 +177,7 @@ def test_unknown_place_and_browser_read_as_placeholders(settings: Any) -> None:
     settings.GEOIP_CITY_DB = ""
     customer = CustomerFactory.create()
     web = start_test_session(customer, fid=WEB_FID, platform="web", app_version="")
-    account_sessions.stamp_session(web.session.pk, user_agent="", ip="84.54.70.10")
+    account_services.stamp_session(web.session.pk, user_agent="", ip="84.54.70.10")
     client = APIClient()
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {tokens.issue_access(web.session)[0]}", **web_headers())
     [row] = client.get(SESSIONS, HTTP_ACCEPT_LANGUAGE="en").json()["results"]
@@ -197,8 +199,8 @@ def test_sign_in_records_the_browser_the_bff_forwards(settings: Any) -> None:
         META = request_meta
         client_ip = "84.54.70.10"
 
-    user_agent, ip = account_sessions.client_facts(Request())
-    account_sessions.stamp_session(started.session.pk, user_agent=user_agent, ip=ip)
+    user_agent, ip = account_request_facts.client_facts(Request())
+    account_services.stamp_session(started.session.pk, user_agent=user_agent, ip=ip)
     started.session.refresh_from_db()
     assert started.session.user_agent == CHROME_WINDOWS
     assert (started.session.last_ip, started.session.location) == ("84.54.70.10", "Tashkent, Tashkent, UZ")
@@ -404,7 +406,7 @@ def test_admin_lists_and_revokes_a_customers_sessions(
     customer = CustomerFactory.create()
     app = start_test_session(customer)
     web = start_test_session(customer, fid=WEB_FID, platform="web", app_version="")
-    account_sessions.stamp_session(web.session.pk, user_agent=CHROME_WINDOWS, ip="84.54.70.10")
+    account_services.stamp_session(web.session.pk, user_agent=CHROME_WINDOWS, ip="84.54.70.10")
     url = f"/api/v1/admin/customers/{customer.pk}/sessions/"
     response = staff_client.get(url)
     assert response.status_code == 200
@@ -499,7 +501,7 @@ def test_revoking_from_a_session_that_just_ended_is_refused() -> None:
     client = client_for(app)
     AuthSession.objects.filter(pk=app.session.pk).update(revoked_at=timeutils.now(), revoke_reason="logout")
     with pytest.raises(AuthFailed) as caught:
-        account_sessions.revoke_session(
+        account_services.revoke_open_customer_session(
             customer.pk,
             str(web.session.pk),
             actor=customer,
@@ -517,7 +519,7 @@ def test_deleting_the_customer_blanks_the_session_client_facts() -> None:
 
     customer = CustomerFactory.create()
     web = start_test_session(customer, fid=WEB_FID, platform="web", app_version="")
-    account_sessions.stamp_session(web.session.pk, user_agent=CHROME_WINDOWS, ip="84.54.70.10")
+    account_services.stamp_session(web.session.pk, user_agent=CHROME_WINDOWS, ip="84.54.70.10")
     services.delete_customer(customer.pk)
     web.session.refresh_from_db()
     assert (web.session.user_agent, web.session.last_ip, web.session.location) == ("", None, "")
@@ -528,7 +530,7 @@ def test_a_web_request_without_forwarded_facts_bumps_only_the_activity() -> None
     agent as the browser's."""
     customer = CustomerFactory.create()
     web = start_test_session(customer, fid=WEB_FID, platform="web", app_version="")
-    account_sessions.stamp_session(web.session.pk, user_agent=CHROME_WINDOWS, ip="84.54.70.10")
+    account_services.stamp_session(web.session.pk, user_agent=CHROME_WINDOWS, ip="84.54.70.10")
     before = AuthSession.objects.get(pk=web.session.pk).last_used_at
     client = APIClient()
     client.credentials(
@@ -564,5 +566,5 @@ def test_session_pages_have_a_total_order() -> None:
     started = [start_test_session(customer, fid=f"fid-page-{n:04d}") for n in range(3)]
     same = timeutils.now()
     AuthSession.objects.filter(customer=customer).update(last_used_at=same)
-    rows = list(account_sessions.open_sessions(customer.pk))
+    rows = list(account_selectors.open_sessions(customer.pk))
     assert [row.pk for row in rows] == sorted(start.session.pk for start in started)

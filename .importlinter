@@ -94,11 +94,12 @@ name = accounts.services.customer modules
 type = layers
 containers =
     glowderma.accounts.services.customer
+exhaustive = true
 layers =
     lifecycle
-    device_registration | refresh | addresses | profile | identities
+    device_registration | refresh | addresses | profile | identities | session_revocation
     auth_sessions
-    devices | locks
+    devices | locks | session_activity
 
 [importlinter:contract:accounts-services-otp]
 name = accounts.services.otp modules
@@ -134,7 +135,7 @@ source_modules =
     glowderma.accounts.services.staff
 forbidden_modules =
     glowderma.accounts.console
-    glowderma.accounts.sessions
+    glowderma.accounts.selectors
     glowderma.accounts.tasks
     glowderma.accounts.authentication
     glowderma.accounts.api.admin

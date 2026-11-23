@@ -18,7 +18,14 @@ from glowderma.accounts.selectors.customer_dashboard import (
     signups_by_day_and_method,
 )
 from glowderma.accounts.selectors.customer_sessions import (
+    APP_NAME,
+    APP_PLATFORMS,
+    UNKNOWN_LOCATION,
+    SessionView,
     customer_session_open,
+    device_label,
+    open_sessions,
+    session_view,
 )
 from glowderma.accounts.selectors.staff_directory import (
     DIRECTORY_COLUMNS,
@@ -33,6 +40,8 @@ from glowderma.accounts.selectors.staff_directory import (
 )
 
 __all__ = [
+    "APP_NAME",
+    "APP_PLATFORMS",
     "DIRECTORY_COLUMNS",
     "INVITE_COLUMNS",
     "MEMBER_COLUMNS",
@@ -43,15 +52,20 @@ __all__ = [
     "SIGNUP_EMAIL",
     "SIGNUP_PHONE",
     "SOCIAL_SIGNUP_WINDOW",
+    "UNKNOWN_LOCATION",
     "Invite",
     "OtpVolume",
     "PhoneCoverage",
+    "SessionView",
     "StaffFilters",
     "customer_session_open",
+    "device_label",
     "invite_of",
     "open_customer_sessions_by_platform",
+    "open_sessions",
     "otp_volume",
     "phone_coverage",
+    "session_view",
     "signups_by_day_and_method",
     "staff_list",
     "staff_member",
