@@ -94,7 +94,7 @@ def test_login_page_is_unfold_styled_with_the_guarded_form() -> None:
     assert page.status_code == 200
     assert b"Glow Derma Ops" in page.content and b'name="username"' in page.content
     # The password step leads to the second factor (here: enrolment, the user has no TOTP device yet); the
-    # console index is the default destination after it (glowderma.accounts.tests.test_console_2fa).
+    # console index is the default destination after it (glowderma.accounts.tests.console.test_console_2fa).
     get_user_model().objects.create_user("login@x.uz", "Saffron!Harbor-Long72", is_staff=True)
     answer = Client().post(
         "/django-admin/login/", {"username": "login@x.uz", "password": "Saffron!Harbor-Long72"}

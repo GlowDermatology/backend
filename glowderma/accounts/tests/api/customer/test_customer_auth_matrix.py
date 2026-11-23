@@ -31,8 +31,8 @@ from glowderma.accounts.api.customer_base import (
     WebhookAPIView,
 )
 from glowderma.accounts.models import StaffUser
+from glowderma.accounts.tests.api.admin.test_admin_auth_matrix import route_kwarg
 from glowderma.accounts.tests.factories import CustomerFactory, device_headers, start_test_session
-from glowderma.accounts.tests.test_admin_auth_matrix import route_kwarg
 from glowderma.core.api.parsers import JSONParser
 
 EXCLUDED_PREFIXES = ("api/v1/admin/", "api/v1/health/", "api/v1/schema/", "api/v1/docs/")
