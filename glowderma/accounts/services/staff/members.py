@@ -10,7 +10,7 @@ from typing import Any
 from django.db import IntegrityError, transaction
 from rest_framework.exceptions import NotFound, ValidationError
 
-from glowderma.accounts.console import state as console_state
+from glowderma.accounts import console_sessions
 from glowderma.accounts.models import StaffUser
 from glowderma.accounts.services.common import revocation
 from glowderma.accounts.services.staff import auth_sessions, credentials, locks, messages, password_links
@@ -337,7 +337,7 @@ def reset_staff_password(
     stored.save(update_fields=["password", "must_change_password"])
     user.must_change_password = stored.must_change_password
     sessions = auth_sessions.revoke_user_sessions_locked(stored, "password_changed")
-    console_sessions = console_state.end_console_sessions(stored)
+    ended_console_sessions = console_sessions.end_console_sessions(stored)
     password_links.revoke_password_tokens(stored)
     credentials.unlock_on_commit(stored.email)
     details: dict[str, Any] = {
@@ -346,8 +346,8 @@ def reset_staff_password(
         "delivery": delivery,
         "must_change_password": stored.must_change_password,
     }
-    if console_sessions:
-        details["console_sessions"] = console_sessions
+    if ended_console_sessions:
+        details["console_sessions"] = ended_console_sessions
     audit.record(
         action="staff.password_reset",
         entity_type="staff",

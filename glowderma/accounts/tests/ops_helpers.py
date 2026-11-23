@@ -25,8 +25,7 @@ from django_otp import DEVICE_ID_SESSION_KEY
 from django_otp.oath import TOTP
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
-from glowderma.accounts import second_factor
-from glowderma.accounts.console import state
+from glowderma.accounts import console_sessions, second_factor
 from glowderma.accounts.models import StaffUser
 from glowderma.accounts.tests.factories import TEST_PASSWORD, StaffUserFactory
 from glowderma.core import timeutils
@@ -84,8 +83,8 @@ def verify_session(client: Client, user: StaffUser, device: TOTPDevice | None = 
     session = client.session
     session[DEVICE_ID_SESSION_KEY] = device.persistent_id
     now = timeutils.now().timestamp()
-    session[state.STARTED] = now
-    session[state.SEEN] = now
+    session[console_sessions.STARTED] = now
+    session[console_sessions.SEEN] = now
     session.save()
 
 

@@ -16,8 +16,8 @@ from django_otp import DEVICE_ID_SESSION_KEY
 from django_otp.plugins.otp_static.models import StaticDevice, StaticToken
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
-from glowderma.accounts import second_factor
-from glowderma.accounts.console import access, state
+from glowderma.accounts import console_sessions, second_factor
+from glowderma.accounts.console import access
 from glowderma.accounts.models import StaffUser
 from glowderma.accounts.security.login_lockout import email_hash
 from glowderma.accounts.tests.factories import TEST_PASSWORD, StaffUserFactory
@@ -153,7 +153,7 @@ def test_code_step_verifies_the_session_and_cycles_its_key() -> None:
     assert answer.status_code == 302 and answer["Location"] == "/django-admin/"
     assert client.session.session_key != pending_key
     assert client.session[SESSION_KEY] == str(user.pk)
-    assert state.PENDING not in client.session
+    assert console_sessions.PENDING not in client.session
     assert is_verified_console(client)
     entry = AuditEntry.objects.filter(action="console.login_succeeded").get()
     assert after(entry)["method"] == "totp" and entry.actor_id == user.pk
@@ -228,7 +228,7 @@ def test_a_pending_sign_in_expires(monkeypatch: pytest.MonkeyPatch) -> None:
     user = ops_staff("ops@x.uz")
     client = Client()
     password_step(client, "ops@x.uz")
-    shift_clock(monkeypatch, state.PENDING_SECONDS + 1)
+    shift_clock(monkeypatch, console_sessions.PENDING_SECONDS + 1)
     answer = client.post(VERIFY, {"code": totp_code(TOTPDevice.objects.get(user=user))}, follow=True)
     assert answer.redirect_chain[0] == (LOGIN, 302)
     assert "Kirish muddati tugadi" in answer.content.decode()
@@ -264,7 +264,7 @@ def test_non_staff_and_inactive_users_never_reach_the_second_step() -> None:
     for email in ("panel@x.uz", "gone@x.uz"):
         client = Client()
         answer = password_step(client, email)
-        assert answer.status_code == 200 and state.PENDING not in client.session
+        assert answer.status_code == 200 and console_sessions.PENDING not in client.session
     assert AuditEntry.objects.filter(action="console.login_failed").count() == 2
 
 

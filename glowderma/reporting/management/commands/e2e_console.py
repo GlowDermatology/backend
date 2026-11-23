@@ -35,8 +35,8 @@ from django.utils.text import capfirst
 from django_otp import DEVICE_ID_SESSION_KEY
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
-from glowderma.accounts import second_factor
-from glowderma.accounts.console import access, state
+from glowderma.accounts import console_sessions, second_factor
+from glowderma.accounts.console import access
 from glowderma.accounts.models import AuthSession, Customer, StaffUser
 from glowderma.accounts.security.login_lockout import email_hash
 from glowderma.core import integration_modes, timeutils
@@ -372,13 +372,13 @@ def session(data: dict[str, Any]) -> Any:
     store = SessionStore()
     now = timeutils.now().timestamp()
     store[SESSION_KEY] = str(user.pk)
-    store[BACKEND_SESSION_KEY] = state.BACKEND
+    store[BACKEND_SESSION_KEY] = console_sessions.BACKEND
     store[HASH_SESSION_KEY] = user.get_session_auth_hash()
     if data.get("verified", True):
         device = second_factor.CONSOLE.totp_devices(user).filter(confirmed=True).first() or _new_device(user)
         store[DEVICE_ID_SESSION_KEY] = device.persistent_id
-    store[state.STARTED] = now
-    store[state.SEEN] = now
+    store[console_sessions.STARTED] = now
+    store[console_sessions.SEEN] = now
     store.create()
     return {"session_key": store.session_key, "cookie": settings.SESSION_COOKIE_NAME}
 
@@ -394,19 +394,22 @@ def age_session(data: dict[str, Any]) -> Any:
     """Move a console session's login and last-request stamps into the past."""
     store = _store(str(data["session_key"]))
     store.load()
-    for name, setting in ((state.SEEN, "idle_seconds"), (state.STARTED, "absolute_seconds")):
+    for name, setting in (
+        (console_sessions.SEEN, "idle_seconds"),
+        (console_sessions.STARTED, "absolute_seconds"),
+    ):
         if setting in data:
             store[name] = float(store[name]) - float(data[setting])
     store.save()
-    return {"started": store.get(state.STARTED), "seen": store.get(state.SEEN)}
+    return {"started": store.get(console_sessions.STARTED), "seen": store.get(console_sessions.SEEN)}
 
 
 def age_pending(data: dict[str, Any]) -> Any:
     """Move a pending sign-in (password passed, code not yet) into the past."""
     store = _store(str(data["session_key"]))
-    pending = dict(store[state.PENDING])
-    pending["at"] = float(pending["at"]) - float(data.get("seconds", state.PENDING_SECONDS + 1))
-    store[state.PENDING] = pending
+    pending = dict(store[console_sessions.PENDING])
+    pending["at"] = float(pending["at"]) - float(data.get("seconds", console_sessions.PENDING_SECONDS + 1))
+    store[console_sessions.PENDING] = pending
     store.save()
     return {"at": pending["at"]}
 
@@ -421,7 +424,7 @@ def session_state(data: dict[str, Any]) -> Any:
         "exists": True,
         "user_id": decoded.get(SESSION_KEY),
         "verified": DEVICE_ID_SESSION_KEY in decoded,
-        "pending": state.PENDING in decoded,
+        "pending": console_sessions.PENDING in decoded,
     }
 
 
@@ -431,7 +434,7 @@ def user_sessions(data: dict[str, Any]) -> Any:
     count = 0
     for row in Session.objects.filter(expire_date__gt=timeutils.now()).iterator():
         decoded = row.get_decoded()
-        signin = decoded.get(state.PENDING)
+        signin = decoded.get(console_sessions.PENDING)
         if str(decoded.get(SESSION_KEY)) == str(user.pk) or (
             isinstance(signin, dict) and signin.get("uid") == user.pk
         ):

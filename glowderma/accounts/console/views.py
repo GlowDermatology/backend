@@ -35,9 +35,9 @@ from django.views.decorators.debug import sensitive_post_parameters
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 from rest_framework.exceptions import Throttled
 
-from glowderma.accounts import second_factor
+from glowderma.accounts import console_sessions, second_factor
 from glowderma.accounts.api.guard import lockout_message, record_ip_locked
-from glowderma.accounts.console import access, events, state
+from glowderma.accounts.console import access, events
 from glowderma.accounts.console.forms import RecoveryCodeForm, TotpCodeForm
 from glowderma.accounts.models import StaffUser
 from glowderma.accounts.security.address_budget import IpFailureBudget, IpThrottled, client_bucket
@@ -72,7 +72,7 @@ CSRF_FAILED = _(
 )
 CODES_FILENAME = "glowderma-ops-zaxira-kodlar.txt"  # a file name: the same in every language
 
-type StepView = Callable[[HttpRequest, state.Pending], HttpResponse]
+type StepView = Callable[[HttpRequest, console_sessions.Pending], HttpResponse]
 
 
 def few_recovery_codes(left: int) -> str:
@@ -104,8 +104,8 @@ def signin_step(view: StepView) -> Callable[[HttpRequest], HttpResponse]:
     @never_cache
     @require_http_methods(["GET", "POST"])
     def wrapper(request: HttpRequest) -> HttpResponse:
-        had_signin = state.PENDING in request.session
-        current = state.pending(request)
+        had_signin = console_sessions.PENDING in request.session
+        current = console_sessions.pending(request)
         if current is None:
             if had_signin:
                 messages.warning(request, SIGNIN_EXPIRED)
@@ -166,7 +166,7 @@ def _succeeded(request: HttpRequest, user: StaffUser) -> None:
 
 
 @signin_step
-def verify(request: HttpRequest, current: state.Pending) -> HttpResponse:
+def verify(request: HttpRequest, current: console_sessions.Pending) -> HttpResponse:
     """The TOTP code of the user's confirmed device."""
     user = current.user
     if not second_factor.has_second_factor(user, scope=second_factor.CONSOLE):
@@ -184,9 +184,9 @@ def verify(request: HttpRequest, current: state.Pending) -> HttpResponse:
         )
         if device is not None:
             _succeeded(request, user)
-            state.complete_login(request, user, device)
+            console_sessions.complete_login(request, user, device)
             events.record("console.login_succeeded", request, user, method="totp")
-            return HttpResponseRedirect(state.safe_next(request, current.next_url))
+            return HttpResponseRedirect(console_sessions.safe_next(request, current.next_url))
         _failed(request, user, "totp", form)
         if form.is_valid():
             form.add_error(None, WRONG_CODE)
@@ -194,7 +194,7 @@ def verify(request: HttpRequest, current: state.Pending) -> HttpResponse:
 
 
 @signin_step
-def recovery(request: HttpRequest, current: state.Pending) -> HttpResponse:
+def recovery(request: HttpRequest, current: console_sessions.Pending) -> HttpResponse:
     """One of the user's recovery codes instead of the TOTP code (the code is used up)."""
     user = current.user
     if not second_factor.has_second_factor(user, scope=second_factor.CONSOLE):
@@ -212,12 +212,12 @@ def recovery(request: HttpRequest, current: state.Pending) -> HttpResponse:
         )
         if used is not None:
             _succeeded(request, user)
-            state.complete_login(request, user, used.device)
+            console_sessions.complete_login(request, user, used.device)
             events.record("console.recovery_code_used", request, user, remaining=used.remaining)
             events.record("console.login_succeeded", request, user, method="recovery")
             if used.remaining <= 3:
                 messages.warning(request, few_recovery_codes(used.remaining))
-            return HttpResponseRedirect(state.safe_next(request, current.next_url))
+            return HttpResponseRedirect(console_sessions.safe_next(request, current.next_url))
         _failed(request, user, "recovery", form)
         if form.is_valid():
             form.add_error(None, WRONG_RECOVERY)
@@ -227,14 +227,14 @@ def recovery(request: HttpRequest, current: state.Pending) -> HttpResponse:
 def _refuse_enrolment(request: HttpRequest, user: StaffUser, reason: str) -> HttpResponse:
     """No enrolment without an open window (module doc): the pending sign-in ends, the login page says why."""
     second_factor.CONSOLE.totp_devices(user).filter(confirmed=False).delete()
-    state.clear_pending(request)
+    console_sessions.clear_pending(request)
     events.record("console.enrol_refused", request, user, reason=reason)
     messages.error(request, ENROL_SAME_MANAGER if reason == access.SAME_MANAGER else ENROL_CLOSED)
     return HttpResponseRedirect(LOGIN_PATH)
 
 
 @signin_step
-def enrol(request: HttpRequest, current: state.Pending) -> HttpResponse:
+def enrol(request: HttpRequest, current: console_sessions.Pending) -> HttpResponse:
     """First sign-in without a TOTP device, inside an open enrolment window: scan the QR code (or type the
     key), confirm with a code; the recovery codes follow on ``recovery_codes`` (shown once, never stored in
     plain text beyond that one redirect)."""
@@ -246,9 +246,9 @@ def enrol(request: HttpRequest, current: state.Pending) -> HttpResponse:
     if refusal or window is None:
         return _refuse_enrolment(request, user, refusal or access.NO_WINDOW)
     device = second_factor.enrolment_device(
-        user, request.session.get(state.ENROLMENT_DEVICE), scope=second_factor.CONSOLE
+        user, request.session.get(console_sessions.ENROLMENT_DEVICE), scope=second_factor.CONSOLE
     )
-    request.session[state.ENROLMENT_DEVICE] = device.pk
+    request.session[console_sessions.ENROLMENT_DEVICE] = device.pk
     form = TotpCodeForm(request.POST if request.method == "POST" else None)
     template = "accounts/console/enrol.html"
     context = _context(
@@ -271,7 +271,7 @@ def enrol(request: HttpRequest, current: state.Pending) -> HttpResponse:
         )
         if enrolment is not None:
             _succeeded(request, user)
-            state.complete_login(request, user, enrolment.device)
+            console_sessions.complete_login(request, user, enrolment.device)
             events.record(
                 "console.2fa_enrolled",
                 request,
@@ -289,8 +289,8 @@ def enrol(request: HttpRequest, current: state.Pending) -> HttpResponse:
                 {"staff_id": user.pk, "window_audit_id": window.audit_id, "via": window.via},
                 scope=str(user.pk),
             )
-            state.keep_recovery_codes(
-                request, enrolment.recovery_codes, state.safe_next(request, current.next_url)
+            console_sessions.keep_recovery_codes(
+                request, enrolment.recovery_codes, console_sessions.safe_next(request, current.next_url)
             )
             return HttpResponseRedirect(reverse("ops_2fa_recovery_codes"))
         _failed(request, user, "enrolment", form)
@@ -307,10 +307,13 @@ def recovery_codes(request: HttpRequest) -> HttpResponse:
     request.current_app = admin.site.name
     if not admin.site.has_permission(request):
         return HttpResponseRedirect(LOGIN_PATH)
-    kept = state.take_recovery_codes(request)
+    kept = console_sessions.take_recovery_codes(request)
     if kept is None:
         context = _context(
-            request, gettext("Zaxira kodlar"), shown_once=CODES_SHOWN_ONCE, next_url=state.CONSOLE_INDEX
+            request,
+            gettext("Zaxira kodlar"),
+            shown_once=CODES_SHOWN_ONCE,
+            next_url=console_sessions.CONSOLE_INDEX,
         )
         return _render(request, "accounts/console/recovery_codes.html", context)
     codes, next_url = kept
@@ -335,7 +338,7 @@ def recovery_codes(request: HttpRequest) -> HttpResponse:
 @require_POST
 def cancel(request: HttpRequest) -> HttpResponse:
     """Leave a pending sign-in (another account, or a lost phone: ask a manager)."""
-    state.clear_pending(request)
+    console_sessions.clear_pending(request)
     return HttpResponseRedirect(LOGIN_PATH)
 
 
@@ -359,6 +362,6 @@ def csrf_failure(request: HttpRequest, reason: str = "") -> HttpResponse:
         from django.views.csrf import csrf_failure as django_csrf_failure
 
         return django_csrf_failure(request, reason)
-    target = LOGIN_PATH if not admin.site.has_permission(request) else state.CONSOLE_INDEX
+    target = LOGIN_PATH if not admin.site.has_permission(request) else console_sessions.CONSOLE_INDEX
     context = _context(request, gettext("So‘rov qabul qilinmadi"), csrf_message=CSRF_FAILED, next_url=target)
     return _render(request, "accounts/console/csrf_failure.html", context, status=403)

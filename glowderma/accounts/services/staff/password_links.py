@@ -12,8 +12,7 @@ from django.conf import settings
 from django.db import transaction
 from rest_framework.exceptions import ErrorDetail, ValidationError
 
-from glowderma.accounts import topics
-from glowderma.accounts.console import state as console_state
+from glowderma.accounts import console_sessions, topics
 from glowderma.accounts.errors import PasswordTokenInvalid
 from glowderma.accounts.models import AuthSession, StaffPasswordToken, StaffUser
 from glowderma.accounts.services.common import hashing, revocation
@@ -195,11 +194,11 @@ def set_password_with_token(raw: object, new_password: str, *, request: Any = No
     row.save(update_fields=["used_at"])
     revoke_password_tokens(user, except_id=row.pk)
     sessions = auth_sessions.revoke_user_sessions_locked(user, "password_changed")
-    console_sessions = console_state.end_console_sessions(user)
+    ended_console_sessions = console_sessions.end_console_sessions(user)
     credentials.unlock_on_commit(user.email)
     details: dict[str, Any] = {"purpose": row.purpose, "link_id": row.pk, "revoked_count": len(sessions)}
-    if console_sessions:
-        details["console_sessions"] = console_sessions
+    if ended_console_sessions:
+        details["console_sessions"] = ended_console_sessions
     audit.record(
         action="staff.password_set",
         entity_type="staff",

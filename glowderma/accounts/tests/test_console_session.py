@@ -8,7 +8,7 @@ import pytest
 from django.contrib.auth import SESSION_KEY
 from django.test import Client, override_settings
 
-from glowderma.accounts.console import state
+from glowderma.accounts import console_sessions
 from glowderma.accounts.console.middleware import TOUCH_SECONDS
 from glowderma.accounts.models import StaffUser
 from glowderma.accounts.tests.ops_helpers import ops_device, verify_session
@@ -21,15 +21,15 @@ pytestmark = pytest.mark.django_db
 def age(client: Client, *, started: float = 0, seen: float = 0) -> None:
     session = client.session
     now = timeutils.now().timestamp()
-    session[state.STARTED] = now - started
-    session[state.SEEN] = now - seen
+    session[console_sessions.STARTED] = now - started
+    session[console_sessions.SEEN] = now - seen
     session.save()
 
 
 def test_a_fresh_session_works_and_its_last_request_is_stamped(ops_client: Client) -> None:
     age(ops_client, started=100, seen=TOUCH_SECONDS + 1)
     assert ops_client.get("/django-admin/").status_code == 200
-    assert timeutils.now().timestamp() - ops_client.session[state.SEEN] < TOUCH_SECONDS
+    assert timeutils.now().timestamp() - ops_client.session[console_sessions.SEEN] < TOUCH_SECONDS
 
 
 @override_settings(OPS_SESSION_IDLE_SECONDS=1800)

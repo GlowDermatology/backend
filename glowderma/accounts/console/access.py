@@ -36,8 +36,7 @@ from django.conf import settings
 from django.db import transaction
 from django.http import HttpRequest
 
-from glowderma.accounts import second_factor
-from glowderma.accounts.console import state
+from glowderma.accounts import console_sessions, second_factor
 from glowderma.accounts.models import StaffUser
 from glowderma.core import audit, enums, timeutils
 from glowderma.core.api.exceptions import Conflict
@@ -142,7 +141,7 @@ def revoke(
     user: StaffUser, *, actor: StaffUser | None, reason: str, request: HttpRequest | None = None
 ) -> dict[str, int]:
     removed = second_factor.reset_devices(user, scope=second_factor.CONSOLE)
-    sessions = state.end_console_sessions(user)
+    sessions = console_sessions.end_console_sessions(user)
     if user.is_staff:
         user.is_staff = False
         user.save(update_fields=["is_staff"])
@@ -163,7 +162,7 @@ def reset_two_factor(
     """Delete the devices and recovery codes, end every console session of ``user`` (a sign-in pending with
     the old factor included) and open the enrolment window."""
     removed = second_factor.reset_devices(user, scope=second_factor.CONSOLE)
-    result = {**removed, "sessions": state.end_console_sessions(user)}
+    result = {**removed, "sessions": console_sessions.end_console_sessions(user)}
     _record(
         "ops_access.2fa_reset",
         user,

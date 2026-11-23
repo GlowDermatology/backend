@@ -16,9 +16,9 @@ from django.core.management import call_command
 from django.test import Client, RequestFactory, override_settings
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
-from glowderma.accounts import second_factor, topics
+from glowderma.accounts import console_sessions, second_factor, topics
 from glowderma.accounts import services as account_services
-from glowderma.accounts.console import access, state
+from glowderma.accounts.console import access
 from glowderma.accounts.models import StaffUser
 from glowderma.accounts.security.address_budget import client_bucket
 from glowderma.accounts.tests.factories import (
@@ -358,7 +358,7 @@ def test_recovery_codes_are_shown_once_on_a_get_page_with_copy_and_download() ->
     assert 'download="glowderma-ops-zaxira-kodlar.txt"' in content
     assert f"data:text/plain;charset=utf-8,{quote('Glow Derma Ops')}" in content
     assert all(quote(code) in content for code in codes)  # the download carries the same codes
-    assert state.RECOVERY_CODES not in client.session
+    assert console_sessions.RECOVERY_CODES not in client.session
     again = client.get(CODES)  # a reload: never the codes again, a clear message and a way on
     assert again.status_code == 200
     assert codes[0] not in again.content.decode()

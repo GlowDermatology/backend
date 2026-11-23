@@ -43,11 +43,12 @@ layers =
     counters
 
 [importlinter:contract:accounts-security-is-a-primitive]
-name = accounts.security and accounts.second_factor never import the layers built on them
+name = accounts.security, second_factor and console_sessions never import the layers built on them
 type = forbidden
 source_modules =
     glowderma.accounts.security
     glowderma.accounts.second_factor
+    glowderma.accounts.console_sessions
 forbidden_modules =
     glowderma.accounts.api
     glowderma.accounts.console
@@ -123,6 +124,7 @@ source_modules =
     glowderma.accounts.services.otp
     glowderma.accounts.services.staff
 forbidden_modules =
+    glowderma.accounts.console
     glowderma.accounts.sessions
     glowderma.accounts.tasks
     glowderma.accounts.authentication

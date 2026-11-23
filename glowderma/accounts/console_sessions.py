@@ -1,4 +1,7 @@
-"""Session state of the console sign-in.
+"""Session state of the ops console's sign-in and sessions (``accounts.console_sessions``).
+
+A plain session store below the console views and the staff services (both end console sessions), so it lives
+outside the ``console`` package.
 
 A correct password does not log anyone in: it records a *pending* sign-in (user id, the user's session auth
 hash, when, where to go next) in a fresh session key. Only the second step — a TOTP code, a recovery code or

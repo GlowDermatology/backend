@@ -19,8 +19,8 @@ from django.utils.translation import gettext, ngettext
 from rest_framework.exceptions import Throttled
 from unfold.forms import AuthenticationForm as UnfoldAuthenticationForm
 
-from glowderma.accounts import second_factor
-from glowderma.accounts.console import events, state
+from glowderma.accounts import console_sessions, second_factor
+from glowderma.accounts.console import events
 from glowderma.accounts.security.address_budget import IpFailureBudget, IpThrottled, client_bucket
 from glowderma.accounts.security.login_lockout import LoginGuard, email_hash
 from glowderma.core import alerts
@@ -98,12 +98,12 @@ class ConsolePasswordView(LoginView):
 
     def form_valid(self, form: Any) -> HttpResponse:
         user = form.get_user()
-        next_url = state.safe_next(self.request, self.get_redirect_url() or None)
+        next_url = console_sessions.safe_next(self.request, self.get_redirect_url() or None)
         if not settings.OPS_REQUIRE_2FA:
-            state.complete_login(self.request, user, None)
+            console_sessions.complete_login(self.request, user, None)
             events.record("console.login_succeeded", self.request, user, method="password")
             return HttpResponseRedirect(next_url)
-        state.start_pending(self.request, user, next_url)
+        console_sessions.start_pending(self.request, user, next_url)
         events.record("console.password_verified", self.request, user)
         step = (
             "ops_2fa_verify"

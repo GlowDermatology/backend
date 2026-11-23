@@ -2,7 +2,8 @@
 
 Only ``/django-admin`` requests of a logged-in session are looked at (sessions exist for the console alone).
 A session without the login stamp (logged in some other way) is ended as well: every console login goes
-through ``state.complete_login``. The last-request stamp is written at most every ``TOUCH_SECONDS``.
+through ``console_sessions.complete_login``. The last-request stamp is written at most every
+``TOUCH_SECONDS``.
 """
 
 from __future__ import annotations
@@ -17,7 +18,8 @@ from django.contrib.sessions.backends.base import SessionBase
 from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.utils.translation import gettext_lazy as _
 
-from glowderma.accounts.console import events, state
+from glowderma.accounts import console_sessions
+from glowderma.accounts.console import events
 from glowderma.accounts.models import StaffUser
 from glowderma.core import timeutils
 from glowderma.core.network import CONSOLE_PREFIX
@@ -28,8 +30,8 @@ EXPIRED_MESSAGE = _("Sessiya muddati tugadi. Qaytadan kiring.")
 
 
 def expiry_reason(session: SessionBase, now: float) -> str | None:
-    started = session.get(state.STARTED)
-    seen = session.get(state.SEEN)
+    started = session.get(console_sessions.STARTED)
+    seen = session.get(console_sessions.SEEN)
     if not isinstance(started, (int, float)) or not isinstance(seen, (int, float)):
         return "unstamped"
     if now - seen > settings.OPS_SESSION_IDLE_SECONDS:
@@ -56,6 +58,6 @@ class ConsoleSessionMiddleware:
                 if request.method == "GET" and request.path_info != LOGIN_PATH:
                     target += "?" + urlencode({"next": request.get_full_path()})
                 return HttpResponseRedirect(target)
-            if now - float(request.session[state.SEEN]) >= TOUCH_SECONDS:
-                request.session[state.SEEN] = now
+            if now - float(request.session[console_sessions.SEEN]) >= TOUCH_SECONDS:
+                request.session[console_sessions.SEEN] = now
         return self.get_response(request)
