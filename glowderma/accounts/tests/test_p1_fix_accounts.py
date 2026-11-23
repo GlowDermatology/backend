@@ -16,6 +16,7 @@ from django.test import override_settings
 
 from glowderma.accounts import services, tasks
 from glowderma.accounts.models import Customer, SmsCode
+from glowderma.accounts.services.common import revocation
 from glowderma.accounts.tests.factories import start_test_session
 from glowderma.core import outbox
 from glowderma.core.api.exceptions import AuthFailed
@@ -197,7 +198,7 @@ def test_a_tombstone_failure_is_logged_not_raised(
         def set_many(self, *args: Any, **kwargs: Any) -> Any:
             raise ConnectionError("redis down")
 
-    monkeypatch.setattr(services, "cache", SetManyFails())
+    monkeypatch.setattr(revocation, "cache", SetManyFails())
     with caplog.at_level(logging.ERROR):
         services.logout_customer(started.raw_refresh)
     assert any("auth.tombstone_failed" in record.getMessage() for record in caplog.records)

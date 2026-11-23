@@ -23,6 +23,7 @@ from rest_framework.exceptions import NotFound, ValidationError
 
 from glowderma.accounts import services as account_services
 from glowderma.accounts.models import Address, AuthSession, Customer, CustomerSocialIdentity
+from glowderma.accounts.services.common import revocation
 from glowderma.accounts.tests.factories import start_test_session
 from glowderma.core.api.exceptions import AuthFailed, PasswordChanged
 from glowderma.core.models import AuditEntry, OutboxMessage
@@ -617,18 +618,22 @@ def test_a_tombstone_failure_after_a_committed_login_still_returns_the_tokens(
     old = start_test_session(customer, fid=FID_A)
     token = verification(str(customer.phone), "login_new_device")
 
+    failed: list[object] = []
+
     class SetManyFails:
         def __getattr__(self, name: str) -> Any:
             return getattr(cache, name)
 
         def set_many(self, *args: Any, **kwargs: Any) -> Any:
+            failed.append(args)
             raise ConnectionError("redis down")
 
-    monkeypatch.setattr(account_services, "cache", SetManyFails())
+    monkeypatch.setattr(revocation, "cache", SetManyFails())
     # B-W1: only a sign-in on the same install ends the earlier session (a tombstone to write)
     result = services.login(str(customer.phone), PASSWORD, token, device=ctx(FID_A), device_key=None)
     assert isinstance(result, services.SignIn) and result.started.raw_device_key
     assert AuthSession.objects.get(pk=old.session.pk).revoke_reason == "replaced"
+    assert failed, "the tombstone write never reached the failing cache"
 
 
 # --- small fixes --------------------------------------------------------------------------------------------

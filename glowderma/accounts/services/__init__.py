@@ -36,6 +36,12 @@ from glowderma.accounts.models import (
     StaffPasswordToken,
     StaffUser,
 )
+from glowderma.accounts.services.common import hashing as common_hashing
+from glowderma.accounts.services.common import revocation as common_revocation
+from glowderma.accounts.services.common.hashing import hash_secret as hash_secret
+from glowderma.accounts.services.common.revocation import raise_revoked_session as raise_revoked_session
+from glowderma.accounts.services.common.revocation import revoke_session as revoke_session
+from glowderma.accounts.services.common.revocation import tombstone_ttl as tombstone_ttl
 from glowderma.core import alerts, audit, enums, integration_modes, outbox, qr_store, secretbox, timeutils
 from glowderma.core.api.exceptions import (
     AuthFailed,
@@ -49,7 +55,6 @@ from glowderma.core.api.exceptions import (
     OtpLocked,
     OtpNetworkLimit,
     OtpResendTooSoon,
-    PasswordChanged,
     PhoneNotRegistered,
     PhoneRegistered,
     PhoneRequired,
@@ -134,45 +139,6 @@ def refresh_staff_session(raw_refresh: str) -> AuthSession:
     return session
 
 
-def tombstone_ttl() -> int:
-    """Seconds a ``revoked:<reason>`` tombstone outlives the last access token of either audience."""
-    return max(int(settings.STAFF_ACCESS_TTL), int(settings.CUSTOMER_ACCESS_TTL)) + 60
-
-
-def _tombstone_on_commit(sessions: Iterable[AuthSession]) -> None:
-    """Write ``revoked:<reason>`` tombstones once the revocation committed.
-
-    Best effort (``robust``): the revocation already committed, so a Redis error must not turn the request
-    that made it into a 500 (the client would lose the tokens a sign-in just issued). An unwritten tombstone
-    leaves at most the add-only ``auth:sid`` active entry, whose TTL is ≤ 60 s; the failure logs ERROR.
-    """
-    values = {f"auth:sid:{session.pk}": f"revoked:{session.revoke_reason}" for session in sessions}
-    if not values:
-        return
-
-    def write() -> None:
-        try:
-            cache.set_many(values, timeout=tombstone_ttl())
-        except Exception:
-            logger.exception(
-                "auth.tombstone_failed sids=%s", sorted(key.rsplit(":", 1)[-1] for key in values)
-            )
-
-    transaction.on_commit(write, robust=True)
-
-
-@transaction.atomic
-def revoke_session(session: AuthSession, reason: str) -> None:
-    stored = AuthSession.objects.select_for_update().get(pk=session.pk)
-    if stored.revoked_at is None:
-        stored.revoked_at = timeutils.now()
-        stored.revoke_reason = reason
-        stored.save(update_fields=["revoked_at", "revoke_reason"])
-    session.revoked_at = stored.revoked_at
-    session.revoke_reason = stored.revoke_reason
-    _tombstone_on_commit([stored])
-
-
 @transaction.atomic
 def revoke_user_sessions(user: StaffUser, reason: str, *, except_sid: uuid.UUID | None = None) -> int:
     return len(_revoke_user_sessions(user, reason, except_sid=except_sid))
@@ -193,7 +159,7 @@ def _revoke_user_sessions(
         AuthSession.objects.filter(pk__in=[session.pk for session in sessions]).update(
             revoked_at=instant, revoke_reason=reason
         )
-    _tombstone_on_commit(sessions)
+    common_revocation.tombstone_on_commit(sessions)
     return sessions
 
 
@@ -249,21 +215,6 @@ def _lock_active_managers() -> list[int]:
         .order_by("pk")
         .values_list("pk", flat=True)
     )
-
-
-def _audit_revoked_sessions(
-    sessions: Iterable[AuthSession], *, actor: Any, request: Any, reason: str
-) -> None:
-    for session in sessions:
-        audit.record(
-            action="auth.session_revoked",
-            entity_type="auth_session",
-            entity_id=str(session.pk),
-            actor=actor,
-            request=request,
-            after={"sid": str(session.pk), "reason": session.revoke_reason},
-            reason=reason,
-        )
 
 
 @transaction.atomic
@@ -390,7 +341,7 @@ def change_specialist_role(
         before={"role": previous_role, "is_manager": was_manager},
         after={"role": user.role, "is_manager": False, "revoked_count": len(sessions)},
     )
-    _audit_revoked_sessions(sessions, actor=actor, request=request, reason="")
+    common_revocation.audit_revoked_sessions(sessions, actor=actor, request=request, reason="")
     return user
 
 
@@ -502,7 +453,7 @@ def deactivate_staff(
         after={"is_active": False, "revoked_count": len(sessions)},
         reason=reason,
     )
-    _audit_revoked_sessions(sessions, actor=actor, request=request, reason=reason)
+    common_revocation.audit_revoked_sessions(sessions, actor=actor, request=request, reason=reason)
     return len(sessions)
 
 
@@ -623,7 +574,7 @@ def reset_staff_password(
         after=details,
         reason=reason,
     )
-    _audit_revoked_sessions(sessions, actor=actor, request=request, reason=reason)
+    common_revocation.audit_revoked_sessions(sessions, actor=actor, request=request, reason=reason)
     if delivery != enums.StaffPasswordDelivery.TEMPORARY_PASSWORD:
         issue_password_link(
             stored, enums.StaffPasswordPurpose.RESET, actor=actor, request=request, via="reset", reason=reason
@@ -703,7 +654,7 @@ def issue_password_token(
     row = StaffPasswordToken.objects.create(
         staff=user,
         purpose=purpose,
-        token_hash=hash_secret(raw),
+        token_hash=common_hashing.hash_secret(raw),
         created_by=actor,
         expires_at=timeutils.now() + timedelta(hours=int(settings.STAFF_INVITE_TTL_HOURS)),
     )
@@ -787,7 +738,11 @@ def request_own_password_link(user: StaffUser, *, request: Any = None) -> StaffP
 def _password_token(raw: object) -> StaffPasswordToken | None:
     if not isinstance(raw, str) or not raw or len(raw) > PASSWORD_TOKEN_MAX_LENGTH:
         return None
-    return StaffPasswordToken.objects.select_related("staff").filter(token_hash=hash_secret(raw)).first()
+    return (
+        StaffPasswordToken.objects.select_related("staff")
+        .filter(token_hash=common_hashing.hash_secret(raw))
+        .first()
+    )
 
 
 def _token_usable(row: StaffPasswordToken | None) -> bool:
@@ -850,7 +805,7 @@ def set_password_with_token(raw: object, new_password: str, *, request: Any = No
         request=request,
         after=details,
     )
-    _audit_revoked_sessions(sessions, actor=user, request=request, reason="")
+    common_revocation.audit_revoked_sessions(sessions, actor=user, request=request, reason="")
     return user
 
 
@@ -1116,7 +1071,7 @@ def reset_staff_mfa(
         after=details,
         reason=reason,
     )
-    _audit_revoked_sessions(sessions, actor=actor, request=request, reason=reason)
+    common_revocation.audit_revoked_sessions(sessions, actor=actor, request=request, reason=reason)
     logger.warning("auth.mfa_reset staff_id=%s via=%s", stored.pk, via)
     alerts.alert("auth.mfa_reset", {"staff_id": stored.pk, "via": via}, scope=str(stored.pk))
     return {**removed, "revoked_count": len(sessions)}
@@ -1439,11 +1394,6 @@ class SessionStart:
     farewell_tokens: list[str] = field(default_factory=list)
 
 
-def hash_secret(raw: str) -> str:
-    """SHA-256 hex of a refresh token or device key (the only form stored)."""
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-
-
 def lock_customer(customer_id: int) -> Customer:
     """The customer-level lock (customer contract §2.7.1): ``FOR NO KEY UPDATE``, never a plain ``FOR
     UPDATE``, so foreign-key inserts that take ``FOR KEY SHARE`` (a capture's ``Purchase``) never wait for
@@ -1596,7 +1546,7 @@ def start_customer_session(
     raw_device_key: str | None = None
     if issue_device_key:
         raw_device_key = secrets.token_urlsafe(32)
-        device.key_hash = hash_secret(raw_device_key)
+        device.key_hash = common_hashing.hash_secret(raw_device_key)
         device.save(update_fields=["key_hash", "updated_at"])
     raw_refresh = secrets.token_urlsafe(32)
     session = AuthSession.objects.create(
@@ -1604,7 +1554,7 @@ def start_customer_session(
         customer_id=customer_id,
         device=device,
         device_label=customer_device_label(platform, device.model),
-        refresh_hash=hash_secret(raw_refresh),
+        refresh_hash=common_hashing.hash_secret(raw_refresh),
         created_at=instant,
         last_used_at=instant,
         absolute_expires_at=instant + timedelta(days=int(settings.CUSTOMER_REFRESH_TTL_DAYS)),
@@ -1637,7 +1587,7 @@ def _revoke_open_customer_sessions(
         AuthSession.objects.filter(pk__in=[session.pk for session in sessions]).update(
             revoked_at=instant, revoke_reason=reason
         )
-    _tombstone_on_commit(sessions)
+    common_revocation.tombstone_on_commit(sessions)
     _revoke_session_qr_on_commit(sessions)
     return sessions
 
@@ -1938,7 +1888,7 @@ def device_is_known(customer_id: int, fid: str, raw_device_key: str | None) -> b
     )
     if not stored:
         return False
-    return hmac.compare_digest(stored, hash_secret(raw_device_key))
+    return hmac.compare_digest(stored, common_hashing.hash_secret(raw_device_key))
 
 
 def invalidate_fcm_token(device_id: int, *, token: str | None = None) -> bool:
@@ -2477,7 +2427,7 @@ def verify_code(identifier: str | OtpTarget, purpose: str, code: str) -> Verific
             token = secrets.token_urlsafe(32)
             ttl = int(settings.CUSTOMER_VERIFICATION_TTL_SECONDS)
             row.consumed_at = now
-            row.verification_token_hash = hash_secret(token)
+            row.verification_token_hash = common_hashing.hash_secret(token)
             row.verification_expires_at = now + timedelta(seconds=ttl)
             row.save(update_fields=["consumed_at", "verification_token_hash", "verification_expires_at"])
             return Verification(token, ttl, purpose, active_customer_by_phone(target) is not None)
@@ -2497,7 +2447,7 @@ def verification_row(
     UPDATE``) for :func:`consume_verification`."""
     if not token:
         raise VerificationInvalid()
-    queryset = SmsCode.objects.filter(verification_token_hash=hash_secret(token))
+    queryset = SmsCode.objects.filter(verification_token_hash=common_hashing.hash_secret(token))
     if lock:
         queryset = queryset.select_for_update()
     row = queryset.first()
@@ -2584,7 +2534,7 @@ def rotate_customer_refresh(
     hand out tokens (rotate, grace replay, re-rotation) require the session's device (else 401
     ``not_authenticated``).
     """
-    digest = hash_secret(raw)
+    digest = common_hashing.hash_secret(raw)
     written: list[str] = []
     refusal: Exception | None = None
     reused: tuple[int, Any, bool] | None = None
@@ -2612,7 +2562,7 @@ def rotate_customer_refresh(
                     raise RefreshUnknown()
                 reuse = True
             if session.revoked_at is not None:
-                raise_revoked_session(session.revoke_reason)
+                common_revocation.raise_revoked_session(session.revoke_reason)
             now = timeutils.now()
             customer = session.customer
             if (
@@ -2642,7 +2592,7 @@ def rotate_customer_refresh(
             if not reuse and session.refresh_hash == digest:
                 new_raw = secrets.token_urlsafe(32)
                 session.previous_refresh_hash = digest
-                session.refresh_hash = hash_secret(new_raw)
+                session.refresh_hash = common_hashing.hash_secret(new_raw)
                 session.rotation += 1
                 session.rotation_confirmed = False
                 session.rotated_at = session.last_used_at = now
@@ -2669,7 +2619,7 @@ def rotate_customer_refresh(
                 cache.set(_dead_key(session.refresh_hash), str(session.pk), remaining)
                 written.append(_dead_key(session.refresh_hash))  # removed again on rollback
                 new_raw = secrets.token_urlsafe(32)
-                session.refresh_hash = hash_secret(new_raw)
+                session.refresh_hash = common_hashing.hash_secret(new_raw)
                 session.rotation += 1
                 session.rotation_confirmed = False
                 session.last_used_at = now
@@ -2714,14 +2664,6 @@ def _revoke_reused_session(customer_id: int, sid: Any, foreign_device: bool, *, 
     logger.warning("customer.refresh_reused sid=%s foreign_device=%s", sid, foreign_device)
 
 
-def raise_revoked_session(reason: str) -> None:
-    """The 401 of a revoked customer session: ``password_changed`` for that reason, else ``SESSION_EXPIRED``
-    (B-W1: a sign-in elsewhere no longer ends a session, so ``SESSION_REPLACED`` is never answered)."""
-    if reason == enums.SessionRevokeReason.PASSWORD_CHANGED:
-        raise PasswordChanged()
-    raise AuthFailed("SESSION_EXPIRED")
-
-
 @transaction.atomic
 def logout_customer(raw: str, *, scope: str = enums.LogoutScope.CURRENT, request: Any = None) -> AuthSession:
     """``auth/logout/`` (customer contract §2.1.7): revoke the session owning the refresh token (``logout``,
@@ -2739,7 +2681,7 @@ def logout_customer(raw: str, *, scope: str = enums.LogoutScope.CURRENT, request
     """
     if scope not in enums.LogoutScope.values:
         raise ValueError(f"Unknown logout scope {scope!r}")
-    digest = hash_secret(raw)
+    digest = common_hashing.hash_secret(raw)
     match = Q(refresh_hash=digest) | Q(previous_refresh_hash=digest)
     customer_id = (
         AuthSession.objects.filter(audience="customer")
@@ -2859,7 +2801,7 @@ def lock_signed_in_customer(customer_id: int, sid: uuid.UUID | str | NoSession) 
         if session is None:
             raise AuthFailed("SESSION_EXPIRED")
         if session.revoked_at is not None:
-            raise_revoked_session(session.revoke_reason)
+            common_revocation.raise_revoked_session(session.revoke_reason)
         if session.absolute_expires_at <= timeutils.now():
             raise AuthFailed("SESSION_EXPIRED")
     return stored
@@ -3104,7 +3046,7 @@ def enqueue_apple_token_revoke(
             "client_id": client_id,
             "sealed_token": sealed_token,
         },
-        dedupe_key=f"{topics.APPLE_REVOKE}:token:{hash_secret(sealed_token)[:32]}",
+        dedupe_key=f"{topics.APPLE_REVOKE}:token:{common_hashing.hash_secret(sealed_token)[:32]}",
     )
     return True
 
