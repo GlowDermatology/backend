@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 import secrets
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from django.conf import settings
@@ -66,6 +66,69 @@ def _check_refresh_device(session: AuthSession, fid: str, platform: str | None) 
         raise AuthFailed("not_authenticated")
 
 
+def _locked_session(digest: str) -> tuple[AuthSession, bool]:
+    """The customer session a presented refresh token belongs to, locked, and whether presenting it is a
+    reuse: the current or previous hash finds the session; a hash remembered as dead (a re-rotation's unused
+    token) finds it through the cache and is always a reuse. 401 :class:`RefreshUnknown` otherwise."""
+    session = (
+        AuthSession.objects.select_for_update(of=("self",))
+        .select_related("device", "customer")
+        .filter(audience="customer")
+        .filter(Q(refresh_hash=digest) | Q(previous_refresh_hash=digest))
+        .first()
+    )
+    if session is not None:
+        return session, False
+    dead_sid = cache.get(_dead_key(digest))
+    if not dead_sid:
+        raise RefreshUnknown()
+    session = (
+        AuthSession.objects.select_for_update(of=("self",))
+        .select_related("device", "customer")
+        .filter(pk=dead_sid, audience="customer")
+        .first()
+    )
+    if session is None:
+        raise RefreshUnknown()
+    return session, True
+
+
+def _rotate(session: AuthSession, digest: str, now: datetime) -> str:
+    """Step 3, the current token: a new refresh token, the presented one kept as the previous hash, the
+    rotation unconfirmed and the absolute expiry renewed. Returns the new raw token."""
+    new_raw = secrets.token_urlsafe(32)
+    session.previous_refresh_hash = digest
+    session.refresh_hash = hashing.hash_secret(new_raw)
+    session.rotation += 1
+    session.rotation_confirmed = False
+    session.rotated_at = session.last_used_at = now
+    session.absolute_expires_at = now + timedelta(days=int(settings.CUSTOMER_REFRESH_TTL_DAYS))
+    session.save(
+        update_fields=[
+            "previous_refresh_hash",
+            "refresh_hash",
+            "rotation",
+            "rotation_confirmed",
+            "rotated_at",
+            "last_used_at",
+            "absolute_expires_at",
+        ]
+    )
+    return new_raw
+
+
+def _rerotate(session: AuthSession, now: datetime) -> str:
+    """Step 5, the previous token of an unconfirmed rotation: replace the current token, keep the previous
+    hash and the expiry. Returns the new raw token (the caller has remembered the replaced hash as dead)."""
+    new_raw = secrets.token_urlsafe(32)
+    session.refresh_hash = hashing.hash_secret(new_raw)
+    session.rotation += 1
+    session.rotation_confirmed = False
+    session.last_used_at = now
+    session.save(update_fields=["refresh_hash", "rotation", "rotation_confirmed", "last_used_at"])
+    return new_raw
+
+
 def rotate_customer_refresh(
     raw: str, *, fid: str, platform: str | None = None, request: Any = None
 ) -> RefreshResult:
@@ -89,27 +152,7 @@ def rotate_customer_refresh(
     reused: tuple[int, Any, bool] | None = None
     try:
         with transaction.atomic():
-            session = (
-                AuthSession.objects.select_for_update(of=("self",))
-                .select_related("device", "customer")
-                .filter(audience="customer")
-                .filter(Q(refresh_hash=digest) | Q(previous_refresh_hash=digest))
-                .first()
-            )
-            reuse = False
-            if session is None:
-                dead_sid = cache.get(_dead_key(digest))
-                if not dead_sid:
-                    raise RefreshUnknown()
-                session = (
-                    AuthSession.objects.select_for_update(of=("self",))
-                    .select_related("device", "customer")
-                    .filter(pk=dead_sid, audience="customer")
-                    .first()
-                )
-                if session is None:
-                    raise RefreshUnknown()
-                reuse = True
+            session, reuse = _locked_session(digest)
             if session.revoked_at is not None:
                 revocation.raise_revoked_session(session.revoke_reason)
             now = timeutils.now()
@@ -139,24 +182,7 @@ def rotate_customer_refresh(
                 foreign_device = True
             grace_ttl = int(settings.CUSTOMER_REFRESH_GRACE_SECONDS)
             if not reuse and session.refresh_hash == digest:
-                new_raw = secrets.token_urlsafe(32)
-                session.previous_refresh_hash = digest
-                session.refresh_hash = hashing.hash_secret(new_raw)
-                session.rotation += 1
-                session.rotation_confirmed = False
-                session.rotated_at = session.last_used_at = now
-                session.absolute_expires_at = now + timedelta(days=int(settings.CUSTOMER_REFRESH_TTL_DAYS))
-                session.save(
-                    update_fields=[
-                        "previous_refresh_hash",
-                        "refresh_hash",
-                        "rotation",
-                        "rotation_confirmed",
-                        "rotated_at",
-                        "last_used_at",
-                        "absolute_expires_at",
-                    ]
-                )
+                new_raw = _rotate(session, digest, now)
                 body = refresh_body(session, new_raw)
                 cache.set(_grace_key(digest), body, grace_ttl)
                 written.append(_grace_key(digest))
@@ -167,12 +193,7 @@ def rotate_customer_refresh(
                 remaining = max(1, int((session.absolute_expires_at - now).total_seconds()))
                 cache.set(_dead_key(session.refresh_hash), str(session.pk), remaining)
                 written.append(_dead_key(session.refresh_hash))  # removed again on rollback
-                new_raw = secrets.token_urlsafe(32)
-                session.refresh_hash = hashing.hash_secret(new_raw)
-                session.rotation += 1
-                session.rotation_confirmed = False
-                session.last_used_at = now
-                session.save(update_fields=["refresh_hash", "rotation", "rotation_confirmed", "last_used_at"])
+                new_raw = _rerotate(session, now)
                 body = refresh_body(session, new_raw)
                 cache.set(_grace_key(digest), body, grace_ttl)
                 written.append(_grace_key(digest))

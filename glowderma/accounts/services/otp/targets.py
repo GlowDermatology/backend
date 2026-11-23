@@ -70,14 +70,6 @@ def otp_target(identifier: str | OtpTarget) -> OtpTarget:
     return OtpTarget(channels.SMS_CHANNEL, identifier)
 
 
-def row_target(row: SmsCode) -> OtpTarget:
-    return (
-        OtpTarget(channels.EMAIL_CHANNEL, row.email)
-        if row.email
-        else OtpTarget(channels.SMS_CHANNEL, row.phone)
-    )
-
-
 def row_identifier(row: SmsCode) -> str:
     """The phone or the e-mail address a code row was sent to."""
     return row.email or row.phone
@@ -130,7 +122,6 @@ __all__ = [
     "normalize_email",
     "OtpTarget",
     "otp_target",
-    "row_target",
     "row_identifier",
     "account_targets",
     "lock_target",

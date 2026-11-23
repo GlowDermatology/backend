@@ -4,7 +4,6 @@ check every authenticated request makes and the revocation of a member's session
 
 from __future__ import annotations
 
-import hashlib
 import secrets
 import uuid
 from datetime import timedelta
@@ -13,7 +12,7 @@ from django.conf import settings
 from django.db import transaction
 
 from glowderma.accounts.models import AuthSession, StaffUser
-from glowderma.accounts.services.common import revocation
+from glowderma.accounts.services.common import hashing, revocation
 from glowderma.core import timeutils
 from glowderma.core.api.exceptions import AuthFailed
 
@@ -49,7 +48,7 @@ def start_staff_session(
         audience="staff",
         staff=user,
         device_label=device_label[:100],
-        refresh_hash=hashlib.sha256(refresh.encode()).hexdigest(),
+        refresh_hash=hashing.hash_secret(refresh),
         absolute_expires_at=timeutils.now() + timedelta(seconds=settings.STAFF_REFRESH_TTL),
         auth_method=auth_method,
     )
@@ -68,7 +67,7 @@ def refresh_staff_session(raw_refresh: str) -> AuthSession:
     session = (
         AuthSession.objects.select_for_update(of=("self",))
         .select_related("staff")
-        .filter(refresh_hash=hashlib.sha256(raw_refresh.encode()).hexdigest(), audience="staff")
+        .filter(refresh_hash=hashing.hash_secret(raw_refresh), audience="staff")
         .first()
     )
     if session is None:
@@ -90,17 +89,7 @@ def revoke_user_sessions_locked(
     queryset = AuthSession.objects.select_for_update().filter(staff=user, revoked_at__isnull=True)
     if except_sid is not None:
         queryset = queryset.exclude(pk=except_sid)
-    sessions = list(queryset)
-    instant = timeutils.now()
-    for session in sessions:
-        session.revoked_at = instant
-        session.revoke_reason = reason
-    if sessions:
-        AuthSession.objects.filter(pk__in=[session.pk for session in sessions]).update(
-            revoked_at=instant, revoke_reason=reason
-        )
-    revocation.tombstone_on_commit(sessions)
-    return sessions
+    return revocation.revoke_locked(queryset, reason)
 
 
 __all__ = [

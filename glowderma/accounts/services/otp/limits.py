@@ -15,13 +15,7 @@ from django.db.models import Q, Sum
 from glowderma.accounts.models import SmsCode
 from glowderma.accounts.services.otp import channels, targets
 from glowderma.core import alerts, timeutils
-from glowderma.core.api.exceptions import (
-    EmailServiceUnavailable,
-    OtpDailyLimit,
-    OtpLocked,
-    OtpNetworkLimit,
-    SmsUnavailable,
-)
+from glowderma.core.api.exceptions import OtpDailyLimit, OtpLocked, OtpNetworkLimit
 from glowderma.core.pii import pii_ref
 
 logger = logging.getLogger("glowderma.accounts.services")
@@ -56,7 +50,7 @@ def _email_ip_counter_key(ip: str, now: datetime) -> str:
 
 
 def _global_counter_key(now: datetime, channel: str = channels.SMS_CHANNEL) -> str:
-    prefix = "gd:otp:email_global" if channel == channels.EMAIL_CHANNEL else "gd:otp:global"
+    prefix = channels.CHANNELS[channel].global_counter_prefix
     return f"{prefix}:{now.astimezone(timeutils.TASHKENT).strftime('%Y%m%d%H')}"
 
 
@@ -119,8 +113,7 @@ def wrong_codes_today(identifier: str | targets.OtpTarget, now: datetime) -> int
 
 
 def _daily_limit(target: targets.OtpTarget, now: datetime) -> Exception:
-    key = "error.otp_daily_limit_email" if target.is_email else None
-    return OtpDailyLimit(retry_after=to_midnight(now), key=key)
+    return OtpDailyLimit(retry_after=to_midnight(now), key=channels.CHANNELS[target.channel].daily_limit_key)
 
 
 def cap_block(target: targets.OtpTarget, *, fid: str, ip: str, now: datetime) -> Exception | None:
@@ -146,18 +139,13 @@ def budget_block(now: datetime, channel: str = channels.SMS_CHANNEL) -> Exceptio
     and the alert of the same name; e-mail → 503 ``email_unavailable`` + ``otp.email_budget_tripped``, once
     per dedupe window. The alert insert belongs to the caller's transaction: ``auth/login/`` rolls its
     transaction back with the refusal (the ERROR line stays), ``auth/send-code/`` has none."""
-    if channel == channels.EMAIL_CHANNEL:
-        limit = int(settings.EMAIL_GLOBAL_HOURLY_LIMIT)
-        if _counter(_global_counter_key(now, channel)) >= limit:
-            logger.error("otp.email_budget_tripped limit=%s", limit)
-            alerts.alert("otp.email_budget_tripped", {"limit": limit})
-            return EmailServiceUnavailable(retry_after=_seconds_to_next_hour(now))
+    otp_channel = channels.CHANNELS[channel]
+    limit = int(getattr(settings, otp_channel.global_limit_setting))
+    if _counter(_global_counter_key(now, channel)) < limit:
         return None
-    if _counter(_global_counter_key(now)) >= int(settings.SMS_GLOBAL_HOURLY_LIMIT):
-        logger.error("otp.budget_tripped limit=%s", settings.SMS_GLOBAL_HOURLY_LIMIT)
-        alerts.alert("otp.budget_tripped", {"limit": int(settings.SMS_GLOBAL_HOURLY_LIMIT)})
-        return SmsUnavailable(retry_after=_seconds_to_next_hour(now))
-    return None
+    logger.error(otp_channel.budget_event + " limit=%s", limit)
+    alerts.alert(otp_channel.budget_event, {"limit": limit})
+    return otp_channel.unavailable(retry_after=_seconds_to_next_hour(now))
 
 
 def count_issue(*, fid: str, ip: str, now: datetime, channel: str = channels.SMS_CHANNEL) -> None:

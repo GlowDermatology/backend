@@ -6,11 +6,13 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
+from datetime import datetime
 from typing import Any
 
 from django.conf import settings
 from django.core.cache import cache
 from django.db import transaction
+from django.db.models import QuerySet
 
 from glowderma.accounts.models import AuthSession
 from glowderma.core import audit, enums, timeutils
@@ -44,6 +46,28 @@ def tombstone_on_commit(sessions: Iterable[AuthSession]) -> None:
             )
 
     transaction.on_commit(write, robust=True)
+
+
+def revoke_locked(
+    sessions: QuerySet[AuthSession], reason: str, *, at: datetime | None = None
+) -> list[AuthSession]:
+    """Revoke the sessions ``sessions`` selects and tombstone them on commit; returns them, revoked.
+
+    The caller passes the queryset already filtered to the open sessions it means and already marked
+    ``select_for_update`` (its own lock clause), and owns the transaction: evaluating the queryset takes the
+    row locks, then every row gets the same ``revoked_at`` (``at`` or now) in one ``UPDATE``.
+    """
+    rows = list(sessions)
+    instant = at or timeutils.now()
+    for session in rows:
+        session.revoked_at = instant
+        session.revoke_reason = reason
+    if rows:
+        AuthSession.objects.filter(pk__in=[session.pk for session in rows]).update(
+            revoked_at=instant, revoke_reason=reason
+        )
+    tombstone_on_commit(rows)
+    return rows
 
 
 @transaction.atomic
@@ -82,6 +106,7 @@ def raise_revoked_session(reason: str) -> None:
 __all__ = [
     "tombstone_ttl",
     "tombstone_on_commit",
+    "revoke_locked",
     "revoke_session",
     "audit_revoked_sessions",
     "raise_revoked_session",

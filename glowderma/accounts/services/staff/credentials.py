@@ -54,14 +54,15 @@ def superuser_may_be_taken_by(user: StaffUser, actor: StaffUser | None) -> bool:
     return not user.is_superuser or (actor is not None and actor.is_superuser)
 
 
-def unlock_on_commit(email: str) -> None:
-    """End the login lockouts of ``email`` once the surrounding transaction commits (a rolled-back reset
-    leaves them). Best effort: a Redis error logs and never fails the committed reset."""
+def unlock_on_commit(email: str, scopes: tuple[str, ...] = STAFF_LOGIN_SCOPES) -> None:
+    """End the lockouts of ``email`` in ``scopes`` (the login ones by default) once the surrounding
+    transaction commits (a rolled-back reset leaves them). Best effort: a Redis error logs and never fails
+    the committed reset."""
     hashed = email_hash(email)
 
     def unlock() -> None:
         guard = LoginGuard()
-        for scope in STAFF_LOGIN_SCOPES:
+        for scope in scopes:
             try:
                 guard.unlock(scope, hashed)
             except Exception:

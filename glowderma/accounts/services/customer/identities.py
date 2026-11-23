@@ -4,7 +4,6 @@ sealed at rest and its revocation, and the replay guards of a social sign-in (no
 
 from __future__ import annotations
 
-import hashlib
 import secrets
 from typing import Any
 
@@ -96,15 +95,11 @@ SOCIAL_NONCE_KEY = "gd:social:nonce:{digest}"
 SOCIAL_SEEN_KEY = "gd:social:seen:{digest}"
 
 
-def _sha256(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
 def issue_social_nonce(fid: str) -> tuple[str, int]:
     """A 256-bit nonce bound to this install (``gd:social:nonce:{sha256(nonce)}`` = ``pii_ref(fid)``)."""
     nonce = secrets.token_urlsafe(32)
     ttl = int(settings.SOCIAL_NONCE_TTL_SECONDS)
-    cache.set(SOCIAL_NONCE_KEY.format(digest=_sha256(nonce)), pii_ref(fid), ttl)
+    cache.set(SOCIAL_NONCE_KEY.format(digest=hashing.hash_secret(nonce)), pii_ref(fid), ttl)
     return nonce, ttl
 
 
@@ -113,7 +108,7 @@ def consume_social_nonce(nonce: str, fid: str) -> bool:
     of the same nonce deletes nothing and fails)."""
     if not nonce:
         return False
-    key = SOCIAL_NONCE_KEY.format(digest=_sha256(nonce))
+    key = SOCIAL_NONCE_KEY.format(digest=hashing.hash_secret(nonce))
     if cache.get(key) != pii_ref(fid):
         return False
     return bool(cache.delete(key))
@@ -125,7 +120,9 @@ def remember_id_token(provider: str, raw_token: str, *, expires_at: int) -> bool
     token was seen before. Keyed by the raw token: Apple's token has no ``jti`` and two tokens of one second
     share every claim."""
     ttl = max(1, int(expires_at - timeutils.now().timestamp()))
-    return bool(cache.add(SOCIAL_SEEN_KEY.format(digest=_sha256(f"{provider}:{raw_token}")), 1, ttl))
+    return bool(
+        cache.add(SOCIAL_SEEN_KEY.format(digest=hashing.hash_secret(f"{provider}:{raw_token}")), 1, ttl)
+    )
 
 
 def link_customer_identity(

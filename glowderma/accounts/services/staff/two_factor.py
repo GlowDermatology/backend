@@ -10,7 +10,6 @@ from typing import Any
 from django.db import transaction
 
 from glowderma.accounts import mfa
-from glowderma.accounts.api.guard import LoginGuard, email_hash
 from glowderma.accounts.console import twofactor
 from glowderma.accounts.errors import MfaChallengeInvalid
 from glowderma.accounts.models import AuthSession, SocialIdentity, StaffUser
@@ -133,15 +132,7 @@ def reset_staff_mfa(
         raise Conflict(messages.MFA_NOT_ENABLED_FOR)
     removed = twofactor.reset_devices(stored, scope=twofactor.PANEL)
     sessions = auth_sessions.revoke_user_sessions_locked(stored, "admin_revoked")
-    hashed = email_hash(stored.email)
-
-    def unlock() -> None:
-        try:
-            LoginGuard().unlock(mfa.GUARD_SCOPE, hashed)
-        except Exception:
-            logger.exception("auth.unlock_failed scope=%s", mfa.GUARD_SCOPE)
-
-    transaction.on_commit(unlock, robust=True)
+    credentials.unlock_on_commit(stored.email, scopes=(mfa.GUARD_SCOPE,))
     details: dict[str, Any] = {**removed, "revoked_count": len(sessions), "via": via}
     audit.record(
         action="auth.mfa_reset",

@@ -162,16 +162,9 @@ def _revoke_customer_sessions(
 def revoke_open_sessions(queryset: Any, reason: str, *, at: datetime | None = None) -> list[AuthSession]:
     """Lock and revoke the open customer sessions of ``queryset`` with ``reason`` (tombstones and the QR keys
     each session issued deleted on commit)."""
-    sessions = list(queryset.select_for_update().filter(audience="customer", revoked_at__isnull=True))
-    instant = at or timeutils.now()
-    for session in sessions:
-        session.revoked_at = instant
-        session.revoke_reason = reason
-    if sessions:
-        AuthSession.objects.filter(pk__in=[session.pk for session in sessions]).update(
-            revoked_at=instant, revoke_reason=reason
-        )
-    revocation.tombstone_on_commit(sessions)
+    sessions = revocation.revoke_locked(
+        queryset.select_for_update().filter(audience="customer", revoked_at__isnull=True), reason, at=at
+    )
     _revoke_session_qr_on_commit(sessions)
     return sessions
 

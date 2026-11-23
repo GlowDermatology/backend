@@ -24,6 +24,15 @@ def _sync_address_text(customer_id: int) -> str:
     return text
 
 
+def _clear_other_defaults(customer_id: int, *, except_pk: int | None = None) -> None:
+    """Clear the customer's current default (but ``except_pk``) before another address takes it: the partial
+    unique constraint allows one default per customer."""
+    defaults = Address.objects.filter(customer_id=customer_id, is_default=True)
+    if except_pk is not None:
+        defaults = defaults.exclude(pk=except_pk)
+    defaults.update(is_default=False, updated_at=timeutils.now())
+
+
 @transaction.atomic
 def add_address(
     customer_id: int,
@@ -44,9 +53,7 @@ def add_address(
     """
     locks.lock_customer(customer_id)
     if is_default or not Address.objects.filter(customer_id=customer_id).exists():
-        Address.objects.filter(customer_id=customer_id, is_default=True).update(
-            is_default=False, updated_at=timeutils.now()
-        )
+        _clear_other_defaults(customer_id)
         is_default = True
     address = Address.objects.create(
         customer_id=customer_id,
@@ -102,9 +109,7 @@ def update_address(
         if value is not _UNSET
     }
     if changes.get("is_default"):
-        Address.objects.filter(customer_id=address.customer_id, is_default=True).exclude(
-            pk=address.pk
-        ).update(is_default=False, updated_at=timeutils.now())
+        _clear_other_defaults(address.customer_id, except_pk=address.pk)
     for name, value in changes.items():
         setattr(address, name, value)
     address.save(update_fields=[*changes])  # TimeStampedModel adds updated_at
@@ -116,9 +121,7 @@ def update_address(
 def set_default_address(address: Address) -> Address:
     """Make ``address`` the customer's default, clearing the previous one in the same transaction."""
     locks.lock_customer(address.customer_id)
-    Address.objects.filter(customer_id=address.customer_id, is_default=True).exclude(pk=address.pk).update(
-        is_default=False, updated_at=timeutils.now()
-    )
+    _clear_other_defaults(address.customer_id, except_pk=address.pk)
     if not address.is_default:
         address.is_default = True
         address.save(update_fields=["is_default"])

@@ -18,7 +18,8 @@ from glowderma.core import audit, enums
 from glowderma.core.api.exceptions import Conflict, field_error
 from glowderma.core.uzsource import N_
 
-# Editable through ``PATCH staff/{id}/`` (the email is the sign-in identity and stays as created).
+# Editable through ``PATCH staff/{id}/``. The email is the sign-in identity: changing it revokes the
+# password links sent to the previous address.
 STAFF_EDITABLE_FIELDS = ("full_name", "is_manager", "email")
 
 
