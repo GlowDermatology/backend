@@ -18,6 +18,18 @@ layers =
 ignore_imports =
     glowderma.*.tests.** -> glowderma.**
 
+# accounts.models is a package (models/__init__.py is the facade Django loads); one subject per module,
+# all of them above the shared defaults that migrations reference.
+[importlinter:contract:accounts-models]
+name = accounts.models: subject modules above the shared defaults
+type = layers
+containers =
+    glowderma.accounts.models
+exhaustive = true
+layers =
+    staff | customers | devices | otp_codes | auth_sessions
+    defaults
+
 # accounts.services is a package (services/__init__.py is the facade callers import). Its submodules form
 # layers of their own, so the split stays acyclic and each name keeps a single home.
 [importlinter:contract:accounts-services-packages]

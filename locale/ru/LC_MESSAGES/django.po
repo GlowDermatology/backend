@@ -24,7 +24,7 @@ msgstr "%(amount)s млрд сум"
 msgid "%(amount)s so‘m"
 msgstr "%(amount)s сум"
 
-#: glowderma/accounts/models.py
+#: glowderma/accounts/models/auth_sessions.py
 msgid "%(audience)s sessiyasi %(id)s"
 msgstr "%(audience)s · сеанс %(id)s"
 
@@ -261,7 +261,7 @@ msgstr "Запросов: %(jobs)s, с ошибкой: %(failed)s · %(cost)s US
 msgid "%(kind)s %(start)s–%(end)s (mutaxassis #%(professional_id)s)"
 msgstr "%(kind)s %(start)s–%(end)s (специалист #%(professional_id)s)"
 
-#: glowderma/accounts/models.py
+#: glowderma/accounts/models/customers.py
 msgid "%(label)s #%(id)s · mijoz #%(customer)s"
 msgstr "%(label)s #%(id)s · клиент #%(customer)s"
 
@@ -337,7 +337,7 @@ msgstr "Удалить: %(name)s"
 msgid "%(number)s-versiya faollashtirildi: keyingi so‘rovlar undan foydalanadi."
 msgstr "Версия %(number)s активирована: следующие запросы используют её."
 
-#: glowderma/accounts/models.py
+#: glowderma/accounts/models/devices.py
 msgid "%(platform)s %(model)s · mijoz #%(customer)s"
 msgstr "%(platform)s %(model)s · клиент #%(customer)s"
 
@@ -349,7 +349,7 @@ msgstr "Версия %(previous)s снова станет активной, а �
 msgid "%(products)s faol mahsulot va %(categories)s kategoriya tekshirildi"
 msgstr "Проверено активных товаров: %(products)s, категорий: %(categories)s"
 
-#: glowderma/accounts/models.py
+#: glowderma/accounts/models/customers.py
 msgid "%(provider)s: %(subject)s → mijoz #%(customer)s"
 msgstr "%(provider)s: %(subject)s → клиент #%(customer)s"
 
@@ -361,11 +361,11 @@ msgstr "%(provider)s: последняя синхронизация — %(synced
 msgid "%(purchase)s · bekor qilingan"
 msgstr "%(purchase)s · отменена"
 
-#: glowderma/accounts/models.py
+#: glowderma/accounts/models/staff.py
 msgid "%(purpose)s havolasi · xodim #%(staff)s"
 msgstr "Ссылка «%(purpose)s» · сотрудник #%(staff)s"
 
-#: glowderma/accounts/models.py
+#: glowderma/accounts/models/otp_codes.py
 msgid "%(purpose)s kodi · %(contact)s · %(created)s"
 msgstr "Код: %(purpose)s · %(contact)s · %(created)s"
 
@@ -3227,7 +3227,7 @@ msgstr "Квалификация (uz)"
 msgid "Manba"
 msgstr "Источник"
 
-#: glowderma/accounts/models.py
+#: glowderma/accounts/models/customers.py
 #: glowderma/commerce/admin.py
 msgid "Manzil"
 msgstr "Адрес"
@@ -3364,7 +3364,7 @@ msgstr "Корзина клиента #%(customer)s"
 msgid "Mijoz #%(customer_id)s · segment #%(segment_id)s"
 msgstr "Клиент #%(customer_id)s · сегмент #%(segment_id)s"
 
-#: glowderma/accounts/models.py
+#: glowderma/accounts/models/customers.py
 #: glowderma/core/admin.py
 #: glowderma/customers/admin.py
 msgid "Mijoz #%(id)s"
